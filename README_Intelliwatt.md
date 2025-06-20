@@ -1,8 +1,8 @@
-# IntelliWatt
+# IntelliWatt™
 
 **Smarter Energy. Freely Delivered.**
 
-IntelliWatt is your personal energy HQ — designed to help real households understand their energy usage, reduce waste, and unlock long-term savings. We're building the most advanced consumer-facing energy intelligence platform ever offered — and making it free to use.
+IntelliWatt™ is your personal energy HQ — designed to help real households understand their energy usage, reduce waste, and unlock long-term savings. We're building the most advanced consumer-facing energy intelligence platform ever offered — and making it free to use.
 
 ## 🔧 Live Preview
 Visit: [https://intelliwatt.com](https://intelliwatt.com)
@@ -17,7 +17,7 @@ This is a placeholder launch site hosted via GitHub and deployed on Vercel.
 - Smart usage tracking
 - Plan comparison engine
 - Personalized energy insights
-- Full IntelliWatt platform for smarter living
+- Full IntelliWatt™ platform for smarter living
 
 ---
 
