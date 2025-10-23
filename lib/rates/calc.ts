@@ -486,3 +486,7 @@ export function estimateAcrossConfigs(
   if (opts?.limit && opts.limit > 0) return out.slice(0, opts.limit);
   return out;
 }
+
+// Export aliases for backward compatibility
+export const estimateBill = estimateMonthlyBill;
+export const sumIntervalsKwh = sum;

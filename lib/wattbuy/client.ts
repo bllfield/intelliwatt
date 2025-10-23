@@ -221,6 +221,28 @@ export async function getRetailRates({
   return safeFetchJSON<any>(url, { timeoutMs: 15_000 });
 }
 
+// Export WattBuyClient class for backward compatibility
+export class WattBuyClient {
+  static async getESIByAddress(addr: Addr) {
+    return getESIByAddress(addr);
+  }
+  static async getUtilityInfo(addr: Addr) {
+    return getUtilityInfo(addr);
+  }
+  static async getOffersForAddress(addr: Addr) {
+    return getOffersForAddress(addr);
+  }
+  static async getOffersForESIID(esiid: string) {
+    return getOffersForESIID(esiid);
+  }
+  static async getRetailRates(params: any) {
+    return getRetailRates(params);
+  }
+}
+
+// Export tdspToSlug for backward compatibility
+export const tdspToSlug = extractTdspSlug;
+
 // Helper used by probe & matchers to pull TDSP slug from various responses
 export function extractTdspSlug(anyResp: any): string | null {
   // Cases:

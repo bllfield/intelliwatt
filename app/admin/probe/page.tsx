@@ -66,7 +66,7 @@ function SeverityPill({ s }: { s: QaFlag['severity'] }) {
   return <span style={{ background: color, color: 'white', borderRadius: 6, padding: '2px 6px', fontSize: 12 }}>{s}</span>
 }
 
-export function QaPanel() {
+function QaPanel() {
   const [rows, setRows] = useState<QaRow[]>([])
   const [loading, setLoading] = useState(false)
   const [tdsp, setTdsp] = useState('')
