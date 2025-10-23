@@ -233,7 +233,7 @@ export async function matchOfferToRate(offer: any): Promise<{ key: string | null
 
   // 3) Search by planId only (last resort)
   if (parts.planIdent) {
-    for (const [k, v] of idx.entries()) {
+    for (const [k, v] of Array.from(idx.entries())) {
       if (v.planId && String(v.planId) === parts.planIdent) {
         return { key: k, rate: v, parts };
       }
