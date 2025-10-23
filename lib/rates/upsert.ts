@@ -46,7 +46,8 @@
 //
 // If your schema differs, adjust the field names below accordingly.
 
-import { deriveRateKey, getRateKeyParts, type OfferLite } from '@/lib/rates/key';
+import { deriveRateKey, getRateKeyParts } from '@/lib/rates/key';
+import { WattBuyOffer } from '@/lib/offers/match';
 import { fetchEflText } from '@/lib/efl/fetch';
 import { parseEflText } from '@/lib/efl/parse';
 import { PrismaClient } from '@prisma/client';
@@ -68,7 +69,7 @@ export type UpsertResult =
     };
 
 export async function upsertRateFromOffer(
-  offer: OfferLite,
+  offer: WattBuyOffer,
   opts?: { force?: boolean }
 ): Promise<UpsertResult> {
   try {
@@ -206,7 +207,7 @@ export async function upsertRateFromOffer(
 // --------- batch helper (for nightly refresh) ---------
 
 export async function upsertRatesFromOffers(
-  offers: OfferLite[],
+  offers: WattBuyOffer[],
   opts?: { force?: boolean; concurrency?: number }
 ) {
   const c = Math.max(1, Math.min(8, opts?.concurrency ?? 3));
@@ -232,7 +233,7 @@ export async function upsertRatesFromOffers(
 // --------- internals ---------
 
 async function upsertOfferMap(
-  offer: OfferLite,
+  offer: WattBuyOffer,
   rateKey: string,
   supplier: string,
   planId: string,
