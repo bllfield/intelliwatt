@@ -123,7 +123,7 @@ export default function ResultsPage() {
           <input className="inp" type="number" min={1} value={monthlyKwh} onChange={e => setMonthlyKwh(parseInt(e.target.value || '0', 10))} />
         </div>
         <div style={{ gridColumn: 'span 12' }}>
-          <label className="lbl">Or paste SMT intervals JSON (array of {{start,kwh}})</label>
+          <label className="lbl">Or paste SMT intervals JSON (array of &#123;&#123;start,kwh&#125;&#125;)</label>
           <textarea
             className="inp"
             placeholder='[{"start":"2025-09-01T00:00:00Z","kwh":0.25}]'
