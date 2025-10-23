@@ -110,19 +110,16 @@ export async function POST(req: NextRequest) {
       const greenPct = typeof od.green_percentage === 'number' ? od.green_percentage : null;
 
       // Try to find an existing RateConfig by strong keys first
-      const existingRC =
-        (planId &&
-          (await prisma.rateConfig.findFirst({
-            where: { supplierSlug, tdspSlug, planId },
-          }))) ||
-        (nameId &&
-          (await prisma.rateConfig.findFirst({
-            where: { supplierSlug, tdspSlug, nameId },
-          })));
+      const existingRC = await prisma.rateConfig.findFirst({
+        where: {
+          supplierSlug,
+          tdspSlug,
+          ...(planId ? { planId } : {}),
+          ...(nameId ? { nameId } : {}),
+        },
+      });
 
-      const rateConfig =
-        existingRC ??
-        (await prisma.rateConfig.create({
+      const rateConfig = existingRC || await prisma.rateConfig.create({
           data: {
             key: `${supplierSlug}:${planId ?? 'unknown'}:${tdspSlug ?? 'unknown'}`,
             supplierSlug,
