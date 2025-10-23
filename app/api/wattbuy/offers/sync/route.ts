@@ -138,7 +138,7 @@ export async function POST(req: NextRequest) {
             yracUrl: yracUrl ?? undefined,
             notes: 'Seeded from WattBuy offers sync; awaiting EFL parse.',
           },
-        }));
+        });
 
       if (!existingRC) createdRateConfigs += 1;
 
