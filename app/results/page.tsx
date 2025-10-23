@@ -153,6 +153,7 @@ export default function ResultsPage() {
         {results.map((r) => (
           <PlanCard
             key={r.planId}
+            planId={r.planId}
             supplierName={r.supplierName}
             planName={r.planName}
             productType={r.productType}
