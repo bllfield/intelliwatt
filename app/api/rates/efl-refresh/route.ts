@@ -77,23 +77,24 @@ export async function POST(req: NextRequest) {
       }
     } else {
       // General scan by supplier/tdsp and "missing-only" heuristic
+      const whereClause2: any = {
+        ...(body.supplier ? { supplierSlug: body.supplier.toLowerCase() } : {}),
+        ...(body.tdsp ? { tdspSlug: body.tdsp.toLowerCase() } : {}),
+        eflUrl: { not: null },
+        isActive: true,
+      };
+
+      if (whereMissingOnly && !force) {
+        whereClause2.OR = [
+          { baseMonthlyFeeCents: null },
+          { centsPerKwhJson: Prisma.JsonNull },
+          { billCreditsJson: Prisma.JsonNull },
+          { touWindowsJson: Prisma.JsonNull },
+        ];
+      }
+
       candidates = await prisma.rateConfig.findMany({
-        where: {
-          ...(body.supplier ? { supplierSlug: body.supplier.toLowerCase() } : {}),
-          ...(body.tdsp ? { tdspSlug: body.tdsp.toLowerCase() } : {}),
-          ...(whereMissingOnly && !force
-            ? {
-                OR: [
-                  { baseMonthlyFeeCents: null },
-                  { centsPerKwhJson: null },
-                  { billCreditsJson: null },
-                  { touWindowsJson: null },
-                ],
-              }
-            : {}),
-          eflUrl: { not: null },
-          isActive: true,
-        },
+        where: whereClause2,
         select: { id: true, eflUrl: true, checksum: true, supplierSlug: true, tdspSlug: true },
         take: limit,
       });
