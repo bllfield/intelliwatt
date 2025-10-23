@@ -23,11 +23,21 @@ export async function listSupplierControls(): Promise<SupplierControlRow[]> {
 
 export async function upsertSupplierControl(input: SupplierControlRow) {
   const key = input.supplierName.trim()
-  await prisma.supplierControl.upsert({
-    where: { supplierName: key },
-    update: { isBlocked: input.isBlocked, rolloutPercent: input.rolloutPercent ?? null, notes: input.notes ?? null },
-    create: { supplierName: key, isBlocked: input.isBlocked, rolloutPercent: input.rolloutPercent ?? null, notes: input.notes ?? null }
+  
+  const existing = await prisma.supplierControl.findFirst({
+    where: { supplierName: key }
   })
+  
+  if (existing) {
+    await prisma.supplierControl.update({
+      where: { id: existing.id },
+      data: { isBlocked: input.isBlocked, rolloutPercent: input.rolloutPercent ?? null, notes: input.notes ?? null }
+    })
+  } else {
+    await prisma.supplierControl.create({
+      data: { supplierName: key, isBlocked: input.isBlocked, rolloutPercent: input.rolloutPercent ?? null, notes: input.notes ?? null }
+    })
+  }
 }
 
 function hashKey(s: string) {
