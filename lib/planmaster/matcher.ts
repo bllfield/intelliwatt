@@ -31,17 +31,17 @@ export async function matchOffer(offer: any): Promise<MatchResult> {
     }
   }
 
-  // 2) nameId + planId
+  // 2) plan_name + offer_id
   const row2 = await prisma.masterPlan.findFirst({
     where: {
-      nameId: n.nameId,
-      planId: n.planId,
+      planName: n.plan_name,
+      offerId: n.offer_id,
       tdsp: n.tdsp,
       termMonths: n.term_months
     }
   })
   if (row2) {
-    reasons.push('Matched by nameId+planId+tdsp+term')
+    reasons.push('Matched by planName+offerId+tdsp+term')
     return { type: 'exact', plan: row2, reasons }
   }
 
