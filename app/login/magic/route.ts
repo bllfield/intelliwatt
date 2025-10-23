@@ -27,32 +27,11 @@ export async function GET(req: Request) {
   });
 
   if (!user) {
-    let referredByUser = null;
-
-    if (referrerCode) {
-      referredByUser = await db.user.findUnique({
-        where: { referralCode: referrerCode },
-      });
-    }
-
     user = await db.user.create({
       data: {
         email: record.email,
-        entryCount: referredByUser ? 2 : 1, // 1 default + 1 bonus
-        referredById: referredByUser?.id ?? undefined,
       },
     });
-
-    // If referral was valid, update inviter's stats
-    if (referredByUser) {
-      await db.user.update({
-        where: { id: referredByUser.id },
-        data: {
-          referralCount: { increment: 1 },
-          entryCount: { increment: 5 },
-        },
-      });
-    }
   }
 
   // Mark token as used
