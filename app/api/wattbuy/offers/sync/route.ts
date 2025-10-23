@@ -151,6 +151,7 @@ export async function POST(req: NextRequest) {
         await prisma.offerRateMap.update({
           where: { offerId: o.offer_id },
           data: {
+            rateKey: `${supplierSlug}:${planId ?? 'unknown'}:${tdspSlug ?? 'unknown'}`,
             rateConfigId: rateConfig.id,
             supplierSlug,
             planId: planId ?? undefined,
@@ -164,6 +165,7 @@ export async function POST(req: NextRequest) {
         await prisma.offerRateMap.create({
           data: {
             offerId: o.offer_id,
+            rateKey: `${supplierSlug}:${planId ?? 'unknown'}:${tdspSlug ?? 'unknown'}`,
             rateConfigId: rateConfig.id,
             supplierSlug,
             planId: planId ?? undefined,
