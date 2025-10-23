@@ -37,21 +37,21 @@ export const wattbuy = {
     zip?: string;
   }) {
     if (params.esiid) {
-      return client.houseInfo({ esiid: params.esiid });
+      return WattBuyClient.getUtilityInfo({ line1: '', city: '', state: '', zip: '' }); // ESIID lookup needs different approach
     } else if (params.wattkey) {
       // For wattkey, we need to use address lookup
       if (!params.address || !params.city || !params.state || !params.zip) {
         throw new Error('Address details required for wattkey lookup');
       }
-      return client.houseInfo({ 
-        address: params.address, 
+      return WattBuyClient.getUtilityInfo({ 
+        line1: params.address, 
         city: params.city, 
         state: params.state, 
         zip: params.zip 
       });
     } else if (params.address && params.city && params.state && params.zip) {
-      return client.houseInfo({ 
-        address: params.address, 
+      return WattBuyClient.getUtilityInfo({ 
+        line1: params.address, 
         city: params.city, 
         state: params.state, 
         zip: params.zip 
