@@ -156,6 +156,7 @@ export default function ResultsPage() {
             planId={r.planId}
             supplierName={r.supplierName}
             planName={r.planName}
+            tdsp={r.tdsp}
             productType={r.productType}
             termMonths={r.termMonths}
             cancelFeeCents={r.cancelFeeCents}

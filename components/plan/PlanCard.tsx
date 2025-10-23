@@ -21,6 +21,7 @@ export type PlanCardProps = {
   planId: string
   supplierName: string
   planName: string
+  tdsp: string
   productType: string
   termMonths: number
   cancelFeeCents?: number | null
@@ -33,7 +34,7 @@ export type PlanCardProps = {
 
 export default function PlanCard(props: PlanCardProps) {
   const {
-    planId, supplierName, planName, productType, termMonths, cancelFeeCents, hasBillCredit, disclosures, breakdown, docs, canEnroll
+    planId, supplierName, planName, tdsp, productType, termMonths, cancelFeeCents, hasBillCredit, disclosures, breakdown, docs, canEnroll
   } = props
 
   const outbound = extractOutboundUrl(docs)
