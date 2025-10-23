@@ -124,6 +124,7 @@ export async function POST(req: NextRequest) {
         existingRC ??
         (await prisma.rateConfig.create({
           data: {
+            key: `${supplierSlug}:${planId ?? 'unknown'}:${tdspSlug ?? 'unknown'}`,
             supplierSlug,
             supplierName: supplierName ?? undefined,
             planId: planId ?? undefined,
