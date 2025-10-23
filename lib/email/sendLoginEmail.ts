@@ -17,9 +17,17 @@ export async function sendLoginEmail(email: string, link: string) {
   console.log(`Magic Link: ${link}`);
   console.log('==============================');
   
+  // Check if email configuration is available
+  console.log('Email configuration check:');
+  console.log(`EMAIL_HOST: ${process.env.EMAIL_HOST ? 'SET' : 'NOT SET'}`);
+  console.log(`EMAIL_PORT: ${process.env.EMAIL_PORT ? 'SET' : 'NOT SET'}`);
+  console.log(`EMAIL_USER: ${process.env.EMAIL_USER ? 'SET' : 'NOT SET'}`);
+  console.log(`EMAIL_PASS: ${process.env.EMAIL_PASS ? 'SET' : 'NOT SET'}`);
+  
   // Try to send email if email configuration is available
   if (process.env.EMAIL_HOST && process.env.EMAIL_USER && process.env.EMAIL_PASS) {
     try {
+      console.log('Attempting to send email...');
       const mailOptions = {
         from: `"IntelliWatt Login" <${process.env.EMAIL_USER}>`,
         to: email,
@@ -38,12 +46,13 @@ export async function sendLoginEmail(email: string, link: string) {
       };
 
       await transporter.sendMail(mailOptions);
-      console.log(`Email sent successfully to ${email}`);
+      console.log(`✅ Email sent successfully to ${email}`);
     } catch (emailError) {
-      console.error('Email sending failed:', emailError);
+      console.error('❌ Email sending failed:', emailError);
+      console.error('Error details:', emailError.message);
       // Don't throw - we'll still log the magic link for testing
     }
   } else {
-    console.log('Email configuration not available - magic link logged to console only');
+    console.log('⚠️ Email configuration not available - magic link logged to console only');
   }
 }
