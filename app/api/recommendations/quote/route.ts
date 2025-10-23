@@ -187,13 +187,15 @@ export async function POST(req: NextRequest) {
         const rc = await prisma.rateConfig.findUnique({ where: { id: map.rateConfigId } });
         if (rc) {
           const est = await estimateBill({
-            rateConfig: rc,
-            monthlyKwh: monthlyKwh ?? undefined,
-            intervals15min: intervals ?? undefined,
+            config: rc,
+            usage: {
+              monthlyKwh: monthlyKwh ?? undefined,
+              hours: intervals ? intervals.map(i => ({ ts: i.ts, kwh: i.kwh })) : undefined,
+            },
           });
-          breakdown = est;
-          subtotalCents = est.subtotalCents;
-          eff = est.effectiveCentsPerKwh;
+          breakdown = est.breakdown;
+          subtotalCents = Math.round(est.totals.usd * 100);
+          eff = monthlyKwh ? Math.round((est.totals.usd / monthlyKwh) * 100) : 0;
           notes = est.notes;
         }
       }
