@@ -119,7 +119,7 @@ export async function upsertRateFromOffer(
         // If nothing changed and not forcing, skip heavy update
         if (!opts?.force && existing?.eflHash && existing.eflHash === f.hash) {
           // Update OfferRateMap timestamp and return fast
-          await upsertOfferMap(offer, rateKey, supplierSlug, planIdent, tdspSlug);
+          await upsertOfferMap(offer, rateKey, supplierSlug, planIdent, tdspSlug, existing.id);
           return {
             ok: true,
             rateKey,
@@ -195,7 +195,7 @@ export async function upsertRateFromOffer(
     });
 
     // 4) Upsert OfferRateMap (offer_id → rateKey)
-    await upsertOfferMap(offer, rateKey, supplierSlug, planIdent, tdspSlug);
+    await upsertOfferMap(offer, rateKey, supplierSlug, planIdent, tdspSlug, upserted.id);
 
     const updated = !existing || (fetched && fetched.hash !== existing.eflHash) || !!opts?.force;
     return { ok: true, rateKey, rateConfigId: upserted.id, updated };
@@ -237,7 +237,8 @@ async function upsertOfferMap(
   rateKey: string,
   supplier: string,
   planId: string,
-  tdsp: string
+  tdsp: string,
+  rateConfigId: string
 ) {
   const offerId = offer.offer_id;
   if (!offerId) return;
@@ -245,7 +246,7 @@ async function upsertOfferMap(
   await prisma.offerRateMap.upsert({
     where: { offerId },
     update: { rateKey, supplierSlug: supplier, planId: String(planId), tdspSlug: tdsp, lastSeenAt: new Date() },
-    create: { offerId, rateKey, supplierSlug: supplier, planId: String(planId), tdspSlug: tdsp },
+    create: { offerId, rateKey, supplierSlug: supplier, planId: String(planId), tdspSlug: tdsp, rateConfigId },
   });
 }
 
