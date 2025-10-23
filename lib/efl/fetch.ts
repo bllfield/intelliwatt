@@ -94,7 +94,7 @@ async function pdfToText(buf: Uint8Array): Promise<string> {
 
   let out = '';
   const meta = await pdf.getMetadata().catch(() => null);
-  if (meta?.info?.Title) out += `Title: ${meta.info.Title}\n`;
+  if ((meta?.info as any)?.Title) out += `Title: ${(meta.info as any).Title}\n`;
 
   const maxPages = Math.min(pdf.numPages, 200); // safety cap
   for (let i = 1; i <= maxPages; i++) {
