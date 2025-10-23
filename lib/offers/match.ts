@@ -314,7 +314,7 @@ function offerKeys(o: WattBuyOffer) {
     ...extractEflKeys(o.offer_data.efl),
     ...extractEflKeys(o.link),
   ]);
-  for (const ec of eflCodes) {
+  for (const ec of Array.from(eflCodes)) {
     keys.key_eflCode.push(`k:efl#${sup}#${ec}${tdspPart}`, `k:efl#${sup}#${ec}`);
   }
 
