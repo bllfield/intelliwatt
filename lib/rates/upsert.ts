@@ -77,8 +77,8 @@ export async function upsertRateFromOffer(
     const rateKey = deriveRateKey(offer);
     if (!rateKey) return { ok: false, error: 'Missing supplier/plan_id/utility on offer.', rateKey };
 
-    const { supplier, planId, tdsp } = getRateKeyParts(offer);
-    if (!supplier || !planId || !tdsp) {
+    const { supplierSlug, planIdent, tdspSlug } = getRateKeyParts(offer);
+    if (!supplierSlug || !planIdent || !tdspSlug) {
       return { ok: false, error: 'Incomplete rate key parts.', rateKey };
     }
 
@@ -119,7 +119,7 @@ export async function upsertRateFromOffer(
         // If nothing changed and not forcing, skip heavy update
         if (!opts?.force && existing?.eflHash && existing.eflHash === f.hash) {
           // Update OfferRateMap timestamp and return fast
-          await upsertOfferMap(offer, rateKey, supplier, planId, tdsp);
+          await upsertOfferMap(offer, rateKey, supplierSlug, planIdent, tdspSlug);
           return {
             ok: true,
             rateKey,
@@ -131,11 +131,11 @@ export async function upsertRateFromOffer(
 
         parsed = parseEflText(f.text, {
           eflUrl,
-          tdspSlug: tdsp,
-          supplierSlug: supplier,
+          tdspSlug: tdspSlug,
+          supplierSlug: supplierSlug,
           supplierName: offer.offer_data?.supplier_name,
           planName: offer.offer_name,
-          planId: String(planId),
+          planId: String(planIdent),
           tosUrl: offer.offer_data?.tos,
           yracUrl: offer.offer_data?.yrac,
         });
@@ -148,10 +148,10 @@ export async function upsertRateFromOffer(
     // 2) Build the payload to upsert (merge parsed EFL + WattBuy fallbacks)
     const basePayload = {
       key: rateKey,
-      supplierSlug: supplier,
-      planId: String(planId),
-      tdspSlug: tdsp,
-      supplierName: offer.offer_data?.supplier_name ?? capFirst(supplier),
+      supplierSlug: supplierSlug,
+      planId: String(planIdent),
+      tdspSlug: tdspSlug,
+      supplierName: offer.offer_data?.supplier_name ?? capFirst(supplierSlug),
       planName: offer.offer_name || offer.offer_data?.name_id || null,
       termMonths: offer.offer_data?.term ?? parsed?.rate.termMonths ?? null,
       eflUrl: eflUrl ?? parsed?.rate.eflUrl ?? null,
@@ -195,7 +195,7 @@ export async function upsertRateFromOffer(
     });
 
     // 4) Upsert OfferRateMap (offer_id → rateKey)
-    await upsertOfferMap(offer, rateKey, supplier, planId, tdsp);
+    await upsertOfferMap(offer, rateKey, supplierSlug, planIdent, tdspSlug);
 
     const updated = !existing || (fetched && fetched.hash !== existing.eflHash) || !!opts?.force;
     return { ok: true, rateKey, rateConfigId: upserted.id, updated };
