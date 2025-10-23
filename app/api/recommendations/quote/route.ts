@@ -186,8 +186,52 @@ export async function POST(req: NextRequest) {
       if (map?.rateConfigId) {
         const rc = await prisma.rateConfig.findUnique({ where: { id: map.rateConfigId } });
         if (rc) {
+          // Convert database RateConfig to calculation format
+          const config = {
+            schema: 'intelliwatt.rate.v1' as const,
+            key: rc.key,
+            source: {
+              provider: 'wattbuy.retail-rate-db' as const,
+              received_at: rc.createdAt.toISOString(),
+              id: rc.id,
+              name: rc.planName,
+              utilityID: null,
+              verified_at: null,
+              raw: {},
+            },
+            meta: {
+              display_name: rc.planName || rc.key,
+              sector: null,
+              effective: null,
+              expiration: null,
+              state: 'TX',
+              tdsp: rc.tdspSlug,
+              eia_utility_id: null,
+              source_url: rc.eflUrl,
+            },
+            pricing: {
+              base_monthly_usd: rc.baseMonthlyFeeCents ? rc.baseMonthlyFeeCents / 100 : null,
+              components: [
+                ...(rc.centsPerKwhJson ? [{ 
+                  kind: 'flat_per_kwh' as const,
+                  rate_cents_per_kwh: rc.centsPerKwhJson,
+                  tier: null,
+                  tou: null,
+                  notes: 'Energy rate'
+                }] : []),
+                ...(rc.tduDeliveryCentsPerKwh ? [{
+                  kind: 'flat_per_kwh' as const,
+                  rate_cents_per_kwh: rc.tduDeliveryCentsPerKwh,
+                  tier: null,
+                  tou: null,
+                  notes: 'TDU delivery'
+                }] : []),
+              ],
+            },
+          };
+
           const est = await estimateBill({
-            config: rc,
+            config,
             usage: {
               monthlyKwh: monthlyKwh ?? undefined,
               hours: intervals ? intervals.map(i => ({ ts: i.ts, kwh: i.kwh })) : undefined,
