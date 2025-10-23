@@ -121,7 +121,7 @@ export const wattbuy = {
     baseline_zone?: string;
     page?: string;
   }) {
-    return client.retailRates({
+    return WattBuyClient.getRetailRates({
       utilityID: params.utilityID,
       state: params.state,
       verified_from: params.verified_from ? parseInt(params.verified_from) : undefined,
