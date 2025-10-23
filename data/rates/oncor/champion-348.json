@@ -1,0 +1,23 @@
+{
+  "key": "champion:oncor:348",
+  "supplierSlug": "champion",
+  "supplierName": "Champion Energy Services",
+  "planId": "348",
+  "planName": "Champ Saver-18",
+  "termMonths": 18,
+  "tdspSlug": "oncor",
+
+  "avgPrice500": 15.6,
+  "avgPrice1000": 15.2,
+  "avgPrice2000": 15.0,
+
+  "rateType": "fixed",
+  "greenPercentage": 26,
+  "cancellationFee": "$250",
+  "links": {
+    "efl": "https://docs.championenergyservices.com/ExternalDocs?planName=PN1348&state=TX&language=EN",
+    "tos": "https://docs.championenergyservices.com/fulfillment/byversion?version=TX-TOS-All-0-EN-20240624",
+    "yrac": "https://docs.championenergyservices.com/fulfillment/byversion?version=TX-YRAC-All-0-EN-20231031"
+  },
+  "notes": ["No bill credit; averages only until structured tiers are parsed."]
+}

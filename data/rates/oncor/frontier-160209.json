@@ -1,0 +1,25 @@
+{
+  "key": "frontier:oncor:160209",
+  "supplierSlug": "frontier",
+  "supplierName": "Frontier",
+  "planId": "160209",
+  "planName": "Frontier Saver Plus 8",
+  "termMonths": 8,
+  "tdspSlug": "oncor",
+
+  "billCreditsJson": [{ "thresholdKwh": 1000, "creditCents": 12500 }],
+
+  "avgPrice500": 22.2,
+  "avgPrice1000": 9.2,
+  "avgPrice2000": 15.3,
+
+  "rateType": "fixed",
+  "greenPercentage": 30.4,
+  "cancellationFee": "$150",
+  "links": {
+    "efl": "https://eflviewer.frontierutilities.com/eflviewer.aspx?lang=EN&prodcode=FSVRPLS8&tdspcode=ONCOR_ELEC",
+    "tos": "https://eflviewer.frontierutilities.com/eflviewer.aspx?lang=EN&prodcode=TOS",
+    "yrac": "https://eflviewer.frontierutilities.com/eflviewer.aspx?lang=EN&prodcode=YRAC"
+  },
+  "notes": ["Sample config seeded from WattBuy offer_data; detailed tiers TBD by EFL parser."]
+}

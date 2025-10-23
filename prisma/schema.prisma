@@ -1,0 +1,410 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+enum PlanSource {
+  wattbuy
+  manual
+  tdsp_feed
+}
+
+enum TdspCode {
+  ONCOR
+  CENTERPOINT
+  AEP_NORTH
+  AEP_CENTRAL
+  TNMP
+}
+
+enum ProductType {
+  fixed
+  variable
+  indexed
+  tou
+}
+
+model User {
+  id          String       @id @default(cuid())
+  email       String       @unique
+  createdAt   DateTime     @default(now())
+  referredById String?     
+  referrals   Referral[]   @relation("UserReferrals")
+  entries     Entry[]      @relation("UserEntries")
+  profile     UserProfile?
+  sessions    Session[]
+  usage       UsageData[]
+  utilityPlans UtilityPlan[]
+  commissions CommissionRecord[]
+  jackpotPayouts JackpotPayout[]
+}
+
+model UserProfile {
+  id               String         @id @default(cuid())
+  userId           String         @unique
+  fullName         String?
+  phone            String?
+  address          String?
+  zipCode          String?
+  homeSqFt         Int?
+  homeAge          Int?
+  numStories       Int?
+  numBedrooms      Int?
+  numBathrooms     Int?
+  wallMaterial     String?
+  foundationType   String?
+  insulationType   String?
+  windowType       String?
+  windowSealing    String?
+  roofDirection    String?
+  ledLighting      Boolean?
+  smartThermostat  Boolean?
+  thermostatType   String?
+  summerTemp       Int?
+  winterTemp       Int?
+  heatingType      String?
+  hvacType         String?
+  waterHeaterType  String?
+  pool             Boolean?
+  poolPumpType     String?
+  evChargerType    String?
+  evMilesPerDay    Int?
+  numOccupants     Int?
+  numStayHome      Int?
+  numWorkOrSchool  Int?
+  numFridges       Int?
+  lightingType     String?
+  applianceImagesUploaded Boolean?
+  unusualTravelDates String?
+  hasSolar         Boolean?
+  hasBattery       Boolean?
+  plansToAddSolar  Boolean?
+  plansToAddBattery Boolean?
+  createdAt        DateTime       @default(now())
+
+  user             User           @relation(fields: [userId], references: [id])
+  appliances       Appliance[]
+  apiConnections   ApiConnection[]
+  solarSystem      SolarSystem?
+}
+
+model Appliance {
+  id         String   @id @default(cuid())
+  profileId  String
+  type       String
+  brand      String?
+  model      String?
+  year       Int?
+  energyStar Boolean?
+  dailyKWh   Float?
+  photoUrl   String?
+  vin        String?
+  schedule   String?
+  createdAt  DateTime @default(now())
+
+  profile    UserProfile @relation(fields: [profileId], references: [id])
+}
+
+model ApiConnection {
+  id          String   @id @default(cuid())
+  profileId   String
+  provider    String
+  isActive    Boolean
+  connectedAt DateTime @default(now())
+
+  profile     UserProfile @relation(fields: [profileId], references: [id])
+}
+
+model SolarSystem {
+  id              String   @id @default(cuid())
+  profileId       String   @unique
+  numPanels       Int?
+  panelModel      String?
+  panelWattage    Int?
+  annualKWh       Float?
+  azimuth         Int?
+  tilt            Int?
+  batteryModel    String?
+  batteryCount    Int?
+  batteryCapacity Float?
+  exportRate      Float?
+  netMetering     Boolean?
+  createdAt       DateTime @default(now())
+
+  profile         UserProfile @relation(fields: [profileId], references: [id])
+}
+
+model UsageData {
+  id         String   @id @default(cuid())
+  userId     String
+  source     String
+  interval   String
+  data       Json
+  startDate  DateTime
+  endDate    DateTime
+  createdAt  DateTime @default(now())
+
+  user       User     @relation(fields: [userId], references: [id])
+}
+
+model UtilityPlan {
+  id           String   @id @default(cuid())
+  userId       String
+  provider     String
+  planName     String
+  rateImport   Float
+  rateExport   Float
+  deliveryFee  Float
+  monthlyFee   Float
+  expiration   DateTime?
+  isCurrent    Boolean
+  createdAt    DateTime @default(now())
+
+  user         User     @relation(fields: [userId], references: [id])
+}
+
+model Referral {
+  id             String   @id @default(cuid())
+  referredById   String
+  referredEmail  String
+  createdAt      DateTime @default(now())
+
+  referredBy     User     @relation("UserReferrals", fields: [referredById], references: [id])
+}
+
+model Entry {
+  id        String   @id @default(cuid())
+  userId    String
+  type      String
+  amount    Int
+  createdAt DateTime @default(now())
+
+  user      User     @relation("UserEntries", fields: [userId], references: [id])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id])
+}
+
+model MagicLinkToken {
+  id        String   @id @default(cuid())
+  email     String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  used      Boolean  @default(false)
+}
+
+model FinanceRecord {
+  id        String   @id @default(cuid())
+  type      String   // "income" | "expense"
+  source    String   // e.g. "commission", "jackpot", "ads"
+  category  String   // e.g. "solar", "plan-switch", "payroll"
+  amount    Float
+  status    String   // "pending" | "paid"
+  date      DateTime
+  note      String?
+  createdAt DateTime @default(now())
+}
+
+model CommissionRecord {
+  id         String   @id @default(cuid())
+  userId     String
+  leadEmail  String?
+  type       String   // "plan-switch" | "referral" | "solar-upgrade"
+  amount     Float
+  status     String   // "pending" | "approved" | "paid"
+  earnedAt   DateTime
+  note       String?
+  createdAt  DateTime @default(now())
+
+  user       User     @relation(fields: [userId], references: [id])
+}
+
+model JackpotPayout {
+  id          String   @id @default(cuid())
+  userId      String
+  amount      Float
+  drawingDate DateTime
+  paid        Boolean  @default(false)
+  paidDate    DateTime?
+  createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id])
+}
+
+// WattBuy Rate Models for EFL parsing and live offer mapping
+model RateConfig {
+  id                      String   @id @default(cuid())
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  // Composite key for mapping offers to rates
+  key                     String   @unique       // "${supplierSlug}:${planId}:${tdspSlug}"
+
+  // REP / plan identity (from EFL + offer_data)
+  supplierSlug            String                 // e.g., "gexa", "frontier", "champion"
+  supplierName            String?
+  planId                  String?                // REP-specific numeric/string id (e.g., offer_data.plan_id)
+  nameId                  String?                // human slug (e.g., "gexa-eco-saver-plus-12")
+  planName                String?                // marketing name
+  tdsp                    String?                // "Oncor Electric Delivery"
+  tdspSlug                String?                // "oncor"
+  termMonths              Int?
+  rateType                String?                // "fixed" | "variable" | "renewable"
+  isGreen                 Boolean?
+  greenPct                Float?
+
+  // Source docs (nightly crawl)
+  eflUrl                  String?
+  tosUrl                  String?
+  yracUrl                 String?
+
+  // Structured pricing extracted from EFL (used for SMT-based bill calc)
+  baseMonthlyFeeCents     Int?                   // account/flat fee
+  tduDeliveryCentsPerKwh  Float?                 // if explicitly stated in EFL (often it's bundled)
+  centsPerKwhJson         Json?                  // [{ min:0, max:1000, cents: 12.3 }, ...]
+  billCreditsJson         Json?                  // e.g., { threshold: 1000, creditCents: 12500, bands:[...] }
+  touWindowsJson          Json?                  // e.g., [{ start:"21:00", end:"06:00", cents: 5.0 }]
+  otherFeesJson           Json?                  // deposits, min usage fees, base pass-throughs, etc.
+  notes                   String?
+
+  // Hygiene
+  checksum                String?  @unique       // hash of parsed doc to avoid dup writes
+  eflHash                 String?                 // sha256 of raw fetched payload
+  fetchedAt               DateTime?               // when EFL was last fetched
+  validFrom               DateTime?
+  validTo                 DateTime?
+  isActive                Boolean  @default(true)
+
+  // Relations
+  mappings                OfferRateMap[]
+}
+
+model OfferRateMap {
+  id            String   @id @default(cuid())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Keys from WattBuy (live availability)
+  offerId       String   @unique                // e.g., "wbdb-xxxx"
+  rateKey       String                            // "${supplierSlug}:${planId}:${tdspSlug}"
+  supplierSlug  String                            // mirror of offer_data.supplier
+  planId        String?                           // mirror of offer_data.plan_id
+  nameId        String?                           // mirror of offer_data.name_id
+  tdspSlug      String?                           // mirror of offer_data.utility (e.g., "oncor")
+  eflUrl        String?                           // mirror of offer_data.efl (snapshot at mapping time)
+  lastSeenAt    DateTime @default(now())         // when this offer was last seen
+
+  // Link to our parsed EFL configuration
+  rateConfigId  String
+  rateConfig    RateConfig @relation(fields: [rateConfigId], references: [id], onDelete: Cascade)
+
+  @@index([supplierSlug, planId])
+  @@index([supplierSlug, nameId])
+  @@index([tdspSlug])
+}
+
+model MasterPlan {
+  id                 String       @id @default(uuid())
+  source             PlanSource
+  offerId            String?      @unique
+  supplierName       String
+  supplierPuctNo     String?
+  tdsp               TdspCode
+  planName           String
+  /** Normalized keys from planmaster/keys.ts (Step 61) */
+  nameId             String
+  planId             String
+  termMonths         Int
+  cancelFeeCents     Int?
+  productType        ProductType
+  minUsageKwh        Int?
+  hasBillCredit      Boolean      @default(false)
+
+  eflUrl             String?
+  tosUrl             String?
+  yracUrl            String?
+
+  /** Raw provider payload (WattBuy offer, or other source) */
+  docs               Json
+  /** Parsed/normalized rate model from EFL (populated in Step 64) */
+  rateModel          Json?
+
+  effectiveAt        DateTime     @default(now())
+  expiresAt          DateTime?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  @@index([tdsp, termMonths])
+  @@index([supplierName, planName])
+  @@index([nameId])
+  @@index([planId])
+  @@index([effectiveAt])
+  @@index([expiresAt])
+  // Guard uniqueness for (source, offerId) when offerId present is handled via partial unique index in SQL migration.
+}
+
+model TdspRateSnapshot {
+  id          String    @id @default(uuid())
+  tdsp        TdspCode
+  sourceUrl   String
+  payload     Json      // normalized delivery charge structure
+  effectiveAt DateTime? // effective start (if provided by source)
+  createdAt   DateTime  @default(now())
+
+  @@index([tdsp, createdAt])
+  @@index([effectiveAt])
+}
+
+model OfferAudit {
+  id           String   @id @default(uuid())
+  event        String   // 'shown' or 'selected'
+  planId       String
+  supplierName String
+  planName     String
+  tdsp         String
+  userKey      String?  // hashed user/session identifier
+  metadata     Json?
+  createdAt    DateTime @default(now())
+
+  @@index([planId])
+  @@index([supplierName])
+  @@index([tdsp])
+  @@index([createdAt])
+}
+
+model FeatureFlag {
+  key       String   @id
+  value     String   // store as string; interpret as bool/number/json at read-time
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+}
+
+model SupplierControl {
+  id                String   @id @default(uuid())
+  supplierName      String   // case-insensitive compare in code
+  isBlocked         Boolean  @default(false)
+  rolloutPercent    Int?     // 0..100; if set, randomly allow this % of traffic to see supplier
+  notes             String?
+  updatedAt         DateTime @updatedAt
+  createdAt         DateTime @default(now())
+
+  @@index([supplierName])
+}

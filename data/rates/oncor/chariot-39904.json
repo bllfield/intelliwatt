@@ -1,0 +1,23 @@
+{
+  "key": "chariot:oncor:39904",
+  "supplierSlug": "chariot",
+  "supplierName": "Chariot Energy",
+  "planId": "39904",
+  "planName": "Solarize 12",
+  "termMonths": 12,
+  "tdspSlug": "oncor",
+
+  "avgPrice500": 16.0,
+  "avgPrice1000": 15.5,
+  "avgPrice2000": 15.3,
+
+  "rateType": "renewable",
+  "greenPercentage": 100,
+  "cancellationFee": "$15/month remaining",
+  "links": {
+    "efl": "https://signup.chariotenergy.com//Home/EFl?productId=39904&promo=14346",
+    "tos": "https://signup.chariotenergy.com//Home/TOS?productId=39904&promo=14346",
+    "yrac": "https://signup.chariotenergy.com//Home/YRAC?productId=39904&promo=14346"
+  },
+  "notes": ["Seeded from offer_data; TOU/buyback not modeled here (handled separately if needed)."]
+}

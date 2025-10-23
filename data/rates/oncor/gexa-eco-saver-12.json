@@ -1,0 +1,66 @@
+{
+  "key": "gexa:oncor:eco-saver-12",
+  "supplierSlug": "gexa",
+  "supplierName": "Gexa Energy",
+  "planId": "160192",
+  "planName": "Eco Saver 12",
+  "termMonths": 12,
+  "tdspSlug": "oncor",
+  "rateType": "fixed",
+  "greenPercentage": 100,
+  "cancellationFee": "$150",
+  
+  "baseMonthlyFeeCents": 0,
+  "tduDeliveryCentsPerKwh": 3.2,
+  
+  "centsPerKwhJson": [
+    {
+      "minKwh": 0,
+      "maxKwh": 1000,
+      "centsPerKwh": 8.5
+    },
+    {
+      "minKwh": 1000,
+      "maxKwh": null,
+      "centsPerKwh": 7.8
+    }
+  ],
+  
+  "billCreditsJson": [
+    {
+      "thresholdKwh": 1000,
+      "creditCents": 2500
+    }
+  ],
+  
+  "touWindowsJson": [
+    {
+      "label": "Off-Peak",
+      "startHour": 22,
+      "endHour": 6,
+      "centsPerKwh": 6.5
+    },
+    {
+      "label": "On-Peak",
+      "startHour": 6,
+      "endHour": 22,
+      "centsPerKwh": 9.2
+    }
+  ],
+  
+  "avgPrice500": 12.3,
+  "avgPrice1000": 11.8,
+  "avgPrice2000": 11.2,
+  
+  "links": {
+    "efl": "https://www.gexaenergy.com/efl/eco-saver-12",
+    "tos": "https://www.gexaenergy.com/terms/eco-saver-12",
+    "yrac": "https://www.gexaenergy.com/yrac/eco-saver-12"
+  },
+  
+  "notes": [
+    "100% renewable energy",
+    "No base monthly fee",
+    "Bill credit for usage over 1000 kWh"
+  ]
+}

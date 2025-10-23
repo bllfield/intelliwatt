@@ -1,0 +1,9 @@
+Relevant Clauses from WattBuy Contract:
+
+- Full Integration model assumed
+- Commission structure may change based on integration method
+- Supplier obligations:
+  - Present plan supplier, plan name, term, all tiers
+  - Include links to EFL, ToS, Rights as Customer
+  - Must include supplier contact info and registration number
+  - Dynamic form fields required per plan (see API response) 

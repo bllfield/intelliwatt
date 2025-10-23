@@ -1,0 +1,25 @@
+{
+  "key": "gexa:oncor:159872",
+  "supplierSlug": "gexa",
+  "supplierName": "Gexa Energy",
+  "planId": "159872",
+  "planName": "Gexa Eco Saver Plus 8",
+  "termMonths": 8,
+  "tdspSlug": "oncor",
+
+  "billCreditsJson": [{ "thresholdKwh": 1000, "creditCents": 12500 }],
+
+  "avgPrice500": 22.3,
+  "avgPrice1000": 9.3,
+  "avgPrice2000": 15.4,
+
+  "rateType": "renewable",
+  "greenPercentage": 100,
+  "cancellationFee": "$150",
+  "links": {
+    "efl": "https://eflviewer.gexaenergy.com/eflviewer.aspx?lang=EN&prodcode=GXAECOSVRPLS8&tdspcode=ONCOR_ELEC",
+    "tos": "https://eflviewer.gexaenergy.com/eflviewer.aspx?lang=EN&prodcode=TOS",
+    "yrac": "https://eflviewer.gexaenergy.com/eflviewer.aspx?lang=EN&prodcode=YRAC"
+  },
+  "notes": ["Usage credit plan; exact base/TDU will be filled by nightly EFL parser."]
+}

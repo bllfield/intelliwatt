@@ -1,0 +1,25 @@
+{
+  "get_form_fields_example": {
+    "plan_id": "abc123",
+    "response": {
+      "required_fields": [
+        "first_name",
+        "last_name",
+        "email",
+        "phone_number",
+        "service_address",
+        "social_security_number"
+      ]
+    }
+  },
+  "submit_order_example": {
+    "plan_id": "abc123",
+    "user_data": {
+      "first_name": "John",
+      "last_name": "Doe",
+      "email": "john@example.com",
+      "ssn": "###-##-####",
+      "consent_checkbox": true
+    }
+  }
+} 

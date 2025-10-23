@@ -1,0 +1,201 @@
+'use client';
+
+import Image from 'next/image';
+import Link from 'next/link';
+import SmartMeterSection from '../../components/SmartMeterSection';
+
+export default function DashboardPage() {
+  return (
+    <div className="min-h-screen bg-brand-white">
+      {/* Hero Section */}
+      <section className="relative bg-brand-navy py-20 px-4 overflow-hidden">
+        {/* Background Pattern */}
+        <div className="absolute inset-0 bg-gradient-to-br from-brand-navy via-brand-navy to-brand-navy/95">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(0,240,255,0.1),transparent_50%)]"></div>
+        </div>
+        
+        <div className="relative z-10 max-w-6xl mx-auto">
+          <div className="text-center mb-16">
+            <h1 className="text-4xl md:text-6xl font-bold text-brand-white mb-6">
+              Welcome to <span className="text-brand-blue">IntelliWatt™</span>
+            </h1>
+            <p className="text-xl text-brand-white mb-8 max-w-4xl mx-auto leading-relaxed">
+              Your AI-powered energy optimization dashboard. Track savings, manage your plan, and earn rewards.
+            </p>
+            
+            {/* Beta Banner */}
+            <div className="inline-block bg-brand-blue text-brand-navy px-6 py-2 rounded-full font-semibold mb-8">
+              🚀 Beta Version - New Features Coming Soon!
+            </div>
+          </div>
+        </div>
+      </section>
+
+            {/* Dashboard Grid */}
+      <section className="py-16 px-4 bg-brand-white">
+        <div className="max-w-6xl mx-auto">
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
+            
+            {/* Usage Analysis */}
+            <div className="bg-brand-white p-8 rounded-2xl border-2 border-brand-navy shadow-lg hover:border-brand-blue transition-all duration-300 group">
+              <div className="w-16 h-16 bg-brand-navy rounded-full flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
+                <span className="text-brand-blue text-2xl">📊</span>
+              </div>
+              <h3 className="text-2xl font-bold text-brand-navy mb-4">Usage Analysis</h3>
+              <p className="text-brand-navy mb-6">View detailed usage patterns and insights</p>
+              <Link href="/dashboard/usage" className="inline-block bg-brand-navy text-brand-blue font-bold py-3 px-6 rounded-xl border-2 border-brand-navy hover:border-brand-blue transition-all duration-300">
+                View Analysis
+              </Link>
+            </div>
+
+            {/* Plan Comparison */}
+            <div className="bg-brand-white p-8 rounded-2xl border-2 border-brand-navy shadow-lg hover:border-brand-blue transition-all duration-300 group">
+              <div className="w-16 h-16 bg-brand-navy rounded-full flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
+                <span className="text-brand-blue text-2xl">🔍</span>
+              </div>
+              <h3 className="text-2xl font-bold text-brand-navy mb-4">Plan Comparison</h3>
+              <p className="text-brand-navy mb-6">Compare plans and find the best rates</p>
+              <Link href="/dashboard/plans" className="inline-block bg-brand-navy text-brand-blue font-bold py-3 px-6 rounded-xl border-2 border-brand-navy hover:border-brand-blue transition-all duration-300">
+                Compare Plans
+              </Link>
+            </div>
+
+            {/* Manual Entry */}
+            <div className="bg-brand-white p-8 rounded-2xl border-2 border-brand-navy shadow-lg hover:border-brand-blue transition-all duration-300 group">
+              <div className="w-16 h-16 bg-brand-navy rounded-full flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
+                <span className="text-brand-blue text-2xl">✍️</span>
+              </div>
+              <h3 className="text-2xl font-bold text-brand-navy mb-4">Manual Entry</h3>
+              <p className="text-brand-navy mb-6">Enter usage data manually</p>
+              <Link href="/dashboard/manual-entry" className="inline-block bg-brand-navy text-brand-blue font-bold py-3 px-6 rounded-xl border-2 border-brand-navy hover:border-brand-blue transition-all duration-300">
+                Enter Data
+              </Link>
+            </div>
+
+            {/* Referrals */}
+            <div className="bg-brand-white p-8 rounded-2xl border-2 border-brand-navy shadow-lg hover:border-brand-blue transition-all duration-300 group">
+              <div className="w-16 h-16 bg-brand-navy rounded-full flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
+                <span className="text-brand-blue text-2xl">👥</span>
+              </div>
+              <h3 className="text-2xl font-bold text-brand-navy mb-4">Referrals</h3>
+              <p className="text-brand-navy mb-6">Earn rewards by referring friends</p>
+              <Link href="/dashboard/referrals" className="inline-block bg-brand-navy text-brand-blue font-bold py-3 px-6 rounded-xl border-2 border-brand-navy hover:border-brand-blue transition-all duration-300">
+                Invite Friends
+              </Link>
+            </div>
+
+            {/* Jackpot Entries */}
+            <div className="bg-brand-white p-8 rounded-2xl border-2 border-brand-navy shadow-lg hover:border-brand-blue transition-all duration-300 group">
+              <div className="w-16 h-16 bg-brand-navy rounded-full flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
+                <span className="text-brand-blue text-2xl">🎰</span>
+              </div>
+              <h3 className="text-2xl font-bold text-brand-navy mb-4">Jackpot Entries</h3>
+              <p className="text-brand-navy mb-6">Track your entries and rewards</p>
+              <Link href="/dashboard/entries" className="inline-block bg-brand-navy text-brand-blue font-bold py-3 px-6 rounded-xl border-2 border-brand-navy hover:border-brand-blue transition-all duration-300">
+                View Entries
+              </Link>
+            </div>
+
+            {/* API Integration */}
+            <div className="bg-brand-white p-8 rounded-2xl border-2 border-brand-navy shadow-lg hover:border-brand-blue transition-all duration-300 group">
+              <div className="w-16 h-16 bg-brand-navy rounded-full flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
+                <span className="text-brand-blue text-2xl">🔌</span>
+              </div>
+              <h3 className="text-2xl font-bold text-brand-navy mb-4">API Integration</h3>
+              <p className="text-brand-navy mb-6">Connect third-party services</p>
+              <Link href="/dashboard/api" className="inline-block bg-brand-navy text-brand-blue font-bold py-3 px-6 rounded-xl border-2 border-brand-navy hover:border-brand-blue transition-all duration-300">
+                Manage APIs
+              </Link>
+            </div>
+
+            {/* Appliance Tracking */}
+            <div className="bg-brand-white p-8 rounded-2xl border-2 border-brand-navy shadow-lg hover:border-brand-blue transition-all duration-300 group">
+              <div className="w-16 h-16 bg-brand-navy rounded-full flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
+                <span className="text-brand-blue text-2xl">🏠</span>
+              </div>
+              <h3 className="text-2xl font-bold text-brand-navy mb-4">Appliances</h3>
+              <p className="text-brand-navy mb-6">Track individual appliance usage</p>
+              <Link href="/dashboard/appliances" className="inline-block bg-brand-navy text-brand-blue font-bold py-3 px-6 rounded-xl border-2 border-brand-navy hover:border-brand-blue transition-all duration-300">
+                Manage Appliances
+              </Link>
+            </div>
+
+            {/* Upgrades */}
+            <div className="bg-brand-white p-8 rounded-2xl border-2 border-brand-navy shadow-lg hover:border-brand-blue transition-all duration-300 group">
+              <div className="w-16 h-16 bg-brand-navy rounded-full flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
+                <span className="text-brand-blue text-2xl">🚀</span>
+              </div>
+              <h3 className="text-2xl font-bold text-brand-navy mb-4">Upgrades</h3>
+              <p className="text-brand-navy mb-6">Explore premium features</p>
+              <Link href="/dashboard/upgrades" className="inline-block bg-brand-navy text-brand-blue font-bold py-3 px-6 rounded-xl border-2 border-brand-navy hover:border-brand-blue transition-all duration-300">
+                View Upgrades
+              </Link>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Smart Meter Connection Section */}
+      <section className="py-16 px-4 bg-brand-navy">
+        <div className="max-w-4xl mx-auto">
+          <SmartMeterSection />
+        </div>
+      </section>
+
+      {/* Stats Section */}
+      <section className="py-16 px-4 bg-brand-navy">
+        <div className="max-w-6xl mx-auto">
+          <h2 className="text-3xl font-bold text-brand-white text-center mb-12">
+            Your <span className="text-brand-blue">Savings</span> Summary
+          </h2>
+          
+          <div className="grid md:grid-cols-4 gap-8">
+            <div className="text-center">
+              <div className="text-4xl font-bold text-brand-blue mb-2">$847</div>
+              <div className="text-brand-white">Annual Savings</div>
+            </div>
+            <div className="text-center">
+              <div className="text-4xl font-bold text-brand-blue mb-2">94%</div>
+              <div className="text-brand-white">Accuracy Rate</div>
+            </div>
+            <div className="text-center">
+              <div className="text-4xl font-bold text-brand-blue mb-2">12</div>
+              <div className="text-brand-white">Jackpot Entries</div>
+            </div>
+            <div className="text-center">
+              <div className="text-4xl font-bold text-brand-blue mb-2">3</div>
+              <div className="text-brand-white">Referred Friends</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Quick Actions */}
+      <section className="py-16 px-4 bg-brand-white">
+        <div className="max-w-4xl mx-auto">
+          <h2 className="text-3xl font-bold text-brand-navy text-center mb-12">
+            Quick <span className="text-brand-blue">Actions</span>
+          </h2>
+          
+          <div className="grid md:grid-cols-2 gap-8">
+            <div className="bg-brand-navy p-8 rounded-2xl text-center">
+              <h3 className="text-2xl font-bold text-brand-white mb-4">Need Help?</h3>
+              <p className="text-brand-white mb-6">Get support or view our FAQ</p>
+              <Link href="/faq" className="inline-block bg-brand-blue text-brand-navy font-bold py-3 px-6 rounded-xl border-2 border-brand-blue hover:border-brand-white transition-all duration-300">
+                Get Help
+              </Link>
+            </div>
+            
+            <div className="bg-brand-navy p-8 rounded-2xl text-center">
+              <h3 className="text-2xl font-bold text-brand-white mb-4">Settings</h3>
+              <p className="text-brand-white mb-6">Manage your account preferences</p>
+              <Link href="/dashboard/settings" className="inline-block bg-brand-blue text-brand-navy font-bold py-3 px-6 rounded-xl border-2 border-brand-blue hover:border-brand-white transition-all duration-300">
+                Manage Settings
+              </Link>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+} 

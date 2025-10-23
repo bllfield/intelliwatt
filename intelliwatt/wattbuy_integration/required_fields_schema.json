@@ -1,0 +1,19 @@
+{
+  "DirectEnergy": {
+    "required_fields": [
+      "preferred_communication_method",
+      "email",
+      "phone_number",
+      "service_address",
+      "ssn"
+    ]
+  },
+  "Constellation": {
+    "required_fields": [
+      "email",
+      "phone_number",
+      "ssn",
+      "service_address"
+    ]
+  }
+} 

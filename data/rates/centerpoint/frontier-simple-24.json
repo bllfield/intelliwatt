@@ -1,0 +1,38 @@
+{
+  "key": "frontier:centerpoint:simple-24",
+  "supplierSlug": "frontier",
+  "supplierName": "Frontier Utilities",
+  "planId": "FSVRPLS24",
+  "planName": "Simple 24",
+  "termMonths": 24,
+  "tdspSlug": "centerpoint",
+  "rateType": "fixed",
+  "greenPercentage": 0,
+  "cancellationFee": "$15/month remaining",
+  
+  "baseMonthlyFeeCents": 995,
+  "tduDeliveryCentsPerKwh": 2.8,
+  
+  "centsPerKwhJson": [
+    {
+      "minKwh": 0,
+      "maxKwh": null,
+      "centsPerKwh": 9.8
+    }
+  ],
+  
+  "avgPrice500": 13.2,
+  "avgPrice1000": 12.6,
+  "avgPrice2000": 12.1,
+  
+  "links": {
+    "efl": "https://www.frontierutilities.com/efl/simple-24",
+    "tos": "https://www.frontierutilities.com/terms/simple-24"
+  },
+  
+  "notes": [
+    "Simple flat rate pricing",
+    "No tiered pricing",
+    "24-month fixed term"
+  ]
+}
