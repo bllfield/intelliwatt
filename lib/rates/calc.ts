@@ -88,6 +88,11 @@ export type HourlySample = {
   kwh: number; // consumption for that hour
 };
 
+export type Interval15 = {
+  ts: string | number | Date; // timestamp
+  kwh: number; // consumption for that 15-minute interval
+};
+
 export type UsageInput =
   | {
       // Preferred: full hourly series for a billing month
