@@ -53,23 +53,24 @@ export async function POST(req: NextRequest) {
       });
       const rateConfigIds = maps.map((m) => m.rateConfigId);
       if (rateConfigIds.length) {
+        const whereClause: any = {
+          id: { in: rateConfigIds },
+          ...(body.supplier ? { supplierSlug: body.supplier.toLowerCase() } : {}),
+          ...(body.tdsp ? { tdspSlug: body.tdsp.toLowerCase() } : {}),
+          eflUrl: { not: null },
+        };
+
+        if (whereMissingOnly && !force) {
+          whereClause.OR = [
+            { baseMonthlyFeeCents: null },
+            { centsPerKwhJson: Prisma.JsonNull },
+            { billCreditsJson: Prisma.JsonNull },
+            { touWindowsJson: Prisma.JsonNull },
+          ];
+        }
+
         candidates = await prisma.rateConfig.findMany({
-          where: {
-            id: { in: rateConfigIds },
-            ...(body.supplier ? { supplierSlug: body.supplier.toLowerCase() } : {}),
-            ...(body.tdsp ? { tdspSlug: body.tdsp.toLowerCase() } : {}),
-            ...(whereMissingOnly && !force
-              ? {
-                  OR: [
-                    { baseMonthlyFeeCents: null },
-                    { centsPerKwhJson: Prisma.JsonNull },
-                    { billCreditsJson: Prisma.JsonNull },
-                    { touWindowsJson: Prisma.JsonNull },
-                  ],
-                }
-              : {}),
-            eflUrl: { not: null },
-          },
+          where: whereClause,
           select: { id: true, eflUrl: true, checksum: true, supplierSlug: true, tdspSlug: true },
           take: limit,
         });
