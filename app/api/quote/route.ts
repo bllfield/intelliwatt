@@ -78,7 +78,7 @@ export async function POST(req: NextRequest) {
 
     // ---- Compute quotes
     const quotes = await Promise.all(
-      offers.map(async (offer) => {
+      offers.map(async (offer: any) => {
         // Try to match to structured local rate
         const { key, rate, parts } = await matchOfferToRate(offer);
 
