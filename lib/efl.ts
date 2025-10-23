@@ -66,7 +66,7 @@ async function extractHtmlText(htmlBuf: Buffer): Promise<{ text: string; $: Chee
   const html = htmlBuf.toString('utf8');
   const cheerio = (await import('cheerio')).load;
   const $ = cheerio(html);
-  const { htmlToText } = await import('html-to-text');
+  const { htmlToText } = await import('html-to-text') as any;
   const text = htmlToText(html, {
     wordwrap: false,
     selectors: [
