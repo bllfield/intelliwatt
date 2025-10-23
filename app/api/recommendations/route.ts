@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
           title: "We don't have any offers to show right now",
           reason: filteredCount > 0
             ? `All ${filteredCount} available plans are currently hidden due to supplier controls or rollouts.`
-            : 'We couldn't compute plan costs at this time.',
+            : 'We couldn\'t compute plan costs at this time.',
           actions: [
             'Try a different billing window or TDSP.',
             'Check back later as providers update their offers.',
