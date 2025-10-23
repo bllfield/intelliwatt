@@ -9,6 +9,7 @@ function LandingPageContent() {
   const [email, setEmail] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [showSuccessPopup, setShowSuccessPopup] = useState(false);
   const searchParams = useSearchParams();
   const from = searchParams?.get('from');
   const source = searchParams?.get('source');
@@ -26,10 +27,15 @@ function LandingPageContent() {
         body: JSON.stringify({ email }),
       });
 
+      const data = await response.json();
+
       if (response.ok) {
         setSubmitted(true);
+        setShowSuccessPopup(true);
+        // Auto-hide popup after 5 seconds
+        setTimeout(() => setShowSuccessPopup(false), 5000);
       } else {
-        alert('Failed to send magic link. Please try again.');
+        alert(data.error || 'Failed to send magic link. Please try again.');
       }
     } catch (error) {
       alert('Failed to send magic link. Please try again.');
@@ -40,6 +46,34 @@ function LandingPageContent() {
 
   return (
     <div className="min-h-screen bg-brand-white">
+      {/* Success Popup */}
+      {showSuccessPopup && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4 shadow-xl">
+            <div className="text-center">
+              <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-green-100 mb-4">
+                <svg className="h-6 w-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>
+                </svg>
+              </div>
+              <h3 className="text-lg font-medium text-gray-900 mb-2">Magic Link Sent!</h3>
+              <p className="text-sm text-gray-600 mb-4">
+                We've sent a magic link to <strong>{email}</strong>. Please check your inbox and click the link to access your dashboard.
+              </p>
+              <p className="text-xs text-gray-500 mb-4">
+                The link will expire in 15 minutes. If you don't see the email, check your spam folder.
+              </p>
+              <button
+                onClick={() => setShowSuccessPopup(false)}
+                className="w-full bg-brand-blue text-white py-2 px-4 rounded-md hover:bg-blue-600 transition-colors"
+              >
+                Got it!
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Hero Section */}
       <section className="relative bg-brand-navy py-20 px-4 overflow-hidden">
         {/* Background Pattern */}
