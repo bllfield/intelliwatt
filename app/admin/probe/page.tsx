@@ -356,8 +356,8 @@ function Block({ title, children }: { title: string; children: React.ReactNode }
 function Th({ children, className = '' }: { children: React.ReactNode; className?: string }) {
   return <th className={`px-3 py-2 text-left ${className}`}>{children}</th>;
 }
-function Td({ children, align }: { children: React.ReactNode; align?: 'left' | 'right' | 'center' }) {
-  return <td className={`px-3 py-2 ${align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : ''}`}>{children}</td>;
+function Td({ children, align, className = '' }: { children: React.ReactNode; align?: 'left' | 'right' | 'center'; className?: string }) {
+  return <td className={`px-3 py-2 ${align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : ''} ${className}`}>{children}</td>;
 }
 
 function fmtCents(v: number | null) {
