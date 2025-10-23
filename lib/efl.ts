@@ -57,8 +57,8 @@ async function fetchBuffer(url: string): Promise<{ buf: Buffer; contentType?: st
 }
 
 async function extractPdfText(buf: Buffer): Promise<string> {
-  const pdfParse = (await import('pdf-parse')).default;
-  const data = await pdfParse(buf);
+  const pdfParse = await import('pdf-parse');
+  const data = await pdfParse.default(buf);
   return data.text || '';
 }
 
