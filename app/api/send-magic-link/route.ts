@@ -15,7 +15,8 @@ export async function POST(request: NextRequest) {
     await storeToken(email, token);
     
     // Create the magic link URL
-    const magicLink = `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/login/magic?token=${token}`;
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://intelliwatt.com';
+    const magicLink = `${baseUrl}/login/magic?token=${token}`;
 
     // Log the magic link for testing
     console.log('=== MAGIC LINK FOR TESTING ===');

@@ -11,25 +11,39 @@ const transporter = nodemailer.createTransport({
 });
 
 export async function sendLoginEmail(email: string, link: string) {
-  // For testing: log the magic link to console instead of sending email
+  // For testing: log the magic link to console
   console.log('=== MAGIC LINK FOR TESTING ===');
   console.log(`Email: ${email}`);
   console.log(`Magic Link: ${link}`);
   console.log('==============================');
   
-  // Uncomment the code below when you have proper email configuration
-  /*
-  const mailOptions = {
-    from: `"IntelliWatt Login" <${process.env.EMAIL_USER}>`,
-    to: email,
-    subject: 'Your Magic Link to IntelliWatt',
-    html: `
-      <p>Click below to access your IntelliWatt dashboard:</p>
-      <p><a href="${link}" style="background:#0077ff;color:#fff;padding:10px 20px;border-radius:5px;text-decoration:none;">Access Dashboard</a></p>
-      <p>This link will expire in 15 minutes.</p>
-    `,
-  };
+  // Try to send email if email configuration is available
+  if (process.env.EMAIL_HOST && process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+    try {
+      const mailOptions = {
+        from: `"IntelliWatt Login" <${process.env.EMAIL_USER}>`,
+        to: email,
+        subject: 'Your Magic Link to IntelliWatt',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #0077ff;">Welcome to IntelliWatt!</h2>
+            <p>Click the button below to access your IntelliWatt dashboard:</p>
+            <div style="text-align: center; margin: 30px 0;">
+              <a href="${link}" style="background: #0077ff; color: #fff; padding: 15px 30px; border-radius: 5px; text-decoration: none; display: inline-block;">Access Dashboard</a>
+            </div>
+            <p style="color: #666; font-size: 14px;">This link will expire in 15 minutes.</p>
+            <p style="color: #666; font-size: 14px;">If you didn't request this link, you can safely ignore this email.</p>
+          </div>
+        `,
+      };
 
-  await transporter.sendMail(mailOptions);
-  */
+      await transporter.sendMail(mailOptions);
+      console.log(`Email sent successfully to ${email}`);
+    } catch (emailError) {
+      console.error('Email sending failed:', emailError);
+      // Don't throw - we'll still log the magic link for testing
+    }
+  } else {
+    console.log('Email configuration not available - magic link logged to console only');
+  }
 }
