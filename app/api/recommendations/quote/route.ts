@@ -214,7 +214,7 @@ export async function POST(req: NextRequest) {
               components: [
                 ...(rc.centsPerKwhJson ? [{ 
                   kind: 'flat_per_kwh' as const,
-                  rate_cents_per_kwh: rc.centsPerKwhJson,
+                  rate_cents_per_kwh: typeof rc.centsPerKwhJson === 'number' ? rc.centsPerKwhJson : parseFloat(String(rc.centsPerKwhJson)) || 0,
                   tier: null,
                   tou: null,
                   notes: 'Energy rate'
