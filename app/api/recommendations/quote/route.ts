@@ -232,10 +232,15 @@ export async function POST(req: NextRequest) {
 
           const est = await estimateBill({
             config,
-            usage: {
-              monthlyKwh: monthlyKwh ?? undefined,
-              hours: intervals ? intervals.map(i => ({ ts: i.ts, kwh: i.kwh })) : undefined,
-            },
+            usage: intervals && intervals.length > 0 
+              ? {
+                  monthlyKwh: undefined,
+                  hours: intervals.map(i => ({ ts: i.ts, kwh: i.kwh })),
+                }
+              : {
+                  monthlyKwh: monthlyKwh || 0,
+                  hours: undefined,
+                },
           });
           breakdown = est.breakdown;
           subtotalCents = Math.round(est.totals.usd * 100);
