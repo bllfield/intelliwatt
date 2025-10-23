@@ -49,7 +49,7 @@ export async function sendLoginEmail(email: string, link: string) {
       console.log(`✅ Email sent successfully to ${email}`);
     } catch (emailError) {
       console.error('❌ Email sending failed:', emailError);
-      console.error('Error details:', emailError.message);
+      console.error('Error details:', (emailError as Error).message);
       // Don't throw - we'll still log the magic link for testing
     }
   } else {
