@@ -36,7 +36,7 @@ export async function matchOffer(offer: any): Promise<MatchResult> {
     where: {
       planName: n.plan_name,
       offerId: n.offer_id,
-      tdsp: n.tdsp,
+      ...(n.tdsp ? { tdsp: n.tdsp as any } : {}),
       termMonths: n.term_months
     }
   })
@@ -51,7 +51,7 @@ export async function matchOffer(offer: any): Promise<MatchResult> {
       supplierName: { contains: n.supplier_name, mode: 'insensitive' },
       planName: { contains: n.plan_name, mode: 'insensitive' },
       termMonths: n.term_months,
-      tdsp: n.tdsp
+      ...(n.tdsp ? { tdsp: n.tdsp as any } : {})
     }
   })
   if (row3) {
