@@ -221,7 +221,7 @@ export async function matchOfferToRate(offer: any): Promise<{ key: string | null
   // 2) Try without tdsp if present (some files may be supplier:*:planId)
   if (parts.planIdent && parts.supplierSlug) {
     const relaxed = `${parts.supplierSlug}:${parts.planIdent}`;
-    for (const k of idx.keys()) {
+    for (const k of Array.from(idx.keys())) {
       if (k.endsWith(`:${parts.planIdent}`) && k.startsWith(`${parts.supplierSlug}:`)) {
         return { key: k, rate: idx.get(k)!, parts };
       }
