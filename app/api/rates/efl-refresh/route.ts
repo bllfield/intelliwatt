@@ -13,6 +13,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { Prisma } from '@prisma/client';
 import { fetchAndParseEfl, toRateConfigUpdate } from '@/lib/efl';
 
 type Payload = {
@@ -60,10 +61,10 @@ export async function POST(req: NextRequest) {
             ...(whereMissingOnly && !force
               ? {
                   OR: [
-                    { baseMonthlyFeeCents: { equals: null } },
-                    { centsPerKwhJson: { equals: null } },
-                    { billCreditsJson: { equals: null } },
-                    { touWindowsJson: { equals: null } },
+                    { baseMonthlyFeeCents: null },
+                    { centsPerKwhJson: Prisma.JsonNull },
+                    { billCreditsJson: Prisma.JsonNull },
+                    { touWindowsJson: Prisma.JsonNull },
                   ],
                 }
               : {}),
