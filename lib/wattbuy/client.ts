@@ -238,6 +238,15 @@ export class WattBuyClient {
   static async getRetailRates(params: any) {
     return getRetailRates(params);
   }
+  
+  // Instance methods for backward compatibility
+  async offersByEsiid({ esiid }: { esiid: string }) {
+    return getOffersForESIID(esiid);
+  }
+  
+  async offersByAddress({ address, city, state, zip }: { address: string; city: string; state: string; zip: string }) {
+    return getOffersForAddress({ line1: address, city, state, zip });
+  }
 }
 
 // Export tdspToSlug for backward compatibility
