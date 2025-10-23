@@ -60,10 +60,10 @@ export async function POST(req: NextRequest) {
             ...(whereMissingOnly && !force
               ? {
                   OR: [
-                    { baseMonthlyFeeCents: null },
-                    { centsPerKwhJson: null },
-                    { billCreditsJson: null },
-                    { touWindowsJson: null },
+                    { baseMonthlyFeeCents: { equals: null } },
+                    { centsPerKwhJson: { equals: null } },
+                    { billCreditsJson: { equals: null } },
+                    { touWindowsJson: { equals: null } },
                   ],
                 }
               : {}),
