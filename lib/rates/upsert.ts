@@ -168,19 +168,19 @@ export async function upsertRateFromOffer(
       avgPrice1000: parsed?.rate.avgPrice1000 ?? offer.offer_data?.kwh1000 ?? null,
       avgPrice2000: parsed?.rate.avgPrice2000 ?? offer.offer_data?.kwh2000 ?? null,
 
-      isGreen: parsed?.rate.isGreen ?? toBool(offer.offer_data?.is_green),
+      isGreen: parsed?.rate.isGreen ?? toBool((offer.offer_data as any)?.is_green),
       greenPct:
         parsed?.rate.greenPct ??
-        (typeof offer.offer_data?.green_percentage === 'number'
-          ? Math.round(offer.offer_data!.green_percentage)
+        (typeof (offer.offer_data as any)?.green_percentage === 'number'
+          ? Math.round((offer.offer_data as any).green_percentage)
           : null),
-      cancelFeeCents: parsed?.rate.cancelFeeCents ?? parseCancelFee(offer.offer_data?.cancel_notes),
+      cancelFeeCents: parsed?.rate.cancelFeeCents ?? parseCancelFee((offer.offer_data as any)?.cancel_notes),
       isFixed:
         parsed?.rate.isFixed ??
-        (typeof offer.offer_data?.is_fixed === 'boolean' ? offer.offer_data!.is_fixed : null),
+        (typeof (offer.offer_data as any)?.is_fixed === 'boolean' ? (offer.offer_data as any).is_fixed : null),
       isVariable:
         parsed?.rate.isVariable ??
-        (typeof offer.offer_data?.is_variable === 'boolean' ? offer.offer_data!.is_variable : null),
+        (typeof (offer.offer_data as any)?.is_variable === 'boolean' ? (offer.offer_data as any).is_variable : null),
 
       eflHash: fetched?.hash ?? existing?.eflHash ?? null,
       fetchedAt: fetched ? new Date() : existing?.fetchedAt ?? null,
