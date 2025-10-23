@@ -20,7 +20,7 @@ export const wattbuy = {
    * ESIID + wattkey by address (preferred first step).
    */
   async esiidByAddress(address: string, city: string, state: string, zip: string) {
-    const result = await client.getESIByAddress({ line1: address, city, state, zip });
+    const result = await WattBuyClient.getESIByAddress({ line1: address, city, state, zip });
     return result.addresses?.[0] || null;
   },
 
