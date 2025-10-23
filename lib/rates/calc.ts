@@ -494,4 +494,6 @@ export function estimateAcrossConfigs(
 
 // Export aliases for backward compatibility
 export const estimateBill = estimateMonthlyBill;
-export const sumIntervalsKwh = sum;
+export const sumIntervalsKwh = (intervals: Interval15[]): number => {
+  return sum(intervals.map(i => i.kwh));
+};
