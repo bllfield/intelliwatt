@@ -48,8 +48,8 @@ export async function matchOffer(offer: any): Promise<MatchResult> {
   // 3) fuzzy: supplier + planName contains
   const row3 = await prisma.masterPlan.findFirst({
     where: {
-      supplierName: { contains: n.supplier_name, mode: 'insensitive' },
-      planName: { contains: n.plan_name, mode: 'insensitive' },
+      ...(n.supplier_name ? { supplierName: { contains: n.supplier_name, mode: 'insensitive' } } : {}),
+      ...(n.plan_name ? { planName: { contains: n.plan_name, mode: 'insensitive' } } : {}),
       ...(n.term_months ? { termMonths: n.term_months } : {}),
       ...(n.tdsp ? { tdsp: n.tdsp as any } : {})
     }

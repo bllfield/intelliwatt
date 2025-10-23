@@ -15,6 +15,7 @@ vi.mock('@prisma/client', () => {
 
 describe('matchOffer', () => {
   it('returns exact match by offerId', async () => {
+    // @ts-ignore - dynamic import for test mocking
     const { __mockFindFirst } = await import('@prisma/client') as any
     __mockFindFirst.mockResolvedValueOnce({ id: 'p1', planName: 'Saver 12' })
     const res = await matcher.matchOffer({ offer_id: '123' })
@@ -23,6 +24,7 @@ describe('matchOffer', () => {
   })
 
   it('returns none when nothing found', async () => {
+    // @ts-ignore - dynamic import for test mocking
     const { __mockFindFirst } = await import('@prisma/client') as any
     __mockFindFirst.mockResolvedValue(null)
     const res = await matcher.matchOffer({ supplier: 'Test', plan_name: 'Foo', term: 12 })
