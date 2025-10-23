@@ -32,7 +32,12 @@ export async function POST(req: NextRequest) {
     const { recommendations, filteredCount } = await recommendPlans({ tdsp, intervals, periodStart: body.periodStart, periodEnd: body.periodEnd, limit, userKey })
     
     // Log offers shown for audit trail
-    await logOffersShown(recommendations, userKey, {
+    await logOffersShown(recommendations.map(r => ({
+      id: r.planId,
+      supplierName: r.supplierName,
+      planName: r.planName,
+      tdsp: r.tdsp
+    })), userKey, {
       tdsp,
       periodStart: body.periodStart,
       periodEnd: body.periodEnd,
