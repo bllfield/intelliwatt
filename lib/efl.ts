@@ -113,7 +113,7 @@ function parseBandsByKwh(text: string): ParsedBands | undefined {
 function parseAvgPrices(text: string) {
   // "Average Price at 500 / 1000 / 2000 kWh: 15.0¢ 14.2¢ 13.1¢"
   const re =
-    /Average\s+Price.*?(?:500[^0-9]+([0-9]+(?:\.[0-9]+)?)\s*(?:¢|c))[^0-9]+(?:1000[^0-9]+([0-9]+(?:\.[0-9]+)?)\s*(?:¢|c))[^0-9]+(?:2000[^0-9]+([0-9]+(?:\.[0-9]+)?)\s*(?:¢|c))/is;
+    /Average\s+Price[\s\S]*?(?:500[^0-9]+([0-9]+(?:\.[0-9]+)?)\s*(?:¢|c))[^0-9]+(?:1000[^0-9]+([0-9]+(?:\.[0-9]+)?)\s*(?:¢|c))[^0-9]+(?:2000[^0-9]+([0-9]+(?:\.[0-9]+)?)\s*(?:¢|c))/i;
   const m = re.exec(text);
   if (!m) return {};
   return {
