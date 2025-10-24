@@ -20,20 +20,27 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
   useEffect(() => {
     setMounted(true);
     
-    // Check if Google Maps is loaded
-    const checkGoogleLoaded = () => {
-      if (typeof window !== 'undefined' && window.google && window.google.maps) {
-        setGoogleLoaded(true);
+    // Always allow manual entry immediately, then try to enhance with Google Maps
+    setGoogleLoaded(true);
+    
+    // Try to initialize Google Maps if available
+    const tryInitializeGoogle = () => {
+      if (typeof window !== 'undefined' && 
+          window.google && 
+          window.google.maps && 
+          window.google.maps.places &&
+          process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY) {
         initializeAutocomplete();
-      } else {
-        // Retry after a short delay
-        setTimeout(checkGoogleLoaded, 100);
       }
     };
     
-    if (mounted) {
-      checkGoogleLoaded();
-    }
+    // Try immediately
+    tryInitializeGoogle();
+    
+    // Also try after a delay in case Google Maps is still loading
+    const timeout = setTimeout(tryInitializeGoogle, 1000);
+    
+    return () => clearTimeout(timeout);
   }, [mounted]);
 
   const initializeAutocomplete = () => {
@@ -139,17 +146,12 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
               <input
                 ref={inputRef}
                 type="text"
-                placeholder={googleLoaded ? "Enter your service address to get started..." : "Loading address suggestions..."}
+                placeholder="Enter your service address to get started..."
                 value={address}
                 onChange={(e) => setAddress(e.target.value)}
                 className="w-full px-4 py-3 text-sm bg-white/90 border border-white/30 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-blue focus:border-brand-blue text-brand-navy placeholder-brand-navy/60"
                 disabled={isSubmitting || !googleLoaded}
               />
-              {!googleLoaded && (
-                <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-brand-blue"></div>
-                </div>
-              )}
             </div>
           </div>
           <button
