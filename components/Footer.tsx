@@ -63,7 +63,7 @@ export default function Footer() {
                 <li><a href="/join" className="hover:text-brand-white transition-colors">Join</a></li>
                 <li><a href="/login" className="hover:text-brand-white transition-colors">Login</a></li>
                 <li><a href="/dashboard" className="hover:text-brand-white transition-colors">Dashboard</a></li>
-                <li><button onClick={handleAdminClick} className="hover:text-brand-white transition-colors text-left">Admin Access</button></li>
+                <li><button onClick={handleAdminClick} className="hover:text-brand-white transition-colors text-sm text-brand-blue/80">Admin Access</button></li>
               </ul>
             </div>
           </div>
