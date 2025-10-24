@@ -56,7 +56,8 @@ export async function GET(req: Request) {
     });
 
     // Set admin cookie
-    cookies().set({
+    const cookieStore = cookies();
+    cookieStore.set({
       name: 'intelliwatt_admin',
       value: record.email,
       httpOnly: true,
@@ -65,6 +66,8 @@ export async function GET(req: Request) {
       maxAge: 60 * 60 * 24, // 24 hours
     });
 
+    console.log('Admin cookie set for:', record.email);
+    console.log('Redirecting to /admin');
     redirect('/admin');
   } catch (dbError) {
     console.error('Database error in admin magic link login:', dbError);
