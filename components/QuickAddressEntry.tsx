@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 interface QuickAddressEntryProps {
   onAddressSubmitted: (address: string) => void;
@@ -13,10 +13,47 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [consent, setConsent] = useState(false);
   const [showTerms, setShowTerms] = useState(false);
+  const [autocomplete, setAutocomplete] = useState<any>(null);
+  const [googleLoaded, setGoogleLoaded] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setMounted(true);
-  }, []);
+    
+    // Check if Google Maps is loaded
+    const checkGoogleLoaded = () => {
+      if (typeof window !== 'undefined' && window.google && window.google.maps) {
+        setGoogleLoaded(true);
+        initializeAutocomplete();
+      } else {
+        // Retry after a short delay
+        setTimeout(checkGoogleLoaded, 100);
+      }
+    };
+    
+    if (mounted) {
+      checkGoogleLoaded();
+    }
+  }, [mounted]);
+
+  const initializeAutocomplete = () => {
+    if (!inputRef.current || !window.google) return;
+
+    const autocompleteInstance = new window.google.maps.places.Autocomplete(inputRef.current, {
+      types: ['address'],
+      componentRestrictions: { country: 'us' },
+      fields: ['formatted_address', 'address_components', 'place_id']
+    });
+
+    autocompleteInstance.addListener('place_changed', () => {
+      const place = autocompleteInstance.getPlace();
+      if (place.formatted_address) {
+        setAddress(place.formatted_address);
+      }
+    });
+
+    setAutocomplete(autocompleteInstance);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -84,14 +121,22 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
             <span className="text-white text-sm">⚡</span>
           </div>
           <div className="flex-1">
-            <input
-              type="text"
-              placeholder="Enter your service address to get started..."
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              className="w-full px-4 py-3 text-sm bg-white/90 border border-white/30 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-blue focus:border-brand-blue text-brand-navy placeholder-brand-navy/60"
-              disabled={isSubmitting}
-            />
+            <div className="relative">
+              <input
+                ref={inputRef}
+                type="text"
+                placeholder={googleLoaded ? "Enter your service address to get started..." : "Loading address suggestions..."}
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                className="w-full px-4 py-3 text-sm bg-white/90 border border-white/30 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-blue focus:border-brand-blue text-brand-navy placeholder-brand-navy/60"
+                disabled={isSubmitting || !googleLoaded}
+              />
+              {!googleLoaded && (
+                <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-brand-blue"></div>
+                </div>
+              )}
+            </div>
           </div>
           <button
             type="submit"
