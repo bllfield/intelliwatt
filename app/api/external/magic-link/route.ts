@@ -58,7 +58,10 @@ export async function POST(request: NextRequest) {
     });
 
     // Add CORS headers for HitTheJackWatt domains
-    response.headers.set('Access-Control-Allow-Origin', 'https://bllfield.github.io, https://hitthejackwatt.com');
+    const origin = request.headers.get('origin');
+    if (origin === 'https://bllfield.github.io' || origin === 'https://hitthejackwatt.com') {
+      response.headers.set('Access-Control-Allow-Origin', origin);
+    }
     response.headers.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
     response.headers.set('Access-Control-Allow-Headers', 'Content-Type');
 
@@ -74,8 +77,12 @@ export async function POST(request: NextRequest) {
 
 // Handle CORS preflight requests
 export async function OPTIONS(request: NextRequest) {
+  const origin = request.headers.get('origin');
   const response = new NextResponse(null, { status: 200 });
-  response.headers.set('Access-Control-Allow-Origin', 'https://bllfield.github.io, https://hitthejackwatt.com');
+  
+  if (origin === 'https://bllfield.github.io' || origin === 'https://hitthejackwatt.com') {
+    response.headers.set('Access-Control-Allow-Origin', origin);
+  }
   response.headers.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
   response.headers.set('Access-Control-Allow-Headers', 'Content-Type');
   return response;
