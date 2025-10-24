@@ -247,7 +247,7 @@ function LandingPageContent() {
                 <span className="text-brand-navy font-bold text-2xl">3</span>
               </div>
               <h3 className="text-2xl font-semibold text-brand-white mb-4">Start Saving Money</h3>
-              <p className="text-brand-white text-lg leading-relaxed">Get personalized recommendations and automatic plan switching</p>
+              <p className="text-brand-white text-lg leading-relaxed">Get personalized recommendations and easy plan enrollment</p>
             </div>
           </div>
         </div>

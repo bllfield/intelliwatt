@@ -15,7 +15,7 @@ export default function HowItWorksPage() {
             How <span className="text-brand-blue">IntelliWatt™</span> Works
           </h1>
           <p className="text-xl text-brand-white mb-8 max-w-2xl mx-auto leading-relaxed">
-            Our AI-powered platform analyzes your energy usage and automatically finds the best plan for your home.
+            Our AI-powered platform analyzes your energy usage and finds the best plan for your home.
           </p>
         </div>
       </section>
@@ -51,9 +51,9 @@ export default function HowItWorksPage() {
               <div className="w-24 h-24 bg-brand-navy rounded-full flex items-center justify-center mx-auto mb-8 shadow-lg group-hover:shadow-brand-blue/50 transition-all duration-300 transform group-hover:scale-110">
                 <span className="text-brand-blue font-bold text-3xl">3</span>
               </div>
-              <h3 className="text-2xl font-bold text-brand-navy mb-4">Automatic Switching</h3>
+              <h3 className="text-2xl font-bold text-brand-navy mb-4">Easy Enrollment</h3>
               <p className="text-brand-navy text-lg leading-relaxed">
-                We handle the entire switching process for you. No phone calls, no paperwork — just automatic savings.
+                We guide you through the enrollment process. No phone calls, no paperwork — just easy sign-up and savings.
               </p>
             </div>
           </div>
@@ -141,7 +141,7 @@ export default function HowItWorksPage() {
                 <ul className="text-brand-white space-y-2">
                   <li className="flex items-center">
                     <span className="text-brand-blue mr-2">•</span>
-                    Automatic plan enrollment and switching
+                    Easy plan enrollment and sign-up
                   </li>
                   <li className="flex items-center">
                     <span className="text-brand-blue mr-2">•</span>
