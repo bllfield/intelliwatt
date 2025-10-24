@@ -4,7 +4,7 @@ import { sendLoginEmail } from '@/lib/email/sendLoginEmail';
 
 export async function POST(request: NextRequest) {
   try {
-    const { email, source = 'external' } = await request.json();
+    const { email, zip, source = 'external' } = await request.json();
 
     if (!email || !email.includes('@')) {
       return NextResponse.json({ error: 'Valid email is required' }, { status: 400 });
@@ -33,24 +33,36 @@ export async function POST(request: NextRequest) {
     // Log the magic link for testing
     console.log('=== EXTERNAL MAGIC LINK FOR TESTING ===');
     console.log(`Email: ${email}`);
+    console.log(`Zip: ${zip || 'not provided'}`);
     console.log(`Source: ${source}`);
     console.log(`Magic Link: ${magicLink}`);
     console.log('========================================');
 
-    // Try to send email
+    // Try to send email with custom subject for HitTheJackWatt
     try {
-      await sendLoginEmail(email, magicLink, 'Welcome to IntelliWatt - Access Your Dashboard');
+      const emailSubject = source === 'hitthejackwatt' 
+        ? 'Your HitTheJackWatt Magic Link' 
+        : 'Welcome to IntelliWatt - Access Your Dashboard';
+      
+      await sendLoginEmail(email, magicLink, emailSubject);
       console.log('External magic link email sent successfully');
     } catch (emailError) {
       console.error('Email sending failed:', emailError);
       // Don't fail the request if email fails - we still log the link
     }
 
-    return NextResponse.json({ 
+    const response = NextResponse.json({ 
       success: true, 
       message: 'Magic link sent! Please check your email inbox.',
       magicLink: magicLink // Return the link for testing purposes
     });
+
+    // Add CORS headers for HitTheJackWatt domains
+    response.headers.set('Access-Control-Allow-Origin', 'https://bllfield.github.io, https://hitthejackwatt.com');
+    response.headers.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    response.headers.set('Access-Control-Allow-Headers', 'Content-Type');
+
+    return response;
   } catch (error) {
     console.error('Error sending external magic link:', error);
     return NextResponse.json(
@@ -58,4 +70,13 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+// Handle CORS preflight requests
+export async function OPTIONS(request: NextRequest) {
+  const response = new NextResponse(null, { status: 200 });
+  response.headers.set('Access-Control-Allow-Origin', 'https://bllfield.github.io, https://hitthejackwatt.com');
+  response.headers.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  response.headers.set('Access-Control-Allow-Headers', 'Content-Type');
+  return response;
 }
