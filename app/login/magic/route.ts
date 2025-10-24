@@ -1,5 +1,6 @@
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
+import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 
 export async function GET(req: Request) {
@@ -26,7 +27,7 @@ export async function GET(req: Request) {
       maxAge: 60 * 60 * 24 * 7,
     });
 
-    redirect('/dashboard');
+    return NextResponse.redirect(new URL('/dashboard', req.url));
   }
 
   // Handle real tokens from database
@@ -62,7 +63,7 @@ export async function GET(req: Request) {
     });
 
     // Set login cookie
-    cookies().set({
+    cookieStore.set({
       name: 'intelliwatt_user',
       value: user.email,
       httpOnly: true,
@@ -72,14 +73,15 @@ export async function GET(req: Request) {
     });
 
     // Clear referrer cookie after use
-    cookies().set({
+    cookieStore.set({
       name: 'referrer',
       value: '',
       expires: new Date(0),
       path: '/',
     });
 
-    redirect('/dashboard');
+    // Use NextResponse.redirect instead of redirect() to avoid NEXT_REDIRECT error
+    return NextResponse.redirect(new URL('/dashboard', req.url));
   } catch (dbError) {
     console.error('Database error in magic link login:', dbError);
     return new Response('Database error - please try again', { status: 500 });
