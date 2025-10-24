@@ -10,7 +10,7 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-export async function sendLoginEmail(email: string, link: string) {
+export async function sendLoginEmail(email: string, link: string, subject?: string) {
   // For testing: log the magic link to console
   console.log('=== MAGIC LINK FOR TESTING ===');
   console.log(`Email: ${email}`);
@@ -28,16 +28,21 @@ export async function sendLoginEmail(email: string, link: string) {
   if (process.env.EMAIL_HOST && process.env.EMAIL_USER && process.env.EMAIL_PASS) {
     try {
       console.log('Attempting to send email...');
+      const isAdmin = subject?.includes('Admin') || false;
+      const buttonText = isAdmin ? 'Access Admin Panel' : 'Access Dashboard';
+      const title = isAdmin ? 'Admin Access to IntelliWatt' : 'Welcome to IntelliWatt!';
+      const description = isAdmin ? 'Click the button below to access the IntelliWatt admin panel:' : 'Click the button below to access your IntelliWatt dashboard:';
+
       const mailOptions = {
-        from: `"IntelliWatt Login" <${process.env.EMAIL_USER}>`,
+        from: `"IntelliWatt ${isAdmin ? 'Admin' : 'Login'}" <${process.env.EMAIL_USER}>`,
         to: email,
-        subject: 'Your Magic Link to IntelliWatt',
+        subject: subject || 'Your Magic Link to IntelliWatt',
         html: `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-            <h2 style="color: #0077ff;">Welcome to IntelliWatt!</h2>
-            <p>Click the button below to access your IntelliWatt dashboard:</p>
+            <h2 style="color: #0077ff;">${title}</h2>
+            <p>${description}</p>
             <div style="text-align: center; margin: 30px 0;">
-              <a href="${link}" style="background: #0077ff; color: #fff; padding: 15px 30px; border-radius: 5px; text-decoration: none; display: inline-block;">Access Dashboard</a>
+              <a href="${link}" style="background: #0077ff; color: #fff; padding: 15px 30px; border-radius: 5px; text-decoration: none; display: inline-block;">${buttonText}</a>
             </div>
             <p style="color: #666; font-size: 14px;">This link will expire in 15 minutes.</p>
             <p style="color: #666; font-size: 14px;">If you didn't request this link, you can safely ignore this email.</p>

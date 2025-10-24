@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
 import './globals.css'
+import Footer from '@/components/Footer'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -23,7 +24,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <a href="/faq" className="text-brand-blue hover:text-brand-white transition-colors">FAQ</a>
               <a href="/privacy-policy" className="text-brand-blue hover:text-brand-white transition-colors">Privacy</a>
               <a href="/rules" className="text-brand-blue hover:text-brand-white transition-colors">Rules</a>
-              <a href="/admin" className="text-brand-blue hover:text-brand-white transition-colors font-semibold">Admin</a>
             </nav>
             <div className="md:hidden">
               <span className="text-sm text-brand-blue">Menu</span>
@@ -31,6 +31,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </div>
         </header>
         <main>{children}</main>
+        <Footer />
       </body>
     </html>
   );
