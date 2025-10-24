@@ -52,21 +52,19 @@ export default function DashboardPage() {
               Your AI-powered energy optimization dashboard. Track savings, manage your plan, and earn rewards.
             </p>
             
+            {/* Address Entry - Right below hero text */}
+            <div className="max-w-2xl mx-auto mb-8">
+              <QuickAddressEntry 
+                onAddressSubmitted={handleAddressSubmitted}
+                userAddress={userAddress}
+              />
+            </div>
+            
             {/* Beta Banner */}
             <div className="inline-block bg-brand-blue text-brand-navy px-6 py-2 rounded-full font-semibold mb-8">
               🚀 Beta Version - New Features Coming Soon!
             </div>
           </div>
-        </div>
-      </section>
-
-      {/* Quick Address Entry - Top Priority */}
-      <section className="py-6 px-4 bg-brand-white border-b border-brand-blue/10">
-        <div className="max-w-6xl mx-auto">
-          <QuickAddressEntry 
-            onAddressSubmitted={handleAddressSubmitted}
-            userAddress={userAddress}
-          />
         </div>
       </section>
 
