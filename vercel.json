@@ -3,5 +3,15 @@
   "buildCommand": "npm run build",
   "devCommand": "npm run dev",
   "installCommand": "npm install",
-  "outputDirectory": ".next"
+  "outputDirectory": ".next",
+  "crons": [
+    {
+      "path": "/api/admin/rates/refresh",
+      "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/api/rates/efl-refresh",
+      "schedule": "0 3 * * *"
+    }
+  ]
 }
