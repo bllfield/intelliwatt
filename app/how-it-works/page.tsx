@@ -195,7 +195,7 @@ export default function HowItWorksPage() {
               <ul className="text-brand-navy space-y-2">
                 <li className="flex items-center">
                   <span className="text-brand-blue mr-2">✓</span>
-                  94% accuracy rate
+                  Advanced machine learning algorithms
                 </li>
                 <li className="flex items-center">
                   <span className="text-brand-blue mr-2">✓</span>
