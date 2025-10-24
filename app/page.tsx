@@ -4,7 +4,6 @@ import React, { useState, Suspense } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import MainLayout from '@/components/MainLayout';
 
 function LandingPageContent() {
   const [email, setEmail] = useState('');
@@ -46,8 +45,7 @@ function LandingPageContent() {
   };
 
   return (
-    <MainLayout>
-      <div className="min-h-screen bg-brand-white">
+    <div className="min-h-screen bg-brand-white">
       {/* Success Popup */}
       {showSuccessPopup && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -444,8 +442,7 @@ function LandingPageContent() {
           </div>
         </div>
       </section>
-      </div>
-    </MainLayout>
+    </div>
   );
 }
 
