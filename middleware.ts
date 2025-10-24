@@ -12,7 +12,7 @@ export function middleware(req: NextRequest) {
     adminValue: adminLoggedIn
   });
 
-  const publicPaths = ['/', '/login', '/admin-login', '/admin/magic', '/api', '/_next', '/favicon.ico', '/how-it-works', '/faq', '/privacy-policy', '/rules', '/join', '/quote', '/results'];
+  const publicPaths = ['/', '/login', '/login/magic', '/admin-login', '/admin/magic', '/api', '/_next', '/favicon.ico', '/how-it-works', '/faq', '/privacy-policy', '/rules', '/join', '/quote', '/results'];
 
   const isPublic = publicPaths.some((path) => req.nextUrl.pathname.startsWith(path));
 
