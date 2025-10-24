@@ -83,16 +83,58 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
     setIsSubmitting(true);
     
     try {
-      // Store the address in localStorage for persistence
-      localStorage.setItem('intelliwatt_user_address', address);
+      // Get user ID from dashboard API
+      const userResponse = await fetch('/api/admin/user/dashboard');
+      if (!userResponse.ok) {
+        throw new Error('User not authenticated');
+      }
+      const userData = await userResponse.json();
       
-      // Call the parent callback
-      onAddressSubmitted(address);
-      
-      // Simulate API call delay
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Create Google Place Details format from the address
+      const googlePlaceDetails = {
+        place_id: null,
+        formatted_address: address,
+        address_components: [
+          { long_name: address, short_name: address, types: ['street_address'] },
+          { long_name: 'United States', short_name: 'US', types: ['country'] }
+        ],
+        geometry: {
+          location: null
+        }
+      };
+
+      // Save address to database using the new API
+      const response = await fetch('/api/address/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: userData.user?.email || 'unknown',
+          houseId: null,
+          googlePlaceDetails: googlePlaceDetails,
+          smartMeterConsent: consent,
+          smartMeterConsentDate: new Date().toISOString()
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log('Address saved successfully:', data);
+        
+        // Store the address in localStorage for persistence
+        localStorage.setItem('intelliwatt_user_address', address);
+        
+        // Call the parent callback
+        onAddressSubmitted(address);
+        
+        // Show success message
+        alert('Address saved successfully! You can now connect your Smart Meter.');
+      } else {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to save address');
+      }
     } catch (error) {
       console.error('Error saving address:', error);
+      alert('Failed to save address. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
