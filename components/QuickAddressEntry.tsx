@@ -112,7 +112,11 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
               className="mt-1 w-4 h-4 text-brand-blue bg-white border-white/30 rounded focus:ring-brand-blue focus:ring-2"
             />
             <span className="text-white group-hover:text-brand-blue transition-colors">
-              I agree to allow IntelliWatt to securely access my Smart Meter Texas data for automatic plan optimization and savings calculations.
+              The IntelliWatt Rate Plan Analyzer is in final testing. You can
+              <span className="font-semibold"> authorize Smart Meter Texas now</span> so your usage data is securely
+              linked and ready. While we finish connections and squash bugs, we won&rsquo;t show results in the dashboard yet.
+              As soon as everything is live, we&rsquo;ll <span className="font-semibold">email your personalized plan recommendation</span>.
+              Thanks for joining the early waitlist and helping us launch this the right way!
             </span>
           </label>
 
