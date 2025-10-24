@@ -56,6 +56,15 @@ model UserProfile {
   phone            String?
   address          String?
   zipCode          String?
+  addressLine1     String?
+  addressCity      String?
+  addressState     String?
+  addressZip       String?
+  esiid            String?
+  tdspSlug         String?
+  addressValidated Boolean?
+  smartMeterConsent Boolean?
+  smartMeterConsentDate DateTime?
   homeSqFt         Int?
   homeAge          Int?
   numStories       Int?

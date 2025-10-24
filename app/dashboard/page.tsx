@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import SmartMeterSection from '../../components/SmartMeterSection';
 import QuickAddressEntry from '../../components/QuickAddressEntry';
+import AddressCollection from '../../components/AddressCollection';
 
 interface DashboardData {
   user: {
@@ -213,6 +214,13 @@ export default function DashboardPage() {
         </div>
       </section>
       )}
+
+      {/* Address Collection Section */}
+      <section className="py-16 px-4 bg-brand-white">
+        <div className="max-w-4xl mx-auto">
+          <AddressCollection />
+        </div>
+      </section>
 
       {/* Call to Action - Show if no address entered */}
       {!userAddress && (
