@@ -12,12 +12,12 @@ export function middleware(req: NextRequest) {
     adminValue: adminLoggedIn
   });
 
-  const publicPaths = ['/', '/login', '/admin-login', '/api', '/_next', '/favicon.ico', '/how-it-works', '/faq', '/privacy-policy', '/rules', '/join', '/quote', '/results'];
+  const publicPaths = ['/', '/login', '/admin-login', '/admin/magic', '/api', '/_next', '/favicon.ico', '/how-it-works', '/faq', '/privacy-policy', '/rules', '/join', '/quote', '/results'];
 
   const isPublic = publicPaths.some((path) => req.nextUrl.pathname.startsWith(path));
 
-  // Check if accessing admin routes
-  if (req.nextUrl.pathname.startsWith('/admin')) {
+  // Check if accessing admin routes (but not the magic link handler)
+  if (req.nextUrl.pathname.startsWith('/admin') && !req.nextUrl.pathname.startsWith('/admin/magic')) {
     console.log('Admin route access attempt:', {
       path: req.nextUrl.pathname,
       adminCookie: adminLoggedIn ? 'present' : 'missing'
