@@ -41,79 +41,54 @@ export default function AdminDashboard() {
   const [mounted, setMounted] = useState(false);
   const [loading, setLoading] = useState(true);
   const [adminEmail, setAdminEmail] = useState('admin@intelliwatt.com');
+  
+  // Real data state
+  const [users, setUsers] = useState<User[]>([]);
+  const [commissions, setCommissions] = useState<Commission[]>([]);
+  const [jackpotPayouts, setJackpotPayouts] = useState<JackpotPayout[]>([]);
+  const [financeRecords, setFinanceRecords] = useState<FinanceRecord[]>([]);
 
-  // Mock data for testing
-  const mockUsers: User[] = [
-    {
-      id: '1',
-      email: 'user1@example.com',
-      createdAt: '2024-01-15T10:00:00Z',
-      entries: [{ id: '1' }, { id: '2' }],
-      referrals: [{ id: '1' }]
-    },
-    {
-      id: '2',
-      email: 'user2@example.com',
-      createdAt: '2024-01-20T14:30:00Z',
-      entries: [{ id: '3' }],
-      referrals: []
-    }
-  ];
-
-  const mockCommissions: Commission[] = [
-    {
-      id: '1',
-      userId: '1',
-      type: 'plan-switch',
-      amount: 25.00,
-      status: 'paid',
-      user: mockUsers[0]
-    },
-    {
-      id: '2',
-      userId: '2',
-      type: 'referral',
-      amount: 15.00,
-      status: 'pending',
-      user: mockUsers[1]
-    }
-  ];
-
-  const mockJackpot: JackpotPayout[] = [
-    {
-      id: '1',
-      userId: '1',
-      amount: 100.00,
-      paid: false,
-      user: mockUsers[0]
-    }
-  ];
-
-  const mockFinance: FinanceRecord[] = [
-    {
-      id: '1',
-      type: 'income',
-      source: 'commission',
-      amount: 40.00,
-      status: 'paid'
-    },
-    {
-      id: '2',
-      type: 'expense',
-      source: 'jackpot',
-      amount: 100.00,
-      status: 'pending'
-    }
-  ];
-
+  // Fetch real data from API
   useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const [usersRes, commissionsRes, jackpotRes, financeRes] = await Promise.all([
+          fetch('/api/admin/users'),
+          fetch('/api/admin/commissions'),
+          fetch('/api/admin/jackpot'),
+          fetch('/api/admin/finance')
+        ]);
+
+        if (usersRes.ok) {
+          const usersData = await usersRes.json();
+          setUsers(usersData);
+        }
+
+        if (commissionsRes.ok) {
+          const commissionsData = await commissionsRes.json();
+          setCommissions(commissionsData);
+        }
+
+        if (jackpotRes.ok) {
+          const jackpotData = await jackpotRes.json();
+          setJackpotPayouts(jackpotData);
+        }
+
+        if (financeRes.ok) {
+          const financeData = await financeRes.json();
+          setFinanceRecords(financeData);
+        }
+      } catch (error) {
+        console.error('Error fetching admin data:', error);
+      }
+    };
+
     setMounted(true);
-    // Set document title
     document.title = 'Admin Dashboard - IntelliWatt™';
-    // Simulate loading
-    setTimeout(() => {
+    
+    fetchData().finally(() => {
       setLoading(false);
-    }, 1000);
+    });
   }, []);
 
   // Prevent hydration mismatch by not rendering until mounted
@@ -180,14 +155,22 @@ export default function AdminDashboard() {
                 </tr>
               </thead>
               <tbody>
-                {mockUsers.map(user => (
-                  <tr key={user.id} className="border-b border-brand-navy/10 hover:bg-brand-navy/5">
-                    <td className="py-3 px-4 text-brand-navy">{user.email}</td>
-                    <td className="py-3 px-4 text-brand-navy">{new Date(user.createdAt).toLocaleDateString()}</td>
-                    <td className="py-3 px-4 text-brand-navy">{user.entries?.length || 0}</td>
-                    <td className="py-3 px-4 text-brand-navy">{user.referrals?.length || 0}</td>
+                {users.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="py-8 px-4 text-center text-brand-navy/60">
+                      No users found
+                    </td>
                   </tr>
-                ))}
+                ) : (
+                  users.map(user => (
+                    <tr key={user.id} className="border-b border-brand-navy/10 hover:bg-brand-navy/5">
+                      <td className="py-3 px-4 text-brand-navy">{user.email}</td>
+                      <td className="py-3 px-4 text-brand-navy">{new Date(user.createdAt).toLocaleDateString()}</td>
+                      <td className="py-3 px-4 text-brand-navy">{user.entries?.length || 0}</td>
+                      <td className="py-3 px-4 text-brand-navy">{user.referrals?.length || 0}</td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
@@ -207,22 +190,30 @@ export default function AdminDashboard() {
                 </tr>
               </thead>
               <tbody>
-                {mockCommissions.map(c => (
-                  <tr key={c.id} className="border-b border-brand-navy/10 hover:bg-brand-navy/5">
-                    <td className="py-3 px-4 text-brand-navy">{c.user?.email || 'Unknown'}</td>
-                    <td className="py-3 px-4 text-brand-navy">{c.type}</td>
-                    <td className="py-3 px-4 text-brand-navy font-semibold">${c.amount.toFixed(2)}</td>
-                    <td className="py-3 px-4">
-                      <span className={`px-2 py-1 rounded-full text-xs ${
-                        c.status === 'paid' ? 'bg-green-100 text-green-800' :
-                        c.status === 'approved' ? 'bg-blue-100 text-blue-800' :
-                        'bg-yellow-100 text-yellow-800'
-                      }`}>
-                        {c.status}
-                      </span>
+                {commissions.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="py-8 px-4 text-center text-brand-navy/60">
+                      No commissions found
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  commissions.map(c => (
+                    <tr key={c.id} className="border-b border-brand-navy/10 hover:bg-brand-navy/5">
+                      <td className="py-3 px-4 text-brand-navy">{c.user?.email || 'Unknown'}</td>
+                      <td className="py-3 px-4 text-brand-navy">{c.type}</td>
+                      <td className="py-3 px-4 text-brand-navy font-semibold">${c.amount.toFixed(2)}</td>
+                      <td className="py-3 px-4">
+                        <span className={`px-2 py-1 rounded-full text-xs ${
+                          c.status === 'paid' ? 'bg-green-100 text-green-800' :
+                          c.status === 'approved' ? 'bg-blue-100 text-blue-800' :
+                          'bg-yellow-100 text-yellow-800'
+                        }`}>
+                          {c.status}
+                        </span>
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
@@ -241,19 +232,27 @@ export default function AdminDashboard() {
                 </tr>
               </thead>
               <tbody>
-                {mockJackpot.map(j => (
-                  <tr key={j.id} className="border-b border-brand-navy/10 hover:bg-brand-navy/5">
-                    <td className="py-3 px-4 text-brand-navy">{j.user?.email || 'Unknown'}</td>
-                    <td className="py-3 px-4 text-brand-navy font-semibold">${j.amount.toFixed(2)}</td>
-                    <td className="py-3 px-4">
-                      {j.paid ? (
-                        <span className="text-green-600">✅ Paid</span>
-                      ) : (
-                        <span className="text-red-600">❌ Pending</span>
-                      )}
+                {jackpotPayouts.length === 0 ? (
+                  <tr>
+                    <td colSpan={3} className="py-8 px-4 text-center text-brand-navy/60">
+                      No jackpot payouts found
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  jackpotPayouts.map(j => (
+                    <tr key={j.id} className="border-b border-brand-navy/10 hover:bg-brand-navy/5">
+                      <td className="py-3 px-4 text-brand-navy">{j.user?.email || 'Unknown'}</td>
+                      <td className="py-3 px-4 text-brand-navy font-semibold">${j.amount.toFixed(2)}</td>
+                      <td className="py-3 px-4">
+                        {j.paid ? (
+                          <span className="text-green-600">✅ Paid</span>
+                        ) : (
+                          <span className="text-red-600">❌ Pending</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
@@ -273,8 +272,15 @@ export default function AdminDashboard() {
                 </tr>
               </thead>
               <tbody>
-                {mockFinance.map(f => (
-                  <tr key={f.id} className="border-b border-brand-navy/10 hover:bg-brand-navy/5">
+                {financeRecords.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="py-8 px-4 text-center text-brand-navy/60">
+                      No finance records found
+                    </td>
+                  </tr>
+                ) : (
+                  financeRecords.map(f => (
+                    <tr key={f.id} className="border-b border-brand-navy/10 hover:bg-brand-navy/5">
                     <td className="py-3 px-4">
                       <span className={`px-2 py-1 rounded-full text-xs ${
                         f.type === 'income' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
@@ -292,7 +298,8 @@ export default function AdminDashboard() {
                       </span>
                     </td>
                   </tr>
-                ))}
+                  ))
+                )}
               </tbody>
             </table>
           </div>
