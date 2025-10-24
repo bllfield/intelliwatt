@@ -6,6 +6,7 @@ import { useState, useEffect } from 'react';
 import SmartMeterSection from '../../components/SmartMeterSection';
 import QuickAddressEntry from '../../components/QuickAddressEntry';
 import AddressCollection from '../../components/AddressCollection';
+import AddressImageUpload from '../../components/AddressImageUpload';
 
 interface DashboardData {
   user: {
@@ -217,8 +218,9 @@ export default function DashboardPage() {
 
       {/* Address Collection Section */}
       <section className="py-16 px-4 bg-brand-white">
-        <div className="max-w-4xl mx-auto">
+        <div className="max-w-4xl mx-auto space-y-8">
           <AddressCollection />
+          <AddressImageUpload />
         </div>
       </section>
 
