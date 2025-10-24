@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Head from 'next/head';
 
 interface User {
   id: string;
@@ -132,7 +133,12 @@ export default function AdminDashboard() {
   const totalFinance = mockFinance.reduce((sum, f) => sum + (f.type === 'income' ? f.amount : -f.amount), 0);
 
   return (
-    <div className="min-h-screen bg-brand-navy">
+    <>
+      <Head>
+        <title>Admin Dashboard - IntelliWatt™</title>
+        <link rel="icon" href="/favicon.ico" />
+      </Head>
+      <div className="min-h-screen bg-brand-navy">
       {/* Header */}
       <div className="bg-brand-navy border-b border-brand-blue/20">
         <div className="max-w-7xl mx-auto px-4 py-6">
@@ -296,6 +302,6 @@ export default function AdminDashboard() {
           </div>
         </section>
       </div>
-    </div>
+    </>
   );
 } 

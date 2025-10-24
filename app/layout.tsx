@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
+import Image from 'next/image'
 import './globals.css'
 import Footer from '@/components/Footer'
 
@@ -17,7 +18,17 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <header className="p-4 bg-brand-navy text-brand-blue font-bold shadow-lg border-b border-brand-blue/20">
           <div className="max-w-6xl mx-auto flex justify-between items-center">
             <div className="flex items-center space-x-4">
-              <a href="/" className="text-xl font-bold text-brand-blue hover:text-brand-white transition-colors">IntelliWatt™</a>
+              <div className="flex items-center space-x-3">
+                <div className="relative w-8 h-8">
+                  <Image
+                    src="/IntelliWatt Logo.png"
+                    alt="IntelliWatt™ Logo"
+                    fill
+                    className="object-contain"
+                  />
+                </div>
+                <a href="/" className="text-xl font-bold text-brand-blue hover:text-brand-white transition-colors">IntelliWatt™</a>
+              </div>
             </div>
             <nav className="hidden md:flex space-x-6 text-sm">
               <a href="/how-it-works" className="text-brand-blue hover:text-brand-white transition-colors">How It Works</a>

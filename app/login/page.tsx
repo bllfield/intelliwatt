@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Image from 'next/image';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -43,6 +44,16 @@ export default function LoginPage() {
       <div className="max-w-md w-full">
         <div className="bg-brand-white p-8 rounded-2xl border-2 border-brand-navy shadow-lg">
           <div className="text-center mb-8">
+            <div className="flex justify-center mb-4">
+              <div className="relative w-16 h-16">
+                <Image
+                  src="/IntelliWatt Logo.png"
+                  alt="IntelliWatt™ Logo"
+                  fill
+                  className="object-contain"
+                />
+              </div>
+            </div>
             <h1 className="text-3xl font-bold text-brand-navy mb-2">Welcome Back</h1>
             <p className="text-brand-navy">Sign in to your IntelliWatt™ account</p>
           </div>
