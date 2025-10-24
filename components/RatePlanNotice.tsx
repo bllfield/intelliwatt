@@ -67,7 +67,7 @@ export default function DashboardPage() {
   return (
     <main className="mx-auto max-w-5xl p-4 md:p-8">
       <RatePlanNotice className="mb-6" />
-      {/* ...rest of dashboard... */}
+      // ...rest of dashboard...
     </main>
   );
 }
