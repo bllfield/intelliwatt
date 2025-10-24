@@ -2,9 +2,38 @@
 
 import Image from 'next/image';
 import Link from 'next/link';
+import { useState, useEffect } from 'react';
 import SmartMeterSection from '../../components/SmartMeterSection';
+import QuickAddressEntry from '../../components/QuickAddressEntry';
 
 export default function DashboardPage() {
+  const [mounted, setMounted] = useState(false);
+  const [userAddress, setUserAddress] = useState<string>('');
+
+  useEffect(() => {
+    setMounted(true);
+    // Load saved address from localStorage
+    const savedAddress = localStorage.getItem('intelliwatt_user_address');
+    if (savedAddress) {
+      setUserAddress(savedAddress);
+    }
+  }, []);
+
+  const handleAddressSubmitted = (address: string) => {
+    setUserAddress(address);
+    if (!address) {
+      localStorage.removeItem('intelliwatt_user_address');
+    }
+  };
+
+  // Prevent hydration mismatch
+  if (!mounted) {
+    return (
+      <div className="min-h-screen bg-brand-white flex items-center justify-center">
+        <div className="animate-pulse text-brand-navy">Loading...</div>
+      </div>
+    );
+  }
   return (
     <div className="min-h-screen bg-brand-white">
       {/* Hero Section */}
@@ -31,10 +60,21 @@ export default function DashboardPage() {
         </div>
       </section>
 
-            {/* Dashboard Grid */}
-      <section className="py-16 px-4 bg-brand-white">
+      {/* Quick Address Entry - Top Priority */}
+      <section className="py-6 px-4 bg-brand-white border-b border-brand-blue/10">
         <div className="max-w-6xl mx-auto">
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
+          <QuickAddressEntry 
+            onAddressSubmitted={handleAddressSubmitted}
+            userAddress={userAddress}
+          />
+        </div>
+      </section>
+
+      {/* Dashboard Grid - Only show if address is entered */}
+      {userAddress && (
+        <section className="py-16 px-4 bg-brand-white">
+          <div className="max-w-6xl mx-auto">
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
             
             {/* Usage Analysis */}
             <div className="bg-brand-white p-8 rounded-2xl border-2 border-brand-navy shadow-lg hover:border-brand-blue transition-all duration-300 group">
@@ -134,68 +174,117 @@ export default function DashboardPage() {
           </div>
         </div>
       </section>
+      )}
 
-      {/* Smart Meter Connection Section */}
-      <section className="py-16 px-4 bg-brand-navy">
-        <div className="max-w-4xl mx-auto">
-          <SmartMeterSection />
-        </div>
-      </section>
-
-      {/* Stats Section */}
-      <section className="py-16 px-4 bg-brand-navy">
-        <div className="max-w-6xl mx-auto">
-          <h2 className="text-3xl font-bold text-brand-white text-center mb-12">
-            Your <span className="text-brand-blue">Savings</span> Summary
-          </h2>
-          
-          <div className="grid md:grid-cols-4 gap-8">
-            <div className="text-center">
-              <div className="text-4xl font-bold text-brand-blue mb-2">$847</div>
-              <div className="text-brand-white">Annual Savings</div>
-            </div>
-            <div className="text-center">
-              <div className="text-4xl font-bold text-brand-blue mb-2">94%</div>
-              <div className="text-brand-white">Accuracy Rate</div>
-            </div>
-            <div className="text-center">
-              <div className="text-4xl font-bold text-brand-blue mb-2">12</div>
-              <div className="text-brand-white">Jackpot Entries</div>
-            </div>
-            <div className="text-center">
-              <div className="text-4xl font-bold text-brand-blue mb-2">3</div>
-              <div className="text-brand-white">Referred Friends</div>
+      {/* Call to Action - Show if no address entered */}
+      {!userAddress && (
+        <section className="py-16 px-4 bg-brand-white">
+          <div className="max-w-4xl mx-auto text-center">
+            <div className="bg-brand-blue/10 p-8 rounded-2xl border border-brand-blue/20">
+              <div className="w-16 h-16 bg-brand-blue rounded-full flex items-center justify-center mx-auto mb-6">
+                <span className="text-white text-2xl">⚡</span>
+              </div>
+              <h2 className="text-3xl font-bold text-brand-navy mb-4">
+                Ready to Start <span className="text-brand-blue">Saving</span>?
+              </h2>
+              <p className="text-lg text-brand-navy mb-8 max-w-2xl mx-auto">
+                Enter your service address above to unlock personalized energy plan recommendations and start tracking your savings.
+              </p>
+              <div className="grid md:grid-cols-3 gap-6 text-left">
+                <div className="bg-white p-6 rounded-xl border border-brand-blue/20">
+                  <div className="w-12 h-12 bg-brand-navy rounded-full flex items-center justify-center mb-4">
+                    <span className="text-brand-blue text-xl">🔍</span>
+                  </div>
+                  <h3 className="text-xl font-bold text-brand-navy mb-2">Find Best Plans</h3>
+                  <p className="text-brand-navy text-sm">Get personalized recommendations based on your usage patterns</p>
+                </div>
+                <div className="bg-white p-6 rounded-xl border border-brand-blue/20">
+                  <div className="w-12 h-12 bg-brand-navy rounded-full flex items-center justify-center mb-4">
+                    <span className="text-brand-blue text-xl">📊</span>
+                  </div>
+                  <h3 className="text-xl font-bold text-brand-navy mb-2">Track Usage</h3>
+                  <p className="text-brand-navy text-sm">Monitor your energy consumption and identify savings opportunities</p>
+                </div>
+                <div className="bg-white p-6 rounded-xl border border-brand-blue/20">
+                  <div className="w-12 h-12 bg-brand-navy rounded-full flex items-center justify-center mb-4">
+                    <span className="text-brand-blue text-xl">💰</span>
+                  </div>
+                  <h3 className="text-xl font-bold text-brand-navy mb-2">Save Money</h3>
+                  <p className="text-brand-navy text-sm">Optimize your plan selection to reduce your monthly energy bills</p>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
-      {/* Quick Actions */}
-      <section className="py-16 px-4 bg-brand-white">
-        <div className="max-w-4xl mx-auto">
-          <h2 className="text-3xl font-bold text-brand-navy text-center mb-12">
-            Quick <span className="text-brand-blue">Actions</span>
-          </h2>
-          
-          <div className="grid md:grid-cols-2 gap-8">
-            <div className="bg-brand-navy p-8 rounded-2xl text-center">
-              <h3 className="text-2xl font-bold text-brand-white mb-4">Need Help?</h3>
-              <p className="text-brand-white mb-6">Get support or view our FAQ</p>
-              <Link href="/faq" className="inline-block bg-brand-blue text-brand-navy font-bold py-3 px-6 rounded-xl border-2 border-brand-blue hover:border-brand-white transition-all duration-300">
-                Get Help
-              </Link>
-            </div>
+      {/* Smart Meter Connection Section - Only show if address is entered */}
+      {userAddress && (
+        <section className="py-16 px-4 bg-brand-navy">
+          <div className="max-w-4xl mx-auto">
+            <SmartMeterSection />
+          </div>
+        </section>
+      )}
+
+      {/* Stats Section - Only show if address is entered */}
+      {userAddress && (
+        <section className="py-16 px-4 bg-brand-navy">
+          <div className="max-w-6xl mx-auto">
+            <h2 className="text-3xl font-bold text-brand-white text-center mb-12">
+              Your <span className="text-brand-blue">Savings</span> Summary
+            </h2>
             
-            <div className="bg-brand-navy p-8 rounded-2xl text-center">
-              <h3 className="text-2xl font-bold text-brand-white mb-4">Settings</h3>
-              <p className="text-brand-white mb-6">Manage your account preferences</p>
-              <Link href="/dashboard/settings" className="inline-block bg-brand-blue text-brand-navy font-bold py-3 px-6 rounded-xl border-2 border-brand-blue hover:border-brand-white transition-all duration-300">
-                Manage Settings
-              </Link>
+            <div className="grid md:grid-cols-4 gap-8">
+              <div className="text-center">
+                <div className="text-4xl font-bold text-brand-blue mb-2">$847</div>
+                <div className="text-brand-white">Annual Savings</div>
+              </div>
+              <div className="text-center">
+                <div className="text-4xl font-bold text-brand-blue mb-2">94%</div>
+                <div className="text-brand-white">Accuracy Rate</div>
+              </div>
+              <div className="text-center">
+                <div className="text-4xl font-bold text-brand-blue mb-2">12</div>
+                <div className="text-brand-white">Jackpot Entries</div>
+              </div>
+              <div className="text-center">
+                <div className="text-4xl font-bold text-brand-blue mb-2">3</div>
+                <div className="text-brand-white">Referred Friends</div>
+              </div>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
+      )}
+
+      {/* Quick Actions - Only show if address is entered */}
+      {userAddress && (
+        <section className="py-16 px-4 bg-brand-white">
+          <div className="max-w-4xl mx-auto">
+            <h2 className="text-3xl font-bold text-brand-navy text-center mb-12">
+              Quick <span className="text-brand-blue">Actions</span>
+            </h2>
+            
+            <div className="grid md:grid-cols-2 gap-8">
+              <div className="bg-brand-navy p-8 rounded-2xl text-center">
+                <h3 className="text-2xl font-bold text-brand-white mb-4">Need Help?</h3>
+                <p className="text-brand-white mb-6">Get support or view our FAQ</p>
+                <Link href="/faq" className="inline-block bg-brand-blue text-brand-navy font-bold py-3 px-6 rounded-xl border-2 border-brand-blue hover:border-brand-white transition-all duration-300">
+                  Get Help
+                </Link>
+              </div>
+              
+              <div className="bg-brand-navy p-8 rounded-2xl text-center">
+                <h3 className="text-2xl font-bold text-brand-white mb-4">Settings</h3>
+                <p className="text-brand-white mb-6">Manage your account preferences</p>
+                <Link href="/dashboard/settings" className="inline-block bg-brand-blue text-brand-navy font-bold py-3 px-6 rounded-xl border-2 border-brand-blue hover:border-brand-white transition-all duration-300">
+                  Manage Settings
+                </Link>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
     </div>
   );
 } 
