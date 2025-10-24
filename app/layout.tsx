@@ -15,7 +15,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body className="bg-brand-white text-brand-navy">
-        <header className="p-4 bg-brand-navy text-brand-blue font-bold shadow-lg border-b border-brand-blue/20">
+        <header className="px-4 py-2 bg-brand-navy text-brand-blue font-bold shadow-lg border-b border-brand-blue/20">
           <div className="max-w-6xl mx-auto flex justify-between items-center">
             <div className="flex items-center space-x-4">
               <a href="/">

@@ -2,7 +2,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   return (
     <div className="min-h-screen bg-brand-white text-brand-navy">
       {/* Updated header with reduced height */}
-      <header className="px-4 py-1 bg-brand-navy text-brand-blue font-bold shadow-lg border-b border-brand-blue/20">
+      <header className="px-4 py-0.5 bg-brand-navy text-brand-blue font-bold shadow-lg border-b border-brand-blue/20">
         <div className="max-w-6xl mx-auto flex justify-between items-center">
           <div className="flex items-center space-x-4">
             <a href="/dashboard" className="text-xl font-bold text-brand-blue hover:text-brand-white transition-colors">Dashboard</a>
