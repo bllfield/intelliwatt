@@ -86,9 +86,11 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
       // Get user ID from dashboard API
       const userResponse = await fetch('/api/admin/user/dashboard');
       if (!userResponse.ok) {
+        console.error('Failed to get user data:', userResponse.status, userResponse.statusText);
         throw new Error('User not authenticated');
       }
       const userData = await userResponse.json();
+      console.log('User data:', userData);
       
       // Create Google Place Details format from the address
       const googlePlaceDetails = {
@@ -104,6 +106,14 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
       };
 
       // Save address to database using the new API
+      console.log('Sending address save request:', {
+        userId: userData.user?.email || 'unknown',
+        houseId: null,
+        googlePlaceDetails: googlePlaceDetails,
+        smartMeterConsent: consent,
+        smartMeterConsentDate: new Date().toISOString()
+      });
+
       const response = await fetch('/api/address/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -115,6 +125,8 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
           smartMeterConsentDate: new Date().toISOString()
         })
       });
+
+      console.log('Address save response:', response.status, response.statusText);
 
       if (response.ok) {
         const data = await response.json();
@@ -130,6 +142,7 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
         alert('Address saved successfully! You can now connect your Smart Meter.');
       } else {
         const error = await response.json();
+        console.error('Address save failed:', error);
         throw new Error(error.error || 'Failed to save address');
       }
     } catch (error) {
