@@ -106,8 +106,7 @@ export async function POST(request: NextRequest) {
       data: {
         userId: user.id,
         type: 'address_completed',
-        amount: 1,
-        description: 'Service address added and validated'
+        amount: 1
       }
     });
 
@@ -117,8 +116,7 @@ export async function POST(request: NextRequest) {
         data: {
           userId: user.id,
           type: 'smart_meter_consent',
-          amount: 1,
-          description: 'Smart Meter Texas consent provided'
+          amount: 1
         }
       });
     }
