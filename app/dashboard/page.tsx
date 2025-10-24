@@ -7,6 +7,7 @@ import SmartMeterSection from '../../components/SmartMeterSection';
 import QuickAddressEntry from '../../components/QuickAddressEntry';
 import AddressCollection from '../../components/AddressCollection';
 import AddressImageUpload from '../../components/AddressImageUpload';
+import RatePlanNotice from '../../components/RatePlanNotice';
 
 interface DashboardData {
   user: {
@@ -107,6 +108,13 @@ export default function DashboardPage() {
               🚀 Beta Version - New Features Coming Soon!
             </div>
           </div>
+        </div>
+      </section>
+
+      {/* Rate Plan Notice */}
+      <section className="py-8 px-4 bg-brand-white">
+        <div className="max-w-6xl mx-auto">
+          <RatePlanNotice className="mb-6" />
         </div>
       </section>
 
