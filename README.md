@@ -2,6 +2,12 @@
 
 **Stop Overpaying for Power** - AI-powered energy optimization platform
 
+## Project Docs
+- **Authoritative Plan:** [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md)
+- **Environment Variables:** [`docs/ENV_VARS.md`](docs/ENV_VARS.md)
+
+These two documents define the guardrails Cursor/GPT must follow and list required configuration for all environments.
+
 ## Overview
 
 IntelliWatt™ is a comprehensive energy management platform that helps users optimize their electricity usage and find the best electricity plans using AI-powered insights. The platform integrates with smart meters, analyzes usage patterns, and provides personalized recommendations to reduce energy costs.
