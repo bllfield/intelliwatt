@@ -75,11 +75,60 @@ export default function AddressImageUpload() {
     }
   };
 
-  const handleUseAddress = () => {
+  const handleUseAddress = async () => {
     if (result?.address) {
-      // You can integrate this with your existing address collection system
-      console.log('Using extracted address:', result.address);
-      // TODO: Integrate with AddressCollection component
+      setLoading(true);
+      try {
+        // Get user ID from cookie or session
+        const userResponse = await fetch('/api/admin/user/dashboard');
+        if (!userResponse.ok) {
+          throw new Error('User not authenticated');
+        }
+        const userData = await userResponse.json();
+        
+        // Convert extracted address to Google Place Details format
+        const googlePlaceDetails = {
+          place_id: null,
+          formatted_address: result.address.fullAddress || '',
+          address_components: [
+            { long_name: result.address.street || '', short_name: result.address.street || '', types: ['street_address'] },
+            { long_name: result.address.city || '', short_name: result.address.city || '', types: ['locality'] },
+            { long_name: result.address.state || '', short_name: result.address.state || '', types: ['administrative_area_level_1'] },
+            { long_name: result.address.zipCode || '', short_name: result.address.zipCode || '', types: ['postal_code'] },
+            { long_name: 'United States', short_name: 'US', types: ['country'] }
+          ],
+          geometry: {
+            location: null
+          }
+        };
+
+        const response = await fetch('/api/address/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: userData.user?.email || 'unknown', // Use email as userId for now
+            houseId: null,
+            googlePlaceDetails: googlePlaceDetails,
+            smartMeterConsent: false, // User can check this separately
+            smartMeterConsentDate: null
+          })
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          alert(`Address saved successfully! Address ID: ${data.address.id}`);
+          // Reset the form after successful save
+          resetForm();
+        } else {
+          const error = await response.json();
+          alert(error.error || 'Failed to save address');
+        }
+      } catch (err) {
+        console.error('Error saving address:', err);
+        alert('Failed to save address');
+      } finally {
+        setLoading(false);
+      }
     }
   };
 
@@ -200,9 +249,10 @@ export default function AddressImageUpload() {
             {result.address?.fullAddress && (
               <button
                 onClick={handleUseAddress}
-                className="w-full bg-brand-navy text-brand-blue py-3 px-6 rounded-lg font-semibold hover:bg-brand-navy/90 transition-all duration-300"
+                disabled={loading}
+                className="w-full bg-brand-navy text-brand-blue py-3 px-6 rounded-lg font-semibold hover:bg-brand-navy/90 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Use This Address
+                {loading ? 'Saving Address...' : 'Save This Address'}
               </button>
             )}
           </div>
