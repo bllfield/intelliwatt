@@ -144,7 +144,7 @@ export default function FAQPage() {
             <div className="bg-brand-white p-8 rounded-2xl border-2 border-brand-navy shadow-lg hover:border-brand-blue transition-all duration-300">
               <h3 className="text-2xl font-bold text-brand-navy mb-4">Do you work with all energy providers?</h3>
               <p className="text-brand-navy text-lg leading-relaxed">
-                We partner with major energy providers in your area to ensure you get access to the best available plans. 
+                We have access to most of the major energy providers in your area to ensure you get access to the best available plans. 
                 Our AI analyzes all available options to find the perfect match for your usage patterns.
               </p>
             </div>
