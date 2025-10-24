@@ -1,4 +1,49 @@
+'use client';
+
+import { useState, useEffect } from 'react';
+
+interface EntryData {
+  id: string;
+  type: string;
+  amount: number;
+  createdAt: string;
+}
+
 export default function EntriesPage() {
+  const [entries, setEntries] = useState<EntryData[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchEntries = async () => {
+      try {
+        const response = await fetch('/api/admin/user/dashboard');
+        if (response.ok) {
+          const data = await response.json();
+          // Mock entries for now - would need to create entries API
+          setEntries([
+            { id: '1', type: 'Profile Completed', amount: 1, createdAt: new Date().toISOString() },
+            { id: '2', type: 'Smart Meter Connected', amount: 1, createdAt: new Date().toISOString() },
+            { id: '3', type: 'Appliances Tagged', amount: 2, createdAt: new Date().toISOString() }
+          ]);
+        }
+      } catch (error) {
+        console.error('Error fetching entries:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchEntries();
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-brand-white flex items-center justify-center">
+        <div className="animate-pulse text-brand-navy">Loading...</div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-brand-white">
       {/* Hero Section */}
@@ -25,29 +70,23 @@ export default function EntriesPage() {
             <h2 className="text-2xl font-bold text-brand-navy mb-6">Your Entries Summary</h2>
             
             <div className="grid md:grid-cols-2 gap-6 mb-8">
-              <div className="flex items-center justify-between p-4 bg-brand-navy border border-brand-navy rounded-lg">
-                <div className="flex items-center space-x-3">
-                  <span className="text-brand-blue text-xl">🔲</span>
-                  <span className="text-brand-white font-medium">Profile Completed</span>
+              {entries.length === 0 ? (
+                <div className="col-span-2 text-center py-8">
+                  <div className="text-brand-slate text-lg">No entries yet. Complete tasks to earn jackpot entries!</div>
                 </div>
-                <span className="bg-brand-white text-brand-navy px-3 py-1 rounded-full text-sm font-semibold">1 Entry</span>
-              </div>
-              
-              <div className="flex items-center justify-between p-4 bg-brand-navy border border-brand-navy rounded-lg">
-                <div className="flex items-center space-x-3">
-                  <span className="text-brand-blue text-xl">🔲</span>
-                  <span className="text-brand-white font-medium">Smart Meter Connected</span>
-                </div>
-                <span className="bg-brand-white text-brand-navy px-3 py-1 rounded-full text-sm font-semibold">1 Entry</span>
-              </div>
-              
-              <div className="flex items-center justify-between p-4 bg-brand-navy border border-brand-navy rounded-lg">
-                <div className="flex items-center space-x-3">
-                  <span className="text-brand-blue text-xl">🔲</span>
-                  <span className="text-brand-white font-medium">Appliances Tagged</span>
-                </div>
-                <span className="bg-brand-white text-brand-navy px-3 py-1 rounded-full text-sm font-semibold">2 Entries</span>
-              </div>
+              ) : (
+                entries.map(entry => (
+                  <div key={entry.id} className="flex items-center justify-between p-4 bg-brand-navy border border-brand-navy rounded-lg">
+                    <div className="flex items-center space-x-3">
+                      <span className="text-brand-blue text-xl">🔲</span>
+                      <span className="text-brand-white font-medium">{entry.type}</span>
+                    </div>
+                    <span className="bg-brand-white text-brand-navy px-3 py-1 rounded-full text-sm font-semibold">
+                      {entry.amount} {entry.amount === 1 ? 'Entry' : 'Entries'}
+                    </span>
+                  </div>
+                ))
+              )}
               
               <div className="flex items-center justify-between p-4 bg-brand-navy border border-brand-navy rounded-lg">
                 <div className="flex items-center space-x-3">
@@ -61,7 +100,9 @@ export default function EntriesPage() {
           
           <div className="bg-brand-navy p-6 rounded-2xl text-center border-2 border-brand-navy">
             <p className="text-brand-blue font-bold text-lg mb-2">Total Entries Earned</p>
-            <p className="text-brand-blue text-4xl font-bold">4</p>
+            <p className="text-brand-blue text-4xl font-bold">
+              {entries.reduce((total, entry) => total + entry.amount, 0)}
+            </p>
             <p className="text-brand-blue text-sm mt-2">Keep completing actions to earn more entries!</p>
           </div>
         </div>

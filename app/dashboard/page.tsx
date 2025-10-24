@@ -6,17 +6,57 @@ import { useState, useEffect } from 'react';
 import SmartMeterSection from '../../components/SmartMeterSection';
 import QuickAddressEntry from '../../components/QuickAddressEntry';
 
+interface DashboardData {
+  user: {
+    email: string;
+    createdAt: string;
+  };
+  stats: {
+    annualSavings: number;
+    accuracyRate: number;
+    totalEntries: number;
+    totalReferrals: number;
+  };
+  profile: any;
+  hasAddress: boolean;
+  hasSmartMeter: boolean;
+  hasUsageData: boolean;
+  currentPlan: any;
+}
+
 export default function DashboardPage() {
   const [mounted, setMounted] = useState(false);
   const [userAddress, setUserAddress] = useState<string>('');
+  const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     setMounted(true);
+    
     // Load saved address from localStorage
     const savedAddress = localStorage.getItem('intelliwatt_user_address');
     if (savedAddress) {
       setUserAddress(savedAddress);
     }
+
+    // Fetch user dashboard data
+    const fetchDashboardData = async () => {
+      try {
+        const response = await fetch('/api/admin/user/dashboard');
+        if (response.ok) {
+          const data = await response.json();
+          setDashboardData(data);
+        } else {
+          console.error('Failed to fetch dashboard data');
+        }
+      } catch (error) {
+        console.error('Error fetching dashboard data:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchDashboardData();
   }, []);
 
   const handleAddressSubmitted = (address: string) => {
@@ -27,7 +67,7 @@ export default function DashboardPage() {
   };
 
   // Prevent hydration mismatch
-  if (!mounted) {
+  if (!mounted || loading) {
     return (
       <div className="min-h-screen bg-brand-white flex items-center justify-center">
         <div className="animate-pulse text-brand-navy">Loading...</div>
@@ -235,19 +275,27 @@ export default function DashboardPage() {
             
             <div className="grid md:grid-cols-4 gap-8">
               <div className="text-center">
-                <div className="text-4xl font-bold text-brand-blue mb-2">$847</div>
+                <div className="text-4xl font-bold text-brand-blue mb-2">
+                  ${dashboardData?.stats.annualSavings || 0}
+                </div>
                 <div className="text-brand-white">Annual Savings</div>
               </div>
               <div className="text-center">
-                <div className="text-4xl font-bold text-brand-blue mb-2">94%</div>
+                <div className="text-4xl font-bold text-brand-blue mb-2">
+                  {dashboardData?.stats.accuracyRate || 0}%
+                </div>
                 <div className="text-brand-white">Accuracy Rate</div>
               </div>
               <div className="text-center">
-                <div className="text-4xl font-bold text-brand-blue mb-2">12</div>
+                <div className="text-4xl font-bold text-brand-blue mb-2">
+                  {dashboardData?.stats.totalEntries || 0}
+                </div>
                 <div className="text-brand-white">Jackpot Entries</div>
               </div>
               <div className="text-center">
-                <div className="text-4xl font-bold text-brand-blue mb-2">3</div>
+                <div className="text-4xl font-bold text-brand-blue mb-2">
+                  {dashboardData?.stats.totalReferrals || 0}
+                </div>
                 <div className="text-brand-white">Referred Friends</div>
               </div>
             </div>
