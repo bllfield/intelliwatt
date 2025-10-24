@@ -44,12 +44,21 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
   }, [mounted]);
 
   const initializeAutocomplete = () => {
+    console.log('Debug: Initializing Google Maps autocomplete...');
+    console.log('Debug: inputRef.current:', !!inputRef.current);
+    console.log('Debug: window.google:', !!window.google);
+    console.log('Debug: window.google.maps:', !!(window.google && window.google.maps));
+    console.log('Debug: window.google.maps.places:', !!(window.google && window.google.maps && window.google.maps.places));
+    console.log('Debug: API key available:', !!process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY);
+    
     if (!inputRef.current || !window.google || !process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY) {
+      console.log('Debug: Missing requirements, falling back to manual entry');
       setGoogleLoaded(true); // Allow manual entry if no API key
       return;
     }
 
     try {
+      console.log('Debug: Creating PlaceAutocompleteElement...');
       // Use the new PlaceAutocompleteElement API
       const autocompleteElement = new window.google.maps.places.PlaceAutocompleteElement({
         types: ['address'],
@@ -57,12 +66,16 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
         fields: ['formatted_address', 'address_components', 'place_id']
       });
 
+      console.log('Debug: PlaceAutocompleteElement created successfully');
+
       // Replace the input with the autocomplete element
       if (inputRef.current.parentNode) {
         inputRef.current.parentNode.replaceChild(autocompleteElement, inputRef.current);
+        console.log('Debug: Input replaced with autocomplete element');
       }
 
       autocompleteElement.addEventListener('gmp-placeselect', (event: any) => {
+        console.log('Debug: Place selected:', event.place);
         const place = event.place;
         if (place.formatted_address) {
           setAddress(place.formatted_address);
@@ -70,6 +83,7 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
       });
 
       setAutocomplete(autocompleteElement);
+      console.log('Debug: Google Maps autocomplete initialized successfully');
     } catch (error) {
       console.warn('Google Places API not available, falling back to manual entry:', error);
       setGoogleLoaded(true); // Allow manual entry on error
