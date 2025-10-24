@@ -16,7 +16,7 @@ export default function Footer() {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
             <div className="col-span-1 md:col-span-2">
               <div className="flex items-center mb-4">
-                <div className="relative w-24 h-24">
+                <div className="relative w-32 h-32">
                   <img
                     src="/IntelliWatt Logo.png"
                     alt="IntelliWatt™ Logo"
@@ -48,7 +48,7 @@ export default function Footer() {
                 <li>
                   <button 
                     onClick={handleAdminClick}
-                    className="hover:text-brand-white transition-colors text-sm font-medium"
+                    className="hover:text-brand-white transition-colors text-sm font-medium text-left"
                   >
                     Admin Access
                   </button>
