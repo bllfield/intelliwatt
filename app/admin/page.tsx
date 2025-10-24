@@ -61,22 +61,34 @@ export default function AdminDashboard() {
 
         if (usersRes.ok) {
           const usersData = await usersRes.json();
+          console.log('Fetched users data:', usersData);
           setUsers(usersData);
+        } else {
+          console.error('Failed to fetch users:', usersRes.status, usersRes.statusText);
         }
 
         if (commissionsRes.ok) {
           const commissionsData = await commissionsRes.json();
+          console.log('Fetched commissions data:', commissionsData);
           setCommissions(commissionsData);
+        } else {
+          console.error('Failed to fetch commissions:', commissionsRes.status, commissionsRes.statusText);
         }
 
         if (jackpotRes.ok) {
           const jackpotData = await jackpotRes.json();
+          console.log('Fetched jackpot data:', jackpotData);
           setJackpotPayouts(jackpotData);
+        } else {
+          console.error('Failed to fetch jackpot:', jackpotRes.status, jackpotRes.statusText);
         }
 
         if (financeRes.ok) {
           const financeData = await financeRes.json();
+          console.log('Fetched finance data:', financeData);
           setFinanceRecords(financeData);
+        } else {
+          console.error('Failed to fetch finance:', financeRes.status, financeRes.statusText);
         }
       } catch (error) {
         console.error('Error fetching admin data:', error);
@@ -104,9 +116,9 @@ export default function AdminDashboard() {
     );
   }
 
-  const totalCommissions = mockCommissions.reduce((sum, r) => sum + r.amount, 0);
-  const pendingJackpot = mockJackpot.filter(j => !j.paid).length;
-  const totalFinance = mockFinance.reduce((sum, f) => sum + (f.type === 'income' ? f.amount : -f.amount), 0);
+  const totalCommissions = commissions.reduce((sum, r) => sum + r.amount, 0);
+  const pendingJackpot = jackpotPayouts.filter(j => !j.paid).length;
+  const totalFinance = financeRecords.reduce((sum, f) => sum + (f.type === 'income' ? f.amount : -f.amount), 0);
 
   return (
     <div className="min-h-screen bg-brand-navy">
@@ -124,7 +136,7 @@ export default function AdminDashboard() {
         {/* Stats Overview */}
         <div className="grid md:grid-cols-4 gap-6 mb-8">
           <div className="bg-brand-white rounded-lg p-6 shadow-lg">
-            <div className="text-2xl font-bold text-brand-navy">{mockUsers.length}</div>
+            <div className="text-2xl font-bold text-brand-navy">{users.length}</div>
             <div className="text-brand-navy/60">Total Users</div>
           </div>
           <div className="bg-brand-white rounded-lg p-6 shadow-lg">
