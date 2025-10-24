@@ -18,8 +18,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <header className="p-4 bg-brand-navy text-brand-blue font-bold shadow-lg border-b border-brand-blue/20">
           <div className="max-w-6xl mx-auto flex justify-between items-center">
             <div className="flex items-center space-x-4">
-              <div className="flex items-center space-x-3">
-                <div className="relative w-8 h-8">
+              <a href="/">
+                <div className="relative w-16 h-16">
                   <Image
                     src="/IntelliWatt Logo.png"
                     alt="IntelliWatt™ Logo"
@@ -27,8 +27,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                     className="object-contain"
                   />
                 </div>
-                <a href="/" className="text-xl font-bold text-brand-blue hover:text-brand-white transition-colors">IntelliWatt™</a>
-              </div>
+              </a>
             </div>
             <nav className="hidden md:flex space-x-6 text-sm">
               <a href="/how-it-works" className="text-brand-blue hover:text-brand-white transition-colors">How It Works</a>
