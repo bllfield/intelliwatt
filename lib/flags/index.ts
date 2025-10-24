@@ -64,3 +64,31 @@ export async function setFlags(kv: Record<string,string>) {
   await Promise.all(ops)
   cache = { data: {}, ts: 0 }
 }
+
+/**
+ * Synchronous feature flag helper for environment-based flags.
+ * Use this for flags that don't require database lookups.
+ * 
+ * Dual flag system:
+ * - Async flags (flagBool, getFlag): Database-backed with caching
+ * - Sync flags (flagBoolSync, flags): Environment variable based
+ */
+export function flagBoolSync(value: string | undefined, defaultVal = false): boolean {
+  if (value == null) return defaultVal;
+  const v = value.trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes" || v === "on";
+}
+
+/**
+ * Typed feature flags for common integrations and settings.
+ * These are environment-based and available synchronously.
+ */
+export const flags = {
+  // Integration flags (client-accessible via NEXT_PUBLIC_)
+  wattbuyEnabled: flagBoolSync(process.env.NEXT_PUBLIC_FLAG_WATTBUY, false),
+  smtEnabled: flagBoolSync(process.env.NEXT_PUBLIC_FLAG_SMT, false),
+  greenButtonEnabled: flagBoolSync(process.env.NEXT_PUBLIC_FLAG_GREENBUTTON, false),
+
+  // Server-only flags
+  strictPIILogging: flagBoolSync(process.env.FLAG_STRICT_PII_LOGGING, true),
+} as const;
