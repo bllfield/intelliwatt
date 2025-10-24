@@ -73,13 +73,12 @@ function AdminLoginContent() {
 
       <div className="max-w-md w-full space-y-8">
         <div>
-          <div className="mx-auto h-12 w-12 flex items-center justify-center">
+          <div className="mx-auto h-32 w-32 flex items-center justify-center">
             <Image
               src="/IntelliWatt Logo.png"
               alt="IntelliWatt Logo"
-              width={48}
-              height={48}
-              className="h-12 w-12"
+              fill
+              className="object-contain"
             />
           </div>
           <h2 className="mt-6 text-center text-3xl font-extrabold text-brand-navy">
