@@ -42,7 +42,13 @@ function AdminLoginContent() {
   };
 
   return (
-    <div className="min-h-screen bg-brand-white flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+    <html lang="en">
+      <head>
+        <title>Admin Login - IntelliWatt™</title>
+        <link rel="icon" href="/favicon.ico" />
+      </head>
+      <body className="bg-brand-white">
+        <div className="min-h-screen bg-brand-white flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
       {/* Success Popup */}
       {showSuccessPopup && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -133,14 +139,12 @@ function AdminLoginContent() {
           </a>
         </div>
       </div>
-    </div>
+        </div>
+      </body>
+    </html>
   );
 }
 
 export default function AdminLoginPage() {
-  return (
-    <Suspense fallback={<div>Loading...</div>}>
-      <AdminLoginContent />
-    </Suspense>
-  );
+  return <AdminLoginContent />;
 }
