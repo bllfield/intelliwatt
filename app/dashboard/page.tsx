@@ -52,7 +52,7 @@ export default function DashboardPage() {
               Your AI-powered energy optimization dashboard. Track savings, manage your plan, and earn rewards.
             </p>
             
-            {/* Address Entry - Right below hero text */}
+            {/* Address Entry - Right below hero text - Updated */}
             <div className="max-w-2xl mx-auto mb-8">
               <QuickAddressEntry 
                 onAddressSubmitted={handleAddressSubmitted}
