@@ -42,8 +42,6 @@ export async function GET(req: Request) {
     // Check if email is authorized for admin access
     const ADMIN_EMAILS = [
       'brian@intelliwatt.com',
-      'brian@intellipath-solutions.com',
-      'login@intelliwatt.com',
     ];
 
     if (!ADMIN_EMAILS.includes(record.email.toLowerCase())) {

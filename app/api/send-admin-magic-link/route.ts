@@ -5,9 +5,6 @@ import { sendLoginEmail } from '@/lib/email/sendLoginEmail';
 // List of authorized admin emails
 const ADMIN_EMAILS = [
   'brian@intelliwatt.com',
-  'brian@intellipath-solutions.com',
-  'login@intelliwatt.com',
-  // Add more admin emails as needed
 ];
 
 export async function POST(request: NextRequest) {
