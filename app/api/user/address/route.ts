@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { db } from '@/lib/db';
-import { WattBuyClient } from '@/lib/wattbuy/client';
+import { getESIByAddress, getUtilityInfo, extractTdspSlug } from '@/lib/wattbuy/client';
 
 export async function POST(request: NextRequest) {
   try {
@@ -45,8 +45,7 @@ export async function POST(request: NextRequest) {
     let addressValid = false;
 
     try {
-      const wb = new WattBuyClient();
-      const esiLookup = await wb.getESIByAddress({ 
+      const esiLookup = await getESIByAddress({ 
         line1: address, 
         city, 
         state: state.toUpperCase(), 
@@ -58,13 +57,13 @@ export async function POST(request: NextRequest) {
         addressValid = true;
         
         // Extract TDSP slug
-        const utilityInfo = await wb.getUtilityInfo({ 
+        const utilityInfo = await getUtilityInfo({ 
           line1: address, 
           city, 
           state: state.toUpperCase(), 
           zip 
         });
-        tdspSlug = wb.extractTdspSlug(utilityInfo);
+        tdspSlug = extractTdspSlug(utilityInfo);
       }
     } catch (error) {
       console.error('Address validation error:', error);
