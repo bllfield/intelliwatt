@@ -19,6 +19,13 @@ enum PlanSource {
   tdsp_feed
 }
 
+enum ValidationSource {
+  NONE
+  GOOGLE
+  USER
+  OTHER
+}
+
 enum TdspCode {
   ONCOR
   CENTERPOINT
@@ -416,4 +423,49 @@ model SupplierControl {
   createdAt         DateTime @default(now())
 
   @@index([supplierName])
+}
+
+model HouseAddress {
+  id                    String   @id @default(uuid())
+  userId                String
+  houseId               String?
+
+  // Normalized address (Google → normalized)
+  addressLine1          String
+  addressLine2          String?
+  addressCity           String
+  addressState          String
+  addressZip5           String
+  addressZip4           String?
+  addressCountry        String   @default("US")
+
+  // Geocoding + linkage
+  placeId               String?
+  lat                   Float?
+  lng                   Float?
+
+  // Validation status
+  addressValidated      Boolean  @default(false)
+  validationSource      ValidationSource @default(NONE)
+
+  // Power/utility identifiers (TX-centric but optional)
+  esiid                 String?  @unique
+  tdspSlug              String?
+  utilityName           String?
+  utilityPhone          String?
+
+  // Consent
+  smartMeterConsent     Boolean  @default(false)
+  smartMeterConsentDate DateTime?
+
+  // Raw payloads for lossless re-mapping
+  rawGoogleJson         Json?
+  rawWattbuyJson        Json?
+
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([placeId])
+  @@index([addressState, addressZip5])
+  @@index([esiid])
 }
