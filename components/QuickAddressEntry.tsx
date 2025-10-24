@@ -37,22 +37,36 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
   }, [mounted]);
 
   const initializeAutocomplete = () => {
-    if (!inputRef.current || !window.google) return;
+    if (!inputRef.current || !window.google || !process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY) {
+      setGoogleLoaded(true); // Allow manual entry if no API key
+      return;
+    }
 
-    const autocompleteInstance = new window.google.maps.places.Autocomplete(inputRef.current, {
-      types: ['address'],
-      componentRestrictions: { country: 'us' },
-      fields: ['formatted_address', 'address_components', 'place_id']
-    });
+    try {
+      // Use the new PlaceAutocompleteElement API
+      const autocompleteElement = new window.google.maps.places.PlaceAutocompleteElement({
+        types: ['address'],
+        componentRestrictions: { country: 'us' },
+        fields: ['formatted_address', 'address_components', 'place_id']
+      });
 
-    autocompleteInstance.addListener('place_changed', () => {
-      const place = autocompleteInstance.getPlace();
-      if (place.formatted_address) {
-        setAddress(place.formatted_address);
+      // Replace the input with the autocomplete element
+      if (inputRef.current.parentNode) {
+        inputRef.current.parentNode.replaceChild(autocompleteElement, inputRef.current);
       }
-    });
 
-    setAutocomplete(autocompleteInstance);
+      autocompleteElement.addEventListener('gmp-placeselect', (event: any) => {
+        const place = event.place;
+        if (place.formatted_address) {
+          setAddress(place.formatted_address);
+        }
+      });
+
+      setAutocomplete(autocompleteElement);
+    } catch (error) {
+      console.warn('Google Places API not available, falling back to manual entry:', error);
+      setGoogleLoaded(true); // Allow manual entry on error
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
