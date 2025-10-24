@@ -4,7 +4,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <header className="p-4 bg-brand-navy text-brand-blue font-bold shadow-lg border-b border-brand-blue/20">
         <div className="max-w-6xl mx-auto flex justify-between items-center">
           <div className="flex items-center space-x-4">
-            <a href="/dashboard" className="text-xl font-bold text-brand-blue hover:text-brand-white transition-colors">IntelliWatt™</a>
+            <a href="/dashboard" className="text-xl font-bold text-brand-blue hover:text-brand-white transition-colors">Dashboard</a>
           </div>
           <nav className="hidden md:flex space-x-6 text-sm">
             <a href="/dashboard" className="text-brand-blue hover:text-brand-white transition-colors">Dashboard</a>
