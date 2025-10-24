@@ -16,7 +16,7 @@ export default function Footer() {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
             <div className="col-span-1 md:col-span-2">
               <div className="flex items-center mb-4">
-                <div className="relative w-16 h-16">
+                <div className="relative w-24 h-24">
                   <img
                     src="/IntelliWatt Logo.png"
                     alt="IntelliWatt™ Logo"
@@ -45,12 +45,6 @@ export default function Footer() {
                 <li><a href="/join" className="hover:text-brand-white transition-colors">Join</a></li>
                 <li><a href="/login" className="hover:text-brand-white transition-colors">Login</a></li>
                 <li><a href="/dashboard" className="hover:text-brand-white transition-colors">Dashboard</a></li>
-              </ul>
-            </div>
-            
-            <div>
-              <h4 className="text-sm font-semibold text-brand-blue mb-3">Admin</h4>
-              <ul className="space-y-2 text-sm text-brand-blue/80">
                 <li>
                   <button 
                     onClick={handleAdminClick}
