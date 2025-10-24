@@ -18,7 +18,11 @@ export async function GET(request: NextRequest) {
       include: {
         entries: true,
         referrals: true,
-        profile: true,
+        profile: {
+          include: {
+            apiConnections: true
+          }
+        },
         usage: {
           orderBy: { createdAt: 'desc' },
           take: 1
