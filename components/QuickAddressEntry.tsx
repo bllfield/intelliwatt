@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { parseManualAddress } from '@/lib/parseManualAddress';
 
 interface QuickAddressEntryProps {
   onAddressSubmitted: (address: string) => void;
@@ -115,18 +116,9 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
       const userData = await userResponse.json();
       console.log('User data:', userData);
       
-      // Use the full place details if available, otherwise construct from address string
-      const googlePlaceDetails = placeDetails || {
-        place_id: null,
-        formatted_address: address,
-        address_components: [
-          { long_name: address, short_name: address, types: ['street_address'] },
-          { long_name: 'United States', short_name: 'US', types: ['country'] }
-        ],
-        geometry: {
-          location: null
-        }
-      };
+      // Use the full place details if available (from Google autocomplete)
+      // Otherwise parse the manual address entry
+      const googlePlaceDetails = placeDetails || parseManualAddress(address);
 
       // Save address to database using the new API
       console.log('Sending address save request:', {
