@@ -11,6 +11,7 @@ interface QuickAddressEntryProps {
 export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: QuickAddressEntryProps) {
   const [mounted, setMounted] = useState(false);
   const [address, setAddress] = useState(userAddress || '');
+  const [unitNumber, setUnitNumber] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [consent, setConsent] = useState(false);
   const [showTerms, setShowTerms] = useState(false);
@@ -136,6 +137,7 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
           userId: userData.user?.email || 'unknown',
           houseId: null,
           googlePlaceDetails: googlePlaceDetails,
+          unitNumber: unitNumber.trim() || undefined,
           smartMeterConsent: consent,
           smartMeterConsentDate: new Date().toISOString()
         })
@@ -214,7 +216,7 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
             <input
               ref={inputRef}
               type="text"
-              placeholder="Enter your service address (include apt/suite if applicable)..."
+              placeholder="Enter your service address..."
               value={address}
               onChange={(e) => setAddress(e.target.value)}
               className="w-full px-4 py-3 text-sm bg-white/90 border border-white/30 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-blue focus:border-brand-blue text-brand-navy placeholder-brand-navy/60"
@@ -222,6 +224,19 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
             />
             </div>
           </div>
+          
+          {/* Optional Unit/Apartment Number Field */}
+          <div className="flex-1">
+            <input
+              type="text"
+              placeholder="Unit/Apt # (optional)"
+              value={unitNumber}
+              onChange={(e) => setUnitNumber(e.target.value)}
+              className="w-full px-4 py-3 text-sm bg-white/90 border border-white/30 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-blue focus:border-brand-blue text-brand-navy placeholder-brand-navy/60"
+              disabled={isSubmitting || !googleLoaded}
+            />
+          </div>
+          
           <button
               type="submit"
               disabled={!address.trim() || !consent || isSubmitting}

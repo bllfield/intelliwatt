@@ -6,6 +6,7 @@ type SaveAddressBody = {
   userId: string;
   houseId?: string | null;
   googlePlaceDetails: GooglePlaceDetails;
+  unitNumber?: string; // Optional unit/apartment number
   wattbuyJson?: unknown; // optional: if you already fetched it client-side
   utilityHints?: {
     esiid?: string | null;
@@ -27,7 +28,7 @@ export async function POST(req: NextRequest) {
     }
 
     console.log("Google Place Details:", JSON.stringify(body.googlePlaceDetails, null, 2));
-    const normalized = normalizeGoogleAddress(body.googlePlaceDetails);
+    const normalized = normalizeGoogleAddress(body.googlePlaceDetails, body.unitNumber);
     console.log("Normalized address:", normalized);
 
     const record = await prisma.houseAddress.create({

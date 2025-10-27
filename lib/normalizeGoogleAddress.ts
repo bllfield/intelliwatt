@@ -20,11 +20,11 @@ function pick(components: AddressComponent[] = [], type: string, useShort = fals
   return useShort ? c.short_name : c.long_name;
 }
 
-export function normalizeGoogleAddress(details: GooglePlaceDetails) {
+export function normalizeGoogleAddress(details: GooglePlaceDetails, unitNumber?: string) {
   const c = details.address_components ?? [];
   const streetNumber = pick(c, "street_number");
   const route = pick(c, "route");
-  const subpremise = pick(c, "subpremise") || null;
+  const subpremise = pick(c, "subpremise") || unitNumber || null;
   const city = pick(c, "locality") || pick(c, "sublocality") || pick(c, "postal_town") || "";
   const state = pick(c, "administrative_area_level_1", true); // short_name: "TX"
   const postal = pick(c, "postal_code");
