@@ -211,15 +211,15 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
           </div>
           <div className="flex-1">
             <div className="relative">
-              <input
-                ref={inputRef}
-                type="text"
-                placeholder="Enter your service address to get started..."
-                value={address}
-                onChange={(e) => setAddress(e.target.value)}
-                className="w-full px-4 py-3 text-sm bg-white/90 border border-white/30 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-blue focus:border-brand-blue text-brand-navy placeholder-brand-navy/60"
-                disabled={isSubmitting || !googleLoaded}
-              />
+            <input
+              ref={inputRef}
+              type="text"
+              placeholder="Enter your service address (include apt/suite if applicable)..."
+              value={address}
+              onChange={(e) => setAddress(e.target.value)}
+              className="w-full px-4 py-3 text-sm bg-white/90 border border-white/30 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-blue focus:border-brand-blue text-brand-navy placeholder-brand-navy/60"
+              disabled={isSubmitting || !googleLoaded}
+            />
             </div>
           </div>
           <button
