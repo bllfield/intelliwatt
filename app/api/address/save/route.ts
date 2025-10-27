@@ -36,6 +36,14 @@ export async function POST(req: NextRequest) {
       where: { userId: body.userId },
       orderBy: { createdAt: 'desc' }
     });
+    
+    console.log("Existing address check for userId:", body.userId);
+    console.log("Existing address found:", !!existingAddress);
+    if (existingAddress) {
+      console.log("Will update existing address ID:", existingAddress.id);
+    } else {
+      console.log("Will create new address");
+    }
 
     const addressData = {
       userId: body.userId,
