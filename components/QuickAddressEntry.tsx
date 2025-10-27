@@ -91,7 +91,15 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!address.trim() || !consent) return;
+    console.log('Debug: Submit button clicked', { address: address.trim(), consent, isSubmitting });
+    
+    if (!address.trim() || !consent) {
+      console.log('Debug: Validation failed', { 
+        addressEmpty: !address.trim(), 
+        consentMissing: !consent 
+      });
+      return;
+    }
 
     setIsSubmitting(true);
     
