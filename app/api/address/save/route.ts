@@ -31,62 +31,97 @@ export async function POST(req: NextRequest) {
     const normalized = normalizeGoogleAddress(body.googlePlaceDetails, body.unitNumber);
     console.log("Normalized address:", normalized);
 
-    const record = await prisma.houseAddress.create({
-      data: {
-        userId: body.userId,
-        houseId: body.houseId ?? null,
-
-        addressLine1: normalized.addressLine1,
-        addressLine2: normalized.addressLine2,
-        addressCity: normalized.addressCity,
-        addressState: normalized.addressState,
-        addressZip5: normalized.addressZip5,
-        addressZip4: normalized.addressZip4,
-        addressCountry: normalized.addressCountry,
-
-        placeId: normalized.placeId ?? undefined,
-        lat: normalized.lat ?? undefined,
-        lng: normalized.lng ?? undefined,
-
-        addressValidated: normalized.addressValidated,
-        validationSource: "GOOGLE",
-
-        // Optional utility hints (e.g., from WattBuy or your own resolver)
-        esiid: body.utilityHints?.esiid ?? undefined,
-        tdspSlug: body.utilityHints?.tdspSlug ?? undefined,
-        utilityName: body.utilityHints?.utilityName ?? undefined,
-        utilityPhone: body.utilityHints?.utilityPhone ?? undefined,
-
-        smartMeterConsent: body.smartMeterConsent ?? false,
-        smartMeterConsentDate: body.smartMeterConsentDate
-          ? new Date(body.smartMeterConsentDate)
-          : undefined,
-
-        rawGoogleJson: body.googlePlaceDetails as any,
-        rawWattbuyJson: body.wattbuyJson as any,
-      },
-      select: {
-        id: true,
-        userId: true,
-        houseId: true,
-        addressLine1: true,
-        addressLine2: true,
-        addressCity: true,
-        addressState: true,
-        addressZip5: true,
-        addressZip4: true,
-        addressCountry: true,
-        lat: true,
-        lng: true,
-        addressValidated: true,
-        esiid: true,
-        tdspSlug: true,
-        utilityName: true,
-        utilityPhone: true,
-        createdAt: true,
-        updatedAt: true,
-      },
+    // Check if user already has an address
+    const existingAddress = await prisma.houseAddress.findFirst({
+      where: { userId: body.userId },
+      orderBy: { createdAt: 'desc' }
     });
+
+    const addressData = {
+      userId: body.userId,
+      houseId: body.houseId ?? null,
+
+      addressLine1: normalized.addressLine1,
+      addressLine2: normalized.addressLine2,
+      addressCity: normalized.addressCity,
+      addressState: normalized.addressState,
+      addressZip5: normalized.addressZip5,
+      addressZip4: normalized.addressZip4,
+      addressCountry: normalized.addressCountry,
+
+      placeId: normalized.placeId ?? undefined,
+      lat: normalized.lat ?? undefined,
+      lng: normalized.lng ?? undefined,
+
+      addressValidated: normalized.addressValidated,
+      validationSource: "GOOGLE" as const,
+
+      // Optional utility hints (e.g., from WattBuy or your own resolver)
+      esiid: body.utilityHints?.esiid ?? undefined,
+      tdspSlug: body.utilityHints?.tdspSlug ?? undefined,
+      utilityName: body.utilityHints?.utilityName ?? undefined,
+      utilityPhone: body.utilityHints?.utilityPhone ?? undefined,
+
+      smartMeterConsent: body.smartMeterConsent ?? false,
+      smartMeterConsentDate: body.smartMeterConsentDate
+        ? new Date(body.smartMeterConsentDate)
+        : undefined,
+
+      rawGoogleJson: body.googlePlaceDetails as any,
+      rawWattbuyJson: body.wattbuyJson as any,
+    };
+
+    // If user has an existing address, update it; otherwise create a new one
+    const record = existingAddress 
+      ? await prisma.houseAddress.update({
+          where: { id: existingAddress.id },
+          data: addressData,
+          select: {
+            id: true,
+            userId: true,
+            houseId: true,
+            addressLine1: true,
+            addressLine2: true,
+            addressCity: true,
+            addressState: true,
+            addressZip5: true,
+            addressZip4: true,
+            addressCountry: true,
+            lat: true,
+            lng: true,
+            addressValidated: true,
+            esiid: true,
+            tdspSlug: true,
+            utilityName: true,
+            utilityPhone: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        })
+      : await prisma.houseAddress.create({
+          data: addressData,
+          select: {
+            id: true,
+            userId: true,
+            houseId: true,
+            addressLine1: true,
+            addressLine2: true,
+            addressCity: true,
+            addressState: true,
+            addressZip5: true,
+            addressZip4: true,
+            addressCountry: true,
+            lat: true,
+            lng: true,
+            addressValidated: true,
+            esiid: true,
+            tdspSlug: true,
+            utilityName: true,
+            utilityPhone: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        });
 
     // Stable UI-facing shape
     return NextResponse.json({
