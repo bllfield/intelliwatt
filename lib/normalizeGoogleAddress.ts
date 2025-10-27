@@ -24,6 +24,7 @@ export function normalizeGoogleAddress(details: GooglePlaceDetails, unitNumber?:
   const c = details.address_components ?? [];
   const streetNumber = pick(c, "street_number");
   const route = pick(c, "route");
+  const streetAddress = pick(c, "street_address"); // For manual entries
   const subpremiseFromGoogle = pick(c, "subpremise");
   const subpremise = (subpremiseFromGoogle && subpremiseFromGoogle.trim()) || unitNumber || null;
   const city = pick(c, "locality") || pick(c, "sublocality") || pick(c, "postal_town") || "";
@@ -32,7 +33,8 @@ export function normalizeGoogleAddress(details: GooglePlaceDetails, unitNumber?:
   const plus4 = pick(c, "postal_code_suffix") || "";
   const country = pick(c, "country", true) || "US";
 
-  const line1 = [streetNumber, route].filter(Boolean).join(" ").trim();
+  // Use street_address if available (manual entry), otherwise build from street_number + route
+  const line1 = streetAddress || [streetNumber, route].filter(Boolean).join(" ").trim();
   const [lat, lng] = (() => {
     const loc = details.geometry?.location;
     if (!loc) return [null, null] as const;
