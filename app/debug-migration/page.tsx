@@ -16,7 +16,7 @@ export default function DebugMigrationPage() {
       
       const data = await response.json();
       setResult(data);
-    } catch (error) {
+    } catch (error: any) {
       setResult({ error: error.message });
     } finally {
       setLoading(false);
@@ -33,7 +33,7 @@ export default function DebugMigrationPage() {
       
       const data = await response.json();
       setResult(data);
-    } catch (error) {
+    } catch (error: any) {
       setResult({ error: error.message });
     } finally {
       setLoading(false);
@@ -46,7 +46,7 @@ export default function DebugMigrationPage() {
       const response = await fetch('/api/debug/check-address');
       const data = await response.json();
       setResult(data);
-    } catch (error) {
+    } catch (error: any) {
       setResult({ error: error.message });
     } finally {
       setLoading(false);
