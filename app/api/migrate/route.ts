@@ -6,7 +6,7 @@ export async function GET(request: NextRequest) {
     console.log("Debug: Running database migration...");
     
     // Check if HouseAddress table exists first
-    const tableExists = await prisma.$queryRaw`
+    const tableExists = await prisma.$queryRaw<Array<{ exists: boolean }>>`
       SELECT EXISTS (
         SELECT FROM information_schema.tables 
         WHERE table_schema = 'public' 
