@@ -31,6 +31,9 @@ export async function POST(req: NextRequest) {
     const normalized = normalizeGoogleAddress(body.googlePlaceDetails, body.unitNumber);
     console.log("Normalized address:", normalized);
 
+    // Determine validation source: if place_id is null, it's a manual entry
+    const validationSource = body.googlePlaceDetails.place_id ? "GOOGLE" : "USER";
+
     // Check if user already has an address
     const existingAddress = await prisma.houseAddress.findFirst({
       where: { userId: body.userId },
@@ -44,6 +47,7 @@ export async function POST(req: NextRequest) {
     } else {
       console.log("Will create new address");
     }
+    console.log("Validation source:", validationSource);
 
     const addressData = {
       userId: body.userId,
@@ -62,7 +66,7 @@ export async function POST(req: NextRequest) {
       lng: normalized.lng ?? undefined,
 
       addressValidated: normalized.addressValidated,
-      validationSource: "GOOGLE" as const,
+      validationSource: validationSource as "GOOGLE" | "USER" | "NONE" | "OTHER",
 
       // Optional utility hints (e.g., from WattBuy or your own resolver)
       esiid: body.utilityHints?.esiid ?? undefined,
