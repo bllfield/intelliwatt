@@ -230,13 +230,16 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
               />
             </div>
           </div>
-          <button
-            type="submit"
-            disabled={!address.trim() || !consent || isSubmitting}
-            className="bg-brand-blue text-white px-6 py-3 text-sm font-medium rounded-md hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {isSubmitting ? 'Connecting...' : 'Connect'}
-          </button>
+            <div className="text-xs text-white/60 mb-2">
+              Debug: Address={!!address.trim()} Consent={consent} Submit={!address.trim() || !consent || isSubmitting}
+            </div>
+            <button
+              type="submit"
+              disabled={!address.trim() || !consent || isSubmitting}
+              className="bg-brand-blue text-white px-6 py-3 text-sm font-medium rounded-md hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isSubmitting ? 'Connecting...' : 'Connect'}
+            </button>
         </div>
 
         {/* Smart Meter Consent */}
