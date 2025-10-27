@@ -62,8 +62,7 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
       // Use the new PlaceAutocompleteElement API
       const autocompleteElement = new window.google.maps.places.PlaceAutocompleteElement({
         types: ['address'],
-        componentRestrictions: { country: 'us' },
-        fields: ['formatted_address', 'address_components', 'place_id']
+        componentRestrictions: { country: 'us' }
       });
 
       console.log('Debug: PlaceAutocompleteElement created successfully');
