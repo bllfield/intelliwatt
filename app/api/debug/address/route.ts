@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
     console.log("Debug: Database connection successful");
     
     // Test if HouseAddress table exists
-    const tableExists = await prisma.$queryRaw`
+    const tableExists = await prisma.$queryRaw<Array<{ exists: boolean }>>`
       SELECT EXISTS (
         SELECT FROM information_schema.tables 
         WHERE table_schema = 'public' 
@@ -43,7 +43,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ 
       success: true, 
       message: "Database and HouseAddress model working correctly",
-      tableExists: tableExists,
+      tableExists: tableExists[0]?.exists,
       testRecord: testRecord
     });
     
