@@ -58,40 +58,27 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
     }
 
     try {
-      console.log('Debug: Creating PlaceAutocompleteElement...');
-      // Use the new PlaceAutocompleteElement API
-      const autocompleteElement = new window.google.maps.places.PlaceAutocompleteElement({
+      console.log('Debug: Creating standard Autocomplete...');
+      // Use the standard Google Places Autocomplete API (works with React)
+      const autocompleteInstance = new window.google.maps.places.Autocomplete(inputRef.current, {
         types: ['address'],
-        componentRestrictions: { country: 'us' }
+        componentRestrictions: { country: 'us' },
+        fields: ['formatted_address', 'address_components', 'place_id']
       });
 
-      console.log('Debug: PlaceAutocompleteElement created successfully');
-
-      // Replace the input with the autocomplete element
-      if (inputRef.current.parentNode) {
-        inputRef.current.parentNode.replaceChild(autocompleteElement, inputRef.current);
-        console.log('Debug: Input replaced with autocomplete element');
-      }
+      console.log('Debug: Autocomplete created successfully');
 
       // Listen for place selection
-      autocompleteElement.addEventListener('gmp-placeselect', (event: any) => {
-        console.log('Debug: Place selected:', event.place);
-        const place = event.place;
+      autocompleteInstance.addListener('place_changed', () => {
+        const place = autocompleteInstance.getPlace();
+        console.log('Debug: Place selected:', place);
         if (place.formatted_address) {
           console.log('Debug: Setting address to:', place.formatted_address);
           setAddress(place.formatted_address);
         }
       });
 
-      // Listen for input changes to update state
-      autocompleteElement.addEventListener('input', (event: any) => {
-        console.log('Debug: Input event:', event.target?.value);
-        if (event.target?.value) {
-          setAddress(event.target.value);
-        }
-      });
-
-      setAutocomplete(autocompleteElement);
+      setAutocomplete(autocompleteInstance);
       console.log('Debug: Google Maps autocomplete initialized successfully');
     } catch (error) {
       console.warn('Google Places API not available, falling back to manual entry:', error);
