@@ -73,11 +73,21 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
         console.log('Debug: Input replaced with autocomplete element');
       }
 
+      // Listen for place selection
       autocompleteElement.addEventListener('gmp-placeselect', (event: any) => {
         console.log('Debug: Place selected:', event.place);
         const place = event.place;
         if (place.formatted_address) {
+          console.log('Debug: Setting address to:', place.formatted_address);
           setAddress(place.formatted_address);
+        }
+      });
+
+      // Listen for input changes to update state
+      autocompleteElement.addEventListener('input', (event: any) => {
+        console.log('Debug: Input event:', event.target?.value);
+        if (event.target?.value) {
+          setAddress(event.target.value);
         }
       });
 
