@@ -20,11 +20,15 @@ type SaveAddressBody = {
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as SaveAddressBody;
+    console.log("API received body:", JSON.stringify(body, null, 2));
+    
     if (!body?.userId || !body?.googlePlaceDetails) {
       return NextResponse.json({ ok: false, error: "Missing required fields" }, { status: 400 });
     }
 
+    console.log("Google Place Details:", JSON.stringify(body.googlePlaceDetails, null, 2));
     const normalized = normalizeGoogleAddress(body.googlePlaceDetails);
+    console.log("Normalized address:", normalized);
 
     const record = await prisma.houseAddress.create({
       data: {
