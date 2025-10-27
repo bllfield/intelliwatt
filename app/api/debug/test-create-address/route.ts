@@ -1,7 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 
+export async function GET(request: NextRequest) {
+  return await handleRequest();
+}
+
 export async function POST(request: NextRequest) {
+  return await handleRequest();
+}
+
+async function handleRequest(): Promise<NextResponse> {
   try {
     console.log("Debug: Testing address creation...");
     

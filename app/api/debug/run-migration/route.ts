@@ -1,7 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 
+export async function GET(request: NextRequest) {
+  return await handleMigration();
+}
+
 export async function POST(request: NextRequest) {
+  return await handleMigration();
+}
+
+async function handleMigration(): Promise<NextResponse> {
   try {
     console.log("Debug: Running database migration...");
     
