@@ -6,9 +6,9 @@ export async function GET(request: NextRequest) {
     // Get all addresses from HouseAddress table
     const allAddresses = await prisma.houseAddress.findMany({
       orderBy: {
-        createdAt: 'desc'
+        updatedAt: 'desc' // Order by updatedAt to see most recently modified
       },
-      take: 10 // Get the 10 most recent
+      take: 20 // Get the 20 most recent
     });
     
     console.log("Debug: All addresses:", allAddresses);
