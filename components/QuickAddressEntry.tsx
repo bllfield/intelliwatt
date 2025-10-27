@@ -15,6 +15,7 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
   const [showTerms, setShowTerms] = useState(false);
   const [autocomplete, setAutocomplete] = useState<any>(null);
   const [googleLoaded, setGoogleLoaded] = useState(false);
+  const [placeDetails, setPlaceDetails] = useState<any>(null); // Store full Google Place object
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -72,6 +73,10 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
       autocompleteInstance.addListener('place_changed', () => {
         const place = autocompleteInstance.getPlace();
         console.log('Debug: Place selected:', place);
+        
+        // Store the full place details for saving to database
+        setPlaceDetails(place);
+        
         if (place.formatted_address) {
           console.log('Debug: Setting address to:', place.formatted_address);
           setAddress(place.formatted_address);
@@ -110,8 +115,8 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
       const userData = await userResponse.json();
       console.log('User data:', userData);
       
-      // Create Google Place Details format from the address
-      const googlePlaceDetails = {
+      // Use the full place details if available, otherwise construct from address string
+      const googlePlaceDetails = placeDetails || {
         place_id: null,
         formatted_address: address,
         address_components: [
