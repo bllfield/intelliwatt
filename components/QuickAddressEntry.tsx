@@ -117,9 +117,18 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
       const userData = await userResponse.json();
       console.log('User data:', userData);
       
-      // Use the full place details if available (from Google autocomplete)
-      // Otherwise parse the manual address entry
-      const googlePlaceDetails = placeDetails || parseManualAddress(address);
+      // Check if the current address matches what the user typed vs what Google selected
+      // If placeDetails exists but the formatted address doesn't match what user typed, it's a manual entry
+      let googlePlaceDetails;
+      if (placeDetails && placeDetails.formatted_address === address.trim()) {
+        // User selected from Google autocomplete - use the full place details
+        googlePlaceDetails = placeDetails;
+        console.log('Using Google autocomplete place details');
+      } else {
+        // User typed manually - parse the manual address
+        googlePlaceDetails = parseManualAddress(address);
+        console.log('Using manual address parsing');
+      }
 
       // Save address to database using the new API
       console.log('Sending address save request:', {
