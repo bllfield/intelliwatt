@@ -24,7 +24,8 @@ export function normalizeGoogleAddress(details: GooglePlaceDetails, unitNumber?:
   const c = details.address_components ?? [];
   const streetNumber = pick(c, "street_number");
   const route = pick(c, "route");
-  const subpremise = pick(c, "subpremise") || unitNumber || null;
+  const subpremiseFromGoogle = pick(c, "subpremise");
+  const subpremise = (subpremiseFromGoogle && subpremiseFromGoogle.trim()) || unitNumber || null;
   const city = pick(c, "locality") || pick(c, "sublocality") || pick(c, "postal_town") || "";
   const state = pick(c, "administrative_area_level_1", true); // short_name: "TX"
   const postal = pick(c, "postal_code");
