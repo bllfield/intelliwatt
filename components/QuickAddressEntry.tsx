@@ -156,8 +156,7 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
         // Call the parent callback
         onAddressSubmitted(address);
         
-        // Show success message
-        alert('Address saved successfully! You can now connect your Smart Meter.');
+        // Address saved successfully - user can see the updated UI
       } else {
         const error = await response.json();
         console.error('Address save failed:', error);
@@ -165,7 +164,6 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
       }
     } catch (error) {
       console.error('Error saving address:', error);
-      alert('Failed to save address. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -227,10 +225,7 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
               />
             </div>
           </div>
-            <div className="text-xs text-white/60 mb-2">
-              Debug: Address={!!address.trim()} Consent={consent} Submit={!address.trim() || !consent || isSubmitting}
-            </div>
-            <button
+          <button
               type="submit"
               disabled={!address.trim() || !consent || isSubmitting}
               className="bg-brand-blue text-white px-6 py-3 text-sm font-medium rounded-md hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
