@@ -49,6 +49,7 @@ model User {
   referrals   Referral[]   @relation("UserReferrals")
   entries     Entry[]      @relation("UserEntries")
   profile     UserProfile?
+  houseAddress HouseAddress[]
   sessions    Session[]
   usage       UsageData[]
   utilityPlans UtilityPlan[]
@@ -464,6 +465,8 @@ model HouseAddress {
 
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
+
+  user                  User     @relation(fields: [userId], references: [id])
 
   @@index([placeId])
   @@index([addressState, addressZip5])

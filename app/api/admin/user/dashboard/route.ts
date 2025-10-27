@@ -30,6 +30,10 @@ export async function GET(request: NextRequest) {
         utilityPlans: {
           where: { isCurrent: true },
           take: 1
+        },
+        houseAddress: {
+          orderBy: { updatedAt: 'desc' },
+          take: 1
         }
       }
     });
@@ -50,6 +54,7 @@ export async function GET(request: NextRequest) {
 
     const dashboardData = {
       user: {
+        id: user.id,
         email: user.email,
         createdAt: user.createdAt
       },
@@ -60,7 +65,8 @@ export async function GET(request: NextRequest) {
         totalReferrals
       },
       profile: user.profile,
-      hasAddress: !!user.profile?.address,
+      address: user.houseAddress?.[0] || null,
+      hasAddress: !!user.houseAddress?.[0],
       hasSmartMeter: !!user.profile?.apiConnections?.length,
       hasUsageData: !!user.usage?.length,
       currentPlan: user.utilityPlans?.[0] || null

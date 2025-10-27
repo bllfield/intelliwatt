@@ -143,7 +143,7 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          userId: userData.user?.email || 'unknown',
+          userId: userData.user?.id || userData.user?.email || 'unknown',
           houseId: null,
           googlePlaceDetails: googlePlaceDetails,
           unitNumber: unitNumber.trim() || undefined,

@@ -27,6 +27,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "Missing required fields" }, { status: 400 });
     }
 
+    // Convert email to user ID if needed
+    let userId = body.userId;
+    if (body.userId.includes('@')) {
+      // It's an email, look up the user
+      const user = await prisma.user.findUnique({ where: { email: body.userId } });
+      if (!user) {
+        return NextResponse.json({ ok: false, error: "User not found" }, { status: 404 });
+      }
+      userId = user.id;
+      console.log(`Converted email ${body.userId} to user ID ${userId}`);
+    }
+
     console.log("Google Place Details:", JSON.stringify(body.googlePlaceDetails, null, 2));
     console.log("Address components types:", body.googlePlaceDetails.address_components?.map((c: any) => c.types));
     const normalized = normalizeGoogleAddress(body.googlePlaceDetails, body.unitNumber);
@@ -35,25 +47,9 @@ export async function POST(req: NextRequest) {
     // Determine validation source: if place_id is null, it's a manual entry
     const validationSource = body.googlePlaceDetails.place_id ? "GOOGLE" : "USER";
 
-    // Check if user already has an address
-    const existingAddress = await prisma.houseAddress.findFirst({
-      where: { userId: body.userId },
-      orderBy: { createdAt: 'desc' }
-    });
-    
-    console.log("Existing address check for userId:", body.userId);
-    console.log("Existing address found:", !!existingAddress);
-    if (existingAddress) {
-      console.log("Will update existing address ID:", existingAddress.id);
-    } else {
-      console.log("Will create new address");
-    }
-    console.log("Validation source:", validationSource);
-
     const addressData = {
-      userId: body.userId,
+      userId: userId,
       houseId: body.houseId ?? null,
-
       addressLine1: normalized.addressLine1,
       addressLine2: normalized.addressLine2,
       addressCity: normalized.addressCity,
@@ -61,31 +57,31 @@ export async function POST(req: NextRequest) {
       addressZip5: normalized.addressZip5,
       addressZip4: normalized.addressZip4,
       addressCountry: normalized.addressCountry,
-
       placeId: normalized.placeId ?? undefined,
       lat: normalized.lat ?? undefined,
       lng: normalized.lng ?? undefined,
-
       addressValidated: normalized.addressValidated,
       validationSource: validationSource as "GOOGLE" | "USER" | "NONE" | "OTHER",
-
-      // Optional utility hints (e.g., from WattBuy or your own resolver)
       esiid: body.utilityHints?.esiid ?? undefined,
       tdspSlug: body.utilityHints?.tdspSlug ?? undefined,
       utilityName: body.utilityHints?.utilityName ?? undefined,
       utilityPhone: body.utilityHints?.utilityPhone ?? undefined,
-
       smartMeterConsent: body.smartMeterConsent ?? false,
       smartMeterConsentDate: body.smartMeterConsentDate
         ? new Date(body.smartMeterConsentDate)
         : undefined,
-
       rawGoogleJson: body.googlePlaceDetails as any,
       rawWattbuyJson: body.wattbuyJson as any,
     };
 
-    // If user has an existing address, update it; otherwise create a new one
-    const record = existingAddress 
+    // Check if user already has an address
+    const existingAddress = await prisma.houseAddress.findFirst({
+      where: { userId: userId },
+      select: { id: true },
+      orderBy: { createdAt: 'desc' }
+    });
+    
+    const record = existingAddress
       ? await prisma.houseAddress.update({
           where: { id: existingAddress.id },
           data: addressData,
