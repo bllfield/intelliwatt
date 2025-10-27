@@ -28,8 +28,9 @@ export async function POST(req: NextRequest) {
     }
 
     console.log("Google Place Details:", JSON.stringify(body.googlePlaceDetails, null, 2));
+    console.log("Address components types:", body.googlePlaceDetails.address_components?.map((c: any) => c.types));
     const normalized = normalizeGoogleAddress(body.googlePlaceDetails, body.unitNumber);
-    console.log("Normalized address:", normalized);
+    console.log("Normalized address:", JSON.stringify(normalized, null, 2));
 
     // Determine validation source: if place_id is null, it's a manual entry
     const validationSource = body.googlePlaceDetails.place_id ? "GOOGLE" : "USER";
