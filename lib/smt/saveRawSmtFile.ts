@@ -1,55 +1,35 @@
-// lib/smt/saveRawSmtFile.ts
-// Save RAW SMT files to database with idempotency via SHA256
+import { prisma } from "@/lib/db";
 
-import { prisma } from '@/lib/db';
-import crypto from 'crypto';
-
-export interface RawSmtFileInput {
+export type SaveRawSmtFileInput = {
   filename: string;
   sourcePath?: string | null;
   size: number;
-  content: string; // base64 encoded
-}
+  sha256: string;
+  content: Buffer;
+};
 
-export interface RawSmtFileResult {
-  id: string;
-  alreadyExists: boolean;
-}
-
-/**
- * Save a raw SMT file to the database.
- * Idempotent: if file with same sha256 exists, returns existing record.
- * Does NOT parse or transform the file content (RAW only per PC-2025-02).
- */
-export async function saveRawSmtFile(input: RawSmtFileInput): Promise<RawSmtFileResult> {
-  // Calculate SHA256 from base64 content
-  const sha256 = crypto.createHash('sha256').update(input.content, 'base64').digest('hex');
-  
-  // Check if file already exists (idempotency)
-  const existing = await prisma.rawSmtFile.findUnique({
-    where: { sha256 },
-    select: { id: true }
-  });
-
-  if (existing) {
-    return { id: existing.id, alreadyExists: true };
+export async function saveRawSmtFile(input: SaveRawSmtFileInput) {
+  // Idempotency by sha256 (unique)
+  try {
+    const created = await prisma.rawSmtFile.create({
+      data: {
+        filename: input.filename,
+        sourcePath: input.sourcePath ?? null,
+        size: input.size,
+        sha256: input.sha256,
+        content: input.content,
+      },
+      select: { id: true, sha256: true },
+    });
+    return { created: true, id: created.id, sha256: created.sha256 };
+  } catch (err: any) {
+    // Unique constraint => already exists; fetch existing id
+    const existing = await prisma.rawSmtFile.findUnique({
+      where: { sha256: input.sha256 },
+      select: { id: true, sha256: true },
+    });
+    if (existing) return { created: false, id: existing.id, sha256: existing.sha256 };
+    throw err;
   }
-
-  // Convert base64 to Buffer for storage as Bytes
-  const contentBuffer = Buffer.from(input.content, 'base64');
-
-  // Create new record
-  const created = await prisma.rawSmtFile.create({
-    data: {
-      filename: input.filename,
-      sourcePath: input.sourcePath ?? null,
-      size: input.size,
-      sha256,
-      content: contentBuffer,
-    },
-    select: { id: true }
-  });
-
-  return { id: created.id, alreadyExists: false };
 }
 

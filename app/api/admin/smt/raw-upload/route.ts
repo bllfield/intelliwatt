@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { guardAdmin } from '@/lib/auth/admin';
 import { saveRawSmtFile } from '@/lib/smt/saveRawSmtFile';
+import crypto from 'crypto';
 
 /**
  * POST /api/admin/smt/raw-upload
@@ -19,7 +20,7 @@ import { saveRawSmtFile } from '@/lib/smt/saveRawSmtFile';
  * {
  *   ok: boolean;
  *   fileId: string;
- *   alreadyExists: boolean;
+ *   created: boolean;
  *   sha256: string;
  * }
  */
@@ -53,23 +54,26 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Save file to database (idempotent via SHA256)
+    // Calculate SHA256 from base64 content
+    const sha256 = crypto.createHash('sha256').update(body.content, 'base64').digest('hex');
+
+    // Convert base64 to Buffer
+    const contentBuffer = Buffer.from(body.content, 'base64');
+
+    // Save file to database (idempotent via SHA256 unique constraint)
     const result = await saveRawSmtFile({
       filename: body.filename,
       sourcePath: body.sourcePath ?? null,
       size: body.size,
-      content: body.content,
+      sha256,
+      content: contentBuffer,
     });
-
-    // Calculate SHA256 for response
-    const crypto = require('crypto');
-    const sha256 = crypto.createHash('sha256').update(body.content, 'base64').digest('hex');
 
     return NextResponse.json({
       ok: true,
       fileId: result.id,
-      alreadyExists: result.alreadyExists,
-      sha256,
+      created: result.created,
+      sha256: result.sha256,
     }, { status: 200 });
 
   } catch (error: any) {
