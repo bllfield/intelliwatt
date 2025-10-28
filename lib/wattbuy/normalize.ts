@@ -38,6 +38,11 @@ export type OfferNormalized = {
     yrac: string | null;
   };
   enroll_link: string | null;            // only use in customer-facing flows, not in probe
+  // Compliance fields
+  supplier_puct_registration?: string | null;
+  supplier_contact_email?: string | null;
+  supplier_contact_phone?: string | null;
+  distributor_name?: string | null;
   raw: any;                              // keep original for debugging
 };
 
@@ -129,6 +134,18 @@ export function normalizeOffer(o: any): OfferNormalized {
     cancel_fee_text: o?.offer_data?.cancel_notes ?? null,
     docs,
     enroll_link: typeof o?.link === 'string' ? o.link : null,
+    // Extract compliance fields from API response
+    supplier_puct_registration: o?.offer_data?.supplier_registration_number ?? 
+                                 o?.offer_data?.puct_registration_number ?? 
+                                 o?.offer_data?.puct_registration ?? null,
+    supplier_contact_email: o?.offer_data?.supplier_contact_email ?? 
+                            o?.offer_data?.contact_email ?? null,
+    supplier_contact_phone: o?.offer_data?.supplier_contact_phone ?? 
+                            o?.offer_data?.contact_phone ?? 
+                            o?.offer_data?.phone ?? null,
+    distributor_name: o?.offer_data?.utility_name ?? 
+                      o?.offer_data?.distributor_name ?? 
+                      o?.offer_data?.utility ?? null,
     raw: o,
   };
 }

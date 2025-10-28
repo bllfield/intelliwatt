@@ -30,11 +30,17 @@ export type PlanCardProps = {
   breakdown: Breakdown
   docs?: any
   canEnroll?: boolean        // NEW: gate the CTA until consent is checked
+  // WattBuy compliance fields
+  supplierPuctRegistration?: string | null
+  supplierContactEmail?: string | null
+  supplierContactPhone?: string | null
+  distributorName?: string | null
 }
 
 export default function PlanCard(props: PlanCardProps) {
   const {
-    planId, supplierName, planName, tdsp, productType, termMonths, cancelFeeCents, hasBillCredit, disclosures, breakdown, docs, canEnroll
+    planId, supplierName, planName, tdsp, productType, termMonths, cancelFeeCents, hasBillCredit, disclosures, breakdown, docs, canEnroll,
+    supplierPuctRegistration, supplierContactEmail, supplierContactPhone, distributorName
   } = props
 
   const outbound = extractOutboundUrl(docs)
@@ -110,6 +116,16 @@ export default function PlanCard(props: PlanCardProps) {
         </ul>
       </div>
 
+      <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: 12 }}>
+        <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 14 }}>Supplier Information</div>
+        <div style={{ display: 'grid', gap: 6, fontSize: 13 }}>
+          <InfoRow label="Distributor" value={distributorName || tdsp} />
+          <InfoRow label="PUCT Registration" value={supplierPuctRegistration} />
+          <InfoRow label="Contact Email" value={supplierContactEmail} />
+          <InfoRow label="Contact Phone" value={supplierContactPhone} />
+        </div>
+      </div>
+
       <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
         <a href={disclosures.eflUrl || '#'} target="_blank" rel="noreferrer"
            style={linkStyle(disclosures.eflUrl)}>EFL</a>
@@ -148,6 +164,20 @@ function Badge({ label, tone = 'slate' }: { label: string; tone?: 'slate' | 'blu
   const fg = tone === 'blue' ? '#1d4ed8' : '#334155'
   return (
     <span style={{ background: bg, color: fg, borderRadius: 999, padding: '2px 8px', fontSize: 12 }}>{label}</span>
+  )
+}
+
+function InfoRow({ label, value }: { label: string; value?: string | null }) {
+  const displayValue = value && value.trim() ? value : 'Not provided by supplier'
+  const isMissing = !value || !value.trim()
+  
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+      <span style={{ color: '#6b7280' }}>{label}:</span>
+      <span style={{ color: isMissing ? '#9ca3af' : '#111827', fontWeight: isMissing ? 400 : 500 }}>
+        {displayValue}
+      </span>
+    </div>
   )
 }
 
