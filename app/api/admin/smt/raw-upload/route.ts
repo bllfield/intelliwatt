@@ -1,85 +1,92 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { guardAdmin } from '@/lib/auth/admin';
-import { saveRawSmtFile } from '@/lib/smt/saveRawSmtFile';
-import crypto from 'crypto';
+import { NextResponse } from "next/server";
+import crypto from "crypto";
+import { saveRawSmtFile } from "@/lib/smt/saveRawSmtFile";
 
-/**
- * POST /api/admin/smt/raw-upload
- * 
- * Admin-gated endpoint to receive RAW SMT files (per PC-2025-02).
- * 
- * Request body:
- * {
- *   filename: string;
- *   sourcePath?: string;
- *   size: number;
- *   content: string; // base64 encoded
- * }
- * 
- * Response:
- * {
- *   ok: boolean;
- *   fileId: string;
- *   created: boolean;
- *   sha256: string;
- * }
- */
-export async function POST(req: NextRequest) {
-  // Guard against unauthorized access
-  const gate = guardAdmin(req);
-  if (gate) return gate;
+type UploadBody = {
+  filename: string;
+  sourcePath?: string | null;
+  size: number;              // bytes
+  sha256: string;            // hex string
+  bytesBase64: string;       // base64 of entire file
+};
+
+export async function POST(request: Request) {
+  const corrId = crypto.randomUUID();
+  const adminToken = process.env.ADMIN_TOKEN;
+  if (!adminToken) {
+    return NextResponse.json(
+      { ok: false, error: "ADMIN_TOKEN_NOT_CONFIGURED", corrId },
+      { status: 503 }
+    );
+  }
+
+  const hdr = request.headers.get("x-admin-token");
+  if (!hdr || hdr !== adminToken) {
+    return NextResponse.json(
+      { ok: false, error: "UNAUTHORIZED", corrId },
+      { status: 401 }
+    );
+  }
+
+  let body: UploadBody;
+  try {
+    body = (await request.json()) as UploadBody;
+  } catch {
+    return NextResponse.json(
+      { ok: false, error: "INVALID_JSON", corrId },
+      { status: 400 }
+    );
+  }
+
+  const { filename, sourcePath, size, sha256, bytesBase64 } = body || {};
+  if (!filename || !sha256 || !bytesBase64 || typeof size !== "number") {
+    return NextResponse.json(
+      { ok: false, error: "VALIDATION", details: "Missing required fields", corrId },
+      { status: 400 }
+    );
+  }
+
+  let content: Buffer;
+  try {
+    content = Buffer.from(bytesBase64, "base64");
+  } catch {
+    return NextResponse.json(
+      { ok: false, error: "BASE64_DECODE_FAILED", corrId },
+      { status: 400 }
+    );
+  }
+
+  if (content.length !== size) {
+    return NextResponse.json(
+      { ok: false, error: "SIZE_MISMATCH", corrId, details: { size, decoded: content.length } },
+      { status: 400 }
+    );
+  }
+
+  const computed = crypto.createHash("sha256").update(content).digest("hex");
+  if (computed.toLowerCase() !== sha256.toLowerCase()) {
+    return NextResponse.json(
+      { ok: false, error: "SHA256_MISMATCH", corrId, details: { provided: sha256, computed } },
+      { status: 400 }
+    );
+  }
 
   try {
-    const body = await req.json();
-
-    // Validate required fields
-    if (!body.filename || typeof body.filename !== 'string') {
-      return NextResponse.json(
-        { ok: false, error: 'filename is required and must be a string' },
-        { status: 400 }
-      );
-    }
-
-    if (!body.content || typeof body.content !== 'string') {
-      return NextResponse.json(
-        { ok: false, error: 'content is required and must be a string (base64)' },
-        { status: 400 }
-      );
-    }
-
-    if (typeof body.size !== 'number' || body.size <= 0) {
-      return NextResponse.json(
-        { ok: false, error: 'size is required and must be a positive number' },
-        { status: 400 }
-      );
-    }
-
-    // Calculate SHA256 from base64 content
-    const sha256 = crypto.createHash('sha256').update(body.content, 'base64').digest('hex');
-
-    // Convert base64 to Buffer
-    const contentBuffer = Buffer.from(body.content, 'base64');
-
-    // Save file to database (idempotent via SHA256 unique constraint)
-    const result = await saveRawSmtFile({
-      filename: body.filename,
-      sourcePath: body.sourcePath ?? null,
-      size: body.size,
-      sha256,
-      content: contentBuffer,
+    const { created, id } = await saveRawSmtFile({
+      filename,
+      sourcePath: sourcePath ?? null,
+      size,
+      sha256: computed,
+      content,
     });
 
-    return NextResponse.json({
-      ok: true,
-      fileId: result.id,
-      created: result.created,
-      sha256: result.sha256,
-    }, { status: 200 });
-
-  } catch (error: any) {
-    console.error('[SMT raw upload] Error:', error);
     return NextResponse.json(
-      { ok: false, error: error?.message || 'Internal server error' },
+      { ok: true, corrId, id, created },
+      { status: 200 }
+    );
+  } catch (err: any) {
+    return NextResponse.json(
+      { ok: false, error: "DATABASE", corrId },
       { status: 500 }
     );
   }
