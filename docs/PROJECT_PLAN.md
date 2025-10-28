@@ -77,3 +77,25 @@ Enable direct upload of Smart Meter Texas (SMT) raw files via an admin-gated end
 - Follows idempotent ingestion patterns
 - Admin-gated for security
 - RAW data capture follows existing pattern
+
+### PC-2025-02: SMT RAW File Ingestion (October 2025)
+
+**Rationale:**
+Capture Smart Meter Texas files in RAW form before any parsing, maintaining RAW→CDM standards. This ensures data integrity and enables re-processing of SMT files without re-fetching.
+
+**Scope:**
+- Add Prisma model `RawSmtFile` to store original SMT files (bytes) plus metadata (`filename`, `size`, `sha256`, `sourcePath`).
+- Add admin-gated endpoint `POST /api/admin/smt/raw-upload` (App Router) to accept RAW file uploads from the DO proxy.
+- Endpoint will **not** parse or transform; it only persists RAW with idempotency via unique `sha256`.
+- Store metadata for traceability and debugging.
+
+**Rollback Plan:**
+- If issues occur, disable access by removing the Vercel `ADMIN_TOKEN` or feature-flag route in `middleware.ts`.
+- Keep data; do not drop the table. Reprocess is possible later from saved bytes.
+- Endpoint can be safely disabled without data loss.
+
+**Guardrails Preserved:**
+- Maintains RAW capture before transformation (RAW→CDM pattern)
+- Idempotent via SHA256 deduplication
+- Admin-gated via existing `guardAdmin` function
+- No transformation happens at upload time (preserves RAW integrity)
