@@ -15,11 +15,17 @@
 - **Build System**: Next.js 14+ with App Router
 
 ### Infrastructure
-- **Droplet**: DigitalOcean droplet for backend processing
 - **Database**: DigitalOcean managed PostgreSQL cluster
 - **Hosting**: Vercel for frontend/API deployment
 - **CDN**: Vercel Edge Network for static assets
 - **Monitoring**: Integrated with Vercel Analytics
+
+#### Infrastructure (SMT Proxy)
+- **Droplet**: DigitalOcean — `intelliwatt-smt-proxy`
+- **IP**: `64.225.25.54`
+- **OS/User**: Ubuntu 22.04+, user `deploy`
+- **Purpose**: Pull SMT files (SFTP), post RAW files to IntelliWatt API
+- **Key Path**: `/home/deploy/.ssh/intelliwatt_smt_rsa4096` (private), `.pub` uploaded to SMT
 
 ### Environment Strategy
 ⚠️ **CRITICAL**: Use Preview deployments for testing, treat Production as read-only
