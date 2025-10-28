@@ -49,3 +49,31 @@ Add a short "Plan Change" section here with:
 - Scope (files/endpoints)
 - Rollback plan
 Then perform the change.
+
+## Plan Changes
+
+### PC-2025-01: Raw SMT Files Upload Endpoint (January 2025)
+
+**Rationale:**
+Enable direct upload of Smart Meter Texas (SMT) raw files via an admin-gated endpoint to support manual ingestion of SMT data when standard SFTP integration is unavailable or for testing/debugging purposes.
+
+**Scope:**
+- Add `raw_smt_files` table to Prisma schema with fields: `id`, `createdAt`, `filename`, `content` (text/blob), `uploaded_by` (admin token reference)
+- Create gated admin endpoint `POST /api/admin/smt/upload` that:
+  - Requires `ADMIN_TOKEN` header (via existing `guardAdmin` function)
+  - Accepts multipart file upload of SMT CSV/XML files
+  - Stores raw file in database
+  - Returns upload confirmation and file ID for potential rollback
+- Optional (future): Add `POST /api/admin/smt/upload/rollback?fileId=xyz` to delete uploaded files
+
+**Rollback Plan:**
+- If endpoint causes issues, remove `app/api/admin/smt/upload/route.ts`
+- Drop `raw_smt_files` table via Prisma migration if needed
+- No UI changes required for this endpoint (admin-only tool)
+- Existing SMT transformer logic remains unchanged and unaffected
+
+**Guardrails Preserved:**
+- Maintains CDM-first architecture (SMT data still transforms to CDM)
+- Follows idempotent ingestion patterns
+- Admin-gated for security
+- RAW data capture follows existing pattern
