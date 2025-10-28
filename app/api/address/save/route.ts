@@ -132,6 +132,22 @@ export async function POST(req: NextRequest) {
           },
         });
 
+    // Fire-and-forget: trigger SMT fetch on droplet (non-blocking)
+    const webhookUrl = process.env.DROPLET_WEBHOOK_URL;
+    const webhookSecret = process.env.DROPLET_WEBHOOK_SECRET;
+    if (webhookUrl && webhookSecret) {
+      fetch(webhookUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-intelliwatt-secret': webhookSecret,
+        },
+        body: JSON.stringify({ userId, addressId: record.id }),
+      }).catch((err) => {
+        console.warn('[SMT webhook] Failed (non-blocking):', err);
+      });
+    }
+
     // Stable UI-facing shape
     return NextResponse.json({
       ok: true,
