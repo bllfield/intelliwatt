@@ -1,0 +1,30 @@
+# IntelliWatt Project Rules for Cursor AI
+
+Before making any changes, read these key documentation files:
+
+## Required Reading
+1. **docs/PROJECT_PLAN.md** - Authoritative plan with architecture guardrails
+2. **docs/PROJECT_CONTEXT.md** - Current operational state and deployment info
+3. **docs/QUICK_START.md** - Quick reference for environment and commands
+4. **docs/ADMIN_API.md** - Admin API security and wrapper script usage
+
+## Critical Rules
+- Never use bash-style `&&` chaining (use `;` for PowerShell)
+- Never commit secrets or tokens to the repository
+- All admin/debug API calls must use scripts/admin/Invoke-Intelliwatt.ps1 wrapper
+- Always check PROJECT_PLAN.md for guardrails before modifying code
+- Use Preview deployments for testing, Production is read-only
+
+## Environment
+- Shell: Windows PowerShell
+- Production URL: https://intelliwatt.com
+- Database: DigitalOcean PostgreSQL
+- No local dev server needed
+
+## Security
+- ADMIN_TOKEN required for admin endpoints
+- Use $env:ADMIN_TOKEN in PowerShell session (never commit)
+- Wrapper script auto-injects x-admin-token header
+
+See full documentation in docs/ directory.
+

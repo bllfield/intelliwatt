@@ -40,25 +40,10 @@
 - **Production:** `ADMIN_TOKEN` is required; requests must include header `x-admin-token`.
 - **Preview/Dev:** If `ADMIN_TOKEN` is set, it is required; if it is **not** set, access is allowed to prevent lockout.
 - See **ENV_VARS.md → ADMIN_TOKEN** for details and usage examples.
+- **Admin/debug calls:** Use the wrapper `scripts/admin/Invoke-Intelliwatt.ps1` so requests automatically include `x-admin-token`. See **docs/ADMIN_API.md**.
 
 ---
 
-## Current Database State
-
-### HouseAddress Records
-After cleanup, the database contains **3 addresses** (1 per user):
-
-1. **bllfield@yahoo.com**
-   - Address: 9514 Santa Paula Drive
-   - City: Fort Worth, TX 76116
-
-2. **brian@intellipath-solutions.com**
-   - Address: 8808 Las Vegas Court
-   - City: Fort Worth, TX 76108
-
-3. **bllfield32@gmail.com**
-   - Address: 1860 East Northside Drive (Unit 2223)
-   - City: Fort Worth, TX 76106
 
 ### Database Schema
 - **Model**: `HouseAddress` (in `prisma/schema.prisma`)

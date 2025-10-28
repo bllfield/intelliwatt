@@ -1,6 +1,9 @@
+import IdleGuard from '@/components/IdleGuard';
+
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen bg-brand-white text-brand-navy">
+    <IdleGuard>
+      <div className="min-h-screen bg-brand-white text-brand-navy">
       {/* Updated header with reduced height */}
       <header className="px-4 py-0.5 bg-brand-navy text-brand-blue font-bold shadow-lg border-b border-brand-blue/20">
         <div className="max-w-6xl mx-auto flex justify-between items-center">
@@ -40,5 +43,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </div>
       </footer>
     </div>
+    </IdleGuard>
   );
 } 

@@ -19,6 +19,11 @@
 ## Security
 - `ADMIN_TOKEN` — **Admin route protection.** Required header `x-admin-token` must match this value on admin/debug endpoints.
 
+## Session Management
+- `SESSION_MAX_AGE_HOURS` — Server | Recommended | Reject server writes if session is older than this (default 12).
+- `NEXT_PUBLIC_IDLE_WARN_MIN` — Client | Optional | Minutes of inactivity before showing warning (default **30**).
+- `NEXT_PUBLIC_IDLE_GRACE_SEC` — Client | Optional | Seconds to wait after warning before redirect (default **60**).
+
 ### Notes
 - **Public flags** must start with `NEXT_PUBLIC_` (exposed to the browser).
 - **Server-only** vars must **not** use `NEXT_PUBLIC_`.
