@@ -426,6 +426,23 @@ model SupplierControl {
   @@index([supplierName])
 }
 
+model RawSmtFile {
+  id          String   @id @default(uuid())
+  createdAt   DateTime @default(now())
+  
+  // File metadata
+  filename    String
+  size        Int                    // bytes
+  sha256      String   @unique       // for idempotency
+  sourcePath  String?                 // where file came from (e.g., SFTP path)
+  
+  // Raw file content (binary stored as text)
+  content     String                  // base64 or raw text of SMT file
+  
+  @@index([sha256])
+  @@index([createdAt])
+}
+
 model HouseAddress {
   id                    String   @id @default(uuid())
   userId                String
