@@ -1,3 +1,5 @@
+'use client';
+
 // Idle timeout with cross-tab sync:
 // - Warn at 30 minutes of inactivity (configurable)
 // - 60-second grace countdown (configurable)
