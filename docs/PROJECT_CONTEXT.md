@@ -14,6 +14,13 @@
 - **CMS**: Connected to DigitalOcean managed database
 - **Build System**: Next.js 14+ with App Router
 
+### Infrastructure
+- **Droplet**: DigitalOcean droplet for backend processing
+- **Database**: DigitalOcean managed PostgreSQL cluster
+- **Hosting**: Vercel for frontend/API deployment
+- **CDN**: Vercel Edge Network for static assets
+- **Monitoring**: Integrated with Vercel Analytics
+
 ### Environment Strategy
 ⚠️ **CRITICAL**: Use Preview deployments for testing, treat Production as read-only
 
