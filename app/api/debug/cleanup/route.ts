@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { guardAdmin } from '@/lib/auth/admin';
 import { prisma } from "@/lib/db";
 
 export async function POST(request: NextRequest) {
+  const gate = guardAdmin(request);
+  if (gate) return gate;
+  
   try {
     console.log('Starting address cleanup...');
 

@@ -1,5 +1,7 @@
 # Google Maps API Setup for IntelliWatt
 
+> 📚 **Related Documentation**: See [PROJECT_CONTEXT.md](./PROJECT_CONTEXT.md) for complete project context and [QUICK_START.md](./QUICK_START.md) for quick reference.
+
 ## Required Environment Variable
 
 You need to set up the Google Maps API key for address autocomplete functionality:
@@ -37,13 +39,18 @@ NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=your_api_key_here
 
 ### 4. Set Environment Variable
 
-**For Vercel (Production):**
+**For Vercel (Production & Preview):**
 1. Go to your Vercel project dashboard
 2. Navigate to "Settings" > "Environment Variables"
 3. Add:
    - **Name**: `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`
    - **Value**: `your_api_key_here`
    - **Environment**: Production, Preview, Development
+
+**Testing Strategy:**
+- Test Google Maps integration on **Preview deployments** first
+- Verify autocomplete functionality works correctly
+- Only promote to Production after Preview validation
 
 **For Local Development:**
 1. Create `.env.local` file in project root
@@ -54,6 +61,11 @@ NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=your_api_key_here
 
 ### 5. Deploy
 After setting the environment variable, redeploy your application. The address field will now have Google Places autocomplete functionality.
+
+**Deployment Best Practices:**
+- Test on Preview deployments before merging to main
+- Verify API key restrictions allow both Production and Preview URLs
+- Monitor API usage in Google Cloud Console
 
 ## Features Enabled
 
