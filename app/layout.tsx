@@ -29,7 +29,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <div className="max-w-6xl mx-auto flex justify-between items-center">
             <div className="flex items-center space-x-4">
               <a href="/">
-                <div className="relative w-32 h-32">
+                <div className="relative" style={{ width: '8.48rem', height: '8.48rem' }}>
                   <Image
                     src="/IntelliWatt Logo.png"
                     alt="IntelliWatt™ Logo"
