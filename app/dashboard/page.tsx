@@ -104,7 +104,7 @@ export default function DashboardPage() {
               Welcome to <span className="text-brand-blue">IntelliWatt™</span>
             </h1>
             <p className="text-xl text-brand-white mb-4 max-w-4xl mx-auto leading-relaxed">
-              Your AI-powered energy optimization dashboard. Track savings, manage your plan, and earn rewards.
+              Your FREE AI-powered energy optimization dashboard. Track savings, manage your plan, and earn rewards.
             </p>
             {/* Smart Meter + Referral CTA with stacked, high-contrast lines */}
             <div className="mb-8 flex items-center justify-center gap-4">
@@ -133,9 +133,14 @@ export default function DashboardPage() {
               />
             </div>
             
-            {/* Beta Banner */}
-            <div className="inline-block bg-brand-blue text-brand-navy px-6 py-2 rounded-full font-semibold mb-8">
-              🚀 Beta Version - New Features Coming Soon!
+            {/* Beta & Free Banners */}
+            <div className="flex flex-col items-center gap-2 mb-8">
+              <div className="inline-block bg-brand-blue text-brand-navy px-6 py-2 rounded-full font-semibold">
+                🚀 Beta Version - New Features Coming Soon!
+              </div>
+              <div className="inline-block bg-white/10 text-white px-4 py-1.5 rounded-full font-semibold border border-white/20">
+                💸 100% Free — No fees, ever
+              </div>
             </div>
           </div>
         </div>

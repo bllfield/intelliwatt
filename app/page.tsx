@@ -98,9 +98,12 @@ function LandingPageContent() {
             <h1 className="text-5xl md:text-7xl font-bold text-brand-white mb-6">
               Stop <span className="text-brand-blue">Overpaying</span> for Power
             </h1>
-            <p className="text-xl md:text-2xl text-brand-white mb-8 max-w-4xl mx-auto leading-relaxed">
-              AI-powered energy plan optimization that uses your actual usage data to find the perfect plan for your home.
+            <p className="text-xl md:text-2xl text-brand-white mb-4 max-w-4xl mx-auto leading-relaxed">
+              FREE AI-powered energy plan optimization that uses your actual usage data to find the perfect plan for your home.
             </p>
+            <div className="mb-8 inline-block bg-white/10 text-white px-4 py-1.5 rounded-full font-semibold border border-white/20">
+              💸 100% Free — No fees, ever
+            </div>
             
             {/* Email Entry Form */}
             <div className="max-w-md mx-auto">
