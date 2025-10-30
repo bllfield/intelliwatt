@@ -106,15 +106,22 @@ export default function DashboardPage() {
             <p className="text-xl text-brand-white mb-4 max-w-4xl mx-auto leading-relaxed">
               Your AI-powered energy optimization dashboard. Track savings, manage your plan, and earn rewards.
             </p>
-            {/* Smart Meter CTA with logo positioned to the left (outside the pill) */}
+            {/* Smart Meter + Referral CTA with stacked, high-contrast lines */}
             <div className="mb-8 flex items-center justify-center gap-4">
               <span className="relative inline-block w-64 h-24">
                 <Image src="/Hitthejackwatt-Logo.png" alt="HitTheJackWatt" fill className="object-contain" />
               </span>
-              <div className="inline-flex items-center gap-3 bg-[#39FF14]/10 border border-[#39FF14]/30 px-4 py-3 rounded-full">
-                <span className="text-[#39FF14] font-semibold">Connect your smart meter data</span>
-                <span className="text-xs text-brand-white/80">10 jackpot entries available</span>
-                <span className="text-xs text-brand-white/70 ml-1">+ Refer a Friend: 5 jackpot entries per signup</span>
+              <div className="inline-flex flex-col items-center text-center gap-1 bg-[#39FF14]/10 border border-[#39FF14]/40 px-6 py-4 rounded-full shadow-lg shadow-[#39FF14]/10 ring-1 ring-[#39FF14]/30">
+                <span className="text-lg md:text-xl font-extrabold leading-tight">
+                  <span style={{ color: '#39FF14' }}>⚡ Connect your smart meter data</span>
+                  <span className="mx-1 text-brand-white">for</span>
+                  <span style={{ color: '#39FF14' }}>10 jackpot entries!!</span>
+                </span>
+                <span className="text-sm md:text-base font-bold leading-tight">
+                  <span style={{ color: '#BF00FF' }}>👥 Refer a Friend:</span>
+                  <span className="mx-1 text-brand-white"> </span>
+                  <span style={{ color: '#39FF14' }}>5 jackpot entries per signup!!</span>
+                </span>
               </div>
             </div>
             
