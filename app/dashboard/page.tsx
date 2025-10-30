@@ -108,7 +108,7 @@ export default function DashboardPage() {
             </p>
             {/* Smart Meter CTA with logo positioned to the left (outside the pill) */}
             <div className="mb-8 flex items-center justify-center gap-4">
-              <span className="relative inline-block w-24 h-10">
+              <span className="relative inline-block w-32 h-12">
                 <Image src="/Hitthejackwatt-Logo.png" alt="HitTheJackWatt" fill className="object-contain" />
               </span>
               <div className="inline-flex items-center gap-3 bg-[#39FF14]/10 border border-[#39FF14]/30 px-4 py-3 rounded-full">

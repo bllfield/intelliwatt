@@ -29,6 +29,6 @@ export default function ClientEntriesCounter() {
   }, []);
 
   return (
-    <div className="font-bold" style={{ color: '#BF00FF' }}>{count}</div>
+    <div className="font-bold text-base md:text-lg" style={{ color: '#BF00FF' }}>{count}</div>
   );
 }

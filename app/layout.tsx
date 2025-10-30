@@ -39,13 +39,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 </div>
               </a>
               {/* Jackpot total indicator */}
-              <div className="hidden sm:flex items-center gap-3 pl-3 border-l border-brand-blue/20 ml-2">
-                <div className="relative w-16 h-8">
+              <div className="hidden sm:flex items-center gap-4 pl-3 border-l border-brand-blue/20 ml-2">
+                <div className="relative w-28 h-10">
                   <Image src="/Hitthejackwatt-Logo.png" alt="HitTheJackWatt" fill className="object-contain" />
                 </div>
-                <div className="text-xs leading-tight">
+                <div className="relative text-xs leading-tight">
                   <div className="font-semibold" style={{ color: '#39FF14' }}>Total Entries</div>
-                  <ClientEntriesCounter />
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <ClientEntriesCounter />
+                  </div>
                 </div>
               </div>
             </div>
