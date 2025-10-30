@@ -7,6 +7,7 @@ export default function SmartMeterSection() {
   const [address, setAddress] = useState('');
   const [consent, setConsent] = useState(false);
   const [status, setStatus] = useState<'idle' | 'connecting' | 'connected' | 'manual'>('idle');
+  const [showAwardModal, setShowAwardModal] = useState(false);
 
   useEffect(() => {
     setMounted(true);
@@ -35,8 +36,9 @@ export default function SmartMeterSection() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ type: 'smart_meter_connect', amount: 10 }),
         });
-        // Refresh the sidebar entries by triggering a custom event
+        // Refresh entry indicators
         window.dispatchEvent(new CustomEvent('entriesUpdated'));
+        setShowAwardModal(true);
       } catch (error) {
         console.error('Error awarding entries:', error);
       }
@@ -67,7 +69,7 @@ export default function SmartMeterSection() {
 
   if (status === 'connected') {
     return (
-      <section className="bg-gradient-to-r from-green-600 to-green-700 text-white p-8 rounded-2xl shadow-lg mb-6 border border-green-500/20">
+      <section className="bg-gradient-to-r from-green-600 to-green-700 text-white p-8 rounded-2xl shadow-lg mb-6 border border-green-500/20 relative">
         <div className="text-center">
           <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4">
             <span className="text-2xl">✅</span>
@@ -75,6 +77,19 @@ export default function SmartMeterSection() {
           <h2 className="text-3xl font-bold mb-3">Smart Meter Connected!</h2>
           <p className="text-lg text-green-100">Your usage, plan, and ESIID data are now loaded into your dashboard.</p>
         </div>
+        {showAwardModal && (
+          <div className="absolute inset-0 bg-black/50 flex items-center justify-center p-4">
+            <div className="bg-white text-brand-navy rounded-xl p-6 max-w-sm w-full shadow-xl">
+              <div className="flex items-center gap-3 mb-3">
+                <img src="/Hitthejackwatt-Logo.png" alt="HitTheJackWatt" className="w-10 h-6 object-contain" />
+                <h3 className="text-xl font-bold">Jackpot entries earned!</h3>
+              </div>
+              <p className="mb-4">You just earned <span className="font-bold" style={{ color: '#39FF14' }}>10 jackpot entries</span> for connecting your smart meter.</p>
+              <a href="/dashboard/home" className="inline-block bg-brand-navy text-brand-blue font-bold py-2 px-4 rounded-lg border-2 border-brand-navy hover:border-brand-blue transition-all duration-300">Add Home Details →</a>
+              <button onClick={() => setShowAwardModal(false)} className="ml-3 inline-block text-sm underline">Dismiss</button>
+            </div>
+          </div>
+        )}
       </section>
     );
   }
@@ -116,7 +131,7 @@ export default function SmartMeterSection() {
             <label className="block text-brand-navy font-semibold mb-2">
               Service Address
               <span className="ml-2 text-sm font-normal" style={{ color: '#39FF14' }}>
-                🎁 Earn 10 more entries by connecting your smart meter
+                🎁 Earn 10 more jackpot entries by connecting your smart meter
               </span>
             </label>
             <input

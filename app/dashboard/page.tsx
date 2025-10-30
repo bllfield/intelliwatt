@@ -106,10 +106,16 @@ export default function DashboardPage() {
             <p className="text-xl text-brand-white mb-4 max-w-4xl mx-auto leading-relaxed">
               Your AI-powered energy optimization dashboard. Track savings, manage your plan, and earn rewards.
             </p>
-            <div className="mb-8 inline-block bg-[#39FF14]/20 border border-[#39FF14]/40 px-4 py-2 rounded-full">
-              <span className="text-[#39FF14] font-semibold">
-                🎁 You earned 1 entry for visiting your dashboard!
+            {/* Smart Meter CTA replacing previous earned banner */}
+            <div className="mb-8 inline-flex items-center gap-3 bg-[#39FF14]/10 border border-[#39FF14]/30 px-4 py-3 rounded-full">
+              <span className="inline-flex items-center">
+                <span className="relative inline-block w-10 h-6 mr-2">
+                  <Image src="/Hitthejackwatt-Logo.png" alt="HitTheJackWatt" fill className="object-contain" />
+                </span>
+                <span className="text-[#39FF14] font-semibold">Connect your smart meter data</span>
               </span>
+              <span className="text-xs text-brand-white/80">10 jackpot entries available</span>
+              <span className="text-xs text-brand-white/70 ml-3">+ Refer a Friend: 5 jackpot entries per signup</span>
             </div>
             
             {/* Address Entry - Right below hero text - Updated */}

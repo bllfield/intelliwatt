@@ -3,6 +3,7 @@ import { Inter } from 'next/font/google'
 import Image from 'next/image'
 import './globals.css'
 import Footer from '@/components/Footer'
+import ClientEntriesCounter from '@/components/ClientEntriesCounter'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -37,6 +38,16 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   />
                 </div>
               </a>
+              {/* Jackpot total indicator */}
+              <div className="hidden sm:flex items-center gap-2 pl-2 border-l border-brand-blue/20 ml-2">
+                <div className="relative w-10 h-6">
+                  <Image src="/Hitthejackwatt-Logo.png" alt="HitTheJackWatt" fill className="object-contain" />
+                </div>
+                <div className="text-xs leading-tight">
+                  <div className="text-brand-blue/80">Total Entries</div>
+                  <ClientEntriesCounter />
+                </div>
+              </div>
             </div>
             <nav className="hidden md:flex space-x-6 text-sm">
               <a href="/how-it-works" className="text-brand-blue hover:text-brand-white transition-colors">How It Works</a>

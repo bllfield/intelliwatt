@@ -58,14 +58,14 @@ export default function HomePage() {
           {!hasCompleted && (
             <div className="inline-block bg-[#39FF14]/20 border border-[#39FF14]/40 px-4 py-2 rounded-full mb-6">
               <span className="text-[#39FF14] font-semibold">
-                🎁 Complete this form to earn 10 entries!
+                🎁 Complete this form to earn 10 jackpot entries!
               </span>
             </div>
           )}
           {hasCompleted && (
             <div className="inline-block bg-[#BF00FF]/20 border border-[#BF00FF]/40 px-4 py-2 rounded-full mb-6">
               <span className="text-[#BF00FF] font-semibold">
-                ✓ You earned 10 entries for completing home details!
+                ✓ You earned 10 jackpot entries for completing home details!
               </span>
             </div>
           )}

@@ -96,7 +96,7 @@ export default function ReferralsPage() {
           </h1>
           <div className="inline-block bg-[#39FF14]/20 border border-[#39FF14]/40 px-4 py-2 rounded-full mb-6">
             <span className="text-[#39FF14] font-semibold">
-              🎁 Earn 5 entries for each friend who signs up!
+              🎁 Earn 5 jackpot entries for each friend who signs up!
             </span>
           </div>
           <p className="text-xl text-brand-white mb-8 max-w-2xl mx-auto">

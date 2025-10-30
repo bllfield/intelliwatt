@@ -1,17 +1,11 @@
 import IdleGuard from '@/components/IdleGuard';
-import EntriesSidebar from '@/components/hitthejackwatt/EntriesSidebar';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
     <IdleGuard>
-      <div className="min-h-screen bg-brand-white text-brand-navy flex">
-        {/* HitTheJackWatt Sidebar - Hidden on mobile, shown on md+ */}
-        <div className="hidden lg:block w-72 flex-shrink-0">
-          <EntriesSidebar />
-        </div>
-        
+      <div className="min-h-screen bg-brand-white text-brand-navy">
         {/* Main Content Area */}
-        <div className="flex-1 flex flex-col min-w-0">
+        <div className="flex flex-col min-w-0">
           {/* Updated header with reduced height */}
           <header className="px-4 py-0.5 bg-brand-navy text-brand-blue font-bold shadow-lg border-b border-brand-blue/20">
             <div className="max-w-6xl mx-auto flex justify-between items-center">
