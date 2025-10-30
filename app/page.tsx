@@ -108,12 +108,12 @@ function LandingPageContent() {
             {/* Email Entry Form */}
             <div className="max-w-md mx-auto">
               {/* Entries CTA block above email (Visit Dashboard only) */}
-              <div className="bg-brand-navy/60 border border-brand-blue/20 rounded-2xl p-4 mb-6 text-left">
-                <div className="flex items-center gap-2 mb-2">
+              <div className="bg-brand-navy/60 border border-brand-blue/20 rounded-2xl p-4 mb-6 text-center">
+                <div className="flex items-center justify-center gap-2 mb-2">
                   <span className="text-[#BF00FF] text-lg">✓</span>
                   <span className="text-brand-white font-semibold">Visit Dashboard - Submit Email Below</span>
                 </div>
-                <div className="pl-6 text-brand-white/90 text-sm">
+                <div className="text-brand-white/90 text-sm">
                   Access your dashboard for the first time to create your account
                   <span className="ml-2" style={{ color: '#39FF14' }}>1 jackpot entry available</span>
                 </div>
@@ -144,7 +144,7 @@ function LandingPageContent() {
               )}
 
               {/* Secondary CTA pill below the button */}
-              <div className="bg-brand-navy/60 border border-brand-blue/20 rounded-2xl p-4 mt-6 text-left">
+              <div className="bg-brand-navy/60 border border-brand-blue/20 rounded-2xl p-4 mt-6 text-center">
                 <div className="text-brand-white/90 text-sm">
                   <span className="font-semibold">Authorize Smart Meter Texas</span>
                   <span className="ml-2" style={{ color: '#39FF14' }}>10 jackpot entries available</span>
