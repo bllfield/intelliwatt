@@ -40,7 +40,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </a>
               {/* Jackpot total indicator */}
               <div className="hidden sm:flex items-center gap-4 pl-3 border-l border-brand-blue/20 ml-2">
-                <div className="relative" style={{ width: '9.492rem', height: '3.39rem' }}>
+                <div className="relative" style={{ width: '11.3904rem', height: '4.068rem' }}>
                   <Image src="/Hitthejackwatt-Logo.png" alt="HitTheJackWatt" fill className="object-contain" />
                 </div>
                 <div className="text-xs leading-tight flex flex-col items-center">
