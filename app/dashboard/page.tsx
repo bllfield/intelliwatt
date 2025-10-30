@@ -56,7 +56,22 @@ export default function DashboardPage() {
       }
     };
 
+    // Award 1 entry for visiting dashboard (one-time)
+    const awardDashboardEntry = async () => {
+      try {
+        await fetch('/api/user/entries', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'dashboard_visit', amount: 1 }),
+        });
+        window.dispatchEvent(new CustomEvent('entriesUpdated'));
+      } catch (error) {
+        console.error('Error awarding dashboard entry:', error);
+      }
+    };
+
     fetchDashboardData();
+    awardDashboardEntry();
   }, []);
 
   const handleAddressSubmitted = (address: string) => {
@@ -88,9 +103,14 @@ export default function DashboardPage() {
             <h1 className="text-4xl md:text-6xl font-bold text-brand-white mb-6">
               Welcome to <span className="text-brand-blue">IntelliWatt™</span>
             </h1>
-            <p className="text-xl text-brand-white mb-8 max-w-4xl mx-auto leading-relaxed">
+            <p className="text-xl text-brand-white mb-4 max-w-4xl mx-auto leading-relaxed">
               Your AI-powered energy optimization dashboard. Track savings, manage your plan, and earn rewards.
             </p>
+            <div className="mb-8 inline-block bg-[#39FF14]/20 border border-[#39FF14]/40 px-4 py-2 rounded-full">
+              <span className="text-[#39FF14] font-semibold">
+                🎁 You earned 1 entry for visiting your dashboard!
+              </span>
+            </div>
             
             {/* Address Entry - Right below hero text - Updated */}
             <div className="max-w-2xl mx-auto mb-8">

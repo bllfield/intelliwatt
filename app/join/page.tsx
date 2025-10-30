@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, Suspense } from 'react';
+import { useState, Suspense, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 
@@ -10,6 +10,16 @@ function JoinPageContent() {
   const [isLoading, setIsLoading] = useState(false);
   const searchParams = useSearchParams();
   const referralCode = searchParams?.get('ref');
+
+  // Set referral cookie when ref parameter is present
+  useEffect(() => {
+    if (referralCode) {
+      // Set cookie for 90 days
+      const expiryDate = new Date();
+      expiryDate.setTime(expiryDate.getTime() + 90 * 24 * 60 * 60 * 1000);
+      document.cookie = `intelliwatt_referrer=${referralCode}; expires=${expiryDate.toUTCString()}; path=/; SameSite=Lax`;
+    }
+  }, [referralCode]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

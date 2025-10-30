@@ -2,6 +2,7 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { verifyReferralToken } from '@/lib/referral/verify';
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
@@ -41,12 +42,14 @@ export async function GET(req: Request) {
     }
 
     const cookieStore = cookies();
-    const referrerCode = cookieStore.get('referrer')?.value;
+    const referrerToken = cookieStore.get('intelliwatt_referrer')?.value;
 
     // Find user (or create if new)
     let user = await db.user.findUnique({
       where: { email: record.email },
     });
+
+    const isNewUser = !user;
 
     if (!user) {
       user = await db.user.create({
@@ -54,6 +57,40 @@ export async function GET(req: Request) {
           email: record.email,
         },
       });
+    }
+
+    // Process referral if token exists and user is new
+    if (referrerToken && isNewUser) {
+      const referralData = verifyReferralToken(referrerToken);
+      
+      if (referralData && referralData.userId !== user.id) {
+        // Check if referral already exists
+        const existingReferral = await db.referral.findFirst({
+          where: {
+            referredById: referralData.userId,
+            referredEmail: user.email,
+          },
+        });
+
+        if (!existingReferral) {
+          // Create referral record
+          await db.referral.create({
+            data: {
+              referredById: referralData.userId,
+              referredEmail: user.email,
+            },
+          });
+
+          // Award 5 entries to the referrer
+          await db.entry.create({
+            data: {
+              userId: referralData.userId,
+              type: 'referral',
+              amount: 5,
+            },
+          });
+        }
+      }
     }
 
     // Mark token as used
@@ -74,7 +111,7 @@ export async function GET(req: Request) {
 
     // Clear referrer cookie after use
     cookieStore.set({
-      name: 'referrer',
+      name: 'intelliwatt_referrer',
       value: '',
       expires: new Date(0),
       path: '/',

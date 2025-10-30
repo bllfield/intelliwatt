@@ -28,6 +28,18 @@ export default function SmartMeterSection() {
 
     if (res.ok) {
       setStatus('connected');
+      // Award 10 entries for connecting smart meter
+      try {
+        await fetch('/api/user/entries', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'smart_meter_connect', amount: 10 }),
+        });
+        // Refresh the sidebar entries by triggering a custom event
+        window.dispatchEvent(new CustomEvent('entriesUpdated'));
+      } catch (error) {
+        console.error('Error awarding entries:', error);
+      }
     } else {
       setStatus('idle');
       alert('Something went wrong connecting your Smart Meter.');
@@ -101,7 +113,12 @@ export default function SmartMeterSection() {
       <div className="bg-white p-6 rounded-xl border border-brand-navy">
         <div className="space-y-4">
           <div>
-            <label className="block text-brand-navy font-semibold mb-2">Service Address</label>
+            <label className="block text-brand-navy font-semibold mb-2">
+              Service Address
+              <span className="ml-2 text-sm font-normal" style={{ color: '#39FF14' }}>
+                🎁 Earn 10 more entries by connecting your smart meter
+              </span>
+            </label>
             <input
               type="text"
               placeholder="Enter your service address..."
