@@ -33,30 +33,43 @@ export function parseInZoneToUTC(
 
   // No offset: interpret as wall time in `zone`
   let dt = DateTime.fromISO(isoish, { zone });
-  if (!dt.isValid) return null;
-
-  // Handle DST anomalies
-  if (dt.isInDST !== undefined) {
-    // Luxon flags invalid for non-existent times; if invalid due to DST, step forward minute-by-minute until valid
-    if (!dt.isValid) {
-      // Shouldn't hit here because of guard above, but keep for clarity
+  
+  // Handle invalid times (e.g., non-existent during spring-forward)
+  if (!dt.isValid) {
+    // For non-existent times during spring-forward, shift forward to next valid time
+    // Parse components and construct a time after the DST transition
+    try {
+      const parts = isoish.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/);
+      if (parts) {
+        const [, year, month, day, hour, minute, second] = parts;
+        // Try constructing at 3 AM (after spring-forward) on the same day
+        const fallback = DateTime.fromObject(
+          { year: +year, month: +month, day: +day, hour: 3, minute: +minute, second: +second || 0 },
+          { zone }
+        );
+        if (fallback.isValid) {
+          dt = fallback;
+        } else {
+          return null;
+        }
+      } else {
+        return null;
+      }
+    } catch {
       return null;
     }
+  }
 
-    // Fall-back ambiguity handling:
-    // When wall time is ambiguous (exists twice), Luxon resolves to earlier by default.
-    // To force 'later', add 1 hour during overlap window if the same wall clock exists twice.
-    if (isAmbiguousWallTime(dt)) {
-      if (ambiguous === 'later') {
-        // Move forward one hour within overlap to target the second instance
-        const later = dt.plus({ hours: 1 });
-
-        // If moving an hour changed the wall clock hour (rare), step back 1h but add 1 minute until the zone picks later instance
-        dt = later.set({ millisecond: 0 });
-      } else {
-        // earlier = keep as-is (Luxon's default behavior)
-      }
+  // Fall-back ambiguity handling:
+  // When wall time is ambiguous (exists twice), Luxon resolves to earlier by default.
+  // To force 'later', add 1 hour during overlap window if the same wall clock exists twice.
+  if (isAmbiguousWallTime(dt)) {
+    if (ambiguous === 'later') {
+      // Move forward one hour within overlap to target the second instance
+      const later = dt.plus({ hours: 1 });
+      dt = later.set({ millisecond: 0 });
     }
+    // earlier = keep as-is (Luxon's default behavior)
   }
 
   return dt.toUTC().toJSDate();
