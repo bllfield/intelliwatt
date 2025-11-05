@@ -1,94 +1,68 @@
-import { NextResponse } from "next/server";
-import crypto from "crypto";
-import { saveRawSmtFile } from "@/lib/smt/saveRawSmtFile";
+import { NextRequest, NextResponse } from 'next/server';
+import { saveRawSmtFile } from '@/lib/smt/saveRawSmtFile';
+import { requireAdmin } from '@/lib/auth/admin';
 
-type UploadBody = {
-  filename: string;
-  sourcePath?: string | null;
-  size: number;              // bytes
-  sha256: string;            // hex string
-  bytesBase64: string;       // base64 of entire file
-};
+export async function POST(req: NextRequest) {
+  const gate = requireAdmin(req);
+  if (!gate.ok) return NextResponse.json(gate.body, { status: gate.status });
 
-export async function POST(request: Request) {
-  const corrId = crypto.randomUUID();
-  const adminToken = process.env.ADMIN_TOKEN;
-  if (!adminToken) {
-    return NextResponse.json(
-      { ok: false, error: "ADMIN_TOKEN_NOT_CONFIGURED", corrId },
-      { status: 503 }
-    );
+  const body = await req.json().catch(() => ({} as Record<string, unknown>));
+  const filename = body.filename as string | undefined;
+  const sizeBytes = (body.sizeBytes ?? body.size_bytes) as number | undefined;
+  const sha256 = body.sha256 as string | undefined;
+  const storagePath =
+    (body.storagePath as string | undefined) ??
+    (body.storage_path as string | undefined) ??
+    `/adhocusage/${filename ?? ''}`;
+
+  const missing: string[] = [];
+
+  if (!filename) missing.push('filename (string)');
+  if (typeof sizeBytes !== 'number' || Number.isNaN(sizeBytes)) {
+    missing.push('size_bytes|sizeBytes (number)');
   }
+  if (!sha256) missing.push('sha256 (string)');
 
-  const hdr = request.headers.get("x-admin-token");
-  if (!hdr || hdr !== adminToken) {
+  if (missing.length > 0) {
+    const receivedKeys = Object.keys(body ?? {});
+    // helpful server log (keeps corrId flow you already have)
+    console.error('[raw-upload] validation failed', { missing, receivedKeys, body });
     return NextResponse.json(
-      { ok: false, error: "UNAUTHORIZED", corrId },
-      { status: 401 }
-    );
-  }
-
-  let body: UploadBody;
-  try {
-    body = (await request.json()) as UploadBody;
-  } catch {
-    return NextResponse.json(
-      { ok: false, error: "INVALID_JSON", corrId },
-      { status: 400 }
-    );
-  }
-
-  const { filename, sourcePath, size, sha256, bytesBase64 } = body || {};
-  if (!filename || !sha256 || !bytesBase64 || typeof size !== "number") {
-    return NextResponse.json(
-      { ok: false, error: "VALIDATION", details: "Missing required fields", corrId },
-      { status: 400 }
-    );
-  }
-
-  let content: Buffer;
-  try {
-    content = Buffer.from(bytesBase64, "base64");
-  } catch {
-    return NextResponse.json(
-      { ok: false, error: "BASE64_DECODE_FAILED", corrId },
-      { status: 400 }
-    );
-  }
-
-  if (content.length !== size) {
-    return NextResponse.json(
-      { ok: false, error: "SIZE_MISMATCH", corrId, details: { size, decoded: content.length } },
-      { status: 400 }
-    );
-  }
-
-  const computed = crypto.createHash("sha256").update(content).digest("hex");
-  if (computed.toLowerCase() !== sha256.toLowerCase()) {
-    return NextResponse.json(
-      { ok: false, error: "SHA256_MISMATCH", corrId, details: { provided: sha256, computed } },
-      { status: 400 }
+      {
+        ok: false,
+        error: 'VALIDATION',
+        details: 'Missing or invalid required fields',
+        missing,
+        receivedKeys,
+      },
+      { status: 400 },
     );
   }
 
   try {
-    const { created, id } = await saveRawSmtFile({
-      filename,
-      sourcePath: sourcePath ?? null,
-      size,
-      sha256: computed,
-      content,
+    // Use existing saveRawSmtFile function which handles idempotency
+    // For metadata-only uploads, use empty buffer
+    // TypeScript: these are guaranteed to be defined after validation
+    const result = await saveRawSmtFile({
+      filename: filename!,
+      size: sizeBytes!,
+      sha256: sha256!,
+      sourcePath: storagePath,
+      content: Buffer.alloc(0), // Empty buffer for metadata-only uploads
     });
 
+    return NextResponse.json({
+      ok: true,
+      id: result.id,
+      filename,
+      sizeBytes,
+      sha256: result.sha256,
+      created: result.created,
+    });
+  } catch (error) {
     return NextResponse.json(
-      { ok: true, corrId, id, created },
-      { status: 200 }
-    );
-  } catch (err: any) {
-    return NextResponse.json(
-      { ok: false, error: "DATABASE", corrId },
-      { status: 500 }
+      { ok: false, error: 'DB', details: String(error) },
+      { status: 500 },
     );
   }
 }
-

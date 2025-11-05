@@ -5,15 +5,14 @@ export async function GET(request: NextRequest) {
   try {
     // Get the most recently updated address
     const latest = await prisma.houseAddress.findFirst({
-      orderBy: { updatedAt: 'desc' },
-      include: {
-        user: {
-          select: {
-            email: true
-          }
-        }
-      }
+      orderBy: { updatedAt: 'desc' }
     });
+
+    // Get user email separately since relation may not be defined
+    const userEmail = latest ? await prisma.user.findUnique({
+      where: { id: latest.userId },
+      select: { email: true }
+    }) : null;
 
     // Also get all addresses for bllfield@yahoo.com
     const allForUser = await prisma.houseAddress.findMany({
@@ -23,7 +22,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      latestAddress: latest,
+      latestAddress: latest ? { ...latest, userEmail: userEmail?.email } : null,
       allForUser: allForUser,
       count: await prisma.houseAddress.count()
     });

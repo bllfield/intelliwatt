@@ -14,10 +14,10 @@ export async function saveRawSmtFile(input: SaveRawSmtFileInput) {
     const created = await prisma.rawSmtFile.create({
       data: {
         filename: input.filename,
-        sourcePath: input.sourcePath ?? null,
-        size: input.size,
+        storage_path: input.sourcePath ?? null,
+        size_bytes: input.size,
         sha256: input.sha256,
-        content: input.content,
+        content: input.content ?? null,
       },
       select: { id: true, sha256: true },
     });

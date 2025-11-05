@@ -30,10 +30,6 @@ export async function GET(request: NextRequest) {
         utilityPlans: {
           where: { isCurrent: true },
           take: 1
-        },
-        houseAddress: {
-          orderBy: { updatedAt: 'desc' },
-          take: 1
         }
       }
     });
@@ -41,6 +37,12 @@ export async function GET(request: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
+
+    // Query HouseAddress separately since relation may not be defined
+    const houseAddress = await db.houseAddress.findFirst({
+      where: { userId: user.id },
+      orderBy: { updatedAt: 'desc' }
+    });
 
     // Calculate stats
     const totalEntries = user.entries?.length || 0;
@@ -65,8 +67,8 @@ export async function GET(request: NextRequest) {
         totalReferrals
       },
       profile: user.profile,
-      address: user.houseAddress?.[0] || null,
-      hasAddress: !!user.houseAddress?.[0],
+      address: houseAddress || null,
+      hasAddress: !!houseAddress,
       hasSmartMeter: !!user.profile?.apiConnections?.length,
       hasUsageData: !!user.usage?.length,
       currentPlan: user.utilityPlans?.[0] || null
