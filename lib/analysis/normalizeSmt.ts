@@ -23,7 +23,11 @@ export type NormalizedPoint = {
   ts: string;
   /** kWh for the 15-min interval */
   kwh: number;
+  /** true if this point was synthesized to fill a gap */
+  filled?: boolean;
 };
+
+const FIFTEEN_MIN_MS = 15 * 60 * 1000;
 
 function parseMaybeNumber(v: unknown): number | null {
   if (typeof v === 'number') return Number.isFinite(v) ? v : null;
@@ -95,5 +99,39 @@ export function normalizeSmtTo15Min(raw: Array<SmtAdhocRow | SmtGbRow>): Normali
   return Array.from(slotMap.entries())
     .map(([ts, kwh]) => ({ ts, kwh }))
     .sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
+}
+
+/**
+ * Fill missing 15-min slots between first and last timestamps (inclusive range).
+ * - Existing points are preserved as-is.
+ * - Missing slots are inserted with kwh=0 and filled=true.
+ * - Assumes incoming points are sorted by ts ascending and in UTC ISO format.
+ */
+export function fillMissing15Min(points: NormalizedPoint[], opts?: {
+  /** Optional explicit start (UTC ISO). Default: points[0].ts */
+  start?: string;
+  /** Optional explicit end (UTC ISO). Default: points[points.length-1].ts */
+  end?: string;
+}): NormalizedPoint[] {
+  if (!Array.isArray(points) || points.length === 0) return points ?? [];
+
+  const sorted = [...points].sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
+  const startMs = new Date(opts?.start ?? sorted[0].ts).getTime();
+  const endMs   = new Date(opts?.end   ?? sorted[sorted.length - 1].ts).getTime();
+
+  const index = new Map<string, NormalizedPoint>();
+  for (const p of sorted) index.set(p.ts, p);
+
+  const out: NormalizedPoint[] = [];
+  for (let t = startMs; t <= endMs; t += FIFTEEN_MIN_MS) {
+    const ts = new Date(t).toISOString();
+    const existing = index.get(ts);
+    if (existing) {
+      out.push(existing);
+    } else {
+      out.push({ ts, kwh: 0, filled: true });
+    }
+  }
+  return out;
 }
 
