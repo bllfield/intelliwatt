@@ -26,9 +26,12 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const points = normalizeSmtTo15Min(rows);
+  const tz = typeof body?.tz === 'string' ? body.tz : 'America/Chicago';
+  const strictTz = body?.strictTz !== false;
+  const ambiguous = body?.ambiguous === 'later' ? 'later' : 'earlier';
 
-  // Optional gap filling
+  const points = normalizeSmtTo15Min(rows, { tz, strictTz, ambiguous });
+
   const doFill = body?.fill === true;
   const start = typeof body?.start === 'string' ? body.start : undefined;
   const end   = typeof body?.end === 'string' ? body.end   : undefined;
@@ -39,6 +42,8 @@ export async function POST(req: NextRequest) {
     ok: true,
     count: finalPoints.length,
     filled: doFill,
+    tz,
+    ambiguous,
     points: finalPoints,
   });
 }
