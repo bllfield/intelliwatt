@@ -52,3 +52,5 @@ coverage/
 
 # Generated files
 /lib/generated/prisma
+
+.vercel

@@ -115,7 +115,8 @@ function LandingPageContent() {
                 </div>
                 <div className="text-brand-white/90 text-sm">
                   Access your dashboard for the first time to create your account
-                  <span className="ml-2" style={{ color: '#39FF14' }}>1 jackpot entry available</span>
+                  <br />
+                  <span style={{ color: '#39FF14' }}>1 jackpot entry available</span>
                 </div>
               </div>
               {!submitted ? (
