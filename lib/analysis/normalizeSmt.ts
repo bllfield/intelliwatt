@@ -140,3 +140,81 @@ export function fillMissing15Min(points: NormalizedPoint[], opts?: {
   return out;
 }
 
+export type GroupBy = 'esiid' | 'meter' | 'esiid_meter';
+
+export type GroupedResult = {
+  groups: Record<string, { points: NormalizedPoint[] }>;
+  totalCount: number;
+};
+
+export function groupNormalize(
+  raw: Array<SmtAdhocRow | SmtGbRow>,
+  groupBy: GroupBy,
+  normalizeOpts: NormalizeOpts,
+  fillOpts?: { fill?: boolean; start?: string; end?: string }
+): GroupedResult {
+  const groups: Record<string, Array<SmtAdhocRow | SmtGbRow>> = {};
+
+  for (const row of raw ?? []) {
+    const adhoc = row as SmtAdhocRow;
+    const esiid = adhoc.esiid ?? 'unknown';
+    const meter = adhoc.meter ?? 'unknown';
+
+    let key: string;
+    if (groupBy === 'esiid') {
+      key = esiid;
+    } else if (groupBy === 'meter') {
+      key = meter;
+    } else {
+      key = `${esiid}|${meter}`;
+    }
+
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(row);
+  }
+
+  const result: Record<string, { points: NormalizedPoint[] }> = {};
+  let totalCount = 0;
+
+  for (const [key, rows] of Object.entries(groups)) {
+    const points = normalizeSmtTo15Min(rows, normalizeOpts);
+    const finalPoints = fillOpts?.fill
+      ? fillMissing15Min(points, { start: fillOpts.start, end: fillOpts.end })
+      : points;
+    result[key] = { points: finalPoints };
+    totalCount += finalPoints.length;
+  }
+
+  return { groups: result, totalCount };
+}
+
+export function buildDailyCompleteness(points: NormalizedPoint[], tz: string = 'America/Chicago'): {
+  dates: Record<string, { total: number; filled: number; missing: number; completeness: number }>;
+} {
+  const dates: Record<string, { total: number; filled: number; missing: number; completeness: number }> = {};
+
+  for (const p of points) {
+    const d = new Date(p.ts);
+    const dateKey = d.toISOString().split('T')[0]; // YYYY-MM-DD
+
+    if (!dates[dateKey]) {
+      dates[dateKey] = { total: 0, filled: 0, missing: 0, completeness: 0 };
+    }
+
+    dates[dateKey].total++;
+    if (p.filled) {
+      dates[dateKey].filled++;
+    } else {
+      dates[dateKey].missing++;
+    }
+  }
+
+  // Calculate completeness (expected 96 points per day for 15-min intervals)
+  const expectedPerDay = 96;
+  for (const [date, stats] of Object.entries(dates)) {
+    stats.completeness = Math.min(1, stats.total / expectedPerDay);
+  }
+
+  return { dates };
+}
+

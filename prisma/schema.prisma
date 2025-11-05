@@ -436,3 +436,18 @@ model RawSmtFile {
   @@index([sha256])
   @@index([created_at])
 }
+
+model SmtInterval {
+  id        String   @id @default(cuid())
+  esiid     String
+  meter     String
+  ts        DateTime   // UTC interval START (15-min)
+  kwh       Decimal    @db.Decimal(10,5)
+  filled    Boolean    @default(false) // true if synthesized by gap-fill
+  source    String?                 // e.g., 'smt', 'gb', 'mixed'
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([esiid, meter, ts])
+  @@index([esiid, meter, ts])
+}
