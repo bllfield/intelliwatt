@@ -12,6 +12,14 @@
     {
       "path": "/api/rates/efl-refresh",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/admin/cron/normalize-smt",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/admin/cron/normalize-smt-catch",
+      "schedule": "*/1 * * * *"
     }
   ]
 }

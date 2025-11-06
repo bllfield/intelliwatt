@@ -7,6 +7,8 @@
 - **Vercel Scheduled Functions (Option A)** — *Active*
   - `/api/admin/rates/refresh` (2:00 AM UTC daily)
   - `/api/rates/efl-refresh` (3:00 AM UTC daily)
+  - `/api/admin/cron/normalize-smt` (every 5 minutes)
+  - `/api/admin/cron/normalize-smt-catch` (every 1 minute - catch-up sweep)
   - **Auth:** `x-vercel-cron` header required, optional `CRON_SECRET` supported (see below).
 
 - **Droplet systemd timers (Option B)** — *Planned/Potential*
@@ -19,14 +21,18 @@
 ### Vercel Cron Jobs
 
 **File**: `vercel.json`
-- Lists 2 cron paths/schedules:
+- Lists 4 cron paths/schedules:
   - `"/api/admin/rates/refresh"` → `"0 2 * * *"` (2:00 AM UTC daily)
   - `"/api/rates/efl-refresh"` → `"0 3 * * *"` (3:00 AM UTC daily)
+  - `"/api/admin/cron/normalize-smt"` → `"*/5 * * * *"` (every 5 minutes)
+  - `"/api/admin/cron/normalize-smt-catch"` → `"*/1 * * * *"` (every 1 minute)
 
 **Implementation**:
 - `app/api/admin/rates/refresh/route.ts` - Nightly rates discovery + EFL refresh (Texas TDSPs)
 - `app/api/rates/efl-refresh/route.ts` - Nightly EFL refresher to update RateConfig
-- Both routes now protected by `requireVercelCron()` from `lib/auth/cron.ts`
+- `app/api/admin/cron/normalize-smt/route.ts` - 5-minute SMT normalization sweep (TODO: implement)
+- `app/api/admin/cron/normalize-smt-catch/route.ts` - 1-minute catch-up sweep (placeholder/no-op)
+- All routes protected by `requireVercelCron()` from `lib/auth/cron.ts`
 
 **Authentication**:
 - Requires `x-vercel-cron` header (automatically added by Vercel)
@@ -88,6 +94,7 @@ export function requireVercelCron(req: NextRequest) {
 - `DATABASE_URL` (Postgres) - Required
 - `WATTBUY_API_KEY` - Required for `/api/admin/rates/refresh`
 - `CRON_SECRET` *(optional, recommended)* - Additional security for cron routes
+- `SHARED_INGEST_SECRET` - Required for `/api/internal/smt/ingest-normalize` (fast path)
 
 ### Droplet (if using systemd timers)
 - `ADMIN_TOKEN` in service `EnvironmentFile` - Required for admin route calls
@@ -234,6 +241,62 @@ systemctl start intelliwatt-smt-cycle.service
    sudo systemctl start intelliwatt-<name>.timer
    ```
 
+## Fast Path — On-Demand SMT Normalize (Seconds-latency)
+
+**Endpoint:** `POST /api/internal/smt/ingest-normalize`  
+**Auth:** `x-shared-secret: $SHARED_INGEST_SECRET` (set in Vercel env)  
+**Caller:** Droplet immediately after raw ingest
+
+**Purpose**: Fast on-demand normalization and persistence of SMT data. Called by the droplet immediately after it POSTs raw rows or writes to the raw table. This enables seconds-latency analysis using cached WattBuy rates.
+
+**Body (either):**
+
+- **Direct rows** (recommended):
+```json
+{
+  "tz": "America/Chicago",
+  "esiid": "1044...AAA",
+  "meter": "M1",
+  "rows": [
+    { "esiid": "1044...AAA", "meter": "M1", "timestamp": "2025-10-30T13:15:00-05:00", "kwh": 0.25 },
+    { "esiid": "1044...AAA", "meter": "M1", "start": "2025-10-30T18:00:00-05:00", "end": "2025-10-30T18:15:00-05:00", "value": "0.30" }
+  ]
+}
+```
+
+- **Time window** (requires from/to + esiid/meter):
+```json
+{
+  "tz": "America/Chicago",
+  "esiid": "1044...AAA",
+  "meter": "M1",
+  "from": "2025-10-30T00:00:00Z",
+  "to": "2025-10-30T23:59:59Z"
+}
+```
+
+**Response:**
+```json
+{
+  "ok": true,
+  "tz": "America/Chicago",
+  "strictTz": true,
+  "processed": 10,
+  "normalizedPoints": 96,
+  "persisted": 96
+}
+```
+
+**Implementation Notes:**
+- Uses `normalizeSmtTo15Min()` with strict timezone parsing
+- Upserts to `SmtInterval` table (idempotent)
+- Skips rows with missing/unknown esiid or meter
+- No gap-filling (for speed)
+- Source marked as `'smt'`
+
+**Environment Variable:**
+- `SHARED_INGEST_SECRET` - Required in Vercel env for authentication
+
 ## Related Documentation
 
 - `docs/ADMIN_API.md` - Admin endpoint authentication patterns
@@ -241,3 +304,4 @@ systemctl start intelliwatt-smt-cycle.service
 - `scripts/admin/Invoke-Intelliwatt.ps1` - Admin API wrapper script
 - `lib/auth/cron.ts` - Cron authentication helper
 - `lib/auth/admin.ts` - Admin authentication helper
+- `lib/auth/shared.ts` - Shared secret authentication helper
