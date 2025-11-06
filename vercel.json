@@ -4,7 +4,6 @@
   "devCommand": "npm run dev",
   "installCommand": "npm install",
   "outputDirectory": ".next",
-  "//": "Uncomment the cron below to enable hourly sweep in production.",
   "crons": [
     {
       "path": "/api/admin/rates/refresh",
