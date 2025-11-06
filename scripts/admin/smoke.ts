@@ -1,135 +1,99 @@
 // scripts/admin/smoke.ts
-// Backend smoke tests for admin endpoints
-// Usage: npm run admin:summary | npm run admin:catch
+// Usage examples (in Cursor terminal):
+//  ADMIN_TOKEN=xxx npm run admin:summary
+//  ADMIN_TOKEN=xxx CRON_SECRET=yyy npm run admin:catch
 //
-// Setup:
-// 1. Copy .env.local.example to .env.local
-// 2. Fill in ADMIN_TOKEN and CRON_SECRET values
-// 3. Run: npm install (to install tsx and dotenv)
-// 4. Run: npm run admin:summary or npm run admin:catch
+// If you prefer .env.local, create one locally (not committed) and run via `npm run admin:summary`.
+//
+// Base URL: defaults to production. Override with BASE_URL if needed.
 
-import { config } from 'dotenv';
-import { resolve } from 'path';
+const BASE_URL = process.env.BASE_URL || 'https://intelliwatt.com';
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN || '';
+const CRON_SECRET = process.env.CRON_SECRET || '';
 
-// Load .env.local if it exists
-config({ path: resolve(process.cwd(), '.env.local') });
-
-const BASE_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://intelliwatt.com';
-const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
-const CRON_SECRET = process.env.CRON_SECRET;
-
-function log(message: string, data?: any) {
-  const timestamp = new Date().toISOString();
-  console.log(`[${timestamp}] ${message}`);
-  if (data) {
-    console.log(JSON.stringify(data, null, 2));
-  }
-}
-
-function error(message: string, err?: any) {
-  const timestamp = new Date().toISOString();
-  console.error(`[${timestamp}] ERROR: ${message}`);
-  if (err) {
-    console.error(err);
-  }
+if (!ADMIN_TOKEN) {
+  console.error('Missing ADMIN_TOKEN. Provide it via env (ADMIN_TOKEN=...) or .env.local');
   process.exit(1);
 }
 
-async function testDailySummary() {
-  if (!ADMIN_TOKEN) {
-    error('ADMIN_TOKEN not set in environment');
+const mode = process.argv[2] || 'summary'; // 'summary' | 'catch'
+const esiid = process.env.ESIID;           // optional filter
+const meter = process.env.METER;           // optional filter
+const dateStart = process.env.DATE_START;  // optional ISO
+const dateEnd = process.env.DATE_END;      // optional ISO
+
+async function adminFetch(path: string, init: RequestInit = {}) {
+  const headers: Record<string, string> = {
+    'x-admin-token': ADMIN_TOKEN,
+    ...(init.headers as Record<string, string> || {}),
+  };
+  const res = await fetch(`${BASE_URL}${path}`, { ...init, headers });
+  const text = await res.text();
+  let json: any;
+  try { json = JSON.parse(text); } catch { json = { raw: text }; }
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status} on ${path}: ${text}`);
   }
-
-  log('Testing daily-summary endpoint...');
-  const url = `${BASE_URL}/api/admin/analysis/daily-summary`;
-
-  try {
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'x-admin-token': ADMIN_TOKEN as string,
-      },
-    });
-
-    const data = await response.json();
-    const duration = response.headers.get('x-response-time') || 'N/A';
-
-    if (!response.ok) {
-      error(`Request failed with status ${response.status}`, data);
-    }
-
-    log('✓ Daily summary test passed', {
-      status: response.status,
-      corrId: data.corrId,
-      rowCount: data.rows?.length || 0,
-      sample: data.rows?.[0] || null,
-    });
-
-    return data;
-  } catch (err: any) {
-    error('Request failed', err);
-  }
+  return json;
 }
 
-async function testCatchUp() {
+async function cronFetch(path: string, init: RequestInit = {}) {
+  const headers: Record<string, string> = {
+    'x-vercel-cron': '1',
+    ...(CRON_SECRET ? { 'x-cron-secret': CRON_SECRET } : {}),
+    ...(init.headers as Record<string, string> || {}),
+  };
+  const res = await fetch(`${BASE_URL}${path}`, { ...init, headers });
+  const text = await res.text();
+  let json: any;
+  try { json = JSON.parse(text); } catch { json = { raw: text }; }
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status} on ${path}: ${text}`);
+  }
+  return json;
+}
+
+async function runSummary() {
+  const params = new URLSearchParams();
+  if (esiid) params.set('esiid', esiid);
+  if (meter) params.set('meter', meter);
+  if (dateStart) params.set('dateStart', dateStart);
+  if (dateEnd) params.set('dateEnd', dateEnd);
+
+  const path = `/api/admin/analysis/daily-summary${params.toString() ? `?${params}` : ''}`;
+  const t0 = Date.now();
+  const json = await adminFetch(path, { method: 'GET' });
+  const ms = Date.now() - t0;
+
+  // Simple console report
+  const rows = json?.rows || [];
+  console.log(`\n=== DAILY SUMMARY (${rows.length} rows, ${ms} ms) ===`);
+  const sample = rows.slice(0, 10); // show first 10
+  for (const r of sample) {
+    console.log(`${r.esiid || '∅'} | ${r.meter || '∅'} | ${r.date} | slots=${r.totalSlots} | completeness=${(r.completeness*100).toFixed(1)}% | missing=${r.has_missing}`);
+  }
+  if (rows.length > sample.length) console.log(`... +${rows.length - sample.length} more`);
+}
+
+async function runCatch() {
   if (!CRON_SECRET) {
-    error('CRON_SECRET not set in environment');
+    console.warn('Warning: CRON_SECRET not set — the route will likely reject. Provide CRON_SECRET to simulate Vercel Cron auth.');
   }
+  const t0 = Date.now();
+  const json = await cronFetch('/api/admin/cron/normalize-smt-catch', { method: 'POST' });
+  const ms = Date.now() - t0;
+  console.log(`\n=== CATCH SWEEP RESULT (${ms} ms) ===\n`, JSON.stringify(json, null, 2));
+}
 
-  log('Testing normalize-smt-catch endpoint...');
-  const url = `${BASE_URL}/api/admin/cron/normalize-smt-catch`;
-
+(async () => {
   try {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'x-vercel-cron': '1',
-        'x-cron-secret': CRON_SECRET as string,
-      },
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      error(`Request failed with status ${response.status}`, data);
+    if (mode === 'catch') {
+      await runCatch();
+    } else {
+      await runSummary();
     }
-
-    log('✓ Catch-up test passed', {
-      status: response.status,
-      corrId: data.corrId,
-      checkedDays: data.checkedDays,
-      missingDays: data.missingDays,
-      processed: data.processed,
-    });
-
-    return data;
-  } catch (err: any) {
-    error('Request failed', err);
+  } catch (e: any) {
+    console.error('Smoke test failed:', e?.message || e);
+    process.exit(1);
   }
-}
-
-// Main
-const command = process.argv[2];
-
-if (command === 'summary') {
-  testDailySummary()
-    .then(() => {
-      log('Test completed successfully');
-      process.exit(0);
-    })
-    .catch((err) => {
-      error('Test failed', err);
-    });
-} else if (command === 'catch') {
-  testCatchUp()
-    .then(() => {
-      log('Test completed successfully');
-      process.exit(0);
-    })
-    .catch((err) => {
-      error('Test failed', err);
-    });
-} else {
-  error('Usage: npm run admin:summary | npm run admin:catch');
-}
-
+})();
