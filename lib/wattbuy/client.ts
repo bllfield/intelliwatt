@@ -299,23 +299,38 @@ function mapResponse(json: any): EsiLookupResult {
 
 async function doFetch(url: string, apiKey: string): Promise<{ ok: boolean; status: number; json: any; text: string }> {
   // According to WattBuy docs, only Authorization: Bearer header is needed
+  const headers = { 
+    'Authorization': `Bearer ${apiKey}`,
+  };
+  
+  // Log the exact request we're about to send
+  console.error(
+    JSON.stringify({
+      route: 'wattbuy/doFetch-request',
+      method: 'GET',
+      url: url.replace(apiKey, '***'),
+      header_present: Boolean(headers.Authorization),
+      header_format: headers.Authorization ? `Bearer ${apiKey.substring(0, 4)}...${apiKey.substring(apiKey.length - 4)}` : 'missing',
+      api_key_length: apiKey.length,
+    })
+  );
+  
   const res = await fetch(url, {
     method: 'GET',
-    headers: { 
-      'Authorization': `Bearer ${apiKey}`,
-    },
+    headers,
   });
   const text = await res.text();
   let json: any;
   try { json = JSON.parse(text); } catch { json = { raw: text }; }
   
-  // Log request/response for debugging
+  // Log response
   console.error(
     JSON.stringify({
-      route: 'wattbuy/doFetch',
-      url: url.replace(apiKey, '***'),
+      route: 'wattbuy/doFetch-response',
       status: res.status,
+      statusText: res.statusText,
       response_preview: text.slice(0, 200),
+      response_full: text.length < 500 ? text : text.slice(0, 500) + '...',
     })
   );
   
