@@ -7,6 +7,34 @@
 //
 // Base URL: defaults to production. Override with BASE_URL if needed.
 
+import { readFileSync, existsSync } from 'fs';
+import { resolve } from 'path';
+
+// Load .env.local if it exists
+const envPath = resolve(process.cwd(), '.env.local');
+if (existsSync(envPath)) {
+  try {
+    const envContent = readFileSync(envPath, 'utf-8');
+    for (const line of envContent.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (trimmed && !trimmed.startsWith('#')) {
+        const equalIndex = trimmed.indexOf('=');
+        if (equalIndex > 0) {
+          const key = trimmed.substring(0, equalIndex).trim();
+          const value = trimmed.substring(equalIndex + 1).trim();
+          // Remove quotes if present
+          const cleanValue = value.replace(/^["']|["']$/g, '');
+          if (key) {
+            process.env[key] = cleanValue;
+          }
+        }
+      }
+    }
+  } catch (e) {
+    // .env.local exists but can't be read, that's fine
+  }
+}
+
 const BASE_URL = process.env.BASE_URL || 'https://intelliwatt.com';
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || '';
 const CRON_SECRET = process.env.CRON_SECRET || '';
