@@ -256,6 +256,44 @@ systemctl start intelliwatt-smt-cycle.service
 
 **Notes:** Uses cached WattBuy plans later in analysis; no WattBuy call needed here.
 
+## Fast On-Demand SMT Normalize (Production)
+
+**Endpoint**: `POST /api/internal/smt/ingest-normalize`  
+
+**Auth**: `x-shared-secret: $SHARED_INGEST_SECRET` (Vercel env + droplet env)  
+
+**Bodies**:
+
+- Direct rows:
+
+  ```json
+  {
+    "esiid": "1044...AAA",
+    "meter": "M1",
+    "rows": [
+      { "timestamp": "2025-10-30T13:15:00-05:00", "kwh": 0.25 },
+      { "start": "2025-10-30T18:00:00-05:00", "end": "2025-10-30T18:15:00-05:00", "value": "0.30" }
+    ]
+  }
+  ```
+
+- Windowed fetch (if rows aren't passed):
+
+  ```json
+  { "esiid":"1044...AAA","meter":"M1","from":"2025-10-30T18:00:00-05:00","to":"2025-10-30T19:00:00-05:00" }
+  ```
+
+**Persistence policy**:
+
+- Default `saveFilled=true`: zero placeholders are written to DB.
+- Guard: a zero never overwrites a real reading; a later real reading upgrades a zero.
+
+**Readback**:
+
+- `GET /api/admin/analysis/intervals?esiid=...&meter=...&date=YYYY-MM-DD&tz=America/Chicago` (admin-gated)
+
+**WattBuy**: Plans are pulled nightly and cached; no extra WattBuy call on SMT arrival.
+
 ## Related Documentation
 
 - `docs/ADMIN_API.md` - Admin endpoint authentication patterns

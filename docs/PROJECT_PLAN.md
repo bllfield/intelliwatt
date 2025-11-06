@@ -99,3 +99,45 @@ Capture Smart Meter Texas files in RAW form before any parsing, maintaining RAW�
 - Idempotent via SHA256 deduplication
 - Admin-gated via existing `guardAdmin` function
 - No transformation happens at upload time (preserves RAW integrity)
+
+## Normalization Engine — Current State (2025-11-06)
+
+### What's done
+
+- ✅ SMT SFTP ingest → raw tables proven in prod.
+
+- ✅ Admin verification routes working:
+
+  - `/api/admin/smt/raw-upload` (writes raw_smt_files/rows)
+
+  - `/api/admin/debug/smt/raw-files` (lists)
+
+- ✅ WattBuy admin routes verified: `/api/admin/wattbuy/ping`, `/offers`.
+
+- ✅ Normalizer v1:
+
+  - `lib/analysis/normalizeSmt.ts` converts SMT/GB-ish rows → 15-min UTC START series.
+
+  - Admin test route `/api/admin/analysis/normalize-smt` supports fill/DST/grouping/dry-run.
+
+- ✅ **Fast path** on-demand normalize + persist:
+
+  - `POST /api/internal/smt/ingest-normalize` with `x-shared-secret`.
+
+  - Persists **zero-fill** placeholders by default, but **never overwrites real data** with zeros. Real readings upgrade zero rows.
+
+### What's next (ordered)
+
+1) (Optional) 1-minute Vercel catch-up cron for missed windows.
+
+2) Daily completeness summaries per ESIID/Meter/Day (kWh_real, kWh_filled, %complete).
+
+3) Tie to analysis page: run analysis immediately after persist (use cached nightly WattBuy plans).
+
+4) Backfill runner (date windows) and safeguards (idempotent batches).
+
+### Operational settings
+
+- Vercel env: `SHARED_INGEST_SECRET` (required), `ADMIN_TOKEN` (admin routes), `WATTBUY_API_KEY` (nightly).
+
+- Droplet env: `/home/deploy/smt_ingest/.env` includes `SHARED_INGEST_SECRET=...`.
