@@ -24,6 +24,7 @@
 // - Steps 16–19 in place (EFL fetch/parse + upsert)
 
 import { NextRequest, NextResponse } from 'next/server';
+import { requireVercelCron } from '@/lib/auth/cron';
 import { upsertRatesFromOffers } from '@/lib/rates/upsert';
 import { wattbuy } from '@/lib/wattbuy';
 
@@ -53,6 +54,9 @@ const DEFAULT_TX_ADDRESSES: Record<string, Addr[]> = {
 export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {
+  const guard = requireVercelCron(req);
+  if (guard) return guard;
+
   try {
     const body = (await req.json().catch(() => ({}))) as {
       tdsp?: string[];

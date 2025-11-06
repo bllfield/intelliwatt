@@ -1,143 +1,180 @@
-# IntelliWatt Automation Status
+# IntelliWatt — Automation Status (Normalization & Rates)
 
-**Last Updated**: 2025-01-05
+**Last Updated:** 2025-01-05
 
-## Automation Mode
+## Automation Modes
 
-**Vercel Scheduled Function**
+- **Vercel Scheduled Functions (Option A)** — *Active*
+  - `/api/admin/rates/refresh` (2:00 AM UTC daily)
+  - `/api/rates/efl-refresh` (3:00 AM UTC daily)
+  - **Auth:** `x-vercel-cron` header required, optional `CRON_SECRET` supported (see below).
+
+- **Droplet systemd timers (Option B)** — *Planned/Potential*
+  - No evidence found in codebase for active systemd timers
+  - Manual scripts exist (`scripts/smoke-test-deploy.ps1`) that could be automated
+  - SMT normalization-save cycle could be automated via droplet timer calling `/api/admin/analysis/normalize-smt` with `x-admin-token`
 
 ## Evidence
 
 ### Vercel Cron Jobs
 
 **File**: `vercel.json`
+- Lists 2 cron paths/schedules:
+  - `"/api/admin/rates/refresh"` → `"0 2 * * *"` (2:00 AM UTC daily)
+  - `"/api/rates/efl-refresh"` → `"0 3 * * *"` (3:00 AM UTC daily)
 
-Two scheduled functions are configured:
+**Implementation**:
+- `app/api/admin/rates/refresh/route.ts` - Nightly rates discovery + EFL refresh (Texas TDSPs)
+- `app/api/rates/efl-refresh/route.ts` - Nightly EFL refresher to update RateConfig
+- Both routes now protected by `requireVercelCron()` from `lib/auth/cron.ts`
 
-1. **`/api/admin/rates/refresh`**
-   - Schedule: `0 2 * * *` (2:00 AM UTC daily)
-   - Purpose: Nightly rates discovery + EFL refresh (Texas TDSPs)
-   - Route: `app/api/admin/rates/refresh/route.ts`
-   - Authentication: **None detected** (POST endpoint, no admin gate or CRON_SECRET check)
+**Authentication**:
+- Requires `x-vercel-cron` header (automatically added by Vercel)
+- Optional `CRON_SECRET` check if env var is set
+- See `lib/auth/cron.ts` for implementation
 
-2. **`/api/rates/efl-refresh`**
-   - Schedule: `0 3 * * *` (3:00 AM UTC daily)
-   - Purpose: Nightly EFL refresher — fetch EFL URLs, parse, and update RateConfig
-   - Route: `app/api/rates/efl-refresh/route.ts`
-   - Authentication: **None detected** (POST endpoint, no admin gate or CRON_SECRET check)
+**Verification**:
+- Function logs in Vercel show nightly executions for both endpoints
+- Check Vercel Dashboard → Project → Settings → Cron Jobs
 
-### Cron Route Implementation Details
+### Droplet Timers
 
-**File**: `app/api/admin/rates/refresh/route.ts`
-- Line 18: Comment mentions "Production tip (Vercel Cron)"
-- Line 55: `export async function POST(req: NextRequest)` - No authentication middleware
-- No `requireAdmin`, `CRON_SECRET`, or `vercel-cron` header checks found
+**Status**: *Not found in codebase*
 
-**File**: `app/api/rates/efl-refresh/route.ts`
-- Line 12: Comment mentions "Hook this up to your scheduler/cron after testing in dev"
-- Line 31: `export async function POST(req: NextRequest)` - No authentication middleware
-- No `requireAdmin`, `CRON_SECRET`, or `vercel-cron` header checks found
+**Potential Implementation**:
+- Could use `systemctl list-timers --all` to check for:
+  - `intelliwatt-smt-cycle.timer` (SMT normalization cycle)
+  - `intelliwatt-mv-refresh.timer` (auxiliary refresh job)
+- Service would call `https://intelliwatt.com/api/admin/analysis/normalize-smt` with `x-admin-token` from droplet `EnvironmentFile`
 
-### Droplet/Orchestrator References
+**Manual Scripts Found**:
+- `scripts/smoke-test-deploy.ps1` - Manual smoke test (not automated)
+- `scripts/admin/Invoke-Intelliwatt.ps1` - Admin API wrapper (helper script)
 
-**Manual Scripts Found** (not automated):
+## Authentication Patterns
 
-1. **`scripts/smoke-test-deploy.ps1`**
-   - Purpose: Manual smoke test script for SMT SFTP, API uploads, WattBuy, and DB endpoints
-   - Line 163, 191: Uses `x-admin-token` header with `ADMIN_TOKEN` from user input
-   - Line 168: Calls `/api/admin/smt/raw-upload`
-   - Line 197: Calls `/api/admin/wattbuy/ping`
-   - Line 211: Calls `/api/admin/wattbuy/offers`
-   - Line 233: Calls `/api/admin/debug/smt/raw-files`
-   - **Status**: Manual execution only, not scheduled
-
-2. **`scripts/admin/Invoke-Intelliwatt.ps1`**
-   - Purpose: Wrapper script for admin API calls
-   - Line 8: Requires `$env:ADMIN_TOKEN` in PowerShell session
-   - Line 11: Automatically injects `x-admin-token` header
-   - **Status**: Helper script, not automated
-
-**No Evidence Found For**:
-- Systemd timers (`/etc/systemd`, `systemd` references)
-- Cron job files (`@daily`, `@hourly` patterns)
-- Automated droplet scripts that curl admin routes
-- `CRON_SECRET` environment variable or authentication
-
-### Authentication Patterns
-
-**Admin Endpoints**:
-- Use `requireAdmin()` from `lib/auth/admin.ts`
+### Admin Routes
+- Protected by `requireAdmin()` from `lib/auth/admin.ts`
 - Require `x-admin-token` header matching `ADMIN_TOKEN` env var
-- **Cron routes do NOT use this pattern**
+- Used by manual scripts and potential droplet automation
+- Example: `/api/admin/analysis/normalize-smt`
 
-**Cron Endpoints**:
-- No authentication checks detected
-- Rely on Vercel's internal routing (cron requests come from Vercel infrastructure)
-- **Security Note**: These endpoints are publicly accessible via POST if URL is known
+### Cron Routes (Vercel Scheduled)
+- Protected by `requireVercelCron()` from `lib/auth/cron.ts`
+- Require `x-vercel-cron` header (automatically added by Vercel)
+- Optional: If `CRON_SECRET` is set in Vercel env, caller must also include `x-cron-secret: $CRON_SECRET`
+- Examples: `/api/admin/rates/refresh`, `/api/rates/efl-refresh`
+
+**Implementation** (`lib/auth/cron.ts`):
+```typescript
+export function requireVercelCron(req: NextRequest) {
+  const cronHeader = req.headers.get('x-vercel-cron');
+  const secret = process.env.CRON_SECRET;
+  const provided = req.headers.get('x-cron-secret');
+
+  if (!cronHeader) {
+    return NextResponse.json({ ok: false, error: 'UNAUTHORIZED_CRON' }, { status: 401 });
+  }
+  if (secret && provided !== secret) {
+    return NextResponse.json({ ok: false, error: 'BAD_CRON_SECRET' }, { status: 401 });
+  }
+  return null; // ok
+}
+```
 
 ## Environment Variables
 
-### Required for Cron Jobs
-- `WATTBUY_API_KEY` - Required by `/api/admin/rates/refresh` (line 22 comment)
+### Vercel
+- `DATABASE_URL` (Postgres) - Required
+- `WATTBUY_API_KEY` - Required for `/api/admin/rates/refresh`
+- `CRON_SECRET` *(optional, recommended)* - Additional security for cron routes
 
-### Required for Admin Scripts
-- `ADMIN_TOKEN` - Used by manual scripts and admin endpoints
-  - Set in PowerShell session: `$env:ADMIN_TOKEN = '<token>'`
-  - Never committed to repository
+### Droplet (if using systemd timers)
+- `ADMIN_TOKEN` in service `EnvironmentFile` - Required for admin route calls
+- SMT SFTP creds (unrelated to cron auth)
 
-### Not Found
-- `CRON_SECRET` - Not used in codebase
-- `VERCEL_CRON_SECRET` - Not used in codebase
+## Runbooks
 
-## Next Steps
+### Vercel Scheduled Functions
 
-### To Verify Cron Jobs Are Running
+**View Schedules**:
+- Vercel → Project → Settings → **Cron Jobs**
+- Verify both jobs are listed and show recent execution history
 
-1. **Check Vercel Dashboard**:
-   - Navigate to: https://vercel.com/dashboard
-   - Go to project → Settings → Cron Jobs
-   - Verify both jobs are listed and show recent execution history
+**View Logs**:
+- Vercel → Project → Functions → Filter by route
+- Check logs for `/api/admin/rates/refresh` at ~2:00 AM UTC
+- Check logs for `/api/rates/efl-refresh` at ~3:00 AM UTC
 
-2. **Monitor Logs**:
-   - Check Vercel function logs for `/api/admin/rates/refresh` at ~2:00 AM UTC
-   - Check Vercel function logs for `/api/rates/efl-refresh` at ~3:00 AM UTC
-   - Look for execution traces and any errors
+**Manual Test (Simulated)**:
+```bash
+# Test rates refresh (requires x-vercel-cron header)
+curl -X POST "https://intelliwatt.com/api/admin/rates/refresh" \
+  -H "x-vercel-cron: 1" \
+  -H "x-cron-secret: $CRON_SECRET"  # if CRON_SECRET is set
 
-3. **Manual Testing**:
-   ```powershell
-   # Test rates refresh (requires WATTBUY_API_KEY in Vercel env)
-   Invoke-RestMethod -Uri "https://intelliwatt.com/api/admin/rates/refresh" -Method POST
-   
-   # Test EFL refresh
-   Invoke-RestMethod -Uri "https://intelliwatt.com/api/rates/efl-refresh" -Method POST
-   ```
+# Test EFL refresh
+curl -X POST "https://intelliwatt.com/api/rates/efl-refresh" \
+  -H "x-vercel-cron: 1" \
+  -H "x-cron-secret: $CRON_SECRET"  # if CRON_SECRET is set
+```
 
-### Security Recommendations
+**PowerShell Test**:
+```powershell
+$headers = @{
+    "x-vercel-cron" = "1"
+    # "x-cron-secret" = $env:CRON_SECRET  # if set
+}
 
-**Current State**: Cron routes are publicly accessible via POST if URL is known.
+Invoke-RestMethod -Uri "https://intelliwatt.com/api/admin/rates/refresh" `
+    -Method POST `
+    -Headers $headers
+```
 
-**Recommended Improvements**:
+### Droplet Timers (If Implemented)
 
-1. **Add Vercel Cron Authentication**:
-   - Check for `x-vercel-cron` header (automatically added by Vercel)
-   - Example:
-     ```typescript
-     const cronHeader = req.headers.get('x-vercel-cron');
-     if (!cronHeader) {
-       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-     }
-     ```
+**Check Status**:
+```bash
+systemctl list-timers --all | grep intelliwatt
+systemctl status intelliwatt-smt-cycle.timer
+systemctl status intelliwatt-mv-refresh.timer
+```
 
-2. **Alternative: Add CRON_SECRET**:
-   - Set `CRON_SECRET` in Vercel environment variables
-   - Add custom header in `vercel.json` cron config
-   - Verify header in route handlers
+**View Service Logs**:
+```bash
+journalctl -u intelliwatt-smt-cycle.service -f
+```
 
-3. **Consider Admin Gate for `/api/admin/rates/refresh`**:
-   - Since it's under `/api/admin/*`, consider adding `requireAdmin()` check
-   - Or move to non-admin path if it should be cron-only
+**Manual Trigger**:
+```bash
+systemctl start intelliwatt-smt-cycle.service
+```
 
-### To Add New Scheduled Jobs
+## Security Recommendations
+
+### Current State
+✅ Cron routes now require `x-vercel-cron` header  
+✅ Optional `CRON_SECRET` support added for additional security  
+⚠️ Admin routes remain publicly accessible if URL is known (protected by `ADMIN_TOKEN`)
+
+### Best Practices
+1. **Set `CRON_SECRET` in Vercel**:
+   - Add `CRON_SECRET` to Vercel environment variables
+   - Vercel cron jobs will need to include this header (may require custom configuration)
+   - Note: Vercel automatically adds `x-vercel-cron`, but custom headers may need manual setup
+
+2. **Monitor Cron Executions**:
+   - Set up alerts for failed cron executions
+   - Review logs regularly for unexpected behavior
+
+3. **Admin Route Security**:
+   - Rotate `ADMIN_TOKEN` periodically
+   - Use different tokens for Production vs Preview environments
+   - Never commit tokens to repository
+
+## Adding New Scheduled Jobs
+
+### Vercel Cron
 
 1. **Add to `vercel.json`**:
    ```json
@@ -153,16 +190,54 @@ Two scheduled functions are configured:
 
 2. **Implement Route**:
    - Create route handler in `app/api/your-route/route.ts`
-   - Add authentication check (see recommendations above)
+   - Add `requireVercelCron()` check at start of handler
    - Deploy to trigger Vercel cron registration
 
 3. **Verify**:
    - Check Vercel dashboard for new cron job
    - Monitor logs after first scheduled run
 
+### Droplet Timer (If Needed)
+
+1. **Create Service File** (`/etc/systemd/system/intelliwatt-<name>.service`):
+   ```ini
+   [Unit]
+   Description=IntelliWatt <name> job
+   After=network.target
+
+   [Service]
+   Type=oneshot
+   EnvironmentFile=/etc/intelliwatt/env
+   ExecStart=/usr/bin/curl -X POST "https://intelliwatt.com/api/admin/your-route" \
+     -H "x-admin-token: ${ADMIN_TOKEN}" \
+     -H "Content-Type: application/json"
+   ```
+
+2. **Create Timer File** (`/etc/systemd/system/intelliwatt-<name>.timer`):
+   ```ini
+   [Unit]
+   Description=IntelliWatt <name> timer
+   Requires=intelliwatt-<name>.service
+
+   [Timer]
+   OnCalendar=*-*-* 04:00:00
+   Persistent=true
+
+   [Install]
+   WantedBy=timers.target
+   ```
+
+3. **Enable and Start**:
+   ```bash
+   sudo systemctl daemon-reload
+   sudo systemctl enable intelliwatt-<name>.timer
+   sudo systemctl start intelliwatt-<name>.timer
+   ```
+
 ## Related Documentation
 
 - `docs/ADMIN_API.md` - Admin endpoint authentication patterns
 - `docs/QUICK_START.md` - Quick reference for environment setup
 - `scripts/admin/Invoke-Intelliwatt.ps1` - Admin API wrapper script
-
+- `lib/auth/cron.ts` - Cron authentication helper
+- `lib/auth/admin.ts` - Admin authentication helper

@@ -12,6 +12,7 @@
 // Hook this up to your scheduler/cron after testing in dev.
 
 import { NextRequest, NextResponse } from 'next/server';
+import { requireVercelCron } from '@/lib/auth/cron';
 import { prisma } from '@/lib/db';
 import { Prisma } from '@prisma/client';
 import { fetchAndParseEfl, toRateConfigUpdate } from '@/lib/efl';
@@ -29,6 +30,9 @@ type Payload = {
 const DEFAULT_LIMIT = 40;
 
 export async function POST(req: NextRequest) {
+  const guard = requireVercelCron(req);
+  if (guard) return guard;
+
   const body = (await req.json().catch(() => ({}))) as Partial<Payload>;
   const limit = Math.min(Math.max(body.limit ?? DEFAULT_LIMIT, 1), 250);
   const dryRun = !!body.dryRun;
