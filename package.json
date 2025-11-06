@@ -12,7 +12,8 @@
     "admin:summary": "tsx ./scripts/admin/smoke.ts summary",
     "admin:catch": "tsx ./scripts/admin/smoke.ts catch",
     "address:esiid": "tsx ./scripts/admin/resolve.ts address",
-    "esiid:meter": "tsx ./scripts/admin/resolve.ts esiid"
+    "esiid:meter": "tsx ./scripts/admin/resolve.ts esiid",
+    "test:connections": "tsx ./scripts/admin/test-connections.ts"
   },
   "dependencies": {
     "@google-cloud/vision": "^5.3.4",
