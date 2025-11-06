@@ -244,58 +244,17 @@ systemctl start intelliwatt-smt-cycle.service
 ## Fast Path — On-Demand SMT Normalize (Seconds-latency)
 
 **Endpoint:** `POST /api/internal/smt/ingest-normalize`  
-**Auth:** `x-shared-secret: $SHARED_INGEST_SECRET` (set in Vercel env)  
-**Caller:** Droplet immediately after raw ingest
+**Auth:** `x-shared-secret: $SHARED_INGEST_SECRET` (Vercel env)  
+**Caller:** Droplet immediately after raw ingest (or UI-driven on demand)
 
-**Purpose**: Fast on-demand normalization and persistence of SMT data. Called by the droplet immediately after it POSTs raw rows or writes to the raw table. This enables seconds-latency analysis using cached WattBuy rates.
+**Bodies supported:**
 
-**Body (either):**
+- **Direct rows:** `{ esiid, meter, rows:[...] }`
+- **Window:** `{ esiid, meter, from, to }`
 
-- **Direct rows** (recommended):
-```json
-{
-  "tz": "America/Chicago",
-  "esiid": "1044...AAA",
-  "meter": "M1",
-  "rows": [
-    { "esiid": "1044...AAA", "meter": "M1", "timestamp": "2025-10-30T13:15:00-05:00", "kwh": 0.25 },
-    { "esiid": "1044...AAA", "meter": "M1", "start": "2025-10-30T18:00:00-05:00", "end": "2025-10-30T18:15:00-05:00", "value": "0.30" }
-  ]
-}
-```
+**Response:** `{ ok, processed, normalizedPoints, persisted }`
 
-- **Time window** (requires from/to + esiid/meter):
-```json
-{
-  "tz": "America/Chicago",
-  "esiid": "1044...AAA",
-  "meter": "M1",
-  "from": "2025-10-30T00:00:00Z",
-  "to": "2025-10-30T23:59:59Z"
-}
-```
-
-**Response:**
-```json
-{
-  "ok": true,
-  "tz": "America/Chicago",
-  "strictTz": true,
-  "processed": 10,
-  "normalizedPoints": 96,
-  "persisted": 96
-}
-```
-
-**Implementation Notes:**
-- Uses `normalizeSmtTo15Min()` with strict timezone parsing
-- Upserts to `SmtInterval` table (idempotent)
-- Skips rows with missing/unknown esiid or meter
-- No gap-filling (for speed)
-- Source marked as `'smt'`
-
-**Environment Variable:**
-- `SHARED_INGEST_SECRET` - Required in Vercel env for authentication
+**Notes:** Uses cached WattBuy plans later in analysis; no WattBuy call needed here.
 
 ## Related Documentation
 

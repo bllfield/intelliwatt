@@ -1,17 +1,20 @@
-// app/api/internal/smt/ingest-normalize/route.ts
-// Fast path: on-demand normalize+save used right after raw ingest
-// Called by the droplet immediately after it POSTs the raw rows (or after it writes to raw table).
-// Fast path: accepts either explicit rows OR a small time window (from/to) + esiid/meter filter.
-// Uses saved WattBuy rates later in your analysis route—no need to call WattBuy here.
-
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
-import { DateTime } from 'luxon';
 import { prisma } from '@/lib/db';
+import { normalizeSmtTo15Min } from '@/lib/analysis/normalizeSmt';
 import { requireSharedSecret } from '@/lib/auth/shared';
-import { normalizeSmtTo15Min, type SmtAdhocRow, type SmtGbRow } from '@/lib/analysis/normalizeSmt';
+
+function groupByEsidMeter(points: Array<any>) {
+  const map = new Map<string, any[]>();
+  for (const p of points) {
+    const key = `${p.esiid ?? 'unknown'}|${p.meter ?? 'unknown'}`;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key)!.push(p);
+  }
+  return map;
+}
 
 export async function POST(req: NextRequest) {
   const guard = requireSharedSecret(req);
@@ -24,15 +27,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: 'BAD_JSON' }, { status: 400 });
   }
 
-  const {
-    tz = 'America/Chicago',
-    strictTz = true,
-    esiid,
-    meter,
-    from, // ISO local or UTC
-    to, // ISO local or UTC
-    rows, // optional immediate rows [{ esiid, meter, timestamp|start|end, kwh|value }, ...]
-  } = body || {};
+  const { esiid, meter, rows, from, to } = body || {};
 
   // 1) Load candidate raws
   let raws: any[] = [];
@@ -40,120 +35,66 @@ export async function POST(req: NextRequest) {
   if (Array.isArray(rows) && rows.length) {
     raws = rows;
   } else {
-    // Fallback: pull recent raws from RawSmtFile by created_at
-    // Note: RawSmtFile is metadata only; actual data would need to be parsed from content
-    // For now, we'll return an error if rows aren't provided
-    // In production, you might have a separate raw data table or parse from content
-    if (!from || !to) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: 'MISSING_DATA',
-          details: 'Either provide rows array or from/to timestamps with esiid/meter',
-        },
-        { status: 400 }
-      );
+    // autodetect raw model; replace later if you know the exact model
+    const candidates = ['rawSmtRow', 'rawSmtRows', 'rawSmtFile', 'rawSmtFiles', 'smtRawRow', 'smtRawRows'];
+    let dao: any = null;
+    for (const name of candidates) {
+      if ((prisma as any)[name]?.findMany) {
+        dao = (prisma as any)[name];
+        break;
+      }
+    }
+    if (!dao) {
+      return NextResponse.json({ ok: false, error: 'NO_RAW_MODEL', tried: candidates }, { status: 500 });
     }
 
-    // Try to find raw files in the time window
-    const fromDate = new Date(from);
-    const toDate = new Date(to);
-
-    const rawFiles = await prisma.rawSmtFile.findMany({
-      where: {
-        created_at: {
-          gte: fromDate,
-          lte: toDate,
-        },
-      },
-      orderBy: { created_at: 'asc' },
-      take: 100, // Limit to avoid huge queries
+    const where: any = {};
+    if (esiid) where.esiid = esiid;
+    if (meter) where.meter = meter;
+    if (from || to) {
+      // adjust this timestamp field to your schema if different
+      where.createdAt = {};
+      if (from) where.createdAt.gte = new Date(from);
+      if (to) where.createdAt.lte = new Date(to);
+    }
+    raws = await dao.findMany({
+      where: Object.keys(where).length ? where : undefined,
+      orderBy: { id: 'asc' },
+      take: 5000,
     });
-
-    // Note: RawSmtFile.content is Bytes, would need parsing
-    // For now, return error suggesting rows parameter
-    if (rawFiles.length === 0) {
-      return NextResponse.json({
-        ok: true,
-        processed: 0,
-        persisted: 0,
-        note: 'NO_RAWS_FOUND',
-        hint: 'Provide rows array for immediate processing',
-      });
-    }
-
-    return NextResponse.json(
-      {
-        ok: false,
-        error: 'RAW_FILE_PARSING_NOT_IMPLEMENTED',
-        details:
-          'RawSmtFile contains metadata only. Please provide rows array directly, or implement content parsing.',
-        foundFiles: rawFiles.length,
-      },
-      { status: 501 }
-    );
   }
 
   if (!raws.length) {
-    return NextResponse.json({ ok: true, processed: 0, persisted: 0, note: 'NO_RAWS' });
+    return NextResponse.json({ ok: true, processed: 0, normalizedPoints: 0, persisted: 0, note: 'NO_RAWS' });
   }
 
-  // 2) Shape → normalize to 15-min START UTC (no fill here for speed)
-  const shaped: Array<SmtAdhocRow | SmtGbRow> = raws.map((r) => ({
+  // 2) Shape → normalize to 15-min UTC START slots
+  const shaped = raws.map((r) => ({
     esiid: r.esiid ?? esiid,
     meter: r.meter ?? meter,
-    timestamp: r.timestamp ?? undefined,
+    timestamp: r.timestamp ?? undefined, // end timestamp form
     kwh: r.kwh ?? r.value ?? undefined,
-    start: r.start ?? undefined,
+    start: r.start ?? undefined, // GB shape
     end: r.end ?? undefined,
-    value: r.value ?? r.kwh ?? undefined,
   }));
 
-  const points = normalizeSmtTo15Min(shaped, { tz, strictTz });
+  const points = normalizeSmtTo15Min(shaped).map((p) => ({
+    ...p,
+    esiid: (p as any).esiid ?? esiid ?? shaped[0]?.esiid ?? 'unknown',
+    meter: (p as any).meter ?? meter ?? shaped[0]?.meter ?? 'unknown',
+  }));
 
-  // Extract esiid/meter from first row or use provided defaults
-  const firstRow = shaped[0] as SmtAdhocRow | SmtGbRow;
-  const defaultEsiid = esiid ?? ('esiid' in firstRow ? firstRow.esiid : undefined) ?? 'unknown';
-  const defaultMeter = meter ?? ('meter' in firstRow ? firstRow.meter : undefined) ?? 'unknown';
-
-  // 3) Persist quickly (upsert on { esiid, meter, ts })
+  // 3) Persist fast (idempotent upsert on { esiid, meter, ts })
   let persisted = 0;
   for (const p of points) {
-    const pointEsiid = (p as any).esiid ?? defaultEsiid;
-    const pointMeter = (p as any).meter ?? defaultMeter;
-
-    if (!pointEsiid || pointEsiid === 'unknown' || !pointMeter || pointMeter === 'unknown') {
-      continue;
-    }
-
-    try {
-      await (prisma as any).smtInterval.upsert({
-        where: { esiid_meter_ts: { esiid: pointEsiid, meter: pointMeter, ts: new Date(p.ts) } },
-        update: { kwh: p.kwh, filled: false, source: 'smt' },
-        create: {
-          esiid: pointEsiid,
-          meter: pointMeter,
-          ts: new Date(p.ts),
-          kwh: p.kwh,
-          filled: false,
-          source: 'smt',
-        },
-      });
-      persisted++;
-    } catch (error: any) {
-      // Log error but continue processing
-      console.error('[ingest-normalize] upsert failed', { esiid: pointEsiid, meter: pointMeter, ts: p.ts, error });
-    }
+    if (!p.esiid || !p.meter) continue;
+    await (prisma as any).smtInterval.upsert({
+      where: { esiid_meter_ts: { esiid: p.esiid, meter: p.meter, ts: new Date(p.ts) } },
+      update: { kwh: p.kwh, filled: false, source: 'smt' },
+      create: { esiid: p.esiid, meter: p.meter, ts: new Date(p.ts), kwh: p.kwh, filled: false, source: 'smt' },
+    });
+    persisted++;
   }
 
-  // 4) Return fast so frontend can run the analysis immediately using cached WattBuy plans
-  return NextResponse.json({
-    ok: true,
-    tz,
-    strictTz,
-    processed: raws.length,
-    normalizedPoints: points.length,
-    persisted,
-  });
+  return NextResponse.json({ ok: true, processed: raws.length, normalizedPoints: points.length, persisted });
 }
-
