@@ -16,10 +16,6 @@
     {
       "path": "/api/admin/cron/normalize-smt",
       "schedule": "*/5 * * * *"
-    },
-    {
-      "path": "/api/admin/cron/normalize-smt-catch",
-      "schedule": "*/1 * * * *"
     }
   ]
 }
