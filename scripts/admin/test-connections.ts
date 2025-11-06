@@ -106,6 +106,10 @@ async function sharedSecretFetch(path: string, body: any) {
 // ==================== SMT TESTS ====================
 
 async function testSmtIngestNormalize() {
+  if (!SHARED_INGEST_SECRET) {
+    throw new Error('SHARED_INGEST_SECRET not set - add to .env.local');
+  }
+
   const testEsiid = '10443720004895510';
   const testMeter = '123652874LG';
   const now = new Date();
@@ -130,27 +134,34 @@ async function testSmtIngestNormalize() {
   if (!result.ok) throw new Error('SMT ingest-normalize returned ok=false');
   if (result.persisted === undefined) throw new Error('Missing persisted count');
 
-  // Verify data in database
-  const intervals = await prisma.smtInterval.findMany({
-    where: {
-      esiid: testEsiid,
-      meter: testMeter,
-    },
-    orderBy: { ts: 'desc' },
-    take: 5,
-  });
-
-  return {
-    persisted: result.persisted,
-    normalizedPoints: result.normalizedPoints,
-    dbIntervalsFound: intervals.length,
-    sampleInterval: intervals[0] ? {
+  // Verify data in database (if DATABASE_URL is set)
+  let dbIntervalsFound = 0;
+  let sampleInterval = null;
+  if (process.env.DATABASE_URL) {
+    const intervals = await prisma.smtInterval.findMany({
+      where: {
+        esiid: testEsiid,
+        meter: testMeter,
+      },
+      orderBy: { ts: 'desc' },
+      take: 5,
+    });
+    dbIntervalsFound = intervals.length;
+    sampleInterval = intervals[0] ? {
       esiid: intervals[0].esiid,
       meter: intervals[0].meter,
       ts: intervals[0].ts,
       kwh: intervals[0].kwh.toString(),
       filled: intervals[0].filled,
-    } : null,
+    } : null;
+  }
+
+  return {
+    persisted: result.persisted,
+    normalizedPoints: result.normalizedPoints,
+    dbIntervalsFound,
+    sampleInterval,
+    note: process.env.DATABASE_URL ? 'Database verified' : 'Database check skipped (no DATABASE_URL)',
   };
 }
 
@@ -169,6 +180,10 @@ async function testSmtDailySummary() {
 }
 
 async function testSmtDatabaseCounts() {
+  if (!process.env.DATABASE_URL) {
+    throw new Error('DATABASE_URL not set - cannot query database. Add to .env.local');
+  }
+
   const totalIntervals = await prisma.smtInterval.count();
   const realIntervals = await prisma.smtInterval.count({
     where: { filled: false },
@@ -237,7 +252,7 @@ async function testWattBuyEsiidToMeter() {
 
 async function testWattBuyOffersSync() {
   if (!WATTBUY_API_KEY) {
-    throw new Error('WATTBUY_API_KEY not set - skipping WattBuy test');
+    throw new Error('WATTBUY_API_KEY not set - add to .env.local');
   }
 
   const result = await adminFetch('/api/wattbuy/offers/sync', {
@@ -252,28 +267,40 @@ async function testWattBuyOffersSync() {
 
   if (result.error) throw new Error(result.error);
 
-  // Verify data in database
-  const offerMaps = await prisma.offerRateMap.findMany({
-    take: 5,
-    orderBy: { lastSeenAt: 'desc' },
-  });
+  // Verify data in database (if DATABASE_URL is set)
+  let dbOfferMaps = 0;
+  let dbRateConfigs = 0;
+  if (process.env.DATABASE_URL) {
+    const offerMaps = await prisma.offerRateMap.findMany({
+      take: 5,
+      orderBy: { lastSeenAt: 'desc' },
+    });
 
-  const rateConfigs = await prisma.rateConfig.findMany({
-    take: 5,
-    orderBy: { createdAt: 'desc' },
-  });
+    const rateConfigs = await prisma.rateConfig.findMany({
+      take: 5,
+      orderBy: { createdAt: 'desc' },
+    });
+
+    dbOfferMaps = offerMaps.length;
+    dbRateConfigs = rateConfigs.length;
+  }
 
   return {
     totalOffers: result.totalOffers,
     inserted: result.inserted,
     updated: result.updated,
     createdRateConfigs: result.createdRateConfigs,
-    dbOfferMaps: offerMaps.length,
-    dbRateConfigs: rateConfigs.length,
+    dbOfferMaps,
+    dbRateConfigs,
+    note: process.env.DATABASE_URL ? 'Database verified' : 'Database check skipped (no DATABASE_URL)',
   };
 }
 
 async function testWattBuyDatabaseCounts() {
+  if (!process.env.DATABASE_URL) {
+    throw new Error('DATABASE_URL not set - cannot query database. Add to .env.local');
+  }
+
   const offerMaps = await prisma.offerRateMap.count();
   const rateConfigs = await prisma.rateConfig.count();
   const masterPlans = await prisma.masterPlan.count();
@@ -293,6 +320,8 @@ async function runAllTests() {
   console.log(`Admin Token: ${ADMIN_TOKEN ? '✅ Set' : '❌ Missing'}`);
   console.log(`Shared Secret: ${SHARED_INGEST_SECRET ? '✅ Set' : '❌ Missing'}`);
   console.log(`WattBuy API Key: ${WATTBUY_API_KEY ? '✅ Set' : '❌ Missing'}`);
+  console.log(`Database URL: ${process.env.DATABASE_URL ? '✅ Set' : '❌ Missing'}`);
+  console.log('\n💡 Tip: Add missing env vars to .env.local for full test coverage');
 
   // SMT Tests
   await test('SMT: Ingest & Normalize', testSmtIngestNormalize);
