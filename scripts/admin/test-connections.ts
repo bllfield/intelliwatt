@@ -11,30 +11,143 @@ import { prisma } from '../../lib/db';
 const envPath = resolve(process.cwd(), '.env.local');
 if (existsSync(envPath)) {
   try {
-    const envContent = readFileSync(envPath, 'utf-8');
+    // Read file as buffer first to detect encoding
+    const buffer = readFileSync(envPath);
+    let envContent: string;
+    
+    // Check for UTF-16 BOM (FE FF for BE, FF FE for LE)
+    if (buffer.length >= 2 && buffer[0] === 0xFF && buffer[1] === 0xFE) {
+      // UTF-16 LE
+      envContent = buffer.toString('utf16le');
+      console.log(`[DEBUG] Detected UTF-16 LE encoding`);
+    } else if (buffer.length >= 2 && buffer[0] === 0xFE && buffer[1] === 0xFF) {
+      // UTF-16 BE (less common)
+      envContent = buffer.swap16().toString('utf16le');
+      console.log(`[DEBUG] Detected UTF-16 BE encoding`);
+    } else {
+      // Try UTF-8, remove BOM if present
+      envContent = buffer.toString('utf-8');
+      if (envContent.charCodeAt(0) === 0xFEFF) {
+        envContent = envContent.slice(1);
+        console.log(`[DEBUG] Removed UTF-8 BOM`);
+      }
+    }
+    
+    console.log(`[DEBUG] File read: ${envContent.length} chars, ${envContent.split(/\r?\n/).length} lines`);
+    let loadedCount = 0;
+    const importantKeys = ['SHARED_INGEST_SECRET', 'WATTBUY_API_KEY', 'DATABASE_URL', 'ADMIN_TOKEN'];
+    const foundKeys: string[] = [];
+    
+    const parsedKeysList: string[] = [];
     for (const line of envContent.split(/\r?\n/)) {
       const trimmed = line.trim();
-      if (trimmed && !trimmed.startsWith('#')) {
-        const equalIndex = trimmed.indexOf('=');
-        if (equalIndex > 0) {
-          const key = trimmed.substring(0, equalIndex).trim();
-          const value = trimmed.substring(equalIndex + 1).trim();
-          const cleanValue = value.replace(/^["']|["']$/g, '');
-          if (key) {
-            process.env[key] = cleanValue;
+      // Skip empty lines and comments
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      
+      const equalIndex = trimmed.indexOf('=');
+      if (equalIndex <= 0) continue; // No = found or = at start
+      
+      const key = trimmed.substring(0, equalIndex).trim();
+      parsedKeysList.push(key);
+      let value = trimmed.substring(equalIndex + 1);
+      
+      // Handle quoted values (can span multiple lines or have escaped quotes)
+      if ((value.startsWith('"') && value.endsWith('"')) || 
+          (value.startsWith("'") && value.endsWith("'"))) {
+        value = value.slice(1, -1);
+      }
+      
+      // Trim after removing quotes
+      value = value.trim();
+      
+      // Handle escaped characters in quoted strings
+      if (value.includes('\\')) {
+        value = value.replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\"/g, '"').replace(/\\'/g, "'");
+      }
+      
+      if (key) {
+        const isImportant = importantKeys.includes(key);
+        if (isImportant) {
+          foundKeys.push(key);
+          console.log(`[DEBUG] Found important key: "${key}" with value length ${value.length}`);
+        }
+        
+        process.env[key] = value;
+        loadedCount++;
+        
+        // Verify it was set immediately
+        if (isImportant) {
+          const setValue = process.env[key];
+          if (!setValue) {
+            console.log(`[DEBUG]   ⚠️  ERROR: Key "${key}" was NOT set in process.env!`);
+          } else if (setValue.length !== value.length) {
+            console.log(`[DEBUG]   ⚠️  WARNING: Length mismatch for "${key}": expected ${value.length}, got ${setValue.length}`);
+          } else {
+            console.log(`[DEBUG]   ✅ Key "${key}" set correctly (${setValue.length} chars)`);
           }
         }
       }
     }
-  } catch (e) {
-    // .env.local exists but can't be read, that's fine
+    if (loadedCount > 0) {
+      console.log(`[DEBUG] Loaded ${loadedCount} environment variables from .env.local`);
+      console.log(`[DEBUG] Important keys found during parsing: ${foundKeys.length}/${importantKeys.length} (${foundKeys.join(', ')})`);
+      
+      // Show keys that were parsed from the file
+      console.log(`[DEBUG] Keys parsed from file (first 15): ${parsedKeysList.slice(0, 15).join(', ')}`);
+      console.log(`[DEBUG] Looking for these important keys: ${importantKeys.join(', ')}`);
+      
+      // Show all keys that were parsed (first 10)
+      const allParsedKeys = Object.keys(process.env).filter(k => !k.startsWith('npm_') && !k.startsWith('NODE_') && !k.startsWith('PATH') && !k.startsWith('TEMP') && !k.startsWith('ALL') && !k.startsWith('APP') && !k.startsWith('CHROME') && !k.startsWith('COLOR') && !k.startsWith('Common') && !k.startsWith('COMPUTER') && !k.startsWith('ComSpec'));
+      console.log(`[DEBUG] Custom env vars in process.env (first 10): ${allParsedKeys.slice(0, 10).join(', ')}`);
+      
+      // Check if keys exist with different casing or whitespace
+      for (const importantKey of importantKeys) {
+        const exact = process.env[importantKey];
+        const upper = process.env[importantKey.toUpperCase()];
+        const lower = process.env[importantKey.toLowerCase()];
+        console.log(`[DEBUG] Checking "${importantKey}": exact=${!!exact}, upper=${!!upper}, lower=${!!lower}`);
+        if (!exact) {
+          // Try to find similar keys
+          const similar = allParsedKeys.filter(k => k.toUpperCase().includes(importantKey.toUpperCase()));
+          if (similar.length > 0) {
+            console.log(`[DEBUG]   Found similar: ${similar.join(', ')}`);
+          }
+        }
+      }
+      
+      // Final verification
+      console.log(`[DEBUG] Final verification of process.env:`);
+      for (const key of importantKeys) {
+        const val = process.env[key];
+        console.log(`[DEBUG]   process.env["${key}"] = ${val ? `✅ SET (${val.length} chars)` : '❌ MISSING'}`);
+      }
+    }
+  } catch (e: any) {
+    console.error('[DEBUG] Error reading .env.local:', e?.message || e);
   }
+} else {
+  console.log('[DEBUG] .env.local file not found at:', envPath);
 }
+
+// Debug: Verify variables are in process.env BEFORE creating constants
+console.log('\n[DEBUG] process.env check BEFORE constants:');
+console.log(`  process.env.ADMIN_TOKEN: ${process.env.ADMIN_TOKEN ? '✅ (' + process.env.ADMIN_TOKEN.length + ' chars)' : '❌ Missing'}`);
+console.log(`  process.env.SHARED_INGEST_SECRET: ${process.env.SHARED_INGEST_SECRET ? '✅ (' + process.env.SHARED_INGEST_SECRET.length + ' chars)' : '❌ Missing'}`);
+console.log(`  process.env.WATTBUY_API_KEY: ${process.env.WATTBUY_API_KEY ? '✅ (' + process.env.WATTBUY_API_KEY.length + ' chars)' : '❌ Missing'}`);
+console.log(`  process.env.DATABASE_URL: ${process.env.DATABASE_URL ? '✅ (' + process.env.DATABASE_URL.length + ' chars)' : '❌ Missing'}`);
 
 const BASE_URL = process.env.BASE_URL || 'https://intelliwatt.com';
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || '';
 const SHARED_INGEST_SECRET = process.env.SHARED_INGEST_SECRET || '';
 const WATTBUY_API_KEY = process.env.WATTBUY_API_KEY || '';
+
+// Debug: Check if variables were loaded into constants
+console.log('\n[DEBUG] Constants check AFTER assignment:');
+console.log(`  ADMIN_TOKEN: ${ADMIN_TOKEN ? '✅ (' + ADMIN_TOKEN.length + ' chars)' : '❌ Missing'}`);
+console.log(`  SHARED_INGEST_SECRET: ${SHARED_INGEST_SECRET ? '✅ (' + SHARED_INGEST_SECRET.length + ' chars)' : '❌ Missing'}`);
+console.log(`  WATTBUY_API_KEY: ${WATTBUY_API_KEY ? '✅ (' + WATTBUY_API_KEY.length + ' chars)' : '❌ Missing'}`);
+console.log(`  DATABASE_URL: ${process.env.DATABASE_URL ? '✅ (' + process.env.DATABASE_URL.length + ' chars)' : '❌ Missing'}`);
+console.log('');
 
 interface TestResult {
   name: string;
@@ -45,62 +158,162 @@ interface TestResult {
 
 const results: TestResult[] = [];
 
-async function test(name: string, fn: () => Promise<any>): Promise<void> {
+// Helper to wrap database queries with timeout
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMsg: string): Promise<T> {
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    setTimeout(() => reject(new Error(`${errorMsg} (timeout after ${timeoutMs}ms)`)), timeoutMs);
+  });
+  return Promise.race([promise, timeoutPromise]);
+}
+
+async function test(name: string, fn: () => Promise<any>, timeoutMs = 60000): Promise<void> {
   try {
     console.log(`\n🧪 Testing: ${name}...`);
-    const details = await fn();
-    results.push({ name, passed: true, details });
-    console.log(`✅ PASSED: ${name}`);
-    if (details) {
-      console.log(`   Details:`, JSON.stringify(details, null, 2).slice(0, 200));
+    
+    // Wrap the test function with timeout
+    const testPromise = fn();
+    let timeoutHandle: NodeJS.Timeout | null = null;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutHandle = setTimeout(() => reject(new Error(`Test timeout after ${timeoutMs}ms`)), timeoutMs);
+    });
+    
+    try {
+      const details = await Promise.race([testPromise, timeoutPromise]);
+      
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+        timeoutHandle = null;
+      }
+      
+      results.push({ name, passed: true, details });
+      console.log(`✅ PASSED: ${name}`);
+      if (details) {
+        console.log(`   Details:`, JSON.stringify(details, null, 2).slice(0, 200));
+      }
+    } finally {
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+      }
     }
   } catch (e: any) {
     results.push({ name, passed: false, error: e?.message || String(e) });
     console.log(`❌ FAILED: ${name}`);
     console.log(`   Error: ${e?.message || e}`);
   }
+  
+  // Small delay between tests to avoid overwhelming connections
+  await new Promise(resolve => setTimeout(resolve, 100));
 }
 
-async function adminFetch(path: string, init: RequestInit = {}) {
-  const headers: Record<string, string> = {
-    'x-admin-token': ADMIN_TOKEN,
-    'content-type': 'application/json',
-    ...(init.headers as Record<string, string> || {}),
-  };
-  const res = await fetch(`${BASE_URL}${path}`, { ...init, headers });
-  const text = await res.text();
-  let json: any;
+async function adminFetch(path: string, init: RequestInit = {}, timeoutMs = 30000) {
+  const controller = new AbortController();
+  let timeoutId: NodeJS.Timeout | null = setTimeout(() => {
+    controller.abort();
+    timeoutId = null;
+  }, timeoutMs);
+  
+  let res: Response | null = null;
   try {
-    json = JSON.parse(text);
-  } catch {
-    json = { raw: text };
-  }
-  if (!res.ok) {
-    throw new Error(`HTTP ${res.status}: ${JSON.stringify(json)}`);
-  }
-  return json;
-}
-
-async function sharedSecretFetch(path: string, body: any) {
-  const res = await fetch(`${BASE_URL}${path}`, {
-    method: 'POST',
-    headers: {
-      'x-shared-secret': SHARED_INGEST_SECRET,
+    const headers: Record<string, string> = {
+      'x-admin-token': ADMIN_TOKEN,
       'content-type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
-  const text = await res.text();
-  let json: any;
+      ...(init.headers as Record<string, string> || {}),
+    };
+    res = await fetch(`${BASE_URL}${path}`, { 
+      ...init, 
+      headers,
+      signal: controller.signal,
+    });
+    
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+      timeoutId = null;
+    }
+    
+    const text = await res.text();
+    let json: any;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      json = { raw: text };
+    }
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}: ${JSON.stringify(json)}`);
+    }
+    return json;
+  } catch (e: any) {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+      timeoutId = null;
+    }
+    // Ensure response body is consumed to free connection
+    if (res && res.body) {
+      try {
+        await res.body.cancel();
+      } catch {
+        // Ignore cancel errors
+      }
+    }
+    if (e.name === 'AbortError' || controller.signal.aborted) {
+      throw new Error(`Request timeout after ${timeoutMs}ms: ${path}`);
+    }
+    throw e;
+  }
+}
+
+async function sharedSecretFetch(path: string, body: any, timeoutMs = 30000) {
+  const controller = new AbortController();
+  let timeoutId: NodeJS.Timeout | null = setTimeout(() => {
+    controller.abort();
+    timeoutId = null;
+  }, timeoutMs);
+  
+  let res: Response | null = null;
   try {
-    json = JSON.parse(text);
-  } catch {
-    json = { raw: text };
+    res = await fetch(`${BASE_URL}${path}`, {
+      method: 'POST',
+      headers: {
+        'x-shared-secret': SHARED_INGEST_SECRET,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+      timeoutId = null;
+    }
+    
+    const text = await res.text();
+    let json: any;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      json = { raw: text };
+    }
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}: ${JSON.stringify(json)}`);
+    }
+    return json;
+  } catch (e: any) {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+      timeoutId = null;
+    }
+    // Ensure response body is consumed to free connection
+    if (res && res.body) {
+      try {
+        await res.body.cancel();
+      } catch {
+        // Ignore cancel errors
+      }
+    }
+    if (e.name === 'AbortError' || controller.signal.aborted) {
+      throw new Error(`Request timeout after ${timeoutMs}ms: ${path}`);
+    }
+    throw e;
   }
-  if (!res.ok) {
-    throw new Error(`HTTP ${res.status}: ${JSON.stringify(json)}`);
-  }
-  return json;
 }
 
 // ==================== SMT TESTS ====================
@@ -138,14 +351,18 @@ async function testSmtIngestNormalize() {
   let dbIntervalsFound = 0;
   let sampleInterval = null;
   if (process.env.DATABASE_URL) {
-    const intervals = await prisma.smtInterval.findMany({
-      where: {
-        esiid: testEsiid,
-        meter: testMeter,
-      },
-      orderBy: { ts: 'desc' },
-      take: 5,
-    });
+    const intervals = await withTimeout(
+      prisma.smtInterval.findMany({
+        where: {
+          esiid: testEsiid,
+          meter: testMeter,
+        },
+        orderBy: { ts: 'desc' },
+        take: 5,
+      }),
+      15000,
+      'Database query timeout'
+    );
     dbIntervalsFound = intervals.length;
     sampleInterval = intervals[0] ? {
       esiid: intervals[0].esiid,
@@ -184,19 +401,31 @@ async function testSmtDatabaseCounts() {
     throw new Error('DATABASE_URL not set - cannot query database. Add to .env.local');
   }
 
-  const totalIntervals = await prisma.smtInterval.count();
-  const realIntervals = await prisma.smtInterval.count({
-    where: { filled: false },
-  });
-  const filledIntervals = await prisma.smtInterval.count({
-    where: { filled: true },
-  });
-
-  const uniqueEsiids = await prisma.$queryRawUnsafe<{ count: bigint }[]>(
-    'SELECT COUNT(DISTINCT esiid) as count FROM "SmtInterval"'
+  const totalIntervals = await withTimeout(prisma.smtInterval.count(), 15000, 'Count query timeout');
+  const realIntervals = await withTimeout(
+    prisma.smtInterval.count({ where: { filled: false } }),
+    15000,
+    'Real intervals count timeout'
   );
-  const uniqueMeters = await prisma.$queryRawUnsafe<{ count: bigint }[]>(
-    'SELECT COUNT(DISTINCT meter) as count FROM "SmtInterval"'
+  const filledIntervals = await withTimeout(
+    prisma.smtInterval.count({ where: { filled: true } }),
+    15000,
+    'Filled intervals count timeout'
+  );
+
+  const uniqueEsiids = await withTimeout(
+    prisma.$queryRawUnsafe<{ count: bigint }[]>(
+      'SELECT COUNT(DISTINCT esiid) as count FROM "SmtInterval"'
+    ),
+    15000,
+    'Unique ESIIDs query timeout'
+  );
+  const uniqueMeters = await withTimeout(
+    prisma.$queryRawUnsafe<{ count: bigint }[]>(
+      'SELECT COUNT(DISTINCT meter) as count FROM "SmtInterval"'
+    ),
+    15000,
+    'Unique meters query timeout'
   );
 
   return {
@@ -243,10 +472,17 @@ async function testWattBuyEsiidToMeter() {
 
   if (!result.ok) throw new Error('ESIID resolve returned ok=false');
 
+  const meterIds = result.meterIds || [];
+  if (meterIds.length === 0) {
+    console.log(`   ⚠️  WARNING: No meters found for ESIID ${testEsiid} in database`);
+    console.log(`   💡 This is expected if no SMT data has been ingested for this ESIID yet`);
+  }
+
   return {
     esiid: result.esiid,
     meterId: result.meterId,
-    meterIds: result.meterIds,
+    meterIds: meterIds,
+    note: meterIds.length === 0 ? 'No meters found (expected if no data ingested)' : `${meterIds.length} meter(s) found`,
   };
 }
 
@@ -271,28 +507,52 @@ async function testWattBuyOffersSync() {
   let dbOfferMaps = 0;
   let dbRateConfigs = 0;
   if (process.env.DATABASE_URL) {
-    const offerMaps = await prisma.offerRateMap.findMany({
-      take: 5,
-      orderBy: { lastSeenAt: 'desc' },
-    });
+    const offerMaps = await withTimeout(
+      prisma.offerRateMap.findMany({
+        take: 5,
+        orderBy: { lastSeenAt: 'desc' },
+      }),
+      15000,
+      'Offer maps query timeout'
+    );
 
-    const rateConfigs = await prisma.rateConfig.findMany({
-      take: 5,
-      orderBy: { createdAt: 'desc' },
-    });
+    const rateConfigs = await withTimeout(
+      prisma.rateConfig.findMany({
+        take: 5,
+        orderBy: { createdAt: 'desc' },
+      }),
+      15000,
+      'Rate configs query timeout'
+    );
 
     dbOfferMaps = offerMaps.length;
     dbRateConfigs = rateConfigs.length;
   }
 
+  const totalOffers = result.totalOffers || 0;
+  const inserted = result.inserted || 0;
+  const updated = result.updated || 0;
+  
+  if (totalOffers === 0 && inserted === 0 && updated === 0) {
+    console.log(`   ⚠️  WARNING: No offers found/synced from WattBuy API`);
+    console.log(`   💡 This could mean:`);
+    console.log(`      - No offers available for this address`);
+    console.log(`      - WattBuy API returned no results`);
+    console.log(`      - Address lookup failed`);
+  }
+
   return {
-    totalOffers: result.totalOffers,
-    inserted: result.inserted,
-    updated: result.updated,
-    createdRateConfigs: result.createdRateConfigs,
+    totalOffers,
+    inserted,
+    updated,
+    createdRateConfigs: result.createdRateConfigs || 0,
     dbOfferMaps,
     dbRateConfigs,
-    note: process.env.DATABASE_URL ? 'Database verified' : 'Database check skipped (no DATABASE_URL)',
+    note: process.env.DATABASE_URL 
+      ? (dbOfferMaps === 0 && dbRateConfigs === 0 
+          ? 'Database verified but empty (no WattBuy data yet)' 
+          : 'Database verified')
+      : 'Database check skipped (no DATABASE_URL)',
   };
 }
 
@@ -301,14 +561,29 @@ async function testWattBuyDatabaseCounts() {
     throw new Error('DATABASE_URL not set - cannot query database. Add to .env.local');
   }
 
-  const offerMaps = await prisma.offerRateMap.count();
-  const rateConfigs = await prisma.rateConfig.count();
-  const masterPlans = await prisma.masterPlan.count();
+  const offerMaps = await withTimeout(prisma.offerRateMap.count(), 15000, 'Offer maps count timeout');
+  const rateConfigs = await withTimeout(prisma.rateConfig.count(), 15000, 'Rate configs count timeout');
+  const masterPlans = await withTimeout(prisma.masterPlan.count(), 15000, 'Master plans count timeout');
+
+  const offerMapsCount = Number(offerMaps);
+  const rateConfigsCount = Number(rateConfigs);
+  const masterPlansCount = Number(masterPlans);
+
+  if (offerMapsCount === 0 && rateConfigsCount === 0 && masterPlansCount === 0) {
+    console.log(`   ⚠️  WARNING: No WattBuy data found in database`);
+    console.log(`   💡 This is expected if:`);
+    console.log(`      - No WattBuy offers have been synced yet`);
+    console.log(`      - The offers sync endpoint hasn't been run`);
+    console.log(`      - The database is empty/new`);
+  }
 
   return {
-    offerMaps: Number(offerMaps),
-    rateConfigs: Number(rateConfigs),
-    masterPlans: Number(masterPlans),
+    offerMaps: offerMapsCount,
+    rateConfigs: rateConfigsCount,
+    masterPlans: masterPlansCount,
+    note: (offerMapsCount === 0 && rateConfigsCount === 0 && masterPlansCount === 0)
+      ? 'Database empty (no WattBuy data yet)'
+      : 'Database contains WattBuy data',
   };
 }
 
@@ -323,12 +598,12 @@ async function runAllTests() {
   console.log(`Database URL: ${process.env.DATABASE_URL ? '✅ Set' : '❌ Missing'}`);
   console.log('\n💡 Tip: Add missing env vars to .env.local for full test coverage');
 
-  // SMT Tests
+  // SMT Tests (sequential to avoid connection issues)
   await test('SMT: Ingest & Normalize', testSmtIngestNormalize);
   await test('SMT: Daily Summary', testSmtDailySummary);
   await test('SMT: Database Counts', testSmtDatabaseCounts);
 
-  // WattBuy Tests
+  // WattBuy Tests (sequential to avoid connection issues)
   await test('WattBuy: Address → ESIID', testWattBuyAddressResolve);
   await test('WattBuy: ESIID → Meter', testWattBuyEsiidToMeter);
   await test('WattBuy: Offers Sync', testWattBuyOffersSync);
@@ -351,17 +626,51 @@ async function runAllTests() {
   console.log('='.repeat(60));
   console.log(`\nTotal: ${results.length} | Passed: ${passed} | Failed: ${failed}\n`);
 
-  if (failed > 0) {
-    process.exit(1);
-  }
+  // Return exit code: 0 for success, 1 for failure
+  return failed > 0 ? 1 : 0;
 }
 
+// Add a global timeout for the entire test suite
+const GLOBAL_TIMEOUT = 5 * 60 * 1000; // 5 minutes
+let globalTimeoutId: NodeJS.Timeout | null = null;
+let isExiting = false;
+
+async function cleanupAndExit(code: number) {
+  if (isExiting) return;
+  isExiting = true;
+  
+  if (globalTimeoutId) {
+    clearTimeout(globalTimeoutId);
+    globalTimeoutId = null;
+  }
+  
+  // Give any pending operations a moment to complete
+  await new Promise(resolve => setTimeout(resolve, 200));
+  
+  try {
+    await prisma.$disconnect();
+  } catch (e) {
+    // Ignore disconnect errors during shutdown
+  }
+  
+  // Additional delay to ensure all connections are closed
+  await new Promise(resolve => setTimeout(resolve, 100));
+  
+  // Exit cleanly
+  process.exit(code);
+}
+
+globalTimeoutId = setTimeout(() => {
+  console.error('\n⏱️  Global timeout: Tests took too long, forcing exit...');
+  cleanupAndExit(1);
+}, GLOBAL_TIMEOUT);
+
 runAllTests()
+  .then((exitCode) => {
+    cleanupAndExit(exitCode);
+  })
   .catch((e) => {
     console.error('Fatal error:', e);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
+    cleanupAndExit(1);
   });
 

@@ -25,17 +25,45 @@ export async function POST(req: NextRequest) {
     const result = await lookupEsiId({ line1, city, state, zip });
 
     const durationMs = Date.now() - t0;
-    console.log(
-      JSON.stringify({
-        corrId,
-        route: 'admin/address/resolve-esiid',
-        status: 200,
-        durationMs,
-        found: Boolean(result.esiid),
-        utility: result.utility ?? null,
-      })
-    );
-    return NextResponse.json({ ok: true, corrId, ...result }, { status: 200 });
+    
+    // The improved lookupEsiId returns structured results
+    if (result.esiid) {
+      console.log(
+        JSON.stringify({
+          corrId,
+          route: 'admin/address/resolve-esiid',
+          status: 200,
+          durationMs,
+          found: true,
+          utility: result.utility ?? null,
+        })
+      );
+      return NextResponse.json({ ok: true, corrId, ...result }, { status: 200 });
+    } else {
+      // No ESIID found - log detailed error info for debugging
+      const errorDetails = result.raw?.errors || [];
+      console.error(
+        JSON.stringify({
+          corrId,
+          route: 'admin/address/resolve-esiid',
+          status: 500,
+          durationMs,
+          found: false,
+          attempts: result.raw?.attempts || 0,
+          errors: errorDetails,
+          address: { line1, city, state, zip },
+        })
+      );
+      return NextResponse.json({ 
+        ok: false, 
+        corrId, 
+        error: 'ADDRESS_ESIID_RESOLVE_FAILED',
+        message: `No ESIID found after ${result.raw?.attempts || 0} attempts`,
+        attempts: result.raw?.attempts,
+        errors: errorDetails,
+        raw: result.raw,
+      }, { status: 500 });
+    }
   } catch (err: any) {
     const durationMs = Date.now() - t0;
     console.error(
@@ -46,9 +74,15 @@ export async function POST(req: NextRequest) {
         durationMs,
         errorClass: 'BUSINESS_LOGIC',
         message: err?.message,
+        stack: err?.stack?.split('\n').slice(0, 3).join('\n'),
       })
     );
-    return NextResponse.json({ ok: false, corrId, error: 'ADDRESS_ESIID_RESOLVE_FAILED' }, { status: 500 });
+    return NextResponse.json({ 
+      ok: false, 
+      corrId, 
+      error: 'ADDRESS_ESIID_RESOLVE_FAILED',
+      message: err?.message 
+    }, { status: 500 });
   }
 }
 

@@ -7,21 +7,45 @@
 import { readFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
 
-// Load .env.local if it exists
+// Load .env.local if it exists (with UTF-16 encoding support)
 const envPath = resolve(process.cwd(), '.env.local');
 if (existsSync(envPath)) {
   try {
-    const envContent = readFileSync(envPath, 'utf-8');
+    // Read file as buffer first to detect encoding
+    const buffer = readFileSync(envPath);
+    let envContent: string;
+    
+    // Check for UTF-16 BOM (FE FF for BE, FF FE for LE)
+    if (buffer.length >= 2 && buffer[0] === 0xFF && buffer[1] === 0xFE) {
+      // UTF-16 LE
+      envContent = buffer.toString('utf16le');
+    } else if (buffer.length >= 2 && buffer[0] === 0xFE && buffer[1] === 0xFF) {
+      // UTF-16 BE (less common)
+      envContent = buffer.swap16().toString('utf16le');
+    } else {
+      // Try UTF-8, remove BOM if present
+      envContent = buffer.toString('utf-8');
+      if (envContent.charCodeAt(0) === 0xFEFF) {
+        envContent = envContent.slice(1);
+      }
+    }
+    
     for (const line of envContent.split(/\r?\n/)) {
       const trimmed = line.trim();
       if (trimmed && !trimmed.startsWith('#')) {
         const equalIndex = trimmed.indexOf('=');
         if (equalIndex > 0) {
           const key = trimmed.substring(0, equalIndex).trim();
-          const value = trimmed.substring(equalIndex + 1).trim();
-          const cleanValue = value.replace(/^["']|["']$/g, '');
+          let value = trimmed.substring(equalIndex + 1).trim();
+          
+          // Remove surrounding quotes if present
+          if ((value.startsWith('"') && value.endsWith('"')) || 
+              (value.startsWith("'") && value.endsWith("'"))) {
+            value = value.slice(1, -1);
+          }
+          
           if (key) {
-            process.env[key] = cleanValue;
+            process.env[key] = value;
           }
         }
       }

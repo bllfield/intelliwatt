@@ -222,7 +222,11 @@ export async function getRetailRates({
   return safeFetchJSON<any>(url, { timeoutMs: 15_000 });
 }
 
-// New: Simplified ESIID lookup for address-first flow
+// New: Hardened ESIID lookup for address-first flow
+// - Tries multiple param shapes (address_line1 vs address, etc.)
+// - Handles multiple response shapes (flat vs nested .data)
+// - Retries on 429/5xx with small backoff
+// - Emits concise debug logs on non-200s for troubleshooting
 export type EsiLookupInput = { line1: string; city: string; state: string; zip: string };
 
 export type EsiLookupResult = {
@@ -232,33 +236,164 @@ export type EsiLookupResult = {
   raw?: any;
 };
 
-export async function lookupEsiId(addr: EsiLookupInput): Promise<EsiLookupResult> {
-  assertKey();
-  const query = new URLSearchParams({
-    address_line1: addr.line1,
-    address_city: addr.city,
-    address_state: addr.state,
-    address_zip: addr.zip,
-  });
+type ParamShape = Record<string, string>;
 
-  const url = `${BASE}/electricity/info/esi?${query.toString()}`;
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${API_KEY ?? ''}` } });
+function buildCandidates(addr: EsiLookupInput): ParamShape[] {
+  // Common shapes seen across WattBuy tooling and docs
+  return [
+    // 1) snake_case
+    {
+      address_line1: addr.line1,
+      address_city: addr.city,
+      address_state: addr.state,
+      address_zip: addr.zip,
+    },
+    // 2) single address + city/state/zip
+    {
+      address: addr.line1,
+      city: addr.city,
+      state: addr.state,
+      zip: addr.zip,
+    },
+    // 3) alternate keys we've seen in sample widgets
+    {
+      line1: addr.line1,
+      locality: addr.city,
+      region: addr.state,
+      postal_code: addr.zip,
+    },
+  ];
+}
+
+function mapResponse(json: any): EsiLookupResult {
+  // Known shapes:
+  // flat: { esi: "...", utility: "...", territory: "..." }
+  // alt:  { esiid: "...", utility: "...", territory: "..." }
+  // nested: { data: { esi: "...", utility: "...", territory: "..." } }
+  // addresses array: { addresses: [{ esi: "...", utility: "..." }] }
+  const j = json || {};
+  
+  // Try addresses array first (common WattBuy response format)
+  if (Array.isArray(j.addresses) && j.addresses.length > 0) {
+    const addr = j.addresses[0];
+    const esiid = addr.esi || addr.esiid || null;
+    const utility = addr.utility ?? null;
+    const territory = addr.territory ?? null;
+    return { esiid, utility, territory, raw: json };
+  }
+  
+  // Try nested data
+  const src = j.data || j;
+  const esiid = src.esi || src.esiid || null;
+  const utility = src.utility ?? null;
+  const territory = src.territory ?? null;
+  
+  // Log what we found for debugging
+  if (!esiid) {
+    console.error(
+      JSON.stringify({
+        route: 'wattbuy/mapResponse',
+        message: 'No ESIID found in response',
+        response_keys: Object.keys(j),
+        response_preview: JSON.stringify(j).slice(0, 500),
+      })
+    );
+  }
+  
+  return { esiid, utility, territory, raw: json };
+}
+
+async function doFetch(url: string, apiKey: string): Promise<{ ok: boolean; status: number; json: any; text: string }> {
+  const res = await fetch(url, {
+    method: 'GET',
+    headers: { 
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+  });
   const text = await res.text();
   let json: any;
-  try {
-    json = JSON.parse(text);
-  } catch {
-    json = { raw: text };
+  try { json = JSON.parse(text); } catch { json = { raw: text }; }
+  
+  // Log request/response for debugging
+  console.error(
+    JSON.stringify({
+      route: 'wattbuy/doFetch',
+      url: url.replace(apiKey, '***'),
+      status: res.status,
+      response_preview: text.slice(0, 200),
+    })
+  );
+  
+  return { ok: res.ok, status: res.status, json, text };
+}
+
+async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
+  let lastErr: any;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (e: any) {
+      lastErr = e;
+      // tiny backoff
+      await new Promise(r => setTimeout(r, 250 * (i + 1)));
+    }
+  }
+  throw lastErr;
+}
+
+export async function lookupEsiId(addr: EsiLookupInput): Promise<EsiLookupResult> {
+  const apiKey = process.env.WATTBUY_API_KEY || process.env.NEXT_PUBLIC_WATTBUY_API_KEY;
+  if (!apiKey) throw new Error('Missing WATTBUY_API_KEY');
+
+  const candidates = buildCandidates(addr);
+  const endpoint = `${BASE}/electricity/info/esi`;
+
+  // Try each param shape with retry on 429/5xx
+  const errors: Array<{ status: number; body: string; qs: ParamShape }> = [];
+
+  for (const qs of candidates) {
+    const url = `${endpoint}?${new URLSearchParams(qs).toString()}`;
+    try {
+      const out = await withRetry(async () => {
+        const r = await doFetch(url, apiKey);
+        if (!r.ok) {
+          // Retry only on 429/ >=500
+          if (r.status === 429 || r.status >= 500) {
+            throw new Error(`Transient HTTP ${r.status}`);
+          }
+          // Non-retryable: record & move on to next shape
+          errors.push({ status: r.status, body: r.text.slice(0, 500), qs });
+          return r;
+        }
+        return r;
+      });
+
+      if (out.ok) {
+        const mapped = mapResponse(out.json);
+        if (mapped.esiid) return mapped; // success
+        // 200 but no ESIID — record and try next
+        errors.push({ status: 200, body: JSON.stringify(out.json).slice(0, 500), qs });
+      }
+    } catch (e: any) {
+      // Retries exhausted — record
+      errors.push({ status: -1, body: String(e?.message || e), qs });
+    }
   }
 
-  if (!res.ok) throw new Error(`WattBuy ESI lookup failed ${res.status}: ${text}`);
+  // If we got here, nothing yielded an ESIID. Emit a concise error with context.
+  // NOTE: We include only small excerpts to avoid leaking full payloads into logs.
+  console.error(
+    JSON.stringify({
+      route: 'wattbuy/lookup-esi',
+      message: 'All param shapes failed to return an ESIID',
+      attempts: errors.length,
+      errors: errors.map(e => ({ status: e.status, qs: e.qs, body_excerpt: e.body })),
+    })
+  );
 
-  // Map conservative shapes
-  const esiid = json?.esi || json?.esiid || json?.data?.esi || null;
-  const utility = json?.utility || json?.data?.utility || null;
-  const territory = json?.territory || json?.data?.territory || null;
-
-  return { esiid, utility, territory, raw: json };
+  // Return a structured failure (caller can render "no match" vs "error")
+  return { esiid: null, raw: { attempts: errors.length, errors } };
 }
 
 // Export WattBuyClient class for backward compatibility
@@ -278,12 +413,12 @@ export class WattBuyClient {
   static async getRetailRates(params: any) {
     return getRetailRates(params);
   }
-
+  
   // Instance methods for backward compatibility
   async offersByEsiid({ esiid }: { esiid: string }) {
     return getOffersForESIID(esiid);
   }
-
+  
   async offersByAddress({ address, city, state, zip }: { address: string; city: string; state: string; zip: string }) {
     return getOffersForAddress({ line1: address, city, state, zip });
   }
