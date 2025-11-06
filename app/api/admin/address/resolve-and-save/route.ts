@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
 
   const gate = requireAdmin(req);
 
-  if (gate) return gate;
+  if (!gate.ok) return NextResponse.json(gate.body, { status: gate.status });
 
 
 
