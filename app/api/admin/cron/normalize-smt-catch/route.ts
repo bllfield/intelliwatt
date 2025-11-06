@@ -57,6 +57,11 @@ export async function POST(req: NextRequest) {
     const results: Array<{ esiid: string; meter: string; date: string; processed: number; persisted: number }> = [];
 
     for (const day of missingDays) {
+      // Skip if esiid or meter is null
+      if (!day.esiid || !day.meter) {
+        continue;
+      }
+
       // Convert local day to UTC window
       const dayStartLocal = DateTime.fromISO(day.date, { zone: tz }).startOf('day');
       const dayEndLocal = dayStartLocal.plus({ days: 1 });
