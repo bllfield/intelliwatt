@@ -239,28 +239,22 @@ export type EsiLookupResult = {
 type ParamShape = Record<string, string>;
 
 function buildCandidates(addr: EsiLookupInput): ParamShape[] {
-  // Common shapes seen across WattBuy tooling and docs
+  // According to WattBuy docs, the correct format is:
+  // address_line1, address_city, address_state, address_zip
   return [
-    // 1) snake_case
+    // 1) Official format from WattBuy documentation
     {
       address_line1: addr.line1,
       address_city: addr.city,
       address_state: addr.state,
       address_zip: addr.zip,
     },
-    // 2) single address + city/state/zip
+    // 2) Fallback: single address + city/state/zip (in case docs are outdated)
     {
       address: addr.line1,
       city: addr.city,
       state: addr.state,
       zip: addr.zip,
-    },
-    // 3) alternate keys we've seen in sample widgets
-    {
-      line1: addr.line1,
-      locality: addr.city,
-      region: addr.state,
-      postal_code: addr.zip,
     },
   ];
 }
@@ -304,11 +298,11 @@ function mapResponse(json: any): EsiLookupResult {
 }
 
 async function doFetch(url: string, apiKey: string): Promise<{ ok: boolean; status: number; json: any; text: string }> {
+  // According to WattBuy docs, only Authorization: Bearer header is needed
   const res = await fetch(url, {
     method: 'GET',
     headers: { 
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
     },
   });
   const text = await res.text();
@@ -346,6 +340,16 @@ export async function lookupEsiId(addr: EsiLookupInput): Promise<EsiLookupResult
   const apiKey = process.env.WATTBUY_API_KEY || process.env.NEXT_PUBLIC_WATTBUY_API_KEY;
   if (!apiKey) throw new Error('Missing WATTBUY_API_KEY');
 
+  // Log API key presence (first/last 4 chars only for security)
+  console.error(
+    JSON.stringify({
+      route: 'wattbuy/lookup-esi',
+      api_key_present: Boolean(apiKey),
+      api_key_length: apiKey?.length || 0,
+      api_key_preview: apiKey ? `${apiKey.substring(0, 4)}...${apiKey.substring(apiKey.length - 4)}` : 'missing',
+    })
+  );
+
   const candidates = buildCandidates(addr);
   const endpoint = `${BASE}/electricity/info/esi`;
 
@@ -353,6 +357,7 @@ export async function lookupEsiId(addr: EsiLookupInput): Promise<EsiLookupResult
   const errors: Array<{ status: number; body: string; qs: ParamShape }> = [];
 
   for (const qs of candidates) {
+    // Use URLSearchParams for proper encoding (matches docs example)
     const url = `${endpoint}?${new URLSearchParams(qs).toString()}`;
     try {
       const out = await withRetry(async () => {
