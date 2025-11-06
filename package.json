@@ -13,6 +13,8 @@
     "admin:catch": "tsx ./scripts/admin/smoke.ts catch",
     "address:esiid": "tsx ./scripts/admin/resolve.ts address",
     "esiid:meter": "tsx ./scripts/admin/resolve.ts esiid",
+    "esiid:resolve-save": "tsx ./scripts/admin/esiid-save.ts resolve-save",
+    "esiid:save": "tsx ./scripts/admin/esiid-save.ts save",
     "test:connections": "tsx ./scripts/admin/test-connections.ts"
   },
   "dependencies": {

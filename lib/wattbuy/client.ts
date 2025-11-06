@@ -299,8 +299,10 @@ function mapResponse(json: any): EsiLookupResult {
 
 async function doFetch(url: string, apiKey: string): Promise<{ ok: boolean; status: number; json: any; text: string }> {
   // According to WattBuy docs, only Authorization: Bearer header is needed
-  const headers = { 
-    'Authorization': `Bearer ${apiKey}`,
+  // Ensure exact format: "Bearer <token>" with single space
+  const authHeader = `Bearer ${apiKey.trim()}`;
+  const headers: HeadersInit = { 
+    'Authorization': authHeader,
   };
   
   // Log the exact request we're about to send
@@ -310,8 +312,10 @@ async function doFetch(url: string, apiKey: string): Promise<{ ok: boolean; stat
       method: 'GET',
       url: url.replace(apiKey, '***'),
       header_present: Boolean(headers.Authorization),
-      header_format: headers.Authorization ? `Bearer ${apiKey.substring(0, 4)}...${apiKey.substring(apiKey.length - 4)}` : 'missing',
+      header_exact: authHeader.substring(0, 20) + '...' + authHeader.substring(authHeader.length - 4),
+      header_starts_with: authHeader.startsWith('Bearer '),
       api_key_length: apiKey.length,
+      api_key_has_spaces: apiKey.includes(' '),
     })
   );
   
