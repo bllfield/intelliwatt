@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { getCorrelationId } from '@/lib/correlation';
 
-import { requireAdmin } from '@/lib/auth/admin';
+import { ensureAdmin } from '@/lib/auth/adminGate';
 
 import { prisma } from '@/lib/db';
 
@@ -22,9 +22,9 @@ export async function POST(req: NextRequest) {
 
   const t0 = Date.now();
 
-  const gate = requireAdmin(req);
+  const deny = ensureAdmin(req);
 
-  if (!gate.ok) return NextResponse.json(gate.body, { status: gate.status });
+  if (deny) return deny;
 
 
 
@@ -113,6 +113,26 @@ export async function POST(req: NextRequest) {
   } catch (err: any) {
 
     const durationMs = Date.now() - t0;
+
+    if (err?.code === 'P2002') {
+
+      // Unique constraint failed on HouseAddress.esiid
+
+      console.error(JSON.stringify({
+
+        corrId, route: 'admin/address/save-esiid', status: 409, durationMs,
+
+        errorClass: 'PRISMA_UNIQUE_CONSTRAINT', message: err?.message, code: err?.code
+
+      }));
+
+      return NextResponse.json({
+
+        ok: false, corrId, error: 'ESIID_ALREADY_ASSIGNED', field: 'esiid'
+
+      }, { status: 409 });
+
+    }
 
     console.error(JSON.stringify({
 
