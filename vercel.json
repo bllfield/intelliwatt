@@ -1,16 +1,7 @@
 {
   "crons": [
-    {
-      "path": "/api/admin/ercot/cron",
-      "schedule": "15 3 * * *"
-    },
-    {
-      "path": "/api/admin/ercot/cron",
-      "schedule": "30 4 * * 3"
-    },
-    {
-      "path": "/api/admin/ercot/cron",
-      "schedule": "0 9 * * *"
-    }
+    { "path": "/api/admin/ercot/cron", "schedule": "15 9 * * *" },
+    { "path": "/api/admin/ercot/cron", "schedule": "30 10 * * 3" },
+    { "path": "/api/admin/ercot/cron", "schedule": "0 15 * * *" }
   ]
 }
