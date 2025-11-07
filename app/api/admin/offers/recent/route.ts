@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { prisma } from '@/lib/db';
 
+export const runtime = 'nodejs';
+
 function requireAdmin(req: NextRequest) {
   const expected = process.env.ADMIN_TOKEN || '';
   const token = req.headers.get('x-admin-token') || '';

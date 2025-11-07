@@ -7,6 +7,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { PrismaClient } from '@prisma/client';
 
+export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 function jsonError(message: string, status = 400) {

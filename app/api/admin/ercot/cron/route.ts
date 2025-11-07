@@ -8,6 +8,7 @@ import os from 'os';
 import path from 'path';
 import { requireVercelCron } from '@/lib/auth/cron';
 
+export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 function jsonError(message: string, status = 400) {

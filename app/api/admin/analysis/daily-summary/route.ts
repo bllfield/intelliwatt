@@ -4,6 +4,8 @@ import { PrismaClient } from "@prisma/client";
 import { DateTime } from "luxon";
 import { expectedIntervalsForDateISO } from "@/lib/analysis/dst";
 
+export const runtime = 'nodejs';
+
 export const dynamic = "force-dynamic";
 
 function jsonError(message: string, status = 400) {

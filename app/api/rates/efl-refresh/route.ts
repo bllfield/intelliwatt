@@ -17,6 +17,8 @@ import { prisma } from '@/lib/db';
 import { Prisma } from '@prisma/client';
 import { fetchAndParseEfl, toRateConfigUpdate } from '@/lib/efl';
 
+export const runtime = 'nodejs';
+
 type Payload = {
   offerIds?: string[];
   supplier?: string;  // e.g., "gexa"

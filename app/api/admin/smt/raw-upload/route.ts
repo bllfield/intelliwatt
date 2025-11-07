@@ -3,6 +3,8 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import { requireAdmin } from '@/lib/auth/admin';
 
+export const runtime = 'nodejs';
+
 export async function POST(req: NextRequest) {
   const gate = requireAdmin(req);
   if (!gate.ok) return NextResponse.json(gate.body, { status: gate.status });
