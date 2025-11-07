@@ -411,3 +411,20 @@ ERCOT_PAGE_FILTER=TDSP
 - `npm run ercot:resolve-fetch` — resolves the latest link from `ERCOT_PAGE_URL` and calls `/api/admin/ercot/fetch-latest`.
 - `npm run ercot:cron:curl` — exercises the cron route; now resolves automatically if `ERCOT_DAILY_URL` is empty.
 
+### Verify WattBuy offers (no ESIID) and DB persistence
+1) Run the probe + public offers smoke (bash):
+   ```bash
+   ADMIN_TOKEN="<ADMIN_TOKEN>" BASE_URL="https://intelliwatt.com" ZIP5="76107" scripts/admin/wattbuy_offers_smoke.sh
+   ```
+   PowerShell:
+   ```powershell
+   ./scripts/admin/wattbuy_offers_smoke.ps1 -AdminToken "<ADMIN_TOKEN>" -BaseUrl "https://intelliwatt.com" -Zip5 "76107"
+   ```
+   - Expect: probe returns upstream `status: 200` (or a clear error code); `/api/offers` returns plans JSON.
+2) Confirm rows saved to DB (token-gated):
+   ```bash
+   ADMIN_TOKEN="<ADMIN_TOKEN>" curl -sS "https://intelliwatt.com/api/admin/offers/recent?zip5=76107&limit=25" \
+     -H "x-admin-token: $ADMIN_TOKEN" | jq .
+   ```
+   - Expect: `{ ok: true, rows: [...] }` with recent rows. If empty but upstream=200, ensure your normalization/persist step runs.
+
