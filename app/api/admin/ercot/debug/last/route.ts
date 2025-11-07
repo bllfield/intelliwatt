@@ -25,10 +25,13 @@ export async function GET(req: NextRequest) {
   if (rawTdsp && rawTdsp.trim()) where.tdsp = rawTdsp.trim();
 
   try {
-    const row = await prisma.ercotIngestLog?.findFirst({
-      where,
-      orderBy: { createdAt: 'desc' },
-    });
+    const ingestModel = (prisma as any).ercotIngestLog;
+    const row = ingestModel
+      ? await ingestModel.findFirst({
+          where,
+          orderBy: { finishedAt: 'desc' },
+        })
+      : null;
     return NextResponse.json({ ok: true, row }
     );
   } catch (err: any) {

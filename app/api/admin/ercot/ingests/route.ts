@@ -61,7 +61,7 @@ export async function GET(req: NextRequest) {
       ? await ingestModel.findMany({
           where,
           take: limit,
-          orderBy: { createdAt: "desc" },
+          orderBy: { finishedAt: 'desc' },
           select: {
             id: true,
             fileName: true,
@@ -70,7 +70,7 @@ export async function GET(req: NextRequest) {
             rowsUpsert: true,
             notes: true,
             headerSnapshot: true,
-            createdAt: true,
+            finishedAt: true,
           },
         })
       : [];
