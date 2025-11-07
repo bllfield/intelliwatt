@@ -5,6 +5,8 @@ import './globals.css'
 import Footer from '@/components/Footer'
 import ClientEntriesCounter from '../components/ClientEntriesCounter'
 
+export const runtime = 'nodejs'
+
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
