@@ -5,6 +5,6 @@ export async function GET() {
     ok: true,
     service: 'intelliwatt',
     ts: new Date().toISOString(),
-    path: '/api/ping',
+    path: '/ping',
   });
 }
