@@ -16,6 +16,7 @@
     "esiid:resolve-save": "tsx ./scripts/admin/esiid-save.ts resolve-save",
     "esiid:save": "tsx ./scripts/admin/esiid-save.ts save",
     "test:connections": "tsx ./scripts/admin/test-connections.ts",
+    "test:prod": "node scripts/admin/api_test_prod.mjs --base",
     "check:ercot": "node scripts/db/check_ercot_setup.mjs",
     "check:ercot:local": "node scripts/db/check_ercot_setup.mjs",
     "ercot:test": "tsx scripts/ercot/test_match.ts",
