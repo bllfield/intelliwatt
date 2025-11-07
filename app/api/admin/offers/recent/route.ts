@@ -38,20 +38,33 @@ export async function GET(req: NextRequest) {
     if (!Number.isNaN(d.valueOf())) lt = d;
   }
 
-  const where: any = {};
-  if (rawZip) where.zip5 = rawZip;
+  const where: any = {
+    rawWattbuyJson: { not: null },
+  };
+  if (rawZip) {
+    where.addressZip5 = rawZip;
+  }
   if (gte || lt) {
-    where.createdAt = {};
-    if (gte) where.createdAt.gte = gte;
-    if (lt) where.createdAt.lt = lt;
+    where.updatedAt = {};
+    if (gte) where.updatedAt.gte = gte;
+    if (lt) where.updatedAt.lt = lt;
   }
 
   try {
-    const rows = await prisma.rawWattbuyOffer.findMany({
+    const rows = await prisma.houseAddress.findMany({
       where,
-      orderBy: { createdAt: 'desc' },
+      orderBy: { updatedAt: 'desc' },
       take: limit,
-      // adjust select if needed to trim payload
+      select: {
+        id: true,
+        houseId: true,
+        addressLine1: true,
+        addressCity: true,
+        addressState: true,
+        addressZip5: true,
+        updatedAt: true,
+        rawWattbuyJson: true,
+      },
     });
 
     return NextResponse.json({ ok: true, rows });
