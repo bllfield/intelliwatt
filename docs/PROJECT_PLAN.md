@@ -346,3 +346,24 @@ Droplet cleaned of all Vercel CLI and linked metadata (~/.vercel removed).
 Droplet confirmed working for Git and local helper scripts (run as deploy user).
 
 Production Vercel build set to Next.js Default Output (not Static Export).
+
+## Operational Conventions
+
+**Deployment Model — Git via Vercel**
+
+- Production deployments occur by pushing to the Production branch (`main`).
+- Vercel is connected to the repository; each push to `main` triggers an automatic build and deploy.
+- Updates to `vercel.json` (e.g., cron entries) take effect on the next Git deploy.
+- The DigitalOcean droplet is only for SMT SFTP/ingest; do not run web-app deploys from the droplet.
+
+**Development Model — Cursor-Only, GPT Blocks**
+
+- All code edits are authored as single, copy-ready GPT blocks in Cursor.
+- Each block must specify:
+  - Model: GPT-4o
+  - Thinking: With Thinking
+  - Agent: OFF
+  - Files to target: explicit file paths
+  - Clear, surgical edits limited to the requested scope.
+- Do not chain commands with `&&` in shell instructions.
+- Avoid refactors unless explicitly requested; assume working systems stay intact.

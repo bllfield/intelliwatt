@@ -1,3 +1,11 @@
+# Development & Deploy Workflow (Required)
+
+1. Edit code in Cursor using single, self-contained GPT blocks that list exact files to change.
+2. Commit & push to `main` to deploy to Production via Vercel (Git-linked).
+3. After deploy, run admin health checks such as `/api/admin/env-health` to confirm env presence.
+4. The DigitalOcean droplet is for SMT ingestion only—do not deploy the web app from the droplet.
+5. Avoid `&&` in commands; provide one command per line.
+
 # IntelliWatt Quick Start
 
 **One-page reference for new chat sessions**
