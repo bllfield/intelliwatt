@@ -73,6 +73,8 @@
 - Minimize PII exposure in responses
 - Implement data retention policies
 
+**ESIID Lineage:** Source of truth is ERCOT (daily extract / future Agreement APIs). WattBuy is **not** an ESIID source. UI/CDM treat `esiid` as optional; transformations must not require its presence.
+
 ## UI Resilience
 
 ### Safe Response Shapes

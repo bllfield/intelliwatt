@@ -20,6 +20,7 @@
 - `NEXT_PUBLIC_FLAG_SMT` = true | false
 - `NEXT_PUBLIC_FLAG_GREENBUTTON` = true | false
 - `FLAG_STRICT_PII_LOGGING` = true | false  # server-only
+- `WATTBUY_ESIID_DISABLED` — default "true". When "true", WattBuy-backed ESIID admin routes are gated off; plan pulls remain address/zip based.
 
 ## Security
 - `ADMIN_TOKEN` — **Admin route protection.** Required header `x-admin-token` must match this value on admin/debug endpoints.

@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { lookupEsiId } from '@/lib/wattbuy/client';
 import { getCorrelationId } from '@/lib/correlation';
 import { requireAdmin } from '@/lib/auth/admin';
+import { wattbuyEsiidDisabled } from '@/lib/flags';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -13,6 +14,18 @@ export async function POST(req: NextRequest) {
 
   const gate = requireAdmin(req);
   if (!gate.ok) return NextResponse.json(gate.body, { status: gate.status });
+
+  if (wattbuyEsiidDisabled) {
+    return NextResponse.json(
+      {
+        ok: false,
+        corrId,
+        error: 'DEPRECATED_WATTBUY_ESIID',
+        message: 'WattBuy-based ESIID lookup is retired. Use ERCOT-derived ESIID data.',
+      },
+      { status: 410 }
+    );
+  }
 
   try {
     const body = await req.json();

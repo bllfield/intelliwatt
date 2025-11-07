@@ -253,6 +253,30 @@ Add Vercel schedule that reads daily completeness to a cache/report; protect wit
 Rollback
 Remove the route/cron; no schema changes required.
 
+PC-2025-11-07: ESIID Source Cutover (ERCOT-only; remove WattBuy ESIID)
+
+Rationale
+
+- ESIID resolution must come exclusively from ERCOT daily extracts / Agreement APIs to keep UI/CDM stable and vendor-agnostic. (ESIID is optional in CDM; we continue to persist it on `HouseAddress`.)
+
+Scope
+
+- Feature-flag and deprecate admin routes:
+
+  - `/api/admin/address/resolve-esiid` and `/api/admin/address/resolve-and-save` (WattBuy-backed lookups) are now gated off and scheduled for removal.
+
+- Keep WattBuy for plan pulls only (address/zip and TDSP where available), **never** for ESIID.
+
+- Update docs and flags; add a probe endpoint for WattBuy offers.
+
+Rollback
+
+- Re-enable the two admin routes via feature flag `wattbuyEsiidDisabled=false` if emergency rollback is required.
+
+Guardrails
+
+- CDM-first API consumption and RAW→CDM discipline remain unchanged.
+
 PC-2025-11-03: Plan Display Compliance (WattBuy)
 
 Rationale
@@ -367,3 +391,58 @@ Production Vercel build set to Next.js Default Output (not Static Export).
   - Clear, surgical edits limited to the requested scope.
 - Do not chain commands with `&&` in shell instructions.
 - Avoid refactors unless explicitly requested; assume working systems stay intact.
+
+PC-2025-11-01: ESIID Resolver — Switch to ERCOT (Deprecate WattBuy for ESIID)
+
+Rationale
+We will source ESIID from ERCOT/SMT flows going forward. WattBuy is no longer used for ESIID lookups.
+
+Scope
+
+Provider flag: RESOLVER_PROVIDER=ercot (default).
+
+Resolver: lib/resolver/addressToEsiid.ts routes to ERCOT resolver implementation.
+
+Admin routes:
+
+POST /api/admin/address/resolve-esiid now calls ERCOT resolver.
+
+POST /api/admin/address/resolve-and-save remains the same contract; it uses the ERCOT resolver internally and persists to HouseAddress.esiid (+ UserProfile.esiid if linked).
+
+RAW→CDM:
+
+Store ERCOT responses in raw_ercot (new RAW collection/bucket if not present).
+
+Transformer tx_ercot_to_meter → HouseAddress.esiid, utilityName, tdspSlug.
+
+Observability: corrId + duration logging (unchanged).
+
+Rollback
+Flip RESOLVER_PROVIDER=wattbuy (legacy path remains in code but unused by default).
+
+PC-2025-11-02: WattBuy 403 Closure (FYI / Support Artifact)
+
+Context
+WattBuy confirmed they do not whitelist domains. The 403s were unrelated to origin. We have moved off WattBuy for ESIID; however, to close the support ticket, we can provide a reproducible call log (see snippet below).
+
+Action
+Retain a one-time diagnostic: cURL + response body excerpt demonstrating 403, so WattBuy support can validate key/scope if needed for other endpoints later.
+
+PC-2025-11-03: Daily Completeness Summary (unchanged)
+
+Rationale
+Day-level QA for SMT coverage before analysis.
+
+Scope
+
+GET /api/admin/analysis/daily-summary (admin-gated)
+
+Query: esiid?, meter?, dateStart, dateEnd
+
+Response per ESIID/Meter/Day:
+{ esiid, meter, day, totalSlots, realCount, filledCount, pct_complete, kWh_real, kWh_filled, kWh_total }
+
+Optional cron after verification with x-vercel-cron (+ CRON_SECRET).
+
+Rollback
+Remove route/cron; no schema changes.

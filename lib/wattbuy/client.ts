@@ -7,7 +7,6 @@
 //  • getESIByAddress(addr)
 //  • getUtilityInfo(addr)
 //  • getOffersForAddress(addr)
-//  • getOffersForESIID(esiid)
 //  • getRetailRates({ utilityID, state, page })
 //  • extractTdspSlug(any)
 //  • lookupEsiId(addr) - New: simplified ESIID lookup for address-first flow
@@ -36,6 +35,20 @@ type FetchOpts = {
   headers?: Record<string, string>;
   signal?: AbortSignal;
 };
+
+function redactUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    u.searchParams.forEach((_, key) => {
+      u.searchParams.set(key, '***');
+    });
+    const query = u.searchParams.toString();
+    return `${u.origin}${u.pathname}${query ? `?${query}` : ''}`;
+  } catch {
+    const [base] = url.split('?');
+    return `${base}?***`;
+  }
+}
 
 async function safeFetchJSON<T = any>(url: string, opts: FetchOpts = {}): Promise<T> {
   const {
@@ -87,6 +100,19 @@ async function safeFetchJSON<T = any>(url: string, opts: FetchOpts = {}): Promis
       if (res.ok) return body as T;
 
       // Not OK — maybe retry?
+      if (res.status === 403) {
+        const excerpt = typeof body === 'string' ? body.slice(0, 200) : JSON.stringify(body || {}).slice(0, 200);
+        console.error(
+          JSON.stringify({
+            route: 'wattbuy/safeFetchJSON',
+            status: 403,
+            hint: 'Upstream forbidden. Verify WattBuy API key scope and plan coverage.',
+            url: redactUrl(url),
+            body_excerpt: excerpt,
+          })
+        );
+      }
+
       if (attempt <= retries && retryOn(res.status)) {
         const retryAfter = parseRetryAfter(res.headers.get('retry-after'));
         const backoffMs = retryAfter ?? backoff(attempt);
@@ -181,20 +207,24 @@ export async function getUtilityInfo(addr: Addr) {
   return safeFetchJSON<any>(url);
 }
 
-export async function getOffersForAddress(addr: Addr) {
-  assertKey();
-  const url = `${BASE}/offers${qs({
-    address: addr.line1,
-    city: addr.city,
-    state: addr.state,
-    zip: addr.zip,
-  })}`;
-  return safeFetchJSON<any>(url);
-}
+export type OfferAddressInput = {
+  line1?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip: string;
+  tdsp?: string | null;
+};
 
-export async function getOffersForESIID(esiid: string) {
+export async function getOffersForAddress(addr: OfferAddressInput) {
   assertKey();
-  const url = `${BASE}/offers${qs({ esiid })}`;
+  const query: Record<string, string> = { zip: addr.zip };
+  if (addr.line1) query.address = addr.line1;
+  if (addr.city) query.city = addr.city;
+  query.state = (addr.state && addr.state.trim()) || 'TX';
+  if (addr.tdsp) query.utility = addr.tdsp;
+
+  // Compliance: WattBuy offers are requested without ESIID. See docs/WATTBUY_COMPLIANCE_UPDATE.md.
+  const url = `${BASE}/offers${qs(query)}`;
   return safeFetchJSON<any>(url);
 }
 
@@ -428,23 +458,16 @@ export class WattBuyClient {
   static async getUtilityInfo(addr: Addr) {
     return getUtilityInfo(addr);
   }
-  static async getOffersForAddress(addr: Addr) {
+  static async getOffersForAddress(addr: OfferAddressInput) {
     return getOffersForAddress(addr);
-  }
-  static async getOffersForESIID(esiid: string) {
-    return getOffersForESIID(esiid);
   }
   static async getRetailRates(params: any) {
     return getRetailRates(params);
   }
   
   // Instance methods for backward compatibility
-  async offersByEsiid({ esiid }: { esiid: string }) {
-    return getOffersForESIID(esiid);
-  }
-  
-  async offersByAddress({ address, city, state, zip }: { address: string; city: string; state: string; zip: string }) {
-    return getOffersForAddress({ line1: address, city, state, zip });
+  async offersByAddress({ address, city, state, zip, tdsp }: { address?: string; city?: string; state?: string; zip: string; tdsp?: string | null }) {
+    return getOffersForAddress({ line1: address, city, state, zip, tdsp: tdsp ?? undefined });
   }
 }
 
