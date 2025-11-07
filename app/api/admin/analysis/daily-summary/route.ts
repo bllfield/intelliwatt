@@ -1,98 +1,133 @@
 // app/api/admin/analysis/daily-summary/route.ts
-import { NextRequest, NextResponse } from 'next/server';
-import { getDailySummary } from '@/lib/analysis/dailySummary';
-import { requireAdmin } from '@/lib/auth/admin';
-import { getCorrelationId } from '@/lib/correlation';
-import { DateTime } from 'luxon';
+import { NextRequest, NextResponse } from "next/server";
+import { PrismaClient } from "@prisma/client";
+import { DateTime } from "luxon";
+import { expectedIntervalsForDateISO } from "@/lib/analysis/dst";
 
-function defaults(range?: { start?: string; end?: string }) {
-  const tz = 'America/Chicago';
-  const now = DateTime.now().setZone(tz);
-  
-  // If end is provided, parse it; otherwise use today
-  const endDate = range?.end 
-    ? DateTime.fromISO(range.end, { zone: tz })
-    : now;
-  
-  // If start is provided, parse it; otherwise use 7 days before end
-  const startDate = range?.start
-    ? DateTime.fromISO(range.start, { zone: tz })
-    : endDate.minus({ days: 7 });
-  
-  // Return as YYYY-MM-DD strings in local timezone
-  return {
-    startIso: startDate.toISODate() || '',
-    endIso: endDate.toISODate() || '',
-  };
+export const dynamic = "force-dynamic";
+
+function jsonError(message: string, status = 400) {
+  return NextResponse.json({ ok: false, error: message }, { status });
 }
 
-async function handle(req: NextRequest) {
-  const corrId = getCorrelationId(req.headers);
-  const t0 = Date.now();
+function normalizeDateRange({ dateStart, dateEnd }: { dateStart?: string | null; dateEnd?: string | null }) {
+  const zone = "America/Chicago";
+  const todayLocal = DateTime.now().setZone(zone).startOf("day");
+  const defaultStart = todayLocal.minus({ days: 7 });
+  const defaultEnd = todayLocal.plus({ days: 1 });
 
-  const gate = requireAdmin(req);
-  if (!gate.ok) return NextResponse.json(gate.body, { status: gate.status });
+  const start = dateStart ? DateTime.fromISO(dateStart, { zone }) : defaultStart;
+  const end = dateEnd ? DateTime.fromISO(dateEnd, { zone }) : defaultEnd;
+  return { start, end, zone };
+}
+
+export async function GET(req: NextRequest) {
+  const admin = req.headers.get("x-admin-token");
+  if (!process.env.ADMIN_TOKEN || admin !== process.env.ADMIN_TOKEN) {
+    return jsonError("Unauthorized", 401);
+  }
+
+  const url = new URL(req.url);
+  const esiid = url.searchParams.get("esiid");
+  const meter = url.searchParams.get("meter");
+  const dateStart = url.searchParams.get("dateStart");
+  const dateEnd = url.searchParams.get("dateEnd");
+
+  const { start, end, zone } = normalizeDateRange({ dateStart, dateEnd });
+  if (!start.isValid || !end.isValid || end <= start) {
+    return jsonError("Invalid dateStart/dateEnd");
+  }
+
+  const rawTable = process.env.SMT_INTERVAL_TABLE || 'SmtInterval';
+  const SMT_TABLE = `"${rawTable.replace(/"/g, '""')}"`;
+  const prisma = new PrismaClient();
 
   try {
-    let esiid: string | undefined;
-    let meter: string | undefined;
-    let dateStart: string | undefined;
-    let dateEnd: string | undefined;
+    const params: any[] = [];
+    let idx = 1;
+    const where: string[] = [];
 
-    if (req.method === 'GET') {
-      const sp = new URL(req.url).searchParams;
-      esiid = sp.get('esiid') ?? undefined;
-      meter = sp.get('meter') ?? undefined;
-      dateStart = sp.get('dateStart') ?? undefined;
-      dateEnd = sp.get('dateEnd') ?? undefined;
-    } else {
-      const body = await req.json().catch(() => ({}));
-      esiid = body.esiid ?? undefined;
-      meter = body.meter ?? undefined;
-      dateStart = body.dateStart ?? undefined;
-      dateEnd = body.dateEnd ?? undefined;
+    where.push(`ts >= $${idx++} AND ts < $${idx++}`);
+    params.push(start.toUTC().toISO(), end.toUTC().toISO());
+
+    if (esiid) {
+      where.push(`esiid = $${idx++}`);
+      params.push(esiid);
+    }
+    if (meter) {
+      where.push(`meter = $${idx++}`);
+      params.push(meter);
     }
 
-    const { startIso, endIso } = defaults({ start: dateStart, end: dateEnd });
+    const sql = `
+      SELECT
+        to_char((ts AT TIME ZONE 'America/Chicago')::date, 'YYYY-MM-DD') AS day_local,
+        esiid,
+        meter,
+        COUNT(*)::int AS found
+      FROM ${SMT_TABLE}
+      WHERE ${where.join(' AND ')}
+      GROUP BY day_local, esiid, meter
+      ORDER BY day_local, esiid, meter
+    `;
 
-    const rows = await getDailySummary({
-      esiid,
-      meter,
-      dateStart: startIso,
-      dateEnd: endIso,
+    const rows = await prisma.$queryRawUnsafe<any[]>(sql, ...params);
+
+    const days: string[] = [];
+    for (let d = start.startOf('day'); d < end; d = d.plus({ days: 1 })) {
+      days.push(d.toFormat('yyyy-LL-dd'));
+    }
+
+    const byKey = new Map<string, any>();
+    for (const r of rows) {
+      byKey.set(`${r.day_local}||${r.esiid || ''}||${r.meter || ''}`, r);
+    }
+
+    const pairs = new Set<string>();
+    for (const r of rows) {
+      pairs.add(`${r.esiid || ''}||${r.meter || ''}`);
+    }
+
+    if (pairs.size === 0) {
+      return NextResponse.json({
+        ok: true,
+        rows: [],
+        meta: {
+          filters: { esiid: esiid || null, meter: meter || null },
+          range: { start: start.toISO(), end: end.toISO(), zone },
+          table: SMT_TABLE,
+        },
+      });
+    }
+
+    const pairList = Array.from(pairs);
+    const out: any[] = [];
+    for (const pair of pairList) {
+      const [pairEsiid, pairMeter] = pair.split('||');
+      if (!pairEsiid && esiid) continue;
+      if (!pairMeter && meter) continue;
+
+      for (const day of days) {
+        const rec = byKey.get(`${day}||${pairEsiid || ''}||${pairMeter || ''}`);
+        const found = rec?.found ?? 0;
+        const expected = expectedIntervalsForDateISO(day);
+        const completeness = expected > 0 ? +(found / expected).toFixed(4) : 0;
+        out.push({ date: day, esiid: pairEsiid || null, meter: pairMeter || null, found, expected, completeness });
+      }
+    }
+
+    return NextResponse.json({
+      ok: true,
+      rows: out,
+      meta: {
+        filters: { esiid: esiid || null, meter: meter || null },
+        range: { start: start.toISO(), end: end.toISO(), zone },
+        table: SMT_TABLE,
+      },
     });
-
-    const durationMs = Date.now() - t0;
-    console.log(
-      JSON.stringify({
-        corrId,
-        route: 'admin/analysis/daily-summary',
-        method: req.method,
-        status: 200,
-        durationMs,
-        count: rows.length,
-      })
-    );
-    return NextResponse.json({ ok: true, corrId, rows }, { status: 200 });
   } catch (err: any) {
-    const durationMs = Date.now() - t0;
-    console.error(
-      JSON.stringify({
-        corrId,
-        route: 'admin/analysis/daily-summary',
-        method: req.method,
-        status: 500,
-        durationMs,
-        errorClass: 'BUSINESS_LOGIC',
-        message: err?.message,
-      })
-    );
-    return NextResponse.json({ ok: false, corrId, error: 'DAILY_SUMMARY_FAILED' }, { status: 500 });
+    return jsonError(err?.message || 'daily-summary failed', 500);
+  } finally {
+    await prisma.$disconnect();
   }
 }
-
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
-
-export const GET = handle;
-export const POST = handle;

@@ -182,3 +182,49 @@ X-RateLimit-Reset: 1640995200
 - **On update**: Invalidate by address ID
 - **On delete**: Remove from cache
 - **TTL**: Automatic expiration after 5 minutes
+
+---
+
+**POST /api/admin/wattbuy/ingest**
+
+Headers: `x-admin-token`
+```json
+{
+  "zip": "75201",
+  "offers": [ /* WattBuy offers array */ ]
+}
+```
+Response:
+```json
+{ "ok": true, "plansUpserted": 12, "planIds": [1,2,3] }
+```
+
+**POST /api/plan/estimate**
+
+Headers: `x-admin-token`
+```json
+{
+  "planId": 123,
+  "usage": {
+    "granularity": "interval15" | "hourly" | "monthly",
+    "points": [ /* usage points */ ]
+  }
+}
+```
+Response:
+```json
+{
+  "ok": true,
+  "planId": 123,
+  "breakdown": {
+    "energy": 0,
+    "delivery": 0,
+    "baseFees": 0,
+    "riders": 0,
+    "credits": 0,
+    "adjustments": 0,
+    "total": 0,
+    "details": [ { "label": "Monthly fees", "amount": 4.95 } ]
+  }
+}
+```

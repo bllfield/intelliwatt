@@ -141,3 +141,208 @@ Capture Smart Meter Texas files in RAW form before any parsing, maintaining RAW�
 - Vercel env: `SHARED_INGEST_SECRET` (required), `ADMIN_TOKEN` (admin routes), `WATTBUY_API_KEY` (nightly).
 
 - Droplet env: `/home/deploy/smt_ingest/.env` includes `SHARED_INGEST_SECRET=...`.
+
+Project Plan Update — Add This Section
+Phase 3 Continued — SMT Normalization + ESIID Resolution Integration
+
+Goal:
+Connect SMT interval data (normalized and persisted) with verified ESIIDs pulled via WattBuy until direct SMT Agreement lookups are activated.
+
+✅ Completed in this thread
+
+Confirmed SMT normalization + Vercel automation working end-to-end.
+
+Added /api/admin/analysis/daily-summary and /api/admin/cron/normalize-smt-catch for interval completeness tracking.
+
+Fixed Next.js TypeScript return types for admin routes.
+
+Built and deployed new WattBuy integration flow:
+
+lib/wattbuy/client.ts — REST client for https://apis.wattbuy.com/v3/electricity/info/esi.
+
+app/api/admin/address/resolve-esiid → lookup only.
+
+app/api/admin/address/resolve-and-save → lookup + save ESIID to HouseAddress & UserProfile.
+
+app/api/admin/esiid/resolve-meter → find latest meter in UsageInterval.
+
+CLI scripts: scripts/admin/resolve.ts, scripts/admin/esiid-save.ts.
+
+Added WattBuy 403-diagnostic probe route (/api/admin/wattbuy/probe-esiid) with multi-strategy auth/param fallbacks.
+
+Verified database schema supports ESIID fields in HouseAddress, UserProfile, SmtInterval.
+
+Identified WattBuy 403 root cause → domain whitelist mismatch (Intellipath vs. Intelliwatt).
+
+⚙️ Environment / Config
+
+WATTBUY_API_KEY and ADMIN_TOKEN already in .env.local and Vercel.
+
+BASE_URL switches between:
+
+http://localhost:3000 (local testing)
+
+https://intelliwatt.com (prod API calls)
+
+WattBuy_BASE_URL hard-coded to https://apis.wattbuy.com/v3.
+
+📤 Action Items for Next Steps
+
+WattBuy must whitelist https://intelliwatt.com for API origin approval.
+(403s occur because only intellipath-solutions.com is registered.)
+
+Once confirmed, set BASE_URL=https://intelliwatt.com everywhere and rerun:
+
+npm run esiid:resolve-save -- <houseId> "9515 Santa Paula Dr" "Fort Worth" "TX" "76116"
+
+
+Confirm successful ESIID lookup and persistence in HouseAddress/UserProfile.
+
+After ESIID flow stable, integrate SMT AgreementESIIDs API to replace WattBuy lookup entirely.
+
+💡 Next phase goal:
+Make the system fully address-first → auto-resolve ESIID + meter and link to persisted intervals for analysis.
+
+PC-2025-11-01: WattBuy → ESIID Bridge (Finalize)
+
+Rationale
+Persist ESIIDs via WattBuy until SMT Agreement APIs replace this flow. Preserve RAW→CDM discipline.
+
+Scope
+
+RAW capture: Persist full WattBuy lookup responses to raw_wattbuy (probe/save flows).
+
+Transformer: tx_wattbuy_to_meter maps → HouseAddress.esiid, utilityName, tdspSlug.
+
+Routes:
+
+POST /api/admin/address/resolve-esiid (lookup only)
+
+POST /api/admin/address/resolve-and-save (lookup + persist ESIID to HouseAddress and UserProfile)
+
+Auth: requireAdmin header (x-admin-token).
+
+Observability: corrId + duration logging.
+
+Rollback
+Disable the admin routes; RAW in raw_wattbuy remains intact (no schema drops).
+(Aligned with component standards for WattBuy RAW→CDM.)
+
+PC-2025-11-02: Daily Completeness Summary (Admin)
+
+Rationale
+Provide day-level QA signal for SMT coverage before plan analysis.
+
+Scope
+
+Route: GET /api/admin/analysis/daily-summary (admin-gated)
+
+Query: esiid?, meter?, dateStart, dateEnd
+
+Response (per ESIID/Meter/Day):
+{ esiid, meter, day, totalSlots, realCount, filledCount, pct_complete, kWh_real, kWh_filled, kWh_total }
+
+Auth: requireAdmin
+
+Observability: corrId + duration; counters for missing days.
+
+Cron (after verification)
+
+Add Vercel schedule that reads daily completeness to a cache/report; protect with x-vercel-cron (+ CRON_SECRET if set). See lib/auth/cron.ts.
+
+Rollback
+Remove the route/cron; no schema changes required.
+
+PC-2025-11-03: Plan Display Compliance (WattBuy)
+
+Rationale
+Satisfy WattBuy/PUCT presentation requirements.
+
+Scope
+
+Extend lib/wattbuy/normalize.ts to extract and store:
+
+supplier_registration_number (PUCT #), supplier_contact_email, supplier_contact_phone, full utility_name (TDSP).
+
+Update UI (components/plan/PlanCard.tsx) to display these fields with fallbacks (“Not provided by supplier”).
+
+Keep existing layouts and offer logic unchanged.
+
+References
+See docs/WATTBUY_COMPLIANCE_UPDATE.md for fields and fallbacks.
+
+Rollback
+Hide the extra UI fields; keep normalization code in place for future use.
+
+First test sequence (matches our admin tooling)
+# 0) Sanity
+$env:ADMIN_TOKEN = '<YOUR_ADMIN_TOKEN>'
+.\scripts\admin\Invoke-Intelliwatt.ps1 -Uri 'https://intelliwatt.com/api/admin/env-health'
+
+# 1) Probe WattBuy ESIID after whitelist
+.\scripts\admin\Invoke-Intelliwatt.ps1 -Uri 'https://intelliwatt.com/api/admin/wattbuy/probe-esiid?zip=76116&line1=9515%20Santa%20Paula%20Dr&city=Fort%20Worth&state=TX'
+
+# 2) Resolve-and-save (persists HouseAddress.esiid + utility)
+.\scripts\admin\Invoke-Intelliwatt.ps1 -Uri 'https://intelliwatt.com/api/admin/address/resolve-and-save?email=bllfield@yahoo.com'
+
+# 3) Daily completeness (once route is in)
+.\scripts\admin\Invoke-Intelliwatt.ps1 -Uri 'https://intelliwatt.com/api/admin/analysis/daily-summary?dateStart=2025-10-28&dateEnd=2025-11-06&esiid=10443720004895510'
+
+
+Env and auth patterns for these routes are already documented in PROJECT_CONTEXT.md and AUTOMATION_STATUS.md.
+
+Phase 3.5 — ERCOT ESIID Extract Integration (WattBuy Bypass)
+
+Status: ✅ Implementation complete | 🚀 Pending production redeploy
+
+✅ Completed in this phase
+
+ERCOT Public Data Integration
+
+Added automated pull logic for ERCOT TDSP ESIID Extract (ZP15-612) via public ERCOT Market Data Transparency page.
+
+Implemented nightly cron endpoint:
+
+/api/admin/ercot/cron (requires CRON_SECRET)
+
+Resolves and downloads the latest ERCOT extract file, hashes it, and skips duplicates.
+
+Implemented admin fetch route:
+
+/api/admin/ercot/fetch-latest?url=...&notes=daily
+
+Implemented ingest log endpoint:
+
+/api/admin/ercot/ingests (requires ADMIN_TOKEN)
+
+Lists prior ingests and file hashes.
+
+ERCOT Loader and Matcher
+
+Created ingestion scripts to normalize and upsert data into ErcotEsiidIndex.
+
+Built fuzzy address matcher with USPS normalization and trigram index (pg_trgm).
+
+Verified end-to-end matching using sample address (9514 Santa Paula Drive, Fort Worth, TX 76116).
+
+Daily Summary Engine
+
+Implemented /api/admin/analysis/daily-summary for DST-aware SMT completeness checks.
+
+Added CLI (npm run analysis:daily:csv) to export CSV summaries.
+
+Environment & Infrastructure
+
+Environment variables documented and validated:
+
+ERCOT_PAGE_URL=https://www.ercot.com/mp/data-products/data-product-details?id=ZP15-612
+
+ERCOT_PAGE_FILTER=TDSP (optional)
+
+ADMIN_TOKEN, CRON_SECRET, DATABASE_URL, PROD_BASE_URL
+
+Droplet cleaned of all Vercel CLI and linked metadata (~/.vercel removed).
+
+Droplet confirmed working for Git and local helper scripts (run as deploy user).
+
+Production Vercel build set to Next.js Default Output (not Static Export).

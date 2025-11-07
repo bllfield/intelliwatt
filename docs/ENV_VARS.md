@@ -10,6 +10,7 @@
 - `SMT_SFTP_HOST`, `SMT_SFTP_USER`, `SMT_SFTP_KEY` — Smart Meter Texas SFTP (for droplet)
 - `SMT_FETCH_TRIGGER_URL` — Vercel URL for on-demand SMT fetch trigger (e.g., `https://intelliwatt.com/api/admin/smt/fetch-trigger`)
 - `SMT_FETCH_ADMIN_TOKEN` — Token for SMT fetch trigger authorization (can reuse `ADMIN_TOKEN`)
+- `SMT_INTERVAL_TABLE` — Optional override if your SMT interval table/view name differs from `SmtInterval`
 - `DROPLET_WEBHOOK_URL` — Droplet webhook URL for on-demand fetch (e.g., `http://64.225.25.54:8787/trigger/smt-now`)
 - `DROPLET_WEBHOOK_SECRET` — Shared secret sent in header `x-intelliwatt-secret`
 - `GREENBUTTON_API_KEY` — (future) Green Button API access
@@ -66,3 +67,11 @@ Invoke-RestMethod -Headers $headers -Uri "https://<your-preview>.vercel.app/api/
 
 **Related keys**
 - `ADMIN_SEED_TOKEN` (if present) is for one-time bootstrap/seed flows and is **not** used for route protection.
+
+### ERCOT fetch settings
+- `ERCOT_DAILY_URL` — Public HTTPS URL for the daily TDSP ESIID extract.
+- `ERCOT_MONTHLY_URL` — Public HTTPS URL for the monthly extract (optional).
+- `ERCOT_USER_AGENT` — Optional custom User-Agent string when fetching ERCOT files.
+- `CRON_SECRET` — Optional token that allows `/api/admin/ercot/cron?token=...` for manual/QA runs in addition to Vercel cron.
+- `ERCOT_PAGE_URL` — Public ERCOT product page (e.g., EMIL ZP15-612 listing). When set, the system resolves the latest `mirDownload?doclookupId=...` link automatically if `ERCOT_DAILY_URL` is omitted.
+- `ERCOT_PAGE_FILTER` — Optional substring to prefer in link context (e.g., `TDSP`, `ESIID`).

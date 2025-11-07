@@ -451,3 +451,39 @@ model SmtInterval {
   @@unique([esiid, meter, ts], name: "esiid_meter_ts")
   @@index([esiid, meter, ts], name: "esiid_meter_ts_idx")
 }
+
+model ErcotEsiidIndex {
+  id              BigInt   @id @default(autoincrement())
+  esiid           String   @unique @db.VarChar(22)    // Keep leading zeros
+  tdspCode        String?  @db.VarChar(16)
+  serviceAddress1 String?  @db.Text
+  serviceCity     String?  @db.VarChar(64)
+  serviceState    String?  @db.Char(2)
+  serviceZip      String?  @db.VarChar(10)
+  status          String?  @db.VarChar(16)            // e.g., ACTIVE/INACTIVE
+  premiseType     String?  @db.VarChar(32)
+  postedAtUtc     DateTime @db.Timestamptz            // When ERCOT posted the file (UTC)
+
+  // Normalized (USPS-style) fields for matching
+  normLine1       String?  @db.Text
+  normCity        String?  @db.VarChar(64)
+  normZip         String?  @db.VarChar(10)
+
+  @@index([normZip])
+}
+
+model ErcotIngestLog {
+  id              BigInt   @id @default(autoincrement())
+  source          String   @db.VarChar(256) // e.g. local-file:/path, or url:https://...
+  fileName        String?  @db.VarChar(256)
+  fileHash        String?  @db.VarChar(64)  // sha256 of raw file
+  headerSnapshot  String?  @db.Text         // first line headers as ingested (for schema drift)
+  rowsSeen        Int
+  rowsUpsert      Int
+  startedAt       DateTime @default(now()) @db.Timestamptz
+  finishedAt      DateTime @db.Timestamptz
+  notes           String?  @db.Text
+
+  @@index([source])
+  @@index([fileHash])
+}

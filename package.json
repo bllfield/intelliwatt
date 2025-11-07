@@ -15,7 +15,23 @@
     "esiid:meter": "tsx ./scripts/admin/resolve.ts esiid",
     "esiid:resolve-save": "tsx ./scripts/admin/esiid-save.ts resolve-save",
     "esiid:save": "tsx ./scripts/admin/esiid-save.ts save",
-    "test:connections": "tsx ./scripts/admin/test-connections.ts"
+    "test:connections": "tsx ./scripts/admin/test-connections.ts",
+    "check:ercot": "node scripts/db/check_ercot_setup.mjs",
+    "check:ercot:local": "node scripts/db/check_ercot_setup.mjs",
+    "ercot:test": "tsx scripts/ercot/test_match.ts",
+    "ercot:test:local": "tsx scripts/ercot/test_match.ts --",
+    "ercot:load:file": "tsx scripts/ercot/load_from_file.ts --",
+    "ercot:fetch:latest": "tsx scripts/ercot/fetch_latest.ts --",
+    "ercot:cron:curl": "bash -lc 'curl -sS \"http://localhost:3000/api/admin/ercot/cron?token=$CRON_SECRET\"'",
+    "deploy:prod": "vercel --prod --confirm",
+    "smoke:prod": "node scripts/deploy/smoke_prod.mjs",
+    "analysis:daily:csv": "tsx scripts/admin/export_daily_summary.ts --",
+    "plans:ingest:wattbuy": "echo 'Use curl with x-admin-token to /api/admin/wattbuy/ingest (see QUICK_START)'",
+    "plans:estimate": "echo 'Use curl to POST /api/plan/estimate (see QUICK_START)'",
+    "test:ercot:fetch": "node scripts/admin/test_ercot_fetch.mjs",
+    "ercot:url:sanity": "node scripts/admin/ercot_url_sanity.mjs",
+    "ercot:ingests": "powershell -NoProfile -Command \"Invoke-WebRequest -Headers @{ 'x-admin-token'=$env:ADMIN_TOKEN } -Uri $env:PROD_BASE_URL'/api/admin/ercot/ingests?limit=10' -UseBasicParsing | Select-Object -ExpandProperty Content\"",
+    "ercot:resolve-fetch": "node scripts/admin/resolve_and_fetch.mjs"
   },
   "dependencies": {
     "@google-cloud/vision": "^5.3.4",
@@ -33,6 +49,8 @@
     "pdf-parse": "^2.1.6",
     "pdfjs-dist": "^5.4.149",
     "prisma": "^6.11.1",
+    "dotenv": "^16.4.5",
+    "pg": "^8.11.5",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },

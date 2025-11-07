@@ -1,21 +1,16 @@
 {
-  "framework": "nextjs",
-  "buildCommand": "npm run build",
-  "devCommand": "npm run dev",
-  "installCommand": "npm install",
-  "outputDirectory": ".next",
   "crons": [
     {
-      "path": "/api/admin/rates/refresh",
-      "schedule": "0 2 * * *"
+      "path": "/api/admin/ercot/cron",
+      "schedule": "15 3 * * *"
     },
     {
-      "path": "/api/rates/efl-refresh",
-      "schedule": "0 3 * * *"
+      "path": "/api/admin/ercot/cron",
+      "schedule": "30 4 * * 3"
     },
     {
-      "path": "/api/admin/cron/normalize-smt",
-      "schedule": "*/5 * * * *"
+      "path": "/api/admin/ercot/cron",
+      "schedule": "0 9 * * *"
     }
   ]
 }
