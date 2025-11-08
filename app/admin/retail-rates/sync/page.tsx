@@ -3,7 +3,7 @@
 // -----------------------------------------------------------
 // What this page does
 //  - Lets an admin trigger the batch sync endpoint (Step 47) with controls:
-//      • TDSP (or explicit EIA utilityID)
+//      • TDSP (or explicit EIA utility_id)
 //      • verified_from (ISO like 2024-01-01 or epoch seconds)
 //      • maxPages
 //      • dry-run toggle
@@ -14,7 +14,7 @@
 // Usage
 //  - Navigate to /admin/retail-rates/sync
 //  - Enter token = ADMIN_SEED_TOKEN (server env)
-//  - Pick TDSP (or enter a utilityID), set options, click "Run Sync"
+//  - Pick TDSP (or enter a utility_id), set options, click "Run Sync"
 //
 // Env (server)
 //  - ADMIN_SEED_TOKEN
@@ -27,7 +27,7 @@ import { useCallback, useMemo, useState } from 'react';
 type SyncResponse = {
   query: {
     tdsp: string | null;
-    utilityID: number | null;
+    utility_id: number | null;
     state: string;
     verified_from: number | null;
     maxPages: number;
@@ -48,7 +48,7 @@ export default function RetailRatesSyncPage() {
   const [useUtilityID, setUseUtilityID] = useState(false);
 
   const [tdsp, setTdsp] = useState<'oncor' | 'centerpoint' | 'aep_n' | 'aep_c' | 'tnmp' | 'unknown'>('oncor');
-  const [utilityID, setUtilityID] = useState<string>(''); // EIA number (string input)
+  const [utilityId, setUtilityId] = useState<string>(''); // EIA number (string input)
   const [verifiedFrom, setVerifiedFrom] = useState<string>('2024-01-01');
   const [maxPages, setMaxPages] = useState<number>(5);
   const [dryRun, setDryRun] = useState(true);
@@ -60,10 +60,10 @@ export default function RetailRatesSyncPage() {
   const canSubmit = useMemo(() => {
     if (!token || loading) return false;
     if (useUtilityID) {
-      return /^\d+$/.test(utilityID.trim());
+      return /^\d+$/.test(utilityId.trim());
     }
     return Boolean(tdsp);
-  }, [token, loading, useUtilityID, utilityID, tdsp]);
+  }, [token, loading, useUtilityID, utilityId, tdsp]);
 
   const runSync = useCallback(async () => {
     if (!canSubmit) return;
@@ -80,7 +80,7 @@ export default function RetailRatesSyncPage() {
       };
       if (verifiedFrom.trim()) body.verified_from = verifiedFrom.trim();
       if (useUtilityID) {
-        body.utilityID = Number(utilityID.trim());
+        body.utility_id = Number(utilityId.trim());
       } else {
         body.tdsp = tdsp;
       }
@@ -106,19 +106,19 @@ export default function RetailRatesSyncPage() {
     } finally {
       setLoading(false);
     }
-  }, [canSubmit, dryRun, maxPages, tdsp, verifiedFrom, token, useUtilityID, utilityID]);
+  }, [canSubmit, dryRun, maxPages, tdsp, verifiedFrom, token, useUtilityID, utilityId]);
 
   const download = useCallback(() => {
     if (!resp) return;
     const blob = new Blob([JSON.stringify(resp, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    const tag = useUtilityID ? `eia-${utilityID.trim()}` : tdsp;
+    const tag = useUtilityID ? `eia-${utilityId.trim()}` : tdsp;
     a.href = url;
     a.download = `retail-rates-sync-${tag}-${Date.now()}.json`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [resp, useUtilityID, utilityID, tdsp]);
+  }, [resp, useUtilityID, utilityId, tdsp]);
 
   return (
     <main className="min-h-screen w-full bg-gray-50">
@@ -150,7 +150,7 @@ export default function RetailRatesSyncPage() {
                 onChange={(e) => setUseUtilityID(e.target.checked)}
               />
               <label htmlFor="use-utility-id" className="text-sm">
-                Use EIA utilityID instead of TDSP shortcut
+                Use EIA utility_id instead of TDSP shortcut
               </label>
             </div>
 
@@ -172,7 +172,7 @@ export default function RetailRatesSyncPage() {
                   </select>
                 </div>
                 <div className="opacity-60">
-                  <label className="block text-sm font-medium mb-1">utilityID (EIA)</label>
+                  <label className="block text-sm font-medium mb-1">utility_id (EIA)</label>
                   <input
                     className="w-full rounded-lg border px-3 py-2"
                     value=""
@@ -184,11 +184,11 @@ export default function RetailRatesSyncPage() {
             ) : (
               <div className="grid gap-2 md:grid-cols-2">
                 <div>
-                  <label className="block text-sm font-medium mb-1">utilityID (EIA)</label>
+                  <label className="block text-sm font-medium mb-1">utility_id (EIA)</label>
                   <input
                     className="w-full rounded-lg border px-3 py-2"
-                    value={utilityID}
-                    onChange={(e) => setUtilityID(e.target.value)}
+                    value={utilityId}
+                    onChange={(e) => setUtilityId(e.target.value)}
                     placeholder="e.g., 44372 for Oncor"
                     inputMode="numeric"
                   />
@@ -199,7 +199,7 @@ export default function RetailRatesSyncPage() {
                     className="w-full rounded-lg border px-3 py-2"
                     value="—"
                     disabled
-                    placeholder="n/a when using utilityID"
+                    placeholder="n/a when using utility_id"
                   />
                 </div>
               </div>
@@ -275,7 +275,7 @@ export default function RetailRatesSyncPage() {
                   <span className="text-gray-500">TDSP:</span> {resp.query.tdsp ?? '—'}
                 </div>
                 <div>
-                  <span className="text-gray-500">utilityID:</span> {resp.query.utilityID ?? '—'}
+                  <span className="text-gray-500">utility_id:</span> {resp.query.utility_id ?? '—'}
                 </div>
                 <div>
                   <span className="text-gray-500">verified_from:</span> {resp.query.verified_from ?? '—'}

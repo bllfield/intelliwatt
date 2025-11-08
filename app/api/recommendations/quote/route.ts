@@ -197,7 +197,7 @@ export async function POST(req: NextRequest) {
               received_at: rc.createdAt.toISOString(),
               id: rc.id,
               name: rc.planName,
-              utilityID: null,
+              utility_id: null,
               verified_at: null,
               raw: {},
             },

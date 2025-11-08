@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
   // Optional: address, city, state
   if (sp.get('address')) q.address = sp.get('address')!;
   if (sp.get('city')) q.city = sp.get('city')!;
-  if (sp.get('state')) q.state = sp.get('state')!.toLowerCase(); // API expects lowercase
+  if (sp.get('state')) q.state = sp.get('state')!.toUpperCase(); // API expects uppercase
   // Optional: housing_chars, utility_list
   if (sp.get('housing_chars')) {
     const val = sp.get('housing_chars')!;
@@ -44,7 +44,7 @@ export async function GET(req: NextRequest) {
   });
   try {
     const data = await fetchElectricityInfo(q);
-    await prisma.rawWattbuyElectricityInfo.create({
+    await (prisma as any).rawWattbuyElectricityInfo.create({
       data: {
         state: q.state ? q.state.toUpperCase() : null, // Store uppercase in DB
         zip5: q.zip ?? null,

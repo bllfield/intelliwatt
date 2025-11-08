@@ -3,7 +3,7 @@
 // --------------------------------------------------------------------------------------
 // What it does
 //   - Server-side proxy to WattBuy Retail Rate DB (tariffs + component rates)
-//   - Accepts either utilityID=<EIA id> or tdsp=<oncor|centerpoint|aep_n|aep_c|tnmp>, plus state=TX
+//   - Accepts either utility_id=<EIA id> or tdsp=<oncor|centerpoint|aep_n|aep_c|tnmp>, plus state=TX
 //   - Optional verified_from (epoch seconds or ISO); optional page (default 1)
 //   - Keeps your API key on the server; adds a tiny rate limiter
 //
@@ -13,13 +13,14 @@
 //
 // Usage examples:
 //   /api/retail-rates?tdsp=oncor&state=TX
-//   /api/retail-rates?utilityID=44372&state=TX&page=2
+//   /api/retail-rates?utility_id=44372&state=TX&page=2
 //   /api/retail-rates?tdsp=centerpoint&state=TX&verified_from=2024-01-01
 //
 // Env:
 //   WATTBUY_API_KEY must be set on the server.
 
 import { NextRequest, NextResponse } from 'next/server';
+import { wbGet } from '@/lib/wattbuy/client';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -65,7 +66,7 @@ export async function GET(req: NextRequest) {
     // ---- input
     const url = new URL(req.url);
     const tdspRaw = (url.searchParams.get('tdsp') || '').toLowerCase().trim();
-    const utilityIDParam = url.searchParams.get('utilityID');
+    const utilityIDParam = url.searchParams.get('utility_id');
     const state = (url.searchParams.get('state') || 'TX').toUpperCase();
     const pageParam = url.searchParams.get('page');
     const verifiedFromParam = url.searchParams.get('verified_from'); // epoch seconds OR ISO date string
@@ -77,12 +78,12 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'This proxy currently supports Texas (TX) only.' }, { status: 400 });
     }
 
-    // Resolve utilityID
+    // Resolve utility_id
     let utilityID: number | null = null;
     if (utilityIDParam) {
       const n = Number(utilityIDParam);
       if (!Number.isFinite(n)) {
-        return NextResponse.json({ error: 'utilityID must be a number.' }, { status: 400 });
+        return NextResponse.json({ error: 'utility_id must be a number.' }, { status: 400 });
       }
       utilityID = n;
     } else if (tdspRaw) {
@@ -96,7 +97,7 @@ export async function GET(req: NextRequest) {
       utilityID = mapped;
     } else {
       return NextResponse.json(
-        { error: 'Provide either utilityID=<EIA id> or tdsp=<oncor|centerpoint|aep_n|aep_c|tnmp>.' },
+        { error: 'Provide either utility_id=<EIA id> or tdsp=<oncor|centerpoint|aep_n|aep_c|tnmp>.' },
         { status: 400 }
       );
     }
@@ -123,33 +124,24 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Build request
-    const endpoint = 'https://apis.wattbuy.com/v3/electricity/retail-rates';
-    const qp = new URLSearchParams();
-    qp.set('utilityID', String(utilityID));
-    qp.set('state', state);
-    qp.set('page', String(page));
-    if (verified_from != null) qp.set('verified_from', String(verified_from));
+    // Build request using wbGet (clean headers, no internal header forwarding)
+    const params: Record<string, unknown> = {
+      utility_id: String(utilityID),
+      state,
+      page: String(page),
+    };
+    if (verified_from != null) params.verified_from = String(verified_from);
 
-    const res = await fetch(`${endpoint}?${qp.toString()}`, {
-      headers: {
-        Authorization: `Bearer ${process.env.WATTBUY_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      // Avoid caching while we iterate
-      cache: 'no-store',
-    });
+    const result = await wbGet('electricity/retail-rates', params);
 
-    const text = await res.text();
-    const json = safeJson(text);
-
-    if (!res.ok) {
-      // Redact any accidental token echoes
-      const msg = (json?.error || res.statusText || 'Upstream error')
+    if (!result.ok) {
+      const msg = (result.text || 'Upstream error')
         .toString()
         .replace(/(Bearer\s+)?[A-Za-z0-9-_]{20,}/g, '***');
-      return NextResponse.json({ error: msg, upstreamStatus: res.status, upstream: json }, { status: 502 });
+      return NextResponse.json({ error: msg, upstreamStatus: result.status, upstream: result.text }, { status: 502 });
     }
+
+    const json = result.data;
 
     // Provide a tiny "mini" summary for quick QA in the UI without knowing schema details
     const items = Array.isArray(json?.results || json?.data) ? (json.results || json.data) : [];
@@ -166,7 +158,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json(
       {
-        query: { utilityID, tdsp: tdspRaw || null, state, page, verified_from: verified_from ?? null },
+        query: { utility_id: utilityID, tdsp: tdspRaw || null, state, page, verified_from: verified_from ?? null },
         count: items.length,
         mini,
         raw: json,

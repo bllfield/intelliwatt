@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
   // Optional: address, city, state
   if (sp.get('address')) q.address = sp.get('address')!;
   if (sp.get('city')) q.city = sp.get('city')!;
-  if (sp.get('state')) q.state = sp.get('state')!.toLowerCase(); // API expects lowercase
+  if (sp.get('state')) q.state = sp.get('state')!.toUpperCase(); // API expects uppercase
   // Optional: utility_eid (number)
   if (sp.get('utility_eid')) {
     const utilityEid = Number(sp.get('utility_eid')!);
@@ -42,14 +42,14 @@ export async function GET(req: NextRequest) {
   });
   try {
     const data = await fetchElectricityCatalog(q);
-    await prisma.rawWattbuyElectricity.create({
+    await (prisma as any).rawWattbuyElectricity.create({
       data: {
         state: q.state ? q.state.toUpperCase() : null, // Store uppercase in DB
         utility: q.utility_eid ? String(q.utility_eid) : null, // Store utility_eid as string
         zip5: q.zip ?? null,
         upstreamStatus: 200,
         raw: data,
-      } as any,
+      },
     });
     // Extract useful metadata from response
     const hasEstimation = Boolean((data as any)?.estimation);

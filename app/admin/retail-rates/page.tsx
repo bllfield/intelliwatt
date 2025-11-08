@@ -2,7 +2,7 @@
 // Step 44: Admin Retail Rate Explorer — query the Retail Rate DB via our proxy
 // ---------------------------------------------------------------------------
 // What this page does
-//  - Calls /api/retail-rates with either tdsp (oncor|centerpoint|aep_n|aep_c|tnmp) or utilityID (EIA)
+//  - Calls /api/retail-rates with either tdsp (oncor|centerpoint|aep_n|aep_c|tnmp) or utility_id (EIA)
 //  - Optional: verified_from (epoch or ISO like 2024-01-01), page
 //  - Displays a mini table (id, name, dates, sector, component kinds) and lets you inspect/copy raw JSON
 //
@@ -48,9 +48,9 @@ const TDSP_EIA_HINT: Record<string, number> = {
 
 export default function AdminRetailRatesPage() {
   // ---- form state
-  const [mode, setMode] = useState<'tdsp' | 'utilityID'>('tdsp');
+  const [mode, setMode] = useState<'tdsp' | 'utility_id'>('tdsp');
   const [tdsp, setTdsp] = useState<'oncor' | 'centerpoint' | 'aep_n' | 'aep_c' | 'tnmp'>('oncor');
-  const [utilityID, setUtilityID] = useState<string>('');
+  const [utilityId, setUtilityId] = useState<string>('');
   const [verifiedFrom, setVerifiedFrom] = useState<string>('');
   const [page, setPage] = useState<string>('1');
 
@@ -61,9 +61,9 @@ export default function AdminRetailRatesPage() {
 
   const canFetch = useMemo(() => {
     if (mode === 'tdsp') return Boolean(tdsp);
-    const n = Number(utilityID);
+    const n = Number(utilityId);
     return Number.isFinite(n) && n > 0;
-  }, [mode, tdsp, utilityID]);
+  }, [mode, tdsp, utilityId]);
 
   const doFetch = useCallback(async () => {
     if (!canFetch || loading) return;
@@ -74,7 +74,7 @@ export default function AdminRetailRatesPage() {
     try {
       const qs = new URLSearchParams();
       if (mode === 'tdsp') qs.set('tdsp', tdsp);
-      else qs.set('utilityID', String(Number(utilityID)));
+      else qs.set('utility_id', String(Number(utilityId)));
 
       qs.set('state', 'TX');
       const p = Math.max(1, Number(page) || 1);
@@ -93,7 +93,7 @@ export default function AdminRetailRatesPage() {
     } finally {
       setLoading(false);
     }
-  }, [canFetch, loading, mode, tdsp, utilityID, verifiedFrom, page]);
+  }, [canFetch, loading, mode, tdsp, utilityId, verifiedFrom, page]);
 
   return (
     <main className="min-h-screen w-full bg-gray-50">
@@ -111,7 +111,7 @@ export default function AdminRetailRatesPage() {
               TDSP
             </label>
             <label className="inline-flex items-center gap-2 text-sm">
-              <input type="radio" checked={mode === 'utilityID'} onChange={() => setMode('utilityID')} />
+              <input type="radio" checked={mode === 'utility_id'} onChange={() => setMode('utility_id')} />
               Utility ID (EIA)
             </label>
           </div>
@@ -143,8 +143,8 @@ export default function AdminRetailRatesPage() {
                 <input
                   className="w-full rounded-lg border px-3 py-2"
                   placeholder="e.g., 44372"
-                  value={utilityID}
-                  onChange={(e) => setUtilityID(e.target.value)}
+                  value={utilityId}
+                    onChange={(e) => setUtilityId(e.target.value)}
                   inputMode="numeric"
                 />
               </div>

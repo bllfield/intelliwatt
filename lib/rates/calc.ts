@@ -63,7 +63,7 @@ export type RateConfig = {
     received_at: string;
     id?: string | number | null;
     name?: string | null;
-    utilityID?: number | null;
+    utility_id?: number | null;
     verified_at?: string | null;
     raw: any;
   };

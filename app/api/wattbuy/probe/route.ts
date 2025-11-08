@@ -77,7 +77,7 @@ export async function GET(req: NextRequest) {
     let retailResp: any = null;
     let eiaId: number | null = tdspToEia(tdspSlug);
     if (retail && eiaId) {
-      retailResp = await getRetailRates({ utilityID: eiaId, state: 'tx', page });
+      retailResp = await getRetailRates({ utility_id: eiaId, state: 'TX', page });
     }
 
     // Redact enroll links in diagnostics to avoid accidental sign-ups in QA

@@ -1,5 +1,53 @@
-const BASE = 'https://apis.wattbuy.com/v3';
+// lib/wattbuy/client.ts
 
+import { normalizeRetailRateParams, normalizeElectricityParams } from './params';
+
+export const WB_BASE = 'https://apis.wattbuy.com/v3';
+
+function buildUrl(path: string, params?: Record<string, unknown>): string {
+  const url = new URL(path.startsWith('http') ? path : `${WB_BASE}/${path.replace(/^\/+/, '')}`);
+  if (params) {
+    for (const [k, v] of Object.entries(params)) {
+      if (v === undefined || v === null) continue;
+      url.searchParams.set(k, String(v));
+    }
+  }
+  return url.toString();
+}
+
+function authHeader(): string {
+  const key = (process.env.WATTBUY_API_KEY || '').trim();
+  if (!key) throw new Error('WATTBUY_API_KEY is not set');
+  return `Bearer ${key}`;
+}
+
+export async function wbGet<T = any>(
+  path: string,
+  params?: Record<string, unknown>,
+  init?: Omit<RequestInit, 'headers'|'method'>
+): Promise<{ ok: boolean; status: number; data?: T; text?: string }> {
+  const res = await fetch(buildUrl(path, params), {
+    method: 'GET',
+    headers: {
+      Authorization: authHeader(),
+      Accept: 'application/json',
+    },
+    cache: 'no-store',
+    ...init,
+  });
+  const ct = res.headers.get('content-type') || '';
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    return { ok: false, status: res.status, text };
+  }
+  if (ct.includes('application/json')) return { ok: true, status: res.status, data: await res.json() as T };
+  return { ok: true, status: res.status, text: await res.text() };
+}
+
+export type WattBuyRetailRate = Record<string, any>;
+export type WattBuyElectricityMeta = Record<string, any>;
+
+// Legacy helper: qs for backward compatibility with existing function signatures
 function qs(params: Record<string, any>): string {
   const sp = new URLSearchParams();
   Object.entries(params).forEach(([k, v]) => {
@@ -55,6 +103,7 @@ function parseRetryAfter(v: string | null): number | undefined {
   return Number.isFinite(s) ? s * 1000 : undefined;
 }
 
+// Legacy safeFetchJSON - now uses wbGet internally but maintains backward compatibility
 async function safeFetchJSON<T = any>(url: string, opts: FetchOpts = {}): Promise<T> {
   const {
     timeoutMs = 12_000,
@@ -70,56 +119,90 @@ async function safeFetchJSON<T = any>(url: string, opts: FetchOpts = {}): Promis
   let attempt = 0;
   while (true) {
     attempt++;
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${process.env.WATTBUY_API_KEY}` }, signal: finalSignal } as any);
-    let body: any = null;
-    try { body = await res.json(); } catch { body = await res.text().catch(() => null); }
-
-    if (res.ok) {
+    // Use wbGet for clean headers, but extract path and params from full URL
+    const urlObj = new URL(url);
+    // Remove leading /v3/ if present, keep just the path after /v3/
+    let path = urlObj.pathname.replace(/^\/v3\//, '').replace(/^\//, '');
+    const params: Record<string, string> = {};
+    urlObj.searchParams.forEach((v, k) => {
+      params[k] = v;
+    });
+    
+    const result = await wbGet(path, params, { signal: finalSignal });
+    
+    if (result.ok && result.data !== undefined) {
       clearTimeout(id);
-      return body as T;
+      return result.data as T;
     }
 
-    if (res.status === 403) {
-      const excerpt = typeof body === 'string' ? body.slice(0, 200) : JSON.stringify(body || {}).slice(0, 200);
-      console.error(JSON.stringify({
-        route: 'wattbuy/safeFetchJSON',
-        status: 403,
-        hint: 'Upstream forbidden. Verify WattBuy API key scope and plan coverage.',
-        url: redactUrl(url),
-        body_excerpt: excerpt,
-      }));
+    if (!result.ok) {
+      const status = result.status;
+      const body = result.text || '';
+
+      if (status === 403) {
+        const excerpt = typeof body === 'string' ? body.slice(0, 200) : JSON.stringify(body || {}).slice(0, 200);
+        console.error(JSON.stringify({
+          route: 'wattbuy/safeFetchJSON',
+          status: 403,
+          hint: 'Upstream forbidden. Verify WattBuy API key scope and plan coverage.',
+          url: redactUrl(url),
+          body_excerpt: excerpt,
+        }));
+      }
+
+      if (attempt <= retries && retryOn(status)) {
+        const backoffMs = backoff(attempt);
+        await new Promise(r => setTimeout(r, backoffMs));
+        continue;
+      }
+
+      clearTimeout(id);
+      const err: any = new Error(`Upstream ${status}`);
+      err.status = status;
+      err.body = body;
+      throw err;
     }
 
-    if (attempt <= retries && retryOn(res.status)) {
-      const retryAfter = parseRetryAfter(res.headers.get('retry-after'));
-      const backoffMs = retryAfter ?? backoff(attempt);
-      await new Promise(r => setTimeout(r, backoffMs));
-      continue;
-    }
-
+    // If ok but no data, treat as error
     clearTimeout(id);
-    const err: any = new Error(`Upstream ${res.status}`);
-    err.status = res.status;
-    err.body = body;
+    const err: any = new Error('Unexpected response format');
+    err.status = result.status;
     throw err;
   }
 }
 
 export async function getESIByAddress(addr: Addr) {
   assertKey();
-  const url = `${BASE}/electricity/info/esi${qs({
+  const result = await wbGet('electricity/info/esi', {
     address: addr.line1,
     city: addr.city,
     state: addr.state,
     zip: addr.zip,
-  })}`;
-  return safeFetchJSON<any>(url);
+  });
+  if (!result.ok) {
+    const err: any = new Error(`Upstream ${result.status}`);
+    err.status = result.status;
+    err.body = result.text;
+    throw err;
+  }
+  return result.data as any;
 }
 
 export async function getUtilityInfo(addr: Addr) {
   assertKey();
-  const url = `${BASE}/utility${qs({ address: addr.line1, city: addr.city, state: addr.state, zip: addr.zip })}`;
-  return safeFetchJSON<any>(url);
+  const result = await wbGet('utility', {
+    address: addr.line1,
+    city: addr.city,
+    state: addr.state,
+    zip: addr.zip,
+  });
+  if (!result.ok) {
+    const err: any = new Error(`Upstream ${result.status}`);
+    err.status = result.status;
+    err.body = result.text;
+    throw err;
+  }
+  return result.data as any;
 }
 
 export type OfferAddressInput = {
@@ -132,19 +215,25 @@ export type OfferAddressInput = {
 
 export async function getOffersForAddress(addr: OfferAddressInput) {
   assertKey();
-  const query: Record<string, string> = { zip: addr.zip };
-  if (addr.line1) query.address = addr.line1;
-  if (addr.city) query.city = addr.city;
-  query.state = (addr.state && addr.state.trim()) || 'TX';
-  if (addr.tdsp) query.utility = addr.tdsp;
+  const params: Record<string, string> = { zip: addr.zip };
+  if (addr.line1) params.address = addr.line1;
+  if (addr.city) params.city = addr.city;
+  params.state = (addr.state && addr.state.trim()) || 'TX';
+  if (addr.tdsp) params.utility = addr.tdsp;
   // Compliance: WattBuy offers are requested without ESIID.
-  const url = `${BASE}/offers${qs(query)}`;
-  return safeFetchJSON<any>(url);
+  const result = await wbGet('offers', params);
+  if (!result.ok) {
+    const err: any = new Error(`Upstream ${result.status}`);
+    err.status = result.status;
+    err.body = result.text;
+    throw err;
+  }
+  return result.data as any;
 }
 
 export type RetailRatesQuery = {
   state?: string;
-  utilityID?: string | number; // Required: Numeric string of utilityID (EIA utility ID)
+  utility_id?: string | number; // API parameter: Numeric string of utility_id (EIA utility ID)
   zip?: string;
   page?: number;
   page_size?: number;
@@ -153,22 +242,26 @@ export type RetailRatesQuery = {
 
 export async function fetchRetailRates(q: RetailRatesQuery = {}) {
   assertKey();
-  const state = (q.state && String(q.state).trim().toUpperCase()) || 'TX';
-  const query: Record<string, string> = { state };
-  // WattBuy API requires utilityID as numeric string (EIA utility ID)
-  if (q.utilityID !== undefined && q.utilityID !== null) {
-    query.utilityID = String(q.utilityID);
-  }
-  if (q.zip) query.zip = String(q.zip);
-  if (typeof q.page === 'number') query.page = String(q.page);
-  if (typeof q.page_size === 'number') query.page_size = String(q.page_size);
+  const params: Record<string, unknown> = normalizeRetailRateParams({
+    zip: q.zip,
+    state: q.state || 'TX',
+    utility_id: q.utility_id ? String(q.utility_id) : undefined,
+  });
+  if (typeof q.page === 'number') params.page = q.page;
+  if (typeof q.page_size === 'number') params.page_size = q.page_size;
   for (const [k, v] of Object.entries(q)) {
-    if (['state','utilityID','zip','page','page_size'].includes(k)) continue;
+    if (['state','utility_id','zip','page','page_size'].includes(k)) continue;
     if (v === undefined || v === null) continue;
-    query[k] = String(v);
+    params[k] = String(v);
   }
-  const url = `${BASE}/electricity/retail-rates${qs(query)}`;
-  return safeFetchJSON<any>(url, { timeoutMs: 15000, retries: 2 });
+  const result = await wbGet('electricity/retail-rates', params);
+  if (!result.ok) {
+    const err: any = new Error(`Upstream ${result.status}`);
+    err.status = result.status;
+    err.body = result.text;
+    throw err;
+  }
+  return result.data as any;
 }
 
 export async function getRetailRatesSafe(q: RetailRatesQuery = {}) {
@@ -193,29 +286,32 @@ export type ElectricityCatalogQuery = {
 
 export async function fetchElectricityCatalog(q: ElectricityCatalogQuery = {}) {
   assertKey();
-  const query: Record<string, string> = {};
-  // Required: zip (5-digit)
-  if (q.zip) {
-    query.zip = String(q.zip).trim();
-  }
-  // Optional: address, city, state
-  if (q.address) query.address = String(q.address);
-  if (q.city) query.city = String(q.city);
-  if (q.state) query.state = String(q.state).toLowerCase(); // API expects lowercase like "tx"
+  const params: Record<string, unknown> = normalizeElectricityParams({
+    address: q.address,
+    city: q.city,
+    state: q.state,
+    zip: q.zip,
+  });
   // Optional: utility_eid (number)
   if (q.utility_eid !== undefined && q.utility_eid !== null) {
-    query.utility_eid = String(q.utility_eid);
+    params.utility_eid = Number(q.utility_eid);
   }
   // Optional: wattkey
-  if (q.wattkey) query.wattkey = String(q.wattkey);
+  if (q.wattkey) params.wattkey = String(q.wattkey);
   // Pass through any other keys
   for (const [k, v] of Object.entries(q)) {
     if (['address','city','state','zip','utility_eid','wattkey'].includes(k)) continue;
     if (v === undefined || v === null) continue;
-    query[k] = String(v);
+    params[k] = String(v);
   }
-  const url = `${BASE}/electricity${qs(query)}`;
-  return safeFetchJSON<any>(url, { timeoutMs: 15000, retries: 2 });
+  const result = await wbGet('electricity', params);
+  if (!result.ok) {
+    const err: any = new Error(`Upstream ${result.status}`);
+    err.status = result.status;
+    err.body = result.text;
+    throw err;
+  }
+  return result.data as any;
 }
 
 // --- New: electricity info fetcher (/v3/electricity/info)
@@ -231,30 +327,33 @@ export type ElectricityInfoQuery = {
 
 export async function fetchElectricityInfo(q: ElectricityInfoQuery = {}) {
   assertKey();
-  const query: Record<string, string> = {};
-  // Required: zip (5-digit)
-  if (q.zip) {
-    query.zip = String(q.zip).trim();
-  }
-  // Optional: address, city, state
-  if (q.address) query.address = String(q.address);
-  if (q.city) query.city = String(q.city);
-  if (q.state) query.state = String(q.state).toLowerCase(); // API expects lowercase like "tx"
+  const params: Record<string, unknown> = normalizeElectricityParams({
+    address: q.address,
+    city: q.city,
+    state: q.state,
+    zip: q.zip,
+  });
   // Optional: housing_chars, utility_list (can be "true" string or boolean)
   if (q.housing_chars !== undefined && q.housing_chars !== null) {
-    query.housing_chars = q.housing_chars === true || q.housing_chars === 'true' ? 'true' : String(q.housing_chars);
+    params.housing_chars = q.housing_chars === true || q.housing_chars === 'true' ? 'true' : String(q.housing_chars);
   }
   if (q.utility_list !== undefined && q.utility_list !== null) {
-    query.utility_list = q.utility_list === true || q.utility_list === 'true' ? 'true' : String(q.utility_list);
+    params.utility_list = q.utility_list === true || q.utility_list === 'true' ? 'true' : String(q.utility_list);
   }
   // Pass through any other keys
   for (const [k, v] of Object.entries(q)) {
     if (['address','city','state','zip','housing_chars','utility_list'].includes(k)) continue;
     if (v === undefined || v === null) continue;
-    query[k] = String(v);
+    params[k] = String(v);
   }
-  const url = `${BASE}/electricity/info${qs(query)}`;
-  return safeFetchJSON<any>(url, { timeoutMs: 15000, retries: 2 });
+  const result = await wbGet('electricity/info', params);
+  if (!result.ok) {
+    const err: any = new Error(`Upstream ${result.status}`);
+    err.status = result.status;
+    err.body = result.text;
+    throw err;
+  }
+  return result.data as any;
 }
 
 export function extractTdspSlug(anyVal: any): string | null {

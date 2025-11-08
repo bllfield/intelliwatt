@@ -2,7 +2,7 @@
 // Step 47: Batch sync Retail Rate DB → local /data/rates (multi-page, TX TDSPs)
 // -----------------------------------------------------------------------------
 // What it does
-//   - Loops through WattBuy Retail Rate DB pages for a TX TDSP (or EIA utilityID).
+//   - Loops through WattBuy Retail Rate DB pages for a TX TDSP (or EIA utility_id).
 //   - Normalizes each item into our RateConfig and (optionally) writes JSON files.
 //   - Returns a full summary: fetched pages, counts, errors, and preview of first few outputs.
 //
@@ -14,10 +14,10 @@
 //     -H 'x-seed-token: <ADMIN_SEED_TOKEN>' -H 'content-type: application/json' \
 //     -d '{ "tdsp": "oncor", "verified_from": "2024-01-01", "maxPages": 10 }'
 //
-// Or with utilityID (EIA):
+// Or with utility_id (EIA):
 //   curl -X POST '/api/retail-rates/sync?dry=0' \
 //     -H 'x-seed-token: <ADMIN_SEED_TOKEN>' -H 'content-type: application/json' \
-//     -d '{ "utilityID": 44372, "maxPages": 5 }'
+//     -d '{ "utility_id": 44372, "maxPages": 5 }'
 //
 // Env
 //   - WATTBUY_API_KEY
@@ -32,13 +32,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { wbGet } from '@/lib/wattbuy/client';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 type SyncBody = {
   tdsp?: 'oncor' | 'centerpoint' | 'aep_n' | 'aep_c' | 'tnmp' | string;
-  utilityID?: number;
+  utility_id?: number;
   verified_from?: number | string; // epoch seconds or ISO
   maxPages?: number; // default 10
   state?: 'TX' | string; // default TX
@@ -81,12 +82,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'This sync endpoint is TX-only.' }, { status: 400 });
     }
 
-    // Resolve utilityID from tdsp if needed
+    // Resolve utility_id from tdsp if needed
     let utilityID: number | null = null;
     let tdspFolder = (body.tdsp || '').toLowerCase().trim() || null;
 
-    if (typeof body.utilityID === 'number' && Number.isFinite(body.utilityID)) {
-      utilityID = body.utilityID;
+    if (typeof body.utility_id === 'number' && Number.isFinite(body.utility_id)) {
+      utilityID = body.utility_id;
       if (!tdspFolder) tdspFolder = eiaToTdsp(utilityID);
     } else if (tdspFolder) {
       const mapped = TDSP_TO_EIA[tdspFolder];
@@ -99,7 +100,7 @@ export async function POST(req: NextRequest) {
       utilityID = mapped;
     } else {
       return NextResponse.json(
-        { error: 'Provide either "tdsp" (oncor|centerpoint|aep_n|aep_c|tnmp) or "utilityID" (EIA).' },
+        { error: 'Provide either "tdsp" (oncor|centerpoint|aep_n|aep_c|tnmp) or "utility_id" (EIA).' },
         { status: 400 }
       );
     }
@@ -126,7 +127,7 @@ export async function POST(req: NextRequest) {
 
     // ---- fetch loop
     const summary = {
-      query: { tdsp: tdspFolder, utilityID, state, verified_from: verified_from ?? null, maxPages, dryRun: dry },
+      query: { tdsp: tdspFolder, utility_id: utilityID, state, verified_from: verified_from ?? null, maxPages, dryRun: dry },
       pagesFetched: 0,
       totalItems: 0,
       written: 0,
@@ -138,7 +139,7 @@ export async function POST(req: NextRequest) {
 
     for (let page = 1; page <= maxPages; page++) {
       const { ok, items, upstreamStatus, upstreamError } = await fetchRetailRatesPage({
-        utilityID: utilityID!,
+        utility_id: utilityID!,
         state,
         page,
         verified_from,
@@ -199,42 +200,37 @@ export async function POST(req: NextRequest) {
 // ----------------- helpers -----------------
 
 async function fetchRetailRatesPage(opts: {
-  utilityID: number;
+  utility_id: number;
   state: string;
   page: number;
   verified_from?: number;
 }): Promise<{ ok: boolean; items: any[]; upstreamStatus: number; upstreamError?: string }> {
-  const endpoint = 'https://apis.wattbuy.com/v3/electricity/retail-rates';
-  const qs = new URLSearchParams();
-  qs.set('utilityID', String(opts.utilityID));
-  qs.set('state', opts.state);
-  qs.set('page', String(opts.page));
-  if (opts.verified_from != null) qs.set('verified_from', String(opts.verified_from));
+  // Use wbGet (clean headers, no internal header forwarding)
+  const params: Record<string, unknown> = {
+    utility_id: String(opts.utility_id),
+    state: opts.state,
+    page: String(opts.page),
+  };
+  if (opts.verified_from != null) params.verified_from = String(opts.verified_from);
 
-  const res = await fetch(`${endpoint}?${qs.toString()}`, {
-    headers: {
-      Authorization: `Bearer ${process.env.WATTBUY_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    cache: 'no-store',
-  });
+  const result = await wbGet('electricity/retail-rates', params);
 
-  const status = res.status;
-
-  if (status === 204) {
-    return { ok: false, items: [], upstreamStatus: 204 };
+  if (!result.ok) {
+    if (result.status === 204) {
+      return { ok: false, items: [], upstreamStatus: 204 };
+    }
+    return {
+      ok: false,
+      items: [],
+      upstreamStatus: result.status,
+      upstreamError: result.text || 'Upstream error',
+    };
   }
 
-  const text = await res.text();
-  const json = safeJson(text);
+  const json = result.data;
+  const status = result.status;
 
-  if (!res.ok) {
-    const errMsg = (json?.error || res.statusText || 'Upstream error')
-      .toString()
-      .replace(/(Bearer\s+)?[A-Za-z0-9-_]{20,}/g, '***');
-    return { ok: false, items: [], upstreamStatus: status, upstreamError: errMsg };
-  }
-
+  // result.ok is already checked above, so we can proceed
   const items = extractItems(json);
   return { ok: true, items, upstreamStatus: status };
 }
@@ -359,7 +355,7 @@ type RateConfig = {
     received_at: string;
     id?: string | number | null;
     name?: string | null;
-    utilityID?: number | null;
+    utility_id?: number | null;
     verified_at?: string | null;
     raw: any;
   };
@@ -388,7 +384,7 @@ function normalizeRetailItem(item: any): RateConfig {
   const effective = item?.effective_date ?? item?.effective ?? null;
   const expiration = item?.expiration_date ?? item?.expires ?? null;
   const verified_at = item?.verified_at ?? item?.last_verified ?? null;
-  const utilityID = numOrNull(item?.utilityID ?? item?.utility_id ?? item?.eia_utility_id);
+  const utilityID = numOrNull(item?.utility_id ?? item?.eia_utility_id);
   const state = (item?.state || item?.service_territory || '').toString().slice(0, 2).toUpperCase() || null;
   const tdsp = (item?.tdsp || item?.utility_name || item?.utility || null) && String(item?.tdsp || item?.utility_name || item?.utility);
   const source_url = item?.source_url || item?.source || null;
@@ -484,7 +480,7 @@ function normalizeRetailItem(item: any): RateConfig {
       received_at: nowIso,
       id,
       name,
-      utilityID,
+      utility_id: utilityID,
       verified_at,
       raw: item,
     },

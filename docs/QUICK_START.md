@@ -143,14 +143,14 @@ curl -sS "https://intelliwatt.com/api/admin/wattbuy/retail-rates?state=TX" \
   -H "x-admin-token: $ADMIN_TOKEN" | jq .
 ```
 
-2) With utilityID (EIA utility ID, numeric string) and optional zip:
+2) With utility_id (EIA utility ID, numeric string) and optional zip:
 
 ```bash
-curl -sS "https://intelliwatt.com/api/admin/wattbuy/retail-rates?state=TX&utilityID=6452&zip=76107" \
+curl -sS "https://intelliwatt.com/api/admin/wattbuy/retail-rates?state=TX&utility_id=6452&zip=76107" \
   -H "x-admin-token: $ADMIN_TOKEN" | jq .
 ```
 
-Note: `utilityID` is required and must be a numeric string (EIA utility ID). See https://www.eia.gov/electricity/data/eia861/ for utility IDs.
+Note: `utility_id` is required and must be a numeric string (EIA utility ID). See https://www.eia.gov/electricity/data/eia861/ for utility IDs.
 
 3) Inspect DB rows (examples depend on your admin readers; use psql/Prisma Studio as needed).
 

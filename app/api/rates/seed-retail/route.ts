@@ -69,7 +69,7 @@ type RateConfig = {
     received_at: string; // ISO
     id?: string | number | null;
     name?: string | null;
-    utilityID?: number | null;
+    utility_id?: number | null;
     verified_at?: string | null;
     raw: any; // keep entire source for audit
   };
@@ -171,7 +171,7 @@ function normalizeRetailItem(item: any): RateConfig {
   const effective = item?.effective_date ?? item?.effective ?? null;
   const expiration = item?.expiration_date ?? item?.expires ?? null;
   const verified_at = item?.verified_at ?? item?.last_verified ?? null;
-  const utilityID = numOrNull(item?.utilityID ?? item?.utility_id ?? item?.eia_utility_id);
+  const utilityID = numOrNull(item?.utility_id ?? item?.eia_utility_id);
   const state = (item?.state || item?.service_territory || '').toString().slice(0, 2).toUpperCase() || null;
   const tdsp = (item?.tdsp || item?.utility_name || item?.utility || null) && String(item?.tdsp || item?.utility_name || item?.utility);
   const source_url = item?.source_url || item?.source || null;
@@ -279,7 +279,7 @@ function normalizeRetailItem(item: any): RateConfig {
       received_at: nowIso,
       id,
       name,
-      utilityID,
+      utility_id: utilityID,
       verified_at,
       raw: item,
     },
