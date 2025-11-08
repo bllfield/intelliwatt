@@ -133,3 +133,11 @@ Invoke-RestMethod -Headers $headers -Uri "https://intelliwatt.com/api/admin/env-
 
 **Last Updated**: January 2025
 
+### Verify WattBuy offers (no ESIID) and DB persistence
+
+1) Run the probe + public offers smoke (bash):
+
+```bash
+ADMIN_TOKEN="<ADMIN_TOKEN>" BASE_URL="https://intelliwatt.com" ZIP5="76107" scripts/admin/wattbuy_offers_smoke.sh
+```
+
