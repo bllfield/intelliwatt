@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { normalizeGoogleAddress, type GooglePlaceDetails } from "@/lib/normalizeGoogleAddress";
+import { normalizeEmail } from "@/lib/utils/email";
 
 export const dynamic = 'force-dynamic';
 
@@ -32,13 +33,14 @@ export async function POST(req: NextRequest) {
     // Convert email to user ID if needed
     let userId = body.userId;
     if (body.userId.includes('@')) {
-      // It's an email, look up the user
-      const user = await prisma.user.findUnique({ where: { email: body.userId } });
+      // It's an email, normalize and look up the user
+      const normalizedEmail = normalizeEmail(body.userId);
+      const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
       if (!user) {
         return NextResponse.json({ ok: false, error: "User not found" }, { status: 404 });
       }
       userId = user.id;
-      console.log(`Converted email ${body.userId} to user ID ${userId}`);
+      console.log(`Converted email ${normalizedEmail} to user ID ${userId}`);
     }
 
     console.log("Google Place Details:", JSON.stringify(body.googlePlaceDetails, null, 2));

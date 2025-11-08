@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { guardAdmin } from '@/lib/auth/admin';
 import { prisma } from "@/lib/db";
+import { normalizeEmail } from '@/lib/utils/email';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,7 +10,9 @@ export async function GET(request: NextRequest) {
   if (gate) return gate;
   
   try {
-    const email = "bllfield32@gmail.com";
+    const emailRaw = "bllfield32@gmail.com";
+    // Normalize email to lowercase for consistent lookup
+    const email = normalizeEmail(emailRaw);
     console.log(`Debug: Checking address for ${email}...`);
     
     // Check UserProfile table (old system)

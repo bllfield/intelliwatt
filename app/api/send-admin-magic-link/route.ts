@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createMagicToken, storeToken } from '@/lib/magic/magic-token';
 import { sendLoginEmail } from '@/lib/email/sendLoginEmail';
+import { normalizeEmail } from '@/lib/utils/email';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,8 +19,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Valid email is required' }, { status: 400 });
     }
 
+    // Normalize email to lowercase for consistent storage and comparison
+    const normalizedEmail = normalizeEmail(email);
+
     // Check if email is authorized for admin access
-    if (!ADMIN_EMAILS.includes(email.toLowerCase())) {
+    if (!ADMIN_EMAILS.includes(normalizedEmail)) {
       return NextResponse.json({ 
         error: 'Unauthorized. This email is not authorized for admin access.' 
       }, { status: 403 });
@@ -30,8 +34,8 @@ export async function POST(request: NextRequest) {
     let magicLink: string;
     
     try {
-      token = await createMagicToken(email);
-      await storeToken(email, token);
+      token = await createMagicToken(normalizedEmail);
+      await storeToken(normalizedEmail, token);
       
       // Create the magic link URL
       const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://intelliwatt.com');
@@ -47,13 +51,13 @@ export async function POST(request: NextRequest) {
 
     // Log the magic link for testing
     console.log('=== ADMIN MAGIC LINK FOR TESTING ===');
-    console.log(`Email: ${email}`);
+    console.log(`Email: ${normalizedEmail}`);
     console.log(`Magic Link: ${magicLink}`);
     console.log('=====================================');
 
     // Try to send email
     try {
-      await sendLoginEmail(email, magicLink, 'Admin Access to IntelliWatt');
+      await sendLoginEmail(normalizedEmail, magicLink, 'Admin Access to IntelliWatt');
       console.log('Admin magic link email sent successfully');
     } catch (emailError) {
       console.error('Email sending failed:', emailError);

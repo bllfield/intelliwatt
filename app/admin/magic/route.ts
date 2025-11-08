@@ -1,6 +1,7 @@
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { normalizeEmail } from '@/lib/utils/email';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,13 +42,16 @@ export async function GET(req: Request) {
     return new Response('Invalid or expired token', { status: 401 });
   }
 
+  // Normalize email to lowercase for consistent comparison
+  const normalizedEmail = normalizeEmail(record.email);
+
   // Check if email is authorized for admin access
   const ADMIN_EMAILS = [
     'brian@intelliwatt.com',
     'brian@intellipath-solutions.com',
   ];
 
-  if (!ADMIN_EMAILS.includes(record.email.toLowerCase())) {
+  if (!ADMIN_EMAILS.includes(normalizedEmail)) {
     return new Response('Unauthorized. This email is not authorized for admin access.', { status: 403 });
   }
 
@@ -58,11 +62,11 @@ export async function GET(req: Request) {
       data: { used: true },
     });
 
-    // Set admin cookie
+    // Set admin cookie (use normalized email)
     const cookieStore = cookies();
     cookieStore.set({
       name: 'intelliwatt_admin',
-      value: record.email,
+      value: normalizedEmail,
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
@@ -70,7 +74,7 @@ export async function GET(req: Request) {
       maxAge: 60 * 60 * 24, // 24 hours
     });
 
-    console.log('Admin cookie set for:', record.email);
+    console.log('Admin cookie set for:', normalizedEmail);
     console.log('Redirecting to /admin');
   } catch (dbError) {
     console.error('Database error in admin magic link login:', dbError);

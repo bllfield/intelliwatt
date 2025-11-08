@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { verifyReferralToken } from '@/lib/referral/verify';
+import { normalizeEmail } from '@/lib/utils/email';
 
 export const dynamic = 'force-dynamic';
 
@@ -47,9 +48,12 @@ export async function GET(req: Request) {
     const cookieStore = cookies();
     const referrerToken = cookieStore.get('intelliwatt_referrer')?.value;
 
+    // Normalize email to lowercase for consistent storage and lookup
+    const normalizedEmail = normalizeEmail(record.email);
+
     // Find user (or create if new)
     let user = await db.user.findUnique({
-      where: { email: record.email },
+      where: { email: normalizedEmail },
     });
 
     const isNewUser = !user;
@@ -57,7 +61,7 @@ export async function GET(req: Request) {
     if (!user) {
       user = await db.user.create({
         data: {
-          email: record.email,
+          email: normalizedEmail,
         },
       });
     }
@@ -71,7 +75,7 @@ export async function GET(req: Request) {
         const existingReferral = await db.referral.findFirst({
           where: {
             referredById: referralData.userId,
-            referredEmail: user.email,
+            referredEmail: normalizedEmail,
           },
         });
 
@@ -80,7 +84,7 @@ export async function GET(req: Request) {
           await db.referral.create({
             data: {
               referredById: referralData.userId,
-              referredEmail: user.email,
+              referredEmail: normalizedEmail,
             },
           });
 
@@ -102,10 +106,10 @@ export async function GET(req: Request) {
       data: { used: true },
     });
 
-    // Set login cookie
+    // Set login cookie (use normalized email)
     cookieStore.set({
       name: 'intelliwatt_user',
-      value: user.email,
+      value: normalizedEmail,
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',

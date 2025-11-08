@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { normalizeEmail } from '@/lib/utils/email';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
-    const email = "brian@intellipath-solutions.com";
+    const emailRaw = "brian@intellipath-solutions.com";
+    // Normalize email to lowercase for consistent lookup
+    const email = normalizeEmail(emailRaw);
     console.log(`Debug: Checking address for ${email}...`);
     
     // Check UserProfile table (old system)

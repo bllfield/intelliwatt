@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createMagicToken, storeToken } from '@/lib/magic/magic-token';
 import { sendLoginEmail } from '@/lib/email/sendLoginEmail';
+import { normalizeEmail } from '@/lib/utils/email';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,13 +13,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Valid email is required' }, { status: 400 });
     }
 
+    // Normalize email to lowercase for consistent storage
+    const normalizedEmail = normalizeEmail(email);
+
     // Create and store the magic token
     let token: string;
     let magicLink: string;
     
     try {
-      token = await createMagicToken(email);
-      await storeToken(email, token);
+      token = await createMagicToken(normalizedEmail);
+      await storeToken(normalizedEmail, token);
       
       // Create the magic link URL
       const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://intelliwatt.com');
@@ -34,13 +38,13 @@ export async function POST(request: NextRequest) {
 
     // Log the magic link for testing
     console.log('=== MAGIC LINK FOR TESTING ===');
-    console.log(`Email: ${email}`);
+    console.log(`Email: ${normalizedEmail}`);
     console.log(`Magic Link: ${magicLink}`);
     console.log('==============================');
 
-    // Try to send email
+    // Try to send email (use original email for display, but normalized for storage)
     try {
-      await sendLoginEmail(email, magicLink);
+      await sendLoginEmail(normalizedEmail, magicLink);
       console.log('Magic link email sent successfully');
     } catch (emailError) {
       console.error('Email sending failed:', emailError);

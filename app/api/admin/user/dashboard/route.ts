@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { db } from '@/lib/db';
+import { normalizeEmail } from '@/lib/utils/email';
 
 export const dynamic = 'force-dynamic';
 
@@ -8,11 +9,14 @@ export async function GET(request: NextRequest) {
   try {
     // Get user email from cookie
     const cookieStore = cookies();
-    const userEmail = cookieStore.get('intelliwatt_user')?.value;
+    const userEmailRaw = cookieStore.get('intelliwatt_user')?.value;
     
-    if (!userEmail) {
+    if (!userEmailRaw) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
     }
+
+    // Normalize email to lowercase for consistent lookup
+    const userEmail = normalizeEmail(userEmailRaw);
 
     // Find user and their data
     const user = await db.user.findUnique({
