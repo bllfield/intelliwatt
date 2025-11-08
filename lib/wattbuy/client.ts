@@ -158,6 +158,9 @@ export function extractTdspSlug(anyVal: any): string | null {
   return null;
 }
 
+// Export tdspToSlug for backward compatibility
+export const tdspToSlug = extractTdspSlug;
+
 export class WattBuyClient {
   static async getUtilityInfo(addr: Addr) {
     return getUtilityInfo(addr);
