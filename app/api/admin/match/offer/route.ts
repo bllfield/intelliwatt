@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { matchOffer } from '@/lib/planmaster/matcher'
 
 export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
 
 /**
  * POST /api/admin/match/offer

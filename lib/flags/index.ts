@@ -92,3 +92,6 @@ export const flags = {
   // Server-only flags
   strictPIILogging: flagBoolSync(process.env.FLAG_STRICT_PII_LOGGING, true),
 } as const;
+
+export const wattbuyEsiidDisabled =
+  process.env.WATTBUY_ESIID_DISABLED?.toLowerCase() !== 'false';

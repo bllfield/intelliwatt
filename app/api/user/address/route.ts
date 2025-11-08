@@ -3,6 +3,8 @@ import { cookies } from 'next/headers';
 import { db } from '@/lib/db';
 import { getESIByAddress, getUtilityInfo, extractTdspSlug } from '@/lib/wattbuy/client';
 
+export const dynamic = 'force-dynamic';
+
 export async function POST(request: NextRequest) {
   try {
     // Get user email from cookie

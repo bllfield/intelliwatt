@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createMagicToken, storeToken } from '@/lib/magic/magic-token';
 import { sendLoginEmail } from '@/lib/email/sendLoginEmail';
 
+export const dynamic = 'force-dynamic';
+
 export async function POST(request: NextRequest) {
   try {
     const { email } = await request.json();

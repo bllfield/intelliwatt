@@ -9,6 +9,7 @@ import { ensureAdmin } from '@/lib/auth/adminGate';
 import { prisma } from '@/lib/db';
 
 import { resolveAddressToEsiid } from '@/lib/resolver/addressToEsiid';
+import { wattbuyEsiidDisabled } from '@/lib/flags';
 
 
 
@@ -27,6 +28,18 @@ export async function POST(req: NextRequest) {
   const deny = ensureAdmin(req);
 
   if (deny) return deny;
+
+  if (wattbuyEsiidDisabled) {
+    return NextResponse.json(
+      {
+        ok: false,
+        corrId,
+        error: 'DEPRECATED_WATTBUY_ESIID',
+        message: 'WattBuy-based ESIID persistence is retired. Use ERCOT-derived ESIID data.',
+      },
+      { status: 410 }
+    );
+  }
 
 
 

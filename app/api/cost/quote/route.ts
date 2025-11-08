@@ -3,6 +3,7 @@ import { computeBill } from '@/lib/cost/engine'
 import { QuoteRequest } from '@/lib/cost/types'
 
 export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
 
 /**
  * POST /api/cost/quote

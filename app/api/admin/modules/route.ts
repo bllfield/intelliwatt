@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { modulesCatalog } from '@/lib/catalog/modules'
 
 export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
 
 /**
  * GET /api/admin/modules

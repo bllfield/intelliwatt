@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { guardAdmin } from '@/lib/auth/admin';
 import { prisma } from "@/lib/db";
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: NextRequest) {
   const gate = guardAdmin(request);
   if (gate) return gate;

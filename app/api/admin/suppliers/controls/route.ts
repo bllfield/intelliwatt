@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { listSupplierControls, upsertSupplierControl } from '@/lib/suppliers/controls'
 
 export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
 
 /**
  * GET  /api/admin/suppliers/controls          -> list

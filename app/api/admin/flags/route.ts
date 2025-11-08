@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getFlags, setFlag, setFlags } from '@/lib/flags'
 
 export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
 
 /**
  * GET  /api/admin/flags        -> all flags

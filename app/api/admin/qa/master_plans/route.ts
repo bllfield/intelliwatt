@@ -4,6 +4,7 @@ import { qaAnalyzePlans } from '@/lib/planmaster/qa'
 
 const prisma = new PrismaClient()
 export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
 
 /**
  * GET /api/admin/qa/master_plans?limit=50&tdsp=ONCOR

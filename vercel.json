@@ -5,17 +5,6 @@
   "installCommand": "npm install",
   "outputDirectory": ".next",
   "crons": [
-    {
-      "path": "/api/admin/rates/refresh",
-      "schedule": "0 2 * * *"
-    },
-    {
-      "path": "/api/rates/efl-refresh",
-      "schedule": "0 3 * * *"
-    },
-    {
-      "path": "/api/admin/cron/normalize-smt",
-      "schedule": "*/5 * * * *"
-    }
+    { "path": "/api/admin/ercot/cron", "schedule": "0 9 * * *" }
   ]
 }

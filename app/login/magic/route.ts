@@ -4,6 +4,8 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { verifyReferralToken } from '@/lib/referral/verify';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const token = searchParams.get('token');
@@ -23,7 +25,8 @@ export async function GET(req: Request) {
       name: 'intelliwatt_user',
       value: 'temp_user@intelliwatt.com',
       httpOnly: true,
-      secure: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
       path: '/',
       maxAge: 60 * 60 * 24 * 7,
     });
@@ -104,7 +107,8 @@ export async function GET(req: Request) {
       name: 'intelliwatt_user',
       value: user.email,
       httpOnly: true,
-      secure: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
       path: '/',
       maxAge: 60 * 60 * 24 * 7,
     });

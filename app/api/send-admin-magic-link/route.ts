@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createMagicToken, storeToken } from '@/lib/magic/magic-token';
 import { sendLoginEmail } from '@/lib/email/sendLoginEmail';
 
+export const dynamic = 'force-dynamic';
+
 // List of authorized admin emails
 const ADMIN_EMAILS = [
   'brian@intelliwatt.com',

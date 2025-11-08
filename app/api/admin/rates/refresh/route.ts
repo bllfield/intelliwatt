@@ -28,6 +28,8 @@ import { requireVercelCron } from '@/lib/auth/cron';
 import { upsertRatesFromOffers } from '@/lib/rates/upsert';
 import { wattbuy } from '@/lib/wattbuy';
 
+export const dynamic = 'force-dynamic';
+
 type Addr = { address: string; city: string; state?: string; zip: string };
 
 // Representative addresses per TDSP (safe public test addresses; replace with your own if desired)

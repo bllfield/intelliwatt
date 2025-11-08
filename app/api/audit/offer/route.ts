@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { logOfferSelected } from '@/lib/observability/audit'
 
 export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
 
 /**
  * POST /api/audit/offer

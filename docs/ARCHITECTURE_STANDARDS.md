@@ -120,3 +120,89 @@
 - Monitor response times
 - Use connection pooling
 - Optimize database queries
+
+## Operational Standards
+
+### Deployment Model — Git via Vercel
+
+- Production deploys are triggered only by pushing to the Production branch (`main`).
+
+- `vercel.json` schedules (cron jobs) take effect on the next Git deploy.
+
+- The DigitalOcean droplet is reserved for SMT ingestion/testing; do **not** deploy the web app from the droplet.
+
+### Development Model — Cursor GPT Blocks
+
+- All code edits must be delivered as single, copy-ready GPT blocks inside Cursor.
+
+- Each block must specify: Model (GPT-4o), Thinking (With Thinking), Agent (OFF), and Files to target.
+
+- Avoid `&&` in shell commands; provide one command per line.
+
+## Authentication Standards
+
+### Admin Routes
+
+- All `/api/admin/*` and `/api/debug/*` endpoints require `x-admin-token` matching `ADMIN_TOKEN`.
+
+- On failure, return `{ ok: false, error: 'unauthorized' }` (HTTP 401).
+
+- Never echo secrets or raw PII in responses or logs.
+
+### Scheduled (Cron) Routes
+
+- Vercel-scheduled routes must validate the `x-vercel-cron` header.
+
+- Support optional `CRON_SECRET` via `x-cron-secret` header or `?token=` for manual smoke tests.
+
+- Cron handlers must be idempotent (hash-skip, upsert) and produce structured logs.
+
+## Data Domains (RAW → CDM)
+
+### ERCOT ESIID Index
+
+**ESIID Lineage:** Source of truth is ERCOT (daily extract / future Agreement APIs). WattBuy is **not** an ESIID source. UI/CDM treat `esiid` as optional; transformations must not require its presence.
+
+- RAW capture: store downloaded ERCOT extracts and response metadata before processing.
+
+- Idempotence: compute/persist file hash; skip duplicate ingests.
+
+- Normalization: load into `ErcotEsiidIndex`, USPS-normalize addresses, support fuzzy match (`pg_trgm`) for ZIP + line1.
+
+- Admin tools:
+
+  - `/api/admin/ercot/cron` (scheduled) — resolves, downloads, hash-skips.
+
+  - `/api/admin/ercot/fetch-latest` (manual) — fetches a specified URL.
+
+  - `/api/admin/ercot/ingests` — lists ingest history with filters (date/status/tdsp/limit).
+
+- UI consumption remains CDM-shaped; never couple UI to vendor schemas.
+
+## Health & Debug Endpoints (Non-PII)
+
+- **Primary Health:** `/api/health` → `{ ok, db, corrId }`.
+
+- **Env Health:** `/api/admin/env-health` → boolean presence of required env vars (token-gated; no values shown).
+
+- **ERCOT Debug:**
+
+  - `/api/admin/ercot/debug/last` → most recent ingest row (token-gated).
+
+  - `/api/admin/ercot/debug/echo-cron` → confirms cron headers/secret, no side effects.
+
+## Observability Cross-Reference
+
+- Log `corrId`, route, status, durationMs, errorClass for every route.
+
+- Track data-quality counters (e.g., `unmapped_fields_count`, `transformer_errors`) per OBSERVABILITY.md.
+
+- Use structured JSON logs and avoid printing raw PII; hash when necessary.
+
+## PII Handling (Reminder)
+
+- Treat ESIID, addresses, names as PII.
+
+- Do not log raw values; store only what is required in RAW stores and CDM tables.
+
+- Mask or hash PII in logs/diagnostics; never echo secrets in responses.

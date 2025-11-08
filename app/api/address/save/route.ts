@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { normalizeGoogleAddress, type GooglePlaceDetails } from "@/lib/normalizeGoogleAddress";
 
+export const dynamic = 'force-dynamic';
+
 type SaveAddressBody = {
   userId: string;
   houseId?: string | null;

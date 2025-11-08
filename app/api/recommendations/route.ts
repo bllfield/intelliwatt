@@ -6,6 +6,7 @@ import { logOffersShown } from '@/lib/observability/audit'
 import { flagBool } from '@/lib/flags'
 
 export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
 
 /**
  * POST /api/recommendations

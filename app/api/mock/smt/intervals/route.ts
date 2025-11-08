@@ -4,6 +4,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
+export const dynamic = 'force-dynamic';
+
 type Payload = {
   month: string;        // "2025-08" (YYYY-MM)
   avgMonthlyKwh?: number; // target monthly kWh, default 1200

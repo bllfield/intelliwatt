@@ -22,10 +22,11 @@ import {
   getESIByAddress,
   getUtilityInfo,
   getOffersForAddress,
-  getOffersForESIID,
   getRetailRates,
   extractTdspSlug,
 } from '@/lib/wattbuy/client';
+
+export const dynamic = 'force-dynamic';
 
 type Addr = { line1: string; city: string; state: string; zip: string };
 
@@ -40,9 +41,9 @@ export async function GET(req: NextRequest) {
 
     const addr = toAddress(url);
 
-    if (!esiid && !addr) {
+    if (!addr) {
       return NextResponse.json(
-        { error: 'Provide either ?esiid=… or ?address=…&city=…&state=…&zip=…' },
+        { error: 'Provide ?address=…&city=…&state=…&zip=… to probe offers.' },
         { status: 400 }
       );
     }
@@ -65,12 +66,9 @@ export async function GET(req: NextRequest) {
       tdspSlug = tdspSlug || extractTdspSlug(utilInfo);
     }
 
-    // 3) Offers (prefer ESIID when available)
+    // 3) Offers (address-based only)
     let offersResp: any = null;
-    if (resolvedEsiid) {
-      offersResp = await getOffersForESIID(resolvedEsiid);
-      tdspSlug = tdspSlug || normalizeTdsp(offersResp?.offers?.[0]?.offer_data?.utility || null);
-    } else if (addr) {
+    if (addr) {
       offersResp = await getOffersForAddress(addr);
       tdspSlug = tdspSlug || normalizeTdsp(offersResp?.offers?.[0]?.offer_data?.utility || null);
     }

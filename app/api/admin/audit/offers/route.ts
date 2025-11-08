@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { listAudits } from '@/lib/observability/audit'
 
 export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
 
 /**
  * GET /api/admin/audit/offers?limit=50

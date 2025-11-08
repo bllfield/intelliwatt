@@ -4,6 +4,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { wattbuy } from '@/lib/wattbuy';
 
+export const dynamic = 'force-dynamic';
+
 type AddressPayload = {
   address: string;
   city: string;

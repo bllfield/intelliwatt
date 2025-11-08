@@ -8,6 +8,8 @@
 // Returns: { inserted, updated, totalOffers, createdRateConfigs, offersSample: [...] }
 
 import { NextRequest, NextResponse } from 'next/server';
+
+export const dynamic = 'force-dynamic';
 import { wattbuy } from '@/lib/wattbuy';
 import { prisma } from '@/lib/db'; // If your prisma client is exported differently, adjust this import.
 

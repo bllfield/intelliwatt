@@ -3,6 +3,7 @@ import { TdspCode } from '@prisma/client'
 import { getLatestTdspSnapshots } from '@/lib/tdsp/fetch'
 
 export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)

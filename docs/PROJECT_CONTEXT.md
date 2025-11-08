@@ -6,6 +6,36 @@
 
 ---
 
+## How We Build & Deploy (Read First)
+
+- Coding happens in Cursor using single, copy-ready GPT blocks with explicit file targets and surgical edits.
+
+- Production deploys happen via Git; pushing to `main` triggers Vercel Production builds automatically.
+
+- The DigitalOcean droplet is only for Smart Meter Texas (SMT) SFTP/ingestion—not web-app deploys.
+
+- Avoid `&&` in command examples; keep one command per line.
+
+**Authoritative docs:**
+
+- Workflow overview: `docs/QUICK_START.md` (Development & Deploy Workflow)
+
+- GPT/Cursor collaboration rules: `docs/GPT_COLLAB.md`
+
+- System-wide expectations: `docs/ARCHITECTURE_STANDARDS.md` (Operational Standards, Auth Standards, Health/Debug)
+
+- ERCOT daily pull runbook: `docs/DEPLOY_ERCOT.md`
+
+## Where To Start
+
+1. Open `docs/QUICK_START.md` and follow the workflow steps.
+
+2. Use Cursor to apply changes via single GPT blocks.
+
+3. Push to `main` to deploy and verify with `/api/admin/env-health`.
+
+---
+
 ## Environment & Deployment
 
 ### Production Infrastructure

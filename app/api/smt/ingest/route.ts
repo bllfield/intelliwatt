@@ -34,6 +34,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { parseSmtCsvToIntervals, parseGreenButtonToIntervals, type Interval15 } from '@/lib/smt/adapter';
 
+export const dynamic = 'force-dynamic';
+
 type JsonBody = {
   type?: 'csv' | 'greenbutton' | 'auto';
   text?: string;

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: NextRequest) {
   try {
     const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;

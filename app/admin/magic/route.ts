@@ -1,6 +1,8 @@
 import { cookies } from 'next/headers';
-import { redirect } from 'next/navigation';
+import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
@@ -21,12 +23,13 @@ export async function GET(req: Request) {
       name: 'intelliwatt_admin',
       value: 'temp_admin@intelliwatt.com',
       httpOnly: true,
-      secure: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
       path: '/',
       maxAge: 60 * 60 * 24, // 24 hours
     });
 
-    redirect('/admin');
+    return NextResponse.redirect(new URL('/admin', req.url));
   }
 
   // Handle real tokens from database
@@ -61,7 +64,8 @@ export async function GET(req: Request) {
       name: 'intelliwatt_admin',
       value: record.email,
       httpOnly: true,
-      secure: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
       path: '/',
       maxAge: 60 * 60 * 24, // 24 hours
     });
@@ -74,5 +78,5 @@ export async function GET(req: Request) {
   }
 
   // Redirect after all database operations are complete
-  redirect('/admin');
+  return NextResponse.redirect(new URL('/admin', req.url));
 }

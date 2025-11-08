@@ -4,6 +4,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { wattbuy } from '@/lib/wattbuy';
 
+export const dynamic = 'force-dynamic';
+
 type ByWattkey = { wattkey: string };
 type ByEsiid = { esiid: string };
 type ByAddress = { address: string; city: string; state: string; zip: string };

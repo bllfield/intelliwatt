@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ImageAnnotatorClient } from '@google-cloud/vision';
 
+export const dynamic = 'force-dynamic';
+
 // Initialize Google Vision client
 const visionClient = new ImageAnnotatorClient({
   credentials: {

@@ -1,3 +1,25 @@
+# 🚀 Development & Deploy Workflow
+
+Welcome to the IntelliWatt / IntelliPath codebase.
+
+**How this project runs:**
+
+1. All code edits are made in Cursor using single GPT blocks that specify files, model, and intent.
+
+2. **Production deploys happen through Git** — pushing to the `main` branch automatically builds & deploys on Vercel.
+
+3. The DigitalOcean droplet handles only **Smart Meter Texas (SMT) ingestion** — never web-app deploys.
+
+📘 Learn more:
+
+- [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md#operational-conventions)
+
+- [docs/QUICK_START.md](docs/QUICK_START.md#development--deploy-workflow-required)
+
+- [docs/GPT_COLLAB.md](docs/GPT_COLLAB.md)
+
+---
+
 # IntelliWatt™ Website
 
 **Stop Overpaying for Power** - AI-powered energy optimization platform
@@ -75,7 +97,7 @@ Open [http://localhost:3000](http://localhost:3000) to view the application.
 ├── app/                    # Next.js App Router pages
 │   ├── admin/             # Admin panel pages
 │   ├── api/               # API routes
-│   ├── dashboard/         # User dashboard
+│   ├── dashboard/        # User dashboard
 │   └── ...
 ├── components/            # React components
 ├── lib/                   # Utility libraries and business logic
