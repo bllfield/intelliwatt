@@ -451,3 +451,35 @@ model SmtInterval {
   @@unique([esiid, meter, ts], name: "esiid_meter_ts")
   @@index([esiid, meter, ts], name: "esiid_meter_ts_idx")
 }
+
+/// Raw WattBuy Retail Rates catalog snapshots
+model RawWattbuyRetailRate {
+  id             String   @id @default(cuid())
+  // Query context (optional)
+  state          String?
+  utility        String?
+  zip5           String?
+  page           Int?
+  pageSize       Int?
+  // Upstream meta
+  upstreamStatus Int
+  raw            Json
+  createdAt      DateTime @default(now())
+  @@index([state, utility, zip5])
+  @@index([createdAt])
+}
+
+/// Raw WattBuy Electricity catalog snapshots (general /v3/electricity)
+model RawWattbuyElectricity {
+  id             String   @id @default(cuid())
+  // Query context (optional – we allow pass-through to future-proof)
+  state          String?
+  utility        String?
+  zip5           String?
+  // Upstream meta
+  upstreamStatus Int
+  raw            Json
+  createdAt      DateTime @default(now())
+  @@index([state, utility, zip5])
+  @@index([createdAt])
+}

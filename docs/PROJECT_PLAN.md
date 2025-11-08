@@ -209,3 +209,29 @@ WattBuy confirmed they do not whitelist domains. The 403s were unrelated to orig
 Action
 
 Retain a one-time diagnostic: cURL + response body excerpt demonstrating 403, so WattBuy support can validate key/scope if needed for other endpoints later.
+
+PC-2025-11-08: Replace Offers with Retail-Rates + Electricity (Catalog)
+
+Rationale
+
+- We only need the rate database and electricity catalog; `/v3/offers` is deprecated for our use case.
+
+Scope
+
+- Add admin-gated proxies:
+
+  - `GET /api/admin/wattbuy/retail-rates` → persists to `RawWattbuyRetailRate`.
+
+  - `GET /api/admin/wattbuy/electricity` → persists to `RawWattbuyElectricity`.
+
+- Deprecate `/api/offers` with HTTP 410 to prevent accidental calls.
+
+- Do not refactor existing code paths beyond removing offers; keep UI unaffected until it's wired to new sources.
+
+Rollback
+
+- Re-enable `/api/offers` by restoring prior route if needed.
+
+Guardrails
+
+- Token-gated admin endpoints; log corrId and never leak API keys.

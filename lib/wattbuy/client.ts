@@ -142,10 +142,63 @@ export async function getOffersForAddress(addr: OfferAddressInput) {
   return safeFetchJSON<any>(url);
 }
 
-export async function getRetailRates(params: any) {
+export type RetailRatesQuery = {
+  state?: string;
+  utility?: string;
+  zip?: string;
+  page?: number;
+  page_size?: number;
+  [k: string]: any;
+};
+
+export async function fetchRetailRates(q: RetailRatesQuery = {}) {
   assertKey();
-  const url = `${BASE}/retail-rates${qs(params)}`;
-  return safeFetchJSON<any>(url);
+  const state = (q.state && String(q.state).trim()) || 'TX';
+  const query: Record<string, string> = { state };
+  if (q.utility) query.utility = String(q.utility);
+  if (q.zip) query.zip = String(q.zip);
+  if (typeof q.page === 'number') query.page = String(q.page);
+  if (typeof q.page_size === 'number') query.page_size = String(q.page_size);
+  for (const [k, v] of Object.entries(q)) {
+    if (['state','utility','zip','page','page_size'].includes(k)) continue;
+    if (v === undefined || v === null) continue;
+    query[k] = String(v);
+  }
+  const url = `${BASE}/electricity/retail-rates${qs(query)}`;
+  return safeFetchJSON<any>(url, { timeoutMs: 15000, retries: 2 });
+}
+
+export async function getRetailRatesSafe(q: RetailRatesQuery = {}) {
+  return fetchRetailRates(q);
+}
+
+// Backward compatibility
+export async function getRetailRates(params: any) {
+  return fetchRetailRates(params);
+}
+
+// --- New: electricity catalog fetcher (/v3/electricity)
+export type ElectricityCatalogQuery = {
+  state?: string;
+  utility?: string;
+  zip?: string;
+  [k: string]: any;
+};
+
+export async function fetchElectricityCatalog(q: ElectricityCatalogQuery = {}) {
+  assertKey();
+  // Keep conservative/default params; pass-through unknown keys
+  const query: Record<string, string> = {};
+  if (q.state) query.state = String(q.state).toUpperCase();
+  if (q.utility) query.utility = String(q.utility);
+  if (q.zip) query.zip = String(q.zip);
+  for (const [k, v] of Object.entries(q)) {
+    if (['state','utility','zip'].includes(k)) continue;
+    if (v === undefined || v === null) continue;
+    query[k] = String(v);
+  }
+  const url = `${BASE}/electricity${qs(query)}`;
+  return safeFetchJSON<any>(url, { timeoutMs: 15000, retries: 2 });
 }
 
 export function extractTdspSlug(anyVal: any): string | null {

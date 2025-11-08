@@ -4,7 +4,7 @@
 
 WattBuy requires that all plan presentations include specific supplier and distributor information to maintain compliance with regulatory requirements in Texas.
 
-> Note: WattBuy offer retrieval does **not** require ESIID. Plans are requested by address/zip and optional TDSP context; ESIID is never sent.
+> Note: We now use WattBuy's **Retail Rates** database and **Electricity** catalog for plan intelligence. `/v3/offers` is retired in our stack. API keys remain server-only; admin routes are token-gated.
 
 ## Required Compliance Fields
 

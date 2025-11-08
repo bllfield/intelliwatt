@@ -133,11 +133,41 @@ Invoke-RestMethod -Headers $headers -Uri "https://intelliwatt.com/api/admin/env-
 
 **Last Updated**: January 2025
 
-### Verify WattBuy offers (no ESIID) and DB persistence
+### Verify WattBuy Retail Rates (catalog) — admin proxy
 
-1) Run the probe + public offers smoke (bash):
+1) Basic pull:
 
 ```bash
-ADMIN_TOKEN="<ADMIN_TOKEN>" BASE_URL="https://intelliwatt.com" ZIP5="76107" scripts/admin/wattbuy_offers_smoke.sh
+ADMIN_TOKEN="<ADMIN_TOKEN>"
+curl -sS "https://intelliwatt.com/api/admin/wattbuy/retail-rates?state=TX" \
+  -H "x-admin-token: $ADMIN_TOKEN" | jq .
 ```
+
+2) With utility/zip (if supported by your contract):
+
+```bash
+curl -sS "https://intelliwatt.com/api/admin/wattbuy/retail-rates?state=TX&utility=oncor&zip=76107" \
+  -H "x-admin-token: $ADMIN_TOKEN" | jq .
+```
+
+3) Inspect DB rows (examples depend on your admin readers; use psql/Prisma Studio as needed).
+
+### Verify WattBuy Electricity catalog — admin proxy
+
+1) Basic pull:
+
+```bash
+ADMIN_TOKEN="<ADMIN_TOKEN>"
+curl -sS "https://intelliwatt.com/api/admin/wattbuy/electricity?state=TX" \
+  -H "x-admin-token: $ADMIN_TOKEN" | jq .
+```
+
+2) With utility/zip (if supported by your contract):
+
+```bash
+curl -sS "https://intelliwatt.com/api/admin/wattbuy/electricity?state=TX&utility=oncor&zip=76107" \
+  -H "x-admin-token: $ADMIN_TOKEN" | jq .
+```
+
+3) Inspect DB rows (examples depend on your admin readers; use psql/Prisma Studio as needed).
 
