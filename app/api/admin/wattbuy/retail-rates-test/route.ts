@@ -15,9 +15,16 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
 
-  const zip = searchParams.get('zip') || '75201';
+  const utilityID = searchParams.get('utilityID');
+  const state = searchParams.get('state')?.toLowerCase();
+  const zip = searchParams.get('zip');
 
-  const params = retailRatesParams({ zip });
+  // Build params - WattBuy requires utilityID+state OR zip
+  const params = retailRatesParams({ 
+    utilityID: utilityID ?? undefined, 
+    state: state || undefined, 
+    zip: zip ?? undefined 
+  });
 
   const res = await wbGet('electricity/retail-rates', params, undefined, 1);
 
