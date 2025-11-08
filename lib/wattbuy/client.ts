@@ -162,6 +162,9 @@ export function extractTdspSlug(anyVal: any): string | null {
 export const tdspToSlug = extractTdspSlug;
 
 export class WattBuyClient {
+  static async getESIByAddress(addr: Addr) {
+    return getESIByAddress(addr);
+  }
   static async getUtilityInfo(addr: Addr) {
     return getUtilityInfo(addr);
   }
