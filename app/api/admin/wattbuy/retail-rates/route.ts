@@ -22,13 +22,18 @@ export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const q: RetailRatesQuery = {};
   if (sp.get('state')) q.state = sp.get('state')!.toUpperCase();
-  if (sp.get('utility')) q.utility = sp.get('utility')!;
+  // WattBuy API requires utilityID (numeric string, EIA utility ID)
+  if (sp.get('utilityID')) {
+    const utilityID = sp.get('utilityID')!;
+    // Accept as string or number, convert to string for API
+    q.utilityID = isNaN(Number(utilityID)) ? utilityID : Number(utilityID);
+  }
   if (sp.get('zip')) q.zip = sp.get('zip')!;
   if (sp.get('page')) q.page = Number(sp.get('page'));
   if (sp.get('page_size')) q.page_size = Number(sp.get('page_size'));
   sp.forEach((v, k) => {
     if (k in q) return;
-    if (['state','utility','zip','page','page_size'].includes(k)) return;
+    if (['state','utilityID','zip','page','page_size'].includes(k)) return;
     (q as any)[k] = v;
   });
   try {
@@ -36,7 +41,7 @@ export async function GET(req: NextRequest) {
     await prisma.rawWattbuyRetailRate.create({
       data: {
         state: q.state ?? null,
-        utility: q.utility ?? null,
+        utility: q.utilityID ? String(q.utilityID) : null, // Store utilityID as string in DB
         zip5: q.zip ?? null,
         page: typeof q.page === 'number' ? q.page : null,
         pageSize: typeof q.page_size === 'number' ? q.page_size : null,

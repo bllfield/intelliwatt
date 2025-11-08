@@ -143,31 +143,59 @@ curl -sS "https://intelliwatt.com/api/admin/wattbuy/retail-rates?state=TX" \
   -H "x-admin-token: $ADMIN_TOKEN" | jq .
 ```
 
-2) With utility/zip (if supported by your contract):
+2) With utilityID (EIA utility ID, numeric string) and optional zip:
 
 ```bash
-curl -sS "https://intelliwatt.com/api/admin/wattbuy/retail-rates?state=TX&utility=oncor&zip=76107" \
+curl -sS "https://intelliwatt.com/api/admin/wattbuy/retail-rates?state=TX&utilityID=6452&zip=76107" \
   -H "x-admin-token: $ADMIN_TOKEN" | jq .
 ```
+
+Note: `utilityID` is required and must be a numeric string (EIA utility ID). See https://www.eia.gov/electricity/data/eia861/ for utility IDs.
 
 3) Inspect DB rows (examples depend on your admin readers; use psql/Prisma Studio as needed).
 
 ### Verify WattBuy Electricity catalog — admin proxy
 
-1) Basic pull:
+1) With address (zip is required):
 
 ```bash
 ADMIN_TOKEN="<ADMIN_TOKEN>"
-curl -sS "https://intelliwatt.com/api/admin/wattbuy/electricity?state=TX" \
+curl -sS "https://intelliwatt.com/api/admin/wattbuy/electricity?address=9514%20santa%20paula%20dr&city=fort%20worth&state=tx&zip=76116" \
   -H "x-admin-token: $ADMIN_TOKEN" | jq .
 ```
 
-2) With utility/zip (if supported by your contract):
+2) With utility_eid (optional, EID of Utility):
 
 ```bash
-curl -sS "https://intelliwatt.com/api/admin/wattbuy/electricity?state=TX&utility=oncor&zip=76107" \
+curl -sS "https://intelliwatt.com/api/admin/wattbuy/electricity?state=tx&zip=76116&utility_eid=6452" \
   -H "x-admin-token: $ADMIN_TOKEN" | jq .
 ```
 
-3) Inspect DB rows (examples depend on your admin readers; use psql/Prisma Studio as needed).
+3) With wattkey (optional, WattBuy home identifier):
+
+```bash
+curl -sS "https://intelliwatt.com/api/admin/wattbuy/electricity?wattkey=<wattkey>&zip=76116" \
+  -H "x-admin-token: $ADMIN_TOKEN" | jq .
+```
+
+Note: `zip` is required. Use `state` as lowercase two-letter code (e.g., "tx"). `address` and `city` should be URL-encoded.
+
+### Verify WattBuy Electricity Info — admin proxy
+
+1) With address (zip is required):
+
+```bash
+ADMIN_TOKEN="<ADMIN_TOKEN>"
+curl -sS "https://intelliwatt.com/api/admin/wattbuy/electricity/info?address=9514%20santa%20paula%20dr&city=fort%20worth&state=tx&zip=76116&housing_chars=true&utility_list=true" \
+  -H "x-admin-token: $ADMIN_TOKEN" | jq .
+```
+
+2) With just zip (minimal query):
+
+```bash
+curl -sS "https://intelliwatt.com/api/admin/wattbuy/electricity/info?zip=76116" \
+  -H "x-admin-token: $ADMIN_TOKEN" | jq .
+```
+
+Note: `zip` is required. `housing_chars` and `utility_list` can be set to "true" to include those sections in the response. Response includes ESIID, utility info, housing characteristics, and utility list.
 

@@ -483,3 +483,19 @@ model RawWattbuyElectricity {
   @@index([state, utility, zip5])
   @@index([createdAt])
 }
+
+/// Raw WattBuy Electricity Info snapshots (/v3/electricity/info)
+model RawWattbuyElectricityInfo {
+  id             String   @id @default(cuid())
+  // Query context
+  state          String?
+  zip5           String?
+  address        String?
+  city           String?
+  // Upstream meta
+  upstreamStatus Int
+  raw            Json
+  createdAt      DateTime @default(now())
+  @@index([state, zip5])
+  @@index([createdAt])
+}

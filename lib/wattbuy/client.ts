@@ -144,7 +144,7 @@ export async function getOffersForAddress(addr: OfferAddressInput) {
 
 export type RetailRatesQuery = {
   state?: string;
-  utility?: string;
+  utilityID?: string | number; // Required: Numeric string of utilityID (EIA utility ID)
   zip?: string;
   page?: number;
   page_size?: number;
@@ -153,14 +153,17 @@ export type RetailRatesQuery = {
 
 export async function fetchRetailRates(q: RetailRatesQuery = {}) {
   assertKey();
-  const state = (q.state && String(q.state).trim()) || 'TX';
+  const state = (q.state && String(q.state).trim().toUpperCase()) || 'TX';
   const query: Record<string, string> = { state };
-  if (q.utility) query.utility = String(q.utility);
+  // WattBuy API requires utilityID as numeric string (EIA utility ID)
+  if (q.utilityID !== undefined && q.utilityID !== null) {
+    query.utilityID = String(q.utilityID);
+  }
   if (q.zip) query.zip = String(q.zip);
   if (typeof q.page === 'number') query.page = String(q.page);
   if (typeof q.page_size === 'number') query.page_size = String(q.page_size);
   for (const [k, v] of Object.entries(q)) {
-    if (['state','utility','zip','page','page_size'].includes(k)) continue;
+    if (['state','utilityID','zip','page','page_size'].includes(k)) continue;
     if (v === undefined || v === null) continue;
     query[k] = String(v);
   }
@@ -179,25 +182,78 @@ export async function getRetailRates(params: any) {
 
 // --- New: electricity catalog fetcher (/v3/electricity)
 export type ElectricityCatalogQuery = {
-  state?: string;
-  utility?: string;
-  zip?: string;
+  address?: string; // Street address (URL encoded)
+  city?: string; // City name
+  state?: string; // Two-letter state code (e.g., "TX")
+  zip?: string; // Required: 5-digit zip code
+  utility_eid?: number; // Optional: EID of Utility
+  wattkey?: string; // Optional: WattBuy identifier for the home
   [k: string]: any;
 };
 
 export async function fetchElectricityCatalog(q: ElectricityCatalogQuery = {}) {
   assertKey();
-  // Keep conservative/default params; pass-through unknown keys
   const query: Record<string, string> = {};
-  if (q.state) query.state = String(q.state).toUpperCase();
-  if (q.utility) query.utility = String(q.utility);
-  if (q.zip) query.zip = String(q.zip);
+  // Required: zip (5-digit)
+  if (q.zip) {
+    query.zip = String(q.zip).trim();
+  }
+  // Optional: address, city, state
+  if (q.address) query.address = String(q.address);
+  if (q.city) query.city = String(q.city);
+  if (q.state) query.state = String(q.state).toLowerCase(); // API expects lowercase like "tx"
+  // Optional: utility_eid (number)
+  if (q.utility_eid !== undefined && q.utility_eid !== null) {
+    query.utility_eid = String(q.utility_eid);
+  }
+  // Optional: wattkey
+  if (q.wattkey) query.wattkey = String(q.wattkey);
+  // Pass through any other keys
   for (const [k, v] of Object.entries(q)) {
-    if (['state','utility','zip'].includes(k)) continue;
+    if (['address','city','state','zip','utility_eid','wattkey'].includes(k)) continue;
     if (v === undefined || v === null) continue;
     query[k] = String(v);
   }
   const url = `${BASE}/electricity${qs(query)}`;
+  return safeFetchJSON<any>(url, { timeoutMs: 15000, retries: 2 });
+}
+
+// --- New: electricity info fetcher (/v3/electricity/info)
+export type ElectricityInfoQuery = {
+  address?: string; // Street address (URL encoded)
+  city?: string; // City name
+  state?: string; // Two-letter state code (e.g., "tx")
+  zip?: string; // Required: 5-digit zip code
+  housing_chars?: string | boolean; // Optional: "true" to include housing characteristics
+  utility_list?: string | boolean; // Optional: "true" to include utility list
+  [k: string]: any;
+};
+
+export async function fetchElectricityInfo(q: ElectricityInfoQuery = {}) {
+  assertKey();
+  const query: Record<string, string> = {};
+  // Required: zip (5-digit)
+  if (q.zip) {
+    query.zip = String(q.zip).trim();
+  }
+  // Optional: address, city, state
+  if (q.address) query.address = String(q.address);
+  if (q.city) query.city = String(q.city);
+  if (q.state) query.state = String(q.state).toLowerCase(); // API expects lowercase like "tx"
+  // Optional: housing_chars, utility_list (can be "true" string or boolean)
+  if (q.housing_chars !== undefined && q.housing_chars !== null) {
+    query.housing_chars = q.housing_chars === true || q.housing_chars === 'true' ? 'true' : String(q.housing_chars);
+  }
+  if (q.utility_list !== undefined && q.utility_list !== null) {
+    query.utility_list = q.utility_list === true || q.utility_list === 'true' ? 'true' : String(q.utility_list);
+  }
+  // Pass through any other keys
+  for (const [k, v] of Object.entries(q)) {
+    if (['address','city','state','zip','housing_chars','utility_list'].includes(k)) continue;
+    if (v === undefined || v === null) continue;
+    query[k] = String(v);
+  }
+  const url = `${BASE}/electricity/info${qs(query)}`;
   return safeFetchJSON<any>(url, { timeoutMs: 15000, retries: 2 });
 }
 
