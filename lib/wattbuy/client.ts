@@ -44,11 +44,17 @@ async function doFetch<T>(url: string, init?: RequestInit): Promise<WbResponse<T
     const text = await res.text().catch(() => '');
     return { ok: false, status: res.status, text, headers };
   }
-  if (ct.includes('application/json')) {
-    const data = (await res.json()) as T;
-    return { ok: true, status: res.status, data, headers };
+  // Read as text first, then parse JSON if content-type suggests it
+  const text = await res.text().catch(() => '');
+  if (ct.includes('application/json') && text) {
+    try {
+      const data = JSON.parse(text) as T;
+      return { ok: true, status: res.status, data, headers };
+    } catch (e) {
+      // If JSON parsing fails, return as text
+      return { ok: true, status: res.status, text, headers };
+    }
   }
-  const text = await res.text();
   return { ok: true, status: res.status, text, headers };
 }
 
