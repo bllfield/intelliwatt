@@ -5,20 +5,21 @@
 
 export function retailRatesParams(input: {
   utilityID?: string | number;
-  state: string; // required by their test page
+  state?: string; // lowercase
+  zip?: string | number;
 }): Record<string, string> {
   const out: Record<string, string> = {};
-  if (input.utilityID !== undefined) out.utilityID = String(input.utilityID);
-  // state must be two-letter lowercase (per examples)
-  out.state = String(input.state).toLowerCase();
+  if (input.utilityID != null) out.utilityID = String(input.utilityID);
+  if (input.state) out.state = String(input.state).toLowerCase();
+  if (input.zip != null) out.zip = String(input.zip);
   return out;
 }
 
 export function electricityParams(input: {
-  address?: string; // raw string (do not pre-encode)
+  address?: string;
   city?: string;
-  state?: string; // lowercase 2-letter
-  zip: string | number; // required
+  state?: string; // lowercase
+  zip: string | number;
 }): Record<string, string> {
   const out: Record<string, string> = {};
   if (input.address) out.address = input.address;
@@ -32,7 +33,7 @@ export function electricityInfoParams(input: {
   address?: string;
   city?: string;
   state?: string; // lowercase
-  zip: string | number; // required
+  zip: string | number;
   housing_chars?: boolean | string;
   utility_list?: boolean | string;
 }): Record<string, string> {

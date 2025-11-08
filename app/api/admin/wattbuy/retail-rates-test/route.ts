@@ -15,17 +15,27 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
 
-  const utilityID = searchParams.get('utilityID'); // e.g., 44372 for Oncor
+  const zip = searchParams.get('zip') || '75201';
 
-  const state = (searchParams.get('state') || 'tx').toLowerCase();
+  const params = retailRatesParams({ zip });
 
-  const params = retailRatesParams({ utilityID: utilityID ?? undefined, state });
-
-  const res = await wbGet('electricity/retail-rates', params);
+  const res = await wbGet('electricity/retail-rates', params, undefined, 1);
 
   if (!res.ok) {
-    return new Response(JSON.stringify({ ok: false, status: res.status, error: res.text }), { status: 502 });
+    return new Response(JSON.stringify({
+      ok: false,
+      status: res.status,
+      error: res.text,
+      headers: res.headers,
+      where: params
+    }), { status: 502 });
   }
 
-  return Response.json({ ok: true, where: params, count: Array.isArray(res.data) ? res.data.length : undefined, data: res.data });
+  return Response.json({
+    ok: true,
+    where: params,
+    headers: res.headers,
+    count: Array.isArray(res.data) ? res.data.length : undefined,
+    sample: Array.isArray(res.data) ? res.data.slice(0, 3) : res.data
+  });
 }

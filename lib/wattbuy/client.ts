@@ -6,12 +6,7 @@ export const WB_BASE = 'https://apis.wattbuy.com/v3';
 
 function buildUrl(path: string, params?: Record<string, unknown>): string {
   const url = new URL(path.startsWith('http') ? path : `${WB_BASE}/${path.replace(/^\/+/, '')}`);
-  if (params) {
-    for (const [k, v] of Object.entries(params)) {
-      if (v === undefined || v === null) continue;
-      url.searchParams.set(k, String(v));
-    }
-  }
+  if (params) for (const [k, v] of Object.entries(params ?? {})) if (v != null) url.searchParams.set(k, String(v));
   return url.toString();
 }
 
@@ -21,28 +16,65 @@ function apiKey(): string {
   return key;
 }
 
-// Minimal GET with x-api-key header per WattBuy test page
-export async function wbGet<T = any>(
-  path: string,
-  params?: Record<string, unknown>,
-  init?: Omit<RequestInit, 'headers' | 'method'>
-): Promise<{ ok: boolean; status: number; data?: T; text?: string }> {
-  const res = await fetch(buildUrl(path, params), {
+type WbResponse<T> = {
+  ok: boolean;
+  status: number;
+  data?: T;
+  text?: string;
+  headers?: Record<string, string | null>;
+};
+
+async function doFetch<T>(url: string, init?: RequestInit): Promise<WbResponse<T>> {
+  const res = await fetch(url, {
     method: 'GET',
-    headers: {
-      'x-api-key': apiKey(),
-      'Accept': 'application/json',
-    },
+    headers: { 'x-api-key': apiKey(), 'Accept': 'application/json' },
     cache: 'no-store',
     ...init,
   });
+
+  const headers = {
+    'x-amzn-requestid': res.headers.get('x-amzn-requestid'),
+    'x-documentation-url': res.headers.get('x-documentation-url'),
+    'x-amz-apigw-id': res.headers.get('x-amz-apigw-id'),
+    'content-type': res.headers.get('content-type'),
+  };
+
   const ct = res.headers.get('content-type') || '';
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    return { ok: false, status: res.status, text };
+    return { ok: false, status: res.status, text, headers };
   }
-  if (ct.includes('application/json')) return { ok: true, status: res.status, data: await res.json() as T };
-  return { ok: true, status: res.status, text: await res.text() };
+  if (ct.includes('application/json')) {
+    const data = (await res.json()) as T;
+    return { ok: true, status: res.status, data, headers };
+  }
+  const text = await res.text();
+  return { ok: true, status: res.status, text, headers };
+}
+
+export async function wbGet<T = any>(
+  path: string,
+  params?: Record<string, unknown>,
+  init?: Omit<RequestInit, 'headers'|'method'>,
+  retries = 1
+): Promise<WbResponse<T>> {
+  const url = buildUrl(path, params);
+  let last: WbResponse<T> | undefined;
+  for (let i = 0; i <= retries; i++) {
+    try {
+      const out = await doFetch<T>(url, init);
+      if (out.ok) return out;
+      // Retry on 5xx only
+      if (out.status < 500 || i === retries) return out;
+      await new Promise(r => setTimeout(r, 300 * (i + 1)));
+      last = out;
+    } catch (err) {
+      if (i === retries) throw err;
+      await new Promise(r => setTimeout(r, 300 * (i + 1)));
+    }
+  }
+  // should not reach
+  return last ?? { ok: false, status: 500, text: 'Unknown error (no response)' };
 }
 
 export type WattBuyRetailRate = Record<string, any>;
@@ -247,9 +279,9 @@ export async function fetchRetailRates(q: RetailRatesQuery = {}) {
   assertKey();
   const params: Record<string, unknown> = retailRatesParams({
     utilityID: q.utilityID ?? q.utility_id, // Accept both for backward compat
-    state: q.state || 'tx', // required, lowercase per test page
+    state: q.state, // optional, lowercase per test page
+    zip: q.zip,
   });
-  if (q.zip) params.zip = String(q.zip);
   if (typeof q.page === 'number') params.page = q.page;
   if (typeof q.page_size === 'number') params.page_size = q.page_size;
   for (const [k, v] of Object.entries(q)) {
