@@ -8,6 +8,8 @@ import { wbGet } from '@/lib/wattbuy/client';
 
 import { retailRatesParams } from '@/lib/wattbuy/params';
 
+import { deriveUtilityFromAddress } from '@/lib/wattbuy/derive';
+
 export async function GET(req: NextRequest) {
   if (req.headers.get('x-admin-token') !== process.env.ADMIN_TOKEN) {
     return new Response(JSON.stringify({ ok: false, error: 'Unauthorized' }), { status: 401 });
@@ -15,10 +17,25 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
 
-  const zip = searchParams.get('zip') || '75201';
+  const address = searchParams.get('address') || undefined;
+  const city = searchParams.get('city') || undefined;
+  const state = (searchParams.get('state') || '').toLowerCase() || undefined;
+  const zip = searchParams.get('zip') || undefined;
 
-  const params = retailRatesParams({ zip });
+  if (!zip) {
+    return new Response(JSON.stringify({ ok: false, error: 'zip required' }), { status: 400 });
+  }
 
+  const derived = await deriveUtilityFromAddress({ address, city, state, zip });
+  if (!derived) {
+    return new Response(JSON.stringify({
+      ok: false,
+      error: 'Unable to derive utilityID from address. Provide utilityID+state directly.',
+      where: { address, city, state, zip }
+    }), { status: 422 });
+  }
+
+  const params = retailRatesParams({ utilityID: derived.utilityID, state: derived.state });
   const res = await wbGet('electricity/retail-rates', params, undefined, 1);
 
   if (!res.ok) {
@@ -39,4 +56,3 @@ export async function GET(req: NextRequest) {
     sample: Array.isArray(res.data) ? res.data.slice(0, 3) : res.data
   });
 }
-
