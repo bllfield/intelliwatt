@@ -153,6 +153,34 @@ export default function AdminDashboard() {
           </div>
         </div>
 
+        {/* Quick Links / Tools Section */}
+        <section className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
+          <h2 className="text-2xl font-bold text-brand-navy mb-4">🔧 Admin Tools</h2>
+          <div className="grid md:grid-cols-3 gap-4">
+            <a
+              href="/admin/wattbuy/inspector"
+              className="block p-4 border-2 border-brand-blue/20 rounded-lg hover:border-brand-blue hover:bg-brand-blue/5 transition-colors"
+            >
+              <div className="font-semibold text-brand-navy mb-1">🔍 WattBuy Inspector</div>
+              <div className="text-sm text-brand-navy/60">Test and inspect WattBuy API endpoints with real-time metadata</div>
+            </a>
+            <a
+              href="/admin/retail-rates"
+              className="block p-4 border-2 border-brand-blue/20 rounded-lg hover:border-brand-blue hover:bg-brand-blue/5 transition-colors"
+            >
+              <div className="font-semibold text-brand-navy mb-1">⚡ Retail Rates</div>
+              <div className="text-sm text-brand-navy/60">Explore and manage retail rate data</div>
+            </a>
+            <a
+              href="/admin/modules"
+              className="block p-4 border-2 border-brand-blue/20 rounded-lg hover:border-brand-blue hover:bg-brand-blue/5 transition-colors"
+            >
+              <div className="font-semibold text-brand-navy mb-1">📦 Modules</div>
+              <div className="text-sm text-brand-navy/60">View available system modules</div>
+            </a>
+          </div>
+        </section>
+
         {/* Users Section */}
         <section className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
           <h2 className="text-2xl font-bold text-brand-navy mb-4">📋 Users</h2>
