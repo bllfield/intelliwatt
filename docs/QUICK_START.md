@@ -221,3 +221,22 @@ curl -sS "https://intelliwatt.com/api/admin/wattbuy/electricity/info?zip=76116" 
 
 Note: `zip` is required. `housing_chars` and `utility_list` can be set to "true" to include those sections in the response. Response includes ESIID, utility info, housing characteristics, and utility list.
 
+### WattBuy Inspector UI
+
+For interactive testing with visual inspection of responses:
+
+1. Navigate to `/admin/wattbuy/inspector` in your browser
+2. Paste your `ADMIN_TOKEN` in the auth field
+3. Test endpoints with real-time inspection results:
+   - **By Utility**: Enter `utilityID` and `state` (lowercase)
+   - **By Address**: Enter address fields and test multiple endpoints
+4. View inspection metadata:
+   - `topType`: Payload structure (array/object)
+   - `topKeys`: Top-level keys (if object)
+   - `foundListPath`: Where the array was found (`rates`, `plans`, `(root)`, etc.)
+   - `count`: Number of items found
+   - `sample`: First 3 items
+   - `note`: Diagnostic messages
+
+**If `count = 0`**: This indicates upstream content from WattBuy. Contact support with the `x-amzn-requestid` from headers, exact selector used, and the `topType`/`topKeys`/`foundListPath` metadata. See `docs/WATTBUY_TESTING_RUNBOOK.md` for details.
+

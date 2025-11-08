@@ -76,14 +76,53 @@ If either endpoint fails:
 - **Empty results**: Verify ZIP code or utilityID is valid for Texas
 - **Timeout**: Check network connectivity, retry logic should handle transient 5xx errors
 
+## Using the Admin Inspector UI
+
+Navigate to `/admin/wattbuy/inspector` for an interactive testing interface.
+
+### Inspector Response Fields
+
+After running tests, you'll see:
+
+- **`topType`**: Whether the payload is an `array` or `object`
+- **`topKeys`**: If object, what keys exist at the top level
+- **`foundListPath`**: Which key contains the array (or `"(root)"` if the payload itself is the list)
+- **`count`**: Number of items found (even when WattBuy doesn't return a root array)
+- **`sample`**: First 3 items from the found array
+- **`note`**: Diagnostic message if no array was found
+
+### If `count = 0`
+
+If the inspector shows `count = 0`, this indicates upstream content from WattBuy, not a code issue. When contacting WattBuy support, include:
+
+1. **Request ID**: The `x-amzn-requestid` from the response headers (already captured)
+2. **Exact selector used**: 
+   - `utilityID=44372&state=tx` (if explicit)
+   - Or the derived utilityID from address/zip (if auto-derived)
+3. **Context**: Note that `/v3/electricity/info` for the same address/zip works, but `/v3/electricity/retail-rates` returns no list
+4. **Metadata**: Include the `topType`, `topKeys`, and `foundListPath` values (helps them confirm the expected shape/field names for your product key)
+
+### Updating Field Names
+
+If WattBuy confirms a different field name for the array (e.g., `plans` vs `rates`), update the `candidates` list in `lib/wattbuy/inspect.ts`:
+
+```typescript
+const candidates = ['rates', 'plans', 'results', 'data', 'items'];
+// Add the confirmed field name here
+```
+
 ## Response Format
 
 Successful response includes:
 - `ok: true`
 - `where`: Parameters sent to API
-- `headers`: Diagnostic headers from WattBuy
-- `count`: Number of results (if array)
+- `headers`: Diagnostic headers from WattBuy (including `x-amzn-requestid`, `x-documentation-url`, `x-amz-apigw-id`)
+- `topType`: Payload structure type (`array`, `object`, etc.)
+- `topKeys`: Top-level keys (if object)
+- `foundListPath`: Path to the array (`rates`, `plans`, `(root)`, etc.)
+- `count`: Number of results found
 - `sample`: First 3 items (for quick inspection)
+- `note`: Diagnostic message (if applicable)
 
 Error response includes:
 - `ok: false`

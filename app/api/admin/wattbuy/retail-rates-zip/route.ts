@@ -10,6 +10,8 @@ import { retailRatesParams } from '@/lib/wattbuy/params';
 
 import { deriveUtilityFromAddress } from '@/lib/wattbuy/derive';
 
+import { inspectRetailRatesPayload } from '@/lib/wattbuy/inspect';
+
 export async function GET(req: NextRequest) {
   if (req.headers.get('x-admin-token') !== process.env.ADMIN_TOKEN) {
     return new Response(JSON.stringify({ ok: false, error: 'Unauthorized' }), { status: 401 });
@@ -48,11 +50,17 @@ export async function GET(req: NextRequest) {
     }), { status: 502 });
   }
 
+  const inspect = inspectRetailRatesPayload(res.data);
+
   return Response.json({
     ok: true,
     where: params,
     headers: res.headers,
-    count: Array.isArray(res.data) ? res.data.length : undefined,
-    sample: Array.isArray(res.data) ? res.data.slice(0, 3) : res.data
+    topType: inspect.topType,
+    topKeys: inspect.topKeys,
+    foundListPath: inspect.foundListPath,
+    count: inspect.count,
+    sample: inspect.sample,
+    note: inspect.message,
   });
 }

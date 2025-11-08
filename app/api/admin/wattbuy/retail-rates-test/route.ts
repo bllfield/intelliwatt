@@ -8,6 +8,8 @@ import { wbGet } from '@/lib/wattbuy/client';
 
 import { retailRatesParams } from '@/lib/wattbuy/params';
 
+import { inspectRetailRatesPayload } from '@/lib/wattbuy/inspect';
+
 import { deriveUtilityFromAddress } from '@/lib/wattbuy/derive';
 
 export async function GET(req: NextRequest) {
@@ -64,12 +66,18 @@ export async function GET(req: NextRequest) {
       }), { status: 502 });
     }
 
+    const inspect = inspectRetailRatesPayload(res.data);
+
     return Response.json({
       ok: true,
       where: params,
       headers: res.headers,
-      count: Array.isArray(res.data) ? res.data.length : undefined,
-      sample: Array.isArray(res.data) ? res.data.slice(0, 3) : res.data
+      topType: inspect.topType,
+      topKeys: inspect.topKeys,
+      foundListPath: inspect.foundListPath,
+      count: inspect.count,
+      sample: inspect.sample,
+      note: inspect.message,
     });
   } catch (e: any) {
     return new Response(JSON.stringify({

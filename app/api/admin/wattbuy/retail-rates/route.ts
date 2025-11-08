@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCorrelationId } from '@/lib/correlation';
 import { prisma } from '@/lib/db';
 import { fetchRetailRates, type RetailRatesQuery } from '@/lib/wattbuy/client';
+import { inspectRetailRatesPayload } from '@/lib/wattbuy/inspect';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -52,7 +53,19 @@ export async function GET(req: NextRequest) {
         raw: data,
       } as any,
     });
-    return NextResponse.json({ ok: true, corrId, query: q, countHint: Array.isArray((data as any)?.results) ? (data as any).results.length : undefined, data }, { status: 200 });
+    const inspect = inspectRetailRatesPayload(data);
+    return NextResponse.json({
+      ok: true,
+      corrId,
+      query: q,
+      topType: inspect.topType,
+      topKeys: inspect.topKeys,
+      foundListPath: inspect.foundListPath,
+      count: inspect.count,
+      sample: inspect.sample,
+      note: inspect.message,
+      data
+    }, { status: 200 });
   } catch (err: any) {
     const status = typeof err?.status === 'number' ? err.status : 502;
     return NextResponse.json({ ok: false, corrId, error: status === 403 ? 'UPSTREAM_FORBIDDEN' : 'UPSTREAM_ERROR' }, { status });
