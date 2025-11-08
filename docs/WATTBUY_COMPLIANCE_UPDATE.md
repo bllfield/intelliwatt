@@ -4,7 +4,14 @@
 
 WattBuy requires that all plan presentations include specific supplier and distributor information to maintain compliance with regulatory requirements in Texas.
 
-> Note: We now use WattBuy's **Retail Rates** database and **Electricity** catalog for plan intelligence. `/v3/offers` is retired in our stack. API keys remain server-only; admin routes are token-gated.
+> Note: We now use WattBuy's **Retail Rates** database (`/v3/electricity/retail-rates`), **Electricity** catalog (`/v3/electricity`), and **Electricity Info** (`/v3/electricity/info`) for plan intelligence. `/v3/offers` is retired in our stack. API keys remain server-only; admin routes are token-gated.
+
+**Current Implementation:**
+- Uses `x-api-key` header (not Authorization Bearer) per WattBuy test page spec.
+- Parameters: `utilityID` (camelCase), `state` (lowercase, e.g., `tx`).
+- Auto-derives `utilityID` from address via `/v3/electricity/info` when not provided.
+- Includes retry logic (1 retry on 5xx errors) and diagnostic header capture.
+- Endpoints: `/api/admin/wattbuy/retail-rates-test`, `/api/admin/wattbuy/retail-rates-zip`, `/api/admin/wattbuy/retail-rates-by-address`.
 
 ## Required Compliance Fields
 

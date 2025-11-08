@@ -4,7 +4,7 @@ Quick reference for testing WattBuy retail-rates endpoints after deployment.
 
 ## Test Endpoints
 
-### 1. Test with utilityID + state (Oncor)
+### A) Explicit utilityID + state (Oncor)
 
 ```bash
 curl -sS "https://intelliwatt.com/api/admin/wattbuy/retail-rates-test?utilityID=44372&state=tx" \
@@ -13,14 +13,34 @@ curl -sS "https://intelliwatt.com/api/admin/wattbuy/retail-rates-test?utilityID=
 
 **Expected:** Returns retail rates for Oncor (utilityID 44372) in Texas.
 
-### 2. Test with ZIP code
+### B) Derive from address (auto-derives utilityID)
+
+```bash
+curl -sS "https://intelliwatt.com/api/admin/wattbuy/retail-rates-test?address=9514%20Santa%20Paula%20Dr&city=Fort%20Worth&state=tx&zip=76116" \
+  -H "x-admin-token: $ADMIN_TOKEN" | jq
+```
+
+**Expected:** Auto-derives utilityID from address via `/v3/electricity/info`, then fetches retail rates.
+
+### C) Convenience by-address route
+
+```bash
+curl -sS "https://intelliwatt.com/api/admin/wattbuy/retail-rates-by-address?address=9514%20Santa%20Paula%20Dr&city=Fort%20Worth&state=tx&zip=76116" \
+  -H "x-admin-token: $ADMIN_TOKEN" | jq
+```
+
+**Expected:** Same as B, but with simpler path name.
+
+### D) ZIP-only endpoint (auto-derives utilityID)
 
 ```bash
 curl -sS "https://intelliwatt.com/api/admin/wattbuy/retail-rates-zip?zip=75201" \
   -H "x-admin-token: $ADMIN_TOKEN" | jq
 ```
 
-**Expected:** Returns retail rates for ZIP code 75201 (Dallas, TX).
+**Expected:** Auto-derives utilityID from ZIP code, then fetches retail rates.
+
+**Note:** All endpoints require `state` to be lowercase (e.g., `tx` not `TX`). `utilityID` must be camelCase.
 
 ## Debugging Failures
 
@@ -41,10 +61,13 @@ If either endpoint fails:
 3. **Compare against raw WattBuy API** from server:
    ```bash
    # On the server (or locally with WATTBUY_API_KEY set):
-   curl -v "https://apis.wattbuy.com/v3/electricity/retail-rates?zip=75201" \
+   # Note: WattBuy requires utilityID + state, not just zip
+   curl -v "https://apis.wattbuy.com/v3/electricity/retail-rates?utilityID=44372&state=tx" \
      -H "x-api-key: $WATTBUY_API_KEY" \
      -H "accept: application/json"
    ```
+   
+   **Important:** WattBuy's `/v3/electricity/retail-rates` endpoint requires `utilityID` (camelCase) + `state` (lowercase). ZIP alone is not sufficient.
 
 ## Common Issues
 

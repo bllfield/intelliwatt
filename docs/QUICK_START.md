@@ -135,22 +135,42 @@ Invoke-RestMethod -Headers $headers -Uri "https://intelliwatt.com/api/admin/env-
 
 ### Verify WattBuy Retail Rates (catalog) — admin proxy
 
-1) Basic pull:
+**Note:** WattBuy API requires `utilityID` (camelCase) + `state` (lowercase). We support auto-derivation from address.
+
+1) **Explicit utilityID + state (Oncor):**
 
 ```bash
 ADMIN_TOKEN="<ADMIN_TOKEN>"
-curl -sS "https://intelliwatt.com/api/admin/wattbuy/retail-rates?state=TX" \
+curl -sS "https://intelliwatt.com/api/admin/wattbuy/retail-rates-test?utilityID=44372&state=tx" \
   -H "x-admin-token: $ADMIN_TOKEN" | jq .
 ```
 
-2) With utility_id (EIA utility ID, numeric string) and optional zip:
+2) **Auto-derive from address:**
 
 ```bash
-curl -sS "https://intelliwatt.com/api/admin/wattbuy/retail-rates?state=TX&utility_id=6452&zip=76107" \
+curl -sS "https://intelliwatt.com/api/admin/wattbuy/retail-rates-test?address=9514%20Santa%20Paula%20Dr&city=Fort%20Worth&state=tx&zip=76116" \
   -H "x-admin-token: $ADMIN_TOKEN" | jq .
 ```
 
-Note: `utility_id` is required and must be a numeric string (EIA utility ID). See https://www.eia.gov/electricity/data/eia861/ for utility IDs.
+3) **Convenience by-address route:**
+
+```bash
+curl -sS "https://intelliwatt.com/api/admin/wattbuy/retail-rates-by-address?address=9514%20Santa%20Paula%20Dr&city=Fort%20Worth&state=tx&zip=76116" \
+  -H "x-admin-token: $ADMIN_TOKEN" | jq .
+```
+
+4) **ZIP-only endpoint (auto-derives utilityID):**
+
+```bash
+curl -sS "https://intelliwatt.com/api/admin/wattbuy/retail-rates-zip?zip=75201" \
+  -H "x-admin-token: $ADMIN_TOKEN" | jq .
+```
+
+**Notes:**
+- `utilityID` must be camelCase (e.g., `44372` for Oncor).
+- `state` must be lowercase (e.g., `tx` not `TX`).
+- Auto-derivation calls `/v3/electricity/info` to extract utilityID from address.
+- See https://www.eia.gov/electricity/data/eia861/ for EIA utility IDs.
 
 3) Inspect DB rows (examples depend on your admin readers; use psql/Prisma Studio as needed).
 
@@ -170,6 +190,8 @@ curl -sS "https://intelliwatt.com/api/admin/wattbuy/electricity?address=9514%20s
 curl -sS "https://intelliwatt.com/api/admin/wattbuy/electricity?state=tx&zip=76116&utility_eid=6452" \
   -H "x-admin-token: $ADMIN_TOKEN" | jq .
 ```
+
+**Note:** `state` must be lowercase (e.g., `tx` not `TX`).
 
 3) With wattkey (optional, WattBuy home identifier):
 

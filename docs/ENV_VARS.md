@@ -6,7 +6,7 @@
 - `GOOGLE_SERVICE_ACCOUNT_EMAIL` — service account email (backend only)
 
 ## Integrations
-- `WATTBUY_API_KEY` — server key for WattBuy
+- `WATTBUY_API_KEY` — server key for WattBuy (used with `x-api-key` header, not Authorization Bearer)
 - `SMT_SFTP_HOST`, `SMT_SFTP_USER`, `SMT_SFTP_KEY` — Smart Meter Texas SFTP (for droplet)
 - `SMT_FETCH_TRIGGER_URL` — Vercel URL for on-demand SMT fetch trigger (e.g., `https://intelliwatt.com/api/admin/smt/fetch-trigger`)
 - `SMT_FETCH_ADMIN_TOKEN` — Token for SMT fetch trigger authorization (can reuse `ADMIN_TOKEN`)

@@ -26,7 +26,13 @@
 - **Env:** `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` required for client autocomplete.
 
 ## Component Standards
-- **WattBuy:** RAW → `raw_wattbuy`; transformer `tx_wattbuy_to_meter` → `meter(esiid, utilityName, tdspSlug)`.
+- **WattBuy:** 
+  - Uses `/v3/electricity/retail-rates`, `/v3/electricity`, `/v3/electricity/info` endpoints.
+  - API client (`lib/wattbuy/client.ts`) uses `x-api-key` header, `utilityID` (camelCase), `state` (lowercase).
+  - Auto-derives `utilityID` from address via `lib/wattbuy/derive.ts` when not provided.
+  - Includes retry logic (1 retry on 5xx) and diagnostic header capture.
+  - RAW → `RawWattbuyRetailRate`, `RawWattbuyElectricity`, `RawWattbuyElectricityInfo`.
+  - Transformer `tx_wattbuy_to_meter` → `meter(esiid, utilityName, tdspSlug)`.
 - **SMT:** SFTP/decrypt → `raw_smt_files/raw_smt_intervals`; transformer `tx_smt_to_usage_interval` (idempotent on `(meter_id, ts)`).
 - **Green Button:** RAW XML → `raw_green_button`; transformer → `usage_interval(source='green_button')`.
 - **Plan Analyzer:** Inputs CDM only; outputs to `analysis_result` (immutable by config hash).
@@ -112,7 +118,14 @@ Capture Smart Meter Texas files in RAW form before any parsing, maintaining RAW�
 
   - `/api/admin/debug/smt/raw-files` (lists)
 
-- ✅ WattBuy admin routes verified: `/api/admin/wattbuy/ping`, `/offers`.
+- ✅ WattBuy admin routes verified: 
+  - `/api/admin/wattbuy/retail-rates-test` (utilityID+state OR address auto-derive)
+  - `/api/admin/wattbuy/retail-rates-zip` (ZIP-based, auto-derives utilityID)
+  - `/api/admin/wattbuy/retail-rates-by-address` (convenience endpoint)
+  - `/api/admin/wattbuy/retail-rates` (persists to RawWattbuyRetailRate)
+  - `/api/admin/wattbuy/electricity` (persists to RawWattbuyElectricity)
+  - `/api/admin/wattbuy/electricity/info` (persists to RawWattbuyElectricityInfo)
+  - `/api/admin/wattbuy/ping`
 
 - ✅ Normalizer v1:
 
@@ -224,6 +237,8 @@ Scope
 
   - `GET /api/admin/wattbuy/electricity` → persists to `RawWattbuyElectricity`.
 
+  - `GET /api/admin/wattbuy/electricity/info` → persists to `RawWattbuyElectricityInfo`.
+
 - Deprecate `/api/offers` with HTTP 410 to prevent accidental calls.
 
 - Do not refactor existing code paths beyond removing offers; keep UI unaffected until it's wired to new sources.
@@ -235,3 +250,50 @@ Rollback
 Guardrails
 
 - Token-gated admin endpoints; log corrId and never leak API keys.
+
+PC-2025-01-XX: WattBuy API Client Standardization
+
+Rationale
+
+- Standardize WattBuy API calls to match their test page specification (x-api-key header, camelCase parameters, lowercase state).
+- Add retry logic and diagnostic header capture for better troubleshooting.
+- Enable auto-derivation of utilityID from address for retail-rates queries.
+
+Scope
+
+- **Client (`lib/wattbuy/client.ts`):**
+  - Use `x-api-key` header (not Authorization Bearer).
+  - Add retry logic (1 retry on 5xx errors with exponential backoff).
+  - Capture diagnostic headers: `x-amzn-requestid`, `x-documentation-url`, `x-amz-apigw-id`.
+  - Handle JSON parsing errors gracefully.
+
+- **Parameters (`lib/wattbuy/params.ts`):**
+  - `retailRatesParams`: Accept `utilityID` (camelCase), optional `state` (lowercase), optional `zip`.
+  - `electricityParams`: Accept `address`, `city`, `state` (lowercase), required `zip`.
+  - `electricityInfoParams`: Extends `electricityParams` with `housing_chars`, `utility_list`.
+
+- **Auto-derivation (`lib/wattbuy/derive.ts`):**
+  - `deriveUtilityFromAddress()`: Calls `/v3/electricity/info` to extract utilityID from address.
+  - Prefers deregulated utilities, falls back to TX TDSPs.
+  - Uses hard-coded EIA utility IDs as last resort.
+
+- **Endpoints:**
+  - `/api/admin/wattbuy/retail-rates-test`: Accepts `utilityID+state` OR `address/city/state/zip` (auto-derives).
+  - `/api/admin/wattbuy/retail-rates-zip`: Always derives utilityID from address (requires zip).
+  - `/api/admin/wattbuy/retail-rates-by-address`: Convenience endpoint for address-based queries.
+
+- **API Endpoints Used:**
+  - `/v3/electricity/retail-rates`: Requires `utilityID` (camelCase, integer as string) + `state` (lowercase).
+  - `/v3/electricity`: Catalog endpoint, requires `zip`, optional `address`, `city`, `state` (lowercase).
+  - `/v3/electricity/info`: Info endpoint, requires `zip`, optional `address`, `city`, `state` (lowercase), `housing_chars`, `utility_list`.
+
+Rollback
+
+- Revert to previous parameter names (`utility_id` snake_case) if needed.
+- Remove auto-derivation if it causes issues.
+
+Guardrails
+
+- All WattBuy calls use centralized `wbGet()` function with clean headers.
+- No internal headers forwarded to WattBuy API.
+- State always lowercase, utilityID always camelCase per WattBuy test page spec.
