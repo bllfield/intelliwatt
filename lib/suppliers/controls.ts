@@ -1,8 +1,10 @@
-import { PrismaClient } from '@prisma/client'
-import crypto from 'crypto'
-import { flagBool } from '@/lib/flags'
+import crypto from 'crypto';
+import { Prisma } from '@prisma/client';
+import { prisma } from '@/lib/db';
+import { flagBool } from '@/lib/flags';
+import { assertNodeRuntime } from '@/lib/node/_guard';
 
-const prisma = new PrismaClient()
+assertNodeRuntime();
 
 export type SupplierGateInput = {
   supplierName: string

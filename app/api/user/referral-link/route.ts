@@ -3,6 +3,8 @@ import { cookies } from 'next/headers';
 import { db } from '@/lib/db';
 import crypto from 'crypto';
 
+export const runtime = 'nodejs';
+
 // Generate a signed referral token
 function generateReferralToken(userId: string, campaignId?: string): string {
   const secret = process.env.REFERRAL_SECRET || 'default-secret-change-in-production';

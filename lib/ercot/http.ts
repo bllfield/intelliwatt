@@ -1,4 +1,7 @@
 import https from 'https';
+import { assertNodeRuntime } from '@/lib/node/_guard';
+
+assertNodeRuntime();
 
 export async function fetchWithRetries(url: string, opts: RequestInit = {}, attempts = 3): Promise<Response> {
   let attempt = 0;

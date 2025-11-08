@@ -11,6 +11,9 @@
 
 import crypto from 'crypto';
 import type { CheerioAPI } from 'cheerio';
+import { assertNodeRuntime } from '@/lib/node/_guard';
+
+assertNodeRuntime();
 
 export type ParsedBands = Array<{ min: number; max: number | null; cents: number }>;
 export type ParsedCredit =

@@ -50,7 +50,10 @@ import { deriveRateKey, getRateKeyParts } from '@/lib/rates/key';
 import { WattBuyOffer } from '@/lib/offers/match';
 import { fetchEflText } from '@/lib/efl/fetch';
 import { parseEflText } from '@/lib/efl/parse';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
+import { assertNodeRuntime } from '@/lib/node/_guard';
+
+assertNodeRuntime();
 
 const prisma = new PrismaClient();
 

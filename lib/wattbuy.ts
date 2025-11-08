@@ -4,6 +4,9 @@
 // Now uses the comprehensive WattBuyClient for better error handling and type safety.
 
 import { WattBuyClient } from './wattbuy/client';
+import { assertNodeRuntime } from '@/lib/node/_guard';
+
+assertNodeRuntime();
 
 // Create a singleton client instance
 const client = new WattBuyClient();

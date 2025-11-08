@@ -1,4 +1,7 @@
 import { PrismaClient } from '@prisma/client'
+import { assertNodeRuntime } from '@/lib/node/_guard';
+
+assertNodeRuntime();
 
 const prisma = new PrismaClient()
 type Cache = { data: Record<string,string>, ts: number }

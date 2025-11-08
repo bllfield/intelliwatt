@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+export const runtime = 'nodejs';
+
 function cronAuthorized(req: NextRequest) {
   const vercelHeader = req.headers.get('x-vercel-cron');
   const providedSecret = req.headers.get('x-cron-secret') || req.nextUrl.searchParams.get('token') || '';

@@ -4,6 +4,10 @@
  * - Defensive to DST: relies on provided timestamps; no timezone math beyond Date parsing.
  */
 import { Aggregation, Interval } from './types'
+import { DateTime } from 'luxon';
+import { assertNodeRuntime } from '@/lib/node/_guard';
+
+assertNodeRuntime();
 
 function isoDay(d: Date) {
   return d.toISOString().slice(0, 10)

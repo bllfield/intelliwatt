@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '@/lib/db';
 
-const prisma = new PrismaClient();
+export const runtime = 'nodejs';
 
-export async function GET(request: NextRequest) {
+export async function GET(req: NextRequest) {
   try {
     const commissions = await prisma.commissionRecord.findMany({
       include: {

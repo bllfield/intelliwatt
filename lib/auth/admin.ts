@@ -1,5 +1,7 @@
-import 'server-only';
 import { NextRequest, NextResponse } from 'next/server';
+import { assertNodeRuntime } from '@/lib/node/_guard';
+
+assertNodeRuntime();
 
 export type AdminGate =
   | { ok: true }

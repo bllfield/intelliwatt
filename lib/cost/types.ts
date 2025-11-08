@@ -1,3 +1,7 @@
+import { assertNodeRuntime } from '@/lib/node/_guard';
+
+assertNodeRuntime();
+
 export type Interval = {
   /** ISO string or Date for the start of the interval */
   start: string | Date

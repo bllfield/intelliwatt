@@ -1,8 +1,10 @@
 // app/api/admin/db-smoke/route.ts
-import { NextResponse } from "next/server";
-import { PrismaClient } from "@prisma/client";
-const prisma = new PrismaClient();
-export async function GET() {
+import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/lib/db';
+
+export const runtime = 'nodejs';
+
+export async function GET(req: NextRequest) {
   try {
     await prisma.$queryRaw`SELECT 1`;
     return NextResponse.json({ ok: true });

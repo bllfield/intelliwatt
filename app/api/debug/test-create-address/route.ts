@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 
+export const runtime = 'nodejs';
+
 export async function GET(request: NextRequest) {
   return await handleRequest();
 }
 
-export async function POST(request: NextRequest) {
+export async function POST(req: NextRequest) {
   return await handleRequest();
 }
 

@@ -31,6 +31,10 @@
 //
 // Types are duplicated locally to avoid import cycles. Keep in sync with Step 47.
 
+import { assertNodeRuntime } from '@/lib/node/_guard';
+
+assertNodeRuntime();
+
 export type RateComponent =
   | {
       kind: 'flat_per_kwh';

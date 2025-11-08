@@ -3,6 +3,10 @@
 
 import type { AmbiguousPolicy } from '@/lib/time/tz';
 import { parseInZoneToUTC } from '@/lib/time/tz';
+import { DateTime } from 'luxon';
+import { assertNodeRuntime } from '@/lib/node/_guard';
+
+assertNodeRuntime();
 
 export type SmtAdhocRow = {
   esiid?: string;

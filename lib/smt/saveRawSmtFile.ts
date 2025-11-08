@@ -1,4 +1,7 @@
-import { prisma } from "@/lib/db";
+import { prisma } from '@/lib/db';
+import { assertNodeRuntime } from '@/lib/node/_guard';
+
+assertNodeRuntime();
 
 export type SaveRawSmtFileInput = {
   filename: string;

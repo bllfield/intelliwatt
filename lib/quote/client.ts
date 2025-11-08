@@ -1,3 +1,9 @@
+import { Prisma } from '@prisma/client';
+import { prisma } from '@/lib/db';
+import { assertNodeRuntime } from '@/lib/node/_guard';
+
+assertNodeRuntime();
+
 // lib/quote/client.ts
 // Step 36: Lightweight client helper to call our Quote API from the UI
 // - POSTs to /api/quote with address + usage

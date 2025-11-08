@@ -1,9 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from 'next/server';
 import { guardAdmin } from '@/lib/auth/admin';
-import { prisma } from "@/lib/db";
+import { prisma } from '@/lib/db';
 
-export async function POST(request: NextRequest) {
-  const gate = guardAdmin(request);
+export const runtime = 'nodejs';
+
+export async function POST(req: NextRequest) {
+  const gate = guardAdmin(req);
   if (gate) return gate;
   
   try {

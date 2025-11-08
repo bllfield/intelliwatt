@@ -1,5 +1,9 @@
 import { PrismaClient, TdspCode } from '@prisma/client'
 import { TdspDelivery } from './types'
+import { DateTime } from 'luxon';
+import { assertNodeRuntime } from '@/lib/node/_guard';
+
+assertNodeRuntime();
 
 const prisma = new PrismaClient()
 

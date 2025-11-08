@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/db";
 
-export async function POST(request: NextRequest) {
+export const runtime = 'nodejs';
+
+export async function POST(req: NextRequest) {
   try {
     // Check admin authentication
     const cookieStore = cookies();

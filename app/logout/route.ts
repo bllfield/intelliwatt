@@ -1,13 +1,7 @@
-import { cookies } from 'next/headers';
-import { redirect } from 'next/navigation';
+import { NextResponse } from 'next/server';
 
-export async function GET() {
-  cookies().set({
-    name: 'intelliwatt_user',
-    value: '',
-    expires: new Date(0),
-    path: '/',
-  });
+export const runtime = 'nodejs';
 
-  redirect('/');
+export async function POST() {
+
 } 

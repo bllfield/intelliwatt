@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+export const runtime = 'nodejs';
+
 function requireAdmin(req: NextRequest) {
   const token = req.headers.get('x-admin-token') || '';
   const expected = process.env.ADMIN_TOKEN || '';

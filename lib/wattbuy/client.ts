@@ -1,3 +1,7 @@
+import { assertNodeRuntime } from '@/lib/node/_guard';
+
+assertNodeRuntime();
+
 // lib/wattbuy/client.ts
 // Step 59: Hardened WattBuy client (timeouts, retries, 429 handling) + helpers
 // ----------------------------------------------------------------------------

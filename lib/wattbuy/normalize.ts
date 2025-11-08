@@ -15,6 +15,9 @@
 // Usage note: Offers are requested by address/zip + optional TDSP context; ESIID is intentionally unused. See docs/WATTBUY_COMPLIANCE_UPDATE.md.
 
 import { extractTdspSlug } from './client';
+import { assertNodeRuntime } from '@/lib/node/_guard';
+
+assertNodeRuntime();
 
 export type OfferNormalized = {
   offer_id: string;

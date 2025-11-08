@@ -8,8 +8,10 @@
 // Returns: { inserted, updated, totalOffers, createdRateConfigs, offersSample: [...] }
 
 import { NextRequest, NextResponse } from 'next/server';
-import { wattbuy } from '@/lib/wattbuy';
-import { prisma } from '@/lib/db'; // If your prisma client is exported differently, adjust this import.
+import { prisma } from '@/lib/db';
+import { syncWattbuyOffers } from '@/lib/wattbuy/offersSync';
+
+export const runtime = 'nodejs';
 
 type ByWattkey = { wattkey: string };
 type ByAddress = { address: string; city: string; state: string; zip: string };
@@ -79,7 +81,7 @@ export async function POST(req: NextRequest) {
         ? { wattkey: body.wattkey! }
         : { address: body.address!, city: body.city!, state: body.state!, zip: body.zip! };
 
-      const raw = await wattbuy.offers(params);
+      const raw = await syncWattbuyOffers(params);
       offers = extractElectricityOffers(raw);
     }
 

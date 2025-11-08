@@ -22,7 +22,10 @@
 //  • INDEX  (supplier_slug, plan_id, tdsp)
 
 import crypto from 'crypto';
+import { assertNodeRuntime } from '@/lib/node/_guard';
 import type { OfferNormalized } from '@/lib/wattbuy/normalize';
+
+assertNodeRuntime();
 
 export type JoinCandidates = {
   // Ordered list to try in sequence

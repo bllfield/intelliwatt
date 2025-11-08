@@ -44,6 +44,8 @@ import { prisma } from '@/lib/db';
 import { wattbuy } from '@/lib/wattbuy';
 import { estimateBill, sumIntervalsKwh, type Interval15 } from '@/lib/rates/calc';
 
+export const runtime = 'nodejs';
+
 type ByWattkey = { wattkey: string };
 type ByAddress = { address: string; city: string; state: string; zip: string };
 

@@ -1,4 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { assertNodeRuntime } from '@/lib/node/_guard';
+
+assertNodeRuntime();
 
 export function requireSharedSecret(req: NextRequest) {
   const shared = process.env.SHARED_INGEST_SECRET || '';

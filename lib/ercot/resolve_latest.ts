@@ -1,4 +1,7 @@
 import { fetchText } from '@/lib/ercot/http';
+import { assertNodeRuntime } from '@/lib/node/_guard';
+
+assertNodeRuntime();
 
 /**
  * Resolve the latest public "mirDownload?doclookupId=..." link from an ERCOT product page.

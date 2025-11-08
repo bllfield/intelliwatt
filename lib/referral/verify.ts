@@ -1,5 +1,9 @@
 // Verify and decode referral token
 import crypto from 'crypto';
+import { prisma } from '@/lib/db';
+import { assertNodeRuntime } from '@/lib/node/_guard';
+
+assertNodeRuntime();
 
 export function verifyReferralToken(token: string): { userId: string; campaignId: string; issuedAt: number } | null {
   try {

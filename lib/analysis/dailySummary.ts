@@ -1,6 +1,9 @@
 // lib/analysis/dailySummary.ts
 import { prisma } from '@/lib/db';
+import { assertNodeRuntime } from '@/lib/node/_guard';
 import { DateTime } from 'luxon';
+
+assertNodeRuntime();
 
 export type DailySummaryRow = {
   esiid: string | null;

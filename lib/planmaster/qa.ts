@@ -1,4 +1,9 @@
 import { QaFlag, QaResult, MinimalPlanLike } from './qa.types'
+import { Prisma } from '@prisma/client';
+import { prisma } from '@/lib/db';
+import { assertNodeRuntime } from '@/lib/node/_guard';
+
+assertNodeRuntime();
 
 /**
  * Heuristics for quirky plans. Stateless and deterministic.

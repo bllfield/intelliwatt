@@ -1,3 +1,8 @@
+import { prisma } from '@/lib/db';
+import { assertNodeRuntime } from '@/lib/node/_guard';
+
+assertNodeRuntime();
+
 /**
  * Try to extract an outbound purchase/enroll URL for a plan. Falls back to null.
  * We expect WattBuy payloads to sometimes include:

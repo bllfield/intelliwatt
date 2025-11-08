@@ -1,5 +1,8 @@
 // lib/auth/cron.ts
 import { NextRequest, NextResponse } from 'next/server';
+import { assertNodeRuntime } from '@/lib/node/_guard';
+
+assertNodeRuntime();
 
 export function requireVercelCron(req: NextRequest) {
   // Vercel adds x-vercel-cron to scheduled invocations

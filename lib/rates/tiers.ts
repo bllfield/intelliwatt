@@ -23,6 +23,10 @@
 //  • Time-of-use configs will still compute using monthly approximation unless you
 //    pass hourly series — which is fine for quick tier comparisons.
 
+import { assertNodeRuntime } from '@/lib/node/_guard';
+
+assertNodeRuntime();
+
 import { estimateMonthlyBill } from '@/lib/rates/calc';
 
 export type EflCentsMap = Partial<Record<500 | 1000 | 2000, number>>;

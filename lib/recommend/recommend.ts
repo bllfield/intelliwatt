@@ -1,8 +1,11 @@
-import { PrismaClient, TdspCode, MasterPlan } from '@prisma/client'
+import { PrismaClient } from '@prisma/client';
 import { Interval, QuoteRequest, QuoteResponse, RateModel } from '@/lib/cost/types'
 import { computeBill } from '@/lib/cost/engine'
 import { allowSupplier } from '@/lib/suppliers/controls'
 import { flagBool } from '@/lib/flags'
+import { assertNodeRuntime } from '@/lib/node/_guard';
+
+assertNodeRuntime();
 
 const prisma = new PrismaClient()
 
@@ -24,7 +27,7 @@ export type Recommendation = {
 }
 
 export type RecommendOpts = {
-  tdsp: TdspCode
+  tdsp: string
   intervals: Interval[]
   periodStart: string
   periodEnd: string
@@ -45,7 +48,7 @@ export async function recommendPlans(opts: RecommendOpts): Promise<RecommendResu
   if (!enabled) return { recommendations: [], filteredCount: 0 }
 
   const plans = await prisma.masterPlan.findMany({
-    where: { tdsp, expiresAt: null },
+    where: { tdsp: tdsp as any, expiresAt: null },
     orderBy: { createdAt: 'desc' },
     take: 300
   })
@@ -60,7 +63,7 @@ export async function recommendPlans(opts: RecommendOpts): Promise<RecommendResu
     if (!p.rateModel) continue
 
     const rateModel = p.rateModel as RateModel
-    const req: QuoteRequest = { tdsp, intervals, periodStart, periodEnd, rateModel }
+    const req: QuoteRequest = { tdsp: tdsp as any, intervals, periodStart, periodEnd, rateModel }
     try {
       const { breakdown } = await computeBill(req)
       recs.push({

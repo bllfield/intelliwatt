@@ -1,21 +1,17 @@
 /**
- * TDSP retail delivery charges — light-weight, pluggable fetcher.
- * Start with a curated JSON feed (TDSP_RATE_JSON_URL). Later you can add scrapers.
+ * TDSP Delivery Charges fetcher
  *
- * Expected JSON (per TDSP):
- * {
- *   "ONCOR":    { "effectiveAt": "2025-09-01", "monthlyFeeCents": 395, "deliveryCentsPerKwh": 3.287, "notes": "TCRF incl." },
- *   "CENTERPOINT": { ...same keys... },
- *   "AEP_NORTH":   { ... },
- *   "AEP_CENTRAL": { ... },
- *   "TNMP":        { ... }
- * }
+ * Schema assumption (adjust to your DB schema if different):
+ * - table: TdspDeliveryCharge
+ * - columns: tdspSlug (PK), deliveryChargeCents, fixedChargeCents, notes
+ * - createdAt/updatedAt timestamps
  *
- * - monthlyFeeCents: TDSP fixed customer charge (¢) per month
- * - deliveryCentsPerKwh: TDSP volumetric delivery (¢/kWh)
- * - notes: optional string
+ * If your schema differs, adjust the Prisma calls below.
  */
 import { PrismaClient, TdspCode } from '@prisma/client'
+import { assertNodeRuntime } from '@/lib/node/_guard';
+
+assertNodeRuntime();
 
 const prisma = new PrismaClient()
 

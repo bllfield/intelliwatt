@@ -1,4 +1,7 @@
 import nodemailer from 'nodemailer';
+import { assertNodeRuntime } from '@/lib/node/_guard';
+
+assertNodeRuntime();
 
 const transporter = nodemailer.createTransport({
   host: process.env.EMAIL_HOST,

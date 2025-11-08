@@ -3,6 +3,9 @@
  */
 import fs from 'fs';
 import readline from 'readline';
+import { assertNodeRuntime } from '@/lib/node/_guard';
+
+assertNodeRuntime();
 
 export type Row = Record<string, string>;
 export type Sniff = { delimiter: string; headers: string[] };

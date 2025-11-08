@@ -1,7 +1,9 @@
-import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/lib/db';
 
-export async function GET(request: NextRequest) {
+export const runtime = 'nodejs';
+
+export async function GET(req: NextRequest) {
   try {
     // Get the most recently updated address
     const latest = await prisma.houseAddress.findFirst({

@@ -1,19 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '@/lib/db';
+import { requireVercelCron } from '@/lib/auth/cron';
 
-const prisma = new PrismaClient();
-
-function requireAdmin(req: NextRequest) {
-  const token = req.headers.get('x-admin-token') || '';
-  const expected = process.env.ADMIN_TOKEN || '';
-  if (!expected || token !== expected) {
-    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
-  }
-  return null;
-}
+export const runtime = 'nodejs';
 
 export async function GET(req: NextRequest) {
-  const guard = requireAdmin(req);
+  const guard = requireVercelCron(req);
   if (guard) return guard;
 
   const sp = req.nextUrl.searchParams;

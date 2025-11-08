@@ -1,7 +1,9 @@
-import { PrismaClient, MasterPlan } from '@prisma/client'
-import { normalizeOffer } from '@/lib/wattbuy/normalize'
+import { Prisma, type MasterPlan } from '@prisma/client';
+import { prisma } from '@/lib/db';
+import { normalizeOffer } from '@/lib/wattbuy/normalize';
+import { assertNodeRuntime } from '@/lib/node/_guard';
 
-const prisma = new PrismaClient()
+assertNodeRuntime();
 
 export interface MatchResult {
   type: 'exact' | 'fuzzy' | 'none'

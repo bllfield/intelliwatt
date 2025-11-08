@@ -1,4 +1,7 @@
 import { PrismaClient } from '@prisma/client';
+import { assertNodeRuntime } from '@/lib/node/_guard';
+
+assertNodeRuntime();
 
 declare global {
   // Prevent multiple instances of PrismaClient in dev

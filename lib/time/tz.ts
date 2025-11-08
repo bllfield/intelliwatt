@@ -1,4 +1,7 @@
 import { DateTime } from 'luxon';
+import { assertNodeRuntime } from '@/lib/node/_guard';
+
+assertNodeRuntime();
 
 export const TZ_BUILD_ID = 'snap-0300-v3';
 export type AmbiguousPolicy = 'earlier' | 'later';

@@ -1,3 +1,9 @@
+import { Prisma } from '@prisma/client';
+import { prisma } from '@/lib/db';
+import { assertNodeRuntime } from '@/lib/node/_guard';
+
+assertNodeRuntime();
+
 // lib/offers/match.ts
 // Step 50: Match engine — join WattBuy offers → nightly PlanMaster
 // -----------------------------------------------------------------

@@ -11,6 +11,9 @@
 //   (otherwise ignore TOU to keep things fast)
 
 import type { RateLike, Tier, BillCredit } from '@/lib/rates/store';
+import { assertNodeRuntime } from '@/lib/node/_guard';
+
+assertNodeRuntime();
 
 export function computeBill(input: {
   rate: RateLike;

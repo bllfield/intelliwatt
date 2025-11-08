@@ -2,6 +2,10 @@ import { Aggregation, CostBreakdown, EnergyChargeTier, QuoteRequest, RateModel }
 import { aggregateIntervals } from './smt'
 import { getTdspForPeriod } from './tdsp'
 import { TdspCode } from '@prisma/client'
+import { DateTime } from 'luxon';
+import { assertNodeRuntime } from '@/lib/node/_guard';
+
+assertNodeRuntime();
 
 /**
  * Core: calculate energy supply charges from a rate model and total kWh.

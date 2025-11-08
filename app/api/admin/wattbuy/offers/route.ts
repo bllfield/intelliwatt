@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/lib/db';
 import { requireAdmin } from '@/lib/auth/admin';
 // import { fetchWattBuyOffers } from '@/lib/wattbuy/fetchOffers';
+
+export const runtime = 'nodejs';
 
 export async function GET(req: NextRequest) {
   const gate = requireAdmin(req);

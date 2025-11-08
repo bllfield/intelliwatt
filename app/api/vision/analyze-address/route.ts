@@ -1,85 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { ImageAnnotatorClient } from '@google-cloud/vision';
+import { runVisionAddressAnalysis } from '@/lib/vision/analyzeAddress';
 
-// Initialize Google Vision client
-const visionClient = new ImageAnnotatorClient({
-  credentials: {
-    client_email: process.env.GOOGLE_VISION_CLIENT_EMAIL,
-    private_key: process.env.GOOGLE_VISION_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-  },
-});
+export const runtime = 'nodejs';
 
-interface AddressComponents {
-  street?: string;
-  city?: string;
-  state?: string;
-  zipCode?: string;
-  fullAddress?: string;
-}
-
-function parseAddressFromText(text: string): AddressComponents {
-  const lines = text.split('\n').map(line => line.trim()).filter(line => line.length > 0);
-  
-  // Common US state abbreviations
-  const states = [
-    'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA',
-    'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD',
-    'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ',
-    'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC',
-    'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY'
-  ];
-
-  const result: AddressComponents = {};
-  
-  // Look for ZIP code pattern (5 digits or 5-4 format)
-  const zipPattern = /\b(\d{5}(?:-\d{4})?)\b/;
-  const zipMatch = text.match(zipPattern);
-  if (zipMatch) {
-    result.zipCode = zipMatch[1];
-  }
-
-  // Look for state pattern
-  const statePattern = new RegExp(`\\b(${states.join('|')})\\b`, 'i');
-  const stateMatch = text.match(statePattern);
-  if (stateMatch) {
-    result.state = stateMatch[1].toUpperCase();
-  }
-
-  // Try to identify city (usually before state)
-  if (stateMatch && stateMatch.index) {
-    const beforeState = text.substring(0, stateMatch.index).trim();
-    const cityMatch = beforeState.match(/([A-Za-z\s]+)$/);
-    if (cityMatch) {
-      result.city = cityMatch[1].trim();
-    }
-  }
-
-  // Look for street address (usually contains numbers)
-  const streetPattern = /\b(\d+\s+[A-Za-z\s]+(?:Street|St|Avenue|Ave|Road|Rd|Drive|Dr|Lane|Ln|Boulevard|Blvd|Way|Circle|Cir|Court|Ct|Place|Pl))\b/i;
-  const streetMatch = text.match(streetPattern);
-  if (streetMatch) {
-    result.street = streetMatch[1].trim();
-  } else {
-    // Fallback: look for any line with numbers
-    const numberPattern = /\b(\d+\s+[A-Za-z\s]+)\b/;
-    const numberMatch = text.match(numberPattern);
-    if (numberMatch) {
-      result.street = numberMatch[1].trim();
-    }
-  }
-
-  // Combine all components into full address
-  const components = [result.street, result.city, result.state, result.zipCode].filter(Boolean);
-  if (components.length > 0) {
-    result.fullAddress = components.join(', ');
-  }
-
-  return result;
-}
-
-export async function POST(request: NextRequest) {
+export async function POST(req: NextRequest) {
   try {
-    const formData = await request.formData();
+    const formData = await req.formData();
     const imageFile = formData.get('image') as File;
     
     if (!imageFile) {
@@ -90,9 +16,7 @@ export async function POST(request: NextRequest) {
     const imageBuffer = Buffer.from(await imageFile.arrayBuffer());
 
     // Use Google Vision API to extract text
-    const [result] = await visionClient.textDetection({
-      image: { content: imageBuffer },
-    });
+    const [result] = await runVisionAddressAnalysis(imageBuffer);
 
     const detections = result.textAnnotations;
     if (!detections || detections.length === 0) {
@@ -132,4 +56,14 @@ export async function GET() {
     supportedFormats: ['JPEG', 'PNG', 'GIF', 'BMP', 'WEBP'],
     maxFileSize: '10MB'
   });
+}
+
+function parseAddressFromText(text: string) {
+  const lines = text.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+  const zipMatch = text.match(/\b(\d{5})(?:[- ]\d{4})?\b/);
+  return {
+    lines,
+    zip: zipMatch ? zipMatch[1] : null,
+    raw: text,
+  };
 }

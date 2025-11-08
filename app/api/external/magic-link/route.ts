@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createMagicToken, storeToken } from '@/lib/magic/magic-token';
 import { sendLoginEmail } from '@/lib/email/sendLoginEmail';
+import { prisma } from '@/lib/db';
 
-export async function POST(request: NextRequest) {
+export const runtime = 'nodejs';
+
+export async function POST(req: NextRequest) {
   try {
-    const { email, zip, source = 'external' } = await request.json();
+    const { email, zip, source = 'external' } = await req.json();
 
     if (!email || !email.includes('@')) {
       return NextResponse.json({ error: 'Valid email is required' }, { status: 400 });
@@ -58,7 +61,7 @@ export async function POST(request: NextRequest) {
     });
 
     // Add CORS headers for HitTheJackWatt domains
-    const origin = request.headers.get('origin');
+    const origin = req.headers.get('origin');
     if (origin === 'https://bllfield.github.io' || origin === 'https://hitthejackwatt.com' || origin === 'https://www.hitthejackwatt.com') {
       response.headers.set('Access-Control-Allow-Origin', origin);
     }

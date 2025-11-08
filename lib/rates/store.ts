@@ -51,9 +51,12 @@
 //   "notes": ["free-form"]
 // }
 
-import fs from 'node:fs';
-import path from 'node:path';
+import fs from 'fs';
+import path from 'path';
+import { assertNodeRuntime } from '@/lib/node/_guard';
 import { deriveRateKey, getRateKeyParts } from '@/lib/rates/key';
+
+assertNodeRuntime();
 
 export type Tier = { upToKwh: number | null; rateCents: number };
 export type BillCredit = { thresholdKwh: number; creditCents: number };

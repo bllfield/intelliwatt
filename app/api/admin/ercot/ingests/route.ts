@@ -1,23 +1,24 @@
-import { NextRequest, NextResponse } from "next/server";
-import { PrismaClient } from "@prisma/client";
+import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/lib/db';
 
-export const dynamic = "force-dynamic";
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 function jsonError(msg: string, status = 400) {
   return NextResponse.json({ ok: false, error: msg }, { status });
 }
 
 export async function GET(req: NextRequest) {
-  if (!process.env.ADMIN_TOKEN || req.headers.get("x-admin-token") !== process.env.ADMIN_TOKEN) {
-    return jsonError("Unauthorized", 401);
+  if (!process.env.ADMIN_TOKEN || req.headers.get('x-admin-token') !== process.env.ADMIN_TOKEN) {
+    return jsonError('Unauthorized', 401);
   }
 
   const searchParams = req.nextUrl.searchParams;
-  const rawLimit = searchParams.get("limit");
-  const rawStart = searchParams.get("dateStart");
-  const rawEnd = searchParams.get("dateEnd");
-  const rawStatus = searchParams.get("status");
-  const rawTdsp = searchParams.get("tdsp");
+  const rawLimit = searchParams.get('limit');
+  const rawStart = searchParams.get('dateStart');
+  const rawEnd = searchParams.get('dateEnd');
+  const rawStatus = searchParams.get('status');
+  const rawTdsp = searchParams.get('tdsp');
 
   let limit = 50;
   if (rawLimit) {
@@ -53,8 +54,6 @@ export async function GET(req: NextRequest) {
     if (lt) where.createdAt.lt = lt;
   }
 
-  const prisma = new PrismaClient();
-
   try {
     const ingestModel = (prisma as any).ercotIngestLog;
     const rows = ingestModel
@@ -77,8 +76,6 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ ok: true, rows });
   } catch (e: any) {
-    return jsonError(e?.message || "failed", 500);
-  } finally {
-    await prisma.$disconnect();
+    return jsonError(e?.message || 'failed', 500);
   }
 }

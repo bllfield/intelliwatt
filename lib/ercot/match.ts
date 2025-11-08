@@ -1,7 +1,10 @@
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
-const { Pool } = require('pg');
-import { normalizeAddress } from './normalize';
+import { Prisma } from '@prisma/client';
+import { Pool } from 'pg';
+import { prisma } from '@/lib/db';
+import { normalizeAddress } from '@/lib/ercot/normalize';
+import { assertNodeRuntime } from '@/lib/node/_guard';
+
+assertNodeRuntime();
 
 function buildSslOption(url: string) {
   try {
