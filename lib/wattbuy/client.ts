@@ -1,6 +1,6 @@
 // lib/wattbuy/client.ts
 
-import { normalizeRetailRateParams, normalizeElectricityParams } from './params';
+import { retailRatesParams, electricityParams, electricityInfoParams } from './params';
 
 export const WB_BASE = 'https://apis.wattbuy.com/v3';
 
@@ -15,22 +15,23 @@ function buildUrl(path: string, params?: Record<string, unknown>): string {
   return url.toString();
 }
 
-function authHeader(): string {
+function apiKey(): string {
   const key = (process.env.WATTBUY_API_KEY || '').trim();
   if (!key) throw new Error('WATTBUY_API_KEY is not set');
-  return `Bearer ${key}`;
+  return key;
 }
 
+// Minimal GET with x-api-key header per WattBuy test page
 export async function wbGet<T = any>(
   path: string,
   params?: Record<string, unknown>,
-  init?: Omit<RequestInit, 'headers'|'method'>
+  init?: Omit<RequestInit, 'headers' | 'method'>
 ): Promise<{ ok: boolean; status: number; data?: T; text?: string }> {
   const res = await fetch(buildUrl(path, params), {
     method: 'GET',
     headers: {
-      Authorization: authHeader(),
-      Accept: 'application/json',
+      'x-api-key': apiKey(),
+      'Accept': 'application/json',
     },
     cache: 'no-store',
     ...init,
@@ -45,7 +46,8 @@ export async function wbGet<T = any>(
 }
 
 export type WattBuyRetailRate = Record<string, any>;
-export type WattBuyElectricityMeta = Record<string, any>;
+export type WattBuyElectricity = Record<string, any>;
+export type WattBuyElectricityInfo = Record<string, any>;
 
 // Legacy helper: qs for backward compatibility with existing function signatures
 function qs(params: Record<string, any>): string {
@@ -233,7 +235,8 @@ export async function getOffersForAddress(addr: OfferAddressInput) {
 
 export type RetailRatesQuery = {
   state?: string;
-  utility_id?: string | number; // API parameter: Numeric string of utility_id (EIA utility ID)
+  utilityID?: string | number; // API parameter: utilityID (integer as string) per test page
+  utility_id?: string | number; // Legacy support, converts to utilityID
   zip?: string;
   page?: number;
   page_size?: number;
@@ -242,15 +245,15 @@ export type RetailRatesQuery = {
 
 export async function fetchRetailRates(q: RetailRatesQuery = {}) {
   assertKey();
-  const params: Record<string, unknown> = normalizeRetailRateParams({
-    zip: q.zip,
-    state: q.state || 'TX',
-    utility_id: q.utility_id ? String(q.utility_id) : undefined,
+  const params: Record<string, unknown> = retailRatesParams({
+    utilityID: q.utilityID ?? q.utility_id, // Accept both for backward compat
+    state: q.state || 'tx', // required, lowercase per test page
   });
+  if (q.zip) params.zip = String(q.zip);
   if (typeof q.page === 'number') params.page = q.page;
   if (typeof q.page_size === 'number') params.page_size = q.page_size;
   for (const [k, v] of Object.entries(q)) {
-    if (['state','utility_id','zip','page','page_size'].includes(k)) continue;
+    if (['state','utilityID','utility_id','zip','page','page_size'].includes(k)) continue;
     if (v === undefined || v === null) continue;
     params[k] = String(v);
   }
@@ -286,7 +289,8 @@ export type ElectricityCatalogQuery = {
 
 export async function fetchElectricityCatalog(q: ElectricityCatalogQuery = {}) {
   assertKey();
-  const params: Record<string, unknown> = normalizeElectricityParams({
+  if (!q.zip) throw new Error('zip is required for electricity catalog');
+  const params: Record<string, unknown> = electricityParams({
     address: q.address,
     city: q.city,
     state: q.state,
@@ -327,19 +331,15 @@ export type ElectricityInfoQuery = {
 
 export async function fetchElectricityInfo(q: ElectricityInfoQuery = {}) {
   assertKey();
-  const params: Record<string, unknown> = normalizeElectricityParams({
+  if (!q.zip) throw new Error('zip is required for electricity info');
+  const params: Record<string, unknown> = electricityInfoParams({
     address: q.address,
     city: q.city,
     state: q.state,
     zip: q.zip,
+    housing_chars: q.housing_chars,
+    utility_list: q.utility_list,
   });
-  // Optional: housing_chars, utility_list (can be "true" string or boolean)
-  if (q.housing_chars !== undefined && q.housing_chars !== null) {
-    params.housing_chars = q.housing_chars === true || q.housing_chars === 'true' ? 'true' : String(q.housing_chars);
-  }
-  if (q.utility_list !== undefined && q.utility_list !== null) {
-    params.utility_list = q.utility_list === true || q.utility_list === 'true' ? 'true' : String(q.utility_list);
-  }
   // Pass through any other keys
   for (const [k, v] of Object.entries(q)) {
     if (['address','city','state','zip','housing_chars','utility_list'].includes(k)) continue;

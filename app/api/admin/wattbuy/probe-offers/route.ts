@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
     const zipRaw = cleanString(body.zip5 ?? body.zip);
     const line1 = cleanString(body.line1);
     const city = cleanString(body.city);
-    const state = cleanString(body.state)?.toUpperCase();
+    const state = cleanString(body.state)?.toLowerCase();
     const tdsp = cleanString(body.tdsp)?.toLowerCase();
 
     if (!zipRaw) {

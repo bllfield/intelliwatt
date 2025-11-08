@@ -115,15 +115,15 @@ export const wattbuy = {
    * Optional: Retail Rate DB for regulated utilities (not a replacement for TX REP EFLs).
    */
   async retailRates(params: {
-    utility_id: string;
+    utilityID: string;
     state: string;
     verified_from?: string;
     baseline_zone?: string;
     page?: string;
   }) {
     return WattBuyClient.getRetailRates({
-      utility_id: params.utility_id,
-      state: params.state,
+      utilityID: params.utilityID,
+      state: params.state.toLowerCase(), // lowercase per WattBuy test page
       verified_from: params.verified_from ? parseInt(params.verified_from) : undefined,
       baseline_zone: params.baseline_zone,
       page: params.page ? parseInt(params.page) : undefined

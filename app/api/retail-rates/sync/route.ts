@@ -77,8 +77,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid JSON body.' }, { status: 400 });
     }
 
-    const state = (body.state || 'TX').toUpperCase();
-    if (state !== 'TX') {
+    const state = (body.state || 'tx').toLowerCase();
+    if (state !== 'tx') {
       return NextResponse.json({ error: 'This sync endpoint is TX-only.' }, { status: 400 });
     }
 
@@ -127,7 +127,7 @@ export async function POST(req: NextRequest) {
 
     // ---- fetch loop
     const summary = {
-      query: { tdsp: tdspFolder, utility_id: utilityID, state, verified_from: verified_from ?? null, maxPages, dryRun: dry },
+      query: { tdsp: tdspFolder, utilityID, state, verified_from: verified_from ?? null, maxPages, dryRun: dry },
       pagesFetched: 0,
       totalItems: 0,
       written: 0,
@@ -139,7 +139,7 @@ export async function POST(req: NextRequest) {
 
     for (let page = 1; page <= maxPages; page++) {
       const { ok, items, upstreamStatus, upstreamError } = await fetchRetailRatesPage({
-        utility_id: utilityID!,
+        utilityID: utilityID!,
         state,
         page,
         verified_from,
@@ -200,15 +200,15 @@ export async function POST(req: NextRequest) {
 // ----------------- helpers -----------------
 
 async function fetchRetailRatesPage(opts: {
-  utility_id: number;
+  utilityID: number;
   state: string;
   page: number;
   verified_from?: number;
 }): Promise<{ ok: boolean; items: any[]; upstreamStatus: number; upstreamError?: string }> {
   // Use wbGet (clean headers, no internal header forwarding)
   const params: Record<string, unknown> = {
-    utility_id: String(opts.utility_id),
-    state: opts.state,
+    utilityID: String(opts.utilityID), // camelCase per WattBuy test page
+    state: opts.state.toLowerCase(), // lowercase
     page: String(opts.page),
   };
   if (opts.verified_from != null) params.verified_from = String(opts.verified_from);

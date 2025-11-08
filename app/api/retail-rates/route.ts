@@ -67,14 +67,14 @@ export async function GET(req: NextRequest) {
     const url = new URL(req.url);
     const tdspRaw = (url.searchParams.get('tdsp') || '').toLowerCase().trim();
     const utilityIDParam = url.searchParams.get('utility_id');
-    const state = (url.searchParams.get('state') || 'TX').toUpperCase();
+    const state = (url.searchParams.get('state') || 'tx').toLowerCase();
     const pageParam = url.searchParams.get('page');
     const verifiedFromParam = url.searchParams.get('verified_from'); // epoch seconds OR ISO date string
 
     if (!process.env.WATTBUY_API_KEY) {
       return NextResponse.json({ error: 'WATTBUY_API_KEY not configured on server.' }, { status: 500 });
     }
-    if (state !== 'TX') {
+    if (state !== 'tx') {
       return NextResponse.json({ error: 'This proxy currently supports Texas (TX) only.' }, { status: 400 });
     }
 
@@ -126,8 +126,8 @@ export async function GET(req: NextRequest) {
 
     // Build request using wbGet (clean headers, no internal header forwarding)
     const params: Record<string, unknown> = {
-      utility_id: String(utilityID),
-      state,
+      utilityID: String(utilityID), // camelCase per WattBuy test page
+      state, // lowercase
       page: String(page),
     };
     if (verified_from != null) params.verified_from = String(verified_from);
@@ -158,7 +158,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json(
       {
-        query: { utility_id: utilityID, tdsp: tdspRaw || null, state, page, verified_from: verified_from ?? null },
+        query: { utilityID, tdsp: tdspRaw || null, state, page, verified_from: verified_from ?? null },
         count: items.length,
         mini,
         raw: json,

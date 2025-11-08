@@ -6,7 +6,7 @@ import { NextRequest } from 'next/server';
 
 import { wbGet } from '@/lib/wattbuy/client';
 
-import { normalizeRetailRateParams } from '@/lib/wattbuy/params';
+import { retailRatesParams } from '@/lib/wattbuy/params';
 
 export async function GET(req: NextRequest) {
   if (req.headers.get('x-admin-token') !== process.env.ADMIN_TOKEN) {
@@ -15,23 +15,17 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
 
-  const zip = searchParams.get('zip') || '75201';
+  const utilityID = searchParams.get('utilityID'); // e.g., 44372 for Oncor
 
-  const state = (searchParams.get('state') || 'TX').toUpperCase();
+  const state = (searchParams.get('state') || 'tx').toLowerCase();
 
-  const utility_id = searchParams.get('utility_id') || undefined;
+  const params = retailRatesParams({ utilityID: utilityID ?? undefined, state });
 
-  const params = normalizeRetailRateParams({ zip, state, utility_id });
+  const res = await wbGet('electricity/retail-rates', params);
 
-  const rr = await wbGet('electricity/retail-rates', params);
+  if (!res.ok) {
+    return new Response(JSON.stringify({ ok: false, status: res.status, error: res.text }), { status: 502 });
+  }
 
-  return Response.json({
-    ok: rr.ok,
-    status: rr.status,
-    where: params,
-    sampleCount: Array.isArray(rr.data) ? rr.data.length : undefined,
-    preview: Array.isArray(rr.data) ? rr.data.slice(0, 2) : rr.data,
-    errorText: rr.text
-  });
+  return Response.json({ ok: true, where: params, count: Array.isArray(res.data) ? res.data.length : undefined, data: res.data });
 }
-

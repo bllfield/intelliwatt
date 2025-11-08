@@ -6,7 +6,7 @@ import { NextRequest } from 'next/server';
 
 import { wbGet } from '@/lib/wattbuy/client';
 
-import { normalizeRetailRateParams, normalizeElectricityParams } from '@/lib/wattbuy/params';
+import { retailRatesParams, electricityParams } from '@/lib/wattbuy/params';
 
 export async function POST(req: NextRequest) {
   // Authenticate YOUR cron/admin only (do not forward upstream)
@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
   const results = [];
 
   for (const t of targets) {
-    const rrParams = normalizeRetailRateParams({ zip: t.zip, state: t.state, utility_id: (t as any).utility_id });
+    const rrParams = retailRatesParams({ utilityID: (t as any).utilityID, state: t.state });
 
     const rr = await wbGet('electricity/retail-rates', rrParams);
 
@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
       continue;
     }
 
-    const elecParams = normalizeElectricityParams({ address: (t as any).address, city: (t as any).city, state: t.state, zip: t.zip });
+    const elecParams = electricityParams({ address: (t as any).address, city: (t as any).city, state: t.state, zip: t.zip });
 
     const meta = await wbGet('electricity', elecParams);
 

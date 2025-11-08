@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
   // Optional: address, city, state
   if (sp.get('address')) q.address = sp.get('address')!;
   if (sp.get('city')) q.city = sp.get('city')!;
-  if (sp.get('state')) q.state = sp.get('state')!.toUpperCase(); // API expects uppercase
+  if (sp.get('state')) q.state = sp.get('state')!.toLowerCase(); // API expects lowercase per test page
   // Optional: utility_eid (number)
   if (sp.get('utility_eid')) {
     const utilityEid = Number(sp.get('utility_eid')!);
