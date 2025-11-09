@@ -60,9 +60,9 @@ export async function GET(req: NextRequest) {
       return new Response(JSON.stringify({
         ok: false,
         status: res.status,
-        error: res.text,
         headers: res.headers,
-        where: params
+        where: params,
+        error: res.text || 'Upstream non-OK without body',
       }), { status: 502 });
     }
 
@@ -70,6 +70,7 @@ export async function GET(req: NextRequest) {
 
     return Response.json({
       ok: true,
+      status: res.status,
       where: params,
       headers: res.headers,
       topType: inspect.topType,
@@ -78,6 +79,7 @@ export async function GET(req: NextRequest) {
       count: inspect.count,
       sample: inspect.sample,
       note: inspect.message,
+      rawTextPreview: res.text ? String(res.text).slice(0, 400) : undefined,
     });
   } catch (e: any) {
     return new Response(JSON.stringify({

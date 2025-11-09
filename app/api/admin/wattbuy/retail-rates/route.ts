@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCorrelationId } from '@/lib/correlation';
 import { prisma } from '@/lib/db';
-import { fetchRetailRates, type RetailRatesQuery } from '@/lib/wattbuy/client';
+import { wbGet } from '@/lib/wattbuy/client';
+import { retailRatesParams } from '@/lib/wattbuy/params';
 import { inspectRetailRatesPayload } from '@/lib/wattbuy/inspect';
 
 export const runtime = 'nodejs';
@@ -41,34 +42,68 @@ export async function GET(req: NextRequest) {
     (q as any)[k] = v;
   });
   try {
-    const data = await fetchRetailRates(q);
+    // Build params using retailRatesParams helper
+    const params = retailRatesParams({
+      utilityID: q.utilityID ?? q.utility_id,
+      state: q.state,
+      zip: q.zip,
+    });
+    if (typeof q.page === 'number') params.page = q.page;
+    if (typeof q.page_size === 'number') params.page_size = q.page_size;
+
+    const res = await wbGet('electricity/retail-rates', params, undefined, 1);
+
+    if (!res.ok) {
+      return NextResponse.json({
+        ok: false,
+        corrId,
+        status: res.status,
+        headers: res.headers,
+        where: params,
+        error: res.text || 'Upstream non-OK without body',
+      }, { status: 502 });
+    }
+
+    // Persist raw response to database
     await (prisma as any).rawWattbuyRetailRate.create({
       data: {
         state: q.state ?? null,
-        utility: q.utilityID ? String(q.utilityID) : (q.utility_id ? String(q.utility_id) : null), // Store utilityID/utility_id as string in DB
+        utility: q.utilityID ? String(q.utilityID) : (q.utility_id ? String(q.utility_id) : null),
         zip5: q.zip ?? null,
         page: typeof q.page === 'number' ? q.page : null,
         pageSize: typeof q.page_size === 'number' ? q.page_size : null,
-        upstreamStatus: 200,
-        raw: data,
+        upstreamStatus: res.status,
+        raw: res.data,
       } as any,
     });
-    const inspect = inspectRetailRatesPayload(data);
+
+    const inspect = inspectRetailRatesPayload(res.data);
+
     return NextResponse.json({
       ok: true,
       corrId,
+      status: res.status,
       query: q,
+      where: params,
+      headers: res.headers,
       topType: inspect.topType,
       topKeys: inspect.topKeys,
       foundListPath: inspect.foundListPath,
       count: inspect.count,
       sample: inspect.sample,
       note: inspect.message,
-      data
+      rawTextPreview: res.text ? String(res.text).slice(0, 400) : undefined,
+      data: res.data,
     }, { status: 200 });
   } catch (err: any) {
     const status = typeof err?.status === 'number' ? err.status : 502;
-    return NextResponse.json({ ok: false, corrId, error: status === 403 ? 'UPSTREAM_FORBIDDEN' : 'UPSTREAM_ERROR' }, { status });
+    return NextResponse.json({
+      ok: false,
+      corrId,
+      status,
+      error: status === 403 ? 'UPSTREAM_FORBIDDEN' : 'UPSTREAM_ERROR',
+      message: err?.message || 'Unhandled exception',
+    }, { status });
   }
 }
 

@@ -164,7 +164,8 @@ export default function WattBuyInspector() {
           <h3 className="font-medium mb-2">Inspector Summary</h3>
           <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm">
             <dt className="text-gray-500">ok</dt><dd>{String(result?.ok ?? '')}</dd>
-            <dt className="text-gray-500">status</dt><dd>{result?.status ?? ''}</dd>
+            <dt className="text-gray-500">http status</dt><dd>{result?.status ?? ''}</dd>
+            <dt className="text-gray-500">content-length</dt><dd>{result?.headers?.['content-length'] ?? ''}</dd>
             <dt className="text-gray-500">topType</dt><dd>{result?.topType ?? ''}</dd>
             <dt className="text-gray-500">foundListPath</dt><dd>{result?.foundListPath ?? ''}</dd>
             <dt className="text-gray-500">count</dt><dd>{result?.count ?? 0}</dd>
@@ -200,6 +201,14 @@ export default function WattBuyInspector() {
           <pre className="text-xs bg-gray-50 rounded-lg p-3 overflow-auto max-h-[32rem]">
 {pretty(raw)}
           </pre>
+          {(raw as any)?.rawTextPreview && (
+            <div className="mt-3">
+              <div className="text-xs text-gray-500 mb-1">Raw Text Preview</div>
+              <pre className="text-xs bg-gray-50 rounded-lg p-3 overflow-auto max-h-40">
+{String((raw as any).rawTextPreview)}
+              </pre>
+            </div>
+          )}
         </div>
       </section>
     </div>

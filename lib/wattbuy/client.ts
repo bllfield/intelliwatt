@@ -19,10 +19,40 @@ function apiKey(): string {
 type WbResponse<T> = {
   ok: boolean;
   status: number;
-  data?: T;
-  text?: string;
+  data?: T | null;
+  text?: string; // raw text body if non-JSON or empty
   headers?: Record<string, string | null>;
 };
+
+function pickHeaders(res: Response) {
+  return {
+    'x-amzn-requestid': res.headers.get('x-amzn-requestid'),
+    'x-documentation-url': res.headers.get('x-documentation-url'),
+    'x-amz-apigw-id': res.headers.get('x-amz-apigw-id'),
+    'content-type': res.headers.get('content-type'),
+    'content-length': res.headers.get('content-length'),
+  };
+}
+
+async function parseBody<T>(res: Response): Promise<{ data: T | null; text: string | undefined }> {
+  const ct = res.headers.get('content-type') || '';
+  // Read as text once; decide JSON vs raw
+  const raw = await res.text().catch(() => '');
+  if (!raw || raw.trim() === '') {
+    return { data: null, text: '' };
+  }
+  if (ct.includes('application/json')) {
+    try {
+      const json = JSON.parse(raw) as T;
+      return { data: json, text: undefined };
+    } catch {
+      // malformed JSON though advertised as JSON; return raw for debugging
+      return { data: null, text: raw.slice(0, 2000) };
+    }
+  }
+  // Non-JSON content
+  return { data: null, text: raw.slice(0, 2000) };
+}
 
 async function doFetch<T>(url: string, init?: RequestInit): Promise<WbResponse<T>> {
   const res = await fetch(url, {
@@ -32,30 +62,13 @@ async function doFetch<T>(url: string, init?: RequestInit): Promise<WbResponse<T
     ...init,
   });
 
-  const headers = {
-    'x-amzn-requestid': res.headers.get('x-amzn-requestid'),
-    'x-documentation-url': res.headers.get('x-documentation-url'),
-    'x-amz-apigw-id': res.headers.get('x-amz-apigw-id'),
-    'content-type': res.headers.get('content-type'),
-  };
+  const headers = pickHeaders(res);
+  const { data, text } = await parseBody<T>(res);
 
-  const ct = res.headers.get('content-type') || '';
   if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    return { ok: false, status: res.status, text, headers };
+    return { ok: false, status: res.status, data, text, headers };
   }
-  // Read as text first, then parse JSON if content-type suggests it
-  const text = await res.text().catch(() => '');
-  if (ct.includes('application/json') && text) {
-    try {
-      const data = JSON.parse(text) as T;
-      return { ok: true, status: res.status, data, headers };
-    } catch (e) {
-      // If JSON parsing fails, return as text
-      return { ok: true, status: res.status, text, headers };
-    }
-  }
-  return { ok: true, status: res.status, text, headers };
+  return { ok: true, status: res.status, data, text, headers };
 }
 
 export async function wbGet<T = any>(
@@ -70,7 +83,6 @@ export async function wbGet<T = any>(
     try {
       const out = await doFetch<T>(url, init);
       if (out.ok) return out;
-      // Retry on 5xx only
       if (out.status < 500 || i === retries) return out;
       await new Promise(r => setTimeout(r, 300 * (i + 1)));
       last = out;
@@ -79,7 +91,6 @@ export async function wbGet<T = any>(
       await new Promise(r => setTimeout(r, 300 * (i + 1)));
     }
   }
-  // should not reach
   return last ?? { ok: false, status: 500, text: 'Unknown error (no response)' };
 }
 
