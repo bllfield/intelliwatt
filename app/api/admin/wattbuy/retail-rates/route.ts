@@ -48,8 +48,8 @@ export async function GET(req: NextRequest) {
       state: q.state,
       zip: q.zip,
     });
-    if (typeof q.page === 'number') params.page = q.page;
-    if (typeof q.page_size === 'number') params.page_size = q.page_size;
+    if (typeof q.page === 'number') params.page = String(q.page);
+    if (typeof q.page_size === 'number') params.page_size = String(q.page_size);
 
     const res = await wbGet('electricity/retail-rates', params, undefined, 1);
 
