@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCorrelationId } from '@/lib/correlation';
 import { prisma } from '@/lib/db';
-import { wbGet } from '@/lib/wattbuy/client';
+import { wbGet, type RetailRatesQuery } from '@/lib/wattbuy/client';
 import { retailRatesParams } from '@/lib/wattbuy/params';
 import { inspectRetailRatesPayload } from '@/lib/wattbuy/inspect';
 
