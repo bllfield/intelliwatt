@@ -540,3 +540,40 @@ model RatePlan {
   @@unique([utilityId, state, supplier, planName, termMonths, isUtilityTariff])
   @@index([utilityId, state, termMonths])
 }
+
+/// ERCOT ESIID Index - stores normalized ESIID data from ERCOT extracts
+model ErcotEsiidIndex {
+  id          String   @id @default(cuid())
+  esiid       String
+  addressLine1 String
+  city        String
+  state       String
+  zip         String
+  utility     String?
+  tdsp        String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([esiid])
+  @@index([zip, addressLine1])
+  @@index([state, zip])
+  @@index([tdsp])
+}
+
+/// ERCOT Ingest - tracks ingestion history of ERCOT data files
+model ErcotIngest {
+  id          String   @id @default(cuid())
+  status      String   // 'pending', 'processing', 'completed', 'failed'
+  tdsp        String?  // 'oncor', 'centerpoint', 'aep_north', 'aep_central', 'tnmp'
+  sourceUrl   String?
+  fileHash    String?  @unique
+  recordCount Int?
+  error       String?
+  createdAt   DateTime @default(now())
+  startedAt   DateTime?
+  finishedAt  DateTime?
+
+  @@index([status, createdAt])
+  @@index([tdsp, createdAt])
+  @@index([finishedAt])
+}
