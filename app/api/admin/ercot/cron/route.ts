@@ -24,40 +24,59 @@ export async function GET(req: NextRequest) {
     // Create ingest record
     const ingest = await prisma.ercotIngest.create({
       data: {
-        status: 'processing',
+        status: 'pending',
         startedAt: new Date(),
       },
     });
 
-    // TODO: Implement ERCOT data fetching logic
-    // 1. Determine which TDSP files to fetch (or fetch all)
-    // 2. Download ERCOT extract files
-    // 3. Compute file hash for idempotence
-    // 4. Check if hash already exists (skip if duplicate)
-    // 5. Parse CSV/JSON data
-    // 6. Normalize addresses (USPS normalization)
-    // 7. Upsert into ErcotEsiidIndex
-    // 8. Update ingest record with status and counts
+    try {
+      // TODO: Implement ERCOT data fetching logic
+      // 1. Determine which TDSP files to fetch (or fetch all)
+      // 2. Download ERCOT extract files
+      // 3. Compute file hash for idempotence
+      // 4. Check if hash already exists (skip if duplicate)
+      // 5. Parse CSV/JSON data
+      // 6. Normalize addresses (USPS normalization)
+      // 7. Upsert into ErcotEsiidIndex
+      // 8. Update ingest record with status and counts
 
-    // For now, return a placeholder response
-    await prisma.ercotIngest.update({
-      where: { id: ingest.id },
-      data: {
-        status: 'completed',
-        finishedAt: new Date(),
-        recordCount: 0,
-        error: 'ERCOT ingestion not yet implemented - placeholder endpoint',
-      },
-    });
+      // For now, return a placeholder response
+      await prisma.ercotIngest.update({
+        where: { id: ingest.id },
+        data: {
+          status: 'success',
+          finishedAt: new Date(),
+          recordsSeen: 0,
+          recordsUpserted: 0,
+          errorMessage: 'ERCOT ingestion not yet implemented - placeholder endpoint',
+        },
+      });
+    } catch (error: any) {
+      await prisma.ercotIngest.update({
+        where: { id: ingest.id },
+        data: {
+          status: 'error',
+          finishedAt: new Date(),
+          errorMessage: error?.message || 'Unknown error during ERCOT ingestion',
+        },
+      });
+      throw error;
+    }
 
     const durationMs = Date.now() - startMs;
     console.log(JSON.stringify({ corrId, route: 'ercot-cron', status: 200, durationMs, ingestId: ingest.id }));
+
+    const updatedIngest = await prisma.ercotIngest.findUnique({
+      where: { id: ingest.id },
+    });
 
     return NextResponse.json({
       ok: true,
       corrId,
       ingestId: ingest.id,
-      status: 'completed',
+      status: updatedIngest?.status || 'unknown',
+      recordsSeen: updatedIngest?.recordsSeen || 0,
+      recordsUpserted: updatedIngest?.recordsUpserted || 0,
       message: 'ERCOT ingestion endpoint is active but not yet implemented',
       durationMs,
     });

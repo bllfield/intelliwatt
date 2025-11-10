@@ -27,20 +27,21 @@ export async function POST(req: NextRequest) {
     }
 
     // Query ErcotEsiidIndex for matching address
-    // Using fuzzy matching on address line1 and exact match on zip
+    // Using fuzzy matching on serviceAddress1 and exact match on zip
     const results = await prisma.$queryRawUnsafe<any[]>(`
       SELECT 
         esiid,
-        "addressLine1",
+        "serviceAddress1",
         city,
         state,
         zip,
-        utility,
-        tdsp,
-        similarity("addressLine1", $1) as similarity
+        "utilityName",
+        "tdspName",
+        "tdspCode",
+        similarity("serviceAddress1", $1) as similarity
       FROM "ErcotEsiidIndex"
       WHERE zip = $2
-        AND similarity("addressLine1", $1) > 0.3
+        AND similarity("serviceAddress1", $1) > 0.3
       ORDER BY similarity DESC
       LIMIT 10
     `, line1, zip).catch(() => []);
@@ -59,10 +60,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       esiid: bestMatch.esiid,
-      utility: bestMatch.utility,
-      tdsp: bestMatch.tdsp,
+      utility: bestMatch.utilityName,
+      tdsp: bestMatch.tdspName || bestMatch.tdspCode,
       address: {
-        line1: bestMatch.addressLine1,
+        line1: bestMatch.serviceAddress1,
         city: bestMatch.city,
         state: bestMatch.state,
         zip: bestMatch.zip,
@@ -71,7 +72,7 @@ export async function POST(req: NextRequest) {
       matches: results.length,
       allMatches: results.map((r: any) => ({
         esiid: r.esiid,
-        address: r.addressLine1,
+        address: r.serviceAddress1,
         similarity: r.similarity,
       })),
     });
