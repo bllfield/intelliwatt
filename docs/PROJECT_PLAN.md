@@ -460,3 +460,35 @@ Guardrails
 - Webhook endpoints require `DROPLET_WEBHOOK_SECRET` header.
 - ESIID lookup uses fuzzy matching for address resolution.
 - SMT pull triggered only after ESIID confirmation.
+
+---
+
+### PC-2025-11-10: Admin Read-Only DB Explorer
+
+**Rationale**
+
+Provide a secure, on-domain, read-only database viewer for internal operations without depending on external tools each time. Must respect ADMIN_TOKEN security and RAW→CDM discipline.
+
+**Scope**
+
+- New admin UI: `/admin/database`
+- New admin API routes:
+  - `GET /api/admin/db/tables` — whitelisted tables + columns + row counts
+  - `POST /api/admin/db/query` — paginated rows, optional ILIKE search on text columns, optional CSV export
+- Whitelist tables: `HouseAddress`, `ErcotIngest`, `ErcotEsiidIndex`, `RatePlan`, `RawSmtFile`, `SmtInterval`
+- Token gate: `x-admin-token` header, as documented in ENV_VARS and ADMIN_API
+
+**Security & Guardrails**
+
+- Follows existing admin token model (see ENV_VARS.md and ADMIN_API.md)
+- Read-only: no INSERT/UPDATE/DELETE endpoints
+- No secrets or PII echoed in logs; CSV export is admin-only
+- `force-dynamic` to avoid caching
+
+**Rollback**
+
+- Remove `/app/admin/database` and `/app/api/admin/db/*` files. No schema changes required.
+
+**How to use it (quick):**
+
+Deploy the change (push to main). Navigate to `/admin/database`, paste your `ADMIN_TOKEN`, and browse whitelisted tables with pagination, search, and CSV export.

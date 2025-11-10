@@ -6,16 +6,37 @@ const DEFAULT_UA = process.env.ERCOT_USER_AGENT ?? 'IntelliWattBot/1.0 (+https:/
 
 export async function resolveLatestFromPage(pageUrl: string) {
   const res = await fetch(pageUrl, { headers: { 'user-agent': DEFAULT_UA } });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch page: ${res.status} ${res.statusText}`);
+  }
   const html = await res.text();
   const dom = new JSDOM(html);
   const anchors = Array.from(dom.window.document.querySelectorAll('a[href]')) as HTMLAnchorElement[];
-  const links = anchors
-    .map(a => a.href)
-    .filter(href => href && href.toLowerCase().includes('tdsp') && href.toLowerCase().includes('esiid'))
-    .filter(href => href.toUpperCase().includes(DEFAULT_FILTER.toUpperCase()));
+  
+  // Collect all links for debugging
+  const allLinks = anchors.map(a => a.href).filter(Boolean);
+  
+  // Filter for TDSP ESIID links
+  const tdspEsiidLinks = allLinks
+    .filter(href => {
+      const lower = href.toLowerCase();
+      return lower.includes('tdsp') && lower.includes('esiid');
+    });
+  
+  // Apply filter if specified
+  const filtered = DEFAULT_FILTER
+    ? tdspEsiidLinks.filter(href => href.toUpperCase().includes(DEFAULT_FILTER.toUpperCase()))
+    : tdspEsiidLinks;
 
-  // Pick the last link (assumes page lists newest first or includes date in URL)
-  const candidates = links.slice(-3); // keep a few
+  // Pick the last few links (assumes page lists newest first or includes date in URL)
+  const candidates = filtered.slice(-3);
+  
+  // If no candidates after filter, return all TDSP ESIID links for debugging
+  if (candidates.length === 0 && tdspEsiidLinks.length > 0) {
+    // Return all TDSP ESIID links so caller can see what was found
+    return tdspEsiidLinks.slice(-3);
+  }
+  
   return candidates;
 }
 

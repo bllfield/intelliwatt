@@ -24,10 +24,49 @@ export async function GET(req: NextRequest) {
   const pageUrl = process.env.ERCOT_PAGE_URL;
   if (!pageUrl) return NextResponse.json({ ok: false, error: 'MISSING_ERCOT_PAGE_URL' }, { status: 500 });
 
-  const candidates = await resolveLatestFromPage(pageUrl);
+  let candidates: string[] = [];
+  let resolveError: string | undefined;
+  try {
+    candidates = await resolveLatestFromPage(pageUrl);
+  } catch (e: any) {
+    resolveError = e?.message || String(e);
+    await prisma.ercotIngest.create({ 
+      data: { 
+        status: 'error', 
+        note: 'cron', 
+        fileUrl: pageUrl, 
+        fileSha256: null,
+        error: 'RESOLVE_ERROR',
+        errorDetail: resolveError
+      } 
+    });
+    return NextResponse.json({ 
+      ok: false, 
+      status: 'error', 
+      reason: 'RESOLVE_ERROR', 
+      error: resolveError,
+      pageUrl 
+    }, { status: 500 });
+  }
+  
   if (!candidates?.length) {
-    await prisma.ercotIngest.create({ data: { status: 'skipped', note: 'NO_CANDIDATES', fileUrl: pageUrl, fileSha256: 'n/a' } });
-    return NextResponse.json({ ok: true, status: 'skipped', reason: 'NO_CANDIDATES', pageUrl });
+    await prisma.ercotIngest.create({ 
+      data: { 
+        status: 'error', 
+        note: 'cron', 
+        fileUrl: pageUrl, 
+        fileSha256: null,
+        error: 'NO_CANDIDATES',
+        errorDetail: `No matching links found on page. Check ERCOT_PAGE_FILTER (current: ${process.env.ERCOT_PAGE_FILTER || 'TDSP'})`
+      } 
+    });
+    return NextResponse.json({ 
+      ok: true, 
+      status: 'skipped', 
+      reason: 'NO_CANDIDATES', 
+      pageUrl,
+      hint: `No links found matching filter. Check ERCOT_PAGE_FILTER env var (current: ${process.env.ERCOT_PAGE_FILTER || 'TDSP'})`
+    });
   }
 
   // Absolute-ize relative links and try most recent candidate first
