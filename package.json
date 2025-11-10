@@ -16,7 +16,12 @@
     "esiid:resolve-save": "tsx ./scripts/admin/esiid-save.ts resolve-save",
     "esiid:save": "tsx ./scripts/admin/esiid-save.ts save",
     "test:connections": "tsx ./scripts/admin/test-connections.ts",
-    "test:prod": "node scripts/admin/api_test_prod.mjs"
+    "test:prod": "node scripts/admin/api_test_prod.mjs",
+    "ercot:migrate:dev": "prisma migrate dev --name ercot_models",
+    "ercot:migrate:deploy": "prisma migrate deploy",
+    "ercot:fetch:latest": "node scripts/admin/ercot_fetch_latest.mjs",
+    "ercot:load:file": "node scripts/admin/ercot_load_file.mjs",
+    "ercot:resolve:fetch": "node scripts/admin/ercot_resolve_fetch.mjs"
   },
   "dependencies": {
     "@google-cloud/vision": "^5.3.4",
@@ -27,6 +32,7 @@
     "cheerio": "^1.1.2",
     "html-to-text": "^9.0.5",
     "js-cookie": "^3.0.5",
+    "jsdom": "^24.0.0",
     "luxon": "^3.7.2",
     "next": "^14.0.0",
     "nodemailer": "^7.0.4",
@@ -38,6 +44,7 @@
     "react-dom": "^18.2.0"
   },
   "devDependencies": {
+    "@types/jsdom": "^21.1.6",
     "@types/luxon": "^3.7.1",
     "@types/node": "^20.0.0",
     "@types/react": "^18.2.0",

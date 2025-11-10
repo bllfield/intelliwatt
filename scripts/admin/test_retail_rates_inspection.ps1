@@ -34,7 +34,7 @@ try {
     }
 }
 
-Write-Host "`n=== Test 2: By Address (auto-derive utilityID) ===" -ForegroundColor Cyan
+Write-Host "`n=== Test 2: By Address (auto-derive utilityID + fallback) ===" -ForegroundColor Cyan
 $address = "9514%20Santa%20Paula%20Dr"
 $city = "Fort%20Worth"
 $state = "tx"
@@ -43,6 +43,7 @@ $uri = "$baseUrl/api/admin/wattbuy/retail-rates-by-address?address=$address&city
 try {
     $response = Invoke-RestMethod -Uri $uri -Headers $headers -Method GET
     Write-Host "✓ Success" -ForegroundColor Green
+    Write-Host "  status: $($response.status)"
     Write-Host "  topType: $($response.topType)"
     Write-Host "  foundListPath: $($response.foundListPath)"
     Write-Host "  count: $($response.count)"
@@ -56,6 +57,13 @@ try {
         Write-Host "  where (utilityID): $($response.where.utilityID)"
         Write-Host "  where (state): $($response.where.state)"
     }
+    if ($response.tried) {
+        Write-Host "  tried utilities:" -ForegroundColor Cyan
+        foreach ($t in $response.tried) {
+            $statusColor = if ($t.status -eq 200) { "Green" } elseif ($t.status -eq 204) { "Yellow" } else { "Red" }
+            Write-Host "    - $($t.utilityID) ($($t.utilityName)): status=$($t.status), count=$($t.count)" -ForegroundColor $statusColor
+        }
+    }
 } catch {
     Write-Host "✗ Error: $($_.Exception.Message)" -ForegroundColor Red
     if ($_.ErrorDetails.Message) {
@@ -63,11 +71,12 @@ try {
     }
 }
 
-Write-Host "`n=== Test 3: ZIP-only (auto-derive utilityID) ===" -ForegroundColor Cyan
+Write-Host "`n=== Test 3: ZIP-only (auto-derive utilityID + fallback) ===" -ForegroundColor Cyan
 $uri = "$baseUrl/api/admin/wattbuy/retail-rates-zip?zip=75201"
 try {
     $response = Invoke-RestMethod -Uri $uri -Headers $headers -Method GET
     Write-Host "✓ Success" -ForegroundColor Green
+    Write-Host "  status: $($response.status)"
     Write-Host "  topType: $($response.topType)"
     Write-Host "  foundListPath: $($response.foundListPath)"
     Write-Host "  count: $($response.count)"
@@ -76,6 +85,13 @@ try {
     }
     if ($response.note) {
         Write-Host "  note: $($response.note)" -ForegroundColor Yellow
+    }
+    if ($response.tried) {
+        Write-Host "  tried utilities:" -ForegroundColor Cyan
+        foreach ($t in $response.tried) {
+            $statusColor = if ($t.status -eq 200) { "Green" } elseif ($t.status -eq 204) { "Yellow" } else { "Red" }
+            Write-Host "    - $($t.utilityID) ($($t.utilityName)): status=$($t.status), count=$($t.count)" -ForegroundColor $statusColor
+        }
     }
 } catch {
     Write-Host "✗ Error: $($_.Exception.Message)" -ForegroundColor Red

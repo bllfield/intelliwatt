@@ -240,3 +240,22 @@ For interactive testing with visual inspection of responses:
 
 **If `count = 0`**: This indicates upstream content from WattBuy. Contact support with the `x-amzn-requestid` from headers, exact selector used, and the `topType`/`topKeys`/`foundListPath` metadata. See `docs/WATTBUY_TESTING_RUNBOOK.md` for details.
 
+## ERCOT — Quick Commands (Production)
+
+```bash
+# Verify env health
+curl -sS "$PROD_BASE_URL/api/admin/env-health" -H "x-admin-token: $ADMIN_TOKEN" | jq
+
+# Confirm we can resolve the latest daily file from the page
+curl -sS "$PROD_BASE_URL/api/admin/ercot/debug/url-sanity" -H "x-admin-token: $ADMIN_TOKEN" | jq
+
+# Manual fetch by explicit URL (set ERCOT_TEST_URL first)
+npm run ercot:fetch:latest
+
+# Exercise the cron route (uses ERCOT_PAGE_URL resolver)
+npm run ercot:resolve:fetch
+
+# List recent ingests
+curl -sS "$PROD_BASE_URL/api/admin/ercot/ingests?limit=10" -H "x-admin-token: $ADMIN_TOKEN" | jq
+```
+

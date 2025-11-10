@@ -543,48 +543,38 @@ model RatePlan {
 
 /// ERCOT Ingest - tracks ingestion history of ERCOT data files
 model ErcotIngest {
-  id             String   @id @default(cuid())
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-
-  // unique fingerprint of the source file/batch (for idempotence)
-  fileHash       String?  @unique
-  sourceUrl      String?
-  startedAt      DateTime? 
-  finishedAt     DateTime?
-  status         String   @default("pending") // pending|success|error
-  recordsSeen    Int      @default(0)
-  recordsUpserted Int     @default(0)
-  errorMessage   String?
-
-  @@index([status, createdAt])
+  id          String   @id @default(cuid())
+  createdAt   DateTime @default(now())
+  status      String   // "ok" | "skipped" | "error"
+  note        String?  // freeform note (e.g., "daily", "manual test")
+  fileUrl     String?
+  fileSha256  String?  @unique
+  tdsp        String?  // oncor|centerpoint|aep_north|aep_central|tnmp|unknown
+  rowCount    Int?
+  headers     Json?    // snapshot of response headers for drift
+  error       String?  // short error
+  errorDetail String?  // long stack
 }
 
 /// ERCOT ESIID Index - stores normalized ESIID data from ERCOT extracts
 model ErcotEsiidIndex {
-  id              String   @id @default(cuid())
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id               String   @id @default(cuid())
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
-  esiid           String   @unique
-  meterNumber     String?
-  serviceAddress1 String?
-  serviceAddress2 String?
-  city            String?
-  state           String?
-  zip             String?
-  county          String?
-  premiseType     String?   // Residential/Commercial if present
-  status          String?   // Active/Inactive if present
+  esiid            String   @unique   // 17/18-digit
+  tdsp             String?  // oncor|centerpoint|aep_north|aep_central|tnmp|mou|coop|unknown
+  utilityName      String?
+  serviceAddress1  String?
+  serviceAddress2  String?
+  city             String?
+  state            String?
+  zip              String?
+  meterNumber      String?
+  premiseType      String?  // res/com
+  raw              Json?    // raw parsed columns for traceability
+  srcFileSha256    String?  // provenance
 
-  tdspName        String?   // e.g., Oncor Electric Delivery
-  tdspCode        String?   // normalized slug/code if derivable
-  utilityName     String?
-  utilityId       String?   // ERCOT or EIA id if derivable
-
-  // free-form raw blob for fields we haven't modeled yet
-  raw             Json?
-
-  @@index([zip, city, state])
-  @@index([tdspName])
+  @@index([city, zip])
+  @@index([serviceAddress1])
 }
