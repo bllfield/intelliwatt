@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireVercelCron } from '@/lib/auth/cron';
-import { prisma } from '@/lib/db';
+import { runErcotIngest } from '@/lib/ercot/ingest';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -21,63 +21,22 @@ export async function GET(req: NextRequest) {
   const startMs = Date.now();
 
   try {
-    // Create ingest record
-    const ingest = await prisma.ercotIngest.create({
-      data: {
-        status: 'pending',
-        startedAt: new Date(),
-      },
-    });
-
-    try {
-      // TODO: Implement ERCOT data fetching logic
-      // 1. Determine which TDSP files to fetch (or fetch all)
-      // 2. Download ERCOT extract files
-      // 3. Compute file hash for idempotence
-      // 4. Check if hash already exists (skip if duplicate)
-      // 5. Parse CSV/JSON data
-      // 6. Normalize addresses (USPS normalization)
-      // 7. Upsert into ErcotEsiidIndex
-      // 8. Update ingest record with status and counts
-
-      // For now, return a placeholder response
-      await prisma.ercotIngest.update({
-        where: { id: ingest.id },
-        data: {
-          status: 'success',
-          finishedAt: new Date(),
-          recordsSeen: 0,
-          recordsUpserted: 0,
-          errorMessage: 'ERCOT ingestion not yet implemented - placeholder endpoint',
-        },
-      });
-    } catch (error: any) {
-      await prisma.ercotIngest.update({
-        where: { id: ingest.id },
-        data: {
-          status: 'error',
-          finishedAt: new Date(),
-          errorMessage: error?.message || 'Unknown error during ERCOT ingestion',
-        },
-      });
-      throw error;
-    }
+    const result = await runErcotIngest(fetch);
 
     const durationMs = Date.now() - startMs;
-    console.log(JSON.stringify({ corrId, route: 'ercot-cron', status: 200, durationMs, ingestId: ingest.id }));
-
-    const updatedIngest = await prisma.ercotIngest.findUnique({
-      where: { id: ingest.id },
-    });
+    console.log(JSON.stringify({ corrId, route: 'ercot-cron', status: 200, durationMs, ingestId: result.id, status: result.status }));
 
     return NextResponse.json({
-      ok: true,
+      ok: result.ok,
       corrId,
-      ingestId: ingest.id,
-      status: updatedIngest?.status || 'unknown',
-      recordsSeen: updatedIngest?.recordsSeen || 0,
-      recordsUpserted: updatedIngest?.recordsUpserted || 0,
-      message: 'ERCOT ingestion endpoint is active but not yet implemented',
+      ingestId: result.id,
+      status: result.status,
+      recordsSeen: 'seen' in result ? result.seen : 0,
+      recordsUpserted: 'upserted' in result ? result.upserted : 0,
+      fileHash: 'fileHash' in result ? result.fileHash : undefined,
+      sourceUrl: 'sourceUrl' in result ? result.sourceUrl : undefined,
+      message: result.status === 'noop' ? result.message : undefined,
+      error: 'error' in result ? result.error : undefined,
       durationMs,
     });
   } catch (error: any) {
