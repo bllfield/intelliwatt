@@ -18,8 +18,8 @@ export async function upsertPlans(plans: TransformedPlan[]) {
         utilityId_state_supplier_planName_termMonths_isUtilityTariff: {
           utilityId,
           state,
-          supplier,
-          planName,
+          supplier: supplier as string | null,
+          planName: planName as string | null,
           termMonths: term ?? 0,
           isUtilityTariff: isTariff,
         },
