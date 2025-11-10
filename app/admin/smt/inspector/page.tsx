@@ -29,6 +29,13 @@ export default function SMTInspector() {
   const [loading, setLoading] = useState(false);
   const [testFile, setTestFile] = useState<File | null>(null);
   const [testText, setTestText] = useState('');
+  const [address, setAddress] = useState({
+    line1: '',
+    city: '',
+    state: 'TX',
+    zip: '',
+  });
+  const [foundEsiid, setFoundEsiid] = useState<string | null>(null);
 
   const ready = useMemo(() => Boolean(token), [token]);
 
@@ -146,6 +153,66 @@ export default function SMTInspector() {
     }
   }
 
+  async function lookupEsiidAndPull() {
+    if (!token) { alert('Set x-admin-token first'); return; }
+    if (!address.line1 || !address.city || !address.state || !address.zip) {
+      alert('Please fill in all address fields');
+      return;
+    }
+    setLoading(true);
+    setResult(null);
+    setRaw(null);
+    setFoundEsiid(null);
+    try {
+      // Step 1: Lookup ESIID via ERCOT
+      const lookupRes = await fetch('/api/admin/ercot/lookup-esiid', {
+        method: 'POST',
+        headers: { 'x-admin-token': token, 'content-type': 'application/json' },
+        body: JSON.stringify(address),
+      });
+      const lookupData = await lookupRes.json().catch(() => ({ error: 'Failed to parse JSON' }));
+      
+      if (!lookupData.ok || !lookupData.esiid) {
+        setRaw(lookupData);
+        setResult({
+          ok: false,
+          status: lookupRes.status,
+          error: lookupData.error || 'ESIID lookup failed',
+          data: lookupData,
+        });
+        setLoading(false);
+        return;
+      }
+
+      const esiid = lookupData.esiid;
+      setFoundEsiid(esiid);
+
+      // Step 2: Trigger SMT pull with ESIID
+      const pullRes = await fetch('/api/admin/smt/pull', {
+        method: 'POST',
+        headers: { 'x-admin-token': token, 'content-type': 'application/json' },
+        body: JSON.stringify({ esiid }),
+      });
+      const pullData = await pullRes.json().catch(() => ({ error: 'Failed to parse JSON' }));
+      
+      setRaw({
+        lookup: lookupData,
+        pull: pullData,
+      });
+      setResult({
+        ok: pullData?.ok,
+        status: pullRes.status,
+        error: pullData?.error,
+        data: { lookup: lookupData, pull: pullData },
+        message: pullData?.message,
+      });
+    } catch (e: any) {
+      setResult({ ok: false, status: 500, error: e?.message || 'fetch failed' });
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
       <h1 className="text-2xl font-semibold">SMT Inspector</h1>
@@ -190,6 +257,66 @@ export default function SMTInspector() {
             </button>
           </div>
         </div>
+      </section>
+
+      <section className="p-4 rounded-2xl border">
+        <h2 className="font-medium mb-3">Address to SMT Pull</h2>
+        <p className="text-sm text-gray-600 mb-3">Enter an address to lookup ESIID via ERCOT, then trigger SMT pull</p>
+        <div className="grid md:grid-cols-4 gap-4 mb-4">
+          <div>
+            <label className="block text-sm mb-1">Address Line 1</label>
+            <input
+              type="text"
+              className="w-full rounded-lg border px-3 py-2"
+              placeholder="123 Main St"
+              value={address.line1}
+              onChange={(e) => setAddress({ ...address, line1: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="block text-sm mb-1">City</label>
+            <input
+              type="text"
+              className="w-full rounded-lg border px-3 py-2"
+              placeholder="Dallas"
+              value={address.city}
+              onChange={(e) => setAddress({ ...address, city: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="block text-sm mb-1">State</label>
+            <input
+              type="text"
+              className="w-full rounded-lg border px-3 py-2"
+              placeholder="TX"
+              value={address.state}
+              onChange={(e) => setAddress({ ...address, state: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="block text-sm mb-1">ZIP</label>
+            <input
+              type="text"
+              className="w-full rounded-lg border px-3 py-2"
+              placeholder="75201"
+              value={address.zip}
+              onChange={(e) => setAddress({ ...address, zip: e.target.value })}
+            />
+          </div>
+        </div>
+        <button
+          onClick={lookupEsiidAndPull}
+          className="px-4 py-2 rounded-lg border hover:bg-gray-50 bg-green-50 font-semibold"
+          disabled={loading || !ready}
+        >
+          {loading ? 'Processing…' : 'Lookup ESIID & Pull SMT'}
+        </button>
+        {foundEsiid && (
+          <div className="mt-3 p-3 bg-green-50 rounded-lg">
+            <p className="text-sm font-semibold">ESIID Found: <span className="font-mono">{foundEsiid}</span></p>
+            <p className="text-sm text-gray-600">SMT pull has been triggered for this ESIID</p>
+          </div>
+        )}
       </section>
 
       <section className="p-4 rounded-2xl border">

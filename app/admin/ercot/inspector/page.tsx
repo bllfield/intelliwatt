@@ -34,6 +34,12 @@ export default function ERCOTInspector() {
     tdsp: '',
     limit: '50',
   });
+  const [address, setAddress] = useState({
+    line1: '',
+    city: '',
+    state: 'TX',
+    zip: '',
+  });
 
   const ready = useMemo(() => Boolean(token), [token]);
 
@@ -74,6 +80,37 @@ export default function ERCOTInspector() {
     await hit(`/api/admin/ercot/ingests?${params.toString()}`);
   }
 
+  async function lookupEsiid() {
+    if (!token) { alert('Set x-admin-token first'); return; }
+    if (!address.line1 || !address.city || !address.state || !address.zip) {
+      alert('Please fill in all address fields');
+      return;
+    }
+    setLoading(true);
+    setResult(null);
+    setRaw(null);
+    try {
+      const r = await fetch('/api/admin/ercot/lookup-esiid', {
+        method: 'POST',
+        headers: { 'x-admin-token': token, 'content-type': 'application/json' },
+        body: JSON.stringify(address),
+      });
+      const data = await r.json().catch(() => ({ error: 'Failed to parse JSON', status: r.status }));
+      setRaw(data);
+      setResult({
+        ok: data?.ok,
+        status: r.status,
+        error: data?.error,
+        data: data,
+        message: data?.message,
+      });
+    } catch (e: any) {
+      setResult({ ok: false, status: 500, error: e?.message || 'fetch failed' });
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
       <h1 className="text-2xl font-semibold">ERCOT ESIID Inspector</h1>
@@ -111,6 +148,66 @@ export default function ERCOTInspector() {
             </button>
           </div>
         </div>
+      </section>
+
+      <section className="p-4 rounded-2xl border">
+        <h2 className="font-medium mb-3">Address to ESIID Lookup</h2>
+        <div className="grid md:grid-cols-4 gap-4 mb-4">
+          <div>
+            <label className="block text-sm mb-1">Address Line 1</label>
+            <input
+              type="text"
+              className="w-full rounded-lg border px-3 py-2"
+              placeholder="123 Main St"
+              value={address.line1}
+              onChange={(e) => setAddress({ ...address, line1: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="block text-sm mb-1">City</label>
+            <input
+              type="text"
+              className="w-full rounded-lg border px-3 py-2"
+              placeholder="Dallas"
+              value={address.city}
+              onChange={(e) => setAddress({ ...address, city: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="block text-sm mb-1">State</label>
+            <input
+              type="text"
+              className="w-full rounded-lg border px-3 py-2"
+              placeholder="TX"
+              value={address.state}
+              onChange={(e) => setAddress({ ...address, state: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="block text-sm mb-1">ZIP</label>
+            <input
+              type="text"
+              className="w-full rounded-lg border px-3 py-2"
+              placeholder="75201"
+              value={address.zip}
+              onChange={(e) => setAddress({ ...address, zip: e.target.value })}
+            />
+          </div>
+        </div>
+        <button
+          onClick={lookupEsiid}
+          className="px-4 py-2 rounded-lg border hover:bg-gray-50 bg-blue-50"
+          disabled={loading || !ready}
+        >
+          {loading ? 'Looking up…' : 'Lookup ESIID'}
+        </button>
+        {raw?.esiid && (
+          <div className="mt-3 p-3 bg-green-50 rounded-lg">
+            <p className="text-sm font-semibold">Found ESIID: <span className="font-mono">{raw.esiid}</span></p>
+            {raw.utility && <p className="text-sm">Utility: {raw.utility}</p>}
+            {raw.tdsp && <p className="text-sm">TDSP: {raw.tdsp}</p>}
+          </div>
+        )}
       </section>
 
       <section className="p-4 rounded-2xl border">
@@ -175,6 +272,7 @@ export default function ERCOTInspector() {
             <dt className="text-gray-500">status</dt><dd>{result?.status ?? ''}</dd>
             <dt className="text-gray-500">error</dt><dd>{result?.error ?? ''}</dd>
             <dt className="text-gray-500">count</dt><dd>{raw?.count ?? ''}</dd>
+            <dt className="text-gray-500">esiid</dt><dd>{raw?.esiid ?? ''}</dd>
             <dt className="text-gray-500">message</dt><dd>{result?.message ?? ''}</dd>
           </dl>
         </div>
