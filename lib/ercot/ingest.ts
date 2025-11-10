@@ -86,8 +86,7 @@ export async function ingestLocalFile(absPath: string, sha256: string, note?: st
   for (let i = 0; i < toUpsert.length; i += batch) {
     const slice = toUpsert.slice(i, i + batch)
     await db.$transaction(
-      slice.map(args => db.ercotEsiidIndex.upsert(args as any)),
-      { timeout: 60000 }
+      slice.map(args => db.ercotEsiidIndex.upsert(args as any))
     )
     rowCount += slice.length
   }
