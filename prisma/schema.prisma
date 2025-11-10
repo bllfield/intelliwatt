@@ -499,3 +499,44 @@ model RawWattbuyElectricityInfo {
   @@index([state, zip5])
   @@index([createdAt])
 }
+
+/// Rate plans (REP plans and utility tariffs)
+model RatePlan {
+  id           String   @id @default(cuid())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Source identity
+  externalId   String?     // vendor/plan id if any
+  utilityId    String
+  state        String
+  supplier     String?
+  supplierPUCT String?
+  planName     String?
+
+  // Commercial bits (for REP plans)
+  termMonths   Int?
+  rate500      Float?
+  rate1000     Float?
+  rate2000     Float?
+  cancelFee    String?
+
+  eflUrl       String?
+  tosUrl       String?
+  yracUrl      String?
+
+  // NEW — tariff-style
+  isUtilityTariff Boolean   @default(false)
+  tariffStructure  Json?    // raw rate_structure[]
+  customerCharge   Float?   // monthly fixed charge if present
+  minimumBill      Float?   // minimum bill amount if present
+  effectiveStart   DateTime?
+  effectiveEnd     DateTime?
+  sourceRateUrl    String?
+  sourceParentUrl  String?
+
+  lastSeenAt   DateTime @default(now())
+
+  @@unique([utilityId, state, supplier, planName, termMonths, isUtilityTariff])
+  @@index([utilityId, state, termMonths])
+}
