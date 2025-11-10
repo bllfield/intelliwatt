@@ -4,6 +4,8 @@ import { db } from '@/lib/db';
 import { getESIByAddress, getUtilityInfo, extractTdspSlug } from '@/lib/wattbuy/client';
 import { normalizeEmail } from '@/lib/utils/email';
 
+// keep: harmless runtime/caching hints (no impact to WattBuy logic)
+export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
