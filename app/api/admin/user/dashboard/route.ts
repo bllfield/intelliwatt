@@ -3,6 +3,8 @@ import { cookies } from 'next/headers';
 import { db } from '@/lib/db';
 import { normalizeEmail } from '@/lib/utils/email';
 
+// keep: harmless runtime/caching hints (no impact to WattBuy logic)
+export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
