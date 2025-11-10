@@ -26,8 +26,8 @@ export async function GET(req: NextRequest) {
     return new Response(JSON.stringify({
       ok: false,
       status: out.status,
-      headers: out.headers,
-      error: out.text || 'UPSTREAM_ERROR',
+      headers: 'headers' in out ? out.headers : undefined,
+      error: ('error' in out ? out.error : undefined) || ('text' in out ? out.text : undefined) || 'UPSTREAM_ERROR',
       where: { address, city, state, zip },
     }), { status: 502 });
   }
