@@ -5,17 +5,18 @@ import { wbGet } from './client';
 import { electricityInfoParams } from './params';
 
 /**
- * Derive { utilityID, state } from an address by calling /v3/electricity/info.
+ * Derive { utilityID, state, utilityList } from an address by calling /v3/electricity/info.
  * - Prefers deregulated utilities in the returned utility_list.
  * - Falls back to a matching distributor (Oncor, CenterPoint, TNMP, AEP Central/North) if present.
- * Returns undefined if nothing usable is found.
+ * - Returns utilityList so callers can try alternates if the first utility returns 204/empty.
+ * Returns undefined if electricity/info call fails.
  */
 export async function deriveUtilityFromAddress(input: {
   address?: string;
   city?: string;
   state?: string;   // lower/upper accepted; we lower it internally
   zip: string | number;
-}) : Promise<{ utilityID: string; state: string } | undefined> {
+}) : Promise<{ utilityID: string; state: string; utilityList?: Array<{ utility_eid?: number; utility_name?: string; type?: string }> } | undefined> {
   const state = String(input.state ?? '').toLowerCase() || 'tx';
   const params = electricityInfoParams({
     address: input.address,
@@ -29,30 +30,27 @@ export async function deriveUtilityFromAddress(input: {
   const info = await wbGet<any>('electricity/info', params, undefined, 1);
   if (!info.ok) return undefined;
 
-  // utility_list items may include deregulated utilities; prefer those.
   const list: any[] = Array.isArray(info.data?.utility_list) ? info.data.utility_list : [];
-  // Prefer well-known TX TDSPs or any "deregulated" entry
   const prefer = ['Oncor', 'CenterPoint', 'Texas New Mexico Power', 'AEP North', 'AEP Central'];
   let candidate = list.find(u => u.type === 'deregulated') || list.find(u => prefer.includes(u.utility_name));
 
-  // Some pages expose Oncor via "utility_info" with eid/company_id fields—try those as fallback.
+  // fallback via utility_info fields
   if (!candidate && Array.isArray(info.data?.utility_info) && info.data.utility_info.length > 0) {
     const ui = info.data.utility_info[0];
     if (ui?.eid) {
-      return { utilityID: String(ui.eid), state };
+      return { utilityID: String(ui.eid), state, utilityList: list };
     }
     if (ui?.company_id) {
-      return { utilityID: String(ui.company_id), state };
+      return { utilityID: String(ui.company_id), state, utilityList: list };
     }
   }
 
-  // From utility_list we prefer a utility_eid if available
+  // pick an eid from utility_list if present
   if (candidate?.utility_eid) {
-    return { utilityID: String(candidate.utility_eid), state };
+    return { utilityID: String(candidate.utility_eid), state, utilityList: list };
   }
 
-  // If a TX TDSP name was matched but no eid was present, try common hard-codes (last resort)
-  // (These are public EIA ids; keep minimal and only for TX TDSPs)
+  // hard-codes last resort
   const hardCodes: Record<string, string> = {
     'Oncor Electric Delivery': '44372',
     'Oncor': '44372',
@@ -62,9 +60,8 @@ export async function deriveUtilityFromAddress(input: {
     'AEP Central': '3278',
   };
   if (candidate?.utility_name && hardCodes[candidate.utility_name]) {
-    return { utilityID: hardCodes[candidate.utility_name], state };
+    return { utilityID: hardCodes[candidate.utility_name], state, utilityList: list };
   }
 
-  return undefined;
+  return { utilityID: '', state, utilityList: list };
 }
-
