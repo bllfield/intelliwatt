@@ -18,7 +18,9 @@ export async function fetchToTmp(url: string, userAgent?: string) {
   await fs.writeFile(tmpPath, buf)
   // capture a few headers
   const headers: Record<string, string> = {}
-  for (const [k, v] of res.headers.entries()) headers[k.toLowerCase()] = v
+  res.headers.forEach((v, k) => {
+    headers[k.toLowerCase()] = v
+  })
   return { tmpPath, sha256, headers }
 }
 
