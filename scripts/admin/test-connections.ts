@@ -486,73 +486,61 @@ async function testWattBuyEsiidToMeter() {
   };
 }
 
-async function testWattBuyOffersSync() {
+async function testWattBuyElectricityProbe() {
   if (!WATTBUY_API_KEY) {
     throw new Error('WATTBUY_API_KEY not set - add to .env.local');
   }
 
-  const result = await adminFetch('/api/wattbuy/offers/sync', {
-    method: 'POST',
-    body: JSON.stringify({
-      address: '9515 Santa Paula Dr',
-      city: 'Fort Worth',
-      state: 'TX',
-      zip: '76116',
-    }),
-  });
+  const addr = '9514 Santa Paula Dr';
+  const city = 'Fort Worth';
+  const state = 'tx';
+  const zip = '76116';
+
+  const q = encodeURIComponent;
+  const result = await adminFetch(`/api/admin/wattbuy/electricity-probe?address=${q(addr)}&city=${q(city)}&state=${state}&zip=${zip}`);
 
   if (result.error) throw new Error(result.error);
 
-  // Verify data in database (if DATABASE_URL is set)
-  let dbOfferMaps = 0;
-  let dbRateConfigs = 0;
-  if (process.env.DATABASE_URL) {
-    const offerMaps = await withTimeout(
-      prisma.offerRateMap.findMany({
-        take: 5,
-        orderBy: { lastSeenAt: 'desc' },
-      }),
-      15000,
-      'Offer maps query timeout'
-    );
+  return {
+    ok: result.ok,
+    status: result.status,
+    usedWattkey: result.usedWattkey || false,
+    shape: result.shape,
+    note: result.usedWattkey ? 'Used wattkey fallback' : 'Direct address lookup',
+  };
+}
 
-    const rateConfigs = await withTimeout(
-      prisma.rateConfig.findMany({
-        take: 5,
-        orderBy: { createdAt: 'desc' },
-      }),
-      15000,
-      'Rate configs query timeout'
-    );
-
-    dbOfferMaps = offerMaps.length;
-    dbRateConfigs = rateConfigs.length;
+async function testWattBuyRetailRates() {
+  if (!WATTBUY_API_KEY) {
+    throw new Error('WATTBUY_API_KEY not set - add to .env.local');
   }
 
-  const totalOffers = result.totalOffers || 0;
-  const inserted = result.inserted || 0;
-  const updated = result.updated || 0;
+  // Test explicit utilityID + state
+  const result1 = await adminFetch('/api/admin/wattbuy/retail-rates-test?utilityID=44372&state=tx');
   
-  if (totalOffers === 0 && inserted === 0 && updated === 0) {
-    console.log(`   ⚠️  WARNING: No offers found/synced from WattBuy API`);
-    console.log(`   💡 This could mean:`);
-    console.log(`      - No offers available for this address`);
-    console.log(`      - WattBuy API returned no results`);
-    console.log(`      - Address lookup failed`);
-  }
+  // Test by address (with fallback)
+  const addr = '9514 Santa Paula Dr';
+  const city = 'Fort Worth';
+  const state = 'tx';
+  const zip = '76116';
+  const q = encodeURIComponent;
+  const result2 = await adminFetch(`/api/admin/wattbuy/retail-rates-by-address?address=${q(addr)}&city=${q(city)}&state=${state}&zip=${zip}`);
 
   return {
-    totalOffers,
-    inserted,
-    updated,
-    createdRateConfigs: result.createdRateConfigs || 0,
-    dbOfferMaps,
-    dbRateConfigs,
-    note: process.env.DATABASE_URL 
-      ? (dbOfferMaps === 0 && dbRateConfigs === 0 
-          ? 'Database verified but empty (no WattBuy data yet)' 
-          : 'Database verified')
-      : 'Database check skipped (no DATABASE_URL)',
+    explicit: {
+      ok: result1.ok,
+      status: result1.status,
+      count: result1.count || 0,
+    },
+    byAddress: {
+      ok: result2.ok,
+      status: result2.status,
+      count: result2.count || 0,
+      tried: result2.tried?.length || 0,
+    },
+    note: result1.count === 0 && result2.count === 0 
+      ? 'No retail rates found (may be 204 from WattBuy)' 
+      : 'Retail rates retrieved',
   };
 }
 
@@ -606,7 +594,8 @@ async function runAllTests() {
   // WattBuy Tests (sequential to avoid connection issues)
   await test('WattBuy: Address → ESIID', testWattBuyAddressResolve);
   await test('WattBuy: ESIID → Meter', testWattBuyEsiidToMeter);
-  await test('WattBuy: Offers Sync', testWattBuyOffersSync);
+  await test('WattBuy: Electricity Probe', testWattBuyElectricityProbe);
+  await test('WattBuy: Retail Rates', testWattBuyRetailRates);
   await test('WattBuy: Database Counts', testWattBuyDatabaseCounts);
 
   // Summary

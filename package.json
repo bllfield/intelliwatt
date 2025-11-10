@@ -15,7 +15,8 @@
     "esiid:meter": "tsx ./scripts/admin/resolve.ts esiid",
     "esiid:resolve-save": "tsx ./scripts/admin/esiid-save.ts resolve-save",
     "esiid:save": "tsx ./scripts/admin/esiid-save.ts save",
-    "test:connections": "tsx ./scripts/admin/test-connections.ts"
+    "test:connections": "tsx ./scripts/admin/test-connections.ts",
+    "test:prod": "node scripts/admin/api_test_prod.mjs"
   },
   "dependencies": {
     "@google-cloud/vision": "^5.3.4",
