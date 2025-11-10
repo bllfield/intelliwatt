@@ -34,13 +34,21 @@
 
 ## ERCOT cron
 
-- Echo (optional): `GET /api/admin/ercot/cron?token=<CRON_SECRET>`
-
 - Vercel Managed Cron calls `/api/admin/ercot/cron` (no headers). We allow either:
 
   - Header: `x-cron-secret: <CRON_SECRET>` **or**
 
   - Query: `?token=<CRON_SECRET>`
+
+**Example curl commands:**
+
+```bash
+# Using header
+curl -sS -H "x-cron-secret: $CRON_SECRET" "$BASE/api/admin/ercot/cron" | jq
+
+# Using query parameter
+curl -sS "$BASE/api/admin/ercot/cron?token=$CRON_SECRET" | jq
+```
 
 ## WattBuy (current — unchanged)
 
