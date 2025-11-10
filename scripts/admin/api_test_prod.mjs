@@ -1,108 +1,62 @@
 #!/usr/bin/env node
 
-// scripts/admin/api_test_prod.mjs
-// Production API smoke test
-// Usage: node scripts/admin/api_test_prod.mjs --base https://intelliwatt.com
-//        or: npm run test:prod -- https://intelliwatt.com
-//
-// Loads .env.vercel (from `vercel env pull .env.vercel --environment=production`)
-// and tests public + admin endpoints.
+import 'node:process';
+import { setTimeout as delay } from 'node:timers/promises';
 
-import { readFileSync, existsSync } from 'fs';
-import { resolve } from 'path';
-
-// Load .env.vercel if it exists
-const envPath = resolve(process.cwd(), '.env.vercel');
-if (existsSync(envPath)) {
-  const envContent = readFileSync(envPath, 'utf-8');
-  for (const line of envContent.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (trimmed && !trimmed.startsWith('#')) {
-      const equalIndex = trimmed.indexOf('=');
-      if (equalIndex > 0) {
-        const key = trimmed.substring(0, equalIndex).trim();
-        const value = trimmed.substring(equalIndex + 1).trim();
-        const cleanValue = value.replace(/^["']|["']$/g, '');
-        if (key) {
-          process.env[key] = cleanValue;
-        }
-      }
-    }
+function parseArgs() {
+  const args = process.argv.slice(2);
+  const out = {};
+  for (let i = 0; i < args.length; i += 2) {
+    const key = args[i];
+    const val = args[i + 1];
+    if (!key) continue;
+    if (key === '--base') out.base = val;
   }
+  return out;
 }
 
-// Parse CLI args
-const baseArgIndex = process.argv.indexOf('--base');
-const root = baseArgIndex >= 0 && process.argv[baseArgIndex + 1]
-  ? process.argv[baseArgIndex + 1]
-  : process.argv[2] || 'https://intelliwatt.com';
-
-const ADMIN_TOKEN = process.env.ADMIN_TOKEN || '';
-const CRON_SECRET = process.env.CRON_SECRET || '';
-
-if (!ADMIN_TOKEN) {
-  console.error('Missing ADMIN_TOKEN. Load from .env.vercel or set env var.');
-  process.exit(1);
+function need(name) {
+  const v = process.env[name];
+  if (!v || v.length === 0) throw new Error(`Missing required env: ${name}. Pull Vercel envs or export it.`);
+  return v;
 }
 
-// Helper functions
 async function jget(url, headers = {}) {
   const res = await fetch(url, { headers });
-  const text = await res.text();
-  try {
-    return { status: res.status, ok: res.ok, data: JSON.parse(text) };
-  } catch {
-    return { status: res.status, ok: res.ok, text };
-  }
+  const txt = await res.text();
+  let body;
+  try { body = JSON.parse(txt); } catch { body = txt; }
+  return { status: res.status, body };
 }
 
-async function jpost(url, headers = {}, body = {}) {
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...headers },
-    body: JSON.stringify(body),
-  });
-  const text = await res.text();
-  try {
-    return { status: res.status, ok: res.ok, data: JSON.parse(text) };
-  } catch {
-    return { status: res.status, ok: res.ok, text };
-  }
+function print(label, { status, body }) {
+  const safe = v => typeof v === 'string' ? v : JSON.stringify(v, null, 2);
+  console.log(`\n=== ${label} [${status}] ===\n${safe(body)}`);
 }
 
-function print(label, result) {
-  console.log(`\n[${label}]`);
-  console.log(`Status: ${result.status} ${result.ok ? 'OK' : 'ERROR'}`);
-  if (result.data) {
-    console.log(JSON.stringify(result.data, null, 2));
-  } else if (result.text) {
-    console.log(result.text);
-  }
-}
+async function main() {
+  try { await import('dotenv/config'); } catch {}
 
-// Run tests
-(async () => {
-  console.log(`Testing: ${root}`);
-  console.log(`Admin Token: ${ADMIN_TOKEN ? '✅ Set' : '❌ Missing'}`);
-  console.log(`Cron Secret: ${CRON_SECRET ? '✅ Set' : '❌ Missing'}`);
+  const { base } = parseArgs();
+  if (!base || !/^https?:\/\//i.test(base)) throw new Error('Pass a base URL: --base https://intelliwatt.com');
+
+  const root = base.replace(/\/$/, '');
 
   print('PING', await jget(`${root}/api/ping`));
+  print('PING.TXT', await jget(`${root}/api/ping.txt`));
+
+  const ADMIN_TOKEN = need('ADMIN_TOKEN');
   print('ENV HEALTH', await jget(`${root}/api/admin/env-health`, { 'x-admin-token': ADMIN_TOKEN }));
 
-  if (CRON_SECRET) {
-    print('CRON ECHO', await jget(`${root}/api/admin/ercot/debug/echo-cron`, { 'x-cron-secret': CRON_SECRET }));
-    print('ERCOT CRON', await jget(`${root}/api/admin/ercot/cron`, { 'x-cron-secret': CRON_SECRET }));
-  }
+  const CRON_SECRET = need('CRON_SECRET');
+  print('ERCOT CRON (token via header)', await jget(`${root}/api/admin/ercot/cron`, { 'x-cron-secret': CRON_SECRET }));
+  await delay(150);
 
-  // --- WATTBUY (current flow, no 'offers') ---
+  // --- WattBuy (no changes to your working code) ---
+  const q = encodeURIComponent;
+  const addr = '9514 Santa Paula Dr', city = 'Fort Worth', state = 'tx', zip = '76116';
 
-  const addr = '9514 Santa Paula Dr';
-  const city = 'Fort Worth';
-  const state = 'tx';
-  const zip = '76116';
-
-  const q = (v) => encodeURIComponent(v);
-  print('WATTBUY ELECTRICITY (robust)',
+  print('WATTBUY ELECTRICITY (probe)',
     await jget(`${root}/api/admin/wattbuy/electricity-probe?address=${q(addr)}&city=${q(city)}&state=${state}&zip=${zip}`, {
       'x-admin-token': ADMIN_TOKEN,
     })
@@ -122,11 +76,16 @@ function print(label, result) {
       'x-admin-token': ADMIN_TOKEN,
     })
   );
-  print('WATTBUY RETAIL RATES (zip auto-derive 75201)',
+  print('WATTBUY RETAIL RATES (zip 75201)',
     await jget(`${root}/api/admin/wattbuy/retail-rates-zip?zip=75201`, {
       'x-admin-token': ADMIN_TOKEN,
     })
   );
-  console.log('\nDONE.');
-})();
 
+  console.log('\nDONE.');
+}
+
+main().catch((err) => {
+  console.error('\nTEST FAILED:', err?.message || err);
+  process.exitCode = 1;
+});
