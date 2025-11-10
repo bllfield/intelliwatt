@@ -156,6 +156,41 @@ export default function WattBuyInspector() {
           >
             {loading ? 'Loading…' : 'Electricity (estimation bundle)'}
           </button>
+          <button
+            className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-50"
+            disabled={!ready || loading}
+            onClick={async () => {
+              const u = new URLSearchParams();
+              if (address) u.set('address', address);
+              if (city) u.set('city', city);
+              if (state) u.set('state', state);
+              if (zip) u.set('zip', zip);
+              setLoading(true);
+              setResult(null);
+              setRaw(null);
+              try {
+                const r = await fetch(`/api/admin/wattbuy/electricity?${u}`, {
+                  headers: { 'x-admin-token': token },
+                });
+                const j = await r.json();
+                setRaw(j);
+                setResult({
+                  status: j.status,
+                  where: j.where,
+                  headers: j.headers,
+                  topType: j?.shape?.topType,
+                  topKeys: j?.shape?.keys,
+                  note: j.usedWattkey ? 'Fetched via wattkey fallback' : undefined,
+                } as any);
+              } catch (e: any) {
+                setResult({ ok: false, status: 500, error: e?.message || 'fetch failed' });
+              } finally {
+                setLoading(false);
+              }
+            }}
+          >
+            {loading ? 'Loading…' : 'Electricity (robust)'}
+          </button>
         </div>
       </section>
 
