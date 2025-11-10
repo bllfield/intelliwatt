@@ -72,6 +72,11 @@ export async function GET(req: NextRequest) {
           count: insp.count,
           sample: insp.sample,
           note: insp.message,
+          // NEW: bubble through pagination hints if present
+          pagination: {
+            count: rr.data?.count,
+            next: rr.data?.next,
+          },
         });
       }
     }
@@ -90,5 +95,10 @@ export async function GET(req: NextRequest) {
     count: inspect.count,
     sample: inspect.sample,
     note: inspect.message || (res.status === 204 ? 'No content for this utility/state' : undefined),
+    // NEW: bubble through pagination hints if present
+    pagination: {
+      count: res.data?.count,
+      next: res.data?.next,
+    },
   });
 }
