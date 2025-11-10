@@ -105,8 +105,8 @@ export async function GET(req: NextRequest) {
     const zip = searchParams.get('zip') || '76116';
 
     try {
-      // Test offers endpoint (read-only) - using electricity/offers path
-      const offersRes = await wbGet('electricity/offers', {
+      // Test offers endpoint (read-only) - using 'offers' path (deprecated but still works)
+      const offersRes = await wbGet('offers', {
         address,
         city,
         state,
@@ -116,7 +116,7 @@ export async function GET(req: NextRequest) {
       return Response.json({
         ok: true,
         mode: 'test-offers',
-        endpoint: '/v3/electricity/offers',
+        endpoint: '/v3/offers',
         status: offersRes.status,
         hasData: offersRes.ok && offersRes.status === 200 && offersRes.data !== null,
         dataType: Array.isArray(offersRes.data) ? 'array' : typeof offersRes.data,
