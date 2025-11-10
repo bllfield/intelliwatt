@@ -1,26 +1,22 @@
-import crypto from 'node:crypto'
-import { promises as fs } from 'node:fs'
+import { sha256buf } from './resolve';
+import { promises as fs } from 'node:fs';
+
+const DEFAULT_UA = process.env.ERCOT_USER_AGENT ?? 'IntelliWattBot/1.0 (+https://intelliwatt.com)';
 
 export async function fetchToTmp(url: string, userAgent?: string) {
-  const res = await fetch(url, {
-    headers: userAgent ? { 'user-agent': userAgent } : undefined,
-    cache: 'no-store',
-  })
+  const ua = userAgent || DEFAULT_UA;
+  const res = await fetch(url, { headers: { 'user-agent': ua } });
   if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    const err = new Error(`Fetch failed ${res.status}: ${text.slice(0, 500)}`)
-    ;(err as any).status = res.status
-    throw err
+    const text = await res.text().catch(() => '');
+    throw new Error(`Fetch failed ${res.status}: ${text.slice(0, 500)}`);
   }
-  const buf = Buffer.from(await res.arrayBuffer())
-  const sha256 = crypto.createHash('sha256').update(buf).digest('hex')
-  const tmpPath = `/tmp/ercot_${sha256}.txt`
-  await fs.writeFile(tmpPath, buf)
-  // capture a few headers
-  const headers: Record<string, string> = {}
-  res.headers.forEach((v, k) => {
-    headers[k.toLowerCase()] = v
-  })
-  return { tmpPath, sha256, headers }
+  const ab = await res.arrayBuffer();
+  const buf = Buffer.from(ab);
+  const sha = sha256buf(buf);
+  const tmpPath = `/tmp/ercot_${sha}.dat`;
+  await fs.writeFile(tmpPath, buf);
+  const headers: Record<string, any> = {};
+  res.headers.forEach((v, k) => (headers[k] = v));
+  return { tmpPath, sha, headers };
 }
 

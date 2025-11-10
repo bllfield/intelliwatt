@@ -27,6 +27,12 @@ $env:ADMIN_TOKEN = '<YOUR_ADMIN_TOKEN>'
 - Use **Production token** for `intelliwatt.com` and **Preview token** for `*.vercel.app` if they differ.
 - If you rotate tokens in Vercel, update your local `$env:ADMIN_TOKEN` and re-run.
 
+## Related Documentation
+
+For detailed API testing instructions, see:
+- **[TESTING_API.md](./TESTING_API.md)** - Complete API testing guide including WattBuy, ERCOT, and SMT endpoints
+- **[QUICK_START.md](./QUICK_START.md)** - Quick reference for common commands
+
 ## Troubleshooting
 - `401 Unauthorized`: wrong/missing token, wrong environment, or header stripped by tool.
 - `503 Admin token not configured`: env var missing at runtime; ensure **Vercel env** is set and redeploy.

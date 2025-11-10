@@ -1,103 +1,80 @@
-import { readFile } from 'node:fs/promises'
-import { db } from '@/lib/db'
-import { Prisma } from '@prisma/client'
+import fs from 'node:fs';
+import readline from 'node:readline';
+import { prisma } from '@/lib/db';
 
-// heuristic parser that tolerates pipe/csv/tsv, tries to find an ESIID per line
-function tokenize(line: string): string[] {
-  if (line.includes('|')) return line.split('|')
-  if (line.includes('\t')) return line.split('\t')
-  return line.split(',')
+/**
+ * ERCOT TDSP ESIID extracts are typically pipe or tab delimited. We'll be permissive:
+ * - Split on pipe first, else split on tab.
+ * Expected columns include ESIID and service address lines; we persist raw row JSON for traceability.
+ */
+function splitSmart(line: string): string[] {
+  if (line.includes('|')) return line.split('|');
+  if (line.includes('\t')) return line.split('\t');
+  return line.split(','); // fallback
 }
 
-function pickTdsp(hay: string) {
-  const s = hay.toLowerCase()
-  if (s.includes('oncor')) return 'oncor'
-  if (s.includes('centerpoint')) return 'centerpoint'
-  if (s.includes('aep') && s.includes('north')) return 'aep_north'
-  if (s.includes('aep') && s.includes('central')) return 'aep_central'
-  if (s.includes('tnmp') || s.includes('new mexico')) return 'tnmp'
-  if (s.includes('mou')) return 'mou'
-  if (s.includes('coop')) return 'coop'
-  return 'unknown'
-}
+export async function ingestLocalFile(tmpPath: string, fileSha256: string, fileUrl: string, tdspHint?: string) {
+  const stream = fs.createReadStream(tmpPath);
+  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
 
-const ESIID_RE = /\b1\d{16,17}\b/ // 17-18 digits starting with 1
+  let rowCount = 0;
+  const batch: any[] = [];
+  const BATCH_SIZE = 1000;
 
-export async function ingestLocalFile(absPath: string, sha256: string, note?: string) {
-  const buf = await readFile(absPath, 'utf8')
-  const lines = buf.split(/\r?\n/).filter(Boolean)
+  const pushBatch = async () => {
+    if (!batch.length) return;
+    await prisma.ercotEsiidIndex.createMany({ data: batch, skipDuplicates: true });
+    batch.length = 0;
+  };
 
-  // idempotence: if we already processed this sha256, skip
-  const existing = await db.ercotIngest.findUnique({ where: { fileSha256: sha256 } })
-  if (existing) {
-    return await db.ercotIngest.update({
-      where: { id: existing.id },
-      data: { status: 'skipped', note: note || existing.note },
-    })
+  // naive header detection
+  let headers: string[] | null = null;
+
+  for await (const line of rl) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const cols = splitSmart(trimmed);
+    if (!headers) {
+      headers = cols.map(c => c.trim());
+      continue;
+    }
+    const row: Record<string, string> = {};
+    for (let i = 0; i < Math.min(cols.length, headers.length); i++) {
+      row[headers[i]] = cols[i]?.trim() ?? '';
+    }
+    const esiid = (row['ESIID'] || row['ESI ID'] || row['esiid'] || '').replace(/\D/g, '');
+    if (!esiid) continue;
+
+    const addr1 = row['SERVICE ADDRESS 1'] || row['Service Address1'] || row['ADDRESS'] || row['Service Address'] || '';
+    const city = row['CITY'] || row['City'] || '';
+    const state = (row['STATE'] || row['State'] || '').toLowerCase();
+    const zip = (row['ZIP'] || row['Zip'] || '').trim();
+
+    batch.push({
+      esiid,
+      tdspCode: tdspHint || row['TDSP'] || row['TDSP DUNS'] || '',
+      serviceAddress1: addr1,
+      serviceCity: city,
+      serviceState: state || 'tx',
+      serviceZip: zip,
+    });
+
+    rowCount++;
+    if (batch.length >= BATCH_SIZE) await pushBatch();
   }
 
-  let rowCount = 0
-  let tdspSeen: string | undefined
+  await pushBatch();
 
-  const toUpsert: Prisma.ErcotEsiidIndexUpsertArgs[] = []
-
-  for (const rawLine of lines) {
-    const cols = tokenize(rawLine).map(c => c.trim())
-    if (cols.length < 2) continue
-
-    const joined = cols.join(' ')
-    const esiidMatch = joined.match(ESIID_RE)
-    if (!esiidMatch) continue
-
-    const esiid = esiidMatch[0]
-    // naive mapping for address-ish fields
-    const addr = cols.find(c => /\d+ [\w\s.-]+/i.test(c)) || null
-    const city = cols.find(c => /[A-Za-z\s]+,?\s*TX\b/i.test(c))?.replace(/,?\s*TX\b/i, '')?.trim() || null
-    const zip = cols.find(c => /^\d{5}(-\d{4})?$/.test(c)) || null
-    const tdspGuess = pickTdsp(joined)
-    if (!tdspSeen && tdspGuess !== 'unknown') tdspSeen = tdspGuess
-
-    toUpsert.push({
-      where: { esiid },
-      create: {
-        esiid,
-        serviceAddress1: addr || undefined,
-        city: city || undefined,
-        state: 'TX',
-        zip: zip || undefined,
-        tdsp: tdspGuess,
-        raw: cols as unknown as Prisma.InputJsonValue,
-        srcFileSha256: sha256,
-      },
-      update: {
-        serviceAddress1: addr || undefined,
-        city: city || undefined,
-        state: 'TX',
-        zip: zip || undefined,
-        tdsp: tdspGuess,
-        raw: cols as unknown as Prisma.InputJsonValue,
-        srcFileSha256: sha256,
-      },
-    } as any)
-  }
-
-  // upsert in batches to avoid long transactions
-  const batch = 1000
-  for (let i = 0; i < toUpsert.length; i += batch) {
-    const slice = toUpsert.slice(i, i + batch)
-    await db.$transaction(
-      slice.map(args => db.ercotEsiidIndex.upsert(args as any))
-    )
-    rowCount += slice.length
-  }
-
-  return await db.ercotIngest.create({
+  await prisma.ercotIngest.create({
     data: {
       status: 'ok',
-      note,
-      fileSha256: sha256,
-      tdsp: tdspSeen,
+      note: 'ingested',
+      fileUrl,
+      fileSha256,
+      tdsp: tdspHint || null,
       rowCount,
     },
-  })
+  });
+
+  return { status: 'ok' as const, rowCount };
 }

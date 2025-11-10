@@ -10,9 +10,16 @@
 - `SMT_SFTP_HOST`, `SMT_SFTP_USER`, `SMT_SFTP_KEY` — Smart Meter Texas SFTP (for droplet)
 - `SMT_FETCH_TRIGGER_URL` — Vercel URL for on-demand SMT fetch trigger (e.g., `https://intelliwatt.com/api/admin/smt/fetch-trigger`)
 - `SMT_FETCH_ADMIN_TOKEN` — Token for SMT fetch trigger authorization (can reuse `ADMIN_TOKEN`)
-- `DROPLET_WEBHOOK_URL` — Droplet webhook URL for on-demand fetch (e.g., `http://64.225.25.54:8787/trigger/smt-now`)
-- `DROPLET_WEBHOOK_SECRET` — Shared secret sent in header `x-intelliwatt-secret`
+- `DROPLET_WEBHOOK_URL` — Droplet webhook URL for SMT data pull (e.g., `http://64.225.25.54:8787/trigger/smt-now`)
+- `DROPLET_WEBHOOK_SECRET` — Shared secret sent in header `x-intelliwatt-secret` for SMT webhook authentication
 - `GREENBUTTON_API_KEY` — (future) Green Button API access
+
+## ERCOT Integration
+- `ERCOT_PAGE_URL` — ERCOT data product page URL (e.g., `https://www.ercot.com/mp/data-products/data-product-details?id=ZP15-612`)
+- `ERCOT_PAGE_FILTER` — Optional filter for file links (e.g., `TDSP`)
+- `ERCOT_USER_AGENT` — Optional user agent string for ERCOT requests
+- `ERCOT_TEST_URL` — Optional explicit file URL for manual testing
+- `CRON_SECRET` — Secret token for ERCOT cron authentication (header `x-cron-secret` or query `?token=CRON_SECRET`)
 
 ## Feature Flags
 - `NEXT_PUBLIC_FLAG_WATTBUY` = true | false

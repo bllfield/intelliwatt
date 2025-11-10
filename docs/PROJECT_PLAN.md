@@ -258,14 +258,16 @@ Rationale
 - Standardize WattBuy API calls to match their test page specification (x-api-key header, camelCase parameters, lowercase state).
 - Add retry logic and diagnostic header capture for better troubleshooting.
 - Enable auto-derivation of utilityID from address for retail-rates queries.
+- Implement robust electricity endpoint with fallback strategies.
 
 Scope
 
 - **Client (`lib/wattbuy/client.ts`):**
   - Use `x-api-key` header (not Authorization Bearer).
   - Add retry logic (1 retry on 5xx errors with exponential backoff).
-  - Capture diagnostic headers: `x-amzn-requestid`, `x-documentation-url`, `x-amz-apigw-id`.
-  - Handle JSON parsing errors gracefully.
+  - Capture diagnostic headers: `x-amzn-requestid`, `x-documentation-url`, `x-amz-apigw-id`, `content-type`, `content-length`.
+  - Handle JSON parsing errors gracefully with raw text preview for debugging.
+  - Response type includes `data`, `text`, `headers`, `ok`, `status`.
 
 - **Parameters (`lib/wattbuy/params.ts`):**
   - `retailRatesParams`: Accept `utilityID` (camelCase), optional `state` (lowercase), optional `zip`.
@@ -274,26 +276,187 @@ Scope
 
 - **Auto-derivation (`lib/wattbuy/derive.ts`):**
   - `deriveUtilityFromAddress()`: Calls `/v3/electricity/info` to extract utilityID from address.
+  - Returns `utilityID`, `state`, and `utilityList` for multi-utility fallback.
   - Prefers deregulated utilities, falls back to TX TDSPs.
   - Uses hard-coded EIA utility IDs as last resort.
 
+- **Robust Electricity (`lib/wattbuy/electricity.ts`):**
+  - `getElectricityRobust()`: Implements 3-strategy fallback:
+    1. Direct call with uppercase state
+    2. Retry with lowercase state
+    3. Fallback to `wattkey` lookup via `/v3/electricity/info`
+  - Returns diagnostic info including `usedWattkey` flag.
+
+- **Response Inspection (`lib/wattbuy/inspect.ts`):**
+  - `inspectRetailRatesPayload()`: Analyzes raw WattBuy payloads to find list structures.
+  - Returns `topType`, `topKeys`, `foundListPath`, `count`, `sample`, `message`.
+  - Handles both array and object payloads.
+
+- **Data Normalization (`lib/wattbuy/normalize-plans.ts`):**
+  - `toPlans()`: Normalizes raw WattBuy responses into unified `Plan` type.
+  - Distinguishes between REP plans and utility tariffs.
+  - Maps to `RatePlan` Prisma model via `upsert-plans.ts`.
+
 - **Endpoints:**
-  - `/api/admin/wattbuy/retail-rates-test`: Accepts `utilityID+state` OR `address/city/state/zip` (auto-derives).
-  - `/api/admin/wattbuy/retail-rates-zip`: Always derives utilityID from address (requires zip).
-  - `/api/admin/wattbuy/retail-rates-by-address`: Convenience endpoint for address-based queries.
+  - `/api/admin/wattbuy/retail-rates-test`: Accepts `utilityID+state` OR `address/city/state/zip` (auto-derives). Returns inspection metadata.
+  - `/api/admin/wattbuy/retail-rates-zip`: Always derives utilityID from address (requires zip). Includes multi-utility fallback.
+  - `/api/admin/wattbuy/retail-rates-by-address`: Convenience endpoint for address-based queries with fallback.
+  - `/api/admin/wattbuy/retail-rates`: Main endpoint with database persistence to `RatePlan` model.
+  - `/api/admin/wattbuy/electricity`: Robust electricity endpoint with fallback strategies.
+  - `/api/admin/wattbuy/electricity-probe`: Dedicated probe endpoint for testing.
 
 - **API Endpoints Used:**
-  - `/v3/electricity/retail-rates`: Requires `utilityID` (camelCase, integer as string) + `state` (lowercase).
+  - `/v3/electricity/retail-rates`: Requires `utilityID` (camelCase, integer as string) + `state` (lowercase). Returns REP plans or utility tariffs.
   - `/v3/electricity`: Catalog endpoint, requires `zip`, optional `address`, `city`, `state` (lowercase).
   - `/v3/electricity/info`: Info endpoint, requires `zip`, optional `address`, `city`, `state` (lowercase), `housing_chars`, `utility_list`.
+  - `/v3/offers`: **DEPRECATED** - No longer used in our stack.
 
 Rollback
 
 - Revert to previous parameter names (`utility_id` snake_case) if needed.
 - Remove auto-derivation if it causes issues.
+- Disable robust electricity fallback if upstream issues resolved.
 
 Guardrails
 
 - All WattBuy calls use centralized `wbGet()` function with clean headers.
 - No internal headers forwarded to WattBuy API.
 - State always lowercase, utilityID always camelCase per WattBuy test page spec.
+- Multi-utility fallback only triggers on 204/empty responses.
+- All responses include diagnostic metadata for troubleshooting.
+
+---
+
+PC-2025-11-10: ERCOT Daily Pull System
+
+Rationale
+
+- Source ESIID data exclusively from ERCOT daily extracts for accurate, vendor-agnostic ESIID resolution.
+- Enable automated daily ingestion of ERCOT TDSP ESIID Extract files.
+- Support manual testing and debugging of ERCOT data ingestion.
+
+Scope
+
+- **Prisma Models:**
+  - `ErcotIngest`: Tracks ingestion history with `fileSha256` (unique), `status`, `note`, `fileUrl`, `tdsp`, `rowCount`, `headers`, `error`, `errorDetail`.
+  - `ErcotEsiidIndex`: Stores normalized ESIID data with `esiid` (unique), `tdsp`, `serviceAddress1`, `city`, `state`, `zip`, `raw` (JSON), `srcFileSha256`.
+
+- **Library Functions (`lib/ercot/`):**
+  - `resolve.ts`: `resolveLatestFromPage()` - Uses JSDOM to parse HTML and extract TDSP_ESIID_Extract file links.
+  - `fetch.ts`: `fetchToTmp()` - Downloads files to `/tmp`, computes SHA256 hash, captures headers.
+  - `ingest.ts`: `ingestLocalFile()` - Parses CSV/TSV/pipe-delimited files, extracts ESIIDs, batch upserts to `ErcotEsiidIndex`.
+  - `types.ts`: `IngestResult` type for ingestion results.
+
+- **API Routes:**
+  - `/api/admin/ercot/cron`: Vercel cron endpoint (supports header `x-cron-secret` or query `?token=CRON_SECRET`).
+  - `/api/admin/ercot/fetch-latest`: Manual fetch by explicit URL (admin-gated).
+  - `/api/admin/ercot/ingests`: List ingestion history (admin-gated).
+  - `/api/admin/ercot/debug/last`: Get last ingest record (admin-gated).
+  - `/api/admin/ercot/debug/url-sanity`: Test URL resolution (admin-gated).
+  - `/api/admin/ercot/lookup-esiid`: Lookup ESIID from address using ERCOT data (admin-gated).
+
+- **Admin Scripts:**
+  - `scripts/admin/ercot_fetch_latest.mjs`: Manual file fetch via API.
+  - `scripts/admin/ercot_resolve_fetch.mjs`: Exercise cron route.
+  - `scripts/admin/test_ercot.mjs`: Test all ERCOT endpoints.
+
+- **Vercel Cron:**
+  - Schedule: `15 9 * * *`, `30 10 * * 3`, `0 15 * * *` (multiple daily runs).
+  - Path: `/api/admin/ercot/cron`.
+
+- **Idempotence:**
+  - Files deduplicated by SHA256 hash.
+  - Skips re-ingestion of already processed files.
+  - Batch upserts for efficient database writes.
+
+Rollback
+
+- Disable cron in `vercel.json` if issues occur.
+- Remove admin routes if needed (data remains in database).
+- Migration can be rolled back if schema issues.
+
+Guardrails
+
+- RAW→CDM: ERCOT data stored in `ErcotEsiidIndex` with raw JSON for traceability.
+- Idempotent ingestion via SHA256 deduplication.
+- Admin-gated endpoints for security.
+- Error logging with full stack traces for debugging.
+
+---
+
+PC-2025-11-10: Email Normalization
+
+Rationale
+
+- Prevent duplicate user accounts due to email case sensitivity.
+- Ensure consistent email storage, lookup, and comparison across the system.
+
+Scope
+
+- **Utility (`lib/utils/email.ts`):**
+  - `normalizeEmail()`: Converts email to lowercase and trims whitespace.
+  - `normalizeEmailSafe()`: Safe version that returns empty string on invalid input.
+
+- **Updated Files:**
+  - All email storage: `lib/magic/magic-token.ts`, `app/login/magic/route.ts`, `app/api/send-magic-link/route.ts`.
+  - All email lookups: `app/api/address/save/route.ts`, `app/api/user/address/route.ts`, `app/api/user/entries/route.ts`.
+  - All email comparisons: `app/api/user/referral-link/route.ts`, `app/api/admin/user/dashboard/route.ts`.
+  - All debug endpoints: `app/api/debug/check-address/route.ts`, `app/api/debug/check-address-brian/route.ts`.
+  - All external endpoints: `app/api/external/magic-link/route.ts`, `app/api/send-admin-magic-link/route.ts`.
+  - Admin routes: `app/admin/magic/route.ts`.
+
+Rollback
+
+- Remove `normalizeEmail()` calls if issues occur (emails remain in database as stored).
+- No data migration needed (existing emails remain as-is).
+
+Guardrails
+
+- All new email inputs normalized before storage/lookup/comparison.
+- Existing emails in database remain unchanged (no migration).
+- Case-insensitive email handling prevents duplicate accounts.
+
+---
+
+PC-2025-11-10: SMT Integration & Admin Tools
+
+Rationale
+
+- Enable SMT data pull via webhook from DigitalOcean droplet.
+- Provide admin UI for testing SMT endpoints and triggering pulls.
+- Integrate ERCOT ESIID lookup with SMT pull workflow.
+
+Scope
+
+- **SMT API Routes:**
+  - `/api/admin/smt/pull`: Trigger SMT data pull via webhook (requires `DROPLET_WEBHOOK_URL` and `DROPLET_WEBHOOK_SECRET`).
+  - `/api/admin/smt/ingest`: SMT file ingestion endpoint.
+  - `/api/admin/smt/upload`: SMT file upload endpoint.
+  - `/api/admin/smt/health`: SMT health check endpoint.
+
+- **ERCOT ESIID Lookup:**
+  - `/api/admin/ercot/lookup-esiid`: POST endpoint to find ESIID from address using ERCOT data.
+  - Uses fuzzy matching on `serviceAddress1` and `zip`.
+  - Returns best match with similarity score.
+
+- **Admin UI Pages:**
+  - `/admin/wattbuy/inspector`: Interactive WattBuy API testing with real-time metadata.
+  - `/admin/smt/inspector`: SMT endpoint testing with address-to-ESIID-to-SMT-pull workflow.
+  - `/admin/ercot/inspector`: ERCOT ingest history and ESIID lookup.
+  - `/admin/retail-rates`: Retail rates exploration and management.
+  - `/admin/modules`: System modules overview.
+
+- **Admin Dashboard:**
+  - `/admin/page.tsx`: Updated with Admin Tools section linking to all inspector pages.
+
+Rollback
+
+- Remove admin UI pages if needed (API routes remain functional).
+- Disable webhook endpoints if security concerns.
+
+Guardrails
+
+- All admin routes require `ADMIN_TOKEN` header.
+- Webhook endpoints require `DROPLET_WEBHOOK_SECRET` header.
+- ESIID lookup uses fuzzy matching for address resolution.
+- SMT pull triggered only after ESIID confirmation.

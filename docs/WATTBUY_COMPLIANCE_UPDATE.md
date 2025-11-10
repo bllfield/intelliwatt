@@ -11,7 +11,19 @@ WattBuy requires that all plan presentations include specific supplier and distr
 - Parameters: `utilityID` (camelCase), `state` (lowercase, e.g., `tx`).
 - Auto-derives `utilityID` from address via `/v3/electricity/info` when not provided.
 - Includes retry logic (1 retry on 5xx errors) and diagnostic header capture.
-- Endpoints: `/api/admin/wattbuy/retail-rates-test`, `/api/admin/wattbuy/retail-rates-zip`, `/api/admin/wattbuy/retail-rates-by-address`.
+- Multi-utility fallback for retail rates (tries alternate utilities on 204/empty responses).
+- Robust electricity endpoint with 3-strategy fallback (uppercase state → lowercase state → wattkey lookup).
+- Response inspection utilities for analyzing payload structures.
+- Data normalization to unified `RatePlan` model (supports both REP plans and utility tariffs).
+- Endpoints: 
+  - `/api/admin/wattbuy/retail-rates-test` - Test endpoint with inspection metadata
+  - `/api/admin/wattbuy/retail-rates-zip` - ZIP-based with auto-derivation and fallback
+  - `/api/admin/wattbuy/retail-rates-by-address` - Address-based convenience endpoint
+  - `/api/admin/wattbuy/retail-rates` - Main endpoint with database persistence
+  - `/api/admin/wattbuy/electricity` - Robust electricity catalog
+  - `/api/admin/wattbuy/electricity-probe` - Dedicated probe endpoint
+  - `/api/admin/wattbuy/electricity/info` - Electricity info endpoint
+- Admin UI: `/admin/wattbuy/inspector` for interactive testing with real-time metadata.
 
 ## Required Compliance Fields
 

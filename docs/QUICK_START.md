@@ -174,9 +174,11 @@ curl -sS "https://intelliwatt.com/api/admin/wattbuy/retail-rates-zip?zip=75201" 
 
 3) Inspect DB rows (examples depend on your admin readers; use psql/Prisma Studio as needed).
 
-### Verify WattBuy Electricity catalog — admin proxy
+### Verify WattBuy Electricity catalog — admin proxy (Robust)
 
-1) With address (zip is required):
+The robust electricity endpoint implements 3-strategy fallback for maximum reliability:
+
+1) **With address (recommended):**
 
 ```bash
 ADMIN_TOKEN="<ADMIN_TOKEN>"
@@ -184,23 +186,25 @@ curl -sS "https://intelliwatt.com/api/admin/wattbuy/electricity?address=9514%20s
   -H "x-admin-token: $ADMIN_TOKEN" | jq .
 ```
 
-2) With utility_eid (optional, EID of Utility):
+2) **Using electricity-probe endpoint (dedicated testing):**
 
 ```bash
-curl -sS "https://intelliwatt.com/api/admin/wattbuy/electricity?state=tx&zip=76116&utility_eid=6452" \
+curl -sS "https://intelliwatt.com/api/admin/wattbuy/electricity-probe?address=9514%20santa%20paula%20dr&city=fort%20worth&state=tx&zip=76116" \
   -H "x-admin-token: $ADMIN_TOKEN" | jq .
 ```
 
-**Note:** `state` must be lowercase (e.g., `tx` not `TX`).
+**Fallback Strategy:**
+1. Direct call with uppercase state (e.g., `TX`)
+2. Retry with lowercase state (e.g., `tx`)
+3. Fallback to `wattkey` lookup via `/v3/electricity/info`
 
-3) With wattkey (optional, WattBuy home identifier):
+**Response includes:**
+- `usedWattkey`: Boolean indicating if fallback was used
+- `shape`: Payload structure metadata (`topType`, `keys`)
+- `headers`: Diagnostic headers from WattBuy
+- `data`: Full response payload
 
-```bash
-curl -sS "https://intelliwatt.com/api/admin/wattbuy/electricity?wattkey=<wattkey>&zip=76116" \
-  -H "x-admin-token: $ADMIN_TOKEN" | jq .
-```
-
-Note: `zip` is required. Use `state` as lowercase two-letter code (e.g., "tx"). `address` and `city` should be URL-encoded.
+**Note:** `zip` is required. Use `state` as lowercase two-letter code (e.g., "tx"). `address` and `city` should be URL-encoded.
 
 ### Verify WattBuy Electricity Info — admin proxy
 
@@ -238,10 +242,18 @@ For interactive testing with visual inspection of responses:
    - `sample`: First 3 items
    - `note`: Diagnostic messages
 
-**If `count = 0`**: This indicates upstream content from WattBuy. Contact support with the `x-amzn-requestid` from headers, exact selector used, and the `topType`/`topKeys`/`foundListPath` metadata. See `docs/WATTBUY_TESTING_RUNBOOK.md` for details.
+**If `count = 0`**: This indicates upstream content from WattBuy. Contact support with the `x-amzn-requestid` from headers, exact selector used, and the `topType`/`topKeys`/`foundListPath` metadata. See `docs/TESTING_API.md` for detailed troubleshooting.
 
 ## ERCOT — Quick Commands (Production)
 
+### Environment Setup
+```bash
+export PROD_BASE_URL="https://intelliwatt.com"
+export ADMIN_TOKEN="<your-admin-token>"
+export CRON_SECRET="<your-cron-secret>"
+```
+
+### Basic Verification
 ```bash
 # Verify env health
 curl -sS "$PROD_BASE_URL/api/admin/env-health" -H "x-admin-token: $ADMIN_TOKEN" | jq
@@ -249,13 +261,64 @@ curl -sS "$PROD_BASE_URL/api/admin/env-health" -H "x-admin-token: $ADMIN_TOKEN" 
 # Confirm we can resolve the latest daily file from the page
 curl -sS "$PROD_BASE_URL/api/admin/ercot/debug/url-sanity" -H "x-admin-token: $ADMIN_TOKEN" | jq
 
+# List recent ingests
+curl -sS "$PROD_BASE_URL/api/admin/ercot/ingests?limit=10" -H "x-admin-token: $ADMIN_TOKEN" | jq
+
+# Get last ingest record
+curl -sS "$PROD_BASE_URL/api/admin/ercot/debug/last" -H "x-admin-token: $ADMIN_TOKEN" | jq
+```
+
+### Manual Operations
+```bash
 # Manual fetch by explicit URL (set ERCOT_TEST_URL first)
 npm run ercot:fetch:latest
 
 # Exercise the cron route (uses ERCOT_PAGE_URL resolver)
 npm run ercot:resolve:fetch
 
-# List recent ingests
-curl -sS "$PROD_BASE_URL/api/admin/ercot/ingests?limit=10" -H "x-admin-token: $ADMIN_TOKEN" | jq
+# Or trigger cron directly:
+curl -sS "$PROD_BASE_URL/api/admin/ercot/cron?token=$CRON_SECRET" | jq
+# Or with header:
+curl -sS "$PROD_BASE_URL/api/admin/ercot/cron" -H "x-cron-secret: $CRON_SECRET" | jq
 ```
+
+### ESIID Lookup
+```bash
+# Lookup ESIID from address using ERCOT data
+curl -sS -X POST "$PROD_BASE_URL/api/admin/ercot/lookup-esiid" \
+  -H "x-admin-token: $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"line1":"9514 Santa Paula Dr","city":"Fort Worth","state":"TX","zip":"76116"}' | jq
+```
+
+### Admin UI
+- Navigate to `/admin/ercot/inspector` for interactive ERCOT testing
+- View ingest history, test URL resolution, lookup ESIIDs
+- Requires `ADMIN_TOKEN` in browser session
+
+## Admin Inspector UIs
+
+### WattBuy Inspector
+- **URL**: `/admin/wattbuy/inspector`
+- **Features**: 
+  - Test all WattBuy endpoints with real-time metadata
+  - View inspection results (topType, count, sample, etc.)
+  - Test robust electricity endpoint with fallback indicators
+  - Requires `ADMIN_TOKEN` for authentication
+
+### SMT Inspector
+- **URL**: `/admin/smt/inspector`
+- **Features**:
+  - Test SMT ingest, upload, and health endpoints
+  - Address-to-ESIID lookup (via ERCOT)
+  - Trigger SMT pull by ESIID
+  - Requires `ADMIN_TOKEN` for authentication
+
+### ERCOT Inspector
+- **URL**: `/admin/ercot/inspector`
+- **Features**:
+  - View ERCOT ingest history
+  - Test URL resolution
+  - Lookup ESIID from address
+  - Requires `ADMIN_TOKEN` for authentication
 

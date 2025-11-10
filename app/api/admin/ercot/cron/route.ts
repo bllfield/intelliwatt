@@ -1,64 +1,67 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
-import { resolveLatestFromPage } from '@/lib/ercot/resolve'
-import { fetchToTmp } from '@/lib/ercot/fetch'
-import { ingestLocalFile } from '@/lib/ercot/ingest'
+import { NextRequest, NextResponse } from 'next/server';
+import { resolveLatestFromPage } from '@/lib/ercot/resolve';
+import { fetchToTmp } from '@/lib/ercot/fetch';
+import { ingestLocalFile } from '@/lib/ercot/ingest';
+import { prisma } from '@/lib/db';
 
-function isCron(req: NextRequest) {
-  // Vercel scheduled adds x-vercel-cron; allow ?token=CRON_SECRET for manual
-  const v = req.headers.get('x-vercel-cron')
-  if (v) return true
-  const token = req.nextUrl.searchParams.get('token')
-  if (process.env.CRON_SECRET && token === process.env.CRON_SECRET) return true
-  // or header
-  const h = req.headers.get('x-cron-secret')
-  if (process.env.CRON_SECRET && h === process.env.CRON_SECRET) return true
-  return false
+export const dynamic = 'force-dynamic';
+
+function allowCron(req: NextRequest) {
+  // Accept either x-cron-secret header or ?token=
+  const headerToken = req.headers.get('x-cron-secret') || '';
+  const qsToken = req.nextUrl.searchParams.get('token') || '';
+  if (process.env.CRON_SECRET && (headerToken === process.env.CRON_SECRET || qsToken === process.env.CRON_SECRET)) return true;
+  // Also accept Vercel managed cron (optional)
+  if (req.headers.get('x-vercel-cron') === '1') return true;
+  return false;
 }
 
-export const runtime = 'nodejs'
-export const dynamic = 'force-dynamic'
-
 export async function GET(req: NextRequest) {
-  if (!isCron(req)) {
-    return NextResponse.json({ ok: false, error: 'UNAUTHORIZED' }, { status: 401 })
-  }
-  if (!process.env.ERCOT_PAGE_URL) {
-    return NextResponse.json({ ok: false, error: 'MISSING_ERCOT_PAGE_URL' }, { status: 500 })
+  if (!allowCron(req)) {
+    return NextResponse.json({ ok: false, error: 'UNAUTHORIZED' }, { status: 401 });
   }
 
-  try {
-    const { latest, candidates } = await resolveLatestFromPage(
-      process.env.ERCOT_PAGE_URL,
-      process.env.ERCOT_PAGE_FILTER || null,
-      process.env.ERCOT_USER_AGENT
-    )
-    if (!latest) {
-      await db.ercotIngest.create({
-        data: { status: 'error', error: 'NO_CANDIDATES', note: 'cron' },
-      })
-      return NextResponse.json({ ok: false, error: 'NO_CANDIDATES', candidates }, { status: 500 })
+  const pageUrl = process.env.ERCOT_PAGE_URL;
+  if (!pageUrl) return NextResponse.json({ ok: false, error: 'MISSING_ERCOT_PAGE_URL' }, { status: 500 });
+
+  const candidates = await resolveLatestFromPage(pageUrl);
+  if (!candidates?.length) {
+    await prisma.ercotIngest.create({ data: { status: 'skipped', note: 'NO_CANDIDATES', fileUrl: pageUrl, fileSha256: 'n/a' } });
+    return NextResponse.json({ ok: true, status: 'skipped', reason: 'NO_CANDIDATES', pageUrl });
+  }
+
+  // Absolute-ize relative links and try most recent candidate first
+  const base = new URL(pageUrl);
+  const absolute = candidates.map(href => {
+    try {
+      return new URL(href, base).toString();
+    } catch {
+      return href;
     }
+  });
 
-    const { tmpPath, sha256, headers } = await fetchToTmp(latest, process.env.ERCOT_USER_AGENT)
+  const tried: any[] = [];
+  for (let i = absolute.length - 1; i >= 0; i--) {
+    const url = absolute[i];
+    try {
+      const { tmpPath, sha, headers } = await fetchToTmp(url);
 
-    const exists = await db.ercotIngest.findUnique({ where: { fileSha256: sha256 } })
-    if (exists) {
-      await db.ercotIngest.update({ where: { id: exists.id }, data: { status: 'skipped', note: 'cron' } })
-      return NextResponse.json({ ok: true, status: 'skipped', sha256, latest, candidates, headers })
+      // Idempotence: skip if this sha already ingested
+      const exists = await prisma.ercotIngest.findFirst({ where: { fileSha256: sha } });
+      if (exists) {
+        await prisma.ercotIngest.create({ data: { status: 'skipped', note: 'DUPLICATE', fileUrl: url, fileSha256: sha, headers } as any });
+        tried.push({ url, sha, status: 'skipped-duplicate' });
+        continue;
+      }
+
+      const tdspHint = /AEP/i.test(url) ? 'AEP' : /ONCOR/i.test(url) ? 'ONCOR' : /CENTERPOINT/i.test(url) ? 'CENTERPOINT' : undefined;
+      const result = await ingestLocalFile(tmpPath, sha, url, tdspHint);
+      return NextResponse.json({ ok: true, pageUrl, used: url, sha, result, tried });
+    } catch (e: any) {
+      tried.push({ url, error: e?.message?.slice(0, 200) || String(e).slice(0, 200) });
+      continue;
     }
-
-    const rec = await ingestLocalFile(tmpPath, sha256, 'cron')
-    await db.ercotIngest.update({
-      where: { id: rec.id },
-      data: { fileUrl: latest, headers },
-    })
-    return NextResponse.json({ ok: true, status: rec.status, sha256, rows: rec.rowCount, latest, candidates })
-  } catch (e: any) {
-    const msg = e?.message || 'ERR'
-    await db.ercotIngest.create({
-      data: { status: 'error', error: msg.slice(0, 500), errorDetail: String(e?.stack || ''), note: 'cron' },
-    })
-    return NextResponse.json({ ok: false, error: 'CRON_ERROR', detail: msg }, { status: 500 })
   }
+
+  return NextResponse.json({ ok: false, error: 'ALL_CANDIDATES_FAILED', pageUrl, tried }, { status: 502 });
 }

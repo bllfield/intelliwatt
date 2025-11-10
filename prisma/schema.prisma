@@ -391,6 +391,112 @@ model HouseAddress {
   @@index([esiid])
 }
 
+model RawSmtFile {
+  id           BigInt    @id @default(autoincrement())
+  filename     String
+  size_bytes   Int
+  sha256       String    @unique
+  source       String?   @default("adhocusage")
+  content_type String?   @default("application/octet-stream")
+  storage_path String?
+  content      Bytes?
+  received_at  DateTime? @default(now())
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @updatedAt
+
+  @@index([sha256])
+  @@index([created_at])
+  @@map("raw_smt_files")
+}
+
+model SmtInterval {
+  id        String   @id @default(cuid())
+  esiid     String
+  meter     String
+  ts        DateTime
+  kwh       Decimal  @db.Decimal(10, 5)
+  filled    Boolean  @default(false)
+  source    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([esiid, meter, ts], name: "esiid_meter_ts")
+  @@index([esiid, meter, ts], map: "esiid_meter_ts_idx")
+}
+
+/// RatePlan - normalized electricity plans (REP plans and utility tariffs)
+model RatePlan {
+  id           String   @id @default(cuid())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  externalId   String?
+  utilityId    String
+  state        String
+  supplier     String?
+  supplierPUCT String?
+  planName     String?
+
+  termMonths   Int?
+  rate500      Float?
+  rate1000     Float?
+  rate2000     Float?
+  cancelFee    String?
+
+  eflUrl       String?
+  tosUrl       String?
+  yracUrl      String?
+
+  isUtilityTariff Boolean   @default(false)
+  tariffStructure  Json?
+  customerCharge   Float?
+  minimumBill      Float?
+  effectiveStart   DateTime?
+  effectiveEnd      DateTime?
+  sourceRateUrl     String?
+  sourceParentUrl   String?
+
+  lastSeenAt   DateTime @default(now())
+
+  @@unique([utilityId, state, supplier, planName, termMonths, isUtilityTariff])
+  @@index([utilityId, state, termMonths])
+}
+
+/// ERCOT Ingest - tracks ingestion history
+model ErcotIngest {
+  id          String   @id @default(cuid())
+  createdAt   DateTime @default(now())
+  status      String   // "ok" | "skipped" | "error"
+  note        String?  // freeform note (e.g., "daily", "manual test")
+  fileUrl     String?
+  fileSha256  String?  @unique
+  tdsp        String?  // oncor|centerpoint|aep_north|aep_central|tnmp|unknown
+  rowCount    Int?
+  headers     Json?    // snapshot of response headers for drift
+  error       String?  // short error
+  errorDetail String?  // long stack
+}
+
+/// ERCOT ESIID Index - stores normalized ESIID data from ERCOT extracts
+model ErcotEsiidIndex {
+  id              BigInt   @id @default(autoincrement())
+  esiid           String   @unique @db.VarChar(22)
+  tdspCode        String?  @db.VarChar(16)
+  serviceAddress1 String?
+  serviceCity     String?  @db.VarChar(64)
+  serviceState    String?  @db.Char(2)
+  serviceZip      String?  @db.VarChar(10)
+  status          String?  @db.VarChar(16)
+  premiseType     String?  @db.VarChar(32)
+  postedAtUtc     DateTime @db.Timestamptz(6)
+  normLine1       String?
+  normCity        String?  @db.VarChar(64)
+  normZip         String?  @db.VarChar(10)
+
+  @@index([normZip])
+  @@index([normLine1(ops: raw("gin_trgm_ops"))], map: "ercot_esiid_index_normline1_trgm", type: Gin)
+}
+
 enum PlanSource {
   wattbuy
   manual
@@ -417,164 +523,4 @@ enum ProductType {
   variable
   indexed
   tou
-}
-
-model RawSmtFile {
-  id           BigInt    @id @default(autoincrement())
-  filename     String
-  size_bytes   Int
-  sha256       String    @unique
-  source       String?   @default("adhocusage")
-  content_type String?   @default("application/octet-stream")
-  storage_path String?
-  content      Bytes?
-  received_at  DateTime? @default(now())
-  created_at   DateTime  @default(now())
-  updated_at   DateTime  @updatedAt
-
-  @@map("raw_smt_files")
-  @@index([sha256])
-  @@index([created_at])
-}
-
-model SmtInterval {
-  id        String   @id @default(cuid())
-  esiid     String
-  meter     String
-  ts        DateTime   // UTC interval START (15-min)
-  kwh       Decimal    @db.Decimal(10,5)
-  filled    Boolean    @default(false) // true if synthesized by gap-fill
-  source    String?                 // e.g., 'smt', 'gb', 'mixed'
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-
-  @@unique([esiid, meter, ts], name: "esiid_meter_ts")
-  @@index([esiid, meter, ts], name: "esiid_meter_ts_idx")
-}
-
-/// Raw WattBuy Retail Rates catalog snapshots
-model RawWattbuyRetailRate {
-  id             String   @id @default(cuid())
-  // Query context (optional)
-  state          String?
-  utility        String?
-  zip5           String?
-  page           Int?
-  pageSize       Int?
-  // Upstream meta
-  upstreamStatus Int
-  raw            Json
-  createdAt      DateTime @default(now())
-  @@index([state, utility, zip5])
-  @@index([createdAt])
-}
-
-/// Raw WattBuy Electricity catalog snapshots (general /v3/electricity)
-model RawWattbuyElectricity {
-  id             String   @id @default(cuid())
-  // Query context (optional – we allow pass-through to future-proof)
-  state          String?
-  utility        String?
-  zip5           String?
-  // Upstream meta
-  upstreamStatus Int
-  raw            Json
-  createdAt      DateTime @default(now())
-  @@index([state, utility, zip5])
-  @@index([createdAt])
-}
-
-/// Raw WattBuy Electricity Info snapshots (/v3/electricity/info)
-model RawWattbuyElectricityInfo {
-  id             String   @id @default(cuid())
-  // Query context
-  state          String?
-  zip5           String?
-  address        String?
-  city           String?
-  // Upstream meta
-  upstreamStatus Int
-  raw            Json
-  createdAt      DateTime @default(now())
-  @@index([state, zip5])
-  @@index([createdAt])
-}
-
-/// Rate plans (REP plans and utility tariffs)
-model RatePlan {
-  id           String   @id @default(cuid())
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
-  // Source identity
-  externalId   String?     // vendor/plan id if any
-  utilityId    String
-  state        String
-  supplier     String?
-  supplierPUCT String?
-  planName     String?
-
-  // Commercial bits (for REP plans)
-  termMonths   Int?
-  rate500      Float?
-  rate1000     Float?
-  rate2000     Float?
-  cancelFee    String?
-
-  eflUrl       String?
-  tosUrl       String?
-  yracUrl      String?
-
-  // NEW — tariff-style
-  isUtilityTariff Boolean   @default(false)
-  tariffStructure  Json?    // raw rate_structure[]
-  customerCharge   Float?   // monthly fixed charge if present
-  minimumBill      Float?   // minimum bill amount if present
-  effectiveStart   DateTime?
-  effectiveEnd     DateTime?
-  sourceRateUrl    String?
-  sourceParentUrl  String?
-
-  lastSeenAt   DateTime @default(now())
-
-  @@unique([utilityId, state, supplier, planName, termMonths, isUtilityTariff])
-  @@index([utilityId, state, termMonths])
-}
-
-/// ERCOT Ingest - tracks ingestion history of ERCOT data files
-model ErcotIngest {
-  id          String   @id @default(cuid())
-  createdAt   DateTime @default(now())
-  status      String   // "ok" | "skipped" | "error"
-  note        String?  // freeform note (e.g., "daily", "manual test")
-  fileUrl     String?
-  fileSha256  String?  @unique
-  tdsp        String?  // oncor|centerpoint|aep_north|aep_central|tnmp|unknown
-  rowCount    Int?
-  headers     Json?    // snapshot of response headers for drift
-  error       String?  // short error
-  errorDetail String?  // long stack
-}
-
-/// ERCOT ESIID Index - stores normalized ESIID data from ERCOT extracts
-model ErcotEsiidIndex {
-  id               String   @id @default(cuid())
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-
-  esiid            String   @unique   // 17/18-digit
-  tdsp             String?  // oncor|centerpoint|aep_north|aep_central|tnmp|mou|coop|unknown
-  utilityName      String?
-  serviceAddress1  String?
-  serviceAddress2  String?
-  city             String?
-  state            String?
-  zip              String?
-  meterNumber      String?
-  premiseType      String?  // res/com
-  raw              Json?    // raw parsed columns for traceability
-  srcFileSha256    String?  // provenance
-
-  @@index([city, zip])
-  @@index([serviceAddress1])
 }

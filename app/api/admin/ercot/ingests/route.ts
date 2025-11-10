@@ -1,18 +1,21 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/lib/db';
+
+export const dynamic = 'force-dynamic';
 
 function requireAdmin(req: NextRequest) {
-  const token = req.headers.get('x-admin-token') || ''
-  return !!process.env.ADMIN_TOKEN && token === process.env.ADMIN_TOKEN
+  const token = req.headers.get('x-admin-token') || '';
+  if (!process.env.ADMIN_TOKEN || token !== process.env.ADMIN_TOKEN) throw new Error('UNAUTHORIZED');
 }
 
-export const runtime = 'nodejs'
-export const dynamic = 'force-dynamic'
-
 export async function GET(req: NextRequest) {
-  if (!requireAdmin(req)) return NextResponse.json({ ok: false, error: 'UNAUTHORIZED' }, { status: 401 })
-  const limit = Number(req.nextUrl.searchParams.get('limit') || 25)
-  const rows = await db.ercotIngest.findMany({ orderBy: { createdAt: 'desc' }, take: limit })
-  return NextResponse.json({ ok: true, rows })
+  try {
+    requireAdmin(req);
+    const list = await prisma.ercotIngest.findMany({ orderBy: { createdAt: 'desc' }, take: 50 });
+    return NextResponse.json({ ok: true, ingests: list });
+  } catch (err: any) {
+    const msg = err?.message || String(err);
+    return NextResponse.json({ ok: false, error: msg }, { status: msg === 'UNAUTHORIZED' ? 401 : 500 });
+  }
 }
 

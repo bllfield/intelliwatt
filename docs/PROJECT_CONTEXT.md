@@ -24,7 +24,7 @@
 
 - System-wide expectations: `docs/ARCHITECTURE_STANDARDS.md` (Operational Standards, Auth Standards, Health/Debug)
 
-- ERCOT daily pull runbook: `docs/DEPLOY_ERCOT.md`
+- ERCOT daily pull system: `docs/DEPLOY_ERCOT.md` (complete guide including migration, deployment, and troubleshooting)
 
 ## Where To Start
 
@@ -89,9 +89,16 @@
 
 
 ### Database Schema
-- **Model**: `HouseAddress` (in `prisma/schema.prisma`)
+- **Models**: 
+  - `HouseAddress` (in `prisma/schema.prisma`) - Address collection with ESIID
+  - `ErcotIngest` - ERCOT file ingestion history tracking
+  - `ErcotEsiidIndex` - Normalized ESIID data from ERCOT extracts
+  - `RatePlan` - Normalized electricity plans (REP plans and utility tariffs)
+  - `RawSmtFile` - Raw SMT file storage
+  - `SmtInterval` - SMT usage interval data
 - **Validation Source**: Enum values (NONE, GOOGLE, USER, OTHER)
 - **Indexes**: userId, placeId, addressState+addressZip5, esiid
+- **ERCOT Indexes**: normZip, normLine1 (GIN trigram for fuzzy matching)
 
 ---
 
@@ -177,9 +184,36 @@ components/             # React components
 - `GET https://intelliwatt.com/api/migrate` - Run migrations
 - `GET https://intelliwatt.com/api/admin/env-health` - Check environment variable status
 
+#### WattBuy Admin Endpoints (admin-gated)
+- `GET /api/admin/wattbuy/retail-rates-test` - Test retail rates (utilityID+state OR address auto-derive)
+- `GET /api/admin/wattbuy/retail-rates-zip` - Retail rates by ZIP (auto-derives utilityID)
+- `GET /api/admin/wattbuy/retail-rates-by-address` - Retail rates by address (convenience)
+- `GET /api/admin/wattbuy/retail-rates` - Main retail rates endpoint (with DB persistence)
+- `GET /api/admin/wattbuy/electricity` - Robust electricity catalog (with fallback)
+- `GET /api/admin/wattbuy/electricity-probe` - Electricity probe endpoint
+- `GET /api/admin/wattbuy/electricity/info` - Electricity info endpoint
+
+#### ERCOT Admin Endpoints (admin-gated)
+- `GET /api/admin/ercot/cron` - Vercel cron endpoint (header `x-cron-secret` or query `?token=CRON_SECRET`)
+- `GET /api/admin/ercot/fetch-latest` - Manual fetch by explicit URL
+- `GET /api/admin/ercot/ingests` - List ingestion history
+- `GET /api/admin/ercot/debug/last` - Get last ingest record
+- `GET /api/admin/ercot/debug/url-sanity` - Test URL resolution
+- `POST /api/admin/ercot/lookup-esiid` - Lookup ESIID from address using ERCOT data
+
+#### SMT Admin Endpoints (admin-gated)
+- `POST /api/admin/smt/pull` - Trigger SMT data pull via webhook
+- `POST /api/admin/smt/ingest` - SMT file ingestion
+- `POST /api/admin/smt/upload` - SMT file upload
+- `GET /api/admin/smt/health` - SMT health check
+
 #### Data Endpoints
 - `POST https://intelliwatt.com/api/address/save` - Save/update address
 - `GET https://intelliwatt.com/api/v1/houses/{id}/profile` - Get house profile
+
+#### Public Endpoints
+- `GET /api/ping` - Health check (JSON)
+- `GET /api/ping.txt` - Health check (plain text)
 
 ---
 
@@ -191,6 +225,7 @@ components/             # React components
 - **Storage**: `HouseAddress` model in database
 - **Normalization**: Google → normalized via `lib/normalizeGoogleAddress.ts`
 - **Consent**: Smart Meter consent checkbox integrated
+- **Email Normalization**: All emails normalized to lowercase via `lib/utils/email.ts` to prevent duplicate accounts
 
 ### Google Maps Setup
 - **API Key**: `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` (env var)
@@ -223,11 +258,20 @@ components/             # React components
 
 ## Next Steps & Considerations
 
+### Recent Features Implemented
+- ✅ ERCOT daily pull system for ESIID data ingestion
+- ✅ WattBuy retail rates and electricity catalog integration
+- ✅ Email normalization to prevent duplicate accounts
+- ✅ SMT integration with webhook triggers
+- ✅ Admin inspector UIs for WattBuy, SMT, and ERCOT
+- ✅ Robust electricity endpoint with fallback strategies
+- ✅ Rate plan normalization and database persistence
+
 ### Planned Features
-- Add WattBuy integration to fetch ESIID after save
 - Add database indexes and accelerate connection pooling
 - Allow multiple addresses per user (add houseId field)
 - Add validation/geocoding with retries
+- Complete ERCOT file URL resolution (currently manual)
 
 ### Optimization Opportunities
 - Implement caching strategies
