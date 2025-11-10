@@ -549,27 +549,34 @@ async function testWattBuyDatabaseCounts() {
     throw new Error('DATABASE_URL not set - cannot query database. Add to .env.local');
   }
 
-  const offerMaps = await withTimeout(prisma.offerRateMap.count(), 15000, 'Offer maps count timeout');
   const rateConfigs = await withTimeout(prisma.rateConfig.count(), 15000, 'Rate configs count timeout');
   const masterPlans = await withTimeout(prisma.masterPlan.count(), 15000, 'Master plans count timeout');
+  // RatePlan may not exist if migration hasn't run - handle gracefully
+  let ratePlansCount = 0;
+  try {
+    const ratePlans = await withTimeout((prisma as any).ratePlan?.count() || Promise.resolve(0), 15000, 'Rate plans count timeout');
+    ratePlansCount = Number(ratePlans);
+  } catch {
+    // RatePlan model not available yet
+    ratePlansCount = 0;
+  }
 
-  const offerMapsCount = Number(offerMaps);
   const rateConfigsCount = Number(rateConfigs);
   const masterPlansCount = Number(masterPlans);
 
-  if (offerMapsCount === 0 && rateConfigsCount === 0 && masterPlansCount === 0) {
+  if (rateConfigsCount === 0 && masterPlansCount === 0 && ratePlansCount === 0) {
     console.log(`   ⚠️  WARNING: No WattBuy data found in database`);
     console.log(`   💡 This is expected if:`);
-    console.log(`      - No WattBuy offers have been synced yet`);
-    console.log(`      - The offers sync endpoint hasn't been run`);
+    console.log(`      - No retail rates have been fetched yet`);
+    console.log(`      - The retail-rates endpoints haven't been run`);
     console.log(`      - The database is empty/new`);
   }
 
   return {
-    offerMaps: offerMapsCount,
     rateConfigs: rateConfigsCount,
     masterPlans: masterPlansCount,
-    note: (offerMapsCount === 0 && rateConfigsCount === 0 && masterPlansCount === 0)
+    ratePlans: ratePlansCount,
+    note: (rateConfigsCount === 0 && masterPlansCount === 0 && ratePlansCount === 0)
       ? 'Database empty (no WattBuy data yet)'
       : 'Database contains WattBuy data',
   };
