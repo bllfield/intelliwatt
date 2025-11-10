@@ -156,7 +156,7 @@ export default function AdminDashboard() {
         {/* Quick Links / Tools Section */}
         <section className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
           <h2 className="text-2xl font-bold text-brand-navy mb-4">🔧 Admin Tools</h2>
-          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
             <a
               href="/admin/wattbuy/inspector"
               className="block p-4 border-2 border-brand-blue/20 rounded-lg hover:border-brand-blue hover:bg-brand-blue/5 transition-colors"
@@ -170,6 +170,13 @@ export default function AdminDashboard() {
             >
               <div className="font-semibold text-brand-navy mb-1">📊 SMT Inspector</div>
               <div className="text-sm text-brand-navy/60">Test SMT ingest, upload, and health endpoints</div>
+            </a>
+            <a
+              href="/admin/ercot/inspector"
+              className="block p-4 border-2 border-brand-blue/20 rounded-lg hover:border-brand-blue hover:bg-brand-blue/5 transition-colors"
+            >
+              <div className="font-semibold text-brand-navy mb-1">⚡ ERCOT ESIID</div>
+              <div className="text-sm text-brand-navy/60">View ERCOT ingest history and pull ESIID data</div>
             </a>
             <a
               href="/admin/retail-rates"
