@@ -18,11 +18,11 @@ export async function upsertPlans(plans: TransformedPlan[]) {
         utilityId_state_supplier_planName_termMonths_isUtilityTariff: {
           utilityId,
           state,
-          supplier: supplier as string | null,
-          planName: planName as string | null,
+          supplier: supplier ?? null,
+          planName: planName ?? null,
           termMonths: term ?? 0,
           isUtilityTariff: isTariff,
-        },
+        } as any,
       },
       update: {
         externalId: p.external_id || undefined,
