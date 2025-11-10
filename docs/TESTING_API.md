@@ -2,51 +2,71 @@
 
 ## Why do I need to pass tokens if I have `.env.local`?
 
-- `.env.local` is loaded by the Next.js **server** when you run locally.
+- `.env.local` is loaded by the **server** when you run locally.
 
-- When you call a deployed endpoint from your shell, you are an **external client**—the server still expects `x-admin-token` (or other headers) to prove admin access.
+- When you call a **deployed** endpoint from your terminal, you're an external client — admin routes still require `x-admin-token`.
 
-- Production env vars live in Vercel → Project → Settings → Environment Variables. Your local file does **not** apply to Vercel automatically.
+- Production env vars live in Vercel → Project → Settings → Environment Variables.
 
 ## Deployment URLs
 
-- Production domain: `https://intelliwatt.com`
+- Production: `https://intelliwatt.com`
 
-- Production deployment URL example: `https://<project>-<hash>-vercel.app`
+- Preview example: `https://<project>-<hash>-vercel.app` (useful to test fresh builds before aliasing)
 
-## Quick sanity
+## Automated Node smoke test (Cursor / CI)
+
+1. `npm i -g vercel` and `vercel login` (select IntelliWatt)
+
+2. Pull prod env vars locally:  
+
+   `vercel env pull .env.vercel --environment=production`
+
+3. Run smoke:  
+
+   `node scripts/admin/api_test_prod.mjs --base https://intelliwatt.com`  
+
+   or: `npm run test:prod -- https://intelliwatt.com`
+
+4. You can also target a preview URL the same way.
+
+The script loads `.env.vercel`, calls public + admin endpoints, and fails fast if secrets are missing.
+
+## Quick sanity endpoints
 
 - Public ping (no token): `GET /api/ping` → `{ ok: true, service: "intelliwatt", ts: "..." }`
 
-- Admin env health (token required): `GET /api/admin/env-health` with header `x-admin-token: <ADMIN_TOKEN>`
+- Plain-text ping (no token): `GET /api/ping.txt` → `OK`
 
-## Admin testing targets (current)
+- Admin env health: `GET /api/admin/env-health` with `x-admin-token: <ADMIN_TOKEN>`
 
-- **WattBuy Electricity (robust):** `GET /api/admin/wattbuy/electricity-probe?address=...&city=...&state=tx&zip=...`
+## WattBuy admin tests (current — no 'offers')
 
-- **Retail Rates (explicit):** `GET /api/admin/wattbuy/retail-rates-test?utilityID=44372&state=tx`
+- **Electricity (robust)**  
 
-- **Retail Rates (by address):** `GET /api/admin/wattbuy/retail-rates-by-address?address=...&city=...&state=tx&zip=...`
+  `GET /api/admin/wattbuy/electricity-probe?address=...&city=...&state=tx&zip=...`
 
-- **Retail Rates (zip auto-derive):** `GET /api/admin/wattbuy/retail-rates-zip?zip=75201`
+- **Save electricity snapshot**  
 
-All require the header: `x-admin-token: <ADMIN_TOKEN>`
+  `GET /api/admin/wattbuy/electricity-save?address=...&city=...&state=tx&zip=...`
 
-## Cron tests (unchanged)
+- **Retail rates (explicit)**  
 
-- Cron echo (secret required): `GET /api/admin/ercot/debug/echo-cron` with header `x-cron-secret: <CRON_SECRET>`
+  `GET /api/admin/wattbuy/retail-rates-test?utilityID=44372&state=tx`
 
-- Manual ERCOT cron trigger: `GET /api/admin/ercot/cron` with header `x-cron-secret: <CRON_SECRET>`
+- **Retail rates (by address)**  
 
-## Recommended flow
+  `GET /api/admin/wattbuy/retail-rates-by-address?address=...&city=...&state=tx&zip=...`
 
-1. **Ping** → confirm deployment is up.
+- **Retail rates (zip auto-derive)**  
 
-2. **Env health** → verify keys present (WATTBUY_API_KEY, ADMIN_TOKEN).
+  `GET /api/admin/wattbuy/retail-rates-zip?zip=75201`
 
-3. **Electricity Probe** → confirm 200 with payload (or wattkey fallback).
+All WattBuy admin routes require `x-admin-token: <ADMIN_TOKEN>`.
 
-4. **Retail Rates** → test explicit `utilityID+state`; if 204, try **by-address** to cycle alternates.
+## ERCOT cron (unchanged)
 
-5. If retail rates return 204 for TX TDSPs, include `x-amzn-requestid` + `x-documentation-url` in support emails.
+- Cron echo: `GET /api/admin/ercot/debug/echo-cron` with `x-cron-secret: <CRON_SECRET>`
+
+- Manual run: `GET /api/admin/ercot/cron` with `x-cron-secret: <CRON_SECRET>`
 
