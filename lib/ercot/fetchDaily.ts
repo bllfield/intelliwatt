@@ -132,10 +132,21 @@ export async function getLatestDailyFiles(ercotPageUrl: string): Promise<{ poste
   }
 
   // --- HTML FALLBACK (best-effort) ---
-  const res = await fetch(ercotPageUrl, { cache: "no-store" });
+  const res = await fetch(ercotPageUrl, { 
+    cache: "no-store",
+    headers: {
+      'User-Agent': process.env.ERCOT_USER_AGENT || 'IntelliWattBot/1.0 (+https://intelliwatt.com)',
+    }
+  });
   if (!res.ok) throw new Error(`ERCOT page fetch failed: ${res.status}`);
   const html = await res.text();
   const $ = cheerio.load(html);
+  
+  // Check if page is a login page
+  const pageText = $('body').text().toLowerCase();
+  if (pageText.includes('log in') || pageText.includes('login') || pageText.includes('sign in')) {
+    throw new Error(`ERCOT page appears to be a login page. The page may require authentication or the URL (${ercotPageUrl}) may be incorrect. Please verify ERCOT_PAGE_URL points to the public data product page.`);
+  }
 
   // Try multiple selectors for zip links
   let anchors = $('a[href*=".zip"]');
