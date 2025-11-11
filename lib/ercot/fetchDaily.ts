@@ -52,13 +52,21 @@ export async function getLatestDailyFiles(ercotPageUrl: string): Promise<{ poste
         if (listRes.ok) {
           const listJson = await listRes.json().catch(() => null);
           const products: any[] = listJson?._embedded?.products || listJson?.products || [];
-          // Look for TDSP ESIID product (case-insensitive search)
+          // Look for TDSP ESIID product (case-insensitive search with multiple strategies)
           const tdspProduct = products.find((p: any) => {
             const name = (p.name || '').toUpperCase();
             const desc = (p.description || '').toUpperCase();
             const emilId = (p.emilId || '').toUpperCase();
-            return name.includes('TDSP') && (name.includes('ESIID') || name.includes('ESI ID') || desc.includes('ESIID') || desc.includes('ESI ID')) ||
-                   emilId === PRODUCT_ID.toUpperCase() || emilId === 'ZP15-612';
+            // Strategy 1: Exact emilId match
+            if (emilId === PRODUCT_ID.toUpperCase() || emilId === 'ZP15-612') return true;
+            // Strategy 2: TDSP + ESIID in name/description
+            if (name.includes('TDSP') && (name.includes('ESIID') || name.includes('ESI ID') || name.includes('EXTRACT'))) return true;
+            if (desc.includes('TDSP') && (desc.includes('ESIID') || desc.includes('ESI ID') || desc.includes('EXTRACT'))) return true;
+            // Strategy 3: Look for "ZP15" in emilId (might be different format)
+            if (emilId.includes('ZP15') || emilId.includes('ZP-15')) return true;
+            // Strategy 4: Look for "DAILY" + "TDSP" or "DAILY" + "EXTRACT"
+            if ((name.includes('DAILY') || desc.includes('DAILY')) && (name.includes('TDSP') || name.includes('EXTRACT') || desc.includes('TDSP') || desc.includes('EXTRACT'))) return true;
+            return false;
           });
           
           if (tdspProduct?.emilId) {
@@ -73,10 +81,10 @@ export async function getLatestDailyFiles(ercotPageUrl: string): Promise<{ poste
               throw new Error(`ERCOT API: Found TDSP ESIID product '${correctEmilId}' but archive endpoint failed ${archRes.status}: ${errorText}`);
             }
           } else {
-            // Product not found in list
-            const productNames = products.slice(0, 10).map((p: any) => `${p.emilId}: ${p.name}`).join(', ');
+            // Product not found in list - show all products for debugging
+            const allProducts = products.map((p: any) => `${p.emilId}: ${p.name || p.description || 'N/A'}`).join('\n  ');
             const errorText = await prodRes.text().catch(() => '');
-            throw new Error(`ERCOT API product '${PRODUCT_ID}' not found. Searched ${products.length} products. Sample products: ${productNames}. Product error: ${errorText}`);
+            throw new Error(`ERCOT API product '${PRODUCT_ID}' not found. Searched ${products.length} products with keywords: TDSP, ESIID, EXTRACT, ZP15, DAILY.\n\nAll available products:\n  ${allProducts}\n\nProduct error: ${errorText}`);
           }
         } else {
           const errorText = await prodRes.text().catch(() => '');
