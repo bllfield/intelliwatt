@@ -282,9 +282,9 @@ curl -sS "$PROD_BASE_URL/api/admin/ercot/cron?token=$CRON_SECRET" | jq
 curl -sS "$PROD_BASE_URL/api/admin/ercot/cron" -H "x-cron-secret: $CRON_SECRET" | jq
 ```
 
-### ESIID Lookup (via WattBuy Electricity)
+### ESIID Lookup (via WattBuy Electricity Info)
 ```bash
-# Lookup ESIID from address using WattBuy Electricity endpoint
+# Lookup ESIID from address using WattBuy Electricity Info endpoint (/v3/electricity/info)
 curl -sS "$PROD_BASE_URL/api/admin/ercot/lookup-esiid?line1=9514%20Santa%20Paula%20Dr&city=Fort%20Worth&state=TX&zip=76116" \
   -H "x-admin-token: $ADMIN_TOKEN" | jq
 ```
@@ -308,7 +308,8 @@ curl -sS "$PROD_BASE_URL/api/admin/ercot/lookup-esiid?line1=9514%20Santa%20Paula
 - **URL**: `/admin/smt/inspector`
 - **Features**:
   - Test SMT ingest, upload, and health endpoints
-  - Address-to-ESIID lookup (via WattBuy Electricity endpoint)
+  - Address-to-ESIID lookup (via WattBuy Electricity Info endpoint `/v3/electricity/info`)
+  - Manual ESIID entry option (skip lookup)
   - Trigger SMT pull by ESIID
   - Requires `ADMIN_TOKEN` for authentication
 
@@ -317,6 +318,6 @@ curl -sS "$PROD_BASE_URL/api/admin/ercot/lookup-esiid?line1=9514%20Santa%20Paula
 - **Features**:
   - View ERCOT ingest history
   - Test URL resolution
-  - Lookup ESIID from address (via WattBuy Electricity endpoint)
+  - Lookup ESIID from address (via WattBuy Electricity Info endpoint `/v3/electricity/info`)
   - Requires `ADMIN_TOKEN` for authentication
 

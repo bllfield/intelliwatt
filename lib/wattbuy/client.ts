@@ -492,6 +492,25 @@ export async function wbGetElectricity(params: {
   });
 }
 
+// Electricity info - specifically for ESIID extraction
+// Uses /v3/electricity/info endpoint which contains ESIID data
+export async function wbGetElectricityInfo(params: {
+  address?: string; city?: string; state: string; zip: string;
+  housing_chars?: string | boolean;
+  utility_list?: string | boolean;
+}) {
+  const { electricityInfoParams } = await import('./params');
+  const queryParams = electricityInfoParams({
+    address: params.address,
+    city: params.city,
+    state: params.state,
+    zip: params.zip,
+    housing_chars: params.housing_chars ?? 'true',
+    utility_list: params.utility_list ?? 'true',
+  });
+  return await wbGet<any>('electricity/info', queryParams, undefined, 1);
+}
+
 // Offers: address-based OR wattkey-based.
 // Uses wbGet() for consistency with other WattBuy endpoints
 // Defaults: language='en', is_renter=false, all=true

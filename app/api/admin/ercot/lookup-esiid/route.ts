@@ -1,21 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/auth/admin';
-import { wbGetElectricity } from '@/lib/wattbuy/client';
+import { wbGetElectricityInfo } from '@/lib/wattbuy/client';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 /**
- * ESIID Lookup via WattBuy Electricity endpoint
+ * ESIID Lookup via WattBuy Electricity Info endpoint
  * 
- * Note: This endpoint now uses WattBuy's /v3/electricity endpoint to get ESIID,
+ * Note: This endpoint uses WattBuy's /v3/electricity/info endpoint to get ESIID,
  * not the ERCOT database. The ERCOT database lookup logic is preserved but not used.
  * 
- * The WattBuy electricity response may include ESIID in various field names:
+ * The WattBuy electricity/info response may include ESIID in various field names:
  * - esiid
  * - esiId
  * - esi_id
  * - addresses[0].esi / addresses[0].esiid
+ * - utility_info[].esiid
  */
 export async function GET(req: NextRequest) {
   const gate = requireAdmin(req);
@@ -31,20 +32,20 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ ok: false, error: 'REQUIRED: line1/address, state, zip' }, { status: 400 });
     }
 
-    // Use WattBuy electricity endpoint to get ESIID
-    const elec = await wbGetElectricity({ address, city, state, zip });
+    // Use WattBuy electricity/info endpoint to get ESIID
+    const info = await wbGetElectricityInfo({ address, city, state, zip, utility_list: 'true' });
     
-    if (!elec.ok) {
+    if (!info.ok) {
       return NextResponse.json({
         ok: false,
-        error: 'WATTBUY_ELECTRICITY_FAILED',
-        status: elec.status,
-        message: 'Failed to fetch electricity details from WattBuy',
-      }, { status: elec.status || 502 });
+        error: 'WATTBUY_ELECTRICITY_INFO_FAILED',
+        status: info.status,
+        message: 'Failed to fetch electricity/info from WattBuy',
+      }, { status: info.status || 502 });
     }
 
     // Extract ESIID from various possible field names
-    const data = elec.data || {};
+    const data = info.data || {};
     let esiid: string | null = null;
     
     // Try direct fields first

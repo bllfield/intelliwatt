@@ -4,7 +4,7 @@
  * Optional: &is_renter=true|false &language=en|es
  */
 import { NextRequest, NextResponse } from 'next/server';
-import { wbGetElectricity, extractElectricityKeys, wbGetOffers } from '@/lib/wattbuy/client';
+import { wbGetElectricity, wbGetElectricityInfo, extractElectricityKeys, wbGetOffers } from '@/lib/wattbuy/client';
 import { requireAdmin } from '@/lib/auth/admin';
 
 export const runtime = 'nodejs';
@@ -88,10 +88,23 @@ function extractEsiidFromElectricity(elec: any): string | null {
   return searchObj(elec);
 }
 
-async function kickSmtIfPossible(elec: any) {
+async function kickSmtIfPossible(address: string, city: string, state: string, zip: string) {
   try {
-    // Extract ESIID using comprehensive search
-    const esiid = extractEsiidFromElectricity(elec);
+    // Get ESIID from /v3/electricity/info endpoint (not /v3/electricity)
+    const infoRes = await wbGetElectricityInfo({ address, city, state, zip, utility_list: 'true' });
+    
+    if (!infoRes.ok || !infoRes.data) {
+      return {
+        kicked: false,
+        reason: 'ELECTRICITY_INFO_FAILED',
+        status: infoRes.status,
+        error: 'Failed to fetch electricity/info for ESIID extraction',
+      };
+    }
+    
+    // Extract ESIID from electricity/info response
+    const info = infoRes.data;
+    const esiid = extractEsiidFromElectricity(info);
     
     if (!esiid) {
       // Return diagnostic info to help debug
@@ -99,9 +112,9 @@ async function kickSmtIfPossible(elec: any) {
         kicked: false,
         reason: 'NO_ESIID_IN_RESPONSE',
         diagnostic: {
-          hasData: !!elec,
-          topLevelKeys: elec && typeof elec === 'object' ? Object.keys(elec).slice(0, 20) : [],
-          sampleStructure: elec ? JSON.stringify(elec).slice(0, 500) : null,
+          hasData: !!info,
+          topLevelKeys: info && typeof info === 'object' ? Object.keys(info).slice(0, 20) : [],
+          sampleStructure: info ? JSON.stringify(info).slice(0, 500) : null,
         },
       };
     }
@@ -144,15 +157,15 @@ export async function GET(req: NextRequest) {
     const language = (searchParams.get('language') as 'en' | 'es') ?? 'en';
     const is_renter = (searchParams.get('is_renter') ?? 'false') === 'true';
 
-    // 1) Electricity details → wattkey (+ maybe ESIID)
+    // 1) Electricity details → wattkey (for offers)
     const elec = await wbGetElectricity({ address, city, state, zip });
     if (!elec.ok) {
       return NextResponse.json({ ok: false, stage: 'electricity', elec }, { status: elec.status || 502 });
     }
     const keys = extractElectricityKeys(elec.data);
 
-    // 2) SMT kick (best-effort)
-    const smtKick = await kickSmtIfPossible(elec.data);
+    // 2) SMT kick (best-effort) - uses /v3/electricity/info for ESIID extraction
+    const smtKick = await kickSmtIfPossible(address, city, state, zip);
 
     // 3) Offers (prefer wattkey; fall back to address if missing)
     const offers = await wbGetOffers(
@@ -161,6 +174,20 @@ export async function GET(req: NextRequest) {
         : { address, city, state, zip, language, is_renter, all: true }
     );
 
+    // Get electricity/info data for ESIID debugging (if SMT kick failed)
+    let electricityInfo: any = null;
+    if (!smtKick.kicked && smtKick.reason === 'NO_ESIID_IN_RESPONSE') {
+      const infoRes = await wbGetElectricityInfo({ address, city, state, zip, utility_list: 'true' }).catch(() => null);
+      if (infoRes?.ok) {
+        electricityInfo = {
+          status: infoRes.status,
+          headers: infoRes.headers,
+          data: infoRes.data,
+          sampleKeys: Object.keys(infoRes.data ?? {}),
+        };
+      }
+    }
+
     return NextResponse.json({
       ok: true,
       where: { address, city, state, zip },
@@ -168,9 +195,9 @@ export async function GET(req: NextRequest) {
         status: elec.status,
         headers: elec.headers,
         sampleKeys: Object.keys(elec.data ?? {}),
-        // Include full electricity data for ESIID debugging
-        data: elec.data,
+        data: elec.data, // Full electricity data (for wattkey)
       },
+      electricityInfo, // Include electricity/info data if ESIID lookup failed
       smtKick,
       offers: { status: offers.status, headers: offers.headers, topKeys: offers.data ? Object.keys(offers.data) : null, data: offers.data },
     }, { status: 200 });

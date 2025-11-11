@@ -176,33 +176,34 @@ export default function SMTInspector() {
       setFoundEsiid(null);
       
       try {
-        // Step 1: Lookup ESIID via WattBuy Electricity endpoint
+        // Step 1: Lookup ESIID via WattBuy Electricity Info endpoint
         const params = new URLSearchParams({
           address: address.line1,
           city: address.city,
           state: address.state,
           zip: address.zip,
+          utility_list: 'true',
         });
-        const elecRes = await fetch(`/api/admin/wattbuy/electricity?${params.toString()}`, {
+        const infoRes = await fetch(`/api/admin/wattbuy/electricity/info?${params.toString()}`, {
           method: 'GET',
           headers: { 'x-admin-token': token },
         });
-        const elecData = await elecRes.json().catch(() => ({ error: 'Failed to parse JSON' }));
+        const infoData = await infoRes.json().catch(() => ({ error: 'Failed to parse JSON' }));
         
-        if (!elecData.ok || !elecData.data) {
-          setRaw(elecData);
+        if (!infoData.ok || !infoData.data) {
+          setRaw(infoData);
           setResult({
             ok: false,
-            status: elecRes.status,
-            error: elecData.error || 'WattBuy electricity lookup failed',
-            data: elecData,
+            status: infoRes.status,
+            error: infoData.error || 'WattBuy electricity/info lookup failed',
+            data: infoData,
           });
           setLoading(false);
           return;
         }
 
-        // Extract ESIID from electricity response
-        const elec = elecData.data;
+        // Extract ESIID from electricity/info response
+        const elec = infoData.data;
         const directFields = ['esiid', 'esiId', 'esi_id', 'ESIID', 'ESI_ID', 'esi'];
         
         // Try direct fields
@@ -245,16 +246,16 @@ export default function SMTInspector() {
         
         if (!esiid) {
           setRaw({
-            electricity: elecData,
+            electricityInfo: infoData,
             error: 'NO_ESIID_FOUND',
-            message: 'ESIID not found in WattBuy electricity response',
+            message: 'ESIID not found in WattBuy electricity/info response',
             sampleKeys: Object.keys(elec || {}).slice(0, 20),
           });
           setResult({
             ok: false,
             status: 404,
             error: 'NO_ESIID_FOUND',
-            data: { message: 'ESIID not found in WattBuy electricity response', electricity: elecData },
+            data: { message: 'ESIID not found in WattBuy electricity/info response', electricityInfo: infoData },
           });
           setLoading(false);
           return;
@@ -352,7 +353,7 @@ export default function SMTInspector() {
       <section className="p-4 rounded-2xl border">
         <h2 className="font-medium mb-3">Address to SMT Pull</h2>
         <p className="text-sm text-gray-600 mb-3">
-          Option 1: Enter address to lookup ESIID via WattBuy Electricity endpoint, then trigger SMT pull<br/>
+          Option 1: Enter address to lookup ESIID via WattBuy Electricity Info endpoint (/v3/electricity/info), then trigger SMT pull<br/>
           Option 2: Enter ESIID manually to test SMT pull directly (skip WattBuy lookup)
         </p>
         <div className="mb-4">

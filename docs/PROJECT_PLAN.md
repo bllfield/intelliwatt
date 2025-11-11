@@ -155,21 +155,23 @@ Capture Smart Meter Texas files in RAW form before any parsing, maintaining RAW�
 
 - Droplet env: `/home/deploy/smt_ingest/.env` includes `SHARED_INGEST_SECRET=...`.
 
-PC-2025-11-07: ESIID Source Cutover (WattBuy Electricity endpoint)
+PC-2025-11-07: ESIID Source Cutover (WattBuy Electricity Info endpoint)
 
 Rationale
 
-- ESIID resolution now uses WattBuy's `/v3/electricity` endpoint, which provides reliable ESIID data along with property context. This simplifies our architecture by using a single vendor for both ESIID and plan data.
+- ESIID resolution now uses WattBuy's `/v3/electricity/info` endpoint, which provides reliable ESIID data. This endpoint is specifically designed for ESIID extraction and utility information.
 
 Scope
 
-- ESIID lookup endpoint `/api/admin/ercot/lookup-esiid` now uses WattBuy Electricity endpoint instead of ERCOT database.
+- ESIID lookup endpoint `/api/admin/ercot/lookup-esiid` now uses WattBuy Electricity Info endpoint (`/v3/electricity/info`) instead of ERCOT database.
 
 - ERCOT database (`ErcotEsiidIndex`) is preserved but no longer used for ESIID lookups. ERCOT ingestion continues for historical/backup purposes.
 
-- WattBuy Electricity endpoint provides ESIID in various field names (esiid, esiId, esi_id, addresses[].esi, utility_info[].esiid).
+- WattBuy Electricity Info endpoint provides ESIID in various field names (esiid, esiId, esi_id, addresses[].esi, utility_info[].esiid).
 
 - All ESIID lookup logic preserved; only the data source changed from ERCOT database to WattBuy API.
+
+- Property bundle and SMT Inspector now use `/v3/electricity/info` for ESIID extraction (while still using `/v3/electricity` for wattkey and property context).
 
 Rollback
 
@@ -182,25 +184,27 @@ Guardrails
 
 
 
-PC-2025-11-01: ESIID Resolver — Use WattBuy Electricity Endpoint
+PC-2025-11-01: ESIID Resolver — Use WattBuy Electricity Info Endpoint
 
 Rationale
 
-We source ESIID from WattBuy's `/v3/electricity` endpoint, which provides reliable ESIID data along with property context. This simplifies our architecture by using WattBuy for both ESIID and plan data.
+We source ESIID from WattBuy's `/v3/electricity/info` endpoint, which is specifically designed for ESIID extraction and utility information. This endpoint provides more reliable ESIID data than the general `/v3/electricity` endpoint.
 
 Scope
 
-ESIID lookup: `/api/admin/ercot/lookup-esiid` uses WattBuy Electricity endpoint (`wbGetElectricity`).
+ESIID lookup: `/api/admin/ercot/lookup-esiid` uses WattBuy Electricity Info endpoint (`wbGetElectricityInfo`).
 
 Admin routes:
 
-GET /api/admin/ercot/lookup-esiid now calls WattBuy Electricity endpoint and extracts ESIID from response.
+GET /api/admin/ercot/lookup-esiid now calls WattBuy Electricity Info endpoint (`/v3/electricity/info`) and extracts ESIID from response.
 
 ESIID extraction handles multiple field name variations (esiid, esiId, esi_id, addresses[].esi, utility_info[].esiid).
 
+Property bundle and SMT Inspector: Use `/v3/electricity/info` for ESIID extraction, while `/v3/electricity` is still used for wattkey and property context.
+
 RAW→CDM:
 
-WattBuy electricity responses are captured via `wbGetElectricity` which uses `wbGet` internally (retry logic, diagnostic headers).
+WattBuy electricity/info responses are captured via `wbGetElectricityInfo` which uses `wbGet` internally (retry logic, diagnostic headers).
 
 ESIID is extracted and returned to callers; can be persisted to `HouseAddress.esiid` if needed.
 
@@ -338,7 +342,7 @@ Scope
 
 - **Prisma Models:**
   - `ErcotIngest`: Tracks ingestion history with `fileSha256` (unique), `status`, `note`, `fileUrl`, `tdsp`, `rowCount`, `headers`, `error`, `errorDetail`.
-  - `ErcotEsiidIndex`: Stores normalized ESIID data (preserved but not used for lookups; ESIID now comes from WattBuy Electricity endpoint).
+  - `ErcotEsiidIndex`: Stores normalized ESIID data (preserved but not used for lookups; ESIID now comes from WattBuy Electricity Info endpoint `/v3/electricity/info`).
 
 - **Library Functions (`lib/ercot/`):**
   - `resolve.ts`: `resolveLatestFromPage()` - Uses JSDOM to parse HTML and extract TDSP_ESIID_Extract file links.
@@ -352,7 +356,7 @@ Scope
   - `/api/admin/ercot/ingests`: List ingestion history (admin-gated).
   - `/api/admin/ercot/debug/last`: Get last ingest record (admin-gated).
   - `/api/admin/ercot/debug/url-sanity`: Test URL resolution (admin-gated).
-  - `/api/admin/ercot/lookup-esiid`: Lookup ESIID from address using WattBuy Electricity endpoint (admin-gated).
+  - `/api/admin/ercot/lookup-esiid`: Lookup ESIID from address using WattBuy Electricity Info endpoint `/v3/electricity/info` (admin-gated).
 
 - **Admin Scripts:**
   - `scripts/admin/ercot_fetch_latest.mjs`: Manual file fetch via API.
@@ -376,7 +380,7 @@ Rollback
 
 Guardrails
 
-- RAW→CDM: ERCOT data stored in `ErcotEsiidIndex` with raw JSON for traceability (preserved but not used for ESIID lookups; ESIID now comes from WattBuy Electricity endpoint).
+- RAW→CDM: ERCOT data stored in `ErcotEsiidIndex` with raw JSON for traceability (preserved but not used for ESIID lookups; ESIID now comes from WattBuy Electricity Info endpoint `/v3/electricity/info`).
 - Idempotent ingestion via SHA256 deduplication.
 - Admin-gated endpoints for security.
 - Error logging with full stack traces for debugging.
@@ -434,7 +438,7 @@ Scope
   - `/api/admin/smt/health`: SMT health check endpoint.
 
 - **ESIID Lookup (via WattBuy):**
-  - `/api/admin/ercot/lookup-esiid`: GET endpoint to find ESIID from address using WattBuy Electricity endpoint.
+  - `/api/admin/ercot/lookup-esiid`: GET endpoint to find ESIID from address using WattBuy Electricity Info endpoint (`/v3/electricity/info`).
   - Uses fuzzy matching on `serviceAddress1` and `zip`.
   - Returns best match with similarity score.
 

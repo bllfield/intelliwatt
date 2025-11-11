@@ -2,11 +2,12 @@
 
 **Goal:** On-demand per-address pull that:
 
-1) Calls `/v3/electricity` to get property context (and `wattkey`, ESIID),  
-2) Triggers SMT ingestion if an ESIID is present,  
-3) Calls `/v3/offers` with `all=true` to retrieve the full plan set, plus upgrade/solar offers.
+1) Calls `/v3/electricity` to get property context (and `wattkey`),  
+2) Calls `/v3/electricity/info` to get ESIID (for SMT trigger),  
+3) Triggers SMT ingestion if an ESIID is present,  
+4) Calls `/v3/offers` with `all=true` to retrieve the full plan set, plus upgrade/solar offers.
 
-**Note:** All WattBuy API calls use the standardized `wbGet()` function for consistency, retry logic, and diagnostic header capture (same pattern as `/v3/electricity`).
+**Note:** All WattBuy API calls use the standardized `wbGet()` function for consistency, retry logic, and diagnostic header capture. ESIID extraction specifically uses `/v3/electricity/info` endpoint.
 
 ## Endpoints (admin)
 
@@ -28,7 +29,7 @@
 
 - **all=true** returns the large set of plans; omitting it returns their "recommended" subset.
 
-- If electricity response includes an **ESIID**, we POST to your internal SMT route (best-effort).
+- ESIID is extracted from `/v3/electricity/info` response (not `/v3/electricity`). If found, we POST to your internal SMT route (best-effort).
 
 - Keep your existing Inspector UI to visualize payload shapes and headers; these routes preserve diagnostic headers.
 
