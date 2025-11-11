@@ -2,7 +2,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { scrapeLatestDailyList, downloadZip } from '@/lib/ercot/fetchDaily';
+import { getLatestDailyFiles, downloadZip } from '@/lib/ercot/fetchDaily';
 import { putObject, objectExists } from '@/lib/ercot/upload';
 import crypto from 'node:crypto';
 
@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const { postedAt, files } = await scrapeLatestDailyList(ercotPage);
+    const { postedAt, files } = await getLatestDailyFiles(ercotPage);
     // Partition key: YYYY-MM-DD
     const yyyy = postedAt.getUTCFullYear();
     const mm = String(postedAt.getUTCMonth() + 1).padStart(2, '0');
