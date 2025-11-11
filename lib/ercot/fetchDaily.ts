@@ -10,7 +10,7 @@ export type ErcotFile = {
   postedAt: Date;     // UTC
 };
 
-const PRODUCT_ID = (process.env.ERCOT_PRODUCT_ID || 'ZP15-612').toLowerCase(); // emil id
+const PRODUCT_ID = process.env.ERCOT_PRODUCT_ID || 'ZP15-612'; // Keep original case (API may be case-sensitive)
 
 function toAbs(base: string, rel: string) {
   try { return new URL(rel, base).toString(); } catch { return rel; }
@@ -23,24 +23,30 @@ export async function getLatestDailyFiles(ercotPageUrl: string): Promise<{ poste
   if (subKey) {
     const idToken = await getErcotIdToken();
     const root = 'https://api.ercot.com/api/public-reports';
-    const productUrl = `${root}/${PRODUCT_ID}`;
     const commonHeaders = {
       'Ocp-Apim-Subscription-Key': subKey,
       'Authorization': `Bearer ${idToken}`,
       'Accept': 'application/json',
     } as const;
 
-    const res = await fetch(productUrl, { headers: commonHeaders, cache: 'no-store' });
-    if (!res.ok) {
-      throw new Error(`ERCOT API product fetch failed ${res.status} ${await res.text()}`);
+    // Try direct archive endpoint first (more reliable than product endpoint)
+    let archiveHref = `${root}/archive/${PRODUCT_ID}`;
+    let archRes = await fetch(archiveHref, { headers: commonHeaders, cache: 'no-store' });
+
+    // If archive endpoint fails, try product endpoint to get archive link
+    if (!archRes.ok && archRes.status === 404) {
+      const productUrl = `${root}/${PRODUCT_ID}`;
+      const prodRes = await fetch(productUrl, { headers: commonHeaders, cache: 'no-store' });
+      if (prodRes.ok) {
+        const prod = await prodRes.json();
+        archiveHref = prod?._links?.archive?.href || archiveHref;
+        archRes = await fetch(archiveHref, { headers: commonHeaders, cache: 'no-store' });
+      } else {
+        const errorText = await prodRes.text().catch(() => '');
+        throw new Error(`ERCOT API product '${PRODUCT_ID}' not found. Tried: ${productUrl} and ${archiveHref}. Error: ${errorText}`);
+      }
     }
 
-    const prod = await res.json();
-    const archiveHref: string =
-      prod?._links?.archive?.href ||
-      `${root}/archive/${PRODUCT_ID}`;
-
-    const archRes = await fetch(archiveHref, { headers: commonHeaders, cache: 'no-store' });
     if (!archRes.ok) {
       throw new Error(`ERCOT API archive fetch failed ${archRes.status} ${await archRes.text()}`);
     }
