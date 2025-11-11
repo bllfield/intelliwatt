@@ -21,123 +21,114 @@ export async function getLatestDailyFiles(ercotPageUrl: string): Promise<{ poste
 
   // Prefer API mode whenever subscription key is present; fetch fresh id_token each run.
   if (subKey) {
-    const idToken = await getErcotIdToken();
-    const root = 'https://api.ercot.com/api/public-reports';
-    const commonHeaders = {
-      'Ocp-Apim-Subscription-Key': subKey,
-      'Authorization': `Bearer ${idToken}`,
-      'Accept': 'application/json',
-    } as const;
+    try {
+      const idToken = await getErcotIdToken();
+      const root = 'https://api.ercot.com/api/public-reports';
+      const commonHeaders = {
+        'Ocp-Apim-Subscription-Key': subKey,
+        'Authorization': `Bearer ${idToken}`,
+        'Accept': 'application/json',
+      } as const;
 
-    // Try multiple endpoint strategies:
-    // 1. Direct archive endpoint
-    // 2. Product endpoint to get archive link
-    // 3. Products list to find correct product ID (by name/description matching TDSP ESIID)
-    
-    let archiveHref = `${root}/archive/${PRODUCT_ID}`;
-    let archRes = await fetch(archiveHref, { headers: commonHeaders, cache: 'no-store' });
+      // Try multiple endpoint strategies:
+      // 1. Direct archive endpoint
+      // 2. Product endpoint to get archive link
+      // 3. Products list to find correct product ID (by name/description matching TDSP ESIID)
+      
+      let archiveHref = `${root}/archive/${PRODUCT_ID}`;
+      let archRes = await fetch(archiveHref, { headers: commonHeaders, cache: 'no-store' });
 
-    // If archive endpoint fails, try product endpoint
-    if (!archRes.ok && archRes.status === 404) {
-      const productUrl = `${root}/${PRODUCT_ID}`;
-      const prodRes = await fetch(productUrl, { headers: commonHeaders, cache: 'no-store' });
-      if (prodRes.ok) {
-        const prod = await prodRes.json();
-        archiveHref = prod?._links?.archive?.href || archiveHref;
-        archRes = await fetch(archiveHref, { headers: commonHeaders, cache: 'no-store' });
-      } else {
-        // Query products list to find TDSP ESIID product
-        const productsListUrl = `${root}`;
-        const listRes = await fetch(productsListUrl, { headers: commonHeaders, cache: 'no-store' });
-        if (listRes.ok) {
-          const listJson = await listRes.json().catch(() => null);
-          const products: any[] = listJson?._embedded?.products || listJson?.products || [];
-          // Look for TDSP ESIID product (case-insensitive search with multiple strategies)
-          const tdspProduct = products.find((p: any) => {
-            const name = (p.name || '').toUpperCase();
-            const desc = (p.description || '').toUpperCase();
-            const emilId = (p.emilId || '').toUpperCase();
-            // Strategy 1: Exact emilId match
-            if (emilId === PRODUCT_ID.toUpperCase() || emilId === 'ZP15-612') return true;
-            // Strategy 2: TDSP + ESIID in name/description
-            if (name.includes('TDSP') && (name.includes('ESIID') || name.includes('ESI ID') || name.includes('EXTRACT'))) return true;
-            if (desc.includes('TDSP') && (desc.includes('ESIID') || desc.includes('ESI ID') || desc.includes('EXTRACT'))) return true;
-            // Strategy 3: Look for "ZP15" in emilId (might be different format)
-            if (emilId.includes('ZP15') || emilId.includes('ZP-15')) return true;
-            // Strategy 4: Look for "DAILY" + "TDSP" or "DAILY" + "EXTRACT"
-            if ((name.includes('DAILY') || desc.includes('DAILY')) && (name.includes('TDSP') || name.includes('EXTRACT') || desc.includes('TDSP') || desc.includes('EXTRACT'))) return true;
-            return false;
-          });
-          
-          if (tdspProduct?.emilId) {
-            // Found the product, use its emilId
-            const correctEmilId = tdspProduct.emilId;
-            archiveHref = `${root}/archive/${correctEmilId}`;
-            archRes = await fetch(archiveHref, { headers: commonHeaders, cache: 'no-store' });
-            if (archRes.ok) {
-              // Success! Continue with the correct product ID
-            } else {
-              const errorText = await archRes.text().catch(() => '');
-              throw new Error(`ERCOT API: Found TDSP ESIID product '${correctEmilId}' but archive endpoint failed ${archRes.status}: ${errorText}`);
-            }
-          } else {
-            // Product not found in list - show all products for debugging
-            const allProducts = products.map((p: any) => `${p.emilId}: ${p.name || p.description || 'N/A'}`).join('\n  ');
-            const errorText = await prodRes.text().catch(() => '');
-            throw new Error(`ERCOT API product '${PRODUCT_ID}' not found. Searched ${products.length} products with keywords: TDSP, ESIID, EXTRACT, ZP15, DAILY.\n\nAll available products:\n  ${allProducts}\n\nProduct error: ${errorText}`);
-          }
+      // If archive endpoint fails, try product endpoint
+      if (!archRes.ok && archRes.status === 404) {
+        const productUrl = `${root}/${PRODUCT_ID}`;
+        const prodRes = await fetch(productUrl, { headers: commonHeaders, cache: 'no-store' });
+        if (prodRes.ok) {
+          const prod = await prodRes.json();
+          archiveHref = prod?._links?.archive?.href || archiveHref;
+          archRes = await fetch(archiveHref, { headers: commonHeaders, cache: 'no-store' });
         } else {
-          const errorText = await prodRes.text().catch(() => '');
-          throw new Error(`ERCOT API product '${PRODUCT_ID}' not found. Tried: ${productUrl} and ${archiveHref}. Products list also failed ${listRes.status}. Product error: ${errorText}`);
+          // Query products list to find TDSP ESIID product
+          const productsListUrl = `${root}`;
+          const listRes = await fetch(productsListUrl, { headers: commonHeaders, cache: 'no-store' });
+          if (listRes.ok) {
+            const listJson = await listRes.json().catch(() => null);
+            const products: any[] = listJson?._embedded?.products || listJson?.products || [];
+            // Look for TDSP ESIID product (case-insensitive search with multiple strategies)
+            const tdspProduct = products.find((p: any) => {
+              const name = (p.name || '').toUpperCase();
+              const desc = (p.description || '').toUpperCase();
+              const emilId = (p.emilId || '').toUpperCase();
+              // Strategy 1: Exact emilId match
+              if (emilId === PRODUCT_ID.toUpperCase() || emilId === 'ZP15-612') return true;
+              // Strategy 2: TDSP + ESIID in name/description
+              if (name.includes('TDSP') && (name.includes('ESIID') || name.includes('ESI ID') || name.includes('EXTRACT'))) return true;
+              if (desc.includes('TDSP') && (desc.includes('ESIID') || desc.includes('ESI ID') || desc.includes('EXTRACT'))) return true;
+              // Strategy 3: Look for "ZP15" in emilId (might be different format)
+              if (emilId.includes('ZP15') || emilId.includes('ZP-15')) return true;
+              // Strategy 4: Look for "DAILY" + "TDSP" or "DAILY" + "EXTRACT"
+              if ((name.includes('DAILY') || desc.includes('DAILY')) && (name.includes('TDSP') || name.includes('EXTRACT') || desc.includes('TDSP') || desc.includes('EXTRACT'))) return true;
+              return false;
+            });
+            
+            if (tdspProduct?.emilId) {
+              // Found the product, use its emilId
+              const correctEmilId = tdspProduct.emilId;
+              archiveHref = `${root}/archive/${correctEmilId}`;
+              archRes = await fetch(archiveHref, { headers: commonHeaders, cache: 'no-store' });
+            }
+          }
         }
       }
+
+      // If API succeeded, process the response
+      if (archRes.ok) {
+        const archiveJson = await archRes.json();
+        const artifacts: any[] = archiveJson?._embedded?.artifacts || archiveJson?.artifacts || [];
+
+        if (!artifacts.length) throw new Error('ERCOT API returned no artifacts for this product');
+
+        artifacts.sort((a, b) => new Date(b.postDateTime).getTime() - new Date(a.postDateTime).getTime());
+
+        const latestPost = artifacts[0]?.postDateTime ? new Date(artifacts[0].postDateTime) : null;
+        if (!latestPost) throw new Error('ERCOT API artifacts missing postDateTime');
+
+        const sameDay = artifacts.filter(a => new Date(a.postDateTime).getTime() === latestPost.getTime());
+
+        const files: ErcotFile[] = sameDay
+          .filter(a =>
+            (a.fileName || '').toLowerCase().endsWith('.zip') ||
+            (a._links?.download?.href || '').toLowerCase().endsWith('.zip')
+          )
+          .map(a => {
+            const href = a._links?.download?.href || a.downloadUrl || '';
+            const filename = (a.fileName || href.split('/').pop() || '').trim();
+            const display = (a.displayName || filename || '').toUpperCase();
+            const tdspGuess = (display.match(/ONCOR|CENTERPOINT|AEP[_\s]?NORTH|AEP[_\s]?CENTRAL|TNMP|LUBBOCK/i)?.[0] || 'UNKNOWN')
+              .replace(/\s+/g, '_')
+              .replace(/__+/g, '_')
+              .toUpperCase();
+
+            const tdsp = tdspGuess.includes('AEP_NORTH') ? 'AEP_NORTH____DAILY'
+                      : tdspGuess.includes('AEP_CENTRAL') ? 'AEP_CENTRAL__DAILY'
+                      : tdspGuess.includes('CENTERPOINT') ? 'CENTERPOINT__DAILY'
+                      : tdspGuess.includes('ONCOR') ? 'ONCOR_ELEC___DAILY'
+                      : tdspGuess.includes('TNMP') ? 'TNMP_________DAILY'
+                      : tdspGuess.includes('LUBBOCK') ? 'LUBBOCK______DAILY'
+                      : tdspGuess;
+
+            return { tdsp, href, filename, postedAt: latestPost! };
+          });
+
+        if (!files.length) throw new Error('ERCOT API returned artifacts but none looked like .zip');
+
+        return { postedAt: latestPost!, files };
+      }
+      // If API failed, fall through to HTML scraping (don't throw error yet)
+      console.warn(`ERCOT API: Product '${PRODUCT_ID}' not found in API. Falling back to HTML scraping.`);
+    } catch (apiError: any) {
+      // API mode failed, fall through to HTML scraping
+      console.warn(`ERCOT API error: ${apiError?.message || String(apiError)}. Falling back to HTML scraping.`);
     }
-
-    if (!archRes.ok) {
-      const errorText = await archRes.text().catch(() => '');
-      throw new Error(`ERCOT API archive fetch failed ${archRes.status}: ${errorText}`);
-    }
-
-    const archiveJson = await archRes.json();
-    const artifacts: any[] = archiveJson?._embedded?.artifacts || archiveJson?.artifacts || [];
-
-    if (!artifacts.length) throw new Error('ERCOT API returned no artifacts for this product');
-
-    artifacts.sort((a, b) => new Date(b.postDateTime).getTime() - new Date(a.postDateTime).getTime());
-
-    const latestPost = artifacts[0]?.postDateTime ? new Date(artifacts[0].postDateTime) : null;
-    if (!latestPost) throw new Error('ERCOT API artifacts missing postDateTime');
-
-    const sameDay = artifacts.filter(a => new Date(a.postDateTime).getTime() === latestPost.getTime());
-
-    const files: ErcotFile[] = sameDay
-      .filter(a =>
-        (a.fileName || '').toLowerCase().endsWith('.zip') ||
-        (a._links?.download?.href || '').toLowerCase().endsWith('.zip')
-      )
-      .map(a => {
-        const href = a._links?.download?.href || a.downloadUrl || '';
-        const filename = (a.fileName || href.split('/').pop() || '').trim();
-        const display = (a.displayName || filename || '').toUpperCase();
-        const tdspGuess = (display.match(/ONCOR|CENTERPOINT|AEP[_\s]?NORTH|AEP[_\s]?CENTRAL|TNMP|LUBBOCK/i)?.[0] || 'UNKNOWN')
-          .replace(/\s+/g, '_')
-          .replace(/__+/g, '_')
-          .toUpperCase();
-
-        const tdsp = tdspGuess.includes('AEP_NORTH') ? 'AEP_NORTH____DAILY'
-                  : tdspGuess.includes('AEP_CENTRAL') ? 'AEP_CENTRAL__DAILY'
-                  : tdspGuess.includes('CENTERPOINT') ? 'CENTERPOINT__DAILY'
-                  : tdspGuess.includes('ONCOR') ? 'ONCOR_ELEC___DAILY'
-                  : tdspGuess.includes('TNMP') ? 'TNMP_________DAILY'
-                  : tdspGuess.includes('LUBBOCK') ? 'LUBBOCK______DAILY'
-                  : tdspGuess;
-
-        return { tdsp, href, filename, postedAt: latestPost! };
-      });
-
-    if (!files.length) throw new Error('ERCOT API returned artifacts but none looked like .zip');
-
-    return { postedAt: latestPost!, files };
   }
 
   // --- HTML FALLBACK (best-effort) ---
