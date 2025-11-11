@@ -29,11 +29,15 @@ export async function getLatestDailyFiles(ercotPageUrl: string): Promise<{ poste
       'Accept': 'application/json',
     } as const;
 
-    // Try direct archive endpoint first (more reliable than product endpoint)
+    // Try multiple endpoint strategies:
+    // 1. Direct archive endpoint
+    // 2. Product endpoint to get archive link
+    // 3. Products list to find correct product ID
+    
     let archiveHref = `${root}/archive/${PRODUCT_ID}`;
     let archRes = await fetch(archiveHref, { headers: commonHeaders, cache: 'no-store' });
 
-    // If archive endpoint fails, try product endpoint to get archive link
+    // If archive endpoint fails, try product endpoint
     if (!archRes.ok && archRes.status === 404) {
       const productUrl = `${root}/${PRODUCT_ID}`;
       const prodRes = await fetch(productUrl, { headers: commonHeaders, cache: 'no-store' });
@@ -42,13 +46,18 @@ export async function getLatestDailyFiles(ercotPageUrl: string): Promise<{ poste
         archiveHref = prod?._links?.archive?.href || archiveHref;
         archRes = await fetch(archiveHref, { headers: commonHeaders, cache: 'no-store' });
       } else {
+        // Try products list to see what's available
+        const productsListUrl = `${root}`;
+        const listRes = await fetch(productsListUrl, { headers: commonHeaders, cache: 'no-store' });
+        const listText = listRes.ok ? await listRes.text().catch(() => '') : '';
         const errorText = await prodRes.text().catch(() => '');
-        throw new Error(`ERCOT API product '${PRODUCT_ID}' not found. Tried: ${productUrl} and ${archiveHref}. Error: ${errorText}`);
+        throw new Error(`ERCOT API product '${PRODUCT_ID}' not found. Tried: ${productUrl} and ${archiveHref}. Product list available at: ${productsListUrl}. Product error: ${errorText}. List preview: ${listText.slice(0, 500)}`);
       }
     }
 
     if (!archRes.ok) {
-      throw new Error(`ERCOT API archive fetch failed ${archRes.status} ${await archRes.text()}`);
+      const errorText = await archRes.text().catch(() => '');
+      throw new Error(`ERCOT API archive fetch failed ${archRes.status}: ${errorText}`);
     }
 
     const archiveJson = await archRes.json();
