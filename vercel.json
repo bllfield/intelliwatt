@@ -5,6 +5,6 @@
   "installCommand": "npm install",
   "outputDirectory": ".next",
   "crons": [
-    { "path": "/api/admin/ercot/cron", "schedule": "0 6 * * *" }
+    { "path": "/api/admin/ercot/cron", "schedule": "0 12 * * *" }
   ]
 }
