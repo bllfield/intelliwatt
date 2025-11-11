@@ -93,7 +93,7 @@ export default function WattBuyInspector() {
         </div>
 
         <div className="p-4 rounded-2xl border">
-          <h2 className="font-medium mb-3">By Utility</h2>
+          <h2 className="font-medium mb-3">Regulated Utilities</h2>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-sm mb-1">utilityID</label>
@@ -109,13 +109,13 @@ export default function WattBuyInspector() {
             className="mt-3 px-3 py-2 rounded-lg border hover:bg-gray-50"
             disabled={loading || !ready}
           >
-            {loading ? 'Loading…' : 'Get Retail Rates (utilityID+state)'}
+            {loading ? 'Loading…' : 'Regulated Utility Rates'}
           </button>
         </div>
       </section>
 
       <section className="p-4 rounded-2xl border">
-        <h2 className="font-medium mb-3">By Address</h2>
+        <h2 className="font-medium mb-3">Deregulated Plan Tools</h2>
         <div className="grid md:grid-cols-4 gap-3">
           <div>
             <label className="block text-sm mb-1">Address</label>
@@ -140,70 +140,35 @@ export default function WattBuyInspector() {
             className="px-3 py-2 rounded-lg border hover:bg-gray-50"
             disabled={loading || !ready}
           >
-            {loading ? 'Loading…' : 'Retail Rates (derive utilityID)'}
+            {loading ? 'Loading…' : 'Regulated Utility Rates'}
           </button>
           <button
             onClick={() => hit(`/api/admin/wattbuy/electricity/info?${qsAddr}&housing_chars=true&utility_list=true`)}
             className="px-3 py-2 rounded-lg border hover:bg-gray-50"
             disabled={loading || !ready}
           >
-            {loading ? 'Loading…' : 'Electricity Info (ESIID, utilities)'}
+            {loading ? 'Loading…' : 'Utility & ESIID Info'}
           </button>
           <button
             onClick={() => hit(`/api/admin/wattbuy/electricity?${qsAddr}`)}
             className="px-3 py-2 rounded-lg border hover:bg-gray-50"
             disabled={loading || !ready}
           >
-            {loading ? 'Loading…' : 'Electricity (estimation bundle)'}
-          </button>
-          <button
-            className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-50"
-            disabled={!ready || loading}
-            onClick={async () => {
-              const u = new URLSearchParams();
-              if (address) u.set('address', address);
-              if (city) u.set('city', city);
-              if (state) u.set('state', state);
-              if (zip) u.set('zip', zip);
-              setLoading(true);
-              setResult(null);
-              setRaw(null);
-              try {
-                const r = await fetch(`/api/admin/wattbuy/electricity?${u}`, {
-                  headers: { 'x-admin-token': token },
-                });
-                const j = await r.json();
-                setRaw(j);
-                setResult({
-                  status: j.status,
-                  where: j.where,
-                  headers: j.headers,
-                  topType: j?.shape?.topType,
-                  topKeys: j?.shape?.keys,
-                  note: j.usedWattkey ? 'Fetched via wattkey fallback' : undefined,
-                } as any);
-              } catch (e: any) {
-                setResult({ ok: false, status: 500, error: e?.message || 'fetch failed' });
-              } finally {
-                setLoading(false);
-              }
-            }}
-          >
-            {loading ? 'Loading…' : 'Electricity (robust)'}
+            {loading ? 'Loading…' : 'Electricity Estimates'}
           </button>
           <button
             onClick={() => hit(`/api/admin/wattbuy/offers-by-address?${qsAddr}&all=true`)}
             className="px-3 py-2 rounded-lg border hover:bg-gray-50"
             disabled={loading || !ready}
           >
-            {loading ? 'Loading…' : 'Offers (by address)'}
+            {loading ? 'Loading…' : 'Deregulated Plan Options'}
           </button>
           <button
             onClick={() => hit(`/api/admin/wattbuy/property-bundle?${qsAddr}`)}
             className="px-3 py-2 rounded-lg border hover:bg-gray-50 bg-green-50"
             disabled={loading || !ready}
           >
-            {loading ? 'Loading…' : 'Property Bundle (electricity → SMT → offers)'}
+            {loading ? 'Loading…' : 'Property Bundle (WattBuy → SMT usage → offers)'}
           </button>
         </div>
       </section>

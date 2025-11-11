@@ -92,20 +92,30 @@ async function kickSmtIfPossible(address: string, city: string, state: string, z
   try {
     // Get ESIID from /v3/electricity/info endpoint (not /v3/electricity)
     const infoRes = await wbGetElectricityInfo({ address, city, state, zip, utility_list: 'true' });
-    
+
+    const infoSummary = infoRes?.data
+      ? {
+          status: infoRes.status,
+          headers: infoRes.headers,
+          sampleKeys: Object.keys(infoRes.data ?? {}).slice(0, 20),
+          data: infoRes.data,
+        }
+      : undefined;
+
     if (!infoRes.ok || !infoRes.data) {
       return {
         kicked: false,
         reason: 'ELECTRICITY_INFO_FAILED',
         status: infoRes.status,
         error: 'Failed to fetch electricity/info for ESIID extraction',
+        info: infoSummary,
       };
     }
-    
+
     // Extract ESIID from electricity/info response
     const info = infoRes.data;
     const esiid = extractEsiidFromElectricity(info);
-    
+
     if (!esiid) {
       // Return diagnostic info to help debug
       return {
@@ -116,13 +126,14 @@ async function kickSmtIfPossible(address: string, city: string, state: string, z
           topLevelKeys: info && typeof info === 'object' ? Object.keys(info).slice(0, 20) : [],
           sampleStructure: info ? JSON.stringify(info).slice(0, 500) : null,
         },
+        info: infoSummary,
       };
     }
-    
+
     // Use the SMT pull endpoint
     const SMT_BASE = process.env.PROD_BASE_URL ?? process.env.NEXT_PUBLIC_BASE_URL ?? '';
-    if (!SMT_BASE) return { kicked: false, reason: 'NO_PROD_BASE_URL', esiid };
-    
+    if (!SMT_BASE) return { kicked: false, reason: 'NO_PROD_BASE_URL', esiid, info: infoSummary };
+
     const url = `${SMT_BASE}/api/admin/smt/pull`;
     const r = await fetch(url, {
       method: 'POST',
@@ -138,6 +149,7 @@ async function kickSmtIfPossible(address: string, city: string, state: string, z
       status: r.status,
       esiid, // Include ESIID in response for verification
       response: data,
+      info: infoSummary,
     };
   } catch (err: any) {
     return { kicked: false, reason: 'SMT_KICK_ERROR', error: err?.message };
@@ -174,20 +186,6 @@ export async function GET(req: NextRequest) {
         : { address, city, state, zip, language, is_renter, all: true }
     );
 
-    // Get electricity/info data for ESIID debugging (if SMT kick failed)
-    let electricityInfo: any = null;
-    if (!smtKick.kicked && smtKick.reason === 'NO_ESIID_IN_RESPONSE') {
-      const infoRes = await wbGetElectricityInfo({ address, city, state, zip, utility_list: 'true' }).catch(() => null);
-      if (infoRes?.ok) {
-        electricityInfo = {
-          status: infoRes.status,
-          headers: infoRes.headers,
-          data: infoRes.data,
-          sampleKeys: Object.keys(infoRes.data ?? {}),
-        };
-      }
-    }
-
     return NextResponse.json({
       ok: true,
       where: { address, city, state, zip },
@@ -197,7 +195,7 @@ export async function GET(req: NextRequest) {
         sampleKeys: Object.keys(elec.data ?? {}),
         data: elec.data, // Full electricity data (for wattkey)
       },
-      electricityInfo, // Include electricity/info data if ESIID lookup failed
+      electricityInfo: smtKick.info ?? null,
       smtKick,
       offers: { status: offers.status, headers: offers.headers, topKeys: offers.data ? Object.keys(offers.data) : null, data: offers.data },
     }, { status: 200 });
