@@ -467,49 +467,33 @@ export async function lookupEsiId(addr: EsiLookupInput): Promise<EsiLookupResult
 
 // --- OFFERS + ELECTRICITY (WattBuy) ---
 // Notes:
-// - Uses the already-working electricity details call (getElectricity).
+// - Uses the already-working electricity details call (getElectricityRobust from electricity.ts).
 // - For offers, we default to `all=true` to retrieve the complete plan list.
 // - Offers can be queried via address OR via wattkey (preferred after electricity call).
-// - We keep our diagnostics (request ids) consistent with prior style.
+// - Uses wbGet() for consistency with other WattBuy endpoints (retry logic, diagnostic headers).
 
-type WBHeaders = Record<string, string>;
-function wbHeaders(extra: WBHeaders = {}): WBHeaders {
-  return {
-    'x-api-key': apiKey(),
-    'content-type': 'application/json',
-    ...extra,
-  };
-}
-
-// Electricity details (already working in your app—keeping a local helper for reuse)
+// Electricity details - use getElectricityRobust from electricity.ts for robust fetching
+// This is a thin wrapper that uses wbGet internally
 export async function wbGetElectricity(params: {
   address?: string; city?: string; state: string; zip: string;
   wattkey?: string;
 }) {
-  const u = new URL(`${WB_BASE}/electricity`);
-  for (const [k, v] of Object.entries(params)) {
-    if (v !== undefined && v !== null && String(v).length > 0) {
-      u.searchParams.set(k, String(v));
-    }
+  // Use the robust electricity fetcher which handles retries and fallbacks
+  const { getElectricityRobust } = await import('./electricity');
+  if (params.wattkey) {
+    // Direct wattkey lookup
+    return await wbGet<any>('electricity', { wattkey: params.wattkey }, undefined, 1);
   }
-  const res = await fetch(u.toString(), { headers: wbHeaders() });
-  const text = await res.text();
-  let data: any = null;
-  try { data = JSON.parse(text); } catch { /* keep raw */ }
-  return {
-    ok: res.ok,
-    status: res.status,
-    headers: {
-      'x-amzn-requestid': res.headers.get('x-amzn-requestid') ?? undefined,
-      'x-documentation-url': res.headers.get('x-documentation-url') ?? undefined,
-      'x-amz-apigw-id': res.headers.get('x-amz-apigw-id') ?? undefined,
-      'content-type': res.headers.get('content-type') ?? undefined,
-    },
-    data: data ?? text,
-  };
+  return await getElectricityRobust({
+    address: params.address,
+    city: params.city,
+    state: params.state,
+    zip: params.zip,
+  });
 }
 
 // Offers: address-based OR wattkey-based.
+// Uses wbGet() for consistency with other WattBuy endpoints
 // Defaults: language='en', is_renter=false, all=true
 export async function wbGetOffers(params: {
   address?: string; city?: string; state?: string; zip?: string;
@@ -520,36 +504,29 @@ export async function wbGetOffers(params: {
   utility_eid?: number;
   category?: string;
 }) {
-  const u = new URL(`${WB_BASE}/offers`);
   const {
     language = 'en',
     is_renter = false,
     all = true,
     ...rest
   } = params ?? {};
-  u.searchParams.set('language', String(language));
-  u.searchParams.set('is_renter', String(is_renter));
-  u.searchParams.set('all', String(all)); // force full plan list by default
+
+  // Build params object for wbGet
+  const queryParams: Record<string, unknown> = {
+    language: String(language),
+    is_renter: String(is_renter),
+    all: String(all), // force full plan list by default
+  };
+
+  // Add rest of params (wattkey, address, city, state, zip, utility_eid, category)
   for (const [k, v] of Object.entries(rest)) {
     if (v !== undefined && v !== null && String(v).length > 0) {
-      u.searchParams.set(k, String(v));
+      queryParams[k] = v;
     }
   }
-  const res = await fetch(u.toString(), { headers: wbHeaders() });
-  const text = await res.text();
-  let data: any = null;
-  try { data = JSON.parse(text); } catch { /* keep raw */ }
-  return {
-    ok: res.ok,
-    status: res.status,
-    headers: {
-      'x-amzn-requestid': res.headers.get('x-amzn-requestid') ?? undefined,
-      'x-documentation-url': res.headers.get('x-documentation-url') ?? undefined,
-      'x-amz-apigw-id': res.headers.get('x-amz-apigw-id') ?? undefined,
-      'content-type': res.headers.get('content-type') ?? undefined,
-    },
-    data: data ?? text,
-  };
+
+  // Use wbGet for consistency with other endpoints (retry logic, diagnostic headers)
+  return await wbGet<any>('offers', queryParams, undefined, 1);
 }
 
 // Utility helper to extract useful bits from electricity payload

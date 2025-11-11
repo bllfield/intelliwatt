@@ -13,16 +13,39 @@ export const dynamic = 'force-dynamic';
 async function kickSmtIfPossible(elec: any) {
   try {
     // Try to find ESIID from electricity details (field name varies by account).
-    const esiid = elec?.esiid ?? elec?.esiId ?? elec?.esi_id ?? undefined;
-    if (!esiid) return { kicked: false };
-    // If you already have an internal SMT trigger route, call it here:
-    const SMT_BASE = process.env.PROD_BASE_URL ?? '';
+    // Check direct fields first
+    let esiid = elec?.esiid ?? elec?.esiId ?? elec?.esi_id ?? undefined;
+    
+    // Try addresses array
+    if (!esiid && Array.isArray(elec?.addresses) && elec.addresses.length > 0) {
+      const addr = elec.addresses[0];
+      esiid = addr.esi || addr.esiid || addr.esi_id || undefined;
+    }
+    
+    // Try utility_info array
+    if (!esiid && Array.isArray(elec?.utility_info) && elec.utility_info.length > 0) {
+      const ui = elec.utility_info[0];
+      esiid = ui.esiid || ui.esiId || ui.esi_id || undefined;
+    }
+    
+    if (!esiid) return { kicked: false, reason: 'NO_ESIID_IN_RESPONSE' };
+    
+    // Use the SMT pull endpoint
+    const SMT_BASE = process.env.PROD_BASE_URL ?? process.env.NEXT_PUBLIC_BASE_URL ?? '';
     if (!SMT_BASE) return { kicked: false, reason: 'NO_PROD_BASE_URL' };
-    const url = `${SMT_BASE}/api/admin/smt/request?esiid=${encodeURIComponent(esiid)}`;
-    const r = await fetch(url, { method: 'POST', headers: { 'x-admin-token': process.env.ADMIN_TOKEN || '' } });
-    return { kicked: true, status: r.status };
-  } catch {
-    return { kicked: false };
+    const url = `${SMT_BASE}/api/admin/smt/pull`;
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'x-admin-token': process.env.ADMIN_TOKEN || '',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ esiid }),
+    });
+    const data = await r.json().catch(() => ({}));
+    return { kicked: true, status: r.status, response: data };
+  } catch (err: any) {
+    return { kicked: false, reason: 'SMT_KICK_ERROR', error: err?.message };
   }
 }
 

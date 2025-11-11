@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
 const TABLE_WHITELIST = [
   'HouseAddress',
   'ErcotIngest',
-  'ErcotEsiidIndex',
+  // 'ErcotEsiidIndex', // Removed: ESIID lookup now uses WattBuy, not ERCOT database
   'RatePlan',
   'RawSmtFile',
   'SmtInterval'

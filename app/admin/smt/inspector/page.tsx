@@ -164,11 +164,16 @@ export default function SMTInspector() {
     setRaw(null);
     setFoundEsiid(null);
     try {
-      // Step 1: Lookup ESIID via ERCOT
-      const lookupRes = await fetch('/api/admin/ercot/lookup-esiid', {
-        method: 'POST',
-        headers: { 'x-admin-token': token, 'content-type': 'application/json' },
-        body: JSON.stringify(address),
+      // Step 1: Lookup ESIID via WattBuy Electricity endpoint
+      const params = new URLSearchParams({
+        line1: address.line1,
+        city: address.city,
+        state: address.state,
+        zip: address.zip,
+      });
+      const lookupRes = await fetch(`/api/admin/ercot/lookup-esiid?${params.toString()}`, {
+        method: 'GET',
+        headers: { 'x-admin-token': token },
       });
       const lookupData = await lookupRes.json().catch(() => ({ error: 'Failed to parse JSON' }));
       
@@ -261,7 +266,7 @@ export default function SMTInspector() {
 
       <section className="p-4 rounded-2xl border">
         <h2 className="font-medium mb-3">Address to SMT Pull</h2>
-        <p className="text-sm text-gray-600 mb-3">Enter an address to lookup ESIID via ERCOT, then trigger SMT pull</p>
+        <p className="text-sm text-gray-600 mb-3">Enter an address to lookup ESIID via WattBuy Electricity endpoint, then trigger SMT pull</p>
         <div className="grid md:grid-cols-4 gap-4 mb-4">
           <div>
             <label className="block text-sm mb-1">Address Line 1</label>

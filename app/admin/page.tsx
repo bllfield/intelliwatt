@@ -162,7 +162,7 @@ export default function AdminDashboard() {
               className="block p-4 border-2 border-brand-blue/20 rounded-lg hover:border-brand-blue hover:bg-brand-blue/5 transition-colors"
             >
               <div className="font-semibold text-brand-navy mb-1">🔍 WattBuy Inspector</div>
-              <div className="text-sm text-brand-navy/60">Test and inspect WattBuy API endpoints with real-time metadata</div>
+              <div className="text-sm text-brand-navy/60">Test electricity, retail rates, and offers endpoints with real-time metadata</div>
             </a>
             <a
               href="/admin/smt/inspector"

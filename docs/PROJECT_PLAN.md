@@ -155,61 +155,60 @@ Capture Smart Meter Texas files in RAW form before any parsing, maintaining RAW�
 
 - Droplet env: `/home/deploy/smt_ingest/.env` includes `SHARED_INGEST_SECRET=...`.
 
-PC-2025-11-07: ESIID Source Cutover (ERCOT-only; remove WattBuy ESIID)
+PC-2025-11-07: ESIID Source Cutover (WattBuy Electricity endpoint)
 
 Rationale
 
-- ESIID resolution must come exclusively from ERCOT daily extracts / Agreement APIs to keep UI/CDM stable and vendor-agnostic. (ESIID is optional in CDM; we continue to persist it on `HouseAddress`.)
+- ESIID resolution now uses WattBuy's `/v3/electricity` endpoint, which provides reliable ESIID data along with property context. This simplifies our architecture by using a single vendor for both ESIID and plan data.
 
 Scope
 
-- Feature-flag and deprecate admin routes:
+- ESIID lookup endpoint `/api/admin/ercot/lookup-esiid` now uses WattBuy Electricity endpoint instead of ERCOT database.
 
-  - `/api/admin/address/resolve-esiid` and `/api/admin/address/resolve-and-save` (WattBuy-backed lookups) are now gated off and scheduled for removal.
+- ERCOT database (`ErcotEsiidIndex`) is preserved but no longer used for ESIID lookups. ERCOT ingestion continues for historical/backup purposes.
 
-- Keep WattBuy for plan pulls only (address/zip and TDSP where available), **never** for ESIID.
+- WattBuy Electricity endpoint provides ESIID in various field names (esiid, esiId, esi_id, addresses[].esi, utility_info[].esiid).
 
-- Update docs and flags; add a probe endpoint for WattBuy offers.
+- All ESIID lookup logic preserved; only the data source changed from ERCOT database to WattBuy API.
 
 Rollback
 
-- Re-enable the two admin routes via feature flag `wattbuyEsiidDisabled=false` if emergency rollback is required.
+- ERCOT database lookup logic remains in codebase but is not wired to database queries. Can be re-enabled if needed.
 
 Guardrails
 
 - CDM-first API consumption and RAW→CDM discipline remain unchanged.
+- ESIID is optional in CDM; we continue to persist it on `HouseAddress`.
 
 
 
-PC-2025-11-01: ESIID Resolver — Switch to ERCOT (Deprecate WattBuy for ESIID)
+PC-2025-11-01: ESIID Resolver — Use WattBuy Electricity Endpoint
 
 Rationale
 
-We will source ESIID from ERCOT/SMT flows going forward. WattBuy is no longer used for ESIID lookups.
+We source ESIID from WattBuy's `/v3/electricity` endpoint, which provides reliable ESIID data along with property context. This simplifies our architecture by using WattBuy for both ESIID and plan data.
 
 Scope
 
-Provider flag: RESOLVER_PROVIDER=ercot (default).
-
-Resolver: lib/resolver/addressToEsiid.ts routes to ERCOT resolver implementation.
+ESIID lookup: `/api/admin/ercot/lookup-esiid` uses WattBuy Electricity endpoint (`wbGetElectricity`).
 
 Admin routes:
 
-POST /api/admin/address/resolve-esiid now calls ERCOT resolver.
+GET /api/admin/ercot/lookup-esiid now calls WattBuy Electricity endpoint and extracts ESIID from response.
 
-POST /api/admin/address/resolve-and-save remains the same contract; it uses the ERCOT resolver internally and persists to HouseAddress.esiid (+ UserProfile.esiid if linked).
+ESIID extraction handles multiple field name variations (esiid, esiId, esi_id, addresses[].esi, utility_info[].esiid).
 
 RAW→CDM:
 
-Store ERCOT responses in raw_ercot (new RAW collection/bucket if not present).
+WattBuy electricity responses are captured via `wbGetElectricity` which uses `wbGet` internally (retry logic, diagnostic headers).
 
-Transformer tx_ercot_to_meter → HouseAddress.esiid, utilityName, tdspSlug.
+ESIID is extracted and returned to callers; can be persisted to `HouseAddress.esiid` if needed.
 
 Observability: corrId + duration logging (unchanged).
 
 Rollback
 
-Flip RESOLVER_PROVIDER=wattbuy (legacy path remains in code but unused by default).
+ERCOT database lookup logic remains in codebase but is not wired. Can be re-enabled if needed.
 
 
 
@@ -339,7 +338,7 @@ Scope
 
 - **Prisma Models:**
   - `ErcotIngest`: Tracks ingestion history with `fileSha256` (unique), `status`, `note`, `fileUrl`, `tdsp`, `rowCount`, `headers`, `error`, `errorDetail`.
-  - `ErcotEsiidIndex`: Stores normalized ESIID data with `esiid` (unique), `tdsp`, `serviceAddress1`, `city`, `state`, `zip`, `raw` (JSON), `srcFileSha256`.
+  - `ErcotEsiidIndex`: Stores normalized ESIID data (preserved but not used for lookups; ESIID now comes from WattBuy Electricity endpoint).
 
 - **Library Functions (`lib/ercot/`):**
   - `resolve.ts`: `resolveLatestFromPage()` - Uses JSDOM to parse HTML and extract TDSP_ESIID_Extract file links.
@@ -353,7 +352,7 @@ Scope
   - `/api/admin/ercot/ingests`: List ingestion history (admin-gated).
   - `/api/admin/ercot/debug/last`: Get last ingest record (admin-gated).
   - `/api/admin/ercot/debug/url-sanity`: Test URL resolution (admin-gated).
-  - `/api/admin/ercot/lookup-esiid`: Lookup ESIID from address using ERCOT data (admin-gated).
+  - `/api/admin/ercot/lookup-esiid`: Lookup ESIID from address using WattBuy Electricity endpoint (admin-gated).
 
 - **Admin Scripts:**
   - `scripts/admin/ercot_fetch_latest.mjs`: Manual file fetch via API.
@@ -377,7 +376,7 @@ Rollback
 
 Guardrails
 
-- RAW→CDM: ERCOT data stored in `ErcotEsiidIndex` with raw JSON for traceability.
+- RAW→CDM: ERCOT data stored in `ErcotEsiidIndex` with raw JSON for traceability (preserved but not used for ESIID lookups; ESIID now comes from WattBuy Electricity endpoint).
 - Idempotent ingestion via SHA256 deduplication.
 - Admin-gated endpoints for security.
 - Error logging with full stack traces for debugging.
@@ -434,8 +433,8 @@ Scope
   - `/api/admin/smt/upload`: SMT file upload endpoint.
   - `/api/admin/smt/health`: SMT health check endpoint.
 
-- **ERCOT ESIID Lookup:**
-  - `/api/admin/ercot/lookup-esiid`: POST endpoint to find ESIID from address using ERCOT data.
+- **ESIID Lookup (via WattBuy):**
+  - `/api/admin/ercot/lookup-esiid`: GET endpoint to find ESIID from address using WattBuy Electricity endpoint.
   - Uses fuzzy matching on `serviceAddress1` and `zip`.
   - Returns best match with similarity score.
 
@@ -475,7 +474,7 @@ Provide a secure, on-domain, read-only database viewer for internal operations w
 - New admin API routes:
   - `GET /api/admin/db/tables` — whitelisted tables + columns + row counts
   - `POST /api/admin/db/query` — paginated rows, optional ILIKE search on text columns, optional CSV export
-- Whitelist tables: `HouseAddress`, `ErcotIngest`, `ErcotEsiidIndex`, `RatePlan`, `RawSmtFile`, `SmtInterval`
+- Whitelist tables: `HouseAddress`, `ErcotIngest`, `RatePlan`, `RawSmtFile`, `SmtInterval` (ErcotEsiidIndex removed from whitelist; ESIID lookup now uses WattBuy)
 - Token gate: `x-admin-token` header, as documented in ENV_VARS and ADMIN_API
 
 **Security & Guardrails**

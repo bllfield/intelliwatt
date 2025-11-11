@@ -191,6 +191,57 @@ export default function WattBuyInspector() {
           >
             {loading ? 'Loading…' : 'Electricity (robust)'}
           </button>
+          <button
+            onClick={() => hit(`/api/admin/wattbuy/offers-by-address?${qsAddr}&all=true`)}
+            className="px-3 py-2 rounded-lg border hover:bg-gray-50"
+            disabled={loading || !ready}
+          >
+            {loading ? 'Loading…' : 'Offers (by address)'}
+          </button>
+          <button
+            onClick={() => hit(`/api/admin/wattbuy/property-bundle?${qsAddr}`)}
+            className="px-3 py-2 rounded-lg border hover:bg-gray-50 bg-green-50"
+            disabled={loading || !ready}
+          >
+            {loading ? 'Loading…' : 'Property Bundle (electricity → SMT → offers)'}
+          </button>
+        </div>
+      </section>
+
+      <section className="p-4 rounded-2xl border">
+        <h2 className="font-medium mb-3">Offers (with wattkey)</h2>
+        <p className="text-sm text-gray-600 mb-3">First get electricity to obtain wattkey, then use it for offers</p>
+        <div className="flex flex-wrap gap-3">
+          <button
+            onClick={async () => {
+              // First get electricity to extract wattkey
+              setLoading(true);
+              setResult(null);
+              setRaw(null);
+              try {
+                const elecRes = await fetch(`/api/admin/wattbuy/electricity?${qsAddr}`, {
+                  headers: { 'x-admin-token': token },
+                });
+                const elecData = await elecRes.json();
+                const wattkey = elecData?.data?.wattkey;
+                if (!wattkey) {
+                  setResult({ ok: false, status: 400, error: 'No wattkey found in electricity response' });
+                  setRaw(elecData);
+                  return;
+                }
+                // Then get offers with wattkey
+                await hit(`/api/admin/wattbuy/offers?wattkey=${encodeURIComponent(wattkey)}&all=true`);
+              } catch (e: any) {
+                setResult({ ok: false, status: 500, error: e?.message || 'fetch failed' });
+              } finally {
+                setLoading(false);
+              }
+            }}
+            className="px-3 py-2 rounded-lg border hover:bg-gray-50"
+            disabled={loading || !ready}
+          >
+            {loading ? 'Loading…' : 'Offers (auto wattkey)'}
+          </button>
         </div>
       </section>
 

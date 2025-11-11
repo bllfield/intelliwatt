@@ -90,10 +90,15 @@ export default function ERCOTInspector() {
     setResult(null);
     setRaw(null);
     try {
-      const r = await fetch('/api/admin/ercot/lookup-esiid', {
-        method: 'POST',
-        headers: { 'x-admin-token': token, 'content-type': 'application/json' },
-        body: JSON.stringify(address),
+      const params = new URLSearchParams({
+        line1: address.line1,
+        city: address.city,
+        state: address.state,
+        zip: address.zip,
+      });
+      const r = await fetch(`/api/admin/ercot/lookup-esiid?${params.toString()}`, {
+        method: 'GET',
+        headers: { 'x-admin-token': token },
       });
       const data = await r.json().catch(() => ({ error: 'Failed to parse JSON', status: r.status }));
       setRaw(data);
@@ -113,7 +118,8 @@ export default function ERCOTInspector() {
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
-      <h1 className="text-2xl font-semibold">ERCOT ESIID Inspector</h1>
+      <h1 className="text-2xl font-semibold">ERCOT Inspector</h1>
+      <p className="text-sm text-gray-600 mb-4">Note: ESIID lookup now uses WattBuy Electricity endpoint, not ERCOT database</p>
 
       <section className="grid md:grid-cols-2 gap-4">
         <div className="p-4 rounded-2xl border">
@@ -151,7 +157,7 @@ export default function ERCOTInspector() {
       </section>
 
       <section className="p-4 rounded-2xl border">
-        <h2 className="font-medium mb-3">Address to ESIID Lookup</h2>
+        <h2 className="font-medium mb-3">Address to ESIID Lookup (via WattBuy)</h2>
         <div className="grid md:grid-cols-4 gap-4 mb-4">
           <div>
             <label className="block text-sm mb-1">Address Line 1</label>

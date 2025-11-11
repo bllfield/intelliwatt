@@ -2,9 +2,11 @@
 
 **Goal:** On-demand per-address pull that:
 
-1) Calls `/v3/electricity` to get property context (and `wattkey`),  
+1) Calls `/v3/electricity` to get property context (and `wattkey`, ESIID),  
 2) Triggers SMT ingestion if an ESIID is present,  
 3) Calls `/v3/offers` with `all=true` to retrieve the full plan set, plus upgrade/solar offers.
+
+**Note:** All WattBuy API calls use the standardized `wbGet()` function for consistency, retry logic, and diagnostic header capture (same pattern as `/v3/electricity`).
 
 ## Endpoints (admin)
 
