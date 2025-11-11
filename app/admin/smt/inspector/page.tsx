@@ -41,6 +41,7 @@ export default function SMTInspector() {
   const [selectedRawFile, setSelectedRawFile] = useState<any | null>(null);
   const [rawFileContent, setRawFileContent] = useState<string | null>(null);
   const [rawFileBase64, setRawFileBase64] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   const ready = useMemo(() => Boolean(token), [token]);
 
@@ -87,6 +88,10 @@ export default function SMTInspector() {
       setRaw(data);
       setResult({ ok: data?.ok ?? true, status: r.status, data });
       setRawFiles(Array.isArray(data?.rows) ? data.rows : []);
+      setSelectedRawFile(null);
+      setRawFileContent(null);
+      setRawFileBase64(null);
+      setDownloadError(null);
     } catch (e: any) {
       setResult({ ok: false, status: 500, error: e?.message || 'fetch failed' });
       setRawFiles([]);
@@ -111,6 +116,7 @@ export default function SMTInspector() {
         return;
       }
       setSelectedRawFile(data);
+      setDownloadError(null);
       if (data.textPreview) {
         setRawFileContent(data.textPreview as string);
       } else if (data.contentBase64) {
@@ -120,6 +126,32 @@ export default function SMTInspector() {
       setResult({ ok: false, status: 500, error: e?.message || 'fetch failed' });
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function downloadRawFile(id: string, filename?: string | null) {
+    if (!token) { alert('Set x-admin-token first'); return; }
+    try {
+      const res = await fetch(`/api/admin/debug/smt/raw-files/${encodeURIComponent(id)}/download`, {
+        headers: { 'x-admin-token': token },
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => 'Download failed');
+        setDownloadError(text);
+        return;
+      }
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename || `raw-smt-${id}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      setDownloadError(null);
+    } catch (e: any) {
+      setDownloadError(e?.message || 'Download failed');
     }
   }
 
@@ -546,19 +578,32 @@ export default function SMTInspector() {
                       <td className="py-2 px-2">{file.sizeBytes?.toLocaleString?.() ?? file.sizeBytes}</td>
                       <td className="py-2 px-2">{file.source || 'adhocusage'}</td>
                       <td className="py-2 px-2">
-                        <button
-                          onClick={() => loadRawFile(file.id)}
-                          className="px-3 py-1 rounded border hover:bg-gray-100"
-                          disabled={loading}
-                        >
-                          Inspect
-                        </button>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => loadRawFile(file.id)}
+                            className="px-3 py-1 rounded border hover:bg-gray-100"
+                            disabled={loading}
+                          >
+                            Inspect
+                          </button>
+                          <button
+                            onClick={() => downloadRawFile(file.id, file.filename)}
+                            className="px-3 py-1 rounded border hover:bg-gray-100"
+                            disabled={loading}
+                          >
+                            Download
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+
+            {downloadError && (
+              <div className="mt-3 text-sm text-red-600">{downloadError}</div>
+            )}
 
             {selectedRawFile && (
               <div className="mt-4 p-4 border rounded-lg bg-gray-50">
@@ -582,7 +627,16 @@ export default function SMTInspector() {
                   </div>
                   <div>
                     <dt className="text-gray-500">Storage Path</dt>
-                    <dd className="text-xs break-all">{selectedRawFile.storagePath || '—'}</dd>
+                    <dd className="text-xs break-all flex items-center gap-2">
+                      {selectedRawFile.storagePath || '—'}
+                      <button
+                        onClick={() => downloadRawFile(selectedRawFile.id, selectedRawFile.filename)}
+                        className="px-3 py-1 rounded border hover:bg-gray-100"
+                        disabled={loading}
+                      >
+                        Download
+                      </button>
+                    </dd>
                   </div>
                   <div>
                     <dt className="text-gray-500">Created</dt>
