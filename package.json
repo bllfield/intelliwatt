@@ -21,7 +21,8 @@
     "ercot:migrate:deploy": "prisma migrate deploy",
     "ercot:fetch:latest": "node scripts/admin/ercot_fetch_latest.mjs",
     "ercot:load:file": "node scripts/admin/ercot_load_file.mjs",
-    "ercot:resolve:fetch": "node scripts/admin/ercot_resolve_fetch.mjs"
+    "ercot:resolve:fetch": "node scripts/admin/ercot_resolve_fetch.mjs",
+    "puct:fetch-reps": "node scripts/admin/fetch-puct-reps.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.673.0",
@@ -30,7 +31,9 @@
     "@types/js-cookie": "^3.0.6",
     "@types/nodemailer": "^6.4.17",
     "@types/papaparse": "^5.3.16",
+    "axios": "^1.13.2",
     "cheerio": "^1.1.2",
+    "csv-writer": "^1.6.0",
     "html-to-text": "^9.0.5",
     "js-cookie": "^3.0.5",
     "jsdom": "^24.0.0",
