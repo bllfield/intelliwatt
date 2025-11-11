@@ -32,7 +32,7 @@ export async function getLatestDailyFiles(ercotPageUrl: string): Promise<{ poste
     // Try multiple endpoint strategies:
     // 1. Direct archive endpoint
     // 2. Product endpoint to get archive link
-    // 3. Products list to find correct product ID
+    // 3. Products list to find correct product ID (by name/description matching TDSP ESIID)
     
     let archiveHref = `${root}/archive/${PRODUCT_ID}`;
     let archRes = await fetch(archiveHref, { headers: commonHeaders, cache: 'no-store' });
@@ -46,12 +46,42 @@ export async function getLatestDailyFiles(ercotPageUrl: string): Promise<{ poste
         archiveHref = prod?._links?.archive?.href || archiveHref;
         archRes = await fetch(archiveHref, { headers: commonHeaders, cache: 'no-store' });
       } else {
-        // Try products list to see what's available
+        // Query products list to find TDSP ESIID product
         const productsListUrl = `${root}`;
         const listRes = await fetch(productsListUrl, { headers: commonHeaders, cache: 'no-store' });
-        const listText = listRes.ok ? await listRes.text().catch(() => '') : '';
-        const errorText = await prodRes.text().catch(() => '');
-        throw new Error(`ERCOT API product '${PRODUCT_ID}' not found. Tried: ${productUrl} and ${archiveHref}. Product list available at: ${productsListUrl}. Product error: ${errorText}. List preview: ${listText.slice(0, 500)}`);
+        if (listRes.ok) {
+          const listJson = await listRes.json().catch(() => null);
+          const products: any[] = listJson?._embedded?.products || listJson?.products || [];
+          // Look for TDSP ESIID product (case-insensitive search)
+          const tdspProduct = products.find((p: any) => {
+            const name = (p.name || '').toUpperCase();
+            const desc = (p.description || '').toUpperCase();
+            const emilId = (p.emilId || '').toUpperCase();
+            return name.includes('TDSP') && (name.includes('ESIID') || name.includes('ESI ID') || desc.includes('ESIID') || desc.includes('ESI ID')) ||
+                   emilId === PRODUCT_ID.toUpperCase() || emilId === 'ZP15-612';
+          });
+          
+          if (tdspProduct?.emilId) {
+            // Found the product, use its emilId
+            const correctEmilId = tdspProduct.emilId;
+            archiveHref = `${root}/archive/${correctEmilId}`;
+            archRes = await fetch(archiveHref, { headers: commonHeaders, cache: 'no-store' });
+            if (archRes.ok) {
+              // Success! Continue with the correct product ID
+            } else {
+              const errorText = await archRes.text().catch(() => '');
+              throw new Error(`ERCOT API: Found TDSP ESIID product '${correctEmilId}' but archive endpoint failed ${archRes.status}: ${errorText}`);
+            }
+          } else {
+            // Product not found in list
+            const productNames = products.slice(0, 10).map((p: any) => `${p.emilId}: ${p.name}`).join(', ');
+            const errorText = await prodRes.text().catch(() => '');
+            throw new Error(`ERCOT API product '${PRODUCT_ID}' not found. Searched ${products.length} products. Sample products: ${productNames}. Product error: ${errorText}`);
+          }
+        } else {
+          const errorText = await prodRes.text().catch(() => '');
+          throw new Error(`ERCOT API product '${PRODUCT_ID}' not found. Tried: ${productUrl} and ${archiveHref}. Products list also failed ${listRes.status}. Product error: ${errorText}`);
+        }
       }
     }
 
