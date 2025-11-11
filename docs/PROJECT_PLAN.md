@@ -492,3 +492,62 @@ Provide a secure, on-domain, read-only database viewer for internal operations w
 **How to use it (quick):**
 
 Deploy the change (push to main). Navigate to `/admin/database`, paste your `ADMIN_TOKEN`, and browse whitelisted tables with pagination, search, and CSV export.
+
+---
+
+### PC-2025-11-10-B: ERCOT Daily TDSP Zip Auto-Fetch
+
+**Rationale**
+
+Automate ingestion of ERCOT TDSP DAILY zip files (Lubbock, CenterPoint, Oncor, TNMP, AEP Central, AEP North). Keep a daily archive in S3 and record metadata in `ErcotIngest`.
+
+**Scope**
+
+- `GET /api/admin/ercot/cron?token=CRON_SECRET`: scrape `ERCOT_PAGE_URL`, detect latest "Posted" day, download all DAILY zips, upload to S3 (`ercot/YYYY-MM-DD/<filename>`), create `ErcotIngest` rows.
+- Idempotent: skip upload if object exists in S3 or SHA256 already ingested.
+- Token-gated with `CRON_SECRET` (supports query param or `x-cron-secret` header, or Vercel managed cron).
+
+**Schedule**
+
+- Vercel → Settings → Cron Jobs:
+  - Path: `/api/admin/ercot/cron?token=$CRON_SECRET`
+  - Schedule: `0 6 * * *` (6:00 AM America/Chicago) — adjust as needed.
+
+**ENV Variables Required (Production)**
+
+- `ERCOT_PAGE_URL` — ERCOT data product page URL (e.g., `https://www.ercot.com/mp/data-products/data-product-details?id=ZP15-612`)
+- `CRON_SECRET` — Long random string for cron authentication
+- `S3_ENDPOINT` or `DO_SPACES_ENDPOINT` — S3-compatible endpoint (e.g., `https://nyc3.digitaloceanspaces.com` or AWS endpoint)
+- `S3_REGION` — Region (e.g., `nyc3` for DO Spaces or `us-east-1` for AWS)
+- `S3_BUCKET` — Bucket name
+- `S3_ACCESS_KEY_ID` — Access key
+- `S3_SECRET_ACCESS_KEY` — Secret key
+- `S3_FORCE_PATH_STYLE` — Optional, set to `true` for MinIO-style endpoints
+- `S3_ACL` — Optional, defaults to `private`
+
+**How to run it now (smoke test)**
+
+After deploy, run:
+
+```bash
+# Replace BASE and secrets
+BASE="https://intelliwatt.com"
+CRON_SECRET="<your-cron-secret>"
+
+curl -sS "$BASE/api/admin/ercot/cron?token=$CRON_SECRET" | jq
+```
+
+You should see: latest `postedAt`, and `results` for each TDSP with `key`, `bytes`, or `skipped:true` if already present.
+
+**Notes & Gotchas**
+
+- **Why scrape?** ERCOT's MIS/Data Product page doesn't expose a stable JSON index publicly, so we parse the HTML safely and grab the newest day's zips. If ERCOT changes markup, we'll tweak selectors (keep cheerio here for that reason).
+- **Storage first, parse later:** We only archive here. Your existing ESIID resolvers/parsers can read from S3 using `storageKey` in `ErcotIngest` headers JSON—separate concerns keep this resilient.
+- **Timing:** Your page snippet shows "Posted 6:19:52 AM" for all six. A 6:30 AM CT cron run is perfect.
+- **Idempotent:** Re-running the job for the same day won't dupe files (checks S3 object existence and SHA256 hash).
+
+**Rollback**
+
+- Remove or disable cron in `vercel.json`.
+- Remove `/app/api/admin/ercot/cron/route.ts` and related library files if needed.
+- S3 objects remain (no automatic deletion).
