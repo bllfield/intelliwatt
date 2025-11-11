@@ -59,10 +59,38 @@ The cron will request a fresh `id_token` every run and use:
 
 **Note:** If `ERCOT_SUBSCRIPTION_KEY` is not set, the system falls back to HTML scraping (less reliable).
 
+## ERCOT EWS (mutual-TLS) credentials (preferred method)
+
+Set these in Vercel (Production) to use ERCOT EWS (mutual-TLS authentication):
+
+- `ERCOT_EWS_BASE` — EWS service base URL (e.g., `https://ews.ercot.com`)
+- `ERCOT_EWS_REPORTTYPE` — Report type ID (default: `203` for TDSP ESIID Extract)
+
+**Option 1: PFX certificate (recommended)**
+- `ERCOT_EWS_PFX` — Base64-encoded PKCS#12 (.pfx) file containing client certificate and private key
+- `ERCOT_EWS_PFX_PASS` — Password for the PFX file (if required)
+
+**Option 2: PEM certificate and key**
+- `ERCOT_EWS_CERT` — PEM-encoded client certificate (include newlines with `\n` or copy-paste full certificate)
+- `ERCOT_EWS_KEY` — PEM-encoded private key (include newlines with `\n` or copy-paste full key)
+- `ERCOT_EWS_CA` — Optional: PEM-encoded CA certificate chain (if required by ERCOT)
+
+**How to get ERCOT EWS credentials:**
+1. Contact ERCOT to request EWS access and obtain client certificate
+2. Convert certificate to PFX format (if needed): `openssl pkcs12 -export -out cert.pfx -inkey key.pem -in cert.pem`
+3. Encode PFX to base64: `base64 -i cert.pfx` (or `cat cert.pfx | base64`)
+4. Set `ERCOT_EWS_PFX` to the base64 string and `ERCOT_EWS_PFX_PASS` to the password
+
+**Priority order:**
+1. EWS (if `ERCOT_EWS_BASE` and certificate configured) — **preferred**
+2. ERCOT Public API (if `ERCOT_SUBSCRIPTION_KEY` configured)
+3. HTML scraping (fallback)
+
 ## Notes
 
 - Vercel cron uses UTC.
 - If ERCOT markup changes, update selectors in `lib/ercot/fetchDaily.ts`.
 - For large-file timeouts: split TDSPs into separate invocations or run the job on your droplet.
 - When using ERCOT Public API, tokens expire ~1 hour; a fresh token is requested on each cron run.
+- EWS uses mutual-TLS authentication and requires a valid client certificate from ERCOT.
 

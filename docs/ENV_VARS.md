@@ -15,11 +15,17 @@
 - `GREENBUTTON_API_KEY` — (future) Green Button API access
 
 ## ERCOT Integration
-- `ERCOT_PAGE_URL` — ERCOT data product page URL (e.g., `https://www.ercot.com/mp/data-products/data-product-details?id=ZP15-612`)
-- `ERCOT_PAGE_FILTER` — Optional filter for file links (e.g., `TDSP`)
-- `ERCOT_USER_AGENT` — Optional user agent string for ERCOT requests
-- `ERCOT_TEST_URL` — Optional explicit file URL for manual testing
-- `CRON_SECRET` — Secret token for ERCOT cron authentication (header `x-cron-secret` or query `?token=CRON_SECRET`)
+
+### ERCOT EWS (mutual-TLS) - Preferred Method
+- `ERCOT_EWS_BASE` — EWS service base URL (e.g., `https://ews.ercot.com`)
+- `ERCOT_EWS_REPORTTYPE` — Report type ID (default: `203` for TDSP ESIID Extract)
+- `ERCOT_EWS_PFX` — Base64-encoded PKCS#12 (.pfx) file containing client certificate and private key (preferred)
+- `ERCOT_EWS_PFX_PASS` — Password for the PFX file (if required)
+- `ERCOT_EWS_CERT` — PEM-encoded client certificate (alternative to PFX, include newlines with `\n`)
+- `ERCOT_EWS_KEY` — PEM-encoded private key (alternative to PFX, include newlines with `\n`)
+- `ERCOT_EWS_CA` — Optional: PEM-encoded CA certificate chain (if required by ERCOT)
+
+### ERCOT Public API (fallback)
 - `ERCOT_SUBSCRIPTION_KEY` — ERCOT Public API subscription key (from API Explorer → Products → Subscribe → Profile → Show Primary key)
 - `ERCOT_USERNAME` — ERCOT API Explorer username (email) for ROPC token flow
 - `ERCOT_PASSWORD` — ERCOT API Explorer password for ROPC token flow
@@ -27,6 +33,13 @@
 - `ERCOT_CLIENT_ID` — Optional override (defaults to `fec253ea-0d06-4272-a5e6-b478baeecd70`)
 - `ERCOT_SCOPE` — Optional override (defaults to `openid fec253ea-0d06-4272-a5e6-b478baeecd70 offline_access` - space-separated)
 - `ERCOT_PRODUCT_ID` — Optional override (defaults to `ZP15-612`)
+
+### ERCOT HTML Scraping (fallback)
+- `ERCOT_PAGE_URL` — ERCOT data product page URL (e.g., `https://www.ercot.com/mp/data-products/data-product-details?id=ZP15-612`)
+- `ERCOT_PAGE_FILTER` — Optional filter for file links (e.g., `TDSP`)
+- `ERCOT_USER_AGENT` — Optional user agent string for ERCOT requests
+- `ERCOT_TEST_URL` — Optional explicit file URL for manual testing
+- `CRON_SECRET` — Secret token for ERCOT cron authentication (header `x-cron-secret` or query `?token=CRON_SECRET`)
 
 ## S3 / DigitalOcean Spaces (ERCOT Storage)
 - `S3_ENDPOINT` or `DO_SPACES_ENDPOINT` — S3-compatible endpoint (e.g., `https://nyc3.digitaloceanspaces.com` or AWS endpoint)
