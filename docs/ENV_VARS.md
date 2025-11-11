@@ -25,7 +25,7 @@
 - `ERCOT_PASSWORD` — ERCOT API Explorer password for ROPC token flow
 - `ERCOT_TOKEN_URL` — Optional override for ERCOT B2C token endpoint (defaults to official endpoint)
 - `ERCOT_CLIENT_ID` — Optional override (defaults to `fec253ea-0d06-4272-a5e6-b478baeecd70`)
-- `ERCOT_SCOPE` — Optional override (defaults to `openid+fec253ea-0d06-4272-a5e6-b478baeecd70+offline_access`)
+- `ERCOT_SCOPE` — Optional override (defaults to `openid fec253ea-0d06-4272-a5e6-b478baeecd70 offline_access` - space-separated)
 - `ERCOT_PRODUCT_ID` — Optional override (defaults to `ZP15-612`)
 
 ## S3 / DigitalOcean Spaces (ERCOT Storage)

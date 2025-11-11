@@ -20,7 +20,7 @@ const CLIENT_ID =
   process.env.ERCOT_CLIENT_ID || 'fec253ea-0d06-4272-a5e6-b478baeecd70';
 
 const SCOPE =
-  process.env.ERCOT_SCOPE || 'openid+fec253ea-0d06-4272-a5e6-b478baeecd70+offline_access';
+  process.env.ERCOT_SCOPE || 'openid fec253ea-0d06-4272-a5e6-b478baeecd70 offline_access';
 
 type TokenResp = {
   id_token?: string;
@@ -43,11 +43,14 @@ export async function getErcotIdToken(): Promise<string> {
   }
 
   // ERCOT examples show token params either as querystring or body. We'll send as form body.
+  // Azure AD B2C expects space-separated scopes (not plus-separated)
+  // Ensure 'openid' is included (required when response_type=id_token)
+  const scopeValue = SCOPE.includes('openid') ? SCOPE : `openid ${SCOPE}`;
   const form = new URLSearchParams();
   form.set('username', username);
   form.set('password', password);
   form.set('grant_type', 'password');
-  form.set('scope', SCOPE);
+  form.set('scope', scopeValue);
   form.set('client_id', CLIENT_ID);
   form.set('response_type', 'id_token');
 

@@ -50,7 +50,7 @@ Set these in Vercel (Production) to use the ERCOT Public Data API (recommended):
 
 - `ERCOT_TOKEN_URL` — ERCOT B2C token endpoint
 - `ERCOT_CLIENT_ID` — defaults to `fec253ea-0d06-4272-a5e6-b478baeecd70`
-- `ERCOT_SCOPE` — defaults to `openid+fec253ea-0d06-4272-a5e6-b478baeecd70+offline_access`
+- `ERCOT_SCOPE` — defaults to `openid fec253ea-0d06-4272-a5e6-b478baeecd70 offline_access` (space-separated)
 - `ERCOT_PRODUCT_ID` — defaults to `ZP15-612`
 
 The cron will request a fresh `id_token` every run and use:
