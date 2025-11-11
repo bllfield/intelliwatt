@@ -25,6 +25,10 @@ export async function GET(req: NextRequest) {
   const vars = {
     ERCOT_PAGE_URL: has('ERCOT_PAGE_URL'),
     CRON_SECRET: has('CRON_SECRET'),
+    // ERCOT Public API (preferred over HTML scraping)
+    ERCOT_SUBSCRIPTION_KEY: has('ERCOT_SUBSCRIPTION_KEY'),
+    ERCOT_USERNAME: has('ERCOT_USERNAME'),
+    ERCOT_PASSWORD: has('ERCOT_PASSWORD'),
     // Spaces/S3
     S3_ENDPOINT: has('S3_ENDPOINT') || has('DO_SPACES_ENDPOINT'),
     S3_REGION: has('S3_REGION'),
@@ -34,14 +38,18 @@ export async function GET(req: NextRequest) {
     S3_FORCE_PATH_STYLE: process.env.S3_FORCE_PATH_STYLE === 'true' || process.env.S3_FORCE_PATH_STYLE === '1'
   };
 
-  const missing = Object.entries(vars)
-    .filter(([, v]) => !v)
-    .map(([k]) => k);
+  // Required vars (must be present)
+  const required = ['ERCOT_PAGE_URL', 'CRON_SECRET', 'S3_ENDPOINT', 'S3_REGION', 'S3_BUCKET', 'S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY'];
+  const missing = required.filter(k => !vars[k as keyof typeof vars]);
+
+  // ERCOT API vars are optional (fallback to HTML scraping if not set)
+  const hasApiCreds = vars.ERCOT_SUBSCRIPTION_KEY && vars.ERCOT_USERNAME && vars.ERCOT_PASSWORD;
 
   return NextResponse.json({
     ok: missing.length === 0,
     missing,
-    vars
+    vars,
+    mode: hasApiCreds ? 'api' : 'html-fallback'
   });
 }
 
