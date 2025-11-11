@@ -137,17 +137,38 @@ export async function getLatestDailyFiles(ercotPageUrl: string): Promise<{ poste
   const html = await res.text();
   const $ = cheerio.load(html);
 
-  const anchors = $('a[href*=".zip"]');
+  // Try multiple selectors for zip links
+  let anchors = $('a[href*=".zip"]');
+  if (anchors.length === 0) {
+    // Try case-insensitive search
+    anchors = $('a').filter((_, el) => {
+      const href = $(el).attr('href') || '';
+      return href.toLowerCase().includes('.zip');
+    });
+  }
+  if (anchors.length === 0) {
+    // Try looking for any link with "tdsp" and "esiid" in the href or text
+    anchors = $('a').filter((_, el) => {
+      const href = $(el).attr('href') || '';
+      const text = $(el).text() || '';
+      const combined = (href + ' ' + text).toLowerCase();
+      return combined.includes('tdsp') && (combined.includes('esiid') || combined.includes('esi id') || combined.includes('extract'));
+    });
+  }
+
   const rows: Array<{ tdsp: string; postedAt: Date; href: string; filename: string }> = [];
 
   anchors.each((_, a) => {
-    const href = toAbs(ercotPageUrl, $(a).attr('href')!);
+    const href = toAbs(ercotPageUrl, $(a).attr('href') || '');
+    if (!href || !href.toLowerCase().includes('.zip')) return;
+    
     const filename = href.split('/').pop() || 'file.zip';
-    const container = $(a).closest('tr').length ? $(a).closest('tr') : $(a).closest('div,section,li');
-    const contextText = container?.text() || $('body').text() || '';
+    const container = $(a).closest('tr').length ? $(a).closest('tr') : $(a).closest('div,section,li,td');
+    const contextText = container?.text() || $(a).text() || $('body').text() || '';
 
     const tdsp = (contextText.match(/(ONCOR|CENTERPOINT|AEP[\s_]*NORTH|AEP[\s_]*CENTRAL|TNMP|LUBBOCK)[\w_\s-]*DAILY/i)?.[0]
       || contextText.match(/ONCOR|CENTERPOINT|AEP[\s_]*NORTH|AEP[\s_]*CENTRAL|TNMP|LUBBOCK/i)?.[0]
+      || filename.match(/(ONCOR|CENTERPOINT|AEP[\s_]*NORTH|AEP[\s_]*CENTRAL|TNMP|LUBBOCK)/i)?.[0]
       || 'UNKNOWN_DAILY')
       .toUpperCase()
       .replace(/\s+/g, '_');
@@ -160,7 +181,11 @@ export async function getLatestDailyFiles(ercotPageUrl: string): Promise<{ poste
   });
 
   if (!rows.length) {
-    throw new Error('No DAILY zip links found on ERCOT page (HTML fallback). Provide ERCOT_SUBSCRIPTION_KEY + ERCOT_USERNAME + ERCOT_PASSWORD to use the ERCOT Public Data API.');
+    // Provide more diagnostic info
+    const allLinks = $('a[href]').length;
+    const zipLinks = $('a[href*=".zip"], a[href*=".ZIP"]').length;
+    const pageText = $('body').text().slice(0, 500);
+    throw new Error(`No DAILY zip links found on ERCOT page (HTML fallback). Found ${allLinks} total links, ${zipLinks} zip links. Page preview: ${pageText}...`);
   }
 
   rows.sort((a,b) => b.postedAt.getTime() - a.postedAt.getTime());
