@@ -10,29 +10,106 @@ import { requireAdmin } from '@/lib/auth/admin';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+/**
+ * Extract ESIID from WattBuy electricity response
+ * Handles multiple field name variations and nested structures
+ */
+function extractEsiidFromElectricity(elec: any): string | null {
+  if (!elec || typeof elec !== 'object') return null;
+  
+  // Direct fields (case-insensitive check)
+  const directFields = ['esiid', 'esiId', 'esi_id', 'ESIID', 'ESI_ID', 'esi'];
+  for (const field of directFields) {
+    if (elec[field] && typeof elec[field] === 'string' && elec[field].trim()) {
+      return elec[field].trim();
+    }
+  }
+  
+  // Try addresses array
+  if (Array.isArray(elec.addresses) && elec.addresses.length > 0) {
+    for (const addr of elec.addresses) {
+      if (addr && typeof addr === 'object') {
+        for (const field of directFields) {
+          if (addr[field] && typeof addr[field] === 'string' && addr[field].trim()) {
+            return addr[field].trim();
+          }
+        }
+      }
+    }
+  }
+  
+  // Try utility_info array
+  if (Array.isArray(elec.utility_info) && elec.utility_info.length > 0) {
+    for (const ui of elec.utility_info) {
+      if (ui && typeof ui === 'object') {
+        for (const field of directFields) {
+          if (ui[field] && typeof ui[field] === 'string' && ui[field].trim()) {
+            return ui[field].trim();
+          }
+        }
+      }
+    }
+  }
+  
+  // Try nested objects (common patterns)
+  if (elec.address && typeof elec.address === 'object') {
+    for (const field of directFields) {
+      if (elec.address[field] && typeof elec.address[field] === 'string' && elec.address[field].trim()) {
+        return elec.address[field].trim();
+      }
+    }
+  }
+  
+  if (elec.utility && typeof elec.utility === 'object') {
+    for (const field of directFields) {
+      if (elec.utility[field] && typeof elec.utility[field] === 'string' && elec.utility[field].trim()) {
+        return elec.utility[field].trim();
+      }
+    }
+  }
+  
+  // Deep search in all string values that look like ESIIDs (17-18 digits)
+  const esiidPattern = /\b\d{17,18}\b/;
+  const searchObj = (obj: any, depth = 0): string | null => {
+    if (depth > 3) return null; // Limit recursion
+    if (typeof obj === 'string' && esiidPattern.test(obj)) {
+      const match = obj.match(esiidPattern);
+      if (match) return match[0];
+    }
+    if (obj && typeof obj === 'object') {
+      for (const value of Object.values(obj)) {
+        const found = searchObj(value, depth + 1);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+  
+  return searchObj(elec);
+}
+
 async function kickSmtIfPossible(elec: any) {
   try {
-    // Try to find ESIID from electricity details (field name varies by account).
-    // Check direct fields first
-    let esiid = elec?.esiid ?? elec?.esiId ?? elec?.esi_id ?? undefined;
+    // Extract ESIID using comprehensive search
+    const esiid = extractEsiidFromElectricity(elec);
     
-    // Try addresses array
-    if (!esiid && Array.isArray(elec?.addresses) && elec.addresses.length > 0) {
-      const addr = elec.addresses[0];
-      esiid = addr.esi || addr.esiid || addr.esi_id || undefined;
+    if (!esiid) {
+      // Return diagnostic info to help debug
+      return {
+        kicked: false,
+        reason: 'NO_ESIID_IN_RESPONSE',
+        diagnostic: {
+          hasData: !!elec,
+          topLevelKeys: elec && typeof elec === 'object' ? Object.keys(elec).slice(0, 20) : [],
+          sampleStructure: elec ? JSON.stringify(elec).slice(0, 500) : null,
+        },
+      };
     }
-    
-    // Try utility_info array
-    if (!esiid && Array.isArray(elec?.utility_info) && elec.utility_info.length > 0) {
-      const ui = elec.utility_info[0];
-      esiid = ui.esiid || ui.esiId || ui.esi_id || undefined;
-    }
-    
-    if (!esiid) return { kicked: false, reason: 'NO_ESIID_IN_RESPONSE' };
     
     // Use the SMT pull endpoint
     const SMT_BASE = process.env.PROD_BASE_URL ?? process.env.NEXT_PUBLIC_BASE_URL ?? '';
-    if (!SMT_BASE) return { kicked: false, reason: 'NO_PROD_BASE_URL' };
+    if (!SMT_BASE) return { kicked: false, reason: 'NO_PROD_BASE_URL', esiid };
+    
     const url = `${SMT_BASE}/api/admin/smt/pull`;
     const r = await fetch(url, {
       method: 'POST',
@@ -43,7 +120,12 @@ async function kickSmtIfPossible(elec: any) {
       body: JSON.stringify({ esiid }),
     });
     const data = await r.json().catch(() => ({}));
-    return { kicked: true, status: r.status, response: data };
+    return {
+      kicked: true,
+      status: r.status,
+      esiid, // Include ESIID in response for verification
+      response: data,
+    };
   } catch (err: any) {
     return { kicked: false, reason: 'SMT_KICK_ERROR', error: err?.message };
   }
@@ -82,7 +164,13 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       where: { address, city, state, zip },
-      electricity: { status: elec.status, headers: elec.headers, sampleKeys: Object.keys(elec.data ?? {}) },
+      electricity: {
+        status: elec.status,
+        headers: elec.headers,
+        sampleKeys: Object.keys(elec.data ?? {}),
+        // Include full electricity data for ESIID debugging
+        data: elec.data,
+      },
       smtKick,
       offers: { status: offers.status, headers: offers.headers, topKeys: offers.data ? Object.keys(offers.data) : null, data: offers.data },
     }, { status: 200 });
