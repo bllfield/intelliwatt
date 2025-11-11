@@ -37,6 +37,10 @@ export default function SMTInspector() {
   });
   const [manualEsiid, setManualEsiid] = useState('');
   const [foundEsiid, setFoundEsiid] = useState<string | null>(null);
+  const [rawFiles, setRawFiles] = useState<any[]>([]);
+  const [selectedRawFile, setSelectedRawFile] = useState<any | null>(null);
+  const [rawFileContent, setRawFileContent] = useState<string | null>(null);
+  const [rawFileBase64, setRawFileBase64] = useState<string | null>(null);
 
   const ready = useMemo(() => Boolean(token), [token]);
 
@@ -45,6 +49,9 @@ export default function SMTInspector() {
     setLoading(true);
     setResult(null);
     setRaw(null);
+    setSelectedRawFile(null);
+    setRawFileContent(null);
+    setRawFileBase64(null);
     try {
       const r = await fetch(path, {
         headers: { 'x-admin-token': token, 'accept': 'application/json', ...options?.headers },
@@ -60,6 +67,55 @@ export default function SMTInspector() {
         message: data?.message,
       };
       setResult(normalized);
+    } catch (e: any) {
+      setResult({ ok: false, status: 500, error: e?.message || 'fetch failed' });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function listRawFiles() {
+    if (!token) { alert('Set x-admin-token first'); return; }
+    setLoading(true);
+    setResult(null);
+    setRaw(null);
+    try {
+      const r = await fetch('/api/admin/debug/smt/raw-files?limit=10', {
+        headers: { 'x-admin-token': token, 'accept': 'application/json' },
+      });
+      const data = await r.json().catch(() => ({ error: 'Failed to parse JSON', status: r.status }));
+      setRaw(data);
+      setResult({ ok: data?.ok ?? true, status: r.status, data });
+      setRawFiles(Array.isArray(data?.rows) ? data.rows : []);
+    } catch (e: any) {
+      setResult({ ok: false, status: 500, error: e?.message || 'fetch failed' });
+      setRawFiles([]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function loadRawFile(id: string) {
+    if (!token) { alert('Set x-admin-token first'); return; }
+    setLoading(true);
+    setSelectedRawFile(null);
+    setRawFileContent(null);
+    setRawFileBase64(null);
+    try {
+      const r = await fetch(`/api/admin/debug/smt/raw-files/${encodeURIComponent(id)}`, {
+        headers: { 'x-admin-token': token, 'accept': 'application/json' },
+      });
+      const data = await r.json().catch(() => ({ error: 'Failed to parse JSON', status: r.status }));
+      if (!data?.ok) {
+        setResult({ ok: false, status: r.status, error: data?.error || 'Failed to load raw file', data });
+        return;
+      }
+      setSelectedRawFile(data);
+      if (data.textPreview) {
+        setRawFileContent(data.textPreview as string);
+      } else if (data.contentBase64) {
+        setRawFileBase64(data.contentBase64 as string);
+      }
     } catch (e: any) {
       setResult({ ok: false, status: 500, error: e?.message || 'fetch failed' });
     } finally {
@@ -340,7 +396,7 @@ export default function SMTInspector() {
               {loading ? 'Loading…' : 'Health Check (public)'}
             </button>
             <button
-              onClick={() => hit('/api/admin/debug/smt/raw-files')}
+              onClick={listRawFiles}
               className="w-full px-3 py-2 rounded-lg border hover:bg-gray-50"
               disabled={loading || !ready}
             >
@@ -467,6 +523,92 @@ export default function SMTInspector() {
             </button>
           </div>
         </div>
+
+        {rawFiles.length > 0 && (
+          <div className="mt-6">
+            <h3 className="font-medium mb-2">Recent SMT Raw Files</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-200">
+                    <th className="text-left py-2 px-2">Created</th>
+                    <th className="text-left py-2 px-2">Filename</th>
+                    <th className="text-left py-2 px-2">Size</th>
+                    <th className="text-left py-2 px-2">Source</th>
+                    <th className="text-left py-2 px-2">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rawFiles.map((file: any) => (
+                    <tr key={file.id} className="border-b border-gray-100 hover:bg-gray-50">
+                      <td className="py-2 px-2 whitespace-nowrap">{file.createdAt}</td>
+                      <td className="py-2 px-2">{file.filename}</td>
+                      <td className="py-2 px-2">{file.sizeBytes?.toLocaleString?.() ?? file.sizeBytes}</td>
+                      <td className="py-2 px-2">{file.source || 'adhocusage'}</td>
+                      <td className="py-2 px-2">
+                        <button
+                          onClick={() => loadRawFile(file.id)}
+                          className="px-3 py-1 rounded border hover:bg-gray-100"
+                          disabled={loading}
+                        >
+                          Inspect
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {selectedRawFile && (
+              <div className="mt-4 p-4 border rounded-lg bg-gray-50">
+                <h4 className="font-semibold mb-2">{selectedRawFile.filename}</h4>
+                <dl className="grid md:grid-cols-2 gap-x-4 gap-y-1 text-sm">
+                  <div>
+                    <dt className="text-gray-500">ID</dt>
+                    <dd className="font-mono">{selectedRawFile.id}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-gray-500">Size</dt>
+                    <dd>{selectedRawFile.sizeBytes?.toLocaleString?.() ?? selectedRawFile.sizeBytes} bytes</dd>
+                  </div>
+                  <div>
+                    <dt className="text-gray-500">SHA256</dt>
+                    <dd className="font-mono text-xs break-all">{selectedRawFile.sha256}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-gray-500">Content Type</dt>
+                    <dd>{selectedRawFile.contentType || 'application/octet-stream'}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-gray-500">Storage Path</dt>
+                    <dd className="text-xs break-all">{selectedRawFile.storagePath || '—'}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-gray-500">Created</dt>
+                    <dd>{selectedRawFile.createdAt}</dd>
+                  </div>
+                </dl>
+                {rawFileContent && (
+                  <div className="mt-3">
+                    <div className="text-xs text-gray-500 mb-1">Text Preview</div>
+                    <pre className="text-xs bg-white rounded-lg p-3 overflow-auto max-h-72 border">
+{rawFileContent}
+                    </pre>
+                  </div>
+                )}
+                {!rawFileContent && rawFileBase64 && (
+                  <div className="mt-3">
+                    <div className="text-xs text-gray-500 mb-1">Content (base64)</div>
+                    <pre className="text-xs bg-white rounded-lg p-3 overflow-auto max-h-72 border">
+{rawFileBase64}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </section>
 
       <section className="grid md:grid-cols-2 gap-4">
