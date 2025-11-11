@@ -25,12 +25,16 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const webhookUrl = process.env.DROPLET_WEBHOOK_URL;
-    const webhookSecret = process.env.DROPLET_WEBHOOK_SECRET;
+    const webhookUrl = process.env.DROPLET_WEBHOOK_URL ?? process.env.INTELLIWATT_WEBHOOK_URL;
+    const webhookSecret = process.env.DROPLET_WEBHOOK_SECRET ?? process.env.INTELLIWATT_WEBHOOK_SECRET;
 
     if (!webhookUrl || !webhookSecret) {
       return NextResponse.json(
-        { ok: false, error: 'WEBHOOK_NOT_CONFIGURED', details: 'DROPLET_WEBHOOK_URL and DROPLET_WEBHOOK_SECRET must be set' },
+        {
+          ok: false,
+          error: 'WEBHOOK_NOT_CONFIGURED',
+          details: 'Set DROPLET_WEBHOOK_URL/SECRET or INTELLIWATT_WEBHOOK_URL/SECRET',
+        },
         { status: 503 }
       );
     }

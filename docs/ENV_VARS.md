@@ -10,8 +10,8 @@
 - `SMT_SFTP_HOST`, `SMT_SFTP_USER`, `SMT_SFTP_KEY` — Smart Meter Texas SFTP (for droplet)
 - `SMT_FETCH_TRIGGER_URL` — Vercel URL for on-demand SMT fetch trigger (e.g., `https://intelliwatt.com/api/admin/smt/fetch-trigger`)
 - `SMT_FETCH_ADMIN_TOKEN` — Token for SMT fetch trigger authorization (can reuse `ADMIN_TOKEN`)
-- `DROPLET_WEBHOOK_URL` — Droplet webhook URL for SMT data pull (e.g., `http://64.225.25.54:8787/trigger/smt-now`)
-- `DROPLET_WEBHOOK_SECRET` — Shared secret sent in header `x-intelliwatt-secret` for SMT webhook authentication
+- `DROPLET_WEBHOOK_URL` — Droplet webhook URL for SMT data pull (e.g., `http://64.225.25.54:8787/trigger/smt-now`). Alias: `INTELLIWATT_WEBHOOK_URL`
+- `DROPLET_WEBHOOK_SECRET` — Shared secret sent in header `x-intelliwatt-secret` for SMT webhook authentication. Alias: `INTELLIWATT_WEBHOOK_SECRET`
 - `GREENBUTTON_API_KEY` — (future) Green Button API access
 
 ## ERCOT Integration

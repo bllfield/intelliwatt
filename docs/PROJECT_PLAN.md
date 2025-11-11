@@ -432,7 +432,7 @@ Rationale
 Scope
 
 - **SMT API Routes:**
-  - `/api/admin/smt/pull`: Trigger SMT data pull via webhook (requires `DROPLET_WEBHOOK_URL` and `DROPLET_WEBHOOK_SECRET`).
+  - `/api/admin/smt/pull`: Trigger SMT data pull via webhook (requires `DROPLET_WEBHOOK_URL`/`SECRET` **or** `INTELLIWATT_WEBHOOK_URL`/`SECRET`).
   - `/api/admin/smt/ingest`: SMT file ingestion endpoint.
   - `/api/admin/smt/upload`: SMT file upload endpoint.
   - `/api/admin/smt/health`: SMT health check endpoint.
@@ -460,7 +460,7 @@ Rollback
 Guardrails
 
 - All admin routes require `ADMIN_TOKEN` header.
-- Webhook endpoints require `DROPLET_WEBHOOK_SECRET` header.
+- Webhook endpoints require the shared secret header `x-intelliwatt-secret` (value from `DROPLET_WEBHOOK_SECRET` or `INTELLIWATT_WEBHOOK_SECRET`).
 - ESIID lookup uses fuzzy matching for address resolution.
 - SMT pull triggered only after ESIID confirmation.
 
