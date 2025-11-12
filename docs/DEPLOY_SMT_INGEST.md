@@ -32,9 +32,10 @@ SMT_KEY=/home/deploy/.ssh/intelliwatt_smt_rsa4096
 SMT_REMOTE_DIR=/
 SMT_LOCAL_DIR=/home/deploy/smt_inbox
 
-# Optional overrides
+# Optional overrides used by fetch_and_post.sh
 SOURCE_TAG=adhocusage
 METER_DEFAULT=M1
+ESIID_DEFAULT=10443720000000001
 ```
 
 Ensure the file is readable by `deploy` (root-owned with mode `640` is recommended).
@@ -47,11 +48,21 @@ Ensure the file is readable by `deploy` (root-owned with mode `640` is recommend
 sudo cp /home/deploy/apps/intelliwatt/deploy/smt/smt-ingest.service /etc/systemd/system/
 sudo cp /home/deploy/apps/intelliwatt/deploy/smt/smt-ingest.timer /etc/systemd/system/
 sudo systemctl daemon-reload
+```
+
+### Ensure the service has a writable working directory
+
+```bash
+sudo mkdir -p /etc/systemd/system/smt-ingest.service.d
+sudo tee /etc/systemd/system/smt-ingest.service.d/override.conf >/dev/null <<'OVR'
+[Service]
+WorkingDirectory=/home/deploy/smt_inbox
+Environment=STATE_FILE=/home/deploy/smt_inbox/.posted_sha256
+OVR
+sudo systemctl daemon-reload
 sudo systemctl enable --now smt-ingest.timer
 sudo systemctl status smt-ingest.timer
 ```
-
-This copies the units, reloads systemd, enables the timer, and shows its status.
 
 ---
 
@@ -81,6 +92,7 @@ sudo -u deploy INTELLIWATT_BASE_URL="https://intelliwatt.com" \
 | `deploy/smt/smt-ingest.service` | systemd unit that runs the script |
 | `deploy/smt/smt-ingest.timer` | systemd timer (every 30 minutes) |
 | `/etc/default/intelliwatt-smt` | environment variables consumed by the unit |
+| `/home/deploy/smt_ingest/web/webhook_server.py` | Python webhook bridge (droplet → Vercel trigger) |
 
 Make the script executable:
 
@@ -118,6 +130,15 @@ Each successful POST writes the SHA256 of the file into `SMT_LOCAL_DIR/.posted_s
   ssh deploy@<DROPLET_IP_OR_HOSTNAME>
   cd /home/deploy/apps/intelliwatt
   ```
+
+---
+
+## Webhook (droplet → Vercel bridge)
+
+- Webhook server path: `/home/deploy/smt_ingest/web/webhook_server.py`
+- External URL used by Vercel: `DROPLET_WEBHOOK_URL=http://64.225.25.54:8787/trigger/smt-now`
+- Accepted header names (Vercel route will match any): `x-intelliwatt-secret`, `x-smt-secret`, `x-webhook-secret`
+- Secret env var (set on Vercel and droplet): `INTELLIWATT_WEBHOOK_SECRET` (alias `DROPLET_WEBHOOK_SECRET`)
 
 ---
 
@@ -163,5 +184,7 @@ pwsh -File scripts/admin/smt_inline_post_test.ps1 `
   -Esiid 10443720000000001 `
   -Meter M1
 ```
+
+---
 
 With the timer active, the droplet continuously ingests new SMT files into IntelliWatt without exposing admin secrets in the client.

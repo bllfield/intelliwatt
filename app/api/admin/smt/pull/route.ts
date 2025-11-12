@@ -7,13 +7,22 @@ import { saveRawToStorage } from '@/app/lib/storage/rawFiles';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const WEBHOOK_HEADER = 'x-intelliwatt-secret' as const;
+const WEBHOOK_HEADERS = ['x-intelliwatt-secret', 'x-smt-secret', 'x-webhook-secret'] as const;
 
-function usingWebhookSecret(req: NextRequest) {
-  const headerValue = (req.headers.get(WEBHOOK_HEADER) ?? '').trim();
+type WebhookAuthResult =
+  | { matched: true; reason: 'MATCHED'; header: string }
+  | { matched: false; reason: 'SECRET_NOT_CONFIGURED' | 'HEADER_MISSING' };
+
+function usingWebhookSecret(req: NextRequest): WebhookAuthResult {
   const secret = (process.env.INTELLIWATT_WEBHOOK_SECRET ?? process.env.DROPLET_WEBHOOK_SECRET ?? '').trim();
-  if (!secret) return { matched: false, reason: 'SECRET_NOT_CONFIGURED' as const };
-  return { matched: headerValue.length > 0 && headerValue === secret, reason: headerValue.length > 0 ? 'MATCHED' : 'HEADER_MISSING' as const };
+  if (!secret) return { matched: false, reason: 'SECRET_NOT_CONFIGURED' };
+  for (const headerName of WEBHOOK_HEADERS) {
+    const value = (req.headers.get(headerName) ?? '').trim();
+    if (value && value === secret) {
+      return { matched: true, reason: 'MATCHED', header: headerName };
+    }
+  }
+  return { matched: false, reason: 'HEADER_MISSING' };
 }
 
 /**
@@ -192,7 +201,7 @@ export async function POST(req: NextRequest) {
       webhookResponse = await fetch(DROPLET_WEBHOOK_URL, {
         method: 'POST',
         headers: {
-          [WEBHOOK_HEADER]: WEBHOOK_SECRET,
+          [WEBHOOK_HEADERS[0]]: WEBHOOK_SECRET,
           'content-type': 'application/json',
         },
         body: JSON.stringify({

@@ -14,6 +14,19 @@
 - `DROPLET_WEBHOOK_SECRET` — Shared secret sent in header `x-intelliwatt-secret` for SMT webhook authentication. Alias: `INTELLIWATT_WEBHOOK_SECRET`
 - `GREENBUTTON_API_KEY` — (future) Green Button API access
 
+## SMT Inline Ingest (Vercel ↔ Droplet)
+- **Vercel env (required):**
+  - `ADMIN_TOKEN`
+  - `INTELLIWATT_WEBHOOK_SECRET` (alias `DROPLET_WEBHOOK_SECRET`)
+  - `DROPLET_WEBHOOK_URL`
+- **Droplet env (`/etc/default/intelliwatt-smt`):**
+  - `ADMIN_TOKEN`
+  - `INTELLIWATT_BASE_URL`
+  - `SMT_HOST`, `SMT_USER`, `SMT_KEY`, `SMT_REMOTE_DIR`
+  - `SMT_LOCAL_DIR`
+  - Optional: `SOURCE_TAG`, `METER_DEFAULT`, `ESIID_DEFAULT`
+- **Accepted webhook headers (Vercel route `/api/admin/smt/pull`):** `x-intelliwatt-secret`, `x-smt-secret`, `x-webhook-secret`
+
 ## ERCOT Integration
 
 ### ERCOT EWS (mutual-TLS) - Preferred Method

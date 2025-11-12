@@ -585,6 +585,12 @@ You should see: latest `postedAt`, and `results` for each TDSP with `key`, `byte
 - `/admin/smt` UI uses a server action proxy; admin secrets never touch the browser.
 - `/api/admin/smt/normalize` supports `dryRun=1` for DST + record-count verification before writes.
 
+### PC-2025-11-12-E — SMT Webhook & Droplet Ingest Hardening
+
+- Vercel route `/api/admin/smt/pull` now accepts webhook headers `x-intelliwatt-secret`, `x-smt-secret`, or `x-webhook-secret`.
+- Droplet script `deploy/smt/fetch_and_post.sh` falls back to `ESIID_DEFAULT` when filenames omit the ESIID and posts JSON via stdin.
+- Documentation updated (`docs/DEPLOY_SMT_INGEST.md`, `docs/ENV_VARS.md`, `docs/OPS_CHECKLIST.md`) with exact env vars, SSH steps, webhook URL, and inline smoke tests (bash + PowerShell + webhook curl script).
+
 ## PC-2025-11-12 — Adopt ChatGPT House Rules
 
 **Decision:** The project adopts `docs/CHATGPT_HOUSE_RULES.md` as the authoritative guidance for how ChatGPT must answer.  

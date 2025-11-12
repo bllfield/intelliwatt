@@ -97,4 +97,10 @@ Set these in Vercel (Production) to use ERCOT EWS (mutual-TLS authentication):
 ### SMT Inline Upload Guardrails
 
 - **Body size:** Next.js no longer allows overriding App Router body-parser size in `next.config.js`; keep inline payloads small (≈4 MB) or upload via the droplet webhook for larger files.
-- **Storage envs:** Ensure Spaces/S3 envs (`
+- **Storage envs:** Ensure Spaces/S3 envs (`S3_*` or `DO_SPACES_*`) are configured when not using Vercel Blob.
+- **Webhook auth:** Vercel route `/api/admin/smt/pull` accepts `x-intelliwatt-secret`, `x-smt-secret`, or `x-webhook-secret`; secret value comes from `INTELLIWATT_WEBHOOK_SECRET` (alias `DROPLET_WEBHOOK_SECRET`).
+- **Droplet ingest:** Timer `smt-ingest.timer` runs `deploy/smt/fetch_and_post.sh` (uses `/etc/default/intelliwatt-smt` for `ADMIN_TOKEN`, `INTELLIWATT_BASE_URL`, SFTP creds, optional `ESIID_DEFAULT`).
+- **Smoke tests:**
+  - Bash inline: see `docs/DEPLOY_SMT_INGEST.md` manual post snippet.
+  - PowerShell inline: `scripts/admin/smt_inline_post_test.ps1`.
+  - Webhook ping: run `scripts/admin/test_webhook.sh` (see repo) to confirm droplet bridge accepts the secret header.
