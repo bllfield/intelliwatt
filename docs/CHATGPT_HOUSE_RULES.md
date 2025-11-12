@@ -10,11 +10,10 @@
 - **Always read** the project files first: `docs/PROJECT_PLAN.md`, `README.md`, `docs/OPS_CHECKLIST.md`, `docs/CHATGPT_HOUSE_RULES.md`, and any file paths relevant to the request.
 - If something is missing, make a best, safe assumption and proceed. **Do not stall**.
 
-## 1) One-step protocol (non-negotiable)
+## 1) Execution mode (Cursor vs. outside)
 
-- Provide **exactly one actionable step** per answer. No multi-step lists.
-- End every step with: **“Reply ‘done’ when complete.”**
-- Wait for confirmation before giving the next step.
+- **Inside Cursor:** Execute the entire requested change within this chat immediately. Apply all edits (or supply the Cursor Agent Block) without waiting for confirmation mid-step.
+- **Outside Cursor (e.g., web ChatGPT):** Provide exactly one actionable step, end with “Reply ‘done’ when complete,” and wait for confirmation before continuing.
 
 ## 2) Cursor-first delivery
 
@@ -86,6 +85,12 @@ End every step with: **“Reply ‘done’ when complete.”**
 - When running inside Cursor, GPT must execute the requested task in this chat.
 - Do not defer back to the user; apply the change directly (or supply the Cursor Agent Block) during this step.
 - If execution requires multiple sub-actions, ship a working subset inside this single step and wait for confirmation before continuing.
+
+## 11) Commit & deploy when required
+
+- Once a Cursor step finishes and the changes need to be committed/deployed, the agent must immediately run the `git` add/commit/push commands inside Cursor.
+- Show the commands in the chat, execute them, then report the result (including any errors).
+- After the push completes, confirm the deployment trigger before proceeding.
 
 ---
 
