@@ -108,6 +108,10 @@
 - Use consistent naming conventions
 - Document public APIs thoroughly
 - Maintain backward compatibility
+- Keep features isolated by route/module; avoid cross-module coupling
+- Keep App Router entry points (e.g., `page.tsx`) thin—move business logic into services/hooks/components
+- Avoid reusing global state between subpages unless you expose a clear interface
+- Treat core schemas such as `MagicLinkToken`, `User`, `Referral`, and `EnergyUsage` as protected; extend via adjacent tables instead of modifying directly
 
 ### Error Handling
 - Use structured error responses
@@ -206,3 +210,11 @@
 - Do not log raw values; store only what is required in RAW stores and CDM tables.
 
 - Mask or hash PII in logs/diagnostics; never echo secrets in responses.
+
+### Development Stack & Tooling
+- Next.js 14+ App Router with modular route groups
+- Prisma ORM (`@prisma/client`) for data access
+- Tailwind CSS for styling
+- Nodemailer for email-based authentication flows
+- Cursor-based AI blocks for code reviews and delivery (follow repo GPT block guidelines)
+- Future integrations include WattBuy, Smart Meter Texas (SMT), Zillow, Google Maps, and appliance recognition tooling
