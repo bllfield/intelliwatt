@@ -395,6 +395,11 @@ export default function SMTInspector() {
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
       <h1 className="text-2xl font-semibold">SMT Inspector</h1>
+      <p className="text-sm text-blue-600">
+        <a className="underline hover:text-blue-500" href="/admin/smt/normalize">
+          Need to run normalization? Use the SMT Normalize UI →
+        </a>
+      </p>
 
       <section className="grid md:grid-cols-2 gap-4">
         <div className="p-4 rounded-2xl border">
