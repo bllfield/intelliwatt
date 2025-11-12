@@ -576,3 +576,11 @@ You should see: latest `postedAt`, and `results` for each TDSP with `key`, `byte
   - Buttons: Trigger webhook pull, Send inline test CSV.
   - Results table wired to `/api/admin/debug/smt/raw-files`.
 - Confirmed: `/api/admin/debug/smt/raw-files?limit=N` continues to expose the latest raw files for QA.
+
+#### PC-2025-11-12-b — SMT Guardrails Before Normalize
+
+- `/api/admin/smt/pull` inline uploads persist to storage + `raw_smt_files` with `sha256` idempotency.
+- `SmtInterval` enforces uniqueness on `(esiid, meter, ts)` to prevent duplicate ingest.
+- `vercel.json` raises `maxRequestBodySize` for SMT routes so inline payloads up to 25 MB are accepted.
+- `/admin/smt` UI uses a server action proxy; admin secrets never touch the browser.
+- `/api/admin/smt/normalize` supports `dryRun=1` for DST + record-count verification before writes.

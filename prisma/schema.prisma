@@ -420,7 +420,7 @@ model SmtInterval {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([esiid, meter, ts], name: "esiid_meter_ts")
+  @@unique([esiid, meter, ts])
   @@index([esiid, meter, ts], map: "esiid_meter_ts_idx")
 }
 

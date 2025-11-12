@@ -4,6 +4,17 @@
   "devCommand": "npm run dev",
   "installCommand": "npm install",
   "outputDirectory": ".next",
+  "functions": {
+    "app/api/admin/smt/pull/route.ts": {
+      "maxDuration": 60,
+      "memory": 1024,
+      "maxRequestBodySize": "25mb"
+    },
+    "app/api/admin/smt/normalize/route.ts": {
+      "maxDuration": 60,
+      "memory": 1024
+    }
+  },
   "crons": [
     { "path": "/api/admin/ercot/cron", "schedule": "0 12 * * *" }
   ]

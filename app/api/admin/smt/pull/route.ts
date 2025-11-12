@@ -9,15 +9,34 @@ export const dynamic = 'force-dynamic';
 
 const WEBHOOK_HEADER = 'x-intelliwatt-secret' as const;
 
+function usingWebhookSecret(req: NextRequest) {
+  const headerValue = (req.headers.get(WEBHOOK_HEADER) ?? '').trim();
+  const secret = (process.env.INTELLIWATT_WEBHOOK_SECRET ?? process.env.DROPLET_WEBHOOK_SECRET ?? '').trim();
+  if (!secret) return { matched: false, reason: 'SECRET_NOT_CONFIGURED' as const };
+  return { matched: headerValue.length > 0 && headerValue === secret, reason: headerValue.length > 0 ? 'MATCHED' : 'HEADER_MISSING' as const };
+}
+
 /**
  * POST /api/admin/smt/pull
- * 
- * Trigger SMT pull for a given ESIID via webhook.
- * Requires x-admin-token header.
+ *
+ * Trigger SMT pull for a given ESIID via webhook, or persist inline uploads for diagnostics.
+ * Accepts either x-admin-token (interactive) or x-intelliwatt-secret (droplet webhook).
  */
 export async function POST(req: NextRequest) {
-  const gate = requireAdmin(req);
-  if (!gate.ok) return NextResponse.json(gate.body, { status: gate.status });
+  const secretCheck = usingWebhookSecret(req);
+  const hasWebhookAuth = secretCheck.matched;
+
+  if (!hasWebhookAuth) {
+    const gate = requireAdmin(req);
+    if (!gate.ok) {
+      return NextResponse.json(gate.body, { status: gate.status });
+    }
+  }
+
+  const contentType = req.headers.get('content-type') || '';
+  if (!contentType.toLowerCase().includes('application/json')) {
+    return NextResponse.json({ ok: false, error: 'EXPECTED_JSON' }, { status: 400 });
+  }
 
   let body: any;
   try {
@@ -44,7 +63,7 @@ export async function POST(req: NextRequest) {
     }
 
     let filename = typeof rawFilename === 'string' ? rawFilename.trim() : '';
-    filename = filename.replace(/^\+|^\/+/g, '');
+    filename = filename.replace(/^[\\/]+/, '');
     if (!filename) {
       return NextResponse.json({ ok: false, error: 'INLINE_MISSING_FILENAME' }, { status: 400 });
     }
@@ -63,7 +82,7 @@ export async function POST(req: NextRequest) {
             expected: Number(declaredSize),
             actual: computedSize,
           },
-          { status: 400 }
+          { status: 400 },
         );
       }
 
@@ -74,7 +93,7 @@ export async function POST(req: NextRequest) {
         console.error('[smt/pull:inline] storage failed', storageError);
         return NextResponse.json(
           { ok: false, error: 'STORAGE_FAILED', detail: String(storageError?.message ?? storageError) },
-          { status: 500 }
+          { status: 500 },
         );
       }
 
@@ -127,7 +146,7 @@ export async function POST(req: NextRequest) {
         sizeBytes: saved.sizeBytes,
         sha256: saved.sha256,
         storagePath: saved.storagePath,
-        persisted: true,
+        persisted: !duplicate,
         duplicate,
         id: recordId ? recordId.toString() : undefined,
         message: duplicate
@@ -146,16 +165,16 @@ export async function POST(req: NextRequest) {
     if (!esiid) {
       return NextResponse.json(
         { ok: false, error: 'MISSING_ESIID', details: 'esiid is required' },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
-    const WEBHOOK_SECRET = process.env.INTELLIWATT_WEBHOOK_SECRET ?? process.env.DROPLET_WEBHOOK_SECRET;
+    const WEBHOOK_SECRET = (process.env.INTELLIWATT_WEBHOOK_SECRET ?? process.env.DROPLET_WEBHOOK_SECRET ?? '').trim();
     if (!WEBHOOK_SECRET) {
       console.error('SMT webhook missing INTELLIWATT_WEBHOOK_SECRET/DROPLET_WEBHOOK_SECRET');
       return NextResponse.json(
         { ok: false, error: 'SERVER_MISCONFIG', details: 'Missing INTELLIWATT_WEBHOOK_SECRET/DROPLET_WEBHOOK_SECRET' },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
@@ -164,7 +183,7 @@ export async function POST(req: NextRequest) {
       console.error('SMT webhook missing DROPLET_WEBHOOK_URL');
       return NextResponse.json(
         { ok: false, error: 'SERVER_MISCONFIG', details: 'Missing DROPLET_WEBHOOK_URL' },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
@@ -185,21 +204,27 @@ export async function POST(req: NextRequest) {
         cache: 'no-store',
       });
     } catch (err: any) {
-      return NextResponse.json({
-        ok: false,
-        error: 'WEBHOOK_CONNECTION_FAILED',
-        details: err?.message || 'Failed to connect to webhook',
-      }, { status: 502 });
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'WEBHOOK_CONNECTION_FAILED',
+          details: err?.message || 'Failed to connect to webhook',
+        },
+        { status: 502 },
+      );
     }
 
     if (!webhookResponse.ok) {
       const errorText = await webhookResponse.text().catch(() => 'Unknown error');
-      return NextResponse.json({
-        ok: false,
-        error: 'WEBHOOK_FAILED',
-        details: errorText,
-        status: webhookResponse.status,
-      }, { status: 502 });
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'WEBHOOK_FAILED',
+          details: errorText,
+          status: webhookResponse.status,
+        },
+        { status: 502 },
+      );
     }
 
     const webhookData = await webhookResponse.json().catch(() => ({}));
@@ -214,7 +239,7 @@ export async function POST(req: NextRequest) {
   } catch (e: any) {
     return NextResponse.json(
       { ok: false, error: e?.message || 'Failed to trigger SMT pull' },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
