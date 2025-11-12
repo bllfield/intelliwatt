@@ -104,4 +104,64 @@ Each successful POST writes the SHA256 of the file into `SMT_LOCAL_DIR/.posted_s
 - Check recent runs with `journalctl -u smt-ingest.service -n 200`.
 - Packages `jq`, `curl`, `openssh-client`, and coreutils tools (`sha256sum`, `base64`) must be installed.
 
+---
+
+## Quick: SSH to droplet as deploy
+
+- Already root on the box? Switch back to `deploy` and the repo:
+  ```bash
+  sudo -iu deploy
+  cd /home/deploy/apps/intelliwatt
+  ```
+- From a fresh local terminal:
+  ```bash
+  ssh deploy@<DROPLET_IP_OR_HOSTNAME>
+  cd /home/deploy/apps/intelliwatt
+  ```
+
+---
+
+## Manual inline post (bash)
+
+```bash
+BASE_URL="https://intelliwatt.com"
+ADMIN_TOKEN="<64-char-token>"
+CSV="/home/deploy/smt_inbox/seed_root.csv"
+ESIID="10443720000000001"
+METER="M1"
+
+json=$(jq -n \
+  --arg mode "inline" \
+  --arg source "adhocusage" \
+  --arg filename "$(basename "$CSV")" \
+  --arg mime "text/csv" \
+  --arg encoding "base64" \
+  --arg content_b64 "$(base64 -w 0 "$CSV")" \
+  --arg esiid "$ESIID" \
+  --arg meter "$METER" \
+  --arg captured_at "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+  --argjson sizeBytes "$(stat -c %s "$CSV")" \
+  '{mode,source,filename,mime,encoding,sizeBytes,content_b64,esiid,meter,captured_at}'
+)
+
+printf '%s' "$json" | curl -sS -o - -w '\nHTTP %{http_code}\n' \
+  -X POST "$BASE_URL/api/admin/smt/pull" \
+  -H "x-admin-token: $ADMIN_TOKEN" \
+  -H "content-type: application/json" \
+  --data-binary @-
+```
+
+---
+
+## Manual inline post (PowerShell)
+
+```powershell
+pwsh -File scripts/admin/smt_inline_post_test.ps1 `
+  -BaseUrl https://intelliwatt.com `
+  -AdminToken <token> `
+  -CsvPath /home/deploy/smt_inbox/seed_root.csv `
+  -Esiid 10443720000000001 `
+  -Meter M1
+```
+
 With the timer active, the droplet continuously ingests new SMT files into IntelliWatt without exposing admin secrets in the client.

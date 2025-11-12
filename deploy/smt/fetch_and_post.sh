@@ -79,7 +79,7 @@ for f in "${FILES[@]}"; do
   esiid_guess=$(echo "$bn" | grep -oE '10[0-9]{16}' || true)
   meter_guess=$(echo "$bn" | grep -oE 'M[0-9]+' || true)
 
-  esiid="${esiid_guess:-}"
+  esiid="${esiid_guess:-${ESIID_DEFAULT:-}}"
   meter="${meter_guess:-$METER_DEFAULT}"
 
   captured_at=$(date -u -d @"$(stat -c %Y "$f")" +"%Y-%m-%dT%H:%M:%SZ")
@@ -101,11 +101,13 @@ for f in "${FILES[@]}"; do
 
   url="${INTELLIWATT_BASE_URL%/}/api/admin/smt/pull"
   log "Posting inline payload: $bn → $url (esiid=${esiid:-N/A}, meter=$meter, size=$size_bytes)"
-  http_code=$(curl -sS -o "$RESP_FILE" -w "%{http_code}" \
-    -X POST "$url" \
-    -H "x-admin-token: $ADMIN_TOKEN" \
-    -H "content-type: application/json" \
-    --data "$json" || echo "000")
+  http_code=$( \
+    printf '%s' "$json" | curl -sS -o "$RESP_FILE" -w "%{http_code}" \
+      -X POST "$url" \
+      -H "x-admin-token: $ADMIN_TOKEN" \
+      -H "content-type: application/json" \
+      --data-binary @- 2>/dev/null || echo "000" \
+  )
 
   if [[ "$http_code" == "200" || "$http_code" == "201" ]]; then
     log "POST success ($http_code): $(jq -c '.' "$RESP_FILE" 2>/dev/null || cat "$RESP_FILE")"
