@@ -6,13 +6,6 @@ import { saveRawToStorage } from '@/app/lib/storage/rawFiles';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const config = {
-  api: {
-    bodyParser: {
-      sizeLimit: '25mb',
-    },
-  },
-};
 
 const WEBHOOK_HEADER = 'x-intelliwatt-secret' as const;
 

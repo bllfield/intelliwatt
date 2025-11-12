@@ -96,5 +96,5 @@ Set these in Vercel (Production) to use ERCOT EWS (mutual-TLS authentication):
 
 ### SMT Inline Upload Guardrails
 
-- **Body size:** `app/api/admin/smt/pull/route.ts` exports `config.api.bodyParser.sizeLimit = '25mb'` so inline uploads accept real CSV payloads (redeploy to apply).
+- **Body size:** `next.config.js` sets `api.bodyParser.sizeLimit = '25mb'` so inline uploads accept real CSV payloads (redeploy to apply).
 - **Storage envs:** Ensure Spaces/S3 envs (`
