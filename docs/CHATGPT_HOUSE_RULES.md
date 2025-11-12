@@ -1,0 +1,94 @@
+# ChatGPT House Rules — *Authoritative, Enforced* (Working Doc)
+
+> **Purpose:** Define exactly how ChatGPT must respond for IntelliWatt / IntelliPath.  
+> **Status:** Authoritative. Newer rules here override anything else. Keep this updated.
+
+---
+
+## 0) Pre-answer requirement
+
+- **Always read** the project files first: `docs/PROJECT_PLAN.md`, `README.md`, `docs/OPS_CHECKLIST.md`, `docs/CHATGPT_HOUSE_RULES.md`, and any file paths relevant to the request.
+- If something is missing, make a best, safe assumption and proceed. **Do not stall**.
+
+## 1) One-step protocol (non-negotiable)
+
+- Provide **exactly one actionable step** per answer. No multi-step lists.
+- End every step with: **“Reply ‘done’ when complete.”**
+- Wait for confirmation before giving the next step.
+
+## 2) Cursor-first delivery
+
+- If Cursor can apply the change, you **must** return a single **Cursor Agent Block** with:
+  - Exact file paths to create/edit (no ellipses).
+  - Full file contents or minimal diffs that apply cleanly.
+  - No `&&` in shell examples (user terminal doesn’t support it).
+
+## 3) Explicit placement & context (assume zero prior knowledge)
+
+Every step **must begin** with:
+- **Where to run it:** “Local Windows PowerShell,” “Vercel dashboard env,” or “Droplet: `/home/deploy`.”
+- **Exact paths:** e.g., `app/api/admin/smt/normalize/route.ts`.
+- **Secrets/keys needed now:** show exact variable names and **how to set them** in that environment (e.g., PowerShell `$ADMIN_TOKEN="..."`).
+- **State management:** If a terminal/session must remain open for subsequent steps, say: “**Do not close this window**; we’ll reuse these variables in the next step.”
+
+## 4) No optional fluff
+
+- Do **not** present options or branches unless strictly non-functional (purely cosmetic).
+- If a thing is required for stability/robustness, **do it now** without asking.
+
+## 5) Plan updates on pivots
+
+- Any major change must include a **Cursor Agent Block** that updates:
+  - `docs/PROJECT_PLAN.md` (append a “Plan Change” that **overrides prior guidance**),
+  - and any other plan docs referenced.
+
+## 6) Return shape & tone
+
+- Be direct. No filler.
+- Provide copy-paste-ready commands and full file contents.
+- Never promise background/async work; deliver now.
+- If long, ship a **working partial** instead of stopping for clarification.
+
+---
+
+## 7) Terminal instruction format (MANDATORY TEMPLATE)
+
+Use this format for any terminal action:
+
+**Where:** Local Windows **PowerShell** (project root), keep this window open.  
+**Set variables (paste exactly, with quotes):**
+```powershell
+$BASE_URL    = "https://intelliwatt.com"
+$ADMIN_TOKEN = "<PASTE_YOUR_64_CHAR_TOKEN>"
+```
+Run the command:
+
+```powershell
+Invoke-RestMethod -Method GET `
+  -Uri "$BASE_URL/api/admin/debug/smt/raw-files?limit=3" `
+  -Headers @{ "x-admin-token" = $ADMIN_TOKEN } | ConvertTo-Json -Depth 6
+```
+Expected result: short, concrete expectation.
+
+When finished: Reply done.
+
+## 8) Step ending line
+
+End every step with: **“Reply ‘done’ when complete.”**
+
+## 9) Default model
+
+- Default model for all answers and Cursor Agent Blocks: **GPT-5 Codex**.
+- Include this in every Cursor Agent Block header.
+
+---
+
+### How to extend this doc
+
+Append dated sections at the end. Example:
+
+```
+## 2025-11-12 — Example additions
+- Always show exact path for any route.
+- Always show expected JSON keys in responses.
+```

@@ -142,3 +142,21 @@ IntelliPath Solutions
 ---
 
 **IntelliWatt™** - HitTheJackWatt™
+
+## Chat Guidance (Required)
+
+Before using ChatGPT in this project:
+
+- Read [`docs/CHATGPT_HOUSE_RULES.md`](docs/CHATGPT_HOUSE_RULES.md).
+- Start each new chat by pasting the contents of [`docs/CHAT_BOOTSTRAP.txt`](docs/CHAT_BOOTSTRAP.txt).
+- Expect one actionable step per answer, delivered as a Cursor Agent Block when code changes are involved.
+
+## Chat Usage — Required
+
+Start each new chat by pasting `docs/CHAT_BOOTSTRAP.txt` as your first message.
+Expect one step at a time with exact “where to run,” variables to set, and paste-ready commands.
+Cursor changes will be shipped as one Cursor Agent Block per step.
+
+```
+Reply 'done' when complete.
+```

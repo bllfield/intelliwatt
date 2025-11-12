@@ -321,3 +321,22 @@ curl -sS "$PROD_BASE_URL/api/admin/ercot/lookup-esiid?line1=9514%20Santa%20Paula
   - Lookup ESIID from address (via WattBuy Electricity Info endpoint `/v3/electricity/info`)
   - Requires `ADMIN_TOKEN` for authentication
 
+
+## Using ChatGPT for this Project
+
+1. Open a new chat.
+2. Paste the entire contents of `docs/CHAT_BOOTSTRAP.txt`.
+3. Ask for ONE step. ChatGPT will provide a single Cursor Agent Block or precise instructions.
+4. Apply that step. Confirm done.
+5. Ask for the next step.
+6. For major pivots, ChatGPT will provide a Cursor block that updates `docs/PROJECT_PLAN.md` (and other plan files as needed).
+
+
+### Default Model
+
+All development, deployment, and automation chats in this project use **GPT-5 Codex** by default.  
+Confirm at the top of each Cursor Agent Block:
+```
+# Model: GPT-5 Codex
+```
+

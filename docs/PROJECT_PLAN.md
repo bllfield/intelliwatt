@@ -584,3 +584,35 @@ You should see: latest `postedAt`, and `results` for each TDSP with `key`, `byte
 - `next.config.js` sets `api.bodyParser.sizeLimit = '25mb'` and we keep SMT function limits at 60s/1 GB so inline payloads succeed in production.
 - `/admin/smt` UI uses a server action proxy; admin secrets never touch the browser.
 - `/api/admin/smt/normalize` supports `dryRun=1` for DST + record-count verification before writes.
+
+## PC-2025-11-12 — Adopt ChatGPT House Rules
+
+**Decision:** The project adopts `docs/CHATGPT_HOUSE_RULES.md` as the authoritative guidance for how ChatGPT must answer.  
+**Scope:** All future instructions must comply:
+- One step per answer.
+- Cursor Agent Blocks for any change Cursor can apply.
+- Start with exact placement (paths, environment, secrets).
+- Keep plan docs up to date with explicit overrides.
+
+**Overrides:** This plan change supersedes any prior guidance that conflicts with the House Rules.
+
+## PC-2025-11-12-C: Standardize Model → GPT-5 Codex
+
+**Decision:** All Cursor-based operations and ChatGPT answers default to **GPT-5 Codex**.  
+**Rationale:** Ensures consistent code generation and alignment with IntelliWatt development stack.  
+**Scope:**  
+- `.cursor/model.config.json` defines the default model.  
+- Cursor Agent Blocks and inline GPT editing must specify `# Model: GPT-5 Codex`.  
+**Overrides:** Supersedes any prior model directives (GPT-4.1, GPT-4o, etc.).
+
+## PC-2025-11-12-D — Enforce One-Step, Explicit Instruction Protocol
+
+**Decision:** Adopt stricter house rules for ChatGPT responses.
+
+**Scope:**
+- Overwrite `docs/CHATGPT_HOUSE_RULES.md` with the one-step, explicit, Cursor-first protocol.
+- Overwrite `docs/CHAT_BOOTSTRAP.txt` with the strict bootstrap.
+
+**Effect:** This change overrides all prior instruction styles or multi-step guidance.
+
+**Model:** Default to GPT-5 Codex for all code/instruction blocks.

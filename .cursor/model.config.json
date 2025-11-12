@@ -1,0 +1,8 @@
+{
+  "default_model": "gpt-5-codex",
+  "description": "Default code-first model for all Cursor Agent Blocks and inline edits.",
+  "notes": [
+    "Use GPT-5 Codex for all coding, deployment, and automation steps.",
+    "Only switch models if explicitly instructed for non-code content."
+  ]
+}
