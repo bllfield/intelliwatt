@@ -96,5 +96,5 @@ Set these in Vercel (Production) to use ERCOT EWS (mutual-TLS authentication):
 
 ### SMT Inline Upload Guardrails
 
-- **Body size:** `next.config.js` sets `api.bodyParser.sizeLimit = '25mb'` so inline uploads accept real CSV payloads (redeploy to apply).
+- **Body size:** Next.js no longer allows overriding App Router body-parser size in `next.config.js`; keep inline payloads small (≈4 MB) or upload via the droplet webhook for larger files.
 - **Storage envs:** Ensure Spaces/S3 envs (`

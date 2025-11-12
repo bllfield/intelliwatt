@@ -581,7 +581,7 @@ You should see: latest `postedAt`, and `results` for each TDSP with `key`, `byte
 
 - `/api/admin/smt/pull` inline uploads persist to storage + `raw_smt_files` with `sha256` idempotency.
 - `SmtInterval` enforces uniqueness on `(esiid, meter, ts)` to prevent duplicate ingest.
-- `next.config.js` sets `api.bodyParser.sizeLimit = '25mb'` and we keep SMT function limits at 60s/1 GB so inline payloads succeed in production.
+- Next.js does not allow custom App Router body-parser sizing; keep inline payloads within default limits (~4 MB) and fall back to the droplet webhook for larger files while keeping function limits at 60s/1 GB.
 - `/admin/smt` UI uses a server action proxy; admin secrets never touch the browser.
 - `/api/admin/smt/normalize` supports `dryRun=1` for DST + record-count verification before writes.
 
