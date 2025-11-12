@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import { requireAdmin } from '@/lib/auth/admin';
 import { prisma } from '@/lib/db';
-import { putObject } from '@/lib/ercot/upload';
+import { saveRawToStorage } from '@/app/lib/storage/rawFiles';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
 
   if (body?.mode === 'inline') {
     const {
-      source = 'adhocusage',
+      source: rawSource = 'adhocusage',
       filename: rawFilename = 'adhoc.csv',
       mime = 'text/csv',
       encoding = 'base64',
@@ -36,6 +36,7 @@ export async function POST(req: NextRequest) {
       esiid,
       meter,
       captured_at,
+      sizeBytes: declaredSize,
     } = body ?? {};
 
     if (!content_b64 || encoding !== 'base64') {
@@ -43,21 +44,32 @@ export async function POST(req: NextRequest) {
     }
 
     let filename = typeof rawFilename === 'string' ? rawFilename.trim() : '';
-    filename = filename.replace(/^\\+|^\/+/g, '');
+    filename = filename.replace(/^\+|^\/+/g, '');
     if (!filename) {
       return NextResponse.json({ ok: false, error: 'INLINE_MISSING_FILENAME' }, { status: 400 });
     }
 
+    let source = typeof rawSource === 'string' ? rawSource.trim() : 'adhocusage';
+    source = source || 'adhocusage';
+
     try {
       const buf = Buffer.from(content_b64, 'base64');
-      const sizeBytes = buf.byteLength;
-      const { createHash } = await import('crypto');
-      const sha256 = createHash('sha256').update(buf).digest('hex');
-      const storagePath = `/adhocusage/${filename}`;
-      const key = storagePath.replace(/^\//, '');
+      const computedSize = buf.byteLength;
+      if (declaredSize && Number(declaredSize) !== computedSize) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: 'INLINE_SIZE_MISMATCH',
+            expected: Number(declaredSize),
+            actual: computedSize,
+          },
+          { status: 400 }
+        );
+      }
 
+      let saved;
       try {
-        await putObject(key, buf, mime || 'application/octet-stream');
+        saved = await saveRawToStorage({ source, filename, mime, buf });
       } catch (storageError: any) {
         console.error('[smt/pull:inline] storage failed', storageError);
         return NextResponse.json(
@@ -74,12 +86,12 @@ export async function POST(req: NextRequest) {
       try {
         const created = await prisma.rawSmtFile.create({
           data: {
-            filename,
-            size_bytes: sizeBytes,
-            sha256,
-            source,
-            content_type: mime,
-            storage_path: storagePath,
+            filename: saved.filename,
+            size_bytes: saved.sizeBytes,
+            sha256: saved.sha256,
+            source: saved.source,
+            content_type: saved.contentType,
+            storage_path: saved.storagePath,
             content: buf,
             received_at: safeReceivedAt,
           },
@@ -89,7 +101,7 @@ export async function POST(req: NextRequest) {
       } catch (err: any) {
         if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
           const existing = await prisma.rawSmtFile.findUnique({
-            where: { sha256 },
+            where: { sha256: saved.sha256 },
             select: { id: true },
           });
           if (existing) {
@@ -106,15 +118,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         ok: true,
         mode: 'inline',
-        filename,
-        mime,
-        source,
+        filename: saved.filename,
+        mime: saved.contentType,
+        source: saved.source,
         esiid,
         meter,
         captured_at,
-        sizeBytes,
-        sha256,
-        storagePath,
+        sizeBytes: saved.sizeBytes,
+        sha256: saved.sha256,
+        storagePath: saved.storagePath,
         persisted: true,
         duplicate,
         id: recordId ? recordId.toString() : undefined,

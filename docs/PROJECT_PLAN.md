@@ -567,3 +567,12 @@ You should see: latest `postedAt`, and `results` for each TDSP with `key`, `byte
   - **Droplet:** `SMT_SFTP_*`, `GNUPG_HOME`, `PGP_RECIPIENT_FPR`, `BATCH_LIMIT`, `LOG_LEVEL`, `INTELLIWATT_WEBHOOK_SECRET`
   - **Vercel:** `DATABASE_URL`, `ADMIN_TOKEN`, `INTELLIWATT_WEBHOOK_SECRET`, `DROPLET_WEBHOOK_URL`, `DROPLET_WEBHOOK_SECRET`
 - **Done Criteria:** SFTP login OK, cycle shows non-zero fetch/decrypt/send, inspector download works, JWT protected API succeeds.
+
+### PC-2025-11-12-B — SMT Pulls Aligned + Inline Persistence + Admin Tools
+
+- Standardized webhook auth to `x-intelliwatt-secret`.
+- Persist inline CSV uploads received via `/api/admin/smt/pull` (mode: "inline") into storage + RawFile DB.
+- Added Admin → SMT Tools page with:
+  - Buttons: Trigger webhook pull, Send inline test CSV.
+  - Results table wired to `/api/admin/debug/smt/raw-files`.
+- Confirmed: `/api/admin/debug/smt/raw-files?limit=N` continues to expose the latest raw files for QA.
