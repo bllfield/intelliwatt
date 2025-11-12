@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { Prisma } from '@prisma/client';
 import { requireAdmin } from '@/lib/auth/admin';
+import { prisma } from '@/lib/db';
+import { putObject } from '@/lib/ercot/upload';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -26,7 +29,7 @@ export async function POST(req: NextRequest) {
   if (body?.mode === 'inline') {
     const {
       source = 'adhocusage',
-      filename = 'adhoc.csv',
+      filename: rawFilename = 'adhoc.csv',
       mime = 'text/csv',
       encoding = 'base64',
       content_b64,
@@ -39,11 +42,66 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: 'INLINE_MISSING_B64' }, { status: 400 });
     }
 
+    let filename = typeof rawFilename === 'string' ? rawFilename.trim() : '';
+    filename = filename.replace(/^\\+|^\/+/g, '');
+    if (!filename) {
+      return NextResponse.json({ ok: false, error: 'INLINE_MISSING_FILENAME' }, { status: 400 });
+    }
+
     try {
       const buf = Buffer.from(content_b64, 'base64');
       const sizeBytes = buf.byteLength;
       const { createHash } = await import('crypto');
       const sha256 = createHash('sha256').update(buf).digest('hex');
+      const storagePath = `/adhocusage/${filename}`;
+      const key = storagePath.replace(/^\//, '');
+
+      try {
+        await putObject(key, buf, mime || 'application/octet-stream');
+      } catch (storageError: any) {
+        console.error('[smt/pull:inline] storage failed', storageError);
+        return NextResponse.json(
+          { ok: false, error: 'STORAGE_FAILED', detail: String(storageError?.message ?? storageError) },
+          { status: 500 }
+        );
+      }
+
+      const receivedAt = captured_at ? new Date(captured_at) : new Date();
+      const safeReceivedAt = Number.isNaN(receivedAt.getTime()) ? new Date() : receivedAt;
+
+      let recordId: bigint | null = null;
+      let duplicate = false;
+      try {
+        const created = await prisma.rawSmtFile.create({
+          data: {
+            filename,
+            size_bytes: sizeBytes,
+            sha256,
+            source,
+            content_type: mime,
+            storage_path: storagePath,
+            content: buf,
+            received_at: safeReceivedAt,
+          },
+          select: { id: true },
+        });
+        recordId = created.id;
+      } catch (err: any) {
+        if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+          const existing = await prisma.rawSmtFile.findUnique({
+            where: { sha256 },
+            select: { id: true },
+          });
+          if (existing) {
+            recordId = existing.id;
+            duplicate = true;
+          } else {
+            throw err;
+          }
+        } else {
+          throw err;
+        }
+      }
 
       return NextResponse.json({
         ok: true,
@@ -56,10 +114,17 @@ export async function POST(req: NextRequest) {
         captured_at,
         sizeBytes,
         sha256,
-        message: 'Inline payload received and verified (not persisted).',
+        storagePath,
+        persisted: true,
+        duplicate,
+        id: recordId ? recordId.toString() : undefined,
+        message: duplicate
+          ? 'Inline payload verified (duplicate sha256, existing record reused).'
+          : 'Inline payload stored and verified.',
       });
     } catch (err: any) {
-      return NextResponse.json({ ok: false, error: 'INLINE_DECODE_FAILED', detail: String(err?.message ?? err) }, { status: 400 });
+      console.error('[smt/pull:inline] persistence failed', err);
+      return NextResponse.json({ ok: false, error: 'INLINE_PERSIST_FAILED', detail: String(err?.message ?? err) }, { status: 500 });
     }
   }
 
