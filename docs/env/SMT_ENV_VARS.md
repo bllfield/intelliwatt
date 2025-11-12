@@ -20,6 +20,13 @@
 - `DROPLET_WEBHOOK_URL` = `http://<DROPLET_IP>:8787/trigger/smt-now`
 - `DROPLET_WEBHOOK_SECRET` = `<same value as INTELLIWATT_WEBHOOK_SECRET>`
 
+## Webhook auth (SMT droplet)
+- `INTELLIWATT_WEBHOOK_SECRET` — primary secret Vercel sends to droplet.
+- `DROPLET_WEBHOOK_SECRET` — fallback/alias; keep equal to the above.
+- `DROPLET_WEBHOOK_URL` — e.g. `http://<droplet-ip>:8787/trigger/smt-now`
+- Header used: `x-intelliwatt-secret`
+- **Do not use `x-proxy-secret` (deprecated).**
+
 ## Headers
 - `x-intelliwatt-secret` = **INTELLIWATT_WEBHOOK_SECRET**
 - `x-admin-token` = **ADMIN_TOKEN**

@@ -4,6 +4,8 @@ import { requireAdmin } from '@/lib/auth/admin';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+const WEBHOOK_HEADER = 'x-intelliwatt-secret' as const;
+
 /**
  * POST /api/admin/smt/pull
  * 
@@ -71,28 +73,31 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const webhookUrl = process.env.DROPLET_WEBHOOK_URL ?? process.env.INTELLIWATT_WEBHOOK_URL;
-    const webhookSecret = process.env.DROPLET_WEBHOOK_SECRET ?? process.env.INTELLIWATT_WEBHOOK_SECRET;
-
-    if (!webhookUrl || !webhookSecret) {
+    const WEBHOOK_SECRET = process.env.INTELLIWATT_WEBHOOK_SECRET ?? process.env.DROPLET_WEBHOOK_SECRET;
+    if (!WEBHOOK_SECRET) {
+      console.error('SMT webhook missing INTELLIWATT_WEBHOOK_SECRET/DROPLET_WEBHOOK_SECRET');
       return NextResponse.json(
-        {
-          ok: false,
-          error: 'WEBHOOK_NOT_CONFIGURED',
-          details: 'Set DROPLET_WEBHOOK_URL/SECRET or INTELLIWATT_WEBHOOK_URL/SECRET',
-        },
-        { status: 503 }
+        { ok: false, error: 'SERVER_MISCONFIG', details: 'Missing INTELLIWATT_WEBHOOK_SECRET/DROPLET_WEBHOOK_SECRET' },
+        { status: 500 }
       );
     }
 
-    // Trigger SMT pull via webhook
+    const DROPLET_WEBHOOK_URL = process.env.DROPLET_WEBHOOK_URL;
+    if (!DROPLET_WEBHOOK_URL) {
+      console.error('SMT webhook missing DROPLET_WEBHOOK_URL');
+      return NextResponse.json(
+        { ok: false, error: 'SERVER_MISCONFIG', details: 'Missing DROPLET_WEBHOOK_URL' },
+        { status: 500 }
+      );
+    }
+
     let webhookResponse: Response;
     try {
-      webhookResponse = await fetch(webhookUrl, {
+      webhookResponse = await fetch(DROPLET_WEBHOOK_URL, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'x-intelliwatt-secret': webhookSecret,
+          [WEBHOOK_HEADER]: WEBHOOK_SECRET,
+          'content-type': 'application/json',
         },
         body: JSON.stringify({
           reason: 'admin_triggered',
