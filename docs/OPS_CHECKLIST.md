@@ -96,14 +96,5 @@ Set these in Vercel (Production) to use ERCOT EWS (mutual-TLS authentication):
 
 ### SMT Inline Upload Guardrails
 
-- **Body size:** `vercel.json` sets `maxRequestBodySize: 25mb` for `/api/admin/smt/pull` so inline uploads accept real CSV payloads.
-- **Storage envs:** Ensure Spaces/S3 envs (`S3_ENDPOINT`, `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_FORCE_PATH_STYLE`) are configured when not using Vercel Blob.
-- **Admin UI:** The `/admin/smt` page now triggers normalization through a server action, keeping `ADMIN_TOKEN` off the client.
-- **Dry-run sanity:** Hit `POST /api/admin/smt/normalize?limit=1&dryRun=1` for DST-spanning files to verify interval counts before writing.
-
-### SMT Smoke Tests
-
-1. Inline upload → call `/api/admin/smt/pull` with `mode: "inline"` and confirm `/api/admin/debug/smt/raw-files` lists the new blob.
-2. Normalize (dry-run) → `POST /api/admin/smt/normalize?limit=5&dryRun=1` and confirm `filesProcessed`, `records`, and `tsMin/tsMax` look correct.
-3. Normalize (write) → `POST /api/admin/smt/normalize?limit=5` and verify `intervalsInserted` increases while duplicates are counted in `duplicatesSkipped`.
-
+- **Body size:** `app/api/admin/smt/pull/route.ts` exports `config.api.bodyParser.sizeLimit = '25mb'` so inline uploads accept real CSV payloads (redeploy to apply).
+- **Storage envs:** Ensure Spaces/S3 envs (`

@@ -581,6 +581,6 @@ You should see: latest `postedAt`, and `results` for each TDSP with `key`, `byte
 
 - `/api/admin/smt/pull` inline uploads persist to storage + `raw_smt_files` with `sha256` idempotency.
 - `SmtInterval` enforces uniqueness on `(esiid, meter, ts)` to prevent duplicate ingest.
-- `vercel.json` raises `maxRequestBodySize` for SMT routes so inline payloads up to 25 MB are accepted.
+- `app/api/admin/smt/pull/route.ts` sets `config.api.bodyParser.sizeLimit = '25mb'` and keeps function limits at 60s/1GB so inline payloads succeed in production.
 - `/admin/smt` UI uses a server action proxy; admin secrets never touch the browser.
 - `/api/admin/smt/normalize` supports `dryRun=1` for DST + record-count verification before writes.

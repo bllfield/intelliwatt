@@ -7,8 +7,7 @@
   "functions": {
     "app/api/admin/smt/pull/route.ts": {
       "maxDuration": 60,
-      "memory": 1024,
-      "maxRequestBodySize": "25mb"
+      "memory": 1024
     },
     "app/api/admin/smt/normalize/route.ts": {
       "maxDuration": 60,
