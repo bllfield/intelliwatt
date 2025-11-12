@@ -14,8 +14,54 @@ export async function POST(req: NextRequest) {
   const gate = requireAdmin(req);
   if (!gate.ok) return NextResponse.json(gate.body, { status: gate.status });
 
+  let body: any;
   try {
-    const body = await req.json();
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ ok: false, error: 'BAD_JSON' }, { status: 400 });
+  }
+
+  if (body?.mode === 'inline') {
+    const {
+      source = 'adhocusage',
+      filename = 'adhoc.csv',
+      mime = 'text/csv',
+      encoding = 'base64',
+      content_b64,
+      esiid,
+      meter,
+      captured_at,
+    } = body ?? {};
+
+    if (!content_b64 || encoding !== 'base64') {
+      return NextResponse.json({ ok: false, error: 'INLINE_MISSING_B64' }, { status: 400 });
+    }
+
+    try {
+      const buf = Buffer.from(content_b64, 'base64');
+      const sizeBytes = buf.byteLength;
+      const { createHash } = await import('crypto');
+      const sha256 = createHash('sha256').update(buf).digest('hex');
+
+      return NextResponse.json({
+        ok: true,
+        mode: 'inline',
+        filename,
+        mime,
+        source,
+        esiid,
+        meter,
+        captured_at,
+        sizeBytes,
+        sha256,
+        message: 'Inline payload received and verified (not persisted).',
+      });
+    } catch (err: any) {
+      return NextResponse.json({ ok: false, error: 'INLINE_DECODE_FAILED', detail: String(err?.message ?? err) }, { status: 400 });
+    }
+  }
+
+  try {
     const { esiid, meter } = body || {};
 
     if (!esiid) {
