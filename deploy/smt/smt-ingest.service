@@ -1,0 +1,17 @@
+[Unit]
+Description=IntelliWatt SMT ingest (SFTP -> inline POST)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=deploy
+Group=deploy
+EnvironmentFile=/etc/default/intelliwatt-smt
+WorkingDirectory=/home/deploy/apps/intelliwatt
+ExecStart=/bin/bash /home/deploy/apps/intelliwatt/deploy/smt/fetch_and_post.sh
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
