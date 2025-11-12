@@ -81,6 +81,12 @@ End every step with: **“Reply ‘done’ when complete.”**
 - Default model for all answers and Cursor Agent Blocks: **GPT-5 Codex**.
 - Include this in every Cursor Agent Block header.
 
+## 10) Cursor execution guarantee
+
+- When running inside Cursor, GPT must execute the requested task in this chat.
+- Do not defer back to the user; apply the change directly (or supply the Cursor Agent Block) during this step.
+- If execution requires multiple sub-actions, ship a working subset inside this single step and wait for confirmation before continuing.
+
 ---
 
 ### How to extend this doc
