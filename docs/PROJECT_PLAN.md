@@ -554,3 +554,16 @@ You should see: latest `postedAt`, and `results` for each TDSP with `key`, `byte
 - Remove or disable cron in `vercel.json`.
 - Remove `/app/api/admin/ercot/cron/route.ts` and related library files if needed.
 - S3 objects remain (no automatic deletion).
+
+## PC-2025-11-11-A — SMT JWT Upgrade (Authoritative Override)
+
+- **Rationale:** SMT decommissioned FTPS and non-JWT API (effective 2025-09-13). We must use SFTP and API with JWT.
+- **Scope:**
+  - Keep SFTP path (OpenSSH keys, `/adhocusage`) as-is.
+  - Add JWT acquisition/caching to all SMT API calls.
+  - Standardize webhook headers: `x-intelliwatt-secret`, `x-admin-token`.
+  - Inline ingest payload enabled for inspector (`content_b64` supported).
+- **Env keys:**
+  - **Droplet:** `SMT_SFTP_*`, `GNUPG_HOME`, `PGP_RECIPIENT_FPR`, `BATCH_LIMIT`, `LOG_LEVEL`, `INTELLIWATT_WEBHOOK_SECRET`
+  - **Vercel:** `DATABASE_URL`, `ADMIN_TOKEN`, `INTELLIWATT_WEBHOOK_SECRET`, `DROPLET_WEBHOOK_URL`, `DROPLET_WEBHOOK_SECRET`
+- **Done Criteria:** SFTP login OK, cycle shows non-zero fetch/decrypt/send, inspector download works, JWT protected API succeeds.
