@@ -888,3 +888,67 @@ Locked Behavior:
 - This contract MUST be implemented in **app/api/admin/smt/normalize/route.ts** (Next.js App Router) and use the existing DB client.
 
 Status: ACTIVE / DO NOT CHANGE without updating this section.
+
+[PC-2025-11-12-H] SMT Customer Authorization & Auto-Pull (LOCKED, NEXT)
+
+Goal:
+
+- Move from admin-only ingest to customer-authorized automatic delivery of real usage data.
+
+Scope (must implement in this phase):
+
+1) Agreements (CSP Data Sharing)
+
+   - REST: New Energy Data Sharing Agreement, List Agreements, Status, Terminate, List ESIIDs per Agreement.
+
+   - Store: agreementId, status, createdAt, language, termsAcceptedAt, esiid(s), meter(s).
+
+   - UX: capture T&Cs + language; confirm ESIID (from WattBuy).
+
+2) Subscriptions (Ongoing Delivery)
+
+   - REST: New Subscription, List Subscriptions, Unsubscribe/Cancel.
+
+   - Deliveries: SFTP (preferred; droplet already pulling) or Callback API (JSON).
+
+   - Store: subscriptionId, deliveryType, format, status.
+
+3) Enrollment (Historical Backfill — optional but recommended)
+
+   - One-time historical backfill, delivered to SFTP.
+
+   - Limit rules:
+
+     - Residential ESIDs: max 12 months of backfill.
+
+     - Commercial/interval ESIDs: up to 24 months (per SMT constraints).
+
+   - Store: enrollmentId, status, requestedRange, effectiveRange, accountClass (res/com).
+
+4) JWT
+
+   - Implement SMT Token Generation and reuse cached tokens for all REST calls.
+
+5) Ops & Admin
+
+   - Nightly cron to refresh Agreement/Subscription/Enrollment status.
+
+   - Admin pages to create/list/terminate agreements, create/list/unsubscribe subscriptions, trigger enrollment.
+
+   - Logs & alerts if delivery is paused or agreement expires.
+
+Constraints:
+
+- ESIID source of truth remains WattBuy (ERCOT ESIID paused).
+
+- Keep existing SFTP/webhook ingest unchanged.
+
+Done Criteria:
+
+- Customer completes agreement; we can create a subscription; SFTP drop appears and is auto-pulled → normalized into SmtInterval.
+
+- Admin UI shows live Agreement/Subscription/Enrollment status per home, including effective backfill window (12 vs 24 months).
+
+References: SMT Interface Guide sections (Agreements, Subscriptions, Enrollment, Token Generation, backfill limits).
+
+Status: NOT STARTED (docs locked to prevent scope creep).

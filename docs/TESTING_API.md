@@ -221,6 +221,94 @@ curl.exe -X POST ^
 
 **Expect:** HTTP 200 with `[INFO]` / `[DONE]` lines in response body.
 
+## SMT Customer Authorization Canonical Tests (LOCKED — run once endpoints ship)
+
+> **Where:** Windows PowerShell (Invoke-RestMethod or curl.exe variants), admin-gated routes only.
+
+### 1) Create Agreement (admin proxy)
+
+```powershell
+$BaseUrl    = "https://intelliwatt.com"
+$AdminToken = Read-Host "ADMIN_TOKEN"
+$Body = @{
+  esiid    = "10443720000000001"
+  meter    = "M1"
+  language = "en"
+  termsAck = (Get-Date).ToUniversalTime().ToString("o")
+} | ConvertTo-Json -Compress
+
+Invoke-RestMethod -Method POST `
+  -Uri "$BaseUrl/api/admin/smt/agreements/new" `
+  -Headers @{ "x-admin-token" = $AdminToken } `
+  -ContentType "application/json" `
+  -Body $Body | ConvertTo-Json -Depth 6
+```
+
+**Expect (once implemented):** `201 Created` | `200 OK` with `{ ok:true, agreementId, status }`.
+
+### 2) Create Subscription (15-min data, SFTP delivery)
+
+```powershell
+$BaseUrl    = "https://intelliwatt.com"
+$AdminToken = Read-Host "ADMIN_TOKEN"
+$Agreement  = Read-Host "Agreement ID from step 1"
+$Body = @{
+  agreementId = $Agreement
+  delivery    = "SFTP"   # or "CALLBACK"
+  format      = "CSV"    # or "JSON"
+} | ConvertTo-Json -Compress
+
+Invoke-RestMethod -Method POST `
+  -Uri "$BaseUrl/api/admin/smt/subscriptions/new" `
+  -Headers @{ "x-admin-token" = $AdminToken } `
+  -ContentType "application/json" `
+  -Body $Body | ConvertTo-Json -Depth 6
+```
+
+**Expect:** `{ ok:true, subscriptionId, status }`; verify SFTP delivery settings echoed back.
+
+### 3) Enrollment Request (historical backfill to SFTP)
+
+```powershell
+$BaseUrl    = "https://intelliwatt.com"
+$AdminToken = Read-Host "ADMIN_TOKEN"
+$Agreement  = Read-Host "Agreement ID (res reuse from step 1)"
+$Body = @{
+  agreementId = $Agreement
+  monthsBack  = 12    # residential default; 24 only for commercial ESIDs
+} | ConvertTo-Json -Compress
+
+Invoke-RestMethod -Method POST `
+  -Uri "$BaseUrl/api/admin/smt/enrollments/new" `
+  -Headers @{ "x-admin-token" = $AdminToken } `
+  -ContentType "application/json" `
+  -Body $Body | ConvertTo-Json -Depth 6
+```
+
+**Expect:** `{ ok:true, enrollmentId, status, requestedRange, effectiveRange }`.
+
+### 4) Agreement/Subscription/Enrollment Status Checks
+
+```powershell
+$BaseUrl    = "https://intelliwatt.com"
+$AdminToken = Read-Host "ADMIN_TOKEN"
+$Esiid      = "10443720000000001"
+
+Invoke-RestMethod -Method GET `
+  -Uri "$BaseUrl/api/admin/smt/agreements/list?esiid=$Esiid" `
+  -Headers @{ "x-admin-token" = $AdminToken } | ConvertTo-Json -Depth 6
+
+Invoke-RestMethod -Method GET `
+  -Uri "$BaseUrl/api/admin/smt/subscriptions/list?esiid=$Esiid" `
+  -Headers @{ "x-admin-token" = $AdminToken } | ConvertTo-Json -Depth 6
+
+Invoke-RestMethod -Method GET `
+  -Uri "$BaseUrl/api/admin/smt/enrollments/list?esiid=$Esiid" `
+  -Headers @{ "x-admin-token" = $AdminToken } | ConvertTo-Json -Depth 6
+```
+
+**Expect:** `200 OK` with arrays including IDs + status; downstream SFTP drops should appear once active.
+
 ## Windows PowerShell — Canonical HTTP Snippets (LOCKED 2025-11-12)
 
 ### 1) Admin-triggered SMT pull (POST /api/admin/smt/pull)

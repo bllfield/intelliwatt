@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
 type Json = any;
@@ -21,6 +22,45 @@ function useLocalToken(key = 'iw_admin_token') {
 function pretty(x: Json) {
   try { return JSON.stringify(x, null, 2); } catch { return String(x); }
 }
+
+type Tool = {
+  href: string;
+  title: string;
+  desc: string;
+  paused?: boolean;
+};
+
+const SMT_TOOLS: Tool[] = [
+  {
+    href: '/admin/smt/raw',
+    title: 'Raw Files & Normalize UI',
+    desc: 'Lists RawSmtFile rows and runs /api/admin/smt/normalize with { latest:true }, { rawId }, or { since }.',
+  },
+  {
+    href: '/admin/smt/trigger',
+    title: 'Admin SMT Trigger (Webhook)',
+    desc: 'Posts { esiid, meter } to /api/admin/smt/pull using x-admin-token (server) → droplet webhook.',
+  },
+  // Upcoming tools (placeholders per PC-2025-11-12-F nav lock)
+  {
+    href: '/admin/smt/agreements',
+    title: 'Agreements (New/List/Status/Terminate)',
+    desc: 'Customer data sharing agreements.',
+    paused: true,
+  },
+  {
+    href: '/admin/smt/subscriptions',
+    title: 'Subscriptions (New/List/Unsubscribe)',
+    desc: 'Ongoing delivery to SFTP/Callback.',
+    paused: true,
+  },
+  {
+    href: '/admin/smt/enrollments',
+    title: 'Enrollment (Backfill: 12mo res / 24mo com)',
+    desc: 'One-time historical backfill via SFTP (per SMT limits).',
+    paused: true,
+  },
+];
 
 export default function SMTInspector() {
   const { token, setToken } = useLocalToken();
@@ -399,14 +439,25 @@ export default function SMTInspector() {
         <strong>ESIID Source:</strong> <code>WattBuy</code> (LOCKED). ERCOT ESIID indexing is <strong>paused</strong>.
         See <code>docs/PROJECT_PLAN.md → PC-2025-11-12-E</code> and <code>docs/DEPLOY_ERCOT.md</code> for re-enable steps.
       </div>
-      <div className="flex flex-wrap items-center gap-4 text-sm text-blue-600">
-        <a className="underline hover:text-blue-500" href="/admin/smt/normalize">
-          Need to run normalization? Use the SMT Normalize UI →
-        </a>
-        <a className="underline hover:text-blue-500" href="/admin/smt/raw">
-          Manage Raw SMT files & “Normalize now” →
-        </a>
-      </div>
+      <p className="text-sm">
+        Per <code>PC-2025-11-12-F</code>, this hub must link to <em>every</em> SMT admin utility. The list below is driven by
+        the in-file registry <code>SMT_TOOLS</code>.
+      </p>
+      <ul className="space-y-3">
+        {SMT_TOOLS.map((tool) => (
+          <li key={tool.href} className="border rounded p-3">
+            <div className="flex items-center justify-between">
+              <Link className="text-blue-600 underline text-base" href={tool.href}>
+                {tool.title}
+              </Link>
+              {tool.paused ? (
+                <span className="text-xs px-2 py-1 rounded border bg-gray-100">Paused</span>
+              ) : null}
+            </div>
+            <div className="text-xs text-muted-foreground mt-1">{tool.desc}</div>
+          </li>
+        ))}
+      </ul>
 
       <section className="grid md:grid-cols-2 gap-4">
         <div className="p-4 rounded-2xl border">

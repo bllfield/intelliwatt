@@ -172,3 +172,39 @@ Invoke-RestMethod -Headers $headers -Uri "https://<your-preview>.vercel.app/api/
 - With `ERCOT_ESIID_DISABLED=true`, ops must not schedule ERCOT ESIID cron jobs.
 
 - If switching back later, set `ESIID_SOURCE=ercot`, clear `ERCOT_ESIID_DISABLED`, and re-enable cron (see `docs/DEPLOY_ERCOT.md`).
+
+## SMT Customer Authorization & Auto-Pull — Env (LOCKED)
+
+### Vercel (Server)
+
+- `SMT_CALLBACK_VERIFY_SECRET` — Optional, if using SMT callback JSON delivery.
+
+- `SMT_JWT_CLIENT_ID` — SMT API client id.
+
+- `SMT_JWT_CLIENT_SECRET` — SMT API client secret.
+
+- `SMT_JWT_AUDIENCE` — As provided by SMT (token audience).
+
+- `SMT_JWT_TOKEN_URL` — SMT token endpoint URL.
+
+- `SMT_JWT_SCOPE` — Optional scope override if SMT issues non-default scopes.
+
+- `SMT_JWT_CACHE_TTL_SEC` — Optional TTL (seconds) to cache SMT JWTs before refresh (default behavior: refresh on expiry minus safety buffer).
+
+- `SMT_CALLBACK_BASE_URL` — Optional base URL to advertise callback endpoint (include scheme + host, no trailing slash).
+
+- `ADMIN_TOKEN` — Existing admin gate (unchanged).
+
+### Droplet
+
+- (Existing) `INTELLIWATT_WEBHOOK_SECRET` — webhook auth.
+
+- (Existing) SFTP keys & paths (no change).
+
+### Notes
+
+- If choosing Callback API delivery, expose `/api/smt/callback` (server) and validate `SMT_CALLBACK_VERIFY_SECRET`.
+
+- SFTP remains preferred; Enrollment backfill always goes to SFTP per SMT.
+
+- Enrollment logic must cap requested backfill to 12 months for residential and 24 months for commercial ESIDs.
