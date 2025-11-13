@@ -430,3 +430,19 @@ Invoke-RestMethod -Method GET `
 
 - Ensure `ESIID_SOURCE=wattbuy`, `WATTBUY_ESIID_ENABLED=true`, and `ERCOT_ESIID_DISABLED=true` are set in Vercel env.
 - Keep using the Windows IRM / curl.exe conventions locked earlier in this doc.
+
+## Verification Snapshot — SMT + WattBuy ESIID (2025-11-12)
+
+All canonical tests below returned **HTTP 200** in production:
+
+- **Admin SMT Pull:** `POST /api/admin/smt/pull` (IRM + curl.exe variants)
+- **Droplet Webhook:** `POST http://64.225.25.54:8787/trigger/smt-now` with `x-intelliwatt-secret`
+- **Normalize:** `POST /api/admin/smt/normalize` with `{ latest:true }`, `{ rawId }`, `{ since }`
+- **WattBuy ESIID Proxy (Admin):** `GET /api/admin/wattbuy/property-details?...`
+
+Reference:
+
+- Windows rules (IRM/curl.exe, headers, JSON bodies) are **LOCKED** above.
+- UI helpers at **/admin/smt/inspector** exercised the same flows and reported 200 OK.
+
+This snapshot marks the current state as **VERIFIED**. If any route changes, update this section immediately.

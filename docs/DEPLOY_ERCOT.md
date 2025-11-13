@@ -1,5 +1,11 @@
 # ERCOT Daily Pull System — Complete Guide
 
+# ERCOT Daily Pull System — Complete Guide
+
+> STATUS (2025-11-12): **ERCOT ESIID indexing is PAUSED.**  
+> ESIID source of truth is **WattBuy** (see PROJECT_PLAN.md → PC-2025-11-12-E).  
+> Do not enable ERCOT ESIID cron/timers while this status is active.
+
 **Last Updated**: November 2025
 
 This guide covers deployment, migration, testing, and troubleshooting for the ERCOT daily pull system.

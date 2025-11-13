@@ -657,6 +657,86 @@ Implementation Notes:
 
 Status: ACTIVE / Overrides earlier ERCOT-first guidance until explicitly lifted.
 
+[PC-2025-11-12-F] SMT Inspector Navigation (LOCKED)
+
+Requirement:
+
+- The SMT Inspector page **must link to every SMT admin utility** that exists in the app.
+
+- Utilities are maintained as a simple registry (array) in the inspector component so additions are one-line changes.
+
+Initial Set (as of this lock):
+
+- `/admin/smt/raw` — Raw Files & Normalize UI
+
+- `/admin/smt/trigger` — Admin SMT Trigger (Webhook)
+
+Rules:
+
+1) When a new SMT admin utility is added, append it to the inspector registry in `app/admin/smt/inspector/page.tsx`.
+
+2) Do not remove links for active utilities without updating this section.
+
+3) If a utility is temporarily paused, keep the link and annotate its state (Paused) in the UI.
+
+Status: ACTIVE / Required for all future SMT utilities.
+
+[PC-2025-11-12-G] SMT + WattBuy ESIID Hand-off — COMPLETED (2025-11-12)
+
+Scope Verified as DONE:
+
+1) Admin SMT Pull:
+
+   - Route: **/api/admin/smt/pull** (Vercel, App Router)
+
+   - Headers: `x-admin-token`
+
+   - Paths:
+
+     - `{ esiid, meter }` → droplet webhook trigger (200 OK observed)
+
+     - `{ mode:"inline", ... }` → RawSmtFile persist (200 OK observed)
+
+2) Droplet Webhook (SMT fetch/post):
+
+   - URL: **http://64.225.25.54:8787/trigger/smt-now**
+
+   - Header: `x-intelliwatt-secret`
+
+   - Logs: `[INFO] Listing adhocusage ...` / `[DONE] ...` (200 OK observed)
+
+3) Normalize:
+
+   - Route: **/api/admin/smt/normalize**
+
+   - Contract: `{ latest:true } | { rawId } | { since:"ISO" }`
+
+   - Behavior: idempotent upsert; DST handled; links to source raw file
+
+   - Result: 200 OK; filesProcessed/duplicatesSkipped counters correct
+
+4) Admin UIs:
+
+   - **/admin/smt/trigger** — manual POST helper for pull
+
+   - **/admin/smt/raw** — list RawSmtFile + “Normalize now”
+
+   - **/admin/smt/inspector** — hub links (LOCKED nav requirement satisfied)
+
+5) ESIID Source of Truth:
+
+   - **WattBuy** is the active ESIID authority (LOCKED).
+
+   - **ERCOT ESIID indexing is paused** per PC-2025-11-12-E.
+
+6) Testing Conventions (Windows):
+
+   - Locked PowerShell Invoke-RestMethod & curl.exe patterns in **docs/TESTING_API.md**
+
+   - All canonical snippets produce **HTTP 200** with expected shapes.
+
+Status: COMPLETE. Any changes to headers, routes, or source-of-truth must update this milestone and the prior LOCKED sections.
+
 [PC-2025-11-12-A] SMT Inline + Webhook Hand-off (LOCKED)
 
 Context:
