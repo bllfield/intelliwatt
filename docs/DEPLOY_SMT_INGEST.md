@@ -188,3 +188,55 @@ pwsh -File scripts/admin/smt_inline_post_test.ps1 `
 ---
 
 With the timer active, the droplet continuously ingests new SMT files into IntelliWatt without exposing admin secrets in the client.
+
+[2025-11-12] Verified droplet + systemd + webhook configuration
+
+Droplet (Ubuntu 25.04), user: deploy
+
+- Inbox: `/home/deploy/smt_inbox` (mkdir -p; `sudo chown -R deploy:deploy /home/deploy/smt_inbox`)
+
+- Webhook server: `/home/deploy/smt_ingest/web/webhook_server.py`
+
+- Port: 8787 (open in UFW: `sudo ufw allow 8787/tcp`; confirm: `ss -ltnp | grep 8787`)
+
+- Process: `ps -fp <pid>` should show `python3 .../webhook_server.py`
+
+Systemd unit + override (installed via repo assets):
+
+- Unit files copied from repo:
+
+  - `/etc/systemd/system/smt-ingest.service`  ← source: `deploy/smt/smt-ingest.service`
+
+  - `/etc/systemd/system/smt-ingest.timer`    ← source: `deploy/smt/smt-ingest.timer`
+
+- Override to force writable working dir + state file:
+
+  - mkdir: `/etc/systemd/system/smt-ingest.service.d`
+
+  - file: `/etc/systemd/system/smt-ingest.service.d/override.conf`
+
+    ```
+
+    [Service]
+
+    WorkingDirectory=/home/deploy/smt_inbox
+
+    Environment=STATE_FILE=/home/deploy/smt_inbox/.posted_sha256
+
+    ```
+
+- Reload + enable:
+
+  - `sudo systemctl daemon-reload`
+
+  - `sudo systemctl enable --now smt-ingest.timer`
+
+  - `journalctl -u smt-ingest.service -n 100 --no-pager`
+
+Droplet Env file:
+
+- `/etc/default/intelliwatt-smt`
+
+  - must include: `ADMIN_TOKEN`, `INTELLIWATT_BASE_URL`, `SMT_HOST`, `SMT_USER`, `SMT_KEY`, `SMT_REMOTE_DIR`, `SMT_LOCAL_DIR`
+
+  - optional: `SOURCE_TAG`, `METER_DEFAULT`, `ESIID_DEFAULT`

@@ -79,7 +79,7 @@ for f in "${FILES[@]}"; do
   esiid_guess=$(echo "$bn" | grep -oE '10[0-9]{16}' || true)
   meter_guess=$(echo "$bn" | grep -oE 'M[0-9]+' || true)
 
-  esiid="${esiid_guess:-${ESIID_DEFAULT:-}}"
+  esiid="${esiid_guess:-$(printf '%s' "${ESIID_DEFAULT:-}" | tr -d $'\r\n')}"
   meter="${meter_guess:-$METER_DEFAULT}"
 
   captured_at=$(date -u -d @"$(stat -c %Y "$f")" +"%Y-%m-%dT%H:%M:%SZ")

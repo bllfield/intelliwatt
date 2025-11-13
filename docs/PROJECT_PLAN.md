@@ -622,3 +622,155 @@ You should see: latest `postedAt`, and `results` for each TDSP with `key`, `byte
 **Effect:** This change overrides all prior instruction styles or multi-step guidance.
 
 **Model:** Default to GPT-5 Codex for all code/instruction blocks.
+
+[PC-2025-11-12-A] SMT Inline + Webhook Hand-off (LOCKED)
+
+Context:
+
+- We now support two paths on **/api/admin/smt/pull**:
+
+  (a) `mode: "inline"` → stores base64 CSV into RawSmtFile (no pull executed)
+
+  (b) `{ esiid, meter }` (no `mode`) → Admin-triggered webhook call to droplet to pull files
+
+- Vercel route: **app/api/admin/smt/pull/route.ts**
+
+- Header for admin: `x-admin-token`
+
+- Header for webhook: `x-intelliwatt-secret`
+
+Vercel-side Environment (Server):
+
+- `INTELLIWATT_WEBHOOK_SECRET` = (exact same value as droplet)
+
+- `DROPLET_WEBHOOK_URL` = `http://64.225.25.54:8787/trigger/smt-now`
+
+Droplet-side Components (Verified):
+
+- Webhook server: **/home/deploy/smt_ingest/web/webhook_server.py** (listens on TCP 8787)
+
+- Systemd service (smt-ingest.service) runs **deploy/smt/fetch_and_post.sh**
+
+- Inbox dir: **/home/deploy/smt_inbox** (owned by user `deploy`)
+
+- State file: **/home/deploy/smt_inbox/.posted_sha256**
+
+- SMT SFTP host: `ftp.smartmetertexas.biz`, user: `intellipathsolutionsftp`, key: `/home/deploy/.ssh/intelliwatt_smt_rsa4096`
+
+Locked Headers & Fields:
+
+- Admin trigger request body (JSON): `{ "esiid": "1044…", "meter": "M1" }` (no mode)
+
+- Inline upload request body (JSON): `{ "mode":"inline", "filename":"...", "encoding":"base64", "content_b64":"...", "esiid":"...", "meter":"...", "sizeBytes":N, ... }`
+
+- `x-admin-token` required unless `x-intelliwatt-secret` is provided
+
+Navigation (Locked):
+
+- `/admin/smt/inspector` must link to every SMT admin utility (normalize UI, raw files, future SMT tools). Any new SMT admin page is incomplete until the inspector exposes a direct link.
+
+Outcome (What works now):
+
+- **Admin trigger path** returns `{ ok: true, message: "...", webhookResponse: {} }` on 200
+
+- **Droplet webhook** returns 200 with log lines like:
+
+  `[INFO] Listing adhocusage at YYYYMMDD_HHMMSS` / `[DONE] YYYYMMDD_HHMMSS`
+
+- **Inline** persists to `RawSmtFile` and returns `{ ok: true, mode: "inline", ... }`
+
+Next Steps (strict order):
+
+1. Add a UI button in **app/admin/smt/inspector/page.tsx** to POST `{ esiid, meter }` to `/api/admin/smt/pull` (admin header).
+
+2. Wire **app/api/admin/smt/normalize/route.ts** to read the newly persisted `RawSmtFile` (from inline) and emit `SmtInterval` rows.
+
+3. Add an Admin page to list `RawSmtFile` (sha256, filename, received_at) and allow “Normalize now” per file.
+
+4. Embed the tested PowerShell/curl commands into **docs/TESTING_API.md** (this patch does that).
+
+Status: ACTIVE / DO NOT CHANGE HEADERS OR ROUTES WITHOUT UPDATING THIS SECTION.
+
+[PC-2025-11-12-B] Windows PowerShell HTTP Call Conventions (LOCKED)
+
+Rationale:
+
+- Past confusion occurred because Windows PowerShell aliases `curl` → `Invoke-WebRequest`, which does not accept common curl flags (`-sS`, `-H`, `-d`, `--data-binary`) or bash line continuations (`\`).
+
+- To prevent future mistakes, ALL Windows examples must follow the rules below.
+
+Locked Rules:
+
+1) Do not show bare `curl` in Windows PowerShell. Use **Invoke-RestMethod (IRM)** or explicitly call **curl.exe**.
+
+2) If using IRM:
+
+   - Always set `-ContentType "application/json"` when posting JSON.
+
+   - Build the JSON body via `ConvertTo-Json -Compress` (or pass a literal string if needed).
+
+   - Use PowerShell backtick `` ` `` for line continuation (never `\`).
+
+3) If using curl.exe:
+
+   - Force the real binary by calling **`curl.exe`** (not `curl`).
+
+   - Pass a literal JSON string in `$Body` and send with `--data-binary $Body`.
+
+   - Include `-H "content-type: application/json"`.
+
+4) All docs must include *both* variants for admin routes and droplet webhooks:
+
+   - Admin trigger: `POST {base}/api/admin/smt/pull` with header `x-admin-token: <token>`.
+
+   - Droplet webhook: `POST http://<droplet>:8787/trigger/smt-now` with header `x-intelliwatt-secret: <secret>`.
+
+5) Cross-reference: The canonical snippets live in **docs/TESTING_API.md** (Windows section). Any future testing instructions must reference those.
+
+Status: ACTIVE / REQUIRED for all Windows examples going forward.
+
+[PC-2025-11-12-C] SMT Normalize API Contract (LOCKED)
+
+Purpose:
+
+- Convert persisted RAW SMT CSVs (uploaded inline via `/api/admin/smt/pull` mode:"inline") into 15-minute `SmtInterval` rows.
+
+Route (Admin-gated):
+
+- **POST** `/api/admin/smt/normalize`
+
+- Header: `x-admin-token: <ADMIN_TOKEN>`
+
+Request Body (JSON):
+
+- One of:
+
+  1) `{ "rawId": "<uuid-or-numeric-id>" }` → normalize a single RawSmtFile
+
+  2) `{ "latest": true }` → normalize the most recently received RawSmtFile
+
+  3) `{ "since": "2025-11-01T00:00:00Z" }` → normalize all RawSmtFile rows received at/after this ISO timestamp
+
+Response (JSON):
+
+- Success: `{ "ok": true, "normalized": <count>, "files": [ { "id": "...", "filename": "...", "rows": <n> } ] }`
+
+- Error: `{ "ok": false, "error": "<message>" }` (HTTP 400/500 as appropriate)
+
+Locked Behavior:
+
+- Input CSVs are assumed to be SMT “adhoc usage” files; parsing handles CST/CDT → UTC.
+
+- Idempotent upsert: do not duplicate intervals if the same file is re-normalized.
+
+- Required columns: timestamp (local), usage kWh, ESIID, meter.
+
+- Persist referential link from intervals → source raw file.
+
+- Keep existing JSON keys used by current ingestion/inline paths; do not rename existing fields elsewhere.
+
+- Admin header (`x-admin-token`) required; no public access.
+
+- This contract MUST be implemented in **app/api/admin/smt/normalize/route.ts** (Next.js App Router) and use the existing DB client.
+
+Status: ACTIVE / DO NOT CHANGE without updating this section.

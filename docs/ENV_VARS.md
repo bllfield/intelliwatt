@@ -116,3 +116,43 @@ Invoke-RestMethod -Headers $headers -Uri "https://<your-preview>.vercel.app/api/
 
 **Related keys**
 - `ADMIN_SEED_TOKEN` (if present) is for one-time bootstrap/seed flows and is **not** used for route protection.
+
+## SMT Inline/Webhook Hand-off (2025-11-12)
+
+**Vercel (required)**
+
+- `ADMIN_TOKEN` — Admin routes auth (`x-admin-token`)
+
+- `INTELLIWATT_WEBHOOK_SECRET` — Shared secret for droplet webhook (`x-intelliwatt-secret`)
+
+- `DROPLET_WEBHOOK_URL` — `http://64.225.25.54:8787/trigger/smt-now`
+
+**Droplet (`/etc/default/intelliwatt-smt`)**
+
+- `ADMIN_TOKEN` — Must match Vercel
+
+- `INTELLIWATT_BASE_URL` — e.g., `https://intelliwatt.com`
+
+- `SMT_HOST=ftp.smartmetertexas.biz`
+
+- `SMT_USER=intellipathsolutionsftp`
+
+- `SMT_KEY=/home/deploy/.ssh/intelliwatt_smt_rsa4096`
+
+- `SMT_REMOTE_DIR=/`
+
+- `SMT_LOCAL_DIR=/home/deploy/smt_inbox`
+
+- Optional defaults used by fetch_and_post.sh:
+
+  - `SOURCE_TAG=adhocusage`
+
+  - `METER_DEFAULT=M1`
+
+  - `ESIID_DEFAULT=10443720000000001`  # fallback if none provided
+
+**Inline Post Requirements**
+
+- Requests must use `Content-Type: application/json`.
+
+- Payload must include `encoding: "base64"` for file content in `content_b64`.

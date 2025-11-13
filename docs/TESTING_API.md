@@ -160,3 +160,243 @@ Navigate to `/admin/wattbuy/inspector` for an interactive testing interface.
    - **500 Internal Server Error**: Check server logs, verify `WATTBUY_API_KEY` is set
    - **Empty results**: Verify ZIP code or utilityID is valid for Texas
    - **Timeout**: Check network connectivity, retry logic should handle transient 5xx errors
+
+## SMT Inline + Webhook Smoke Tests (2025-11-12)
+
+### A) Inline upload (stores RawSmtFile; no droplet pull)
+
+**Where:** Local Windows PowerShell  
+**Set:**
+
+```powershell
+$BASE_URL    = "https://intelliwatt.com"
+$ADMIN_TOKEN = "<PASTE_64_CHAR>"
+$csvB64      = [Convert]::ToBase64String([IO.File]::ReadAllBytes("C:\path\to\adhoc.csv"))
+$body = @{
+  mode       = "inline"
+  filename   = "adhoc.csv"
+  encoding   = "base64"
+  content_b64= $csvB64
+  esiid      = "10443720000000001"
+  meter      = "M1"
+  sizeBytes  = 12345
+} | ConvertTo-Json
+Invoke-RestMethod -Method POST -Uri "$BASE_URL/api/admin/smt/pull" `
+  -Headers @{ "x-admin-token" = $ADMIN_TOKEN } `
+  -Body $body -ContentType "application/json" | ConvertTo-Json -Depth 6
+```
+
+**Expect:** `{ ok: true, mode: "inline", ... }` and raw persisted.
+
+### B) Admin-triggered webhook (droplet pull)
+
+**Where:** Local Windows PowerShell  
+**Set:**
+
+```powershell
+$BASE_URL    = "https://intelliwatt.com"
+$ADMIN_TOKEN = "<PASTE_64_CHAR>"
+$body = @{
+  esiid = "10443720000000001"
+  meter = "M1"
+} | ConvertTo-Json
+Invoke-RestMethod -Method POST -Uri "$BASE_URL/api/admin/smt/pull" `
+  -Headers @{ "x-admin-token" = $ADMIN_TOKEN } `
+  -Body $body -ContentType "application/json" | ConvertTo-Json -Depth 6
+```
+
+**Expect:** `{ ok: true, message: "...", webhookResponse: {...} }`.
+
+### C) Webhook literal body (Windows curl)
+
+**Where:** Windows PowerShell  
+**Note:** Use `^` for line continuation; `--data-raw` keeps the literal JSON body.
+
+```powershell
+curl.exe -X POST ^
+  http://64.225.25.54:8787/trigger/smt-now ^
+  -H "x-intelliwatt-secret: $env:INTELLIWATT_WEBHOOK_SECRET" ^
+  --data-raw "{\"esiid\":\"10443720000000001\",\"meter\":\"M1\"}"
+```
+
+**Expect:** HTTP 200 with `[INFO]` / `[DONE]` lines in response body.
+
+## Windows PowerShell — Canonical HTTP Snippets (LOCKED 2025-11-12)
+
+### 1) Admin-triggered SMT pull (POST /api/admin/smt/pull)
+
+**A. PowerShell-native (Invoke-RestMethod)**
+
+```powershell
+$BaseUrl    = "https://intelliwatt.com"
+$AdminToken = Read-Host "ADMIN_TOKEN"
+$Body = @{
+  esiid = "10443720000000001"
+  meter = "M1"
+} | ConvertTo-Json -Compress
+
+$Response = Invoke-RestMethod -Method POST `
+  -Uri "$BaseUrl/api/admin/smt/pull" `
+  -Headers @{ "x-admin-token" = $AdminToken } `
+  -ContentType "application/json" `
+  -Body $Body
+
+$Response | ConvertTo-Json -Depth 6
+```
+
+**B. Explicit curl.exe**
+
+```powershell
+$BaseUrl    = "https://intelliwatt.com"
+$AdminToken = Read-Host "ADMIN_TOKEN"
+$Body       = '{"esiid":"10443720000000001","meter":"M1"}'
+
+curl.exe -X POST ^
+  "$BaseUrl/api/admin/smt/pull" ^
+  -H "x-admin-token: $AdminToken" ^
+  -H "content-type: application/json" ^
+  --data-binary $Body
+```
+
+### 2) Droplet webhook trigger (POST http://<droplet>:8787/trigger/smt-now)
+
+**A. PowerShell-native (Invoke-RestMethod)**
+
+```powershell
+$DropletUrl = "http://64.225.25.54:8787/trigger/smt-now"
+$Secret     = Read-Host "INTELLIWATT_WEBHOOK_SECRET"
+$Body = @{
+  esiid = "10443720000000001"
+  meter = "M1"
+} | ConvertTo-Json -Compress
+
+Invoke-RestMethod -Method POST `
+  -Uri $DropletUrl `
+  -Headers @{ "x-intelliwatt-secret" = $Secret } `
+  -ContentType "application/json" `
+  -Body $Body | Out-String
+```
+
+**B. Explicit curl.exe**
+
+```powershell
+$DropletUrl = "http://64.225.25.54:8787/trigger/smt-now"
+$Secret     = Read-Host "INTELLIWATT_WEBHOOK_SECRET"
+$Body       = '{"esiid":"10443720000000001","meter":"M1"}'
+
+curl.exe -X POST ^
+  $DropletUrl ^
+  -H "x-intelliwatt-secret: $Secret" ^
+  -H "content-type: application/json" ^
+  --data-binary $Body
+```
+
+### Gotchas (Windows PowerShell)
+
+- Bare `curl` calls the `Invoke-WebRequest` alias; always choose `Invoke-RestMethod` or `curl.exe`.
+- PowerShell uses the backtick `` ` `` for line continuation; do **not** copy bash `\` line breaks.
+- `ConvertTo-Json -Compress` avoids whitespace issues when posting JSON bodies.
+- `curl.exe --data-binary` sends the string exactly as provided; verify quotes inside `$Body`.
+- These conventions are LOCKED per plan change `[PC-2025-11-12-B]`; future docs must reference this section.
+
+## SMT Normalize API — Canonical Tests (LOCKED 2025-11-12)
+
+### A) Normalize the latest RawSmtFile
+
+**PowerShell (Invoke-RestMethod)**
+
+```powershell
+$BaseUrl    = "https://intelliwatt.com"
+$AdminToken = Read-Host "ADMIN_TOKEN"
+$Body       = @{ latest = $true } | ConvertTo-Json -Compress
+
+Invoke-RestMethod -Method POST `
+  -Uri "$BaseUrl/api/admin/smt/normalize" `
+  -Headers @{ "x-admin-token" = $AdminToken } `
+  -ContentType "application/json" `
+  -Body $Body | ConvertTo-Json -Depth 6
+```
+
+**Explicit curl.exe**
+
+```powershell
+$BaseUrl    = "https://intelliwatt.com"
+$AdminToken = Read-Host "ADMIN_TOKEN"
+$Body       = '{"latest":true}'
+
+curl.exe -X POST ^
+  "$BaseUrl/api/admin/smt/normalize" ^
+  -H "x-admin-token: $AdminToken" ^
+  -H "content-type: application/json" ^
+  --data-binary $Body
+```
+
+### B) Normalize a specific RawSmtFile by ID
+
+**PowerShell (Invoke-RestMethod)**
+
+```powershell
+$BaseUrl    = "https://intelliwatt.com"
+$AdminToken = Read-Host "ADMIN_TOKEN"
+$RawId      = Read-Host "RawSmtFile ID"
+$Body       = @{ rawId = $RawId } | ConvertTo-Json -Compress
+
+Invoke-RestMethod -Method POST `
+  -Uri "$BaseUrl/api/admin/smt/normalize" `
+  -Headers @{ "x-admin-token" = $AdminToken } `
+  -ContentType "application/json" `
+  -Body $Body | ConvertTo-Json -Depth 6
+```
+
+**Explicit curl.exe**
+
+```powershell
+$BaseUrl    = "https://intelliwatt.com"
+$AdminToken = Read-Host "ADMIN_TOKEN"
+$RawId      = Read-Host "RawSmtFile ID"
+$Body       = ("{""rawId"":""{0}""}" -f $RawId)
+
+curl.exe -X POST ^
+  "$BaseUrl/api/admin/smt/normalize" ^
+  -H "x-admin-token: $AdminToken" ^
+  -H "content-type: application/json" ^
+  --data-binary $Body
+```
+
+### C) Normalize all files received since a timestamp
+
+**PowerShell (Invoke-RestMethod)**
+
+```powershell
+$BaseUrl    = "https://intelliwatt.com"
+$AdminToken = Read-Host "ADMIN_TOKEN"
+$Since      = "2025-11-01T00:00:00Z"
+$Body       = @{ since = $Since } | ConvertTo-Json -Compress
+
+Invoke-RestMethod -Method POST `
+  -Uri "$BaseUrl/api/admin/smt/normalize" `
+  -Headers @{ "x-admin-token" = $AdminToken } `
+  -ContentType "application/json" `
+  -Body $Body | ConvertTo-Json -Depth 6
+```
+
+**Explicit curl.exe**
+
+```powershell
+$BaseUrl    = "https://intelliwatt.com"
+$AdminToken = Read-Host "ADMIN_TOKEN"
+$Body       = '{"since":"2025-11-01T00:00:00Z"}'
+
+curl.exe -X POST ^
+  "$BaseUrl/api/admin/smt/normalize" ^
+  -H "x-admin-token: $AdminToken" ^
+  -H "content-type: application/json" ^
+  --data-binary $Body
+```
+
+### Gotchas (Normalize)
+
+- Responses should return `{ ok: true, normalized, files[] }`; inspect `files` array for per-file counts.
+- Re-running against the same file is idempotent; expect `normalized` to remain stable.
+- Errors come back as `{ ok: false, error }` with HTTP 4xx/5xx; check PowerShell `$Error[0]` for details.
+- Keep timestamps in ISO 8601 UTC; PowerShell’s `Get-Date -AsUTC -Format o` is a quick helper if you need dynamic values.
