@@ -393,6 +393,31 @@ For detailed information about specific areas, see:
 
 ---
 
+## Company Identity Snapshot (CSP / SMT)
+
+This snapshot is canonical for SMT, PUCT, and CSP-related integrations.
+
+- Legal Name: Intellipath Solutions LLC
+- DBA: IntelliWatt
+- DUNS: 134642921
+- PUCT Aggregator Registration Number: 80514
+- Official Business Phone (for PUCT / SMT / CSP matters): 817-471-0579
+- Primary Business Email: brian.littlefield@intellipath-solutions.com
+
+Smart Meter Texas Integration Context:
+
+- CSP identity: Intellipath Solutions LLC / DBA IntelliWatt
+- Current usage:
+  - WattBuy is the active ESIID source of truth.
+  - SMT SFTP + API handle customer-authorized interval data (Agreements / Subscriptions / Enrollment).
+- Support contacts in practice:
+  - Primary SMT support: support@smartmetertexas.com
+  - SMT service desk (tickets): rt-smartmeterservicedesk@randstadusa.com
+
+All CSP documentation, SMT tickets, and API requests must reference these identifiers unless superseded by a future LOCKED plan entry.
+
+---
+
 ## Security Updates (Brief)
 
 - **Oct 2025:** Introduced `ADMIN_TOKEN` gating for `/api/debug/*`, `/api/migrate`, and `/api/admin/*`. Production requires the token; Preview/Dev requires it only if set.

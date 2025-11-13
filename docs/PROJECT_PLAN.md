@@ -952,3 +952,178 @@ Done Criteria:
 References: SMT Interface Guide sections (Agreements, Subscriptions, Enrollment, Token Generation, backfill limits).
 
 Status: NOT STARTED (docs locked to prevent scope creep).
+
+[PC-2025-11-13-A] Intake + SMT Authorization UX (Google → ERCOT Autocomplete) (LOCKED, NEXT)
+
+Purpose:
+
+- Define the customer-facing flow for pulling SMT usage with minimal friction.
+- Clarify that we will start with Google Places + WattBuy and later transition to ERCOT-backed autocomplete to reduce cost and own the address/ESIID index.
+- Align this UX with PC-2025-11-12-H (SMT Customer Authorization & Auto-Pull) so engineering and design are building the same thing.
+
+Current State (as of 2025-11-13):
+
+- ESIID source of truth: WattBuy (Get All Electricity Details For A Property / retail rates).
+- ERCOT ESIID indexing: paused (used only for historical work; not powering current frontend).
+- SMT ingestion pipeline: DONE for admin-only test flows (webhook → droplet → SFTP → fetch_and_post.sh → /api/admin/smt/normalize → SmtInterval).
+- SMT Agreements/Subscriptions/Enrollments: NOT IMPLEMENTED YET (see PC-2025-11-12-H).
+
+Locked Primary UX (EnergyBot-style, no SMT login, no meter field on happy path):
+
+1) Address Intake (Step 0)
+
+   - Component: Service address text box on the IntelliWatt onboarding flow.
+   - Behavior (current):
+     - Use Google Places autocomplete as the suggestion source.
+     - When user selects an address:
+       - Normalize and store the address on the House record.
+       - Call WattBuy backend to retrieve ESIID + utility/TDSP for that address.
+       - Store ESIID on the House record and display it in the UI (e.g., “ESIID: 1044…”) for transparency.
+   - Future behavior (see “Transition to ERCOT Autocomplete” below):
+     - Replace Google Places suggestions with an internal ERCOT-backed address/ESIID index, while still using WattBuy for rates and plan shopping.
+
+2) Customer Info + Consent (Step 1)
+
+   - On the next screen, ask for only:
+     - First name
+     - Last name
+     - Email address
+     - Phone number (for SMS/notifications)
+     - Current supplier (auto-suggest list of REPs; prefill based on WattBuy if possible)
+   - Show a single authorization checkbox:
+     - Text must clearly state that the customer authorizes IntelliWatt (legal entity / CSP) to access their electricity usage, meter, and premise data from Smart Meter Texas for up to 12 months (residential) under the SMT terms.
+   - The large SMT-style authorization copy (like the Blitz Ventures example) is displayed in a modal or inline block on IntelliWatt pages, not as a redirect to SMT.
+
+3) Backend SMT Authorization (Step 2 — tied to PC-2025-11-12-H)
+
+   - On submit (checkbox checked), backend will:
+     - Persist a record of:
+       - The exact authorization text shown.
+       - Timestamp, IP, and user identity (name/email/phone).
+       - ESIID and current supplier.
+     - Use the SMT JWT helper (PC-2025-11-12-H) to obtain a valid SMT token.
+     - Call SMT’s Agreement endpoint(s) to:
+       - Create a New Energy Data Sharing Agreement using the ESIID and customer identity data.
+       - Request 12 months of access for residential customers (and up to SMT limits for commercial, per PC-2025-11-12-H).
+   - No SMT login for the customer. The entire consent occurs on IntelliWatt’s UI, using SMT’s required language and our CSP credentials.
+
+4) Subscriptions + Enrollment (Step 3 — tied to PC-2025-11-12-H)
+
+   - Once the Agreement is active:
+     - Create an SMT Subscription for 15-minute interval data with delivery to SFTP (preferred).
+     - Optionally create an SMT Enrollment for historical backfill (12 months residential, up to 24/36 months for qualifying commercial accounts, per SMT limits).
+   - SMT begins delivering CSVs to the existing SFTP inbox; droplet + fetch_and_post.sh + /api/admin/smt/normalize handle ingestion as they do today (no changes to that pipeline).
+   - From the customer’s perspective:
+     - They did not go to the SMT site.
+     - They did not type a meter number.
+     - They did not upload a bill on the happy path.
+     - They only saw IntelliWatt UI + a consent modal.
+
+Fallback Paths (must exist, but are secondary):
+
+A) Bill Upload / Photo (Fallback 1)
+
+   - Provide a way for the customer to upload or photograph their bill.
+   - Use OCR to extract:
+     - Meter number
+     - ESIID (if present)
+     - REP details and other useful metadata.
+   - Use this data to:
+     - Verify or populate ESIID and meter info.
+     - Support SMT Agreement creation in edge cases where automated SMT/ESIID flows fail.
+
+B) Optional Manual Meter Field (Fallback 2)
+
+   - Provide a small optional input:
+     - “If you know it, enter your meter number.”
+   - Used only when:
+     - OCR fails or bill is not available.
+   - This field is not required for the primary flow and should be visually de-emphasized.
+
+Transition Plan: Google → ERCOT Autocomplete (Cost Optimization)
+
+Phase 1 (NOW / CURRENT)
+
+- Continue using Google Places for address autocomplete on customer-facing intake.
+- Use WattBuy for:
+  - ESIID lookup.
+  - Rate/plan shopping.
+- Implement SMT JWT helper + Agreements/Subscriptions/Enrollment using this UX, per PC-2025-11-12-H and this section.
+
+Phase 2 (Re-enable ERCOT Index for Autocomplete)
+
+- When ready to replace Google:
+  - Re-enable ERCOT ESIID indexing cron to populate an internal table (e.g., EsiidAddressIndex) with:
+    - ESIID
+    - Full normalized address (street, city, state, ZIP)
+    - TDSP / utility
+    - Premise metadata as available.
+  - Add a backend search endpoint:
+    - GET /api/address/search?q=...&zip=...
+    - Returns a small list of matching addresses with ESIID and TDSP.
+  - Update the frontend autocomplete to call /api/address/search instead of Google Places.
+  - Still call WattBuy for rates/plan details once an address/ESIID is chosen.
+- Goal:
+  - Reduce external Google Places cost.
+  - Own a Texas-wide address→ESIID autocomplete built on ERCOT data, while keeping WattBuy as the rate engine.
+
+Phase 3 (Refinement & Flags)
+
+- Add feature flags to toggle between:
+  - Google Places (legacy / fallback).
+  - ERCOT-backed address autocomplete.
+- Ensure all new flows continue to:
+  - Use WattBuy as ESIID source of truth for rate analysis.
+  - Use SMT (via Agreements/Subscriptions/Enrollment) for actual interval usage data.
+- Update admin tools (SMT Inspector) to show, per home:
+  - Intake path: Google vs ERCOT autocomplete.
+  - Agreement/subscription/enrollment status.
+  - Whether usage is coming from SMT auto-pulls or uploads (bill/Green Button/etc.).
+
+Notes:
+
+- This section refines the SMT auth UX implied in earlier discussions:
+  - Primary customer consent is captured on IntelliWatt pages via SMT-compliant authorization text and a single checkbox/modal.
+  - No default SMT login or SMT-hosted UI flow is required in the primary path.
+- This plan must be followed for all future SMT-related UX and API work unless this LOCKED section is explicitly superseded in a later PC entry.
+
+Status:
+
+- Phase 1: IN PROGRESS — SMT JWT + Agreement/Subscription/Enrollment APIs still to be implemented, but intake UX is defined here.
+- Phase 2/3: PLANNED — ERCOT autocomplete and flags to be implemented after Phase 1 is stable.
+
+[PC-2025-11-13-B] SMT Identity & Contact Details (LOCKED)
+
+Purpose:
+
+- Prevent confusion about which legal identifiers, phone numbers, and SMT contact emails to use in future integrations, tickets, or documentation.
+
+Locked Identity (Intellipath / IntelliWatt):
+
+- Legal Entity: Intellipath Solutions LLC
+- DBA: IntelliWatt
+- DUNS: 134642921
+- PUCT Aggregator Registration Number: 80514
+- Official Business Phone (Intellipath / IntelliWatt): 817-471-0579
+  - NOTE: 817-471-0579 is the business contact number for CSP / SMT / PUCT work.
+  - Personal numbers (e.g., 817-471-6562) must NOT be used in formal docs or SMT requests.
+
+Locked SMT Contact Channels:
+
+- Primary SMT Support Email (per current SMT guides):
+  - support@smartmetertexas.com
+- Alternate SMT Service Desk Email (in use for API / CSP tickets):
+  - rt-smartmeterservicedesk@randstadusa.com
+- SMT Help Desk Phone:
+  - 1-844-217-8595 (from SMT user guides; use for follow-up/escalation as needed).
+
+Constraints:
+
+- Future plan changes, API contracts, and ops runbooks must reference:
+  - DUNS 134642921
+  - PUCT Aggregator Registration #80514
+  - Business phone 817-471-0579
+  - SMT support@smartmetertexas.com as primary support email
+- Do NOT re-introduce deprecated or bouncing addresses such as smt.operational.support@smartmetertexas.com in new docs.
+
+Status: ACTIVE / REQUIRED for all future SMT-related communications and documentation.

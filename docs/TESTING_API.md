@@ -309,6 +309,28 @@ Invoke-RestMethod -Method GET `
 
 **Expect:** `200 OK` with arrays including IDs + status; downstream SFTP drops should appear once active.
 
+## SMT JWT Token Debug (Admin Only, LOCKED)
+
+> **Where:** Windows PowerShell (Invoke-RestMethod), admin-gated route.
+
+```powershell
+$BaseUrl    = "https://intelliwatt.com"
+$AdminToken = Read-Host "ADMIN_TOKEN"
+
+Invoke-RestMethod -Method GET `
+  -Uri "$BaseUrl/api/admin/smt/token" `
+  -Headers @{ "x-admin-token" = $AdminToken } |
+  ConvertTo-Json -Depth 6
+```
+
+**Expect:** `{ "ok": true, "tokenPreview": "...", "expiresAt": "...", "expiresInSec": 3600, "rawExpiresInSec": 3600, "tokenType": "Bearer", "fromCache": false }`
+
+**Notes:**
+- Requires Vercel env vars: `SMT_JWT_CLIENT_ID`, `SMT_JWT_CLIENT_SECRET`, `SMT_JWT_AUDIENCE`, `SMT_JWT_TOKEN_URL`.
+- Optional env vars: `SMT_JWT_SCOPE`, `SMT_JWT_CACHE_TTL_SEC`.
+- Route is admin-only via `x-admin-token`; use to verify JWT configuration before wiring Agreements/Subscriptions/Enrollment flows.
+- Full token preview (including cached/fresh metadata) is available at `/api/admin/smt/jwt/preview` for deeper ops troubleshooting; never expose that route to end users.
+
 ## Windows PowerShell — Canonical HTTP Snippets (LOCKED 2025-11-12)
 
 ### 1) Admin-triggered SMT pull (POST /api/admin/smt/pull)

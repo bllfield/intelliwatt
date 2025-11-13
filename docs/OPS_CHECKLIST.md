@@ -104,3 +104,30 @@ Set these in Vercel (Production) to use ERCOT EWS (mutual-TLS authentication):
   - Bash inline: see `docs/DEPLOY_SMT_INGEST.md` manual post snippet.
   - PowerShell inline: `scripts/admin/smt_inline_post_test.ps1`.
   - Webhook ping: run `scripts/admin/test_webhook.sh` (see repo) to confirm droplet bridge accepts the secret header.
+
+## SMT Support & Escalation Contacts (Reference)
+
+When working incidents or onboarding steps with Smart Meter Texas (SMT), use this contact set:
+
+Primary SMT Support:
+- Email: support@smartmetertexas.com
+- Phone: 1-844-217-8595
+
+Service Desk Email (in active use for API / CSP tickets):
+- Email: rt-smartmeterservicedesk@randstadusa.com
+
+IntelliWatt / Intellipath CSP Identity (for any tickets or enrollment requests):
+- Company: Intellipath Solutions LLC / DBA IntelliWatt
+- DUNS: 134642921
+- PUCT Aggregator Registration Number: 80514
+- Business Phone: 817-471-0579
+- Contact: Brian Littlefield
+- Contact Email: brian.littlefield@intellipath-solutions.com
+
+Note:
+- Do NOT use personal phone numbers in SMT or PUCT correspondence.
+- Do NOT reference deprecated SMT operational addresses (e.g., smt.operational.support@smartmetertexas.com) in new tickets or docs.
+- When opening SMT tickets about CSP New Customer Enrollment, Agreements, or Subscriptions, always include:
+  - DUNS, PUCT #, CSP name (Intellipath Solutions LLC / DBA IntelliWatt)
+  - Your SMT portal screenshots (e.g., “CSP New Customer Enrollment: OFF”)
+  - Your static IP or certificate details if they are requested.
