@@ -75,6 +75,16 @@ When finished: Reply done.
 
 End every step with: **“Reply ‘done’ when complete.”**
 
+### Run-Completion and Plan-Doc Update Rules
+
+- After each Cursor Agent Block runs, the user will paste Cursor’s response/output back into the chat.
+  - That pasted output is used by ChatGPT to verify the change was applied correctly.
+  - It also counts as the user’s **“done”** signal for that step (equivalent to the user typing “done”).
+- Whenever ChatGPT instructs Cursor to implement or modify anything tied to items tracked in `docs/PROJECT_PLAN.md` (or related plan docs):
+  - ChatGPT must also provide a dedicated Cursor Agent Block to update those plan docs so future chats stay in sync.
+  - Plan updates must clearly identify new Plan Changes (e.g., `PC-YYYY-MM-DD-X`) and explicitly state when they override prior guidance.
+- These requirements apply to all future ChatGPT sessions working inside the IntelliWatt / Intellipath project.
+
 ## 9) Default model
 
 - Default model for all answers and Cursor Agent Blocks: **GPT-5 Codex**.

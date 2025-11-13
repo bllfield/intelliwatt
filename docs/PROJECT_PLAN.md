@@ -1092,6 +1092,30 @@ Status:
 - Phase 1: IN PROGRESS — SMT JWT + Agreement/Subscription/Enrollment APIs still to be implemented, but intake UX is defined here.
 - Phase 2/3: PLANNED — ERCOT autocomplete and flags to be implemented after Phase 1 is stable.
 
+[PC-2025-11-13-C] Chat Run-Completion + Plan-Doc Update Rules (LOCKED)
+
+Rationale:
+
+- Ensure future ChatGPT sessions understand how the user signals that a Cursor step is complete.
+- Enforce that any change affecting items tracked in this plan (or related docs) is always mirrored into the plan docs via a dedicated Cursor Agent Block.
+
+Scope:
+
+- Chat run-completion signal:
+  - After a Cursor Agent Block finishes, the user will paste Cursor’s response/output back into the chat.
+  - That pasted response serves two purposes:
+    1. It lets ChatGPT verify the change was applied as expected.
+    2. It counts as the user saying “done” for that step, so ChatGPT can safely move to the next step.
+- Plan-doc update requirement:
+  - Whenever ChatGPT instructs Cursor to add or edit functionality that touches anything referenced in `docs/PROJECT_PLAN.md` (or any plan-related docs), ChatGPT must:
+    - Include, as part of that same step or the immediately-following step, a Cursor Agent Block that updates the relevant plan docs to reflect the change.
+    - Clearly mark when a new Plan Change entry overrides earlier guidance.
+- This Plan Change is the source of truth for these rules and applies to all future chats operating in the IntelliWatt / Intellipath project.
+
+Rollback:
+
+- To disable this behavior, a future Plan Change must explicitly revoke PC-2025-11-13-C.
+
 [PC-2025-11-13-B] SMT Identity & Contact Details (LOCKED)
 
 Purpose:
