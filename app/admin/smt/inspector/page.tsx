@@ -395,6 +395,10 @@ export default function SMTInspector() {
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
       <h1 className="text-2xl font-semibold">SMT Inspector</h1>
+      <div className="text-sm rounded border border-amber-200 bg-amber-50 p-3">
+        <strong>ESIID Source:</strong> <code>WattBuy</code> (LOCKED). ERCOT ESIID indexing is <strong>paused</strong>.
+        See <code>docs/PROJECT_PLAN.md → PC-2025-11-12-E</code> and <code>docs/DEPLOY_ERCOT.md</code> for re-enable steps.
+      </div>
       <div className="flex flex-wrap items-center gap-4 text-sm text-blue-600">
         <a className="underline hover:text-blue-500" href="/admin/smt/normalize">
           Need to run normalization? Use the SMT Normalize UI →

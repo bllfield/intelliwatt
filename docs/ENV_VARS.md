@@ -156,3 +156,19 @@ Invoke-RestMethod -Headers $headers -Uri "https://<your-preview>.vercel.app/api/
 - Requests must use `Content-Type: application/json`.
 
 - Payload must include `encoding: "base64"` for file content in `content_b64`.
+
+## ESIID Source Selection (2025-11-12)
+
+**Vercel / Server Required**
+
+- `ESIID_SOURCE` — `"wattbuy"` (current) or `"ercot"` (paused)
+
+- `WATTBUY_ESIID_ENABLED` — `true` to enable WattBuy ESIID path (current)
+
+- `ERCOT_ESIID_DISABLED` — `true` to explicitly pause ERCOT ESIID indexing
+
+**Notes**
+
+- With `ERCOT_ESIID_DISABLED=true`, ops must not schedule ERCOT ESIID cron jobs.
+
+- If switching back later, set `ESIID_SOURCE=ercot`, clear `ERCOT_ESIID_DISABLED`, and re-enable cron (see `docs/DEPLOY_ERCOT.md`).

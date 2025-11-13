@@ -400,3 +400,33 @@ curl.exe -X POST ^
 - Re-running against the same file is idempotent; expect `normalized` to remain stable.
 - Errors come back as `{ ok: false, error }` with HTTP 4xx/5xx; check PowerShell `$Error[0]` for details.
 - Keep timestamps in ISO 8601 UTC; PowerShell’s `Get-Date -AsUTC -Format o` is a quick helper if you need dynamic values.
+
+## ESIID Lookup — Current Source: WattBuy (LOCKED 2025-11-12)
+
+WattBuy Property Details → ESIID
+
+**Windows PowerShell (Invoke-RestMethod)**
+
+```powershell
+$BaseUrl    = "https://intelliwatt.com"
+$AdminToken = Read-Host "ADMIN_TOKEN"
+# Example route; update if your repo exposes a helper admin proxy for WattBuy lookups:
+# /api/admin/wattbuy/property-details?address=<...>&city=<...>&state=TX&zip=75201
+$Address = "2000 Ross Ave"
+$City    = "Dallas"
+$State   = "TX"
+$Zip     = "75201"
+
+Invoke-RestMethod -Method GET `
+  -Uri "$BaseUrl/api/admin/wattbuy/property-details?address=$([uri]::EscapeDataString($Address))&city=$City&state=$State&zip=$Zip" `
+  -Headers @{ "x-admin-token" = $AdminToken }
+```
+
+**Expect:** JSON payload including `esiid` resolved by WattBuy for the property.
+
+> NOTE: ERCOT ESIID indexing is paused. Do not run ERCOT ESIID cron or daily pulls while this lock is active. See `docs/DEPLOY_ERCOT.md` “Pause ERCOT ESIID”.
+
+**Gotchas**
+
+- Ensure `ESIID_SOURCE=wattbuy`, `WATTBUY_ESIID_ENABLED=true`, and `ERCOT_ESIID_DISABLED=true` are set in Vercel env.
+- Keep using the Windows IRM / curl.exe conventions locked earlier in this doc.

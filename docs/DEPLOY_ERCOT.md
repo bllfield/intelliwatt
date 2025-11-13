@@ -279,3 +279,46 @@ Navigate to `/admin/ercot/inspector` for interactive testing:
 - **[TESTING_API.md](./TESTING_API.md)** - API testing guide
 - **[ENV_VARS.md](./ENV_VARS.md)** - Environment variables reference
 
+[2025-11-12] Pause ERCOT ESIID Indexing (Ops Checklist)
+
+Goal: keep ERCOT code intact but ensure it does not run while WattBuy is the ESIID source.
+
+Vercel (UI):
+
+1) Settings → Environment Variables:
+
+   - Add or set:
+
+     - `ESIID_SOURCE = wattbuy`
+
+     - `WATTBUY_ESIID_ENABLED = true`
+
+     - `ERCOT_ESIID_DISABLED = true`
+
+   - Redeploy to apply.
+
+2) Settings → Cron Jobs:
+
+   - Remove or disable any cron that calls `/api/admin/ercot/cron` or related ERCOT ESIID tasks.
+
+   - If you keep the route for manual smoke tests, leave it undocumented while paused.
+
+Droplet (if any ERCOT timers exist):
+
+- If a systemd timer was created for ERCOT ESIID (rare):
+
+  ```
+  sudo systemctl disable --now ercot-esid.timer || true
+  sudo systemctl stop ercot-esid.service || true
+  ```
+
+- Document the pause in ops notes and reference this section.
+
+Re-enable later:
+
+- Flip envs:
+
+- `ESIID_SOURCE=ercot`, unset `ERCOT_ESIID_DISABLED`, and (optionally) set `WATTBUY_ESIID_ENABLED=false`.
+
+- Recreate/enable cron and timers per the standard ERCOT section above.
+

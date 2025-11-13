@@ -623,6 +623,40 @@ You should see: latest `postedAt`, and `results` for each TDSP with `key`, `byte
 
 **Model:** Default to GPT-5 Codex for all code/instruction blocks.
 
+[PC-2025-11-12-E] ESIID Source Switch → WattBuy Primary (LOCKED)
+
+Decision:
+
+- Effective immediately, ESIID resolution is sourced from **WattBuy**.
+
+- **ERCOT ESIID indexing and daily pulls are paused** until re-enabled.
+
+Locked Rules:
+
+1) Primary ESIID source: **WattBuy** property-details resolver (good data now).
+
+2) ERCOT: disabled for ESIID lookups (cron/jobs/timers off); keep code in place but inactive.
+
+3) Rates still come from WattBuy retail-rates/electricity APIs as already configured.
+
+4) Any prior guidance naming ERCOT as the ESIID authority is suspended while this section is ACTIVE.
+
+Implementation Notes:
+
+- Add the following env flags (see ENV_VARS.md):
+
+  - `ESIID_SOURCE=wattbuy`
+
+  - `WATTBUY_ESIID_ENABLED=true`
+
+  - `ERCOT_ESIID_DISABLED=true`
+
+- Pause any cron/timer that hits `/api/admin/ercot/cron` or ERCOT ESIID indexing (see DEPLOY_ERCOT.md “Pause” steps).
+
+- Admin UIs should reflect that ERCOT ESIID tools are paused.
+
+Status: ACTIVE / Overrides earlier ERCOT-first guidance until explicitly lifted.
+
 [PC-2025-11-12-A] SMT Inline + Webhook Hand-off (LOCKED)
 
 Context:
