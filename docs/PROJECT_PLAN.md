@@ -1180,6 +1180,30 @@ Rollback:
 
 - A future Plan Change must explicitly revoke PC-2025-11-13-E to change this behavior.
 
+[PC-2025-11-13-F] SMT Manual Upload Rate Limits (LOCKED)
+
+Rationale:
+
+- Prevent abuse or accidental overload of the SMT manual-upload pipeline while still allowing realistic admin and customer usage for 12-month interval CSVs.
+
+Scope:
+
+- Droplet upload server (`scripts/droplet/smt-upload-server.ts`) now enforces in-memory, role-aware rate limits:
+  - Admin uploads: default **50 per 24-hour window** (`SMT_ADMIN_UPLOAD_DAILY_LIMIT` / `SMT_ADMIN_UPLOAD_WINDOW_MS`).
+  - Customer uploads: default **5 per ~30-day window** (`SMT_CUSTOMER_UPLOAD_MONTHLY_LIMIT` / `SMT_CUSTOMER_UPLOAD_WINDOW_MS`).
+- Upload server continues to persist files into `SMT_UPLOAD_DIR` (default `/home/deploy/smt_inbox`) and trigger `SMT_INGEST_SERVICE_NAME` (default `smt-ingest.service`) so data flows into `RawSmtFile` → `SmtInterval`.
+- Admin UI (`/admin/smt/raw`) tags droplet uploads with `role="admin"` and a stable `accountKey`, and surfaces rate-limit (429) errors to operators.
+
+Constraints / Notes:
+
+- Limits are configurable via environment variables without redeploying code.
+- Future customer-facing upload flows must send `role="customer"` and a stable `accountKey` (e.g., user/home ID) while reusing the same droplet endpoint and respecting the configured limits.
+- The upload server optionally accepts `SMT_UPLOAD_TOKEN`; if set, clients must provide the token in the `x-smt-upload-token` header.
+
+Rollback:
+
+- A future Plan Change must explicitly revoke PC-2025-11-13-F to modify these rate-limit rules.
+
 [PC-2025-11-13-B] SMT Identity & Contact Details (LOCKED)
 
 Purpose:

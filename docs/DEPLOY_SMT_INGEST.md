@@ -187,6 +187,8 @@ For web-based big-file uploads (admin UI today, customer UI later) we run a ligh
 - Default port: `8080` (configurable via `SMT_UPLOAD_PORT`)
 - Endpoint: `POST /upload` with `multipart/form-data` (field name `file`)
 - Saves the file into the SMT inbox and triggers `smt-ingest.service`
+- Optional shared secret header (`x-smt-upload-token`) requires `SMT_UPLOAD_TOKEN`
+- Built-in rate limiting (in-memory): admins 50/day, customers 5/month by default (see env vars below)
 
 #### Install / run manually
 

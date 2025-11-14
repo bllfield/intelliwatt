@@ -24,9 +24,11 @@ export default function AdminSmtRawClient() {
   const [busy, setBusy] = useState<boolean>(false);
   const [out, setOut] = useState<string>("");
   const [dropletBusy, setDropletBusy] = useState<boolean>(false);
-  const [dropletMessage, setDropletMessage] = useState<string>("");
+  const [dropletStatus, setDropletStatus] = useState<string>("");
 
   const dropletUploadUrl = process.env.NEXT_PUBLIC_SMT_UPLOAD_URL || "";
+
+  const DROPLET_ACCOUNT_KEY = "intelliwatt-admin";
 
   const headers = useMemo(
     () => ({
@@ -82,7 +84,7 @@ export default function AdminSmtRawClient() {
   async function handleDropletUpload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!dropletUploadUrl) {
-      setDropletMessage("❗ Set NEXT_PUBLIC_SMT_UPLOAD_URL to enable droplet uploads.");
+      setDropletStatus("❗ Set NEXT_PUBLIC_SMT_UPLOAD_URL to enable droplet uploads.");
       return;
     }
 
@@ -90,12 +92,17 @@ export default function AdminSmtRawClient() {
     const formData = new FormData(form);
     const file = formData.get("file") as File | null;
     if (!file || file.size === 0) {
-      setDropletMessage("❗ Choose a CSV file before uploading.");
+      setDropletStatus("❗ Choose a CSV file before uploading.");
       return;
     }
 
+    formData.set("role", "admin");
+    if (!formData.get("accountKey")) {
+      formData.set("accountKey", DROPLET_ACCOUNT_KEY);
+    }
+
     setDropletBusy(true);
-    setDropletMessage("Uploading to droplet…");
+    setDropletStatus("Uploading to droplet…");
     try {
       const response = await fetch(dropletUploadUrl, {
         method: "POST",
@@ -103,19 +110,40 @@ export default function AdminSmtRawClient() {
         mode: "cors",
         credentials: "omit",
       });
-      const json = await response.json().catch(() => ({}));
-      if (response.ok && json?.ok) {
-        setDropletMessage(
-          `✅ Uploaded ${file.name} (${file.size.toLocaleString()} bytes). Ingest service triggered.`,
+      const rawText = await response.text();
+      let json: any = null;
+      try {
+        json = JSON.parse(rawText);
+      } catch {
+        // keep raw text for fallback message
+      }
+
+      if (!response.ok) {
+        if (response.status === 429 && json) {
+          const resetAt = json.resetAt ? `window resets at ${json.resetAt}` : "rate limit window resets soon";
+          setDropletStatus(
+            `❌ Rate limit hit (${json.limit} uploads per window). Remaining: 0. ${resetAt}.`,
+          );
+        } else if (json?.message) {
+          setDropletStatus(`❌ Upload failed: ${json.message}`);
+        } else {
+          setDropletStatus(`❌ Upload failed (HTTP ${response.status}): ${rawText || "see droplet logs"}`);
+        }
+        return;
+      }
+
+      if (json?.ok) {
+        const remaining =
+          typeof json.remaining === "number" ? ` (remaining uploads this window: ${json.remaining})` : "";
+        setDropletStatus(
+          `✅ Uploaded ${file.name} (${file.size.toLocaleString()} bytes). Ingest queued.${remaining}`,
         );
         form.reset();
       } else {
-        setDropletMessage(
-          `❌ Upload failed (HTTP ${response.status}): ${json?.error || "see droplet logs"}`,
-        );
+        setDropletStatus("Upload succeeded but response format was unexpected.");
       }
     } catch (err: any) {
-      setDropletMessage(`❌ Upload failed: ${err?.message || String(err)}`);
+      setDropletStatus(`❌ Upload failed: ${err?.message || String(err)}`);
     } finally {
       setDropletBusy(false);
     }
@@ -225,6 +253,8 @@ export default function AdminSmtRawClient() {
               className="mt-1 block w-full rounded border border-gray-300 px-3 py-2 text-sm"
             />
           </div>
+          <input type="hidden" name="role" value="admin" />
+          <input type="hidden" name="accountKey" value={DROPLET_ACCOUNT_KEY} />
           <div className="flex items-center gap-3">
             <button
               type="submit"
@@ -238,9 +268,9 @@ export default function AdminSmtRawClient() {
             </p>
           </div>
         </form>
-        {dropletMessage ? (
+        {dropletStatus ? (
           <div className="rounded border border-amber-300 bg-white px-3 py-2 text-sm text-gray-800">
-            {dropletMessage}
+            {dropletStatus}
           </div>
         ) : null}
       </section>
