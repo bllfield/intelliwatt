@@ -1269,3 +1269,35 @@ Constraints:
 - Do NOT re-introduce deprecated or bouncing addresses such as smt.operational.support@smartmetertexas.com in new docs.
 
 Status: ACTIVE / REQUIRED for all future SMT-related communications and documentation.
+
+PC-2025-11-14-A: SMT Upload Server HTTPS Proxy + Big-File Path
+
+Rationale:
+
+- Admin and customer SMT interval CSV uploads must support full 12-month, 15-minute data files (~5–6 MB) without App Router size limits.
+- We now have a dedicated upload server on the droplet behind an HTTPS nginx proxy.
+
+Scope:
+
+- Canonical big-file SMT upload endpoint is: https://smt-upload.intelliwatt.com/upload.
+- The upload server:
+  - Accepts multipart/form-data with field name "file".
+  - Respects SMT_UPLOAD_* env vars and rate-limits by role/accountKey.
+  - Triggers smt-ingest.service to bring files into RawSmtFile/SmtInterval via the existing ingest pipeline.
+- Admin UI (/admin/smt/raw) and future customer flows must:
+  - Use NEXT_PUBLIC_SMT_UPLOAD_URL for full-size CSVs,
+  - Tag uploads with role and accountKey,
+  - Treat App Router inline uploads as debug-only for small files.
+- nginx is configured to:
+  - Terminate TLS for smt-upload.intelliwatt.com,
+  - Proxy to 127.0.0.1:8081,
+  - Enforce client_max_body_size 10m at the HTTPS location level to prevent 413s for full SMT CSVs.
+
+Constraints:
+
+- Any future change to the upload pipeline must preserve:
+  - HTTPS-only access from IntelliWatt frontends,
+  - CORS allowlist restricted to https://intelliwatt.com,
+  - Rate limiting to avoid abuse,
+  - Compatibility with smt-ingest.service and the existing RawSmtFile → SmtInterval normalize flow.
+- App Router-based SMT uploads remain debug-only and must not be used for production-sized interval files.

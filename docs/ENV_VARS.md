@@ -161,19 +161,19 @@ Invoke-RestMethod -Headers $headers -Uri "https://<your-preview>.vercel.app/api/
 
 **Client (Next.js)**
 
-- `NEXT_PUBLIC_SMT_UPLOAD_URL` — Public URL for the droplet upload endpoint (e.g., `http://64.225.25.54:8080/upload`). Used by `/admin/smt/raw` (and future customer flows) to send large interval CSVs directly to the droplet.
+- `NEXT_PUBLIC_SMT_UPLOAD_URL` — Example: `https://smt-upload.intelliwatt.com/upload`. This URL **must** be HTTPS to avoid browser mixed-content blocking. Used by `/admin/smt/raw` (and future customer flows) for full-size SMT CSV uploads via the droplet pipeline.
 
 **Droplet**
 
-- `SMT_UPLOAD_DIR` — Directory where uploaded CSVs are stored before ingest (default `/home/deploy/smt_inbox`).
-- `SMT_UPLOAD_PORT` — Port the upload server listens on (default `8080`).
-- `SMT_UPLOAD_MAX_BYTES` — Maximum upload size in bytes (default `10485760`, i.e., 10 MB). Increase if needed.
-- `SMT_UPLOAD_TOKEN` — Optional shared secret; if set, requests must include header `x-smt-upload-token` with this value.
-- `SMT_INGEST_SERVICE_NAME` — systemd service that is started after each upload (default `smt-ingest.service`).
-- `SMT_ADMIN_UPLOAD_DAILY_LIMIT` — Admin upload limit per 24-hour window (default `50`).
-- `SMT_ADMIN_UPLOAD_WINDOW_MS` — Admin rate-limit window in milliseconds (default one day).
-- `SMT_CUSTOMER_UPLOAD_MONTHLY_LIMIT` — Customer upload limit per ~30-day window (default `5`).
-- `SMT_CUSTOMER_UPLOAD_WINDOW_MS` — Customer rate-limit window in milliseconds (default 30 days).
+- `SMT_UPLOAD_DIR` — Default `/home/deploy/smt_inbox`; directory where the upload server writes incoming SMT CSVs.
+- `SMT_UPLOAD_PORT` — Default `8081`; port for the Node upload server (nginx proxies HTTPS traffic to this port).
+- `SMT_UPLOAD_MAX_BYTES` — Default `10485760` (10 MB); maximum upload size enforced by multer. Keep this ≤ nginx `client_max_body_size`.
+- `SMT_INGEST_SERVICE_NAME` — Default `smt-ingest.service`; systemd unit triggered after each successful upload.
+- `SMT_UPLOAD_TOKEN` — Optional; shared secret that, when set, requires clients to send header `x-smt-upload-token` with this value.
+- `SMT_ADMIN_UPLOAD_DAILY_LIMIT` — Default `50`; maximum admin uploads allowed per rate-limit window.
+- `SMT_ADMIN_UPLOAD_WINDOW_MS` — Default `86400000` (24 hours); admin upload rate-limit window in milliseconds.
+- `SMT_CUSTOMER_UPLOAD_MONTHLY_LIMIT` — Default `5`; maximum customer uploads allowed per window.
+- `SMT_CUSTOMER_UPLOAD_MONTHLY_WINDOW_MS` — Default `2592000000` (~30 days); customer upload rate-limit window in milliseconds.
 
 ## ESIID Source Selection (2025-11-12)
 

@@ -184,7 +184,7 @@ After the script returns:
 For web-based big-file uploads (admin UI today, customer UI later) we run a lightweight HTTP server on the droplet:
 
 - Source: `scripts/droplet/smt-upload-server.ts`
-- Default port: `8080` (configurable via `SMT_UPLOAD_PORT`)
+- Default port: `8081` (configurable via `SMT_UPLOAD_PORT`)
 - Endpoint: `POST /upload` with `multipart/form-data` (field name `file`)
 - Saves the file into the SMT inbox and triggers `smt-ingest.service`
 - Optional shared secret header (`x-smt-upload-token`) requires `SMT_UPLOAD_TOKEN`
@@ -212,7 +212,7 @@ After=network.target
 Type=simple
 User=deploy
 WorkingDirectory=/home/deploy/apps/intelliwatt
-Environment=SMT_UPLOAD_PORT=8080
+Environment=SMT_UPLOAD_PORT=8081
 Environment=SMT_LOCAL_DIR=/home/deploy/smt_inbox
 Environment=SMT_INGEST_SERVICE_NAME=smt-ingest.service
 ExecStart=/usr/bin/npx ts-node --transpile-only scripts/droplet/smt-upload-server.ts
@@ -230,7 +230,51 @@ sudo systemctl enable --now smt-upload-server.service
 sudo systemctl status smt-upload-server.service
 ```
 
-Ensure the port is open (e.g., `sudo ufw allow 8080/tcp`) and set `NEXT_PUBLIC_SMT_UPLOAD_URL` (e.g., `http://<droplet-ip>:8080/upload`) so the admin UI can POST directly to this server.
+Ensure the port is open (e.g., `sudo ufw allow 8081/tcp`) and set `NEXT_PUBLIC_SMT_UPLOAD_URL` (e.g., `https://smt-upload.intelliwatt.com/upload`) so the admin UI can POST directly to this server.
+
+### SMT Upload HTTPS Proxy (`smt-upload.intelliwatt.com`)
+
+- The SMT upload server now runs as a Node process on the droplet:
+  - `node scripts/droplet/smt-upload-server.js`
+  - Binds to `127.0.0.1:8081` by default with environment:
+    - `SMT_UPLOAD_DIR=/home/deploy/smt_inbox`
+    - `SMT_UPLOAD_PORT=8081`
+    - `SMT_UPLOAD_MAX_BYTES=10485760`
+    - `SMT_INGEST_SERVICE_NAME=smt-ingest.service`
+    - (optional) `SMT_UPLOAD_TOKEN=<shared-secret>`
+- nginx terminates TLS for `smt-upload.intelliwatt.com` and proxies to the local Node server:
+
+```
+server {
+  listen 443 ssl;
+  server_name smt-upload.intelliwatt.com;
+  ssl_certificate /etc/letsencrypt/live/smt-upload.intelliwatt.com/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/smt-upload.intelliwatt.com/privkey.pem;
+  include /etc/letsencrypt/options-ssl-nginx.conf;
+  ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+  location / {
+    client_max_body_size 10m;
+    proxy_pass http://127.0.0.1:8081;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  }
+}
+server {
+  listen 80;
+  server_name smt-upload.intelliwatt.com;
+  client_max_body_size 10m;
+  if ($host = smt-upload.intelliwatt.com) {
+    return 301 https://$host$request_uri;
+  }
+  return 404;
+}
+```
+
+- nginx explicitly sets `client_max_body_size 10m` inside the HTTPS `location /` block to eliminate the 413 errors Brian hit when the default 1 MB limit rejected 12-month SMT CSVs (~5.4 MB).
+- Certbot manages the certificate and the 80 → 443 redirect; renewals update the files referenced above automatically.
+- The upload server health endpoint is exposed at `https://smt-upload.intelliwatt.com/health` and returns JSON `{ ok, service, uploadDir, maxBytes }`.
+- This droplet upload endpoint is now the canonical path for full-size SMT manual uploads (admin and customer). The App Router inline upload remains a debug-only path for small files.
 
 ---
 

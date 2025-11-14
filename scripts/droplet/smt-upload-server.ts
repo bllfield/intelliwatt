@@ -1,11 +1,10 @@
-import express, { Request, Response } from "express";
+import express, { Request, Response, NextFunction } from "express";
 import multer from "multer";
 import fs from "fs";
-import path from "path";
 import { exec } from "child_process";
 
 const UPLOAD_DIR = process.env.SMT_UPLOAD_DIR || "/home/deploy/smt_inbox";
-const PORT = Number(process.env.SMT_UPLOAD_PORT || "8080");
+const PORT = Number(process.env.SMT_UPLOAD_PORT || "8081");
 const MAX_BYTES = Number(process.env.SMT_UPLOAD_MAX_BYTES || 10 * 1024 * 1024);
 const UPLOAD_TOKEN = process.env.SMT_UPLOAD_TOKEN || "";
 const ADMIN_LIMIT = Number(process.env.SMT_ADMIN_UPLOAD_DAILY_LIMIT || "50");
@@ -103,24 +102,81 @@ const upload = multer({
 });
 
 const app = express();
+const allowedOrigins = new Set(["https://intelliwatt.com"]);
 
-app.get("/health", (_req: Request, res: Response) => {
-  res.json({ ok: true, service: "smt-upload-server", uploadDir: UPLOAD_DIR });
+function verifyUploadToken(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
+  if (!UPLOAD_TOKEN) {
+    next();
+    return;
+  }
+
+  const headerToken = req.headers["x-smt-upload-token"];
+  if (
+    (typeof headerToken === "string" && headerToken === UPLOAD_TOKEN) ||
+    (Array.isArray(headerToken) && headerToken.includes(UPLOAD_TOKEN))
+  ) {
+    next();
+    return;
+  }
+
+  res.status(401).json({
+    ok: false,
+    error: "unauthorized",
+    message: "Invalid or missing SMT upload token",
+  });
+}
+
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const origin = req.headers.origin;
+  if (origin && allowedOrigins.has(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+  }
+
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+
+  const requestHeaders = req.headers["access-control-request-headers"];
+  if (typeof requestHeaders === "string" && requestHeaders.length > 0) {
+    res.setHeader("Access-Control-Allow-Headers", requestHeaders);
+  } else if (Array.isArray(requestHeaders) && requestHeaders.length > 0) {
+    res.setHeader(
+      "Access-Control-Allow-Headers",
+      requestHeaders.join(", "),
+    );
+  } else {
+    res.setHeader(
+      "Access-Control-Allow-Headers",
+      "Content-Type, X-Requested-With, x-smt-upload-token",
+    );
+  }
+
+  if (req.method === "OPTIONS") {
+    res.status(204).end();
+    return;
+  }
+
+  next();
 });
 
-app.post("/upload", upload.single("file"), (req: Request, res: Response) => {
-  try {
-    if (UPLOAD_TOKEN) {
-      const headerToken = req.headers["x-smt-upload-token"];
-      if (!headerToken || headerToken !== UPLOAD_TOKEN) {
-        return res.status(401).json({
-          ok: false,
-          error: "unauthorized",
-          message: "Invalid or missing SMT upload token",
-        });
-      }
-    }
+app.get("/health", (_req: Request, res: Response) => {
+  res.json({
+    ok: true,
+    service: "smt-upload-server",
+    uploadDir: UPLOAD_DIR,
+    maxBytes: MAX_BYTES,
+  });
+});
 
+app.post(
+  "/upload",
+  verifyUploadToken,
+  upload.single("file"),
+  (req: Request, res: Response) => {
+  try {
     const roleRaw = (req.body?.role || "admin").toString().toLowerCase();
     const role: "admin" | "customer" =
       roleRaw === "customer" ? "customer" : "admin";
@@ -130,6 +186,8 @@ app.post("/upload", upload.single("file"), (req: Request, res: Response) => {
     const accountKey = accountKeyRaw.toString();
 
     const rate = checkRateLimit(role, accountKey);
+    const resetAtIso = new Date(rate.resetAt).toISOString();
+
     if (!rate.ok) {
       return res.status(429).json({
         ok: false,
@@ -138,7 +196,7 @@ app.post("/upload", upload.single("file"), (req: Request, res: Response) => {
         accountKey,
         limit: rate.limit,
         remaining: 0,
-        resetAt: new Date(rate.resetAt).toISOString(),
+        resetAt: resetAtIso,
         message:
           role === "admin"
             ? "Admin upload limit reached for the current 24-hour window"
@@ -170,7 +228,9 @@ app.post("/upload", upload.single("file"), (req: Request, res: Response) => {
           sizeBytes: file.size,
           role,
           accountKey,
+          limit: rate.limit,
           remaining: rate.remaining,
+          resetAt: resetAtIso,
           warning: "File stored, but ingest service failed to start",
         });
       }
@@ -186,6 +246,7 @@ app.post("/upload", upload.single("file"), (req: Request, res: Response) => {
         accountKey,
         limit: rate.limit,
         remaining: rate.remaining,
+        resetAt: resetAtIso,
       });
     });
   } catch (err) {
