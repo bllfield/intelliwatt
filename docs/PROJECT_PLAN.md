@@ -1270,34 +1270,26 @@ Constraints:
 
 Status: ACTIVE / REQUIRED for all future SMT-related communications and documentation.
 
-PC-2025-11-14-A: SMT Upload Server HTTPS Proxy + Big-File Path
+PC-2025-11-14-A: SMT Big-File Upload Hardening (CORS + Non-Blocking Ingest)
 
 Rationale:
 
-- Admin and customer SMT interval CSV uploads must support full 12-month, 15-minute data files (~5–6 MB) without App Router size limits.
-- We now have a dedicated upload server on the droplet behind an HTTPS nginx proxy.
+- Admin uploads from https://intelliwatt.com/admin/smt/raw to smt-upload.intelliwatt.com were intermittently failing with 504 Gateway Time-out and browser CORS errors. The upload server must respond quickly and consistently with JSON while still triggering the existing smt-ingest.service pipeline on the droplet.
 
-Scope:
+Changes:
 
-- Canonical big-file SMT upload endpoint is: https://smt-upload.intelliwatt.com/upload.
-- The upload server:
-  - Accepts multipart/form-data with field name "file".
-  - Respects SMT_UPLOAD_* env vars and rate-limits by role/accountKey.
-  - Triggers smt-ingest.service to bring files into RawSmtFile/SmtInterval via the existing ingest pipeline.
-- Admin UI (/admin/smt/raw) and future customer flows must:
-  - Use NEXT_PUBLIC_SMT_UPLOAD_URL for full-size CSVs,
-  - Tag uploads with role and accountKey,
-  - Treat App Router inline uploads as debug-only for small files.
-- nginx is configured to:
-  - Terminate TLS for smt-upload.intelliwatt.com,
-  - Proxy to 127.0.0.1:8081,
-  - Enforce client_max_body_size 10m at the HTTPS location level to prevent 413s for full SMT CSVs.
+- Updated `scripts/droplet/smt-upload-server.ts` (and JS runtime) to:
+  - Enforce a single, centralized CORS middleware that allows origin `https://intelliwatt.com` and sets `Vary: Origin`, including for error responses.
+  - Add structured logging for request method, URL, origin, content-length, saved file path, and ingest trigger status.
+  - Make the `/upload` route fully wrapped in `try/catch` and return a `202` JSON response immediately after saving the CSV to `SMT_UPLOAD_DIR`.
+  - Trigger `smt-ingest.service` using `systemctl start` in a fire-and-forget fashion (no blocking on ingest completion).
+  - Add a global error handler so unexpected errors return JSON with CORS headers instead of hanging and causing nginx 504s.
 
-Constraints:
+Notes / Overrides:
 
-- Any future change to the upload pipeline must preserve:
-  - HTTPS-only access from IntelliWatt frontends,
-  - CORS allowlist restricted to https://intelliwatt.com,
-  - Rate limiting to avoid abuse,
-  - Compatibility with smt-ingest.service and the existing RawSmtFile → SmtInterval normalize flow.
-- App Router-based SMT uploads remain debug-only and must not be used for production-sized interval files.
+- This Plan Change **overrides** any prior SMT upload guidance that implied waiting on ingest completion before responding to the client. The canonical behavior is now:
+  1. Accept large SMT CSV uploads via `smt-upload.intelliwatt.com`.
+  2. Save the file into `SMT_UPLOAD_DIR`.
+  3. Trigger `smt-ingest.service` asynchronously.
+  4. Respond with a `202` JSON payload to the admin UI quickly, to avoid timeouts.
+- Nginx remains responsible for TLS termination and max body size (`client_max_body_size 10m`), but the upload server is now the source of truth for CORS behavior and JSON error responses for SMT uploads.
