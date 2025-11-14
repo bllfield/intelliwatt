@@ -118,6 +118,119 @@ Each successful POST writes the SHA256 of the file into `SMT_LOCAL_DIR/.posted_s
 
 ---
 
+## Big-File SMT Interval CSVs vs Inline Uploads
+
+- Real SMT interval CSVs (12 months of 15-minute reads) can be large.
+- The **primary ingestion path for big SMT CSVs** is:
+  - SMT SFTP → droplet → `smt-ingest` script → `/api/admin/smt/pull` (inline JSON payload) → `RawSmtFile` → `SmtInterval`.
+- The `/admin/smt/raw` → “Load Raw Files” inline upload:
+  - Is limited by Vercel App Router’s request body size (~4 MB).
+  - Is intended for **small test files and debugging**, not for production 12-month SMT exports.
+- Admin or customer “manual interval uploads” must use a big-file-safe path (droplet, storage-based, or equivalent) rather than relying solely on the small inline upload.
+  - Future customer-facing manual upload flows should reuse the droplet ingest pipeline or another storage-backed approach that avoids App Router limits.
+
+### Admin automation: `Upload-SmtCsvToDroplet.ps1`
+
+- For ad-hoc big SMT CSV uploads (admin/testing), use the PowerShell helper committed to the repo:
+  - Script: `scripts/admin/Upload-SmtCsvToDroplet.ps1`
+  - Example (PowerShell on your workstation):
+    ```powershell
+    .\scripts\admin\Upload-SmtCsvToDroplet.ps1 `
+      -FilePath "C:\data\smt_full_year.csv" `
+      -DropletHost "64.225.25.54"
+    ```
+  - Requirements:
+    - SSH key-based access for the target droplet user (defaults to `deploy`).
+    - `scp` and `ssh` available in your PowerShell environment (Git for Windows or OpenSSH).
+- What the script does:
+  1. Copies the local CSV into the droplet inbox (`/home/deploy/smt_inbox` by default).
+  2. Starts `smt-ingest.service`, which posts the file through `/api/admin/smt/pull` (mode `"inline"`) so it lands in `RawSmtFile` and `SmtInterval`.
+- After running the script:
+  - Wait briefly, then visit `/admin/smt/raw` to confirm a new `RawSmtFile`.
+  - Use SMT admin tools to inspect or normalize as needed.
+
+### Manual Big-File SMT CSV Ingest (Admin Script)
+
+For full-size SMT interval CSVs (e.g., 12 months of 15-minute data), the canonical ingestion path is:
+
+- Local file (admin machine)
+- → Droplet SMT inbox (`/home/deploy/smt_inbox`)
+- → `smt-ingest.service` (runs the ingest script)
+- → `/api/admin/smt/pull` (inline JSON payload)
+- → `RawSmtFile` + `SmtInterval`
+
+To make this repeatable, we provide an admin PowerShell helper script in the repo:
+
+- `scripts/admin/Upload-SmtCsvToDroplet.ps1`
+
+Usage example (from Windows PowerShell, with SSH/scp configured):
+
+```powershell
+cd path\to\intelliwatt\repo
+
+.\scripts\admin\Upload-SmtCsvToDroplet.ps1 `
+  -FilePath "C:\path\to\intervaldata.csv" `
+  -DropletHost "your_droplet_host_or_ip"
+```
+
+After the script returns:
+
+1. Wait a short moment for `smt-ingest.service` to finish processing.
+2. Visit `/admin/smt/raw` to confirm a new `RawSmtFile` row.
+3. Normalize/inspect via the SMT admin tools as needed.
+
+### Droplet HTTP Upload Server (`smt-upload-server`)
+
+For web-based big-file uploads (admin UI today, customer UI later) we run a lightweight HTTP server on the droplet:
+
+- Source: `scripts/droplet/smt-upload-server.ts`
+- Default port: `8080` (configurable via `SMT_UPLOAD_PORT`)
+- Endpoint: `POST /upload` with `multipart/form-data` (field name `file`)
+- Saves the file into the SMT inbox and triggers `smt-ingest.service`
+
+#### Install / run manually
+
+```bash
+cd /home/deploy/apps/intelliwatt
+npm install --production # installs express, multer, etc.
+npx ts-node --transpile-only scripts/droplet/smt-upload-server.ts
+```
+
+#### Systemd unit (recommended)
+
+Create `/etc/systemd/system/smt-upload-server.service`:
+
+```
+[Unit]
+Description=IntelliWatt SMT upload server
+After=network.target
+
+[Service]
+Type=simple
+User=deploy
+WorkingDirectory=/home/deploy/apps/intelliwatt
+Environment=SMT_UPLOAD_PORT=8080
+Environment=SMT_LOCAL_DIR=/home/deploy/smt_inbox
+Environment=SMT_INGEST_SERVICE_NAME=smt-ingest.service
+ExecStart=/usr/bin/npx ts-node --transpile-only scripts/droplet/smt-upload-server.ts
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Then reload + enable:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now smt-upload-server.service
+sudo systemctl status smt-upload-server.service
+```
+
+Ensure the port is open (e.g., `sudo ufw allow 8080/tcp`) and set `NEXT_PUBLIC_SMT_UPLOAD_URL` (e.g., `http://<droplet-ip>:8080/upload`) so the admin UI can POST directly to this server.
+
+---
+
 ## Quick: SSH to droplet as deploy
 
 - Already root on the box? Switch back to `deploy` and the repo:
@@ -240,3 +353,5 @@ Droplet Env file:
   - must include: `ADMIN_TOKEN`, `INTELLIWATT_BASE_URL`, `SMT_HOST`, `SMT_USER`, `SMT_KEY`, `SMT_REMOTE_DIR`, `SMT_LOCAL_DIR`
 
   - optional: `SOURCE_TAG`, `METER_DEFAULT`, `ESIID_DEFAULT`
+
+ 

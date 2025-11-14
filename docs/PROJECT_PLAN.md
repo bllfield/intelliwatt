@@ -1116,6 +1116,70 @@ Rollback:
 
 - To disable this behavior, a future Plan Change must explicitly revoke PC-2025-11-13-C.
 
+[PC-2025-11-13-D] Big-File SMT Interval Uploads (Admin + Customer Manual Uploads) (LOCKED)
+
+Rationale:
+
+- Real SMT interval CSVs (12-month, 15-minute data) are often larger than the ~4 MB Next.js App Router upload limit.
+- IntelliWatt must be able to accept full-size interval files end-to-end, not just truncated test samples.
+- This requirement applies to both admin tools and customer-facing “manual upload” flows (e.g., SMT or Green Button CSVs).
+
+Scope:
+
+- Big-file requirement:
+  - SMT interval files MUST be supported at full size for ingestion into `RawSmtFile` and `SmtInterval`.
+  - This applies equally to admin and customer manual upload paths.
+- Ingestion paths:
+  - The canonical big-file ingestion path is via the droplet ingest pipeline (e.g., `fetch_and_post.sh` / `smt-ingest.service`), which is not constrained by App Router body size limits.
+  - Provide and maintain admin automation (e.g., `scripts/admin/Upload-SmtCsvToDroplet.ps1`) that copies local CSVs to the droplet inbox and triggers `smt-ingest.service`, ensuring full-size files enter `RawSmtFile`/`SmtInterval` via the standard pipeline.
+  - The existing `/admin/smt/raw` → “Load Raw Files” inline upload:
+    - Is a small-file/debug convenience only.
+    - Remains subject to App Router limits (~4 MB).
+    - Is NOT the primary path for production-sized SMT interval CSVs.
+- Customer manual uploads:
+  - Any future customer-facing manual interval upload feature MUST:
+    - Use a backend/storage-based pipeline (droplet, object storage, or equivalent) that can safely accept large files.
+    - Avoid directly posting large files into App Router endpoints.
+  - Admin and customer tools should share the same core ingestion module/pattern to keep behavior consistent.
+
+Overrides:
+
+- Overrides earlier assumptions that manual SMT interval uploads would only involve tiny test files.
+- Establishes big-file support as a core requirement for both admin and customer manual uploads.
+
+Rollback:
+
+- A future Plan Change must explicitly revoke PC-2025-11-13-D to alter this requirement.
+
+[PC-2025-11-13-E] Droplet HTTP Upload Relay + Admin UI Hook (LOCKED)
+
+Rationale:
+
+- Admin and future customer flows need a browser-based way to submit full-size SMT interval files without hitting App Router body limits.
+- Reuses the canonical droplet pipeline so the same ingestion path (RawSmtFile → SmtInterval) is exercised for manual uploads.
+
+Scope:
+
+- Droplet HTTP upload server:
+  - Add `scripts/droplet/smt-upload-server.ts` (Express + multer) that writes to `/home/deploy/smt_inbox` and triggers `smt-ingest.service` via `sudo systemctl start`.
+  - Configure via env (`SMT_UPLOAD_PORT`, `SMT_UPLOAD_MAX_BYTES`, `SMT_INGEST_SERVICE_NAME`).
+  - Provide systemd unit instructions in `docs/DEPLOY_SMT_INGEST.md` so ops can run it persistently.
+- Admin UI:
+  - `/admin/smt/raw` now posts big files to `NEXT_PUBLIC_SMT_UPLOAD_URL` (the droplet upload server).
+  - Existing inline upload remains for small/debug files; big-file form clearly routes to the droplet pipeline.
+- Documentation:
+  - `docs/ENV_VARS.md` lists new env vars (`NEXT_PUBLIC_SMT_UPLOAD_URL`, `SMT_UPLOAD_PORT`, etc.).
+  - `docs/DEPLOY_SMT_INGEST.md` explains setup/usage of the upload server and clarifies pipeline responsibilities.
+
+Overrides:
+
+- Reinforces that full-size SMT uploads must traverse the droplet ingest pipeline; App Router inline uploads stay debug-only.
+- Establishes the droplet HTTP relay as the canonical web entry point for manual big-file uploads.
+
+Rollback:
+
+- A future Plan Change must explicitly revoke PC-2025-11-13-E to change this behavior.
+
 [PC-2025-11-13-B] SMT Identity & Contact Details (LOCKED)
 
 Purpose:

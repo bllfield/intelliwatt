@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, FormEvent } from "react";
 
 type RawRow = {
   id: string | number;
@@ -23,6 +23,10 @@ export default function AdminSmtRawClient() {
   const [rows, setRows] = useState<RawRow[]>([]);
   const [busy, setBusy] = useState<boolean>(false);
   const [out, setOut] = useState<string>("");
+  const [dropletBusy, setDropletBusy] = useState<boolean>(false);
+  const [dropletMessage, setDropletMessage] = useState<string>("");
+
+  const dropletUploadUrl = process.env.NEXT_PUBLIC_SMT_UPLOAD_URL || "";
 
   const headers = useMemo(
     () => ({
@@ -72,6 +76,48 @@ export default function AdminSmtRawClient() {
       setOut(`ERROR loading raw files: ${e?.message || String(e)}`);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function handleDropletUpload(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!dropletUploadUrl) {
+      setDropletMessage("❗ Set NEXT_PUBLIC_SMT_UPLOAD_URL to enable droplet uploads.");
+      return;
+    }
+
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+    const file = formData.get("file") as File | null;
+    if (!file || file.size === 0) {
+      setDropletMessage("❗ Choose a CSV file before uploading.");
+      return;
+    }
+
+    setDropletBusy(true);
+    setDropletMessage("Uploading to droplet…");
+    try {
+      const response = await fetch(dropletUploadUrl, {
+        method: "POST",
+        body: formData,
+        mode: "cors",
+        credentials: "omit",
+      });
+      const json = await response.json().catch(() => ({}));
+      if (response.ok && json?.ok) {
+        setDropletMessage(
+          `✅ Uploaded ${file.name} (${file.size.toLocaleString()} bytes). Ingest service triggered.`,
+        );
+        form.reset();
+      } else {
+        setDropletMessage(
+          `❌ Upload failed (HTTP ${response.status}): ${json?.error || "see droplet logs"}`,
+        );
+      }
+    } catch (err: any) {
+      setDropletMessage(`❌ Upload failed: ${err?.message || String(err)}`);
+    } finally {
+      setDropletBusy(false);
     }
   }
 
@@ -159,6 +205,45 @@ export default function AdminSmtRawClient() {
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-6">
       <h2 className="text-xl font-semibold">Raw SMT File Browser</h2>
+
+      <section className="border border-amber-200 rounded-lg p-4 bg-amber-50 space-y-3">
+        <h3 className="text-lg font-medium">Big-file Upload (Droplet Pipeline)</h3>
+        <p className="text-sm text-gray-700">
+          For full-size SMT interval CSVs (12 months of 15-minute reads), upload directly to the droplet inbox.
+          This uses the same pipeline as automated ingest (`smt-ingest.service`). Configure
+          <code className="mx-1">NEXT_PUBLIC_SMT_UPLOAD_URL</code> to point at the droplet upload server, e.g.
+          <code className="mx-1">http://64.225.25.54:8080/upload</code>.
+        </p>
+        <form onSubmit={handleDropletUpload} encType="multipart/form-data" className="space-y-3">
+          <div>
+            <label className="block text-sm font-medium text-gray-700">SMT CSV file</label>
+            <input
+              type="file"
+              name="file"
+              accept=".csv,text/csv"
+              required
+              className="mt-1 block w-full rounded border border-gray-300 px-3 py-2 text-sm"
+            />
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              type="submit"
+              className="px-4 py-2 rounded bg-black text-white text-sm font-medium disabled:opacity-50"
+              disabled={dropletBusy}
+            >
+              {dropletBusy ? "Uploading…" : "Upload to Droplet"}
+            </button>
+            <p className="text-xs text-gray-600">
+              After success, wait a few moments, then click “Load Raw Files” below to confirm ingestion.
+            </p>
+          </div>
+        </form>
+        {dropletMessage ? (
+          <div className="rounded border border-amber-300 bg-white px-3 py-2 text-sm text-gray-800">
+            {dropletMessage}
+          </div>
+        ) : null}
+      </section>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <label className="flex flex-col gap-1">

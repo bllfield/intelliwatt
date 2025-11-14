@@ -157,6 +157,18 @@ Invoke-RestMethod -Headers $headers -Uri "https://<your-preview>.vercel.app/api/
 
 - Payload must include `encoding: "base64"` for file content in `content_b64`.
 
+## SMT Upload Relay (2025-11-13)
+
+**Client (Next.js)**
+
+- `NEXT_PUBLIC_SMT_UPLOAD_URL` — Public URL for droplet upload server (e.g., `http://64.225.25.54:8080/upload`)
+
+**Droplet**
+
+- `SMT_UPLOAD_PORT` — Port the upload server listens on (default `8080`)
+- `SMT_UPLOAD_MAX_BYTES` — Optional max upload size (bytes) for `multer` (default 200 MB)
+- `SMT_INGEST_SERVICE_NAME` — Optional override for the ingest systemd service (default `smt-ingest.service`)
+
 ## ESIID Source Selection (2025-11-12)
 
 **Vercel / Server Required**

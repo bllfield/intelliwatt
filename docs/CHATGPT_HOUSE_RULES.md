@@ -85,6 +85,19 @@ End every step with: **“Reply ‘done’ when complete.”**
   - Plan updates must clearly identify new Plan Changes (e.g., `PC-YYYY-MM-DD-X`) and explicitly state when they override prior guidance.
 - These requirements apply to all future ChatGPT sessions working inside the IntelliWatt / Intellipath project.
 
+### Big-File Uploads and Automation Expectations
+
+- SMT interval CSVs, Green Button exports, and similar datasets may be very large (full 12-month intervals).
+- Do **not** rely on App Router inline uploads as the only solution for these files; App Router has body-size limits.
+- For big-file flows (SMT CSV, customer manual uploads, Green Button, etc.):
+  - Prefer pipelines that use:
+    - The droplet ingest system and scripts already defined in this repo, or
+    - Object-storage / streaming mechanisms that bypass App Router limits.
+- Automation vs manual steps:
+  - When a task can be scripted or automated via Cursor (helper modules, APIs, scripts), supply a Cursor Agent Block that creates or updates those assets.
+  - Avoid providing long manual SSH/scp sequences as the primary solution; manual commands are acceptable only as usage examples for committed scripts or when no automated path exists.
+- Customer manual uploads must use the same big-file-safe pipeline as admin tooling; plan with large files in mind from the outset.
+
 ## 9) Default model
 
 - Default model for all answers and Cursor Agent Blocks: **GPT-5 Codex**.
