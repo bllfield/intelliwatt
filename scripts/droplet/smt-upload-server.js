@@ -318,6 +318,13 @@ app.use((err, req, res, _next) => {
   });
 });
 
+// Lightweight keep-alive timer so the process never exits unexpectedly.
+// This should be effectively no-op but ensures at least one active timer handle.
+setInterval(() => {
+  // eslint-disable-next-line no-console
+  console.log("[smt-upload] keep-alive tick");
+}, 60 * 60 * 1000); // once per hour
+
 app.listen(PORT, () => {
   // eslint-disable-next-line no-console
   console.log(

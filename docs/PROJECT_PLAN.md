@@ -1293,3 +1293,18 @@ Notes / Overrides:
   3. Trigger `smt-ingest.service` asynchronously.
   4. Respond with a `202` JSON payload to the admin UI quickly, to avoid timeouts.
 - Nginx remains responsible for TLS termination and max body size (`client_max_body_size 10m`), but the upload server is now the source of truth for CORS behavior and JSON error responses for SMT uploads.
+
+### PC-2025-11-14-B: SMT Upload Server Keep-Alive
+
+**Rationale:**  
+During testing, the SMT upload server (`smt-upload-server.js`) was starting, logging that it was listening on port 8081, and then the systemd service immediately deactivated. There were no visible errors, and nginx returned 504 Gateway Time-out for admin uploads to `smt-upload.intelliwatt.com`. We need the upload server process to remain alive reliably for long-running operation.
+
+**Changes:**
+
+- Updated `scripts/droplet/smt-upload-server.js` (and TS source) to:
+  - Add a lightweight `setInterval` keep-alive timer that logs a periodic `[smt-upload] keep-alive tick` and ensures the Node event loop always has an active handle.
+  - Keep the existing `app.listen(PORT, ...)` behavior while adding clearer startup logging.
+
+**Notes / Overrides:**
+
+- This is a low-risk operational hardening change on top of PC-2025-11-14-A. It does not alter SMT upload semantics (rate limiting, auth, or ingest triggering); it only ensures the upload server process stays running under systemd instead of exiting unexpectedly.
