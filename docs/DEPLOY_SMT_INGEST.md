@@ -189,6 +189,7 @@ For web-based big-file uploads (admin UI today, customer UI later) we run a ligh
 - Saves the file into the SMT inbox and triggers `smt-ingest.service`
 - Optional shared secret header (`x-smt-upload-token`) requires `SMT_UPLOAD_TOKEN`
 - Built-in rate limiting (in-memory): admins 50/day, customers 5/month by default (see env vars below)
+- Used by `/admin/smt/raw` and customer page `app/customer/smt-upload/page.tsx`
 
 #### Install / run manually
 

@@ -1204,6 +1204,36 @@ Rollback:
 
 - A future Plan Change must explicitly revoke PC-2025-11-13-F to modify these rate-limit rules.
 
+[PC-2025-11-13-G] Customer Manual SMT Upload (Droplet Pipeline) (LOCKED)
+
+Rationale:
+
+- Customers need a simple way to manually upload their own 12-month SMT/interval CSVs.
+- Admin and customer manual uploads must share the same big-file-safe droplet pipeline and rate limits.
+- Each upload must be tied to a specific home/account so we can enforce per-customer limits and surface the ingestion in dashboards.
+
+Scope:
+
+- Added customer-facing upload page `app/customer/smt-upload/page.tsx` with explanatory content.
+- Added reusable component `components/customer/SmtUploadForm.tsx` that posts directly to the droplet upload server (`NEXT_PUBLIC_SMT_UPLOAD_URL`).
+  - Tags uploads with `role=customer` and a user-provided `accountKey` (Home ID reference for now).
+  - Shows success, rate-limit (429), and error messaging returned by the droplet server.
+- Reuses existing droplet upload service and limits (admin 50/day, customer 5/month by default) configured via env vars.
+
+Future Work:
+
+- Integrate the page into the main customer dashboard navigation.
+- Replace the free-text Home ID field with an authenticated `home_id`/`user_id` from the signed-in session.
+- Link post-upload flows to the usage analysis pages so customers can view results immediately after ingest.
+
+Overrides:
+
+- Establishes the droplet-upload-based customer manual upload flow as the canonical method for 12-month SMT CSV ingestion.
+
+Rollback:
+
+- A future Plan Change must explicitly revoke PC-2025-11-13-G to alter this requirement.
+
 [PC-2025-11-13-B] SMT Identity & Contact Details (LOCKED)
 
 Purpose:
