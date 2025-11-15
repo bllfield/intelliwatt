@@ -1,124 +1,41 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
-import type { PrismaClient } from '@prisma/client';
 import { gunzipSync } from 'zlib';
 import { requireAdmin } from '@/lib/auth/admin';
 import { prisma } from '@/lib/db';
 import { saveRawToStorage } from '@/app/lib/storage/rawFiles';
-import { parseSmtCsvFlexible } from '@/lib/smt/parseCsv';
-import {
-  groupNormalize,
-  type NormalizedPoint,
-  type SmtAdhocRow,
-} from '@/lib/analysis/normalizeSmt';
+import { normalizeSmtIntervals } from '@/app/lib/smt/normalize';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const WEBHOOK_HEADERS = ['x-intelliwatt-secret', 'x-smt-secret', 'x-webhook-secret'] as const;
-function toAdhocRows(
-  parsed: ReturnType<typeof parseSmtCsvFlexible>,
-  fallbackEsiid?: string,
-  fallbackMeter?: string,
-): SmtAdhocRow[] {
-  const rows: SmtAdhocRow[] = [];
-
-  for (const entry of parsed) {
-    if (!entry) continue;
-    if (entry.kwh == null) continue;
-
-    let timestamp = entry.endLocal ?? entry.dateTimeLocal ?? null;
-    if (!timestamp && entry.startLocal) {
-      const startDate = new Date(entry.startLocal);
-      if (!Number.isNaN(startDate.getTime())) {
-        const endDate = new Date(startDate.getTime() + 15 * 60 * 1000);
-        timestamp = endDate.toISOString();
-      } else {
-        timestamp = entry.startLocal;
-      }
-    }
-
-    if (!timestamp) continue;
-
-    const esiid = (entry.esiid ?? fallbackEsiid ?? '').trim();
-    const meter = (entry.meter ?? fallbackMeter ?? '').trim();
-    if (!esiid || !meter) continue;
-
-    rows.push({
-      esiid,
-      meter,
-      timestamp,
-      kwh: entry.kwh ?? undefined,
-    });
-  }
-
-  return rows;
-}
-
-function pointsToIntervals(
-  esiid: string,
-  meter: string,
-  points: NormalizedPoint[],
-): Array<{ esiid: string; meter: string; ts: Date; kwh: number }> {
-  const intervals: Array<{ esiid: string; meter: string; ts: Date; kwh: number }> = [];
-
-  for (const point of points) {
-    if (!point || typeof point.kwh !== 'number' || !Number.isFinite(point.kwh)) continue;
-    const ts = new Date(point.ts);
-    if (Number.isNaN(ts.getTime())) continue;
-    intervals.push({ esiid, meter, ts, kwh: point.kwh });
-  }
-
-  return intervals;
-}
 
 async function normalizeInlineSmtCsv(opts: {
-  prismaClient: PrismaClient;
   csvBytes: Buffer;
   esiid?: string | null;
   meter?: string | null;
   source?: string | null;
 }): Promise<void> {
-  const { prismaClient, csvBytes, esiid, meter, source } = opts;
+  const { csvBytes, esiid, meter, source } = opts;
   if (!csvBytes?.length) return;
 
-  const fallbackEsiid = (esiid ?? '').trim();
-  const fallbackMeter = (meter ?? '').trim();
-  if (!fallbackEsiid || !fallbackMeter) {
-    // Without identifiers we cannot persist intervals reliably.
-    return;
-  }
+  const { intervals } = normalizeSmtIntervals(csvBytes.toString('utf8'), {
+    esiid,
+    meter,
+    source: source ?? 'smt-inline',
+  });
 
-  const csvText = csvBytes.toString('utf8');
-  const parsed = parseSmtCsvFlexible(csvText);
-  const adhocRows = toAdhocRows(parsed, fallbackEsiid, fallbackMeter);
-  if (adhocRows.length === 0) return;
+  if (intervals.length === 0) return;
 
-  const grouped = groupNormalize(adhocRows, 'esiid_meter', { tz: 'America/Chicago' });
-  const intervalRecords: Array<{ esiid: string; meter: string; ts: Date; kwh: Prisma.Decimal; source?: string | null }> = [];
-
-  for (const [composite, { points }] of Object.entries(grouped.groups)) {
-    const [esiidPart, meterPart] = composite.split('|');
-    const recordEsiid = (esiidPart && esiidPart !== 'unknown' ? esiidPart : fallbackEsiid).trim();
-    const recordMeter = (meterPart && meterPart !== 'unknown' ? meterPart : fallbackMeter).trim();
-    if (!recordEsiid || !recordMeter) continue;
-
-    const intervals = pointsToIntervals(recordEsiid, recordMeter, points);
-    for (const interval of intervals) {
-      intervalRecords.push({
-        esiid: interval.esiid,
-        meter: interval.meter,
-        ts: interval.ts,
-        kwh: new Prisma.Decimal(interval.kwh),
-        source: source ?? 'smt-inline',
-      });
-    }
-  }
-
-  if (intervalRecords.length === 0) return;
-
-  await prismaClient.smtInterval.createMany({
-    data: intervalRecords,
+  await prisma.smtInterval.createMany({
+    data: intervals.map((interval) => ({
+      esiid: interval.esiid,
+      meter: interval.meter,
+      ts: interval.ts,
+      kwh: new Prisma.Decimal(interval.kwh),
+      source: interval.source ?? 'smt-inline',
+    })),
     skipDuplicates: true,
   });
 }
@@ -271,7 +188,6 @@ export async function POST(req: NextRequest) {
       if (recordId && !duplicate) {
         try {
           await normalizeInlineSmtCsv({
-            prismaClient: prisma,
             csvBytes,
             esiid: typeof esiid === 'string' ? esiid : undefined,
             meter: typeof meter === 'string' ? meter : undefined,

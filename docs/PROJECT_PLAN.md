@@ -1516,3 +1516,31 @@ Details:
   - Future ChatGPT bootstrap text MUST reference this command when instructing how to connect to the SMT droplet.
 - Overrides:
   - Any prior guidance that suggested logging in as deploy using a password is obsolete and should not be used.
+
+PC-2025-11-15-NORM: SMT IntervalData Normalization Canonicalized
+----------------------------------------------------------------
+
+Rationale:
+- SMT IntervalData CSVs (ESIID, USAGE_DATE, USAGE_START_TIME, USAGE_END_TIME, USAGE_KWH, etc.) are now the canonical input for SmtInterval.
+- Clean up ESIID formatting and ensure kWh and meter values are stored correctly for ERCOT/SMT history pulls.
+
+Details:
+- ESIID:
+  - Read from the CSV "ESIID" column when present.
+  - Strip any leading apostrophes or Excel guard characters (e.g. "'10443720004529147" → "10443720004529147").
+  - If CSV ESIID is missing, fall back to the inline payload ESIID (when provided).
+- Meter:
+  - Primary source is the inline payload (meter value passed in from the SMT SFTP/inline POST or manual uploads).
+  - If no meter is provided, SmtInterval.meter falls back to "unknown".
+- kWh:
+  - Parsed from the CSV "USAGE_KWH" column as a number.
+  - Rows with non-numeric kWh are skipped and counted as invalid.
+  - Valid kWh values (e.g. 0.106, 0.086) are stored as-is and used in totalKwh calculations.
+- Shared helper:
+  - Both /api/admin/smt/pull (inline) and /api/admin/smt/normalize now use a shared SMT normalization helper so behavior is consistent.
+- DST and skipDuplicates:
+  - Existing DST handling and SmtInterval.createMany({ skipDuplicates: true }) behavior are preserved.
+
+Overrides:
+- This Plan Change supersedes any earlier informal assumptions about SMT CSV headers or ESIID formatting.
+- Any previous normalization code that stored ESIID with a leading apostrophe or forced kWh to 0 for valid rows is considered legacy and should not be reintroduced.
