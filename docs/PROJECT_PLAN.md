@@ -1544,3 +1544,24 @@ Details:
 Overrides:
 - This Plan Change supersedes any earlier informal assumptions about SMT CSV headers or ESIID formatting.
 - Any previous normalization code that stored ESIID with a leading apostrophe or forced kWh to 0 for valid rows is considered legacy and should not be reintroduced.
+
+PC-2025-11-15-KWH: SMT Interval kWh Mapping Fixed
+-------------------------------------------------
+
+Rationale:
+- SMT IntervalData CSVs were being parsed correctly for kWh (USAGE_KWH) in diagnostics, but SmtInterval.kwh was being persisted as 0.
+- This prevented downstream analysis (daily-summary, completeness checks) from seeing real usage for SMT history pulls.
+
+Details:
+- The shared SMT normalization helper now:
+  - Parses kWh from the "USAGE_KWH" column as a number.
+  - Validates that kWh is finite; rows with non-numeric kWh are skipped and counted as invalid.
+  - Persists the parsed numeric kWh directly into SmtInterval.kwh.
+- No changes were made to:
+  - Timestamp (ts) handling, including DST logic.
+  - ESIID cleaning and meter resolution behavior from PC-2025-11-15-NORM.
+  - Idempotent insertion behavior using prisma.smtInterval.createMany({ skipDuplicates: true }).
+
+Overrides:
+- This Plan Change supersedes any previous behavior where SmtInterval.kwh may have been defaulted to 0 despite valid USAGE_KWH values in the CSV.
+- Any future normalization changes must continue to use the parsed numeric kWh value for persistence.
