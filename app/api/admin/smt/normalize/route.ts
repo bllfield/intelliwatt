@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { requireAdmin } from '@/lib/auth/admin';
 import { prisma } from '@/lib/db';
-import { normalizeSmtIntervals } from '@/app/lib/smt/normalize';
+import { normalizeSmtIntervals, type NormalizeStats } from '@/app/lib/smt/normalize';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -93,6 +93,7 @@ export async function POST(req: NextRequest) {
       kwh: number;
       tsMin?: string;
       tsMax?: string;
+      diagnostics?: NormalizeStats;
     }>,
   };
 
