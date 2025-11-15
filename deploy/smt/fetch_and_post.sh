@@ -84,29 +84,55 @@ for f in "${FILES[@]}"; do
 
   captured_at=$(date -u -d @"$(stat -c %Y "$f")" +"%Y-%m-%dT%H:%M:%SZ")
   size_bytes=$(stat -c %s "$f")
-  b64=$(base64 -w 0 "$f")
-
-  json=$(jq -n \
-    --arg mode "inline" \
-    --arg source "$SOURCE_TAG" \
-    --arg filename "$bn" \
-    --arg mime "text/csv" \
-    --arg encoding "base64" \
-    --arg content_b64 "$b64" \
-    --arg esiid "$esiid" \
-    --arg meter "$meter" \
-    --arg captured_at "$captured_at" \
-    --argjson sizeBytes "$size_bytes" \
-    '{mode,source,filename,mime,encoding,sizeBytes,content_b64,esiid,meter,captured_at}')
 
   url="${INTELLIWATT_BASE_URL%/}/api/admin/smt/pull"
   log "Posting inline payload: $bn → $url (esiid=${esiid:-N/A}, meter=$meter, size=$size_bytes)"
-  http_code=$( \
+
+  # Build the JSON body via python3 to avoid jq argument-length limits
+  json=$(
+    SMT_FILE_PATH="$f" \
+    SMT_SOURCE_TAG="$SOURCE_TAG" \
+    SMT_ESIID="$esiid" \
+    SMT_METER="$meter" \
+    SMT_CAPTURED_AT="$captured_at" \
+    SMT_SIZE_BYTES="$size_bytes" \
+    python3 - << 'PY'
+import base64, json, os, sys
+
+path      = os.environ["SMT_FILE_PATH"]
+source    = os.environ.get("SMT_SOURCE_TAG", "")
+esiid     = os.environ.get("SMT_ESIID", "")
+meter     = os.environ.get("SMT_METER", "")
+captured  = os.environ.get("SMT_CAPTURED_AT", "")
+size_str  = os.environ.get("SMT_SIZE_BYTES", "0")
+
+with open(path, "rb") as fh:
+    data = fh.read()
+
+body = {
+    "mode": "inline",
+    "source": source,
+    "filename": os.path.basename(path),
+    "mime": "text/csv",
+    "encoding": "base64",
+    "sizeBytes": int(size_str),
+    "esiid": esiid,
+    "meter": meter,
+    "captured_at": captured,
+    "content_b64": base64.b64encode(data).decode("ascii"),
+}
+
+# Compact JSON since this can be large
+print(json.dumps(body, separators=(",", ":")))
+PY
+  )
+
+  http_code=$(
     printf '%s' "$json" | curl -sS -o "$RESP_FILE" -w "%{http_code}" \
       -X POST "$url" \
       -H "x-admin-token: $ADMIN_TOKEN" \
       -H "content-type: application/json" \
-      --data-binary @- 2>/dev/null || echo "000" \
+      --data-binary @- 2>/dev/null || echo "000"
   )
 
   if [[ "$http_code" == "200" || "$http_code" == "201" ]]; then
