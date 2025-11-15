@@ -1565,3 +1565,20 @@ Details:
 Overrides:
 - This Plan Change supersedes any previous behavior where SmtInterval.kwh may have been defaulted to 0 despite valid USAGE_KWH values in the CSV.
 - Any future normalization changes must continue to use the parsed numeric kWh value for persistence.
+
+PC-2025-11-15-SMT-Interval-Repair
+---------------------------------
+
+Rationale:
+- We discovered early SMT intervals for ESIID 10443720004529147 were inserted with kWh=0 due to an earlier normalization bug.
+- After fixing the parser, duplicates remained because createMany(skipDuplicates: true) does not overwrite existing rows.
+
+Change:
+- Added POST /api/admin/debug/smt/intervals with a delete-range capability that allows an admin (x-admin-token) to remove intervals for a given esiid/meter/date range.
+- This endpoint is for operational repair and debugging only; ingest and normalization flows remain unchanged.
+
+Usage:
+- Admin can call POST with (esiid, optional meter, optional dateStart/dateEnd) to wipe bad intervals, then re-run /api/admin/smt/normalize for the associated RawSmtFile to re-insert the corrected data.
+
+Notes:
+- This supplements prior SMT debug endpoints (raw-files, intervals GET) and does not alter production ingest behavior or public APIs.

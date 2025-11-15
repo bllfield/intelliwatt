@@ -90,3 +90,88 @@ export async function GET(req: NextRequest) {
   });
 }
 
+export async function POST(req: NextRequest) {
+  const gate = requireAdmin(req);
+  if (!gate.ok) return NextResponse.json(gate.body, { status: gate.status });
+
+  let body: any;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json(
+      { ok: false, error: 'INVALID_JSON', details: 'Request body must be valid JSON.' },
+      { status: 400 },
+    );
+  }
+
+  const esiidRaw = body?.esiid;
+  const meterRaw = body?.meter;
+  const dateStartRaw = body?.dateStart ?? null;
+  const dateEndRaw = body?.dateEnd ?? null;
+
+  if (typeof esiidRaw !== 'string' || !esiidRaw.trim()) {
+    return NextResponse.json(
+      { ok: false, error: 'INVALID_ESIID', details: 'esiid is required and must be a non-empty string.' },
+      { status: 400 },
+    );
+  }
+
+  if (meterRaw != null && (typeof meterRaw !== 'string' || !meterRaw.trim())) {
+    return NextResponse.json(
+      { ok: false, error: 'INVALID_METER', details: 'meter must be a non-empty string if provided.' },
+      { status: 400 },
+    );
+  }
+
+  const dateStart = parseDate(dateStartRaw);
+  if (dateStartRaw && !dateStart) {
+    return NextResponse.json(
+      { ok: false, error: 'INVALID_DATE_START', details: 'dateStart must be a valid ISO timestamp.' },
+      { status: 400 },
+    );
+  }
+
+  const dateEnd = parseDate(dateEndRaw);
+  if (dateEndRaw && !dateEnd) {
+    return NextResponse.json(
+      { ok: false, error: 'INVALID_DATE_END', details: 'dateEnd must be a valid ISO timestamp.' },
+      { status: 400 },
+    );
+  }
+
+  const where: Prisma.SmtIntervalWhereInput = {
+    esiid: esiidRaw.trim(),
+  };
+
+  if (meterRaw && meterRaw.trim()) {
+    where.meter = meterRaw.trim();
+  }
+
+  if (dateStart || dateEnd) {
+    where.ts = {};
+    if (dateStart) where.ts.gte = dateStart;
+    if (dateEnd) where.ts.lt = dateEnd;
+  }
+
+  try {
+    const result = await prisma.smtInterval.deleteMany({ where });
+
+    return NextResponse.json({
+      ok: true,
+      deletedCount: result.count,
+      filters: {
+        esiid: esiidRaw.trim(),
+        meter: meterRaw ? meterRaw.trim() : null,
+        dateStart: dateStart ? dateStart.toISOString() : null,
+        dateEnd: dateEnd ? dateEnd.toISOString() : null,
+      },
+    });
+  } catch (err) {
+    console.error('[debug/smt/intervals:delete] failed', err);
+    return NextResponse.json(
+      { ok: false, error: 'INTERNAL_ERROR', details: 'Failed to delete intervals.' },
+      { status: 500 },
+    );
+  }
+}
+
