@@ -1,80 +1,3 @@
-## PC-2025-11-15-A: SMT upload + ingest hardening
-
-- smt-upload.intelliwatt.com is fronted by nginx on the droplet and proxies to the Node SMT upload server on port 8081.
-- The upload server now:
-  - Exposes `/health` and `/upload` with CORS locked to `https://intelliwatt.com`.
-  - Accepts large SMT CSVs from the Next.js app and drops them into `/home/deploy/smt_inbox`.
-  - Triggers `smt-ingest.service` via `systemctl start smt-ingest.service` after each accepted upload.
-- `smt-ingest.service` runs `deploy/smt/fetch_and_post.sh`, which now:
-  - Uses python3 (not jq CLI args) to build the inline JSON body for `/api/admin/smt/pull`.
-  - Base64-encodes the CSV on the droplet and streams a compact JSON body with:
-    `mode, source, filename, mime, encoding, sizeBytes, esiid, meter, captured_at, content_b64`.
-  - Uses `ESIID_DEFAULT` from the droplet environment when no ESIID can be guessed from the filename.
-- Outstanding follow-ups:
-  - Confirm the exact request contract for `POST /api/admin/smt/pull` and adjust the payload if we still see `MISSING_ESIID`.
-  - Once the inline contract is confirmed, verify that rows appear in `RawSmtFile` / `SmtInterval` for uploaded SMT CSVs.
-PC-2025-11-15-A: SMT inline upload + droplet ingest (current state)
-
-Rationale:
-- Frontend SMT file upload must be reliable and CORS-safe.
-- Droplet must accept direct browser uploads and periodically sync SMT SFTP,
-  then post usage files inline to the Next.js admin /api/admin/smt/pull endpoint.
-
-Current state:
-- HTTPS endpoint smt-upload.intelliwatt.com is fronted by nginx and proxies
-  to the droplet Node service on port 8081 (scripts/droplet/smt-upload-server.js).
-- /health returns JSON and is used for health checks.
-- /upload accepts multipart/form-data with a single `file` plus form fields
-  `role` and `accountKey`. It:
-  - Logs each request and origin.
-  - Saves the uploaded CSV into /home/deploy/smt_inbox with a timestamped
-    filename.
-  - Triggers smt-ingest.service via systemd to process the inbox.
-- CORS is hardened: Access-Control-Allow-Origin is only set for
-  https://intelliwatt.com, and OPTIONS preflight requests are handled.
-
-Droplet ingest (fetch_and_post.sh):
-- smt-ingest.service runs deploy/smt/fetch_and_post.sh on the droplet.
-- The script:
-  - SFTPs from SMT (intellipathsolutionsftp@ftp.smartmetertexas.biz:/)
-    into /home/deploy/smt_inbox (including /adhocusage).
-  - Iterates each CSV file in the inbox, computes a SHA-256 hash, and skips
-    any file that has already been posted (using a .seen file).
-  - Derives ESIID and meter from the filename when possible, with fallback to
-    ESIID_DEFAULT and METER_DEFAULT environment variables.
-  - Builds a JSON payload for each file and POSTs it inline to:
-    ${INTELLIWATT_BASE_URL}/api/admin/smt/pull
-    with header x-admin-token: ADMIN_TOKEN.
-- The JSON payload uses a streaming base64 approach to avoid "Argument list
-  too long":
-  - The file content is piped through `base64 -w 0` and read by jq via
-    `jq -nRs` so the base64 string is not passed via argv.
-  - No use of `jq --argfile` remains in this script.
-
-Known issues / next steps:
-- The inline POSTs are currently reaching /api/admin/smt/pull but returning:
-  {"ok":false,"error":"MISSING_ESIID","details":"esiid is required"}
-  even when an ESIID string is present in the payload. The Next.js endpoint
-  logic needs to be reviewed to:
-  - Confirm the expected shape of the inline payload for SMT CSV files.
-  - Ensure `esiid` is being read correctly for mode="inline".
-  - Decide how to handle new/unknown ESIIDs (e.g., create or link to a
-    House/Address record, or allow unbound interval data).
-- Once /api/admin/smt/pull is accepting these inline SMT payloads, we should:
-  - Verify that IntervalData rows are persisted in the DB.
-  - Add a small admin/debug endpoint to list the last few ingested SMT files
-    and their status (success / error).
-
-Guardrails:
-- Do not change the SMT endpoints, domain names, or service names:
-  - smt-upload.intelliwatt.com
-  - /health
-  - /upload
-  - smt-upload-server.service
-  - smt-ingest.service
-  - /api/admin/smt/pull
-- Keep all existing logging and systemd units intact; changes should remain
-  additive and backward-compatible with the current deployment.
 # IntelliWatt Project Plan (Authoritative)
 
 ## Plan Enforcement
@@ -1385,3 +1308,49 @@ During testing, the SMT upload server (`smt-upload-server.js`) was starting, log
 **Notes / Overrides:**
 
 - This is a low-risk operational hardening change on top of PC-2025-11-14-A. It does not alter SMT upload semantics (rate limiting, auth, or ingest triggering); it only ensures the upload server process stays running under systemd instead of exiting unexpectedly.
+
+## PC-2025-11-15-A: SMT upload + ingest hardening
+
+- smt-upload.intelliwatt.com is fronted by nginx on the droplet and proxies to the Node SMT upload server on port 8081.
+- The upload server:
+  - Exposes `/health` and `/upload` with CORS locked to `https://intelliwatt.com`.
+  - Accepts SMT CSV uploads (admin UI and customer manual flows) and saves them into `/home/deploy/smt_inbox`.
+  - Triggers `smt-ingest.service` via `systemctl start smt-ingest.service` after each accepted upload.
+- `smt-ingest.service` runs `deploy/smt/fetch_and_post.sh`, which:
+  - Uses a python3 helper to build the inline JSON payload for `/api/admin/smt/pull` (compression override covered in PC-2025-11-15-B).
+  - Derives `esiid` / `meter` from filenames, falling back to `ESIID_DEFAULT` / `METER_DEFAULT` when absent.
+  - Skips CSVs already posted by tracking SHA-256 hashes in `.posted_sha256`.
+- Guardrails / next steps:
+  - Keep endpoints, headers, and service names unchanged.
+  - Confirm inline payload contract stays aligned with compression behavior.
+  - Verify that uploaded files appear in `RawSmtFile` / `SmtInterval` after normalize jobs.
+
+## PC-2025-11-15-B: SMT Inline Upload Compression (base64+gzip Override)
+
+- Droplet inline uploads now gzip large SMT CSV files before base64 encoding to satisfy Vercel’s ~4.5 MB function body limit.
+- Endpoint remains `POST https://intelliwatt.com/api/admin/smt/pull` with `mode: "inline"` and `x-admin-token`.
+- Payload shape:
+  - `encoding: "base64+gzip"` (new default); `sizeBytes` is the uncompressed CSV byte size; optional `compressedBytes` notes the gzipped size.
+  - Debug tools can continue sending `"encoding": "base64"` for small files; both encodings are supported.
+- Example inline payload:
+```jsonc
+{
+  "mode": "inline",
+  "source": "adhocusage",
+  "filename": "20251114T202822_IntervalData.csv",
+  "mime": "text/csv",
+  "encoding": "base64+gzip",         // gzipped CSV bytes, then base64
+  "sizeBytes": 5642292,              // original CSV size in bytes
+  "compressedBytes": 1876543,        // optional: gzipped byte length
+  "esiid": "10443720000000001",
+  "meter": "M1",
+  "captured_at": "2025-11-14T20:28:22Z",
+  "content_b64": "<base64-of-gzipped-csv>"
+}
+```
+- App changes:
+  - `/api/admin/smt/pull` auto-detects `"base64"` vs `"base64+gzip"` and gunzips when required before storing bytes.
+  - Storage and `RawSmtFile` persistence always use the original CSV bytes; SHA-256 dedupe also uses the raw CSV.
+- Guardrails:
+  - No changes to domain names, webhook secrets, or systemd units.
+  - This overrides earlier guidance that assumed inline uploads were plain base64 only.

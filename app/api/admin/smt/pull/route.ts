@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
+import { gunzipSync } from 'zlib';
 import { requireAdmin } from '@/lib/auth/admin';
 import { prisma } from '@/lib/db';
 import { saveRawToStorage } from '@/app/lib/storage/rawFiles';
@@ -67,8 +68,15 @@ export async function POST(req: NextRequest) {
       sizeBytes: declaredSize,
     } = body ?? {};
 
-    if (!content_b64 || encoding !== 'base64') {
+    if (!content_b64) {
       return NextResponse.json({ ok: false, error: 'INLINE_MISSING_B64' }, { status: 400 });
+    }
+
+    if (encoding !== 'base64' && encoding !== 'base64+gzip') {
+      return NextResponse.json(
+        { ok: false, error: 'INLINE_UNSUPPORTED_ENCODING', details: `encoding "${encoding}" is not supported` },
+        { status: 400 },
+      );
     }
 
     let filename = typeof rawFilename === 'string' ? rawFilename.trim() : '';
@@ -81,14 +89,18 @@ export async function POST(req: NextRequest) {
     source = source || 'adhocusage';
 
     try {
-      const buf = Buffer.from(content_b64, 'base64');
-      const computedSize = buf.byteLength;
-      if (declaredSize && Number(declaredSize) !== computedSize) {
+      const decoded = Buffer.from(content_b64, 'base64');
+      const compressedBytes = encoding === 'base64+gzip' ? decoded.byteLength : undefined;
+      const csvBytes = encoding === 'base64+gzip' ? gunzipSync(decoded) : decoded;
+      const expectedSize =
+        declaredSize === undefined || declaredSize === null ? undefined : Number(declaredSize);
+      const computedSize = csvBytes.byteLength;
+      if (expectedSize !== undefined && !Number.isNaN(expectedSize) && expectedSize !== computedSize) {
         return NextResponse.json(
           {
             ok: false,
             error: 'INLINE_SIZE_MISMATCH',
-            expected: Number(declaredSize),
+            expected: expectedSize,
             actual: computedSize,
           },
           { status: 400 },
@@ -97,7 +109,7 @@ export async function POST(req: NextRequest) {
 
       let saved;
       try {
-        saved = await saveRawToStorage({ source, filename, mime, buf });
+        saved = await saveRawToStorage({ source, filename, mime, buf: csvBytes });
       } catch (storageError: any) {
         console.error('[smt/pull:inline] storage failed', storageError);
         return NextResponse.json(
@@ -120,7 +132,7 @@ export async function POST(req: NextRequest) {
             source: saved.source,
             content_type: saved.contentType,
             storage_path: saved.storagePath,
-            content: buf,
+            content: csvBytes,
             received_at: safeReceivedAt,
           },
           select: { id: true },
@@ -143,7 +155,7 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      return NextResponse.json({
+      const responsePayload: Record<string, unknown> = {
         ok: true,
         mode: 'inline',
         filename: saved.filename,
@@ -157,11 +169,18 @@ export async function POST(req: NextRequest) {
         storagePath: saved.storagePath,
         persisted: !duplicate,
         duplicate,
+        encoding,
         id: recordId ? recordId.toString() : undefined,
         message: duplicate
           ? 'Inline payload verified (duplicate sha256, existing record reused).'
           : 'Inline payload stored and verified.',
-      });
+      };
+
+      if (compressedBytes !== undefined) {
+        responsePayload.compressedBytes = compressedBytes;
+      }
+
+      return NextResponse.json(responsePayload);
     } catch (err: any) {
       console.error('[smt/pull:inline] persistence failed', err);
       return NextResponse.json({ ok: false, error: 'INLINE_PERSIST_FAILED', detail: String(err?.message ?? err) }, { status: 500 });

@@ -97,33 +97,57 @@ for f in "${FILES[@]}"; do
     SMT_CAPTURED_AT="$captured_at" \
     SMT_SIZE_BYTES="$size_bytes" \
     python3 - << 'PY'
-import base64, json, os, sys
+import base64
+import gzip
+import json
+import os
+import sys
+from pathlib import Path
 
-path      = os.environ["SMT_FILE_PATH"]
-source    = os.environ.get("SMT_SOURCE_TAG", "")
-esiid     = os.environ.get("SMT_ESIID", "")
-meter     = os.environ.get("SMT_METER", "")
-captured  = os.environ.get("SMT_CAPTURED_AT", "")
-size_str  = os.environ.get("SMT_SIZE_BYTES", "0")
+file_path = os.environ.get("SMT_FILE_PATH")
+source_tag = os.environ.get("SMT_SOURCE_TAG", "smt-ingest")
+esiid = os.environ.get("SMT_ESIID")
+meter = os.environ.get("SMT_METER")
+captured_at = os.environ.get("SMT_CAPTURED_AT")
+size_bytes = os.environ.get("SMT_SIZE_BYTES")
 
-with open(path, "rb") as fh:
-    data = fh.read()
+if not file_path:
+    print("SMT_FILE_PATH is required", file=sys.stderr)
+    sys.exit(1)
 
-body = {
+missing = []
+if not esiid:
+    missing.append("SMT_ESIID")
+if not meter:
+    missing.append("SMT_METER")
+if not captured_at:
+    missing.append("SMT_CAPTURED_AT")
+if not size_bytes:
+    missing.append("SMT_SIZE_BYTES")
+if missing:
+    print("Missing required SMT env vars: " + ", ".join(missing), file=sys.stderr)
+    sys.exit(1)
+
+path = Path(file_path)
+raw_bytes = path.read_bytes()
+gzipped = gzip.compress(raw_bytes)
+content_b64 = base64.b64encode(gzipped).decode("ascii")
+
+payload = {
     "mode": "inline",
-    "source": source,
-    "filename": os.path.basename(path),
+    "source": source_tag,
+    "filename": path.name,
     "mime": "text/csv",
-    "encoding": "base64",
-    "sizeBytes": int(size_str),
+    "encoding": "base64+gzip",
+    "sizeBytes": int(size_bytes),
+    "compressedBytes": len(gzipped),
     "esiid": esiid,
     "meter": meter,
-    "captured_at": captured,
-    "content_b64": base64.b64encode(data).decode("ascii"),
+    "captured_at": captured_at,
+    "content_b64": content_b64,
 }
 
-# Compact JSON since this can be large
-print(json.dumps(body, separators=(",", ":")))
+sys.stdout.write(json.dumps(payload, separators=(",", ":")))
 PY
   )
 
