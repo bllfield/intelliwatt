@@ -1354,3 +1354,11 @@ During testing, the SMT upload server (`smt-upload-server.js`) was starting, log
 - Guardrails:
   - No changes to domain names, webhook secrets, or systemd units.
   - This overrides earlier guidance that assumed inline uploads were plain base64 only.
+
+## PC-2025-11-15-C: SMT Inline Auto-Normalization
+
+- Inline uploads to `/api/admin/smt/pull` now normalize SMT IntervalData CSVs immediately after the raw file is saved.
+- The handler decodes the CSV bytes, parses them via `parseSmtCsvFlexible`, groups into 15-minute intervals with `groupNormalize`, and upserts rows into `SmtInterval` using `skipDuplicates`.
+- Normalization is synchronous with the inline ingest; a 200 OK response indicates both `RawSmtFile` and corresponding `SmtInterval` rows exist (deduped by `(esiid, meter, ts)`).
+- The process is idempotent: duplicate raw files (same SHA-256) skip reprocessing, and interval inserts rely on the unique index.
+- Downstream analysis endpoints (e.g., `/api/admin/analysis/daily-summary`) can rely on `SmtInterval` being populated immediately after droplet inline ingest succeeds.
