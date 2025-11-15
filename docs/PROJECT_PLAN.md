@@ -1362,3 +1362,157 @@ During testing, the SMT upload server (`smt-upload-server.js`) was starting, log
 - Normalization is synchronous with the inline ingest; a 200 OK response indicates both `RawSmtFile` and corresponding `SmtInterval` rows exist (deduped by `(esiid, meter, ts)`).
 - The process is idempotent: duplicate raw files (same SHA-256) skip reprocessing, and interval inserts rely on the unique index.
 - Downstream analysis endpoints (e.g., `/api/admin/analysis/daily-summary`) can rely on `SmtInterval` being populated immediately after droplet inline ingest succeeds.
+
+## PC-2025-11-15-D: SMT Upload & Inline Ingest (Finalized Droplet Flow)
+
+**Scope**
+
+This plan change locks in the current SMT ingestion flow from browser upload through interval normalization and overrides any prior, partial SMT ingest guidance.
+
+**Architecture**
+
+- Frontend:
+  - Main app: `https://intelliwatt.com` (Next.js App Router).
+  - Users upload SMT CSVs (IntervalData) from the IntelliWatt UI.
+
+- Upload edge:
+  - Domain: `https://smt-upload.intelliwatt.com`
+  - Backed by nginx on the DigitalOcean droplet:
+    - `GET /health` → Node upload server on `127.0.0.1:8081`.
+    - `POST /upload` → Node upload server on `127.0.0.1:8081`.
+  - CORS is locked to `https://intelliwatt.com` only.
+
+- Droplet upload server:
+  - Service: `smt-upload-server.service`
+  - Binary: `scripts/droplet/smt-upload-server.js` (listens on port 8081).
+  - Behavior:
+    - `GET /health` responds with JSON including `uploadDir` and `maxBytes`.
+    - `POST /upload` accepts `multipart/form-data` including:
+      - `file`: SMT CSV.
+      - `role`, `accountKey` meta fields.
+    - On success:
+      - Saves files into `/home/deploy/smt_inbox` with timestamped names (e.g. `20251114T202822_IntervalData.csv`).
+      - Triggers `systemctl start smt-ingest.service`.
+
+- SMT ingest job (droplet):
+  - Service: `smt-ingest.service`.
+  - Script: `deploy/smt/fetch_and_post.sh`.
+  - Workflow:
+    1. SFTP pull from Smart Meter Texas:
+       - Host/user are configured via env (see ENV_VARS).
+       - Remote root currently `/` (includes an `adhocusage` directory used for testing).
+       - Files land in `/home/deploy/smt_inbox`.
+    2. For each discovered `.csv` file:
+       - Computes SHA-256; dedupes using a `.posted_sha256` file so files are not re-posted.
+       - Attempts to infer `esiid` and `meter` from the filename; if not present, falls back to `ESIID_DEFAULT` and `METER_DEFAULT`.
+       - Computes `captured_at` from file mtime and `sizeBytes` via `stat`.
+       - Builds an inline JSON payload via an embedded `python3` helper:
+         - Reads raw CSV bytes.
+         - Gzips them.
+         - Base64-encodes the gzipped bytes.
+         - Sets:
+           - `"encoding": "base64+gzip"`.
+           - `"sizeBytes"` = original CSV size.
+           - `"compressedBytes"` = gzipped byte length (for observability).
+           - `"content_b64"` = base64(gzip(CSV bytes)).
+       - POSTs to:
+         - `POST ${INTELLIWATT_BASE_URL}/api/admin/smt/pull`
+         - Header: `x-admin-token: ${ADMIN_TOKEN}`.
+
+**Inline API contract**
+
+`POST /api/admin/smt/pull` with `mode = "inline"` now supports both:
+
+- Plain base64 CSV (for tiny test files, e.g. PowerShell):
+  - `"encoding": "base64"`
+  - `"content_b64"` = base64(CSV bytes)
+
+- Compressed SMT IntervalData CSV (for real SMT files from the droplet):
+  - `"encoding": "base64+gzip"`
+  - `"content_b64"` = base64(gzip(CSV bytes))
+  - `"sizeBytes"` = original CSV size
+  - `"compressedBytes"` = gzipped size (optional; used for debugging)
+
+Example droplet payload:
+
+```jsonc
+{
+  "mode": "inline",
+  "source": "adhocusage",
+  "filename": "20251114T202822_IntervalData.csv",
+  "mime": "text/csv",
+  "encoding": "base64+gzip",
+  "sizeBytes": 5642292,
+  "compressedBytes": 338959,
+  "esiid": "10443720000000001",
+  "meter": "M1",
+  "captured_at": "2025-11-14T20:28:22Z",
+  "content_b64": "<base64-of-gzipped-csv>"
+}
+```
+
+Behavior in `/api/admin/smt/pull`
+
+For mode = "inline":
+
+The handler validates:
+
+esiid, meter, captured_at, sizeBytes, and content_b64.
+
+It decodes the payload based on encoding:
+
+"base64" → content_b64 is base64-decoded directly as CSV bytes.
+
+"base64+gzip" → base64-decoded bytes are gunzipped to recover the CSV.
+
+It persists a RawSmtFile record, including:
+
+filename, source, sizeBytes, sha256, storagePath, contentType, and encoding info.
+
+It calls an inline CSV normalizer:
+
+Parses the CSV (e.g. timestamp,kwh).
+
+Uses a normalization helper to create SmtInterval rows via Prisma
+(smtInterval.createMany with skipDuplicates: true).
+
+Normalization is idempotent; if intervals already exist for that raw file, it does nothing.
+
+Errors during normalization are logged but do not block storing the raw file.
+
+A successful 200 response from /api/admin/smt/pull in inline mode is now interpreted as:
+
+The raw SMT file exists in RawSmtFile.
+
+Its intervals have been normalized into SmtInterval (auto-normalization path).
+
+Override
+
+This plan change supersedes all previous SMT ingest plan notes that assumed:
+
+Plain "encoding":"base64" only.
+
+A separate, manual normalization step.
+
+From now on, SMT ingestion from the droplet must use "encoding":"base64+gzip" for large
+IntervalData CSVs, and /api/admin/smt/pull is the single point that both stores and normalizes
+SMT data for analysis endpoints such as /api/admin/analysis/daily-summary.
+
+PC-2025-11-15-SSH: Droplet Access Standard
+------------------------------------------------
+
+Rationale:
+- Ensure all future admins, scripts, and ChatGPT instructions use the correct SSH key-based login for the SMT droplet.
+- Avoid confusion around password logins, which are not supported for the deploy user.
+
+Details:
+- SMT droplet: 64.225.25.54
+- SSH user: deploy
+- Canonical SSH command (Windows PowerShell):
+    ssh -i "$HOME\.ssh\intelliwatt_deploy_ed25519" deploy@64.225.25.54
+- Notes:
+  - The intelliwatt_deploy_ed25519 public key is stored in /home/deploy/.ssh/authorized_keys on the droplet.
+  - Password login for deploy is disabled; only the SSH key should be used.
+  - Future ChatGPT bootstrap text MUST reference this command when instructing how to connect to the SMT droplet.
+- Overrides:
+  - Any prior guidance that suggested logging in as deploy using a password is obsolete and should not be used.
