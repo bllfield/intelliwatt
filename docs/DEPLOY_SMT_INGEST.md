@@ -401,4 +401,316 @@ Droplet Env file:
 
   - optional: `SOURCE_TAG`, `METER_DEFAULT`, `ESIID_DEFAULT`
 
+SMT Upload & Ingest: Current Deployment Checklist (2025-11-15)
+
+This section reflects the currently working SMT ingestion flow and overrides older partial notes.
+
+Droplet services
+
+smt-upload-server.service
+
+Node server at scripts/droplet/smt-upload-server.js.
+
+Listens on 127.0.0.1:8081.
+
+Proxied via nginx as https://smt-upload.intelliwatt.com.
+
+Endpoints:
+
+GET /health — smoke check.
+
+POST /upload — accepts SMT CSV uploads (multipart).
+
+smt-ingest.service
+
+Runs deploy/smt/fetch_and_post.sh.
+
+Responsibilities:
+
+SFTP mirror from Smart Meter Texas to /home/deploy/smt_inbox.
+
+Iterate .csv files and dedupe by SHA-256 (.posted_sha256).
+
+Build inline JSON payloads via embedded python3:
+
+Gzip + base64 encode contents.
+
+Post to https://intelliwatt.com/api/admin/smt/pull with x-admin-token.
+
+Verify after deployment
+
+On the droplet:
+
+```
+# Check upload server
+curl -sS https://smt-upload.intelliwatt.com/health | jq
+
+# Trigger ingest manually
+sudo systemctl restart smt-ingest.service
+journalctl -u smt-ingest.service -n 80 --no-pager
+```
+
+You should see logs like:
+
+```
+Starting SFTP sync from intellipathsolutionsftp@ftp.smartmetertexas.biz:/
+
+Posting inline payload: 20251114T202822_IntervalData.csv → https://intelliwatt.com/api/admin/smt/pull (esiid=..., meter=..., size=...)
+
+POST success (200): {"ok":true,...,"encoding":"base64+gzip",...,"message":"Inline payload stored and verified."}
+```
+
+Admin verification endpoints
+
+On the droplet (or any trusted machine with ADMIN_TOKEN):
+
+```
+# Latest raw SMT files
+curl -sS -H "x-admin-token: $ADMIN_TOKEN" \
+  "https://intelliwatt.com/api/admin/debug/smt/raw-files?limit=10" | jq
+
+# Daily summary for a known ESIID/meter
+curl -sS -H "x-admin-token: $ADMIN_TOKEN" \
+  "https://intelliwatt.com/api/admin/analysis/daily-summary?esiid=10443720000000001&meter=M1&dateStart=2025-11-14T00:00:00Z&dateEnd=2025-11-16T00:00:00Z&limit=10" | jq
+```
+
+A working ingest flow will show:
+
+The IntervalData CSVs in raw-files (e.g. 20251114T202822_IntervalData.csv).
+
+Corresponding SmtInterval entries for that ESIID/meter in daily-summary.
+
+## SMT Inline Normalize + Verification (Admin Flow)
+
+This documents the current manual admin flow we used to verify SMT ingest for ESIID `10443720004529147`. Use placeholders for real secrets in docs.
+
+### 1. Normalize a specific Raw SMT file
+
+From any terminal with access to production:
+
+```bash
+export ADMIN_TOKEN="<ADMIN_TOKEN>"
+
+curl -sS -X POST "https://intelliwatt.com/api/admin/smt/normalize" \
+  -H "x-admin-token: $ADMIN_TOKEN" \
+  -H "content-type: application/json" \
+  --data-binary '{"rawId":"<RAW_SMT_FILE_ID>"}'
+```
+
+Example (test file):
+
+- `rawId = "10"`
+
+Response (shape):
+
+```jsonc
+{
+  "ok": true,
+  "dryRun": false,
+  "filesProcessed": 5,
+  "intervalsInserted": 96,
+  "duplicatesSkipped": 189,
+  "totalKwh": 69.699,
+  "tsMin": "2025-01-01T06:00:00.000Z",
+  "tsMax": "2025-11-18T05:30:00.000Z",
+  "files": [
+    {
+      "id": "10",
+      "filename": "20251114T202822_IntervalData.csv",
+      "records": 96,
+      "inserted": 96,
+      "skipped": 0,
+      "kwh": 31.669,
+      "tsMin": "2025-11-17T05:45:00.000Z",
+      "tsMax": "2025-11-18T05:30:00.000Z"
+    }
+    // other older test files will typically show inserted: 0, skipped: N
+  ]
+}
+```
+
+Key points:
+
+- First run inserts new intervals.
+- Subsequent runs on the same `rawId` should show `inserted: 0`, `skipped: <records>` due to `skipDuplicates: true`.
+
+### 2. Inspect SmtInterval rows for an ESIID
+
+```bash
+export ADMIN_TOKEN="<ADMIN_TOKEN>"
+
+# Quick peek at latest 5 intervals
+curl -sS -H "x-admin-token: $ADMIN_TOKEN" \
+  "https://intelliwatt.com/api/admin/debug/smt/intervals?esiid=<ESIID>&limit=5"
+
+# Bounded window in UTC (ISO 8601)
+curl -sS -H "x-admin-token: $ADMIN_TOKEN" \
+  "https://intelliwatt.com/api/admin/debug/smt/intervals?esiid=<ESIID>&dateStart=2025-11-17T00:00:00Z&dateEnd=2025-11-19T00:00:00Z&limit=200"
+```
+
+What to check:
+
+- `esiid` matches the expected ESIID.
+- `meter` is currently `"unknown"` (we’ll add proper meter IDs later).
+- `kwh` values look realistic (0s overnight, higher values during peak usage).
+- `ts` is in UTC, but lines up with the local America/Chicago day when converted.
+
+### 3. Delete bad test intervals for an ESIID (if needed)
+
+If a test load used a mangled ESIID or wrong mapping, delete that slice before re-normalizing:
+
+```bash
+export ADMIN_TOKEN="<ADMIN_TOKEN>"
+
+curl -sS -X POST "https://intelliwatt.com/api/admin/debug/smt/intervals" \
+  -H "x-admin-token: $ADMIN_TOKEN" \
+  -H "content-type: application/json" \
+  --data-binary '{
+    "esiid": "<ESIID>",
+    "meter": "unknown",
+    "dateStart": "2025-11-15T00:00:00Z",
+    "dateEnd":   "2025-11-17T00:00:00Z"
+  }'
+```
+
+The response will show `deletedCount`, which should match the number of rows being removed.
+
+### 4. Daily rollup sanity via /analysis/daily-summary
+
+```bash
+export ADMIN_TOKEN="<ADMIN_TOKEN>"
+
+curl -sS -H "x-admin-token: $ADMIN_TOKEN" \
+  "https://intelliwatt.com/api/admin/analysis/daily-summary?esiid=<ESIID>&dateStart=2025-11-17T00:00:00Z&dateEnd=2025-11-19T00:00:00Z&limit=10"
+```
+
+Current behavior:
+
+- `expected: 96` → FULL 15-minute day.
+- `found` = count of intervals in that local day’s window.
+- `completeness = found / expected`.
+- Partial CSV windows (like 2025-11-17T05:45Z → 2025-11-18T05:30Z) will show completeness around 0.5 across two adjacent dates, which is expected.
+
+This is primarily an admin diagnostic right now and will evolve as we tighten DST and boundary handling.
  
+---
+
+## SMT Cron & Droplet Ingest (Production Wiring)
+
+This section documents the production SMT ingest wiring now running on the `intelliwatt-smt-proxy` droplet. It corresponds to Plan Change `[PC-2025-11-17-D] SMT Cron + Droplet Ingest Wired (Production Path)`.
+
+### 1. Droplet Environment File
+
+Create or update `/etc/default/intelliwatt-smt` (as root):
+
+```bash
+cat >/etc/default/intelliwatt-smt <<'EOF'
+# IntelliWatt SMT ingest env (used by deploy/smt/fetch_and_post.sh via smt-ingest.service)
+
+# Admin token for calling /api/admin routes (header: x-admin-token)
+ADMIN_TOKEN=<ADMIN_TOKEN>
+
+# Base URL of the production IntelliWatt app (Vercel)
+INTELLIWATT_BASE_URL=https://intelliwatt.com
+
+# SMT SFTP connection (from Smart Meter Texas portal)
+SMT_HOST=ftp.smartmetertexas.biz
+SMT_USER=intellipathsolutionsftp
+SMT_KEY=/home/deploy/.ssh/intelliwatt_smt_rsa4096
+SMT_REMOTE_DIR=/
+SMT_LOCAL_DIR=/home/deploy/smt_inbox
+
+# Optional overrides consumed by deploy/smt/fetch_and_post.sh
+# Source tag should stay "adhocusage" to match normalize + analysis logic.
+SOURCE_TAG=adhocusage
+METER_DEFAULT=unknown
+EOF
+```
+
+> NOTE: Replace `<ADMIN_TOKEN>` with the actual 64-character admin token. Do **not** commit this file to git; it lives only on the droplet.
+
+### 2. Systemd Units
+
+Install / refresh the units (idempotent):
+
+```bash
+cp /home/deploy/apps/intelliwatt/deploy/smt/smt-ingest.service /etc/systemd/system/smt-ingest.service
+cp /home/deploy/apps/intelliwatt/deploy/smt/smt-ingest.timer   /etc/systemd/system/smt-ingest.timer
+```
+
+Create an override to wire in the env + working directory:
+
+```bash
+mkdir -p /etc/systemd/system/smt-ingest.service.d
+cat >/etc/systemd/system/smt-ingest.service.d/override.conf <<'EOF'
+[Service]
+EnvironmentFile=/etc/default/intelliwatt-smt
+WorkingDirectory=/home/deploy/apps/intelliwatt
+EOF
+
+systemctl daemon-reload
+systemctl enable smt-ingest.timer
+systemctl start smt-ingest.timer
+```
+
+### 3. Verifying the Cron / Ingest Pipeline
+
+Check the timer:
+
+```bash
+systemctl status smt-ingest.timer --no-pager
+```
+
+You should see:
+
+```
+Loaded: loaded (/etc/systemd/system/smt-ingest.timer; enabled; …)
+Active: active (waiting)
+```
+
+Check recent ingest runs:
+
+```bash
+journalctl -u smt-ingest.service -n 50 --no-pager
+```
+
+Example healthy output:
+
+```
+Starting SFTP sync from intellipathsolutionsftp@ftp.smartmetertexas.biz:/
+Fetching /adhocusage/ to adhocusage
+Skipping already-posted file: /home/deploy/smt_inbox/20251114T202822_IntervalData.csv
+Ingest run complete
+smt-ingest.service: Deactivated successfully.
+```
+
+### 4. End-to-End Flow (Expected Behavior)
+
+Every ~30 minutes, `smt-ingest.timer` fires `smt-ingest.service`.
+
+`deploy/smt/fetch_and_post.sh`:
+
+- Runs `sftp` against `SMT_HOST` and syncs all files under `SMT_REMOTE_DIR` into `SMT_LOCAL_DIR` (including `/adhocusage` and `/EnrollmentReports`).
+- For each new CSV file in `SMT_LOCAL_DIR` that has not been posted yet:
+  - Posts it inline to the IntelliWatt admin upload endpoint.
+
+The admin upload handler:
+
+- Persists a `RawSmtFile` row.
+- Invokes `normalizeInlineSmtCsv` to parse the CSV, convert CST/CDT → UTC, and `createMany` `SmtInterval` rows with `skipDuplicates: true`, `source="adhocusage"`, `meter="unknown"`, and a cleaned `esiid`.
+- Subsequent runs log “Skipping already-posted file: …” for files that were already pushed, ensuring idempotent ingestion.
+
+At this point, SMT ingest + normalize is fully wired:
+
+```
+SMT SFTP → droplet (/home/deploy/smt_inbox) → inline POST → RawSmtFile → SmtInterval
+```
+
+Admins can:
+
+- Inspect intervals via `/api/admin/debug/smt/intervals`.
+- Run `/api/admin/analysis/daily-summary` to check daily completeness.
+- Use the SMT admin tools UI:
+  - `/admin/smt/raw` (includes “Normalize Latest SMT File” control).
+  - `/admin/smt/normalize`.
+  - `/admin/smt/trigger`.

@@ -1582,3 +1582,183 @@ Usage:
 
 Notes:
 - This supplements prior SMT debug endpoints (raw-files, intervals GET) and does not alter production ingest behavior or public APIs.
+
+[PC-2025-11-17-C] SMT Admin Normalize Latest Control
+----------------------------------------------------
+
+Rationale
+
+- Provide a one-click admin UI control to run the existing SMT normalize pipeline against the most recent RAW SMT file (optionally filtered by ESIID).
+- Reduce manual rawId lookups now that /api/admin/smt/normalize is verified and in production use.
+
+Scope
+
+- Admin UI: `/admin/smt/raw` (Raw Files & Normalize UI)
+  - Added a “Normalize Latest SMT File” control that:
+    - Accepts an optional ESIID input.
+    - Calls the existing `POST /api/admin/smt/normalize` route with:
+      - `{ latest: true }` when no ESIID is provided.
+      - `{ latest: true, esiid: "<value>" }` when an ESIID is provided.
+    - Displays the JSON summary from the normalize endpoint (inserted, skipped, filesProcessed, tsMin, tsMax, totalKwh) for operator verification.
+  - All admin auth continues to use the existing `ADMIN_TOKEN` server-side patterns; no secrets are exposed to the browser.
+
+Guardrails
+
+- Do NOT rename or change the contract for:
+  - `/api/admin/smt/normalize`
+  - `/api/admin/debug/smt/intervals`
+  - `/api/admin/analysis/daily-summary`
+  - `RawSmtFile`, `SmtInterval`
+- This entry implements the “Admin UX for SMT normalization” step from the 2025-11-17 plan; future work must build on this UI rather than replacing it.
+
+Status: COMPLETE — Admin “Normalize Latest SMT File” control is in place on `/admin/smt/raw`.
+
+## PC-2025-11-17-A: SMT Interval Normalize Verified (Inline RAW → SmtInterval)
+
+**Rationale:** We now have a working path from SMT CSV → `RawSmtFile` → `SmtInterval`, plus admin debug and daily-summary analysis. This locks the behavior so future edits don’t break the ingest pipeline.
+
+**Scope (implemented):**
+
+- `/api/admin/smt/normalize` (admin-gated) can be called with:
+  - `POST { "rawId": "<RawSmtFile id>" }`
+- For `rawId = "10"` (filename `20251114T202822_IntervalData.csv`):
+  - Normalizer processed the file and inserted **96** 15-minute intervals into `SmtInterval` for ESIID `10443720004529147`, `meter = "unknown"`.
+  - Duplicate protection is in place: rerunning with the same `rawId` reports `inserted: 0`, `skipped: 96` (idempotent).
+- kWh column mapping is correct:
+  - Early intervals on 2025-11-17 are `0` kWh (house mostly idle).
+  - Afternoon/evening intervals show real usage (e.g., 0.756, 1.086, 1.47, 1.67, etc.), matching the SMT CSV totals.
+- ESIID cleanup:
+  - Historical test rows that had a leading quote in the ESIID (e.g., `'10443720004529147`) were deleted via the debug delete endpoint.
+  - Only clean rows remain in `SmtInterval` for this ESIID.
+
+**Behavioral notes:**
+
+- The normalizer:
+  - Reads from `RawSmtFile` CSV bytes.
+  - Parses timestamps, converts CST/CDT → UTC.
+  - Writes rows into `SmtInterval` with `source = "adhocusage"`.
+  - Uses `createMany({ skipDuplicates: true })` to be re-runnable.
+- For the test file `20251114T202822_IntervalData.csv`:
+  - `records: 96`, `kwh ≈ 31.669`, `tsMin: 2025-11-17T05:45:00Z`, `tsMax: 2025-11-18T05:30:00Z`.
+
+**Status:** ✅ SMT normalize is working end-to-end for inline RAW → `SmtInterval` and is safe to reuse for real SMT feeds.
+
+---
+
+## PC-2025-11-17-B: SMT Debug & Daily Summary Wiring Verified
+
+**Rationale:** Admin needs a way to inspect and clean intervals, and analytics needs daily rollups to drive UI and plan analysis.
+
+**Scope (implemented):**
+
+- Debug intervals endpoint:
+  - `GET /api/admin/debug/smt/intervals`
+    - Filters by `esiid`, optional `meter`, and optional `dateStart`/`dateEnd`.
+    - Used to confirm that `SmtInterval` rows are present and correctly populated.
+  - `POST /api/admin/debug/smt/intervals`
+    - Deletes rows matching the filter:
+
+      ```json
+      {
+        "esiid": "10443720004529147",
+        "meter": "unknown",
+        "dateStart": "2025-11-15T00:00:00Z",
+        "dateEnd":   "2025-11-17T00:00:00Z"
+      }
+      ```
+
+    - Example result: `"deletedCount": 96` when cleaning a bad slice.
+- Daily summary endpoint:
+  - `GET /api/admin/analysis/daily-summary`
+  - For ESIID `10443720004529147` and range `2025-11-17T00:00:00Z` → `2025-11-19T00:00:00Z`, response shows:
+    - `date = "2025-11-16"`: `found: 0, expected: 96, completeness: 0`
+    - `date = "2025-11-17"`: `found: 49, expected: 96, completeness ≈ 0.51`
+    - `date = "2025-11-18"`: `found: 47, expected: 96, completeness ≈ 0.49`
+  - This matches the fact that the CSV window is **not** full calendar days but from `2025-11-17T05:45:00Z` → `2025-11-18T05:30:00Z`:
+    - 49 intervals land in the “2025-11-17 local day”.
+    - 47 intervals land in the “2025-11-18 local day”.
+  - The `meta.range` confirms the analysis window is expressed in `America/Chicago`:
+    - `start: 2025-11-16T18:00:00.000-06:00`
+    - `end:   2025-11-18T18:00:00.000-06:00`
+
+**Behavioral notes:**
+
+- `expected = 96` is the target for a fully populated 15-minute day; completeness < 1.0 indicates:
+  - partial days (start/end of a CSV),
+  - missing intervals,
+  - or DST edge cases (92/100 intervals) which we will handle explicitly later.
+- Current completeness math is good enough for admin diagnostics and for spotting missing days.
+
+**Status:** ✅ Debug/summary endpoints are confirmed working against real `SmtInterval` data.
+
+**Next Steps (future scope, NOT implemented yet):**
+
+- Add an Admin UI button (“Normalize Latest SMT File”) that:
+  - Fetches the latest `RawSmtFile` id for a given ESIID.
+  - POSTs to `/api/admin/smt/normalize` (optionally with a `dryRun` toggle).
+- Tighten “expected” logic in daily-summary to:
+  - Handle DST days (92 / 100 intervals) explicitly.
+  - Differentiate partial days at CSV boundaries vs true missing data.
+- Later: surface daily completeness and kWh totals in the IntelliWatt UI and feed into plan analysis.
+
+[PC-2025-11-17-D] SMT Cron + Droplet Ingest Wired (Production Path)
+-------------------------------------------------------------------
+
+Rationale
+
+- Finalize the “Cron / automation wiring for SMT” step described in the 2025-11-17 plan.
+- Ensure Smart Meter Texas interval files are pulled from SMT SFTP on a schedule and pushed into the same `/api/admin/smt/pull` → `RawSmtFile` → `/api/admin/smt/normalize` → `SmtInterval` pipeline that has already been verified.
+
+Scope
+
+- Droplet (intelliwatt-smt-proxy):
+  - Environment file created at: `/etc/default/intelliwatt-smt` with (at minimum):
+    - `ADMIN_TOKEN=<ADMIN_TOKEN>` — 64-char admin token used as `x-admin-token` for all admin API calls.
+    - `INTELLIWATT_BASE_URL=https://intelliwatt.com`
+    - `SMT_HOST=ftp.smartmetertexas.biz`
+    - `SMT_USER=intellipathsolutionsftp`
+    - `SMT_KEY=/home/deploy/.ssh/intelliwatt_smt_rsa4096`
+    - `SMT_REMOTE_DIR=/`
+    - `SMT_LOCAL_DIR=/home/deploy/smt_inbox`
+    - `SOURCE_TAG=adhocusage`
+    - `METER_DEFAULT=unknown`
+  - Systemd units installed:
+    - `/etc/systemd/system/smt-ingest.service`
+    - `/etc/systemd/system/smt-ingest.timer`
+    - Override config at `/etc/systemd/system/smt-ingest.service.d/override.conf`:
+
+      ```ini
+      [Service]
+      EnvironmentFile=/etc/default/intelliwatt-smt
+      WorkingDirectory=/home/deploy/apps/intelliwatt
+      ```
+
+  - Timer:
+    - `smt-ingest.timer` enabled + active, running every ~30 minutes.
+    - `smt-ingest.service` runs the SFTP → inline POST pipeline, which:
+      - Syncs SMT files from `SMT_HOST:SMT_REMOTE_DIR` into `SMT_LOCAL_DIR`.
+      - Calls the existing inline SMT upload endpoint (already wired to:
+        - persist `RawSmtFile`
+        - run `normalizeInlineSmtCsv`
+        - upsert `SmtInterval` with `createMany({ skipDuplicates: true })`).
+      - Logs “Skipping already-posted file: …” when a file has already been posted, ensuring idempotent ingest.
+
+- Vercel / API:
+  - No new routes were added in this step.
+  - The existing `/api/admin/smt/normalize` endpoint and inline SMT upload handler remain the single source of truth for normalization behavior.
+
+Guardrails
+
+- Do NOT rename or refactor:
+  - `/api/admin/smt/normalize`
+  - `/api/admin/debug/smt/intervals`
+  - `/api/admin/analysis/daily-summary`
+  - `RawSmtFile`, `SmtInterval`
+  - The droplet units: `smt-ingest.service`, `smt-ingest.timer`
+- Any future changes to the ingest cadence, SFTP paths, or admin endpoints MUST:
+  - Be captured in a new Plan Change entry.
+  - Update `docs/DEPLOY_SMT_INGEST.md` to match.
+
+Status
+
+- COMPLETE — Cron / automation wiring for SMT ingest is live on the droplet and posting into the verified normalization pipeline.
