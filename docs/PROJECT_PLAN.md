@@ -1762,3 +1762,262 @@ Guardrails
 Status
 
 - COMPLETE — Cron / automation wiring for SMT ingest is live on the droplet and posting into the verified normalization pipeline.
+
+---
+
+### PC-2025-11-17-F — Primary SMT Authorization Flow (EnergyBot-Style)
+
+Rationale
+
+To match best-in-class UX patterns (e.g., Blitz Ventures / EnergyBot) and reduce friction for customers, IntelliWatt will adopt a “no meter number required” authorization flow. Customers will only provide address + contact info + REP + consent, and Smart Meter Texas will handle the authorization email + ESIID/meter linking behind the scenes.
+
+This simplifies onboarding and makes SMT access the *default path* for usage ingestion.
+
+Scope
+
+The primary customer onboarding path for SMT data acquisition is now:
+
+1. **Address Autocomplete → ESIID Lookup**
+   - User types address.
+   - Frontend uses Google Places Autocomplete.
+   - Backend uses WattBuy to retrieve:
+     - ESIID
+     - TDSP / utility name
+   - Store address + ESIID as the house record.
+
+2. **Simple Customer Authorization Form**
+   - Collect:
+     - First Name
+     - Last Name
+     - Email
+     - Phone
+     - Current supplier (dropdown)
+     - Checkbox for Terms & Authorization
+   - Terms state that IntelliWatt (your legal entity) is requesting SMT access on their behalf.
+
+3. **Backend: Initiate SMT Authorization Request**
+   - Backend uses IntelliWatt’s CSP/Broker credentials to call SMT’s authorization endpoint.
+   - Provide SMT with:
+     - ESIID (from WattBuy)
+     - Customer name/email/phone
+     - Requested access duration (12 months)
+   - SMT sends customer the authorization email:
+     - **CONFIRM**
+     - **DO NOT CONFIRM**
+     - **DID NOT REQUEST ACCESS**
+
+4. **Customer Confirms via SMT Email**
+   - If customer clicks CONFIRM:
+     - SMT marks authorization ACTIVE for 12 months.
+     - IntelliWatt now has permission to pull interval usage.
+
+5. **Backend: Create SMT Subscription (INTERVAL, SFTP/API)**
+   - Once authorization is ACTIVE:
+     - Create Subscription with:
+       - dataType = INTERVAL
+       - deliveryMode = FTP (or API)
+     - SMT begins delivering:
+       - Historic backfill (Enrollment)
+       - Ongoing interval data
+
+6. **Ingestion Pipeline (Already Live)**
+   - SMT drops files on SFTP.
+   - Droplet cron (`smt-ingest.timer`) and on-demand pull (`/api/admin/smt/pull`) fetch them.
+   - `/api/admin/smt/pull` inline mode persists `RawSmtFile`.
+   - `normalizeInlineSmtCsv`:
+     - Parses,
+     - Converts CST/CDT → UTC,
+     - Inserts `SmtInterval` with skipDuplicates = true.
+
+7. **No Meter Number Required**
+   - Customer never types a meter ID.
+   - SMT binds ESIID ↔ meter internally.
+   - Meter numbers become available to IntelliWatt only after SMT authorization is active.
+
+8. **Bill Upload / Manual Meter Entry = Fallback Only**
+   - If SMT authorization fails (customer ignores email):
+     - User can upload a bill,
+     - Or enter meter manually.
+   - These are fallback paths and *not* the primary flow.
+
+Guardrails
+
+- Do NOT reintroduce default or fallback ESIIDs.
+- Do NOT require meter numbers for the primary authorization flow.
+- Do NOT alter the now-verified SMT ingest pipeline:
+  - `/api/admin/smt/pull`
+  - `/api/admin/smt/normalize`
+  - `/api/admin/debug/smt/intervals`
+  - `/api/admin/analysis/daily-summary`
+
+Status
+
+- SMT ingest, normalize, admin tools, cron automation, and “no fallback ESIID” are COMPLETE.
+- This entry finalizes the intended customer-facing SMT authorization UX.
+- Future steps:
+  - Implement frontend screens for this authorization flow.
+  - Implement backend SMT authorization + agreement + subscription API calls.
+  - Integrate confirmation polling + subscription verification.
+
+### PC-2025-11-17-G — SMT LOA/POA-Based Authorization (Overrides Email-Based Flow)
+
+Rationale
+
+- Earlier language in **PC-2025-11-17-F — Primary SMT Authorization Flow (EnergyBot-Style)** assumed an SMT-managed email confirmation flow.
+- Best-in-class brokers (e.g., EnergyBot) operate with an LOA/POA model: the customer grants authorization directly on the broker’s site, and the broker leverages SMT “Energy Data Sharing Agreement” + “Subscription” APIs with its own credentials.
+- IntelliWatt will follow the LOA/POA pattern:
+  - Consent captured / stored on IntelliWatt UI.
+  - IntelliWatt (as CSP/REP) uses SMT APIs to create agreements/subscriptions.
+  - No SMT email confirmation step is required.
+
+Override Notice (re: PC-2025-11-17-F)
+
+- The email-based “SMT sends customer a confirm email” requirement is no longer the primary flow.
+- This Plan Change overrides any PC-2025-11-17-F language implying SMT email confirmation is required for activation.
+- Authoritative model:
+  - IntelliWatt captures LOA/POA consent.
+  - IntelliWatt uses SMT REST/SOAP APIs to create:
+    - **New Energy Data Sharing Agreement** records
+    - **New Subscription** records (dataType INTERVAL, deliveryMode FTP/API, reportFormat CSV/JSON)
+  - SMT/TDSP rely on IntelliWatt’s CSP/REP credentials.
+
+Scope
+
+1. Customer-Facing UX (customer experience unchanged; legal/technical framing adjusted)
+   - Intake flow remains:
+     - Address autocomplete → ESIID lookup via WattBuy.
+     - Collect first name, last name, email, phone, current REP, consent checkbox.
+   - Terms must explicitly state the customer grants IntelliWatt authority (LOA/POA) to create/manage SMT agreements/subscriptions.
+   - The SMT-style disclosure block stays on IntelliWatt pages, framed as an LOA/POA grant to IntelliWatt.
+
+2. Backend SMT Authorization (Agreement + Subscription via LOA)
+   - On submission:
+     - Persist authorization text, timestamps, IP, user identity, ESIID, TDSP, REP.
+     - Use SMT JWT/token helper for authentication.
+     - Create **New Energy Data Sharing Agreement** for customer ESIID(s) using IntelliWatt credentials.
+   - Once agreement is active:
+     - Create **New Subscription** for 15-minute interval data (`dataType=INTERVAL`, `deliveryMode=FTP/API`, `reportFormat=CSV/JSON`).
+     - Optionally trigger historical backfill enrollment.
+
+3. Ingestion Pipeline (unchanged)
+   - SMT continues to deliver via SFTP/API.
+   - Droplet cron + `/api/admin/smt/pull` + `/api/admin/smt/normalize` remain the normalization path.
+   - No changes to `RawSmtFile`, `SmtInterval`, `/api/admin/smt/pull`, `/api/admin/smt/normalize`, `/api/admin/debug/smt/intervals`, `/api/admin/analysis/daily-summary`.
+
+Guardrails
+
+- Do NOT reintroduce default/fallback ESIIDs for production houses.
+- Do NOT require SMT portal logins or email confirmations.
+- Agreement/subscription implementations must:
+  - Use IntelliWatt CSP/REP credentials and SMT JWT/token configuration.
+  - Treat IntelliWatt-collected LOA/POA as authoritative.
+  - Log SMT Agreement/Subscription IDs/status for audit.
+
+Status
+
+- SMT ingest, normalize, admin tools, cron automation remain COMPLETE.
+- LOA/POA-based SMT authorization is now the official primary flow.
+- Next steps:
+  - Implement `/api/admin/smt/agreements/new` and related admin/test routes (see `docs/TESTING_API.md`).
+  - Build customer-facing authorization screens wired to those routes.
+  - Add SMT Agreement/Subscription status polling and error handling without altering the ingest pipeline.
+
+### PC-2025-11-17-H — SMT Monthly Billing Reads via /v2/energydata
+
+Rationale
+
+- SMT’s Data Access Interface exposes a unified **Energy Data** function at:
+  - UAT: `https://uatservices.smartmetertexas.net/v2/energydata/`
+  - PROD: `https://services.smartmetertexas.net/v2/energydata/`
+- That function supports three data types under one API:
+  - **15-Minute Interval Data**
+  - **Daily Register Reads**
+  - **Monthly Billing Reads**
+- IntelliWatt already ingests 15-minute interval files via SFTP and normalizes into `SmtInterval`.
+- Monthly Billing Reads provide billing-period-level usage that can:
+  - Cross-check interval totals.
+  - Provide compact bill-period views for rate comparison and analytics.
+- This Plan Change establishes Monthly Billing Reads as a first-class dataset and defines how we will retrieve and store them.
+
+Scope
+
+1. Data Source
+   - Use the JWT-secured `/v2/energydata` API as defined in the SMT Data Access Interface Guide.
+   - Configure requests to return both 15-minute interval data and monthly billing reads (daily register optional).
+   - Initial implementation:
+     - Small date window (e.g., last 12 months).
+     - Known test ESIID (same as interval testing).
+
+2. Backend Implementation (high level)
+   - Add admin-only route, e.g. `POST /api/admin/smt/billing/fetch`.
+   - Payload: `esiid`, `startDate`, `endDate`, optional flags (`includeInterval`, `includeDaily`, `includeMonthly`).
+   - Handler:
+     - Obtains SMT JWT via existing helper.
+     - Calls `https://services.smartmetertexas.net/v2/energydata/` with appropriate requestor identity, ESIID(s), date range, and flags requesting monthly billing reads (and optionally interval data).
+     - Persists raw response for audit/replay.
+
+3. Storage Model
+   - Introduce a Prisma model (e.g., `SmtBillingRead`) with fields:
+     - `id`
+     - `esiid`
+     - `meter` (if provided)
+     - `billStart`
+     - `billEnd`
+     - `kwh`
+     - `tdspCode` / `utilityName` (if available)
+     - `rawJson` / `rawPayload`
+     - Timestamps
+   - `RawSmtFile` and `SmtInterval` remain unchanged.
+   - Billing reads are additive: used for validation and analytics, not for reconstructing intervals.
+
+4. Admin Tools & Testing
+   - Extend SMT admin tools with a “Fetch SMT Billing Reads” panel (fields: ESIID, start, end).
+   - Display counts and sample billing periods.
+   - Add PowerShell/curl smoke tests to `docs/TESTING_API.md` after endpoint exists.
+   - No cron/SFTP automation in this change—ad-hoc API pulls only.
+
+Guardrails
+
+- Do NOT modify `SmtInterval`, interval pipelines, or cron/SFTP logic.
+- Billing reads stored separately and clearly marked as billing aggregates.
+- All new SMT API calls:
+  - Use JWT (per `SMT_JWT_UPGRADE.md`).
+  - Are admin-gated (`x-admin-token`).
+- No customer UI changes yet—admin/testing only until validated.
+
+Status
+
+- SMT ingest, normalize, admin tools, and LOA/POA authorization remain COMPLETE.
+- Admin fetch route `POST /api/admin/smt/billing/fetch` is live and returns raw SMT billing payloads for inspection.
+- Storage model (`SmtBillingRead`) and automated ingest are **not implemented yet**; future work will:
+  - Persist monthly billing reads into the dedicated table.
+  - Extend admin tools/UI once persistence and parsing are in place.
+
+---
+### PC-2025-11-17-A — SMT REST Token Auth (Override Old JWT Design)
+
+**Rationale**
+
+The July 1, 2025 Smart Meter Texas Retail Electric Provider / CSP / TDSP Data Access Interface Guide
+defines REST token generation using `username` + `password` (service ID credentials), not OAuth-style
+`client_id` / `client_secret`. IntelliWatt now aligns with the official SMT REST contract.
+
+**Changes**
+
+- Added environment variables:
+  - `SMT_USERNAME`, `SMT_PASSWORD` for token generation.
+  - `SMT_REQUESTOR_ID`, `SMT_REQUESTOR_AUTH_ID` for payload metadata.
+  - `SMT_API_BASE_URL` (default `https://services.smartmetertexas.net`).
+- Implemented `lib/smt/token.ts`:
+  - Posts `{ username, password }` to `{SMT_API_BASE_URL}/v2/token/`.
+  - Caches the token in-memory until ~60 seconds before expiration.
+- Updated admin routes:
+  - `/api/admin/smt/token` and `/api/admin/smt/jwt/preview` now rely on the REST helper.
+  - `/api/admin/smt/billing/fetch` injects `requestorID` / `requesterAuthenticationID` and uses the REST token.
+
+**Overrides**
+
+- Previous guidance referencing `SMT_JWT_CLIENT_ID` / `SMT_JWT_CLIENT_SECRET` is deprecated.
+- All future SMT integrations must treat SMT as a REST username/password token service per the official guide.
+
+---

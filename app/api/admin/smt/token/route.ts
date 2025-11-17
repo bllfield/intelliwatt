@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/auth/admin';
-import { getSmtAccessTokenWithMeta } from '@/lib/smt/jwt';
+import { getSmtTokenMeta } from '@/lib/smt/token';
 
 function bad(message: string, status = 400) {
   return NextResponse.json({ ok: false, error: message }, { status });
@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const meta = await getSmtAccessTokenWithMeta();
+    const meta = await getSmtTokenMeta();
     const preview = meta.token ? `${meta.token.slice(0, 16)}…` : null;
 
     return NextResponse.json({

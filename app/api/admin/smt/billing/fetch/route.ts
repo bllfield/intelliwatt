@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/auth/admin';
-import { getSmtAccessToken } from '@/lib/smt/jwt';
+import { getSmtAccessToken } from '@/lib/smt/token';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -66,11 +66,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (dataTypes.length === 0) dataTypes.push('MONTHLY');
 
   const requestorId =
-    process.env.SMT_REQUESTOR_ID ??
-    process.env.SMT_CSP_ID ??
-    process.env.SMT_REQUESTOR ??
-    'INTELLIPATH';
+    process.env.SMT_REQUESTOR_ID ?? process.env.SMT_USERNAME ?? process.env.SMT_REQUESTOR ?? 'INTELLIWATT';
   const requestorType = process.env.SMT_REQUESTOR_TYPE ?? 'CSP';
+  const requestorAuthId = process.env.SMT_REQUESTOR_AUTH_ID;
+
+  if (!requestorAuthId) {
+    return NextResponse.json(
+      { ok: false, error: 'Missing SMT_REQUESTOR_AUTH_ID environment variable.' },
+      { status: 500 },
+    );
+  }
 
   const smtBaseUrl = process.env.SMT_API_BASE_URL ?? 'https://services.smartmetertexas.net';
   const smtUrl = `${smtBaseUrl.replace(/\/+$/, '')}/v2/energydata/`;
@@ -78,6 +83,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const payload = {
     requestorID: requestorId,
     requestorType,
+    requesterAuthenticationID: requestorAuthId,
     filter: {
       esiidList: [esiid],
       startDate: startIso,
@@ -86,6 +92,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     options: {
       dataTypes,
     },
+    SMTTermsandConditions: 'Y',
   };
 
   try {

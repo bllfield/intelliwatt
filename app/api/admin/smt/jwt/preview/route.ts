@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/auth/admin';
-import { getSmtAccessTokenWithMeta } from '@/lib/smt/jwt';
+import { getSmtTokenMeta } from '@/lib/smt/token';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -22,12 +22,12 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const meta = await getSmtAccessTokenWithMeta();
+    const meta = await getSmtTokenMeta();
     return NextResponse.json(
       {
         ok: true,
         fromCache: meta.fromCache,
-        expiresAt: meta.expiresAt,
+        expiresAt: Math.floor(meta.expiresAtMs / 1000),
         expiresAtIso: meta.expiresAtIso,
         remainingSec: meta.remainingSec,
         rawExpiresInSec: meta.rawExpiresInSec,
