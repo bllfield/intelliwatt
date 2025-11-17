@@ -556,3 +556,224 @@ Reference:
 - UI helpers at **/admin/smt/inspector** exercised the same flows and reported 200 OK.
 
 This snapshot marks the current state as **VERIFIED**. If any route changes, update this section immediately.
+
+SMT Inline Ingest & Normalization – Admin Test Scripts (2025-11-15)
+
+All of these commands require a valid ADMIN_TOKEN for the production project.
+
+1) Direct inline test from a small local CSV (PowerShell example)
+
+On a Windows dev machine with PowerShell:
+
+```
+$BASE_URL    = "https://intelliwatt.com"
+$ADMIN_TOKEN = "<ADMIN_TOKEN>"
+
+$csvPath = "C:\path\to\test-smt.csv"
+
+$csvBytes = [System.IO.File]::ReadAllBytes($csvPath)
+$csvB64   = [System.Convert]::ToBase64String($csvBytes)
+
+$bodyObj = @{
+    mode        = "inline"
+    source      = "local-powershell-test"
+    filename    = [System.IO.Path]::GetFileName($csvPath)
+    mime        = "text/csv"
+    encoding    = "base64"          # small test file -> plain base64
+    sizeBytes   = $csvBytes.Length
+    esiid       = "10443720000000001"
+    meter       = "M1"
+    captured_at = (Get-Date).ToUniversalTime().ToString("o")
+    content_b64 = $csvB64
+}
+
+$bodyJson = $bodyObj | ConvertTo-Json -Depth 6
+
+$response = Invoke-RestMethod -Method POST `
+    -Uri "$BASE_URL/api/admin/smt/pull" `
+    -Headers @{ "x-admin-token" = $ADMIN_TOKEN } `
+    -ContentType "application/json" `
+    -Body $bodyJson
+
+$response | ConvertTo-Json -Depth 10
+```
+
+Expected response:
+
+- ok: true
+- mode: "inline"
+- persisted: true
+- duplicate: false
+- message: "Inline payload stored and verified."
+
+2) Verify raw SMT files
+
+On the droplet or any trusted machine:
+
+```
+export ADMIN_TOKEN="<ADMIN_TOKEN>"
+
+curl -sS -H "x-admin-token: $ADMIN_TOKEN" \
+  "https://intelliwatt.com/api/admin/debug/smt/raw-files?limit=10" | jq
+```
+
+You should see entries for both:
+
+- Direct test uploads (e.g. test-smt.csv, source: "local-powershell-test").
+- Droplet-ingested SMT files (e.g. 20251114T202822_IntervalData.csv, source: "adhocusage").
+
+3) Verify normalized intervals
+
+After a droplet ingest run that posts IntervalData CSVs:
+
+```
+export ADMIN_TOKEN="<ADMIN_TOKEN>"
+
+curl -sS -H "x-admin-token: $ADMIN_TOKEN" \
+  "https://intelliwatt.com/api/admin/analysis/daily-summary?esiid=10443720000000001&meter=M1&dateStart=2025-11-14T00:00:00Z&dateEnd=2025-11-16T00:00:00Z&limit=10" | jq
+```
+
+If auto-normalization is working, rows should include one or more daily summaries for the
+requested ESIID/meter range, driven by SmtInterval records created during inline ingest.
+
+## SMT Normalize + Debug + Daily Summary (Admin Smoke Tests)
+
+Use these tests anytime you touch SMT ingest or analysis logic.
+
+> Note: Replace `<ADMIN_TOKEN>`, `<ESIID>`, and `<RAW_SMT_FILE_ID>` with real values. Do **not** commit secrets into the repo.
+
+1. **Normalize a Raw SMT CSV**
+
+   ```bash
+   export ADMIN_TOKEN="<ADMIN_TOKEN>"
+
+   curl -sS -X POST "https://intelliwatt.com/api/admin/smt/normalize" \
+     -H "x-admin-token: $ADMIN_TOKEN" \
+     -H "content-type: application/json" \
+     --data-binary '{
+       "rawId": "<RAW_SMT_FILE_ID>"
+     }'
+   ```
+
+   Expected:
+
+   - `ok: true`
+   - First run: `intervalsInserted > 0`, `duplicatesSkipped` small.
+   - Subsequent run on same id: `intervalsInserted: 0`, `duplicatesSkipped` equal to records for that file.
+
+2. **Inspect intervals for an ESIID**
+
+   ```bash
+   export ADMIN_TOKEN="<ADMIN_TOKEN>"
+
+   curl -sS -H "x-admin-token: $ADMIN_TOKEN" \
+     "https://intelliwatt.com/api/admin/debug/smt/intervals?esiid=<ESIID>&limit=5"
+   ```
+
+   You should see:
+
+   - Correct `esiid`.
+   - `meter` (currently `"unknown"` in our test).
+   - `ts` in UTC.
+   - Realistic `kwh` values.
+
+   Optional bounded test:
+
+   ```bash
+   curl -sS -H "x-admin-token: $ADMIN_TOKEN" \
+     "https://intelliwatt.com/api/admin/debug/smt/intervals?esiid=<ESIID>&dateStart=2025-11-17T00:00:00Z&dateEnd=2025-11-19T00:00:00Z&limit=200"
+   ```
+
+3. **Delete a bad slice (clean-up test data)**
+
+   ```bash
+    export ADMIN_TOKEN="<ADMIN_TOKEN>"
+
+    curl -sS -X POST "https://intelliwatt.com/api/admin/debug/smt/intervals" \
+      -H "x-admin-token: $ADMIN_TOKEN" \
+      -H "content-type: application/json" \
+      --data-binary '{
+        "esiid": "<ESIID>",
+        "meter": "unknown",
+        "dateStart": "2025-11-15T00:00:00Z",
+        "dateEnd":   "2025-11-17T00:00:00Z"
+      }'
+   ```
+
+   Expected:
+
+   - Response contains `ok: true` and a sensible `deletedCount`.
+   - Re-running the `GET` for the same window should show fewer (or zero) rows.
+
+4. **Daily Summary completeness check**
+
+   ```bash
+   export ADMIN_TOKEN="<ADMIN_TOKEN>"
+
+   curl -sS -H "x-admin-token: $ADMIN_TOKEN" \
+     "https://intelliwatt.com/api/admin/analysis/daily-summary?esiid=<ESIID>&dateStart=2025-11-17T00:00:00Z&dateEnd=2025-11-19T00:00:00Z&limit=10"
+   ```
+
+   Expected:
+
+   - `rows` array with per-day entries.
+   - Each row has: `date` (local date in America/Chicago), `esiid`, `meter`, `found` (interval count), `expected` (currently 96), `completeness = found / expected`.
+   - `meta.range` shows the analyzed local range with `zone: "America/Chicago"`.
+   - Partial CSV windows (e.g., file only covers 06:00–06:00 next day) will produce completeness ≈ 0.5 across two days. This is expected until we add more sophisticated DST/boundary handling.
+
+## SMT Billing Reads (Ad-Hoc via /v2/energydata)
+
+**Endpoint**
+
+- `POST /api/admin/smt/billing/fetch`
+- Admin-only (requires `x-admin-token` header with the same `ADMIN_TOKEN` used elsewhere).
+
+**Purpose**
+
+- Trigger Smart Meter Texas `/v2/energydata` to retrieve:
+  - Monthly Billing Reads (primary target)
+  - Optional 15-minute interval and daily register reads
+- Returns the raw SMT payload so we can study the shape before wiring persistence.
+
+### curl example (Linux/macOS)
+
+```bash
+ADMIN_TOKEN="PASTE_YOUR_64_CHAR_TOKEN"
+BASE_URL="https://intelliwatt.com"
+
+curl -sS -X POST "$BASE_URL/api/admin/smt/billing/fetch" \
+  -H "x-admin-token: $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "esiid": "10443720004529147",
+    "startDate": "2024-11-01",
+    "endDate": "2024-11-30",
+    "includeInterval": false,
+    "includeDaily": false,
+    "includeMonthly": true
+  }'
+```
+
+### PowerShell (Windows)
+
+```powershell
+$BaseUrl    = "https://intelliwatt.com"
+$AdminToken = Read-Host "ADMIN_TOKEN"
+
+$Body = @{
+  esiid           = "10443720004529147"
+  startDate       = "2024-11-01"
+  endDate         = "2024-11-30"
+  includeInterval = $false
+  includeDaily    = $false
+  includeMonthly  = $true
+} | ConvertTo-Json -Compress
+
+Invoke-RestMethod -Method POST `
+  -Uri "$BaseUrl/api/admin/smt/billing/fetch" `
+  -Headers @{ "x-admin-token" = $AdminToken } `
+  -ContentType "application/json" `
+  -Body $Body | ConvertTo-Json -Depth 6
+```
+
+> Tip: Start with short date windows while experimenting. Responses can be large if `includeInterval` is set to true.
