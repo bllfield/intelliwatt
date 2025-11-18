@@ -173,16 +173,6 @@ export default function DashboardPage() {
         (houseAddress?.tdspSlug || houseAddress?.utilityName),
     );
 
-  useEffect(() => {
-    if (dashboardData) {
-      console.log("[dashboard] showSmtAuthorizationForm diagnostics", {
-        hasHouse: Boolean(houseAddress),
-        houseAddress,
-        showSmtAuthorizationForm,
-      });
-    }
-  }, [dashboardData, showSmtAuthorizationForm, houseAddress]);
-
   return (
     <div className="min-h-screen bg-brand-white">
       {/* Hero Section */}
