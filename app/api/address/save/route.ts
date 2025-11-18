@@ -208,15 +208,70 @@ export async function POST(req: NextRequest) {
         });
 
         if (lookup.esiid) {
-          record = await prisma.houseAddress.update({
-            where: { id: record.id },
-            data: {
-              esiid: lookup.esiid,
-              utilityName: lookup.utility ?? record.utilityName ?? undefined,
-              tdspSlug: lookup.territory ?? record.tdspSlug ?? undefined,
-            },
+          const conflicting = await prisma.houseAddress.findFirst({
+            where: { esiid: lookup.esiid },
             select: selectFields,
           });
+
+          if (conflicting && conflicting.id !== record.id) {
+            if (conflicting.userId && conflicting.userId !== record.userId) {
+              console.warn(
+                "[address/save] esiid conflict with different user",
+                JSON.stringify(
+                  {
+                    lookupEsiid: lookup.esiid,
+                    conflictingUserId: conflicting.userId,
+                    currentUserId: record.userId,
+                  },
+                  null,
+                  2,
+                ),
+              );
+            } else {
+              const recordIdToDelete = record.id;
+              record = await prisma.houseAddress.update({
+                where: { id: conflicting.id },
+                data: {
+                  addressLine1: normalized.addressLine1,
+                  addressLine2: normalized.addressLine2,
+                  addressCity: normalized.addressCity,
+                  addressState: normalized.addressState,
+                  addressZip5: normalized.addressZip5,
+                  addressZip4: normalized.addressZip4,
+                  addressCountry: normalized.addressCountry,
+                  placeId: normalized.placeId ?? undefined,
+                  lat: normalized.lat ?? undefined,
+                  lng: normalized.lng ?? undefined,
+                  addressValidated: normalized.addressValidated,
+                  validationSource: validationSource as "GOOGLE" | "USER" | "NONE" | "OTHER",
+                  esiid: lookup.esiid,
+                  utilityName: lookup.utility ?? conflicting.utilityName ?? undefined,
+                  tdspSlug: lookup.territory ?? conflicting.tdspSlug ?? undefined,
+                  rawGoogleJson: body.googlePlaceDetails as any,
+                  rawWattbuyJson: body.wattbuyJson as any,
+                },
+                select: selectFields,
+              });
+
+              if (recordIdToDelete && recordIdToDelete !== conflicting.id) {
+                try {
+                  await prisma.houseAddress.delete({ where: { id: recordIdToDelete } });
+                } catch (deleteErr) {
+                  console.warn("[address/save] cleanup delete failed", deleteErr);
+                }
+              }
+            }
+          } else {
+            record = await prisma.houseAddress.update({
+              where: { id: record.id },
+              data: {
+                esiid: lookup.esiid,
+                utilityName: lookup.utility ?? record.utilityName ?? undefined,
+                tdspSlug: lookup.territory ?? record.tdspSlug ?? undefined,
+              },
+              select: selectFields,
+            });
+          }
 
           try {
             await prisma.userProfile.update({
