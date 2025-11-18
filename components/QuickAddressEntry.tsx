@@ -75,8 +75,9 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
           types: ['address'],
         });
 
-        widget.className =
-          'w-full rounded-md border px-3 py-3 text-sm bg-white/90 border-white/30 text-brand-navy placeholder-brand-navy/60';
+        const widgetClassName =
+          'w-full px-4 py-3 text-sm bg-white/90 border border-white/30 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-blue focus:border-brand-blue text-brand-navy placeholder-brand-navy/60';
+        widget.className = widgetClassName;
         widget.placeholder = 'Enter your service address...';
 
         if (addressValueRef.current) {
