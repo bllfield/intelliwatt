@@ -777,3 +777,59 @@ Invoke-RestMethod -Method POST `
 ```
 
 > Tip: Start with short date windows while experimenting. Responses can be large if `includeInterval` is set to true.
+
+---
+## SMT Authorization API (v1) — Smoke Tests
+
+### POST /api/smt/authorization
+
+Creates an `SmtAuthorization` record using the schema defined in `docs/SMT_AUTH_MODEL.md`. Until the magic-link session helper is wired in, callers must supply `userId` and `contactEmail` in the request body.
+
+#### PowerShell example
+
+```powershell
+$baseUrl = "https://intelliwatt.com"
+
+$body = @{
+  userId = "<TEST_USER_ID>"
+  contactEmail = "user@example.com"
+  houseAddressId = "<HOUSE_ADDRESS_ID>"
+  houseId = "<HOUSE_ID>"
+  esiid = "10443720000000001"
+  serviceAddressLine1 = "123 Main St"
+  serviceCity = "Fort Worth"
+  serviceState = "TX"
+  serviceZip = "76101"
+  tdspCode = "ONCOR"
+  tdspName = "Oncor"
+  customerName = "Test Customer"
+  contactPhone = "8175551234"
+  consent = $true
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+  -Method Post `
+  -Uri "$baseUrl/api/smt/authorization" `
+  -ContentType "application/json" `
+  -Body $body
+```
+
+Expected: HTTP 201 with `{ ok: true, authorizationId: "<uuid>" }`.
+
+### GET /api/admin/smt/authorizations
+
+Lists recent SMT authorizations. Requires `x-admin-token`.
+
+#### PowerShell example
+
+```powershell
+$baseUrl = "https://intelliwatt.com"
+$adminToken = "<YOUR_64_CHAR_ADMIN_TOKEN>"
+
+Invoke-RestMethod `
+  -Method Get `
+  -Uri "$baseUrl/api/admin/smt/authorizations?limit=20" `
+  -Headers @{ "x-admin-token" = $adminToken }
+```
+
+Expected: HTTP 200 with `{ ok: true, count, items: [...] }` or HTTP 401 if the admin token is missing or invalid.
