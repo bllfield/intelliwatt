@@ -25,6 +25,7 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
   const addressValueRef = useRef(address);
   const [useFallbackInput, setUseFallbackInput] = useState(true);
   const [reinitNonce, setReinitNonce] = useState(0);
+  const wait = (durationMs: number) => new Promise<void>((resolve) => setTimeout(resolve, durationMs));
 
   useEffect(() => {
     setMounted(true);
@@ -311,7 +312,8 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
         setPlaceDetails(null);
         parsedAddressRef.current = null;
         
-        // Address saved successfully - user can see the updated UI
+        const savedEsiid = data?.address?.esiid ?? null;
+        await wait(savedEsiid ? 800 : 2500);
         router.push('/dashboard/api#smt');
       } else {
         const error = await response.json();
