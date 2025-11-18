@@ -11,10 +11,17 @@ import { extractEsiidDetails } from '@/lib/wattbuy/extractEsiid';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-async function kickSmtIfPossible(address: string, city: string, state: string, zip: string) {
+function withUnit(address: string, unit?: string | null): string {
+  const trimmedUnit = unit?.trim();
+  if (!trimmedUnit) return address;
+  return `${address} ${trimmedUnit}`;
+}
+
+async function kickSmtIfPossible(address: string, city: string, state: string, zip: string, unit?: string | null) {
   try {
+    const compositeAddress = withUnit(address, unit);
     // Get ESIID from /v3/electricity/info endpoint (not /v3/electricity)
-    const infoRes = await wbGetElectricityInfo({ address, city, state, zip, utility_list: 'true' });
+    const infoRes = await wbGetElectricityInfo({ address: compositeAddress, city, state, zip, utility_list: 'true' });
 
     const infoSummary = infoRes?.data
       ? {
@@ -86,32 +93,35 @@ export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const address = searchParams.get('address') ?? '';
+    const unit = searchParams.get('unit') ?? searchParams.get('line2') ?? '';
     const city = searchParams.get('city') ?? '';
     const state = searchParams.get('state') ?? 'tx';
     const zip = searchParams.get('zip') ?? '';
     const language = (searchParams.get('language') as 'en' | 'es') ?? 'en';
     const is_renter = (searchParams.get('is_renter') ?? 'false') === 'true';
 
+    const compositeAddress = withUnit(address, unit);
+
     // 1) Electricity details → wattkey (for offers)
-    const elec = await wbGetElectricity({ address, city, state, zip });
+    const elec = await wbGetElectricity({ address: compositeAddress, city, state, zip });
     if (!elec.ok) {
       return NextResponse.json({ ok: false, stage: 'electricity', elec }, { status: elec.status || 502 });
     }
     const keys = extractElectricityKeys(elec.data);
 
     // 2) SMT kick (best-effort) - uses /v3/electricity/info for ESIID extraction
-    const smtKick = await kickSmtIfPossible(address, city, state, zip);
+    const smtKick = await kickSmtIfPossible(address, city, state, zip, unit);
 
     // 3) Offers (prefer wattkey; fall back to address if missing)
     const offers = await wbGetOffers(
       keys.wattkey
         ? { wattkey: keys.wattkey, language, is_renter, all: true }
-        : { address, city, state, zip, language, is_renter, all: true }
+        : { address: compositeAddress, city, state, zip, language, is_renter, all: true }
     );
 
     return NextResponse.json({
       ok: true,
-      where: { address, city, state, zip },
+      where: { address: compositeAddress, unit: unit?.trim() || null, city, state, zip },
       electricity: {
         status: elec.status,
         headers: elec.headers,

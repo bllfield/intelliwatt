@@ -7,6 +7,7 @@ import { extractEsiidDetails } from '@/lib/wattbuy/extractEsiid';
 
 export type AddressInput = {
   line1: string;
+  line2?: string | null;
   city: string;
   state: string;
   zip: string;
@@ -25,9 +26,18 @@ export type AddressResolveResult = {
  */
 export async function resolveAddressToEsiid(addr: AddressInput): Promise<AddressResolveResult> {
   try {
-    console.log("[resolveAddressToEsiid] request", addr);
+    const trimmedLine2 =
+      typeof addr.line2 === 'string' && addr.line2.trim().length > 0 ? addr.line2.trim() : null;
+    const compositeLine1 = trimmedLine2 ? `${addr.line1} ${trimmedLine2}` : addr.line1;
+
+    console.log('[resolveAddressToEsiid] request', {
+      ...addr,
+      line2: trimmedLine2,
+      compositeLine1,
+    });
+
     const info = await wbGetElectricityInfo({
-      address: addr.line1,
+      address: compositeLine1,
       city: addr.city,
       state: addr.state,
       zip: addr.zip,
@@ -35,7 +45,7 @@ export async function resolveAddressToEsiid(addr: AddressInput): Promise<Address
     });
 
     if (!info.ok) {
-      console.warn("[resolveAddressToEsiid] wattbuy request failed", {
+      console.warn('[resolveAddressToEsiid] wattbuy request failed', {
         status: info.status,
         text: info.text ?? null,
       });
@@ -49,7 +59,7 @@ export async function resolveAddressToEsiid(addr: AddressInput): Promise<Address
 
     const data = info.data ?? null;
     const details = extractEsiidDetails(data);
-    console.log("[resolveAddressToEsiid] response", {
+    console.log('[resolveAddressToEsiid] response', {
       status: info.status,
       hasEsiid: Boolean(details.esiid),
       utility: details.utility ?? null,
@@ -63,7 +73,7 @@ export async function resolveAddressToEsiid(addr: AddressInput): Promise<Address
       raw: data,
     };
   } catch (err) {
-    console.error("[resolveAddressToEsiid] error", err);
+    console.error('[resolveAddressToEsiid] error', err);
     return {
       esiid: null,
       utility: null,

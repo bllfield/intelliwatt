@@ -163,15 +163,13 @@ export default function DashboardPage() {
     );
   }
   const houseAddress = dashboardData?.address ?? null;
-  const showSmtAuthorizationForm =
-    Boolean(
-      dashboardData?.user?.id &&
-        dashboardData?.user?.email &&
-        houseAddress?.id &&
-        (houseAddress.houseId ?? houseAddress.id) &&
-        houseAddress?.esiid &&
-        (houseAddress?.tdspSlug || houseAddress?.utilityName),
-    );
+  const showSmtAuthorizationForm = Boolean(
+    dashboardData?.user?.id &&
+      dashboardData?.user?.email &&
+      houseAddress?.id &&
+      (houseAddress.houseId ?? houseAddress.id) &&
+      houseAddress?.esiid,
+  );
 
   return (
     <div className="min-h-screen bg-brand-white">

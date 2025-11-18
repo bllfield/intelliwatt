@@ -31,6 +31,7 @@ function pretty(x: Json) {
 export default function WattBuyInspector() {
   const { token, setToken } = useLocalToken();
   const [address, setAddress] = useState('9514 Santa Paula Dr');
+  const [unit, setUnit] = useState('');
   const [city, setCity] = useState('Fort Worth');
   const [state, setState] = useState('tx'); // lowercase per spec
   const [zip, setZip] = useState('76116');
@@ -42,37 +43,40 @@ export default function WattBuyInspector() {
   const ready = useMemo(() => Boolean(token), [token]);
 
   async function hit(path: string) {
-    if (!token) { alert('Set x-admin-token first'); return; }
+    if (!token) {
+      alert('Need admin token');
+      return;
+    }
     setLoading(true);
     setResult(null);
     setRaw(null);
     try {
-      const r = await fetch(path, { headers: { 'x-admin-token': token, 'accept': 'application/json' } });
-      const data = await r.json().catch(() => ({}));
+      const res = await fetch(path, {
+        headers: { 'x-admin-token': token },
+      });
+      const data = await res.json();
+      setResult(data);
       setRaw(data);
-      // normalize into InspectResult-ish shape if endpoint differs
-      const normalized: InspectResult = {
-        ok: data?.ok,
-        status: data?.status,
-        error: data?.error,
-        where: data?.where,
-        headers: data?.headers,
-        topType: data?.topType,
-        topKeys: data?.topKeys,
-        foundListPath: data?.foundListPath,
-        count: data?.count,
-        sample: data?.sample,
-        note: data?.note,
-      };
-      setResult(normalized);
-    } catch (e: any) {
-      setResult({ ok: false, status: 500, error: e?.message || 'fetch failed' });
+    } catch (err: any) {
+      console.error(err);
+      setResult({ ok: false, error: err?.message || 'Unknown error' });
     } finally {
       setLoading(false);
     }
   }
 
-  const qsAddr = `address=${encodeURIComponent(address)}&city=${encodeURIComponent(city)}&state=${encodeURIComponent(state)}&zip=${encodeURIComponent(zip)}`;
+  const qsAddr = useMemo(() => {
+    const params = new URLSearchParams({
+      address,
+      city,
+      state,
+      zip,
+    });
+    if (unit.trim()) {
+      params.set('unit', unit.trim());
+    }
+    return params.toString();
+  }, [address, unit, city, state, zip]);
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
@@ -116,10 +120,14 @@ export default function WattBuyInspector() {
 
       <section className="p-4 rounded-2xl border">
         <h2 className="font-medium mb-3">Deregulated Plan Tools</h2>
-        <div className="grid md:grid-cols-4 gap-3">
+        <div className="grid md:grid-cols-5 gap-3">
           <div>
             <label className="block text-sm mb-1">Address</label>
             <input className="w-full rounded-lg border px-3 py-2" value={address} onChange={(e)=>setAddress(e.target.value)} />
+          </div>
+          <div>
+            <label className="block text-sm mb-1">Unit / Apt</label>
+            <input className="w-full rounded-lg border px-3 py-2" value={unit} onChange={(e)=>setUnit(e.target.value)} placeholder="#123, Apt B" />
           </div>
           <div>
             <label className="block text-sm mb-1">City</label>

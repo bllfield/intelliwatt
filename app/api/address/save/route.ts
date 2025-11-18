@@ -94,7 +94,6 @@ export async function POST(req: NextRequest) {
       incomingLine1: normalized.addressLine1,
       existingLine1: existingAddress?.addressLine1 ?? null,
     });
-
     const addressData = {
       userId,
       houseId: body.houseId ?? null,
@@ -169,6 +168,7 @@ export async function POST(req: NextRequest) {
       try {
         const lookup = await resolveAddressToEsiid({
           line1: normalized.addressLine1,
+          line2: normalized.addressLine2 ?? null,
           city: normalized.addressCity,
           state: normalized.addressState,
           zip: normalized.addressZip5,

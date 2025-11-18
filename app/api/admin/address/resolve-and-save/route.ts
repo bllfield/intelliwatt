@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json();
 
-    const { houseId, line1, city, state, zip } = body || {};
+    const { houseId, line1, line2, city, state, zip } = body || {};
 
     if (!houseId || !line1 || !city || !state || !zip) {
 
@@ -59,7 +59,7 @@ export async function POST(req: NextRequest) {
 
     // 1) Resolve ESIID via provider wrapper (currently WattBuy)
 
-    const lookup = await resolveAddressToEsiid({ line1, city, state, zip });
+    const lookup = await resolveAddressToEsiid({ line1, line2: line2 ?? null, city, state, zip });
 
     if (!lookup.esiid) {
 
@@ -69,7 +69,7 @@ export async function POST(req: NextRequest) {
 
         corrId, route: 'admin/address/resolve-and-save', status: 404, durationMs,
 
-        reason: 'NO_ESIID_FOUND', address: { line1, city, state, zip }
+        reason: 'NO_ESIID_FOUND', address: { line1, line2: line2 ?? null, city, state, zip }
 
       }));
 
