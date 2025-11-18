@@ -6,6 +6,7 @@ import { NextRequest } from 'next/server';
 
 import { wbGet } from '@/lib/wattbuy/client';
 
+import { composeWattbuyAddress, formatUnitForWattbuy } from '@/lib/wattbuy/formatAddress';
 import { electricityInfoParams } from '@/lib/wattbuy/params';
 
 export async function GET(req: NextRequest) {
@@ -15,8 +16,8 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
 
-  const address = searchParams.get('address') || undefined;
-
+  const addressRaw = searchParams.get('address') || undefined;
+  const unitRaw = searchParams.get('unit') || searchParams.get('line2') || undefined;
   const city = searchParams.get('city') || undefined;
 
   const state = (searchParams.get('state') || 'tx').toLowerCase();
@@ -29,7 +30,17 @@ export async function GET(req: NextRequest) {
 
   if (!zip) return new Response(JSON.stringify({ ok: false, error: 'zip required' }), { status: 400 });
 
-  const params = electricityInfoParams({ address, city, state, zip, housing_chars, utility_list });
+  const compositeAddress = composeWattbuyAddress(addressRaw ?? '', unitRaw ?? null);
+  const formattedUnit = formatUnitForWattbuy(unitRaw ?? null);
+
+  const params = electricityInfoParams({
+    address: compositeAddress || addressRaw || undefined,
+    city,
+    state,
+    zip,
+    housing_chars,
+    utility_list,
+  });
 
   const res = await wbGet('electricity/info', params);
 
@@ -37,5 +48,9 @@ export async function GET(req: NextRequest) {
     return new Response(JSON.stringify({ ok: false, status: res.status, error: res.text }), { status: 502 });
   }
 
-  return Response.json({ ok: true, where: params, data: res.data });
+  return Response.json({
+    ok: true,
+    where: { ...params, unit: formattedUnit ?? null },
+    data: res.data,
+  });
 }

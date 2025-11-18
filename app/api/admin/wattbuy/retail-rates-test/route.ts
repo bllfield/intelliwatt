@@ -24,6 +24,7 @@ export async function GET(req: NextRequest) {
 
   // Optionally allow address to auto-derive utilityID/state if not provided
   const address = searchParams.get('address') || undefined;
+  const unit = searchParams.get('unit') || searchParams.get('line2') || undefined;
   const city = searchParams.get('city') || undefined;
   const zip = searchParams.get('zip') || undefined;
   const maybeDerive = !utilityID || !state;
@@ -38,7 +39,7 @@ export async function GET(req: NextRequest) {
         }), { status: 400 });
       }
 
-      const derived = await deriveUtilityFromAddress({ address, city, state, zip });
+      const derived = await deriveUtilityFromAddress({ address, unit, city, state, zip });
       if (!derived) {
         return new Response(JSON.stringify({
           ok: false,
@@ -86,7 +87,7 @@ export async function GET(req: NextRequest) {
       ok: false,
       status: 500,
       error: e?.message || 'Unhandled exception',
-      where: { utilityID, state, address, city, zip }
+      where: { utilityID, state, address, unit, city, zip }
     }), { status: 500 });
   }
 }

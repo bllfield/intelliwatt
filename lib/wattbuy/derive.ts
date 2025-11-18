@@ -1,7 +1,7 @@
 // lib/wattbuy/derive.ts
 
 import { wbGet } from './client';
-
+import { composeWattbuyAddress } from './formatAddress';
 import { electricityInfoParams } from './params';
 
 /**
@@ -13,13 +13,15 @@ import { electricityInfoParams } from './params';
  */
 export async function deriveUtilityFromAddress(input: {
   address?: string;
+  unit?: string | null;
   city?: string;
   state?: string;   // lower/upper accepted; we lower it internally
   zip: string | number;
 }) : Promise<{ utilityID: string; state: string; utilityList?: Array<{ utility_eid?: number; utility_name?: string; type?: string }> } | undefined> {
   const state = String(input.state ?? '').toLowerCase() || 'tx';
+  const composite = composeWattbuyAddress(input.address ?? '', input.unit ?? null);
   const params = electricityInfoParams({
-    address: input.address,
+    address: composite,
     city: input.city,
     state,
     zip: input.zip,

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { wbGetOffers } from '@/lib/wattbuy/client';
+import { composeWattbuyAddress, formatUnitForWattbuy } from '@/lib/wattbuy/formatAddress';
 import { requireAdmin } from '@/lib/auth/admin';
 
 export const runtime = 'nodejs';
@@ -10,7 +11,8 @@ export async function GET(req: NextRequest) {
   if (!gate.ok) return NextResponse.json(gate.body, { status: gate.status });
   try {
     const { searchParams } = new URL(req.url);
-    const address = searchParams.get('address') ?? '';
+    const addressRaw = searchParams.get('address') ?? '';
+    const unitRaw = searchParams.get('unit') || searchParams.get('line2') || '';
     const city = searchParams.get('city') ?? '';
     const state = searchParams.get('state') ?? '';
     const zip = searchParams.get('zip') ?? '';
@@ -20,10 +22,23 @@ export async function GET(req: NextRequest) {
     const is_renter = (searchParams.get('is_renter') ?? 'false') === 'true';
     const category = searchParams.get('category') ?? undefined;
 
+    const compositeAddress = composeWattbuyAddress(addressRaw, unitRaw);
+    const formattedUnit = formatUnitForWattbuy(unitRaw);
+
     const resp = await wbGetOffers({
-      address, city, state, zip, language, is_renter, all, category,
+      address: compositeAddress || addressRaw,
+      city,
+      state,
+      zip,
+      language,
+      is_renter,
+      all,
+      category,
     });
-    return NextResponse.json(resp, { status: resp.status });
+    return NextResponse.json(
+      { ...resp, where: { address: compositeAddress || addressRaw, unit: formattedUnit ?? null, city, state, zip } },
+      { status: resp.status },
+    );
   } catch (err: any) {
     return NextResponse.json({ ok: false, error: 'OFFERS_BY_ADDRESS_ERROR', message: err?.message }, { status: 500 });
   }

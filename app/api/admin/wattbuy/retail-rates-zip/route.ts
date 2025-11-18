@@ -22,6 +22,7 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
 
   const address = searchParams.get('address') || undefined;
+  const unit = searchParams.get('unit') || searchParams.get('line2') || undefined;
   const city = searchParams.get('city') || undefined;
   const state = (searchParams.get('state') || '').toLowerCase() || undefined;
   const zip = searchParams.get('zip') || undefined;
@@ -30,7 +31,7 @@ export async function GET(req: NextRequest) {
     return new Response(JSON.stringify({ ok: false, error: 'zip required' }), { status: 400 });
   }
 
-  const derived = await deriveUtilityFromAddress({ address, city, state, zip });
+  const derived = await deriveUtilityFromAddress({ address, unit, city, state, zip });
   if (!derived || !derived.utilityID) {
     return new Response(JSON.stringify({
       ok: false,

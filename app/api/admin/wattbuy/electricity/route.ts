@@ -4,6 +4,7 @@ export const runtime = 'nodejs';
 
 import { NextRequest } from 'next/server';
 import { getElectricityRobust } from '@/lib/wattbuy/electricity';
+import { composeWattbuyAddress, formatUnitForWattbuy } from '@/lib/wattbuy/formatAddress';
 
 export async function GET(req: NextRequest) {
   if (req.headers.get('x-admin-token') !== process.env.ADMIN_TOKEN) {
@@ -11,7 +12,8 @@ export async function GET(req: NextRequest) {
   }
 
   const { searchParams } = new URL(req.url);
-  const address = searchParams.get('address') || undefined;
+  const addressRaw = searchParams.get('address') || undefined;
+  const unitRaw = searchParams.get('unit') || searchParams.get('line2') || undefined;
   const city = searchParams.get('city') || undefined;
   const state = searchParams.get('state') || undefined;
   const zip = searchParams.get('zip') || undefined;
@@ -20,7 +22,15 @@ export async function GET(req: NextRequest) {
     return new Response(JSON.stringify({ ok: false, error: 'zip required' }), { status: 400 });
   }
 
-  const out = await getElectricityRobust({ address, city, state, zip: zip! });
+  const compositeAddress = composeWattbuyAddress(addressRaw ?? '', unitRaw ?? null);
+  const formattedUnit = formatUnitForWattbuy(unitRaw ?? null);
+
+  const out = await getElectricityRobust({
+    address: compositeAddress || addressRaw,
+    city,
+    state,
+    zip: zip!,
+  });
 
   if (!out.ok) {
     return new Response(JSON.stringify({
@@ -28,7 +38,7 @@ export async function GET(req: NextRequest) {
       status: out.status,
       headers: 'headers' in out ? out.headers : undefined,
       error: ('error' in out ? out.error : undefined) || ('text' in out ? out.text : undefined) || 'UPSTREAM_ERROR',
-      where: { address, city, state, zip },
+      where: { address: compositeAddress || addressRaw, unit: formattedUnit ?? null, city, state, zip },
     }), { status: 502 });
   }
 
@@ -41,7 +51,7 @@ export async function GET(req: NextRequest) {
     ok: true,
     status: out.status,
     headers: out.headers,
-    where: { address, city, state, zip },
+    where: { address: compositeAddress || addressRaw, unit: formattedUnit ?? null, city, state, zip },
     shape: { topType, keys },
     usedWattkey: Boolean(d?.__used_wattkey),
     data: d,
