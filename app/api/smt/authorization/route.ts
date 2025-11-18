@@ -1,68 +1,51 @@
 import { NextRequest, NextResponse } from "next/server";
-import { PrismaClient } from "@prisma/client";
+import { cookies } from "next/headers";
+import { prisma } from "@/lib/db";
+import { normalizeEmail } from "@/lib/utils/email";
 
-const prisma = new PrismaClient();
-
-type CreateSmtAuthorizationBody = {
-  userId: string;
-  contactEmail: string;
+type SmtAuthorizationBody = {
   houseAddressId: string;
-  houseId: string;
-  esiid: string;
-  serviceAddressLine1: string;
-  serviceAddressLine2?: string | null;
-  serviceCity: string;
-  serviceState: string;
-  serviceZip: string;
-  tdspCode: string;
-  tdspName: string;
   customerName: string;
   contactPhone?: string | null;
   consent: boolean;
-  meterNumber?: string | null;
 };
 
-function getEnvOrThrow(name: string): string {
+function getEnvOrDefault(name: string, fallback: string): string {
   const value = process.env[name];
-  if (!value) {
-    throw new Error(`Missing required environment variable: ${name}`);
+  if (!value || !value.trim()) {
+    return fallback;
   }
   return value;
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const body = (await req.json()) as Partial<CreateSmtAuthorizationBody>;
+    const rawBody = (await req.json()) as Partial<SmtAuthorizationBody> | null;
 
-    const requiredFields: (keyof CreateSmtAuthorizationBody)[] = [
-      "userId",
-      "contactEmail",
-      "houseAddressId",
-      "houseId",
-      "esiid",
-      "serviceAddressLine1",
-      "serviceCity",
-      "serviceState",
-      "serviceZip",
-      "tdspCode",
-      "tdspName",
-      "customerName",
-    ];
-
-    for (const field of requiredFields) {
-      const value = body[field];
-      if (value === undefined || value === null || value === "") {
-        return NextResponse.json(
-          {
-            ok: false,
-            error: `Missing required field: ${field}`,
-          },
-          { status: 400 },
-        );
-      }
+    if (!rawBody || typeof rawBody !== "object") {
+      return NextResponse.json(
+        { ok: false, error: "Invalid request body." },
+        { status: 400 },
+      );
     }
 
-    if (!body.consent) {
+    const { houseAddressId, customerName, contactPhone, consent } = rawBody;
+
+    if (!houseAddressId || typeof houseAddressId !== "string" || !houseAddressId.trim()) {
+      return NextResponse.json(
+        { ok: false, error: "Missing required field: houseAddressId" },
+        { status: 400 },
+      );
+    }
+
+    if (!customerName || typeof customerName !== "string" || !customerName.trim()) {
+      return NextResponse.json(
+        { ok: false, error: "Missing required field: customerName" },
+        { status: 400 },
+      );
+    }
+
+    if (consent !== true) {
       return NextResponse.json(
         {
           ok: false,
@@ -72,39 +55,115 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const smtRequestorId = getEnvOrThrow("SMT_REQUESTOR_ID");
-    const smtRequestorAuthId = getEnvOrThrow("SMT_REQUESTOR_AUTH_ID");
+    const cookieStore = cookies();
+    const userEmailRaw = cookieStore.get("intelliwatt_user")?.value;
+
+    if (!userEmailRaw) {
+      return NextResponse.json({ ok: false, error: "Not authenticated." }, { status: 401 });
+    }
+
+    const userEmail = normalizeEmail(userEmailRaw);
+    const user = await prisma.user.findUnique({
+      where: { email: userEmail },
+      select: { id: true, email: true },
+    });
+
+    if (!user) {
+      return NextResponse.json({ ok: false, error: "User not found." }, { status: 404 });
+    }
+
+    const house = await prisma.houseAddress.findUnique({
+      where: { id: houseAddressId.trim() },
+      select: {
+        id: true,
+        houseId: true,
+        addressLine1: true,
+        addressLine2: true,
+        addressCity: true,
+        addressState: true,
+        addressZip5: true,
+        esiid: true,
+        tdspSlug: true,
+        utilityName: true,
+      },
+    });
+
+    if (!house) {
+      return NextResponse.json(
+        { ok: false, error: "House address not found for provided houseAddressId." },
+        { status: 404 },
+      );
+    }
+
+    if (!house.addressLine1 || !house.addressCity || !house.addressState || !house.addressZip5) {
+      return NextResponse.json(
+        { ok: false, error: "House address is missing required address fields." },
+        { status: 400 },
+      );
+    }
+
+    if (!house.esiid) {
+      return NextResponse.json(
+        { ok: false, error: "House address does not have an associated ESIID." },
+        { status: 400 },
+      );
+    }
+
+    const tdspCode = house.tdspSlug
+      ? house.tdspSlug.toUpperCase()
+      : house.utilityName
+      ? house.utilityName.replace(/\s+/g, "_").toUpperCase()
+      : null;
+
+    const tdspName = house.utilityName ?? (house.tdspSlug ? house.tdspSlug.toUpperCase() : null);
+
+    if (!tdspCode || !tdspName) {
+      return NextResponse.json(
+        { ok: false, error: "House address does not have TDSP information." },
+        { status: 400 },
+      );
+    }
+
+    const trimmedCustomerName = customerName.trim();
+    const normalizedContactPhone =
+      typeof contactPhone === "string" && contactPhone.trim().length > 0
+        ? contactPhone.trim()
+        : null;
 
     const now = new Date();
-    const startDate = new Date(
+    const authorizationStartDate = new Date(
       Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
     );
-    const endDate = new Date(
+    const authorizationEndDate = new Date(
       Date.UTC(now.getUTCFullYear() + 1, now.getUTCMonth(), now.getUTCDate()),
     );
 
+    const smtRequestorId = getEnvOrDefault("SMT_REQUESTOR_ID", "INTELLIWATTAPI");
+    const smtRequestorAuthId = getEnvOrDefault("SMT_REQUESTOR_AUTH_ID", "INTELLIWATT_AUTH_ID");
+
+    // @ts-expect-error Prisma client is generated with SmtAuthorization delegate after `prisma generate`
     const created = await prisma.smtAuthorization.create({
       data: {
-        userId: body.userId,
-        houseId: body.houseId,
-        houseAddressId: body.houseAddressId,
-        esiid: body.esiid,
-        meterNumber: body.meterNumber ?? null,
-        customerName: body.customerName,
-        serviceAddressLine1: body.serviceAddressLine1,
-        serviceAddressLine2: body.serviceAddressLine2 ?? null,
-        serviceCity: body.serviceCity,
-        serviceState: body.serviceState,
-        serviceZip: body.serviceZip,
-        tdspCode: body.tdspCode,
-        tdspName: body.tdspName,
-        authorizationStartDate: startDate,
-        authorizationEndDate: endDate,
+        userId: user.id,
+        houseId: house.houseId ?? house.id,
+        houseAddressId: house.id,
+        esiid: house.esiid,
+        meterNumber: null,
+        customerName: trimmedCustomerName,
+        serviceAddressLine1: house.addressLine1,
+        serviceAddressLine2: house.addressLine2 ?? null,
+        serviceCity: house.addressCity,
+        serviceState: house.addressState,
+        serviceZip: house.addressZip5,
+        tdspCode,
+        tdspName,
+        authorizationStartDate,
+        authorizationEndDate,
         allowIntervalUsage: true,
         allowHistoricalBilling: true,
         allowSubscription: true,
-        contactEmail: body.contactEmail,
-        contactPhone: body.contactPhone ?? null,
+        contactEmail: user.email,
+        contactPhone: normalizedContactPhone,
         smtRequestorId,
         smtRequestorAuthId,
       },
@@ -119,20 +178,12 @@ export async function POST(req: NextRequest) {
     );
   } catch (err) {
     console.error("[SMT_AUTH_POST_ERROR]", err);
-    const status =
-      err instanceof Error && err.message.includes("Missing required environment variable")
-        ? 500
-        : 500;
-    const message =
-      err instanceof Error && err.message.includes("Missing required environment variable")
-        ? err.message
-        : "Failed to create SMT authorization.";
     return NextResponse.json(
       {
         ok: false,
-        error: message,
+        error: "Failed to create SMT authorization.",
       },
-      { status },
+      { status: 500 },
     );
   }
 }
