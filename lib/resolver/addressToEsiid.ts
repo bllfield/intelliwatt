@@ -2,7 +2,8 @@
 // Provider-agnostic wrapper for address → ESIID resolution
 // Currently uses WattBuy, but can be extended to support other providers
 
-import { lookupEsiId, type EsiLookupInput, type EsiLookupResult } from '@/lib/wattbuy/client';
+import { wbGetElectricityInfo } from '@/lib/wattbuy/client';
+import { extractEsiidDetails } from '@/lib/wattbuy/extractEsiid';
 
 export type AddressInput = {
   line1: string;
@@ -23,18 +24,40 @@ export type AddressResolveResult = {
  * Returns null esiid if not found, with error details in raw.
  */
 export async function resolveAddressToEsiid(addr: AddressInput): Promise<AddressResolveResult> {
-  const result = await lookupEsiId({
-    line1: addr.line1,
-    city: addr.city,
-    state: addr.state,
-    zip: addr.zip,
-  });
+  try {
+    const info = await wbGetElectricityInfo({
+      address: addr.line1,
+      city: addr.city,
+      state: addr.state,
+      zip: addr.zip,
+      utility_list: 'true',
+    });
 
-  return {
-    esiid: result.esiid,
-    utility: result.utility,
-    territory: result.territory,
-    raw: result.raw,
-  };
+    if (!info.ok) {
+      return {
+        esiid: null,
+        utility: null,
+        territory: null,
+        raw: { status: info.status, body: info.text ?? null },
+      };
+    }
+
+    const data = info.data ?? null;
+    const details = extractEsiidDetails(data);
+
+    return {
+      esiid: details.esiid,
+      utility: details.utility,
+      territory: details.territory,
+      raw: data,
+    };
+  } catch (err) {
+    return {
+      esiid: null,
+      utility: null,
+      territory: null,
+      raw: { error: err instanceof Error ? err.message : String(err) },
+    };
+  }
 }
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/auth/admin';
 import { wbGetElectricityInfo } from '@/lib/wattbuy/client';
+import { extractEsiidDetails } from '@/lib/wattbuy/extractEsiid';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -44,31 +45,15 @@ export async function GET(req: NextRequest) {
       }, { status: info.status || 502 });
     }
 
-    // Extract ESIID from various possible field names
     const data = info.data || {};
-    let esiid: string | null = null;
-    
-    // Try direct fields first
-    esiid = data.esiid || data.esiId || data.esi_id || null;
-    
-    // Try addresses array
-    if (!esiid && Array.isArray(data.addresses) && data.addresses.length > 0) {
-      const addr = data.addresses[0];
-      esiid = addr.esi || addr.esiid || addr.esi_id || null;
-    }
-
-    // Try utility_info array
-    if (!esiid && Array.isArray(data.utility_info) && data.utility_info.length > 0) {
-      const ui = data.utility_info[0];
-      esiid = ui.esiid || ui.esiId || ui.esi_id || null;
-    }
+    const { esiid, utility, territory } = extractEsiidDetails(data);
 
     return NextResponse.json({
       ok: true,
       match: !!esiid,
       esiid: esiid,
-      utility: data.utility || data.utility_name || null,
-      tdsp: data.tdsp || data.territory || null,
+      utility,
+      tdsp: territory,
       wattkey: data.wattkey || null,
       source: 'wattbuy_electricity',
       // Include sample keys for debugging

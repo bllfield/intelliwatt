@@ -93,5 +93,6 @@ export const flags = {
   strictPIILogging: flagBoolSync(process.env.FLAG_STRICT_PII_LOGGING, true),
 } as const;
 
+const rawWattbuyEsiidDisabled = process.env.WATTBUY_ESIID_DISABLED;
 export const wattbuyEsiidDisabled =
-  process.env.WATTBUY_ESIID_DISABLED?.toLowerCase() !== 'false';
+  rawWattbuyEsiidDisabled ? rawWattbuyEsiidDisabled.toLowerCase() === 'true' : false;

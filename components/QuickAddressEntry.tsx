@@ -22,76 +22,90 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
 
   useEffect(() => {
     setMounted(true);
-    
-    // Always allow manual entry immediately, then try to enhance with Google Maps
-    setGoogleLoaded(true);
-    
-    // Try to initialize Google Maps if available
-    const tryInitializeGoogle = () => {
-      if (typeof window !== 'undefined' && 
-          window.google && 
-          window.google.maps && 
-          window.google.maps.places &&
-          process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY) {
-        initializeAutocomplete();
-      }
-    };
-    
-    // Try immediately
-    tryInitializeGoogle();
-    
-    // Also try after a delay in case Google Maps is still loading
-    const timeout = setTimeout(tryInitializeGoogle, 1000);
-    
-    return () => clearTimeout(timeout);
-  }, [mounted]);
+  }, []);
 
-  const initializeAutocomplete = () => {
-    console.log('Debug: Initializing Google Maps autocomplete...');
-    console.log('Debug: inputRef.current:', !!inputRef.current);
-    console.log('Debug: window.google:', !!window.google);
-    console.log('Debug: window.google.maps:', !!(window.google && window.google.maps));
-    console.log('Debug: window.google.maps.places:', !!(window.google && window.google.maps && window.google.maps.places));
-    console.log('Debug: API key available:', !!process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY);
-    
-    if (!inputRef.current || !window.google || !process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY) {
-      console.log('Debug: Missing requirements, falling back to manual entry');
-      setGoogleLoaded(true); // Allow manual entry if no API key
+  useEffect(() => {
+    if (!mounted) return;
+
+    if (userAddress) {
+      if (autocomplete && typeof window !== 'undefined' && window.google?.maps?.event) {
+        window.google.maps.event.clearInstanceListeners(autocomplete);
+      }
+      if (autocomplete) {
+        setAutocomplete(null);
+      }
       return;
     }
 
-    try {
-      console.log('Debug: Creating standard Autocomplete...');
-      // Use the standard Google Places Autocomplete API (works with React)
-      const autocompleteInstance = new window.google.maps.places.Autocomplete(inputRef.current, {
-        types: ['address'],
-        componentRestrictions: { country: 'us' },
-        fields: ['formatted_address', 'address_components', 'place_id']
-      });
+    setGoogleLoaded(true);
 
-      console.log('Debug: Autocomplete created successfully');
+    let cancelled = false;
+    let retryTimer: number | undefined;
+    let listener: any = null;
 
-      // Listen for place selection
-      autocompleteInstance.addListener('place_changed', () => {
-        const place = autocompleteInstance.getPlace();
-        console.log('Debug: Place selected:', place);
-        
-        // Store the full place details for saving to database
-        setPlaceDetails(place);
-        
-        if (place.formatted_address) {
-          console.log('Debug: Setting address to:', place.formatted_address);
-          setAddress(place.formatted_address);
-        }
-      });
+    const attemptInit = () => {
+      if (cancelled || autocomplete) {
+        setGoogleLoaded(true);
+        return;
+      }
 
-      setAutocomplete(autocompleteInstance);
-      console.log('Debug: Google Maps autocomplete initialized successfully');
-    } catch (error) {
-      console.warn('Google Places API not available, falling back to manual entry:', error);
-      setGoogleLoaded(true); // Allow manual entry on error
-    }
-  };
+      const inputEl = inputRef.current;
+      if (!inputEl) {
+        retryTimer = window.setTimeout(attemptInit, 250);
+        return;
+      }
+
+      const hasPlaces =
+        typeof window !== 'undefined' &&
+        !!window.google &&
+        !!window.google.maps &&
+        !!window.google.maps.places &&
+        !!process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+
+      if (!hasPlaces) {
+        setGoogleLoaded(true);
+        return;
+      }
+
+      try {
+        console.log('Debug: Initializing Google Maps autocomplete...');
+        const instance = new window.google.maps.places.Autocomplete(inputEl, {
+          types: ['address'],
+          componentRestrictions: { country: 'us' },
+          fields: ['formatted_address', 'address_components', 'place_id'],
+        });
+
+        listener = instance.addListener('place_changed', () => {
+          const place = instance.getPlace();
+          console.log('Debug: Place selected:', place);
+          setPlaceDetails(place);
+          if (place.formatted_address) {
+            console.log('Debug: Setting address to:', place.formatted_address);
+            setAddress(place.formatted_address);
+          }
+        });
+
+        setAutocomplete(instance);
+        setGoogleLoaded(true);
+        console.log('Debug: Google Maps autocomplete initialized successfully');
+      } catch (error) {
+        console.warn('Google Places API not available, falling back to manual entry:', error);
+        setGoogleLoaded(true);
+      }
+    };
+
+    attemptInit();
+
+    return () => {
+      cancelled = true;
+      if (retryTimer !== undefined) {
+        clearTimeout(retryTimer);
+      }
+      if (listener) {
+        listener.remove();
+      }
+    };
+  }, [mounted, userAddress, autocomplete]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -203,7 +217,17 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
             </div>
           </div>
           <button
-            onClick={() => onAddressSubmitted('')}
+            onClick={() => {
+              if (autocomplete && typeof window !== 'undefined' && window.google?.maps?.event) {
+                window.google.maps.event.clearInstanceListeners(autocomplete);
+              }
+              setAutocomplete(null);
+              setPlaceDetails(null);
+              setAddress('');
+              setUnitNumber('');
+              setConsent(false);
+              onAddressSubmitted('');
+            }}
             className="text-xs text-green-200 hover:text-green-100 underline"
           >
             Change

@@ -135,6 +135,7 @@ export async function POST(req: NextRequest) {
             data: {
               esiid: lookup.esiid,
               utilityName: record.utilityName ?? lookup.utility ?? undefined,
+              tdspSlug: record.tdspSlug ?? lookup.territory ?? undefined,
             },
             select: selectFields,
           });
