@@ -2193,3 +2193,74 @@ defines REST token generation using `username` + `password` (service ID credenti
 - All future SMT integrations must treat SMT as a REST username/password token service per the official guide.
 
 ---
+## PC-2025-11-18-B — SMT Authorization API + UI Scaffolding
+
+Context:
+- SMT auth requirements are documented in `docs/SMT_AUTH_MODEL.md` and the `SmtAuthorization`
+  Prisma model is defined in `prisma/schema.prisma` and `types/smt.ts`.
+- Due to migration drift on the shared DigitalOcean Postgres instance, Prisma migrations
+  are temporarily paused and `SmtAuthorization` may not yet exist in the live DB schema.
+- SMT JWT token flow is handled out-of-band via the droplet-based token proxy and must
+  NOT be wired directly from Vercel (see `docs/SMT_ENV_VARS.md` and `CHAT_BOOTSTRAP.txt`).
+
+Change:
+- Implemented a user-facing SMT Authorization API:
+  - `POST /api/smt/authorization` (App Router)
+    - Uses the authenticated (magic-link) user as the source of `userId` and `contactEmail`.
+    - Accepts JSON body: `{ houseAddressId, customerName, contactPhone?, consent }`.
+    - Looks up `HouseAddress` by `houseAddressId` and snapshots:
+      - Address fields (line1/line2/city/state/ZIP).
+      - `esiid`, `tdspSlug`/`utilityName` → `tdspCode`/`tdspName`.
+    - Automatically sets a 12-month authorization window:
+      - `authorizationStartDate` = today (date-only semantics).
+      - `authorizationEndDate` = +12 months.
+    - Sets consent flags to `true`:
+      - `allowIntervalUsage`, `allowHistoricalBilling`, `allowSubscription`.
+    - Fills `smtRequestorId` / `smtRequestorAuthId` from env (`SMT_REQUESTOR_ID`,
+      `SMT_REQUESTOR_AUTH_ID`) with safe defaults when missing.
+    - Persists via `prisma.smtAuthorization.create` (currently via a `prismaAny` cast
+      until Prisma client types are regenerated).
+
+- Implemented an admin SMT Authorization listing endpoint:
+  - `GET /api/admin/smt/authorizations`
+    - Gated by `x-admin-token` against `ADMIN_TOKEN` (consistent with other admin routes).
+    - Returns recent SMT authorization rows for inspection, with optional `?limit=` query.
+
+- Added a reusable SMT Authorization form component:
+  - `components/smt/SmtAuthorizationForm.tsx`
+    - Client component expecting preloaded data from the dashboard:
+      - `houseAddressId`, address fields, `esiid`, `tdspName`, and `contactEmail`.
+    - Renders read-only address, ESIID, TDSP, and contact email.
+    - Collects:
+      - `customerName` (as on the bill).
+      - Optional `contactPhone`.
+      - A single consent checkbox for 12-month SMT access.
+    - Submits to `POST /api/smt/authorization` and surfaces basic success/error messaging.
+
+Notes / TODO:
+- Prisma migrations:
+  - `npx prisma migrate dev` currently reports drift due to a missing historical migration
+    (`20251107020101_add_ercot_esiid_index`). We must NOT run `prisma migrate reset` on the
+    shared DO database.
+  - A future, dedicated step will reconcile Prisma migration history with the live DB
+    (reconstructing the missing ERCOT migration) before applying the `SmtAuthorization`
+    table migration in prod.
+- Prisma client:
+  - `prismaAny.smtAuthorization` is a temporary workaround until `npx prisma generate` can
+    be run from an environment with both the corrected schema and a safe DB connection.
+
+Next Steps (future plan items):
+1. Reconcile Prisma migration drift with the existing DO Postgres instance:
+   - Recreate the missing ERCOT ESIID migration locally to match the live schema.
+   - Add and apply the `SmtAuthorization` migration without resetting or dropping data.
+2. Regenerate Prisma client types (`npx prisma generate`) and replace `prismaAny` casts
+   with proper typed access to `prisma.smtAuthorization`.
+3. Wire `SmtAuthorizationForm` into the appropriate dashboard page:
+   - After Google address + WattBuy lookup (when `HouseAddress` and `esiid`/TDSP are known).
+   - Use real session-derived user data instead of any temporary passthroughs.
+4. Add automated tests (API + UI) following `docs/TESTING_API.md` patterns to verify:
+   - SMT Authorization creation flow.
+   - Admin listing behavior.
+   - Validation of missing consent / name / ESIID.
+
+---
