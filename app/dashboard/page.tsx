@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { useState, useEffect, useCallback } from 'react';
 import SmartMeterSection from '../../components/SmartMeterSection';
 import QuickAddressEntry from '../../components/QuickAddressEntry';
-import { SmtAuthorizationForm } from '@/components/smt/SmtAuthorizationForm';
 
 interface HouseAddressSummary {
   id: string;
@@ -50,20 +49,6 @@ function formatHouseAddress(address: HouseAddressSummary | null): string {
     `${address.addressCity}, ${address.addressState} ${address.addressZip5}`,
   ].filter(Boolean);
   return parts.join(', ');
-}
-
-function tdspCodeFromAddress(address: HouseAddressSummary): string {
-  if (address.tdspSlug) {
-    return address.tdspSlug.toUpperCase();
-  }
-  if (address.utilityName) {
-    return address.utilityName.replace(/\s+/g, '_').toUpperCase();
-  }
-  return 'UNKNOWN';
-}
-
-function tdspNameFromAddress(address: HouseAddressSummary): string {
-  return address.utilityName || address.tdspSlug?.toUpperCase() || 'Unknown Utility';
 }
 
 export default function DashboardPage() {
@@ -163,53 +148,6 @@ export default function DashboardPage() {
     );
   }
   const houseAddress = dashboardData?.address ?? null;
-  const hasTdspOrUtility =
-    houseAddress?.tdspSlug ??
-    (houseAddress as any)?.tdsp ??
-    houseAddress?.utilityName ??
-    (houseAddress as any)?.utility?.name ??
-    null;
-  const showSmtAuthorizationForm = Boolean(
-    dashboardData?.user?.id &&
-      dashboardData?.user?.email &&
-      houseAddress?.id &&
-      (houseAddress.houseId ?? houseAddress.id) &&
-      houseAddress?.esiid &&
-      hasTdspOrUtility,
-  );
-
-  const tdspName =
-    (houseAddress as any)?.tdspName ??
-    houseAddress?.tdspSlug ??
-    (houseAddress as any)?.tdsp ??
-    houseAddress?.utilityName ??
-    (houseAddress as any)?.utility?.name ??
-    'Unknown Utility';
-
-  const serviceAddressLine1 =
-    (houseAddress as any)?.addressLine1 ??
-    (houseAddress as any)?.line1 ??
-    (houseAddress as any)?.street ??
-    '';
-  const rawLine2 =
-    (houseAddress as any)?.addressLine2 ??
-    (houseAddress as any)?.line2 ??
-    null;
-  const serviceAddressLine2 =
-    rawLine2 && String(rawLine2).trim().length > 0 ? String(rawLine2).trim() : null;
-  const serviceCity =
-    (houseAddress as any)?.addressCity ??
-    (houseAddress as any)?.city ??
-    '';
-  const serviceState =
-    (houseAddress as any)?.addressState ??
-    (houseAddress as any)?.state ??
-    '';
-  const serviceZip =
-    (houseAddress as any)?.addressZip5 ??
-    (houseAddress as any)?.zip5 ??
-    (houseAddress as any)?.postalCode ??
-    '';
 
   return (
     <div className="min-h-screen bg-brand-white">
@@ -427,29 +365,24 @@ export default function DashboardPage() {
         </section>
       )}
 
-      {/* SMT Authorization Form - only show when we have resolved ESIID + TDSP */}
-      {showSmtAuthorizationForm && dashboardData?.user && houseAddress && (
-        <section className="py-16 px-4 bg-brand-white">
-          <div className="max-w-4xl mx-auto">
-            <div className="bg-white p-8 rounded-2xl border-2 border-brand-navy shadow-lg">
-              <SmtAuthorizationForm
-                userId={dashboardData.user.id}
-                contactEmail={dashboardData.user.email}
-                houseAddressId={houseAddress.id}
-                houseId={houseAddress.houseId ?? houseAddress.id}
-                esiid={houseAddress.esiid!}
-                serviceAddressLine1={serviceAddressLine1}
-                serviceAddressLine2={serviceAddressLine2}
-                serviceCity={serviceCity}
-                serviceState={serviceState}
-                serviceZip={serviceZip}
-                tdspCode={tdspCodeFromAddress(houseAddress)}
-                tdspName={tdspName}
-              />
-            </div>
+      <section className="px-4 mt-8">
+        <div className="max-w-4xl mx-auto border border-brand-navy/20 rounded-xl p-6 bg-white shadow-sm">
+          <h2 className="text-xl font-semibold text-brand-navy">
+            Smart Meter Texas (SMT)
+          </h2>
+          <p className="mt-2 text-sm text-slate-600">
+            Connect directly to your smart meter so IntelliWatt can automatically pull your real interval and billing data.
+          </p>
+          <div className="mt-4">
+            <Link
+              href="/dashboard/api#smt"
+              className="inline-flex items-center px-4 py-2 rounded-lg bg-brand-navy text-white text-sm font-medium hover:bg-brand-navy/90"
+            >
+              Connect SMT
+            </Link>
           </div>
-        </section>
-      )}
+        </div>
+      </section>
 
       {/* Stats Section - Only show if address is entered */}
       {userAddress && (
