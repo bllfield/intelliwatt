@@ -69,6 +69,9 @@ export async function POST(req: NextRequest) {
         addressCity: true,
         addressState: true,
         addressZip5: true,
+        placeId: true,
+        lat: true,
+        lng: true,
         esiid: true,
         tdspSlug: true,
         utilityName: true,
@@ -82,6 +85,14 @@ export async function POST(req: NextRequest) {
     const existingStateLower = existingAddress?.addressState?.trim().toLowerCase() ?? "";
     const existingZip = existingAddress?.addressZip5?.trim() ?? "";
     const normalizedLine2Lower = (normalized.addressLine2 ?? "").trim().toLowerCase();
+    const existingPlaceId = existingAddress?.placeId?.trim() ?? "";
+    const normalizedPlaceId = (normalized.placeId ?? "").trim();
+    const existingLat = existingAddress?.lat ?? null;
+    const existingLng = existingAddress?.lng ?? null;
+    const normalizedLat = normalized.lat ?? null;
+    const normalizedLng = normalized.lng ?? null;
+    const latChanged = normalizedLat !== existingLat;
+    const lngChanged = normalizedLng !== existingLng;
 
     const addressChanged =
       !existingAddress ||
@@ -89,7 +100,10 @@ export async function POST(req: NextRequest) {
       existingLine2Lower !== normalizedLine2Lower ||
       existingCityLower !== normalizedCityLower ||
       existingStateLower !== normalizedStateLower ||
-      existingZip !== normalizedZip;
+      existingZip !== normalizedZip ||
+      existingPlaceId !== normalizedPlaceId ||
+      latChanged ||
+      lngChanged;
 
     console.log("[address/save] address comparison", {
       addressChanged,
@@ -98,6 +112,12 @@ export async function POST(req: NextRequest) {
       existingLine1: existingAddress?.addressLine1 ?? null,
       incomingLine2: normalized.addressLine2 ?? null,
       existingLine2: existingAddress?.addressLine2 ?? null,
+      incomingPlaceId: normalized.placeId ?? null,
+      existingPlaceId,
+      incomingLat: normalizedLat,
+      existingLat,
+      incomingLng: normalizedLng,
+      existingLng,
     });
     const addressData = {
       userId,
