@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import { parseManualAddress } from '@/lib/parseManualAddress';
 import { parseGooglePlace, buildLegacyPlace, type ParsedPlace } from '@/lib/google/parsePlace';
 
@@ -10,6 +11,7 @@ interface QuickAddressEntryProps {
 }
 
 export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: QuickAddressEntryProps) {
+  const router = useRouter();
   const [mounted, setMounted] = useState(false);
   const [address, setAddress] = useState(userAddress || '');
   const [unitNumber, setUnitNumber] = useState('');
@@ -310,6 +312,7 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
         parsedAddressRef.current = null;
         
         // Address saved successfully - user can see the updated UI
+        router.push('/dashboard/api#smt');
       } else {
         const error = await response.json();
         console.error('Address save failed:', error);
