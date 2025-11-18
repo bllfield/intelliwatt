@@ -24,15 +24,41 @@ export type AddressResolveResult = {
  * Resolve address to ESIID using the configured provider (currently WattBuy).
  * Returns null esiid if not found, with error details in raw.
  */
+function formatProviderLine2(rawLine2: string | null | undefined): string | null {
+  if (!rawLine2) return null;
+  const trimmed = rawLine2.trim();
+  if (!trimmed) return null;
+
+  const normalized = trimmed.replace(/\s+/g, ' ');
+  const lower = normalized.toLowerCase();
+
+  // If it already describes the unit (apt, unit, suite, #, etc), respect it.
+  const knownPrefixes = ['apt', 'apartment', 'unit', 'suite', 'ste', 'building', 'bldg', '#'];
+  if (
+    knownPrefixes.some((prefix) => lower.startsWith(prefix)) ||
+    /[a-z]/.test(lower.replace(/^#/, '').trim())
+  ) {
+    // ensure we don't leave a bare "#" with no space
+    if (normalized.startsWith('#') && normalized.length > 1) {
+      return `Apt ${normalized.slice(1).trim()}`;
+    }
+    return normalized;
+  }
+
+  return `Apt ${normalized}`;
+}
+
 export async function resolveAddressToEsiid(addr: AddressInput): Promise<AddressResolveResult> {
   try {
     const trimmedLine2 =
       typeof addr.line2 === 'string' && addr.line2.trim().length > 0 ? addr.line2.trim() : null;
-    const compositeLine1 = trimmedLine2 ? `${addr.line1} ${trimmedLine2}` : addr.line1;
+    const providerLine2 = formatProviderLine2(trimmedLine2);
+    const compositeLine1 = providerLine2 ? `${addr.line1}, ${providerLine2}` : addr.line1;
 
     console.log('[resolveAddressToEsiid] request', {
       ...addr,
       line2: trimmedLine2,
+      providerLine2,
       compositeLine1,
     });
 
