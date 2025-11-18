@@ -77,13 +77,16 @@ export async function POST(req: NextRequest) {
     });
 
     const existingLine1Lower = existingAddress?.addressLine1?.trim().toLowerCase() ?? "";
+    const existingLine2Lower = existingAddress?.addressLine2?.trim().toLowerCase() ?? "";
     const existingCityLower = existingAddress?.addressCity?.trim().toLowerCase() ?? "";
     const existingStateLower = existingAddress?.addressState?.trim().toLowerCase() ?? "";
     const existingZip = existingAddress?.addressZip5?.trim() ?? "";
+    const normalizedLine2Lower = (normalized.addressLine2 ?? "").trim().toLowerCase();
 
     const addressChanged =
       !existingAddress ||
       existingLine1Lower !== normalizedLine1Lower ||
+      existingLine2Lower !== normalizedLine2Lower ||
       existingCityLower !== normalizedCityLower ||
       existingStateLower !== normalizedStateLower ||
       existingZip !== normalizedZip;
@@ -93,6 +96,8 @@ export async function POST(req: NextRequest) {
       existingEsiid: existingAddress?.esiid ?? null,
       incomingLine1: normalized.addressLine1,
       existingLine1: existingAddress?.addressLine1 ?? null,
+      incomingLine2: normalized.addressLine2 ?? null,
+      existingLine2: existingAddress?.addressLine2 ?? null,
     });
     const addressData = {
       userId,
