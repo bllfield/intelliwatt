@@ -157,6 +157,50 @@ Invoke-RestMethod -Headers $headers -Uri "https://<your-preview>.vercel.app/api/
 
 - Payload must include `encoding: "base64"` for file content in `content_b64`.
 
+SMT Droplet Environment Variables (2025-11-15)
+
+These variables must be configured on the DigitalOcean droplet for SMT ingest to work.
+
+Core SMT ingest
+
+SMT_HOST  
+Smart Meter Texas SFTP host, e.g. ftp.smartmetertexas.biz.
+
+SMT_USER  
+SMT SFTP username, e.g. intellipathsolutionsftp.
+
+SMT_KEY  
+Path to the private SSH key used for SMT SFTP, e.g. /home/deploy/.ssh/intelliwatt_smt_rsa4096.
+
+SMT_REMOTE_DIR  
+Remote directory on SMT SFTP (currently / while adhocusage is in use).
+
+SMT_LOCAL_DIR  
+Local inbox for SMT files on the droplet, e.g. /home/deploy/smt_inbox.
+
+IntelliWatt API access
+
+INTELLIWATT_BASE_URL  
+Base URL for the main app, e.g. https://intelliwatt.com.
+
+ADMIN_TOKEN  
+64+ char admin token. Used as x-admin-token header when calling
+/api/admin/smt/pull, /api/admin/debug/smt/*, /api/admin/analysis/*, etc.
+
+SMT ingest behavior
+
+SOURCE_TAG  
+Optional label for SMT ingest source (defaults used in script, e.g. adhocusage).
+
+ESIID_DEFAULT  
+Default ESIID to use when a filename does not contain a parseable ESIID.
+
+METER_DEFAULT  
+Default meter ID when a filename does not contain a parseable meter (e.g. M1).
+
+These env vars are consumed by deploy/smt/fetch_and_post.sh and the Node upload server. Changes
+here must be kept in sync with deployment notes in docs/DEPLOY_SMT_INGEST.md.
+
 ## SMT Upload Relay (2025-11-13)
 
 **Client (Next.js)**

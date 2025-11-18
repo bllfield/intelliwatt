@@ -2133,6 +2133,39 @@ Constraints / Guidance:
   state whether it supersedes PC-2025-11-17-A and PC-2025-11-18-A.
 
 ---
+## PC-2025-11-18-A — Add Prisma SmtAuthorization Model
+
+**Context**
+
+- IntelliWatt now uses a documented `SmtAuthorization` spec (see `docs/SMT_AUTH_MODEL.md`)
+  to capture customer consent for Smart Meter Texas data access.
+- The spec assumes:
+  - User is authenticated via magic link (`userId` and `User.email` are known).
+  - Address + ESIID + TDSP come from Google Maps + WattBuy and are stored in `HouseAddress`.
+  - The SMT Authorization form only collects customer name, optional phone, and a single
+    12-month consent checkbox; everything else is prefilled or system-set.
+
+**Change**
+
+- Added Prisma model `SmtAuthorization` with:
+  - Foreign keys: `userId`, `houseId`, `houseAddressId`.
+  - SMT identity fields: `esiid`, `meterNumber?`, `tdspCode`, `tdspName`.
+  - Address snapshot: `serviceAddressLine1/2`, `serviceCity`, `serviceState`, `serviceZip`.
+  - Authorization window: `authorizationStartDate`, `authorizationEndDate` (DateTime).
+  - Consent flags: `allowIntervalUsage`, `allowHistoricalBilling`, `allowSubscription`.
+  - Contact info: `contactEmail` (from `User.email`), `contactPhone?`.
+  - Internal identifiers: `smtRequestorId`, `smtRequestorAuthId`.
+  - Timestamps: `createdAt`, `updatedAt`.
+
+**Notes**
+
+- This step defines the DB model only; no API or UI changes yet.
+- Future steps will:
+  - Add a Prisma migration.
+  - Implement create/read API routes for SMT authorizations.
+  - Wire the SMT Authorization form on the frontend to create `SmtAuthorization` records.
+
+---
 ### PC-2025-11-17-A — SMT REST Token Auth (Override Old JWT Design)
 
 **Rationale**

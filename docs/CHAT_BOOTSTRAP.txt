@@ -1,39 +1,133 @@
-You are ChatGPT operating inside the IntelliWatt/IntelliPath project.
+🔥 INTELLIWATT · SMT JWT STATUS BOOTSTRAP (UPDATED 2025-11-17)
 
-Follow docs/CHATGPT_HOUSE_RULES.md exactly:
+You are ChatGPT inside the IntelliWatt/IntelliPath project.
 
-One step per answer.
-
-Start with where to run it (local PowerShell, droplet path, or Vercel UI), what to set (exact variables/keys), and what to paste.
-
-Anything Cursor can do must be delivered as a single Cursor Agent Block.
-
-No optional fluff. Do what is required to make it function correctly.
-
-For major changes, include a Cursor Block to update docs/PROJECT_PLAN.md and clearly state that it overrides prior guidance.
-
-Assume I know nothing. Write commands I can paste verbatim.
-
-Default model: GPT-5 Codex.
-
-I will say done when the step is complete. You will then give me the next step.
-
-Read all the project files and make sure you understand the project
+Follow docs/CHATGPT_HOUSE_RULES.md:
+- One step per answer
+- Always say where to run things (PowerShell, droplet, Vercel UI, Cursor Workbench)
+- Anything Cursor edits must be a single Cursor Agent Block
+- No extra fluff; only what’s required to make it function
+- Default model: GPT-5 Codex
+- Wait for me to say “done” after each step
 
 ========================================
-SMT INTEGRATION (DO NOT OVERRIDE)
+SMT AUTH STATE (DO NOT REGRESS)
 ========================================
 
-- Smart Meter Texas now requires SFTP for file delivery **and** REST/SOAP APIs with JWT access tokens.
-- Market Notice SMT-M-A051425-10 (May 14, 2025) decommissioned old FTPS + non-JWT API flows.
-- Use the SMT Interface Guide v2 token endpoint:
-  ```bash
-  POST ${SMT_API_BASE_URL}/v2/token/
-  {
-    "username": "<service-id>",
-    "password": "<password>"
-  }
-  ```
-- All SMT API calls must include `Authorization: Bearer <accessToken>`.
-- NEVER suggest legacy “no-JWT” or FTPS-only approaches unless a newer Plan Change explicitly authorizes it.
+Smart Meter Texas market notice SMT-M-A051425-10 (May 14, 2025):
+- FTPS and non-JWT API flows are decommissioned.
+- ONLY SFTP (SSH) + REST API with JWT tokens are valid.
 
+Canonical SMT REST auth (2025+):
+
+Token endpoint:
+- POST ${SMT_API_BASE_URL}/v2/token/
+
+Body (JSON):
+{
+  "username": "<SMT_USERNAME>",   // API Service ID
+  "password": "<SMT_PASSWORD>"    // API Service ID password
+}
+
+Response:
+- statusCode: 200
+- accessToken: "<JWT>"
+- tokenType: "Bearer"
+- expiresIn: 3600
+- issuedAt / expiresAt
+
+All SMT REST calls must send:
+- Authorization: Bearer <accessToken>
+
+DO NOT:
+- Use /oauth/token
+- Use OAuth2 client_credentials
+- Use SMT_JWT_CLIENT_ID / SMT_JWT_CLIENT_SECRET
+- Suggest FTPS-only API flows
+
+========================================
+WORKING PROD CREDS (VERIFIED)
+========================================
+
+We have successfully tested on the SMT droplet:
+
+- SMT_API_BASE_URL = https://services.smartmetertexas.net
+- SMT_USERNAME     = INTELLIWATTAPI
+- SMT_PASSWORD     = (the SMT API Service ID password set in the SMT portal)
+
+Droplet test script (already created and verified):
+
+- Host: intelliwatt-smt-proxy
+- Script: /home/deploy/smt_token_test.sh
+
+This script does:
+
+SMT_API_BASE_URL="${SMT_API_BASE_URL:-https://services.smartmetertexas.net}"
+SMT_USERNAME="${SMT_USERNAME:-INTELLIWATTAPI}"
+
+Prompts for password, then:
+
+POST https://services.smartmetertexas.net/v2/token/
+with { username: SMT_USERNAME, password: SMT_PASSWORD }
+
+and returns a 200 with:
+- accessToken (JWT)
+- tokenType: "Bearer"
+- expiresIn, issuedAt, expiresAt
+
+This is the **canonical live SMT auth test** (droplet IP is whitelisted).
+
+========================================
+VERCEL BACKEND ROUTE BEHAVIOR
+========================================
+
+Vercel IPs are NOT whitelisted by SMT, so calling SMT directly from Vercel times out.
+
+Because of that:
+
+- Route: GET /api/admin/smt/token
+- Behavior:
+  - Enforces x-admin-token via ADMIN_TOKEN (same as other admin routes)
+  - Returns a JSON stub with HTTP status 501:
+    {
+      ok: false,
+      status: 501,
+      message: "SMT JWT token must be tested from the whitelisted SMT droplet, not from Vercel.",
+      instructions: {
+        dropletHost: "intelliwatt-smt-proxy",
+        scriptPath: "/home/deploy/smt_token_test.sh",
+        note: "This route intentionally returns 501 because SMT only whitelists the droplet IP. Use the droplet script for live JWT verification."
+      },
+      integration: {
+        endpoint: "https://services.smartmetertexas.net/v2/token/",
+        authFlow: "POST with { username: SMT_USERNAME, password: SMT_PASSWORD }",
+        usernameEnv: "SMT_USERNAME=INTELLIWATTAPI",
+        baseUrlEnv: "SMT_API_BASE_URL=https://services.smartmetertexas.net"
+      }
+    }
+
+PowerShell test pattern (from my laptop) is ONLY to confirm this admin route returns the stub, NOT to talk to SMT directly:
+
+$BASE_URL    = "https://intelliwatt.com"
+$ADMIN_TOKEN = "<64-char ADMIN_TOKEN>"
+
+Invoke-RestMethod `
+  -Method Get `
+  -Uri "$BASE_URL/api/admin/smt/token" `
+  -Headers @{ "x-admin-token" = $ADMIN_TOKEN }
+
+Expected: 501 with the JSON instructions above.
+
+========================================
+WHAT THE NEXT GPT SHOULD DO
+========================================
+
+- Assume SMT JWT auth **already works** using:
+  - SMT_API_BASE_URL = https://services.smartmetertexas.net
+  - SMT_USERNAME     = INTELLIWATTAPI
+  - SMT_PASSWORD     = configured in SMT portal
+- NEVER reintroduce /oauth/token, client_credentials, or FTPS-only flows.
+- If SMT auth needs to be verified, instruct me to:
+  - SSH to intelliwatt-smt-proxy
+  - Run /home/deploy/smt_token_test.sh
+- Treat /api/admin/smt/token as a documentation/diagnostic stub, not as a live SMT proxy, unless we explicitly decide to add a droplet-backed proxy in a future step.

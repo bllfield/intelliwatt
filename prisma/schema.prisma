@@ -20,6 +20,7 @@ model User {
   usage          UsageData[]
   profile        UserProfile?
   utilityPlans   UtilityPlan[]
+  smtAuthorizations SmtAuthorization[]
 }
 
 model UserProfile {
@@ -386,6 +387,8 @@ model HouseAddress {
   createdAt             DateTime         @default(now())
   updatedAt             DateTime         @updatedAt
 
+  smtAuthorizations SmtAuthorization[]
+
   @@index([placeId])
   @@index([addressState, addressZip5])
   @@index([esiid])
@@ -422,6 +425,52 @@ model SmtInterval {
 
   @@unique([esiid, meter, ts])
   @@index([esiid, meter, ts], map: "esiid_meter_ts_idx")
+}
+
+model SmtAuthorization {
+  id              String   @id @default(cuid())
+
+  userId          String
+  houseId         String
+  houseAddressId  String
+
+  esiid           String
+  meterNumber     String?
+
+  customerName    String
+
+  serviceAddressLine1 String
+  serviceAddressLine2 String?
+  serviceCity          String
+  serviceState         String
+  serviceZip           String
+
+  tdspCode        String
+  tdspName        String
+
+  authorizationStartDate DateTime
+  authorizationEndDate   DateTime
+
+  allowIntervalUsage     Boolean
+  allowHistoricalBilling Boolean
+  allowSubscription      Boolean
+
+  contactEmail           String
+  contactPhone           String?
+
+  smtRequestorId     String
+  smtRequestorAuthId String
+
+  user         User         @relation(fields: [userId], references: [id])
+  houseAddress HouseAddress @relation(fields: [houseAddressId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([houseId])
+  @@index([houseAddressId])
+  @@index([esiid])
 }
 
 /// RatePlan - normalized electricity plans (REP plans and utility tariffs)
