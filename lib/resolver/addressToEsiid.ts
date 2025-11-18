@@ -25,6 +25,7 @@ export type AddressResolveResult = {
  */
 export async function resolveAddressToEsiid(addr: AddressInput): Promise<AddressResolveResult> {
   try {
+    console.log("[resolveAddressToEsiid] request", addr);
     const info = await wbGetElectricityInfo({
       address: addr.line1,
       city: addr.city,
@@ -34,6 +35,10 @@ export async function resolveAddressToEsiid(addr: AddressInput): Promise<Address
     });
 
     if (!info.ok) {
+      console.warn("[resolveAddressToEsiid] wattbuy request failed", {
+        status: info.status,
+        text: info.text ?? null,
+      });
       return {
         esiid: null,
         utility: null,
@@ -44,6 +49,12 @@ export async function resolveAddressToEsiid(addr: AddressInput): Promise<Address
 
     const data = info.data ?? null;
     const details = extractEsiidDetails(data);
+    console.log("[resolveAddressToEsiid] response", {
+      status: info.status,
+      hasEsiid: Boolean(details.esiid),
+      utility: details.utility ?? null,
+      territory: details.territory ?? null,
+    });
 
     return {
       esiid: details.esiid,
@@ -52,6 +63,7 @@ export async function resolveAddressToEsiid(addr: AddressInput): Promise<Address
       raw: data,
     };
   } catch (err) {
+    console.error("[resolveAddressToEsiid] error", err);
     return {
       esiid: null,
       utility: null,
