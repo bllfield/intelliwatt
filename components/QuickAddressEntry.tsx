@@ -84,10 +84,10 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
           const place = instance.getPlace();
           console.log('Debug: Place selected:', place);
           setPlaceDetails(place);
-          if (place.formatted_address) {
-            console.log('Debug: Setting address to:', place.formatted_address);
-            setAddress(place.formatted_address);
-          }
+        if (place.formatted_address) {
+          console.log('Debug: Setting address to:', place.formatted_address);
+          setAddress(place.formatted_address);
+        }
         });
 
         setAutocomplete(instance);
@@ -140,10 +140,10 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
       // Check if the current address matches what the user typed vs what Google selected
       // If placeDetails exists but the formatted address doesn't match what user typed, it's a manual entry
       let googlePlaceDetails;
-      if (placeDetails && placeDetails.formatted_address === address.trim()) {
-        // User selected from Google autocomplete - use the full place details
-        googlePlaceDetails = placeDetails;
+      if (placeDetails && placeDetails.formatted_address) {
         console.log('Using Google autocomplete place details');
+        setAddress(placeDetails.formatted_address);
+        googlePlaceDetails = placeDetails;
       } else {
         // User typed manually - parse the manual address
         googlePlaceDetails = parseManualAddress(address);
