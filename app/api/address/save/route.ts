@@ -128,6 +128,11 @@ export async function POST(req: NextRequest) {
           state: normalized.addressState,
           zip: normalized.addressZip5,
         });
+        console.log("[address/save] resolveAddressToEsiid result", {
+          hasEsiid: Boolean(lookup.esiid),
+          utility: lookup.utility ?? null,
+          territory: lookup.territory ?? null,
+        });
 
         if (lookup.esiid) {
           record = await prisma.houseAddress.update({

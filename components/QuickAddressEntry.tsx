@@ -15,6 +15,7 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [consent, setConsent] = useState(false);
   const [showTerms, setShowTerms] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [autocomplete, setAutocomplete] = useState<any>(null);
   const [googleLoaded, setGoogleLoaded] = useState(false);
   const [placeDetails, setPlaceDetails] = useState<any>(null); // Store full Google Place object
@@ -114,6 +115,7 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     console.log('Debug: Submit button clicked', { address: address.trim(), consent, isSubmitting });
+    setError(null);
     
     if (!address.trim() || !consent) {
       console.log('Debug: Validation failed', { 
@@ -146,6 +148,17 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
         // User typed manually - parse the manual address
         googlePlaceDetails = parseManualAddress(address);
         console.log('Using manual address parsing');
+      }
+
+      const components = googlePlaceDetails.address_components ?? [];
+      const hasPostal = components.some((c: any) => Array.isArray(c.types) && c.types.includes('postal_code'));
+      const hasState = components.some((c: any) => Array.isArray(c.types) && c.types.includes('administrative_area_level_1'));
+      const hasCity = components.some((c: any) => Array.isArray(c.types) && (c.types.includes('locality') || c.types.includes('sublocality') || c.types.includes('postal_town')));
+
+      if (!hasPostal || !hasState || !hasCity) {
+        setError('Please enter the full service address, including city, state, and ZIP code.');
+        setIsSubmitting(false);
+        return;
       }
 
       // Save address to database using the new API
@@ -181,6 +194,7 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
         
         // Call the parent callback
         onAddressSubmitted(address);
+        setError(null);
         
         // Address saved successfully - user can see the updated UI
       } else {
@@ -282,6 +296,12 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
               {isSubmitting ? 'Connecting...' : 'Connect'}
             </button>
         </div>
+
+      {error && (
+        <p className="text-sm text-red-300">
+          {error}
+        </p>
+      )}
 
         {/* Smart Meter Consent */}
         <div className="space-y-3">
