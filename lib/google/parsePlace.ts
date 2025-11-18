@@ -11,8 +11,8 @@ export type ParsedPlace = {
 };
 
 type AddressComponent = {
-  long_name?: string;
-  short_name?: string;
+  long_name: string;
+  short_name: string;
   types: string[];
 };
 
@@ -27,12 +27,31 @@ type PlaceResultLike = {
   };
 };
 
-function pick(
-  components: AddressComponent[] | undefined,
-  type: string,
-  useShort = false,
-): string {
-  if (!components) return "";
+function normalizeComponents(raw: any[]): AddressComponent[] {
+  return raw.map((component) => {
+    if (!component) {
+      return { long_name: "", short_name: "", types: [] };
+    }
+
+    if (component.long_name !== undefined || component.short_name !== undefined) {
+      return {
+        long_name: component.long_name ?? "",
+        short_name: component.short_name ?? component.long_name ?? "",
+        types: component.types ?? [],
+      };
+    }
+
+    const longText = component.longText ?? component.text ?? "";
+    const shortText = component.shortText ?? component.text ?? longText;
+    return {
+      long_name: longText,
+      short_name: shortText,
+      types: component.types ?? [],
+    };
+  });
+}
+
+function pick(components: AddressComponent[], type: string, useShort = false): string {
   const component = components.find((c) => c.types.includes(type));
   if (!component) return "";
   const value = useShort ? component.short_name : component.long_name;
@@ -59,7 +78,9 @@ function resolveLatLng(location: any) {
 export function parseGooglePlace(place: PlaceResultLike | null | undefined): ParsedPlace | null {
   if (!place) return null;
 
-  const components = place.address_components ?? [];
+  const rawComponents =
+    (place as any)?.address_components ?? (place as any)?.addressComponents ?? [];
+  const components = normalizeComponents(Array.isArray(rawComponents) ? rawComponents : []);
   if (components.length === 0) {
     return null;
   }
@@ -80,9 +101,9 @@ export function parseGooglePlace(place: PlaceResultLike | null | undefined): Par
 
   const line1 = [streetNumber, route].filter(Boolean).join(" ").trim();
 
-  const { lat, lng } = resolveLatLng(place.geometry?.location ?? null);
+  const { lat, lng } = resolveLatLng((place as any)?.location ?? place.geometry?.location ?? null);
 
-  const formattedAddress = place.formatted_address ?? line1;
+  const formattedAddress = (place as any)?.formattedAddress ?? place.formatted_address ?? line1;
 
   return {
     line1,

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { parseManualAddress } from '@/lib/parseManualAddress';
 import { parseGooglePlace, type ParsedPlace } from '@/lib/google/parsePlace';
 
@@ -17,130 +17,92 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
   const [consent, setConsent] = useState(false);
   const [showTerms, setShowTerms] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [autocomplete, setAutocomplete] = useState<any>(null);
-  const [googleLoaded, setGoogleLoaded] = useState(false);
   const [placeDetails, setPlaceDetails] = useState<any>(null); // Store full Google Place object
-  const inputRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const autocompleteElementRef = useRef<any>(null);
   const placeDetailsRef = useRef<any>(null);
   const parsedAddressRef = useRef<ParsedPlace | null>(null);
+  const addressValueRef = useRef(address);
+  const [useFallbackInput, setUseFallbackInput] = useState(true);
+  const [reinitNonce, setReinitNonce] = useState(0);
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  const ensurePlaceHasDetails = useCallback(async (place: any) => {
-    const googleObj = typeof window !== 'undefined' ? (window as any).google : undefined;
-    if (!googleObj?.maps?.places) {
-      return null;
-    }
-
-    if (place?.address_components?.length) {
-      return place;
-    }
-
-    if (!place?.place_id) {
-      return null;
-    }
-
-    return await new Promise<any>((resolve) => {
-      try {
-        const service = new googleObj.maps.places.PlacesService(document.createElement('div'));
-        service.getDetails(
-          {
-            placeId: place.place_id,
-            fields: ['address_components', 'geometry', 'formatted_address', 'place_id'],
-          },
-          (result: any, status: string) => {
-            if (status === googleObj.maps.places.PlacesServiceStatus.OK && result) {
-              resolve(result);
-            } else {
-              resolve(null);
-            }
-          },
-        );
-      } catch (err) {
-        console.warn('Failed to fetch place details', err);
-        resolve(null);
-      }
-    });
-  }, []);
-
-  const handleAddressChange = useCallback((value: string) => {
-    setAddress(value);
-    placeDetailsRef.current = null;
-    parsedAddressRef.current = null;
-    setPlaceDetails(null);
-  }, []);
+  useEffect(() => {
+    addressValueRef.current = address;
+  }, [address]);
 
   useEffect(() => {
     if (!mounted) return;
-
-    if (userAddress) {
-      if (autocomplete && typeof window !== 'undefined') {
-        try {
-          (window as any)?.google?.maps?.event?.clearInstanceListeners?.(autocomplete);
-        } catch (err) {
-          console.warn('Google Maps cleanup skipped', err);
-        }
-      }
-      if (autocomplete) {
-        setAutocomplete(null);
-      }
-      return;
-    }
-
-    setGoogleLoaded(true);
-
     let cancelled = false;
-    let retryTimer: number | undefined;
-    let listener: { remove: () => void } | null = null;
+    let widget: any = null;
+    let handleInput: ((event: any) => void) | null = null;
+    let handleSelect: ((event: any) => void) | null = null;
 
-    const attemptInit = () => {
-      if (cancelled || autocomplete) {
-        setGoogleLoaded(true);
+    const googleObj = typeof window !== 'undefined' ? (window as any).google : undefined;
+
+    const fallback = () => {
+      if (!useFallbackInput) {
+        setUseFallbackInput(true);
+      }
+    };
+
+    async function initAutocomplete() {
+      if (!containerRef.current) {
+        fallback();
         return;
       }
 
-      const inputEl = inputRef.current;
-      if (!inputEl) {
-        retryTimer = window.setTimeout(attemptInit, 250);
-        return;
-      }
-
-      const googleObj = typeof window !== 'undefined' ? (window as any).google : undefined;
-      const hasPlaces =
-        !!googleObj &&
-        !!googleObj.maps &&
-        !!googleObj.maps.places &&
-        !!process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
-
-      if (!hasPlaces) {
-        setGoogleLoaded(true);
+      if (!googleObj?.maps?.importLibrary) {
+        console.warn('Google Maps importLibrary is not available.');
+        fallback();
         return;
       }
 
       try {
-        console.log('Debug: Initializing Google Maps autocomplete...');
-        const instance = new googleObj.maps.places.Autocomplete(inputEl, {
+        console.log('Debug: Initializing Google Maps PlaceAutocompleteElement...');
+        // @ts-ignore - PlaceAutocompleteElement typings may not be available
+        const { PlaceAutocompleteElement } = await googleObj.maps.importLibrary('places');
+
+        if (cancelled || !PlaceAutocompleteElement) {
+          fallback();
+          return;
+        }
+
+        widget = new PlaceAutocompleteElement({
           types: ['address'],
-          componentRestrictions: { country: 'us' },
-          fields: ['formatted_address', 'address_components', 'place_id'],
         });
 
-        listener = instance.addListener('place_changed', () => {
-          const place = instance.getPlace();
-          console.log('Debug: Place selected:', place);
-          ensurePlaceHasDetails(place).then((detailedPlace) => {
-            if (!detailedPlace) {
-              console.warn('Unable to resolve place details');
-              placeDetailsRef.current = null;
-              parsedAddressRef.current = null;
-              setPlaceDetails(null);
-              setError('Unable to retrieve address details. Please enter the full address manually.');
-              return;
-            }
+        widget.className =
+          'w-full rounded-md border px-3 py-3 text-sm bg-white/90 border-white/30 text-brand-navy placeholder-brand-navy/60';
+        widget.placeholder = 'Enter your service address...';
 
-            const parsed = parseGooglePlace(detailedPlace);
+        if (addressValueRef.current) {
+          widget.value = addressValueRef.current;
+        }
+
+        handleInput = (event: any) => {
+          const value = event?.target?.value ?? '';
+          addressValueRef.current = value;
+          setAddress(value);
+          parsedAddressRef.current = null;
+          placeDetailsRef.current = null;
+          setPlaceDetails(null);
+          setError(null);
+        };
+
+        handleSelect = async (event: any) => {
+          try {
+            const prediction = event?.placePrediction;
+            if (!prediction) return;
+            const place = await prediction.toPlace();
+            await place.fetchFields({
+              fields: ['addressComponents', 'formattedAddress', 'location'],
+            });
+
+            const parsed = parseGooglePlace(place);
             if (!parsed || !parsed.line1 || !parsed.city || !parsed.state || !parsed.zip) {
               console.warn('Parsed place missing key fields', parsed);
               placeDetailsRef.current = null;
@@ -151,34 +113,71 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
             }
 
             setError(null);
-            placeDetailsRef.current = detailedPlace;
+            placeDetailsRef.current = place;
             parsedAddressRef.current = parsed;
-            setPlaceDetails(detailedPlace);
+            addressValueRef.current = parsed.formattedAddress;
             setAddress(parsed.formattedAddress);
-          });
-        });
+            setPlaceDetails(place);
+          } catch (err) {
+            console.error('PlaceAutocompleteElement selection error', err);
+            placeDetailsRef.current = null;
+            parsedAddressRef.current = null;
+            setPlaceDetails(null);
+            setError('Unable to retrieve address details. Please enter the full address manually.');
+          }
+        };
 
-        setAutocomplete(instance);
-        setGoogleLoaded(true);
-        console.log('Debug: Google Maps autocomplete initialized successfully');
+        widget.addEventListener('input', handleInput);
+        widget.addEventListener('gmp-select', handleSelect);
+
+        containerRef.current.innerHTML = '';
+        containerRef.current.appendChild(widget);
+        autocompleteElementRef.current = widget;
+        if (useFallbackInput) {
+          setUseFallbackInput(false);
+        }
+        console.log('Debug: PlaceAutocompleteElement initialized successfully');
       } catch (error) {
-        console.warn('Google Places API not available, falling back to manual entry:', error);
-        setGoogleLoaded(true);
+        console.warn('Failed to initialize PlaceAutocompleteElement:', error);
+        fallback();
       }
-    };
+    }
 
-    attemptInit();
+    void initAutocomplete();
 
     return () => {
       cancelled = true;
-      if (retryTimer !== undefined) {
-        clearTimeout(retryTimer);
-      }
-      if (listener) {
-        listener.remove();
+      const currentWidget = autocompleteElementRef.current;
+      if (currentWidget) {
+        if (handleInput) {
+          currentWidget.removeEventListener('input', handleInput);
+        }
+        if (handleSelect) {
+          currentWidget.removeEventListener('gmp-select', handleSelect);
+        }
+        if (containerRef.current?.contains(currentWidget)) {
+          containerRef.current.removeChild(currentWidget);
+        }
+        autocompleteElementRef.current = null;
       }
     };
-  }, [mounted, userAddress, autocomplete, ensurePlaceHasDetails]);
+  }, [mounted, reinitNonce]);
+  useEffect(() => {
+    if (!mounted) return;
+    if (!userAddress) return;
+    if (userAddress === addressValueRef.current) return;
+
+    addressValueRef.current = userAddress;
+    setAddress(userAddress);
+    parsedAddressRef.current = null;
+    placeDetailsRef.current = null;
+    setPlaceDetails(null);
+
+    const widget = autocompleteElementRef.current;
+    if (widget) {
+      widget.value = userAddress;
+    }
+  }, [userAddress, mounted]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -316,14 +315,20 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
           </div>
           <button
             onClick={() => {
-              if (autocomplete && typeof window !== 'undefined') {
-                (window as any)?.google?.maps?.event?.clearInstanceListeners?.(autocomplete);
+              const widget = autocompleteElementRef.current;
+              if (widget && containerRef.current?.contains(widget)) {
+                containerRef.current.removeChild(widget);
+                autocompleteElementRef.current = null;
               }
-              setAutocomplete(null);
+              placeDetailsRef.current = null;
+              parsedAddressRef.current = null;
               setPlaceDetails(null);
               setAddress('');
+              addressValueRef.current = '';
               setUnitNumber('');
               setConsent(false);
+              setUseFallbackInput(true);
+              setReinitNonce((nonce) => nonce + 1);
               onAddressSubmitted('');
             }}
             className="text-xs text-green-200 hover:text-green-100 underline"
@@ -344,15 +349,26 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
           </div>
           <div className="flex-1">
             <div className="relative">
-            <input
-              ref={inputRef}
-              type="text"
-              placeholder="Enter your service address..."
-              value={address}
-              onChange={(e) => handleAddressChange(e.target.value)}
-              className="w-full px-4 py-3 text-sm bg-white/90 border border-white/30 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-blue focus:border-brand-blue text-brand-navy placeholder-brand-navy/60"
-              disabled={isSubmitting || !googleLoaded}
-            />
+              <div ref={containerRef} className="min-h-[44px]" />
+              {useFallbackInput && (
+                <input
+                  type="text"
+                  placeholder="Enter your service address..."
+                  value={address}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    addressValueRef.current = value;
+                    setAddress(value);
+                    parsedAddressRef.current = null;
+                    placeDetailsRef.current = null;
+                    setPlaceDetails(null);
+                    setError(null);
+                  }}
+                  className="w-full px-4 py-3 text-sm bg-white/90 border border-white/30 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-blue focus:border-brand-blue text-brand-navy placeholder-brand-navy/60"
+                  disabled={isSubmitting}
+                />
+              )}
+              <input type="hidden" name="serviceAddress" value={address} readOnly />
             </div>
           </div>
           
@@ -364,7 +380,7 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
               value={unitNumber}
               onChange={(e) => setUnitNumber(e.target.value)}
               className="w-full px-4 py-3 text-sm bg-white/90 border border-white/30 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-blue focus:border-brand-blue text-brand-navy placeholder-brand-navy/60"
-              disabled={isSubmitting || !googleLoaded}
+              disabled={isSubmitting}
             />
           </div>
           
