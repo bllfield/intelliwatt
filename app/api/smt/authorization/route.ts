@@ -141,7 +141,6 @@ export async function POST(req: NextRequest) {
     const smtRequestorId = getEnvOrDefault("SMT_REQUESTOR_ID", "INTELLIWATTAPI");
     const smtRequestorAuthId = getEnvOrDefault("SMT_REQUESTOR_AUTH_ID", "INTELLIWATT_AUTH_ID");
 
-    // @ts-expect-error Prisma client is generated with SmtAuthorization delegate after `prisma generate`
     const created = await prisma.smtAuthorization.create({
       data: {
         userId: user.id,
