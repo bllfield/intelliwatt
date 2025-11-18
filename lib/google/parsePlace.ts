@@ -118,4 +118,88 @@ export function parseGooglePlace(place: PlaceResultLike | null | undefined): Par
   };
 }
 
+function componentsFromParsed(parsed: ParsedPlace): AddressComponent[] {
+  const components: AddressComponent[] = [];
+  if (parsed.line1) {
+    components.push({
+      long_name: parsed.line1,
+      short_name: parsed.line1,
+      types: ['street_address'],
+    });
+  }
+  if (parsed.line2) {
+    components.push({
+      long_name: parsed.line2,
+      short_name: parsed.line2,
+      types: ['subpremise'],
+    });
+  }
+  if (parsed.city) {
+    components.push({
+      long_name: parsed.city,
+      short_name: parsed.city,
+      types: ['locality'],
+    });
+  }
+  if (parsed.state) {
+    components.push({
+      long_name: parsed.state,
+      short_name: parsed.state,
+      types: ['administrative_area_level_1'],
+    });
+  }
+  if (parsed.zip) {
+    components.push({
+      long_name: parsed.zip,
+      short_name: parsed.zip,
+      types: ['postal_code'],
+    });
+  }
+  if (parsed.country) {
+    components.push({
+      long_name: parsed.country,
+      short_name: parsed.country,
+      types: ['country'],
+    });
+  }
+  return components;
+}
+
+export function buildLegacyPlace(place: any, parsed: ParsedPlace | null): any | null {
+  if (!place && !parsed) return null;
+
+  const rawComponents =
+    place?.address_components ?? place?.addressComponents ?? [];
+  let components = normalizeComponents(Array.isArray(rawComponents) ? rawComponents : []);
+
+  if ((!components || components.length === 0) && parsed) {
+    components = componentsFromParsed(parsed);
+  }
+
+  const parsedLat = parsed?.lat ?? null;
+  const parsedLng = parsed?.lng ?? null;
+
+  const geometryLocation = (() => {
+    if (parsedLat !== null && parsedLng !== null) {
+      return { lat: parsedLat, lng: parsedLng };
+    }
+    const location = place?.location ?? place?.geometry?.location ?? null;
+    if (!location) {
+      return { lat: null, lng: null };
+    }
+    const { lat, lng } = resolveLatLng(location);
+    return { lat, lng };
+  })();
+
+  return {
+    place_id: place?.place_id ?? place?.placeId ?? place?.id ?? null,
+    formatted_address:
+      parsed?.formattedAddress ?? place?.formatted_address ?? place?.formattedAddress ?? parsed?.line1 ?? '',
+    address_components: components,
+    geometry: {
+      location: geometryLocation,
+    },
+  };
+}
+
 

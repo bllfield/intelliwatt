@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { parseManualAddress } from '@/lib/parseManualAddress';
-import { parseGooglePlace, type ParsedPlace } from '@/lib/google/parsePlace';
+import { parseGooglePlace, buildLegacyPlace, type ParsedPlace } from '@/lib/google/parsePlace';
 
 interface QuickAddressEntryProps {
   onAddressSubmitted: (address: string) => void;
@@ -205,24 +205,40 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
       const userData = await userResponse.json();
       console.log('User data:', userData);
       
-      // Check if the current address matches what the user typed vs what Google selected
-      // If placeDetails exists but the formatted address doesn't match what user typed, it's a manual entry
       let normalizedAddress = address.trim();
-      let googlePlaceDetails = placeDetailsRef.current ?? placeDetails;
       let parsedAddress = parsedAddressRef.current;
+      let placeForSubmit = placeDetailsRef.current;
 
-      if (!googlePlaceDetails || !parsedAddress) {
+      if (!parsedAddress || !placeForSubmit) {
         const manualPlace = parseManualAddress(normalizedAddress);
-        googlePlaceDetails = manualPlace;
         placeDetailsRef.current = manualPlace;
         const parsedManual = parseGooglePlace(manualPlace as any);
         parsedAddress = parsedManual;
         parsedAddressRef.current = parsedManual;
+        placeForSubmit = manualPlace;
       }
 
-      if (parsedAddress?.formattedAddress) {
+      if (!parsedAddress) {
+        setError('Please enter the full service address, including city, state, and ZIP code.');
+        setIsSubmitting(false);
+        return;
+      }
+
+      if (parsedAddress.formattedAddress) {
         normalizedAddress = parsedAddress.formattedAddress;
         setAddress(parsedAddress.formattedAddress);
+        addressValueRef.current = parsedAddress.formattedAddress;
+      }
+
+      let legacyPlace = buildLegacyPlace(placeForSubmit, parsedAddress);
+      if (!legacyPlace) {
+        const manualPlace = parseManualAddress(normalizedAddress);
+        legacyPlace = manualPlace;
+        const parsedManual = parseGooglePlace(manualPlace as any);
+        if (parsedManual) {
+          parsedAddress = parsedManual;
+          parsedAddressRef.current = parsedManual;
+        }
       }
 
       if (
@@ -237,11 +253,38 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
         return;
       }
 
+      const unitValue = unitNumber.trim();
+      if (unitValue) {
+        parsedAddress = { ...parsedAddress, line2: unitValue };
+        parsedAddressRef.current = parsedAddress;
+        const components = Array.isArray(legacyPlace?.address_components)
+          ? legacyPlace.address_components.filter(
+              (component: any) => !component.types?.includes('subpremise'),
+            )
+          : [];
+        components.push({
+          long_name: unitValue,
+          short_name: unitValue,
+          types: ['subpremise'],
+        });
+        legacyPlace = {
+          ...legacyPlace,
+          address_components: components,
+        };
+      }
+
+      if (parsedAddress.formattedAddress) {
+        legacyPlace = {
+          ...legacyPlace,
+          formatted_address: parsedAddress.formattedAddress,
+        };
+      }
+
       // Save address to database using the new API
       console.log('Sending address save request:', {
         userId: userData.user?.email || 'unknown',
         houseId: null,
-        googlePlaceDetails: googlePlaceDetails,
+        googlePlaceDetails: legacyPlace,
         smartMeterConsent: consent,
         smartMeterConsentDate: new Date().toISOString()
       });
@@ -252,7 +295,7 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
         body: JSON.stringify({
           userId: userData.user?.id || userData.user?.email || 'unknown',
           houseId: null,
-          googlePlaceDetails: googlePlaceDetails,
+          googlePlaceDetails: legacyPlace,
           unitNumber: unitNumber.trim() || undefined,
           smartMeterConsent: consent,
           smartMeterConsentDate: new Date().toISOString()
