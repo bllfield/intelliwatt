@@ -37,12 +37,21 @@ export function composeWattbuyAddress(line1: string, unit?: string | null): stri
   if (base.endsWith(',')) {
     base = base.replace(/,\s*$/g, '');
   }
-  const formattedUnit = formatUnitForWattbuy(unit);
+  const unitPattern = /(,?\s*(?:apt|apartment|unit|suite|ste|building|bldg|#)\s*[A-Za-z0-9#-]+(?:\s+[A-Za-z0-9#-]+)*)$/i;
+
+  let formattedUnit = formatUnitForWattbuy(unit);
+
+  if (!formattedUnit) {
+    const unitMatch = base.match(unitPattern);
+    if (unitMatch) {
+      formattedUnit = formatUnitForWattbuy(unitMatch[0].replace(/^,\s*/g, ''));
+    }
+  }
+
   if (!formattedUnit) {
     return base;
   }
 
-  const unitPattern = /(,?\s*(?:apt|apartment|unit|suite|ste|building|bldg|#)\s*[A-Za-z0-9#-]+(?:\s+[A-Za-z0-9#-]+)*)$/i;
   let baseWithoutUnit = base;
   if (unitPattern.test(baseWithoutUnit)) {
     baseWithoutUnit = baseWithoutUnit.replace(unitPattern, '').trim();
