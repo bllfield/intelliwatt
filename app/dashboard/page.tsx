@@ -127,6 +127,7 @@ export default function DashboardPage() {
 
   const handleAddressSubmitted = async (address: string) => {
     setUserAddress(address);
+
     if (typeof window !== 'undefined') {
       if (!address) {
         localStorage.removeItem('intelliwatt_user_address');
@@ -134,6 +135,22 @@ export default function DashboardPage() {
         localStorage.setItem('intelliwatt_user_address', address);
       }
     }
+
+    if (!address) {
+      setDashboardData((previous) =>
+        previous
+          ? {
+              ...previous,
+              address: null,
+              hasAddress: false,
+              hasSmartMeter: false,
+              hasUsageData: false,
+            }
+          : previous,
+      );
+      return;
+    }
+
     await fetchDashboardData();
   };
 
