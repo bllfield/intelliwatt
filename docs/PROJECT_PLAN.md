@@ -2264,3 +2264,16 @@ Next Steps (future plan items):
    - Validation of missing consent / name / ESIID.
 
 ---
+## PC-2025-11-18-C — Manual SmtAuthorization Table (Temporary Workaround)
+
+- Reason: Prisma `migrate dev` is currently blocked by historical ERCOT migration drift in the
+  production DigitalOcean database. We cannot run `prisma migrate reset` because the DB holds live data.
+- Action: Added `sql/add_smt_authorization_manual.sql` and executed it against production using
+  `prisma db execute` to create the `SmtAuthorization` table without touching existing data.
+- Scope: Only adds the `SmtAuthorization` table and related indexes. No existing tables were
+  altered or dropped.
+- Follow-up: In a later phase, we will re-baseline Prisma migrations (including the ERCOT index
+  history) and fold this table into a normal Prisma migration. Until then, avoid running
+  `prisma migrate dev` against the production DO database.
+
+---
