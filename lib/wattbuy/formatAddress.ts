@@ -28,10 +28,45 @@ export function formatUnitForWattbuy(rawUnit: string | null | undefined): string
   return `Apt ${collapsed}`;
 }
 
+function normalizeWhitespace(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
 export function composeWattbuyAddress(line1: string, unit?: string | null): string {
-  const base = (line1 ?? '').trim();
+  let base = normalizeWhitespace(line1 ?? '');
+  if (base.endsWith(',')) {
+    base = base.replace(/,\s*$/g, '');
+  }
   const formattedUnit = formatUnitForWattbuy(unit);
-  return formattedUnit ? `${base}, ${formattedUnit}` : base;
+  if (!formattedUnit) {
+    return base;
+  }
+
+  if (!base) {
+    return formattedUnit;
+  }
+
+  const baseLower = base.toLowerCase();
+  const formattedLower = formattedUnit.toLowerCase();
+
+  // If base already ends with ", <unit>" (case-insensitive), respect it.
+  if (baseLower.endsWith(`, ${formattedLower}`) || baseLower.includes(` ${formattedLower}`)) {
+    return base;
+  }
+
+  // If base already contains any known unit prefix with the same identifier, avoid duplication.
+  const strippedUnit = formattedUnit.replace(/^(apt|apartment|unit|suite|ste|building|bldg)\s+/i, '').trim();
+  if (strippedUnit) {
+    const strippedLower = strippedUnit.toLowerCase();
+    if (
+      baseLower.includes(strippedLower) &&
+      /(apt|apartment|unit|suite|ste|building|bldg|#)\s*/i.test(base)
+    ) {
+      return base;
+    }
+  }
+
+  return `${base}, ${formattedUnit}`;
 }
 
 
