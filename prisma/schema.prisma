@@ -74,6 +74,9 @@ model UserProfile {
   smartMeterConsent       Boolean?
   smartMeterConsentDate   DateTime?
   tdspSlug                String?
+  esiidAttentionRequired  Boolean   @default(false)
+  esiidAttentionCode      String?
+  esiidAttentionAt        DateTime?
   apiConnections          ApiConnection[]
   appliances              Appliance[]
   solarSystem             SolarSystem?

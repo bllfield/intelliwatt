@@ -215,18 +215,44 @@ export async function POST(req: NextRequest) {
 
           if (conflicting && conflicting.id !== record.id) {
             if (conflicting.userId && conflicting.userId !== record.userId) {
-              console.warn(
-                "[address/save] esiid conflict with different user",
-                JSON.stringify(
-                  {
-                    lookupEsiid: lookup.esiid,
-                    conflictingUserId: conflicting.userId,
-                    currentUserId: record.userId,
+              console.warn("[address/save] esiid conflict transfer", {
+                lookupEsiid: lookup.esiid,
+                conflictingUserId: conflicting.userId,
+                currentUserId: record.userId,
+              });
+
+              record = await prisma.$transaction(async (tx) => {
+                await tx.houseAddress.update({
+                  where: { id: conflicting.id },
+                  data: {
+                    esiid: null,
+                    tdspSlug: null,
+                    utilityName: null,
+                    utilityPhone: null,
                   },
-                  null,
-                  2,
-                ),
-              );
+                });
+
+                await tx.userProfile.updateMany({
+                  where: { userId: conflicting.userId },
+                  data: {
+                    esiidAttentionRequired: true,
+                    esiidAttentionCode: lookup.esiid,
+                    esiidAttentionAt: new Date(),
+                  },
+                });
+
+                const updatedRecord = await tx.houseAddress.update({
+                  where: { id: record.id },
+                  data: {
+                    esiid: lookup.esiid,
+                    utilityName: lookup.utility ?? record.utilityName ?? undefined,
+                    tdspSlug: lookup.territory ?? record.tdspSlug ?? undefined,
+                  },
+                  select: selectFields,
+                });
+
+                return updatedRecord;
+              });
             } else {
               const recordIdToDelete = record.id;
               record = await prisma.houseAddress.update({
@@ -276,7 +302,12 @@ export async function POST(req: NextRequest) {
           try {
             await prisma.userProfile.update({
               where: { userId },
-              data: { esiid: lookup.esiid },
+              data: {
+                esiid: lookup.esiid,
+                esiidAttentionRequired: false,
+                esiidAttentionCode: null,
+                esiidAttentionAt: null,
+              },
             });
           } catch (profileErr) {
             if (process.env.NODE_ENV === "development") {
