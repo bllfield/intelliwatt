@@ -182,7 +182,29 @@ Guardrails
 - CDM-first API consumption and RAW→CDM discipline remain unchanged.
 - ESIID is optional in CDM; we continue to persist it on `HouseAddress`.
 
+PC-2025-11-18: ESIID Conflict Reassignment & Attention Flag
 
+Rationale
+
+- When WattBuy returns the same ESIID for multiple apartments in a complex, the newest IntelliWatt customer must retain the meter while the previous household is alerted to refresh their address.
+
+Scope
+
+- `/api/address/save` now resolves Prisma unique-constraint conflicts by clearing the previous `HouseAddress` record, setting attention flags on the prior user's `UserProfile`, and reassigning the ESIID to the current user while preserving raw vendor payloads.
+- Prisma schema adds `esiidAttentionRequired`, `esiidAttentionCode`, `esiidAttentionAt` on `UserProfile` (migration `20251118230500_add_esiid_attention`).
+- Successful assignments reset the attention flag for the winning user.
+- Temporary duplicate `HouseAddress` rows created during the same request are removed after reassignment.
+
+Rollback
+
+- Revert commits `7391510` and `62c9e55`, then roll back migration `20251118230500_add_esiid_attention`.
+- Without the migration the attention fields disappear and conflict handling reverts to the previous (erroring) behavior.
+
+Guardrails
+
+- Conflict transfers execute inside a Prisma transaction for consistency.
+- RAW vendor payloads remain captured before normalization.
+- No new PII is logged; structured warnings continue to reference meter IDs only.
 
 PC-2025-11-01: ESIID Resolver — Use WattBuy Electricity Info Endpoint
 
@@ -213,8 +235,6 @@ Observability: corrId + duration logging (unchanged).
 Rollback
 
 ERCOT database lookup logic remains in codebase but is not wired. Can be re-enabled if needed.
-
-
 
 PC-2025-11-02: WattBuy 403 Closure (FYI / Support Artifact)
 
@@ -651,7 +671,7 @@ Implementation Notes:
 
   - `ERCOT_ESIID_DISABLED=true`
 
-- Pause any cron/timer that hits `/api/admin/ercot/cron` or ERCOT ESIID indexing (see DEPLOY_ERCOT.md “Pause” steps).
+- Pause any cron/timer that hits `/api/admin/ercot/cron` or ERCOT ESIID indexing (see DEPLOY_ERCOT.md "Pause" steps).
 
 - Admin UIs should reflect that ERCOT ESIID tools are paused.
 
@@ -719,7 +739,7 @@ Scope Verified as DONE:
 
    - **/admin/smt/trigger** — manual POST helper for pull
 
-   - **/admin/smt/raw** — list RawSmtFile + “Normalize now”
+   - **/admin/smt/raw** — list RawSmtFile + "Normalize now"
 
    - **/admin/smt/inspector** — hub links (LOCKED nav requirement satisfied)
 
@@ -799,7 +819,7 @@ Next Steps (strict order):
 
 2. Wire **app/api/admin/smt/normalize/route.ts** to read the newly persisted `RawSmtFile` (from inline) and emit `SmtInterval` rows.
 
-3. Add an Admin page to list `RawSmtFile` (sha256, filename, received_at) and allow “Normalize now” per file.
+3. Add an Admin page to list `RawSmtFile` (sha256, filename, received_at) and allow "Normalize now" per file.
 
 4. Embed the tested PowerShell/curl commands into **docs/TESTING_API.md** (this patch does that).
 
@@ -873,7 +893,7 @@ Response (JSON):
 
 Locked Behavior:
 
-- Input CSVs are assumed to be SMT “adhoc usage” files; parsing handles CST/CDT → UTC.
+- Input CSVs are assumed to be SMT "adhoc usage" files; parsing handles CST/CDT → UTC.
 
 - Idempotent upsert: do not duplicate intervals if the same file is re-normalized.
 
@@ -978,8 +998,8 @@ Locked Primary UX (EnergyBot-style, no SMT login, no meter field on happy path):
      - When user selects an address:
        - Normalize and store the address on the House record.
        - Call WattBuy backend to retrieve ESIID + utility/TDSP for that address.
-       - Store ESIID on the House record and display it in the UI (e.g., “ESIID: 1044…”) for transparency.
-   - Future behavior (see “Transition to ERCOT Autocomplete” below):
+       - Store ESIID on the House record and display it in the UI (e.g., "ESIID: 1044…") for transparency.
+   - Future behavior (see "Transition to ERCOT Autocomplete" below):
      - Replace Google Places suggestions with an internal ERCOT-backed address/ESIID index, while still using WattBuy for rates and plan shopping.
 
 2) Customer Info + Consent (Step 1)
@@ -1002,10 +1022,10 @@ Locked Primary UX (EnergyBot-style, no SMT login, no meter field on happy path):
        - Timestamp, IP, and user identity (name/email/phone).
        - ESIID and current supplier.
      - Use the SMT JWT helper (PC-2025-11-12-H) to obtain a valid SMT token.
-     - Call SMT’s Agreement endpoint(s) to:
+     - Call SMT's Agreement endpoint(s) to:
        - Create a New Energy Data Sharing Agreement using the ESIID and customer identity data.
        - Request 12 months of access for residential customers (and up to SMT limits for commercial, per PC-2025-11-12-H).
-   - No SMT login for the customer. The entire consent occurs on IntelliWatt’s UI, using SMT’s required language and our CSP credentials.
+   - No SMT login for the customer. The entire consent occurs on IntelliWatt's UI, using SMT's required language and our CSP credentials.
 
 4) Subscriptions + Enrollment (Step 3 — tied to PC-2025-11-12-H)
 
@@ -1013,7 +1033,7 @@ Locked Primary UX (EnergyBot-style, no SMT login, no meter field on happy path):
      - Create an SMT Subscription for 15-minute interval data with delivery to SFTP (preferred).
      - Optionally create an SMT Enrollment for historical backfill (12 months residential, up to 24/36 months for qualifying commercial accounts, per SMT limits).
    - SMT begins delivering CSVs to the existing SFTP inbox; droplet + fetch_and_post.sh + /api/admin/smt/normalize handle ingestion as they do today (no changes to that pipeline).
-   - From the customer’s perspective:
+   - From the customer's perspective:
      - They did not go to the SMT site.
      - They did not type a meter number.
      - They did not upload a bill on the happy path.
@@ -1035,7 +1055,7 @@ A) Bill Upload / Photo (Fallback 1)
 B) Optional Manual Meter Field (Fallback 2)
 
    - Provide a small optional input:
-     - “If you know it, enter your meter number.”
+     - "If you know it, enter your meter number."
    - Used only when:
      - OCR fails or bill is not available.
    - This field is not required for the primary flow and should be visually de-emphasized.
@@ -1102,10 +1122,10 @@ Rationale:
 Scope:
 
 - Chat run-completion signal:
-  - After a Cursor Agent Block finishes, the user will paste Cursor’s response/output back into the chat.
+  - After a Cursor Agent Block finishes, the user will paste Cursor's response/output back into the chat.
   - That pasted response serves two purposes:
     1. It lets ChatGPT verify the change was applied as expected.
-    2. It counts as the user saying “done” for that step, so ChatGPT can safely move to the next step.
+    2. It counts as the user saying "done" for that step, so ChatGPT can safely move to the next step.
 - Plan-doc update requirement:
   - Whenever ChatGPT instructs Cursor to add or edit functionality that touches anything referenced in `docs/PROJECT_PLAN.md` (or any plan-related docs), ChatGPT must:
     - Include, as part of that same step or the immediately-following step, a Cursor Agent Block that updates the relevant plan docs to reflect the change.
@@ -1122,7 +1142,7 @@ Rationale:
 
 - Real SMT interval CSVs (12-month, 15-minute data) are often larger than the ~4 MB Next.js App Router upload limit.
 - IntelliWatt must be able to accept full-size interval files end-to-end, not just truncated test samples.
-- This requirement applies to both admin tools and customer-facing “manual upload” flows (e.g., SMT or Green Button CSVs).
+- This requirement applies to both admin tools and customer-facing "manual upload" flows (e.g., SMT or Green Button CSVs).
 
 Scope:
 
@@ -1132,7 +1152,7 @@ Scope:
 - Ingestion paths:
   - The canonical big-file ingestion path is via the droplet ingest pipeline (e.g., `fetch_and_post.sh` / `smt-ingest.service`), which is not constrained by App Router body size limits.
   - Provide and maintain admin automation (e.g., `scripts/admin/Upload-SmtCsvToDroplet.ps1`) that copies local CSVs to the droplet inbox and triggers `smt-ingest.service`, ensuring full-size files enter `RawSmtFile`/`SmtInterval` via the standard pipeline.
-  - The existing `/admin/smt/raw` → “Load Raw Files” inline upload:
+  - The existing `/admin/smt/raw` → "Load Raw Files" inline upload:
     - Is a small-file/debug convenience only.
     - Remains subject to App Router limits (~4 MB).
     - Is NOT the primary path for production-sized SMT interval CSVs.
@@ -1327,7 +1347,7 @@ During testing, the SMT upload server (`smt-upload-server.js`) was starting, log
 
 ## PC-2025-11-15-B: SMT Inline Upload Compression (base64+gzip Override)
 
-- Droplet inline uploads now gzip large SMT CSV files before base64 encoding to satisfy Vercel’s ~4.5 MB function body limit.
+- Droplet inline uploads now gzip large SMT CSV files before base64 encoding to satisfy Vercel's ~4.5 MB function body limit.
 - Endpoint remains `POST https://intelliwatt.com/api/admin/smt/pull` with `mode: "inline"` and `x-admin-token`.
 - Payload shape:
   - `encoding: "base64+gzip"` (new default); `sizeBytes` is the uncompressed CSV byte size; optional `compressedBytes` notes the gzipped size.
@@ -1594,7 +1614,7 @@ Rationale
 Scope
 
 - Admin UI: `/admin/smt/raw` (Raw Files & Normalize UI)
-  - Added a “Normalize Latest SMT File” control that:
+  - Added a "Normalize Latest SMT File" control that:
     - Accepts an optional ESIID input.
     - Calls the existing `POST /api/admin/smt/normalize` route with:
       - `{ latest: true }` when no ESIID is provided.
@@ -1609,13 +1629,13 @@ Guardrails
   - `/api/admin/debug/smt/intervals`
   - `/api/admin/analysis/daily-summary`
   - `RawSmtFile`, `SmtInterval`
-- This entry implements the “Admin UX for SMT normalization” step from the 2025-11-17 plan; future work must build on this UI rather than replacing it.
+- This entry implements the "Admin UX for SMT normalization" step from the 2025-11-17 plan; future work must build on this UI rather than replacing it.
 
-Status: COMPLETE — Admin “Normalize Latest SMT File” control is in place on `/admin/smt/raw`.
+Status: COMPLETE — Admin "Normalize Latest SMT File" control is in place on `/admin/smt/raw`.
 
 ## PC-2025-11-17-A: SMT Interval Normalize Verified (Inline RAW → SmtInterval)
 
-**Rationale:** We now have a working path from SMT CSV → `RawSmtFile` → `SmtInterval`, plus admin debug and daily-summary analysis. This locks the behavior so future edits don’t break the ingest pipeline.
+**Rationale:** We now have a working path from SMT CSV → `RawSmtFile` → `SmtInterval`, plus admin debug and daily-summary analysis. This locks the behavior so future edits don't break the ingest pipeline.
 
 **Scope (implemented):**
 
@@ -1675,8 +1695,8 @@ Status: COMPLETE — Admin “Normalize Latest SMT File” control is in place o
     - `date = "2025-11-17"`: `found: 49, expected: 96, completeness ≈ 0.51`
     - `date = "2025-11-18"`: `found: 47, expected: 96, completeness ≈ 0.49`
   - This matches the fact that the CSV window is **not** full calendar days but from `2025-11-17T05:45:00Z` → `2025-11-18T05:30:00Z`:
-    - 49 intervals land in the “2025-11-17 local day”.
-    - 47 intervals land in the “2025-11-18 local day”.
+    - 49 intervals land in the "2025-11-17 local day".
+    - 47 intervals land in the "2025-11-18 local day".
   - The `meta.range` confirms the analysis window is expressed in `America/Chicago`:
     - `start: 2025-11-16T18:00:00.000-06:00`
     - `end:   2025-11-18T18:00:00.000-06:00`
@@ -1693,10 +1713,10 @@ Status: COMPLETE — Admin “Normalize Latest SMT File” control is in place o
 
 **Next Steps (future scope, NOT implemented yet):**
 
-- Add an Admin UI button (“Normalize Latest SMT File”) that:
+- Add an Admin UI button ("Normalize Latest SMT File") that:
   - Fetches the latest `RawSmtFile` id for a given ESIID.
   - POSTs to `/api/admin/smt/normalize` (optionally with a `dryRun` toggle).
-- Tighten “expected” logic in daily-summary to:
+- Tighten "expected" logic in daily-summary to:
   - Handle DST days (92 / 100 intervals) explicitly.
   - Differentiate partial days at CSV boundaries vs true missing data.
 - Later: surface daily completeness and kWh totals in the IntelliWatt UI and feed into plan analysis.
@@ -1706,7 +1726,7 @@ Status: COMPLETE — Admin “Normalize Latest SMT File” control is in place o
 
 Rationale
 
-- Finalize the “Cron / automation wiring for SMT” step described in the 2025-11-17 plan.
+- Finalize the "Cron / automation wiring for SMT" step described in the 2025-11-17 plan.
 - Ensure Smart Meter Texas interval files are pulled from SMT SFTP on a schedule and pushed into the same `/api/admin/smt/pull` → `RawSmtFile` → `/api/admin/smt/normalize` → `SmtInterval` pipeline that has already been verified.
 
 Scope
@@ -1741,7 +1761,7 @@ Scope
         - persist `RawSmtFile`
         - run `normalizeInlineSmtCsv`
         - upsert `SmtInterval` with `createMany({ skipDuplicates: true })`).
-      - Logs “Skipping already-posted file: …” when a file has already been posted, ensuring idempotent ingest.
+      - Logs "Skipping already-posted file: …" when a file has already been posted, ensuring idempotent ingest.
 
 - Vercel / API:
   - No new routes were added in this step.
@@ -1769,7 +1789,7 @@ Status
 
 Rationale
 
-To match best-in-class UX patterns (e.g., Blitz Ventures / EnergyBot) and reduce friction for customers, IntelliWatt will adopt a “no meter number required” authorization flow. Customers will only provide address + contact info + REP + consent, and Smart Meter Texas will handle the authorization email + ESIID/meter linking behind the scenes.
+To match best-in-class UX patterns (e.g., Blitz Ventures / EnergyBot) and reduce friction for customers, IntelliWatt will adopt a "no meter number required" authorization flow. Customers will only provide address + contact info + REP + consent, and Smart Meter Texas will handle the authorization email + ESIID/meter linking behind the scenes.
 
 This simplifies onboarding and makes SMT access the *default path* for usage ingestion.
 
@@ -1796,7 +1816,7 @@ The primary customer onboarding path for SMT data acquisition is now:
    - Terms state that IntelliWatt (your legal entity) is requesting SMT access on their behalf.
 
 3. **Backend: Initiate SMT Authorization Request**
-   - Backend uses IntelliWatt’s CSP/Broker credentials to call SMT’s authorization endpoint.
+   - Backend uses IntelliWatt's CSP/Broker credentials to call SMT's authorization endpoint.
    - Provide SMT with:
      - ESIID (from WattBuy)
      - Customer name/email/phone
@@ -1852,7 +1872,7 @@ Guardrails
 
 Status
 
-- SMT ingest, normalize, admin tools, cron automation, and “no fallback ESIID” are COMPLETE.
+- SMT ingest, normalize, admin tools, cron automation, and "no fallback ESIID" are COMPLETE.
 - This entry finalizes the intended customer-facing SMT authorization UX.
 - Future steps:
   - Implement frontend screens for this authorization flow.
@@ -1864,7 +1884,7 @@ Status
 Rationale
 
 - Earlier language in **PC-2025-11-17-F — Primary SMT Authorization Flow (EnergyBot-Style)** assumed an SMT-managed email confirmation flow.
-- Best-in-class brokers (e.g., EnergyBot) operate with an LOA/POA model: the customer grants authorization directly on the broker’s site, and the broker leverages SMT “Energy Data Sharing Agreement” + “Subscription” APIs with its own credentials.
+- Best-in-class brokers (e.g., EnergyBot) operate with an LOA/POA model: the customer grants authorization directly on the broker's site, and the broker leverages SMT "Energy Data Sharing Agreement" + "Subscription" APIs with its own credentials.
 - IntelliWatt will follow the LOA/POA pattern:
   - Consent captured / stored on IntelliWatt UI.
   - IntelliWatt (as CSP/REP) uses SMT APIs to create agreements/subscriptions.
@@ -1872,14 +1892,14 @@ Rationale
 
 Override Notice (re: PC-2025-11-17-F)
 
-- The email-based “SMT sends customer a confirm email” requirement is no longer the primary flow.
+- The email-based "SMT sends customer a confirm email" requirement is no longer the primary flow.
 - This Plan Change overrides any PC-2025-11-17-F language implying SMT email confirmation is required for activation.
 - Authoritative model:
   - IntelliWatt captures LOA/POA consent.
   - IntelliWatt uses SMT REST/SOAP APIs to create:
     - **New Energy Data Sharing Agreement** records
     - **New Subscription** records (dataType INTERVAL, deliveryMode FTP/API, reportFormat CSV/JSON)
-  - SMT/TDSP rely on IntelliWatt’s CSP/REP credentials.
+  - SMT/TDSP rely on IntelliWatt's CSP/REP credentials.
 
 Scope
 
@@ -1926,7 +1946,7 @@ Status
 
 Rationale
 
-- SMT’s Data Access Interface exposes a unified **Energy Data** function at:
+- SMT's Data Access Interface exposes a unified **Energy Data** function at:
   - UAT: `https://uatservices.smartmetertexas.net/v2/energydata/`
   - PROD: `https://services.smartmetertexas.net/v2/energydata/`
 - That function supports three data types under one API:
@@ -1971,7 +1991,7 @@ Scope
    - Billing reads are additive: used for validation and analytics, not for reconstructing intervals.
 
 4. Admin Tools & Testing
-   - Extend SMT admin tools with a “Fetch SMT Billing Reads” panel (fields: ESIID, start, end).
+   - Extend SMT admin tools with a "Fetch SMT Billing Reads" panel (fields: ESIID, start, end).
    - Display counts and sample billing periods.
    - Add PowerShell/curl smoke tests to `docs/TESTING_API.md` after endpoint exists.
    - No cron/SFTP automation in this change—ad-hoc API pulls only.
@@ -2043,7 +2063,7 @@ The current **SMT Interface Guide v2** documents the REST token and JWT behavior
      ```
 
 2. **No Legacy Auth**
-   - Any guidance referring to “API without JWT”, “basic auth-only”, or “legacy FTPS”
+   - Any guidance referring to "API without JWT", "basic auth-only", or "legacy FTPS"
      is **obsolete** and must not be reintroduced.
    - Any future ChatGPT/Cursor instructions must treat this plan change as overriding
      all older SMT-related PDFs or internal notes that imply non-JWT flows.
@@ -2077,7 +2097,7 @@ The current **SMT Interface Guide v2** documents the REST token and JWT behavior
        login that only works in the web UI.
      - Verify the password for the service ID matches what was configured in the SMT
        portal.
-     - Confirm the calling IP is whitelisted in SMT’s firewall configuration.
+     - Confirm the calling IP is whitelisted in SMT's firewall configuration.
      - If all of the above are correct and 401 persists, open a ticket with SMT
        specifically referencing Market Notice SMT-M-A051425-10 and request a review
        of the service ID + IP configuration.
@@ -2150,130 +2170,4 @@ Constraints / Guidance:
 - Added Prisma model `SmtAuthorization` with:
   - Foreign keys: `userId`, `houseId`, `houseAddressId`.
   - SMT identity fields: `esiid`, `meterNumber?`, `tdspCode`, `tdspName`.
-  - Address snapshot: `serviceAddressLine1/2`, `serviceCity`, `serviceState`, `serviceZip`.
-  - Authorization window: `authorizationStartDate`, `authorizationEndDate` (DateTime).
-  - Consent flags: `allowIntervalUsage`, `allowHistoricalBilling`, `allowSubscription`.
-  - Contact info: `contactEmail` (from `User.email`), `contactPhone?`.
-  - Internal identifiers: `smtRequestorId`, `smtRequestorAuthId`.
-  - Timestamps: `createdAt`, `updatedAt`.
-
-**Notes**
-
-- This step defines the DB model only; no API or UI changes yet.
-- Future steps will:
-  - Add a Prisma migration.
-  - Implement create/read API routes for SMT authorizations.
-  - Wire the SMT Authorization form on the frontend to create `SmtAuthorization` records.
-
----
-### PC-2025-11-17-A — SMT REST Token Auth (Override Old JWT Design)
-
-**Rationale**
-
-The July 1, 2025 Smart Meter Texas Retail Electric Provider / CSP / TDSP Data Access Interface Guide
-defines REST token generation using `username` + `password` (service ID credentials), not OAuth-style
-`client_id` / `client_secret`. IntelliWatt now aligns with the official SMT REST contract.
-
-**Changes**
-
-- Added environment variables:
-  - `SMT_USERNAME`, `SMT_PASSWORD` for token generation.
-  - `SMT_REQUESTOR_ID`, `SMT_REQUESTOR_AUTH_ID` for payload metadata.
-  - `SMT_API_BASE_URL` (default `https://services.smartmetertexas.net`).
-- Implemented `lib/smt/token.ts`:
-  - Posts `{ username, password }` to `{SMT_API_BASE_URL}/v2/token/`.
-  - Caches the token in-memory until ~60 seconds before expiration.
-- Updated admin routes:
-  - `/api/admin/smt/token` and `/api/admin/smt/jwt/preview` now rely on the REST helper.
-  - `/api/admin/smt/billing/fetch` injects `requestorID` / `requesterAuthenticationID` and uses the REST token.
-
-**Overrides**
-
-- Previous guidance referencing `SMT_JWT_CLIENT_ID` / `SMT_JWT_CLIENT_SECRET` is deprecated.
-- All future SMT integrations must treat SMT as a REST username/password token service per the official guide.
-
----
-## PC-2025-11-18-B — SMT Authorization API + UI Scaffolding
-
-Context:
-- SMT auth requirements are documented in `docs/SMT_AUTH_MODEL.md` and the `SmtAuthorization`
-  Prisma model is defined in `prisma/schema.prisma` and `types/smt.ts`.
-- Due to migration drift on the shared DigitalOcean Postgres instance, Prisma migrations
-  are temporarily paused and `SmtAuthorization` may not yet exist in the live DB schema.
-- SMT JWT token flow is handled out-of-band via the droplet-based token proxy and must
-  NOT be wired directly from Vercel (see `docs/SMT_ENV_VARS.md` and `CHAT_BOOTSTRAP.txt`).
-
-Change:
-- Implemented a user-facing SMT Authorization API:
-  - `POST /api/smt/authorization` (App Router)
-    - Uses the authenticated (magic-link) user as the source of `userId` and `contactEmail`.
-    - Accepts JSON body: `{ houseAddressId, customerName, contactPhone?, consent }`.
-    - Looks up `HouseAddress` by `houseAddressId` and snapshots:
-      - Address fields (line1/line2/city/state/ZIP).
-      - `esiid`, `tdspSlug`/`utilityName` → `tdspCode`/`tdspName`.
-    - Automatically sets a 12-month authorization window:
-      - `authorizationStartDate` = today (date-only semantics).
-      - `authorizationEndDate` = +12 months.
-    - Sets consent flags to `true`:
-      - `allowIntervalUsage`, `allowHistoricalBilling`, `allowSubscription`.
-    - Fills `smtRequestorId` / `smtRequestorAuthId` from env (`SMT_REQUESTOR_ID`,
-      `SMT_REQUESTOR_AUTH_ID`) with safe defaults when missing.
-    - Persists via `prisma.smtAuthorization.create` (currently via a `prismaAny` cast
-      until Prisma client types are regenerated).
-
-- Implemented an admin SMT Authorization listing endpoint:
-  - `GET /api/admin/smt/authorizations`
-    - Gated by `x-admin-token` against `ADMIN_TOKEN` (consistent with other admin routes).
-    - Returns recent SMT authorization rows for inspection, with optional `?limit=` query.
-
-- Added a reusable SMT Authorization form component:
-  - `components/smt/SmtAuthorizationForm.tsx`
-    - Client component expecting preloaded data from the dashboard:
-      - `houseAddressId`, address fields, `esiid`, `tdspName`, and `contactEmail`.
-    - Renders read-only address, ESIID, TDSP, and contact email.
-    - Collects:
-      - `customerName` (as on the bill).
-      - Optional `contactPhone`.
-      - A single consent checkbox for 12-month SMT access.
-    - Submits to `POST /api/smt/authorization` and surfaces basic success/error messaging.
-
-Notes / TODO:
-- Prisma migrations:
-  - `npx prisma migrate dev` currently reports drift due to a missing historical migration
-    (`20251107020101_add_ercot_esiid_index`). We must NOT run `prisma migrate reset` on the
-    shared DO database.
-  - A future, dedicated step will reconcile Prisma migration history with the live DB
-    (reconstructing the missing ERCOT migration) before applying the `SmtAuthorization`
-    table migration in prod.
-- Prisma client:
-  - `prismaAny.smtAuthorization` is a temporary workaround until `npx prisma generate` can
-    be run from an environment with both the corrected schema and a safe DB connection.
-
-Next Steps (future plan items):
-1. Reconcile Prisma migration drift with the existing DO Postgres instance:
-   - Recreate the missing ERCOT ESIID migration locally to match the live schema.
-   - Add and apply the `SmtAuthorization` migration without resetting or dropping data.
-2. Regenerate Prisma client types (`npx prisma generate`) and replace `prismaAny` casts
-   with proper typed access to `prisma.smtAuthorization`.
-3. Wire `SmtAuthorizationForm` into the appropriate dashboard page:
-   - After Google address + WattBuy lookup (when `HouseAddress` and `esiid`/TDSP are known).
-   - Use real session-derived user data instead of any temporary passthroughs.
-4. Add automated tests (API + UI) following `docs/TESTING_API.md` patterns to verify:
-   - SMT Authorization creation flow.
-   - Admin listing behavior.
-   - Validation of missing consent / name / ESIID.
-
----
-## PC-2025-11-18-C — Manual SmtAuthorization Table (Temporary Workaround)
-
-- Reason: Prisma `migrate dev` is currently blocked by historical ERCOT migration drift in the
-  production DigitalOcean database. We cannot run `prisma migrate reset` because the DB holds live data.
-- Action: Added `sql/add_smt_authorization_manual.sql` and executed it against production using
-  `prisma db execute` to create the `SmtAuthorization` table without touching existing data.
-- Scope: Only adds the `SmtAuthorization` table and related indexes. No existing tables were
-  altered or dropped.
-- Follow-up: In a later phase, we will re-baseline Prisma migrations (including the ERCOT index
-  history) and fold this table into a normal Prisma migration. Until then, avoid running
-  `prisma migrate dev` against the production DO database.
-
----
+  - Address snapshot: `serviceAddressLine1/2`, `

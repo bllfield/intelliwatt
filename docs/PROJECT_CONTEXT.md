@@ -90,7 +90,8 @@
 
 ### Database Schema
 - **Models**: 
-  - `HouseAddress` (in `prisma/schema.prisma`) - Address collection with ESIID
+  - `HouseAddress` (in `prisma/schema.prisma`) - Address collection with ESIID (conflict handling now transfers meters to the newest user and preserves raw vendor payloads)
+  - `UserProfile` - Stores household metadata and now tracks ESIID attention flags (`esiidAttentionRequired`, `esiidAttentionCode`, `esiidAttentionAt`) so Customer Ops can email prior owners when a meter moves
   - `ErcotIngest` - ERCOT file ingestion history tracking
   - `ErcotEsiidIndex` - Normalized ESIID data from ERCOT extracts
   - `RatePlan` - Normalized electricity plans (REP plans and utility tariffs)
