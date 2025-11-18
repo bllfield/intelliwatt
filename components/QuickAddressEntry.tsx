@@ -28,8 +28,12 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
     if (!mounted) return;
 
     if (userAddress) {
-      if (autocomplete && typeof window !== 'undefined' && window.google?.maps?.event) {
-        window.google.maps.event.clearInstanceListeners(autocomplete);
+      if (autocomplete && typeof window !== 'undefined') {
+        try {
+          (window as any)?.google?.maps?.event?.clearInstanceListeners?.(autocomplete);
+        } catch (err) {
+          console.warn('Google Maps cleanup skipped', err);
+        }
       }
       if (autocomplete) {
         setAutocomplete(null);
@@ -41,7 +45,7 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
 
     let cancelled = false;
     let retryTimer: number | undefined;
-    let listener: any = null;
+    let listener: { remove: () => void } | null = null;
 
     const attemptInit = () => {
       if (cancelled || autocomplete) {
@@ -55,11 +59,11 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
         return;
       }
 
+      const googleObj = typeof window !== 'undefined' ? (window as any).google : undefined;
       const hasPlaces =
-        typeof window !== 'undefined' &&
-        !!window.google &&
-        !!window.google.maps &&
-        !!window.google.maps.places &&
+        !!googleObj &&
+        !!googleObj.maps &&
+        !!googleObj.maps.places &&
         !!process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 
       if (!hasPlaces) {
@@ -69,7 +73,7 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
 
       try {
         console.log('Debug: Initializing Google Maps autocomplete...');
-        const instance = new window.google.maps.places.Autocomplete(inputEl, {
+        const instance = new googleObj.maps.places.Autocomplete(inputEl, {
           types: ['address'],
           componentRestrictions: { country: 'us' },
           fields: ['formatted_address', 'address_components', 'place_id'],
@@ -218,8 +222,8 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
           </div>
           <button
             onClick={() => {
-              if (autocomplete && typeof window !== 'undefined' && window.google?.maps?.event) {
-                window.google.maps.event.clearInstanceListeners(autocomplete);
+              if (autocomplete && typeof window !== 'undefined') {
+                (window as any)?.google?.maps?.event?.clearInstanceListeners?.(autocomplete);
               }
               setAutocomplete(null);
               setPlaceDetails(null);
