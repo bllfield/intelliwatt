@@ -83,8 +83,7 @@ export async function POST(req: NextRequest) {
       Date.UTC(now.getUTCFullYear() + 1, now.getUTCMonth(), now.getUTCDate()),
     );
 
-    const prismaAny = prisma as any;
-    const created = await prismaAny.smtAuthorization.create({
+    const created = await prisma.smtAuthorization.create({
       data: {
         userId: body.userId,
         houseId: body.houseId,

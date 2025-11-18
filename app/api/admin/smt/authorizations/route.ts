@@ -25,8 +25,7 @@ export async function GET(req: NextRequest) {
     const limitValue = limitParam ? parseInt(limitParam, 10) : undefined;
     const limit = limitValue && Number.isFinite(limitValue) ? Math.min(Math.max(limitValue, 1), 100) : 50;
 
-    const prismaAny = prisma as any;
-    const items = await prismaAny.smtAuthorization.findMany({
+    const items = await prisma.smtAuthorization.findMany({
       orderBy: { createdAt: "desc" },
       take: limit,
     });

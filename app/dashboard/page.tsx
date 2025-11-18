@@ -2,12 +2,27 @@
 
 import Image from 'next/image';
 import Link from 'next/link';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import SmartMeterSection from '../../components/SmartMeterSection';
 import QuickAddressEntry from '../../components/QuickAddressEntry';
+import { SmtAuthorizationForm } from '@/components/smt/SmtAuthorizationForm';
+
+interface HouseAddressSummary {
+  id: string;
+  houseId: string | null;
+  addressLine1: string;
+  addressLine2?: string | null;
+  addressCity: string;
+  addressState: string;
+  addressZip5: string;
+  esiid?: string | null;
+  tdspSlug?: string | null;
+  utilityName?: string | null;
+}
 
 interface DashboardData {
   user: {
+    id: string;
     email: string;
     createdAt: string;
   };
@@ -18,10 +33,37 @@ interface DashboardData {
     totalReferrals: number;
   };
   profile: any;
+  address: HouseAddressSummary | null;
   hasAddress: boolean;
   hasSmartMeter: boolean;
   hasUsageData: boolean;
   currentPlan: any;
+}
+
+function formatHouseAddress(address: HouseAddressSummary | null): string {
+  if (!address) {
+    return '';
+  }
+  const parts = [
+    address.addressLine1,
+    address.addressLine2,
+    `${address.addressCity}, ${address.addressState} ${address.addressZip5}`,
+  ].filter(Boolean);
+  return parts.join(', ');
+}
+
+function tdspCodeFromAddress(address: HouseAddressSummary): string {
+  if (address.tdspSlug) {
+    return address.tdspSlug.toUpperCase();
+  }
+  if (address.utilityName) {
+    return address.utilityName.replace(/\s+/g, '_').toUpperCase();
+  }
+  return 'UNKNOWN';
+}
+
+function tdspNameFromAddress(address: HouseAddressSummary): string {
+  return address.utilityName || address.tdspSlug?.toUpperCase() || 'Unknown Utility';
 }
 
 export default function DashboardPage() {
@@ -30,33 +72,42 @@ export default function DashboardPage() {
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const fetchDashboardData = useCallback(async () => {
+    try {
+      setLoading(true);
+      const response = await fetch('/api/admin/user/dashboard', { cache: 'no-store' });
+      if (response.ok) {
+        const data: DashboardData = await response.json();
+        setDashboardData(data);
+        const formattedAddress = formatHouseAddress(data.address ?? null);
+        setUserAddress(formattedAddress);
+        if (typeof window !== 'undefined') {
+          if (formattedAddress) {
+            localStorage.setItem('intelliwatt_user_address', formattedAddress);
+          } else {
+            localStorage.removeItem('intelliwatt_user_address');
+          }
+        }
+      } else {
+        console.error('Failed to fetch dashboard data');
+      }
+    } catch (error) {
+      console.error('Error fetching dashboard data:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     setMounted(true);
-    
-    // Load saved address from localStorage
-    const savedAddress = localStorage.getItem('intelliwatt_user_address');
+
+    const savedAddress = typeof window !== 'undefined'
+      ? localStorage.getItem('intelliwatt_user_address')
+      : null;
     if (savedAddress) {
       setUserAddress(savedAddress);
     }
 
-    // Fetch user dashboard data
-    const fetchDashboardData = async () => {
-      try {
-        const response = await fetch('/api/admin/user/dashboard');
-        if (response.ok) {
-          const data = await response.json();
-          setDashboardData(data);
-        } else {
-          console.error('Failed to fetch dashboard data');
-        }
-      } catch (error) {
-        console.error('Error fetching dashboard data:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    // Award 1 entry for visiting dashboard (one-time)
     const awardDashboardEntry = async () => {
       try {
         await fetch('/api/user/entries', {
@@ -72,13 +123,18 @@ export default function DashboardPage() {
 
     fetchDashboardData();
     awardDashboardEntry();
-  }, []);
+  }, [fetchDashboardData]);
 
-  const handleAddressSubmitted = (address: string) => {
+  const handleAddressSubmitted = async (address: string) => {
     setUserAddress(address);
-    if (!address) {
-      localStorage.removeItem('intelliwatt_user_address');
+    if (typeof window !== 'undefined') {
+      if (!address) {
+        localStorage.removeItem('intelliwatt_user_address');
+      } else {
+        localStorage.setItem('intelliwatt_user_address', address);
+      }
     }
+    await fetchDashboardData();
   };
 
   // Prevent hydration mismatch
@@ -89,6 +145,17 @@ export default function DashboardPage() {
       </div>
     );
   }
+  const houseAddress = dashboardData?.address ?? null;
+  const showSmtAuthorizationForm =
+    Boolean(
+      dashboardData?.user?.id &&
+        dashboardData?.user?.email &&
+        houseAddress?.id &&
+        (houseAddress.houseId ?? houseAddress.id) &&
+        houseAddress?.esiid &&
+        (houseAddress?.tdspSlug || houseAddress?.utilityName),
+    );
+
   return (
     <div className="min-h-screen bg-brand-white">
       {/* Hero Section */}
@@ -301,6 +368,30 @@ export default function DashboardPage() {
         <section className="py-16 px-4 bg-brand-navy">
           <div className="max-w-4xl mx-auto">
             <SmartMeterSection />
+          </div>
+        </section>
+      )}
+
+      {/* SMT Authorization Form - only show when we have resolved ESIID + TDSP */}
+      {showSmtAuthorizationForm && dashboardData?.user && houseAddress && (
+        <section className="py-16 px-4 bg-brand-white">
+          <div className="max-w-4xl mx-auto">
+            <div className="bg-white p-8 rounded-2xl border-2 border-brand-navy shadow-lg">
+              <SmtAuthorizationForm
+                userId={dashboardData.user.id}
+                contactEmail={dashboardData.user.email}
+                houseAddressId={houseAddress.id}
+                houseId={houseAddress.houseId ?? houseAddress.id}
+                esiid={houseAddress.esiid!}
+                serviceAddressLine1={houseAddress.addressLine1}
+                serviceAddressLine2={houseAddress.addressLine2 ?? null}
+                serviceCity={houseAddress.addressCity}
+                serviceState={houseAddress.addressState}
+                serviceZip={houseAddress.addressZip5}
+                tdspCode={tdspCodeFromAddress(houseAddress)}
+                tdspName={tdspNameFromAddress(houseAddress)}
+              />
+            </div>
           </div>
         </section>
       )}
