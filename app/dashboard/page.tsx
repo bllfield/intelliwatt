@@ -163,13 +163,53 @@ export default function DashboardPage() {
     );
   }
   const houseAddress = dashboardData?.address ?? null;
+  const hasTdspOrUtility =
+    houseAddress?.tdspSlug ??
+    (houseAddress as any)?.tdsp ??
+    houseAddress?.utilityName ??
+    (houseAddress as any)?.utility?.name ??
+    null;
   const showSmtAuthorizationForm = Boolean(
     dashboardData?.user?.id &&
       dashboardData?.user?.email &&
       houseAddress?.id &&
       (houseAddress.houseId ?? houseAddress.id) &&
-      houseAddress?.esiid,
+      houseAddress?.esiid &&
+      hasTdspOrUtility,
   );
+
+  const tdspName =
+    (houseAddress as any)?.tdspName ??
+    houseAddress?.tdspSlug ??
+    (houseAddress as any)?.tdsp ??
+    houseAddress?.utilityName ??
+    (houseAddress as any)?.utility?.name ??
+    'Unknown Utility';
+
+  const serviceAddressLine1 =
+    (houseAddress as any)?.addressLine1 ??
+    (houseAddress as any)?.line1 ??
+    (houseAddress as any)?.street ??
+    '';
+  const rawLine2 =
+    (houseAddress as any)?.addressLine2 ??
+    (houseAddress as any)?.line2 ??
+    null;
+  const serviceAddressLine2 =
+    rawLine2 && String(rawLine2).trim().length > 0 ? String(rawLine2).trim() : null;
+  const serviceCity =
+    (houseAddress as any)?.addressCity ??
+    (houseAddress as any)?.city ??
+    '';
+  const serviceState =
+    (houseAddress as any)?.addressState ??
+    (houseAddress as any)?.state ??
+    '';
+  const serviceZip =
+    (houseAddress as any)?.addressZip5 ??
+    (houseAddress as any)?.zip5 ??
+    (houseAddress as any)?.postalCode ??
+    '';
 
   return (
     <div className="min-h-screen bg-brand-white">
@@ -398,13 +438,13 @@ export default function DashboardPage() {
                 houseAddressId={houseAddress.id}
                 houseId={houseAddress.houseId ?? houseAddress.id}
                 esiid={houseAddress.esiid!}
-                serviceAddressLine1={houseAddress.addressLine1}
-                serviceAddressLine2={houseAddress.addressLine2 ?? null}
-                serviceCity={houseAddress.addressCity}
-                serviceState={houseAddress.addressState}
-                serviceZip={houseAddress.addressZip5}
+                serviceAddressLine1={serviceAddressLine1}
+                serviceAddressLine2={serviceAddressLine2}
+                serviceCity={serviceCity}
+                serviceState={serviceState}
+                serviceZip={serviceZip}
                 tdspCode={tdspCodeFromAddress(houseAddress)}
-                tdspName={tdspNameFromAddress(houseAddress)}
+                tdspName={tdspName}
               />
             </div>
           </div>
