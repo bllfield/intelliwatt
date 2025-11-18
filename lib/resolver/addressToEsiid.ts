@@ -99,7 +99,9 @@ export async function resolveAddressToEsiid(addr: AddressInput): Promise<Address
       variants.add(abbreviateDirections(variant));
     }
 
-    for (const variant of variants) {
+    const variantList = Array.from(variants);
+    for (let i = 0; i < variantList.length; i += 1) {
+      const variant = variantList[i];
       if (!variant) continue;
 
       const cleanedVariant = variant.replace(unitPattern, '').replace(/\s+/g, ' ').trim();
