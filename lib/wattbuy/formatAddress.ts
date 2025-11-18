@@ -42,31 +42,21 @@ export function composeWattbuyAddress(line1: string, unit?: string | null): stri
     return base;
   }
 
-  if (!base) {
+  const unitPattern = /(,?\s*(?:apt|apartment|unit|suite|ste|building|bldg|#)\s*[A-Za-z0-9#-]+(?:\s+[A-Za-z0-9#-]+)*)$/i;
+  let baseWithoutUnit = base;
+  if (unitPattern.test(baseWithoutUnit)) {
+    baseWithoutUnit = baseWithoutUnit.replace(unitPattern, '').trim();
+  }
+
+  if (!baseWithoutUnit) {
     return formattedUnit;
   }
 
-  const baseLower = base.toLowerCase();
-  const formattedLower = formattedUnit.toLowerCase();
-
-  // If base already ends with ", <unit>" (case-insensitive), respect it.
-  if (baseLower.endsWith(`, ${formattedLower}`) || baseLower.includes(` ${formattedLower}`)) {
-    return base;
+  if (baseWithoutUnit.endsWith(',')) {
+    baseWithoutUnit = baseWithoutUnit.replace(/,\s*$/g, '');
   }
 
-  // If base already contains any known unit prefix with the same identifier, avoid duplication.
-  const strippedUnit = formattedUnit.replace(/^(apt|apartment|unit|suite|ste|building|bldg)\s+/i, '').trim();
-  if (strippedUnit) {
-    const strippedLower = strippedUnit.toLowerCase();
-    if (
-      baseLower.includes(strippedLower) &&
-      /(apt|apartment|unit|suite|ste|building|bldg|#)\s*/i.test(base)
-    ) {
-      return base;
-    }
-  }
-
-  return `${base}, ${formattedUnit}`;
+  return `${baseWithoutUnit}, ${formattedUnit}`;
 }
 
 
