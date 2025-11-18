@@ -193,6 +193,7 @@ export async function POST(req: NextRequest) {
       try {
         const lookup = await resolveAddressToEsiid({
           line1: normalized.addressLine1,
+          line1Alt: normalized.addressLine1Short ?? null,
           line2: normalized.addressLine2 ?? null,
           city: normalized.addressCity,
           state: normalized.addressState,
