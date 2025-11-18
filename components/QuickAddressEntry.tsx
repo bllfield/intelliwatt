@@ -20,6 +20,7 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
   const [googleLoaded, setGoogleLoaded] = useState(false);
   const [placeDetails, setPlaceDetails] = useState<any>(null); // Store full Google Place object
   const inputRef = useRef<HTMLInputElement>(null);
+  const placeDetailsRef = useRef<any>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -84,10 +85,11 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
           const place = instance.getPlace();
           console.log('Debug: Place selected:', place);
           setPlaceDetails(place);
-        if (place.formatted_address) {
-          console.log('Debug: Setting address to:', place.formatted_address);
-          setAddress(place.formatted_address);
-        }
+          placeDetailsRef.current = place;
+          if (place.formatted_address) {
+            console.log('Debug: Setting address to:', place.formatted_address);
+            setAddress(place.formatted_address);
+          }
         });
 
         setAutocomplete(instance);
@@ -139,15 +141,17 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
       
       // Check if the current address matches what the user typed vs what Google selected
       // If placeDetails exists but the formatted address doesn't match what user typed, it's a manual entry
+      const selectedPlace = placeDetailsRef.current ?? placeDetails;
+      let normalizedAddress = address.trim();
       let googlePlaceDetails;
-      if (placeDetails && placeDetails.formatted_address) {
-        console.log('Using Google autocomplete place details');
-        setAddress(placeDetails.formatted_address);
-        googlePlaceDetails = placeDetails;
+      if (selectedPlace && selectedPlace.formatted_address) {
+        normalizedAddress = selectedPlace.formatted_address;
+        console.log('Using Google autocomplete place details', normalizedAddress);
+        setAddress(normalizedAddress);
+        googlePlaceDetails = selectedPlace;
       } else {
-        // User typed manually - parse the manual address
-        googlePlaceDetails = parseManualAddress(address);
         console.log('Using manual address parsing');
+        googlePlaceDetails = parseManualAddress(normalizedAddress);
       }
 
       const components = googlePlaceDetails.address_components ?? [];
@@ -190,11 +194,13 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
         console.log('Address saved successfully:', data);
         
         // Store the address in localStorage for persistence
-        localStorage.setItem('intelliwatt_user_address', address);
+        localStorage.setItem('intelliwatt_user_address', normalizedAddress);
         
         // Call the parent callback
-        onAddressSubmitted(address);
+        onAddressSubmitted(normalizedAddress);
         setError(null);
+        placeDetailsRef.current = null;
+        setPlaceDetails(null);
         
         // Address saved successfully - user can see the updated UI
       } else {
@@ -204,6 +210,7 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
       }
     } catch (error) {
       console.error('Error saving address:', error);
+      setError(error instanceof Error ? error.message : 'Failed to save address.');
     } finally {
       setIsSubmitting(false);
     }
