@@ -340,3 +340,36 @@ Confirm at the top of each Cursor Agent Block:
 # Model: GPT-5 Codex
 ```
 
+---
+
+## Smart Meter Texas Quick Start (Post-2025 JWT Upgrade)
+
+1. **Prerequisites**
+   - IntelliWatt must have an SMT Entity Account (CSP/REP) with:
+     - Service ID user (e.g. `INTELLIWATTAPI`) and password.
+     - Static IP(s) whitelisted with SMT (droplet or VPN endpoint).
+
+2. **Environment Variables (Vercel / API Layer)**
+   - `SMT_API_BASE_URL` → `https://services.smartmetertexas.net` (prod) or UAT URL.
+   - `SMT_USERNAME` → SMT service ID.
+   - `SMT_PASSWORD` → SMT service ID password.
+   - `SMT_REQUESTOR_ID` → same as service ID unless SMT specifies otherwise.
+   - `SMT_REQUESTOR_AUTH_ID` → IntelliWatt DUNS / SMT authentication ID.
+
+3. **Token Check (whitelisted host)**
+   ```bash
+   curl -sS -H "Accept: application/json" \
+     -H "Content-Type: application/json" \
+     "${SMT_API_BASE_URL}/v2/token/" \
+     -d '{"username":"<SMT_USERNAME>","password":"<SMT_PASSWORD>"}'
+   ```
+   - Expect `statusCode: 200` and an `accessToken` field (JWT string).
+
+4. **REST API Usage**
+   - Attach `Authorization: Bearer <accessToken>` to all SMT requests.
+   - Use the Interface Guide v2 schemas for `/v2/energydata/`, `/v2/premise/`, etc.
+
+5. **SFTP Ingest**
+   - Configure `SMT_HOST`, `SMT_USER`, `SMT_KEY`, `SMT_REMOTE_DIR`, `SMT_LOCAL_DIR`.
+   - Droplet cron + `/api/admin/smt/pull` continue to manage CSV ingestion.
+

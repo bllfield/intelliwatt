@@ -1994,6 +1994,98 @@ Status
   - Extend admin tools/UI once persistence and parsing are in place.
 
 ---
+## PC-2025-11-17-A · SMT 2025 JWT Protocol Lock-in
+
+**Status:** LOCKED IN (overrides all prior SMT auth guidance)
+
+**Context**
+
+Smart Meter Texas issued Market Notice **SMT-M-A051425-10 (May 14, 2025)** stating that:
+
+- FTPS and API **without JWT tokens** are decommissioned as of **September 13, 2025**.
+- Only **SFTP** and **API with JWT tokens** are supported going forward.
+
+The current **SMT Interface Guide v2** documents the REST token and JWT behavior:
+
+- Token endpoint (REST, JSON body):
+  - UAT:  `https://uatservices.smartmetertexas.net/v2/token/`
+  - Prod: `https://services.smartmetertexas.net/v2/token/`
+- Request body:
+  ```json
+  {
+    "username": "<SERVICE_ID_USERNAME>",
+    "password": "<SERVICE_ID_PASSWORD>"
+  }
+  ```
+- Response:
+  ```json
+  {
+    "statusCode": "200",
+    "accessToken": "<JWT_STRING>",
+    "tokenType": "Bearer",
+    "expiresIn": "3600",
+    "issuedAt": "MM/DD/YYYY HH:MM:SS",
+    "expiresAt": "MM/DD/YYYY HH:MM:SS"
+  }
+  ```
+
+**Decision**
+
+1. **Canonical SMT Protocol**
+   - IntelliWatt uses **SFTP** for file-based LSE / adhoc usage reports.
+   - IntelliWatt uses the **REST API** with **JWT access tokens**, obtained by POSTing
+     `username` + `password` service ID credentials to `/v2/token` (or `/v2/access/token`
+     for the SOAP-style token service).
+   - The `accessToken` returned is treated as a **JWT** and must be included in all
+     subsequent SMT REST/SOAP API calls as:
+     ```http
+     Authorization: Bearer <accessToken>
+     ```
+
+2. **No Legacy Auth**
+   - Any guidance referring to “API without JWT”, “basic auth-only”, or “legacy FTPS”
+     is **obsolete** and must not be reintroduced.
+   - Any future ChatGPT/Cursor instructions must treat this plan change as overriding
+     all older SMT-related PDFs or internal notes that imply non-JWT flows.
+
+3. **Environment Variables (high-level)**
+   - SMT REST token + ad hoc API calls require:
+     - `SMT_API_BASE_URL` (UAT or Prod)
+     - `SMT_USERNAME` (SMT service ID username, e.g. `INTELLIWATTAPI`)
+     - `SMT_PASSWORD` (SMT service ID password)
+     - `SMT_REQUESTOR_ID` (usually the same as `SMT_USERNAME`)
+     - `SMT_REQUESTOR_AUTH_ID` (DUNS or other authentication ID as registered with SMT)
+   - SFTP ingestion uses:
+     - `SMT_HOST`, `SMT_USER`, `SMT_KEY`, `SMT_REMOTE_DIR`, `SMT_LOCAL_DIR`
+   - Any `SMT_JWT_CLIENT_ID` / `SMT_JWT_CLIENT_SECRET` fields are considered **legacy
+     placeholders only** unless and until SMT explicitly moves to an OAuth-style
+     client_credentials JWT flow. The current canonical flow is service ID username +
+     password → `/v2/token` → `accessToken` (JWT).
+
+4. **Implementation Guardrails**
+   - All SMT REST client code (token requests, energy data, meter attributes, etc.)
+     MUST:
+     - Use `SMT_API_BASE_URL` for base URL.
+     - Obtain `accessToken` by POSTing `{ username, password }` to `/v2/token`.
+     - Attach `Authorization: Bearer <accessToken>` to all SMT API calls.
+   - All future refactors MUST preserve this behavior unless changed by a new
+     SMT Market Notice and an updated Plan Change section in this document.
+
+5. **Troubleshooting 401 Invalid Credentials**
+   - If `/v2/token` returns a 401 / `invalidCredentials`:
+     - Verify the service ID is the **API user** (e.g. `INTELLIWATTAPI`), not a portal
+       login that only works in the web UI.
+     - Verify the password for the service ID matches what was configured in the SMT
+       portal.
+     - Confirm the calling IP is whitelisted in SMT’s firewall configuration.
+     - If all of the above are correct and 401 persists, open a ticket with SMT
+       specifically referencing Market Notice SMT-M-A051425-10 and request a review
+       of the service ID + IP configuration.
+
+This plan change is the **single source of truth** for how IntelliWatt integrates with
+Smart Meter Texas as of November 17, 2025.
+
+---
 ### PC-2025-11-17-A — SMT REST Token Auth (Override Old JWT Design)
 
 **Rationale**

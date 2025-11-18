@@ -17,3 +17,23 @@ Assume I know nothing. Write commands I can paste verbatim.
 Default model: GPT-5 Codex.
 
 I will say done when the step is complete. You will then give me the next step.
+
+Read all the project files and make sure you understand the project
+
+========================================
+SMT INTEGRATION (DO NOT OVERRIDE)
+========================================
+
+- Smart Meter Texas now requires SFTP for file delivery **and** REST/SOAP APIs with JWT access tokens.
+- Market Notice SMT-M-A051425-10 (May 14, 2025) decommissioned old FTPS + non-JWT API flows.
+- Use the SMT Interface Guide v2 token endpoint:
+  ```bash
+  POST ${SMT_API_BASE_URL}/v2/token/
+  {
+    "username": "<service-id>",
+    "password": "<password>"
+  }
+  ```
+- All SMT API calls must include `Authorization: Bearer <accessToken>`.
+- NEVER suggest legacy “no-JWT” or FTPS-only approaches unless a newer Plan Change explicitly authorizes it.
+
