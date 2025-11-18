@@ -5,14 +5,14 @@ import { normalizeEmail } from "@/lib/utils/email";
 import { resolveAddressToEsiid } from "@/lib/resolver/addressToEsiid";
 import { wattbuyEsiidDisabled } from "@/lib/flags";
 
-export const dynamic = 'force-dynamic';
+export const dynamic = "force-dynamic";
 
 type SaveAddressBody = {
   userId: string;
   houseId?: string | null;
   googlePlaceDetails: GooglePlaceDetails;
-  unitNumber?: string; // Optional unit/apartment number
-  wattbuyJson?: unknown; // optional: if you already fetched it client-side
+  unitNumber?: string;
+  wattbuyJson?: unknown;
   utilityHints?: {
     esiid?: string | null;
     tdspSlug?: string | null;
@@ -20,22 +20,20 @@ type SaveAddressBody = {
     utilityPhone?: string | null;
   } | null;
   smartMeterConsent?: boolean;
-  smartMeterConsentDate?: string | null; // ISO timestamp
+  smartMeterConsentDate?: string | null;
 };
 
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as SaveAddressBody;
     console.log("API received body:", JSON.stringify(body, null, 2));
-    
+
     if (!body?.userId || !body?.googlePlaceDetails) {
       return NextResponse.json({ ok: false, error: "Missing required fields" }, { status: 400 });
     }
 
-    // Convert email to user ID if needed
     let userId = body.userId;
-    if (body.userId.includes('@')) {
-      // It's an email, normalize and look up the user
+    if (body.userId.includes("@")) {
       const normalizedEmail = normalizeEmail(body.userId);
       const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
       if (!user) {
@@ -46,15 +44,59 @@ export async function POST(req: NextRequest) {
     }
 
     console.log("Google Place Details:", JSON.stringify(body.googlePlaceDetails, null, 2));
-    console.log("Address components types:", body.googlePlaceDetails.address_components?.map((c: any) => c.types));
+    console.log(
+      "Address components types:",
+      body.googlePlaceDetails.address_components?.map((c: any) => c.types),
+    );
+
     const normalized = normalizeGoogleAddress(body.googlePlaceDetails, body.unitNumber);
     console.log("Normalized address:", JSON.stringify(normalized, null, 2));
 
-    // Determine validation source: if place_id is null, it's a manual entry
     const validationSource = body.googlePlaceDetails.place_id ? "GOOGLE" : "USER";
 
+    const normalizedLine1Lower = (normalized.addressLine1 ?? "").trim().toLowerCase();
+    const normalizedCityLower = (normalized.addressCity ?? "").trim().toLowerCase();
+    const normalizedStateLower = (normalized.addressState ?? "").trim().toLowerCase();
+    const normalizedZip = (normalized.addressZip5 ?? "").trim();
+
+    const existingAddress = await prisma.houseAddress.findFirst({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        addressLine1: true,
+        addressLine2: true,
+        addressCity: true,
+        addressState: true,
+        addressZip5: true,
+        esiid: true,
+        tdspSlug: true,
+        utilityName: true,
+        utilityPhone: true,
+      },
+    });
+
+    const existingLine1Lower = existingAddress?.addressLine1?.trim().toLowerCase() ?? "";
+    const existingCityLower = existingAddress?.addressCity?.trim().toLowerCase() ?? "";
+    const existingStateLower = existingAddress?.addressState?.trim().toLowerCase() ?? "";
+    const existingZip = existingAddress?.addressZip5?.trim() ?? "";
+
+    const addressChanged =
+      !existingAddress ||
+      existingLine1Lower !== normalizedLine1Lower ||
+      existingCityLower !== normalizedCityLower ||
+      existingStateLower !== normalizedStateLower ||
+      existingZip !== normalizedZip;
+
+    console.log("[address/save] address comparison", {
+      addressChanged,
+      existingEsiid: existingAddress?.esiid ?? null,
+      incomingLine1: normalized.addressLine1,
+      existingLine1: existingAddress?.addressLine1 ?? null,
+    });
+
     const addressData = {
-      userId: userId,
+      userId,
       houseId: body.houseId ?? null,
       addressLine1: normalized.addressLine1,
       addressLine2: normalized.addressLine2,
@@ -68,10 +110,18 @@ export async function POST(req: NextRequest) {
       lng: normalized.lng ?? undefined,
       addressValidated: normalized.addressValidated,
       validationSource: validationSource as "GOOGLE" | "USER" | "NONE" | "OTHER",
-      esiid: body.utilityHints?.esiid ?? undefined,
-      tdspSlug: body.utilityHints?.tdspSlug ?? undefined,
-      utilityName: body.utilityHints?.utilityName ?? undefined,
-      utilityPhone: body.utilityHints?.utilityPhone ?? undefined,
+      esiid: addressChanged
+        ? null
+        : body.utilityHints?.esiid ?? existingAddress?.esiid ?? undefined,
+      tdspSlug: addressChanged
+        ? null
+        : body.utilityHints?.tdspSlug ?? existingAddress?.tdspSlug ?? undefined,
+      utilityName: addressChanged
+        ? null
+        : body.utilityHints?.utilityName ?? existingAddress?.utilityName ?? undefined,
+      utilityPhone: addressChanged
+        ? null
+        : body.utilityHints?.utilityPhone ?? existingAddress?.utilityPhone ?? undefined,
       smartMeterConsent: body.smartMeterConsent ?? false,
       smartMeterConsentDate: body.smartMeterConsentDate
         ? new Date(body.smartMeterConsentDate)
@@ -80,13 +130,6 @@ export async function POST(req: NextRequest) {
       rawWattbuyJson: body.wattbuyJson as any,
     };
 
-    // Check if user already has an address
-    const existingAddress = await prisma.houseAddress.findFirst({
-      where: { userId: userId },
-      select: { id: true },
-      orderBy: { createdAt: 'desc' }
-    });
-    
     const selectFields = {
       id: true,
       userId: true,
@@ -120,7 +163,9 @@ export async function POST(req: NextRequest) {
           select: selectFields,
         });
 
-    if (!record.esiid && !wattbuyEsiidDisabled) {
+    const shouldLookupEsiid = (!record.esiid || addressChanged) && !wattbuyEsiidDisabled;
+
+    if (shouldLookupEsiid) {
       try {
         const lookup = await resolveAddressToEsiid({
           line1: normalized.addressLine1,
@@ -128,10 +173,12 @@ export async function POST(req: NextRequest) {
           state: normalized.addressState,
           zip: normalized.addressZip5,
         });
+
         console.log("[address/save] resolveAddressToEsiid result", {
           hasEsiid: Boolean(lookup.esiid),
           utility: lookup.utility ?? null,
           territory: lookup.territory ?? null,
+          addressChanged,
         });
 
         if (lookup.esiid) {
@@ -139,8 +186,8 @@ export async function POST(req: NextRequest) {
             where: { id: record.id },
             data: {
               esiid: lookup.esiid,
-              utilityName: record.utilityName ?? lookup.utility ?? undefined,
-              tdspSlug: record.tdspSlug ?? lookup.territory ?? undefined,
+              utilityName: lookup.utility ?? record.utilityName ?? undefined,
+              tdspSlug: lookup.territory ?? record.tdspSlug ?? undefined,
             },
             select: selectFields,
           });
@@ -161,7 +208,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Fire-and-forget SMT fast-fetch trigger (non-blocking)
     (async () => {
       try {
         const url = process.env.DROPLET_WEBHOOK_URL;
@@ -173,19 +219,16 @@ export async function POST(req: NextRequest) {
               "Content-Type": "application/json",
               "x-intelliwatt-secret": secret,
             },
-            // optional small hint payload you might use later
             body: JSON.stringify({ reason: "address_saved", ts: Date.now() }),
-            // don't keep connection alive
             cache: "no-store",
             next: { revalidate: 0 },
           });
         }
       } catch {
-        // noop — never block user flow
+        // noop - never block user flow
       }
     })();
 
-    // Stable UI-facing shape
     return NextResponse.json({
       ok: true,
       address: {
