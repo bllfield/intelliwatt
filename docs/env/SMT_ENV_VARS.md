@@ -46,6 +46,33 @@ Response shape (per SMT guide):
 - `SMT_REQUESTOR_ID` – service ID (same value sent in the “requestor” field).  
 - `SMT_REQUESTOR_AUTH_ID` – Authentication identifier required in SMT payloads.  
 
+### Droplet-only: SMT token proxy
+
+Used exclusively on the SMT droplet to expose a local JWT proxy.
+
+| Name            | Example Value                              | Description                                                                  |
+|-----------------|--------------------------------------------|------------------------------------------------------------------------------|
+| SMT_PROXY_TOKEN | ChangeThisToAStrongSharedSecret_1763428355 | Shared secret; requests to the proxy must send `x-proxy-token` with this value. |
+| SMT_PROXY_PORT  | 4101                                       | Local HTTP port for the proxy (default 4101, bound to 127.0.0.1).            |
+
+Env file on droplet (`/etc/default/smt-token-proxy`) typically includes:
+
+```ini
+SMT_API_BASE_URL="https://services.smartmetertexas.net"
+SMT_USERNAME="INTELLIWATTAPI"
+SMT_PASSWORD="********"
+SMT_PROXY_TOKEN="ChangeThisToAStrongSharedSecret_1763428355"
+SMT_PROXY_PORT="4101"
+```
+
+systemd unit `smt-token-proxy.service` runs:
+
+```
+/usr/bin/node /home/deploy/smt-token-proxy.js
+```
+
+Only requests with the correct `x-proxy-token` are forwarded to SMT `/v2/token/`.
+
 ## Droplet / Webhook (existing)
 
 - `INTELLIWATT_WEBHOOK_SECRET` – Shared secret for droplet webhook headers (`x-intelliwatt-secret`).  

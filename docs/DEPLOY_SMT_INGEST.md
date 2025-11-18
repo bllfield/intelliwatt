@@ -593,6 +593,76 @@ Current behavior:
 
 This is primarily an admin diagnostic right now and will evolve as we tighten DST and boundary handling.
  
+## SMT Token Proxy (JWT) — `smt-token-proxy.service`
+
+Purpose: expose a droplet-based HTTP endpoint that fetches SMT JWT tokens using the whitelisted droplet IP, so IntelliWatt backends/tools do not call SMT directly from Vercel.
+
+- **Env file:** `/etc/default/smt-token-proxy`
+- **Script:** `/home/deploy/smt-token-proxy.js`
+- **Systemd unit:** `/etc/systemd/system/smt-token-proxy.service`
+
+Example `/etc/default/smt-token-proxy`:
+
+```ini
+SMT_API_BASE_URL="https://services.smartmetertexas.net"
+SMT_USERNAME="INTELLIWATTAPI"
+SMT_PASSWORD="********"
+SMT_PROXY_TOKEN="ChangeThisToAStrongSharedSecret_1763428355"
+SMT_PROXY_PORT="4101"
+```
+
+Systemd unit:
+
+```ini
+[Unit]
+Description=IntelliWatt SMT Token Proxy
+After=network.target
+
+[Service]
+Type=simple
+User=deploy
+WorkingDirectory=/home/deploy
+EnvironmentFile=/etc/default/smt-token-proxy
+ExecStart=/usr/bin/node /home/deploy/smt-token-proxy.js
+Restart=on-failure
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Lifecycle:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable smt-token-proxy.service
+sudo systemctl restart smt-token-proxy.service
+sudo systemctl status smt-token-proxy.service --no-pager
+```
+
+Smoke test (run on droplet):
+
+```bash
+source /etc/default/smt-token-proxy
+curl -i -X POST "http://127.0.0.1:${SMT_PROXY_PORT}/admin/smt/token" \
+  -H "x-proxy-token: ${SMT_PROXY_TOKEN}"
+```
+
+Expected output:
+
+- HTTP/1.1 200 OK
+- JSON payload containing:
+  - `ok: true`
+  - `via: "smt-token-proxy"`
+  - `smtStatusCode: 200`
+  - `smtBody.statusCode: 200`
+  - `smtBody.accessToken: "<JWT>..."`
+
+If the response shows `invalidCredentials`, verify the SMT username/password and that the droplet IP remains whitelisted with SMT.
+
+
 ---
 
 ## SMT Cron & Droplet Ingest (Production Wiring)

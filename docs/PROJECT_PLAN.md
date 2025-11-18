@@ -2086,6 +2086,53 @@ This plan change is the **single source of truth** for how IntelliWatt integrate
 Smart Meter Texas as of November 17, 2025.
 
 ---
+
+PC-2025-11-18-A: SMT Token Proxy on Droplet (Canonical Path for JWT)
+--------------------------------------------------------------------
+
+Rationale:
+- SMT only whitelists the SMT droplet IP, not Vercel IPs.
+- Direct calls from Vercel functions to `https://services.smartmetertexas.net/v2/token/`
+  time out or are rejected.
+- We now have a working Node-based SMT token proxy on the SMT droplet that calls
+  `/v2/token/` using the whitelisted IP and returns the JWT.
+
+Implementation (Current State):
+- Droplet host: `intelliwatt-smt-proxy`
+- Proxy script: `/home/deploy/smt-token-proxy.js`
+- Env file: `/etc/default/smt-token-proxy`
+- Systemd unit: `smt-token-proxy.service`
+- Local listener: `http://127.0.0.1:4101/admin/smt/token`
+- Shared secret: `SMT_PROXY_TOKEN` (used as `x-proxy-token` header)
+
+Proxy behavior:
+- Accepts: `POST /admin/smt/token`
+  - Requires header `x-proxy-token: ${SMT_PROXY_TOKEN}`
+  - Ignores request body.
+- Uses env:
+  - `SMT_API_BASE_URL` (currently `https://services.smartmetertexas.net`)
+  - `SMT_USERNAME` (currently `INTELLIWATTAPI`)
+  - `SMT_PASSWORD` (SMT API Service ID password)
+- Calls SMT:
+  - `POST ${SMT_API_BASE_URL}/v2/token/`
+  - Body: `{ "username": SMT_USERNAME, "password": SMT_PASSWORD }`
+- Returns JSON:
+  - `ok`: boolean (true when SMT status is 2xx)
+  - `via`: "smt-token-proxy"
+  - `smtStatusCode`: SMT HTTP status (e.g., 200)
+  - `smtBody`: raw SMT JSON (`statusCode`, `accessToken`, `tokenType`, `expiresIn`, etc.)
+
+Constraints / Guidance:
+- The canonical SMT JWT path is now:
+
+  IntelliWatt backend/tools → droplet `smt-token-proxy` → SMT `/v2/token/`
+
+- Do NOT call SMT `/v2/token/` directly from Vercel functions; use the droplet proxy
+  if/when we wire a public-facing path, or run `smt_token_test.sh` over SSH for live tests.
+- Any future change that introduces a different JWT acquisition method must explicitly
+  state whether it supersedes PC-2025-11-17-A and PC-2025-11-18-A.
+
+---
 ### PC-2025-11-17-A — SMT REST Token Auth (Override Old JWT Design)
 
 **Rationale**
