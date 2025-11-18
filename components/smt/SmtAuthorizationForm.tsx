@@ -91,6 +91,9 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
     <form onSubmit={handleSubmit} className="space-y-4">
       <div>
         <h2 className="text-lg font-semibold">Smart Meter Texas Authorization</h2>
+        <div className="mt-2 rounded-md bg-blue-50 border border-blue-200 p-3 text-sm text-blue-900">
+          The IntelliWatt Rate Plan Analyzer is in final testing. You can authorize Smart Meter Texas now so your usage data is securely linked and ready. While we finish connections and squash bugs, we won&rsquo;t show results in the dashboard yet. As soon as everything is live, we&rsquo;ll email your personalized plan recommendation. Thanks for joining the early waitlist and helping us launch this the right way!
+        </div>
         <p className="text-sm text-gray-600">
           Please verify the service address and ESIID, then enter the customer name as it appears
           on your bill and authorize IntelliWatt to access your Smart Meter Texas data.

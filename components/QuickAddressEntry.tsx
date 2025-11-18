@@ -14,8 +14,6 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
   const [address, setAddress] = useState(userAddress || '');
   const [unitNumber, setUnitNumber] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [consent, setConsent] = useState(false);
-  const [showTerms, setShowTerms] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [placeDetails, setPlaceDetails] = useState<any>(null); // Store full Google Place object
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -182,14 +180,11 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log('Debug: Submit button clicked', { address: address.trim(), consent, isSubmitting });
+    console.log('Debug: Submit button clicked', { address: address.trim(), isSubmitting });
     setError(null);
     
-    if (!address.trim() || !consent) {
-      console.log('Debug: Validation failed', { 
-        addressEmpty: !address.trim(), 
-        consentMissing: !consent 
-      });
+    if (!address.trim()) {
+      console.log('Debug: Validation failed', { addressEmpty: !address.trim() });
       return;
     }
 
@@ -285,8 +280,6 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
         userId: userData.user?.email || 'unknown',
         houseId: null,
         googlePlaceDetails: legacyPlace,
-        smartMeterConsent: consent,
-        smartMeterConsentDate: new Date().toISOString()
       });
 
       const response = await fetch('/api/address/save', {
@@ -297,8 +290,6 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
           houseId: null,
           googlePlaceDetails: legacyPlace,
           unitNumber: unitNumber.trim() || undefined,
-          smartMeterConsent: consent,
-          smartMeterConsentDate: new Date().toISOString()
         })
       });
 
@@ -370,7 +361,6 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
               setAddress('');
               addressValueRef.current = '';
               setUnitNumber('');
-              setConsent(false);
               setUseFallbackInput(true);
               setReinitNonce((nonce) => nonce + 1);
               onAddressSubmitted('');
@@ -429,12 +419,12 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
           </div>
           
           <button
-              type="submit"
-              disabled={!address.trim() || !consent || isSubmitting}
-              className="bg-brand-blue text-white px-6 py-3 text-sm font-medium rounded-md hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isSubmitting ? 'Connecting...' : 'Connect'}
-            </button>
+            type="submit"
+            disabled={!address.trim() || isSubmitting}
+            className="bg-brand-blue text-white px-6 py-3 text-sm font-medium rounded-md hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isSubmitting ? 'Connecting...' : 'Connect'}
+          </button>
         </div>
 
       {error && (
@@ -443,78 +433,6 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
         </p>
       )}
 
-        {/* Smart Meter Consent */}
-        <div className="space-y-3">
-          <label className="flex items-start space-x-3 text-sm cursor-pointer group">
-            <input 
-              type="checkbox" 
-              checked={consent} 
-              onChange={() => setConsent(!consent)}
-              className="mt-1 w-4 h-4 text-brand-blue bg-white border-white/30 rounded focus:ring-brand-blue focus:ring-2"
-            />
-            <span className="text-white group-hover:text-brand-blue transition-colors">
-              The IntelliWatt Rate Plan Analyzer is in final testing. You can
-              <span className="font-semibold"> authorize Smart Meter Texas now</span> so your usage data is securely
-              linked and ready. While we finish connections and squash bugs, we won&rsquo;t show results in the dashboard yet.
-              As soon as everything is live, we&rsquo;ll <span className="font-semibold">email your personalized plan recommendation</span>.
-              Thanks for joining the early waitlist and helping us launch this the right way!
-            </span>
-          </label>
-
-          {/* Terms of Service Link */}
-          <div className="text-center">
-            <button
-              type="button"
-              onClick={() => setShowTerms(!showTerms)}
-              className="text-xs text-white/80 hover:text-brand-blue underline transition-colors"
-            >
-              {showTerms ? 'Hide' : 'View'} Terms of Service & Privacy Policy
-            </button>
-          </div>
-
-          {/* Terms Modal */}
-          {showTerms && (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-              <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 shadow-xl max-h-96 overflow-y-auto">
-                <div className="text-center mb-4">
-                  <h3 className="text-lg font-medium text-brand-navy">Terms of Service & Privacy Policy</h3>
-                </div>
-                <div className="text-sm text-brand-navy space-y-4">
-                  <div>
-                    <h4 className="font-semibold mb-2">Smart Meter Data Access</h4>
-                    <p>By connecting your Smart Meter Texas account, you authorize IntelliWatt to:</p>
-                    <ul className="list-disc list-inside mt-2 space-y-1">
-                      <li>Access your ESIID (Electric Service Identifier)</li>
-                      <li>Retrieve your current electricity plan details</li>
-                      <li>Download your historical usage data</li>
-                      <li>Analyze your consumption patterns for optimization</li>
-                    </ul>
-                  </div>
-                  <div>
-                    <h4 className="font-semibold mb-2">Data Security</h4>
-                    <p>Your data is encrypted and stored securely. We never share your personal information with third parties without your explicit consent.</p>
-                  </div>
-                  <div>
-                    <h4 className="font-semibold mb-2">Service Purpose</h4>
-                    <p>This data is used solely to provide you with personalized energy plan recommendations and help you save money on your electricity bills.</p>
-                  </div>
-                  <div>
-                    <h4 className="font-semibold mb-2">Your Rights</h4>
-                    <p>You can disconnect your Smart Meter access at any time through your dashboard settings. You may also request deletion of your data by contacting support.</p>
-                  </div>
-                </div>
-                <div className="mt-6 text-center">
-                  <button
-                    onClick={() => setShowTerms(false)}
-                    className="bg-brand-blue text-white py-2 px-4 rounded-md hover:bg-blue-600 transition-colors"
-                  >
-                    I Understand
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
       </form>
     </div>
   );
