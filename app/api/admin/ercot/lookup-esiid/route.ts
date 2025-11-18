@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/auth/admin';
 import { wbGetElectricityInfo } from '@/lib/wattbuy/client';
+import { composeWattbuyAddress, formatUnitForWattbuy } from '@/lib/wattbuy/formatAddress';
 import { extractEsiidDetails } from '@/lib/wattbuy/extractEsiid';
 
 export const runtime = 'nodejs';
@@ -25,6 +26,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const address = req.nextUrl.searchParams.get('line1') || req.nextUrl.searchParams.get('address') || '';
+    const unit = req.nextUrl.searchParams.get('line2') || req.nextUrl.searchParams.get('unit') || '';
     const city = req.nextUrl.searchParams.get('city') || '';
     const state = req.nextUrl.searchParams.get('state') || 'tx';
     const zip = req.nextUrl.searchParams.get('zip') || '';
@@ -34,7 +36,9 @@ export async function GET(req: NextRequest) {
     }
 
     // Use WattBuy electricity/info endpoint to get ESIID
-    const info = await wbGetElectricityInfo({ address, city, state, zip, utility_list: 'true' });
+    const compositeAddress = composeWattbuyAddress(address, unit);
+    const formattedUnit = formatUnitForWattbuy(unit);
+    const info = await wbGetElectricityInfo({ address: compositeAddress, city, state, zip, utility_list: 'true' });
     
     if (!info.ok) {
       return NextResponse.json({
@@ -56,6 +60,7 @@ export async function GET(req: NextRequest) {
       tdsp: territory,
       wattkey: data.wattkey || null,
       source: 'wattbuy_electricity',
+      address: { compositeAddress, formattedUnit },
       // Include sample keys for debugging
       sampleKeys: Object.keys(data).slice(0, 20),
     });

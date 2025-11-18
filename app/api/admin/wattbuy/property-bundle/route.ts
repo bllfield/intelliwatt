@@ -5,21 +5,17 @@
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { wbGetElectricity, wbGetElectricityInfo, extractElectricityKeys, wbGetOffers } from '@/lib/wattbuy/client';
+import { composeWattbuyAddress, formatUnitForWattbuy } from '@/lib/wattbuy/formatAddress';
 import { requireAdmin } from '@/lib/auth/admin';
 import { extractEsiidDetails } from '@/lib/wattbuy/extractEsiid';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-function withUnit(address: string, unit?: string | null): string {
-  const trimmedUnit = unit?.trim();
-  if (!trimmedUnit) return address;
-  return `${address} ${trimmedUnit}`;
-}
-
 async function kickSmtIfPossible(address: string, city: string, state: string, zip: string, unit?: string | null) {
   try {
-    const compositeAddress = withUnit(address, unit);
+    const compositeAddress = composeWattbuyAddress(address, unit);
+    const formattedUnit = formatUnitForWattbuy(unit);
     // Get ESIID from /v3/electricity/info endpoint (not /v3/electricity)
     const infoRes = await wbGetElectricityInfo({ address: compositeAddress, city, state, zip, utility_list: 'true' });
 
@@ -57,6 +53,7 @@ async function kickSmtIfPossible(address: string, city: string, state: string, z
           sampleStructure: info ? JSON.stringify(info).slice(0, 500) : null,
         },
         info: infoSummary,
+        address: { compositeAddress, unitFormatted: formattedUnit },
       };
     }
 
@@ -100,7 +97,8 @@ export async function GET(req: NextRequest) {
     const language = (searchParams.get('language') as 'en' | 'es') ?? 'en';
     const is_renter = (searchParams.get('is_renter') ?? 'false') === 'true';
 
-    const compositeAddress = withUnit(address, unit);
+    const compositeAddress = composeWattbuyAddress(address, unit);
+    const formattedUnit = formatUnitForWattbuy(unit);
 
     // 1) Electricity details → wattkey (for offers)
     const elec = await wbGetElectricity({ address: compositeAddress, city, state, zip });
@@ -121,7 +119,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      where: { address: compositeAddress, unit: unit?.trim() || null, city, state, zip },
+      where: { address: compositeAddress, unit: formattedUnit, city, state, zip },
       electricity: {
         status: elec.status,
         headers: elec.headers,
