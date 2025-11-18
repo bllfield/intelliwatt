@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { normalizeGoogleAddress, type GooglePlaceDetails } from "@/lib/normalizeGoogleAddress";
 import { normalizeEmail } from "@/lib/utils/email";
+import { resolveAddressToEsiid } from "@/lib/resolver/addressToEsiid";
+import { wattbuyEsiidDisabled } from "@/lib/flags";
 
 export const dynamic = 'force-dynamic';
 
@@ -85,56 +87,73 @@ export async function POST(req: NextRequest) {
       orderBy: { createdAt: 'desc' }
     });
     
-    const record = existingAddress
+    const selectFields = {
+      id: true,
+      userId: true,
+      houseId: true,
+      addressLine1: true,
+      addressLine2: true,
+      addressCity: true,
+      addressState: true,
+      addressZip5: true,
+      addressZip4: true,
+      addressCountry: true,
+      lat: true,
+      lng: true,
+      addressValidated: true,
+      esiid: true,
+      tdspSlug: true,
+      utilityName: true,
+      utilityPhone: true,
+      createdAt: true,
+      updatedAt: true,
+    };
+
+    let record = existingAddress
       ? await prisma.houseAddress.update({
           where: { id: existingAddress.id },
           data: addressData,
-          select: {
-            id: true,
-            userId: true,
-            houseId: true,
-            addressLine1: true,
-            addressLine2: true,
-            addressCity: true,
-            addressState: true,
-            addressZip5: true,
-            addressZip4: true,
-            addressCountry: true,
-            lat: true,
-            lng: true,
-            addressValidated: true,
-            esiid: true,
-            tdspSlug: true,
-            utilityName: true,
-            utilityPhone: true,
-            createdAt: true,
-            updatedAt: true,
-          },
+          select: selectFields,
         })
       : await prisma.houseAddress.create({
           data: addressData,
-          select: {
-            id: true,
-            userId: true,
-            houseId: true,
-            addressLine1: true,
-            addressLine2: true,
-            addressCity: true,
-            addressState: true,
-            addressZip5: true,
-            addressZip4: true,
-            addressCountry: true,
-            lat: true,
-            lng: true,
-            addressValidated: true,
-            esiid: true,
-            tdspSlug: true,
-            utilityName: true,
-            utilityPhone: true,
-            createdAt: true,
-            updatedAt: true,
-          },
+          select: selectFields,
         });
+
+    if (!record.esiid && !wattbuyEsiidDisabled) {
+      try {
+        const lookup = await resolveAddressToEsiid({
+          line1: normalized.addressLine1,
+          city: normalized.addressCity,
+          state: normalized.addressState,
+          zip: normalized.addressZip5,
+        });
+
+        if (lookup.esiid) {
+          record = await prisma.houseAddress.update({
+            where: { id: record.id },
+            data: {
+              esiid: lookup.esiid,
+              utilityName: record.utilityName ?? lookup.utility ?? undefined,
+            },
+            select: selectFields,
+          });
+
+          try {
+            await prisma.userProfile.update({
+              where: { userId },
+              data: { esiid: lookup.esiid },
+            });
+          } catch (profileErr) {
+            if (process.env.NODE_ENV === "development") {
+              console.warn("[address/save] userProfile update skipped", profileErr);
+            }
+          }
+        }
+      } catch (resolveErr) {
+        console.warn("[address/save] resolveAddressToEsiid failed", resolveErr);
+      }
+    }
 
     // Fire-and-forget SMT fast-fetch trigger (non-blocking)
     (async () => {
