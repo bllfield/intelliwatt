@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { parseManualAddress } from '@/lib/parseManualAddress';
+import { parseGooglePlace, type ParsedPlace } from '@/lib/google/parsePlace';
 
 interface QuickAddressEntryProps {
   onAddressSubmitted: (address: string) => void;
@@ -21,9 +22,54 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
   const [placeDetails, setPlaceDetails] = useState<any>(null); // Store full Google Place object
   const inputRef = useRef<HTMLInputElement>(null);
   const placeDetailsRef = useRef<any>(null);
+  const parsedAddressRef = useRef<ParsedPlace | null>(null);
 
   useEffect(() => {
     setMounted(true);
+  }, []);
+
+  const ensurePlaceHasDetails = useCallback(async (place: any) => {
+    const googleObj = typeof window !== 'undefined' ? (window as any).google : undefined;
+    if (!googleObj?.maps?.places) {
+      return null;
+    }
+
+    if (place?.address_components?.length) {
+      return place;
+    }
+
+    if (!place?.place_id) {
+      return null;
+    }
+
+    return await new Promise<any>((resolve) => {
+      try {
+        const service = new googleObj.maps.places.PlacesService(document.createElement('div'));
+        service.getDetails(
+          {
+            placeId: place.place_id,
+            fields: ['address_components', 'geometry', 'formatted_address', 'place_id'],
+          },
+          (result: any, status: string) => {
+            if (status === googleObj.maps.places.PlacesServiceStatus.OK && result) {
+              resolve(result);
+            } else {
+              resolve(null);
+            }
+          },
+        );
+      } catch (err) {
+        console.warn('Failed to fetch place details', err);
+        resolve(null);
+      }
+    });
+  }, []);
+
+  const handleAddressChange = useCallback((value: string) => {
+    setAddress(value);
+    placeDetailsRef.current = null;
+    parsedAddressRef.current = null;
+    setPlaceDetails(null);
   }, []);
 
   useEffect(() => {
@@ -84,12 +130,32 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
         listener = instance.addListener('place_changed', () => {
           const place = instance.getPlace();
           console.log('Debug: Place selected:', place);
-          setPlaceDetails(place);
-          placeDetailsRef.current = place;
-          if (place.formatted_address) {
-            console.log('Debug: Setting address to:', place.formatted_address);
-            setAddress(place.formatted_address);
-          }
+          ensurePlaceHasDetails(place).then((detailedPlace) => {
+            if (!detailedPlace) {
+              console.warn('Unable to resolve place details');
+              placeDetailsRef.current = null;
+              parsedAddressRef.current = null;
+              setPlaceDetails(null);
+              setError('Unable to retrieve address details. Please enter the full address manually.');
+              return;
+            }
+
+            const parsed = parseGooglePlace(detailedPlace);
+            if (!parsed || !parsed.line1 || !parsed.city || !parsed.state || !parsed.zip) {
+              console.warn('Parsed place missing key fields', parsed);
+              placeDetailsRef.current = null;
+              parsedAddressRef.current = null;
+              setPlaceDetails(null);
+              setError('Unable to parse the selected address. Please complete the fields manually.');
+              return;
+            }
+
+            setError(null);
+            placeDetailsRef.current = detailedPlace;
+            parsedAddressRef.current = parsed;
+            setPlaceDetails(detailedPlace);
+            setAddress(parsed.formattedAddress);
+          });
         });
 
         setAutocomplete(instance);
@@ -112,7 +178,7 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
         listener.remove();
       }
     };
-  }, [mounted, userAddress, autocomplete]);
+  }, [mounted, userAddress, autocomplete, ensurePlaceHasDetails]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -141,25 +207,31 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
       
       // Check if the current address matches what the user typed vs what Google selected
       // If placeDetails exists but the formatted address doesn't match what user typed, it's a manual entry
-      const selectedPlace = placeDetailsRef.current ?? placeDetails;
       let normalizedAddress = address.trim();
-      let googlePlaceDetails;
-      if (selectedPlace && selectedPlace.formatted_address) {
-        normalizedAddress = selectedPlace.formatted_address;
-        console.log('Using Google autocomplete place details', normalizedAddress);
-        setAddress(normalizedAddress);
-        googlePlaceDetails = selectedPlace;
-      } else {
-        console.log('Using manual address parsing');
-        googlePlaceDetails = parseManualAddress(normalizedAddress);
+      let googlePlaceDetails = placeDetailsRef.current ?? placeDetails;
+      let parsedAddress = parsedAddressRef.current;
+
+      if (!googlePlaceDetails || !parsedAddress) {
+        const manualPlace = parseManualAddress(normalizedAddress);
+        googlePlaceDetails = manualPlace;
+        placeDetailsRef.current = manualPlace;
+        const parsedManual = parseGooglePlace(manualPlace as any);
+        parsedAddress = parsedManual;
+        parsedAddressRef.current = parsedManual;
       }
 
-      const components = googlePlaceDetails.address_components ?? [];
-      const hasPostal = components.some((c: any) => Array.isArray(c.types) && c.types.includes('postal_code'));
-      const hasState = components.some((c: any) => Array.isArray(c.types) && c.types.includes('administrative_area_level_1'));
-      const hasCity = components.some((c: any) => Array.isArray(c.types) && (c.types.includes('locality') || c.types.includes('sublocality') || c.types.includes('postal_town')));
+      if (parsedAddress?.formattedAddress) {
+        normalizedAddress = parsedAddress.formattedAddress;
+        setAddress(parsedAddress.formattedAddress);
+      }
 
-      if (!hasPostal || !hasState || !hasCity) {
+      if (
+        !parsedAddress ||
+        !parsedAddress.line1 ||
+        !parsedAddress.city ||
+        !parsedAddress.state ||
+        !parsedAddress.zip
+      ) {
         setError('Please enter the full service address, including city, state, and ZIP code.');
         setIsSubmitting(false);
         return;
@@ -201,6 +273,7 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
         setError(null);
         placeDetailsRef.current = null;
         setPlaceDetails(null);
+        parsedAddressRef.current = null;
         
         // Address saved successfully - user can see the updated UI
       } else {
@@ -276,7 +349,7 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
               type="text"
               placeholder="Enter your service address..."
               value={address}
-              onChange={(e) => setAddress(e.target.value)}
+              onChange={(e) => handleAddressChange(e.target.value)}
               className="w-full px-4 py-3 text-sm bg-white/90 border border-white/30 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-blue focus:border-brand-blue text-brand-navy placeholder-brand-navy/60"
               disabled={isSubmitting || !googleLoaded}
             />
