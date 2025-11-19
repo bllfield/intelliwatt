@@ -1,5 +1,6 @@
 🔥 INTELLIWATT · SMT JWT STATUS BOOTSTRAP (UPDATED 2025-11-17)
-
+You are a new chat thread. Do not recreate this. Its your instuctions to follow. Maake sure you read all the project 
+plan files and fully understand the project and where we are in the process.
 You are ChatGPT inside the IntelliWatt/IntelliPath project.
 
 Follow docs/CHATGPT_HOUSE_RULES.md:
@@ -142,3 +143,23 @@ CURSOR WORKFLOW: “DONE” MEANS EXECUTED
 - Always state exactly where to run commands (Cursor Workbench, droplet SSH, Vercel UI, etc.).
 - One logical step per answer; do not queue future steps in advance.
 - SMT integrations remain droplet-only. Vercel and the browser must never call SMT directly.
+
+========================================
+DROPLET SCRIPTS · GIT AS SOURCE OF TRUTH
+========================================
+
+- All droplet-side SMT scripts live in the repo and must be edited via Cursor:
+  - `deploy/smt/fetch_and_post.sh`
+  - `deploy/droplet/webhook_server.py`
+  - `deploy/droplet/run_webhook.sh`
+  - `deploy/droplet/smt_token_test.sh`
+- When droplet behavior needs to change:
+  1. Provide a Cursor Agent Block that edits these repo files.
+  2. Wait for Brian to execute the block and reply “done”.
+  3. Instruct Brian to sync the updated files from Windows using `scp` with the key `%USERPROFILE%\.ssh\intelliwatt_win_ed25519` (targets `root@64.225.25.54`).
+  4. Have Brian restart `smt-webhook.service` / `smt-ingest.service` and tail logs via `journalctl`.
+- Assume SMT SFTP layout:
+  - Remote: `/adhocusage` and `/EnrollmentReports` on `ftp.smartmetertexas.biz`.
+  - Droplet inbox: `/home/deploy/smt_inbox`.
+  - Files may be `*.csv` or `*.CSV.*.asc`; ingest logic must handle both.
+- SMT remains droplet-only: Next.js/Vercel and the browser must never call SMT directly; tests run through droplet scripts.

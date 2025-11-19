@@ -2318,3 +2318,18 @@ We have extended the Smart Meter Texas ingest pipeline and admin tooling:
   - SMT traffic stays droplet-only; Vercel does not call SMT APIs directly.
   - `/api/admin/smt/pull` keeps the existing inline `base64+gzip` contract.
 - No production database resets or schema changes were performed.
+
+### PC-2025-11-19-D · Droplet Script Source of Truth (SMT Ingest)
+
+- Canonical SMT droplet scripts live in Git:
+  - `deploy/smt/fetch_and_post.sh`
+  - `deploy/droplet/webhook_server.py`
+  - `deploy/droplet/run_webhook.sh`
+  - `deploy/droplet/smt_token_test.sh`
+- These files are the source of truth for the ingest + webhook stack on `intelliwatt-smt-proxy`.
+- Any droplet behavior change must be made via Cursor edits to these repo files, committed, and then synced to the droplet (e.g., `scp`). Emergency on-box edits must be mirrored back into the repo immediately.
+- Brian uses `%USERPROFILE%\.ssh\intelliwatt_win_ed25519` to ssh/scp as `root@64.225.25.54`.
+- SMT ingest assumptions:
+  - SFTP host `ftp.smartmetertexas.biz`, remote dirs `/adhocusage` and `/EnrollmentReports`.
+  - Droplet inbox `/home/deploy/smt_inbox`.
+  - SMT files can be named `*.csv` or `*.CSV.*.asc`; scripts must handle both patterns.

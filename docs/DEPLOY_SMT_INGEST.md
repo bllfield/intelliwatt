@@ -349,6 +349,48 @@ pwsh -File scripts/admin/smt_inline_post_test.ps1 `
 
 With the timer active, the droplet continuously ingests new SMT files into IntelliWatt without exposing admin secrets in the client.
 
+### Droplet Script Sync Workflow (Git → Droplet)
+
+Source of truth for SMT ingest scripts now lives in the repo:
+
+- `deploy/smt/fetch_and_post.sh`
+- `deploy/droplet/webhook_server.py`
+- `deploy/droplet/run_webhook.sh`
+- `deploy/droplet/smt_token_test.sh`
+
+Standard workflow:
+
+1. Make changes in Cursor to the files above and commit to the main branch.
+2. On Brian's Windows machine, use the dedicated SSH key at `%USERPROFILE%\.ssh\intelliwatt_win_ed25519` to sync updated scripts:
+
+   ```powershell
+   $KEY = "$env:USERPROFILE\.ssh\intelliwatt_win_ed25519"
+   scp -i $KEY .\deploy\droplet\webhook_server.py  root@64.225.25.54:/home/deploy/smt_ingest/web/webhook_server.py
+   scp -i $KEY .\deploy\droplet\run_webhook.sh      root@64.225.25.54:/home/deploy/smt_ingest/web/run_webhook.sh
+   scp -i $KEY .\deploy\droplet\smt_token_test.sh  root@64.225.25.54:/home/deploy/smt_token_test.sh
+   scp -i $KEY .\deploy\smt\fetch_and_post.sh      root@64.225.25.54:/home/deploy/fetch_and_post.sh
+   ```
+
+3. On the droplet, restart the relevant services (if needed):
+
+   ```bash
+   sudo systemctl restart smt-webhook.service
+   sudo systemctl restart smt-ingest.service
+   ```
+
+4. Tail logs to confirm the updates:
+
+   ```bash
+   journalctl -u smt-webhook.service -n 50 -f
+   journalctl -u smt-ingest.service -n 50 -f
+   ```
+
+Notes:
+
+- SMT env for ingest remains in `/etc/default/intelliwatt-smt` (ADMIN_TOKEN, INTELLIWATT_BASE_URL, SMT_HOST, SMT_USER, SMT_KEY, SMT_REMOTE_DIR, SMT_LOCAL_DIR, etc.).
+- SMT SFTP is the only supported channel for usage/billing files; Vercel must not call SMT directly.
+- Behavior changes start in Git (Cursor edits) and then deploy to the droplet; avoid ad-hoc edits in `/home/deploy/smt_ingest/web`.
+
 [2025-11-12] Verified droplet + systemd + webhook configuration
 
 Droplet (Ubuntu 25.04), user: deploy
