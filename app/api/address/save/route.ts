@@ -6,6 +6,38 @@ import { normalizeEmail } from "@/lib/utils/email";
 import { resolveAddressToEsiid } from "@/lib/resolver/addressToEsiid";
 import { wattbuyEsiidDisabled } from "@/lib/flags";
 
+let userProfileAttentionColumnsAvailable: boolean | null = null;
+
+async function ensureUserProfileAttentionColumns(): Promise<boolean> {
+  if (userProfileAttentionColumnsAvailable !== null) {
+    return userProfileAttentionColumnsAvailable;
+  }
+
+  try {
+    const result = await prisma.$queryRaw<{ count: number }[]>`
+      SELECT COUNT(*)::int AS "count"
+      FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND table_name = 'UserProfile'
+        AND column_name IN ('esiidAttentionRequired', 'esiidAttentionCode', 'esiidAttentionAt')
+    `;
+
+    const count = result[0]?.count ?? 0;
+    userProfileAttentionColumnsAvailable = count === 3;
+  } catch (err) {
+    console.warn("[address/save] attention columns probe failed", err);
+    userProfileAttentionColumnsAvailable = false;
+  }
+
+  if (!userProfileAttentionColumnsAvailable) {
+    console.warn(
+      "[address/save] ESIID attention columns missing; run `npx prisma migrate deploy` to add them.",
+    );
+  }
+
+  return userProfileAttentionColumnsAvailable;
+}
+
 export const dynamic = "force-dynamic";
 
 type SaveAddressBody = {
@@ -199,6 +231,7 @@ export async function POST(req: NextRequest) {
     const shouldLookupEsiid = (!record.esiid || addressChanged) && !wattbuyEsiidDisabled;
 
     if (shouldLookupEsiid) {
+      const attentionColumnsAvailable = await ensureUserProfileAttentionColumns();
       try {
         const lookup = await resolveAddressToEsiid({
           line1: normalized.addressLine1,
@@ -241,11 +274,17 @@ export async function POST(req: NextRequest) {
                   },
                 });
 
-                await tx.$executeRawUnsafe(
-                  'UPDATE "UserProfile" SET "esiidAttentionRequired" = TRUE, "esiidAttentionCode" = $1, "esiidAttentionAt" = NOW() WHERE "userId" = $2',
-                  lookup.esiid,
-                  conflicting.userId,
-                );
+                if (attentionColumnsAvailable) {
+                  await tx.$executeRawUnsafe(
+                    'UPDATE "UserProfile" SET "esiidAttentionRequired" = TRUE, "esiidAttentionCode" = $1, "esiidAttentionAt" = NOW() WHERE "userId" = $2',
+                    lookup.esiid,
+                    conflicting.userId,
+                  );
+                } else {
+                  console.warn(
+                    "[address/save] Skipping attention flag set; columns unavailable (run prisma migrate deploy).",
+                  );
+                }
 
                 const updatedRecord = await tx.houseAddress.update({
                   where: { id: record.id },
@@ -312,10 +351,16 @@ export async function POST(req: NextRequest) {
                 esiid: lookup.esiid,
               },
             });
-            await prisma.$executeRawUnsafe(
-              'UPDATE "UserProfile" SET "esiidAttentionRequired" = FALSE, "esiidAttentionCode" = NULL, "esiidAttentionAt" = NULL WHERE "userId" = $1',
-              userId,
-            );
+            if (attentionColumnsAvailable) {
+              await prisma.$executeRawUnsafe(
+                'UPDATE "UserProfile" SET "esiidAttentionRequired" = FALSE, "esiidAttentionCode" = NULL, "esiidAttentionAt" = NULL WHERE "userId" = $1',
+                userId,
+              );
+            } else {
+              console.warn(
+                "[address/save] Skipping attention flag reset; columns unavailable (run prisma migrate deploy).",
+              );
+            }
           } catch (profileErr) {
             if (process.env.NODE_ENV === "development") {
               console.warn("[address/save] userProfile update skipped", profileErr);
@@ -340,7 +385,6 @@ export async function POST(req: NextRequest) {
             },
             body: JSON.stringify({ reason: "address_saved", ts: Date.now() }),
             cache: "no-store",
-            next: { revalidate: 0 },
           });
         }
       } catch {
