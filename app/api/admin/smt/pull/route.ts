@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
+import type { PrismaClient } from '@prisma/client';
 import { gunzipSync } from 'zlib';
 import { requireAdmin } from '@/lib/auth/admin';
 import { prisma } from '@/lib/db';
@@ -38,6 +39,192 @@ async function normalizeInlineSmtCsv(opts: {
     })),
     skipDuplicates: true,
   });
+}
+
+type BillingCsvDetectionInput = {
+  filename?: string | null;
+  source?: string | null;
+};
+
+function looksLikeBillingCsv({ filename, source }: BillingCsvDetectionInput): boolean {
+  const f = (filename || '').toLowerCase();
+  const s = (source || '').toLowerCase();
+
+  if (f.includes('interval')) return false;
+  if (s.includes('interval')) return false;
+
+  if (f.includes('dailymeterusage')) return true;
+  if (f.includes('monthlybilling')) return true;
+  if (f.includes('billing')) return true;
+  if (f.includes('billread')) return true;
+
+  if (s.includes('billing')) return true;
+  if (s.includes('daily')) return true;
+
+  return false;
+}
+
+type NormalizeBillingOpts = {
+  prismaClient: PrismaClient;
+  csvBytes: Buffer;
+  esiid?: string | null;
+  meter?: string | null;
+  source?: string | null;
+  rawSmtFileId: bigint;
+  filename?: string | null;
+};
+
+async function maybeNormalizeBillingCsv(opts: NormalizeBillingOpts): Promise<void> {
+  const { prismaClient, csvBytes, esiid, meter, source, rawSmtFileId, filename } = opts;
+
+  if (!looksLikeBillingCsv({ filename, source })) {
+    return;
+  }
+
+  try {
+    const text = csvBytes.toString('utf8');
+    const lines = text
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0);
+
+    if (lines.length < 2) {
+      console.warn('[SMT Billing] CSV too short to parse billing reads', {
+        rawSmtFileId: rawSmtFileId.toString(),
+        filename,
+      });
+      return;
+    }
+
+    const headerLine = lines[0];
+    const headerCells = headerLine
+      .split(',')
+      .map((h) => h.trim().replace(/^"|"$/g, ''));
+    const headerLower = headerCells.map((h) => h.toLowerCase());
+
+    const findCol = (...candidates: string[]): number => {
+      for (const candidate of candidates) {
+        const idx = headerLower.findIndex((h) => h === candidate.toLowerCase());
+        if (idx !== -1) return idx;
+      }
+      for (const candidate of candidates) {
+        const idx = headerLower.findIndex((h) => h.includes(candidate.toLowerCase()));
+        if (idx !== -1) return idx;
+      }
+      return -1;
+    };
+
+    const dateIdx = findCol(
+      'usage_date',
+      'read_date',
+      'readdate',
+      'bill_date',
+      'billing_date',
+      'service_period_end',
+      'period_end',
+    );
+    const kwhIdx = findCol('kwh', 'usage_kwh', 'total_kwh', 'billed_kwh');
+
+    if (dateIdx === -1 || kwhIdx === -1) {
+      console.warn('[SMT Billing] No recognizable date/kWh columns in CSV header', {
+        rawSmtFileId: rawSmtFileId.toString(),
+        filename,
+        header: headerCells,
+      });
+      return;
+    }
+
+    const rows: Prisma.SmtBillingReadCreateManyInput[] = [];
+
+    const parseDate = (value: string): Date | null => {
+      const trimmed = value.trim().replace(/^"|"$/g, '');
+      if (!trimmed) return null;
+      const parsed = new Date(trimmed);
+      if (Number.isNaN(parsed.getTime())) {
+        return null;
+      }
+      return parsed;
+    };
+
+    const parseNumber = (value: string): number | null => {
+      const cleaned = value.trim().replace(/^"|"$/g, '');
+      if (!cleaned) return null;
+      const num = Number(cleaned);
+      if (!Number.isFinite(num)) return null;
+      return num;
+    };
+
+    const targetEsiid = (esiid ?? '').trim();
+    if (!targetEsiid) {
+      console.warn('[SMT Billing] Skipping billing parse due to missing ESIID', {
+        rawSmtFileId: rawSmtFileId.toString(),
+        filename,
+      });
+      return;
+    }
+
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i];
+      if (!line) continue;
+
+      const cells = line.split(',');
+      if (cells.length !== headerCells.length) {
+        continue;
+      }
+
+      const dateRaw = cells[dateIdx] ?? '';
+      const kwhRaw = cells[kwhIdx] ?? '';
+
+      const billDate = parseDate(dateRaw);
+      const kwh = parseNumber(kwhRaw);
+
+      if (!billDate || kwh === null) {
+        continue;
+      }
+
+      rows.push({
+        rawSmtFileId,
+        esiid: targetEsiid,
+        meter: (meter ?? undefined) ? meter ?? undefined : null,
+        tdspCode: null,
+        tdspName: null,
+        readStart: billDate,
+        readEnd: null,
+        billDate,
+        kwhTotal: kwh,
+        kwhBilled: kwh,
+        source: source ?? null,
+      });
+    }
+
+    if (!rows.length) {
+      console.warn('[SMT Billing] No valid billing rows parsed from CSV', {
+        rawSmtFileId: rawSmtFileId.toString(),
+        filename,
+      });
+      return;
+    }
+
+    await prismaClient.smtBillingRead.deleteMany({
+      where: { rawSmtFileId },
+    });
+
+    await prismaClient.smtBillingRead.createMany({
+      data: rows,
+    });
+
+    console.log('[SMT Billing] Parsed billing rows from CSV', {
+      rawSmtFileId: rawSmtFileId.toString(),
+      filename,
+      rowCount: rows.length,
+    });
+  } catch (err) {
+    console.error('[SMT Billing] Error while parsing billing CSV', {
+      rawSmtFileId: rawSmtFileId.toString(),
+      filename,
+      error: (err as Error).message,
+    });
+  }
 }
 
 type WebhookAuthResult =
@@ -186,6 +373,7 @@ export async function POST(req: NextRequest) {
       }
 
       if (recordId && !duplicate) {
+        const rawId = recordId;
         try {
           await normalizeInlineSmtCsv({
             csvBytes,
@@ -195,6 +383,20 @@ export async function POST(req: NextRequest) {
           });
         } catch (normalizeErr) {
           console.error('[smt/pull:inline] normalizeInlineSmtCsv failed', { id: recordId }, normalizeErr);
+        }
+
+        try {
+          await maybeNormalizeBillingCsv({
+            prismaClient: prisma,
+            csvBytes,
+            esiid: typeof esiid === 'string' ? esiid : undefined,
+            meter: typeof meter === 'string' ? meter : undefined,
+            source: saved.source,
+            rawSmtFileId: rawId,
+            filename: saved.filename,
+          });
+        } catch (billingErr) {
+          console.error('[smt/pull:inline] maybeNormalizeBillingCsv failed', { id: recordId }, billingErr);
         }
       }
 

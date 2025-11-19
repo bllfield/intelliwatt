@@ -412,6 +412,8 @@ model RawSmtFile {
   created_at   DateTime  @default(now())
   updated_at   DateTime  @updatedAt
 
+  billingReads SmtBillingRead[]
+
   @@index([sha256])
   @@index([created_at])
   @@map("raw_smt_files")
@@ -433,12 +435,12 @@ model SmtInterval {
 }
 
 model SmtBillingRead {
-  id           String       @id @default(cuid())
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+  id           String        @id @default(cuid())
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
 
-  rawSmtFileId String?
-  rawSmtFile   RawSmtFile?  @relation(fields: [rawSmtFileId], references: [id])
+  rawSmtFileId BigInt?
+  rawSmtFile   RawSmtFile?   @relation(fields: [rawSmtFileId], references: [id])
 
   esiid        String
   meter        String?

@@ -131,3 +131,17 @@ Note:
   - DUNS, PUCT #, CSP name (Intellipath Solutions LLC / DBA IntelliWatt)
   - Your SMT portal screenshots (e.g., “CSP New Customer Enrollment: OFF”)
   - Your static IP or certificate details if they are requested.
+
+## SMT · SmtBillingRead Table Fix
+
+If Prisma or Prisma Studio reports:
+
+> The table `public.SmtBillingRead` does not exist in the current database.
+
+and `SmtBillingRead` exists in `prisma/schema.prisma` with migration folder `prisma/migrations/20251119070500_add_smt_billing_read`, apply the migration manually:
+
+```bash
+# From repo root, with DATABASE_URL set
+npm install
+npm run db:apply-smt-billing
+```
