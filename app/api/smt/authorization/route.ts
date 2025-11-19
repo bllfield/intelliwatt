@@ -168,6 +168,39 @@ export async function POST(req: NextRequest) {
       },
     });
 
+    const webhookUrl = process.env.DROPLET_WEBHOOK_URL;
+    const webhookSecret = process.env.DROPLET_WEBHOOK_SECRET;
+
+    if (webhookUrl && webhookSecret) {
+      try {
+        await fetch(webhookUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Webhook-Secret": webhookSecret,
+          },
+          body: JSON.stringify({
+            reason: "smt_authorized",
+            ts: new Date().toISOString(),
+            smtAuthorizationId: created.id,
+            userId: created.userId,
+            houseId: created.houseId,
+            houseAddressId: created.houseAddressId,
+            esiid: created.esiid,
+            tdspCode: created.tdspCode,
+            tdspName: created.tdspName,
+            authorizationStartDate: created.authorizationStartDate,
+            authorizationEndDate: created.authorizationEndDate,
+            includeInterval: true,
+            includeBilling: true,
+            monthsBack: 12,
+          }),
+        });
+      } catch (err) {
+        console.error("Failed to notify SMT droplet webhook after authorization", err);
+      }
+    }
+
     return NextResponse.json(
       {
         ok: true,
