@@ -2190,3 +2190,42 @@ Ops and support need a stable email field on `HouseAddress` for lookups, while t
 - `userId` remains the relational source of truth.
 - No PII is newly exposed beyond what is already stored in `User.email`.
 - Migration keeps RAW payload handling untouched.
+
+### PC-2025-11-19-A – SMT Authorization → Droplet Ingest (Locked)
+
+**Status:** Locked. Do not change without a new plan change entry.
+
+**Summary:** SMT authorization now operates as a three-hop flow that must remain intact:
+1. **Browser → Vercel**: Customer submits the form on `/dashboard/api#smt`, which posts to `POST /api/smt/authorization`.
+2. **Vercel → Droplet**: The route posts JSON to the droplet webhook (`/trigger/smt-now`) with `reason: "smt_authorized"`, signed by `DROPLET_WEBHOOK_SECRET` / `INTELLIWATT_WEBHOOK_SECRET`.
+3. **Droplet → SMT**: `webhook_server.py` validates the secret and executes `deploy/smt/fetch_and_post.sh`, which SFTPs from SMT, then posts the CSVs inline to `/api/admin/smt/pull` (still the canonical ingest path).
+
+**Webhook payload shape (`reason: "smt_authorized"`):**
+```
+{
+  "reason": "smt_authorized",
+  "ts": "<ISO timestamp>",
+  "smtAuthorizationId": "<Prisma ID>",
+  "userId": "<IntelliWatt user id>",
+  "houseId": "<house id>",
+  "houseAddressId": "<house address id>",
+  "esiid": "<ESIID>",
+  "tdspCode": "<TDSP code>",
+  "tdspName": "<TDSP name>",
+  "authorizationStartDate": "<ISO>",
+  "authorizationEndDate": "<ISO>",
+  "includeInterval": true,
+  "includeBilling": true,
+  "monthsBack": 12,
+  "windowFrom": "<ISO>",
+  "windowTo": "<ISO>"
+}
+```
+
+**Operational notes:**
+- SMT remains droplet-only. Vercel never calls SMT APIs or SFTP directly.
+- Successful runs log lines such as:
+  `[INFO] SMT ingest finished for ESIID='...' rc=0 stdout_len=... stderr_len=...`.
+- Droplet ingest currently defaults to a 12-month look-back and posts both interval and billing files.
+
+**Guardrail:** Treat this flow as canonical. Future work must extend it (e.g., new ingest modes) rather than replacing or bypassing the droplet-trigger mechanism.

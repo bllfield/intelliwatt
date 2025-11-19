@@ -294,6 +294,14 @@ systemctl start intelliwatt-smt-cycle.service
 
 **WattBuy**: Plans are pulled nightly and cached; no extra WattBuy call on SMT arrival.
 
+## SMT Live Ingest Automation
+
+- [x] **On-demand ingest on SMT authorization (2025-11-19)**
+  - `POST /api/smt/authorization` sends `reason: "smt_authorized"` to `DROPLET_WEBHOOK_URL` signed by the webhook secret.
+  - Droplet `smt-webhook.service` validates the header, logs the payload, and calls `deploy/smt/fetch_and_post.sh` with `ESIID_DEFAULT` from the payload.
+  - `fetch_and_post.sh` SFTPs new SMT CSVs and posts them inline to `/api/admin/smt/pull`; interval CSVs auto-normalize into `SmtInterval`.
+  - SMT remains droplet-only (JWT + SFTP). Vercel never calls SMT APIs directly.
+
 ## Related Documentation
 
 - `docs/ADMIN_API.md` - Admin endpoint authentication patterns

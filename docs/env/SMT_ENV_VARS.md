@@ -73,6 +73,29 @@ systemd unit `smt-token-proxy.service` runs:
 
 Only requests with the correct `x-proxy-token` are forwarded to SMT `/v2/token/`.
 
+## Droplet ingest + webhook shared environment
+
+The droplet services `smt-ingest.service` (timer) and `smt-webhook.service` (on-demand) both source core variables from `/etc/default/intelliwatt-smt`:
+
+- `SMT_HOST` – SMT SFTP host, e.g. `services.smartmetertexas.net`.
+- `SMT_USER` – SFTP username.
+- `SMT_KEY` – Path to private key used for SFTP (`chmod 600`).
+- `SMT_REMOTE_DIR` – Remote SFTP directory containing SMT exports.
+- `SMT_LOCAL_DIR` – Local inbox directory on the droplet (e.g. `/home/deploy/smt_inbox`).
+- `INTELLIWATT_BASE_URL` – Public base URL for the IntelliWatt app (used when calling `/api/admin/smt/pull`).
+- `ADMIN_TOKEN` – 64-character admin token for authenticated ingest posts.
+
+`/etc/default/intelliwatt-smt` must be readable by systemd (root:root 640 works) so both services inherit the same values. Vercel does **not** have access to SMT credentials; they remain droplet-only.
+
+### Webhook-specific secrets
+
+`smt-webhook.service` also loads `/home/deploy/smt_ingest/.env` for local settings (port, logging, etc.) and combines it with `/etc/default/intelliwatt-smt`. The webhook expects one of the following headers to match the shared secret:
+
+- `INTELLIWATT_WEBHOOK_SECRET` – canonical secret for Vercel → droplet.
+- `DROPLET_WEBHOOK_SECRET` – legacy/alternate secret.
+
+Acceptable header names: `x-intelliwatt-secret`, `x-droplet-webhook-secret`, `x-proxy-secret`.
+
 ## Droplet / Webhook (existing)
 
 - `INTELLIWATT_WEBHOOK_SECRET` – Shared secret for droplet webhook headers (`x-intelliwatt-secret`).  

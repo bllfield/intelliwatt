@@ -784,3 +784,65 @@ Admins can:
   - `/admin/smt/raw` (includes “Normalize Latest SMT File” control).
   - `/admin/smt/normalize`.
   - `/admin/smt/trigger`.
+
+## On-demand SMT ingest from SMT authorizations
+
+The droplet now supports an auth-triggered ingest path that complements the timer-based job.
+
+### Services involved
+
+- `smt-ingest.service`
+  - Timer-driven ingest (see units above) that calls `deploy/smt/fetch_and_post.sh` on a schedule.
+  - Reads `/etc/default/intelliwatt-smt` for SMT_* and IntelliWatt env variables.
+- `smt-webhook.service`
+  - Listens on port 8787 for on-demand ingest triggers at `POST /trigger/smt-now`.
+  - `ExecStart=/home/deploy/smt_ingest/web/run_webhook.sh`.
+  - Drop-in override adds:
+    ```ini
+    [Service]
+    EnvironmentFile=/home/deploy/smt_ingest/.env
+    EnvironmentFile=/etc/default/intelliwatt-smt
+    ```
+
+### Webhook behavior (`webhook_server.py`)
+
+- Accepts only `POST /trigger/smt-now`.
+- Validates one of the shared-secret headers:
+  - `x-intelliwatt-secret`
+  - `x-droplet-webhook-secret`
+  - `x-proxy-secret`
+- Parses JSON payload and inspects `reason`:
+  - Unrecognized `reason` ⇒ log generic trigger and exit (legacy behavior).
+  - `reason == "smt_authorized"` ⇒ log payload and execute:
+    ```bash
+    cd /home/deploy/apps/intelliwatt && \
+    ESIID_DEFAULT=<payload.esiid> \
+    deploy/smt/fetch_and_post.sh
+    ```
+
+### `fetch_and_post.sh` recap
+
+- Requires: `SMT_HOST`, `SMT_USER`, `SMT_KEY`, `SMT_REMOTE_DIR`, `SMT_LOCAL_DIR`, `INTELLIWATT_BASE_URL`, `ADMIN_TOKEN`.
+- Runs `lftp mget -p -r *` from `SMT_REMOTE_DIR` into `SMT_LOCAL_DIR`.
+- Scans for `*.csv` (depth ≤ 2).
+- For each CSV:
+  - Computes SHA-256 and skips files already recorded in `.posted_sha256`.
+  - Derives ESIID/meter from filename, or uses `ESIID_DEFAULT` / `METER_DEFAULT`.
+  - Builds gzipped+base64 JSON payload.
+  - POSTs to `${INTELLIWATT_BASE_URL}/api/admin/smt/pull` with `x-admin-token`.
+  - Interval CSVs are automatically normalized by the admin endpoint into `SmtInterval`.
+
+### Ops: How to test the flow
+
+1. On droplet (as `deploy`):
+   ```bash
+   sudo journalctl -u smt-webhook.service -n 40 -f
+   ```
+2. In browser: visit `/dashboard/api#smt`, submit SMT authorization.
+3. Observe droplet logs:
+   ```
+   [INFO] SMT authorization webhook received: reason='smt_authorized' ...
+   [INFO] Starting SMT ingest via: cd /home/deploy/apps/intelliwatt && ESIID_DEFAULT=... deploy/smt/fetch_and_post.sh
+   [INFO] SMT ingest finished for ESIID='...' rc=0 ...
+   ```
+4. Confirm new CSVs in `/home/deploy/smt_inbox` and check `/api/admin/smt/raw` or interval admin views.
