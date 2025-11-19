@@ -99,38 +99,55 @@ export async function resolveAddressToEsiid(addr: AddressInput): Promise<Address
       variants.add(abbreviateDirections(variant));
     }
 
+    const attempted = new Set<string>();
     const variantList = Array.from(variants);
     for (let i = 0; i < variantList.length; i += 1) {
       const variant = variantList[i];
       if (!variant) continue;
 
       const cleanedVariant = variant.replace(unitPattern, '').replace(/\s+/g, ' ').trim();
-      const compositeLine1 = composeWattbuyAddress(cleanedVariant, trimmedLine2);
       const providerLine2 = formatUnitForWattbuy(trimmedLine2);
 
-      const info = await fetchWattbuyInfo(compositeLine1, addr, providerLine2);
-      fallbackInfo = info;
-
-      if (!info.ok) {
-        continue;
+      const compositeCandidates: string[] = [];
+      const commaVariant = composeWattbuyAddress(cleanedVariant, trimmedLine2);
+      if (commaVariant) {
+        compositeCandidates.push(commaVariant);
+      }
+      if (providerLine2) {
+        compositeCandidates.push(`${cleanedVariant} ${providerLine2}`.trim());
       }
 
-      const data = info.data ?? null;
-      const details = extractEsiidDetails(data);
-      console.log('[resolveAddressToEsiid] response', {
-        hasEsiid: Boolean(details.esiid),
-        utility: details.utility ?? null,
-        territory: details.territory ?? null,
-        compositeLine1,
-      });
+      for (const compositeLine1 of compositeCandidates) {
+        const normalizedComposite = compositeLine1.trim();
+        if (!normalizedComposite || attempted.has(normalizedComposite.toLowerCase())) {
+          continue;
+        }
+        attempted.add(normalizedComposite.toLowerCase());
 
-      if (details.esiid) {
-        return {
-          esiid: details.esiid,
-          utility: details.utility,
-          territory: details.territory,
-          raw: data,
-        };
+        const info = await fetchWattbuyInfo(normalizedComposite, addr, providerLine2);
+        fallbackInfo = info;
+
+        if (!info.ok) {
+          continue;
+        }
+
+        const data = info.data ?? null;
+        const details = extractEsiidDetails(data);
+        console.log('[resolveAddressToEsiid] response', {
+          hasEsiid: Boolean(details.esiid),
+          utility: details.utility ?? null,
+          territory: details.territory ?? null,
+          compositeLine1: normalizedComposite,
+        });
+
+        if (details.esiid) {
+          return {
+            esiid: details.esiid,
+            utility: details.utility,
+            territory: details.territory,
+            raw: data,
+          };
+        }
       }
     }
 
