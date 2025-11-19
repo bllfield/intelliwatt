@@ -109,7 +109,7 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
     });
   }
 
-  const disabled = isPending || hasActiveAuth;
+  const disabled = isPending;
 
   return (
     <div className="space-y-4 rounded-xl border border-slate-200 bg-white/80 p-4 shadow-sm backdrop-blur">
@@ -187,8 +187,9 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
         <div className="space-y-1 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
           <div className="font-semibold">Active SMT authorization already on file</div>
           <p>
-            We already have a valid Smart Meter Texas authorization for this address. You don’t need to submit
-            this form again unless you’ve revoked your consent in Smart Meter Texas or your information has changed.
+            We already have a valid Smart Meter Texas authorization for this address. You can submit this form again to
+            refresh or update your authorization, especially if you’ve changed providers, revoked consent in Smart Meter Texas,
+            or updated your information.
           </p>
           {existingAuth?.authorizationStartDate && existingAuth?.authorizationEndDate && (
             <p className="text-emerald-800">
