@@ -62,7 +62,11 @@ if ! sftp -i "$SMT_KEY" -oStrictHostKeyChecking=accept-new "${SMT_USER}@${SMT_HO
   log "WARN: sftp returned non-zero; continuing with any downloaded files"
 fi
 
-mapfile -t FILES < <(find "$SMT_LOCAL_DIR" -maxdepth 2 -type f -name '*.csv' -print | sort)
+mapfile -t FILES < <(
+  find "$SMT_LOCAL_DIR" -maxdepth 2 -type f \
+    \( -iname '*.csv' -o -iname '*.csv.*' \) \
+    -print | sort
+)
 if (( ${#FILES[@]} == 0 )); then
   log "No CSV files discovered; exiting"
   exit 0
