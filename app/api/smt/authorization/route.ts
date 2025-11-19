@@ -177,7 +177,7 @@ export async function POST(req: NextRequest) {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "X-Webhook-Secret": webhookSecret,
+            "x-droplet-webhook-secret": webhookSecret,
           },
           body: JSON.stringify({
             reason: "smt_authorized",
