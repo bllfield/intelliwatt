@@ -178,7 +178,8 @@ export async function POST(req: NextRequest) {
       windowFromDate.setMonth(windowFromDate.getMonth() - monthsBack);
       const windowFrom = windowFromDate.toISOString();
       const windowTo = windowToDate.toISOString();
-      const meter = created.meterNumber ?? "unknown";
+      const esiid = created.esiid ?? house.esiid;
+      const meter = created.meterNumber ?? "M1";
 
       const dropletPayload = {
         reason: "smt_authorized" as const,
@@ -187,7 +188,7 @@ export async function POST(req: NextRequest) {
         userId: created.userId,
         houseId: created.houseId,
         houseAddressId: created.houseAddressId,
-        esiid: created.esiid,
+        esiid,
         meter,
         tdspCode: created.tdspCode,
         tdspName: created.tdspName,
