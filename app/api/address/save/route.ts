@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/db";
-import type { Prisma } from "@prisma/client";
 import { normalizeGoogleAddress, type GooglePlaceDetails } from "@/lib/normalizeGoogleAddress";
 import { normalizeEmail } from "@/lib/utils/email";
 import { resolveAddressToEsiid } from "@/lib/resolver/addressToEsiid";
 import { wattbuyEsiidDisabled } from "@/lib/flags";
 
 let userProfileAttentionColumnsAvailable: boolean | null = null;
+let houseAddressUserEmailColumnAvailable: boolean | null = null;
 
 async function ensureUserProfileAttentionColumns(): Promise<boolean> {
   if (userProfileAttentionColumnsAvailable !== null) {
@@ -37,6 +37,37 @@ async function ensureUserProfileAttentionColumns(): Promise<boolean> {
   }
 
   return userProfileAttentionColumnsAvailable;
+}
+
+async function ensureHouseAddressUserEmailColumn(): Promise<boolean> {
+  if (houseAddressUserEmailColumnAvailable !== null) {
+    return houseAddressUserEmailColumnAvailable;
+  }
+
+  try {
+    const result = await prisma.$queryRaw<{ exists: boolean }[]>`
+      SELECT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'HouseAddress'
+          AND column_name = 'userEmail'
+      ) AS "exists"
+    `;
+
+    houseAddressUserEmailColumnAvailable = Boolean(result[0]?.exists);
+  } catch (err) {
+    console.warn("[address/save] userEmail column probe failed", err);
+    houseAddressUserEmailColumnAvailable = false;
+  }
+
+  if (!houseAddressUserEmailColumnAvailable) {
+    console.warn(
+      "[address/save] HouseAddress.userEmail column missing; run migration 20251119053000_add_houseaddress_user_email.",
+    );
+  }
+
+  return houseAddressUserEmailColumnAvailable;
 }
 
 export const dynamic = "force-dynamic";
@@ -97,6 +128,32 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "User email unavailable" }, { status: 500 });
     }
 
+    const houseAddressEmailAvailable = await ensureHouseAddressUserEmailColumn();
+
+    const selectFields = {
+      id: true,
+      userId: true,
+      houseId: true,
+      addressLine1: true,
+      addressLine2: true,
+      addressCity: true,
+      addressState: true,
+      addressZip5: true,
+      addressZip4: true,
+      addressCountry: true,
+      placeId: true,
+      lat: true,
+      lng: true,
+      addressValidated: true,
+      esiid: true,
+      tdspSlug: true,
+      utilityName: true,
+      utilityPhone: true,
+      createdAt: true,
+      updatedAt: true,
+      ...(houseAddressEmailAvailable ? { userEmail: true } : {}),
+    };
+
     console.log("Google Place Details:", JSON.stringify(body.googlePlaceDetails, null, 2));
     console.log(
       "Address components types:",
@@ -116,6 +173,7 @@ export async function POST(req: NextRequest) {
     const existingAddress = await prisma.houseAddress.findFirst({
       where: { userId },
       orderBy: { createdAt: "desc" },
+      select: selectFields,
     });
 
     const existingLine1Lower = existingAddress?.addressLine1?.trim().toLowerCase() ?? "";
@@ -161,7 +219,7 @@ export async function POST(req: NextRequest) {
     const addressData = {
       userId,
       houseId: body.houseId ?? null,
-      userEmail: resolvedUserEmail,
+      ...(houseAddressEmailAvailable ? { userEmail: resolvedUserEmail } : {}),
       addressLine1: normalized.addressLine1,
       addressLine2: normalized.addressLine2,
       addressCity: normalized.addressCity,
@@ -198,9 +256,11 @@ export async function POST(req: NextRequest) {
       ? await prisma.houseAddress.update({
           where: { id: existingAddress.id },
           data: addressData,
+          select: selectFields,
         })
       : await prisma.houseAddress.create({
           data: addressData,
+          select: selectFields,
         });
 
     const shouldLookupEsiid = (!record.esiid || addressChanged) && !wattbuyEsiidDisabled;
@@ -227,6 +287,7 @@ export async function POST(req: NextRequest) {
         if (lookup.esiid) {
           const conflicting = await prisma.houseAddress.findFirst({
             where: { esiid: lookup.esiid },
+            select: selectFields,
           });
 
           if (conflicting && conflicting.id !== record.id) {
@@ -262,28 +323,24 @@ export async function POST(req: NextRequest) {
 
                 const nextUtilityName = lookup.utility ?? record.utilityName ?? null;
                 const nextTdspSlug = lookup.territory ?? record.tdspSlug ?? null;
-                const takeoverUpdate: Prisma.HouseAddressUpdateInput = {
+                const takeoverUpdate = {
                   esiid: lookup.esiid,
                   utilityName: nextUtilityName,
                   tdspSlug: nextTdspSlug,
+                  ...(houseAddressEmailAvailable ? { userEmail: resolvedUserEmail } : {}),
                 };
 
                 const updatedRecord = await tx.houseAddress.update({
                   where: { id: record.id },
                   data: takeoverUpdate,
+                  select: selectFields,
                 });
 
-                await tx.$executeRawUnsafe(
-                  'UPDATE "HouseAddress" SET "userEmail" = $1 WHERE "id" = $2',
-                  resolvedUserEmail,
-                  record.id,
-                );
-
-                return { ...updatedRecord, userEmail: resolvedUserEmail };
+                return updatedRecord;
               });
             } else {
               const recordIdToDelete = record.id;
-              const sameUserUpdate: Prisma.HouseAddressUpdateInput = {
+              const sameUserUpdate = {
                 addressLine1: normalized.addressLine1,
                 addressLine2: normalized.addressLine2 ?? null,
                 addressCity: normalized.addressCity,
@@ -295,26 +352,20 @@ export async function POST(req: NextRequest) {
                 lat: normalized.lat ?? null,
                 lng: normalized.lng ?? null,
                 addressValidated: normalized.addressValidated,
-                validationSource: validationSource as Prisma.HouseAddressUpdateInput["validationSource"],
+                validationSource: validationSource as "GOOGLE" | "USER" | "NONE" | "OTHER",
                 esiid: lookup.esiid,
                 utilityName: lookup.utility ?? conflicting.utilityName ?? null,
                 tdspSlug: lookup.territory ?? conflicting.tdspSlug ?? null,
                 rawGoogleJson: body.googlePlaceDetails as any,
                 rawWattbuyJson: body.wattbuyJson as any,
+                ...(houseAddressEmailAvailable ? { userEmail: resolvedUserEmail } : {}),
               };
 
               record = await prisma.houseAddress.update({
                 where: { id: conflicting.id },
                 data: sameUserUpdate,
+                select: selectFields,
               });
-
-              await prisma.$executeRawUnsafe(
-                'UPDATE "HouseAddress" SET "userEmail" = $1 WHERE "id" = $2',
-                resolvedUserEmail,
-                record.id,
-              );
-
-              record = { ...record, userEmail: resolvedUserEmail } as typeof record;
 
               if (recordIdToDelete && recordIdToDelete !== conflicting.id) {
                 try {
@@ -327,46 +378,40 @@ export async function POST(req: NextRequest) {
           } else {
             const nextUtilityName = lookup.utility ?? record.utilityName ?? null;
             const nextTdspSlug = lookup.territory ?? record.tdspSlug ?? null;
-            const standardUpdate: Prisma.HouseAddressUpdateInput = {
+            const standardUpdate = {
               esiid: lookup.esiid,
               utilityName: nextUtilityName,
               tdspSlug: nextTdspSlug,
+              ...(houseAddressEmailAvailable ? { userEmail: resolvedUserEmail } : {}),
             };
 
             record = await prisma.houseAddress.update({
               where: { id: record.id },
               data: standardUpdate,
+              select: selectFields,
             });
 
-            await prisma.$executeRawUnsafe(
-              'UPDATE "HouseAddress" SET "userEmail" = $1 WHERE "id" = $2',
-              resolvedUserEmail,
-              record.id,
-            );
-
-            record = { ...record, userEmail: resolvedUserEmail } as typeof record;
-          }
-
-          try {
-            await prisma.userProfile.update({
-              where: { userId },
-              data: {
-                esiid: lookup.esiid,
-              },
-            });
-            if (attentionColumnsAvailable) {
-              await prisma.$executeRawUnsafe(
-                'UPDATE "UserProfile" SET "esiidAttentionRequired" = FALSE, "esiidAttentionCode" = NULL, "esiidAttentionAt" = NULL WHERE "userId" = $1',
-                userId,
-              );
-            } else {
-              console.warn(
-                "[address/save] Skipping attention flag reset; columns unavailable (run prisma migrate deploy).",
-              );
-            }
-          } catch (profileErr) {
-            if (process.env.NODE_ENV === "development") {
-              console.warn("[address/save] userProfile update skipped", profileErr);
+            try {
+              await prisma.userProfile.update({
+                where: { userId },
+                data: {
+                  esiid: lookup.esiid,
+                },
+              });
+              if (attentionColumnsAvailable) {
+                await prisma.$executeRawUnsafe(
+                  'UPDATE "UserProfile" SET "esiidAttentionRequired" = FALSE, "esiidAttentionCode" = NULL, "esiidAttentionAt" = NULL WHERE "userId" = $1',
+                  userId,
+                );
+              } else {
+                console.warn(
+                  "[address/save] Skipping attention flag reset; columns unavailable (run prisma migrate deploy).",
+                );
+              }
+            } catch (profileErr) {
+              if (process.env.NODE_ENV === "development") {
+                console.warn("[address/save] userProfile update skipped", profileErr);
+              }
             }
           }
         }
@@ -395,13 +440,18 @@ export async function POST(req: NextRequest) {
       }
     })();
 
+    const responseUserEmail =
+      houseAddressEmailAvailable && "userEmail" in record
+        ? ((record as { userEmail?: string | null }).userEmail ?? resolvedUserEmail)
+        : resolvedUserEmail;
+
     return NextResponse.json({
       ok: true,
       address: {
         id: record.id,
         userId: record.userId,
         houseId: record.houseId,
-        userEmail: "userEmail" in record ? (record as any).userEmail ?? resolvedUserEmail : resolvedUserEmail,
+        userEmail: responseUserEmail,
         line1: record.addressLine1,
         line2: record.addressLine2,
         city: record.addressCity,
