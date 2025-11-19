@@ -1,5 +1,6 @@
 import { headers } from "next/headers";
 import BillingReadsTable from "@/components/admin/smt/BillingReadsTable";
+import IntervalReadsTable from "@/components/admin/smt/IntervalReadsTable";
 import { prisma } from "@/lib/db";
 import { NormalizeLatestButton } from "@/components/admin/smt/NormalizeLatestButton";
 import AdminSmtRawClient from "./RawClient";
@@ -46,6 +47,15 @@ type BillingReadRecord = {
   kwhBilled: number | null;
   source: string | null;
   rawSmtFileId: bigint | null;
+};
+
+type IntervalReadRecord = {
+  id: string;
+  esiid: string;
+  meter: string;
+  ts: Date;
+  kwh: any;
+  source: string | null;
 };
 
 export default async function AdminSmtRawPage({ searchParams }: PageProps) {
@@ -125,6 +135,23 @@ export default async function AdminSmtRawPage({ searchParams }: PageProps) {
     rawSmtFileId: row.rawSmtFileId ? row.rawSmtFileId.toString() : null,
   }));
 
+  const intervalWhere = esiidFilter ? { esiid: esiidFilter } : {};
+
+  const intervalReadsRaw = (await (prisma as any).smtInterval.findMany({
+    where: intervalWhere,
+    orderBy: { ts: "desc" },
+    take: limit,
+  })) as IntervalReadRecord[];
+
+  const intervalReads = intervalReadsRaw.map((row) => ({
+    id: row.id,
+    esiid: row.esiid ?? null,
+    meter: row.meter ?? null,
+    ts: row.ts ? row.ts.toISOString() : null,
+    kwh: row.kwh !== null && row.kwh !== undefined ? Number(row.kwh) : null,
+    source: row.source ?? null,
+  }));
+
   return (
     <div className="space-y-10 pb-10">
       <ManualUploadForm />
@@ -140,6 +167,13 @@ export default async function AdminSmtRawPage({ searchParams }: PageProps) {
           initialLimit={limit}
           rows={billingReads}
         />
+      </section>
+      <section className="mt-10 space-y-4">
+        <h2 className="text-lg font-semibold">SMT Interval Reads (Admin)</h2>
+        <p className="text-sm text-muted-foreground">
+          Latest raw SMT interval records (timestamp and kWh). Filter by ESIID to inspect a specific meter.
+        </p>
+        <IntervalReadsTable rows={intervalReads} />
       </section>
     </div>
   );

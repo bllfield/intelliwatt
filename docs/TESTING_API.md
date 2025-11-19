@@ -843,3 +843,13 @@ Expected: HTTP 200 with `{ ok: true, count, items: [...] }` or HTTP 401 if the a
   - Filter by ESIID to inspect a specific meter.
   - Adjust the Rows selector (50–500) to view more recent billing reads ordered by `billDate` and `readStart` descending.
 - The viewer is read-only and safe to open in production.
+
+## SMT · Admin Interval Reads Viewer
+
+- UI: `/admin/smt/raw`
+- Section: **SMT Interval Reads (Admin)**
+- Data source: `SmtInterval` table populated by SMT ingest (inline upload or droplet SFTP pull).
+- Behavior:
+  - Respects `esiid` query param; if set, only interval reads for that ESIID are shown.
+  - Shares the same `limit` query param as the billing viewer (default 100, max 500).
+- Use it to quickly verify latest 15-minute interval rows for a meter. Read-only and safe in production.
