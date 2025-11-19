@@ -176,6 +176,29 @@ export async function POST(req: NextRequest) {
       const windowToDate = new Date();
       const windowFromDate = new Date(windowToDate.getTime());
       windowFromDate.setMonth(windowFromDate.getMonth() - monthsBack);
+      const windowFrom = windowFromDate.toISOString();
+      const windowTo = windowToDate.toISOString();
+      const meter = created.meterNumber ?? "unknown";
+
+      const dropletPayload = {
+        reason: "smt_authorized" as const,
+        ts: new Date().toISOString(),
+        smtAuthorizationId: created.id,
+        userId: created.userId,
+        houseId: created.houseId,
+        houseAddressId: created.houseAddressId,
+        esiid: created.esiid,
+        meter,
+        tdspCode: created.tdspCode,
+        tdspName: created.tdspName,
+        authorizationStartDate: created.authorizationStartDate,
+        authorizationEndDate: created.authorizationEndDate,
+        includeInterval: true,
+        includeBilling: true,
+        monthsBack,
+        windowFrom,
+        windowTo,
+      };
 
       try {
         await fetch(webhookUrl, {
@@ -184,24 +207,7 @@ export async function POST(req: NextRequest) {
             "Content-Type": "application/json",
             "x-droplet-webhook-secret": webhookSecret,
           },
-          body: JSON.stringify({
-            reason: "smt_authorized",
-            ts: new Date().toISOString(),
-            smtAuthorizationId: created.id,
-            userId: created.userId,
-            houseId: created.houseId,
-            houseAddressId: created.houseAddressId,
-            esiid: created.esiid,
-            tdspCode: created.tdspCode,
-            tdspName: created.tdspName,
-            authorizationStartDate: created.authorizationStartDate,
-            authorizationEndDate: created.authorizationEndDate,
-            includeInterval: true,
-            includeBilling: true,
-            monthsBack,
-            windowFrom: windowFromDate.toISOString(),
-            windowTo: windowToDate.toISOString(),
-          }),
+          body: JSON.stringify(dropletPayload),
         });
       } catch (err) {
         console.error("Failed to notify SMT droplet webhook after authorization", err);

@@ -131,3 +131,14 @@ WHAT THE NEXT GPT SHOULD DO
   - SSH to intelliwatt-smt-proxy
   - Run /home/deploy/smt_token_test.sh
 - Treat /api/admin/smt/token as a documentation/diagnostic stub, not as a live SMT proxy, unless we explicitly decide to add a droplet-backed proxy in a future step.
+
+========================================
+CURSOR WORKFLOW: “DONE” MEANS EXECUTED
+========================================
+
+- I will confirm a Cursor Agent Block only after I run it. Questions or follow-ups are not confirmation.
+- NEVER assume a block executed until I explicitly reply with **“done”**.
+- Stay on the current step (and refine that block if needed) until you hear “done”.
+- Always state exactly where to run commands (Cursor Workbench, droplet SSH, Vercel UI, etc.).
+- One logical step per answer; do not queue future steps in advance.
+- SMT integrations remain droplet-only. Vercel and the browser must never call SMT directly.
