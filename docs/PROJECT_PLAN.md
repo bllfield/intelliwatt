@@ -2229,3 +2229,40 @@ Ops and support need a stable email field on `HouseAddress` for lookups, while t
 - Droplet ingest currently defaults to a 12-month look-back and posts both interval and billing files.
 
 **Guardrail:** Treat this flow as canonical. Future work must extend it (e.g., new ingest modes) rather than replacing or bypassing the droplet-trigger mechanism.
+
+### PC-2025-11-19-BILLING: SMT Billing Reads Table (Schema Only)
+
+**Rationale**
+
+- Interval ingestion (`RawSmtFile` → `SmtInterval`) is stable and canonical.
+- SMT delivers daily/monthly billing-style reads (DailyMeterUsage, MonthlyBilling, `/v2/energydata`, etc.).
+- We need a dedicated, idempotent table to store these billing reads before wiring parsers or UI.
+
+**Scope (this step)**
+
+- Add Prisma model `SmtBillingRead` with:
+  - Identity: cuid `id`, required `esiid`, optional `meter`.
+  - Traceability: optional `rawSmtFileId` → `RawSmtFile` relation; `source` string covering CSV/API variants.
+  - Billing window: optional `readStart`, `readEnd`, `billDate`.
+  - Energy quantities: optional `kwhTotal`, `kwhBilled`.
+  - TDSP context: optional `tdspCode`, `tdspName`.
+  - Indexes: `@@index([esiid, billDate])`, `@@index([esiid, readStart])`, `@@index([rawSmtFileId])`.
+- No ingest/parser code changes yet; existing SMT flows remain untouched.
+
+**Next Steps (separate changes)**
+
+1. Extend `/api/admin/smt/pull` to detect billing/daily CSVs and insert into `SmtBillingRead` keyed to the originating `RawSmtFile`.
+2. Add idempotency guardrails (e.g., uniqueness across `esiid + meter + billDate` or `esiid + meter + readStart + readEnd`) after confirming SMT schemas.
+3. Add admin views under `/admin/smt` to inspect billing reads alongside interval data.
+
+**Rollback Plan**
+
+- If billing ingestion is deferred, `SmtBillingRead` can remain empty without affecting current flows.
+- To remove entirely, drop the table in a future migration and delete dependent parsers.
+- Existing SMT models (`RawSmtFile`, `SmtInterval`, `SmtAuthorization`) stay untouched.
+
+**Guardrails Preserved**
+
+- RAW→CDM discipline: billing reads live in their own CDM table.
+- Interval ingest remains the canonical path for 15-minute usage.
+- Admin and customer APIs remain unchanged; this update is schema + documentation only.

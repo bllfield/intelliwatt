@@ -432,6 +432,35 @@ model SmtInterval {
   @@index([esiid, meter, ts], map: "esiid_meter_ts_idx")
 }
 
+model SmtBillingRead {
+  id           String       @id @default(cuid())
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  rawSmtFileId String?
+  rawSmtFile   RawSmtFile?  @relation(fields: [rawSmtFileId], references: [id])
+
+  esiid        String
+  meter        String?
+
+  tdspCode     String?
+  tdspName     String?
+
+  readStart    DateTime?
+  readEnd      DateTime?
+
+  billDate     DateTime?
+
+  kwhTotal     Float?
+  kwhBilled    Float?
+
+  source       String?
+
+  @@index([esiid, billDate])
+  @@index([esiid, readStart])
+  @@index([rawSmtFileId])
+}
+
 model SmtAuthorization {
   id              String   @id @default(cuid())
 
