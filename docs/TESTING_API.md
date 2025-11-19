@@ -833,3 +833,13 @@ Invoke-RestMethod `
 ```
 
 Expected: HTTP 200 with `{ ok: true, count, items: [...] }` or HTTP 401 if the admin token is missing or invalid.
+
+## SMT · Admin Billing Reads Viewer
+
+- UI: `/admin/smt/raw`
+- Section: **SMT Billing Reads (Admin)**
+- Data source: `SmtBillingRead` table populated by `POST /api/admin/smt/pull` (inline SMT pipeline).
+- Usage:
+  - Filter by ESIID to inspect a specific meter.
+  - Adjust the Rows selector (50–500) to view more recent billing reads ordered by `billDate` and `readStart` descending.
+- The viewer is read-only and safe to open in production.
