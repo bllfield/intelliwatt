@@ -172,11 +172,10 @@ export default async function ApiConnectPage() {
 
                   <div className="rounded-2xl border border-brand-blue/10 bg-white/80 p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
                     <SmtAuthorizationForm
-                      userId={user!.id}
                       contactEmail={user!.email}
                       houseAddressId={houseAddress.id}
-                      houseId={houseAddress.houseId ?? houseAddress.id}
-                      esiid={houseAddress.esiid!}
+                      houseId={houseAddress.houseId ?? undefined}
+                      esiid={houseAddress.esiid ?? undefined}
                       tdspCode={tdspCode}
                       tdspName={tdspName}
                       serviceAddressLine1={serviceAddressLine1}
@@ -184,6 +183,7 @@ export default async function ApiConnectPage() {
                       serviceCity={serviceCity}
                       serviceState={serviceState}
                       serviceZip={serviceZip}
+                      existingAuth={existingAuth}
                     />
                   </div>
                 </div>
