@@ -2,86 +2,13 @@
 
 import Image from 'next/image';
 import Link from 'next/link';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import SmartMeterSection from '../../components/SmartMeterSection';
 import QuickAddressEntry from '../../components/QuickAddressEntry';
-
-interface HouseAddressSummary {
-  id: string;
-  houseId: string | null;
-  addressLine1: string;
-  addressLine2?: string | null;
-  addressCity: string;
-  addressState: string;
-  addressZip5: string;
-  esiid?: string | null;
-  tdspSlug?: string | null;
-  utilityName?: string | null;
-}
-
-interface DashboardData {
-  user: {
-    id: string;
-    email: string;
-    createdAt: string;
-  };
-  stats: {
-    annualSavings: number;
-    accuracyRate: number;
-    totalEntries: number;
-    totalReferrals: number;
-  };
-  profile: any;
-  address: HouseAddressSummary | null;
-  hasAddress: boolean;
-  hasSmartMeter: boolean;
-  hasUsageData: boolean;
-  currentPlan: any;
-}
-
-function formatHouseAddress(address: HouseAddressSummary | null): string {
-  if (!address) {
-    return '';
-  }
-  const parts = [
-    address.addressLine1,
-    address.addressLine2,
-    `${address.addressCity}, ${address.addressState} ${address.addressZip5}`,
-  ].filter(Boolean);
-  return parts.join(', ');
-}
 
 export default function DashboardPage() {
   const [mounted, setMounted] = useState(false);
   const [userAddress, setUserAddress] = useState<string>('');
-  const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  const fetchDashboardData = useCallback(async () => {
-    try {
-      setLoading(true);
-      const response = await fetch('/api/admin/user/dashboard', { cache: 'no-store' });
-      if (response.ok) {
-        const data: DashboardData = await response.json();
-        setDashboardData(data);
-        const formattedAddress = formatHouseAddress(data.address ?? null);
-        setUserAddress(formattedAddress);
-        if (typeof window !== 'undefined') {
-          if (formattedAddress) {
-            localStorage.setItem('intelliwatt_user_address', formattedAddress);
-          } else {
-            localStorage.removeItem('intelliwatt_user_address');
-          }
-        }
-      } else {
-        console.error('Failed to fetch dashboard data');
-      }
-    } catch (error) {
-      console.error('Error fetching dashboard data:', error);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
 
   useEffect(() => {
     setMounted(true);
@@ -106,9 +33,8 @@ export default function DashboardPage() {
       }
     };
 
-    fetchDashboardData();
     awardDashboardEntry();
-  }, [fetchDashboardData]);
+  }, []);
 
   const handleAddressSubmitted = async (address: string) => {
     setUserAddress(address);
@@ -122,32 +48,22 @@ export default function DashboardPage() {
     }
 
     if (!address) {
-      setDashboardData((previous) =>
-        previous
-          ? {
-              ...previous,
-              address: null,
-              hasAddress: false,
-              hasSmartMeter: false,
-              hasUsageData: false,
-            }
-          : previous,
-      );
       return;
     }
-
-    await fetchDashboardData();
   };
 
   // Prevent hydration mismatch
-  if (!mounted || loading) {
+  if (!mounted) {
     return (
       <div className="min-h-screen bg-brand-white flex items-center justify-center">
         <div className="animate-pulse text-brand-navy">Loading...</div>
       </div>
     );
   }
-  const houseAddress = dashboardData?.address ?? null;
+  const annualSavings = 0;
+  const accuracyRate = 0;
+  const totalEntries = 0;
+  const totalReferrals = 0;
 
   return (
     <div className="min-h-screen bg-brand-white">
@@ -395,25 +311,25 @@ export default function DashboardPage() {
             <div className="grid md:grid-cols-4 gap-8">
               <div className="text-center">
                 <div className="text-4xl font-bold text-brand-blue mb-2">
-                  ${dashboardData?.stats.annualSavings || 0}
+                  ${annualSavings}
                 </div>
                 <div className="text-brand-white">Annual Savings</div>
               </div>
               <div className="text-center">
                 <div className="text-4xl font-bold text-brand-blue mb-2">
-                  {dashboardData?.stats.accuracyRate || 0}%
+                  {accuracyRate}%
                 </div>
                 <div className="text-brand-white">Accuracy Rate</div>
               </div>
               <div className="text-center">
                 <div className="text-4xl font-bold text-brand-blue mb-2">
-                  {dashboardData?.stats.totalEntries || 0}
+                  {totalEntries}
                 </div>
                 <div className="text-brand-white">Jackpot Entries</div>
               </div>
               <div className="text-center">
                 <div className="text-4xl font-bold text-brand-blue mb-2">
-                  {dashboardData?.stats.totalReferrals || 0}
+                  {totalReferrals}
                 </div>
                 <div className="text-brand-white">Referred Friends</div>
               </div>

@@ -79,13 +79,6 @@ export default function AddressImageUpload() {
     if (result?.address) {
       setLoading(true);
       try {
-        // Get user ID from cookie or session
-        const userResponse = await fetch('/api/admin/user/dashboard');
-        if (!userResponse.ok) {
-          throw new Error('User not authenticated');
-        }
-        const userData = await userResponse.json();
-        
         // Convert extracted address to Google Place Details format
         const googlePlaceDetails = {
           place_id: null,
@@ -106,7 +99,6 @@ export default function AddressImageUpload() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            userId: userData.user?.email || 'unknown', // Use email as userId for now
             houseId: null,
             googlePlaceDetails: googlePlaceDetails,
             smartMeterConsent: false, // User can check this separately

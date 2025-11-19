@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { prisma } from "@/lib/db";
 import { normalizeGoogleAddress, type GooglePlaceDetails } from "@/lib/normalizeGoogleAddress";
 import { normalizeEmail } from "@/lib/utils/email";
@@ -28,13 +29,21 @@ export async function POST(req: NextRequest) {
     const body = (await req.json()) as SaveAddressBody;
     console.log("API received body:", JSON.stringify(body, null, 2));
 
-    if (!body?.userId || !body?.googlePlaceDetails) {
+    if (!body?.googlePlaceDetails) {
       return NextResponse.json({ ok: false, error: "Missing required fields" }, { status: 400 });
     }
 
-    let userId = body.userId;
-    if (body.userId.includes("@")) {
-      const normalizedEmail = normalizeEmail(body.userId);
+    const cookieStore = cookies();
+    const sessionEmail = cookieStore.get("intelliwatt_user")?.value ?? null;
+
+    let userIdentifier = body.userId ?? sessionEmail ?? null;
+    if (!userIdentifier) {
+      return NextResponse.json({ ok: false, error: "Not authenticated" }, { status: 401 });
+    }
+
+    let userId = userIdentifier;
+    if (userIdentifier.includes("@")) {
+      const normalizedEmail = normalizeEmail(userIdentifier);
       const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
       if (!user) {
         return NextResponse.json({ ok: false, error: "User not found" }, { status: 404 });
@@ -232,14 +241,11 @@ export async function POST(req: NextRequest) {
                   },
                 });
 
-                await tx.userProfile.updateMany({
-                  where: { userId: conflicting.userId },
-                  data: {
-                    esiidAttentionRequired: true,
-                    esiidAttentionCode: lookup.esiid,
-                    esiidAttentionAt: new Date(),
-                  },
-                });
+                await tx.$executeRawUnsafe(
+                  'UPDATE "UserProfile" SET "esiidAttentionRequired" = TRUE, "esiidAttentionCode" = $1, "esiidAttentionAt" = NOW() WHERE "userId" = $2',
+                  lookup.esiid,
+                  conflicting.userId,
+                );
 
                 const updatedRecord = await tx.houseAddress.update({
                   where: { id: record.id },
@@ -304,11 +310,12 @@ export async function POST(req: NextRequest) {
               where: { userId },
               data: {
                 esiid: lookup.esiid,
-                esiidAttentionRequired: false,
-                esiidAttentionCode: null,
-                esiidAttentionAt: null,
               },
             });
+            await prisma.$executeRawUnsafe(
+              'UPDATE "UserProfile" SET "esiidAttentionRequired" = FALSE, "esiidAttentionCode" = NULL, "esiidAttentionAt" = NULL WHERE "userId" = $1',
+              userId,
+            );
           } catch (profileErr) {
             if (process.env.NODE_ENV === "development") {
               console.warn("[address/save] userProfile update skipped", profileErr);

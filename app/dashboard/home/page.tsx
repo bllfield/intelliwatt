@@ -7,24 +7,10 @@ export default function HomePage() {
   const [hasCompleted, setHasCompleted] = useState(false);
 
   useEffect(() => {
-    // Check if home details are already completed
-    const checkCompletion = async () => {
-      try {
-        const response = await fetch('/api/admin/user/dashboard');
-        if (response.ok) {
-          const data = await response.json();
-          // Check if profile has required fields
-          const profile = data.profile;
-          if (profile && profile.addressLine1 && profile.homeSqFt) {
-            setHasCompleted(true);
-          }
-        }
-      } catch (error) {
-        console.error('Error checking completion:', error);
-      }
-    };
-
-    checkCompletion();
+    const stored = typeof window !== 'undefined' ? localStorage.getItem('intelliwatt_home_details_complete') : null;
+    if (stored === 'true') {
+      setHasCompleted(true);
+    }
   }, []);
 
   const handleComplete = async () => {
@@ -38,6 +24,9 @@ export default function HomePage() {
       });
       window.dispatchEvent(new CustomEvent('entriesUpdated'));
       setHasCompleted(true);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('intelliwatt_home_details_complete', 'true');
+      }
     } catch (error) {
       console.error('Error awarding entries:', error);
     }

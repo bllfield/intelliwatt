@@ -30,16 +30,7 @@ export default function ReferralsPage() {
           const linkData = await linkResponse.json();
           setReferralData(linkData);
         }
-
-        // Fetch dashboard data for stats
-        const statsResponse = await fetch('/api/admin/user/dashboard');
-        if (statsResponse.ok) {
-          const statsData = await statsResponse.json();
-          setStats({
-            totalReferrals: statsData.stats?.totalReferrals || 0,
-            totalEntries: statsData.stats?.totalEntries || 0,
-          });
-        }
+        setStats({ totalReferrals: 0, totalEntries: 0 });
       } catch (error) {
         console.error('Error fetching referral data:', error);
       } finally {
@@ -111,13 +102,13 @@ export default function ReferralsPage() {
           <div className="grid md:grid-cols-2 gap-6 mb-8">
             <div className="bg-brand-navy p-6 rounded-xl text-center border border-brand-blue/20">
               <div className="text-3xl font-bold mb-2" style={{ color: '#39FF14' }}>
-                {stats?.totalReferrals || 0}
+                {stats?.totalReferrals ?? 0}
               </div>
               <div className="text-brand-blue">Friends Referred</div>
             </div>
             <div className="bg-brand-navy p-6 rounded-xl text-center border border-brand-blue/20">
               <div className="text-3xl font-bold mb-2" style={{ color: '#39FF14' }}>
-                {stats?.totalEntries || 0}
+                {stats?.totalEntries ?? 0}
               </div>
               <div className="text-brand-blue">Total Entries</div>
             </div>

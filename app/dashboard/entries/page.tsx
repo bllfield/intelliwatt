@@ -14,26 +14,13 @@ export default function EntriesPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const fetchEntries = async () => {
-      try {
-        const response = await fetch('/api/admin/user/dashboard');
-        if (response.ok) {
-          const data = await response.json();
-          // Mock entries for now - would need to create entries API
-          setEntries([
-            { id: '1', type: 'Profile Completed', amount: 1, createdAt: new Date().toISOString() },
-            { id: '2', type: 'Smart Meter Connected', amount: 1, createdAt: new Date().toISOString() },
-            { id: '3', type: 'Appliances Tagged', amount: 2, createdAt: new Date().toISOString() }
-          ]);
-        }
-      } catch (error) {
-        console.error('Error fetching entries:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchEntries();
+    const mockEntries: EntryData[] = [
+      { id: '1', type: 'Profile Completed', amount: 1, createdAt: new Date().toISOString() },
+      { id: '2', type: 'Smart Meter Connected', amount: 1, createdAt: new Date().toISOString() },
+      { id: '3', type: 'Appliances Tagged', amount: 2, createdAt: new Date().toISOString() },
+    ];
+    setEntries(mockEntries);
+    setLoading(false);
   }, []);
 
   if (loading) {

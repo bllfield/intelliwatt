@@ -194,15 +194,6 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
     setIsSubmitting(true);
     
     try {
-      // Get user ID from dashboard API
-      const userResponse = await fetch('/api/admin/user/dashboard');
-      if (!userResponse.ok) {
-        console.error('Failed to get user data:', userResponse.status, userResponse.statusText);
-        throw new Error('User not authenticated');
-      }
-      const userData = await userResponse.json();
-      console.log('User data:', userData);
-      
       let normalizedAddress = address.trim();
       let parsedAddress = parsedAddressRef.current;
       let placeForSubmit = placeDetailsRef.current;
@@ -280,8 +271,6 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
 
       // Save address to database using the new API
       console.log('Sending address save request:', {
-        userId: userData.user?.email || 'unknown',
-        houseId: null,
         googlePlaceDetails: legacyPlace,
       });
 
@@ -289,7 +278,6 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          userId: userData.user?.id || userData.user?.email || 'unknown',
           houseId: null,
           googlePlaceDetails: legacyPlace,
           unitNumber: unitNumber.trim() || undefined,
