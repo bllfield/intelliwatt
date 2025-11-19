@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/db";
+import type { Prisma } from "@prisma/client";
 import { normalizeGoogleAddress, type GooglePlaceDetails } from "@/lib/normalizeGoogleAddress";
 import { normalizeEmail } from "@/lib/utils/email";
 import { resolveAddressToEsiid } from "@/lib/resolver/addressToEsiid";
@@ -74,6 +75,7 @@ export async function POST(req: NextRequest) {
     }
 
     let userId = userIdentifier;
+    let resolvedUserEmail: string | null = null;
     if (userIdentifier.includes("@")) {
       const normalizedEmail = normalizeEmail(userIdentifier);
       const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
@@ -81,7 +83,18 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ ok: false, error: "User not found" }, { status: 404 });
       }
       userId = user.id;
+      resolvedUserEmail = normalizedEmail;
       console.log(`Converted email ${normalizedEmail} to user ID ${userId}`);
+    } else {
+      const user = await prisma.user.findUnique({ where: { id: userIdentifier } });
+      if (!user) {
+        return NextResponse.json({ ok: false, error: "User not found" }, { status: 404 });
+      }
+      resolvedUserEmail = normalizeEmail(user.email);
+    }
+
+    if (!resolvedUserEmail) {
+      return NextResponse.json({ ok: false, error: "User email unavailable" }, { status: 500 });
     }
 
     console.log("Google Place Details:", JSON.stringify(body.googlePlaceDetails, null, 2));
@@ -103,21 +116,6 @@ export async function POST(req: NextRequest) {
     const existingAddress = await prisma.houseAddress.findFirst({
       where: { userId },
       orderBy: { createdAt: "desc" },
-      select: {
-        id: true,
-        addressLine1: true,
-        addressLine2: true,
-        addressCity: true,
-        addressState: true,
-        addressZip5: true,
-        placeId: true,
-        lat: true,
-        lng: true,
-        esiid: true,
-        tdspSlug: true,
-        utilityName: true,
-        utilityPhone: true,
-      },
     });
 
     const existingLine1Lower = existingAddress?.addressLine1?.trim().toLowerCase() ?? "";
@@ -163,6 +161,7 @@ export async function POST(req: NextRequest) {
     const addressData = {
       userId,
       houseId: body.houseId ?? null,
+      userEmail: resolvedUserEmail,
       addressLine1: normalized.addressLine1,
       addressLine2: normalized.addressLine2,
       addressCity: normalized.addressCity,
@@ -195,37 +194,13 @@ export async function POST(req: NextRequest) {
       rawWattbuyJson: body.wattbuyJson as any,
     };
 
-    const selectFields = {
-      id: true,
-      userId: true,
-      houseId: true,
-      addressLine1: true,
-      addressLine2: true,
-      addressCity: true,
-      addressState: true,
-      addressZip5: true,
-      addressZip4: true,
-      addressCountry: true,
-      lat: true,
-      lng: true,
-      addressValidated: true,
-      esiid: true,
-      tdspSlug: true,
-      utilityName: true,
-      utilityPhone: true,
-      createdAt: true,
-      updatedAt: true,
-    };
-
     let record = existingAddress
       ? await prisma.houseAddress.update({
           where: { id: existingAddress.id },
           data: addressData,
-          select: selectFields,
         })
       : await prisma.houseAddress.create({
           data: addressData,
-          select: selectFields,
         });
 
     const shouldLookupEsiid = (!record.esiid || addressChanged) && !wattbuyEsiidDisabled;
@@ -252,7 +227,6 @@ export async function POST(req: NextRequest) {
         if (lookup.esiid) {
           const conflicting = await prisma.houseAddress.findFirst({
             where: { esiid: lookup.esiid },
-            select: selectFields,
           });
 
           if (conflicting && conflicting.id !== record.id) {
@@ -286,43 +260,61 @@ export async function POST(req: NextRequest) {
                   );
                 }
 
+                const nextUtilityName = lookup.utility ?? record.utilityName ?? null;
+                const nextTdspSlug = lookup.territory ?? record.tdspSlug ?? null;
+                const takeoverUpdate: Prisma.HouseAddressUpdateInput = {
+                  esiid: lookup.esiid,
+                  utilityName: nextUtilityName,
+                  tdspSlug: nextTdspSlug,
+                };
+
                 const updatedRecord = await tx.houseAddress.update({
                   where: { id: record.id },
-                  data: {
-                    esiid: lookup.esiid,
-                    utilityName: lookup.utility ?? record.utilityName ?? undefined,
-                    tdspSlug: lookup.territory ?? record.tdspSlug ?? undefined,
-                  },
-                  select: selectFields,
+                  data: takeoverUpdate,
                 });
 
-                return updatedRecord;
+                await tx.$executeRawUnsafe(
+                  'UPDATE "HouseAddress" SET "userEmail" = $1 WHERE "id" = $2',
+                  resolvedUserEmail,
+                  record.id,
+                );
+
+                return { ...updatedRecord, userEmail: resolvedUserEmail };
               });
             } else {
               const recordIdToDelete = record.id;
+              const sameUserUpdate: Prisma.HouseAddressUpdateInput = {
+                addressLine1: normalized.addressLine1,
+                addressLine2: normalized.addressLine2 ?? null,
+                addressCity: normalized.addressCity,
+                addressState: normalized.addressState,
+                addressZip5: normalized.addressZip5,
+                addressZip4: normalized.addressZip4 ?? null,
+                addressCountry: normalized.addressCountry,
+                placeId: normalized.placeId ?? null,
+                lat: normalized.lat ?? null,
+                lng: normalized.lng ?? null,
+                addressValidated: normalized.addressValidated,
+                validationSource: validationSource as Prisma.HouseAddressUpdateInput["validationSource"],
+                esiid: lookup.esiid,
+                utilityName: lookup.utility ?? conflicting.utilityName ?? null,
+                tdspSlug: lookup.territory ?? conflicting.tdspSlug ?? null,
+                rawGoogleJson: body.googlePlaceDetails as any,
+                rawWattbuyJson: body.wattbuyJson as any,
+              };
+
               record = await prisma.houseAddress.update({
                 where: { id: conflicting.id },
-                data: {
-                  addressLine1: normalized.addressLine1,
-                  addressLine2: normalized.addressLine2,
-                  addressCity: normalized.addressCity,
-                  addressState: normalized.addressState,
-                  addressZip5: normalized.addressZip5,
-                  addressZip4: normalized.addressZip4,
-                  addressCountry: normalized.addressCountry,
-                  placeId: normalized.placeId ?? undefined,
-                  lat: normalized.lat ?? undefined,
-                  lng: normalized.lng ?? undefined,
-                  addressValidated: normalized.addressValidated,
-                  validationSource: validationSource as "GOOGLE" | "USER" | "NONE" | "OTHER",
-                  esiid: lookup.esiid,
-                  utilityName: lookup.utility ?? conflicting.utilityName ?? undefined,
-                  tdspSlug: lookup.territory ?? conflicting.tdspSlug ?? undefined,
-                  rawGoogleJson: body.googlePlaceDetails as any,
-                  rawWattbuyJson: body.wattbuyJson as any,
-                },
-                select: selectFields,
+                data: sameUserUpdate,
               });
+
+              await prisma.$executeRawUnsafe(
+                'UPDATE "HouseAddress" SET "userEmail" = $1 WHERE "id" = $2',
+                resolvedUserEmail,
+                record.id,
+              );
+
+              record = { ...record, userEmail: resolvedUserEmail } as typeof record;
 
               if (recordIdToDelete && recordIdToDelete !== conflicting.id) {
                 try {
@@ -333,15 +325,26 @@ export async function POST(req: NextRequest) {
               }
             }
           } else {
+            const nextUtilityName = lookup.utility ?? record.utilityName ?? null;
+            const nextTdspSlug = lookup.territory ?? record.tdspSlug ?? null;
+            const standardUpdate: Prisma.HouseAddressUpdateInput = {
+              esiid: lookup.esiid,
+              utilityName: nextUtilityName,
+              tdspSlug: nextTdspSlug,
+            };
+
             record = await prisma.houseAddress.update({
               where: { id: record.id },
-              data: {
-                esiid: lookup.esiid,
-                utilityName: lookup.utility ?? record.utilityName ?? undefined,
-                tdspSlug: lookup.territory ?? record.tdspSlug ?? undefined,
-              },
-              select: selectFields,
+              data: standardUpdate,
             });
+
+            await prisma.$executeRawUnsafe(
+              'UPDATE "HouseAddress" SET "userEmail" = $1 WHERE "id" = $2',
+              resolvedUserEmail,
+              record.id,
+            );
+
+            record = { ...record, userEmail: resolvedUserEmail } as typeof record;
           }
 
           try {
@@ -398,6 +401,7 @@ export async function POST(req: NextRequest) {
         id: record.id,
         userId: record.userId,
         houseId: record.houseId,
+        userEmail: "userEmail" in record ? (record as any).userEmail ?? resolvedUserEmail : resolvedUserEmail,
         line1: record.addressLine1,
         line2: record.addressLine2,
         city: record.addressCity,

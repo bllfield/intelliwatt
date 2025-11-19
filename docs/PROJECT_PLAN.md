@@ -194,6 +194,7 @@ Scope
 - Prisma schema adds `esiidAttentionRequired`, `esiidAttentionCode`, `esiidAttentionAt` on `UserProfile` (migration `20251118230500_add_esiid_attention`).
 - Successful assignments reset the attention flag for the winning user.
 - Temporary duplicate `HouseAddress` rows created during the same request are removed after reassignment.
+- Runtime guard logs a reminder to run `npx prisma migrate deploy` if the new attention columns are missing, so production does not hard-crash while the migration is pending.
 
 Rollback
 
@@ -2171,3 +2172,21 @@ Constraints / Guidance:
   - Foreign keys: `userId`, `houseId`, `houseAddressId`.
   - SMT identity fields: `esiid`, `meterNumber?`, `tdspCode`, `tdspName`.
   - Address snapshot: `serviceAddressLine1/2`, `
+
+### PC-2025-11-19: HouseAddress User Email Mirror
+
+**Rationale:**
+Ops and support need a stable email field on `HouseAddress` for lookups, while the internal `userId` remains the canonical foreign key (cuid). Mirroring the normalized email keeps historical joins intact even after users update their login address.
+
+**Scope:**
+- Extend Prisma schema to add nullable `userEmail` on `HouseAddress` with an index for lookups.
+- Backfill the column: use the existing `userId` when it already stores an email, otherwise join to `User` to copy the current email.
+- Update `/api/address/save` to persist both `userId` (cuid) and `userEmail` on every write, including conflict hand-offs.
+
+**Rollback Plan:**
+- Drop the column and remove associated writes if tooling decides it is unnecessary. Existing logic still relies on `userId`, so removal is non-destructive.
+
+**Guardrails Preserved:**
+- `userId` remains the relational source of truth.
+- No PII is newly exposed beyond what is already stored in `User.email`.
+- Migration keeps RAW payload handling untouched.

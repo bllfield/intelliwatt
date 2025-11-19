@@ -90,8 +90,8 @@
 
 ### Database Schema
 - **Models**: 
-  - `HouseAddress` (in `prisma/schema.prisma`) - Address collection with ESIID (conflict handling now transfers meters to the newest user and preserves raw vendor payloads)
-  - `UserProfile` - Stores household metadata and now tracks ESIID attention flags (`esiidAttentionRequired`, `esiidAttentionCode`, `esiidAttentionAt`) so Customer Ops can email prior owners when a meter moves
+  - `HouseAddress` (in `prisma/schema.prisma`) - Address collection with ESIID (conflict handling now transfers meters to the newest user and preserves raw vendor payloads). As of Nov 19, 2025 we also mirror the normalized `userEmail` alongside the cuid `userId` so ops can search by email even if the login address changes.
+  - `UserProfile` - Stores household metadata and now tracks ESIID attention flags (`esiidAttentionRequired`, `esiidAttentionCode`, `esiidAttentionAt`) so Customer Ops can email prior owners when a meter moves. The address save endpoint now emits a warning (instead of crashing) if those columns are still missing, reminding ops to run `npx prisma migrate deploy`.
   - `ErcotIngest` - ERCOT file ingestion history tracking
   - `ErcotEsiidIndex` - Normalized ESIID data from ERCOT extracts
   - `RatePlan` - Normalized electricity plans (REP plans and utility tariffs)

@@ -366,6 +366,7 @@ model SupplierControl {
 model HouseAddress {
   id                    String           @id @default(uuid())
   userId                String
+  userEmail             String?
   houseId               String?
   addressLine1          String
   addressLine2          String?
@@ -395,6 +396,7 @@ model HouseAddress {
   @@index([placeId])
   @@index([addressState, addressZip5])
   @@index([esiid])
+  @@index([userEmail])
 }
 
 model RawSmtFile {
