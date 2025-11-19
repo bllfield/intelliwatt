@@ -172,6 +172,11 @@ export async function POST(req: NextRequest) {
     const webhookSecret = process.env.DROPLET_WEBHOOK_SECRET;
 
     if (webhookUrl && webhookSecret) {
+      const monthsBack = 12;
+      const windowToDate = new Date();
+      const windowFromDate = new Date(windowToDate.getTime());
+      windowFromDate.setMonth(windowFromDate.getMonth() - monthsBack);
+
       try {
         await fetch(webhookUrl, {
           method: "POST",
@@ -193,7 +198,9 @@ export async function POST(req: NextRequest) {
             authorizationEndDate: created.authorizationEndDate,
             includeInterval: true,
             includeBilling: true,
-            monthsBack: 12,
+            monthsBack,
+            windowFrom: windowFromDate.toISOString(),
+            windowTo: windowToDate.toISOString(),
           }),
         });
       } catch (err) {

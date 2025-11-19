@@ -2266,3 +2266,55 @@ Ops and support need a stable email field on `HouseAddress` for lookups, while t
 - RAW→CDM discipline: billing reads live in their own CDM table.
 - Interval ingest remains the canonical path for 15-minute usage.
 - Admin and customer APIs remain unchanged; this update is schema + documentation only.
+
+---
+
+## PC-2025-11-19-SMT-BILLING-ADMIN
+
+**Status:** In progress (billing pipeline + admin viewer live, interval viewer next)  
+**Owner:** Brian / SMT ingest
+
+### Summary
+
+We have extended the Smart Meter Texas ingest pipeline and admin tooling:
+
+1. **New billing table:** Added `SmtBillingRead` Prisma model + migration, backed by the production DigitalOcean Postgres cluster. Each row represents a billing-level read for an ESIID/meter (window start/end, bill date, kWh total/billed, TDSP context, source metadata).
+2. **Inline billing normalization:** The existing admin ingest endpoint `POST /api/admin/smt/pull` (admin-token protected) now:
+   - Persists a `RawSmtFile` row for inline SMT CSV uploads (interval or billing).
+   - Detects billing/daily CSVs via filename/source (e.g. `DailyMeterUsage*.csv`).
+   - Parses date + kWh columns and populates `SmtBillingRead`, clearing prior reads for that `rawSmtFileId` before insert.
+   - Leaves the interval normalization path (`SmtInterval`) unchanged.
+3. **Admin SMT billing viewer:** `/admin/smt/raw` now exposes a read-only **"SMT Billing Reads (Admin)"** section with an `esiid` + `limit` filter and a `BillingReadsTable` client component showing bill windows, kWh totals, TDSP info, and the originating raw file.
+
+### Scope / Impact
+
+- **Scope:** SMT ingest + admin-only views. No customer-facing flows changed. Droplet remains the only path to SMT (JWT API + SFTP); Vercel never calls SMT directly.
+- **DB Impact:** New `SmtBillingRead` table with FK back to `RawSmtFile`. A helper (`npm run db:apply-smt-billing`) exists for ops to re-apply the migration when needed.
+- **Security:** All new UI remains behind admin token. Viewer is read-only and safe in production.
+
+### Future Work
+
+- **SMT Interval Admin Viewer:** Add a parallel **"SMT Interval Reads (Admin)"** section that queries `SmtInterval` using the same `esiid` + `limit` search params to surface raw interval rows (timestamp + kWh + ESIID/meter + source + raw file ID).
+- **Customer-facing integration:** Use `SmtBillingRead` + `SmtInterval` as backing data for plan analysis and simulated billing once the public-facing plan analyzer is wired.
+
+### Guardrails
+
+- Never call SMT from Vercel/browser; droplet-only access via JWT + SFTP.
+- Do not reset or re-initialize the production Postgres database.
+- Do not change the `/api/admin/smt/pull` contract (inline, base64+gzip payload).
+- Keep `/admin/smt/raw` features read-only and admin-token gated.
+
+### PC-2025-11-19-SMT-WINDOW-FIX — SMT Webhook Historical Window
+
+- Clarified the distinction between **authorization window** and **data retrieval window** for Smart Meter Texas ingest.
+- `authorizationStartDate` and `authorizationEndDate` continue to represent the forward-looking ~12 month consent period for SMT access.
+- The droplet webhook payload (`POST /trigger/smt-now`) now includes:
+  - `monthsBack` (default 12)
+  - `windowTo` = current UTC timestamp
+  - `windowFrom` = UTC timestamp `monthsBack` months prior to `windowTo`
+  ensuring SMT pulls request the preceding 12 months of usage and billing data (or as much history as SMT returns).
+- Ingestion remains append-only and idempotent: `RawSmtFile`, `SmtInterval`, and `SmtBillingRead` rows are only added, and interval inserts continue to rely on `createMany` with `skipDuplicates`.
+- Guardrails preserved:
+  - SMT traffic stays droplet-only; Vercel does not call SMT APIs directly.
+  - `/api/admin/smt/pull` keeps the existing inline `base64+gzip` contract.
+- No production database resets or schema changes were performed.
