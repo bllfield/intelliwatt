@@ -14,51 +14,51 @@ materialize_csv_from_pgp_zip() {
   local asc_path="$1"
   MATERIALIZED_TMP_DIR=""
 
-  if [[ ! "$asc_path" =~ \.asc$ ]]; then
-    echo "$asc_path"
+  if [[ "${asc_path##*.}" != "asc" ]]; then
+    printf '%s\n' "$asc_path"
     return 0
   fi
 
   if ! grep -q "BEGIN PGP MESSAGE" "$asc_path" 2>/dev/null; then
-    echo "$asc_path"
+    printf '%s\n' "$asc_path"
     return 0
   fi
 
   local tmp_dir dec_zip inner_name inner_path
-  tmp_dir=$(mktemp -d "${SMT_LOCAL_DIR%/}/pgp_tmp.XXXXXX") || {
+  tmp_dir="$(mktemp -d "${SMT_LOCAL_DIR%/}/pgp_tmp.XXXXXX")"
+  if [[ -z "$tmp_dir" || ! -d "$tmp_dir" ]]; then
     log "WARN: materialize_csv_from_pgp_zip: mktemp failed for $asc_path"
-    echo "$asc_path"
+    printf '%s\n' "$asc_path"
     return 1
-  }
+  fi
 
   dec_zip="$tmp_dir/decrypted.zip"
   if ! gpg --batch --yes -o "$dec_zip" -d "$asc_path" >/dev/null 2>&1; then
     log "WARN: materialize_csv_from_pgp_zip: gpg decrypt failed for $asc_path"
     rm -rf "$tmp_dir"
-    echo "$asc_path"
+    printf '%s\n' "$asc_path"
     return 1
-  }
+  fi
 
-  inner_name=$(unzip -Z1 "$dec_zip" 2>/dev/null | head -n 1)
-  if [ -z "$inner_name" ]; then
+  inner_name="$(unzip -Z1 "$dec_zip" 2>/dev/null | head -n 1)"
+  if [[ -z "$inner_name" ]]; then
     log "WARN: materialize_csv_from_pgp_zip: empty archive for $asc_path"
     rm -rf "$tmp_dir"
-    echo "$asc_path"
+    printf '%s\n' "$asc_path"
     return 1
-  }
+  fi
 
   if ! unzip -p "$dec_zip" "$inner_name" >"$tmp_dir/$inner_name" 2>/dev/null; then
     log "WARN: materialize_csv_from_pgp_zip: unzip failed for $asc_path"
     rm -rf "$tmp_dir"
-    echo "$asc_path"
+    printf '%s\n' "$asc_path"
     return 1
-  }
+  fi
 
   MATERIALIZED_TMP_DIR="$tmp_dir"
   inner_path="$tmp_dir/$inner_name"
   log "Decoded PGP ZIP file: $asc_path -> $inner_path"
-  echo "$inner_path"
-  return 0
+  printf '%s\n' "$inner_path"
 }
 
 require() {
