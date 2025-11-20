@@ -8,7 +8,8 @@ SOURCE_TAG="${SOURCE_TAG:-adhocusage}"
 METER_DEFAULT="${METER_DEFAULT:-M1}"
 
 log() {
-  printf '[%s] %s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$*"
+  # Send logs to stderr so helpers that return values via stdout remain clean
+  printf '[%s] %s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$*" >&2
 }
 
 # Will hold a tmp dir path when we decrypt a PGP payload
