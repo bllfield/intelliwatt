@@ -8,6 +8,45 @@ log() {
   printf '[%s] %s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$*"
 }
 
+function materialize_csv_from_pgp_zip() {
+  local asc_path="$1"
+  local tmp_dir dec_zip inner_csv
+
+  if [ -z "$asc_path" ] || [ ! -f "$asc_path" ]; then
+    log "WARN: materialize_csv_from_pgp_zip: missing or invalid path: $asc_path"
+    return 1
+  }
+
+  tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/smt_pgp.XXXXXX") || {
+    log "WARN: materialize_csv_from_pgp_zip: mktemp failed for $asc_path"
+    return 1
+  }
+
+  dec_zip="$tmp_dir/decrypted.zip"
+
+  if ! gpg --batch --yes -o "$dec_zip" -d "$asc_path" >/dev/null 2>&1; then
+    log "WARN: materialize_csv_from_pgp_zip: gpg decrypt failed for $asc_path"
+    rm -rf "$tmp_dir"
+    return 1
+  }
+
+  if ! unzip -qq "$dec_zip" -d "$tmp_dir" >/dev/null 2>&1; then
+    log "WARN: materialize_csv_from_pgp_zip: unzip failed for decrypted $asc_path"
+    rm -rf "$tmp_dir"
+    return 1
+  }
+
+  inner_csv=$(find "$tmp_dir" -maxdepth 1 -type f | head -1 || true)
+  if [ -z "$inner_csv" ]; then
+    log "WARN: materialize_csv_from_pgp_zip: no inner file found for $asc_path"
+    rm -rf "$tmp_dir"
+    return 1
+  }
+
+  echo "$inner_csv"
+  return 0
+}
+
 require() {
   local name="$1"
   if [[ -z "${!name:-}" ]]; then
@@ -80,21 +119,36 @@ for f in "${FILES[@]}"; do
   fi
 
   bn="$(basename "$f")"
+
+  payload_path="$f"
+  if [[ "$bn" == *.asc ]]; then
+    log "Detected PGP-wrapped SMT file, attempting decrypt+unzip: $bn"
+    inner_csv="$(materialize_csv_from_pgp_zip "$f" || true)"
+    if [ -n "$inner_csv" ] && [ -f "$inner_csv" ]; then
+      payload_path="$inner_csv"
+      log "Using inner CSV as payload for $bn → $payload_path"
+    else
+      log "WARN: Failed to materialize inner CSV for $bn; marking as posted and skipping"
+      echo "$sha256" >> "$SEEN_FILE"
+      continue
+    fi
+  fi
+
   esiid_guess=$(echo "$bn" | grep -oE '10[0-9]{16}' || true)
   meter_guess=$(echo "$bn" | grep -oE 'M[0-9]+' || true)
 
   esiid="${esiid_guess:-$(printf '%s' "${ESIID_DEFAULT:-}" | tr -d $'\r\n')}"
   meter="${meter_guess:-$METER_DEFAULT}"
 
-  captured_at=$(date -u -d @"$(stat -c %Y "$f")" +"%Y-%m-%dT%H:%M:%SZ")
-  size_bytes=$(stat -c %s "$f")
+  captured_at=$(date -u -d @"$(stat -c %Y "$payload_path")" +"%Y-%m-%dT%H:%M:%SZ")
+  size_bytes=$(stat -c %s "$payload_path")
 
   url="${INTELLIWATT_BASE_URL%/}/api/admin/smt/pull"
   log "Posting inline payload: $bn → $url (esiid=${esiid:-N/A}, meter=$meter, size=$size_bytes)"
 
   # Build the JSON body via python3 to avoid jq argument-length limits
   json=$(
-    SMT_FILE_PATH="$f" \
+    SMT_FILE_PATH="$payload_path" \
     SMT_SOURCE_TAG="$SOURCE_TAG" \
     SMT_ESIID="$esiid" \
     SMT_METER="$meter" \
