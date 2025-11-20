@@ -2364,6 +2364,14 @@ We have extended the Smart Meter Texas ingest pipeline and admin tooling:
 - `/api/admin/smt/pull` already detects DailyMeterUsage CSVs and aggregates them into `SmtBillingRead`, enabling end-to-end SMT daily billing ingestion.
 - IntervalMeterUsage handling, sha256 dedupe (`.posted_sha256`), and other ingest safeguards remain unchanged.
 
+### PC-2025-11-20-A — SMT Agreements + PoA Live Wiring
+
+- Extended `SmtAuthorization` to record SMT agreement/subscription identifiers, status fields, and PoA consent metadata (text version, IP, user agent) without altering the existing ingest pipeline.
+- Added `lib/smt/agreements.ts`, a guarded proxy client that calls the droplet SMT token proxy when `SMT_AGREEMENTS_ENABLED` is true, creating agreements/subscriptions while keeping production togglable.
+- Updated `/api/smt/authorization` to normalize ESIID input, persist PoA consent details, attempt live SMT agreement/subscription creation, and capture resulting IDs/status alongside the authorization record.
+- Updated the `/dashboard/api` SMT card + form to expose explicit PoA legal language, require an authorization checkbox, and send `consentTextVersion: "smt-poa-v1"` during submission.
+- Documented new environment variables (`SMT_AGREEMENTS_ENABLED`, `SMT_PROXY_AGREEMENTS_URL`, `SMT_PROXY_TOKEN`) so ops can control the live SMT flow separately from staging.
+
 ### PC-2025-11-20-D – Admin DB Query Parser Fix for SmtBillingRead
 
 - Updated `/api/admin/db/query` to use a more robust `FROM` clause regex so table names are correctly extracted for arbitrarily projected `SELECT` statements.

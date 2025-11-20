@@ -10,6 +10,8 @@ export default async function ApiConnectPage() {
   const cookieStore = cookies();
   const sessionEmail = cookieStore.get("intelliwatt_user")?.value ?? null;
 
+  const prismaAny = prisma as any;
+
   let user: { id: string; email: string } | null = null;
   if (sessionEmail) {
     const normalizedEmail = normalizeEmail(sessionEmail);
@@ -41,12 +43,28 @@ export default async function ApiConnectPage() {
 
   let existingAuth: any | null = null;
   if (user && houseAddress) {
-    existingAuth = await prisma.smtAuthorization.findFirst({
+    existingAuth = await prismaAny.smtAuthorization.findFirst({
       where: { userId: user.id, houseAddressId: houseAddress.id },
       orderBy: { createdAt: "desc" },
-      select: { id: true, createdAt: true },
+      select: {
+        id: true,
+        createdAt: true,
+        smtStatus: true,
+        smtStatusMessage: true,
+        smtAgreementId: true,
+        smtSubscriptionId: true,
+      },
     });
   }
+
+  const existingAuthStatus =
+    existingAuth && "smtStatus" in existingAuth
+      ? ((existingAuth as any).smtStatus as string | null | undefined)
+      : null;
+  const existingAuthStatusMessage =
+    existingAuth && "smtStatusMessage" in existingAuth
+      ? ((existingAuth as any).smtStatusMessage as string | null | undefined)
+      : null;
 
   const hasEsiid = Boolean(houseAddress?.esiid);
   const rawTdspValues = houseAddress
@@ -166,6 +184,12 @@ export default async function ApiConnectPage() {
                           day: "numeric",
                           year: "numeric",
                         })}
+                        {existingAuthStatus ? (
+                          <span className="ml-2 normal-case text-emerald-700">
+                            (status: {existingAuthStatus}
+                            {existingAuthStatusMessage ? ` – ${existingAuthStatusMessage}` : ""})
+                          </span>
+                        ) : null}
                       </div>
                     )}
                   </article>

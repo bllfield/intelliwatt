@@ -3,12 +3,14 @@ import { cookies } from "next/headers";
 import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
 import { cleanEsiid } from "@/lib/smt/esiid";
+import { createAgreementAndSubscription } from "@/lib/smt/agreements";
 
 type SmtAuthorizationBody = {
   houseAddressId: string;
   customerName: string;
   contactPhone?: string | null;
   consent: boolean;
+  consentTextVersion?: string | null;
 };
 
 function getEnvOrDefault(name: string, fallback: string): string {
@@ -22,6 +24,10 @@ function getEnvOrDefault(name: string, fallback: string): string {
 export async function POST(req: NextRequest) {
   try {
     const rawBody = (await req.json()) as Partial<SmtAuthorizationBody> | null;
+    const agreementsEnabled =
+      process.env.SMT_AGREEMENTS_ENABLED === "true" ||
+      process.env.SMT_AGREEMENTS_ENABLED === "1";
+    const prismaAny = prisma as any;
 
     if (!rawBody || typeof rawBody !== "object") {
       return NextResponse.json(
@@ -133,6 +139,14 @@ export async function POST(req: NextRequest) {
         ? contactPhone.trim()
         : null;
 
+    const consentTextVersion =
+      typeof rawBody.consentTextVersion === "string" && rawBody.consentTextVersion.trim().length > 0
+        ? rawBody.consentTextVersion.trim()
+        : "smt-poa-v1";
+    const clientIp =
+      req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? req.ip ?? null;
+    const userAgent = req.headers.get("user-agent") ?? null;
+
     const now = new Date();
     const authorizationStartDate = new Date(
       Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
@@ -144,7 +158,7 @@ export async function POST(req: NextRequest) {
     const smtRequestorId = getEnvOrDefault("SMT_REQUESTOR_ID", "INTELLIWATTAPI");
     const smtRequestorAuthId = getEnvOrDefault("SMT_REQUESTOR_AUTH_ID", "INTELLIWATT_AUTH_ID");
 
-    const created = await prisma.smtAuthorization.create({
+    const created = await prismaAny.smtAuthorization.create({
       data: {
         userId: user.id,
         houseId: house.houseId ?? house.id,
@@ -168,8 +182,60 @@ export async function POST(req: NextRequest) {
         contactPhone: normalizedContactPhone,
         smtRequestorId,
         smtRequestorAuthId,
+        consentTextVersion,
+        consentIp: clientIp,
+        consentUserAgent: userAgent,
+        smtStatus: agreementsEnabled ? "pending" : null,
       },
     });
+
+    let smtUpdateData: Record<string, any> = {};
+
+    try {
+      const serviceAddressParts = [
+        house.addressLine1,
+        house.addressLine2,
+        `${house.addressCity}, ${house.addressState} ${house.addressZip5}`,
+      ].filter((part) => typeof part === "string" && part.trim().length > 0);
+
+      const agreementResult = await createAgreementAndSubscription({
+        esiid: houseEsiid,
+        serviceAddress: serviceAddressParts.join(", "),
+        customerName: trimmedCustomerName,
+        customerEmail: user.email,
+        customerPhone: normalizedContactPhone,
+      });
+
+      smtUpdateData = {
+        smtAgreementId: agreementResult.agreementId ?? null,
+        smtSubscriptionId: agreementResult.subscriptionId ?? null,
+        smtStatus: agreementResult.status ?? null,
+        smtStatusMessage: agreementResult.message ?? null,
+        smtBackfillRequestedAt: agreementResult.backfillRequestedAt
+          ? new Date(agreementResult.backfillRequestedAt)
+          : null,
+        smtBackfillCompletedAt: agreementResult.backfillCompletedAt
+          ? new Date(agreementResult.backfillCompletedAt)
+          : null,
+      };
+    } catch (agreementErr: any) {
+      smtUpdateData = {
+        smtStatus: "error",
+        smtStatusMessage: `Agreement call threw: ${
+          agreementErr?.message ?? String(agreementErr)
+        }`.slice(0, 500),
+      };
+    }
+
+    const updatedAuthorization =
+      Object.keys(smtUpdateData).length > 0
+        ? await prismaAny.smtAuthorization.update({
+            where: { id: created.id },
+            data: smtUpdateData,
+          })
+        : created;
+
+    const updatedAuthAny = updatedAuthorization as any;
 
     const webhookUrl = process.env.DROPLET_WEBHOOK_URL;
     const webhookSecret = process.env.DROPLET_WEBHOOK_SECRET;
@@ -181,23 +247,23 @@ export async function POST(req: NextRequest) {
       windowFromDate.setMonth(windowFromDate.getMonth() - monthsBack);
       const windowFrom = windowFromDate.toISOString();
       const windowTo = windowToDate.toISOString();
-      const esiid = created.esiid ?? houseEsiid;
-      const meter = created.meterNumber ?? "M1";
-      const payloadEsiid = cleanEsiid(created.esiid ?? houseEsiid) ?? houseEsiid;
+      const esiid = updatedAuthAny.esiid ?? houseEsiid;
+      const meter = updatedAuthAny.meterNumber ?? "M1";
+      const payloadEsiid = cleanEsiid(updatedAuthAny.esiid ?? houseEsiid) ?? houseEsiid;
 
       const dropletPayload = {
         reason: "smt_authorized" as const,
         ts: new Date().toISOString(),
         smtAuthorizationId: created.id,
-        userId: created.userId,
-        houseId: created.houseId,
-        houseAddressId: created.houseAddressId,
+        userId: updatedAuthAny.userId,
+        houseId: updatedAuthAny.houseId,
+        houseAddressId: updatedAuthAny.houseAddressId,
         esiid: payloadEsiid,
         meter,
-        tdspCode: created.tdspCode,
-        tdspName: created.tdspName,
-        authorizationStartDate: created.authorizationStartDate,
-        authorizationEndDate: created.authorizationEndDate,
+        tdspCode: updatedAuthAny.tdspCode,
+        tdspName: updatedAuthAny.tdspName,
+        authorizationStartDate: updatedAuthAny.authorizationStartDate,
+        authorizationEndDate: updatedAuthAny.authorizationEndDate,
         includeInterval: true,
         includeBilling: true,
         monthsBack,
@@ -222,7 +288,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         ok: true,
-        authorizationId: created.id,
+        authorizationId: updatedAuthorization.id,
+        esiid: updatedAuthAny.esiid,
+        smtStatus: updatedAuthAny.smtStatus ?? null,
+        smtStatusMessage: updatedAuthAny.smtStatusMessage ?? null,
       },
       { status: 201 },
     );

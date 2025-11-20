@@ -219,6 +219,12 @@ here must be kept in sync with deployment notes in docs/DEPLOY_SMT_INGEST.md.
 - `SMT_CUSTOMER_UPLOAD_MONTHLY_LIMIT` — Default `5`; maximum customer uploads allowed per window.
 - `SMT_CUSTOMER_UPLOAD_MONTHLY_WINDOW_MS` — Default `2592000000` (~30 days); customer upload rate-limit window in milliseconds.
 
+## SMT Agreements / Subscriptions (Live Wiring)
+
+- `SMT_AGREEMENTS_ENABLED` — When set to `true` or `1`, the SMT authorization API attempts to create a live SMT Agreement + Subscription for the customer's ESIID using the droplet proxy. Leave unset/false to capture consent without calling SMT (useful for staging).
+- `SMT_PROXY_AGREEMENTS_URL` — HTTPS endpoint on the droplet SMT proxy that handles `{ action: "create_agreement_and_subscription", ... }` and talks to the real SMT JWT APIs. If not provided, the code falls back to `SMT_PROXY_URL`.
+- `SMT_PROXY_TOKEN` — Shared bearer token for authenticating the Vercel app to the SMT proxy. This is distinct from the upstream SMT credentials, which remain isolated on the proxy.
+
 ## ESIID Source Selection (2025-11-12)
 
 **Vercel / Server Required**

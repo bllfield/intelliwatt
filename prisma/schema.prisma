@@ -497,6 +497,18 @@ model SmtAuthorization {
   smtRequestorId     String
   smtRequestorAuthId String
 
+  smtAgreementId        String?   @db.VarChar(100)
+  smtSubscriptionId     String?   @db.VarChar(100)
+  smtStatus             String?   @db.VarChar(50)
+  smtStatusMessage      String?   @db.Text
+  smtBackfillRequestedAt DateTime?
+  smtBackfillCompletedAt DateTime?
+  smtLastSyncAt         DateTime?
+
+  consentTextVersion    String?   @db.VarChar(50)
+  consentIp             String?   @db.VarChar(64)
+  consentUserAgent      String?   @db.VarChar(255)
+
   user         User         @relation(fields: [userId], references: [id])
   houseAddress HouseAddress @relation(fields: [houseAddressId], references: [id])
 
