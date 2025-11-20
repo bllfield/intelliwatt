@@ -2358,6 +2358,12 @@ We have extended the Smart Meter Texas ingest pipeline and admin tooling:
 - Updated `/api/admin/db/query` to recursively convert bigint fields in raw query results to strings so JSON serialization no longer fails for tables like `SmtBillingRead`.
 - Maintained admin-token protection, SELECT-only enforcement, and the existing table allow-list.
 
+### PC-2025-11-20-E — SMT Daily Billing PGP→ZIP→CSV Ingest
+
+- Enhanced `deploy/smt/fetch_and_post.sh` so `DailyMeterUsage*.CSV.*.asc` files are decrypted with `gpg`, unzipped to the inner CSV, and posted to `/api/admin/smt/pull` as inline payloads.
+- `/api/admin/smt/pull` already detects DailyMeterUsage CSVs and aggregates them into `SmtBillingRead`, enabling end-to-end SMT daily billing ingestion.
+- IntervalMeterUsage handling, sha256 dedupe (`.posted_sha256`), and other ingest safeguards remain unchanged.
+
 ### PC-2025-11-20-D – Admin DB Query Parser Fix for SmtBillingRead
 
 - Updated `/api/admin/db/query` to use a more robust `FROM` clause regex so table names are correctly extracted for arbitrarily projected `SELECT` statements.

@@ -232,6 +232,19 @@ sudo systemctl status smt-upload-server.service
 
 Ensure the port is open (e.g., `sudo ufw allow 8081/tcp`) and set `NEXT_PUBLIC_SMT_UPLOAD_URL` (e.g., `https://smt-upload.intelliwatt.com/upload`) so the admin UI can POST directly to this server.
 
+### Daily Billing (DailyMeterUsage) Decrypt & Ingest
+
+- SMT delivers **DailyMeterUsage** billing extracts as PGP-armored ZIPs (e.g., `DailyMeterUsageYYYYMMDDHHMMSS…CSV.134642921.asc`).
+- `deploy/smt/fetch_and_post.sh` now:
+  - Decrypts `.asc` files with `gpg` using the IntelliWatt SMT keypair.
+  - Unzips the decrypted payload to a temporary CSV under `$SMT_LOCAL_DIR`.
+  - Posts that CSV as an inline payload to `POST /api/admin/smt/pull` (mode `inline`).
+- The API detects DailyMeterUsage CSVs and persists both `RawSmtFile` and `SmtBillingRead` rows automatically.
+- Requirements:
+  - `gpg` and `unzip` installed on the droplet.
+  - IntelliWatt SMT GPG keypair available for the `deploy` user (`/home/deploy/.gnupg`).
+- Interval files (`IntervalMeterUsage*.csv`) continue through the existing pipeline unchanged.
+
 ### SMT Upload HTTPS Proxy (`smt-upload.intelliwatt.com`)
 
 - The SMT upload server now runs as a Node process on the droplet:
