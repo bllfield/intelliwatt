@@ -24,9 +24,22 @@ export async function POST(req: NextRequest) {
   if (unauthorized) return unauthorized;
 
   const body = await req.json().catch(() => ({}));
-  const { table, offset = 0, limit = 50, orderBy, orderDir = 'desc', q, csv = false } = body || {};
+  const { sql, offset = 0, limit = 50, orderBy, orderDir = 'desc', q, csv = false } = body || {};
 
-  const tableName = typeof table === 'string' ? table.trim() : '';
+  const sqlText = typeof sql === 'string' ? sql.trim() : '';
+  if (!sqlText) {
+    return NextResponse.json(
+      { ok: false, error: 'INVALID_QUERY', detail: { reason: 'SQL string missing or empty' } },
+      { status: 400 },
+    );
+  }
+
+  if (!/^\s*select\b/i.test(sqlText)) {
+    return NextResponse.json({ ok: false, error: 'ONLY_SELECT_ALLOWED' }, { status: 400 });
+  }
+
+  const fromMatch = sqlText.match(/from\s+(?:(?:"?public"?)\.)?\s*"?([A-Za-z0-9_]+)"?/i);
+  const tableName = fromMatch?.[1] ?? '';
 
   if (!tableName || !TABLE_WHITELIST.has(tableName)) {
     return NextResponse.json(
