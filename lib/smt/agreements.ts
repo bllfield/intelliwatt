@@ -47,6 +47,34 @@ export async function createAgreementAndSubscription(
   }
 
   try {
+    const agreementBody = {
+      esiid: payload.esiid,
+      serviceAddress: payload.serviceAddress,
+      customerName: payload.customerName ?? null,
+      customerEmail: payload.customerEmail ?? null,
+      customerPhone: payload.customerPhone ?? null,
+    };
+
+    const subscriptionBody = {
+      esiid: payload.esiid,
+      serviceAddress: payload.serviceAddress,
+      customerName: payload.customerName ?? null,
+      customerEmail: payload.customerEmail ?? null,
+      customerPhone: payload.customerPhone ?? null,
+    };
+
+    const proxyPayload = {
+      action: "create_agreement_and_subscription",
+      agreement: {
+        name: "NewAgreement",
+        body: agreementBody,
+      },
+      subscription: {
+        name: "NewSubscription",
+        body: subscriptionBody,
+      },
+    };
+
     const res = await fetch(SMT_PROXY_AGREEMENTS_URL, {
       method: "POST",
       headers: {
@@ -55,14 +83,7 @@ export async function createAgreementAndSubscription(
           ? { authorization: `Bearer ${SMT_PROXY_TOKEN}` }
           : {}),
       },
-      body: JSON.stringify({
-        action: "create_agreement_and_subscription",
-        esiid: payload.esiid,
-        serviceAddress: payload.serviceAddress,
-        customerName: payload.customerName ?? null,
-        customerEmail: payload.customerEmail ?? null,
-        customerPhone: payload.customerPhone ?? null,
-      }),
+      body: JSON.stringify(proxyPayload),
     });
 
     if (!res.ok) {
@@ -76,12 +97,26 @@ export async function createAgreementAndSubscription(
 
     const json = (await res.json()) as any;
 
+    const resultsArray = Array.isArray(json?.results) ? json.results : [];
+    const agreementResult = resultsArray.find(
+      (entry: any) => entry?.name === "NewAgreement",
+    );
+    const subscriptionResult = resultsArray.find(
+      (entry: any) => entry?.name === "NewSubscription",
+    );
+
     return {
       ok: !!json?.ok,
-      agreementId: json?.agreementId ?? undefined,
-      subscriptionId: json?.subscriptionId ?? undefined,
+      agreementId:
+        agreementResult?.data?.agreementId ??
+        agreementResult?.data?.AgreementID ??
+        undefined,
+      subscriptionId:
+        subscriptionResult?.data?.subscriptionId ??
+        subscriptionResult?.data?.SubscriptionID ??
+        undefined,
       status: json?.status ?? (json?.ok ? "active" : "error"),
-      message: json?.message ?? undefined,
+      message: json?.message ?? json?.error ?? undefined,
       backfillRequestedAt: json?.backfillRequestedAt ?? undefined,
       backfillCompletedAt: json?.backfillCompletedAt ?? undefined,
     };
