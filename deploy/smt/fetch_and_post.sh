@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# -----------------------------------------------------------------------------
+# Config
+# -----------------------------------------------------------------------------
 SOURCE_TAG="${SOURCE_TAG:-adhocusage}"
 METER_DEFAULT="${METER_DEFAULT:-M1}"
 
@@ -8,16 +11,20 @@ log() {
   printf '[%s] %s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$*"
 }
 
+# Will hold a tmp dir path when we decrypt a PGP payload
 MATERIALIZED_TMP_DIR=""
 
+# -----------------------------------------------------------------------------
+# materialize_csv_from_pgp_zip
+# -----------------------------------------------------------------------------
 materialize_csv_from_pgp_zip() {
   local asc_path="$1"
   MATERIALIZED_TMP_DIR=""
 
-  if [[ "${asc_path##*.}" != "asc" ]]; then
-    printf '%s\n' "$asc_path"
-    return 0
-  fi
+  case "$asc_path" in
+    *.asc) ;;
+    *) printf '%s\n' "$asc_path"; return 0 ;;
+  esac
 
   if ! grep -q "BEGIN PGP MESSAGE" "$asc_path" 2>/dev/null; then
     printf '%s\n' "$asc_path"
@@ -77,6 +84,9 @@ require_cmd() {
   fi
 }
 
+# -----------------------------------------------------------------------------
+# Env requirements
+# -----------------------------------------------------------------------------
 require ADMIN_TOKEN
 require INTELLIWATT_BASE_URL
 require SMT_HOST
@@ -92,6 +102,9 @@ require_cmd sha256sum
 require_cmd base64
 require_cmd find
 require_cmd stat
+require_cmd gpg
+require_cmd unzip
+require_cmd python3
 
 mkdir -p "$SMT_LOCAL_DIR"
 cd "$SMT_LOCAL_DIR"
@@ -111,124 +124,110 @@ cd ${SMT_REMOTE_DIR}
 lcd ${SMT_LOCAL_DIR}
 mget -p -r *
 BATCH
+
 if ! sftp -i "$SMT_KEY" -oStrictHostKeyChecking=accept-new "${SMT_USER}@${SMT_HOST}" <"$BATCH_FILE"; then
   log "WARN: sftp returned non-zero; continuing with any downloaded files"
 fi
 
 mapfile -t FILES < <(
   find "$SMT_LOCAL_DIR" -maxdepth 2 -type f \
-    \( -iname '*.csv' -o -iname '*.csv.*' \) \
+    \( -iname '*.csv' -o -iname '*.csv.*' -o -iname '*DailyMeterUsage*.asc' -o -iname '*IntervalMeterUsage*.asc' \) \
     -print | sort
 )
+
 if (( ${#FILES[@]} == 0 )); then
   log "No CSV files discovered; exiting"
   exit 0
 fi
 
 for file_path in "${FILES[@]}"; do
-  sha256=$(sha256sum "$file_path" | awk '{print $1}')
+  sha256="$(sha256sum "$file_path" | awk '{print $1}')"
   if grep -qx "$sha256" "$SEEN_FILE"; then
     log "Skipping already-posted file: $file_path"
     continue
   fi
 
   base="$(basename "$file_path")"
-  esiid_guess=$(echo "$base" | grep -oE '10[0-9]{16}' || true)
-  meter_guess=$(echo "$base" | grep -oE 'M[0-9]+' || true)
+  esiid_guess="$(printf '%s\n' "$base" | grep -oE '10[0-9]{16}' || true)"
+  meter_guess="$(printf '%s\n' "$base" | grep -oE 'M[0-9]+' || true)"
 
   esiid="${esiid_guess:-$(printf '%s' "${ESIID_DEFAULT:-}" | tr -d $'\r\n')}"
   meter="${meter_guess:-$METER_DEFAULT}"
 
-  materialized_file_path="$(materialize_csv_from_pgp_zip "$file_path")"
-  cleanup_dir="$MATERIALIZED_TMP_DIR"
-  MATERIALIZED_TMP_DIR=""
-
-  size_bytes=$(stat -c %s "$materialized_file_path" 2>/dev/null || wc -c <"$materialized_file_path" | tr -d ' ')
-  if captured_epoch=$(stat -c %Y "$materialized_file_path" 2>/dev/null); then
-    captured_at=$(date -u -d @"$captured_epoch" +"%Y-%m-%dT%H:%M:%SZ")
-  else
-    captured_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  if [[ -z "$esiid" ]]; then
+    log "WARN: No ESIID found or ESIID_DEFAULT set for $file_path; skipping"
+    continue
   fi
 
-  url="${INTELLIWATT_BASE_URL%/}/api/admin/smt/pull"
-  log "Posting inline payload: $(basename "$materialized_file_path") → $url (esiid=${esiid:-N/A}, meter=$meter, size=$size_bytes)"
+  effective_path="$(materialize_csv_from_pgp_zip "$file_path" || printf '%s\n' "$file_path")"
 
-  json=(
-    SMT_SOURCE_TAG="$SOURCE_TAG" \
+  size_bytes="$(stat -c '%s' "$effective_path")"
+  mtime_epoch="$(stat -c '%Y' "$effective_path")"
+  captured_at="$(date -u -d "@$mtime_epoch" +%Y-%m-%dT%H:%M:%SZ)"
+
+  json="$(
+    SMT_FILE_PATH="$effective_path" \
     SMT_ESIID="$esiid" \
     SMT_METER="$meter" \
+    SMT_SOURCE="$SOURCE_TAG" \
     SMT_CAPTURED_AT="$captured_at" \
     SMT_SIZE_BYTES="$size_bytes" \
-    SMT_FILE_PATH="$materialized_file_path" \
-    python3 << 'PY'
-import os
-import json
-import gzip
+    python3 - << 'PY'
 import base64
+import gzip
+import json
+import os
 import sys
 from pathlib import Path
 
-file_path = os.environ.get("SMT_FILE_PATH")
-source_tag = os.environ.get("SMT_SOURCE_TAG", "smt-ingest")
-esiid = os.environ.get("SMT_ESIID")
-meter = os.environ.get("SMT_METER")
-captured_at = os.environ.get("SMT_CAPTURED_AT")
-size_bytes = os.environ.get("SMT_SIZE_BYTES")
+path = Path(os.environ["SMT_FILE_PATH"])
+esiid = os.environ["SMT_ESIID"]
+meter = os.environ["SMT_METER"]
+source = os.environ["SMT_SOURCE"]
+captured_at = os.environ["SMT_CAPTURED_AT"]
+size_bytes = int(os.environ["SMT_SIZE_BYTES"])
 
-missing = []
-if not file_path:
-    missing.append("SMT_FILE_PATH")
-if not esiid:
-    missing.append("SMT_ESIID")
-if not meter:
-    missing.append("SMT_METER")
-if not captured_at:
-    missing.append("SMT_CAPTURED_AT")
-if not size_bytes:
-    missing.append("SMT_SIZE_BYTES")
-if missing:
-    print("Missing required SMT env vars: " + ", ".join(missing), file=sys.stderr)
-    sys.exit(1)
-
-path = Path(file_path)
-raw_bytes = path.read_bytes()
-gzipped = gzip.compress(raw_bytes)
+raw = path.read_bytes()
+gz = gzip.compress(raw)
 
 payload = {
     "mode": "inline",
-    "source": source_tag,
+    "source": source,
     "filename": path.name,
     "mime": "text/csv",
     "encoding": "base64+gzip",
-    "sizeBytes": int(size_bytes),
-    "compressedBytes": len(gzipped),
+    "sizeBytes": size_bytes,
+    "compressedBytes": len(gz),
     "esiid": esiid,
     "meter": meter,
     "captured_at": captured_at,
-    "content_b64": base64.b64encode(gzipped).decode("ascii"),
+    "content_b64": base64.b64encode(gz).decode("ascii"),
 }
 
 sys.stdout.write(json.dumps(payload, separators=(",", ":")))
 PY
-  )
+  )"
 
-  http_code=$(
+  url="${INTELLIWATT_BASE_URL%/}/api/admin/smt/pull"
+
+  http_code="$(
     printf '%s' "$json" | curl -sS -o "$RESP_FILE" -w "%{http_code}" \
       -X POST "$url" \
       -H "x-admin-token: $ADMIN_TOKEN" \
       -H "content-type: application/json" \
-      --data-binary @- 2>/dev/null || echo "000"
-  )
+      --data-binary @- 2>/dev/null || printf '000'
+  )"
 
   if [[ "$http_code" == "200" || "$http_code" == "201" ]]; then
     log "POST success ($http_code): $(jq -c '.' "$RESP_FILE" 2>/dev/null || cat "$RESP_FILE")"
-    echo "$sha256" >>"$SEEN_FILE"
+    printf '%s\n' "$sha256" >>"$SEEN_FILE"
   else
     log "POST failed ($http_code): $(cat "$RESP_FILE")"
   fi
 
-  if [[ -n "$cleanup_dir" && -d "$cleanup_dir" ]]; then
-    rm -rf "$cleanup_dir"
+  if [[ -n "$MATERIALIZED_TMP_DIR" && -d "$MATERIALIZED_TMP_DIR" ]]; then
+    rm -rf "$MATERIALIZED_TMP_DIR"
+    MATERIALIZED_TMP_DIR=""
   fi
 
 done
