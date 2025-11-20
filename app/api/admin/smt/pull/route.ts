@@ -74,11 +74,25 @@ type NormalizeBillingOpts = {
   filename?: string | null;
 };
 
-async function maybeNormalizeBillingCsv(opts: NormalizeBillingOpts): Promise<void> {
+type BillingRow = {
+  rawSmtFileId: bigint;
+  esiid: string;
+  meter: string | null;
+  tdspCode: string | null;
+  tdspName: string | null;
+  readStart: Date | null;
+  readEnd: Date | null;
+  billDate: Date | null;
+  kwhTotal: number | null;
+  kwhBilled: number | null;
+  source: string | null;
+};
+
+async function maybeNormalizeBillingCsv(opts: NormalizeBillingOpts): Promise<number> {
   const { prismaClient, csvBytes, esiid, meter, source, rawSmtFileId, filename } = opts;
 
   if (!looksLikeBillingCsv({ filename, source })) {
-    return;
+    return 0;
   }
 
   try {
@@ -93,7 +107,7 @@ async function maybeNormalizeBillingCsv(opts: NormalizeBillingOpts): Promise<voi
         rawSmtFileId: rawSmtFileId.toString(),
         filename,
       });
-      return;
+      return 0;
     }
 
     const headerLine = lines[0];
@@ -125,16 +139,30 @@ async function maybeNormalizeBillingCsv(opts: NormalizeBillingOpts): Promise<voi
     );
     const kwhIdx = findCol('kwh', 'usage_kwh', 'total_kwh', 'billed_kwh');
 
+    const kwhBilledIdx = findCol('kwh_billed', 'billed_kwh', 'billing_kwh', 'kwhbill');
+    const periodStartIdx = findCol(
+      'service_period_start',
+      'period_start',
+      'start_date',
+      'usage_start_date',
+      'read_start_date',
+    );
+    const periodEndIdx = findCol('service_period_end', 'period_end', 'end_date', 'usage_end_date', 'read_end_date');
+    const meterIdx = findCol('meter', 'meter_number', 'meterid', 'meter_id');
+    const esiidIdx = findCol('esiid', 'esiid_number', 'esi_id');
+    const tdspCodeIdx = findCol('tdsp_code', 'tdsp', 'tdspid', 'tdsp_id');
+    const tdspNameIdx = findCol('tdsp_name', 'tdspcompanyname', 'company_name', 'utility_name');
+
     if (dateIdx === -1 || kwhIdx === -1) {
       console.warn('[SMT Billing] No recognizable date/kWh columns in CSV header', {
         rawSmtFileId: rawSmtFileId.toString(),
         filename,
         header: headerCells,
       });
-      return;
+      return 0;
     }
 
-    const rows: Prisma.SmtBillingReadCreateManyInput[] = [];
+    const recordsMap = new Map<string, BillingRow>();
 
     const parseDate = (value: string): Date | null => {
       const trimmed = value.trim().replace(/^"|"$/g, '');
@@ -154,13 +182,15 @@ async function maybeNormalizeBillingCsv(opts: NormalizeBillingOpts): Promise<voi
       return num;
     };
 
-    const targetEsiid = (esiid ?? '').trim();
+    const cleanCell = (value: string | undefined | null): string => (value ?? '').trim().replace(/^"|"$/g, '');
+
+    const targetEsiid = cleanCell(esiid ?? '');
     if (!targetEsiid) {
       console.warn('[SMT Billing] Skipping billing parse due to missing ESIID', {
         rawSmtFileId: rawSmtFileId.toString(),
         filename,
       });
-      return;
+      return 0;
     }
 
     for (let i = 1; i < lines.length; i++) {
@@ -182,35 +212,85 @@ async function maybeNormalizeBillingCsv(opts: NormalizeBillingOpts): Promise<voi
         continue;
       }
 
-      rows.push({
+      const billedKwh = kwhBilledIdx !== -1 ? parseNumber(cells[kwhBilledIdx] ?? '') ?? kwh : kwh;
+
+      const rowEsiidRaw = esiidIdx !== -1 ? cleanCell(cells[esiidIdx]) : '';
+      const resolvedEsiid = rowEsiidRaw || targetEsiid;
+
+      const rowMeterRaw = meterIdx !== -1 ? cleanCell(cells[meterIdx]) : '';
+      const resolvedMeter = rowMeterRaw || cleanCell(meter ?? '');
+
+      const tdspCode = tdspCodeIdx !== -1 ? cleanCell(cells[tdspCodeIdx]) || null : null;
+      const tdspName = tdspNameIdx !== -1 ? cleanCell(cells[tdspNameIdx]) || null : null;
+
+      const readStart = periodStartIdx !== -1 ? parseDate(cells[periodStartIdx] ?? '') : null;
+      const readEnd = periodEndIdx !== -1 ? parseDate(cells[periodEndIdx] ?? '') : null;
+
+      const key = `${resolvedEsiid}::${resolvedMeter ?? ''}::${billDate.toISOString()}`;
+      const existing = recordsMap.get(key);
+      if (existing) {
+        existing.kwhTotal = (existing.kwhTotal ?? 0) + kwh;
+        existing.kwhBilled = (existing.kwhBilled ?? 0) + billedKwh;
+        if (!existing.tdspCode && tdspCode) {
+          existing.tdspCode = tdspCode;
+        }
+        if (!existing.tdspName && tdspName) {
+          existing.tdspName = tdspName;
+        }
+        if (!existing.readStart && readStart) {
+          existing.readStart = readStart;
+        }
+        if (!existing.readEnd && readEnd) {
+          existing.readEnd = readEnd;
+        }
+        continue;
+      }
+
+      recordsMap.set(key, {
         rawSmtFileId,
-        esiid: targetEsiid,
-        meter: (meter ?? undefined) ? meter ?? undefined : null,
-        tdspCode: null,
-        tdspName: null,
-        readStart: billDate,
-        readEnd: null,
+        esiid: resolvedEsiid,
+        meter: resolvedMeter ? resolvedMeter : null,
+        tdspCode,
+        tdspName,
+        readStart: readStart ?? billDate,
+        readEnd: readEnd ?? billDate,
         billDate,
         kwhTotal: kwh,
-        kwhBilled: kwh,
+        kwhBilled: billedKwh,
         source: source ?? null,
       });
     }
+
+    const rows = Array.from(recordsMap.values());
 
     if (!rows.length) {
       console.warn('[SMT Billing] No valid billing rows parsed from CSV', {
         rawSmtFileId: rawSmtFileId.toString(),
         filename,
       });
-      return;
+      return 0;
     }
 
-    await prismaClient.smtBillingRead.deleteMany({
+    const billingModel = (prismaClient as any).smtBillingRead;
+
+    await billingModel.deleteMany({
       where: { rawSmtFileId },
     });
 
-    await prismaClient.smtBillingRead.createMany({
-      data: rows,
+    const result = await billingModel.createMany({
+      data: rows.map((row) => ({
+        ...row,
+        meter: row.meter,
+        tdspCode: row.tdspCode,
+        tdspName: row.tdspName,
+        readStart: row.readStart,
+        readEnd: row.readEnd,
+        billDate: row.billDate,
+        kwhTotal: row.kwhTotal,
+        kwhBilled: row.kwhBilled,
+        source: row.source,
+      })),
+      skipDuplicates: true,
     });
 
     console.log('[SMT Billing] Parsed billing rows from CSV', {
@@ -218,13 +298,18 @@ async function maybeNormalizeBillingCsv(opts: NormalizeBillingOpts): Promise<voi
       filename,
       rowCount: rows.length,
     });
+
+    return (result?.count ?? rows.length) as number;
   } catch (err) {
     console.error('[SMT Billing] Error while parsing billing CSV', {
       rawSmtFileId: rawSmtFileId.toString(),
       filename,
       error: (err as Error).message,
     });
+    return 0;
   }
+
+  return 0;
 }
 
 type WebhookAuthResult =
@@ -325,6 +410,7 @@ export async function POST(req: NextRequest) {
       }
 
       let saved;
+      let billingInsertedCount: number | undefined;
       try {
         saved = await saveRawToStorage({ source, filename, mime, buf: csvBytes });
       } catch (storageError: any) {
@@ -386,7 +472,7 @@ export async function POST(req: NextRequest) {
         }
 
         try {
-          await maybeNormalizeBillingCsv({
+          const inserted = await maybeNormalizeBillingCsv({
             prismaClient: prisma,
             csvBytes,
             esiid: typeof esiid === 'string' ? esiid : undefined,
@@ -395,6 +481,9 @@ export async function POST(req: NextRequest) {
             rawSmtFileId: rawId,
             filename: saved.filename,
           });
+          if (inserted > 0) {
+            billingInsertedCount = inserted;
+          }
         } catch (billingErr) {
           console.error('[smt/pull:inline] maybeNormalizeBillingCsv failed', { id: recordId }, billingErr);
         }
@@ -423,6 +512,9 @@ export async function POST(req: NextRequest) {
 
       if (compressedBytes !== undefined) {
         responsePayload.compressedBytes = compressedBytes;
+      }
+      if (billingInsertedCount !== undefined) {
+        responsePayload.billingInserted = billingInsertedCount;
       }
 
       return NextResponse.json(responsePayload);

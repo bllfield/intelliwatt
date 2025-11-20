@@ -2333,3 +2333,10 @@ We have extended the Smart Meter Texas ingest pipeline and admin tooling:
   - SFTP host `ftp.smartmetertexas.biz`, remote dirs `/adhocusage` and `/EnrollmentReports`.
   - Droplet inbox `/home/deploy/smt_inbox`.
   - SMT files can be named `*.csv` or `*.CSV.*.asc`; scripts must handle both patterns.
+
+### PC-2025-11-20-A · SMT Daily Billing Normalization
+
+- `/api/admin/smt/pull` now auto-normalizes official `DailyMeterUsage*.CSV.*.asc` uploads into `SmtBillingRead`.
+- Inline billing normalization groups records per ESIID/meter/billDate, sums kWh, and stores rows with `createMany(skipDuplicates: true)` while preserving interval ingestion.
+- Droplet ingest (`deploy/smt/fetch_and_post.sh`) already mirrors these files, so DailyMeterUsage payloads now populate `SmtBillingRead` alongside `SmtInterval`.
+- No Prisma schema changes; interval normalization path remains untouched.
