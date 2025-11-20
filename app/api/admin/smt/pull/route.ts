@@ -411,6 +411,7 @@ export async function POST(req: NextRequest) {
 
       let saved;
       let billingInsertedCount: number | undefined;
+      let intervalNormalized = false;
       try {
         saved = await saveRawToStorage({ source, filename, mime, buf: csvBytes });
       } catch (storageError: any) {
@@ -458,7 +459,7 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      if (recordId && !duplicate) {
+      if (recordId) {
         const rawId = recordId;
         try {
           await normalizeInlineSmtCsv({
@@ -467,6 +468,7 @@ export async function POST(req: NextRequest) {
             meter: typeof meter === 'string' ? meter : undefined,
             source: saved.source,
           });
+          intervalNormalized = true;
         } catch (normalizeErr) {
           console.error('[smt/pull:inline] normalizeInlineSmtCsv failed', { id: recordId }, normalizeErr);
         }
@@ -481,9 +483,7 @@ export async function POST(req: NextRequest) {
             rawSmtFileId: rawId,
             filename: saved.filename,
           });
-          if (inserted > 0) {
-            billingInsertedCount = inserted;
-          }
+          billingInsertedCount = inserted;
         } catch (billingErr) {
           console.error('[smt/pull:inline] maybeNormalizeBillingCsv failed', { id: recordId }, billingErr);
         }
@@ -506,12 +506,15 @@ export async function POST(req: NextRequest) {
         encoding,
         id: recordId ? recordId.toString() : undefined,
         message: duplicate
-          ? 'Inline payload verified (duplicate sha256, existing record reused).'
-          : 'Inline payload stored and verified.',
+          ? 'Inline payload verified (duplicate sha256, normalization re-run).'
+          : 'Inline payload stored and normalized.',
       };
 
       if (compressedBytes !== undefined) {
         responsePayload.compressedBytes = compressedBytes;
+      }
+      if (intervalNormalized) {
+        responsePayload.intervalNormalized = true;
       }
       if (billingInsertedCount !== undefined) {
         responsePayload.billingInserted = billingInsertedCount;

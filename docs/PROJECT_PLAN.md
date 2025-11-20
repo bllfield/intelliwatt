@@ -2340,3 +2340,9 @@ We have extended the Smart Meter Texas ingest pipeline and admin tooling:
 - Inline billing normalization groups records per ESIID/meter/billDate, sums kWh, and stores rows with `createMany(skipDuplicates: true)` while preserving interval ingestion.
 - Droplet ingest (`deploy/smt/fetch_and_post.sh`) already mirrors these files, so DailyMeterUsage payloads now populate `SmtBillingRead` alongside `SmtInterval`.
 - No Prisma schema changes; interval normalization path remains untouched.
+
+### PC-2025-11-20-B · SMT Inline Normalization for Duplicate Files
+
+- `/api/admin/smt/pull` now re-runs interval and billing normalization even when the uploaded CSV matches an existing `RawSmtFile` (duplicate sha256), relying on `createMany({ skipDuplicates: true })` for idempotence.
+- DailyMeterUsage uploads surface `billingInserted` counts in the JSON response, allowing operators to confirm billing rows were written (or zero when no new rows).
+- Interval normalization behavior is unchanged aside from exposing an `intervalNormalized` flag in the inline response.
