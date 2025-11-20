@@ -184,7 +184,7 @@ async function maybeNormalizeBillingCsv(opts: NormalizeBillingOpts): Promise<num
 
     const cleanCell = (value: string | undefined | null): string => (value ?? '').trim().replace(/^"|"$/g, '');
 
-    const targetEsiid = cleanCell(esiid ?? '');
+    const targetEsiid = cleanEsiid(cleanCell(esiid ?? ''));
     if (!targetEsiid) {
       console.warn('[SMT Billing] Skipping billing parse due to missing ESIID', {
         rawSmtFileId: rawSmtFileId.toString(),
@@ -215,7 +215,7 @@ async function maybeNormalizeBillingCsv(opts: NormalizeBillingOpts): Promise<num
       const billedKwh = kwhBilledIdx !== -1 ? parseNumber(cells[kwhBilledIdx] ?? '') ?? kwh : kwh;
 
       const rowEsiidRaw = esiidIdx !== -1 ? cleanCell(cells[esiidIdx]) : '';
-      const resolvedEsiid = rowEsiidRaw || targetEsiid;
+      const resolvedEsiid = cleanEsiid(rowEsiidRaw) ?? targetEsiid;
 
       const rowMeterRaw = meterIdx !== -1 ? cleanCell(cells[meterIdx]) : '';
       const resolvedMeter = rowMeterRaw || cleanCell(meter ?? '');
@@ -610,5 +610,13 @@ export async function POST(req: NextRequest) {
       { status: 500 },
     );
   }
+}
+
+const TABLE_WHITELIST = new Set(["HouseAddress", "ErcotIngest", "RatePlan", "RawSmtFile", "SmtInterval", "SmtBillingRead"]);
+
+function cleanEsiid(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const trimmed = raw.replace(/^'+/, '').trim();
+  return trimmed.length ? trimmed : null;
 }
 
