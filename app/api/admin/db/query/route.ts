@@ -19,6 +19,24 @@ const TABLE_WHITELIST = new Set([
 // Modest cap to keep responses efficient on Vercel functions
 const HARD_LIMIT = 500;
 
+function stringifyBigInts<T>(value: T): T {
+  if (value === null || value === undefined) return value;
+  if (typeof value === 'bigint') {
+    return (value.toString() as unknown) as T;
+  }
+  if (Array.isArray(value)) {
+    return (value.map((v) => stringifyBigInts(v)) as unknown) as T;
+  }
+  if (typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = stringifyBigInts(v);
+    }
+    return (out as unknown) as T;
+  }
+  return value;
+}
+
 export async function POST(req: NextRequest) {
   const unauthorized = guardAdmin(req);
   if (unauthorized) return unauthorized;
@@ -103,11 +121,13 @@ export async function POST(req: NextRequest) {
       results = await prisma.$queryRawUnsafe(sql);
     }
 
+    const safeResults = stringifyBigInts(results);
+
     if (csv) {
       // CSV export
       const headers = colNames;
       const lines = [headers.join(',')].concat(
-        results.map(r =>
+        safeResults.map(r =>
           headers.map(h => {
             let v = r[h];
             if (v === null || v === undefined) return '';
@@ -127,7 +147,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    return NextResponse.json({ ok: true, columns: colNames, rows: results });
+    return NextResponse.json({ ok: true, columns: colNames, rows: safeResults });
   } catch (err: any) {
     return NextResponse.json({ ok: false, error: 'DATABASE', detail: String(err?.message || err) }, { status: 500 });
   }

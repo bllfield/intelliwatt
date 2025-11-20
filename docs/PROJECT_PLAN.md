@@ -2353,6 +2353,11 @@ We have extended the Smart Meter Texas ingest pipeline and admin tooling:
 - DailyMeterUsage uploads surface `billingInserted` counts in the JSON response, allowing operators to confirm billing rows were written (or zero when no new rows).
 - Interval normalization behavior is unchanged aside from exposing an `intervalNormalized` flag in the inline response.
 
+### PC-2025-11-20-D – Admin DB Query BigInt Serialization Fix
+
+- Updated `/api/admin/db/query` to recursively convert bigint fields in raw query results to strings so JSON serialization no longer fails for tables like `SmtBillingRead`.
+- Maintained admin-token protection, SELECT-only enforcement, and the existing table allow-list.
+
 ### PC-2025-11-20-D – Admin DB Query Parser Fix for SmtBillingRead
 
 - Updated `/api/admin/db/query` to use a more robust `FROM` clause regex so table names are correctly extracted for arbitrarily projected `SELECT` statements.
