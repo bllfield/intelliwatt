@@ -2346,3 +2346,8 @@ We have extended the Smart Meter Texas ingest pipeline and admin tooling:
 - `/api/admin/smt/pull` now re-runs interval and billing normalization even when the uploaded CSV matches an existing `RawSmtFile` (duplicate sha256), relying on `createMany({ skipDuplicates: true })` for idempotence.
 - DailyMeterUsage uploads surface `billingInserted` counts in the JSON response, allowing operators to confirm billing rows were written (or zero when no new rows).
 - Interval normalization behavior is unchanged aside from exposing an `intervalNormalized` flag in the inline response.
+
+### PC-2025-11-20-C – Admin DB query allow-list SmtBillingRead
+
+- Added `SmtBillingRead` to the `/api/admin/db/query` whitelist so SMT billing rows inserted by `/api/admin/smt/pull` can be inspected via the admin SQL tool and droplet curl commands.
+- No auth changes; the endpoint remains admin-only.

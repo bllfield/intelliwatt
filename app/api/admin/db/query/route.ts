@@ -12,7 +12,8 @@ const TABLE_WHITELIST = new Set([
   // 'ErcotEsiidIndex', // Removed: ESIID lookup now uses WattBuy, not ERCOT database
   'RatePlan',
   'RawSmtFile',
-  'SmtInterval'
+  'SmtInterval',
+  'SmtBillingRead'
 ]);
 
 // Modest cap to keep responses efficient on Vercel functions
