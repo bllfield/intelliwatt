@@ -2,6 +2,9 @@ import os
 import json
 import subprocess
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from typing import Any, Dict, List, Optional
+
+import requests
 
 # Shared secrets from env
 SECRET_A = os.environ.get("INTELLIWATT_WEBHOOK_SECRET", "").strip()
@@ -15,6 +18,14 @@ ACCEPT_HEADERS = (
     "x-proxy-secret",
     "x-droplet-webhook-secret",
 )
+
+SMT_API_BASE_URL = (
+    os.getenv("SMT_API_BASE_URL", "https://services.smartmetertexas.net").rstrip("/")
+    or "https://services.smartmetertexas.net"
+)
+SMT_USERNAME = os.getenv("SMT_USERNAME", "INTELLIWATTAPI")
+SMT_PASSWORD = os.getenv("SMT_PASSWORD")
+SMT_PROXY_TOKEN = os.getenv("SMT_PROXY_TOKEN")
 
 
 def run_default_command() -> bytes:
@@ -123,9 +134,240 @@ def handle_smt_authorized(payload: dict) -> bytes:
     return body.encode()
 
 
+def get_smt_access_token() -> str:
+    if not SMT_PASSWORD:
+        raise Exception("SMT_PASSWORD is not configured")
+
+    token_url = f"{SMT_API_BASE_URL}/v2/token/"
+    try:
+        resp = requests.post(
+            token_url,
+            json={"username": SMT_USERNAME, "password": SMT_PASSWORD},
+            timeout=30,
+        )
+    except requests.RequestException as exc:
+        raise Exception(f"Failed to contact SMT token endpoint: {exc}") from exc
+
+    if resp.status_code != 200:
+        raise Exception(f"SMT token endpoint returned HTTP {resp.status_code}")
+
+    try:
+        data = resp.json()
+    except ValueError as exc:
+        raise Exception("SMT token endpoint returned non-JSON response") from exc
+
+    token = data.get("accessToken")
+    if not token or not isinstance(token, str):
+        raise Exception("SMT token response missing accessToken")
+
+    return token
+
+
+def smt_post(path_or_url: str, body: Dict[str, Any]) -> Dict[str, Any]:
+    token = get_smt_access_token()
+
+    if path_or_url.startswith("http://") or path_or_url.startswith("https://"):
+        url = path_or_url
+    else:
+        url = f"{SMT_API_BASE_URL}{path_or_url}"
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        resp = requests.post(url, json=body, headers=headers, timeout=60)
+    except requests.RequestException as exc:
+        raise Exception(f"SMT POST to {url} failed: {exc}") from exc
+
+    print(f"[SMT_PROXY] POST {url} status={resp.status_code}", flush=True)
+
+    try:
+        data = resp.json()
+    except ValueError:
+        data = {"rawText": resp.text[:4096]}
+
+    return {
+        "status": resp.status_code,
+        "url": url,
+        "data": data,
+    }
+
+
 class H(BaseHTTPRequestHandler):
+    def _read_body_bytes(self) -> bytes:
+        length_str = self.headers.get("Content-Length")
+        if not length_str:
+            return b""
+        try:
+            length = int(length_str)
+        except ValueError:
+            return b""
+        if length <= 0:
+            return b""
+        return self.rfile.read(length)
+
+    def _write_json(self, status: int, payload: Dict[str, Any]) -> None:
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _handle_agreements(self) -> None:
+        if not SMT_PROXY_TOKEN:
+            self._write_json(
+                500,
+                {"ok": False, "error": "smt_proxy_token_not_configured"},
+            )
+            return
+
+        auth_header = self.headers.get("Authorization") or ""
+        if not auth_header.startswith("Bearer "):
+            self._write_json(401, {"ok": False, "error": "unauthorized"})
+            return
+        incoming_token = auth_header.split(" ", 1)[1].strip()
+        if incoming_token != SMT_PROXY_TOKEN:
+            self._write_json(401, {"ok": False, "error": "unauthorized"})
+            return
+
+        body_bytes = self._read_body_bytes()
+        if not body_bytes:
+            self._write_json(400, {"ok": False, "error": "invalid_json"})
+            return
+        try:
+            payload = json.loads(body_bytes.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            self._write_json(400, {"ok": False, "error": "invalid_json"})
+            return
+
+        if not isinstance(payload, dict):
+            self._write_json(400, {"ok": False, "error": "invalid_json"})
+            return
+
+        action = payload.get("action")
+        if action != "create_agreement_and_subscription":
+            self._write_json(
+                400, {"ok": False, "error": "unsupported_action", "action": action}
+            )
+            return
+
+        steps: Optional[List[Dict[str, Any]]] = None
+        raw_steps = payload.get("steps")
+        if isinstance(raw_steps, list) and raw_steps:
+            steps = []
+            for idx, step in enumerate(raw_steps):
+                if not isinstance(step, dict):
+                    self._write_json(
+                        400,
+                        {
+                            "ok": False,
+                            "error": "invalid_step",
+                            "detail": f"steps[{idx}] must be an object",
+                        },
+                    )
+                    return
+                steps.append(step)
+        else:
+            steps = []
+            agreement = payload.get("agreement")
+            subscription = payload.get("subscription")
+            if isinstance(agreement, dict):
+                steps.append(
+                    {
+                        "name": agreement.get("name") or "NewAgreement",
+                        "path": agreement.get("path") or "/v2/NewAgreement/",
+                        "body": agreement.get("body") or {},
+                    }
+                )
+            if isinstance(subscription, dict):
+                steps.append(
+                    {
+                        "name": subscription.get("name") or "NewSubscription",
+                        "path": subscription.get("path") or "/v2/NewSubscription/",
+                        "body": subscription.get("body") or {},
+                    }
+                )
+
+        if not steps or not isinstance(steps, list):
+            self._write_json(400, {"ok": False, "error": "missing_steps"})
+            return
+
+        validated_steps: List[Dict[str, Any]] = []
+        for idx, step in enumerate(steps):
+            name = step.get("name")
+            path = step.get("path")
+            body = step.get("body")
+            if not isinstance(path, str) or not path.strip():
+                self._write_json(
+                    400,
+                    {
+                        "ok": False,
+                        "error": "invalid_step",
+                        "detail": f"steps[{idx}].path is required",
+                    },
+                )
+                return
+            if not isinstance(body, dict):
+                self._write_json(
+                    400,
+                    {
+                        "ok": False,
+                        "error": "invalid_step",
+                        "detail": f"steps[{idx}].body must be an object",
+                    },
+                )
+                return
+            validated_steps.append(
+                {"name": name or path, "path": path, "body": body}
+            )
+
+        print(
+            f"[SMT_PROXY] /agreements action={action} steps={len(validated_steps)}",
+            flush=True,
+        )
+
+        results: List[Dict[str, Any]] = []
+        for step in validated_steps:
+            try:
+                res = smt_post(step["path"], step["body"])
+            except Exception as exc:
+                self._write_json(
+                    502,
+                    {
+                        "ok": False,
+                        "action": action,
+                        "error": str(exc),
+                        "partialResults": results,
+                    },
+                )
+                return
+
+            step_result = {
+                "name": step["name"],
+                "path": step["path"],
+                "status": res.get("status"),
+                "url": res.get("url"),
+                "data": res.get("data"),
+            }
+            results.append(step_result)
+
+        response_payload = {
+            "ok": True,
+            "action": action,
+            "results": results,
+        }
+        if isinstance(payload.get("meta"), dict):
+            response_payload["meta"] = payload["meta"]
+        self._write_json(200, response_payload)
+
     def do_POST(self):
-        # Only one endpoint is supported for now
+        if self.path == "/agreements":
+            self._handle_agreements()
+            return
+
         if self.path != "/trigger/smt-now":
             self.send_response(404)
             self.end_headers()
@@ -145,19 +387,7 @@ class H(BaseHTTPRequestHandler):
             self.wfile.write(b"unauthorized")
             return
 
-        # Read body (if any)
-        length = 0
-        length_str = self.headers.get("Content-Length")
-        if length_str:
-            try:
-                length = int(length_str)
-            except ValueError:
-                length = 0
-
-        body_bytes = b""
-        if length > 0:
-            body_bytes = self.rfile.read(length)
-
+        body_bytes = self._read_body_bytes()
         payload = None
         if body_bytes:
             try:
