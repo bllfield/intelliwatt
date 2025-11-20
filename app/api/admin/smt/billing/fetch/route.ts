@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/auth/admin';
+import { prisma } from '@/lib/db';
 import { getSmtAccessToken } from '@/lib/smt/token';
+import { resolveSmtEsiid } from '@/lib/smt/esiid';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -40,9 +42,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ok: false, error: 'Body must be a JSON object' }, { status: 400 });
   }
 
-  const esiid = typeof raw.esiid === 'string' ? raw.esiid.trim() : '';
+  const esiid = await resolveSmtEsiid({
+    prismaClient: prisma,
+    explicitEsiid: typeof raw.esiid === 'string' ? raw.esiid : null,
+    houseId: typeof raw.houseId === 'string' ? raw.houseId : null,
+  });
   if (!esiid) {
-    return NextResponse.json({ ok: false, error: "Field 'esiid' is required and must be a non-empty string." }, { status: 400 });
+    return NextResponse.json({ ok: false, error: "Field 'esiid' is required and must be resolvable." }, { status: 400 });
   }
 
   const includeInterval = Boolean(raw.includeInterval);

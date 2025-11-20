@@ -1,3 +1,5 @@
+import { cleanEsiid } from '@/lib/smt/esiid';
+
 const ESIID_KEYS = ['esiid', 'esiId', 'esi_id', 'ESIID', 'ESI_ID', 'esi'];
 const UTILITY_KEYS = [
   'utility_name',
@@ -61,7 +63,7 @@ export function extractEsiidDetails(electricityInfo: unknown): {
   const utility = findFirstString(electricityInfo, UTILITY_KEYS);
   const territory = findFirstString(electricityInfo, TERRITORY_KEYS);
 
-  return { esiid, utility, territory };
+  return { esiid: cleanEsiid(esiid), utility, territory };
 }
 
 

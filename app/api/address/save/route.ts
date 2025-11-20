@@ -5,6 +5,7 @@ import { normalizeGoogleAddress, type GooglePlaceDetails } from "@/lib/normalize
 import { normalizeEmail } from "@/lib/utils/email";
 import { resolveAddressToEsiid } from "@/lib/resolver/addressToEsiid";
 import { wattbuyEsiidDisabled } from "@/lib/flags";
+import { extractWattbuyEsiid, cleanEsiid } from "@/lib/smt/esiid";
 
 let userProfileAttentionColumnsAvailable: boolean | null = null;
 let houseAddressUserEmailColumnAvailable: boolean | null = null;
@@ -216,6 +217,14 @@ export async function POST(req: NextRequest) {
       incomingLng: normalizedLng,
       existingLng,
     });
+    const wattbuyEsiid = extractWattbuyEsiid(body.wattbuyJson);
+    const cleanedHintEsiid = cleanEsiid(body.utilityHints?.esiid ?? null);
+    const existingCleanEsiid = cleanEsiid(existingAddress?.esiid ?? null);
+
+    const esiidForWrite: string | null | undefined = addressChanged
+      ? (wattbuyEsiid ?? null)
+      : cleanedHintEsiid ?? existingCleanEsiid ?? wattbuyEsiid ?? undefined;
+
     const addressData = {
       userId,
       houseId: body.houseId ?? null,
@@ -232,9 +241,7 @@ export async function POST(req: NextRequest) {
       lng: normalized.lng ?? undefined,
       addressValidated: normalized.addressValidated,
       validationSource: validationSource as "GOOGLE" | "USER" | "NONE" | "OTHER",
-      esiid: addressChanged
-        ? null
-        : body.utilityHints?.esiid ?? existingAddress?.esiid ?? undefined,
+      esiid: esiidForWrite,
       tdspSlug: addressChanged
         ? null
         : body.utilityHints?.tdspSlug ?? existingAddress?.tdspSlug ?? undefined,

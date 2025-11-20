@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
+import { cleanEsiid } from "@/lib/smt/esiid";
 
 type SmtAuthorizationBody = {
   houseAddressId: string;
@@ -102,7 +103,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (!house.esiid) {
+    const houseEsiid = cleanEsiid(house.esiid);
+
+    if (!houseEsiid) {
       return NextResponse.json(
         { ok: false, error: "House address does not have an associated ESIID." },
         { status: 400 },
@@ -146,7 +149,7 @@ export async function POST(req: NextRequest) {
         userId: user.id,
         houseId: house.houseId ?? house.id,
         houseAddressId: house.id,
-        esiid: house.esiid,
+        esiid: houseEsiid,
         meterNumber: null,
         customerName: trimmedCustomerName,
         serviceAddressLine1: house.addressLine1,
@@ -178,8 +181,9 @@ export async function POST(req: NextRequest) {
       windowFromDate.setMonth(windowFromDate.getMonth() - monthsBack);
       const windowFrom = windowFromDate.toISOString();
       const windowTo = windowToDate.toISOString();
-      const esiid = created.esiid ?? house.esiid;
+      const esiid = created.esiid ?? houseEsiid;
       const meter = created.meterNumber ?? "M1";
+      const payloadEsiid = cleanEsiid(created.esiid ?? houseEsiid) ?? houseEsiid;
 
       const dropletPayload = {
         reason: "smt_authorized" as const,
@@ -188,7 +192,7 @@ export async function POST(req: NextRequest) {
         userId: created.userId,
         houseId: created.houseId,
         houseAddressId: created.houseAddressId,
-        esiid,
+        esiid: payloadEsiid,
         meter,
         tdspCode: created.tdspCode,
         tdspName: created.tdspName,

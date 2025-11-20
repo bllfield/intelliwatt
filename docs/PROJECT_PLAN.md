@@ -2369,3 +2369,12 @@ We have extended the Smart Meter Texas ingest pipeline and admin tooling:
 - Updated `/api/admin/db/query` to use a more robust `FROM` clause regex so table names are correctly extracted for arbitrarily projected `SELECT` statements.
 - Whitelisted `SmtBillingRead` so SMT billing rows inserted via `/api/admin/smt/pull` can be inspected via admin SQL tooling and droplet curl commands.
 - Maintained admin-token protections and SELECT-only enforcement; non-SELECT statements remain blocked.
+
+### PC-2025-11-20-SMT-PROMOTE-TEST-WIRING
+
+- Promoted the previously working SMT "test" wiring to production by centralizing ESIID handling:
+  - Added shared helpers (`cleanEsiid`, `resolveSmtEsiid`, `extractWattbuyEsiid`) so all SMT routes and jobs clean and resolve ESIIDs consistently.
+  - HouseAddress now persists WattBuy-derived ESIIDs automatically when available, matching the validated test flow.
+  - SMT API pull routes (inline and webhook) rely on `resolveSmtEsiid`, falling back to HouseAddress records instead of hard-coded defaults.
+  - Removed production reliance on test ESIIDs by gating any env fallback to non-production environments only.
+- Result: production SMT ingestion now mirrors the behavior of the verified test path end-to-end (WattBuy → HouseAddress.esiid → SMT API / SFTP ingest).

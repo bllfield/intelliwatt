@@ -6,6 +6,7 @@ import { requireAdmin } from '@/lib/auth/admin';
 import { prisma } from '@/lib/db';
 import { saveRawToStorage } from '@/app/lib/storage/rawFiles';
 import { normalizeSmtIntervals } from '@/app/lib/smt/normalize';
+import { cleanEsiid, resolveSmtEsiid } from '@/lib/smt/esiid';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -409,6 +410,25 @@ export async function POST(req: NextRequest) {
         );
       }
 
+      const resolvedEsiid = await resolveSmtEsiid({
+        prismaClient: prisma,
+        explicitEsiid: typeof esiid === 'string' ? esiid : null,
+        houseId: typeof body?.houseId === 'string' ? body.houseId : null,
+      });
+
+      if (!resolvedEsiid) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: 'MISSING_ESIID',
+            details: 'Unable to resolve ESIID from payload or house context.',
+          },
+          { status: 400 },
+        );
+      }
+
+      const normalizedMeter = typeof meter === 'string' && meter.trim() ? meter.trim() : undefined;
+
       let saved;
       let billingInsertedCount: number | undefined;
       let intervalNormalized = false;
@@ -464,8 +484,8 @@ export async function POST(req: NextRequest) {
         try {
           await normalizeInlineSmtCsv({
             csvBytes,
-            esiid: typeof esiid === 'string' ? esiid : undefined,
-            meter: typeof meter === 'string' ? meter : undefined,
+            esiid: resolvedEsiid,
+            meter: normalizedMeter,
             source: saved.source,
           });
           intervalNormalized = true;
@@ -477,8 +497,8 @@ export async function POST(req: NextRequest) {
           const inserted = await maybeNormalizeBillingCsv({
             prismaClient: prisma,
             csvBytes,
-            esiid: typeof esiid === 'string' ? esiid : undefined,
-            meter: typeof meter === 'string' ? meter : undefined,
+            esiid: resolvedEsiid,
+            meter: normalizedMeter,
             source: saved.source,
             rawSmtFileId: rawId,
             filename: saved.filename,
@@ -495,8 +515,8 @@ export async function POST(req: NextRequest) {
         filename: saved.filename,
         mime: saved.contentType,
         source: saved.source,
-        esiid,
-        meter,
+        esiid: resolvedEsiid,
+        meter: normalizedMeter,
         captured_at,
         sizeBytes: saved.sizeBytes,
         sha256: saved.sha256,
@@ -528,9 +548,15 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const { esiid, meter } = body || {};
+    const { esiid, meter, houseId } = body || {};
 
-    if (!esiid) {
+    const resolvedEsiid = await resolveSmtEsiid({
+      prismaClient: prisma,
+      explicitEsiid: typeof esiid === 'string' ? esiid : null,
+      houseId: typeof houseId === 'string' ? houseId : null,
+    });
+
+    if (!resolvedEsiid) {
       return NextResponse.json(
         { ok: false, error: 'MISSING_ESIID', details: 'esiid is required' },
         { status: 400 },
@@ -565,7 +591,7 @@ export async function POST(req: NextRequest) {
         },
         body: JSON.stringify({
           reason: 'admin_triggered',
-          esiid,
+          esiid: resolvedEsiid,
           meter: meter || undefined,
           ts: Date.now(),
         }),
@@ -600,7 +626,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       message: 'SMT pull triggered successfully',
-      esiid,
+      esiid: resolvedEsiid,
       meter: meter || null,
       webhookResponse: webhookData,
     });
@@ -613,10 +639,4 @@ export async function POST(req: NextRequest) {
 }
 
 const TABLE_WHITELIST = new Set(["HouseAddress", "ErcotIngest", "RatePlan", "RawSmtFile", "SmtInterval", "SmtBillingRead"]);
-
-function cleanEsiid(raw: string | null | undefined): string | null {
-  if (!raw) return null;
-  const trimmed = raw.replace(/^'+/, '').trim();
-  return trimmed.length ? trimmed : null;
-}
 
