@@ -2341,13 +2341,14 @@ We have extended the Smart Meter Texas ingest pipeline and admin tooling:
 - Droplet ingest (`deploy/smt/fetch_and_post.sh`) already mirrors these files, so DailyMeterUsage payloads now populate `SmtBillingRead` alongside `SmtInterval`.
 - No Prisma schema changes; interval normalization path remains untouched.
 
-### PC-2025-11-20-B · SMT Inline Normalization for Duplicate Files
+### PC-2025-11-20-B – Admin DB query allow-list SmtBillingRead
+
+- Added `SmtBillingRead` to the `/api/admin/db/query` allow-list so billing rows inserted via `/api/admin/smt/pull` can be inspected via admin SQL tools and droplet curl commands.
+- Normalized table-name handling matches the allow-list casing to prevent false INVALID_TABLE errors.
+- INVALID_TABLE responses now include the parsed table name in `detail` for easier debugging (still admin-token gated).
+
+### PC-2025-11-20-C · SMT Inline Normalization for Duplicate Files
 
 - `/api/admin/smt/pull` now re-runs interval and billing normalization even when the uploaded CSV matches an existing `RawSmtFile` (duplicate sha256), relying on `createMany({ skipDuplicates: true })` for idempotence.
 - DailyMeterUsage uploads surface `billingInserted` counts in the JSON response, allowing operators to confirm billing rows were written (or zero when no new rows).
 - Interval normalization behavior is unchanged aside from exposing an `intervalNormalized` flag in the inline response.
-
-### PC-2025-11-20-C – Admin DB query allow-list SmtBillingRead
-
-- Added `SmtBillingRead` to the `/api/admin/db/query` whitelist so SMT billing rows inserted by `/api/admin/smt/pull` can be inspected via the admin SQL tool and droplet curl commands.
-- No auth changes; the endpoint remains admin-only.

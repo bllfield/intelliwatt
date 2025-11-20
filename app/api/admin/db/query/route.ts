@@ -26,8 +26,17 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const { table, offset = 0, limit = 50, orderBy, orderDir = 'desc', q, csv = false } = body || {};
 
-  if (!table || typeof table !== 'string' || !TABLE_WHITELIST.has(table)) {
-    return NextResponse.json({ ok: false, error: 'INVALID_TABLE' }, { status: 400 });
+  const tableName = typeof table === 'string' ? table.trim() : '';
+
+  if (!tableName || !TABLE_WHITELIST.has(tableName)) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: 'INVALID_TABLE',
+        detail: { tableName }
+      },
+      { status: 400 }
+    );
   }
 
   const safeLimit = Math.max(1, Math.min(Number(limit) || 50, HARD_LIMIT));
@@ -39,7 +48,7 @@ export async function POST(req: NextRequest) {
     const columns = await prisma.$queryRaw<Array<{ column_name: string; data_type: string }>>`
       SELECT column_name, data_type
       FROM information_schema.columns
-      WHERE table_schema='public' AND table_name=${table}
+      WHERE table_schema='public' AND table_name=${tableName}
       ORDER BY ordinal_position
     `;
 
@@ -60,7 +69,7 @@ export async function POST(req: NextRequest) {
       
       const sql = `
         SELECT *
-        FROM "${table}"
+        FROM "${tableName}"
         WHERE ${where}
         ORDER BY "${orderCol}" ${dir.toUpperCase()}
         OFFSET ${safeOffset}
@@ -73,7 +82,7 @@ export async function POST(req: NextRequest) {
     } else {
       const sql = `
         SELECT *
-        FROM "${table}"
+        FROM "${tableName}"
         ORDER BY "${orderCol}" ${dir.toUpperCase()}
         OFFSET ${safeOffset}
         LIMIT ${safeLimit}
@@ -100,7 +109,7 @@ export async function POST(req: NextRequest) {
         status: 200,
         headers: {
           'Content-Type': 'text/csv; charset=utf-8',
-          'Content-Disposition': `attachment; filename="${table}.csv"`
+          'Content-Disposition': `attachment; filename="${tableName}.csv"`
         }
       });
     }
