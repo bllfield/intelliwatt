@@ -62,7 +62,8 @@ const SMT_REQUESTOR_AUTH_ID = (
 ).trim();
 
 // Default language preference for SMT notifications.
-const SMT_LANG_DEFAULT = (process.env.SMT_LANG_DEFAULT || "en").trim() || "en";
+const SMT_LANG_DEFAULT =
+  (process.env.SMT_LANG_DEFAULT || "ENGLISH").trim() || "ENGLISH";
 
 function buildTransId(): string {
   return randomBytes(16).toString("hex");
@@ -105,131 +106,124 @@ if (!SMT_REQUESTOR_AUTH_ID) {
   throw new Error("SMT_REQUESTOR_AUTH_ID (DUNS) is required for SMT agreements.");
 }
 
-type AgreementPayloadInput = {
-  esiid: string;
-  serviceAddress: string;
-  customerName?: string | null;
-  customerEmail?: string | null;
-  customerPhone?: string | null;
-  tdspCode?: string | null;
-  monthsBack: number;
-  includeInterval: boolean;
-  includeBilling: boolean;
+const ALLOWED_AGREEMENT_DURATIONS: ReadonlyArray<
+  1 | 3 | 6 | 9 | 12 | 24 | 36
+> = [1, 3, 6, 9, 12, 24, 36] as const;
+
+type NewAgreementPayload = {
+  trans_id: string;
+  requestorID: string;
+  requesterAuthenticationID: string;
+  retailCustomerEmail: string;
+  agreementDuration: 1 | 3 | 6 | 9 | 12 | 24 | 36;
+  customerLanguagePreference: string;
+  customerMeterList: Array<{
+    ESIID: string;
+    meterNumber: string;
+    PUCTRORNumber: number;
+  }>;
+  SMTTermsandConditions: "Y";
 };
 
-type SubscriptionPayloadInput = {
-  esiid: string;
-  tdspCode?: string | null;
-  monthsBack: number;
-  includeInterval: boolean;
-  includeBilling: boolean;
+type NewSubscriptionPayload = {
+  trans_id: string;
+  requestorID: string;
+  requesterType: "CSP";
+  requesterAuthenticationID: string;
+  subscriptionType: "CSPENROLL" | "SCHEDULE" | "SCHEDULES" | "REPENROLL";
+  historicalSubscriptionDuration: number;
+  reportFormat: "HML" | "MONTHLY" | "interval" | "daily";
+  deliveryMode: "FTP" | "EML" | "API";
+  reportFrequency: "DAILY" | "MONTHLY";
+  ESIIDList: string[];
 };
+
+function resolveAgreementDuration(monthsBack: number): 1 | 3 | 6 | 9 | 12 | 24 | 36 {
+  const normalized = Math.max(1, Math.round(monthsBack || 12));
+  let chosen: 1 | 3 | 6 | 9 | 12 | 24 | 36 = 12;
+  let smallestDiff = Number.POSITIVE_INFINITY;
+  for (const candidate of ALLOWED_AGREEMENT_DURATIONS) {
+    const diff = Math.abs(candidate - normalized);
+    if (diff < smallestDiff) {
+      smallestDiff = diff;
+      chosen = candidate;
+    }
+  }
+  return chosen;
+}
+
+function mapTdspToPuctRorNumber(tdspCode?: string | null): number {
+  switch ((tdspCode || "").toUpperCase()) {
+    case "CENTERPOINT":
+    case "CENTERPOINT_ENERGY":
+    case "CENTERPOINT ENERGY":
+      return 10007;
+    case "ONCOR":
+    case "ONCOR_ELECTRIC_DELIVERY":
+      return 10004;
+    case "AEP_CENTRAL":
+    case "AEP_TEXAS_CENTRAL":
+      return 10005;
+    case "AEP_NORTH":
+    case "AEP_TEXAS_NORTH":
+      return 10002;
+    case "TNMP":
+      return 10006;
+    default:
+      return 0;
+  }
+}
 
 function buildNewAgreementPayload(
-  input: AgreementPayloadInput,
-): Record<string, any> {
+  input: {
+    esiid: string;
+    meterNumber: string;
+    puctRorNumber: number;
+    customerEmail: string;
+    agreementDurationMonths: number;
+  },
+): NewAgreementPayload {
   const esiid = normalizeEsiid(input.esiid);
   const identity = buildSmtIdentity();
-  const header = {
-    ...identity,
-    trans_id: buildTransId(),
-  };
-
-  const customerMeterRecord = {
-    ESIID: esiid,
-    meterNumber: esiid,
-    PUCTRORNumber: "10004",
-    serviceAddress: input.serviceAddress,
-  };
-
-  const request: Record<string, any> = {
-    esiid,
-    tdspCode: input.tdspCode ?? null,
-    serviceAddress: input.serviceAddress,
-    includeInterval: input.includeInterval,
-    includeBilling: input.includeBilling,
-    monthsBack: input.monthsBack,
-    agreementDuration: input.monthsBack,
-    SMTTermsandConditions: "Y",
-    requestorType: "CSP",
-    userType: "CSP",
-    customerMeterList: [customerMeterRecord],
-    retailCustomerEmail: input.customerEmail ?? null,
-    customerLanguagePreference: identity.language,
-  };
-
-  if (input.customerName) {
-    request.customerName = input.customerName;
-  }
-  if (input.customerPhone) {
-    request.customerPhone = input.customerPhone;
-  }
-
   return {
-    NewAgreement: {
-      header,
-      request,
-      trans_id: header.trans_id,
-      requestorID: identity.requestorID,
-      requesterAuthenticationID: identity.requesterAuthenticationID,
-      serviceID: identity.serviceID,
-      username: identity.username,
-      language: identity.language,
-    },
+    trans_id: buildTransId(),
+    requestorID: identity.requestorID,
+    requesterAuthenticationID: identity.requesterAuthenticationID,
+    retailCustomerEmail: input.customerEmail,
+    agreementDuration: resolveAgreementDuration(input.agreementDurationMonths),
+    customerLanguagePreference: identity.language || "ENGLISH",
+    customerMeterList: [
+      {
+        ESIID: esiid,
+        meterNumber: input.meterNumber,
+        PUCTRORNumber: input.puctRorNumber,
+      },
+    ],
+    SMTTermsandConditions: "Y",
   };
 }
 
 function buildNewSubscriptionPayload(
-  input: SubscriptionPayloadInput,
-): Record<string, any> {
+  input: {
+    esiid: string;
+    historicalMonthsBack: number;
+    includeInterval: boolean;
+  },
+): NewSubscriptionPayload {
   const esiid = normalizeEsiid(input.esiid);
   const identity = buildSmtIdentity();
-  const header = {
-    ...identity,
-    trans_id: buildTransId(),
-  };
-
-  const months = Math.max(1, Math.round(input.monthsBack));
-  const start = new Date();
-  start.setMonth(start.getMonth() - months);
-
-  const formatMMDDYYYY = (d: Date): string => {
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const dd = String(d.getDate()).padStart(2, "0");
-    const yyyy = d.getFullYear();
-    return `${mm}/${dd}/${yyyy}`;
-  };
-
-  const customerMeterRecord = {
-    ESIID: esiid,
-    meterNumber: esiid,
-  };
-
-  const request = {
-    esiid,
-    tdspCode: input.tdspCode ?? null,
-    includeInterval: input.includeInterval,
-    includeBilling: input.includeBilling,
-    SMTTermsandConditions: "Y",
-    requestorType: "CSP",
-    userType: "CSP",
-    dataType: "HML",
-    startDate: formatMMDDYYYY(start),
-    endDate: null,
-    customerMeterList: [customerMeterRecord],
-  };
-
+  const includeInterval = input.includeInterval;
   return {
-    NewSubscription: {
-      header,
-      request,
-      trans_id: header.trans_id,
-      requestorID: identity.requestorID,
-      requesterAuthenticationID: identity.requesterAuthenticationID,
-      serviceID: identity.serviceID,
-      username: identity.username,
-      language: identity.language,
-    },
+    trans_id: buildTransId(),
+    requestorID: identity.requestorID,
+    requesterType: "CSP",
+    requesterAuthenticationID: identity.requesterAuthenticationID,
+    subscriptionType: "CSPENROLL",
+    historicalSubscriptionDuration: Math.max(1, Math.round(input.historicalMonthsBack || 12)),
+    reportFormat: includeInterval ? "HML" : "MONTHLY",
+    deliveryMode: "API",
+    reportFrequency: includeInterval ? "DAILY" : "MONTHLY",
+    ESIIDList: [esiid],
   };
 }
 
@@ -267,23 +261,26 @@ export async function createAgreementAndSubscription(
         : Boolean(payload.includeBilling);
     const tdspCode = payload.tdspCode ?? null;
 
+    const meterNumber =
+      (payload.customerPhone && payload.customerPhone.trim()) ||
+      (tdspCode ? `${tdspCode}-MTR` : undefined) ||
+      payload.esiid ||
+      "METER";
+    const puctRorNumber = mapTdspToPuctRorNumber(tdspCode);
+    const customerEmail = (payload.customerEmail || "").trim();
+
     const agreementBody = buildNewAgreementPayload({
       esiid: payload.esiid,
-      serviceAddress: payload.serviceAddress,
-      customerName: payload.customerName ?? null,
-      customerEmail: payload.customerEmail ?? null,
-      customerPhone: payload.customerPhone ?? null,
-      tdspCode,
-      monthsBack,
-      includeInterval,
-      includeBilling,
+      meterNumber,
+      puctRorNumber,
+      customerEmail,
+      agreementDurationMonths: monthsBack,
     });
+
     const subscriptionBody = buildNewSubscriptionPayload({
       esiid: payload.esiid,
-      tdspCode,
-      monthsBack,
+      historicalMonthsBack: monthsBack,
       includeInterval,
-      includeBilling,
     });
 
     const steps = [
