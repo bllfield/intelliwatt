@@ -7,9 +7,9 @@
 
 - `ADMIN_TOKEN` – Admin bearer for all `/api/admin/*` routes (`x-admin-token` header).  
 - `SMT_API_BASE_URL` – Defaults to `https://services.smartmetertexas.net`; override only for UAT.  
-- `SMT_USERNAME` – SMT service ID username (must match `requestorID`).  
-- `SMT_PASSWORD` – SMT service ID password.  
-- `SMT_REQUESTOR_ID` – Requestor ID placed in SMT payloads (`requestorID`). Usually identical to `SMT_USERNAME`.  
+- `SMT_USERNAME` – SMT API Service ID username; this same value is sent as the SMT `username` header, `serviceId` header, and `requestorID` JSON field (e.g., `INTELLIPATH`).  
+- `SMT_PASSWORD` – SMT API Service ID password.  
+- `SMT_REQUESTOR_ID` – **Deprecated alias.** Historically used for `requestorID`, but the system now derives the requestor ID directly from `SMT_USERNAME`.  
 - `SMT_REQUESTOR_AUTH_ID` – SMT/PUCT authentication ID (e.g., DUNS). Placed in `requesterAuthenticationID`.  
 
 ### Token Generation
@@ -59,8 +59,9 @@ Env file on droplet (`/etc/default/smt-token-proxy`) typically includes:
 
 ```ini
 SMT_API_BASE_URL="https://services.smartmetertexas.net"
-SMT_USERNAME="INTELLIWATTAPI"
-SMT_PASSWORD="********"
+SMT_USERNAME="INTELLIPATH"           # SMT API Service ID (username + serviceId + requestorID)
+SMT_PASSWORD="********"              # SMT API Service ID password
+SMT_REQUESTOR_AUTH_ID="134642921"    # IntelliPath DUNS / SMT authentication ID
 SMT_PROXY_TOKEN="ChangeThisToAStrongSharedSecret_1763428355"
 SMT_PROXY_PORT="4101"
 ```

@@ -159,8 +159,16 @@ When the checkbox is checked, the backend sets:
 ### Internal Identifiers
 | Source | DB/Config | SMT Field |
 | --- | --- | --- |
-| Env `SMT_REQUESTOR_ID` | `smtRequestorId` | `requestorID` |
+| Env `SMT_USERNAME` | `smtRequestorId` | `requestorID` |
 | Env `SMT_REQUESTOR_AUTH_ID` | `smtRequestorAuthId` | `requesterAuthenticationID` |
+
+The same SMT service ID must be used in three places for every API call:
+
+1. SMT `username` header (JWT service ID)
+2. SMT `serviceId` header
+3. JSON `requestorID` field inside NewAgreement/NewSubscription
+
+IntelliWatt reads this value from `SMT_USERNAME`.
 
 ---
 

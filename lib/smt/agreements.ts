@@ -31,8 +31,10 @@ const SMT_PROXY_TOKEN = process.env.SMT_PROXY_TOKEN || "";
 
 // SMT agreement/subscription identity wiring.
 // These must match what’s configured in the SMT portal.
-const SMT_USERNAME = process.env.SMT_USERNAME ?? "";
-const SMT_REQUESTOR_AUTH_ID = process.env.SMT_REQUESTOR_AUTH_ID ?? "";
+// SMT_USERNAME serves as the SMT API Service ID (username + serviceId + requestorID).
+const SMT_USERNAME = (process.env.SMT_USERNAME || "").trim();
+const SMT_REQUESTOR_ID = SMT_USERNAME;
+const SMT_REQUESTOR_AUTH_ID = (process.env.SMT_REQUESTOR_AUTH_ID || "").trim();
 
 // Default language preference for SMT notifications.
 const SMT_LANG_DEFAULT = process.env.SMT_LANG_DEFAULT || "ENGLISH";
@@ -50,10 +52,10 @@ function normalizeEsiid(esiid: string): string {
 }
 
 if (!SMT_USERNAME) {
-  throw new Error("SMT_USERNAME is required for SMT agreements");
+  throw new Error("SMT_USERNAME is required for SMT agreements (SMT service ID).");
 }
 if (!SMT_REQUESTOR_AUTH_ID) {
-  throw new Error("SMT_REQUESTOR_AUTH_ID (DUNS) is required for SMT agreements");
+  throw new Error("SMT_REQUESTOR_AUTH_ID (DUNS) is required for SMT agreements.");
 }
 
 function buildNewAgreementBody(payload: SmtAgreementRequest): any {
@@ -62,12 +64,16 @@ function buildNewAgreementBody(payload: SmtAgreementRequest): any {
 
   const customerMeterRecord: any = {
     ESIID: esiid,
+    meterNumber: esiid,
+    PUCTRORNumber: "10004",
     serviceAddress: payload.serviceAddress,
   };
 
   const NewAgreement: any = {
     trans_id: transId,
-    requestorID: SMT_USERNAME,
+    requestorID: SMT_REQUESTOR_ID,
+    userType: "CSP",
+    requestorType: "CSP",
     requesterAuthenticationID: SMT_REQUESTOR_AUTH_ID,
     retailCustomerEmail: payload.customerEmail ?? null,
     agreementDuration: 12,
@@ -104,11 +110,14 @@ function buildNewSubscriptionBody(payload: SmtAgreementRequest): any {
 
   const customerMeterRecord: any = {
     ESIID: esiid,
+    meterNumber: esiid,
   };
 
   const NewSubscription: any = {
     trans_id: transId,
-    requestorID: SMT_USERNAME,
+    requestorID: SMT_REQUESTOR_ID,
+    userType: "CSP",
+    requestorType: "CSP",
     requesterAuthenticationID: SMT_REQUESTOR_AUTH_ID,
     SMTTermsandConditions: "Y",
     dataType: "HML",
@@ -143,8 +152,26 @@ export async function createAgreementAndSubscription(
     const agreementBody = buildNewAgreementBody(payload);
     const subscriptionBody = buildNewSubscriptionBody(payload);
 
+    const steps = [
+      {
+        name: "NewAgreement",
+        path: "/v2/NewAgreement/",
+        username: SMT_USERNAME,
+        serviceId: SMT_USERNAME,
+        body: agreementBody,
+      },
+      {
+        name: "NewSubscription",
+        path: "/v2/NewSubscription/",
+        username: SMT_USERNAME,
+        serviceId: SMT_USERNAME,
+        body: subscriptionBody,
+      },
+    ];
+
     const proxyPayload = {
       action: "create_agreement_and_subscription",
+      steps,
       agreement: {
         name: "NewAgreement",
         body: agreementBody,
