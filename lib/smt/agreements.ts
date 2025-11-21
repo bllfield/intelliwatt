@@ -132,7 +132,8 @@ type NewSubscriptionPayload = {
   requesterAuthenticationID: string;
   subscriptionType: "CSPENROLL" | "SCHEDULE" | "SCHEDULES" | "REPENROLL";
   historicalSubscriptionDuration: number;
-  reportFormat: "HML" | "MONTHLY" | "interval" | "daily";
+  reportFormat: "LSE" | "CSV" | "JSON" | "XML";
+  dataType: "DAILY" | "INTERVAL" | "MONTHLY" | "HML";
   deliveryMode: "FTP" | "EML" | "API";
   reportFrequency: "DAILY" | "MONTHLY";
   ESIIDList: string[];
@@ -212,17 +213,27 @@ function buildNewSubscriptionPayload(
 ): NewSubscriptionPayload {
   const esiid = normalizeEsiid(input.esiid);
   const identity = buildSmtIdentity();
-  const includeInterval = input.includeInterval;
+  const wantsInterval = !!input.includeInterval;
+
+  const reportFormat: "JSON" = "JSON";
+  const dataType: "INTERVAL" | "MONTHLY" = wantsInterval ? "INTERVAL" : "MONTHLY";
+  const deliveryMode: "API" = "API";
+  const reportFrequency: "DAILY" | "MONTHLY" = wantsInterval ? "DAILY" : "MONTHLY";
+
   return {
     trans_id: buildTransId(),
     requestorID: identity.requestorID,
     requesterType: "CSP",
     requesterAuthenticationID: identity.requesterAuthenticationID,
     subscriptionType: "CSPENROLL",
-    historicalSubscriptionDuration: Math.max(1, Math.round(input.historicalMonthsBack || 12)),
-    reportFormat: includeInterval ? "HML" : "MONTHLY",
-    deliveryMode: "API",
-    reportFrequency: includeInterval ? "DAILY" : "MONTHLY",
+    historicalSubscriptionDuration: Math.max(
+      1,
+      Math.round(input.historicalMonthsBack || 12),
+    ),
+    reportFormat,
+    dataType,
+    deliveryMode,
+    reportFrequency,
     ESIIDList: [esiid],
   };
 }
