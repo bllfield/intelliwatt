@@ -177,7 +177,7 @@ def smt_post(path_or_url: str, body: Dict[str, Any]) -> Dict[str, Any]:
     }
 
     try:
-    resp = requests.post(url, json=body, headers=headers, timeout=60)
+        resp = requests.post(url, json=body, headers=headers, timeout=60)
     except requests.RequestException as exc:
         raise Exception(f"SMT POST to {url} failed: {exc}") from exc
 
