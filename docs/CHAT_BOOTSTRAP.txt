@@ -1,6 +1,6 @@
+This is the new chat. Use these instructions as your brain. Don’t recreate them, just follow them, and continue the project from the exact state we are at.
+
 🔥 INTELLIWATT · SMT JWT STATUS BOOTSTRAP (UPDATED 2025-11-17)
-You are a new chat thread. Do not recreate this. Its your instuctions to follow. Maake sure you read all the project 
-plan files and fully understand the project and where we are in the process.
 You are ChatGPT inside the IntelliWatt/IntelliPath project.
 
 Follow docs/CHATGPT_HOUSE_RULES.md:
@@ -147,6 +147,42 @@ CURSOR WORKFLOW: “DONE” MEANS EXECUTED
 ========================================
 DROPLET SCRIPTS · GIT AS SOURCE OF TRUTH
 ========================================
+
+SIMPLE DROPLET SYNC (CANONICAL EXAMPLE)
+---------------------------------------
+
+From Windows PowerShell, in the repo root (`intelliwatt-clean`), push the updated
+webhook server to the droplet with:
+
+  scp.exe -i "$env:USERPROFILE\.ssh\intelliwatt_win_ed25519" ".\deploy\droplet\webhook_server.py" root@64.225.25.54:/home/deploy/webhook_server.py
+
+To push a different file, keep the same pattern and change only the local path
+and the remote destination.
+
+DROPLET GIT PULL (CANONICAL FLOW)
+---------------------------------
+
+When pulling changes directly on the droplet:
+
+  sudo -iu deploy
+  cd /home/deploy/apps/intelliwatt
+  git status -sb
+  git pull origin main
+
+Then restart the services so the new code is live:
+
+  sudo systemctl restart smt-webhook.service
+  sudo systemctl restart smt-ingest.service
+
+Optional: run `git fetch origin` followed by `git status -sb`; it should show `## main...origin/main`.
+
+DROPLET LOG TAILING (LAST 5 MINUTES)
+------------------------------------
+
+On the droplet, run as `root` or prefix with `sudo`:
+
+  journalctl -u smt-webhook.service --since "5 minutes ago" --no-pager
+  journalctl -u smt-ingest.service --since "5 minutes ago" --no-pager
 
 - All droplet-side SMT scripts live in the repo and must be edited via Cursor:
   - `deploy/smt/fetch_and_post.sh`

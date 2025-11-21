@@ -1,9 +1,15 @@
+import { randomBytes } from "crypto";
+
 export type SmtAgreementRequest = {
   esiid: string;
   serviceAddress: string;
   customerName?: string | null;
   customerEmail?: string | null;
   customerPhone?: string | null;
+  tdspCode?: string | null;
+  monthsBack?: number | null;
+  includeInterval?: boolean | null;
+  includeBilling?: boolean | null;
 };
 
 export type SmtAgreementResult = {
@@ -31,24 +37,65 @@ const SMT_PROXY_TOKEN = process.env.SMT_PROXY_TOKEN || "";
 
 // SMT agreement/subscription identity wiring.
 // These must match what’s configured in the SMT portal.
-// SMT_USERNAME serves as the SMT API Service ID (username + serviceId + requestorID).
-const SMT_USERNAME = (process.env.SMT_USERNAME || "").trim();
-const SMT_REQUESTOR_ID = SMT_USERNAME;
-const SMT_REQUESTOR_AUTH_ID = (process.env.SMT_REQUESTOR_AUTH_ID || "").trim();
+const SMT_USERNAME = (
+  process.env.SMT_USERNAME ||
+  process.env.SMT_SERVICE_ID ||
+  process.env.SMT_REQUESTOR_ID ||
+  "INTELLIPATH"
+).trim();
+
+const SMT_SERVICE_ID = (
+  process.env.SMT_SERVICE_ID ||
+  SMT_USERNAME ||
+  "INTELLIPATH"
+).trim();
+
+const SMT_REQUESTOR_ID = (
+  process.env.SMT_REQUESTOR_ID ||
+  SMT_SERVICE_ID ||
+  "INTELLIPATH"
+).trim();
+
+const SMT_REQUESTOR_AUTH_ID = (
+  process.env.SMT_REQUESTOR_AUTH_ID ||
+  "134642921"
+).trim();
 
 // Default language preference for SMT notifications.
-const SMT_LANG_DEFAULT = process.env.SMT_LANG_DEFAULT || "ENGLISH";
+const SMT_LANG_DEFAULT = (process.env.SMT_LANG_DEFAULT || "en").trim() || "en";
 
-function buildTransId(prefix: string): string {
-  const rand = Math.random().toString(36).slice(2, 10);
-  const ts = Date.now().toString(36);
-  const base = `${prefix}-${ts}-${rand}`.replace(/[^a-zA-Z0-9]/g, "");
-  return base.slice(0, 32);
+function buildTransId(): string {
+  return randomBytes(16).toString("hex");
 }
 
 function normalizeEsiid(esiid: string): string {
-  const digits = esiid.replace(/\D/g, "");
-  return digits || esiid;
+  const digits = (esiid || "").replace(/\D/g, "");
+  if (!digits) {
+    return esiid;
+  }
+  const trimmed = digits.slice(-17);
+  return trimmed.padStart(17, "0");
+}
+
+interface SmtIdentity {
+  requestorID: string;
+  requesterAuthenticationID: string;
+  serviceID: string;
+  username: string;
+  language: string;
+}
+
+function buildSmtIdentity(
+  overrides?: Partial<SmtIdentity>,
+): SmtIdentity {
+  return {
+    requestorID: SMT_REQUESTOR_ID,
+    requesterAuthenticationID: SMT_REQUESTOR_AUTH_ID,
+    serviceID: SMT_SERVICE_ID,
+    username: SMT_USERNAME,
+    language: SMT_LANG_DEFAULT,
+    ...overrides,
+  };
 }
 
 if (!SMT_USERNAME) {
@@ -58,48 +105,93 @@ if (!SMT_REQUESTOR_AUTH_ID) {
   throw new Error("SMT_REQUESTOR_AUTH_ID (DUNS) is required for SMT agreements.");
 }
 
-function buildNewAgreementBody(payload: SmtAgreementRequest): any {
-  const esiid = normalizeEsiid(payload.esiid);
-  const transId = buildTransId("AGR");
+type AgreementPayloadInput = {
+  esiid: string;
+  serviceAddress: string;
+  customerName?: string | null;
+  customerEmail?: string | null;
+  customerPhone?: string | null;
+  tdspCode?: string | null;
+  monthsBack: number;
+  includeInterval: boolean;
+  includeBilling: boolean;
+};
 
-  const customerMeterRecord: any = {
+type SubscriptionPayloadInput = {
+  esiid: string;
+  tdspCode?: string | null;
+  monthsBack: number;
+  includeInterval: boolean;
+  includeBilling: boolean;
+};
+
+function buildNewAgreementPayload(
+  input: AgreementPayloadInput,
+): Record<string, any> {
+  const esiid = normalizeEsiid(input.esiid);
+  const identity = buildSmtIdentity();
+  const header = {
+    ...identity,
+    trans_id: buildTransId(),
+  };
+
+  const customerMeterRecord = {
     ESIID: esiid,
     meterNumber: esiid,
     PUCTRORNumber: "10004",
-    serviceAddress: payload.serviceAddress,
+    serviceAddress: input.serviceAddress,
   };
 
-  const NewAgreement: any = {
-    trans_id: transId,
-    requestorID: SMT_REQUESTOR_ID,
-    userType: "CSP",
-    requestorType: "CSP",
-    requesterAuthenticationID: SMT_REQUESTOR_AUTH_ID,
-    retailCustomerEmail: payload.customerEmail ?? null,
-    agreementDuration: 12,
-    customerLanguagePreference: SMT_LANG_DEFAULT,
-    customerMeterList: [customerMeterRecord],
+  const request: Record<string, any> = {
+    esiid,
+    tdspCode: input.tdspCode ?? null,
+    serviceAddress: input.serviceAddress,
+    includeInterval: input.includeInterval,
+    includeBilling: input.includeBilling,
+    monthsBack: input.monthsBack,
+    agreementDuration: input.monthsBack,
     SMTTermsandConditions: "Y",
+    requestorType: "CSP",
+    userType: "CSP",
+    customerMeterList: [customerMeterRecord],
+    retailCustomerEmail: input.customerEmail ?? null,
+    customerLanguagePreference: identity.language,
   };
 
-  // Optional customer identifiers
-  if (payload.customerName) {
-    NewAgreement.customerName = payload.customerName;
+  if (input.customerName) {
+    request.customerName = input.customerName;
   }
-  if (payload.customerPhone) {
-    NewAgreement.customerPhone = payload.customerPhone;
+  if (input.customerPhone) {
+    request.customerPhone = input.customerPhone;
   }
 
-  return { NewAgreement };
+  return {
+    NewAgreement: {
+      header,
+      request,
+      trans_id: header.trans_id,
+      requestorID: identity.requestorID,
+      requesterAuthenticationID: identity.requesterAuthenticationID,
+      serviceID: identity.serviceID,
+      username: identity.username,
+      language: identity.language,
+    },
+  };
 }
 
-function buildNewSubscriptionBody(payload: SmtAgreementRequest): any {
-  const esiid = normalizeEsiid(payload.esiid);
-  const transId = buildTransId("SUB");
+function buildNewSubscriptionPayload(
+  input: SubscriptionPayloadInput,
+): Record<string, any> {
+  const esiid = normalizeEsiid(input.esiid);
+  const identity = buildSmtIdentity();
+  const header = {
+    ...identity,
+    trans_id: buildTransId(),
+  };
 
-  const now = new Date();
-  const start = new Date(now);
-  start.setFullYear(start.getFullYear() - 1);
+  const months = Math.max(1, Math.round(input.monthsBack));
+  const start = new Date();
+  start.setMonth(start.getMonth() - months);
 
   const formatMMDDYYYY = (d: Date): string => {
     const mm = String(d.getMonth() + 1).padStart(2, "0");
@@ -108,25 +200,37 @@ function buildNewSubscriptionBody(payload: SmtAgreementRequest): any {
     return `${mm}/${dd}/${yyyy}`;
   };
 
-  const customerMeterRecord: any = {
+  const customerMeterRecord = {
     ESIID: esiid,
     meterNumber: esiid,
   };
 
-  const NewSubscription: any = {
-    trans_id: transId,
-    requestorID: SMT_REQUESTOR_ID,
-    userType: "CSP",
-    requestorType: "CSP",
-    requesterAuthenticationID: SMT_REQUESTOR_AUTH_ID,
+  const request = {
+    esiid,
+    tdspCode: input.tdspCode ?? null,
+    includeInterval: input.includeInterval,
+    includeBilling: input.includeBilling,
     SMTTermsandConditions: "Y",
+    requestorType: "CSP",
+    userType: "CSP",
     dataType: "HML",
     startDate: formatMMDDYYYY(start),
     endDate: null,
     customerMeterList: [customerMeterRecord],
   };
 
-  return { NewSubscription };
+  return {
+    NewSubscription: {
+      header,
+      request,
+      trans_id: header.trans_id,
+      requestorID: identity.requestorID,
+      requesterAuthenticationID: identity.requesterAuthenticationID,
+      serviceID: identity.serviceID,
+      username: identity.username,
+      language: identity.language,
+    },
+  };
 }
 
 export async function createAgreementAndSubscription(
@@ -149,22 +253,52 @@ export async function createAgreementAndSubscription(
   }
 
   try {
-    const agreementBody = buildNewAgreementBody(payload);
-    const subscriptionBody = buildNewSubscriptionBody(payload);
+    const monthsBack =
+      typeof payload.monthsBack === "number" && !Number.isNaN(payload.monthsBack)
+        ? Math.max(1, Math.round(payload.monthsBack))
+        : 12;
+    const includeInterval =
+      payload.includeInterval === undefined || payload.includeInterval === null
+        ? true
+        : Boolean(payload.includeInterval);
+    const includeBilling =
+      payload.includeBilling === undefined || payload.includeBilling === null
+        ? true
+        : Boolean(payload.includeBilling);
+    const tdspCode = payload.tdspCode ?? null;
+
+    const agreementBody = buildNewAgreementPayload({
+      esiid: payload.esiid,
+      serviceAddress: payload.serviceAddress,
+      customerName: payload.customerName ?? null,
+      customerEmail: payload.customerEmail ?? null,
+      customerPhone: payload.customerPhone ?? null,
+      tdspCode,
+      monthsBack,
+      includeInterval,
+      includeBilling,
+    });
+    const subscriptionBody = buildNewSubscriptionPayload({
+      esiid: payload.esiid,
+      tdspCode,
+      monthsBack,
+      includeInterval,
+      includeBilling,
+    });
 
     const steps = [
       {
         name: "NewAgreement",
         path: "/v2/NewAgreement/",
         username: SMT_USERNAME,
-        serviceId: SMT_USERNAME,
+        serviceId: SMT_SERVICE_ID,
         body: agreementBody,
       },
       {
         name: "NewSubscription",
         path: "/v2/NewSubscription/",
         username: SMT_USERNAME,
-        serviceId: SMT_USERNAME,
+        serviceId: SMT_SERVICE_ID,
         body: subscriptionBody,
       },
     ];

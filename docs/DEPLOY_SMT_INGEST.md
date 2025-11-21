@@ -374,15 +374,13 @@ Source of truth for SMT ingest scripts now lives in the repo:
 Standard workflow:
 
 1. Make changes in Cursor to the files above and commit to the main branch.
-2. On Brian's Windows machine, use the dedicated SSH key at `%USERPROFILE%\.ssh\intelliwatt_win_ed25519` to sync updated scripts:
+2. On Windows (PowerShell), run from the repo root (`intelliwatt-clean`) to push the updated file:
 
    ```powershell
-   $KEY = "$env:USERPROFILE\.ssh\intelliwatt_win_ed25519"
-   scp -i $KEY .\deploy\droplet\webhook_server.py  root@64.225.25.54:/home/deploy/smt_ingest/web/webhook_server.py
-   scp -i $KEY .\deploy\droplet\run_webhook.sh      root@64.225.25.54:/home/deploy/smt_ingest/web/run_webhook.sh
-   scp -i $KEY .\deploy\droplet\smt_token_test.sh  root@64.225.25.54:/home/deploy/smt_token_test.sh
-   scp -i $KEY .\deploy\smt\fetch_and_post.sh      root@64.225.25.54:/home/deploy/fetch_and_post.sh
+   scp.exe -i "$env:USERPROFILE\.ssh\intelliwatt_win_ed25519" ".\deploy\droplet\webhook_server.py" root@64.225.25.54:/home/deploy/webhook_server.py
    ```
+
+   Use the same pattern for other scripts by changing only the local path and the remote destination.
 
 3. On the droplet, restart the relevant services (if needed):
 

@@ -6,6 +6,64 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
+
+# SMT debug logging helpers
+def _log_smt_request(step_name: str, url: str, headers: Dict[str, Any], payload: Any) -> None:
+    try:
+        safe_headers = {}
+        if isinstance(headers, dict):
+            for key, value in headers.items():
+                lower = key.lower()
+                if lower in ("authorization", "proxy-authorization", "password"):
+                    continue
+                safe_headers[key] = value
+        print(
+            f"[SMT_DEBUG] step={step_name} url={url} headers={safe_headers}",
+            flush=True,
+        )
+        payload_repr: str
+        if isinstance(payload, (dict, list)):
+            payload_repr = json.dumps(payload, separators=(",", ":"))
+        else:
+            payload_repr = repr(payload)
+        print(
+            f"[SMT_DEBUG] step={step_name} payload={payload_repr}",
+            flush=True,
+        )
+    except Exception as exc:
+        print(
+            f"[SMT_DEBUG] error_while_logging_request step={step_name} err={exc!r}",
+            flush=True,
+        )
+
+
+def _log_smt_response(step_name: str, resp: requests.Response) -> None:
+    try:
+        status = getattr(resp, "status_code", None)
+        text = getattr(resp, "text", None)
+        print(
+            f"[SMT_DEBUG] step={step_name} response_status={status}",
+            flush=True,
+        )
+        if isinstance(text, str):
+            snippet = text
+            if len(snippet) > 2000:
+                snippet = snippet[:2000] + "...[truncated]"
+            print(
+                f"[SMT_DEBUG] step={step_name} response_body={repr(snippet)}",
+                flush=True,
+            )
+        else:
+            print(
+                f"[SMT_DEBUG] step={step_name} response_body_type={type(text)}",
+                flush=True,
+            )
+    except Exception as exc:
+        print(
+            f"[SMT_DEBUG] error_while_logging_response step={step_name} err={exc!r}",
+            flush=True,
+        )
+
 # Shared secrets from env
 SECRET_A = os.environ.get("INTELLIWATT_WEBHOOK_SECRET", "").strip()
 SECRET_B = os.environ.get("DROPLET_WEBHOOK_SECRET", "").strip()
@@ -177,6 +235,20 @@ def smt_post(path_or_url: str, body: Dict[str, Any]) -> Dict[str, Any]:
     }
 
     payload = body
+    step_name: Optional[str] = None
+    if "NewAgreement" in url:
+        step_name = "NewAgreement"
+    elif "NewSubscription" in url:
+        step_name = "NewSubscription"
+
+    if step_name:
+        try:
+            _log_smt_request(step_name, url, headers, payload)
+        except Exception as exc:
+            print(
+                f"[SMT_DEBUG] log_error step={step_name} err={exc!r}",
+                flush=True,
+            )
 
     try:
         if "NewAgreement" in url:
@@ -202,6 +274,9 @@ def smt_post(path_or_url: str, body: Dict[str, Any]) -> Dict[str, Any]:
         resp = requests.post(url, json=body, headers=headers, timeout=60)
     except requests.RequestException as exc:
         raise Exception(f"SMT POST to {url} failed: {exc}") from exc
+
+    if step_name:
+        _log_smt_response(step_name, resp)
 
     print(f"[SMT_PROXY] POST {url} status={resp.status_code}", flush=True)
     try:

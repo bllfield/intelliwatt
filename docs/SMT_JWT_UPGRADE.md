@@ -43,6 +43,12 @@ Smart Meter Texas upgraded its security model per Market Notice **SMT-M-A051425-
   - `SMT_REQUESTOR_AUTH_ID`
 - Any references to `SMT_JWT_CLIENT_ID` / `SMT_JWT_CLIENT_SECRET` are considered **legacy** and only retained for historical context.
 
+> **Service ID / Requestor mapping**  
+> SMT requires the API Service ID to be consistent between the token request, the `requestorID` field in payloads, and the user configured in the SMT portal. In IntelliWatt production (2025-11-21):  
+> - `SMT_USERNAME` = `INTELLIPATH` (API Service ID)  
+> - `SMT_REQUESTOR_ID` = `INTELLIPATH` (must match the service ID SMT expects)  
+> - `SMT_REQUESTOR_AUTH_ID` = `134642921` (Intellipath Solutions LLC DUNS on SMT)
+
 ### Deployment Guidance
 
 - Token acquisition can live on Vercel **or** the droplet, provided the calling IP is whitelisted by SMT.

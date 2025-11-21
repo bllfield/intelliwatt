@@ -2072,7 +2072,7 @@ The current **SMT Interface Guide v2** documents the REST token and JWT behavior
 3. **Environment Variables (high-level)**
    - SMT REST token + ad hoc API calls require:
      - `SMT_API_BASE_URL` (UAT or Prod)
-     - `SMT_USERNAME` (SMT service ID username, e.g. `INTELLIWATTAPI`)
+    - `SMT_USERNAME` (SMT service ID username, e.g. `INTELLIWATTAPI` — legacy example; current production service ID is `INTELLIPATH`)
      - `SMT_PASSWORD` (SMT service ID password)
      - `SMT_REQUESTOR_ID` (usually the same as `SMT_USERNAME`)
      - `SMT_REQUESTOR_AUTH_ID` (DUNS or other authentication ID as registered with SMT)
@@ -2094,7 +2094,7 @@ The current **SMT Interface Guide v2** documents the REST token and JWT behavior
 
 5. **Troubleshooting 401 Invalid Credentials**
    - If `/v2/token` returns a 401 / `invalidCredentials`:
-     - Verify the service ID is the **API user** (e.g. `INTELLIWATTAPI`), not a portal
+    - Verify the service ID is the **API user** (e.g. `INTELLIWATTAPI` — legacy example; current production service ID is `INTELLIPATH`), not a portal
        login that only works in the web UI.
      - Verify the password for the service ID matches what was configured in the SMT
        portal.
@@ -2131,8 +2131,8 @@ Proxy behavior:
   - Requires header `x-proxy-token: ${SMT_PROXY_TOKEN}`
   - Ignores request body.
 - Uses env:
-  - `SMT_API_BASE_URL` (currently `https://services.smartmetertexas.net`)
-  - `SMT_USERNAME` (currently `INTELLIWATTAPI`)
+- `SMT_API_BASE_URL` (currently `https://services.smartmetertexas.net`)
+- `SMT_USERNAME` (currently `INTELLIWATTAPI` — legacy example; current production service ID is `INTELLIPATH`)
   - `SMT_PASSWORD` (SMT API Service ID password)
 - Calls SMT:
   - `POST ${SMT_API_BASE_URL}/v2/token/`
@@ -2367,7 +2367,7 @@ We have extended the Smart Meter Texas ingest pipeline and admin tooling:
 ### 2025-11-20 – SMT `/agreements` proxy wired to NewAgreement/NewSubscription
 
 - Droplet webhook `POST /agreements` is live, protected by `SMT_PROXY_TOKEN`, and Vercel now calls it via `SMT_PROXY_AGREEMENTS_URL`.
-- Droplet successfully obtains SMT JWTs from `/v2/token/` using `SMT_USERNAME=INTELLIWATTAPI` and the configured `SMT_PASSWORD`.
+- Droplet successfully obtains SMT JWTs from `/v2/token/` using `SMT_USERNAME=INTELLIWATTAPI` (legacy example; current production service ID is `INTELLIPATH`) and the configured `SMT_PASSWORD`.
 - Proxy fan-out to SMT `/v2/NewAgreement/` and `/v2/NewSubscription/` executes, but SMT returns HTTP 401 `"Username/ServiceID Mismatch on both Header and Payload message."` because the current request bodies are placeholders.
 - **Next:** Implement real agreement/subscription payload builders in the Next.js app (leveraging `SMT_REQUESTOR_ID`, `SMT_REQUESTOR_AUTH_ID`, service ID, and house ESIID) so SMT accepts the calls and resulting status flows back through `SmtAuthorization.smtStatus` / `smtStatusMessage`.
 
@@ -2399,3 +2399,64 @@ We have extended the Smart Meter Texas ingest pipeline and admin tooling:
   - SMT API pull routes (inline and webhook) rely on `resolveSmtEsiid`, falling back to HouseAddress records instead of hard-coded defaults.
   - Removed production reliance on test ESIIDs by gating any env fallback to non-production environments only.
 - Result: production SMT ingestion now mirrors the behavior of the verified test path end-to-end (WattBuy → HouseAddress.esiid → SMT API / SFTP ingest).
+
+### PC-2025-11-21-SMT-WIRING — Production SMT JWT + agreements wiring snapshot
+
+**Context.** After the SMT JWT upgrade, SMT started enforcing strict matching between the API Service ID and the `requestorID` / `serviceId` values in NewAgreement/NewSubscription payloads. Using the legacy service ID (`INTELLIWATTAPI`) produced HTTP 401 errors:
+
+> Username/ServiceID Mismatch on both Header and Payload message.
+
+**Current production configuration (2025-11-21).**
+
+- Service ID / username:
+  - `SMT_USERNAME = INTELLIPATH`
+  - `SMT_REQUESTOR_ID = INTELLIPATH`
+  - `SMT_REQUESTOR_AUTH_ID = 134642921` (Intellipath Solutions LLC DUNS on SMT)
+- API base URL:
+  - `SMT_API_BASE_URL = https://services.smartmetertexas.net`
+
+**Vercel → droplet → SMT flow.**
+
+1. Next.js (`lib/smt/agreements.ts`) reads SMT identity from Vercel env and builds SMT-compliant JSON:
+   - `requestorID = SMT_USERNAME`
+   - `requesterAuthenticationID = SMT_REQUESTOR_AUTH_ID`
+   - `serviceId` matches the SMT Service ID (`INTELLIPATH` in production).
+2. The app posts to the droplet proxy:
+   - URL: `SMT_PROXY_AGREEMENTS_URL` (e.g. `https://<droplet>/agreements`)
+   - Header: `Authorization: Bearer ${SMT_PROXY_TOKEN}`
+   - Body: `{ action: "create_agreement_and_subscription", steps: [...] }`
+3. On the droplet, `webhook_server.py`:
+   - Validates the shared secret via `SMT_PROXY_TOKEN` sourced from `/home/deploy/smt_ingest/.env` and `/etc/default/intelliwatt-smt`.
+   - Calls `${SMT_API_BASE_URL}/v2/token/` with `username = SMT_USERNAME` and `password = SMT_PASSWORD`.
+   - Reuses the JWT to call `POST /v2/NewAgreement/` and `POST /v2/NewSubscription/`, logging HTTP status and an `SMT body_snip=...` for debugging.
+4. SMT responses propagate back to Vercel, where `/api/smt/authorization` persists `smtAgreementId`, `smtSubscriptionId`, `smtStatus`, and `smtStatusMessage`.
+
+**SFTP ingest wiring (for completeness).**
+
+- Droplet config: `/etc/default/intelliwatt-smt`
+  - `SMT_HOST=ftp.smartmetertexas.biz`
+  - `SMT_USER=intellipathsolutionsftp`
+  - `SMT_KEY=/home/deploy/.ssh/intelliwatt_smt_rsa4096`
+  - `SMT_REMOTE_DIR=/adhocusage`
+  - `SMT_LOCAL_DIR=/home/deploy/smt_inbox`
+- Systemd units:
+  - `smt-webhook.service` runs `/home/deploy/webhook_server.py`; loads `/home/deploy/smt_ingest/.env` + `/etc/default/intelliwatt-smt`.
+  - `smt-ingest.service` runs `deploy/smt/fetch_and_post.sh` using `/etc/default/intelliwatt-smt` for SFTP + ingest env.
+
+**Env source of truth.**
+
+- Vercel env: `SMT_USERNAME`, `SMT_REQUESTOR_AUTH_ID`, `SMT_PROXY_AGREEMENTS_URL`, `SMT_PROXY_TOKEN`.
+- Droplet env files:
+  - `/home/deploy/smt_ingest/.env` (webhook + proxy secrets, local toggles)
+  - `/etc/default/intelliwatt-smt` (shared ingest + proxy identity)
+  - `/etc/default/smt-token-proxy` (standalone token proxy, same identity)
+
+**Operational notes.**
+
+- When SMT updates the Service ID or DUNS, update Vercel env alongside `/home/deploy/smt_ingest/.env`, `/etc/default/intelliwatt-smt`, and `/etc/default/smt-token-proxy`.
+- After editing droplet env files:
+
+  ```bash
+  sudo systemctl restart smt-webhook.service
+  sudo systemctl restart smt-ingest.service
+  ```

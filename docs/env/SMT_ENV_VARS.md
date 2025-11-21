@@ -12,6 +12,11 @@
 - `SMT_REQUESTOR_ID` – **Deprecated alias.** Historically used for `requestorID`, but the system now derives the requestor ID directly from `SMT_USERNAME`.  
 - `SMT_REQUESTOR_AUTH_ID` – SMT/PUCT authentication ID (e.g., DUNS). Placed in `requesterAuthenticationID`.  
 
+> **Current production snapshot (2025-11-21)**  
+> - `SMT_USERNAME` / `SMT_REQUESTOR_ID` = `INTELLIPATH` (SMT API Service ID)  
+> - `SMT_REQUESTOR_AUTH_ID` = `134642921` (Intellipath Solutions LLC DUNS on SMT)  
+> - `SMT_API_BASE_URL` = `https://services.smartmetertexas.net`
+
 ### Token Generation
 
 IntelliWatt requests tokens via:
@@ -62,9 +67,11 @@ SMT_API_BASE_URL="https://services.smartmetertexas.net"
 SMT_USERNAME="INTELLIPATH"           # SMT API Service ID (username + serviceId + requestorID)
 SMT_PASSWORD="********"              # SMT API Service ID password
 SMT_REQUESTOR_AUTH_ID="134642921"    # IntelliPath DUNS / SMT authentication ID
-SMT_PROXY_TOKEN="ChangeThisToAStrongSharedSecret_1763428355"
+SMT_PROXY_TOKEN="ChangeThisToAStrongSharedSecret_1763428355"  # example only
 SMT_PROXY_PORT="4101"
 ```
+
+In production, `SMT_USERNAME` is the SMT API Service ID (**INTELLIPATH**), and the same value is used as `SMT_REQUESTOR_ID` in SMT payloads.
 
 systemd unit `smt-token-proxy.service` runs:
 
@@ -103,6 +110,13 @@ Acceptable header names: `x-intelliwatt-secret`, `x-droplet-webhook-secret`, `x-
 - `DROPLET_WEBHOOK_URL` – e.g., `http://64.225.25.54:8787/trigger/smt-now`.  
 - `SMT_HOST`, `SMT_USER`, `SMT_KEY`, `SMT_REMOTE_DIR`, `SMT_LOCAL_DIR` – SFTP ingest configuration.  
 - Optional defaults: `SOURCE_TAG`, `METER_DEFAULT`, `ESIID_DEFAULT` for legacy inline ingest script behaviour.
+
+> **Current production snapshot (2025-11-21)**  
+> - `SMT_HOST=ftp.smartmetertexas.biz`  
+> - `SMT_USER=intellipathsolutionsftp`  
+> - `SMT_KEY=/home/deploy/.ssh/intelliwatt_smt_rsa4096`  
+> - `SMT_REMOTE_DIR=/adhocusage`  
+> - `SMT_LOCAL_DIR=/home/deploy/smt_inbox`
 
 ## Deprecated / Legacy
 
