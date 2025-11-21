@@ -103,8 +103,8 @@ async function main() {
       requestorID,
       requesterType: "CSP",
       requesterAuthenticationID,
-      reportFormat: "JSON",
-      deliveryMode: "API",
+      reportFormat: "CSV",
+      deliveryMode: "FTP",
       version: "L",
       ESIIDMeterList: [
         {

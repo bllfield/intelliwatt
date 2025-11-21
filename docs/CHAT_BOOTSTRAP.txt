@@ -181,6 +181,7 @@ DROPLET LOG TAILING (LAST 5 MINUTES)
 
 On the droplet, run as `root` or prefix with `sudo`:
 
+sudo journalctl -u smt-webhook.service -n 200 -f
   journalctl -u smt-webhook.service -f
   journalctl -u smt-ingest.service --since "5 minutes ago" --no-pager
 
