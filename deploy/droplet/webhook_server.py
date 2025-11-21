@@ -8,6 +8,14 @@ import requests
 
 
 # SMT debug logging helpers
+def _smt_snip(text: Optional[str], limit: int = 1000) -> str:
+    if not isinstance(text, str):
+        return ""
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "...[truncated]"
+
+
 def _log_smt_request(step_name: str, url: str, headers: Dict[str, Any], payload: Any) -> None:
     try:
         safe_headers = {}
@@ -17,17 +25,21 @@ def _log_smt_request(step_name: str, url: str, headers: Dict[str, Any], payload:
                 if lower in ("authorization", "proxy-authorization", "password"):
                     continue
                 safe_headers[key] = value
-        print(
-            f"[SMT_DEBUG] step={step_name} url={url} headers={safe_headers}",
-            flush=True,
-        )
-        payload_repr: str
+        body_repr: str
         if isinstance(payload, (dict, list)):
-            payload_repr = json.dumps(payload, separators=(",", ":"))
+            body_repr = json.dumps(payload, separators=(",", ":"))
         else:
-            payload_repr = repr(payload)
+            body_repr = repr(payload)
         print(
-            f"[SMT_DEBUG] step={step_name} payload={payload_repr}",
+            "[SMT_DEBUG] step=%s base_url=%s username=%s url=%s headers=%s body=%s"
+            % (
+                step_name,
+                SMT_API_BASE_URL,
+                SMT_USERNAME,
+                url,
+                safe_headers,
+                _smt_snip(body_repr),
+            ),
             flush=True,
         )
     except Exception as exc:
@@ -42,22 +54,9 @@ def _log_smt_response(step_name: str, resp: requests.Response) -> None:
         status = getattr(resp, "status_code", None)
         text = getattr(resp, "text", None)
         print(
-            f"[SMT_DEBUG] step={step_name} response_status={status}",
+            f"[SMT_DEBUG] step={step_name} response_status={status} body={_smt_snip(text)}",
             flush=True,
         )
-        if isinstance(text, str):
-            snippet = text
-            if len(snippet) > 2000:
-                snippet = snippet[:2000] + "...[truncated]"
-            print(
-                f"[SMT_DEBUG] step={step_name} response_body={repr(snippet)}",
-                flush=True,
-            )
-        else:
-            print(
-                f"[SMT_DEBUG] step={step_name} response_body_type={type(text)}",
-                flush=True,
-            )
     except Exception as exc:
         print(
             f"[SMT_DEBUG] error_while_logging_response step={step_name} err={exc!r}",
