@@ -2364,6 +2364,13 @@ We have extended the Smart Meter Texas ingest pipeline and admin tooling:
 - `/api/admin/smt/pull` already detects DailyMeterUsage CSVs and aggregates them into `SmtBillingRead`, enabling end-to-end SMT daily billing ingestion.
 - IntervalMeterUsage handling, sha256 dedupe (`.posted_sha256`), and other ingest safeguards remain unchanged.
 
+### 2025-11-20 – SMT `/agreements` proxy wired to NewAgreement/NewSubscription
+
+- Droplet webhook `POST /agreements` is live, protected by `SMT_PROXY_TOKEN`, and Vercel now calls it via `SMT_PROXY_AGREEMENTS_URL`.
+- Droplet successfully obtains SMT JWTs from `/v2/token/` using `SMT_USERNAME=INTELLIWATTAPI` and the configured `SMT_PASSWORD`.
+- Proxy fan-out to SMT `/v2/NewAgreement/` and `/v2/NewSubscription/` executes, but SMT returns HTTP 401 `"Username/ServiceID Mismatch on both Header and Payload message."` because the current request bodies are placeholders.
+- **Next:** Implement real agreement/subscription payload builders in the Next.js app (leveraging `SMT_REQUESTOR_ID`, `SMT_REQUESTOR_AUTH_ID`, service ID, and house ESIID) so SMT accepts the calls and resulting status flows back through `SmtAuthorization.smtStatus` / `smtStatusMessage`.
+
 ### PC-2025-11-20-A — SMT Agreements + PoA Live Wiring
 
 - Extended `SmtAuthorization` to record SMT agreement/subscription identifiers, status fields, and PoA consent metadata (text version, IP, user agent) without altering the existing ingest pipeline.
