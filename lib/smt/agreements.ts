@@ -31,15 +31,8 @@ const SMT_PROXY_TOKEN = process.env.SMT_PROXY_TOKEN || "";
 
 // SMT agreement/subscription identity wiring.
 // These must match what’s configured in the SMT portal.
-const SMT_REQUESTOR_ID =
-  process.env.SMT_REQUESTOR_ID || process.env.SMT_USERNAME || "";
-
-const SMT_REQUESTOR_AUTH_ID = process.env.SMT_REQUESTOR_AUTH_ID || "";
-
-// SMT API Service ID created in the SMT portal. If not explicitly set,
-// we fall back to SMT_USERNAME (the API username used for /v2/token/).
-const SMT_SERVICE_ID =
-  process.env.SMT_SERVICE_ID || process.env.SMT_USERNAME || "";
+const SMT_USERNAME = process.env.SMT_USERNAME ?? "";
+const SMT_REQUESTOR_AUTH_ID = process.env.SMT_REQUESTOR_AUTH_ID ?? "";
 
 // Default language preference for SMT notifications.
 const SMT_LANG_DEFAULT = process.env.SMT_LANG_DEFAULT || "ENGLISH";
@@ -56,6 +49,13 @@ function normalizeEsiid(esiid: string): string {
   return digits || esiid;
 }
 
+if (!SMT_USERNAME) {
+  throw new Error("SMT_USERNAME is required for SMT agreements");
+}
+if (!SMT_REQUESTOR_AUTH_ID) {
+  throw new Error("SMT_REQUESTOR_AUTH_ID (DUNS) is required for SMT agreements");
+}
+
 function buildNewAgreementBody(payload: SmtAgreementRequest): any {
   const esiid = normalizeEsiid(payload.esiid);
   const transId = buildTransId("AGR");
@@ -67,21 +67,18 @@ function buildNewAgreementBody(payload: SmtAgreementRequest): any {
 
   const NewAgreement: any = {
     trans_id: transId,
-    requestorID: SMT_REQUESTOR_ID,
-    requestorType: "CSP",
-    requestorRole: "CSP",
-    requestorAuthID: SMT_REQUESTOR_AUTH_ID || undefined,
-    apiServiceID: SMT_SERVICE_ID,
-    SMTTermsandConditions: "Y",
-    languagePreference: SMT_LANG_DEFAULT,
+    requestorID: SMT_USERNAME,
+    requesterAuthenticationID: SMT_REQUESTOR_AUTH_ID,
+    retailCustomerEmail: payload.customerEmail ?? null,
+    agreementDuration: 12,
+    customerLanguagePreference: SMT_LANG_DEFAULT,
     customerMeterList: [customerMeterRecord],
+    SMTTermsandConditions: "Y",
   };
 
+  // Optional customer identifiers
   if (payload.customerName) {
     NewAgreement.customerName = payload.customerName;
-  }
-  if (payload.customerEmail) {
-    NewAgreement.customerEmail = payload.customerEmail;
   }
   if (payload.customerPhone) {
     NewAgreement.customerPhone = payload.customerPhone;
@@ -111,11 +108,8 @@ function buildNewSubscriptionBody(payload: SmtAgreementRequest): any {
 
   const NewSubscription: any = {
     trans_id: transId,
-    requestorID: SMT_REQUESTOR_ID,
-    requestorType: "CSP",
-    requestorRole: "CSP",
-    requestorAuthID: SMT_REQUESTOR_AUTH_ID || undefined,
-    apiServiceID: SMT_SERVICE_ID,
+    requestorID: SMT_USERNAME,
+    requesterAuthenticationID: SMT_REQUESTOR_AUTH_ID,
     SMTTermsandConditions: "Y",
     dataType: "HML",
     startDate: formatMMDDYYYY(start),
@@ -142,25 +136,6 @@ export async function createAgreementAndSubscription(
       ok: false,
       status: "error",
       message: "SMT_PROXY_AGREEMENTS_URL/SMT_PROXY_URL not configured",
-    };
-  }
-
-  const missingEnv: string[] = [];
-  if (!SMT_REQUESTOR_ID) {
-    missingEnv.push("SMT_REQUESTOR_ID/SMT_USERNAME");
-  }
-  if (!SMT_SERVICE_ID) {
-    missingEnv.push("SMT_SERVICE_ID/SMT_USERNAME");
-  }
-  if (!SMT_REQUESTOR_AUTH_ID) {
-    missingEnv.push("SMT_REQUESTOR_AUTH_ID");
-  }
-
-  if (missingEnv.length > 0) {
-    return {
-      ok: false,
-      status: "error",
-      message: `Missing SMT env: ${missingEnv.join(", ")}`,
     };
   }
 
