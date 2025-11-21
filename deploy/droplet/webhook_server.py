@@ -177,11 +177,16 @@ def smt_post(path_or_url: str, body: Dict[str, Any]) -> Dict[str, Any]:
     }
 
     try:
-        resp = requests.post(url, json=body, headers=headers, timeout=60)
+    resp = requests.post(url, json=body, headers=headers, timeout=60)
     except requests.RequestException as exc:
         raise Exception(f"SMT POST to {url} failed: {exc}") from exc
 
     print(f"[SMT_PROXY] POST {url} status={resp.status_code}", flush=True)
+    try:
+        snippet = resp.text.replace("\n", " ")[:200]
+    except Exception:
+        snippet = "<non-text-body>"
+    print(f"[SMT_PROXY] SMT body_snip={snippet}", flush=True)
 
     try:
         data = resp.json()

@@ -155,8 +155,21 @@ export async function POST(req: NextRequest) {
       Date.UTC(now.getUTCFullYear() + 1, now.getUTCMonth(), now.getUTCDate()),
     );
 
-    const smtRequestorId = getEnvOrDefault("SMT_REQUESTOR_ID", "INTELLIWATTAPI");
-    const smtRequestorAuthId = getEnvOrDefault("SMT_REQUESTOR_AUTH_ID", "INTELLIWATT_AUTH_ID");
+    const smtRequestorId =
+      process.env.SMT_REQUESTOR_ID?.trim() || process.env.SMT_USERNAME?.trim() || "";
+    if (!smtRequestorId) {
+      return NextResponse.json(
+        { ok: false, error: "SMT_REQUESTOR_ID (or SMT_USERNAME) must be configured." },
+        { status: 500 },
+      );
+    }
+    const smtRequestorAuthId = process.env.SMT_REQUESTOR_AUTH_ID?.trim() || "";
+    if (!smtRequestorAuthId) {
+      return NextResponse.json(
+        { ok: false, error: "SMT_REQUESTOR_AUTH_ID must be configured." },
+        { status: 500 },
+      );
+    }
 
     const created = await prismaAny.smtAuthorization.create({
       data: {

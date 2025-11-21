@@ -72,7 +72,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (dataTypes.length === 0) dataTypes.push('MONTHLY');
 
   const requestorId =
-    process.env.SMT_REQUESTOR_ID ?? process.env.SMT_USERNAME ?? process.env.SMT_REQUESTOR ?? 'INTELLIWATT';
+    process.env.SMT_REQUESTOR_ID?.trim() ??
+    process.env.SMT_USERNAME?.trim() ??
+    '';
+  if (!requestorId) {
+    return NextResponse.json(
+      { ok: false, error: 'Missing SMT_REQUESTOR_ID/SMT_USERNAME configuration.' },
+      { status: 500 },
+    );
+  }
   const requestorType = process.env.SMT_REQUESTOR_TYPE ?? 'CSP';
   const requestorAuthId = process.env.SMT_REQUESTOR_AUTH_ID;
 

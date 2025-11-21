@@ -68,7 +68,7 @@ function buildNewAgreementBody(payload: SmtAgreementRequest): any {
   const NewAgreement: any = {
     trans_id: transId,
     requestorID: SMT_REQUESTOR_ID,
-    requesterType: "CSP",
+    requestorType: "CSP",
     requestorRole: "CSP",
     requestorAuthID: SMT_REQUESTOR_AUTH_ID || undefined,
     apiServiceID: SMT_SERVICE_ID,
@@ -112,7 +112,7 @@ function buildNewSubscriptionBody(payload: SmtAgreementRequest): any {
   const NewSubscription: any = {
     trans_id: transId,
     requestorID: SMT_REQUESTOR_ID,
-    requesterType: "CSP",
+    requestorType: "CSP",
     requestorRole: "CSP",
     requestorAuthID: SMT_REQUESTOR_AUTH_ID || undefined,
     apiServiceID: SMT_SERVICE_ID,
