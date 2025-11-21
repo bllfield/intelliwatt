@@ -2371,6 +2371,12 @@ We have extended the Smart Meter Texas ingest pipeline and admin tooling:
 - Proxy fan-out to SMT `/v2/NewAgreement/` and `/v2/NewSubscription/` executes, but SMT returns HTTP 401 `"Username/ServiceID Mismatch on both Header and Payload message."` because the current request bodies are placeholders.
 - **Next:** Implement real agreement/subscription payload builders in the Next.js app (leveraging `SMT_REQUESTOR_ID`, `SMT_REQUESTOR_AUTH_ID`, service ID, and house ESIID) so SMT accepts the calls and resulting status flows back through `SmtAuthorization.smtStatus` / `smtStatusMessage`.
 
+### 2025-11-20 — SMT Agreement / Subscription Payloads
+
+- Implemented `lib/smt/agreements.ts` to build SMT-spec NewAgreement and NewSubscription JSON bodies using SMT_REQUESTOR_ID, SMT_REQUESTOR_AUTH_ID, SMT_SERVICE_ID (fallback to SMT_USERNAME), and SMT_LANG_DEFAULT.
+- Vercel now posts `{ agreement: { name: "NewAgreement", body: { NewAgreement: { … } } }, subscription: { name: "NewSubscription", body: { NewSubscription: { … } } } }` to the droplet `/agreements` proxy; proxy/JWT handling and ingest pipeline are unchanged.
+- `SmtAuthorization` continues to expose `smtStatus` / `smtStatusMessage`, allowing ops to see SMT validation results.
+
 ### PC-2025-11-20-A — SMT Agreements + PoA Live Wiring
 
 - Extended `SmtAuthorization` to record SMT agreement/subscription identifiers, status fields, and PoA consent metadata (text version, IP, user agent) without altering the existing ingest pipeline.
