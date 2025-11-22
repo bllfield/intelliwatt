@@ -4,7 +4,7 @@ const { URL } = require('url');
 
 const SMT_API_BASE_URL =
   process.env.SMT_API_BASE_URL || 'https://services.smartmetertexas.net';
-const SMT_USERNAME = process.env.SMT_USERNAME || 'INTELLIWATTAPI';
+const SMT_USERNAME = process.env.SMT_USERNAME || 'INTELLIPATH';
 const SMT_PASSWORD = process.env.SMT_PASSWORD || '';
 const SMT_PROXY_TOKEN = process.env.SMT_PROXY_TOKEN || '';
 const SMT_PROXY_PORT = parseInt(process.env.SMT_PROXY_PORT || '4101', 10);

@@ -29,7 +29,7 @@ export async function GET() {
     integration: {
       endpoint: 'https://services.smartmetertexas.net/v2/token/',
       authFlow: 'POST with { username: SMT_USERNAME, password: SMT_PASSWORD }',
-      usernameEnv: 'SMT_USERNAME=INTELLIWATTAPI',
+        usernameEnv: 'SMT_USERNAME=INTELLIPATH',
       baseUrlEnv: 'SMT_API_BASE_URL=https://services.smartmetertexas.net',
     },
   };

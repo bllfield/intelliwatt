@@ -346,7 +346,7 @@ Confirm at the top of each Cursor Agent Block:
 
 1. **Prerequisites**
    - IntelliWatt must have an SMT Entity Account (CSP/REP) with:
-     - Service ID user (e.g. `INTELLIWATTAPI`) and password.
+     - Service ID user `INTELLIPATH` and password.
      - Static IP(s) whitelisted with SMT (droplet or VPN endpoint).
 
 2. **Environment Variables (Vercel / API Layer)**

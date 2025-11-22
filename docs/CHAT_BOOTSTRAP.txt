@@ -1,6 +1,6 @@
 This is the new chat. Use these instructions as your brain. Don’t recreate them, just follow them, and continue the project from the exact state we are at.
 
-🔥 INTELLIWATT · SMT JWT STATUS BOOTSTRAP (UPDATED 2025-11-17)
+🔥 INTELLIWATT · SMT JWT STATUS BOOTSTRAP (UPDATED 2025-11-22)
 You are ChatGPT inside the IntelliWatt/IntelliPath project.
 
 Follow docs/CHATGPT_HOUSE_RULES.md:
@@ -53,7 +53,7 @@ WORKING PROD CREDS (VERIFIED)
 We have successfully tested on the SMT droplet:
 
 - SMT_API_BASE_URL = https://services.smartmetertexas.net
-- SMT_USERNAME     = INTELLIWATTAPI
+- SMT_USERNAME     = INTELLIPATH
 - SMT_PASSWORD     = (the SMT API Service ID password set in the SMT portal)
 
 Droplet test script (already created and verified):
@@ -64,7 +64,7 @@ Droplet test script (already created and verified):
 This script does:
 
 SMT_API_BASE_URL="${SMT_API_BASE_URL:-https://services.smartmetertexas.net}"
-SMT_USERNAME="${SMT_USERNAME:-INTELLIWATTAPI}"
+SMT_USERNAME="${SMT_USERNAME:-INTELLIPATH}"
 
 Prompts for password, then:
 
@@ -102,7 +102,7 @@ Because of that:
       integration: {
         endpoint: "https://services.smartmetertexas.net/v2/token/",
         authFlow: "POST with { username: SMT_USERNAME, password: SMT_PASSWORD }",
-        usernameEnv: "SMT_USERNAME=INTELLIWATTAPI",
+        usernameEnv: "SMT_USERNAME=INTELLIPATH",
         baseUrlEnv: "SMT_API_BASE_URL=https://services.smartmetertexas.net"
       }
     }
@@ -124,9 +124,9 @@ WHAT THE NEXT GPT SHOULD DO
 ========================================
 
 - Assume SMT JWT auth **already works** using:
-  - SMT_API_BASE_URL = https://services.smartmetertexas.net
-  - SMT_USERNAME     = INTELLIWATTAPI
-  - SMT_PASSWORD     = configured in SMT portal
+- SMT_API_BASE_URL = https://services.smartmetertexas.net
+- SMT_USERNAME     = INTELLIPATH
+- SMT_PASSWORD     = configured in SMT portal
 - NEVER reintroduce /oauth/token, client_credentials, or FTPS-only flows.
 - If SMT auth needs to be verified, instruct me to:
   - SSH to intelliwatt-smt-proxy
@@ -181,9 +181,9 @@ DROPLET LOG TAILING (LAST 5 MINUTES)
 
 On the droplet, run as `root` or prefix with `sudo`:
 
-sudo journalctl -u smt-webhook.service -n 200 -f
-  journalctl -u smt-webhook.service -f
-  journalctl -u smt-ingest.service --since "5 minutes ago" --no-pager
+- `sudo journalctl -u smt-webhook.service -n 200 -f`
+- `sudo journalctl -u smt-webhook.service --since "5 minutes ago" --no-pager`
+- `sudo journalctl -u smt-ingest.service --since "5 minutes ago" --no-pager`
 
 - All droplet-side SMT scripts live in the repo and must be edited via Cursor:
   - `deploy/smt/fetch_and_post.sh`

@@ -162,6 +162,8 @@ When the checkbox is checked, the backend sets:
 | Env `SMT_USERNAME` | `smtRequestorId` | `requestorID` |
 | Env `SMT_REQUESTOR_AUTH_ID` | `smtRequestorAuthId` | `requesterAuthenticationID` |
 
+> **Canonical production identity (2025-11):** `SMT_USERNAME = INTELLIPATH`, `SMT_REQUESTOR_ID = INTELLIPATH`, `SMT_REQUESTOR_AUTH_ID = 134642921` (Intellipath Solutions LLC DUNS). All SMT REST payloads and token requests must use this Service ID consistently.
+
 The same SMT service ID must be used in three places for every API call:
 
 1. SMT `username` header (JWT service ID)

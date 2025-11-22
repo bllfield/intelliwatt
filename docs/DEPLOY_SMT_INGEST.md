@@ -658,7 +658,7 @@ Example `/etc/default/smt-token-proxy`:
 
 ```ini
 SMT_API_BASE_URL="https://services.smartmetertexas.net"
-SMT_USERNAME="INTELLIWATTAPI"
+SMT_USERNAME="INTELLIPATH"
 SMT_PASSWORD="********"
 SMT_PROXY_TOKEN="ChangeThisToAStrongSharedSecret_1763428355"
 SMT_PROXY_PORT="4101"

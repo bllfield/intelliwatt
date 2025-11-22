@@ -11,9 +11,11 @@
 - `SMT_PASSWORD` – SMT API Service ID password.  
 - `SMT_REQUESTOR_ID` – **Deprecated alias.** Historically used for `requestorID`, but the system now derives the requestor ID directly from `SMT_USERNAME`.  
 - `SMT_REQUESTOR_AUTH_ID` – SMT/PUCT authentication ID (e.g., DUNS). Placed in `requesterAuthenticationID`.  
+- `SMT_SERVICE_ID` – Optional explicit override for the SMT service ID; defaults to `SMT_USERNAME`.  
 
 > **Current production snapshot (2025-11-21)**  
 > - `SMT_USERNAME` / `SMT_REQUESTOR_ID` = `INTELLIPATH` (SMT API Service ID)  
+> - `SMT_SERVICE_ID` = `INTELLIPATH`  
 > - `SMT_REQUESTOR_AUTH_ID` = `134642921` (Intellipath Solutions LLC DUNS on SMT)  
 > - `SMT_API_BASE_URL` = `https://services.smartmetertexas.net`
 

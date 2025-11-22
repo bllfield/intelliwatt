@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SMT_API_BASE_URL="${SMT_API_BASE_URL:-https://services.smartmetertexas.net}"
-SMT_USERNAME="${SMT_USERNAME:-INTELLIWATTAPI}"
+SMT_USERNAME="${SMT_USERNAME:-INTELLIPATH}"
 
 echo "SMT_API_BASE_URL: ${SMT_API_BASE_URL}"
 echo "SMT_USERNAME:     ${SMT_USERNAME}"

@@ -2071,11 +2071,11 @@ The current **SMT Interface Guide v2** documents the REST token and JWT behavior
 
 3. **Environment Variables (high-level)**
    - SMT REST token + ad hoc API calls require:
-     - `SMT_API_BASE_URL` (UAT or Prod)
-    - `SMT_USERNAME` (SMT service ID username, e.g. `INTELLIWATTAPI` — legacy example; current production service ID is `INTELLIPATH`)
-     - `SMT_PASSWORD` (SMT service ID password)
-     - `SMT_REQUESTOR_ID` (usually the same as `SMT_USERNAME`)
-     - `SMT_REQUESTOR_AUTH_ID` (DUNS or other authentication ID as registered with SMT)
+    - `SMT_API_BASE_URL` (UAT or Prod)
+    - `SMT_USERNAME` (SMT service ID username — legacy examples such as `INTELLIWATTAPI` are no longer valid; use `INTELLIPATH`)
+    - `SMT_PASSWORD` (SMT service ID password)
+    - `SMT_REQUESTOR_ID` (must match `SMT_USERNAME`, i.e. `INTELLIPATH`)
+    - `SMT_REQUESTOR_AUTH_ID` (DUNS or other authentication ID as registered with SMT; `134642921` in production)
    - SFTP ingestion uses:
      - `SMT_HOST`, `SMT_USER`, `SMT_KEY`, `SMT_REMOTE_DIR`, `SMT_LOCAL_DIR`
    - Any `SMT_JWT_CLIENT_ID` / `SMT_JWT_CLIENT_SECRET` fields are considered **legacy
@@ -2367,7 +2367,7 @@ We have extended the Smart Meter Texas ingest pipeline and admin tooling:
 ### 2025-11-20 – SMT `/agreements` proxy wired to NewAgreement/NewSubscription
 
 - Droplet webhook `POST /agreements` is live, protected by `SMT_PROXY_TOKEN`, and Vercel now calls it via `SMT_PROXY_AGREEMENTS_URL`.
-- Droplet successfully obtains SMT JWTs from `/v2/token/` using `SMT_USERNAME=INTELLIWATTAPI` (legacy example; current production service ID is `INTELLIPATH`) and the configured `SMT_PASSWORD`.
+- Droplet successfully obtains SMT JWTs from `/v2/token/` using `SMT_USERNAME=INTELLIPATH` and the configured `SMT_PASSWORD`. (Older references to `INTELLIWATTAPI` are legacy only.)
 - Proxy fan-out to SMT `/v2/NewAgreement/` and `/v2/NewSubscription/` executes, but SMT returns HTTP 401 `"Username/ServiceID Mismatch on both Header and Payload message."` because the current request bodies are placeholders.
 - **Next:** Implement real agreement/subscription payload builders in the Next.js app (leveraging `SMT_REQUESTOR_ID`, `SMT_REQUESTOR_AUTH_ID`, service ID, and house ESIID) so SMT accepts the calls and resulting status flows back through `SmtAuthorization.smtStatus` / `smtStatusMessage`.
 
@@ -2467,3 +2467,4 @@ We have extended the Smart Meter Texas ingest pipeline and admin tooling:
 - Confirmed SMT currently provides meter attributes via SFTP CSV for INTELLIPATH; `/v2/meterInfo/` returns acknowledgements and `deliveryMode: "API"` yields errorCode `2076`.
 - Added a droplet test script (`scripts/test_smt_meter_info.mjs`) that uses CSV/SFTP semantics so Support has a canonical payload + response when filing SMT tickets.
 - **Next planned step (future work):** after WattBuy returns an address+ESIID, call `/v2/meterInfo/`, ingest the SFTP CSV to capture the authoritative `meterNumber`, and feed that into NewAgreement/NewSubscription payloads. (Not implemented yet; requires SFTP parsing pipeline updates.)
+- This alignment **supersedes** all earlier references to `INTELLIWATT`/`INTELLIWATTAPI` as active SMT service IDs; those names are legacy only.

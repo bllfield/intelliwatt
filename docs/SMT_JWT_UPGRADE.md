@@ -8,8 +8,8 @@ Smart Meter Texas upgraded its security model per Market Notice **SMT-M-A051425-
 
    ```json
    {
-     "username": "<SERVICE_ID_USERNAME>",
-     "password": "<SERVICE_ID_PASSWORD>"
+     "username": "INTELLIPATH",
+     "password": "<SMT_SERVICE_ID_PASSWORD>"
    }
    ```
 
@@ -48,6 +48,8 @@ Smart Meter Texas upgraded its security model per Market Notice **SMT-M-A051425-
 > - `SMT_USERNAME` = `INTELLIPATH` (API Service ID)  
 > - `SMT_REQUESTOR_ID` = `INTELLIPATH` (must match the service ID SMT expects)  
 > - `SMT_REQUESTOR_AUTH_ID` = `134642921` (Intellipath Solutions LLC DUNS on SMT)
+
+> Any earlier references to `INTELLIWATT` or `INTELLIWATTAPI` as the SMT Service ID are legacy only. All active code, scripts, and documentation now assume `INTELLIPATH` as the canonical Service ID.
 
 ### Deployment Guidance
 

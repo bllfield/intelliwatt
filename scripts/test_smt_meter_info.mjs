@@ -6,10 +6,8 @@
 //   . .intelliwatt.env
 //   set +a
 //   cd /home/deploy/apps/intelliwatt
-//   node scripts/test_smt_meter_info.mjs
-
-// ESIID to test
-const ESIID_UNDER_TEST = "10443720004529147";
+//   node scripts/test_smt_meter_info.mjs <ESIID>
+// or set SMT_METERINFO_ESIID in the environment.
 
 async function main() {
   const {
@@ -50,9 +48,20 @@ async function main() {
     process.exit(1);
   }
 
+  const esiidFromArg = (process.argv[2] || "").trim();
+  const esiidFromEnv = (process.env.SMT_METERINFO_ESIID || "").trim();
+  const esiid = esiidFromArg || esiidFromEnv;
+
+  if (!esiid) {
+    console.error(
+      "[TEST] Missing ESIID. Provide it as an argument or set SMT_METERINFO_ESIID in the environment.",
+    );
+    process.exit(1);
+  }
+
   console.log("=== SMT meterInfo ESIID Test ===");
   console.log("Base URL:          ", baseUrl);
-  console.log("ESIID under test:  ", ESIID_UNDER_TEST);
+  console.log("ESIID under test:  ", esiid);
   console.log("requestorID:       ", requestorID);
   console.log("auth ID (DUNS):    ", requesterAuthenticationID);
   console.log("");
@@ -134,24 +143,22 @@ async function main() {
   // Simple trans_id for traceability
   const transId = `TESTMI${Math.random().toString(36).slice(2, 10).toUpperCase()}`;
 
-const meterInfoBody = {
-  // NOTE: For INTELLIPATH, SMT delivers meter attributes via SFTP as CSV files.
-  // /v2/meterInfo/ returns an acknowledgement JSON; the actual data lands on
-  // ftp.smartmetertexas.biz under our SFTP account.
-  MeterSearchRequest: {
+  const meterInfoBody = {
+    // NOTE: For INTELLIPATH, SMT delivers meter attributes via SFTP as CSV files.
+    // /v2/meterInfo/ returns an acknowledgement JSON; the actual data lands on
+    // ftp.smartmetertexas.biz under our SFTP account.
     trans_id: transId,
     requestorID,
     requesterType: "CSP",
     requesterAuthenticationID,
-    reportFormat: "CSV", // SMT delivers meter attributes via SFTP (CSV)
-    version: "L", // Latest
+    reportFormat: "CSV",
+    version: "L",
     ESIIDMeterList: [
       {
-        esiid: ESIID_UNDER_TEST,
+        esiid,
       },
     ],
     SMTTermsandConditions: "Y",
-  },
   };
 
   console.log("[STEP 2] Calling SMT /v2/meterInfo/ with payload:");
@@ -184,17 +191,17 @@ const meterInfoBody = {
 
   if (miStatus < 200 || miStatus >= 300) {
     console.error(
-    "[RESULT] /v2/meterInfo/ did NOT succeed (non-2xx). SMT may be blocking meter attributes for this ESIID or this Service ID configuration.",
+      "[RESULT] /v2/meterInfo/ did NOT succeed (non-2xx). SMT may be blocking meter attributes for this ESIID or this Service ID configuration.",
     );
     process.exit(1);
   }
 
-console.log(
-  `[RESULT] /v2/meterInfo/ returned status ${miStatus}. See body above for acknowledgement or fault codes.`,
-);
-console.log(
-  "Meter attributes, if any, will be delivered via SFTP as CSV according to SMT’s configuration.",
-);
+  console.log(
+    `[RESULT] /v2/meterInfo/ returned status ${miStatus}. See body above for acknowledgement or fault codes.`,
+  );
+  console.log(
+    "Meter attributes, if any, will be delivered via SFTP as CSV according to SMT’s configuration.",
+  );
   process.exit(0);
 }
 

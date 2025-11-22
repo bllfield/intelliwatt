@@ -80,7 +80,7 @@ SMT_API_BASE_URL = (
     os.getenv("SMT_API_BASE_URL", "https://services.smartmetertexas.net").rstrip("/")
     or "https://services.smartmetertexas.net"
 )
-SMT_USERNAME = os.getenv("SMT_USERNAME", "INTELLIWATTAPI")
+SMT_USERNAME = os.getenv("SMT_USERNAME", "INTELLIPATH")
 SMT_PASSWORD = os.getenv("SMT_PASSWORD")
 SMT_PROXY_TOKEN = os.getenv("SMT_PROXY_TOKEN")
 
