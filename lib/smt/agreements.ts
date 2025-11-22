@@ -138,7 +138,6 @@ type InnerNewSubscriptionPayload = {
   requesterAuthenticationID: string;
   subscriptionType: "CSPENROLL" | "SCHEDULE" | "SCHEDULES" | "REPENROLL";
   historicalSubscriptionDuration: number;
-  reportFormat: ReportFormat;
   dataType: DataType;
   deliveryMode: DeliveryMode;
   SMTTermsandConditions: "Y";
@@ -235,7 +234,6 @@ function buildNewSubscriptionPayload(
       1,
       Math.round(input.historicalMonthsBack || 12),
     ),
-    reportFormat: includeInterval ? "LSE" : "CSV",
     dataType: includeInterval ? "INTERVAL" : "BILLING",
     deliveryMode: "FTP",
     SMTTermsandConditions: "Y",
