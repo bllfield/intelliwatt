@@ -1,3 +1,14 @@
+// Simple SMT /v2/meterInfo/ test script.
+// Runs against a single ESIID using env-backed SMT credentials.
+// Usage (on droplet, as deploy user):
+//   cd /home/deploy
+//   set -a
+//   . .intelliwatt.env
+//   set +a
+//   cd /home/deploy/apps/intelliwatt
+//   node scripts/test_smt_meter_info.mjs
+
+// ESIID to test
 const ESIID_UNDER_TEST = "10443720004529147";
 
 async function main() {
@@ -9,6 +20,7 @@ async function main() {
     SMT_REQUESTOR_AUTH_ID,
   } = process.env;
 
+  // Base URL: default to production if env not set
   const baseUrl =
     SMT_API_BASE_URL && SMT_API_BASE_URL.trim().length > 0
       ? SMT_API_BASE_URL.trim().replace(/\/+$/, "")
@@ -16,6 +28,10 @@ async function main() {
 
   const username = (SMT_USERNAME || "").trim();
   const password = (SMT_PASSWORD || "").trim();
+
+  // Per SMT guide:
+  // - requestorID = Service ID user name
+  // - requesterAuthenticationID = DUNS
   const requestorID = (SMT_REQUESTOR_ID || SMT_USERNAME || "").trim();
   const requesterAuthenticationID =
     (SMT_REQUESTOR_AUTH_ID || "134642921").trim();
@@ -35,15 +51,18 @@ async function main() {
   }
 
   console.log("=== SMT meterInfo ESIID Test ===");
-  console.log("Base URL:         ", baseUrl);
-  console.log("ESIID under test: ", ESIID_UNDER_TEST);
-  console.log("requestorID:      ", requestorID);
-  console.log("auth ID (DUNS):   ", requesterAuthenticationID);
+  console.log("Base URL:          ", baseUrl);
+  console.log("ESIID under test:  ", ESIID_UNDER_TEST);
+  console.log("requestorID:       ", requestorID);
+  console.log("auth ID (DUNS):    ", requesterAuthenticationID);
   console.log("");
 
-  // Step 1: request JWT token
-  const tokenUrl = `${baseUrl}/v2/token/`;
+  // ---------------------------------------------------------------------------
+  // STEP 1: Get JWT token via /v2/token/
+  // ---------------------------------------------------------------------------
   console.log("[STEP 1] Requesting SMT JWT access token...");
+
+  const tokenUrl = `${baseUrl}/v2/token/`;
 
   let tokenRes;
   try {
@@ -58,18 +77,20 @@ async function main() {
       }),
     });
   } catch (err) {
-    console.error("[ERROR] Failed to call SMT /v2/token/:", err);
+    console.error("[ERROR] Failed to call /v2/token/:", err);
     process.exit(1);
   }
 
+  const tokenStatus = tokenRes.status;
   const tokenText = await tokenRes.text();
-  console.log("  /v2/token/ status:", tokenRes.status);
+
+  console.log("  /v2/token/ status:", tokenStatus);
   console.log("  /v2/token/ body:  ", tokenText);
   console.log("");
 
-  if (!tokenRes.ok) {
+  if (tokenStatus < 200 || tokenStatus >= 300) {
     console.error(
-      "[ERROR] SMT /v2/token/ did not return 200. Cannot proceed to /v2/meterInfo/.",
+      "[RESULT] /v2/token/ did NOT succeed (non-2xx). Cannot proceed to meterInfo.",
     );
     process.exit(1);
   }
@@ -77,7 +98,7 @@ async function main() {
   let accessToken;
   try {
     const tokenJson = JSON.parse(tokenText);
-    accessToken = tokenJson.access_token || tokenJson.accessToken;
+    accessToken = tokenJson.accessToken;
   } catch (err) {
     console.error("[ERROR] Failed to parse token JSON:", err);
     process.exit(1);
@@ -85,7 +106,7 @@ async function main() {
 
   if (!accessToken) {
     console.error(
-      "[ERROR] No access_token in SMT token response. Check SMT credentials.",
+      "[ERROR] Token response did not contain accessToken. Cannot proceed.",
     );
     process.exit(1);
   }
@@ -93,26 +114,39 @@ async function main() {
   console.log("[STEP 1] Got SMT JWT access token.");
   console.log("");
 
-  // Step 2: call /v2/meterInfo/
+  // ---------------------------------------------------------------------------
+  // STEP 2: Call /v2/meterInfo/ (Meter Information Request)
+  // Per SMT guide example:
+  // {
+  //   "trans_id":"123",
+  //   "requestorID":"SUMANTH_CSP",
+  //   "requesterType":"CSP",
+  //   "requesterAuthenticationID":"199999999999",
+  //   "reportFormat":"CSV",
+  //   "version":"L",
+  //   "ESIIDMeterList":[ { "esiid":"..." } ],
+  //   "SMTTermsandConditions":"y"
+  // }
+  // ---------------------------------------------------------------------------
+
   const meterInfoUrl = `${baseUrl}/v2/meterInfo/`;
-  const transId = `TEST${Date.now().toString(36).toUpperCase()}`;
+
+  // Simple trans_id for traceability
+  const transId = `TESTMI${Math.random().toString(36).slice(2, 10).toUpperCase()}`;
 
   const meterInfoBody = {
-    MeterSearchRequest: {
-      trans_id: transId,
-      requestorID,
-      requesterType: "CSP",
-      requesterAuthenticationID,
-      reportFormat: "JSON",
-      deliveryMode: "API",
-      version: "L",
-      ESIIDMeterList: [
-        {
-          esiid: ESIID_UNDER_TEST,
-        },
-      ],
-      SMTTermsandConditions: "Y",
-    },
+    trans_id: transId,
+    requestorID,
+    requesterType: "CSP",
+    requesterAuthenticationID,
+    reportFormat: "CSV", // match guide example (CSV file via FTP/SFTP)
+    version: "L", // Latest
+    ESIIDMeterList: [
+      {
+        esiid: ESIID_UNDER_TEST,
+      },
+    ],
+    SMTTermsandConditions: "y", // match guide's lowercase "y"
   };
 
   console.log("[STEP 2] Calling SMT /v2/meterInfo/ with payload:");
@@ -131,28 +165,30 @@ async function main() {
       body: JSON.stringify(meterInfoBody),
     });
   } catch (err) {
-    console.error("[ERROR] Failed to call SMT /v2/meterInfo/:", err);
+    console.error("[ERROR] Failed to call /v2/meterInfo/:", err);
     process.exit(1);
   }
 
+  const miStatus = miRes.status;
   const miText = await miRes.text();
-  console.log("  /v2/meterInfo/ status:", miRes.status);
+
+  console.log("  /v2/meterInfo/ status:", miStatus);
   console.log("  /v2/meterInfo/ body:");
   console.log(miText);
+  console.log("");
 
-  if (!miRes.ok) {
+  if (miStatus < 200 || miStatus >= 300) {
     console.error(
-      "[RESULT] /v2/meterInfo/ did NOT succeed (non-2xx). SMT may be blocking meter attributes for this ESIID with the current authorization.",
+      "[RESULT] /v2/meterInfo/ did NOT succeed (non-2xx). SMT may be blocking meter attributes for this ESIID or this ServiceID configuration.",
     );
-    process.exit(2);
+    process.exit(1);
   }
 
-  console.log("");
   console.log(
     "[RESULT] /v2/meterInfo/ returned a successful status code. Inspect the body above for meter attributes or acknowledgements.",
   );
   console.log(
-    "If SMT only returns an acknowledgement with correlationId, actual meter details may arrive later via SFTP depending on SMT’s configuration.",
+    "If SMT only returns an acknowledgement with correlationId, the actual CSV may arrive later via SFTP depending on SMT’s configuration.",
   );
   process.exit(0);
 }
@@ -161,4 +197,3 @@ main().catch((err) => {
   console.error("[FATAL] Unhandled error in meterInfo test:", err);
   process.exit(1);
 });
-
