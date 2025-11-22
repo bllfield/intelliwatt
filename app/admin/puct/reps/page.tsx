@@ -1,7 +1,8 @@
-import { parse } from "csv-parse";
 import { PrismaClient } from "@prisma/client";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { parse } from "csv-parse";
+import { RepSearchBox } from "./RepSearchBox";
 
 const prisma = new PrismaClient() as any;
 
@@ -222,26 +223,7 @@ export default async function PuctRepImportPage({ searchParams }: PageProps) {
 
       <div className="space-y-4 rounded-lg border border-brand-blue/20 bg-brand-white p-6 shadow-lg">
         <h2 className="text-xl font-semibold text-brand-navy">Search REP Directory</h2>
-        <form method="get" className="flex flex-col gap-4 sm:flex-row sm:items-end">
-          <div className="flex-1">
-            <label className="block text-sm font-medium text-brand-navy mb-2" htmlFor="rep-search">
-              Search by PUCT number, legal name, or DBA
-            </label>
-            <input
-              id="rep-search"
-              name="search"
-              defaultValue={searchTerm}
-              placeholder="e.g. 10004 or Just Energy"
-              className="w-full rounded-md border border-brand-blue/30 px-3 py-2 text-sm text-brand-navy shadow-sm focus:border-brand-blue focus:outline-none focus:ring-1 focus:ring-brand-blue"
-            />
-          </div>
-          <button
-            type="submit"
-            className="inline-flex items-center rounded-md border border-brand-blue bg-brand-blue/10 px-4 py-2 text-sm font-medium text-brand-navy transition hover:bg-brand-blue/20"
-          >
-            Search
-          </button>
-        </form>
+        <RepSearchBox initialValue={searchTerm} />
 
         {searchTerm ? (
           <div className="space-y-3">
