@@ -48,16 +48,10 @@ async function main() {
     process.exit(1);
   }
 
+  const DEFAULT_ESIID = "10443720004529147";
   const esiidFromArg = (process.argv[2] || "").trim();
   const esiidFromEnv = (process.env.SMT_METERINFO_ESIID || "").trim();
-  const esiid = esiidFromArg || esiidFromEnv;
-
-  if (!esiid) {
-    console.error(
-      "[TEST] Missing ESIID. Provide it as an argument or set SMT_METERINFO_ESIID in the environment.",
-    );
-    process.exit(1);
-  }
+  const esiid = esiidFromArg || esiidFromEnv || DEFAULT_ESIID;
 
   console.log("=== SMT meterInfo ESIID Test ===");
   console.log("Base URL:          ", baseUrl);
