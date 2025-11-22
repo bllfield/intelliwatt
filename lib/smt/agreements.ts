@@ -134,6 +134,7 @@ type DeliveryMode = "FTP" | "API";
 type InnerNewSubscriptionPayload = {
   trans_id: string;
   requestorID: string;
+  serviceID: string;
   requesterType: "CSP";
   requesterAuthenticationID: string;
   subscriptionType: "CSPENROLL" | "SCHEDULE" | "SCHEDULES" | "REPENROLL";
@@ -227,6 +228,7 @@ function buildNewSubscriptionPayload(
   const envelope: InnerNewSubscriptionPayload = {
     trans_id: buildTransId(),
     requestorID: identity.requestorID,
+    serviceID: identity.serviceID,
     requesterType: "CSP",
     requesterAuthenticationID: identity.requesterAuthenticationID,
     subscriptionType: "CSPENROLL",
