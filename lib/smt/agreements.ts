@@ -127,7 +127,7 @@ type NewAgreementPayload = {
   SMTTermsandConditions: "Y";
 };
 
-type NewSubscriptionPayload = {
+type InnerNewSubscriptionPayload = {
   trans_id: string;
   requestorID: string;
   requesterType: "CSP";
@@ -135,6 +135,10 @@ type NewSubscriptionPayload = {
   subscriptionType: "CSPENROLL" | "SCHEDULE" | "SCHEDULES" | "REPENROLL";
   historicalSubscriptionDuration: number;
   ESIIDList: string[];
+};
+
+type NewSubscriptionPayload = {
+  NewSubscription: InnerNewSubscriptionPayload;
 };
 
 function resolveAgreementDuration(monthsBack: number): 1 | 3 | 6 | 9 | 12 | 24 | 36 {
@@ -212,7 +216,7 @@ function buildNewSubscriptionPayload(
   const esiid = normalizeEsiid(input.esiid);
   const identity = buildSmtIdentity();
 
-  return {
+  const envelope: InnerNewSubscriptionPayload = {
     trans_id: buildTransId(),
     requestorID: identity.requestorID,
     requesterType: "CSP",
@@ -224,6 +228,7 @@ function buildNewSubscriptionPayload(
     ),
     ESIIDList: [esiid],
   };
+  return { NewSubscription: envelope };
 }
 
 export async function createAgreementAndSubscription(
