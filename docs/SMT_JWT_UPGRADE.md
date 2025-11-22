@@ -9,7 +9,7 @@ Smart Meter Texas upgraded its security model per Market Notice **SMT-M-A051425-
    ```json
    {
      "username": "INTELLIPATH",
-     "password": "<SMT_SERVICE_ID_PASSWORD>"
+     "password": "<SMT_PASSWORD>"
    }
    ```
 
