@@ -2468,3 +2468,10 @@ We have extended the Smart Meter Texas ingest pipeline and admin tooling:
 - Added a droplet test script (`scripts/test_smt_meter_info.mjs`) that uses CSV/SFTP semantics so Support has a canonical payload + response when filing SMT tickets.
 - **Next planned step (future work):** after WattBuy returns an address+ESIID, call `/v2/meterInfo/`, ingest the SFTP CSV to capture the authoritative `meterNumber`, and feed that into NewAgreement/NewSubscription payloads. (Not implemented yet; requires SFTP parsing pipeline updates.)
 - This alignment **supersedes** all earlier references to `INTELLIWATT`/`INTELLIWATTAPI` as active SMT service IDs; those names are legacy only.
+
+### PC-2025-11-22-SMT-METERINFO-MINIMAL — Persist meter attributes
+
+- Added Prisma model `SmtMeterInfo` to persist SMT meter metadata per ESIID/house, including raw payload and the high-value MeterData fields we need for downstream agreement payloads.
+- Added `/api/admin/smt/meter-info` so the SMT droplet can POST meterInfo results back into the app.
+- Introduced `SMT_METERINFO_ENABLED` plus helper `queueMeterInfoForHouse` so Vercel queues a droplet webhook after WattBuy returns an ESIID.
+- Address submit now enqueues meterInfo (fire-and-forget) when an ESIID + houseId are present; SMT REST calls remain droplet-only.

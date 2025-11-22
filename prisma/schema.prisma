@@ -463,6 +463,52 @@ model SmtBillingRead {
   @@index([rawSmtFileId])
 }
 
+model SmtMeterInfo {
+  id           String   @id @default(cuid())
+  houseId      String?
+  esiid        String
+
+  transId              String?
+  meterNumber          String?
+  utilityCompanyId     String?
+  meterSerialNumber    String?
+  utilityMeterId       String?
+  kwhMeterMultiplier   Int?
+  configuredChannels   String?
+  manufacturerName     String?
+  meterClass           String?
+  intervalSetting      String?
+  reverseFlowHandling  String?
+  dgChannel            String?
+  disconnect           String?
+  meterStatus          String?
+  meterPhases          String?
+  meterModel           String?
+
+  testDate             String?
+  installationDate     String?
+  initialProvisionDate String?
+  lastUpdatedRaw       String?
+
+  communicationIndicator      String?
+  instrumentRated             String?
+  currentTransformersRatio    String?
+  potentialTransformersRatio  String?
+  esiFirmwareVersion          String?
+  hanProtocol                 String?
+  smartEnergyProfile          String?
+
+  status       String   @default("pending")
+  errorMessage String?
+  rawPayload   Json?
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([esiid, houseId])
+  @@index([esiid])
+}
+
 model SmtAuthorization {
   id              String   @id @default(cuid())
 

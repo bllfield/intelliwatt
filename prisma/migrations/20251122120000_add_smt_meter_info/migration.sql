@@ -1,0 +1,42 @@
+CREATE TABLE "SmtMeterInfo" (
+    "id" TEXT NOT NULL,
+    "houseId" TEXT,
+    "esiid" TEXT NOT NULL,
+    "meterNumber" TEXT,
+    "transId" TEXT,
+    "utilityCompanyId" TEXT,
+    "meterSerialNumber" TEXT,
+    "utilityMeterId" TEXT,
+    "kwhMeterMultiplier" INTEGER,
+    "configuredChannels" TEXT,
+    "manufacturerName" TEXT,
+    "meterClass" TEXT,
+    "intervalSetting" TEXT,
+    "reverseFlowHandling" TEXT,
+    "dgChannel" TEXT,
+    "disconnect" TEXT,
+    "meterStatus" TEXT,
+    "meterPhases" TEXT,
+    "meterModel" TEXT,
+    "testDate" TEXT,
+    "installationDate" TEXT,
+    "initialProvisionDate" TEXT,
+    "lastUpdatedRaw" TEXT,
+    "communicationIndicator" TEXT,
+    "instrumentRated" TEXT,
+    "currentTransformersRatio" TEXT,
+    "potentialTransformersRatio" TEXT,
+    "esiFirmwareVersion" TEXT,
+    "hanProtocol" TEXT,
+    "smartEnergyProfile" TEXT,
+    "status" TEXT NOT NULL DEFAULT 'pending',
+    "errorMessage" TEXT,
+    "rawPayload" JSONB,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "SmtMeterInfo_pkey" PRIMARY KEY ("id")
+);
+
+CREATE UNIQUE INDEX "SmtMeterInfo_esiid_houseId_key" ON "SmtMeterInfo"("esiid", "houseId");
+CREATE INDEX "SmtMeterInfo_esiid_idx" ON "SmtMeterInfo"("esiid");
+

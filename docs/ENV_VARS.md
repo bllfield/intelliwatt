@@ -132,6 +132,7 @@ Invoke-RestMethod -Headers $headers -Uri "https://<your-preview>.vercel.app/api/
 - `ADMIN_TOKEN` — Must match Vercel
 
 - `INTELLIWATT_BASE_URL` — e.g., `https://intelliwatt.com`
+- `SMT_METERINFO_ENABLED` — Feature flag. When `true`, Vercel queues SMT meterInfo via the droplet after WattBuy returns an ESIID (SMT REST remains droplet-only).
 
 - `SMT_HOST=ftp.smartmetertexas.biz`
 

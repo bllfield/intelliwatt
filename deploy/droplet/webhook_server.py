@@ -84,6 +84,20 @@ SMT_USERNAME = os.getenv("SMT_USERNAME", "INTELLIPATH")
 SMT_PASSWORD = os.getenv("SMT_PASSWORD")
 SMT_PROXY_TOKEN = os.getenv("SMT_PROXY_TOKEN")
 
+APP_BASE_URL = (
+    os.environ.get("APP_BASE_URL")
+    or os.environ.get("INTELLIWATT_APP_BASE_URL")
+    or os.environ.get("VERCEL_URL")
+)
+if APP_BASE_URL and not APP_BASE_URL.startswith("http"):
+    APP_BASE_URL = f"https://{APP_BASE_URL}"
+
+WEBHOOK_SECRET = (
+    os.environ.get("DROPLET_WEBHOOK_SECRET")
+    or os.environ.get("INTELLIWATT_WEBHOOK_SECRET")
+    or ""
+).strip()
+
 
 def run_default_command() -> bytes:
     """
@@ -189,6 +203,189 @@ def handle_smt_authorized(payload: dict) -> bytes:
 
     body = "\n".join(body_parts) + "\n"
     return body.encode()
+
+
+def handle_smt_meter_info(payload: dict) -> bytes:
+    """
+    Handle Vercel webhook asking the droplet to fetch SMT meter info.
+    """
+
+    esiid = str(payload.get("esiid", "")).strip()
+    house_id = payload.get("houseId")
+    ts = payload.get("ts")
+
+    log_parts = [
+        "[INFO] SMT meterInfo webhook received",
+        f"esiid={esiid!r}",
+        f"houseId={house_id!r}",
+        f"ts={ts!r}",
+    ]
+    log_line = " ".join(log_parts)
+    print(log_line, flush=True)
+
+    if not esiid:
+        warn = "[WARN] smt_meter_info payload missing ESIID; skipping"
+        print(warn, flush=True)
+        return (log_line + "\n" + warn + "\n").encode()
+
+    repo_root = "/home/deploy/apps/intelliwatt"
+    cmd = ["node", "scripts/test_smt_meter_info.mjs", "--esiid", esiid, "--json"]
+
+    try:
+        proc = subprocess.run(
+            cmd,
+            check=False,
+            capture_output=True,
+            text=True,
+            cwd=repo_root,
+            timeout=300,
+        )
+    except Exception as exc:
+        err = f"[ERROR] smt_meter_info failed to spawn Node script: {exc!r}"
+        print(err, flush=True)
+        _post_meter_info_error(
+            esiid,
+            house_id,
+            f"Node script spawn failed: {exc}",
+            stdout=None,
+            stderr=None,
+        )
+        return (log_line + "\n" + err + "\n").encode()
+
+    stdout = (proc.stdout or "").strip()
+    stderr = (proc.stderr or "").strip()
+
+    if proc.returncode != 0:
+        err = (
+            "[ERROR] smt_meter_info Node script exited non-zero "
+            f"code={proc.returncode} stdout_len={len(stdout)} stderr_len={len(stderr)}"
+        )
+        print(err, flush=True)
+        _post_meter_info_error(
+            esiid,
+            house_id,
+            f"Node script non-zero exit: {proc.returncode}",
+            stdout=stdout,
+            stderr=stderr,
+        )
+        return (log_line + "\n" + err + "\n").encode()
+
+    meter_json = None
+    if stdout:
+        try:
+            meter_json = json.loads(stdout)
+        except Exception as exc:
+            print(
+                f"[WARN] smt_meter_info failed to parse JSON stdout: {exc!r}",
+                flush=True,
+            )
+
+    meter_data = None
+    trans_id = None
+    meter_number = None
+    if isinstance(meter_json, dict):
+        trans_id = meter_json.get("trans_id")
+        meter_data = meter_json.get("MeterData") or meter_json.get("meterData")
+        if isinstance(meter_data, dict):
+            meter_number = (
+                meter_data.get("utilityMeterId")
+                or meter_data.get("meterSerialNumber")
+                or meter_data.get("meterNumber")
+            )
+
+    payload_for_app: Dict[str, Any] = {
+        "esiid": esiid,
+        "houseId": house_id,
+        "meterNumber": meter_number,
+        "rawPayload": meter_json if meter_json is not None else {"stdout": stdout},
+        "status": "complete" if meter_number or meter_data else "pending",
+    }
+    if meter_data:
+        payload_for_app["meterData"] = meter_data
+    if trans_id:
+        payload_for_app["transId"] = trans_id
+    if stderr:
+        if isinstance(payload_for_app["rawPayload"], dict):
+            payload_for_app["rawPayload"]["_stderr"] = stderr
+
+    response_summary = "[WARN] smt_meter_info missing APP_BASE_URL or WEBHOOK_SECRET; payload not sent"
+    if APP_BASE_URL and WEBHOOK_SECRET:
+        try:
+            resp = requests.post(
+                f"{APP_BASE_URL}/api/admin/smt/meter-info",
+                headers={
+                    "content-type": "application/json",
+                    "x-intelliwatt-secret": WEBHOOK_SECRET,
+                },
+                json=payload_for_app,
+                timeout=30,
+            )
+            response_summary = (
+                "[INFO] smt_meter_info posted meter info to app "
+                f"status={resp.status_code} len={len(getattr(resp, 'text', '') or '')}"
+            )
+        except Exception as exc:
+            response_summary = (
+                f"[ERROR] smt_meter_info POST to app failed: {exc!r}"
+            )
+    else:
+        print(
+            "[WARN] smt_meter_info cannot POST back to app; APP_BASE_URL or WEBHOOK_SECRET missing",
+            flush=True,
+        )
+
+    print(response_summary, flush=True)
+    return (log_line + "\n" + response_summary + "\n").encode()
+
+
+def _post_meter_info_error(
+    esiid: str,
+    house_id: Optional[str],
+    error_message: str,
+    stdout: Optional[str],
+    stderr: Optional[str],
+) -> None:
+    if not APP_BASE_URL or not WEBHOOK_SECRET:
+        print(
+            "[WARN] smt_meter_info error callback skipped; APP_BASE_URL or WEBHOOK_SECRET missing",
+            flush=True,
+        )
+        return
+
+    payload: Dict[str, Any] = {
+        "esiid": esiid,
+        "houseId": house_id,
+        "status": "error",
+        "errorMessage": error_message,
+    }
+    raw_payload: Dict[str, Any] = {}
+    if stdout:
+        raw_payload["stdout"] = stdout
+    if stderr:
+        raw_payload["stderr"] = stderr
+    if raw_payload:
+        payload["rawPayload"] = raw_payload
+
+    try:
+        resp = requests.post(
+            f"{APP_BASE_URL}/api/admin/smt/meter-info",
+            headers={
+                "content-type": "application/json",
+                "x-intelliwatt-secret": WEBHOOK_SECRET,
+            },
+            json=payload,
+            timeout=15,
+        )
+        print(
+            "[INFO] smt_meter_info error callback status=%s"
+            % getattr(resp, "status_code", None),
+            flush=True,
+        )
+    except Exception as exc:
+        print(
+            f"[ERROR] smt_meter_info error callback POST failed: {exc!r}",
+            flush=True,
+        )
 
 
 def get_smt_access_token() -> str:
@@ -497,10 +694,13 @@ class H(BaseHTTPRequestHandler):
                 print(f"[WARN] Failed to parse JSON body in webhook: {e!r}", flush=True)
 
         try:
-            if isinstance(payload, dict) and payload.get("reason") == "smt_authorized":
-                resp_body = handle_smt_authorized(payload)
-            else:
-                resp_body = run_default_command()
+            resp_body = run_default_command()
+            if isinstance(payload, dict):
+                reason = payload.get("reason")
+                if reason == "smt_authorized":
+                    resp_body = handle_smt_authorized(payload)
+                elif reason == "smt_meter_info":
+                    resp_body = handle_smt_meter_info(payload)
 
             self.send_response(200)
             self.end_headers()

@@ -48,12 +48,42 @@ async function main() {
     process.exit(1);
   }
 
-  const args = process.argv.slice(2).map((arg) => arg.trim()).filter(Boolean);
+  const rawArgs = process.argv.slice(2);
+  let jsonMode = false;
+  const args = [];
+  for (let i = 0; i < rawArgs.length; i += 1) {
+    const arg = (rawArgs[i] || "").trim();
+    if (!arg) continue;
+    if (arg.toLowerCase() === "--json") {
+      jsonMode = true;
+      continue;
+    }
+    if (arg.toLowerCase() === "--mode") {
+      const next = rawArgs[i + 1] ? rawArgs[i + 1].trim() : "";
+      if (next.toLowerCase() === "json") {
+        jsonMode = true;
+        i += 1;
+        continue;
+      }
+    }
+    args.push(arg);
+  }
+
+  if (jsonMode) {
+    console.log = (...logArgs) => {
+      console.error(...logArgs);
+    };
+  }
+
+  const trimmedArgs = args.map((arg) => arg.trim()).filter(Boolean);
   let esiidFromArgs = "";
-  for (let i = 0; i < args.length; i += 1) {
-    const arg = args[i];
+  for (let i = 0; i < trimmedArgs.length; i += 1) {
+    const arg = trimmedArgs[i];
     if (arg.toLowerCase() === "--esiid") {
-      esiidFromArgs = args[i + 1] ? args[i + 1] : "";
+      esiidFromArgs =
+        trimmedArgs[i + 1] && !trimmedArgs[i + 1].startsWith("--")
+          ? trimmedArgs[i + 1]
+          : "";
       break;
     }
     if (!arg.startsWith("--") && !esiidFromArgs) {
@@ -209,12 +239,38 @@ async function main() {
     process.exit(1);
   }
 
-  console.log(
-    `[RESULT] /v2/meterInfo/ returned status ${miStatus}. See body above for acknowledgement or fault codes.`,
-  );
-  console.log(
-    "Meter attributes, if any, will be delivered via SFTP as CSV according to SMT’s configuration.",
-  );
+  let parsedMeterInfo = null;
+  try {
+    parsedMeterInfo = JSON.parse(miText);
+  } catch {
+    parsedMeterInfo = null;
+  }
+
+  if (jsonMode) {
+    const payload = {
+      trans_id: meterInfoBody.trans_id,
+      esiid: esiidList.length === 1 ? esiidList[0] : esiidList,
+      status: miStatus,
+      rawResponse: parsedMeterInfo ?? miText,
+    };
+    if (parsedMeterInfo && typeof parsedMeterInfo === "object") {
+      if (parsedMeterInfo.MeterData) {
+        payload.MeterData = parsedMeterInfo.MeterData;
+      }
+      if (!payload.trans_id && parsedMeterInfo.trans_id) {
+        payload.trans_id = parsedMeterInfo.trans_id;
+      }
+    }
+    process.stdout.write(`${JSON.stringify(payload)}\n`);
+  } else {
+    console.log(
+      `[RESULT] /v2/meterInfo/ returned status ${miStatus}. See body above for acknowledgement or fault codes.`,
+    );
+    console.log(
+      "Meter attributes, if any, will be delivered via SFTP as CSV according to SMT’s configuration.",
+    );
+  }
+
   process.exit(0);
 }
 

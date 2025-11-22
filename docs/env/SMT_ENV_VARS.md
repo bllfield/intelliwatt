@@ -12,6 +12,7 @@
 - `SMT_REQUESTOR_ID` – **Deprecated alias.** Historically used for `requestorID`, but the system now derives the requestor ID directly from `SMT_USERNAME`.  
 - `SMT_REQUESTOR_AUTH_ID` – SMT/PUCT authentication ID (e.g., DUNS). Placed in `requesterAuthenticationID`.  
 - `SMT_SERVICE_ID` – Optional explicit override for the SMT service ID; defaults to `SMT_USERNAME`.  
+- `SMT_METERINFO_ENABLED` – Feature flag. When `true`, Vercel queues SMT meterInfo requests through the droplet after WattBuy returns an ESIID. SMT REST calls remain droplet-only.
 
 > **Current production snapshot (2025-11-21)**  
 > - `SMT_USERNAME` / `SMT_REQUESTOR_ID` = `INTELLIPATH` (SMT API Service ID)  
@@ -83,6 +84,14 @@ SMT_PROXY_PORT="4101"
 ```
 
 In production, `SMT_USERNAME` is the SMT API Service ID (**INTELLIPATH**), and the same value is used as `SMT_REQUESTOR_ID` in SMT payloads.
+
+### Droplet webhook + meterInfo queue
+
+- `DROPLET_WEBHOOK_URL` – Base URL of the SMT droplet webhook server (e.g., `http://64.225.25.54:8787/trigger/smt-now`).
+- `INTELLIWATT_WEBHOOK_SECRET` / `DROPLET_WEBHOOK_SECRET` – Shared secret sent from Vercel to the droplet in webhook requests (`x-droplet-webhook-secret` / `x-intelliwatt-secret`).
+- `SMT_METERINFO_ENABLED` – Enables the automatic queue that calls the droplet for `/v2/meterInfo/` after an address is matched to an ESIID.
+
+> SMT REST calls remain droplet-only. Vercel never calls SMT `/v2/*` directly; it only queues work through the droplet webhook.
 
 systemd unit `smt-token-proxy.service` runs:
 

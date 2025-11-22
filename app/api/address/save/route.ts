@@ -6,6 +6,7 @@ import { normalizeEmail } from "@/lib/utils/email";
 import { resolveAddressToEsiid } from "@/lib/resolver/addressToEsiid";
 import { wattbuyEsiidDisabled } from "@/lib/flags";
 import { extractWattbuyEsiid, cleanEsiid } from "@/lib/smt/esiid";
+import { queueMeterInfoForHouse } from "@/lib/smt/meterInfo";
 
 let userProfileAttentionColumnsAvailable: boolean | null = null;
 let houseAddressUserEmailColumnAvailable: boolean | null = null;
@@ -425,6 +426,12 @@ export async function POST(req: NextRequest) {
       } catch (resolveErr) {
         console.warn("[address/save] resolveAddressToEsiid failed", resolveErr);
       }
+    }
+
+    if (record.houseId && record.esiid) {
+      queueMeterInfoForHouse({ houseId: record.houseId, esiid: record.esiid }).catch((err) => {
+        console.error("[address/save] queueMeterInfoForHouse failed", { houseId: record.houseId, esiid: record.esiid, err });
+      });
     }
 
     (async () => {
