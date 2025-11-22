@@ -142,7 +142,6 @@ type NewSubscriptionPayload = {
   reportFormat: ReportFormat;
   dataType: DataType;
   deliveryMode: DeliveryMode;
-  reportFrequency?: ReportFrequency;
   SMTTermsandConditions: "Y";
 };
 
@@ -244,10 +243,6 @@ function buildNewSubscriptionPayload(
   const reportFormat: ReportFormat = includeInterval ? "LSE" : "CSV";
   const dataType: DataType = includeInterval ? "INTERVAL" : "MONTHLY";
   const deliveryMode: DeliveryMode = "FTP";
-  const reportFrequency: ReportFrequency | undefined = includeInterval
-    ? "DAILY"
-    : "MONTHLY";
-
   const payload: NewSubscriptionPayload = {
     trans_id: buildTransId(),
     requestorID: identity.requestorID,
@@ -260,9 +255,6 @@ function buildNewSubscriptionPayload(
     deliveryMode,
     SMTTermsandConditions: "Y",
   };
-  if (reportFrequency) {
-    payload.reportFrequency = reportFrequency;
-  }
   return payload;
 }
 
