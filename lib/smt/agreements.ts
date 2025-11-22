@@ -127,9 +127,10 @@ type NewAgreementPayload = {
   SMTTermsandConditions: "Y";
 };
 
-type ReportFormat = "LSE" | "CSV" | "JSON";
-type DataType = "INTERVAL" | "BILLING";
-type DeliveryMode = "FTP" | "API";
+type ReportFormat = "LSE" | "CSV" | "JSON" | "XML";
+type DataType = "DAILY" | "INTERVAL" | "MONTHLY";
+type DeliveryMode = "FTP" | "EML" | "API";
+type ReportFrequency = "DAILY" | "MONTHLY" | "WEEKLY" | "YEARLY";
 
 type NewSubscriptionPayload = {
   trans_id: string;
@@ -138,10 +139,11 @@ type NewSubscriptionPayload = {
   requesterAuthenticationID: string;
   subscriptionType: "CSPENROLL" | "SCHEDULE" | "SCHEDULES" | "REPENROLL";
   historicalSubscriptionDuration: number;
+  reportFormat: ReportFormat;
   dataType: DataType;
   deliveryMode: DeliveryMode;
+  reportFrequency?: ReportFrequency;
   SMTTermsandConditions: "Y";
-  ESIIDList: string[];
 };
 
 function resolveAgreementDuration(monthsBack: number): 1 | 3 | 6 | 9 | 12 | 24 | 36 {
@@ -149,6 +151,21 @@ function resolveAgreementDuration(monthsBack: number): 1 | 3 | 6 | 9 | 12 | 24 |
   let chosen: 1 | 3 | 6 | 9 | 12 | 24 | 36 = 12;
   let smallestDiff = Number.POSITIVE_INFINITY;
   for (const candidate of ALLOWED_AGREEMENT_DURATIONS) {
+    const diff = Math.abs(candidate - normalized);
+    if (diff < smallestDiff) {
+      smallestDiff = diff;
+      chosen = candidate;
+    }
+  }
+  return chosen;
+}
+
+function resolveSubscriptionDuration(monthsBack: number): 3 | 6 | 9 | 12 | 24 {
+  const allowed: Array<3 | 6 | 9 | 12 | 24> = [3, 6, 9, 12, 24];
+  const normalized = Math.max(3, Math.round(monthsBack || 12));
+  let chosen: 3 | 6 | 9 | 12 | 24 = 12;
+  let smallestDiff = Number.POSITIVE_INFINITY;
+  for (const candidate of allowed) {
     const diff = Math.abs(candidate - normalized);
     if (diff < smallestDiff) {
       smallestDiff = diff;
@@ -220,21 +237,32 @@ function buildNewSubscriptionPayload(
   const identity = buildSmtIdentity();
 
   const includeInterval = Boolean(input.includeInterval);
+  const subscriptionDuration = resolveSubscriptionDuration(
+    Math.max(1, Math.round(input.historicalMonthsBack || 12)),
+  );
+
+  const reportFormat: ReportFormat = includeInterval ? "LSE" : "CSV";
+  const dataType: DataType = includeInterval ? "INTERVAL" : "MONTHLY";
+  const deliveryMode: DeliveryMode = "FTP";
+  const reportFrequency: ReportFrequency | undefined = includeInterval
+    ? "DAILY"
+    : "MONTHLY";
+
   const payload: NewSubscriptionPayload = {
     trans_id: buildTransId(),
     requestorID: identity.requestorID,
     requesterType: "CSP",
     requesterAuthenticationID: identity.requesterAuthenticationID,
     subscriptionType: "CSPENROLL",
-    historicalSubscriptionDuration: Math.max(
-      1,
-      Math.round(input.historicalMonthsBack || 12),
-    ),
-    dataType: includeInterval ? "INTERVAL" : "BILLING",
-    deliveryMode: "FTP",
+    historicalSubscriptionDuration: subscriptionDuration,
+    reportFormat,
+    dataType,
+    deliveryMode,
     SMTTermsandConditions: "Y",
-    ESIIDList: [esiid],
   };
+  if (reportFrequency) {
+    payload.reportFrequency = reportFrequency;
+  }
   return payload;
 }
 
