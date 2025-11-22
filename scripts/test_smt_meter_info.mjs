@@ -48,10 +48,23 @@ async function main() {
     process.exit(1);
   }
 
+  const args = process.argv.slice(2).map((arg) => arg.trim()).filter(Boolean);
+  let esiidFromArgs = "";
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (arg.toLowerCase() === "--esiid") {
+      esiidFromArgs = args[i + 1] ? args[i + 1] : "";
+      break;
+    }
+    if (!arg.startsWith("--") && !esiidFromArgs) {
+      esiidFromArgs = arg;
+      break;
+    }
+  }
+
   const DEFAULT_ESIID = "10443720004529147";
-  const esiidFromArg = (process.argv[2] || "").trim();
   const esiidFromEnv = (process.env.SMT_METERINFO_ESIID || "").trim();
-  const esiid = esiidFromArg || esiidFromEnv || DEFAULT_ESIID;
+  const esiid = esiidFromArgs || esiidFromEnv || DEFAULT_ESIID;
 
   console.log("=== SMT meterInfo ESIID Test ===");
   console.log("Base URL:          ", baseUrl);
