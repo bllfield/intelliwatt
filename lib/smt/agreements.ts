@@ -127,13 +127,22 @@ type NewAgreementPayload = {
   SMTTermsandConditions: "Y";
 };
 
+type ReportFormat = "LSE" | "CSV" | "JSON";
+type DataType = "INTERVAL" | "BILLING";
+type DeliveryMode = "FTP" | "API";
+
 type InnerNewSubscriptionPayload = {
   trans_id: string;
   requestorID: string;
+  serviceID: string;
   requesterType: "CSP";
   requesterAuthenticationID: string;
   subscriptionType: "CSPENROLL" | "SCHEDULE" | "SCHEDULES" | "REPENROLL";
   historicalSubscriptionDuration: number;
+  reportFormat: ReportFormat;
+  dataType: DataType;
+  deliveryMode: DeliveryMode;
+  SMTTermsandConditions: "Y";
   ESIIDList: string[];
 };
 
@@ -216,9 +225,11 @@ function buildNewSubscriptionPayload(
   const esiid = normalizeEsiid(input.esiid);
   const identity = buildSmtIdentity();
 
+  const includeInterval = Boolean(input.includeInterval);
   const envelope: InnerNewSubscriptionPayload = {
     trans_id: buildTransId(),
     requestorID: identity.requestorID,
+    serviceID: identity.serviceID,
     requesterType: "CSP",
     requesterAuthenticationID: identity.requesterAuthenticationID,
     subscriptionType: "CSPENROLL",
@@ -226,6 +237,10 @@ function buildNewSubscriptionPayload(
       1,
       Math.round(input.historicalMonthsBack || 12),
     ),
+    reportFormat: includeInterval ? "LSE" : "CSV",
+    dataType: includeInterval ? "INTERVAL" : "BILLING",
+    deliveryMode: "FTP",
+    SMTTermsandConditions: "Y",
     ESIIDList: [esiid],
   };
   return { NewSubscription: envelope };
