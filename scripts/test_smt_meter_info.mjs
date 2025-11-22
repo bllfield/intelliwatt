@@ -64,11 +64,22 @@ async function main() {
 
   const DEFAULT_ESIID = "10443720004529147";
   const esiidFromEnv = (process.env.SMT_METERINFO_ESIID || "").trim();
-  const esiid = esiidFromArgs || esiidFromEnv || DEFAULT_ESIID;
+  const esiidInput = esiidFromArgs || esiidFromEnv || DEFAULT_ESIID;
+  const esiidList = esiidInput
+    .split(",")
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+
+  if (esiidList.length === 0) {
+    console.error("[TEST] Unable to determine any ESIIDs to test.");
+    process.exit(1);
+  }
+
+  const useJsonFormat = esiidList.length === 1;
 
   console.log("=== SMT meterInfo ESIID Test ===");
   console.log("Base URL:          ", baseUrl);
-  console.log("ESIID under test:  ", esiid);
+  console.log("ESIID(s) under test:", esiidList.join(", "));
   console.log("requestorID:       ", requestorID);
   console.log("auth ID (DUNS):    ", requesterAuthenticationID);
   console.log("");
@@ -151,20 +162,15 @@ async function main() {
   const transId = `TESTMI${Math.random().toString(36).slice(2, 10).toUpperCase()}`;
 
   const meterInfoBody = {
-    // NOTE: For INTELLIPATH, SMT delivers meter attributes via SFTP as CSV files.
-    // /v2/meterInfo/ returns an acknowledgement JSON; the actual data lands on
-    // ftp.smartmetertexas.biz under our SFTP account.
+    // NOTE: For INTELLIPATH, SMT delivers meter attributes via SFTP as CSV files when multiple ESIIDs are requested.
+    // When only one ESIID is requested, SMT accepts JSON delivery and returns inline meter information (if enabled).
     trans_id: transId,
     requestorID,
     requesterType: "CSP",
     requesterAuthenticationID,
-    reportFormat: "CSV",
+    reportFormat: useJsonFormat ? "JSON" : "CSV",
     version: "L",
-    ESIIDMeterList: [
-      {
-        esiid,
-      },
-    ],
+    ESIIDMeterList: esiidList.map((esiid) => ({ esiid })),
     SMTTermsandConditions: "Y",
   };
 
