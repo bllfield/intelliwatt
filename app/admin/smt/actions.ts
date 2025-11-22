@@ -85,9 +85,13 @@ export type MonitorMeterInfo = {
   createdAt: Date;
 };
 
+export type MonitorAuthorizationWithMeter = MonitorAuthorization & {
+  meterInfo: MonitorMeterInfo | null;
+};
+
 export type SmtPullStatusesPayload = {
   fetchedAt: string;
-  authorizations: MonitorAuthorization[];
+  authorizations: MonitorAuthorizationWithMeter[];
   meterInfos: MonitorMeterInfo[];
 };
 
@@ -143,9 +147,26 @@ export async function fetchSmtPullStatuses(limit = 10): Promise<SmtPullStatusesP
     }),
   ]);
 
+  const meterInfosTyped = meterInfos as MonitorMeterInfo[];
+  const latestMeterByEsiid = new Map<string, MonitorMeterInfo>();
+  for (const info of meterInfosTyped) {
+    const key = info.esiid;
+    const existing = latestMeterByEsiid.get(key);
+    if (!existing || existing.updatedAt < info.updatedAt) {
+      latestMeterByEsiid.set(key, info);
+    }
+  }
+
+  const authorizationsWithMeter = (authorizations as MonitorAuthorization[]).map(
+    (auth) => ({
+      ...auth,
+      meterInfo: latestMeterByEsiid.get(auth.esiid) ?? null,
+    }),
+  );
+
   return {
     fetchedAt: new Date().toISOString(),
-    authorizations: authorizations as MonitorAuthorization[],
-    meterInfos: meterInfos as MonitorMeterInfo[],
+    authorizations: authorizationsWithMeter,
+    meterInfos: meterInfosTyped,
   };
 }

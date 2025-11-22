@@ -134,6 +134,12 @@ Invoke-RestMethod -Headers $headers -Uri "https://<your-preview>.vercel.app/api/
 - `INTELLIWATT_BASE_URL` — e.g., `https://intelliwatt.com`
 - `SMT_METERINFO_ENABLED` — Feature flag. When `true`, Vercel queues SMT meterInfo via the droplet after WattBuy returns an ESIID (SMT REST remains droplet-only).
 
+  When enabled in production:
+
+  - Address saves that include a `houseId` and `esiid` will enqueue a `SmtMeterInfo` job and POST a `reason: "smt_meter_info"` webhook to the SMT droplet.
+  - The droplet calls SMT `/v2/meterInfo/` using the canonical Service ID (`INTELLIPATH`) and posts the parsed meter attributes back into the app via `/api/admin/smt/meter-info`.
+  - The resulting `SmtMeterInfo` rows, including `meterNumber` and status (`pending`/`complete`/`error`), are surfaced on the `/admin/smt` “Live Pull Monitor” card for operational visibility.
+
 - `SMT_HOST=ftp.smartmetertexas.biz`
 
 - `SMT_USER=intellipathsolutionsftp`

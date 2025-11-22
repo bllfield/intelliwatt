@@ -10,6 +10,7 @@ export type SmtAgreementRequest = {
   monthsBack?: number | null;
   includeInterval?: boolean | null;
   includeBilling?: boolean | null;
+  meterNumber?: string | null;
 };
 
 export type SmtAgreementResult = {
@@ -273,6 +274,7 @@ export async function createAgreementAndSubscription(
     const tdspCode = payload.tdspCode ?? null;
 
     const meterNumber =
+      (payload.meterNumber && payload.meterNumber.trim()) ||
       (payload.customerPhone && payload.customerPhone.trim()) ||
       (tdspCode ? `${tdspCode}-MTR` : undefined) ||
       payload.esiid ||

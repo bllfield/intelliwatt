@@ -2475,3 +2475,19 @@ We have extended the Smart Meter Texas ingest pipeline and admin tooling:
 - Added `/api/admin/smt/meter-info` so the SMT droplet can POST meterInfo results back into the app.
 - Introduced `SMT_METERINFO_ENABLED` plus helper `queueMeterInfoForHouse` so Vercel queues a droplet webhook after WattBuy returns an ESIID.
 - Address submit now enqueues meterInfo (fire-and-forget) when an ESIID + houseId are present; SMT REST calls remain droplet-only.
+
+### PC-2025-11-22-SMT-METERINFO-LIVE — End-to-end meter attributes in production
+
+- Confirmed a full production path from address save → droplet → SMT → app:
+  - `app/api/address/save/route.ts` now calls `queueMeterInfoForHouse({ houseId, esiid })` after WattBuy returns an ESIID and the address record has a `houseId`. This enqueues a `SmtMeterInfo` row with `status = "pending"` and POSTs a webhook to the droplet (when `SMT_METERINFO_ENABLED` is true and droplet webhook envs are set).
+  - The droplet’s `webhook_server.py` handles `reason: "smt_meter_info"` on `/trigger/smt-now`, runs `node scripts/test_smt_meter_info.mjs --esiid <ESIID> --json`, and parses the stdout to extract `trans_id`, `MeterData`, and a meter number.
+  - `webhook_server.py` then POSTs that structured payload back to `${APP_BASE_URL}/api/admin/smt/meter-info` with the shared `x-intelliwatt-secret` header.
+  - `app/api/admin/smt/meter-info/route.ts` persists the payload via `saveMeterInfoFromDroplet`, which now tolerates `houseId = null` by using a findFirst + update/create pattern instead of Prisma upsert on the compound unique key.
+- `SmtMeterInfo` rows are now created and updated in the production database, including the key meter metadata (`meterNumber`, `utilityMeterId`, `meterSerialNumber`, `intervalSetting`, etc.) and a full `rawPayload` snapshot.
+- The SMT admin page (`/admin/smt`) has a “Live Pull Monitor” card that polls recent `SmtAuthorization` and `SmtMeterInfo` records, allowing ops to see meterInfo jobs with their ESIIDs, statuses, last-updated timestamps, and meter numbers.
+- Verified example in production:
+  - ESIID: `10443720004529147`
+  - Status: `complete`
+  - Updated: `2025-11-22T09:30:14Z` (local admin UI shows formatted timestamp)
+  - Meter: `142606737LG`
+- This establishes SMT meterInfo as a first-class, production-safe pipeline and the canonical source of `meterNumber` and related meter attributes for future SMT Agreement/Subscription payloads.

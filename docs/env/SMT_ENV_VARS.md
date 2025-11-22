@@ -14,6 +14,28 @@
 - `SMT_SERVICE_ID` – Optional explicit override for the SMT service ID; defaults to `SMT_USERNAME`.  
 - `SMT_METERINFO_ENABLED` – Feature flag. When `true`, Vercel queues SMT meterInfo requests through the droplet after WattBuy returns an ESIID. SMT REST calls remain droplet-only.
 
+### Droplet ↔ App callback envs (meterInfo and other SMT webhooks)
+
+The SMT droplet uses the following variables to discover where to POST results (such as meterInfo payloads) back into the IntelliWatt app:
+
+- `APP_BASE_URL` – Explicit base URL for the IntelliWatt app (e.g. `https://intelliwatt.com`). If set, this is used as-is.
+- `INTELLIWATT_APP_BASE_URL` – Alternative explicit base URL; used when `APP_BASE_URL` is not set.
+- `VERCEL_URL` – Last-resort hostname provided by Vercel (e.g. `intelliwatt.vercel.app`). When used, the droplet prepends `https://` to form the full base URL.
+
+The droplet chooses the first non-empty value among `APP_BASE_URL`, `INTELLIWATT_APP_BASE_URL`, and `VERCEL_URL`, then posts meterInfo results to:
+
+- `POST ${APP_BASE_URL}/api/admin/smt/meter-info`
+
+For authentication, the droplet and app share a symmetric webhook secret:
+
+- `INTELLIWATT_WEBHOOK_SECRET` – Shared secret used by the droplet to authenticate to the app via headers such as `x-intelliwatt-secret`.  
+- `DROPLET_WEBHOOK_SECRET` – Alias/backup for the same value; the droplet treats either env var as valid and exposes the secret under multiple header names (`x-intelliwatt-secret`, `x-droplet-webhook-secret`, etc.).
+
+All SMT callbacks from the droplet (including `reason: "smt_meter_info"`) rely on these envs being set consistently on both sides:
+
+- The droplet service’s systemd unit must have `APP_BASE_URL` (or an equivalent) and the webhook secret envs.
+- The Vercel app must be configured to recognize the same shared secret when gating `/api/admin/smt/meter-info`.
+
 > **Current production snapshot (2025-11-21)**  
 > - `SMT_USERNAME` / `SMT_REQUESTOR_ID` = `INTELLIPATH` (SMT API Service ID)  
 > - `SMT_SERVICE_ID` = `INTELLIPATH`  

@@ -84,6 +84,7 @@ SMT_API_BASE_URL = (
 SMT_USERNAME = os.getenv("SMT_USERNAME", "INTELLIPATH")
 SMT_PASSWORD = os.getenv("SMT_PASSWORD")
 SMT_PROXY_TOKEN = os.getenv("SMT_PROXY_TOKEN")
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "").strip()
 
 APP_BASE_URL = (
     os.environ.get("APP_BASE_URL")
@@ -98,6 +99,97 @@ WEBHOOK_SECRET = (
     or os.environ.get("INTELLIWATT_WEBHOOK_SECRET")
     or ""
 ).strip()
+
+
+def fetch_meter_info_from_app(esiid: str) -> Optional[Dict[str, Any]]:
+    if not APP_BASE_URL:
+        logging.warning("meter info fetch skipped; APP_BASE_URL not configured")
+        return None
+
+    params = {"esiid": esiid}
+    headers: Dict[str, str] = {}
+    if WEBHOOK_SECRET:
+        headers["x-intelliwatt-secret"] = WEBHOOK_SECRET
+    if ADMIN_TOKEN:
+        headers["x-admin-token"] = ADMIN_TOKEN
+
+    try:
+        resp = requests.get(
+            f"{APP_BASE_URL}/api/admin/smt/meter-info/latest",
+            params=params,
+            headers=headers,
+            timeout=15,
+        )
+    except requests.RequestException as exc:
+        logging.error("failed to fetch meter info from app: %s", exc)
+        return None
+
+    if resp.status_code != 200:
+        logging.warning(
+            "meter info fetch returned status=%s body=%s",
+            resp.status_code,
+            resp.text[:300],
+        )
+        return None
+
+    try:
+        payload = resp.json()
+    except ValueError as exc:
+        logging.error("meter info fetch JSON parse error: %s", exc)
+        return None
+
+    meter_info = payload.get("meterInfo")
+    if not meter_info:
+        logging.info("meter info fetch ok but no record found for esiid=%s", esiid)
+        return None
+
+    return meter_info
+
+
+def maybe_hydrate_meter_number(step: Dict[str, Any]) -> Optional[str]:
+    body = step.get("body")
+    if not isinstance(body, dict):
+        return None
+
+    meter_list = body.get("customerMeterList")
+    if not isinstance(meter_list, list) or not meter_list:
+        return None
+
+    entry = meter_list[0]
+    if not isinstance(entry, dict):
+        return None
+
+    esiid = entry.get("ESIID") or entry.get("esiid")
+    meter_number = entry.get("meterNumber")
+    if not esiid:
+        return None
+
+    normalized_meter = (meter_number or "").strip().upper()
+    needs_lookup = (
+        not normalized_meter
+        or normalized_meter == esiid.strip().upper()
+        or normalized_meter == "METER"
+        or normalized_meter.endswith("-MTR")
+    )
+
+    if not needs_lookup:
+        return meter_number
+
+    meter_info = fetch_meter_info_from_app(esiid.strip())
+    if not meter_info:
+        return meter_number
+
+    fetched_meter = (meter_info.get("meterNumber") or "").strip()
+    if fetched_meter:
+        entry["meterNumber"] = fetched_meter
+        logging.info(
+            "Updated NewAgreement meter number via meterInfo API: esiid=%s meter=%s",
+            esiid,
+            fetched_meter,
+        )
+        return fetched_meter
+
+    return meter_number
 
 
 def run_default_command() -> bytes:
@@ -622,6 +714,16 @@ class H(BaseHTTPRequestHandler):
             validated_steps.append(
                 {"name": name or path, "path": path, "body": body}
             )
+
+        hydrated_meter_number: Optional[str] = None
+        for step in validated_steps:
+            step_name = step.get("name")
+            if isinstance(step_name, str) and step_name.lower() == "newagreement":
+                hydrated_meter_number = maybe_hydrate_meter_number(step)
+                break
+
+        if hydrated_meter_number:
+            logging.info("Final meter number for agreement: %s", hydrated_meter_number)
 
         print(
             f"[SMT_PROXY] /agreements action={action} steps={len(validated_steps)}",

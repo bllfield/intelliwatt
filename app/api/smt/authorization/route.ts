@@ -139,6 +139,14 @@ export async function POST(req: NextRequest) {
         ? contactPhone.trim()
         : null;
 
+    const existingMeterInfo = await prismaAny.smtMeterInfo.findFirst({
+      where: { esiid: houseEsiid },
+      orderBy: { updatedAt: "desc" },
+      select: { meterNumber: true },
+    });
+    const resolvedMeterNumber =
+      (existingMeterInfo?.meterNumber && existingMeterInfo.meterNumber.trim()) || null;
+
     const consentTextVersion =
       typeof rawBody.consentTextVersion === "string" && rawBody.consentTextVersion.trim().length > 0
         ? rawBody.consentTextVersion.trim()
@@ -177,7 +185,7 @@ export async function POST(req: NextRequest) {
         houseId: house.houseId ?? house.id,
         houseAddressId: house.id,
         esiid: houseEsiid,
-        meterNumber: null,
+        meterNumber: resolvedMeterNumber,
         customerName: trimmedCustomerName,
         serviceAddressLine1: house.addressLine1,
         serviceAddressLine2: house.addressLine2 ?? null,
@@ -217,6 +225,11 @@ export async function POST(req: NextRequest) {
         customerName: trimmedCustomerName,
         customerEmail: user.email,
         customerPhone: normalizedContactPhone,
+        tdspCode,
+        meterNumber: resolvedMeterNumber ?? undefined,
+        monthsBack: 12,
+        includeInterval: true,
+        includeBilling: true,
       });
 
       smtUpdateData = {
@@ -230,6 +243,7 @@ export async function POST(req: NextRequest) {
         smtBackfillCompletedAt: agreementResult.backfillCompletedAt
           ? new Date(agreementResult.backfillCompletedAt)
           : null,
+        meterNumber: resolvedMeterNumber ?? null,
       };
     } catch (agreementErr: any) {
       smtUpdateData = {

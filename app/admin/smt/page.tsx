@@ -75,6 +75,7 @@ export default function AdminSmtToolsPage() {
                 <tr>
                   <th className="px-3 py-2 text-left font-medium">ESIID</th>
                   <th className="px-3 py-2 text-left font-medium">Status</th>
+                  <th className="px-3 py-2 text-left font-medium">Meter</th>
                   <th className="px-3 py-2 text-left font-medium">Updated</th>
                   <th className="px-3 py-2 text-left font-medium">Notes</th>
                 </tr>
@@ -82,7 +83,7 @@ export default function AdminSmtToolsPage() {
               <tbody className="divide-y divide-neutral-200">
                 {rows.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="px-3 py-4 text-center text-neutral-500">
+                    <td colSpan={5} className="px-3 py-4 text-center text-neutral-500">
                       No SMT authorizations found.
                     </td>
                   </tr>
@@ -94,6 +95,16 @@ export default function AdminSmtToolsPage() {
                       </td>
                       <td className="px-3 py-2 text-xs md:text-sm">
                         <span className="font-semibold text-neutral-800">{row.smtStatus ?? 'pending'}</span>
+                      </td>
+                      <td className="px-3 py-2 text-xs md:text-sm">
+                        <div className="font-mono text-[11px] uppercase md:text-xs">
+                          {row.meterInfo?.meterNumber ?? '—'}
+                        </div>
+                        {row.meterInfo?.status ? (
+                          <div className="text-[11px] text-neutral-500 md:text-xs">
+                            {row.meterInfo.status}
+                          </div>
+                        ) : null}
                       </td>
                       <td className="px-3 py-2 text-xs text-neutral-500 md:text-sm">
                         {new Date(row.updatedAt).toLocaleString()}
