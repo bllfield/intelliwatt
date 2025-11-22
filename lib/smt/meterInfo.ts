@@ -148,13 +148,28 @@ export async function saveMeterInfoFromDroplet(payload: SavePayload) {
     rawPayload: payload.rawPayload ?? (meterData ? { MeterData: meterData } : null),
   };
 
-  const record = await prismaAny.smtMeterInfo.upsert({
-    where: {
-      esiid_houseId: { esiid, houseId: payload.houseId ?? null },
-    },
-    create: data,
-    update: data,
-  });
+  let record;
+  if (payload.houseId) {
+    record = await prismaAny.smtMeterInfo.upsert({
+      where: {
+        esiid_houseId: { esiid, houseId: payload.houseId },
+      },
+      create: data,
+      update: data,
+    });
+  } else {
+    const existing = await prismaAny.smtMeterInfo.findFirst({
+      where: { esiid, houseId: null },
+    });
+    if (existing) {
+      record = await prismaAny.smtMeterInfo.update({
+        where: { id: existing.id },
+        data,
+      });
+    } else {
+      record = await prismaAny.smtMeterInfo.create({ data });
+    }
+  }
 
   return record;
 }
