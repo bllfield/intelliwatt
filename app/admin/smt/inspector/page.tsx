@@ -32,6 +32,11 @@ type Tool = {
 
 const SMT_TOOLS: Tool[] = [
   {
+    href: '/admin/smt',
+    title: 'Live Pull Monitor',
+    desc: 'Real-time SMT authorizations, backfills, and meter-info jobs (auto-refreshing).',
+  },
+  {
     href: '/admin/smt/raw',
     title: 'Raw Files & Normalize UI',
     desc: 'Lists RawSmtFile rows and runs /api/admin/smt/normalize with { latest:true }, { rawId }, or { since }.',
