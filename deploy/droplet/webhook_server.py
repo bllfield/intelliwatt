@@ -85,6 +85,7 @@ SMT_USERNAME = os.getenv("SMT_USERNAME", "INTELLIPATH")
 SMT_PASSWORD = os.getenv("SMT_PASSWORD")
 SMT_PROXY_TOKEN = os.getenv("SMT_PROXY_TOKEN")
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "").strip()
+SMT_SERVICE_ID = os.getenv("SMT_SERVICE_ID", SMT_USERNAME)
 
 APP_BASE_URL = (
     os.environ.get("APP_BASE_URL")
@@ -529,6 +530,10 @@ def smt_post(path_or_url: str, body: Dict[str, Any]) -> Dict[str, Any]:
         step_name = "NewAgreement"
     elif "NewSubscription" in url:
         step_name = "NewSubscription"
+
+    if step_name in {"NewAgreement", "NewSubscription"}:
+        headers.setdefault("username", SMT_USERNAME)
+        headers.setdefault("serviceId", SMT_SERVICE_ID)
 
     if step_name:
         try:
