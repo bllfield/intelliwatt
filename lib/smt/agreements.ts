@@ -131,14 +131,9 @@ type ReportFormat = "LSE" | "CSV" | "JSON";
 type DataType = "INTERVAL" | "BILLING";
 type DeliveryMode = "FTP" | "API";
 
-type SubscriptionEsiidEntry = {
-  ESIID: string;
-};
-
 type NewSubscriptionPayload = {
   trans_id: string;
   requestorID: string;
-  serviceID: string;
   requesterType: "CSP";
   requesterAuthenticationID: string;
   subscriptionType: "CSPENROLL" | "SCHEDULE" | "SCHEDULES" | "REPENROLL";
@@ -147,7 +142,7 @@ type NewSubscriptionPayload = {
   dataType: DataType;
   deliveryMode: DeliveryMode;
   SMTTermsandConditions: "Y";
-  ESIIDList: SubscriptionEsiidEntry[];
+  ESIIDList: string[];
 };
 
 function resolveAgreementDuration(monthsBack: number): 1 | 3 | 6 | 9 | 12 | 24 | 36 {
@@ -229,7 +224,6 @@ function buildNewSubscriptionPayload(
   const payload: NewSubscriptionPayload = {
     trans_id: buildTransId(),
     requestorID: identity.requestorID,
-    serviceID: identity.serviceID,
     requesterType: "CSP",
     requesterAuthenticationID: identity.requesterAuthenticationID,
     subscriptionType: "CSPENROLL",
@@ -241,7 +235,7 @@ function buildNewSubscriptionPayload(
     dataType: includeInterval ? "INTERVAL" : "BILLING",
     deliveryMode: "FTP",
     SMTTermsandConditions: "Y",
-    ESIIDList: [{ ESIID: esiid }],
+    ESIIDList: [esiid],
   };
   return payload;
 }
