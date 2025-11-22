@@ -103,8 +103,8 @@ async function main() {
       requestorID,
       requesterType: "CSP",
       requesterAuthenticationID,
-      reportFormat: "CSV",
-      deliveryMode: "FTP",
+      reportFormat: "JSON",
+      deliveryMode: "API",
       version: "L",
       ESIIDMeterList: [
         {
@@ -120,15 +120,13 @@ async function main() {
   console.log("");
 
   let miRes;
-  console.log("[DEBUG] Using SMT username header:", username);
   try {
     miRes = await fetch(meterInfoUrl, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json",
-        // Ensure SMT sees the same service ID username in the header.
-        username,
+        Accept: "application/json",
       },
       body: JSON.stringify(meterInfoBody),
     });
