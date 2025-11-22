@@ -146,6 +146,11 @@ export async function POST(req: NextRequest) {
     });
     const resolvedMeterNumber =
       (existingMeterInfo?.meterNumber && existingMeterInfo.meterNumber.trim()) || null;
+    const repPuctOverrideEnv = process.env.SMT_REP_PUCT_OVERRIDE?.trim();
+    const repPuctOverride =
+      repPuctOverrideEnv && !Number.isNaN(Number.parseInt(repPuctOverrideEnv, 10))
+        ? Number.parseInt(repPuctOverrideEnv, 10)
+        : undefined;
 
     const consentTextVersion =
       typeof rawBody.consentTextVersion === "string" && rawBody.consentTextVersion.trim().length > 0
@@ -227,6 +232,7 @@ export async function POST(req: NextRequest) {
         customerPhone: normalizedContactPhone,
         tdspCode,
         meterNumber: resolvedMeterNumber ?? undefined,
+        repPuctNumber: repPuctOverride ?? null,
         monthsBack: 12,
         includeInterval: true,
         includeBilling: true,

@@ -11,6 +11,7 @@ export type SmtAgreementRequest = {
   includeInterval?: boolean | null;
   includeBilling?: boolean | null;
   meterNumber?: string | null;
+  repPuctNumber?: number | null;
 };
 
 export type SmtAgreementResult = {
@@ -133,10 +134,6 @@ type NewSubscriptionPayload = {
   requesterAuthenticationID: string;
   subscriptionType: "CSPENROLL" | "SCHEDULE" | "SCHEDULES" | "REPENROLL";
   historicalSubscriptionDuration: number;
-  reportFormat: "LSE" | "CSV" | "JSON" | "XML";
-  dataType: "DAILY" | "INTERVAL" | "MONTHLY" | "HML";
-  deliveryMode: "FTP" | "EML" | "API";
-  reportFrequency: "DAILY" | "MONTHLY";
   ESIIDList: string[];
 };
 
@@ -214,12 +211,6 @@ function buildNewSubscriptionPayload(
 ): NewSubscriptionPayload {
   const esiid = normalizeEsiid(input.esiid);
   const identity = buildSmtIdentity();
-  const wantsInterval = !!input.includeInterval;
-
-  const reportFormat: "JSON" = "JSON";
-  const dataType: "INTERVAL" | "MONTHLY" = wantsInterval ? "INTERVAL" : "MONTHLY";
-  const deliveryMode: "API" = "API";
-  const reportFrequency: "DAILY" | "MONTHLY" = wantsInterval ? "DAILY" : "MONTHLY";
 
   return {
     trans_id: buildTransId(),
@@ -231,10 +222,6 @@ function buildNewSubscriptionPayload(
       1,
       Math.round(input.historicalMonthsBack || 12),
     ),
-    reportFormat,
-    dataType,
-    deliveryMode,
-    reportFrequency,
     ESIIDList: [esiid],
   };
 }
@@ -272,6 +259,21 @@ export async function createAgreementAndSubscription(
         ? true
         : Boolean(payload.includeBilling);
     const tdspCode = payload.tdspCode ?? null;
+    let puctRorOverride: number | undefined;
+    if (payload.repPuctNumber !== null && payload.repPuctNumber !== undefined) {
+      const parsed = Number(payload.repPuctNumber);
+      if (!Number.isNaN(parsed)) {
+        puctRorOverride = parsed;
+      }
+    } else {
+      const envOverrideRaw = process.env.SMT_REP_PUCT_OVERRIDE?.trim();
+      if (envOverrideRaw) {
+        const parsed = Number.parseInt(envOverrideRaw, 10);
+        if (!Number.isNaN(parsed)) {
+          puctRorOverride = parsed;
+        }
+      }
+    }
 
     const meterNumber =
       (payload.meterNumber && payload.meterNumber.trim()) ||
@@ -279,7 +281,7 @@ export async function createAgreementAndSubscription(
       (tdspCode ? `${tdspCode}-MTR` : undefined) ||
       payload.esiid ||
       "METER";
-    const puctRorNumber = mapTdspToPuctRorNumber(tdspCode);
+    const puctRorNumber = puctRorOverride ?? mapTdspToPuctRorNumber(tdspCode);
     const customerEmail = (payload.customerEmail || "").trim();
 
     const agreementBody = buildNewAgreementPayload({
