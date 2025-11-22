@@ -532,8 +532,10 @@ def smt_post(path_or_url: str, body: Dict[str, Any]) -> Dict[str, Any]:
         step_name = "NewSubscription"
 
     if step_name in {"NewAgreement", "NewSubscription"}:
-        headers.setdefault("username", SMT_USERNAME)
-        headers.setdefault("serviceId", SMT_SERVICE_ID)
+        # SMT expects username/serviceId headers to match payload identity.
+        # Force-set them so we never rely on upstream defaults.
+        headers["username"] = SMT_USERNAME
+        headers["serviceId"] = SMT_SERVICE_ID
 
     if step_name:
         try:

@@ -181,6 +181,12 @@ DROPLET LOG TAILING (LAST 5 MINUTES)
 
 On the droplet, run as `root` or prefix with `sudo`:
 
+cd /home/deploy/apps/intelliwatt
+git pull origin main
+sudo systemctl restart smt-webhook.service
+
+sudo journalctl -u smt-webhook.service -f
+
 - `sudo journalctl -u smt-webhook.service -n 200 -f`
 - `sudo journalctl -u smt-webhook.service --since "5 minutes ago" --no-pager`
 - `sudo journalctl -u smt-ingest.service --since "5 minutes ago" --no-pager`
