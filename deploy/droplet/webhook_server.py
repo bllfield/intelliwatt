@@ -9,6 +9,7 @@ import requests
 
 
 # SMT debug logging helpers
+# NOTE: This file is deployed to /home/deploy/webhook_server.py by systemd.
 def _smt_snip(text: Optional[str], limit: int = 1000) -> str:
     if not isinstance(text, str):
         return ""

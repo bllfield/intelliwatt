@@ -183,6 +183,7 @@ On the droplet, run as `root` or prefix with `sudo`:
 
 cd /home/deploy/apps/intelliwatt
 git pull origin main
+sudo cp deploy/droplet/webhook_server.py /home/deploy/webhook_server.py
 sudo systemctl restart smt-webhook.service
 
 sudo journalctl -u smt-webhook.service -f
