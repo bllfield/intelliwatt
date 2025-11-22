@@ -130,8 +130,6 @@ type NewAgreementPayload = {
 type ReportFormat = "LSE" | "CSV" | "JSON" | "XML";
 type DataType = "DAILY" | "INTERVAL" | "MONTHLY";
 type DeliveryMode = "FTP" | "EML" | "API";
-type ReportFrequency = "DAILY" | "MONTHLY" | "WEEKLY" | "YEARLY";
-
 type NewSubscriptionPayload = {
   trans_id: string;
   requestorID: string;

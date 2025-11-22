@@ -8,18 +8,18 @@ datasource db {
 }
 
 model User {
-  id             String             @id @default(cuid())
-  email          String             @unique
-  createdAt      DateTime           @default(now())
-  referredById   String?
-  commissions    CommissionRecord[]
-  entries        Entry[]            @relation("UserEntries")
-  jackpotPayouts JackpotPayout[]
-  referrals      Referral[]         @relation("UserReferrals")
-  sessions       Session[]
-  usage          UsageData[]
-  profile        UserProfile?
-  utilityPlans   UtilityPlan[]
+  id                String             @id @default(cuid())
+  email             String             @unique
+  createdAt         DateTime           @default(now())
+  referredById      String?
+  commissions       CommissionRecord[]
+  entries           Entry[]            @relation("UserEntries")
+  jackpotPayouts    JackpotPayout[]
+  referrals         Referral[]         @relation("UserReferrals")
+  sessions          Session[]
+  usage             UsageData[]
+  profile           UserProfile?
+  utilityPlans      UtilityPlan[]
   smtAuthorizations SmtAuthorization[]
 }
 
@@ -74,7 +74,7 @@ model UserProfile {
   smartMeterConsent       Boolean?
   smartMeterConsentDate   DateTime?
   tdspSlug                String?
-  esiidAttentionRequired  Boolean   @default(false)
+  esiidAttentionRequired  Boolean         @default(false)
   esiidAttentionCode      String?
   esiidAttentionAt        DateTime?
   apiConnections          ApiConnection[]
@@ -435,28 +435,28 @@ model SmtInterval {
 }
 
 model SmtBillingRead {
-  id           String        @id @default(cuid())
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   rawSmtFileId BigInt?
-  rawSmtFile   RawSmtFile?   @relation(fields: [rawSmtFileId], references: [id])
+  rawSmtFile   RawSmtFile? @relation(fields: [rawSmtFileId], references: [id])
 
-  esiid        String
-  meter        String?
+  esiid String
+  meter String?
 
-  tdspCode     String?
-  tdspName     String?
+  tdspCode String?
+  tdspName String?
 
-  readStart    DateTime?
-  readEnd      DateTime?
+  readStart DateTime?
+  readEnd   DateTime?
 
-  billDate     DateTime?
+  billDate DateTime?
 
-  kwhTotal     Float?
-  kwhBilled    Float?
+  kwhTotal  Float?
+  kwhBilled Float?
 
-  source       String?
+  source String?
 
   @@index([esiid, billDate])
   @@index([esiid, readStart])
@@ -464,71 +464,71 @@ model SmtBillingRead {
 }
 
 model SmtMeterInfo {
-  id           String   @id @default(cuid())
-  houseId      String?
-  esiid        String
+  id      String  @id @default(cuid())
+  houseId String?
+  esiid   String
 
-  transId              String?
-  meterNumber          String?
-  utilityCompanyId     String?
-  meterSerialNumber    String?
-  utilityMeterId       String?
-  kwhMeterMultiplier   Int?
-  configuredChannels   String?
-  manufacturerName     String?
-  meterClass           String?
-  intervalSetting      String?
-  reverseFlowHandling  String?
-  dgChannel            String?
-  disconnect           String?
-  meterStatus          String?
-  meterPhases          String?
-  meterModel           String?
+  transId             String?
+  meterNumber         String?
+  utilityCompanyId    String?
+  meterSerialNumber   String?
+  utilityMeterId      String?
+  kwhMeterMultiplier  Int?
+  configuredChannels  String?
+  manufacturerName    String?
+  meterClass          String?
+  intervalSetting     String?
+  reverseFlowHandling String?
+  dgChannel           String?
+  disconnect          String?
+  meterStatus         String?
+  meterPhases         String?
+  meterModel          String?
 
   testDate             String?
   installationDate     String?
   initialProvisionDate String?
   lastUpdatedRaw       String?
 
-  communicationIndicator      String?
-  instrumentRated             String?
-  currentTransformersRatio    String?
-  potentialTransformersRatio  String?
-  esiFirmwareVersion          String?
-  hanProtocol                 String?
-  smartEnergyProfile          String?
+  communicationIndicator     String?
+  instrumentRated            String?
+  currentTransformersRatio   String?
+  potentialTransformersRatio String?
+  esiFirmwareVersion         String?
+  hanProtocol                String?
+  smartEnergyProfile         String?
 
-  status       String   @default("pending")
+  status       String  @default("pending")
   errorMessage String?
   rawPayload   Json?
 
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([esiid, houseId])
   @@index([esiid])
 }
 
 model SmtAuthorization {
-  id              String   @id @default(cuid())
+  id String @id @default(cuid())
 
-  userId          String
-  houseId         String
-  houseAddressId  String
+  userId         String
+  houseId        String
+  houseAddressId String
 
-  esiid           String
-  meterNumber     String?
+  esiid       String
+  meterNumber String?
 
-  customerName    String
+  customerName String
 
   serviceAddressLine1 String
   serviceAddressLine2 String?
-  serviceCity          String
-  serviceState         String
-  serviceZip           String
+  serviceCity         String
+  serviceState        String
+  serviceZip          String
 
-  tdspCode        String
-  tdspName        String
+  tdspCode String
+  tdspName String
 
   authorizationStartDate DateTime
   authorizationEndDate   DateTime
@@ -537,23 +537,23 @@ model SmtAuthorization {
   allowHistoricalBilling Boolean
   allowSubscription      Boolean
 
-  contactEmail           String
-  contactPhone           String?
+  contactEmail String
+  contactPhone String?
 
   smtRequestorId     String
   smtRequestorAuthId String
 
-  smtAgreementId        String?   @db.VarChar(100)
-  smtSubscriptionId     String?   @db.VarChar(100)
-  smtStatus             String?   @db.VarChar(50)
-  smtStatusMessage      String?   @db.Text
+  smtAgreementId         String?   @db.VarChar(100)
+  smtSubscriptionId      String?   @db.VarChar(100)
+  smtStatus              String?   @db.VarChar(50)
+  smtStatusMessage       String?   @db.Text
   smtBackfillRequestedAt DateTime?
   smtBackfillCompletedAt DateTime?
-  smtLastSyncAt         DateTime?
+  smtLastSyncAt          DateTime?
 
-  consentTextVersion    String?   @db.VarChar(50)
-  consentIp             String?   @db.VarChar(64)
-  consentUserAgent      String?   @db.VarChar(255)
+  consentTextVersion String? @db.VarChar(50)
+  consentIp          String? @db.VarChar(64)
+  consentUserAgent   String? @db.VarChar(255)
 
   user         User         @relation(fields: [userId], references: [id])
   houseAddress HouseAddress @relation(fields: [houseAddressId], references: [id])
@@ -567,11 +567,39 @@ model SmtAuthorization {
   @@index([esiid])
 }
 
+model PuctRep {
+  id         String  @id @default(cuid())
+  /// PUCT Retail Electric Provider certificate number, e.g. "10052"
+  puctNumber String
+  /// Legal company name as listed by PUCT, e.g. "JUST ENERGY TEXAS LP"
+  legalName  String
+  /// Doing-business-as / brand name (if present), e.g. "JUST ENERGY"
+  dbaName    String?
+
+  address1   String?
+  address2   String?
+  city       String?
+  state      String?
+  postalCode String?
+
+  phone   String?
+  website String?
+  email   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([puctNumber, legalName])
+  @@index([puctNumber])
+  @@index([legalName])
+  @@index([dbaName])
+}
+
 /// RatePlan - normalized electricity plans (REP plans and utility tariffs)
 model RatePlan {
-  id           String   @id @default(cuid())
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   externalId   String?
   utilityId    String
@@ -580,26 +608,26 @@ model RatePlan {
   supplierPUCT String?
   planName     String?
 
-  termMonths   Int?
-  rate500      Float?
-  rate1000     Float?
-  rate2000     Float?
-  cancelFee    String?
+  termMonths Int?
+  rate500    Float?
+  rate1000   Float?
+  rate2000   Float?
+  cancelFee  String?
 
-  eflUrl       String?
-  tosUrl       String?
-  yracUrl      String?
+  eflUrl  String?
+  tosUrl  String?
+  yracUrl String?
 
   isUtilityTariff Boolean   @default(false)
-  tariffStructure  Json?
-  customerCharge   Float?
-  minimumBill      Float?
-  effectiveStart   DateTime?
-  effectiveEnd      DateTime?
-  sourceRateUrl     String?
-  sourceParentUrl   String?
+  tariffStructure Json?
+  customerCharge  Float?
+  minimumBill     Float?
+  effectiveStart  DateTime?
+  effectiveEnd    DateTime?
+  sourceRateUrl   String?
+  sourceParentUrl String?
 
-  lastSeenAt   DateTime @default(now())
+  lastSeenAt DateTime @default(now())
 
   @@unique([utilityId, state, supplier, planName, termMonths, isUtilityTariff])
   @@index([utilityId, state, termMonths])
@@ -609,15 +637,15 @@ model RatePlan {
 model ErcotIngest {
   id          String   @id @default(cuid())
   createdAt   DateTime @default(now())
-  status      String   // "ok" | "skipped" | "error"
-  note        String?  // freeform note (e.g., "daily", "manual test")
+  status      String // "ok" | "skipped" | "error"
+  note        String? // freeform note (e.g., "daily", "manual test")
   fileUrl     String?
   fileSha256  String?  @unique
-  tdsp        String?  // oncor|centerpoint|aep_north|aep_central|tnmp|unknown
+  tdsp        String? // oncor|centerpoint|aep_north|aep_central|tnmp|unknown
   rowCount    Int?
-  headers     Json?    // snapshot of response headers for drift
-  error       String?  // short error
-  errorDetail String?  // long stack
+  headers     Json? // snapshot of response headers for drift
+  error       String? // short error
+  errorDetail String? // long stack
 }
 
 /// ERCOT ESIID Index - stores normalized ESIID data from ERCOT extracts

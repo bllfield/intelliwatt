@@ -199,6 +199,15 @@ export default function AdminDashboard() {
               <div className="font-semibold text-brand-navy mb-1">🗄️ Database Explorer</div>
               <div className="text-sm text-brand-navy/60">Read-only database viewer with search and CSV export</div>
             </a>
+            <a
+              href="/admin/puct/reps"
+              className="block p-4 border-2 border-brand-blue/20 rounded-lg hover:border-brand-blue hover:bg-brand-blue/5 transition-colors"
+            >
+              <div className="font-semibold text-brand-navy mb-1">📇 PUCT REP Directory</div>
+              <div className="text-sm text-brand-navy/60">
+                Upload the latest PUCT REP CSV to refresh the internal Retail Electric Provider list
+              </div>
+            </a>
           </div>
         </section>
 

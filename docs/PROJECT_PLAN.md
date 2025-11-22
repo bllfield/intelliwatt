@@ -2491,3 +2491,46 @@ We have extended the Smart Meter Texas ingest pipeline and admin tooling:
   - Updated: `2025-11-22T09:30:14Z` (local admin UI shows formatted timestamp)
   - Meter: `142606737LG`
 - This establishes SMT meterInfo as a first-class, production-safe pipeline and the canonical source of `meterNumber` and related meter attributes for future SMT Agreement/Subscription payloads.
+
+### PC-2025-11-22: PUCT REP Directory (Retail Providers Only) + Admin CSV Uploader
+
+**Rationale**
+
+We need an authoritative, PUCT-backed directory of Retail Electric Providers (REPs) to:
+- Populate SMT NewAgreement payloads with the correct `PUCTRORNumber`.
+- Drive customer-facing REP selection (typeahead/dropdown) independent of vendor APIs.
+- Support future plan and solar modeling across deregulated and regulated markets.
+- Allow non-technical admin users to refresh the PUCT REP directory via CSV upload.
+
+**Scope**
+
+- Add Prisma model `PuctRep` with:
+  - `puctNumber` (PUCT REP certificate number)
+  - `legalName` (PUCT company name)
+  - Optional `dbaName`, address, phone, website, and email fields for display.
+- Add admin-only CSV import script `scripts/admin/import_puct_reps_from_csv.mjs` that:
+  - Reads a local `rep.csv` (exported from the PUCT REP directory).
+  - Parses rows using a robust CSV parser.
+  - Upserts records into `PuctRep` keyed by `(puctNumber, legalName)`.
+- Add admin UI:
+  - Card on `/admin` linking to `/admin/puct/reps`.
+  - `/admin/puct/reps` page with a CSV upload form.
+  - Uploading a new CSV truncates the existing `PuctRep` data and replaces it with the new file contents.
+- The source CSV files are maintained under the repo path:
+  - `docs/PUCT NUMBER LISTS/rep.csv`
+  - This folder maps to the local Windows directory:
+    `C:\Users\bllfi\Documents\Intellipath Solutions\Intelliwatt Website\intelliwatt-clean\docs\PUCT NUMBER LISTS`
+
+**Rollback Plan**
+
+- If the directory causes issues:
+  - Stop invoking the import script and disable the admin uploader link.
+  - Do not use `PuctRep` in any new business logic.
+  - Optionally drop the `PuctRep` table via a Prisma migration if the feature is abandoned.
+
+**Guardrails Preserved**
+
+- CDM-first: We treat PUCT data as a canonical, internal directory separate from any vendor (e.g., WattBuy).
+- RAW capture remains unchanged for other integrations.
+- No existing SMT ingest, WattBuy, or ERCOT code paths are modified in this change.
+- Future SMT Agreement changes will consume `PuctRep` via internal helpers, not vendor payloads.
