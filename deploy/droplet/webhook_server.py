@@ -537,7 +537,6 @@ def smt_post(path_or_url: str, body: Dict[str, Any]) -> Dict[str, Any]:
         # Force-set them so we never rely on upstream defaults.
         headers["username"] = SMT_USERNAME
         headers["serviceID"] = SMT_SERVICE_ID
-        headers["serviceId"] = SMT_SERVICE_ID
 
     if step_name:
         try:
