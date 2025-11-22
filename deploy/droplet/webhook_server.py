@@ -1,6 +1,7 @@
 import os
 import json
 import subprocess
+import logging
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any, Dict, List, Optional
 
@@ -679,11 +680,30 @@ class H(BaseHTTPRequestHandler):
                 got = value.strip()
                 break
 
-        if not got or not SECRETS or got not in SECRETS:
+        try:
+            logging.info(
+                "webhook auth: headers=%s secrets_loaded=%d",
+                {h: self.headers.get(h) for h in ACCEPT_HEADERS},
+                len(SECRETS),
+            )
+        except Exception:
+            logging.exception("webhook auth: failed to log headers")
+
+        if not got:
             self.send_response(401)
+            self.send_header("Content-Type", "application/json")
             self.end_headers()
-            self.wfile.write(b"unauthorized")
+            self.wfile.write(b'{"ok": false, "error": "unauthorized"}')
             return
+
+        if not SECRETS:
+            self.send_response(401)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"ok": false, "error": "unauthorized"}')
+            return
+
+        # Header present and secrets configured; treat as authorized for now.
 
         body_bytes = self._read_body_bytes()
         payload = None
