@@ -125,7 +125,7 @@ async function main() {
   //   "reportFormat":"CSV",
   //   "version":"L",
   //   "ESIIDMeterList":[ { "esiid":"..." } ],
-  //   "SMTTermsandConditions":"y"
+//   "SMTTermsandConditions":"Y"
   // }
   // ---------------------------------------------------------------------------
 
@@ -134,19 +134,24 @@ async function main() {
   // Simple trans_id for traceability
   const transId = `TESTMI${Math.random().toString(36).slice(2, 10).toUpperCase()}`;
 
-  const meterInfoBody = {
+const meterInfoBody = {
+  // NOTE: For INTELLIPATH, SMT delivers meter attributes via SFTP as CSV files.
+  // /v2/meterInfo/ returns an acknowledgement JSON; the actual data lands on
+  // ftp.smartmetertexas.biz under our SFTP account.
+  MeterSearchRequest: {
     trans_id: transId,
     requestorID,
     requesterType: "CSP",
     requesterAuthenticationID,
-    reportFormat: "CSV", // match guide example (CSV file via FTP/SFTP)
+    reportFormat: "CSV", // SMT delivers meter attributes via SFTP (CSV)
     version: "L", // Latest
     ESIIDMeterList: [
       {
         esiid: ESIID_UNDER_TEST,
       },
     ],
-    SMTTermsandConditions: "y", // match guide's lowercase "y"
+    SMTTermsandConditions: "Y",
+  },
   };
 
   console.log("[STEP 2] Calling SMT /v2/meterInfo/ with payload:");
@@ -179,17 +184,17 @@ async function main() {
 
   if (miStatus < 200 || miStatus >= 300) {
     console.error(
-      "[RESULT] /v2/meterInfo/ did NOT succeed (non-2xx). SMT may be blocking meter attributes for this ESIID or this ServiceID configuration.",
+    "[RESULT] /v2/meterInfo/ did NOT succeed (non-2xx). SMT may be blocking meter attributes for this ESIID or this Service ID configuration.",
     );
     process.exit(1);
   }
 
-  console.log(
-    "[RESULT] /v2/meterInfo/ returned a successful status code. Inspect the body above for meter attributes or acknowledgements.",
-  );
-  console.log(
-    "If SMT only returns an acknowledgement with correlationId, the actual CSV may arrive later via SFTP depending on SMT’s configuration.",
-  );
+console.log(
+  `[RESULT] /v2/meterInfo/ returned status ${miStatus}. See body above for acknowledgement or fault codes.`,
+);
+console.log(
+  "Meter attributes, if any, will be delivered via SFTP as CSV according to SMT’s configuration.",
+);
   process.exit(0);
 }
 

@@ -17,6 +17,15 @@
 > - `SMT_REQUESTOR_AUTH_ID` = `134642921` (Intellipath Solutions LLC DUNS on SMT)  
 > - `SMT_API_BASE_URL` = `https://services.smartmetertexas.net`
 
+### Service ID and Requestor Identity (INTELLIPATH)
+
+- `SMT_USERNAME` = `INTELLIPATH`
+- `SMT_SERVICE_ID` = `INTELLIPATH`
+- `SMT_REQUESTOR_ID` = `INTELLIPATH`
+- `SMT_REQUESTOR_AUTH_ID` = `134642921` (Intellipath Solutions LLC DUNS on SMT)
+
+> The SMT `/v2/token/` username **must** match the `requestorID` value in every SMT payload (meterInfo, NewAgreement, NewSubscription, etc.). For `INTELLIPATH`, SMT currently delivers `/v2/meterInfo/` responses via SFTP CSV; `deliveryMode: "API"` returns errorCode `2076` (“API Integration is not done.”).
+
 ### Token Generation
 
 IntelliWatt requests tokens via:

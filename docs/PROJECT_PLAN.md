@@ -2460,3 +2460,10 @@ We have extended the Smart Meter Texas ingest pipeline and admin tooling:
   sudo systemctl restart smt-webhook.service
   sudo systemctl restart smt-ingest.service
   ```
+
+### PC-2025-11-22-SMT-METERINFO-SFTP — meter attributes alignment
+
+- Standardized the SMT meterInfo test flow on the production Service ID: **INTELLIPATH** for both `/v2/token/` and `requestorID`.
+- Confirmed SMT currently provides meter attributes via SFTP CSV for INTELLIPATH; `/v2/meterInfo/` returns acknowledgements and `deliveryMode: "API"` yields errorCode `2076`.
+- Added a droplet test script (`scripts/test_smt_meter_info.mjs`) that uses CSV/SFTP semantics so Support has a canonical payload + response when filing SMT tickets.
+- **Next planned step (future work):** after WattBuy returns an address+ESIID, call `/v2/meterInfo/`, ingest the SFTP CSV to capture the authoritative `meterNumber`, and feed that into NewAgreement/NewSubscription payloads. (Not implemented yet; requires SFTP parsing pipeline updates.)
