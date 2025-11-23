@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useTransition, FormEvent } from "react";
+import { RepSelector } from "@/components/smt/RepSelector";
 
 type SmtAuthorizationFormProps = {
   houseAddressId: string;
@@ -256,29 +257,11 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
           </div>
         </div>
 
-        <div className="space-y-1 rounded-lg bg-slate-50 p-3 text-xs text-slate-700">
-          <label htmlFor="repPuctNumber" className="block text-xs font-semibold text-slate-900">
-            Retail Electric Provider
-          </label>
-          <select
-            id="repPuctNumber"
-            name="repPuctNumber"
-            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-slate-100"
-            value={repPuctNumber}
-            onChange={(event) => {
-              const parsed = Number.parseInt(event.target.value, 10);
-              setRepPuctNumber(Number.isNaN(parsed) ? 10052 : parsed);
-            }}
-            disabled={isPending}
-          >
-            <option value={10052}>Just Energy - PUCT #10052</option>
-          </select>
-          <p className="text-[0.7rem] text-slate-600">
-            IntelliWatt currently uses Just Energy as the Retail Electric Provider when establishing
-            Smart Meter Texas access. Additional providers will be available once the REP directory
-            is fully aligned across environments.
-          </p>
-        </div>
+        <RepSelector
+          repPuctNumber={repPuctNumber}
+          onChange={setRepPuctNumber}
+          helperText="IntelliWatt currently uses Just Energy as the Retail Electric Provider when establishing Smart Meter Texas access. Additional providers will be available once the REP directory is fully aligned across environments."
+        />
 
       <div className="space-y-3 rounded-lg bg-slate-50 p-3 text-xs text-slate-700">
         <p className="leading-relaxed">
