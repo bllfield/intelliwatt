@@ -128,8 +128,12 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
     });
   }
 
+  const containerClasses = showHeader
+    ? "space-y-3 rounded-xl border border-slate-200 bg-white/80 p-4 shadow-sm backdrop-blur"
+    : "space-y-3";
+
   return (
-    <div className="space-y-3 rounded-xl border border-slate-200 bg-white/80 p-4 shadow-sm backdrop-blur">
+    <div className={containerClasses}>
       {showHeader && (
         <>
           <div className="grid gap-3 rounded-lg bg-brand-navy p-3 text-xs text-brand-cyan sm:grid-cols-2">
