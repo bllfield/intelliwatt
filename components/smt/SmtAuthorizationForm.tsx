@@ -15,6 +15,7 @@ type SmtAuthorizationFormProps = {
   serviceZip?: string | null;
   contactEmail: string;
   existingAuth?: any | null;
+  initialRepPuctNumber?: number | null;
 };
 
 type ApiError = {
@@ -35,11 +36,19 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
     serviceZip,
     contactEmail,
     existingAuth,
+    initialRepPuctNumber,
   } = props;
 
   const [customerName, setCustomerName] = useState("");
   const [contactPhone, setContactPhone] = useState("");
   const [consent, setConsent] = useState(false);
+  const [repPuctNumber, setRepPuctNumber] = useState<number>(() => {
+    const fallback = 10052;
+    if (typeof initialRepPuctNumber === "number" && Number.isFinite(initialRepPuctNumber)) {
+      return Math.floor(initialRepPuctNumber);
+    }
+    return fallback;
+  });
   const [isPending, startTransition] = useTransition();
 
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -76,6 +85,7 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
               contactPhone: contactPhone.trim() || undefined,
               consent: true,
               consentTextVersion: "smt-poa-v1",
+            repPuctNumber,
             }),
           });
 
@@ -244,6 +254,30 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
               placeholder="We’ll only use this for account questions"
             />
           </div>
+        </div>
+
+        <div className="space-y-1 rounded-lg bg-slate-50 p-3 text-xs text-slate-700">
+          <label htmlFor="repPuctNumber" className="block text-xs font-semibold text-slate-900">
+            Retail Electric Provider
+          </label>
+          <select
+            id="repPuctNumber"
+            name="repPuctNumber"
+            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-slate-100"
+            value={repPuctNumber}
+            onChange={(event) => {
+              const parsed = Number.parseInt(event.target.value, 10);
+              setRepPuctNumber(Number.isNaN(parsed) ? 10052 : parsed);
+            }}
+            disabled={isPending}
+          >
+            <option value={10052}>Just Energy - PUCT #10052</option>
+          </select>
+          <p className="text-[0.7rem] text-slate-600">
+            IntelliWatt currently uses Just Energy as the Retail Electric Provider when establishing
+            Smart Meter Texas access. Additional providers will be available once the REP directory
+            is fully aligned across environments.
+          </p>
         </div>
 
       <div className="space-y-3 rounded-lg bg-slate-50 p-3 text-xs text-slate-700">

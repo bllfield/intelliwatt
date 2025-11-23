@@ -2644,3 +2644,46 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
 - SMT auth, SFTP ingest, and admin tooling are untouched.
 - Only the specific "Subcription is already active" case is treated as success; all other non-`"0000"` subscription statuses remain failures.
 - The Just Energy PUCT number (10052) stays the default until PuctRep-based routing is ready.
+
+[PC-2025-11-22-A] SMT Customer Authorization - Agreements + Subscriptions + REP Routing (LOCKED)
+
+**Purpose**
+
+- Record that the SMT customer authorization flow now creates agreements and subscriptions via the droplet `/agreements` proxy, so downstream work can treat this path as implemented rather than "not started".
+- Capture the baseline REP routing behavior (static Just Energy PUCT 10052) and "subscription already active" handling so future iterations have a clear foundation.
+
+**Scope**
+
+- SMT JWT auth runs droplet-only using the INTELLIPATH Service ID:
+  - `SMT_USERNAME` / `requestorID` = `INTELLIPATH`
+  - `requesterAuthenticationID` = `134642921` (IntelliPath Solutions LLC DUNS)
+  - Droplet obtains the JWT via `/v2/token/`, then calls `POST /v2/NewAgreement/` and `POST /v2/NewSubscription/`.
+- Droplet `/agreements` endpoint:
+  - Verifies the `Authorization: Bearer ${SMT_PROXY_TOKEN}` header from Vercel.
+  - Logs and forwards the SMT payloads, reusing the JWT.
+  - Accepts an optional `repPuctNumber` and coerces it to an integer; defaults to `10052` on missing or invalid input.
+  - Uses the resulting number as `PUCTRORNumber` for each `customerMeterList` entry.
+- NewAgreement behavior:
+  - Valid requests return SMT ACK payloads with real `agreementNumber` values (for example 3079618, 3079844) which are treated as success.
+  - Meter numbers flow from `SmtMeterInfo` where available; otherwise the fallback logic remains intact.
+- NewSubscription behavior:
+  - `statusCode` `"0000"` continues to represent success.
+  - `statusCode` `"0001"` with a message containing `"Subcription is already active"` is normalized as success (instead of error).
+  - Vercel helper exposes `subscriptionAlreadyActive: true` in responses; UI treats it as a green success message.
+- Customer UI updates on `/dashboard/api`:
+  - Adds a static REP selector ("Just Energy - PUCT #10052") wired to the authorization form.
+  - Sends the selected `repPuctNumber` in the `/api/smt/authorization` request body.
+  - Shows "already active" status as success without firing error toasts.
+
+**Impact / Overrides**
+
+- Partially satisfies **PC-2025-11-12-H (SMT Customer Authorization & Auto-Pull)**:
+  - Completed: customer-facing authorization form, droplet `/agreements` proxy calls, handling of "subscription already active", baseline REP routing via static selector and `repPuctNumber`.
+  - Still open: multi-REP selection powered by the `PuctRep` directory, richer agreement/subscription status dashboards, additional SMT endpoints (List Agreements, Status, Terminate, List ESIIDs per Agreement).
+- Confirms that the `repPuctNumber` plumbing from Vercel to the droplet is live even while the UI exposes only the Just Energy option.
+- Locks in the requirement that all SMT REST traffic continues to flow through the droplet (Vercel remains droplet-only for SMT access).
+
+**Status**
+
+- Status: PARTIALLY COMPLETED for PC-2025-11-12-H.
+- Next steps: align the PuctRep-backed selector once prod DB drift is resolved, expand status observability, and implement additional SMT agreement management endpoints.

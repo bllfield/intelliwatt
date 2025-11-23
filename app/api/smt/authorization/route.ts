@@ -14,6 +14,7 @@ type SmtAuthorizationBody = {
   contactPhone?: string | null;
   consent: boolean;
   consentTextVersion?: string | null;
+  repPuctNumber?: number | string | null;
 };
 
 function getEnvOrDefault(name: string, fallback: string): string {
@@ -159,6 +160,16 @@ export async function POST(req: NextRequest) {
       typeof rawBody.consentTextVersion === "string" && rawBody.consentTextVersion.trim().length > 0
         ? rawBody.consentTextVersion.trim()
         : "smt-poa-v1";
+    const rawRepPuct = rawBody.repPuctNumber;
+    let repPuctNumber: number | undefined;
+    if (typeof rawRepPuct === "number" && Number.isFinite(rawRepPuct)) {
+      repPuctNumber = Math.floor(rawRepPuct);
+    } else if (typeof rawRepPuct === "string" && rawRepPuct.trim().length > 0) {
+      const parsed = Number.parseInt(rawRepPuct.trim(), 10);
+      if (!Number.isNaN(parsed)) {
+        repPuctNumber = parsed;
+      }
+    }
     const clientIp =
       req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? req.ip ?? null;
     const userAgent = req.headers.get("user-agent") ?? null;
@@ -238,7 +249,7 @@ export async function POST(req: NextRequest) {
         includeInterval: true,
         includeBilling: true,
         meterNumber: resolvedMeterNumber ?? undefined,
-        repPuctNumber: DEFAULT_REP_PUCT_NUMBER,
+        repPuctNumber: repPuctNumber ?? DEFAULT_REP_PUCT_NUMBER,
       });
 
       smtUpdateData = {
