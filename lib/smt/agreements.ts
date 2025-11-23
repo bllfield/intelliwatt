@@ -22,6 +22,7 @@ export type SmtAgreementResult = {
   message?: string;
   backfillRequestedAt?: string;
   backfillCompletedAt?: string;
+  subscriptionAlreadyActive?: boolean;
 };
 
 // Feature flag to hard-disable SMT agreements from env.
@@ -266,6 +267,28 @@ function buildNewSubscriptionPayload(
   return payload;
 }
 
+type SmtSubscriptionRaw = {
+  statusCode?: string | null;
+  statusReason?: string | null;
+  [key: string]: unknown;
+};
+
+function normalizeSubscriptionStatus(raw: SmtSubscriptionRaw | null | undefined) {
+  const statusCode = (raw?.statusCode ?? "").toString().trim();
+  const statusReason = (raw?.statusReason ?? "").toString().trim();
+  const reasonLower = statusReason.toLowerCase();
+  const alreadyActive =
+    statusCode === "0001" && reasonLower.includes("subcription is already active");
+  const ok = statusCode === "0000" || alreadyActive;
+  return {
+    ok,
+    alreadyActive,
+    statusCode,
+    statusReason,
+    raw,
+  };
+}
+
 export async function createAgreementAndSubscription(
   payload: SmtAgreementRequest,
 ): Promise<SmtAgreementResult> {
@@ -403,9 +426,12 @@ export async function createAgreementAndSubscription(
     const subscriptionResult = resultsArray.find(
       (entry: any) => entry?.name === "NewSubscription",
     );
+    const subscriptionNormalized = normalizeSubscriptionStatus(
+      subscriptionResult?.data as SmtSubscriptionRaw,
+    );
 
     return {
-      ok: !!json?.ok,
+      ok: !!json?.ok && subscriptionNormalized.ok,
       agreementId:
         agreementResult?.data?.agreementId ??
         agreementResult?.data?.AgreementID ??
@@ -418,6 +444,7 @@ export async function createAgreementAndSubscription(
       message: json?.message ?? json?.error ?? undefined,
       backfillRequestedAt: json?.backfillRequestedAt ?? undefined,
       backfillCompletedAt: json?.backfillCompletedAt ?? undefined,
+      subscriptionAlreadyActive: subscriptionNormalized.alreadyActive,
     };
   } catch (err: any) {
     return {
@@ -427,6 +454,7 @@ export async function createAgreementAndSubscription(
         0,
         500,
       ),
+      subscriptionAlreadyActive: false,
     };
   }
 }
