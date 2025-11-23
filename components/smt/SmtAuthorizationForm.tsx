@@ -183,7 +183,10 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
         </>
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-3">
+      <form
+        onSubmit={handleSubmit}
+        className={`space-y-3 ${showHeader ? "" : "-mt-2 sm:-mt-3"}`}
+      >
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-1">
             <label
