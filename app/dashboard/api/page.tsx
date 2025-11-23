@@ -11,6 +11,7 @@ type ExistingSmtAuthorization = {
   smtAgreementId: string | null;
   smtSubscriptionId: string | null;
   subscriptionAlreadyActive?: boolean | null;
+  meterNumber?: string | null;
 };
 
 export const dynamic = "force-dynamic";
@@ -63,6 +64,7 @@ export default async function ApiConnectPage() {
         smtStatusMessage: true,
         smtAgreementId: true,
         smtSubscriptionId: true,
+        meterNumber: true,
       },
     })) as ExistingSmtAuthorization | null;
   }
@@ -340,6 +342,7 @@ export default async function ApiConnectPage() {
                       serviceState={serviceState}
                       serviceZip={serviceZip}
                       existingAuth={existingAuth}
+                      initialMeterNumber={existingAuth?.meterNumber ?? undefined}
                     />
                   </div>
                 </div>

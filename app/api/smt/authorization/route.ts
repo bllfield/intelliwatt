@@ -13,6 +13,7 @@ type SmtAuthorizationBody = {
   consent: boolean;
   consentTextVersion?: string | null;
   repPuctNumber?: string | number | null;
+  meterNumber?: string | null;
 };
 
 function getEnvOrDefault(name: string, fallback: string): string {
@@ -142,13 +143,24 @@ export async function POST(req: NextRequest) {
         : null;
 
     const meterInfoHouseId = house.houseId ?? house.id;
-    const meterNumber = await waitForMeterInfo({
-      houseId: meterInfoHouseId,
-      esiid: houseEsiid,
-      timeoutMs: 60_000,
-      pollIntervalMs: 3_000,
-      queueIfMissing: true,
-    });
+    let providedMeterNumber: string | null = null;
+    if (typeof rawBody.meterNumber === "string") {
+      const trimmed = rawBody.meterNumber.trim();
+      if (trimmed.length > 0) {
+        providedMeterNumber = trimmed;
+      }
+    }
+
+    let meterNumber = providedMeterNumber;
+    if (!meterNumber) {
+      meterNumber = await waitForMeterInfo({
+        houseId: meterInfoHouseId,
+        esiid: houseEsiid,
+        timeoutMs: 60_000,
+        pollIntervalMs: 3_000,
+        queueIfMissing: true,
+      });
+    }
 
     if (!meterNumber) {
       return NextResponse.json(

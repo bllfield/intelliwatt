@@ -16,6 +16,7 @@ type SmtAuthorizationFormProps = {
   serviceZip?: string | null;
   contactEmail: string;
   existingAuth?: any | null;
+  initialMeterNumber?: string | null;
 };
 
 type ApiError = {
@@ -36,10 +37,14 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
     serviceZip,
     contactEmail,
     existingAuth,
+    initialMeterNumber,
   } = props;
 
   const [customerName, setCustomerName] = useState("");
   const [contactPhone, setContactPhone] = useState("");
+  const [meterNumber, setMeterNumber] = useState(
+    typeof initialMeterNumber === "string" ? initialMeterNumber.trim() : "",
+  );
   const [consent, setConsent] = useState(false);
   const [repPuctNumber, setRepPuctNumber] = useState<string | undefined>(undefined);
   const [isPending, startTransition] = useTransition();
@@ -79,6 +84,10 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
             consentTextVersion: "smt-poa-v1",
           };
           payload.repPuctNumber = repPuctNumber;
+          const trimmedMeter = meterNumber.trim();
+          if (trimmedMeter.length > 0) {
+            payload.meterNumber = trimmedMeter;
+          }
 
           const res = await fetch("/api/smt/authorization", {
             method: "POST",
@@ -259,6 +268,30 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
           repPuctNumber={repPuctNumber}
           onChange={setRepPuctNumber}
         />
+
+        <div className="space-y-1">
+          <label
+            htmlFor="meterNumber"
+            className="block text-xs font-medium text-slate-800"
+          >
+            Meter number (optional)
+          </label>
+          <input
+            id="meterNumber"
+            name="meterNumber"
+            type="text"
+            className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-slate-100"
+            value={meterNumber}
+            onChange={(event) => setMeterNumber(event.target.value)}
+            disabled={isPending}
+            placeholder="As shown on your bill (e.g., 142606737LG)"
+            inputMode="text"
+            autoComplete="off"
+          />
+          <p className="text-[11px] text-slate-500">
+            We’ll attempt to pull this automatically, but if you know it, enter the meter number from your electric bill to speed things up.
+          </p>
+        </div>
 
         <div className="space-y-3 rounded-lg bg-slate-50 p-3 text-xs text-slate-700">
           <p className="leading-relaxed">
