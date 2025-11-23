@@ -33,6 +33,18 @@ postgresql://<user>:<password>@<host>:<port>/intelliwatt_dev?schema=public
 
 Keep this connection string handy; you will not commit it to the repo.
 
+### Dev Database: `intelliwatt_dev` (DO cluster)
+
+- Dedicated dev DB created on the existing DO Postgres cluster.
+  - Name: `intelliwatt_dev`
+  - Same host/port/user as `defaultdb`
+- When running `npx prisma migrate dev`, point `DATABASE_URL` at this database, e.g.:
+  ```bash
+  DATABASE_URL="postgresql://doadmin:<PASSWORD>@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25060/intelliwatt_dev?sslmode=require"
+  ```
+- `npx prisma migrate dev` now applies the full chain of migrations (`20251024001515_init` → … → `20251122120000_add_smt_meter_info` → `20251123035440_puct_rep_dev_setup`) against `intelliwatt_dev`.
+- This database is used exclusively for schema evolution and local testing; it is **not** the same as the production-ish `defaultdb` used by Vercel and the droplet services.
+- The PUCT REP / ERCOT migration is idempotent, so re-running `migrate dev` against `intelliwatt_dev` is safe even if tables already exist.
 ## 3. Using the dev DB with Prisma locally
 
 When you want to run Prisma migrations or test schema-dependent code locally:
@@ -92,4 +104,13 @@ After setting up the dev DB and running `npx prisma migrate dev`:
 
 When in doubt, re-check `docs/PROJECT_PLAN.md` (PC-2025-11-22-B) before changing
 any `DATABASE_URL` in a shared environment.
+
+### Production-ish DB (DO `defaultdb`)
+
+- DO Postgres `defaultdb` hosts live app data and historical manually-applied SMT/ERCOT schema changes.
+- Do **not** run `npx prisma migrate dev` against `defaultdb`. Only `npx prisma migrate deploy` is allowed, and only from a controlled environment (droplet).
+- If a migration fails on `defaultdb`, fix the SQL locally (idempotent guards, conditional renames), commit, then on the droplet:
+  - `npx prisma migrate resolve --rolled-back <migration_name>`
+  - `npx prisma migrate deploy`
+  after clearing any connection-slot issues in the DO UI.
 

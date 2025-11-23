@@ -38,6 +38,18 @@
 - **Storage:** Objects at `ercot/YYYY-MM-DD/<filename>.zip` in your Space
 - **DB:** `/admin/database` → table **ErcotIngest** shows new rows (filename, storageKey, sizeBytes, sourceUrl, status)
 
+## Database / Prisma Operations
+
+- **Recover from failed Prisma migration on DO `defaultdb`:**
+  1. Fix the migration SQL locally to be idempotent (e.g., `CREATE TABLE IF NOT EXISTS`, conditional index rename via DO block), then commit and push.
+  2. On the droplet (`deploy@intelliwatt-smt-proxy`):
+     - `cd /home/deploy/apps/intelliwatt`
+     - `export DATABASE_URL="postgresql://doadmin:<PASSWORD>@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25060/defaultdb?sslmode=require"`
+     - If the command errors with “remaining connection slots are reserved for roles with the SUPERUSER attribute”, terminate idle connections in the DO UI first.
+     - Mark the migration as rolled back: `npx prisma migrate resolve --rolled-back 20251123035440_puct_rep_dev_setup --schema=prisma/schema.prisma`
+     - Re-apply migrations: `npx prisma migrate deploy --schema=prisma/schema.prisma`
+  3. Verify no further P3xxx errors and confirm the migration entry exists in `_prisma_migrations`.
+
 ## ERCOT Public API credentials (auto-ID token)
 
 Set these in Vercel (Production) to use the ERCOT Public Data API (recommended):

@@ -206,6 +206,7 @@ Guardrails
 - Conflict transfers execute inside a Prisma transaction for consistency.
 - RAW vendor payloads remain captured before normalization.
 - No new PII is logged; structured warnings continue to reference meter IDs only.
+- [x] Apply PUCT REP / ERCOT alignment migration (`20251123035440_puct_rep_dev_setup`) to DO `defaultdb` via droplet `npx prisma migrate deploy`.
 
 PC-2025-11-01: ESIID Resolver — Use WattBuy Electricity Info Endpoint
 
@@ -2105,6 +2106,34 @@ The current **SMT Interface Guide v2** documents the REST token and JWT behavior
 
 This plan change is the **single source of truth** for how IntelliWatt integrates with
 Smart Meter Texas as of November 17, 2025.
+
+---
+
+## 2025-11-23 – PUCT REP / ERCOT schema alignment (PC-2025-11-23-DB-PUCT-REP)
+
+- Added Prisma migration `20251123035440_puct_rep_dev_setup` which:
+  - Ensures `pg_trgm` is available for GIN trigram index usage via `CREATE EXTENSION IF NOT EXISTS pg_trgm;`.
+  - Normalizes SMT-related tables by:
+    - Making `SmtAuthorization` creation idempotent (`CREATE TABLE IF NOT EXISTS "SmtAuthorization" ...`).
+    - Adding non-duplicate indexes on SmtAuthorization columns (`userId`, `houseId`, `houseAddressId`, `esiid`).
+  - Creates PUCT REP + ERCOT tables if missing:
+    - `PuctRep` (PUCT REP directory, including `puctNumber`, `legalName`, `dbaName`, address/contact fields).
+    - `ErcotEsiidIndex` (ERCOT ESIID index / address-normalized lookup table).
+  - Adds indexes and constraints with IF NOT EXISTS semantics where applicable:
+    - Unique `PuctRep_puctNumber_legalName_key`.
+    - Unique `ErcotEsiidIndex_esiid_key`.
+    - Supporting indexes on ESIID, normalized ZIP, etc.
+  - Uses a DO block to conditionally rename `SmtInterval_esiid_meter_ts_idx` to `esiid_meter_ts_idx` only if the old index exists and the new one does not.
+- Dev DB: ran `npx prisma migrate dev` against the new `intelliwatt_dev` database on the same DO cluster. All migrations from `20251024001515_init` through `20251123035440_puct_rep_dev_setup` now apply cleanly.
+- Prod-ish DB (DO `defaultdb`):
+  - Previously had `SmtAuthorization` and `ErcotEsiidIndex` created manually plus an older ERCOT migration (`20251107020101_add_ercot_esiid_index`) that is NOT present locally.
+  - To safely align schema without touching data:
+    1. Set `DATABASE_URL` to the DO `defaultdb` connection string on the droplet.
+    2. Marked `20251123035440_puct_rep_dev_setup` as rolled back via `npx prisma migrate resolve --rolled-back 20251123035440_puct_rep_dev_setup`.
+    3. Resolved DO’s “remaining connection slots are reserved for roles with the SUPERUSER attribute” error by terminating excess connections in the DO UI, then re-running the Prisma command.
+    4. Applied `npx prisma migrate deploy` from the droplet, which successfully ran `20251123035440_puct_rep_dev_setup` using the idempotent SQL.
+- Result: The DO `defaultdb` schema now matches the current Prisma migration history for `SmtAuthorization`, `PuctRep`, and `ErcotEsiidIndex`, without dropping or altering existing data.
+- NOTE: The historical migration `20251107020101_add_ercot_esiid_index` remains present in the DO migrations table but not in the local `prisma/migrations` directory. Its effects are functionally superseded by `20251123035440_puct_rep_dev_setup`. We handle this by not rewriting historical migrations and relying on idempotent SQL in the newer migration instead.
 
 ---
 
