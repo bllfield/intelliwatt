@@ -128,7 +128,7 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
     });
   }
 
-  const disabled = isPending || !consent;
+  const submitDisabled = isPending || !consent;
 
   return (
     <div className="space-y-3 rounded-xl border border-slate-200 bg-white/80 p-4 shadow-sm backdrop-blur">
@@ -167,14 +167,6 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
             refresh or update your authorization, especially if you’ve changed providers, revoked consent in Smart Meter Texas,
             or updated your information.
           </p>
-          {existingAuth?.authorizationStartDate && existingAuth?.authorizationEndDate && (
-            <p className="text-emerald-800">
-              Authorization window:
-              <span className="font-medium">
-                {` ${existingAuth.authorizationStartDate} – ${existingAuth.authorizationEndDate}`}
-              </span>
-            </p>
-          )}
         </div>
       )}
 
@@ -195,7 +187,7 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
               className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-slate-100"
               value={customerName}
               onChange={(e) => setCustomerName(e.target.value)}
-              disabled={disabled}
+              disabled={isPending}
               placeholder="First and last name as it appears on your bill"
             />
           </div>
@@ -215,7 +207,7 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
               className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-slate-100"
               value={contactPhone}
               onChange={(e) => setContactPhone(e.target.value)}
-              disabled={disabled}
+              disabled={isPending}
               placeholder="We’ll only use this for account questions"
             />
           </div>
@@ -287,11 +279,11 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
             disabled={isPending}
             className={`w-full rounded-full px-4 py-2 text-sm font-semibold uppercase tracking-wide focus:outline-none focus:ring-2 focus:ring-offset-2 transition ${
               consent
-                ? "bg-brand-navy text-brand-cyan shadow-[0_0_20px_rgba(16,182,231,0.5)] focus:ring-brand-cyan"
-                : "bg-slate-300 text-slate-600 focus:ring-slate-400"
+                ? "bg-brand-navy text-brand-cyan shadow-[0_0_20px_rgba(16,182,231,0.6)] focus:ring-brand-cyan focus:ring-offset-brand-navy"
+                : "bg-brand-navy text-brand-cyan focus:ring-brand-cyan/50"
             }`}
           >
-            AUTHORIZE
+            AUTHORIZE OR UPDATE AUTHORIZATION
           </button>
         </div>
 
@@ -310,10 +302,10 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
         <div className="flex items-center justify-between">
           <button
             type="submit"
-            disabled={disabled}
+            disabled={submitDisabled}
             className="inline-flex items-center rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-400"
           >
-            {hasActiveAuth ? "Update Authorization" : "Authorize Smart Meter Texas Access"}
+            Authorize Smart Meter Texas Access
           </button>
           {isPending && <span className="text-xs text-slate-500">Saving your authorization…</span>}
         </div>
