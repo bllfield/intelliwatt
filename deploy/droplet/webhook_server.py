@@ -594,6 +594,45 @@ def smt_post(path_or_url: str, body: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _normalize_subscription_response(status: int, payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    result: Dict[str, Any] = {
+        "ok": False,
+        "status": "failed",
+        "httpStatus": status,
+        "body": payload,
+        "reason": None,
+    }
+
+    if 200 <= status < 300:
+        result["ok"] = True
+        result["status"] = "created"
+        return result
+
+    reason_message = None
+    fault_list = []
+    if isinstance(payload, dict):
+        fault_list = payload.get("CustomerDUNSFaultList") or []
+        reason_message = payload.get("statusReason")
+
+    if status == 400 and isinstance(fault_list, list):
+        for item in fault_list:
+            reason_code = ""
+            if isinstance(item, dict):
+                reason_code = str(item.get("reasonCode") or "")
+            if "Subcription is already active" in reason_code:
+                result["ok"] = True
+                result["status"] = "already_active"
+                result["reason"] = "Subscription already active for this DUNS"
+                return result
+
+    if reason_message:
+        result["reason"] = reason_message
+    else:
+        result["reason"] = f"HTTP {status}"
+
+    return result
+
+
 class H(BaseHTTPRequestHandler):
     def _read_body_bytes(self) -> bytes:
         length_str = self.headers.get("Content-Length")
@@ -653,10 +692,9 @@ class H(BaseHTTPRequestHandler):
             )
             return
 
-        steps: Optional[List[Dict[str, Any]]] = None
+        steps: List[Dict[str, Any]] = []
         raw_steps = payload.get("steps")
         if isinstance(raw_steps, list) and raw_steps:
-            steps = []
             for idx, step in enumerate(raw_steps):
                 if not isinstance(step, dict):
                     self._write_json(
@@ -670,7 +708,6 @@ class H(BaseHTTPRequestHandler):
                     return
                 steps.append(step)
         else:
-            steps = []
             agreement = payload.get("agreement")
             subscription = payload.get("subscription")
             if isinstance(agreement, dict):
@@ -690,7 +727,7 @@ class H(BaseHTTPRequestHandler):
                     }
                 )
 
-        if not steps or not isinstance(steps, list):
+        if not steps:
             self._write_json(400, {"ok": False, "error": "missing_steps"})
             return
 
@@ -719,9 +756,7 @@ class H(BaseHTTPRequestHandler):
                     },
                 )
                 return
-            validated_steps.append(
-                {"name": name or path, "path": path, "body": body}
-            )
+            validated_steps.append({"name": name or path, "path": path, "body": body})
 
         hydrated_meter_number: Optional[str] = None
         for step in validated_steps:
@@ -738,10 +773,13 @@ class H(BaseHTTPRequestHandler):
             flush=True,
         )
 
-        results: List[Dict[str, Any]] = []
+        agreement_result: Optional[Dict[str, Any]] = None
+        subscription_result: Optional[Dict[str, Any]] = None
+        response_steps: List[Dict[str, Any]] = []
+
         for step in validated_steps:
             try:
-                res = smt_post(step["path"], step["body"])
+                smt_response = smt_post(step["path"], step["body"])
             except Exception as exc:
                 self._write_json(
                     502,
@@ -749,27 +787,93 @@ class H(BaseHTTPRequestHandler):
                         "ok": False,
                         "action": action,
                         "error": str(exc),
-                        "partialResults": results,
+                        "partialResults": response_steps,
                     },
                 )
                 return
 
-            step_result = {
+            entry = {
                 "name": step["name"],
                 "path": step["path"],
-                "status": res.get("status"),
-                "url": res.get("url"),
-                "data": res.get("data"),
+                "httpStatus": smt_response.get("status"),
+                "url": smt_response.get("url"),
+                "body": smt_response.get("data"),
             }
-            results.append(step_result)
+            response_steps.append(entry)
 
-        response_payload = {
+            step_name = (step.get("name") or "").lower()
+            status_code = smt_response.get("status")
+            data = smt_response.get("data")
+
+            if step_name == "newagreement":
+                if not (isinstance(status_code, int) and 200 <= status_code < 300):
+                    self._write_json(
+                        502,
+                        {
+                            "ok": False,
+                            "action": action,
+                            "error": "agreement_failed",
+                            "detail": "SMT NewAgreement failed",
+                            "partialResults": response_steps,
+                        },
+                    )
+                    return
+                agreement_result = {
+                    "httpStatus": status_code,
+                    "body": data,
+                }
+            elif step_name == "newsubscription":
+                normalized = _normalize_subscription_response(status_code, data)
+                subscription_result = normalized
+
+                if normalized["ok"]:
+                    if normalized["status"] == "already_active":
+                        duns = None
+                        fault_list = []
+                        if isinstance(data, dict):
+                            fault_list = data.get("CustomerDUNSFaultList") or []
+                        for item in fault_list:
+                            if isinstance(item, dict):
+                                candidate = item.get("duns") or item.get("DUNS")
+                                if candidate:
+                                    duns = candidate
+                                    break
+                        print(
+                            f"[SMT_PROXY] SMT subscription already active for DUNS={duns} status={status_code}",
+                            flush=True,
+                        )
+                    else:
+                        print(
+                            f"[SMT_PROXY] SMT subscription created status={status_code}",
+                            flush=True,
+                        )
+                else:
+                    self._write_json(
+                        502,
+                        {
+                            "ok": False,
+                            "action": action,
+                            "error": "subscription_failed",
+                            "detail": normalized.get("reason"),
+                            "partialResults": response_steps,
+                        },
+                    )
+                    return
+
+        response_payload: Dict[str, Any] = {
             "ok": True,
             "action": action,
-            "results": results,
+            "results": response_steps,
         }
+
+        if agreement_result is not None:
+            response_payload["agreement"] = agreement_result
+        if subscription_result is not None:
+            response_payload["subscription"] = subscription_result
+
         if isinstance(payload.get("meta"), dict):
             response_payload["meta"] = payload["meta"]
+
         self._write_json(200, response_payload)
 
     def do_POST(self):

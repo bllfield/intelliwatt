@@ -2547,3 +2547,28 @@ We need an authoritative, PUCT-backed directory of Retail Electric Providers (RE
 
 - ERCOT tables and migrations may remain in the database as legacy artifacts and can be cleaned up in a future maintenance window.
 - Treat ERCOT code as parked/legacy. Do not extend or wire it into new features without an explicit plan change.
+
+### PC-2025-11-22-C: SMT NewSubscription "Already Active" Treated as Success
+
+**Rationale**
+
+SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `CustomerDUNSFaultList.reasonCode = "Subcription is already active::134642921"`). Functionally this means the customer is already subscribed, so the droplet should not surface it as an error to the app or to operators.
+
+**Scope**
+
+- Update the droplet `/agreements` handler in `deploy/droplet/webhook_server.py` to normalize SMT `NewSubscription` responses:
+  - 2xx → `status = "created"`.
+  - HTTP 400 with `CustomerDUNSFaultList.reasonCode` containing `"Subcription is already active"` → treat as `status = "already_active"` (ok).
+  - All other 4xx/5xx responses remain failures that bubble back to the caller.
+- Ensure the JSON returned to the app includes structured status info so the UI/Admin can tell whether the subscription was newly created or already present.
+- Preserve the existing NewAgreement requirement and ingest chain.
+
+**Guardrails**
+
+- No changes to authentication, SMT JWT handling, or SFTP ingest.
+- No database schema or migration changes.
+- Callers can continue handling `ok: true` results without any breaking contract changes.
+
+**Rollback**
+
+- Restore the previous behavior by removing the "already_active" special case if needed; all other logic remains backwards compatible.
