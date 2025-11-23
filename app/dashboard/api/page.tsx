@@ -3,6 +3,16 @@ import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
 import { SmtAuthorizationForm } from "@/components/smt/SmtAuthorizationForm";
 
+type ExistingSmtAuthorization = {
+  id: string;
+  createdAt: Date;
+  smtStatus: string | null;
+  smtStatusMessage: string | null;
+  smtAgreementId: string | null;
+  smtSubscriptionId: string | null;
+  subscriptionAlreadyActive?: boolean | null;
+};
+
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
@@ -41,9 +51,9 @@ export default async function ApiConnectPage() {
     });
   }
 
-  let existingAuth: any | null = null;
+  let existingAuth: ExistingSmtAuthorization | null = null;
   if (user && houseAddress) {
-    existingAuth = await prismaAny.smtAuthorization.findFirst({
+    existingAuth = (await prismaAny.smtAuthorization.findFirst({
       where: { userId: user.id, houseAddressId: houseAddress.id },
       orderBy: { createdAt: "desc" },
       select: {
@@ -54,7 +64,7 @@ export default async function ApiConnectPage() {
         smtAgreementId: true,
         smtSubscriptionId: true,
       },
-    });
+    })) as ExistingSmtAuthorization | null;
   }
 
   const existingAuthStatus =
@@ -65,6 +75,117 @@ export default async function ApiConnectPage() {
     existingAuth && "smtStatusMessage" in existingAuth
       ? ((existingAuth as any).smtStatusMessage as string | null | undefined)
       : null;
+
+  const normalizeTitle = (value: string | null | undefined) => {
+    if (!value) {
+      return "";
+    }
+    return value
+      .split(/[\s_-]+/)
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+      .join(" ");
+  };
+
+  const normalizedStatus = (existingAuthStatus ?? "").toLowerCase();
+  const subscriptionAlreadyActive =
+    existingAuth?.subscriptionAlreadyActive === true ||
+    normalizedStatus === "already_active" ||
+    (existingAuthStatusMessage ?? "").toLowerCase().includes("already active");
+
+  const ok =
+    normalizedStatus === "active" ||
+    normalizedStatus === "already_active" ||
+    subscriptionAlreadyActive;
+  const isFreshSuccess = ok && !subscriptionAlreadyActive && normalizedStatus === "active";
+  const isAlreadyActiveSuccess = ok && subscriptionAlreadyActive;
+  const isError = normalizedStatus === "error";
+  const isPending = normalizedStatus === "pending";
+
+  let statusLabel: string | null = null;
+  let statusTone: "success" | "warning" | "error" | "neutral" = "neutral";
+  let statusMessage: string | null = null;
+  let statusSecondaryMessage: string | null = null;
+
+  if (existingAuth) {
+    if (isAlreadyActiveSuccess) {
+      statusLabel = "Already Active";
+      statusTone = "success";
+      statusMessage =
+        "Your Smart Meter Texas subscription is already active for this meter. We're good to go.";
+      if (
+        existingAuthStatusMessage &&
+        !existingAuthStatusMessage.toLowerCase().includes("already active")
+      ) {
+        statusSecondaryMessage = existingAuthStatusMessage;
+      }
+    } else if (isFreshSuccess) {
+      statusLabel = "Connected";
+      statusTone = "success";
+      statusMessage =
+        existingAuthStatusMessage && existingAuthStatusMessage.trim().length > 0
+          ? existingAuthStatusMessage
+          : "SMT authorization is active. We’ll start pulling your usage and billing data shortly.";
+    } else if (isError) {
+      statusLabel = "Error";
+      statusTone = "error";
+      statusMessage =
+        existingAuthStatusMessage && existingAuthStatusMessage.trim().length > 0
+          ? existingAuthStatusMessage
+          : "We couldn't complete your Smart Meter Texas authorization. Please try again or contact support.";
+    } else if (isPending) {
+      statusLabel = "Pending";
+      statusTone = "warning";
+      statusMessage =
+        existingAuthStatusMessage && existingAuthStatusMessage.trim().length > 0
+          ? existingAuthStatusMessage
+          : "We're finalizing your Smart Meter Texas authorization. This usually completes within a minute.";
+    } else if (normalizedStatus) {
+      statusLabel = normalizeTitle(existingAuthStatus ?? "");
+      statusTone = "neutral";
+      statusMessage =
+        existingAuthStatusMessage && existingAuthStatusMessage.trim().length > 0
+          ? existingAuthStatusMessage
+          : null;
+    }
+  }
+
+  const toneStyles = {
+    success: {
+      box: "mt-4 rounded-xl border border-emerald-200/70 bg-emerald-100/40 px-4 py-3 text-xs text-emerald-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]",
+      dot: "bg-emerald-500",
+      badge:
+        "rounded-full bg-emerald-500/10 px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-emerald-700 ring-1 ring-emerald-500/30",
+      label: "text-emerald-700",
+      message: "text-emerald-800",
+    },
+    warning: {
+      box: "mt-4 rounded-xl border border-amber-200/70 bg-amber-100/40 px-4 py-3 text-xs text-amber-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]",
+      dot: "bg-amber-500",
+      badge:
+        "rounded-full bg-amber-500/10 px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-amber-800 ring-1 ring-amber-500/30",
+      label: "text-amber-800",
+      message: "text-amber-900",
+    },
+    error: {
+      box: "mt-4 rounded-xl border border-red-200/70 bg-red-100/40 px-4 py-3 text-xs text-red-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]",
+      dot: "bg-red-500",
+      badge:
+        "rounded-full bg-red-500/10 px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-red-700 ring-1 ring-red-500/30",
+      label: "text-red-800",
+      message: "text-red-800",
+    },
+    neutral: {
+      box: "mt-4 rounded-xl border border-slate-200/70 bg-slate-100/40 px-4 py-3 text-xs text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]",
+      dot: "bg-slate-400",
+      badge:
+        "rounded-full bg-slate-500/10 px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-slate-700 ring-1 ring-slate-400/30",
+      label: "text-slate-700",
+      message: "text-slate-700",
+    },
+  } as const;
+
+  const activeTone = toneStyles[statusTone];
 
   const hasEsiid = Boolean(houseAddress?.esiid);
   const rawTdspValues = houseAddress
@@ -176,19 +297,30 @@ export default async function ApiConnectPage() {
                       <span className="block text-brand-slate">Utility · {tdspName}</span>
                     </p>
                     {existingAuth && (
-                      <div className="mt-4 flex items-center gap-3 rounded-xl border border-emerald-200/70 bg-emerald-100/40 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-emerald-700">
-                        <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                        SMT authorization last submitted{" "}
-                        {existingAuth.createdAt.toLocaleDateString(undefined, {
-                          month: "short",
-                          day: "numeric",
-                          year: "numeric",
-                        })}
-                        {existingAuthStatus ? (
-                          <span className="ml-2 normal-case text-emerald-700">
-                            (status: {existingAuthStatus}
-                            {existingAuthStatusMessage ? ` – ${existingAuthStatusMessage}` : ""})
+                      <div className={activeTone.box}>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className={`h-2 w-2 rounded-full ${activeTone.dot}`} />
+                          <span className={`text-[0.7rem] font-semibold uppercase tracking-wide ${activeTone.label}`}>
+                            SMT authorization last submitted{" "}
+                            {existingAuth.createdAt.toLocaleDateString(undefined, {
+                              month: "short",
+                              day: "numeric",
+                              year: "numeric",
+                            })}
                           </span>
+                          {statusLabel ? (
+                            <span className={activeTone.badge}>{statusLabel}</span>
+                          ) : null}
+                        </div>
+                        {statusMessage ? (
+                          <p className={`mt-2 text-xs leading-relaxed ${activeTone.message}`}>
+                            {statusMessage}
+                          </p>
+                        ) : null}
+                        {statusSecondaryMessage ? (
+                          <p className={`mt-1 text-xs leading-relaxed ${activeTone.message}`}>
+                            {statusSecondaryMessage}
+                          </p>
                         ) : null}
                       </div>
                     )}
