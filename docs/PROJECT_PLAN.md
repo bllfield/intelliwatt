@@ -2628,7 +2628,7 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
 
 - Droplet `/agreements` handler accepts an optional `repPuctNumber` / `rep_puct_number` field and falls back to `10052` when missing or invalid; uses this value for SMT `PUCTRORNumber` and logs it.
 - Vercel SMT agreements client:
-  - Resolves `repPuctNumber` via an env helper (`SMT_DEFAULT_REP_PUCT_NUMBER`, default `10052`).
+  - Receives `repPuctNumber` from the dashboard REP selector; if Vercel sends no value, the droplet `/agreements` handler falls back to `PUCTRORNumber=10052` (Just Energy).
   - Sends `repPuctNumber` in the droplet payload, keeping agreement behavior unchanged while the PuctRep directory is validated.
   - Normalizes SMT `NewSubscription` responses so the "Subcription is already active" case is treated as success, exposing a new `subscriptionAlreadyActive` flag while preserving the existing `ok` flag and raw response.
 
