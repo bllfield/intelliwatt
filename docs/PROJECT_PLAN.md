@@ -2687,3 +2687,50 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
 
 - Status: PARTIALLY COMPLETED for PC-2025-11-12-H.
 - Next steps: align the PuctRep-backed selector once prod DB drift is resolved, expand status observability, and implement additional SMT agreement management endpoints.
+
+[PC-2025-11-22-B] Dev Database Strategy for PuctRep / PUCT REP Directory (PLANNING)
+
+**Purpose**
+
+- Define a safe, dev-only path to bring the PuctRep / PUCT REP directory Prisma migrations online in a clean database, without touching the existing DigitalOcean Postgres cluster that contains historical SMT/ERCOT data and migration drift.
+- Prepare for wiring the REP selector to real PuctRep data once the dev workflow is validated.
+
+**Context**
+
+- Repo already contains:
+  - `PuctRep` Prisma model and migrations.
+  - CSV importer for the PUCT directory.
+  - Admin UI at `/admin/puct/reps`.
+- DO Postgres cluster has drift; we will not reset or rewrite it.
+- Production SMT agreements currently rely on static `repPuctNumber = 10052`.
+
+**Scope (Dev DB only)**
+
+- Provision a clean Postgres database solely for development, independent of the DO cluster (e.g., local Postgres, Neon, Supabase).
+- Working name: `intelliwatt_dev`.
+- Apply **all** Prisma migrations to this dev DB via `prisma migrate dev`.
+- Use the dev DB to validate PuctRep-backed features without impacting production data.
+
+**Dev Workflow**
+
+1. Create the dev Postgres database and capture the connection string, e.g.:
+   - `postgresql://USER:PASSWORD@HOST:5432/intelliwatt_dev?schema=public`
+2. In PowerShell (local machine):
+   ```powershell
+   $env:DATABASE_URL = "postgresql://USER:PASSWORD@HOST:5432/intelliwatt_dev?schema=public"
+   npx prisma migrate dev
+   ```
+   - Applies all migrations into the dev DB.
+   - Session-scoped env var; does **not** alter Vercel or droplet config.
+3. Run local tests/admin UI pointing to the dev DB to verify PuctRep flows.
+
+**Impact / Non-Impact**
+
+- Does **not** modify the DO Postgres schema or production environments.
+- Establishes a repeatable dev-only migration workflow for PuctRep and related features.
+- Sets the stage for a future Plan Change to reconcile prod DB drift (snapshot, `prisma migrate resolve --applied`, controlled rollout).
+
+**Status**
+
+- Status: PLANNED / READY (dev-only).
+- Next: provision dev DB, run `prisma migrate dev`, validate, then document prod alignment strategy in a follow-up Plan Change.
