@@ -64,14 +64,7 @@ const SMT_REQUESTOR_AUTH_ID = (
   "134642921"
 ).trim();
 
-export const DEFAULT_REP_PUCT_NUMBER = (() => {
-  const raw = process.env.SMT_DEFAULT_REP_PUCT_NUMBER?.trim();
-  if (!raw) {
-    return 10052;
-  }
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isNaN(parsed) ? 10052 : parsed;
-})();
+export const DEFAULT_REP_PUCT_NUMBER = 10052;
 
 // Default language preference for SMT notifications.
 const SMT_LANG_DEFAULT =
@@ -338,10 +331,7 @@ export async function createAgreementAndSubscription(
       }
     }
 
-    const repPuctNumberForProxy =
-      puctRorOverride !== undefined && !Number.isNaN(puctRorOverride)
-        ? puctRorOverride
-        : DEFAULT_REP_PUCT_NUMBER;
+    const repPuctNumberForProxy = puctRorOverride;
 
     const meterNumber =
       (payload.meterNumber && payload.meterNumber.trim()) ||
