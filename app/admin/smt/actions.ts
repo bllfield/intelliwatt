@@ -213,6 +213,36 @@ export type AdminAgreementTestResult = {
   tookMs?: number;
 };
 
+export type AdminMeterPipelineTestInput = {
+  addressLine1: string;
+  addressLine2?: string;
+  city: string;
+  state: string;
+  zip: string;
+  esiidOverride?: string;
+};
+
+export type AdminMeterPipelineTestResult = {
+  ok: boolean;
+  esiid?: string | null;
+  meterNumber?: string | null;
+  meterInfoWaitMs?: number;
+  wattbuy?: {
+    esiid: string | null;
+    utility?: string | null;
+    territory?: string | null;
+  } | null;
+  meterInfoRecord?: {
+    id: string;
+    status: string;
+    meterNumber: string | null;
+    updatedAt: string;
+  } | null;
+  messages?: string[];
+  errors?: string[];
+  tookMs?: number;
+};
+
 export async function runSmtAgreementTest(
   input: AdminAgreementTestInput,
 ): Promise<AdminAgreementTestResult> {
@@ -394,6 +424,138 @@ export async function runSmtAgreementTest(
     meterNumber,
     meterInfoWaitMs,
     agreement: agreementResult,
+    wattbuy: wattbuyResult
+      ? {
+          esiid: wattbuyResult.esiid,
+          utility: wattbuyResult.utility ?? null,
+          territory: wattbuyResult.territory ?? null,
+        }
+      : esiid
+      ? null
+      : null,
+    meterInfoRecord: meterInfoRecord
+      ? {
+          id: meterInfoRecord.id,
+          status: meterInfoRecord.status,
+          meterNumber: meterInfoRecord.meterNumber,
+          updatedAt: meterInfoRecord.updatedAt.toISOString(),
+        }
+      : null,
+    messages,
+    errors: errors.length > 0 ? errors : undefined,
+    tookMs: Date.now() - startedAt,
+  };
+}
+
+export async function runSmtMeterPipelineTest(
+  input: AdminMeterPipelineTestInput,
+): Promise<AdminMeterPipelineTestResult> {
+  const startedAt = Date.now();
+  const messages: string[] = [];
+  const errors: string[] = [];
+
+  const addressLine1 = input.addressLine1?.trim();
+  const city = input.city?.trim();
+  const state = input.state?.trim().toUpperCase();
+  const zip = input.zip?.trim();
+  const addressLine2 = input.addressLine2?.trim() || undefined;
+
+  if (!addressLine1) errors.push("Address line 1 is required.");
+  if (!city) errors.push("City is required.");
+  if (!state) errors.push("State is required.");
+  if (!zip) errors.push("ZIP code is required.");
+
+  if (errors.length > 0) {
+    return {
+      ok: false,
+      errors,
+      messages,
+      tookMs: Date.now() - startedAt,
+    };
+  }
+
+  let esiid = cleanEsiid(input.esiidOverride ?? null);
+  let wattbuyResult: Awaited<ReturnType<typeof resolveAddressToEsiid>> | null = null;
+
+  if (esiid) {
+    messages.push(`Using provided ESIID ${esiid}.`);
+  } else {
+    wattbuyResult = await resolveAddressToEsiid({
+      line1: addressLine1,
+      line2: addressLine2 ?? null,
+      line1Alt: null,
+      city,
+      state,
+      zip,
+    });
+
+    esiid = cleanEsiid(wattbuyResult.esiid ?? null);
+    if (esiid) {
+      messages.push(`Resolved ESIID ${esiid} via WattBuy.`);
+    } else {
+      errors.push("WattBuy could not resolve an ESIID for the supplied address.");
+      return {
+        ok: false,
+        errors,
+        messages,
+        wattbuy: {
+          esiid: wattbuyResult?.esiid ?? null,
+          utility: wattbuyResult?.utility ?? null,
+          territory: wattbuyResult?.territory ?? null,
+        },
+        tookMs: Date.now() - startedAt,
+      };
+    }
+  }
+
+  const houseId = randomUUID();
+  let meterNumber: string | null = null;
+  const meterStart = Date.now();
+
+  try {
+    meterNumber = await waitForMeterInfo({
+      houseId,
+      esiid,
+      timeoutMs: 60_000,
+      pollIntervalMs: 3_000,
+      queueIfMissing: true,
+    });
+  } catch (err) {
+    errors.push(
+      `Meter info lookup failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  const meterInfoWaitMs = Date.now() - meterStart;
+
+  const prismaAny = prisma as any;
+  const meterInfoRecord = await prismaAny.smtMeterInfo.findFirst({
+    where: {
+      esiid,
+      OR: [{ houseId }, { houseId: null }],
+    },
+    orderBy: { updatedAt: "desc" },
+    select: {
+      id: true,
+      status: true,
+      meterNumber: true,
+      updatedAt: true,
+    },
+  });
+
+  if (!meterNumber) {
+    errors.push(
+      "Meter number was not returned in time. Check SMT meter info pipeline or try again.",
+    );
+  } else {
+    messages.push(`Meter number retrieved: ${meterNumber}`);
+  }
+
+  return {
+    ok: errors.length === 0,
+    esiid,
+    meterNumber,
+    meterInfoWaitMs,
     wattbuy: wattbuyResult
       ? {
           esiid: wattbuyResult.esiid,

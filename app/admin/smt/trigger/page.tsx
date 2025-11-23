@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useTransition } from "react";
-import { runSmtAgreementTest } from "../actions";
+import { runSmtAgreementTest, runSmtMeterPipelineTest } from "../actions";
 
 export default function AdminSmtTriggerPage() {
   const [baseUrl, setBaseUrl] = useState<string>(() =>
@@ -25,7 +25,9 @@ export default function AdminSmtTriggerPage() {
   const [testRepNumber, setTestRepNumber] = useState<string>("");
   const [testEsiidOverride, setTestEsiidOverride] = useState<string>("");
   const [testResult, setTestResult] = useState<string>("Output will appear here…");
+  const [pipelineResult, setPipelineResult] = useState<string>("Output will appear here…");
   const [isTesting, startTesting] = useTransition();
+  const [isPipelineTesting, startPipelineTesting] = useTransition();
 
   function handleAgreementTest() {
     const pendingMessage = "Running SMT agreement test…";
@@ -46,6 +48,26 @@ export default function AdminSmtTriggerPage() {
         setTestResult(JSON.stringify(result, null, 2));
       } catch (error: any) {
         setTestResult(`ERROR: ${error?.message || String(error)}`);
+      }
+    });
+  }
+
+  function handleMeterPipelineTest() {
+    const pendingMessage = "Running WattBuy + meter info pipeline…";
+    setPipelineResult(pendingMessage);
+    startPipelineTesting(async () => {
+      try {
+        const result = await runSmtMeterPipelineTest({
+          addressLine1: testAddressLine1,
+          addressLine2: testAddressLine2 || undefined,
+          city: testCity,
+          state: testState,
+          zip: testZip,
+          esiidOverride: testEsiidOverride || undefined,
+        });
+        setPipelineResult(JSON.stringify(result, null, 2));
+      } catch (error: any) {
+        setPipelineResult(`ERROR: ${error?.message || String(error)}`);
       }
     });
   }
@@ -198,18 +220,35 @@ export default function AdminSmtTriggerPage() {
           </label>
         </div>
 
-        <button
-          type="button"
-          onClick={handleAgreementTest}
-          disabled={isTesting}
-          className="inline-flex items-center justify-center rounded bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-gray-400"
-        >
-          {isTesting ? "Running..." : "Run Agreement Flow Test"}
-        </button>
+        <div className="flex flex-wrap gap-3">
+          <button
+            type="button"
+            onClick={handleAgreementTest}
+            disabled={isTesting}
+            className="inline-flex items-center justify-center rounded bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-gray-400"
+          >
+            {isTesting ? "Running..." : "Run Agreement Flow Test"}
+          </button>
+          <button
+            type="button"
+            onClick={handleMeterPipelineTest}
+            disabled={isPipelineTesting}
+            className="inline-flex items-center justify-center rounded bg-slate-700 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-gray-400"
+          >
+            {isPipelineTesting ? "Running..." : "Run ESIID + Meter Info Only"}
+          </button>
+        </div>
 
         <pre className="whitespace-pre-wrap text-sm bg-gray-50 border rounded p-3 overflow-x-auto">
           {testResult}
         </pre>
+
+        <div>
+          <h3 className="text-sm font-semibold text-gray-800">Meter pipeline output</h3>
+          <pre className="mt-2 whitespace-pre-wrap text-sm bg-gray-50 border rounded p-3 overflow-x-auto">
+            {pipelineResult}
+          </pre>
+        </div>
 
         <p className="text-xs text-gray-500">
           Sequence: resolve ESIID via WattBuy (unless override), queue &amp; wait for SMT meter info, then call the droplet
