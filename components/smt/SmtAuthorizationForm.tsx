@@ -132,37 +132,42 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
 
   return (
     <div className="space-y-3 rounded-xl border border-slate-200 bg-white/80 p-4 shadow-sm backdrop-blur">
-      <div className="grid gap-3 rounded-lg bg-slate-50 p-3 text-xs text-slate-700 sm:grid-cols-2">
+      <div className="grid gap-3 rounded-lg bg-brand-navy p-3 text-xs text-brand-cyan sm:grid-cols-2">
         <div className="space-y-1">
-          <div className="font-semibold text-slate-900">Service Address</div>
-          <div>
+          <div className="text-sm font-semibold uppercase tracking-wide text-brand-cyan">
+            Service Address on File
+          </div>
+          <div className="space-y-0.5">
             <div>{serviceAddressLine1}</div>
             {serviceAddressLine2 ? <div>{serviceAddressLine2}</div> : null}
             <div>{[serviceCity, serviceState, serviceZip].filter(Boolean).join(", ")}</div>
+            <div>
+              <span className="font-semibold">ESIID · </span>
+              {esiid || <span className="italic text-brand-cyan/70">Not available</span>}
+            </div>
+            <div>
+              <span className="font-semibold">Utility · </span>
+              {tdspName || tdspCode || <span className="italic text-brand-cyan/70">Not available</span>}
+            </div>
           </div>
         </div>
         <div className="space-y-1">
-          <div className="font-semibold text-slate-900">Meter & Utility</div>
-          <div>
+          <div className="text-sm font-semibold uppercase tracking-wide text-brand-cyan">
+            Utility Integrations
+          </div>
+          <div className="space-y-0.5">
             <div>
-              <span className="font-medium">ESIID:</span> {esiid || <span className="italic text-slate-500">Not available</span>}
-            </div>
-            <div>
-              <span className="font-medium">TDSP:</span> {tdspName || tdspCode || (
-                <span className="italic text-slate-500">Not available</span>
-              )}
-            </div>
-            <div>
-              <span className="font-medium">Contact Email:</span> {contactEmail}
+              <span className="font-semibold">Contact Email · </span>
+              {contactEmail}
             </div>
           </div>
         </div>
       </div>
 
       {hasActiveAuth && (
-        <div className="space-y-1 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
-          <div className="font-semibold">Active SMT authorization already on file</div>
-          <p>
+        <div className="space-y-1 rounded-lg border border-brand-cyan/40 bg-brand-navy p-3 text-xs text-brand-cyan">
+          <div className="text-sm font-semibold uppercase tracking-wide">Active SMT authorization already on file</div>
+          <p className="leading-relaxed">
             We already have a valid Smart Meter Texas authorization for this address. You can submit this form again to
             refresh or update your authorization, especially if you’ve changed providers, revoked consent in Smart Meter Texas,
             or updated your information.
