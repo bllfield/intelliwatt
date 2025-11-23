@@ -14,20 +14,16 @@ export interface RepSelectorProps {
   onChange: (nextPuctNumber: string | undefined) => void;
   label?: string;
   helperText?: string;
+  requiredMessage?: string;
 }
 
-/**
- * RepSelector
- *
- * Fetches the live PuctRep directory and allows the user to pick a REP by PUCT number.
- * Leaving the selector on the default option falls back to the Just Energy baseline (10052).
- */
 export function RepSelector(props: RepSelectorProps) {
   const {
     repPuctNumber,
     onChange,
     label = "Retail Electric Provider",
-    helperText = "Choose the Retail Electric Provider we should use when creating your Smart Meter Texas agreement.",
+    helperText = "Select the Retail Electric Provider who issued your plan.",
+    requiredMessage = "Please select a Retail Electric Provider.",
   } = props;
 
   const [search, setSearch] = React.useState("");
@@ -60,7 +56,7 @@ export function RepSelector(props: RepSelectorProps) {
         if (!cancelled && json?.ok && Array.isArray(json.reps)) {
           setOptions(json.reps as RepOption[]);
         }
-      } catch (err: unknown) {
+      } catch (err) {
         if (!cancelled && !(err instanceof DOMException && err.name === "AbortError")) {
           setLoadError("Failed to load Retail Electric Providers.");
         }
@@ -84,16 +80,18 @@ export function RepSelector(props: RepSelectorProps) {
     onChange(value ? value : undefined);
   };
 
+  const hasSelection = Boolean(repPuctNumber);
+
   return (
     <div className="space-y-2 rounded-lg bg-slate-50 p-3 text-xs text-slate-700">
       <label htmlFor="repPuctNumber" className="block text-xs font-semibold text-slate-900">
-        {label}
+        {label} <span className="text-red-600">*</span>
       </label>
       <input
         type="text"
         value={search}
         onChange={(event) => setSearch(event.target.value)}
-        placeholder="Search REP name or DBA (optional)…"
+        placeholder="Search by REP legal name or DBA…"
         className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
       />
       <select
@@ -103,8 +101,8 @@ export function RepSelector(props: RepSelectorProps) {
         value={repPuctNumber ?? ""}
         onChange={handleChange}
       >
-        <option value="">
-          Use default REP (Just Energy – PUCT 10052)
+        <option value="" disabled>
+          Select a Retail Electric Provider…
         </option>
         {options.map((rep) => (
           <option key={rep.id} value={rep.puctNumber}>
@@ -117,6 +115,8 @@ export function RepSelector(props: RepSelectorProps) {
         <p className="text-[0.7rem] text-slate-500">Loading REPs…</p>
       ) : loadError ? (
         <p className="text-[0.7rem] text-red-600">{loadError}</p>
+      ) : !hasSelection ? (
+        <p className="text-[0.7rem] text-red-600">{requiredMessage}</p>
       ) : null}
       <p className="text-[0.7rem] text-slate-600">{helperText}</p>
     </div>

@@ -70,6 +70,10 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
       setSubmitError("You must provide consent before we can request your SMT data.");
       return;
     }
+    if (!repPuctNumber) {
+      setSubmitError("Please select your Retail Electric Provider before submitting.");
+      return;
+    }
 
     startTransition(() => {
       void (async () => {
@@ -81,9 +85,7 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
             consent: true,
             consentTextVersion: "smt-poa-v1",
           };
-          if (repPuctNumber) {
-            payload.repPuctNumber = repPuctNumber;
-          }
+          payload.repPuctNumber = repPuctNumber;
 
           const res = await fetch("/api/smt/authorization", {
             method: "POST",
@@ -263,34 +265,33 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
         <RepSelector
           repPuctNumber={repPuctNumber}
           onChange={setRepPuctNumber}
-          helperText="Choose the Retail Electric Provider we should use when establishing Smart Meter Texas access. Leave as default if you are unsure."
         />
 
-      <div className="space-y-3 rounded-lg bg-slate-50 p-3 text-xs text-slate-700">
-        <p className="leading-relaxed">
-          By checking this box, you authorize Intellipath Solutions LLC d/b/a IntelliWatt (“IntelliWatt”) to act as your
-          authorized agent and Competitive Service Provider (CSP) with Smart Meter Texas (“SMT”) for the ESIID(s) associated
-          with the service address shown above. IntelliWatt may create, update, and terminate SMT data sharing agreements and
-          subscriptions, and may access interval, usage, and billing data for up to 12 months (or until you revoke this
-          authorization). You confirm you are the customer of record or an authorized agent for this address, and you may
-          revoke this authorization at any time through your SMT account or by contacting IntelliWatt.
-        </p>
-        <label className="flex items-start gap-2 text-xs text-slate-800">
-          <input
-            id="consent"
-            name="consent"
-            type="checkbox"
-            className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 disabled:bg-slate-100"
-            checked={consent}
-            onChange={(e) => setConsent(e.target.checked)}
-            disabled={isPending}
-          />
-          <span className="leading-relaxed">
-            I have read and agree to authorize IntelliWatt to act as my agent to access my Smart Meter Texas usage and
-            billing data for this service address, and to create the necessary SMT agreements and subscriptions on my behalf.
-          </span>
-        </label>
-      </div>
+        <div className="space-y-3 rounded-lg bg-slate-50 p-3 text-xs text-slate-700">
+          <p className="leading-relaxed">
+            By checking this box, you authorize Intellipath Solutions LLC d/b/a IntelliWatt (“IntelliWatt”) to act as your
+            authorized agent and Competitive Service Provider (CSP) with Smart Meter Texas (“SMT”) for the ESIID(s) associated
+            with the service address shown above. IntelliWatt may create, update, and terminate SMT data sharing agreements and
+            subscriptions, and may access interval, usage, and billing data for up to 12 months (or until you revoke this
+            authorization). You confirm you are the customer of record or an authorized agent for this address, and you may
+            revoke this authorization at any time through your SMT account or by contacting IntelliWatt.
+          </p>
+          <label className="flex items-start gap-2 text-xs text-slate-800">
+            <input
+              id="consent"
+              name="consent"
+              type="checkbox"
+              className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 disabled:bg-slate-100"
+              checked={consent}
+              onChange={(e) => setConsent(e.target.checked)}
+              disabled={isPending}
+            />
+            <span className="leading-relaxed">
+              I have read and agree to authorize IntelliWatt to act as my agent to access my Smart Meter Texas usage and
+              billing data for this service address, and to create the necessary SMT agreements and subscriptions on my behalf.
+            </span>
+          </label>
+        </div>
 
         {submitError && (
           <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
