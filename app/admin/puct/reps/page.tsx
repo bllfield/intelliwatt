@@ -17,14 +17,53 @@ type PageProps = {
   };
 };
 
-function pick(row: Record<string, unknown>, candidates: string[]): string {
-  for (const key of candidates) {
-    if (Object.prototype.hasOwnProperty.call(row, key) && row[key]) {
-      return String(row[key]).trim();
+function normalizeHeader(header: string): string {
+  return header.replace(/^\uFEFF/, "").trim().toLowerCase();
+}
+
+function normalizeRow(row: Record<string, unknown>): Record<string, unknown> {
+  const normalized: Record<string, unknown> = {};
+  for (const [rawKey, value] of Object.entries(row)) {
+    const key = normalizeHeader(rawKey);
+    if (!key) {
+      continue;
+    }
+    normalized[key] = value;
+  }
+  return normalized;
+}
+
+function pickNormalized(row: Record<string, unknown>, candidates: string[]): string {
+  for (const candidate of candidates) {
+    if (Object.prototype.hasOwnProperty.call(row, candidate) && row[candidate]) {
+      return String(row[candidate]).trim();
     }
   }
   return "";
 }
+
+const CERT_NUMBER_HEADERS = [
+  "certnumber",
+  "certificatenumber",
+  "rep",
+  "cert num",
+  "certnum",
+  "puct",
+  "puctnumber",
+  "puct number",
+  "primaryidno",
+];
+
+const LEGAL_NAME_HEADERS = ["companyname", "company name", "name", "legalname", "company", "entityname"];
+const DBA_HEADERS = ["dba", "dbaname", "dba name"];
+const ADDRESS1_HEADERS = ["address1", "address 1", "street", "streetaddress"];
+const ADDRESS2_HEADERS = ["address2", "address 2", "suite", "address line 2"];
+const CITY_HEADERS = ["city"];
+const STATE_HEADERS = ["state", "st"];
+const POSTAL_CODE_HEADERS = ["zip", "zipcode", "postalcode", "zip code"];
+const PHONE_HEADERS = ["phone", "phonenumber", "phone number"];
+const WEBSITE_HEADERS = ["website", "web site", "url"];
+const EMAIL_HEADERS = ["email", "e-mail", "email address"];
 
 async function importPuctRepsFromFile(file: File) {
   const buffer = Buffer.from(await file.arrayBuffer());
@@ -52,30 +91,19 @@ async function importPuctRepsFromFile(file: File) {
   let skipped = 0;
 
   for (const row of records) {
-    const puctNumber = pick(row, [
-      "CertNumber",
-      "CertificateNumber",
-      "REP",
-      "Rep",
-      "Cert Num",
-      "CertNum",
-    ]);
-    const legalName = pick(row, [
-      "CompanyName",
-      "Name",
-      "LegalName",
-      "Company",
-      "EntityName",
-    ]);
-    const dbaName = pick(row, ["DBA", "DbaName", "DBAName"]);
-    const address1 = pick(row, ["Address1", "Address 1", "Street", "StreetAddress"]);
-    const address2 = pick(row, ["Address2", "Address 2", "Suite"]);
-    const city = pick(row, ["City"]);
-    const state = pick(row, ["State", "ST"]);
-    const postalCode = pick(row, ["Zip", "ZipCode", "PostalCode", "Zip Code"]);
-    const phone = pick(row, ["Phone", "PhoneNumber", "Phone Number"]);
-    const website = pick(row, ["Website", "WebSite", "URL"]);
-    const email = pick(row, ["Email", "E-mail"]);
+    const normalizedRow = normalizeRow(row);
+
+    const puctNumber = pickNormalized(normalizedRow, CERT_NUMBER_HEADERS);
+    const legalName = pickNormalized(normalizedRow, LEGAL_NAME_HEADERS);
+    const dbaName = pickNormalized(normalizedRow, DBA_HEADERS);
+    const address1 = pickNormalized(normalizedRow, ADDRESS1_HEADERS);
+    const address2 = pickNormalized(normalizedRow, ADDRESS2_HEADERS);
+    const city = pickNormalized(normalizedRow, CITY_HEADERS);
+    const state = pickNormalized(normalizedRow, STATE_HEADERS);
+    const postalCode = pickNormalized(normalizedRow, POSTAL_CODE_HEADERS);
+    const phone = pickNormalized(normalizedRow, PHONE_HEADERS);
+    const website = pickNormalized(normalizedRow, WEBSITE_HEADERS);
+    const email = pickNormalized(normalizedRow, EMAIL_HEADERS);
 
     if (!puctNumber || !legalName) {
       skipped++;
