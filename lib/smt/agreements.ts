@@ -205,6 +205,7 @@ function buildNewAgreementPayload(
 ): NewAgreementPayload {
   const esiid = normalizeEsiid(input.esiid);
   const identity = buildSmtIdentity();
+  const PUCT_ROR_NUMBER = 10052; // TEMP: revert to known-good Just Energy REP
   return {
     trans_id: buildTransId(),
     requestorID: identity.requestorID,
@@ -216,7 +217,7 @@ function buildNewAgreementPayload(
       {
         ESIID: esiid,
         meterNumber: input.meterNumber,
-        PUCTRORNumber: input.puctRorNumber,
+        PUCTRORNumber: PUCT_ROR_NUMBER,
       },
     ],
     SMTTermsandConditions: "Y",

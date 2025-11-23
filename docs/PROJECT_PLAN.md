@@ -2572,3 +2572,15 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
 **Rollback**
 
 - Restore the previous behavior by removing the "already_active" special case if needed; all other logic remains backwards compatible.
+
+### PC-2025-11-23-A: SMT Agreement PUCT ROR Number Temporarily Reverted
+
+**Status**
+
+- SMT NewAgreement payloads now use a fixed `PUCTRORNumber` of `10052`, matching the last known good Just Energy REP value.
+- This is a temporary measure while the PuctRep directory and ESIID-to-REP mapping are validated.
+
+**Notes**
+
+- The PuctRep model, uploader, and admin lookup remain in place but are not yet driving SMT agreement payloads.
+- Once the dynamic REP mapping is verified, this override will be removed via a future plan change.
