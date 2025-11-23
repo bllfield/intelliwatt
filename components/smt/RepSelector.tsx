@@ -26,7 +26,6 @@ export function RepSelector(props: RepSelectorProps) {
     requiredMessage = "Please select a Retail Electric Provider.",
   } = props;
 
-  const [search, setSearch] = React.useState("");
   const [options, setOptions] = React.useState<RepOption[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [loadError, setLoadError] = React.useState<string | null>(null);
@@ -40,10 +39,7 @@ export function RepSelector(props: RepSelectorProps) {
       setLoadError(null);
       try {
         const params = new URLSearchParams();
-        if (search.trim()) {
-          params.set("q", search.trim());
-        }
-        params.set("limit", "100");
+        params.set("limit", "200");
         const res = await fetch(`/api/puct/reps?${params.toString()}`, {
           signal: controller.signal,
           cache: "no-store",
@@ -73,7 +69,7 @@ export function RepSelector(props: RepSelectorProps) {
       cancelled = true;
       controller.abort();
     };
-  }, [search]);
+  }, []);
 
   const handleChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
     const value = event.target.value;
@@ -87,13 +83,6 @@ export function RepSelector(props: RepSelectorProps) {
       <label htmlFor="repPuctNumber" className="block text-xs font-semibold text-slate-900">
         {label} <span className="text-red-600">*</span>
       </label>
-      <input
-        type="text"
-        value={search}
-        onChange={(event) => setSearch(event.target.value)}
-        placeholder="Search by REP legal name or DBA…"
-        className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-      />
       <select
         id="repPuctNumber"
         name="repPuctNumber"
@@ -102,7 +91,7 @@ export function RepSelector(props: RepSelectorProps) {
         onChange={handleChange}
       >
         <option value="" disabled>
-          Select a Retail Electric Provider…
+          Select your Retail Electric Provider…
         </option>
         {options.map((rep) => (
           <option key={rep.id} value={rep.puctNumber}>

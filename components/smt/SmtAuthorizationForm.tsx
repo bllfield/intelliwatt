@@ -43,12 +43,7 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
   const [customerName, setCustomerName] = useState("");
   const [contactPhone, setContactPhone] = useState("");
   const [consent, setConsent] = useState(false);
-  const [repPuctNumber, setRepPuctNumber] = useState<string | undefined>(() => {
-    if (typeof initialRepPuctNumber === "number" && Number.isFinite(initialRepPuctNumber)) {
-      return String(Math.floor(initialRepPuctNumber));
-    }
-    return undefined;
-  });
+  const [repPuctNumber, setRepPuctNumber] = useState<string | undefined>(undefined);
   const [isPending, startTransition] = useTransition();
 
   const [submitError, setSubmitError] = useState<string | null>(null);
