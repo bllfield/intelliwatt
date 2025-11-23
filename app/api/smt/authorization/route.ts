@@ -3,10 +3,7 @@ import { cookies } from "next/headers";
 import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
 import { cleanEsiid } from "@/lib/smt/esiid";
-import {
-  createAgreementAndSubscription,
-  DEFAULT_REP_PUCT_NUMBER,
-} from "@/lib/smt/agreements";
+import { createAgreementAndSubscription } from "@/lib/smt/agreements";
 
 type SmtAuthorizationBody = {
   houseAddressId: string;
@@ -14,7 +11,7 @@ type SmtAuthorizationBody = {
   contactPhone?: string | null;
   consent: boolean;
   consentTextVersion?: string | null;
-  repPuctNumber?: number | string | null;
+  repPuctNumber?: string | number | null;
 };
 
 function getEnvOrDefault(name: string, fallback: string): string {
@@ -150,25 +147,17 @@ export async function POST(req: NextRequest) {
     });
     const resolvedMeterNumber =
       (existingMeterInfo?.meterNumber && existingMeterInfo.meterNumber.trim()) || null;
-    const repPuctOverrideEnv = process.env.SMT_REP_PUCT_OVERRIDE?.trim();
-    const repPuctOverride =
-      repPuctOverrideEnv && !Number.isNaN(Number.parseInt(repPuctOverrideEnv, 10))
-        ? Number.parseInt(repPuctOverrideEnv, 10)
-        : undefined;
 
     const consentTextVersion =
       typeof rawBody.consentTextVersion === "string" && rawBody.consentTextVersion.trim().length > 0
         ? rawBody.consentTextVersion.trim()
         : "smt-poa-v1";
     const rawRepPuct = rawBody.repPuctNumber;
-    let repPuctNumber: number | undefined;
+    let repPuctNumber: string | undefined;
     if (typeof rawRepPuct === "number" && Number.isFinite(rawRepPuct)) {
-      repPuctNumber = Math.floor(rawRepPuct);
-    } else if (typeof rawRepPuct === "string" && rawRepPuct.trim().length > 0) {
-      const parsed = Number.parseInt(rawRepPuct.trim(), 10);
-      if (!Number.isNaN(parsed)) {
-        repPuctNumber = parsed;
-      }
+      repPuctNumber = String(Math.floor(rawRepPuct));
+    } else if (typeof rawRepPuct === "string") {
+      repPuctNumber = rawRepPuct.trim() || undefined;
     }
     const clientIp =
       req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? req.ip ?? null;
@@ -249,7 +238,7 @@ export async function POST(req: NextRequest) {
         includeInterval: true,
         includeBilling: true,
         meterNumber: resolvedMeterNumber ?? undefined,
-        repPuctNumber: repPuctNumber ?? DEFAULT_REP_PUCT_NUMBER,
+        repPuctNumber,
       });
 
       smtUpdateData = {

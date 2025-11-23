@@ -43,12 +43,11 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
   const [customerName, setCustomerName] = useState("");
   const [contactPhone, setContactPhone] = useState("");
   const [consent, setConsent] = useState(false);
-  const [repPuctNumber, setRepPuctNumber] = useState<number>(() => {
-    const fallback = 10052;
+  const [repPuctNumber, setRepPuctNumber] = useState<string | undefined>(() => {
     if (typeof initialRepPuctNumber === "number" && Number.isFinite(initialRepPuctNumber)) {
-      return Math.floor(initialRepPuctNumber);
+      return String(Math.floor(initialRepPuctNumber));
     }
-    return fallback;
+    return undefined;
   });
   const [isPending, startTransition] = useTransition();
 
@@ -75,19 +74,23 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
     startTransition(() => {
       void (async () => {
         try {
+          const payload: Record<string, unknown> = {
+            houseAddressId,
+            customerName: customerName.trim(),
+            contactPhone: contactPhone.trim() || undefined,
+            consent: true,
+            consentTextVersion: "smt-poa-v1",
+          };
+          if (repPuctNumber) {
+            payload.repPuctNumber = repPuctNumber;
+          }
+
           const res = await fetch("/api/smt/authorization", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
             },
-            body: JSON.stringify({
-              houseAddressId,
-              customerName: customerName.trim(),
-              contactPhone: contactPhone.trim() || undefined,
-              consent: true,
-              consentTextVersion: "smt-poa-v1",
-            repPuctNumber,
-            }),
+            body: JSON.stringify(payload),
           });
 
           if (!res.ok) {
@@ -260,7 +263,7 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
         <RepSelector
           repPuctNumber={repPuctNumber}
           onChange={setRepPuctNumber}
-          helperText="IntelliWatt currently uses Just Energy as the Retail Electric Provider when establishing Smart Meter Texas access. Additional providers will be available once the REP directory is fully aligned across environments."
+          helperText="Choose the Retail Electric Provider we should use when establishing Smart Meter Texas access. Leave as default if you are unsure."
         />
 
       <div className="space-y-3 rounded-lg bg-slate-50 p-3 text-xs text-slate-700">

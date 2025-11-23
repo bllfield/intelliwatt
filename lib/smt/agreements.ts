@@ -11,7 +11,7 @@ export type SmtAgreementRequest = {
   includeInterval?: boolean | null;
   includeBilling?: boolean | null;
   meterNumber?: string | null;
-  repPuctNumber?: number | null;
+  repPuctNumber?: string | null;
 };
 
 export type SmtAgreementResult = {
@@ -208,7 +208,6 @@ function buildNewAgreementPayload(
 ): NewAgreementPayload {
   const esiid = normalizeEsiid(input.esiid);
   const identity = buildSmtIdentity();
-  const PUCT_ROR_NUMBER = 10052; // TEMP: revert to known-good Just Energy REP
   return {
     trans_id: buildTransId(),
     requestorID: identity.requestorID,
@@ -220,7 +219,7 @@ function buildNewAgreementPayload(
       {
         ESIID: esiid,
         meterNumber: input.meterNumber,
-        PUCTRORNumber: PUCT_ROR_NUMBER,
+        PUCTRORNumber: input.puctRorNumber,
       },
     ],
     SMTTermsandConditions: "Y",
@@ -315,23 +314,37 @@ export async function createAgreementAndSubscription(
         ? true
         : Boolean(payload.includeBilling);
     const tdspCode = payload.tdspCode ?? null;
-    let puctRorOverride: number | undefined;
+
+    let repSelectionNumber: number | undefined;
     if (payload.repPuctNumber !== null && payload.repPuctNumber !== undefined) {
-      const parsed = Number(payload.repPuctNumber);
-      if (!Number.isNaN(parsed)) {
-        puctRorOverride = parsed;
+      const repCandidate = String(payload.repPuctNumber).trim();
+      if (repCandidate) {
+        const parsed = Number.parseInt(repCandidate, 10);
+        if (!Number.isNaN(parsed)) {
+          repSelectionNumber = parsed;
+        }
       }
-    } else {
+    }
+    if (repSelectionNumber === undefined) {
       const envOverrideRaw = process.env.SMT_REP_PUCT_OVERRIDE?.trim();
       if (envOverrideRaw) {
         const parsed = Number.parseInt(envOverrideRaw, 10);
         if (!Number.isNaN(parsed)) {
-          puctRorOverride = parsed;
+          repSelectionNumber = parsed;
         }
       }
     }
 
-    const repPuctNumberForProxy = puctRorOverride;
+    let defaultRepNumber = DEFAULT_REP_PUCT_NUMBER;
+    const envDefaultRepRaw = process.env.SMT_DEFAULT_REP_PUCT_NUMBER?.trim();
+    if (envDefaultRepRaw) {
+      const parsed = Number.parseInt(envDefaultRepRaw, 10);
+      if (!Number.isNaN(parsed)) {
+        defaultRepNumber = parsed;
+      }
+    }
+
+    const repPuctNumberForProxy = repSelectionNumber ?? defaultRepNumber;
 
     const meterNumber =
       (payload.meterNumber && payload.meterNumber.trim()) ||
@@ -339,7 +352,10 @@ export async function createAgreementAndSubscription(
       (tdspCode ? `${tdspCode}-MTR` : undefined) ||
       payload.esiid ||
       "METER";
-    const puctRorNumber = puctRorOverride ?? mapTdspToPuctRorNumber(tdspCode);
+    let puctRorNumber = repSelectionNumber ?? mapTdspToPuctRorNumber(tdspCode);
+    if (!puctRorNumber) {
+      puctRorNumber = defaultRepNumber;
+    }
     const customerEmail = (payload.customerEmail || "").trim();
 
     const agreementBody = buildNewAgreementPayload({
@@ -452,4 +468,5 @@ export async function createAgreementAndSubscription(
 // NOTE: Field names and enum values above are derived from the SMT
 // Data Access Interface Guide v2. Adjust payloads as SMT validation errors
 // are observed, without changing the function signature or proxy wiring.
+
 
