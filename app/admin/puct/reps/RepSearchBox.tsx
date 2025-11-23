@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 type RepSearchBoxProps = {
@@ -9,11 +9,11 @@ type RepSearchBoxProps = {
 
 export function RepSearchBox({ initialValue }: RepSearchBoxProps) {
   const [value, setValue] = useState(initialValue);
-  const formRef = useRef<HTMLFormElement>(null);
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const [, startTransition] = useTransition();
 
   useEffect(() => {
     setValue(initialValue);
@@ -25,24 +25,25 @@ export function RepSearchBox({ initialValue }: RepSearchBoxProps) {
     }
 
     debounceRef.current = setTimeout(() => {
-      const params = new URLSearchParams(Array.from(searchParams?.entries?.() ?? []));
+      startTransition(() => {
+        const params = new URLSearchParams(Array.from(searchParams?.entries?.() ?? []));
 
-      if (nextValue) {
-        params.set("search", nextValue);
-      } else {
-        params.delete("search");
-      }
+        if (nextValue) {
+          params.set("search", nextValue);
+        } else {
+          params.delete("search");
+        }
 
-      const queryString = params.toString();
-      const basePath = pathname ?? "";
-      const target = queryString ? `${basePath}?${queryString}` : basePath;
-      router.replace(target, { scroll: false });
+        const queryString = params.toString();
+        const basePath = pathname ?? "";
+        const target = queryString ? `${basePath}?${queryString}` : basePath;
+        router.replace(target, { scroll: false });
+      });
     }, 300);
   };
 
   return (
     <form
-      ref={formRef}
       method="get"
       className="flex flex-col gap-4 sm:flex-row sm:items-end"
       onSubmit={(event) => {
