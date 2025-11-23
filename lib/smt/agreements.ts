@@ -63,6 +63,15 @@ const SMT_REQUESTOR_AUTH_ID = (
   "134642921"
 ).trim();
 
+export const DEFAULT_REP_PUCT_NUMBER = (() => {
+  const raw = process.env.SMT_DEFAULT_REP_PUCT_NUMBER?.trim();
+  if (!raw) {
+    return 10052;
+  }
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isNaN(parsed) ? 10052 : parsed;
+})();
+
 // Default language preference for SMT notifications.
 const SMT_LANG_DEFAULT =
   (process.env.SMT_LANG_DEFAULT || "ENGLISH").trim() || "ENGLISH";
@@ -111,8 +120,6 @@ if (!SMT_REQUESTOR_AUTH_ID) {
 const ALLOWED_AGREEMENT_DURATIONS: ReadonlyArray<
   1 | 3 | 6 | 9 | 12 | 24 | 36
 > = [1, 3, 6, 9, 12, 24, 36] as const;
-
-export const DEFAULT_REP_PUCT_NUMBER = 10052; // Just Energy PUCT number (temporary default)
 
 type NewAgreementPayload = {
   trans_id: string;
@@ -308,6 +315,11 @@ export async function createAgreementAndSubscription(
       }
     }
 
+    const repPuctNumberForProxy =
+      puctRorOverride !== undefined && !Number.isNaN(puctRorOverride)
+        ? puctRorOverride
+        : DEFAULT_REP_PUCT_NUMBER;
+
     const meterNumber =
       (payload.meterNumber && payload.meterNumber.trim()) ||
       (payload.customerPhone && payload.customerPhone.trim()) ||
@@ -350,10 +362,7 @@ export async function createAgreementAndSubscription(
 
     const proxyPayload = {
       action: "create_agreement_and_subscription",
-      repPuctNumber:
-        payload.repPuctNumber !== null && payload.repPuctNumber !== undefined
-          ? payload.repPuctNumber
-          : DEFAULT_REP_PUCT_NUMBER,
+      repPuctNumber: repPuctNumberForProxy,
       steps,
       agreement: {
         name: "NewAgreement",
