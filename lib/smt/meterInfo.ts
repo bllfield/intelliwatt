@@ -174,3 +174,69 @@ export async function saveMeterInfoFromDroplet(payload: SavePayload) {
   return record;
 }
 
+type WaitParams = {
+  houseId: string;
+  esiid: string;
+  timeoutMs?: number;
+  pollIntervalMs?: number;
+  queueIfMissing?: boolean;
+};
+
+export async function waitForMeterInfo(params: WaitParams): Promise<string | null> {
+  const { houseId, esiid } = params;
+  const timeoutMs = params.timeoutMs ?? 60_000;
+  const pollIntervalMs = params.pollIntervalMs ?? 3_000;
+  const queueIfMissing = params.queueIfMissing !== false;
+
+  const trimmedHouseId = (houseId || "").trim();
+  const trimmedEsiid = (esiid || "").trim();
+  if (!trimmedHouseId || !trimmedEsiid) {
+    throw new Error("houseId and esiid are required to wait for meter info");
+  }
+
+  if (!SMT_METERINFO_ENABLED) {
+    console.warn("[SMT] waitForMeterInfo skipped; SMT_METERINFO_ENABLED is not true");
+    return null;
+  }
+
+  const prismaAny = prisma as any;
+
+  async function fetchLatest(): Promise<any | null> {
+    return prismaAny.smtMeterInfo.findFirst({
+      where: {
+        esiid: trimmedEsiid,
+        OR: [{ houseId: trimmedHouseId }, { houseId: null }],
+      },
+      orderBy: { updatedAt: "desc" },
+    });
+  }
+
+  let queued = false;
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() <= deadline) {
+    const record = await fetchLatest();
+    const meterNumber = record?.meterNumber?.toString().trim();
+    if (meterNumber) {
+      return meterNumber;
+    }
+
+    if (!queued && queueIfMissing) {
+      try {
+        await queueMeterInfoForHouse({ houseId: trimmedHouseId, esiid: trimmedEsiid });
+      } catch (err) {
+        console.error("[SMT] waitForMeterInfo failed to queue meter info", {
+          houseId: trimmedHouseId,
+          esiid: trimmedEsiid,
+          err,
+        });
+      }
+      queued = true;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+  }
+
+  return null;
+}
+

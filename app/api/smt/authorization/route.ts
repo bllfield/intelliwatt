@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
 import { cleanEsiid } from "@/lib/smt/esiid";
 import { createAgreementAndSubscription } from "@/lib/smt/agreements";
+import { waitForMeterInfo } from "@/lib/smt/meterInfo";
 
 type SmtAuthorizationBody = {
   houseAddressId: string;
@@ -140,13 +141,25 @@ export async function POST(req: NextRequest) {
         ? contactPhone.trim()
         : null;
 
-    const existingMeterInfo = await prismaAny.smtMeterInfo.findFirst({
-      where: { esiid: houseEsiid },
-      orderBy: { updatedAt: "desc" },
-      select: { meterNumber: true },
+    const meterInfoHouseId = house.houseId ?? house.id;
+    const meterNumber = await waitForMeterInfo({
+      houseId: meterInfoHouseId,
+      esiid: houseEsiid,
+      timeoutMs: 60_000,
+      pollIntervalMs: 3_000,
+      queueIfMissing: true,
     });
-    const resolvedMeterNumber =
-      (existingMeterInfo?.meterNumber && existingMeterInfo.meterNumber.trim()) || null;
+
+    if (!meterNumber) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "We couldn’t retrieve your meter number from Smart Meter Texas. Please try again in a few minutes.",
+        },
+        { status: 504 },
+      );
+    }
 
     const consentTextVersion =
       typeof rawBody.consentTextVersion === "string" && rawBody.consentTextVersion.trim().length > 0
@@ -196,10 +209,10 @@ export async function POST(req: NextRequest) {
     const created = await prismaAny.smtAuthorization.create({
       data: {
         userId: user.id,
-        houseId: house.houseId ?? house.id,
+        houseId: meterInfoHouseId,
         houseAddressId: house.id,
         esiid: houseEsiid,
-        meterNumber: resolvedMeterNumber,
+        meterNumber,
         customerName: trimmedCustomerName,
         serviceAddressLine1: house.addressLine1,
         serviceAddressLine2: house.addressLine2 ?? null,
@@ -243,7 +256,7 @@ export async function POST(req: NextRequest) {
         monthsBack: 12,
         includeInterval: true,
         includeBilling: true,
-        meterNumber: resolvedMeterNumber ?? undefined,
+        meterNumber,
         repPuctNumber,
       });
 
@@ -258,7 +271,7 @@ export async function POST(req: NextRequest) {
         smtBackfillCompletedAt: smtResult.backfillCompletedAt
           ? new Date(smtResult.backfillCompletedAt)
           : null,
-        meterNumber: resolvedMeterNumber ?? null,
+        meterNumber,
       };
     } catch (agreementErr: any) {
       smtUpdateData = {

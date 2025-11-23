@@ -338,11 +338,10 @@ export async function createAgreementAndSubscription(
       );
     }
 
-    const meterNumber =
-      (payload.meterNumber && payload.meterNumber.trim()) ||
-      (tdspCode ? `${tdspCode}-MTR` : undefined) ||
-      payload.esiid ||
-      "METER";
+    const meterNumber = payload.meterNumber?.toString().trim();
+    if (!meterNumber) {
+      throw new Error("meterNumber is required for SMT agreements. Run meter info fetch first.");
+    }
     const puctRorNumber = repSelectionNumber ?? repPuctNumberForProxy;
     const customerEmail = (payload.customerEmail || "").trim();
 
