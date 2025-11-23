@@ -1,6 +1,5 @@
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/db";
-import { DEFAULT_REP_PUCT_NUMBER } from "@/lib/smt/agreements";
 import { normalizeEmail } from "@/lib/utils/email";
 import { SmtAuthorizationForm } from "@/components/smt/SmtAuthorizationForm";
 
@@ -341,7 +340,6 @@ export default async function ApiConnectPage() {
                       serviceState={serviceState}
                       serviceZip={serviceZip}
                       existingAuth={existingAuth}
-                      initialRepPuctNumber={DEFAULT_REP_PUCT_NUMBER}
                     />
                   </div>
                 </div>

@@ -159,6 +159,12 @@ export async function POST(req: NextRequest) {
     } else if (typeof rawRepPuct === "string") {
       repPuctNumber = rawRepPuct.trim() || undefined;
     }
+    if (!repPuctNumber) {
+      return NextResponse.json(
+        { ok: false, error: "Retail Electric Provider selection is required." },
+        { status: 400 },
+      );
+    }
     const clientIp =
       req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? req.ip ?? null;
     const userAgent = req.headers.get("user-agent") ?? null;

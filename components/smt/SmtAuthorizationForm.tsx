@@ -16,7 +16,6 @@ type SmtAuthorizationFormProps = {
   serviceZip?: string | null;
   contactEmail: string;
   existingAuth?: any | null;
-  initialRepPuctNumber?: number | null;
 };
 
 type ApiError = {
@@ -37,7 +36,6 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
     serviceZip,
     contactEmail,
     existingAuth,
-    initialRepPuctNumber,
   } = props;
 
   const [customerName, setCustomerName] = useState("");

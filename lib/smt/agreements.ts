@@ -64,8 +64,6 @@ const SMT_REQUESTOR_AUTH_ID = (
   "134642921"
 ).trim();
 
-export const DEFAULT_REP_PUCT_NUMBER = 10052;
-
 // Default language preference for SMT notifications.
 const SMT_LANG_DEFAULT =
   (process.env.SMT_LANG_DEFAULT || "ENGLISH").trim() || "ENGLISH";
@@ -102,6 +100,18 @@ function buildSmtIdentity(
     language: SMT_LANG_DEFAULT,
     ...overrides,
   };
+}
+
+function parseRepPuctNumber(value: string | number | null | undefined): number | undefined {
+  if (value === null || value === undefined) {
+    return undefined;
+  }
+  const digits = String(value).replace(/\D/g, "");
+  if (!digits) {
+    return undefined;
+  }
+  const parsed = Number.parseInt(digits, 10);
+  return Number.isNaN(parsed) ? undefined : parsed;
 }
 
 if (!SMT_USERNAME) {
@@ -315,36 +325,18 @@ export async function createAgreementAndSubscription(
         : Boolean(payload.includeBilling);
     const tdspCode = payload.tdspCode ?? null;
 
-    let repSelectionNumber: number | undefined;
-    if (payload.repPuctNumber !== null && payload.repPuctNumber !== undefined) {
-      const repCandidate = String(payload.repPuctNumber).trim();
-      if (repCandidate) {
-        const parsed = Number.parseInt(repCandidate, 10);
-        if (!Number.isNaN(parsed)) {
-          repSelectionNumber = parsed;
-        }
-      }
-    }
-    if (repSelectionNumber === undefined) {
-      const envOverrideRaw = process.env.SMT_REP_PUCT_OVERRIDE?.trim();
-      if (envOverrideRaw) {
-        const parsed = Number.parseInt(envOverrideRaw, 10);
-        if (!Number.isNaN(parsed)) {
-          repSelectionNumber = parsed;
-        }
-      }
-    }
+    const repSelectionNumber = parseRepPuctNumber(payload.repPuctNumber);
+    const overrideRepNumber = parseRepPuctNumber(process.env.SMT_REP_PUCT_OVERRIDE);
+    const tdspFallbackNumber = mapTdspToPuctRorNumber(tdspCode) || undefined;
 
-    let defaultRepNumber = DEFAULT_REP_PUCT_NUMBER;
-    const envDefaultRepRaw = process.env.SMT_DEFAULT_REP_PUCT_NUMBER?.trim();
-    if (envDefaultRepRaw) {
-      const parsed = Number.parseInt(envDefaultRepRaw, 10);
-      if (!Number.isNaN(parsed)) {
-        defaultRepNumber = parsed;
-      }
-    }
+    const repPuctNumberForProxy =
+      repSelectionNumber ?? overrideRepNumber ?? tdspFallbackNumber;
 
-    const repPuctNumberForProxy = repSelectionNumber ?? defaultRepNumber;
+    if (repPuctNumberForProxy === undefined) {
+      throw new Error(
+        "repPuctNumber is required for SMT agreements and no override or fallback is available.",
+      );
+    }
 
     const meterNumber =
       (payload.meterNumber && payload.meterNumber.trim()) ||
@@ -352,10 +344,7 @@ export async function createAgreementAndSubscription(
       (tdspCode ? `${tdspCode}-MTR` : undefined) ||
       payload.esiid ||
       "METER";
-    let puctRorNumber = repSelectionNumber ?? mapTdspToPuctRorNumber(tdspCode);
-    if (!puctRorNumber) {
-      puctRorNumber = defaultRepNumber;
-    }
+    const puctRorNumber = repSelectionNumber ?? repPuctNumberForProxy;
     const customerEmail = (payload.customerEmail || "").trim();
 
     const agreementBody = buildNewAgreementPayload({
