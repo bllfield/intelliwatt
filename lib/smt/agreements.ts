@@ -340,7 +340,6 @@ export async function createAgreementAndSubscription(
 
     const meterNumber =
       (payload.meterNumber && payload.meterNumber.trim()) ||
-      (payload.customerPhone && payload.customerPhone.trim()) ||
       (tdspCode ? `${tdspCode}-MTR` : undefined) ||
       payload.esiid ||
       "METER";
