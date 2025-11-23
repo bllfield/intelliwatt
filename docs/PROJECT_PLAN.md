@@ -2615,3 +2615,32 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
 - Wire `PuctRep` selections into customer authorization and SMT agreement payloads so `PUCTRORNumber` reflects the actual REP.
 - Surface "Subscription already active" as a success state in the app (e.g., status label "Active / already subscribed") while continuing to log the raw SMT response.
 - Add admin observability (last agreement/subscription attempt timestamps, status, SMT response snippet).
+
+### PC-2025-11-23: SMT Agreements REP Routing & Subscription "Already Active" Handling
+
+**Rationale**
+
+- SMT agreements are now verified end-to-end for a real customer using the Just Energy PUCT REP number (10052).
+- We need a safe mechanism to pass future PUCT REP numbers from the Vercel app to the droplet without breaking the current Just Energy flow.
+- SMT `NewSubscription` responses with `reasonCode = "Subcription is already active::134642921"` are business-normal and should not surface as errors.
+
+**Scope**
+
+- Droplet `/agreements` handler accepts an optional `repPuctNumber` / `rep_puct_number` field and falls back to `10052` when missing or invalid; uses this value for SMT `PUCTRORNumber` and logs it.
+- Vercel SMT agreements client:
+  - Resolves `repPuctNumber` via an env helper (`SMT_DEFAULT_REP_PUCT_NUMBER`, default `10052`).
+  - Sends `repPuctNumber` in the droplet payload, keeping agreement behavior unchanged while the PuctRep directory is validated.
+  - Normalizes SMT `NewSubscription` responses so the "Subcription is already active" case is treated as success, exposing a new `subscriptionAlreadyActive` flag while preserving the existing `ok` flag and raw response.
+
+**Rollback Plan**
+
+- Revert Vercel payload changes to stop sending `repPuctNumber`; the droplet will continue using `10052`.
+- Revert droplet override handling to always use `10052` if needed.
+- Removing the normalization helper restores the prior error behavior; no schema changes were made.
+
+**Guardrails**
+
+- No new Prisma models or migrations introduced; PuctRep directory remains code-only until DB drift is resolved with a dedicated dev database and `prisma migrate resolve`.
+- SMT auth, SFTP ingest, and admin tooling are untouched.
+- Only the specific "Subcription is already active" case is treated as success; all other non-`"0000"` subscription statuses remain failures.
+- The Just Energy PUCT number (10052) stays the default until PuctRep-based routing is ready.
