@@ -52,6 +52,8 @@ export default async function ApiConnectPage() {
     });
   }
 
+  const userEmail = user?.email ?? "";
+
   let existingAuth: ExistingSmtAuthorization | null = null;
   if (user && houseAddress) {
     existingAuth = (await prismaAny.smtAuthorization.findFirst({
@@ -152,42 +154,12 @@ export default async function ApiConnectPage() {
     }
   }
 
-  const toneStyles = {
-    success: {
-      box: "mt-4 rounded-xl border border-emerald-200/70 bg-emerald-100/40 px-4 py-3 text-xs text-emerald-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]",
-      dot: "bg-emerald-500",
-      badge:
-        "rounded-full bg-emerald-500/10 px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-emerald-700 ring-1 ring-emerald-500/30",
-      label: "text-emerald-700",
-      message: "text-emerald-800",
-    },
-    warning: {
-      box: "mt-4 rounded-xl border border-amber-200/70 bg-amber-100/40 px-4 py-3 text-xs text-amber-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]",
-      dot: "bg-amber-500",
-      badge:
-        "rounded-full bg-amber-500/10 px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-amber-800 ring-1 ring-amber-500/30",
-      label: "text-amber-800",
-      message: "text-amber-900",
-    },
-    error: {
-      box: "mt-4 rounded-xl border border-red-200/70 bg-red-100/40 px-4 py-3 text-xs text-red-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]",
-      dot: "bg-red-500",
-      badge:
-        "rounded-full bg-red-500/10 px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-red-700 ring-1 ring-red-500/30",
-      label: "text-red-800",
-      message: "text-red-800",
-    },
-    neutral: {
-      box: "mt-4 rounded-xl border border-slate-200/70 bg-slate-100/40 px-4 py-3 text-xs text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]",
-      dot: "bg-slate-400",
-      badge:
-        "rounded-full bg-slate-500/10 px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-slate-700 ring-1 ring-slate-400/30",
-      label: "text-slate-700",
-      message: "text-slate-700",
-    },
+  const statusBadgeStyles = {
+    success: "rounded-full bg-brand-cyan/20 px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-brand-cyan",
+    warning: "rounded-full bg-amber-500/20 px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-amber-200",
+    error: "rounded-full bg-rose-500/20 px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-rose-200",
+    neutral: "rounded-full bg-brand-cyan/15 px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-brand-cyan",
   } as const;
-
-  const activeTone = toneStyles[statusTone];
 
   const hasEsiid = Boolean(houseAddress?.esiid);
   const rawTdspValues = houseAddress
@@ -285,24 +257,47 @@ export default async function ApiConnectPage() {
             {readyForSmt && (
               <div className="space-y-6 rounded-3xl border border-brand-navy/15 bg-white/90 p-8 shadow-[0_18px_60px_rgba(16,46,90,0.06)] backdrop-blur">
                 <div className="grid gap-6 lg:grid-cols-[1.1fr,1fr] lg:items-start">
-                  <article className="rounded-2xl border border-brand-blue/10 bg-brand-blue/5 px-6 py-5 text-sm text-brand-slate shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]">
-                    <h2 className="text-lg font-semibold text-brand-navy">Service address on file</h2>
-                    <p className="mt-3 space-y-1 text-sm leading-relaxed text-brand-slate">
-                      <span className="block font-medium text-brand-navy">{serviceAddressLine1}</span>
-                      {serviceAddressLine2 ? (
-                        <span className="block font-medium text-brand-navy">{serviceAddressLine2}</span>
-                      ) : null}
-                      <span className="block text-brand-slate">
-                        {serviceCity}, {serviceState} {serviceZip}
-                      </span>
-                      <span className="block text-brand-slate">ESIID · {houseAddress.esiid}</span>
-                      <span className="block text-brand-slate">Utility · {tdspName}</span>
-                    </p>
+                  <div className="space-y-4">
+                    <div className="rounded-2xl border border-brand-cyan/40 bg-brand-navy p-6 text-sm text-brand-cyan shadow-[0_10px_30px_rgba(16,182,231,0.18)]">
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <div className="space-y-1">
+                          <h2 className="text-sm font-semibold uppercase tracking-wide text-brand-cyan">
+                            Service address on file
+                          </h2>
+                          <div className="space-y-0.5 text-brand-cyan">
+                            <div>{serviceAddressLine1}</div>
+                            {serviceAddressLine2 ? <div>{serviceAddressLine2}</div> : null}
+                            <div>
+                              {serviceCity}, {serviceState} {serviceZip}
+                            </div>
+                            <div>
+                              <span className="font-semibold">ESIID · </span>
+                              {houseAddress.esiid ?? "—"}
+                            </div>
+                            <div>
+                              <span className="font-semibold">Utility · </span>
+                              {tdspName ?? "—"}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="space-y-1">
+                          <h3 className="text-sm font-semibold uppercase tracking-wide text-brand-cyan">
+                            Utility integrations
+                          </h3>
+                          <div className="space-y-0.5">
+                            <div>
+                              <span className="font-semibold">Contact Email · </span>
+                              {userEmail || "—"}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
                     {existingAuth && (
-                      <div className={activeTone.box}>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className={`h-2 w-2 rounded-full ${activeTone.dot}`} />
-                          <span className={`text-[0.7rem] font-semibold uppercase tracking-wide ${activeTone.label}`}>
+                      <div className="rounded-2xl border border-brand-cyan/40 bg-brand-navy p-6 text-xs text-brand-cyan shadow-[0_10px_30px_rgba(16,182,231,0.18)]">
+                        <div className="flex flex-wrap items-center gap-3">
+                          <span className="text-[0.7rem] font-semibold uppercase tracking-wide">
                             SMT authorization last submitted{" "}
                             {existingAuth.createdAt.toLocaleDateString(undefined, {
                               month: "short",
@@ -311,26 +306,22 @@ export default async function ApiConnectPage() {
                             })}
                           </span>
                           {statusLabel ? (
-                            <span className={activeTone.badge}>{statusLabel}</span>
+                            <span className={statusBadgeStyles[statusTone]}>{statusLabel}</span>
                           ) : null}
                         </div>
                         {statusMessage ? (
-                          <p className={`mt-2 text-xs leading-relaxed ${activeTone.message}`}>
-                            {statusMessage}
-                          </p>
+                          <p className="mt-2 text-xs leading-relaxed text-brand-cyan/90">{statusMessage}</p>
                         ) : null}
                         {statusSecondaryMessage ? (
-                          <p className={`mt-1 text-xs leading-relaxed ${activeTone.message}`}>
-                            {statusSecondaryMessage}
-                          </p>
+                          <p className="mt-1 text-xs leading-relaxed text-brand-cyan/80">{statusSecondaryMessage}</p>
                         ) : null}
                       </div>
                     )}
-                  </article>
+                  </div>
 
                   <div className="rounded-2xl border border-brand-blue/10 bg-white/80 p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
                     <SmtAuthorizationForm
-                      contactEmail={user!.email}
+                      contactEmail={userEmail}
                       houseAddressId={houseAddress.id}
                       houseId={houseAddress.houseId ?? undefined}
                       esiid={houseAddress.esiid ?? undefined}
@@ -343,6 +334,7 @@ export default async function ApiConnectPage() {
                       serviceZip={serviceZip}
                       existingAuth={existingAuth}
                       initialMeterNumber={existingAuth?.meterNumber ?? undefined}
+                      showHeader={false}
                     />
                   </div>
                 </div>
