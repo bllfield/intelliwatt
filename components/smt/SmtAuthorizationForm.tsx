@@ -131,50 +131,7 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
   const disabled = isPending || !consent;
 
   return (
-    <div className="space-y-4 rounded-xl border border-slate-200 bg-white/80 p-4 shadow-sm backdrop-blur">
-      <div className="space-y-1">
-        <h3 className="text-base font-semibold text-slate-900">
-          Smart Meter Texas Authorization
-        </h3>
-        <p className="text-sm text-slate-600">
-          When you authorize IntelliWatt to access your Smart Meter Texas account, we will
-          securely pull your electric usage data directly from your utility so we can show
-          you accurate plan comparisons and savings opportunities.
-        </p>
-      </div>
-
-      <div className="space-y-2 rounded-lg bg-slate-50 p-3 text-xs text-slate-700">
-        <p className="font-medium text-slate-900">
-          By checking the consent box and submitting this form, you understand and agree that:
-        </p>
-        <ul className="list-disc space-y-1 pl-4">
-          <li>
-            IntelliWatt (Intellipath Solutions LLC) will access your
-            <span className="font-semibold"> electric usage data stored in Smart Meter Texas</span>,
-            including 15-minute interval usage, daily meter reads, and monthly billing reads
-            associated with the ESIID and service address shown below.
-          </li>
-          <li>
-            Your consent authorizes access for up to <span className="font-semibold">12 months</span>
-            from the authorization start date saved in our system, unless you revoke that consent earlier.
-          </li>
-          <li>
-            Your data will be used <span className="font-semibold">only for energy analysis, plan matching, and optimization services</span>
-            provided by IntelliWatt. We do not sell your SMT data.
-          </li>
-          <li>
-            You may revoke this authorization at any time by terminating the data sharing agreement in
-            your Smart Meter Texas account or by contacting IntelliWatt using the email or phone number
-            listed in your dashboard communications.
-          </li>
-        </ul>
-        <p>
-          This consent does not change your current Retail Electric Provider or your utility service. It only
-          allows IntelliWatt, as a registered Competitive Service Provider, to securely read your meter data
-          through Smart Meter Texas.
-        </p>
-      </div>
-
+    <div className="space-y-3 rounded-xl border border-slate-200 bg-white/80 p-4 shadow-sm backdrop-blur">
       <div className="grid gap-3 rounded-lg bg-slate-50 p-3 text-xs text-slate-700 sm:grid-cols-2">
         <div className="space-y-1">
           <div className="font-semibold text-slate-900">Service Address</div>
@@ -221,7 +178,7 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-3">
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-1">
             <label
@@ -293,30 +250,49 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
           </p>
         </div>
 
-        <div className="space-y-3 rounded-lg bg-slate-50 p-3 text-xs text-slate-700">
-          <p className="leading-relaxed">
-            By checking this box, you authorize Intellipath Solutions LLC d/b/a IntelliWatt (“IntelliWatt”) to act as your
-            authorized agent and Competitive Service Provider (CSP) with Smart Meter Texas (“SMT”) for the ESIID(s) associated
-            with the service address shown above. IntelliWatt may create, update, and terminate SMT data sharing agreements and
-            subscriptions, and may access interval, usage, and billing data for up to 12 months (or until you revoke this
-            authorization). You confirm you are the customer of record or an authorized agent for this address, and you may
-            revoke this authorization at any time through your SMT account or by contacting IntelliWatt.
-          </p>
-          <label className="flex items-start gap-2 text-xs text-slate-800">
-            <input
-              id="consent"
-              name="consent"
-              type="checkbox"
-              className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 disabled:bg-slate-100"
-              checked={consent}
-              onChange={(e) => setConsent(e.target.checked)}
-              disabled={isPending}
-            />
-            <span className="leading-relaxed">
-              I have read and agree to authorize IntelliWatt to act as my agent to access my Smart Meter Texas usage and
-              billing data for this service address, and to create the necessary SMT agreements and subscriptions on my behalf.
-            </span>
-          </label>
+        <div className="space-y-2">
+          <div className="max-h-48 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs leading-relaxed text-slate-700">
+            <p className="font-medium text-slate-900">Smart Meter Texas Authorization Terms</p>
+            <ul className="mt-2 list-disc space-y-1 pl-4">
+              <li>
+                IntelliWatt (Intellipath Solutions LLC) will access your
+                <span className="font-semibold"> electric usage data stored in Smart Meter Texas</span>,
+                including 15-minute interval usage, daily meter reads, and monthly billing reads
+                associated with the ESIID and service address shown above.
+              </li>
+              <li>
+                Your consent authorizes access for up to <span className="font-semibold">12 months</span>
+                from the authorization start date saved in our system, unless you revoke that consent earlier.
+              </li>
+              <li>
+                Your data will be used <span className="font-semibold">only for energy analysis, plan matching, and optimization services</span>
+                provided by IntelliWatt. We do not sell your SMT data.
+              </li>
+              <li>
+                You may revoke this authorization at any time by terminating the data sharing agreement in
+                your Smart Meter Texas account or by contacting IntelliWatt using the email or phone number
+                listed in your dashboard communications.
+              </li>
+              <li>
+                This consent does not change your current Retail Electric Provider or your utility service. It only
+                allows IntelliWatt, as a registered Competitive Service Provider, to securely read your meter data
+                through Smart Meter Texas.
+              </li>
+            </ul>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setConsent((prev) => !prev)}
+            disabled={isPending}
+            className={`w-full rounded-full px-4 py-2 text-sm font-semibold uppercase tracking-wide focus:outline-none focus:ring-2 focus:ring-offset-2 transition ${
+              consent
+                ? "bg-brand-navy text-brand-cyan shadow-[0_0_20px_rgba(16,182,231,0.5)] focus:ring-brand-cyan"
+                : "bg-slate-300 text-slate-600 focus:ring-slate-400"
+            }`}
+          >
+            AUTHORIZE
+          </button>
         </div>
 
         {submitError && (
