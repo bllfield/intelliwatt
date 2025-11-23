@@ -10,7 +10,7 @@ ALTER TABLE "SmtMeterInfo" ALTER COLUMN "updatedAt" DROP DEFAULT;
 -- AlterTable
 ALTER TABLE "UserProfile" ALTER COLUMN "esiidAttentionAt" SET DATA TYPE TIMESTAMP(3);
 
--- CreateTable
+-- CreateTable: SmtAuthorization (idempotent)
 CREATE TABLE IF NOT EXISTS "SmtAuthorization" (
     "id" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS "SmtAuthorization" (
     CONSTRAINT "SmtAuthorization_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
+-- CreateTable: PuctRep (new table)
 CREATE TABLE "PuctRep" (
     "id" TEXT NOT NULL,
     "puctNumber" TEXT NOT NULL,
@@ -71,8 +71,8 @@ CREATE TABLE "PuctRep" (
     CONSTRAINT "PuctRep_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
-CREATE TABLE "ErcotEsiidIndex" (
+-- CreateTable: ErcotEsiidIndex (idempotent)
+CREATE TABLE IF NOT EXISTS "ErcotEsiidIndex" (
     "id" BIGSERIAL NOT NULL,
     "esiid" VARCHAR(22) NOT NULL,
     "tdspCode" VARCHAR(16),
@@ -90,47 +90,45 @@ CREATE TABLE "ErcotEsiidIndex" (
     CONSTRAINT "ErcotEsiidIndex_pkey" PRIMARY KEY ("id")
 );
 
--- CreateIndex
+-- Indexes on SmtAuthorization (idempotent)
 CREATE INDEX IF NOT EXISTS "SmtAuthorization_userId_idx" ON "SmtAuthorization"("userId");
-
--- CreateIndex
 CREATE INDEX IF NOT EXISTS "SmtAuthorization_houseId_idx" ON "SmtAuthorization"("houseId");
-
--- CreateIndex
 CREATE INDEX IF NOT EXISTS "SmtAuthorization_houseAddressId_idx" ON "SmtAuthorization"("houseAddressId");
-
--- CreateIndex
 CREATE INDEX IF NOT EXISTS "SmtAuthorization_esiid_idx" ON "SmtAuthorization"("esiid");
 
--- CreateIndex
-CREATE INDEX "PuctRep_puctNumber_idx" ON "PuctRep"("puctNumber");
+-- Indexes on PuctRep (make idempotent to be safe)
+CREATE INDEX IF NOT EXISTS "PuctRep_puctNumber_idx" ON "PuctRep"("puctNumber");
+CREATE INDEX IF NOT EXISTS "PuctRep_legalName_idx" ON "PuctRep"("legalName");
+CREATE INDEX IF NOT EXISTS "PuctRep_dbaName_idx" ON "PuctRep"("dbaName");
+CREATE UNIQUE INDEX IF NOT EXISTS "PuctRep_puctNumber_legalName_key" ON "PuctRep"("puctNumber", "legalName");
 
--- CreateIndex
-CREATE INDEX "PuctRep_legalName_idx" ON "PuctRep"("legalName");
+-- Indexes on ErcotEsiidIndex (idempotent)
+CREATE UNIQUE INDEX IF NOT EXISTS "ErcotEsiidIndex_esiid_key" ON "ErcotEsiidIndex"("esiid");
+CREATE INDEX IF NOT EXISTS "ErcotEsiidIndex_normZip_idx" ON "ErcotEsiidIndex"("normZip");
+CREATE INDEX IF NOT EXISTS "ercot_esiid_index_normline1_trgm" ON "ErcotEsiidIndex" USING GIN ("normLine1" gin_trgm_ops);
 
--- CreateIndex
-CREATE INDEX "PuctRep_dbaName_idx" ON "PuctRep"("dbaName");
+-- Foreign keys for SmtAuthorization
+ALTER TABLE "SmtAuthorization" ADD CONSTRAINT "SmtAuthorization_userId_fkey"
+  FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
--- CreateIndex
-CREATE UNIQUE INDEX "PuctRep_puctNumber_legalName_key" ON "PuctRep"("puctNumber", "legalName");
+ALTER TABLE "SmtAuthorization" ADD CONSTRAINT "SmtAuthorization_houseAddressId_fkey"
+  FOREIGN KEY ("houseAddressId") REFERENCES "HouseAddress"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
--- CreateIndex
-CREATE UNIQUE INDEX "ErcotEsiidIndex_esiid_key" ON "ErcotEsiidIndex"("esiid");
+-- RenameIndex on RatePlan (leave as-is; no drift reported here)
+ALTER INDEX "RatePlan_utilityId_state_supplier_planName_termMonths_isUtility"
+  RENAME TO "RatePlan_utilityId_state_supplier_planName_termMonths_isUti_key";
 
--- CreateIndex
-CREATE INDEX "ErcotEsiidIndex_normZip_idx" ON "ErcotEsiidIndex"("normZip");
-
--- CreateIndex
-CREATE INDEX "ercot_esiid_index_normline1_trgm" ON "ErcotEsiidIndex" USING GIN ("normLine1" gin_trgm_ops);
-
--- AddForeignKey
-ALTER TABLE "SmtAuthorization" ADD CONSTRAINT "SmtAuthorization_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "SmtAuthorization" ADD CONSTRAINT "SmtAuthorization_houseAddressId_fkey" FOREIGN KEY ("houseAddressId") REFERENCES "HouseAddress"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-
--- RenameIndex
-ALTER INDEX "RatePlan_utilityId_state_supplier_planName_termMonths_isUtility" RENAME TO "RatePlan_utilityId_state_supplier_planName_termMonths_isUti_key";
-
--- RenameIndex
-ALTER INDEX "SmtInterval_esiid_meter_ts_idx" RENAME TO "esiid_meter_ts_idx";
+-- Conditional rename of SmtInterval index:
+-- On prod, this may already have been renamed by an earlier DB-only migration.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM   pg_class c
+    WHERE  c.relname = 'SmtInterval_esiid_meter_ts_idx'
+    AND    c.relkind = 'i'
+  ) THEN
+    EXECUTE 'ALTER INDEX "SmtInterval_esiid_meter_ts_idx" RENAME TO "esiid_meter_ts_idx"';
+  END IF;
+END
+$$;
