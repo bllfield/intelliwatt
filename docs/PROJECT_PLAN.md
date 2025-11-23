@@ -2584,3 +2584,34 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
 
 - The PuctRep model, uploader, and admin lookup remain in place but are not yet driving SMT agreement payloads.
 - Once the dynamic REP mapping is verified, this override will be removed via a future plan change.
+
+## PC-2025-11-23-A: SMT Agreements Live + PUCT REP Directory Foundations
+
+**Status / Rationale**
+
+- The SMT agreement + subscription path now works end-to-end using the production INTELLIPATH identity:
+  - `SMT_USERNAME` / `SMT_REQUESTOR_ID` = `INTELLIPATH`
+  - `SMT_REQUESTOR_AUTH_ID` = `134642921`
+  - `SMT_API_BASE_URL` = `https://services.smartmetertexas.net`
+- Posts to `/v2/NewAgreement/` now ACK with real agreement numbers (e.g., ESIID `10443720004529147`, meter `142606737LG` when `PUCTRORNumber=10052`).
+- `/v2/NewSubscription/` currently returns `statusCode="0001"` with `reasonCode="Subcription is already active::134642921"`; this is treated as a business-level "already active" outcome, not a payload error, and the droplet still kicks off ingest.
+- The ingest chain (`/agreements` → `/trigger/smt-now` → `deploy/smt/fetch_and_post.sh`) remains canonical and verified (`rc=0`, interval/billing data flow normally).
+
+**PUCT REP Directory: Phase 1 Complete**
+
+- `PuctRep` Prisma model defined (not yet migrated onto the DO prod-ish database).
+- CLI importer: `scripts/admin/import_puct_reps_from_csv.mjs`.
+- Admin UI: `/admin/puct/reps` with CSV upload (truncate + upsert) and live search.
+- Canonical CSVs live in the repo under `docs/PUCT NUMBER LISTS/` (local path mirrors Brian's Windows directory but the repo copy is authoritative).
+- Agreements currently use a temporary fixed `PUCTRORNumber = 10052` until REP matching is fully validated.
+
+**Other Module Updates**
+
+- ERCOT ESIID tools are parked: cards removed from `/admin`; WattBuy remains the locked ESIID authority for address flows.
+- Prisma migrate dev shows drift on the DO "prod-ish" DB (legacy ERCOT migration). Do **not** reset the existing database; plan a dedicated dev DB and future cutover (including PuctRep migration).
+
+**Future Work**
+
+- Wire `PuctRep` selections into customer authorization and SMT agreement payloads so `PUCTRORNumber` reflects the actual REP.
+- Surface "Subscription already active" as a success state in the app (e.g., status label "Active / already subscribed") while continuing to log the raw SMT response.
+- Add admin observability (last agreement/subscription attempt timestamps, status, SMT response snippet).
