@@ -130,6 +130,7 @@ export default function AdminSmtToolsPage() {
                   <th className="px-3 py-2 text-left font-medium">Status</th>
                   <th className="px-3 py-2 text-left font-medium">Updated</th>
                   <th className="px-3 py-2 text-left font-medium">Meter</th>
+                  <th className="px-3 py-2 text-left font-medium">Details</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-neutral-200">
@@ -140,23 +141,62 @@ export default function AdminSmtToolsPage() {
                     </td>
                   </tr>
                 ) : (
-                  meterRows.map((row) => (
-                    <tr key={row.id} className="odd:bg-white even:bg-neutral-50">
-                      <td className="px-3 py-2 font-mono text-[11px] uppercase md:text-xs">{row.esiid}</td>
-                      <td className="px-3 py-2 text-xs md:text-sm">
-                        <span className="font-semibold text-neutral-800">{row.status}</span>
-                        {row.errorMessage ? (
-                          <div className="text-[11px] text-red-600 md:text-xs">{row.errorMessage}</div>
-                        ) : null}
-                      </td>
-                      <td className="px-3 py-2 text-xs text-neutral-500 md:text-sm">
-                        {new Date(row.updatedAt).toLocaleString()}
-                      </td>
-                      <td className="px-3 py-2 text-[11px] text-neutral-700 md:text-xs">
-                        {row.meterNumber ?? '—'}
-                      </td>
-                    </tr>
-                  ))
+                  meterRows.map((row) => {
+                    const rawPayload = row.rawPayload as Record<string, unknown> | null | undefined;
+                    const stderr =
+                      rawPayload && typeof rawPayload === 'object'
+                        ? (rawPayload._stderr as string | undefined) ??
+                          (rawPayload.stderr as string | undefined)
+                        : undefined;
+                    const stdout =
+                      rawPayload && typeof rawPayload === 'object'
+                        ? (rawPayload.stdout as string | undefined)
+                        : undefined;
+                    const hasDetails = Boolean(stderr || stdout);
+
+                    return (
+                      <tr key={row.id} className="odd:bg-white even:bg-neutral-50">
+                        <td className="px-3 py-2 font-mono text-[11px] uppercase md:text-xs">{row.esiid}</td>
+                        <td className="px-3 py-2 text-xs md:text-sm">
+                          <span
+                            className={`font-semibold ${row.status === 'error' ? 'text-red-600' : 'text-neutral-800'}`}
+                          >
+                            {row.status}
+                          </span>
+                          {row.errorMessage ? (
+                            <div className="text-[11px] text-red-600 md:text-xs">{row.errorMessage}</div>
+                          ) : null}
+                        </td>
+                        <td className="px-3 py-2 text-xs text-neutral-500 md:text-sm">
+                          {new Date(row.updatedAt).toLocaleString()}
+                        </td>
+                        <td className="px-3 py-2 text-[11px] text-neutral-700 md:text-xs">
+                          {row.meterNumber ?? '—'}
+                        </td>
+                        <td className="px-3 py-2 text-[11px] text-neutral-600 md:text-xs">
+                          {hasDetails ? (
+                            <details className="space-y-1">
+                              <summary className="cursor-pointer text-neutral-700 underline-offset-2 hover:underline">
+                                View log
+                              </summary>
+                              {stderr ? (
+                                <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded bg-neutral-900 p-2 font-mono text-[10px] text-neutral-100 md:text-[11px]">
+                                  {stderr}
+                                </pre>
+                              ) : null}
+                              {stdout && !stderr ? (
+                                <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded bg-neutral-900 p-2 font-mono text-[10px] text-neutral-100 md:text-[11px]">
+                                  {stdout}
+                                </pre>
+                              ) : null}
+                            </details>
+                          ) : (
+                            <span className="text-neutral-400">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>

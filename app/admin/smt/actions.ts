@@ -86,6 +86,7 @@ export type MonitorMeterInfo = {
   status: string;
   errorMessage: string | null;
   meterNumber: string | null;
+  rawPayload: unknown;
   updatedAt: Date;
   createdAt: Date;
 };
@@ -131,6 +132,7 @@ const meterInfoSelect = {
   status: true,
   errorMessage: true,
   meterNumber: true,
+  rawPayload: true,
   updatedAt: true,
   createdAt: true,
 } satisfies Record<string, unknown>;
