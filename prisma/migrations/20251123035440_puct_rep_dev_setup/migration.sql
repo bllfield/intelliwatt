@@ -11,7 +11,7 @@ ALTER TABLE "SmtMeterInfo" ALTER COLUMN "updatedAt" DROP DEFAULT;
 ALTER TABLE "UserProfile" ALTER COLUMN "esiidAttentionAt" SET DATA TYPE TIMESTAMP(3);
 
 -- CreateTable
-CREATE TABLE "SmtAuthorization" (
+CREATE TABLE IF NOT EXISTS "SmtAuthorization" (
     "id" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
     "houseId" TEXT NOT NULL,
@@ -91,16 +91,16 @@ CREATE TABLE "ErcotEsiidIndex" (
 );
 
 -- CreateIndex
-CREATE INDEX "SmtAuthorization_userId_idx" ON "SmtAuthorization"("userId");
+CREATE INDEX IF NOT EXISTS "SmtAuthorization_userId_idx" ON "SmtAuthorization"("userId");
 
 -- CreateIndex
-CREATE INDEX "SmtAuthorization_houseId_idx" ON "SmtAuthorization"("houseId");
+CREATE INDEX IF NOT EXISTS "SmtAuthorization_houseId_idx" ON "SmtAuthorization"("houseId");
 
 -- CreateIndex
-CREATE INDEX "SmtAuthorization_houseAddressId_idx" ON "SmtAuthorization"("houseAddressId");
+CREATE INDEX IF NOT EXISTS "SmtAuthorization_houseAddressId_idx" ON "SmtAuthorization"("houseAddressId");
 
 -- CreateIndex
-CREATE INDEX "SmtAuthorization_esiid_idx" ON "SmtAuthorization"("esiid");
+CREATE INDEX IF NOT EXISTS "SmtAuthorization_esiid_idx" ON "SmtAuthorization"("esiid");
 
 -- CreateIndex
 CREATE INDEX "PuctRep_puctNumber_idx" ON "PuctRep"("puctNumber");
