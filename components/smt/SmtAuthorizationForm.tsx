@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useTransition, FormEvent } from "react";
+import { useRouter } from "next/navigation";
 import { RepSelector } from "@/components/smt/RepSelector";
 
 type SmtAuthorizationFormProps = {
@@ -52,6 +53,7 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
 
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
+  const router = useRouter();
 
   const hasActiveAuth = Boolean(existingAuth);
 
@@ -115,6 +117,7 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
           setSubmitSuccess(
             "Your Smart Meter Texas authorization has been saved. We’ll begin pulling your interval and billing data shortly.",
           );
+          router.refresh();
         } catch (err) {
           console.error("SMT authorization submit error", err);
           setSubmitError(
