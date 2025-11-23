@@ -2480,11 +2480,11 @@ We have extended the Smart Meter Texas ingest pipeline and admin tooling:
 
 - Confirmed a full production path from address save → droplet → SMT → app:
   - `app/api/address/save/route.ts` now calls `queueMeterInfoForHouse({ houseId, esiid })` after WattBuy returns an ESIID and the address record has a `houseId`. This enqueues a `SmtMeterInfo` row with `status = "pending"` and POSTs a webhook to the droplet (when `SMT_METERINFO_ENABLED` is true and droplet webhook envs are set).
-  - The droplet’s `webhook_server.py` handles `reason: "smt_meter_info"` on `/trigger/smt-now`, runs `node scripts/test_smt_meter_info.mjs --esiid <ESIID> --json`, and parses the stdout to extract `trans_id`, `MeterData`, and a meter number.
+  - The droplet's `webhook_server.py` handles `reason: "smt_meter_info"` on `/trigger/smt-now`, runs `node scripts/test_smt_meter_info.mjs --esiid <ESIID> --json`, and parses the stdout to extract `trans_id`, `MeterData`, and a meter number.
   - `webhook_server.py` then POSTs that structured payload back to `${APP_BASE_URL}/api/admin/smt/meter-info` with the shared `x-intelliwatt-secret` header.
   - `app/api/admin/smt/meter-info/route.ts` persists the payload via `saveMeterInfoFromDroplet`, which now tolerates `houseId = null` by using a findFirst + update/create pattern instead of Prisma upsert on the compound unique key.
 - `SmtMeterInfo` rows are now created and updated in the production database, including the key meter metadata (`meterNumber`, `utilityMeterId`, `meterSerialNumber`, `intervalSetting`, etc.) and a full `rawPayload` snapshot.
-- The SMT admin page (`/admin/smt`) has a “Live Pull Monitor” card that polls recent `SmtAuthorization` and `SmtMeterInfo` records, allowing ops to see meterInfo jobs with their ESIIDs, statuses, last-updated timestamps, and meter numbers.
+- The SMT admin page (`/admin/smt`) has a "Live Pull Monitor" card that polls recent `SmtAuthorization` and `SmtMeterInfo` records, allowing ops to see meterInfo jobs with their ESIIDs, statuses, last-updated timestamps, and meter numbers.
 - Verified example in production:
   - ESIID: `10443720004529147`
   - Status: `complete`
@@ -2534,3 +2534,16 @@ We need an authoritative, PUCT-backed directory of Retail Electric Providers (RE
 - RAW capture remains unchanged for other integrations.
 - No existing SMT ingest, WattBuy, or ERCOT code paths are modified in this change.
 - Future SMT Agreement changes will consume `PuctRep` via internal helpers, not vendor payloads.
+
+### PC-2025-11-22-B: ERCOT Module Parked (Not in Production Use)
+
+**Status**
+
+- The ERCOT ESIID index and related tooling are not part of any production customer or partner flow.
+- No SMT, WattBuy, or interval ingest features depend on ERCOT logic.
+- ERCOT-specific links have been removed from the `/admin` dashboard to avoid accidental use.
+
+**Notes**
+
+- ERCOT tables and migrations may remain in the database as legacy artifacts and can be cleaned up in a future maintenance window.
+- Treat ERCOT code as parked/legacy. Do not extend or wire it into new features without an explicit plan change.
