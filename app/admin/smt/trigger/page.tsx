@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useTransition } from "react";
+import { runSmtAgreementTest } from "../actions";
 
 export default function AdminSmtTriggerPage() {
   const [baseUrl, setBaseUrl] = useState<string>(() =>
@@ -13,6 +14,41 @@ export default function AdminSmtTriggerPage() {
   const [meter, setMeter] = useState<string>("M1");
   const [busy, setBusy] = useState<boolean>(false);
   const [out, setOut] = useState<string>("");
+
+  const [testAddressLine1, setTestAddressLine1] = useState<string>("");
+  const [testAddressLine2, setTestAddressLine2] = useState<string>("");
+  const [testCity, setTestCity] = useState<string>("");
+  const [testState, setTestState] = useState<string>("TX");
+  const [testZip, setTestZip] = useState<string>("");
+  const [testCustomerName, setTestCustomerName] = useState<string>("");
+  const [testCustomerEmail, setTestCustomerEmail] = useState<string>("");
+  const [testRepNumber, setTestRepNumber] = useState<string>("");
+  const [testEsiidOverride, setTestEsiidOverride] = useState<string>("");
+  const [testResult, setTestResult] = useState<string>("Output will appear here…");
+  const [isTesting, startTesting] = useTransition();
+
+  function handleAgreementTest() {
+    const pendingMessage = "Running SMT agreement test…";
+    setTestResult(pendingMessage);
+    startTesting(async () => {
+      try {
+        const result = await runSmtAgreementTest({
+          addressLine1: testAddressLine1,
+          addressLine2: testAddressLine2 || undefined,
+          city: testCity,
+          state: testState,
+          zip: testZip,
+          customerName: testCustomerName,
+          customerEmail: testCustomerEmail,
+          repPuctNumber: testRepNumber,
+          esiidOverride: testEsiidOverride || undefined,
+        });
+        setTestResult(JSON.stringify(result, null, 2));
+      } catch (error: any) {
+        setTestResult(`ERROR: ${error?.message || String(error)}`);
+      }
+    });
+  }
 
   async function triggerPull() {
     setOut("");
@@ -64,6 +100,122 @@ export default function AdminSmtTriggerPage() {
   return (
     <div className="max-w-3xl mx-auto p-6 space-y-6">
       <h1 className="text-2xl font-semibold">Admin · SMT Trigger</h1>
+
+      <div className="rounded-2xl border border-gray-200 bg-white/80 p-6 shadow-sm space-y-4">
+        <div className="flex items-baseline justify-between">
+          <h2 className="text-xl font-semibold text-gray-900">Agreement Flow Tester</h2>
+          {isTesting ? (
+            <span className="text-xs text-indigo-600">Running test…</span>
+          ) : null}
+        </div>
+        <p className="text-sm text-gray-600">
+          Provides end-to-end WattBuy → SMT meter info → Agreement/Subscription flow without touching customer data.
+          All steps run against the droplet proxy using the configured credentials.
+        </p>
+
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <label className="flex flex-col gap-1">
+            <span className="text-sm text-gray-600">Address line 1</span>
+            <input
+              className="border rounded px-3 py-2"
+              value={testAddressLine1}
+              onChange={(e) => setTestAddressLine1(e.target.value)}
+              placeholder="1012 Doreen St"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-sm text-gray-600">Address line 2 (optional)</span>
+            <input
+              className="border rounded px-3 py-2"
+              value={testAddressLine2}
+              onChange={(e) => setTestAddressLine2(e.target.value)}
+              placeholder="Unit / Apt"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-sm text-gray-600">City</span>
+            <input
+              className="border rounded px-3 py-2"
+              value={testCity}
+              onChange={(e) => setTestCity(e.target.value)}
+              placeholder="White Settlement"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-sm text-gray-600">State</span>
+            <input
+              className="border rounded px-3 py-2 uppercase"
+              value={testState}
+              onChange={(e) => setTestState(e.target.value)}
+              placeholder="TX"
+              maxLength={2}
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-sm text-gray-600">ZIP</span>
+            <input
+              className="border rounded px-3 py-2"
+              value={testZip}
+              onChange={(e) => setTestZip(e.target.value)}
+              placeholder="76108"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-sm text-gray-600">REP PUCT number</span>
+            <input
+              className="border rounded px-3 py-2"
+              value={testRepNumber}
+              onChange={(e) => setTestRepNumber(e.target.value)}
+              placeholder="e.g. 10052"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-sm text-gray-600">Customer name</span>
+            <input
+              className="border rounded px-3 py-2"
+              value={testCustomerName}
+              onChange={(e) => setTestCustomerName(e.target.value)}
+              placeholder="Customer of Record"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-sm text-gray-600">Customer email</span>
+            <input
+              className="border rounded px-3 py-2"
+              value={testCustomerEmail}
+              onChange={(e) => setTestCustomerEmail(e.target.value)}
+              placeholder="you@example.com"
+            />
+          </label>
+          <label className="flex flex-col gap-1 md:col-span-2">
+            <span className="text-sm text-gray-600">ESIID override (optional)</span>
+            <input
+              className="border rounded px-3 py-2"
+              value={testEsiidOverride}
+              onChange={(e) => setTestEsiidOverride(e.target.value)}
+              placeholder="Provide to skip WattBuy lookup"
+            />
+          </label>
+        </div>
+
+        <button
+          type="button"
+          onClick={handleAgreementTest}
+          disabled={isTesting}
+          className="inline-flex items-center justify-center rounded bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-gray-400"
+        >
+          {isTesting ? "Running..." : "Run Agreement Flow Test"}
+        </button>
+
+        <pre className="whitespace-pre-wrap text-sm bg-gray-50 border rounded p-3 overflow-x-auto">
+          {testResult}
+        </pre>
+
+        <p className="text-xs text-gray-500">
+          Sequence: resolve ESIID via WattBuy (unless override), queue &amp; wait for SMT meter info, then call the droplet
+          <code> /agreements</code> proxy. Responses shown above include raw agreement results.
+        </p>
+      </div>
 
       <div className="grid grid-cols-1 gap-4">
         <label className="flex flex-col gap-1">

@@ -1,7 +1,12 @@
 'use server';
 
+import { randomUUID } from 'crypto';
 import { headers } from 'next/headers';
 import { prisma } from '@/lib/db';
+import { resolveAddressToEsiid } from '@/lib/resolver/addressToEsiid';
+import { cleanEsiid } from '@/lib/smt/esiid';
+import { waitForMeterInfo } from '@/lib/smt/meterInfo';
+import { createAgreementAndSubscription, type SmtAgreementResult } from '@/lib/smt/agreements';
 
 function resolveBaseUrl() {
   const explicit = process.env.ADMIN_INTERNAL_BASE_URL
@@ -168,5 +173,246 @@ export async function fetchSmtPullStatuses(limit = 10): Promise<SmtPullStatusesP
     fetchedAt: new Date().toISOString(),
     authorizations: authorizationsWithMeter,
     meterInfos: meterInfosTyped,
+  };
+}
+
+export type AdminAgreementTestInput = {
+  addressLine1: string;
+  addressLine2?: string;
+  city: string;
+  state: string;
+  zip: string;
+  customerName: string;
+  customerEmail: string;
+  repPuctNumber: string;
+  esiidOverride?: string;
+  monthsBack?: number;
+  includeInterval?: boolean;
+  includeBilling?: boolean;
+};
+
+export type AdminAgreementTestResult = {
+  ok: boolean;
+  esiid?: string;
+  meterNumber?: string | null;
+  meterInfoWaitMs?: number;
+  agreement?: SmtAgreementResult | null;
+  wattbuy?: {
+    esiid: string | null;
+    utility?: string | null;
+    territory?: string | null;
+  } | null;
+  meterInfoRecord?: {
+    id: string;
+    status: string;
+    meterNumber: string | null;
+    updatedAt: string;
+  } | null;
+  messages?: string[];
+  errors?: string[];
+  tookMs?: number;
+};
+
+export async function runSmtAgreementTest(
+  input: AdminAgreementTestInput,
+): Promise<AdminAgreementTestResult> {
+  const startedAt = Date.now();
+  const errors: string[] = [];
+  const messages: string[] = [];
+
+  const addressLine1 = input.addressLine1?.trim();
+  const city = input.city?.trim();
+  const state = input.state?.trim().toUpperCase();
+  const zip = input.zip?.trim();
+  const customerName = input.customerName?.trim();
+  const customerEmail = input.customerEmail?.trim();
+  const repRaw = input.repPuctNumber?.toString().trim();
+  const addressLine2 = input.addressLine2?.trim() || undefined;
+
+  if (!addressLine1) errors.push("Address line 1 is required.");
+  if (!city) errors.push("City is required.");
+  if (!state) errors.push("State is required.");
+  if (!zip) errors.push("ZIP code is required.");
+  if (!customerName) errors.push("Customer name is required.");
+  if (!customerEmail) errors.push("Customer email is required.");
+  if (!repRaw) errors.push("REP PUCT number is required.");
+
+  const repNumeric = repRaw ? Number.parseInt(repRaw, 10) : NaN;
+  if (!Number.isFinite(repNumeric)) {
+    errors.push("REP PUCT number must be numeric.");
+  }
+
+  const monthsBack =
+    typeof input.monthsBack === "number" && Number.isFinite(input.monthsBack)
+      ? Math.max(1, Math.round(input.monthsBack))
+      : 12;
+  const includeInterval = input.includeInterval ?? true;
+  const includeBilling = input.includeBilling ?? true;
+
+  if (errors.length > 0) {
+    return {
+      ok: false,
+      errors,
+      messages,
+      tookMs: Date.now() - startedAt,
+    };
+  }
+
+  let esiid = cleanEsiid(input.esiidOverride ?? null);
+  let wattbuyResult: Awaited<ReturnType<typeof resolveAddressToEsiid>> | null = null;
+
+  if (esiid) {
+    messages.push(`Using provided ESIID ${esiid}.`);
+  } else {
+    wattbuyResult = await resolveAddressToEsiid({
+      line1: addressLine1,
+      line2: addressLine2 ?? null,
+      line1Alt: null,
+      city,
+      state,
+      zip,
+    });
+
+    esiid = cleanEsiid(wattbuyResult.esiid ?? null);
+    if (esiid) {
+      messages.push(`Resolved ESIID ${esiid} via WattBuy.`);
+    } else {
+      errors.push("WattBuy could not resolve an ESIID for the supplied address.");
+      return {
+        ok: false,
+        errors,
+        messages,
+        wattbuy: {
+          esiid: wattbuyResult?.esiid ?? null,
+          utility: wattbuyResult?.utility ?? null,
+          territory: wattbuyResult?.territory ?? null,
+        },
+        tookMs: Date.now() - startedAt,
+      };
+    }
+  }
+
+  const houseId = randomUUID();
+  const meterStart = Date.now();
+  let meterNumber: string | null = null;
+
+  try {
+    meterNumber = await waitForMeterInfo({
+      houseId,
+      esiid,
+      timeoutMs: 60_000,
+      pollIntervalMs: 3_000,
+      queueIfMissing: true,
+    });
+  } catch (err) {
+    errors.push(
+      `Meter info lookup failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  const meterInfoWaitMs = Date.now() - meterStart;
+
+  const prismaAny = prisma as any;
+  const meterInfoRecord = await prismaAny.smtMeterInfo.findFirst({
+    where: {
+      esiid,
+      OR: [{ houseId }, { houseId: null }],
+    },
+    orderBy: { updatedAt: "desc" },
+    select: {
+      id: true,
+      status: true,
+      meterNumber: true,
+      updatedAt: true,
+    },
+  });
+
+  if (!meterNumber) {
+    errors.push(
+      "Meter number was not returned in time. Check SMT meter info pipeline or try again.",
+    );
+    return {
+      ok: false,
+      errors,
+      messages,
+      esiid,
+      meterNumber: null,
+      meterInfoWaitMs,
+      wattbuy: wattbuyResult
+        ? {
+            esiid: wattbuyResult.esiid,
+            utility: wattbuyResult.utility ?? null,
+            territory: wattbuyResult.territory ?? null,
+          }
+        : esiid
+        ? null
+        : null,
+      meterInfoRecord: meterInfoRecord
+        ? {
+            id: meterInfoRecord.id,
+            status: meterInfoRecord.status,
+            meterNumber: meterInfoRecord.meterNumber,
+            updatedAt: meterInfoRecord.updatedAt.toISOString(),
+          }
+        : null,
+      tookMs: Date.now() - startedAt,
+    };
+  }
+
+  const serviceAddressParts = [
+    addressLine1,
+    addressLine2,
+    `${city}, ${state} ${zip}`,
+  ].filter((part) => part && part.trim().length > 0);
+
+  let agreementResult: SmtAgreementResult | null = null;
+
+  try {
+    agreementResult = await createAgreementAndSubscription({
+      esiid,
+      serviceAddress: serviceAddressParts.join(", "),
+      customerName,
+      customerEmail,
+      customerPhone: null,
+      tdspCode: (wattbuyResult?.territory ?? null) || null,
+      monthsBack,
+      includeInterval,
+      includeBilling,
+      meterNumber,
+      repPuctNumber: String(repNumeric),
+    });
+    messages.push("SMT agreement/subscription request completed.");
+  } catch (err) {
+    errors.push(
+      `Agreement call threw: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  return {
+    ok: errors.length === 0,
+    esiid,
+    meterNumber,
+    meterInfoWaitMs,
+    agreement: agreementResult,
+    wattbuy: wattbuyResult
+      ? {
+          esiid: wattbuyResult.esiid,
+          utility: wattbuyResult.utility ?? null,
+          territory: wattbuyResult.territory ?? null,
+        }
+      : esiid
+      ? null
+      : null,
+    meterInfoRecord: meterInfoRecord
+      ? {
+          id: meterInfoRecord.id,
+          status: meterInfoRecord.status,
+          meterNumber: meterInfoRecord.meterNumber,
+          updatedAt: meterInfoRecord.updatedAt.toISOString(),
+        }
+      : null,
+    messages,
+    errors: errors.length > 0 ? errors : undefined,
+    tookMs: Date.now() - startedAt,
   };
 }
