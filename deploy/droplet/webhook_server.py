@@ -685,6 +685,19 @@ class H(BaseHTTPRequestHandler):
             self._write_json(400, {"ok": False, "error": "invalid_json"})
             return
 
+        rep_puct_number_default = 10052
+        rep_puct_number_raw = payload.get("repPuctNumber") or payload.get("rep_puct_number")
+        rep_puct_number = rep_puct_number_default
+        if rep_puct_number_raw is not None:
+            try:
+                rep_puct_number = int(str(rep_puct_number_raw).strip())
+            except Exception:
+                rep_puct_number = rep_puct_number_default
+        print(
+            f"[SMT_DEBUG] /agreements using PUCTRORNumber={rep_puct_number}",
+            flush=True,
+        )
+
         action = payload.get("action")
         if action != "create_agreement_and_subscription":
             self._write_json(
@@ -763,6 +776,14 @@ class H(BaseHTTPRequestHandler):
             step_name = step.get("name")
             if isinstance(step_name, str) and step_name.lower() == "newagreement":
                 hydrated_meter_number = maybe_hydrate_meter_number(step)
+                # Override PUCT ROR number in agreement body
+                body = step.get("body")
+                if isinstance(body, dict):
+                    meter_list = body.get("customerMeterList")
+                    if isinstance(meter_list, list) and meter_list:
+                        entry = meter_list[0]
+                        if isinstance(entry, dict):
+                            entry["PUCTRORNumber"] = rep_puct_number
                 break
 
         if hydrated_meter_number:
