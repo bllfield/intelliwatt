@@ -47,7 +47,6 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
   const [meterNumber, setMeterNumber] = useState(
     typeof initialMeterNumber === "string" ? initialMeterNumber.trim() : "",
   );
-  const [consent, setConsent] = useState(false);
   const [repPuctNumber, setRepPuctNumber] = useState<string | undefined>(undefined);
   const [isPending, startTransition] = useTransition();
 
@@ -66,10 +65,6 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
       return;
     }
 
-    if (!consent) {
-      setSubmitError("You must provide consent before we can request your SMT data.");
-      return;
-    }
     if (!repPuctNumber) {
       setSubmitError("Please select your Retail Electric Provider before submitting.");
       return;
@@ -129,8 +124,6 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
       })();
     });
   }
-
-  const submitDisabled = isPending || !consent;
 
   return (
     <div className="space-y-3 rounded-xl border border-slate-200 bg-white/80 p-4 shadow-sm backdrop-blur">
@@ -287,17 +280,17 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
           </div>
 
           <button
-            type="button"
-            onClick={() => setConsent((prev) => !prev)}
+            type="submit"
             disabled={isPending}
-            className={`w-full rounded-full px-4 py-2 text-sm font-semibold uppercase tracking-wide focus:outline-none focus:ring-2 focus:ring-offset-2 transition ${
-              consent
-                ? "bg-brand-navy text-brand-cyan shadow-[0_0_20px_rgba(16,182,231,0.6)] focus:ring-brand-cyan focus:ring-offset-brand-navy"
-                : "bg-brand-navy text-brand-cyan focus:ring-brand-cyan/50"
-            }`}
+            className="w-full rounded-full bg-brand-navy px-4 py-2 text-sm font-semibold uppercase tracking-wide text-brand-cyan shadow-[0_0_20px_rgba(16,182,231,0.45)] transition focus:outline-none focus:ring-2 focus:ring-brand-cyan focus:ring-offset-2 focus:ring-offset-brand-navy disabled:cursor-not-allowed disabled:opacity-70"
           >
             AUTHORIZE OR UPDATE AUTHORIZATION
           </button>
+          {isPending && (
+            <p className="text-center text-[11px] uppercase tracking-wide text-slate-500">
+              Submitting authorization…
+            </p>
+          )}
         </div>
 
         {submitError && (
@@ -312,16 +305,6 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
           </div>
         )}
 
-        <div className="flex items-center justify-between">
-          <button
-            type="submit"
-            disabled={submitDisabled}
-            className="inline-flex items-center rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-400"
-          >
-            Authorize Smart Meter Texas Access
-          </button>
-          {isPending && <span className="text-xs text-slate-500">Saving your authorization…</span>}
-        </div>
       </form>
     </div>
   );
