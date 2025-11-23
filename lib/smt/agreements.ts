@@ -112,6 +112,8 @@ const ALLOWED_AGREEMENT_DURATIONS: ReadonlyArray<
   1 | 3 | 6 | 9 | 12 | 24 | 36
 > = [1, 3, 6, 9, 12, 24, 36] as const;
 
+export const DEFAULT_REP_PUCT_NUMBER = 10052; // Just Energy PUCT number (temporary default)
+
 type NewAgreementPayload = {
   trans_id: string;
   requestorID: string;
@@ -348,6 +350,10 @@ export async function createAgreementAndSubscription(
 
     const proxyPayload = {
       action: "create_agreement_and_subscription",
+      repPuctNumber:
+        payload.repPuctNumber !== null && payload.repPuctNumber !== undefined
+          ? payload.repPuctNumber
+          : DEFAULT_REP_PUCT_NUMBER,
       steps,
       agreement: {
         name: "NewAgreement",

@@ -3,7 +3,10 @@ import { cookies } from "next/headers";
 import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
 import { cleanEsiid } from "@/lib/smt/esiid";
-import { createAgreementAndSubscription } from "@/lib/smt/agreements";
+import {
+  createAgreementAndSubscription,
+  DEFAULT_REP_PUCT_NUMBER,
+} from "@/lib/smt/agreements";
 
 type SmtAuthorizationBody = {
   houseAddressId: string;
@@ -224,30 +227,30 @@ export async function POST(req: NextRequest) {
         `${house.addressCity}, ${house.addressState} ${house.addressZip5}`,
       ].filter((part) => typeof part === "string" && part.trim().length > 0);
 
-      const agreementResult = await createAgreementAndSubscription({
+      const smtResult = await createAgreementAndSubscription({
         esiid: houseEsiid,
         serviceAddress: serviceAddressParts.join(", "),
         customerName: trimmedCustomerName,
         customerEmail: user.email,
         customerPhone: normalizedContactPhone,
         tdspCode,
-        meterNumber: resolvedMeterNumber ?? undefined,
-        repPuctNumber: repPuctOverride ?? null,
         monthsBack: 12,
         includeInterval: true,
         includeBilling: true,
+        meterNumber: resolvedMeterNumber ?? undefined,
+        repPuctNumber: DEFAULT_REP_PUCT_NUMBER,
       });
 
       smtUpdateData = {
-        smtAgreementId: agreementResult.agreementId ?? null,
-        smtSubscriptionId: agreementResult.subscriptionId ?? null,
-        smtStatus: agreementResult.status ?? null,
-        smtStatusMessage: agreementResult.message ?? null,
-        smtBackfillRequestedAt: agreementResult.backfillRequestedAt
-          ? new Date(agreementResult.backfillRequestedAt)
+        smtAgreementId: smtResult.agreementId ?? null,
+        smtSubscriptionId: smtResult.subscriptionId ?? null,
+        smtStatus: smtResult.status ?? null,
+        smtStatusMessage: smtResult.message ?? null,
+        smtBackfillRequestedAt: smtResult.backfillRequestedAt
+          ? new Date(smtResult.backfillRequestedAt)
           : null,
-        smtBackfillCompletedAt: agreementResult.backfillCompletedAt
-          ? new Date(agreementResult.backfillCompletedAt)
+        smtBackfillCompletedAt: smtResult.backfillCompletedAt
+          ? new Date(smtResult.backfillCompletedAt)
           : null,
         meterNumber: resolvedMeterNumber ?? null,
       };
