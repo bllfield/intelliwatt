@@ -4,16 +4,18 @@ import { useState } from 'react';
 import Link from 'next/link';
 
 const dashboardLinks = [
-  { href: '/dashboard/entries', label: 'Entries' },
+  { href: '/dashboard/api', label: 'API Connect' },
+  { href: '/dashboard/current-rate', label: 'Current Rate' },
+  { href: '/dashboard/usage', label: 'Usage' },
   { href: '/dashboard/plans', label: 'Plans' },
   { href: '/dashboard/home', label: 'Home Info' },
   { href: '/dashboard/appliances', label: 'Appliances' },
-  { href: '/dashboard/api', label: 'API Connect' },
-  { href: '/dashboard/analysis', label: 'Analysis' },
-  { href: '/dashboard/manual-entry', label: 'Manual Entry' },
-  { href: '/dashboard/usage', label: 'Usage' },
-  { href: '/dashboard/referrals', label: 'Referrals' },
   { href: '/dashboard/upgrades', label: 'Upgrades' },
+  { href: '/dashboard/analysis', label: 'Analysis' },
+  { href: '/dashboard/optimal', label: 'Optimal Energy' },
+  { href: '/dashboard/entries', label: 'Entries' },
+  { href: '/dashboard/referrals', label: 'Referrals' },
+  { href: '/dashboard/profile', label: 'Profile' },
 ];
 
 export default function DashboardHeader() {
