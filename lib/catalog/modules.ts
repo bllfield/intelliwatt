@@ -124,6 +124,15 @@ export const modulesCatalog: ModuleDef[] = [
     inputs: ['Module definitions'],
     outputs: ['Module catalog JSON'],
     estDevTime: '0.5d'
+  },
+  {
+    id: 75,
+    name: 'EFL Fact Card Engine',
+    purpose: 'EFL → PlanRules engine and internal test harness',
+    endpoint: '/admin/efl/tests',
+    inputs: ['EFL PDF/Text'],
+    outputs: ['PlanRules JSON', 'Test harness output'],
+    estDevTime: '1d'
   }
   // Add future modules here as project evolves
 ]

@@ -2763,3 +2763,29 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
 
 - Status: PLANNED / READY (dev-only).
 - Next: provision dev DB, run `prisma migrate dev`, validate, then document prod alignment strategy in a follow-up Plan Change.
+
+### PC-2025-11-23-D: SMT Authorization UI Alignment & Auto-Refresh
+
+**Rationale**
+
+- Align the SMT authorization inputs with the contextual service-address information and ensure customers see their latest authorization status immediately after submitting the form.
+
+**Scope**
+
+- `app/dashboard/api/page.tsx`
+  - Reworks the SMT card layout so the navy service-address panel and existing-authorization summary live in the left column, with the authorization form occupying the right column.
+  - Shows the "We already have a valid Smart Meter Texas authorization..." guidance only when an authorization exists, keeping the UI clear for first-time users.
+- `components/smt/SmtAuthorizationForm.tsx`
+  - Removes redundant container padding when the form renders alongside the info column so inputs align flush with the card header.
+  - Uses a single AUTHORIZE/UPDATE action button for consent + submit, eliminating the secondary submit button.
+  - Calls `router.refresh()` after successful submission so the status card (`existingAuth`) and trailing-12M window timestamps update immediately without a manual reload.
+
+**Rollback**
+
+- Revert the layout and spacing adjustments in `app/dashboard/api/page.tsx` and `components/smt/SmtAuthorizationForm.tsx`.
+- Remove the `router.refresh()` call to restore the prior behaviour (customer must reload to see updated status).
+
+**Guardrails**
+
+- No backend contract changes were made; the authorization POST payload remains unchanged.
+- SMT droplet interactions, agreement payload construction, and meter-info requirements remain intact and enforced by the API layer.
