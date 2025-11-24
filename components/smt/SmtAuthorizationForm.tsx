@@ -136,7 +136,7 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
     <div className={containerClasses}>
       {showHeader && (
         <>
-          <div className="grid grid-cols-1 gap-3 rounded-lg bg-brand-navy p-3 text-xs text-brand-cyan sm:grid-cols-2">
+          <div className="grid gap-3 rounded-lg bg-brand-navy p-3 text-center text-xs text-brand-cyan sm:grid-cols-2">
             <div className="space-y-1">
               <div className="text-sm font-semibold uppercase tracking-wide text-brand-cyan">
                 Service Address on File
@@ -169,7 +169,7 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
           </div>
 
           {hasActiveAuth && (
-            <div className="space-y-1 rounded-lg border border-brand-cyan/40 bg-brand-navy p-3 text-xs text-brand-cyan">
+            <div className="space-y-1 rounded-lg border border-brand-cyan/40 bg-brand-navy p-3 text-center text-xs text-brand-cyan">
               <div className="text-sm font-semibold uppercase tracking-wide">
                 Active SMT authorization already on file
               </div>
@@ -304,13 +304,13 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
         </div>
 
         {submitError && (
-          <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
+          <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-center text-xs text-red-800">
             {submitError}
           </div>
         )}
 
         {submitSuccess && (
-          <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+          <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-center text-xs text-emerald-800">
             {submitSuccess}
           </div>
         )}

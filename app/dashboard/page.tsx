@@ -83,7 +83,7 @@ export default function DashboardPage() {
               Your FREE AI-powered energy optimization dashboard. Track savings, manage your plan, and earn rewards.
             </p>
             {/* Smart Meter + Referral CTA */}
-            <div className="mb-8 flex flex-col items-center gap-4 text-center md:flex-row md:justify-center md:text-left">
+            <div className="mb-8 flex flex-col items-center gap-4 text-center md:flex-row md:justify-center">
               <span className="relative inline-block h-24 w-full max-w-xs sm:h-28 sm:max-w-sm md:h-24 md:w-64">
                 <Image
                   src="/Hitthejackwatt-Logo.png"
@@ -93,7 +93,7 @@ export default function DashboardPage() {
                   priority
                 />
               </span>
-              <div className="inline-flex w-full max-w-xl flex-col items-center gap-2 rounded-2xl border border-[#39FF14]/40 bg-[#39FF14]/10 px-6 py-4 text-center shadow-lg shadow-[#39FF14]/10 ring-1 ring-[#39FF14]/30 md:items-start md:text-left">
+              <div className="inline-flex w-full max-w-xl flex-col items-center gap-2 rounded-2xl border border-[#39FF14]/40 bg-[#39FF14]/10 px-6 py-4 text-center shadow-lg shadow-[#39FF14]/10 ring-1 ring-[#39FF14]/30">
                 <span className="text-lg font-extrabold leading-tight text-brand-white md:text-xl">
                   <span style={{ color: '#39FF14' }}>⚡ Connect your smart meter data</span>
                   <span className="mx-1 text-brand-white">for</span>
@@ -250,7 +250,7 @@ export default function DashboardPage() {
               <p className="text-lg text-brand-navy mb-8 max-w-2xl mx-auto">
                 Enter your service address above to unlock personalized energy plan recommendations and start tracking your savings.
               </p>
-              <div className="grid md:grid-cols-3 gap-6 text-left">
+              <div className="grid md:grid-cols-3 gap-6 text-center">
                 <div className="bg-white p-6 rounded-xl border border-brand-blue/20">
                   <div className="w-12 h-12 bg-brand-navy rounded-full flex items-center justify-center mb-4">
                     <span className="text-brand-blue text-xl">🔍</span>

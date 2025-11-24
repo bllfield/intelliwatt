@@ -55,7 +55,7 @@ export function CurrentRateDetailsForm({
       </div>
 
       <div className="grid gap-6 md:grid-cols-2">
-        <div className="space-y-3 rounded-xl border bg-white p-4">
+        <div className="space-y-3 rounded-xl border bg-white p-4 text-center">
           <h2 className="text-base font-medium">Option 1: Upload your bill</h2>
           <p className="text-xs text-slate-500">
             On mobile, take a clear photo of the first page of your bill. On desktop, upload a PDF
@@ -66,7 +66,7 @@ export function CurrentRateDetailsForm({
             type="file"
             accept="image/*,application/pdf"
             onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-            className="block w-full text-sm"
+            className="block w-full text-sm text-center"
           />
           {file ? (
             <p className="text-xs text-slate-500">

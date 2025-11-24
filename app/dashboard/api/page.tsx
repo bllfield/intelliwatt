@@ -209,7 +209,7 @@ export default async function ApiConnectPage() {
           <div className="pointer-events-none absolute inset-y-0 right-0 hidden w-1/2 bg-gradient-to-bl from-brand-cyan/10 via-transparent to-brand-blue/10 md:block" />
 
           <div className="relative z-10 flex flex-col gap-10 p-8 sm:p-10">
-            <header className="space-y-4">
+            <header className="space-y-4 text-center">
               <span className="inline-flex items-center gap-2 rounded-full bg-brand-navy px-4 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-brand-cyan">
                 Utility Integrations
               </span>
@@ -217,7 +217,7 @@ export default async function ApiConnectPage() {
                 <h1 className="text-3xl font-semibold tracking-tight text-brand-navy sm:text-4xl">
                   Connect Smart Meter Texas
                 </h1>
-                <p className="max-w-2xl text-sm leading-relaxed text-brand-slate">
+                <p className="mx-auto max-w-2xl text-sm leading-relaxed text-brand-slate">
                   Authorize IntelliWatt to sync with your utility&apos;s smart meter. We only use this
                   secure connection to pull usage and billing intervals so plan insights stay accurate
                   automatically.
@@ -231,27 +231,27 @@ export default async function ApiConnectPage() {
 
             <div className="space-y-4">
               {!user && (
-                <div className="rounded-2xl border border-amber-200/70 bg-amber-100/40 px-5 py-4 text-sm font-medium text-amber-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]">
+                <div className="rounded-2xl border border-amber-200/70 bg-amber-100/40 px-5 py-4 text-center text-sm font-medium text-amber-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]">
                   Sign in to connect Smart Meter Texas.
                 </div>
               )}
 
               {user && !houseAddress && (
-                <div className="rounded-2xl border border-amber-200/70 bg-amber-100/40 px-5 py-4 text-sm font-medium text-amber-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]">
+                <div className="rounded-2xl border border-amber-200/70 bg-amber-100/40 px-5 py-4 text-center text-sm font-medium text-amber-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]">
                   We don’t have a service address on file yet. Add your address first and then return
                   here to authorize SMT.
                 </div>
               )}
 
               {user && houseAddress && !hasEsiid && (
-                <div className="rounded-2xl border border-amber-200/70 bg-amber-100/40 px-5 py-4 text-sm font-medium text-amber-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]">
+                <div className="rounded-2xl border border-amber-200/70 bg-amber-100/40 px-5 py-4 text-center text-sm font-medium text-amber-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]">
                   We have your address, but we couldn’t resolve an ESIID yet. Complete the rate lookup
                   step so we can match you with the correct utility meter.
                 </div>
               )}
 
               {user && houseAddress && hasEsiid && !hasTdspOrUtility && (
-                <div className="rounded-2xl border border-amber-200/70 bg-amber-100/40 px-5 py-4 text-sm font-medium text-amber-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]">
+                <div className="rounded-2xl border border-amber-200/70 bg-amber-100/40 px-5 py-4 text-center text-sm font-medium text-amber-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]">
                   We found an ESIID, but utility details are still syncing. Once the TDSP information
                   appears, you’ll be ready to authorize SMT.
                 </div>
@@ -259,11 +259,11 @@ export default async function ApiConnectPage() {
             </div>
 
             {readyForSmt && (
-              <div className="space-y-6 rounded-3xl border border-brand-navy/15 bg-white/90 p-4 shadow-[0_18px_60px_rgba(16,46,90,0.06)] backdrop-blur max-[480px]:p-3 sm:p-6 md:p-8">
+              <div className="space-y-6 rounded-3xl border border-brand-navy/15 bg-white/90 p-4 text-center shadow-[0_18px_60px_rgba(16,46,90,0.06)] backdrop-blur max-[480px]:p-3 sm:p-6 md:p-8">
                 <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.1fr,1fr] lg:items-start">
                   <div className="order-2 space-y-4 lg:order-1">
                     <div className="rounded-2xl border border-brand-cyan/40 bg-brand-navy p-5 text-sm text-brand-cyan shadow-[0_10px_30px_rgba(16,182,231,0.18)] sm:p-6">
-                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <div className="grid grid-cols-1 gap-4">
                         <div className="space-y-1">
                           <h2 className="text-sm font-semibold uppercase tracking-wide text-brand-cyan">
                             Service address on file
@@ -309,7 +309,7 @@ export default async function ApiConnectPage() {
 
                     {existingAuth && (
                       <div className="rounded-2xl border border-brand-cyan/40 bg-brand-navy p-5 text-xs text-brand-cyan shadow-[0_10px_30px_rgba(16,182,231,0.18)] sm:p-6">
-                        <div className="flex flex-wrap items-center gap-3">
+                        <div className="flex flex-wrap items-center justify-center gap-3">
                           <span className="text-[0.7rem] font-semibold uppercase tracking-wide">
                             SMT authorization last submitted{" "}
                             {existingAuth.createdAt.toLocaleDateString(undefined, {
@@ -358,18 +358,18 @@ export default async function ApiConnectPage() {
 
         <section className="relative overflow-hidden rounded-3xl border border-brand-blue/15 bg-white shadow-[0_24px_70px_rgba(16,46,90,0.06)]">
           <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-brand-blue/10 via-transparent to-brand-cyan/15 opacity-70" />
-          <div className="relative z-10 flex flex-col gap-6 p-8 sm:p-10">
+          <div className="relative z-10 flex flex-col gap-6 p-8 sm:p-10 text-center">
             <div className="flex flex-col gap-3">
               <h2 className="text-2xl font-semibold tracking-tight text-brand-navy">Smart Home Devices</h2>
-              <p className="max-w-3xl text-sm leading-relaxed text-brand-slate">
+              <p className="mx-auto max-w-3xl text-sm leading-relaxed text-brand-slate">
                 Connect your Emporia Vue, Sense, Nest, Tesla, or Enphase devices to unlock richer
                 insights and earn bonus jackpot entries. Device integrations are rolling out soon—get
                 on the early access list so you’re first in line.
               </p>
             </div>
 
-            <div className="flex flex-col gap-4 rounded-2xl border border-brand-cyan/40 bg-brand-navy px-6 py-6 text-center text-brand-cyan shadow-[0_12px_32px_rgba(16,46,90,0.12)] sm:flex-row sm:items-center sm:justify-between sm:text-left">
-              <div>
+            <div className="flex flex-col gap-4 rounded-2xl border border-brand-cyan/40 bg-brand-navy px-6 py-6 text-center text-brand-cyan shadow-[0_12px_32px_rgba(16,46,90,0.12)] sm:flex-row sm:items-center sm:justify-between">
+              <div className="mx-auto sm:mx-0">
                 <p className="text-sm font-semibold uppercase tracking-[0.3em] text-brand-cyan">
                   Coming Soon
                 </p>
