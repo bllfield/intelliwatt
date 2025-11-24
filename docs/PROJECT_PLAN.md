@@ -2859,3 +2859,27 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
 
 - No backend contract changes were made; the authorization POST payload remains unchanged.
 - SMT droplet interactions, agreement payload construction, and meter-info requirements remain intact and enforced by the API layer.
+
+### PC-2025-11-23-EFL-LINK-TESTS: EFL Link Runner Admin Smoke Tests
+
+**Rationale**
+
+- The EFL Link Runner now underpins multiple admin tools (manual loader, link runner dashboard). Ops requires documented smoke tests so the module remains verifiable alongside SMT and WattBuy flows.
+
+**Scope**
+
+- Added **EFL Link Runner (Admin Smoke Tests)** to `docs/TESTING_API.md`, documenting:
+  - `POST /api/admin/efl/run-link` invocation with `mode: "test"` (dry run) and `mode: "live"` (persists artifacts).
+  - Example cURL commands mirroring existing admin test style.
+  - Expected JSON response shape (`ok`, `mode`, `eflUrl`, `steps`, `persisted`, `warnings`).
+  - Recommended error-handling checks for invalid URLs and non-PDF content.
+
+**Guardrails / Follow-ups**
+
+- Endpoint remains gated by `x-admin-token`; no runtime code changes shipped with this entry.
+- Future runner changes must keep the documented request/response contract (`eflUrl`, `mode`) aligned or update both the plan and testing docs.
+- Live mode should only be used once pipeline persistence is verified; documentation calls this out explicitly.
+
+**Status**
+
+- COMPLETE — EFL Link Runner is now part of the standard admin smoke-test suite.

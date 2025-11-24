@@ -293,6 +293,10 @@ Until those steps are executed, this document is the **authoritative naming and 
   - Added `buildPlanRulesExtractionPrompt` to generate the strict extraction prompt.
   - Added `extractPlanRulesFromEflText`, which accepts deterministic extract output, calls an injected `PlanRulesModelCaller`, and normalizes the result into `planRules`, `parseConfidence`, `parseWarnings`, with `source = "efl_pdf"`.
   - Remains vendor-agnostic; higher layers supply the actual LLM integration.
+- [x] **Step 2a – EFL Link Runner admin utility**
+  - Added a vendor-agnostic admin page at `/admin/efl/links` (EFL Link Runner).
+  - Lets ops paste any EFL PDF URL (WattBuy, REP portal, manual), fetch the PDF, compute `eflPdfSha256` via `computePdfSha256`, inspect basic headers, and open the EFL in a new tab.
+  - Read-only helper sitting on top of deterministic ingestion (no persistence yet).
 
 ---
 

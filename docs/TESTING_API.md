@@ -1,3 +1,33 @@
+- `/admin/efl/links`
+
+---
+
+## Admin UI — EFL Link Runner (/admin/efl/links)
+
+**Purpose:**  
+Quickly validate and fingerprint EFL PDFs from any source (WattBuy, REP portals, manual URLs) without touching the database.
+
+**How to use (browser):**
+
+1. Sign in as an admin and open `/admin/efl/links`.
+2. Paste a direct EFL PDF URL into “EFL PDF URL”. Works with WattBuy, REP portals, or any valid HTTPS PDF.
+3. (Optional) Enter a Source tag (`wattbuy`, `rep_portal`, `manual`, etc.) as a hint for your own workflow.
+4. Click “Fetch & Fingerprint PDF”.
+5. Review the Result section:
+   - Status (OK or Error)
+   - Normalized URL (clickable; opens in new tab)
+   - SHA-256 fingerprint (matches `computePdfSha256`)
+   - Content-Type / Content-Length (when provided)
+
+**Expected behaviour:**
+
+- Valid EFL PDF URL → Status OK, SHA-256 populated, Open link works.
+- Invalid/unreachable URL → Status Error with explanation.
+
+**Notes:**
+
+- Read-only utility—no Prisma writes or storage side effects.
+- Useful for verifying upstream EFL links before running deterministic ingestion or AI extraction (`deterministicEflExtract`, `extractPlanRulesFromEflText`).
 # Testing IntelliWatt API Endpoints (Prod & Preview)
 
 ## Why do I need to pass tokens if I have `.env.local`?
@@ -54,6 +84,101 @@ curl -sS "$BASE/api/admin/ercot/cron?token=$CRON_SECRET" | jq
 - Set `ERCOT_PAGE_URL` as in `DEPLOY_ERCOT.md`.
 - Use `ERCOT_TEST_URL` for a known file to validate ingestion.
 - Idempotent: repeated runs skip duplicates by `fileSha256`.
+
+## EFL Link Runner (Admin Smoke Tests)
+
+Use these checks to verify the **EFL Link Runner** module that powers the EFL Fact Card Engine pipeline. The endpoint accepts a single EFL PDF URL and executes the runner in either **test** or **live** mode.
+
+> **Admin token reminder:** Never commit real `ADMIN_TOKEN` or live customer URLs. Substitute placeholders locally only.
+
+### 1. Run EFL Link in Test Mode
+
+Use test mode when validating a new link or debugging parser behavior. Test mode must not create durable artifacts.
+
+```bash
+export ADMIN_TOKEN="<ADMIN_TOKEN>"
+
+curl -sS -X POST "https://intelliwatt.com/api/admin/efl/run-link" \
+  -H "x-admin-token: $ADMIN_TOKEN" \
+  -H "content-type: application/json" \
+  --data-binary '{
+    "eflUrl": "https://example.com/path/to/test-efl.pdf",
+    "mode": "test"
+  }' | jq
+```
+
+**Expected structure (example):**
+
+```jsonc
+{
+  "ok": true,
+  "mode": "test",
+  "eflUrl": "https://example.com/path/to/test-efl.pdf",
+  "steps": [
+    "downloaded_pdf",
+    "computed_sha256",
+    "extracted_text"
+  ],
+  "warnings": [],
+  "notes": "No database writes performed in test mode."
+}
+```
+
+- `ok` should be `true` for a clean run.
+- `steps` lists the major phases completed.
+- `warnings` may contain parse/fetch diagnostics (should be empty for green runs).
+
+### 2. Run EFL Link in Live Mode
+
+Use live mode once the link is validated and you want the runner to create/update persistent artifacts (EFL storage, PlanRules, etc.).
+
+```bash
+export ADMIN_TOKEN="<ADMIN_TOKEN>"
+
+curl -sS -X POST "https://intelliwatt.com/api/admin/efl/run-link" \
+  -H "x-admin-token: $ADMIN_TOKEN" \
+  -H "content-type: application/json" \
+  --data-binary '{
+    "eflUrl": "https://example.com/path/to/live-efl.pdf",
+    "mode": "live"
+  }' | jq
+```
+
+**Expected structure (example):**
+
+```jsonc
+{
+  "ok": true,
+  "mode": "live",
+  "eflUrl": "https://example.com/path/to/live-efl.pdf",
+  "steps": [
+    "downloaded_pdf",
+    "computed_sha256",
+    "extracted_text"
+  ],
+  "persisted": {
+    "eflPdfSha256": "abc123...",
+    "storagePath": "efl/2025/11/rep-10260/abc123....pdf"
+  },
+  "warnings": []
+}
+```
+
+- `persisted` summarizes durable outputs created in live mode.
+- Non-empty `warnings` require follow-up before trusting downstream analytics.
+
+### 3. Error Handling Checks
+
+- **Invalid URL** – use an obviously bad host; expect `ok: false` with a fetch error.
+- **Non-PDF URL** – point at HTML/JSON; expect warnings or errors about invalid content type.
+
+Run these checks whenever:
+
+- The link runner code changes.
+- A new upstream EFL source (WattBuy, REP portal, manual) is introduced.
+- You suspect download, hashing, or extraction regressions.
+
+---
 
 ## WattBuy API Testing
 
