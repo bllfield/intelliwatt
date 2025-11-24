@@ -133,6 +133,15 @@ export const modulesCatalog: ModuleDef[] = [
     inputs: ['EFL PDF/Text'],
     outputs: ['PlanRules JSON', 'Test harness output'],
     estDevTime: '1d'
+  },
+  {
+    id: 76,
+    name: 'EFL Link Runner',
+    purpose: 'Vendor-agnostic EFL PDF opener and SHA-256 fingerprint tool',
+    endpoint: '/admin/efl/links',
+    inputs: ['EFL PDF URL'],
+    outputs: ['PDF headers', 'SHA-256 fingerprint'],
+    estDevTime: '0.5d'
   }
   // Add future modules here as project evolves
 ]
