@@ -352,14 +352,25 @@ export default function AdminDashboard() {
                     </td>
                   </tr>
                 ) : (
-                  users.map(user => (
-                    <tr key={user.id} className="border-b border-brand-navy/10 hover:bg-brand-navy/5">
-                      <td className="py-3 px-4 text-brand-navy">{user.email}</td>
-                      <td className="py-3 px-4 text-brand-navy">{new Date(user.createdAt).toLocaleDateString()}</td>
-                      <td className="py-3 px-4 text-brand-navy">{user.entries?.length || 0}</td>
-                      <td className="py-3 px-4 text-brand-navy">{user.referrals?.length || 0}</td>
-                    </tr>
-                  ))
+                  users.map((user) => {
+                    const totalEntries =
+                      user.entries?.reduce((sum, entry) => sum + entry.amount, 0) ?? 0;
+                    const totalReferrals = user.referrals?.length ?? 0;
+
+                    return (
+                      <tr
+                        key={user.id}
+                        className="border-b border-brand-navy/10 hover:bg-brand-navy/5"
+                      >
+                        <td className="py-3 px-4 text-brand-navy">{user.email}</td>
+                        <td className="py-3 px-4 text-brand-navy">
+                          {new Date(user.createdAt).toLocaleDateString()}
+                        </td>
+                        <td className="py-3 px-4 text-brand-navy">{totalEntries}</td>
+                        <td className="py-3 px-4 text-brand-navy">{totalReferrals}</td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>

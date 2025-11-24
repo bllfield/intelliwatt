@@ -53,7 +53,7 @@ export function ProfileContactForm({ initialEmail, initialPhone, initialName }: 
             type="text"
             value={fullName}
             onChange={(event) => setFullName(event.target.value)}
-            className="mt-1 rounded-lg border border-brand-cyan/40 bg-brand-navy px-3 py-2 text-sm text-brand-cyan placeholder:text-brand-cyan/50 focus:border-brand-blue focus:outline-none focus:ring-1 focus:ring-brand-blue"
+            className="mt-1 rounded-lg border border-brand-cyan/40 bg-white px-3 py-2 text-sm text-brand-navy placeholder:text-brand-navy/40 focus:border-brand-blue focus:outline-none focus:ring-1 focus:ring-brand-blue"
             placeholder="Name on your utility account"
             disabled={submitting}
           />
@@ -65,7 +65,7 @@ export function ProfileContactForm({ initialEmail, initialPhone, initialName }: 
             type="tel"
             value={phone}
             onChange={(event) => setPhone(event.target.value)}
-            className="mt-1 rounded-lg border border-brand-cyan/40 bg-brand-navy px-3 py-2 text-sm text-brand-cyan placeholder:text-brand-cyan/50 focus:border-brand-blue focus:outline-none focus:ring-1 focus:ring-brand-blue"
+            className="mt-1 rounded-lg border border-brand-cyan/40 bg-white px-3 py-2 text-sm text-brand-navy placeholder:text-brand-navy/40 focus:border-brand-blue focus:outline-none focus:ring-1 focus:ring-brand-blue"
             placeholder="(555) 555-5555"
             disabled={submitting}
           />
@@ -78,7 +78,7 @@ export function ProfileContactForm({ initialEmail, initialPhone, initialName }: 
           type="email"
           value={email}
           onChange={(event) => setEmail(event.target.value)}
-          className="mt-1 rounded-lg border border-brand-cyan/40 bg-brand-navy px-3 py-2 text-sm text-brand-cyan placeholder:text-brand-cyan/50 focus:border-brand-blue focus:outline-none focus:ring-1 focus:ring-brand-blue"
+          className="mt-1 rounded-lg border border-brand-cyan/40 bg-white px-3 py-2 text-sm text-brand-navy placeholder:text-brand-navy/40 focus:border-brand-blue focus:outline-none focus:ring-1 focus:ring-brand-blue"
           placeholder="you@example.com"
           disabled={submitting}
         />

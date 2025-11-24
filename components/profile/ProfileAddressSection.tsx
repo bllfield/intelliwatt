@@ -118,7 +118,7 @@ export function ProfileAddressSection({
   }, [houses, activeHouseId]);
 
   return (
-    <section className="rounded-3xl border border-brand-cyan/30 bg-brand-navy/80 p-6 text-brand-cyan shadow-[0_18px_50px_rgba(16,46,90,0.35)]">
+    <section className="rounded-3xl border border-brand-cyan/30 bg-brand-navy p-6 text-brand-cyan shadow-[0_0_35px_rgba(56,189,248,0.28)]">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h2 className="text-lg font-semibold uppercase tracking-wide text-brand-cyan">
@@ -151,7 +151,7 @@ export function ProfileAddressSection({
       </div>
 
       <div className="mt-5 grid gap-4 sm:grid-cols-2">
-        <div className="rounded-2xl border border-brand-cyan/40 bg-brand-navy/60 p-4 text-sm text-brand-cyan">
+        <div className="rounded-2xl border border-brand-cyan/40 bg-brand-navy/80 p-4 text-sm text-brand-cyan">
           <p className="text-xs font-semibold uppercase tracking-wide text-brand-cyan/70">
             Active home
           </p>
@@ -159,7 +159,7 @@ export function ProfileAddressSection({
             {addressDisplay || "No address on file"}
           </pre>
         </div>
-        <div className="rounded-2xl border border-brand-cyan/40 bg-brand-navy/60 p-4 text-sm text-brand-cyan">
+        <div className="rounded-2xl border border-brand-cyan/40 bg-brand-navy/80 p-4 text-sm text-brand-cyan">
           <p className="text-xs font-semibold uppercase tracking-wide text-brand-cyan/70">
             Utility details
           </p>
@@ -176,7 +176,7 @@ export function ProfileAddressSection({
         </div>
       </div>
 
-      <div className="mt-5 rounded-2xl border border-brand-cyan/40 bg-brand-navy/60 p-4 text-sm text-brand-cyan">
+      <div className="mt-5 rounded-2xl border border-brand-cyan/40 bg-brand-navy/80 p-4 text-sm text-brand-cyan">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-xs font-semibold uppercase tracking-wide text-brand-cyan/70">
             Home summary
@@ -200,7 +200,7 @@ export function ProfileAddressSection({
                   className={`rounded-2xl border px-4 py-3 text-left transition ${
                     isActive
                       ? "border-brand-blue bg-brand-blue/20 text-brand-blue"
-                      : "border-brand-cyan/30 bg-brand-navy/40 text-brand-cyan hover:border-brand-blue/60 hover:text-brand-blue"
+                      : "border-brand-cyan/30 bg-brand-navy/70 text-brand-cyan hover:border-brand-blue/60 hover:text-brand-blue"
                   }`}
                 >
                   <div className="flex items-center justify-between gap-3">
@@ -247,7 +247,7 @@ export function ProfileAddressSection({
       ) : null}
 
       {isEditing ? (
-        <div className="mt-6 space-y-4 rounded-2xl border border-brand-cyan/40 bg-brand-navy/60 p-5">
+        <div className="mt-6 space-y-4 rounded-2xl border border-brand-cyan/40 bg-brand-navy/80 p-5">
           <div className="rounded-lg border border-rose-400/40 bg-rose-500/10 px-4 py-3 text-xs text-rose-100">
             Saving an address here replaces the old home and deactivates its SMT agreement. To manage
             multiple properties, visit your profile after connecting SMT.
