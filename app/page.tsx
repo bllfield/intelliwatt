@@ -296,8 +296,8 @@ function LandingPageContent() {
           </div>
           
           <div className="grid md:grid-cols-2 gap-8 mb-16">
-            <div className="bg-brand-white p-8 rounded-2xl border border-brand-navy hover:border-brand-blue transition-all duration-300 group shadow-lg">
-              <div className="w-12 h-12 bg-brand-navy rounded-lg flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
+            <div className="bg-brand-white p-8 rounded-2xl border border-brand-navy hover:border-brand-blue transition-all duration-300 group shadow-lg text-center">
+              <div className="w-12 h-12 bg-brand-navy rounded-lg flex items-center justify-center mb-4 mx-auto group-hover:scale-110 transition-transform duration-300">
                 <svg className="w-6 h-6 text-brand-blue" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
@@ -306,18 +306,16 @@ function LandingPageContent() {
               <p className="text-brand-navy">Uses actual usage data — no estimates or averages</p>
             </div>
             
-            <div className="bg-brand-white p-8 rounded-2xl border border-brand-navy hover:border-brand-blue transition-all duration-300 group shadow-lg">
-              <div className="w-12 h-12 bg-brand-navy rounded-lg flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
-                <svg className="w-6 h-6 text-brand-blue" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
+            <div className="bg-brand-white p-8 rounded-2xl border border-brand-navy hover:border-brand-blue transition-all duration-300 group shadow-lg text-center">
+              <div className="w-12 h-12 bg-brand-navy rounded-lg flex items-center justify-center mb-4 mx-auto text-2xl group-hover:scale-110 transition-transform duration-300">
+                ☀️
               </div>
               <h3 className="text-xl font-semibold text-brand-navy mb-3">Weather & Season Normalization</h3>
               <p className="text-brand-navy">Accounts for weather, usage timing, and seasonal changes</p>
             </div>
             
-            <div className="bg-brand-white p-8 rounded-2xl border border-brand-navy hover:border-brand-blue transition-all duration-300 group shadow-lg">
-              <div className="w-12 h-12 bg-brand-navy rounded-lg flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
+            <div className="bg-brand-white p-8 rounded-2xl border border-brand-navy hover:border-brand-blue transition-all duration-300 group shadow-lg text-center">
+              <div className="w-12 h-12 bg-brand-navy rounded-lg flex items-center justify-center mb-4 mx-auto group-hover:scale-110 transition-transform duration-300">
                 <svg className="w-6 h-6 text-brand-blue" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                 </svg>
@@ -326,8 +324,8 @@ function LandingPageContent() {
               <p className="text-brand-navy">Matches your home's unique usage pattern to the best-fit plan</p>
             </div>
             
-            <div className="bg-brand-white p-8 rounded-2xl border border-brand-navy hover:border-brand-blue transition-all duration-300 group shadow-lg">
-              <div className="w-12 h-12 bg-brand-navy rounded-lg flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
+            <div className="bg-brand-white p-8 rounded-2xl border border-brand-navy hover-border-brand-blue transition-all duration-300 group shadow-lg text-center">
+              <div className="w-12 h-12 bg-brand-navy rounded-lg flex items-center justify-center mb-4 mx-auto group-hover:scale-110 transition-transform duration-300">
                 <svg className="w-6 h-6 text-brand-blue" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                 </svg>
@@ -336,8 +334,8 @@ function LandingPageContent() {
               <p className="text-brand-navy">Advanced switching engine — only available at IntelliWatt™</p>
             </div>
             
-            <div className="bg-brand-white p-8 rounded-2xl border border-brand-navy hover:border-brand-blue transition-all duration-300 group shadow-lg md:col-span-2">
-              <div className="w-12 h-12 bg-brand-navy rounded-lg flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
+            <div className="bg-brand-white p-8 rounded-2xl border border-brand-navy hover:border-brand-blue transition-all duration-300 group shadow-lg md:col-span-2 text-center">
+              <div className="w-12 h-12 bg-brand-navy rounded-lg flex items-center justify-center mb-4 mx-auto group-hover:scale-110 transition-transform duration-300">
                 <svg className="w-6 h-6 text-brand-blue" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                 </svg>
