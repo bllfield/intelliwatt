@@ -335,17 +335,17 @@ export default function DashboardPage() {
       )}
 
       <section className="px-4 mt-8">
-        <div className="max-w-4xl mx-auto border border-brand-navy/20 rounded-xl p-6 bg-white shadow-sm">
-          <h2 className="text-xl font-semibold text-brand-navy">
+        <div className="max-w-3xl mx-auto border border-brand-navy/20 rounded-2xl p-8 bg-white shadow-sm text-center">
+          <h2 className="text-2xl font-semibold text-brand-navy">
             Smart Meter Texas (SMT)
           </h2>
-          <p className="mt-2 text-sm text-slate-600">
+          <p className="mt-3 text-base text-brand-navy max-w-2xl mx-auto">
             Connect directly to your smart meter so IntelliWatt can automatically pull your real interval and billing data.
           </p>
-          <div className="mt-4">
+          <div className="mt-6 flex justify-center">
             <Link
               href="/dashboard/api#smt"
-              className="inline-flex items-center px-4 py-2 rounded-lg bg-brand-navy text-white text-sm font-medium hover:bg-brand-navy/90"
+              className="inline-flex items-center px-5 py-3 rounded-xl bg-brand-navy text-brand-blue text-sm font-bold border-2 border-brand-navy hover:border-brand-blue transition-all duration-300"
             >
               Connect SMT
             </Link>
