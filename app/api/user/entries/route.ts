@@ -85,6 +85,21 @@ export async function POST(request: NextRequest) {
     });
 
     if (existing) {
+      if (amount > existing.amount) {
+        const updated = await db.entry.update({
+          where: { id: existing.id },
+          data: { amount },
+        });
+        return NextResponse.json({
+          message: 'Entry amount updated',
+          entry: {
+            id: updated.id,
+            type: updated.type,
+            amount: updated.amount,
+          },
+        });
+      }
+
       return NextResponse.json({
         message: 'Entry already awarded',
         entry: {

@@ -117,6 +117,9 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
           setSubmitSuccess(
             "Your Smart Meter Texas authorization has been saved. We’ll begin pulling your interval and billing data shortly.",
           );
+          if (typeof window !== "undefined") {
+            window.dispatchEvent(new CustomEvent("entriesUpdated"));
+          }
           router.refresh();
         } catch (err) {
           console.error("SMT authorization submit error", err);

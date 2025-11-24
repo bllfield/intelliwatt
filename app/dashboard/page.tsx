@@ -19,21 +19,6 @@ export default function DashboardPage() {
     if (savedAddress) {
       setUserAddress(savedAddress);
     }
-
-    const awardDashboardEntry = async () => {
-      try {
-        await fetch('/api/user/entries', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'dashboard_visit', amount: 1 }),
-        });
-        window.dispatchEvent(new CustomEvent('entriesUpdated'));
-      } catch (error) {
-        console.error('Error awarding dashboard entry:', error);
-      }
-    };
-
-    awardDashboardEntry();
   }, []);
 
   const handleAddressSubmitted = async (address: string) => {

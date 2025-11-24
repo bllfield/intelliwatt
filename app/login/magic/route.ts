@@ -66,6 +66,16 @@ export async function GET(req: Request) {
       });
     }
 
+    if (isNewUser && user) {
+      await db.entry.create({
+        data: {
+          userId: user.id,
+          type: 'signup',
+          amount: 1,
+        },
+      });
+    }
+
     // Process referral if token exists and user is new
     if (referrerToken && isNewUser) {
       const referralData = verifyReferralToken(referrerToken);

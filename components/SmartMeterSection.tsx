@@ -8,6 +8,7 @@ export default function SmartMeterSection() {
   const [consent, setConsent] = useState(false);
   const [status, setStatus] = useState<'idle' | 'connecting' | 'connected' | 'manual'>('idle');
   const [showAwardModal, setShowAwardModal] = useState(false);
+  const [manualAwarded, setManualAwarded] = useState(false);
 
   useEffect(() => {
     setMounted(true);
@@ -103,6 +104,11 @@ export default function SmartMeterSection() {
           </div>
           <h2 className="text-3xl font-bold text-brand-navy mb-3">Manual Entry</h2>
           <p className="text-lg text-brand-navy mb-6">You chose not to connect automatically. Enter your details manually below.</p>
+          {manualAwarded ? (
+            <div className="mb-4 inline-block rounded-full border border-brand-navy bg-brand-navy/10 px-4 py-2 text-sm font-semibold" style={{ color: '#39FF14' }}>
+              ✓ 5 jackpot entries added for manual usage entry
+            </div>
+          ) : null}
           {/* TODO: Add manual entry fields later */}
           <p className="text-sm text-brand-navy/80">Coming soon: manual form fields</p>
         </div>
@@ -177,7 +183,28 @@ export default function SmartMeterSection() {
         <div className="text-center mt-6 pt-6 border-t border-brand-navy/30">
           <p className="text-sm text-brand-navy mb-2">Prefer to enter details manually?</p>
           <button
-            onClick={() => setStatus('manual')}
+            onClick={async () => {
+              if (status === 'manual') {
+                return;
+              }
+              setStatus('manual');
+              if (manualAwarded) {
+                return;
+              }
+              try {
+                const response = await fetch('/api/user/entries', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ type: 'smart_meter_connect', amount: 5 }),
+                });
+                if (response.ok) {
+                  setManualAwarded(true);
+                  window.dispatchEvent(new CustomEvent('entriesUpdated'));
+                }
+              } catch (error) {
+                console.error('Error awarding manual smart meter entries:', error);
+              }
+            }}
             className="text-brand-blue underline hover:text-brand-white transition-colors font-medium"
           >
             Enter Smart Meter Details Manually

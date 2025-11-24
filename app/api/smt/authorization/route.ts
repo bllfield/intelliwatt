@@ -5,6 +5,7 @@ import { normalizeEmail } from "@/lib/utils/email";
 import { cleanEsiid } from "@/lib/smt/esiid";
 import { createAgreementAndSubscription } from "@/lib/smt/agreements";
 import { waitForMeterInfo } from "@/lib/smt/meterInfo";
+import { Entry } from "@prisma/client";
 
 type SmtAuthorizationBody = {
   houseAddressId: string;
@@ -22,6 +23,31 @@ function getEnvOrDefault(name: string, fallback: string): string {
     return fallback;
   }
   return value;
+}
+
+async function ensureEntryAmount(
+  userId: string,
+  type: string,
+  amount: number,
+): Promise<Entry> {
+  const existing = await prisma.entry.findFirst({
+    where: { userId, type },
+  });
+
+  if (!existing) {
+    return prisma.entry.create({
+      data: { userId, type, amount },
+    });
+  }
+
+  if (existing.amount < amount) {
+    return prisma.entry.update({
+      where: { id: existing.id },
+      data: { amount },
+    });
+  }
+
+  return existing;
 }
 
 export async function POST(req: NextRequest) {
@@ -251,6 +277,8 @@ export async function POST(req: NextRequest) {
 
     let smtUpdateData: Record<string, any> = {};
 
+    let smtResult: Awaited<ReturnType<typeof createAgreementAndSubscription>> | null = null;
+
     try {
       const serviceAddressParts = [
         house.addressLine1,
@@ -258,7 +286,7 @@ export async function POST(req: NextRequest) {
         `${house.addressCity}, ${house.addressState} ${house.addressZip5}`,
       ].filter((part) => typeof part === "string" && part.trim().length > 0);
 
-      const smtResult = await createAgreementAndSubscription({
+      smtResult = await createAgreementAndSubscription({
         esiid: houseEsiid,
         serviceAddress: serviceAddressParts.join(", "),
         customerName: trimmedCustomerName,
@@ -303,6 +331,13 @@ export async function POST(req: NextRequest) {
         : created;
 
     const updatedAuthAny = updatedAuthorization as any;
+
+    const shouldAwardSmartMeterEntry =
+      !agreementsEnabled || smtResult?.ok || smtResult?.subscriptionAlreadyActive;
+
+    if (shouldAwardSmartMeterEntry) {
+      await ensureEntryAmount(user.id, "smart_meter_connect", 10);
+    }
 
     const webhookUrl = process.env.DROPLET_WEBHOOK_URL;
     const webhookSecret = process.env.DROPLET_WEBHOOK_SECRET;

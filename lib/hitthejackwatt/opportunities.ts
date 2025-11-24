@@ -3,7 +3,6 @@
 
 export type EntryType = 
   | 'signup'
-  | 'dashboard_visit'
   | 'smart_meter_connect'
   | 'home_details_complete'
   | 'appliance_details_complete'
@@ -26,17 +25,10 @@ export const ENTRY_OPPORTUNITIES: Record<EntryType, EntryOpportunity> = {
     amount: 1,
     maxPerUser: 1,
   },
-  dashboard_visit: {
-    id: 'dashboard_visit',
-    label: 'Visit Dashboard',
-    description: 'Access your dashboard for the first time',
-    amount: 1,
-    maxPerUser: 1,
-  },
   smart_meter_connect: {
     id: 'smart_meter_connect',
     label: 'Authorize Smart Meter Texas',
-    description: 'Connect your smart meter data',
+    description: 'Connect your smart meter data (manual entry earns 5)',
     amount: 10,
     maxPerUser: 1,
   },
