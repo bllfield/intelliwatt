@@ -1,3 +1,73 @@
+### PC-2025-11-23-RATE-DETAILS — Optional Current Rate Details Step
+
+**Rationale:**
+- Many users already have a fixed-rate plan that will renew or roll to a different rate at contract end.
+- Capturing plan name, effective rate(s), and contract expiration lets IntelliWatt show how costs change when the existing contract renews under similar usage.
+- Tying this step to +10 HitTheJackWatt entries deepens engagement and encourages richer data capture.
+
+**Scope:**
+- Insert an optional **Current Rate Details** step between SMT usage import and the Rate Plan Analyzer output:
+  - Address → SMT API Authorization → Usage Normalization → **Current Rate Details (optional)** → Rate Plan Analyzer → Home Details → Appliances → Upgrades → Optimal Energy.
+- Step definition:
+  - Title: “Current Rate Details” with copy explaining the richer comparison (current vs recommended vs renewal) and the +10 jackpot entries reward.
+  - Two input paths:
+    1. **Upload your bill** (photo/image/PDF) for future OCR-based extraction.
+    2. **Manual entry** for:
+       - Plan name
+       - Primary rate (¢/kWh), optional base fee
+       - Contract expiration date
+       - Optional notes (e.g., free nights/weekends, tiers)
+  - Emphasize that the step is optional; skipping still produces usage-based recommendations, but completing it unlocks a more detailed comparison and rewards.
+- This PC only updates documentation and the UI skeleton; it does NOT:
+  - Persist current plan details to the database.
+  - Connect OCR pipelines.
+  - Feed data into the Plan Analyzer engine.
+  - Adjust jackpot entry calculations in code.
+
+**Future Work:**
+- Define a `CurrentPlan`/`CurrentRateDetails` CDM with schema/API.
+- Wire Billing OCR outputs so uploaded bills auto-fill the form with user confirmation.
+- Feed confirmed current plan data into the Plan Analyzer results (current vs recommended vs renewal).
+- Integrate the +10 HitTheJackWatt entries in the jackpot calculator and official rules.
+- Customer-facing plan analysis will optionally incorporate a Current Rate Details step (plan name, rates, expiration) to compare IntelliWatt recommendations against the user's existing contract and projected renewal costs.
+
+---
+
+### PC-2025-11-23-EFL-LINK-RUNNER — EFL Link Runner Admin Utility
+
+**Scope:**  
+Add a vendor-agnostic EFL link runner to the admin console so ops can validate and fingerprint EFL PDFs from any source.
+
+**Changes:**
+
+- **Admin Modules:**  
+  - New card on `/admin/modules`: **“EFL Link Runner”**.  
+  - Links to `/admin/efl/links`.
+
+- **EFL Link Runner (`/admin/efl/links`):**  
+  - Accepts any EFL PDF URL (WattBuy, REP portals, manually pasted links).  
+  - Fetches the PDF and computes its SHA-256 hash via `computePdfSha256`.  
+  - Shows basic HTTP metadata (content-type, content-length when available).  
+  - Provides a one-click **“Open EFL PDF in new tab”** link for manual inspection.
+
+**Notes:**
+
+- Read-only; does not persist data yet.  
+- Utility for the EFL Fact Card Engine / rate-card workflow—verifies upstream EFL links before running deterministic ingestion or AI extraction.  
+- Works with WattBuy URLs, REP-hosted EFLs, or any valid HTTPS EFL PDF link.
+[Plan Analyzer Engine (Planning Doc)](#plan-analyzer-engine-planning-doc)
+
+## Plan Analyzer Engine (Planning Doc)
+
+A dedicated design doc for the rate + usage costing stack lives in:
+
+- `docs/PLAN_ANALYZER_ENGINE.md` — defines:
+  - Core Plan Analyzer types (interval usage, cost outputs, plan refs)
+  - Per-plan cost engine contract
+  - Multi-plan comparison contract
+  - Integration with EFL PlanRules and future SMT/Green Button usage inputs.
+
+
 # IntelliWatt Project Plan (Authoritative)
 
 ## Plan Enforcement

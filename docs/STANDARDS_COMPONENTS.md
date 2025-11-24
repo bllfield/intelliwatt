@@ -98,3 +98,23 @@
 - **Validation flags**: Track user approval status
 - **Error correction**: Allow user modifications
 - **Re-processing**: Enable OCR retry with different settings
+
+## Current Rate Details (Customer-Facing)
+
+- **Purpose:**
+  - Bridge Billing OCR outputs and the Plan Analyzer by collecting the customer’s current retail plan details.
+  - Enable comparisons of “current vs recommended vs renewal” costs.
+- **Inputs:**
+  - User-confirmed plan details from either:
+    - Bill upload + OCR (image/PDF) with a confirmation step.
+    - Manual entry form (plan name, rate(s), base fee, contract expiration, notes).
+- **CDM (future):**
+  - `current_plan` (TBD) linked to the user/service address.
+  - Normalized rate structure (primary ¢/kWh, base fee, TOU modifiers) and contract dates.
+- **Outputs to Plan Analyzer:**
+  - Effective cost schedule for the customer’s current contract.
+  - Renewal timing and assumptions for scenario modeling (“current/renewal vs recommended plan”).
+- **UX Contract:**
+  - Optional but recommended; customers can skip without blocking plan analysis.
+  - Completing it awards **+10 HitTheJackWatt** entries (to be wired in later steps).
+  - Upload flow triggers OCR pipelines; manual entry pathways remain available at all times.

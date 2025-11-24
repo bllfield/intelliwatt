@@ -1,3 +1,29 @@
+## Customer Flow: IntelliWatt Plan Analyzer
+
+1. **Address Capture**
+   - User provides service address (with optional bill upload for prefill).
+   - System resolves TDSP/utility, ESIID, and meter metadata.
+2. **SMT API Authorization**
+   - User consents to Smart Meter Texas access (~12 months).
+   - Backend triggers agreement/subscription and begins pulling usage/billing.
+3. **Usage Normalization**
+   - Normalize SMT interval/billing (or alternate sources) into canonical usage for the last 12 months.
+4. **Current Rate Details (Optional, +10 Entries)**
+   - Screen title: “Current Rate Details — Add your current plan info for a more detailed comparison.”
+   - Paths:
+     - **Upload your bill** (photo/image/PDF) for future OCR extraction.
+     - **Enter manually** (plan name, primary rate, base fee, contract expiration, notes).
+   - Copy explicitly states:
+     - Step is optional; skipping still yields usage-based recommendations.
+     - Completing it shows how current contract costs compare against IntelliWatt recommendations and projected renewal costs.
+     - Completing grants **+10 HitTheJackWatt jackpot entries.**
+5. **Rate Plan Analyzer Output**
+   - Recommend plans based on real usage.
+   - When Current Rate Details are provided, include “current vs recommended vs renewal” cost comparisons.
+6. **Home Details**
+7. **Appliances**
+8. **Upgrades**
+9. **Optimal Energy (future)**
 # IntelliWatt Project Context
 
 **Purpose**: This document provides operational context for the IntelliWatt project, including current deployment state, database information, and development guidelines for AI chat sessions.
