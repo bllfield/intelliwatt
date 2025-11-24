@@ -399,6 +399,7 @@ model HouseAddress {
   label                 String?          @db.VarChar(64)
 
   smtAuthorizations SmtAuthorization[]
+  entries           Entry[]
 
   @@index([placeId])
   @@index([addressState, addressZip5])
