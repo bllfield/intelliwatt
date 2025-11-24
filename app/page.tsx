@@ -307,8 +307,20 @@ function LandingPageContent() {
             </div>
             
             <div className="bg-brand-white p-8 rounded-2xl border border-brand-navy hover:border-brand-blue transition-all duration-300 group shadow-lg text-center">
-              <div className="w-12 h-12 bg-brand-navy rounded-lg flex items-center justify-center mb-4 mx-auto text-2xl group-hover:scale-110 transition-transform duration-300">
-                ☀️
+              <div className="w-12 h-12 bg-brand-navy rounded-lg flex items-center justify-center mb-4 mx-auto group-hover:scale-110 transition-transform duration-300">
+                <svg
+                  className="w-7 h-7 text-brand-blue"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={1.8}
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M12 5V3m0 18v-2m7-7h2M3 12h2m13.364-6.364l1.414-1.414M5.222 18.778l1.414-1.414m0-10.728L5.222 4.222M18.778 18.778l-1.414-1.414M12 8a4 4 0 100 8 4 4 0 000-8z"
+                  />
+                </svg>
               </div>
               <h3 className="text-xl font-semibold text-brand-navy mb-3">Weather & Season Normalization</h3>
               <p className="text-brand-navy">Accounts for weather, usage timing, and seasonal changes</p>
