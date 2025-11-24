@@ -5,8 +5,8 @@ import Link from 'next/link';
 
 const dashboardLinks = [
   { href: '/dashboard/api', label: 'API Connect' },
-  { href: '/dashboard/current-rate', label: 'Current Rate' },
   { href: '/dashboard/usage', label: 'Usage' },
+  { href: '/dashboard/current-rate', label: 'Current Rate' },
   { href: '/dashboard/plans', label: 'Plans' },
   { href: '/dashboard/home', label: 'Home Info' },
   { href: '/dashboard/appliances', label: 'Appliances' },
