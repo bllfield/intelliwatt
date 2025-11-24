@@ -481,6 +481,16 @@ export async function POST(req: NextRequest) {
       record = refreshedRecord;
     }
 
+    if (promotion.archivedHouseIds.length > 0) {
+      await prisma.houseAddress.deleteMany({
+        where: {
+          id: { in: promotion.archivedHouseIds },
+          archivedAt: { not: null },
+          smtAuthorizations: { none: {} },
+        } as any,
+      });
+    }
+
     const previousAuthorizationArchived =
       archivedOnThisHouse > 0 || promotion.archivedHouseIds.length > 0;
 

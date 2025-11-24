@@ -94,6 +94,7 @@
 - `components/QuickAddressEntry.tsx`: now accepts `redirectOnSuccess` and `onSaveResult` hooks so other flows (profile) can reuse the component without auto-navigating to `/dashboard/api`.
 - `app/api/user/profile/route.ts`: new `PATCH` endpoint that updates the signed-in user and their profile (transactional, resets auth cookie on email change).
 - `app/dashboard/profile/page.tsx`: redesigned to navy/neon cards, embeds the new client forms, and only reads active house / SMT data.
+- `app/api/address/save/route.ts`: after promoting the newest house to primary, automatically deletes any newly archived houses that never collected SMT authorizations so each user keeps a single active address record.
 
 **Notes:**
 - Address saves still flow through `/api/address/save` and trigger the new archive logic.
