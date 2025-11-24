@@ -1,0 +1,235 @@
+/**
+ * Manual Fact Card Loader — upload an EFL PDF, run deterministic extraction,
+ * and generate the AI prompt for PlanRules creation.
+ */
+"use client";
+
+import React, { useState, FormEvent } from "react";
+
+type UploadResponse = {
+  ok: true;
+  eflPdfSha256: string;
+  repPuctCertificate: string | null;
+  eflVersionCode: string | null;
+  warnings: string[];
+  prompt: string;
+  rawTextPreview: string;
+  rawTextLength: number;
+  rawTextTruncated: boolean;
+};
+
+type UploadError = {
+  ok: false;
+  error: string;
+};
+
+export default function ManualFactCardLoaderPage() {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [result, setResult] = useState<UploadResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [fileLabel, setFileLabel] = useState<string>("No file selected");
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    setResult(null);
+
+    const form = event.currentTarget;
+    const fileInput = form.elements.namedItem("file") as HTMLInputElement | null;
+    const file = fileInput?.files?.[0];
+
+    if (!file) {
+      setError("Please choose an EFL PDF to upload.");
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const response = await fetch("/api/admin/efl/manual-upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = (await response.json()) as UploadResponse | UploadError;
+
+      if (!response.ok || !data.ok) {
+        throw new Error(
+          "error" in data ? data.error : "Unexpected error while processing PDF.",
+        );
+      }
+
+      setResult(data);
+    } catch (err) {
+      console.error("[ManualFactCardLoader] upload failed:", err);
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Upload failed. Please try again with a valid EFL PDF.",
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleCopy(text: string, label: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setError(null);
+      setFileLabel(`${label} copied to clipboard.`);
+      setTimeout(() => setFileLabel(result ? "Upload complete" : "Ready for upload"), 1500);
+    } catch (err) {
+      console.error("[ManualFactCardLoader] copy failed:", err);
+      setError("Unable to copy to clipboard in this browser.");
+    }
+  }
+
+  return (
+    <div className="max-w-4xl mx-auto space-y-6 py-8">
+      <header>
+        <h1 className="text-2xl font-semibold text-brand-navy">Manual Fact Card Loader</h1>
+        <p className="mt-2 text-sm text-brand-navy/70">
+          Upload an official EFL PDF, review the deterministic extract, and copy the AI prompt
+          required to generate a <code className="rounded bg-brand-navy/5 px-1 py-0.5">PlanRules</code>{" "}
+          JSON. No data is persisted — results are shown only in this browser session.
+        </p>
+      </header>
+
+      <form
+        onSubmit={handleSubmit}
+        className="space-y-4 rounded-lg border border-brand-blue/20 bg-brand-white p-6 shadow-lg"
+        encType="multipart/form-data"
+      >
+        <div>
+          <label className="block text-sm font-medium text-brand-navy mb-2">
+            EFL PDF
+          </label>
+          <input
+            type="file"
+            name="file"
+            accept="application/pdf,.pdf"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              setFileLabel(file ? file.name : "No file selected");
+            }}
+            className="block w-full text-sm text-brand-navy file:mr-4 file:rounded-md file:border-0 file:bg-brand-blue/10 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-brand-navy hover:file:bg-brand-blue/20"
+            required
+          />
+          <p className="mt-1 text-xs text-brand-navy/60">{fileLabel}</p>
+        </div>
+
+        <button
+          type="submit"
+          disabled={isSubmitting}
+          className="inline-flex items-center rounded-md border border-brand-blue bg-brand-blue/10 px-3 py-1.5 text-sm font-medium text-brand-navy transition hover:bg-brand-blue/20 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {isSubmitting ? "Processing…" : "Process Fact Card"}
+        </button>
+      </form>
+
+      {error ? (
+        <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          {error}
+        </div>
+      ) : null}
+
+      {result ? (
+        <section className="space-y-6 rounded-lg border border-brand-blue/20 bg-brand-white p-6 shadow-lg">
+          <header className="space-y-1">
+            <h2 className="text-xl font-semibold text-brand-navy">Deterministic Extract</h2>
+            <p className="text-sm text-brand-navy/70">
+              Copy the metadata below into the database when creating a new rate card. The prompt
+              should be fed to the AI extraction layer to produce the authoritative{" "}
+              <code className="rounded bg-brand-navy/5 px-1 py-0.5">PlanRules</code>.
+            </p>
+          </header>
+
+          <dl className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <dt className="text-xs font-medium uppercase tracking-wide text-brand-navy/70">
+                PDF SHA-256
+              </dt>
+              <dd className="mt-1 break-all rounded-md bg-brand-blue/5 px-2 py-1 text-sm text-brand-navy">
+                {result.eflPdfSha256}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs font-medium uppercase tracking-wide text-brand-navy/70">
+                REP PUCT Certificate
+              </dt>
+              <dd className="mt-1 rounded-md bg-brand-blue/5 px-2 py-1 text-sm text-brand-navy">
+                {result.repPuctCertificate ?? "—"}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs font-medium uppercase tracking-wide text-brand-navy/70">
+                EFL Version Code (Ver. #)
+              </dt>
+              <dd className="mt-1 rounded-md bg-brand-blue/5 px-2 py-1 text-sm text-brand-navy">
+                {result.eflVersionCode ?? "—"}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs font-medium uppercase tracking-wide text-brand-navy/70">
+                Warnings
+              </dt>
+              <dd className="mt-1 rounded-md bg-brand-blue/5 px-2 py-1 text-sm text-brand-navy">
+                {result.warnings.length > 0
+                  ? result.warnings.join("; ")
+                  : "None"}
+              </dd>
+            </div>
+          </dl>
+
+          <section className="space-y-2">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-brand-navy">PlanRules Prompt</h3>
+              <button
+                type="button"
+                onClick={() => handleCopy(result.prompt, "PlanRules prompt")}
+                className="text-xs font-medium text-brand-blue hover:text-brand-navy transition"
+              >
+                Copy Prompt
+              </button>
+            </div>
+            <textarea
+              readOnly
+              value={result.prompt}
+              rows={12}
+              className="w-full rounded-md border border-brand-blue/30 bg-brand-blue/5 p-3 text-xs text-brand-navy focus:outline-none focus:ring-2 focus:ring-brand-blue/40"
+            />
+          </section>
+
+          <section className="space-y-2">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-brand-navy">
+                Raw Text Preview ({result.rawTextLength.toLocaleString()} characters
+                {result.rawTextTruncated ? ", truncated" : ""})
+              </h3>
+              <button
+                type="button"
+                onClick={() => handleCopy(result.rawTextPreview, "Raw text preview")}
+                className="text-xs font-medium text-brand-blue hover:text-brand-navy transition"
+              >
+                Copy Preview
+              </button>
+            </div>
+            <details className="rounded-md border border-brand-blue/20 bg-brand-blue/5">
+              <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-brand-blue hover:text-brand-navy">
+                Toggle raw text preview
+              </summary>
+              <pre className="max-h-[420px] overflow-auto px-3 py-2 text-xs leading-relaxed text-brand-navy">
+                {result.rawTextPreview}
+                {result.rawTextTruncated ? "\n\n[…truncated…]" : ""}
+              </pre>
+            </details>
+          </section>
+        </section>
+      ) : null}
+    </div>
+  );
+}
+

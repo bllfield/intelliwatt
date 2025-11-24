@@ -210,6 +210,15 @@ export default function AdminDashboard() {
                 Run EFL PlanRules smoke tests to verify extraction and pricing helpers
               </div>
             </a>
+            <a
+              href="/admin/efl/manual-upload"
+              className="block p-4 border-2 border-brand-blue/20 rounded-lg hover:border-brand-blue hover:bg-brand-blue/5 transition-colors"
+            >
+              <div className="font-semibold text-brand-navy mb-1">📄 Manual Fact Card Loader</div>
+              <div className="text-sm text-brand-navy/60">
+                Upload an EFL PDF, review deterministic extracts, and copy the AI prompt for PlanRules
+              </div>
+            </a>
           </div>
         </section>
 
