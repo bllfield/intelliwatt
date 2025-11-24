@@ -38,6 +38,7 @@ export async function GET(request: NextRequest) {
         id: e.id,
         type: e.type,
         amount: e.amount,
+        houseId: e.houseId,
         createdAt: e.createdAt.toISOString(),
       })),
       total,
@@ -62,7 +63,8 @@ export async function POST(request: NextRequest) {
     const userEmail = normalizeEmail(userEmailRaw);
 
     const body = await request.json();
-    const { type, amount } = body;
+    const { type, amount, houseId: rawHouseId } = body;
+    const houseId = typeof rawHouseId === 'string' && rawHouseId.trim().length > 0 ? rawHouseId.trim() : null;
 
     if (!type || typeof amount !== 'number') {
       return NextResponse.json({ error: 'Invalid request' }, { status: 400 });
@@ -76,11 +78,23 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
+    if (houseId) {
+      const ownsHouse = await db.houseAddress.findFirst({
+        where: { id: houseId, userId: user.id },
+        select: { id: true },
+      });
+
+      if (!ownsHouse) {
+        return NextResponse.json({ error: 'House not found for user' }, { status: 403 });
+      }
+    }
+
     // Check if entry already exists for this type (if it's a one-time entry)
     const existing = await db.entry.findFirst({
       where: {
         userId: user.id,
         type: type,
+        houseId: houseId ?? null,
       },
     });
 
@@ -96,6 +110,7 @@ export async function POST(request: NextRequest) {
             id: updated.id,
             type: updated.type,
             amount: updated.amount,
+            houseId: updated.houseId,
           },
         });
       }
@@ -106,6 +121,7 @@ export async function POST(request: NextRequest) {
           id: existing.id,
           type: existing.type,
           amount: existing.amount,
+          houseId: existing.houseId,
         },
       });
     }
@@ -116,6 +132,7 @@ export async function POST(request: NextRequest) {
         userId: user.id,
         type: type,
         amount: amount,
+        houseId,
       },
     });
 
@@ -125,6 +142,7 @@ export async function POST(request: NextRequest) {
         id: entry.id,
         type: entry.type,
         amount: entry.amount,
+        houseId: entry.houseId,
       },
     });
   } catch (error) {

@@ -168,6 +168,10 @@ model Entry {
   amount    Int
   createdAt DateTime @default(now())
   user      User     @relation("UserEntries", fields: [userId], references: [id])
+  houseId   String?
+  house     HouseAddress? @relation(fields: [houseId], references: [id])
+
+  @@index([houseId])
 }
 
 model Session {
@@ -392,6 +396,7 @@ model HouseAddress {
   updatedAt             DateTime         @updatedAt
   isPrimary             Boolean          @default(false)
   archivedAt            DateTime?
+  label                 String?          @db.VarChar(64)
 
   smtAuthorizations SmtAuthorization[]
 

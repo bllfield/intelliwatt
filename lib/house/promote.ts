@@ -1,6 +1,10 @@
 import { prisma } from "@/lib/db";
 
-export async function setPrimaryHouse(userId: string, houseId: string) {
+export async function setPrimaryHouse(
+  userId: string,
+  houseId: string,
+  opts: { keepOthers?: boolean } = {},
+) {
   const now = new Date();
 
   const client = prisma as any;
@@ -16,22 +20,32 @@ export async function setPrimaryHouse(userId: string, houseId: string) {
     });
 
     const otherIds = otherHouses.map((house: any) => house.id);
+    let archivedHouseIds: string[] = [];
 
     if (otherIds.length > 0) {
-      await tx.houseAddress.updateMany({
-        where: { id: { in: otherIds } },
-        data: { isPrimary: false, archivedAt: now },
-      });
+      if (opts.keepOthers) {
+        await tx.houseAddress.updateMany({
+          where: { id: { in: otherIds } },
+          data: { isPrimary: false },
+        });
+      } else {
+        await tx.houseAddress.updateMany({
+          where: { id: { in: otherIds } },
+          data: { isPrimary: false, archivedAt: now },
+        });
 
-      await tx.smtAuthorization.updateMany({
-        where: { houseAddressId: { in: otherIds }, archivedAt: null },
-        data: {
-          archivedAt: now,
-          smtStatus: "archived",
-          smtStatusMessage: "Superseded by new address",
-          revokedReason: "address_replaced",
-        },
-      });
+        await tx.smtAuthorization.updateMany({
+          where: { houseAddressId: { in: otherIds }, archivedAt: null },
+          data: {
+            archivedAt: now,
+            smtStatus: "archived",
+            smtStatusMessage: "Superseded by new address",
+            revokedReason: "address_replaced",
+          },
+        });
+
+        archivedHouseIds = otherIds;
+      }
     }
 
     await tx.houseAddress.update({
@@ -39,7 +53,7 @@ export async function setPrimaryHouse(userId: string, houseId: string) {
       data: { isPrimary: true, archivedAt: null },
     });
 
-    return { archivedHouseIds: otherIds };
+    return { archivedHouseIds };
   });
 }
 

@@ -10,6 +10,8 @@ interface QuickAddressEntryProps {
   userAddress?: string;
   redirectOnSuccess?: boolean;
   onSaveResult?: (data: any) => void;
+  houseIdForSave?: string | null;
+  keepOtherHouses?: boolean;
 }
 
 export default function QuickAddressEntry({
@@ -17,6 +19,8 @@ export default function QuickAddressEntry({
   userAddress,
   redirectOnSuccess = true,
   onSaveResult,
+  houseIdForSave = null,
+  keepOtherHouses = false,
 }: QuickAddressEntryProps) {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
@@ -302,9 +306,10 @@ export default function QuickAddressEntry({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          houseId: null,
+          houseId: houseIdForSave ?? null,
           googlePlaceDetails: legacyPlace,
           unitNumber: unitNumber.trim() || undefined,
+          keepOtherHouses,
         })
       });
 

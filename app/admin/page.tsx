@@ -36,6 +36,26 @@ interface FinanceRecord {
   status: string;
 }
 
+interface FlaggedHouseDetail {
+  id: string;
+  addressLine1: string;
+  addressLine2: string | null;
+  addressCity: string;
+  addressState: string;
+  addressZip5: string;
+  archivedAt: string | null;
+  esiid: string | null;
+  utilityName: string | null;
+}
+
+interface FlaggedHouseRecord {
+  userId: string;
+  email: string | null;
+  esiid: string | null;
+  attentionAt: string | null;
+  houses: FlaggedHouseDetail[];
+}
+
 export default function AdminDashboard() {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
@@ -47,16 +67,18 @@ export default function AdminDashboard() {
   const [commissions, setCommissions] = useState<Commission[]>([]);
   const [jackpotPayouts, setJackpotPayouts] = useState<JackpotPayout[]>([]);
   const [financeRecords, setFinanceRecords] = useState<FinanceRecord[]>([]);
+  const [flaggedHouses, setFlaggedHouses] = useState<FlaggedHouseRecord[]>([]);
 
   // Fetch real data from API
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [usersRes, commissionsRes, jackpotRes, financeRes] = await Promise.all([
+        const [usersRes, commissionsRes, jackpotRes, financeRes, flaggedRes] = await Promise.all([
           fetch('/api/admin/users'),
           fetch('/api/admin/commissions'),
           fetch('/api/admin/jackpot'),
-          fetch('/api/admin/finance')
+          fetch('/api/admin/finance'),
+          fetch('/api/admin/houses/flagged')
         ]);
 
         if (usersRes.ok) {
@@ -90,6 +112,14 @@ export default function AdminDashboard() {
         } else {
           console.error('Failed to fetch finance:', financeRes.status, financeRes.statusText);
         }
+
+        if (flaggedRes.ok) {
+          const flaggedData = await flaggedRes.json();
+          console.log('Fetched flagged houses:', flaggedData);
+          setFlaggedHouses(flaggedData);
+        } else {
+          console.error('Failed to fetch flagged houses:', flaggedRes.status, flaggedRes.statusText);
+        }
       } catch (error) {
         console.error('Error fetching admin data:', error);
       }
@@ -119,6 +149,7 @@ export default function AdminDashboard() {
   const totalCommissions = commissions.reduce((sum, r) => sum + r.amount, 0);
   const pendingJackpot = jackpotPayouts.filter(j => !j.paid).length;
   const totalFinance = financeRecords.reduce((sum, f) => sum + (f.type === 'income' ? f.amount : -f.amount), 0);
+  const formatTimestamp = (value: string | null) => (value ? new Date(value).toLocaleString() : '—');
 
   return (
     <div className="min-h-screen bg-brand-navy">
@@ -150,6 +181,10 @@ export default function AdminDashboard() {
           <div className="bg-brand-white rounded-lg p-6 shadow-lg">
             <div className="text-2xl font-bold text-brand-navy">${totalFinance.toFixed(2)}</div>
             <div className="text-brand-navy/60">Net Finance</div>
+          </div>
+          <div className="bg-brand-white rounded-lg p-6 shadow-lg md:col-span-2 lg:col-span-1">
+            <div className="text-2xl font-bold text-brand-navy">{flaggedHouses.length}</div>
+            <div className="text-brand-navy/60">Homes flagged for SMT replacement email</div>
           </div>
         </div>
 
@@ -228,6 +263,71 @@ export default function AdminDashboard() {
                 Fetch any EFL PDF URL, fingerprint it, and open the document in a new tab
               </div>
             </a>
+          </div>
+        </section>
+
+        <section className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
+          <h2 className="text-2xl font-bold text-brand-navy mb-2">🚨 Houses Awaiting Notification</h2>
+          <p className="text-sm text-brand-navy/70 mb-4">
+            These users lost SMT access when another account took their service address. Send the replacement email and help them reconnect.
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-brand-navy/20">
+                  <th className="text-left py-3 px-4 text-brand-navy font-semibold">User Email</th>
+                  <th className="text-left py-3 px-4 text-brand-navy font-semibold">ESIID</th>
+                  <th className="text-left py-3 px-4 text-brand-navy font-semibold">Flagged</th>
+                  <th className="text-left py-3 px-4 text-brand-navy font-semibold">Archived homes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {flaggedHouses.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="py-8 px-4 text-center text-brand-navy/60">
+                      No displaced homes waiting for outreach.
+                    </td>
+                  </tr>
+                ) : (
+                  flaggedHouses.map((record) => (
+                    <tr key={`${record.userId}-${record.esiid ?? 'no-esiid'}`} className="border-b border-brand-navy/10 hover:bg-brand-navy/5">
+                      <td className="py-3 px-4 text-brand-navy">{record.email ?? 'Unknown'}</td>
+                      <td className="py-3 px-4 text-brand-navy">{record.esiid ?? '—'}</td>
+                      <td className="py-3 px-4 text-brand-navy">{formatTimestamp(record.attentionAt)}</td>
+                      <td className="py-3 px-4 text-brand-navy">
+                        {record.houses.length === 0 ? (
+                          <span className="text-brand-navy/60 text-xs">No archived homes on record</span>
+                        ) : (
+                          <ul className="space-y-2">
+                            {record.houses.map((house) => {
+                              const line1 = house.addressLine1;
+                              const line2 = house.addressLine2 ? `${house.addressLine2}\n` : '';
+                              const cityStateZip = `${house.addressCity}, ${house.addressState} ${house.addressZip5}`;
+                              return (
+                                <li key={house.id} className="border border-brand-navy/10 rounded-md p-2 bg-brand-navy/5">
+                                  <div className="font-semibold whitespace-pre-line">
+                                    {`${line1}\n${line2}${cityStateZip}`}
+                                  </div>
+                                  <div className="text-xs text-brand-navy/70 mt-1">
+                                    SMT archived: {formatTimestamp(house.archivedAt)}
+                                  </div>
+                                  {house.esiid ? (
+                                    <div className="text-xs text-brand-navy/70">ESIID: {house.esiid}</div>
+                                  ) : null}
+                                  {house.utilityName ? (
+                                    <div className="text-xs text-brand-navy/70">Utility: {house.utilityName}</div>
+                                  ) : null}
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
         </section>
 

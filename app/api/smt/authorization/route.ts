@@ -30,14 +30,21 @@ async function ensureEntryAmount(
   userId: string,
   type: string,
   amount: number,
+  houseId?: string | null,
 ): Promise<Entry> {
+  const entryWhere: Record<string, unknown> = { userId, type };
+  entryWhere.houseId = houseId ?? null;
+
   const existing = await prisma.entry.findFirst({
-    where: { userId, type },
+    where: entryWhere as any,
   });
 
   if (!existing) {
+    const createData: Record<string, unknown> = { userId, type, amount };
+    createData.houseId = houseId ?? null;
+
     return prisma.entry.create({
-      data: { userId, type, amount },
+      data: createData as any,
     });
   }
 
@@ -146,7 +153,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (!house.isPrimary) {
-      await setPrimaryHouse(user.id, house.id);
+      await setPrimaryHouse(user.id, house.id, { keepOthers: true });
       house = { ...house, isPrimary: true, archivedAt: null };
     }
 
@@ -367,7 +374,7 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    const promotion = await setPrimaryHouse(user.id, house.id);
+    const promotion = await setPrimaryHouse(user.id, house.id, { keepOthers: true });
 
     const conflictResult = await archiveConflictingAuthorizations({
       newAuthorizationId: updatedAuthorization.id,
@@ -381,7 +388,7 @@ export async function POST(req: NextRequest) {
       !agreementsEnabled || smtResult?.ok || smtResult?.subscriptionAlreadyActive;
 
     if (shouldAwardSmartMeterEntry) {
-      await ensureEntryAmount(user.id, "smart_meter_connect", 10);
+      await ensureEntryAmount(user.id, "smart_meter_connect", 10, house.id);
     }
 
     const webhookUrl = process.env.DROPLET_WEBHOOK_URL;

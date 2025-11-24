@@ -93,8 +93,16 @@
 - `components/profile/ProfileAddressSection.tsx`: renders a neon card with current address/utility/ESIID, shows the archive warning, uses the updated `QuickAddressEntry` to save a new address, and surfaces the “Connect to SMT” call-to-action modal after success.
 - `components/QuickAddressEntry.tsx`: now accepts `redirectOnSuccess` and `onSaveResult` hooks so other flows (profile) can reuse the component without auto-navigating to `/dashboard/api`.
 - `app/api/user/profile/route.ts`: new `PATCH` endpoint that updates the signed-in user and their profile (transactional, resets auth cookie on email change).
-- `app/dashboard/profile/page.tsx`: redesigned to navy/neon cards, embeds the new client forms, and only reads active house / SMT data.
+- `app/dashboard/profile/page.tsx`: redesigned to navy/neon cards, embeds the new client forms, only reads active house / SMT data, and now lists every active home with per-house entry totals and SMT state.
 - `app/api/address/save/route.ts`: after promoting the newest house to primary, automatically deletes any newly archived houses that never collected SMT authorizations so each user keeps a single active address record.
+- `lib/house/promote.ts`: gained a `keepOthers` flag to support multi-home accounts without archiving sibling houses.
+- `app/api/user/house/select/route.ts`: POST endpoint that switches the active house (marks `isPrimary=true`) while leaving other houses intact.
+- `components/profile/ProfileAddressSection.tsx`: now handles multiple homes, enforces “SMT first” gating for extra homes, shows per-home entry counts, and lets the user switch the active house.
+- `components/QuickAddressEntry.tsx`: accepts `houseIdForSave` so we can update an existing home in-place or create a new one.
+- `app/api/user/entries/route.ts`: entries can be scoped to a `houseId`, so SMT bonuses are tracked per home. `Entry` records gained an optional `houseId` column.
+- `app/api/smt/authorization/route.ts`: awards SMT entries against the authorized house and preserves other homes while switching primaries.
+- `components/SmartMeterSection.tsx`: includes the `houseId` when awarding manual fallback entries.
+- `app/api/admin/houses/flagged/route.ts` + `app/admin/page.tsx`: Admin dashboard shows a queue of displaced homes (flagged `smt_replaced`) so support can send the replacement email before reconnecting.
 
 **Notes:**
 - Address saves still flow through `/api/address/save` and trigger the new archive logic.

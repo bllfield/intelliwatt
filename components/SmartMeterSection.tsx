@@ -2,7 +2,11 @@
 
 import { useState, useEffect } from 'react';
 
-export default function SmartMeterSection() {
+type SmartMeterSectionProps = {
+  houseId?: string | null;
+};
+
+export default function SmartMeterSection({ houseId }: SmartMeterSectionProps) {
   const [mounted, setMounted] = useState(false);
   const [address, setAddress] = useState('');
   const [consent, setConsent] = useState(false);
@@ -35,7 +39,11 @@ export default function SmartMeterSection() {
         await fetch('/api/user/entries', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'smart_meter_connect', amount: 10 }),
+          body: JSON.stringify({
+            type: 'smart_meter_connect',
+            amount: 10,
+            ...(houseId ? { houseId } : {}),
+          }),
         });
         // Refresh entry indicators
         window.dispatchEvent(new CustomEvent('entriesUpdated'));
@@ -192,7 +200,11 @@ export default function SmartMeterSection() {
                 const response = await fetch('/api/user/entries', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ type: 'smart_meter_connect', amount: 5 }),
+                  body: JSON.stringify({
+                    type: 'smart_meter_connect',
+                    amount: 5,
+                    ...(houseId ? { houseId } : {}),
+                  }),
                 });
                 if (response.ok) {
                   setManualAwarded(true);

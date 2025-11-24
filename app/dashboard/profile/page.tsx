@@ -24,6 +24,39 @@ function formatAddress(parts: Array<string | null | undefined>) {
     .join("\n");
 }
 
+type DbHouseRecord = {
+  id: string;
+  addressLine1: string | null;
+  addressLine2: string | null;
+  addressCity: string | null;
+  addressState: string | null;
+  addressZip5: string | null;
+  esiid: string | null;
+  utilityName: string | null;
+  isPrimary: boolean;
+  archivedAt: Date | null;
+  label: string | null;
+  smtAuthorizations: Array<{ id: string }>;
+};
+
+type EntryRow = {
+  id: string;
+  type: string;
+  amount: number;
+  houseId: string | null;
+};
+
+type HouseSummary = {
+  id: string;
+  label: string | null;
+  formattedAddress: string;
+  hasSmt: boolean;
+  entries: number;
+  esiid: string | null;
+  utilityName: string | null;
+  isPrimary: boolean;
+};
+
 export default async function ProfilePage() {
   const cookieStore = cookies();
   const sessionEmail = cookieStore.get("intelliwatt_user")?.value ?? null;
@@ -65,17 +98,16 @@ export default async function ProfilePage() {
         <div className="mx-auto max-w-xl rounded-3xl border border-brand-cyan/30 bg-brand-navy/70 p-10 text-center text-brand-cyan shadow-[0_24px_70px_rgba(16,46,90,0.5)]">
           <h1 className="text-3xl font-semibold uppercase tracking-wide text-brand-cyan">Profile</h1>
           <p className="mt-4 text-sm text-brand-cyan/70">
-            We couldn’t find your account details. Try signing out and back in, or contact support if the
-            issue persists.
+            We couldn’t find your account details. Try signing out and back in, or contact support if the issue persists.
           </p>
         </div>
       </div>
     );
   }
 
-  let houseAddress = await prismaAny.houseAddress.findFirst({
-    where: { userId: user.id, archivedAt: null, isPrimary: true } as any,
-    orderBy: { createdAt: "desc" },
+  const housesRaw = (await prismaAny.houseAddress.findMany({
+    where: { userId: user.id },
+    orderBy: { createdAt: "asc" },
     select: {
       id: true,
       addressLine1: true,
@@ -85,51 +117,83 @@ export default async function ProfilePage() {
       addressZip5: true,
       esiid: true,
       utilityName: true,
-    },
-  });
-
-  if (!houseAddress) {
-    houseAddress = await prismaAny.houseAddress.findFirst({
-      where: { userId: user.id },
-      orderBy: { createdAt: "desc" },
-      select: {
-        id: true,
-        addressLine1: true,
-        addressLine2: true,
-        addressCity: true,
-        addressState: true,
-        addressZip5: true,
-        esiid: true,
-        utilityName: true,
+      isPrimary: true,
+      archivedAt: true,
+      label: true,
+      smtAuthorizations: {
+        where: { archivedAt: null },
+        select: { id: true },
       },
-    });
-  }
-
-  const smtAuthorization = await prismaAny.smtAuthorization.findFirst({
-    where: houseAddress
-      ? ({ userId: user.id, houseAddressId: houseAddress.id, archivedAt: null } as any)
-      : ({ userId: user.id, archivedAt: null } as any),
-    orderBy: { createdAt: "desc" },
-    select: {
-      id: true,
-      createdAt: true,
-      smtStatus: true,
-      smtStatusMessage: true,
-      meterNumber: true,
-      authorizationStartDate: true,
-      authorizationEndDate: true,
     },
+  })) as DbHouseRecord[];
+
+  const entries = (await prismaAny.entry.findMany({
+    where: { userId: user.id },
+    select: { id: true, type: true, amount: true, houseId: true },
+  })) as EntryRow[];
+
+  const entriesByHouse = new Map<string, number>();
+  for (const entry of entries) {
+    const bucket = entry.houseId ?? "global";
+    entriesByHouse.set(bucket, (entriesByHouse.get(bucket) ?? 0) + entry.amount);
+  }
+  const cumulativeEntries = entries.reduce((sum, entry) => sum + entry.amount, 0);
+
+  const activeHouses = housesRaw.filter((house) => house.archivedAt === null);
+
+  const houseSummaries: HouseSummary[] = activeHouses.map((house) => {
+    const formatted = formatAddress([
+      house.addressLine1,
+      house.addressLine2,
+      `${house.addressCity ?? ""}, ${house.addressState ?? ""} ${house.addressZip5 ?? ""}`,
+    ]);
+    const hasSmt = (house.smtAuthorizations?.length ?? 0) > 0;
+    return {
+      id: house.id,
+      label: house.label,
+      formattedAddress: formatted,
+      hasSmt,
+      entries: entriesByHouse.get(house.id) ?? 0,
+      esiid: house.esiid,
+      utilityName: house.utilityName,
+      isPrimary: Boolean(house.isPrimary),
+    };
   });
 
-  const formattedAddress = houseAddress
-    ? formatAddress([
-        houseAddress.addressLine1,
-        houseAddress.addressLine2,
-        `${houseAddress.addressCity ?? ""}, ${houseAddress.addressState ?? ""} ${
-          houseAddress.addressZip5 ?? ""
-        }`,
-      ])
-    : "";
+  const activeHouseSummary =
+    houseSummaries.find((house) => house.isPrimary) ?? houseSummaries[0] ?? null;
+
+  const activeHouseDetails = activeHouseSummary
+    ? {
+        id: activeHouseSummary.id,
+        formattedAddress: activeHouseSummary.formattedAddress,
+        esiid: activeHouseSummary.esiid,
+        utilityName: activeHouseSummary.utilityName,
+      }
+    : null;
+
+  const allowAdd =
+    houseSummaries.length === 0 || houseSummaries.every((house) => house.hasSmt === true);
+
+  const smtAuthorization = activeHouseSummary
+    ? await prismaAny.smtAuthorization.findFirst({
+        where: {
+          userId: user.id,
+          houseAddressId: activeHouseSummary.id,
+          archivedAt: null,
+        } as any,
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true,
+          createdAt: true,
+          smtStatus: true,
+          smtStatusMessage: true,
+          meterNumber: true,
+          authorizationStartDate: true,
+          authorizationEndDate: true,
+        },
+      })
+    : null;
 
   const smtStatusRaw = smtAuthorization?.smtStatus?.toLowerCase() ?? null;
   const smtStatus =
@@ -143,6 +207,14 @@ export default async function ProfilePage() {
       ? "Error"
       : smtAuthorization?.smtStatus ?? null;
 
+  const addressSectionHouses = houseSummaries.map((house) => ({
+    id: house.id,
+    label: house.label,
+    formattedAddress: house.formattedAddress,
+    hasSmt: house.hasSmt,
+    entries: house.entries,
+  }));
+
   return (
     <div className="min-h-screen bg-brand-navy py-12 px-4 text-brand-cyan">
       <div className="mx-auto flex max-w-6xl flex-col gap-8">
@@ -152,9 +224,7 @@ export default async function ProfilePage() {
             Profile & Home
           </h1>
           <p className="mx-auto mt-4 max-w-2xl text-sm text-brand-cyan/70">
-            Keep your IntelliWatt contact details and service address current. Updating your address
-            immediately archives your previous Smart Meter Texas agreement so you can authorize the new
-            home.
+            Manage your IntelliWatt contact preferences, connect additional homes, and keep Smart Meter Texas authorizations current. Each home earns its own entries once SMT is connected.
           </p>
         </header>
 
@@ -181,9 +251,10 @@ export default async function ProfilePage() {
           </section>
 
           <ProfileAddressSection
-            formattedAddress={formattedAddress}
-            esiid={houseAddress?.esiid ?? null}
-            utilityName={houseAddress?.utilityName ?? null}
+            activeHouse={activeHouseDetails}
+            houses={addressSectionHouses}
+            allowAdd={allowAdd}
+            cumulativeEntries={cumulativeEntries}
           />
         </div>
 
@@ -194,8 +265,7 @@ export default async function ProfilePage() {
                 Smart Meter Texas
               </h2>
               <p className="mt-2 text-sm text-brand-cyan/80">
-                Monitor the status of your live SMT agreement. Reauthorize anytime if you change Retail
-                Electric Providers or move to a new address.
+                Monitor the status of your live SMT agreement. Reauthorize anytime if you change Retail Electric Providers or move to a new address.
               </p>
             </div>
             {smtStatus ? (
@@ -244,8 +314,7 @@ export default async function ProfilePage() {
             </dl>
           ) : (
             <div className="mt-6 rounded-2xl border border-brand-blue/40 bg-brand-blue/10 p-4 text-sm text-brand-blue">
-              You haven’t authorized Smart Meter Texas access yet. Head to the API connect page to get
-              started.
+              You haven’t authorized Smart Meter Texas access yet for this home. Head to the API connect page to get started.
             </div>
           )}
         </section>
@@ -255,8 +324,7 @@ export default async function ProfilePage() {
             Revoke SMT access
           </h2>
           <p className="mt-3 text-sm text-brand-cyan/80">
-            We’re wrapping up the self-service revoke flow. In the meantime, contact support if you need
-            to remove IntelliWatt’s SMT access.
+            We’re wrapping up the self-service revoke flow. In the meantime, contact support if you need to remove IntelliWatt’s SMT access.
           </p>
           <span className="mt-4 inline-flex items-center rounded-full border border-brand-cyan/40 bg-brand-cyan/10 px-4 py-1 text-xs font-semibold uppercase tracking-wide text-brand-cyan">
             Under construction

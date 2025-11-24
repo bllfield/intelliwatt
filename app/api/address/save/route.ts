@@ -81,6 +81,7 @@ type SaveAddressBody = {
   googlePlaceDetails: GooglePlaceDetails;
   unitNumber?: string;
   wattbuyJson?: unknown;
+  keepOtherHouses?: boolean;
   utilityHints?: {
     esiid?: string | null;
     tdspSlug?: string | null;
@@ -148,6 +149,7 @@ export async function POST(req: NextRequest) {
     }
 
     const houseAddressEmailAvailable = await ensureHouseAddressUserEmailColumn();
+    const keepOtherHouses = body.keepOtherHouses === true;
 
     const selectFields: any = {
       id: true,
@@ -470,7 +472,9 @@ export async function POST(req: NextRequest) {
     const archivedOnThisHouse =
       addressChanged && record?.id ? await archiveAuthorizationsForHouse(record.id, "address_replaced") : 0;
 
-    const promotion = await setPrimaryHouse(userId, record.id);
+    const promotion = await setPrimaryHouse(userId, record.id, {
+      keepOthers: keepOtherHouses,
+    });
 
     const refreshedRecord = (await prisma.houseAddress.findUnique({
       where: { id: record.id },
