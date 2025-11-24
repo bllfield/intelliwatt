@@ -129,9 +129,8 @@ export default function DashboardPage() {
       </section>
 
 
-      {/* Dashboard Grid - Only show if address is entered */}
-      {userAddress && (
-        <section className="py-16 px-4 bg-brand-white">
+      {/* Dashboard Grid */}
+      <section className="py-16 px-4 bg-brand-white">
             <div className="max-w-6xl mx-auto">
               <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8 text-center">
                 {/* API Connect */}
@@ -280,7 +279,6 @@ export default function DashboardPage() {
               </div>
             </div>
           </section>
-      )}
 
 
       {/* Call to Action - Show if no address entered */}
