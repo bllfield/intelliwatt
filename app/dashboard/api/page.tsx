@@ -14,6 +14,7 @@ type ExistingSmtAuthorization = {
   meterNumber?: string | null;
   authorizationStartDate?: Date | null;
   authorizationEndDate?: Date | null;
+  archivedAt?: Date | null;
 };
 
 export const dynamic = "force-dynamic";
@@ -37,7 +38,7 @@ export default async function ApiConnectPage() {
   let houseAddress: any | null = null;
   if (user) {
     houseAddress = await prisma.houseAddress.findFirst({
-      where: { userId: user.id },
+      where: { userId: user.id, archivedAt: null, isPrimary: true } as any,
       orderBy: { createdAt: "desc" },
       select: {
         id: true,
@@ -50,8 +51,31 @@ export default async function ApiConnectPage() {
         esiid: true,
         tdspSlug: true,
         utilityName: true,
-      },
+        isPrimary: true,
+        archivedAt: true,
+      } as any,
     });
+
+    if (!houseAddress) {
+      houseAddress = await prisma.houseAddress.findFirst({
+        where: { userId: user.id },
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true,
+          houseId: true,
+          addressLine1: true,
+          addressLine2: true,
+          addressCity: true,
+          addressState: true,
+          addressZip5: true,
+          esiid: true,
+          tdspSlug: true,
+          utilityName: true,
+          isPrimary: true,
+          archivedAt: true,
+        } as any,
+      });
+    }
   }
 
   const userEmail = user?.email ?? "";
@@ -59,7 +83,11 @@ export default async function ApiConnectPage() {
   let existingAuth: ExistingSmtAuthorization | null = null;
   if (user && houseAddress) {
     existingAuth = (await prismaAny.smtAuthorization.findFirst({
-      where: { userId: user.id, houseAddressId: houseAddress.id },
+      where: {
+        userId: user.id,
+        houseAddressId: houseAddress.id,
+        archivedAt: null,
+      },
       orderBy: { createdAt: "desc" },
       select: {
         id: true,
@@ -71,7 +99,8 @@ export default async function ApiConnectPage() {
         meterNumber: true,
         authorizationStartDate: true,
         authorizationEndDate: true,
-      },
+        archivedAt: true,
+      } as any,
     })) as ExistingSmtAuthorization | null;
   }
 

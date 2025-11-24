@@ -58,6 +58,30 @@
 
 ---
 
+### PC-2025-11-24-D — Primary House & SMT Agreement Ownership
+
+**Rationale:**
+- Each customer must have exactly one actionable home context. When they change addresses, the previous house and its SMT agreement must retire immediately to prevent stale data.
+- When a different customer successfully authorizes the same meter, the prior owner needs to be displaced, flagged, and notified that their house was replaced.
+
+**Scope:**
+- **Schema:** Added `HouseAddress.isPrimary`, `HouseAddress.archivedAt`, `SmtAuthorization.archivedAt`, `SmtAuthorization.revokedReason` (`prisma/migrations/20251124093000_primary_house_binding`).
+- **Helpers:** New `lib/house/promote.ts` exports `setPrimaryHouse`, `archiveAuthorizationsForHouse`, `archiveConflictingAuthorizations` so address + SMT flows share the same promotion/archiving logic.
+- **Address Save (`app/api/address/save/route.ts`):**
+  - Saving a *new* address archives any existing SMT authorizations tied to the prior house and promotes the latest address to `isPrimary=true`.
+  - Response now returns a warning flag if a prior authorization was archived so the UI can inform the user that reconnecting SMT is required.
+- **SMT Authorization (`app/api/smt/authorization/route.ts`):**
+  - Requires the submitted `houseAddressId` to be the caller’s primary, non-archived house.
+  - After SMT confirms, archives earlier authorizations for that house, promotes the house to primary, and revokes conflicting authorizations (same ESIID/meter) for other users while flagging them for outreach (`esiidAttentionRequired`).
+  - Response metadata includes which houses were superseded and any displaced user IDs (for email workflows).
+- **UI Queries (`app/dashboard/api/page.tsx`, `app/dashboard/profile/page.tsx`):** Only read the active (`archivedAt IS NULL`, `isPrimary = TRUE`) house and SMT authorization, so superseded data never surfaces after an address/ownership change.
+
+**Notes:**
+- Displaced users retain no primary house until they re-enter an address; the attention flag powers the outbound email.
+- `archiveAuthorizationsForHouse` is available for future admin tooling (manual revokes, etc.).
+
+---
+
 ### PC-2025-11-23-RATE-DETAILS — Optional Current Rate Details Step
 
 **Rationale:**

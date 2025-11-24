@@ -390,6 +390,8 @@ model HouseAddress {
   rawWattbuyJson        Json?
   createdAt             DateTime         @default(now())
   updatedAt             DateTime         @updatedAt
+  isPrimary             Boolean          @default(false)
+  archivedAt            DateTime?
 
   smtAuthorizations SmtAuthorization[]
 
@@ -397,6 +399,7 @@ model HouseAddress {
   @@index([addressState, addressZip5])
   @@index([esiid])
   @@index([userEmail])
+  @@index([userId, isPrimary])
 }
 
 model RawSmtFile {
@@ -554,6 +557,8 @@ model SmtAuthorization {
   consentTextVersion String? @db.VarChar(50)
   consentIp          String? @db.VarChar(64)
   consentUserAgent   String? @db.VarChar(255)
+  archivedAt         DateTime?
+  revokedReason      String? @db.VarChar(100)
 
   user         User         @relation(fields: [userId], references: [id])
   houseAddress HouseAddress @relation(fields: [houseAddressId], references: [id])

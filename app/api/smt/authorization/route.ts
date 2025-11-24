@@ -5,6 +5,7 @@ import { normalizeEmail } from "@/lib/utils/email";
 import { cleanEsiid } from "@/lib/smt/esiid";
 import { createAgreementAndSubscription } from "@/lib/smt/agreements";
 import { waitForMeterInfo } from "@/lib/smt/meterInfo";
+import { archiveConflictingAuthorizations, setPrimaryHouse } from "@/lib/house/promote";
 import { Entry } from "@prisma/client";
 
 type SmtAuthorizationBody = {
@@ -108,7 +109,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "User not found." }, { status: 404 });
     }
 
-    const house = await prisma.houseAddress.findUnique({
+    let house = await prismaAny.houseAddress.findUnique({
       where: { id: houseAddressId.trim() },
       select: {
         id: true,
@@ -121,6 +122,8 @@ export async function POST(req: NextRequest) {
         esiid: true,
         tdspSlug: true,
         utilityName: true,
+        isPrimary: true,
+        archivedAt: true,
       },
     });
 
@@ -129,6 +132,22 @@ export async function POST(req: NextRequest) {
         { ok: false, error: "House address not found for provided houseAddressId." },
         { status: 404 },
       );
+    }
+
+    if (house.archivedAt) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "This address has been archived. Please save your current service address before authorizing Smart Meter Texas access.",
+        },
+        { status: 409 },
+      );
+    }
+
+    if (!house.isPrimary) {
+      await setPrimaryHouse(user.id, house.id);
+      house = { ...house, isPrimary: true, archivedAt: null };
     }
 
     if (!house.addressLine1 || !house.addressCity || !house.addressState || !house.addressZip5) {
@@ -332,6 +351,32 @@ export async function POST(req: NextRequest) {
 
     const updatedAuthAny = updatedAuthorization as any;
 
+    const nowForArchive = new Date();
+
+    await prismaAny.smtAuthorization.updateMany({
+      where: {
+        houseAddressId: house.id,
+        archivedAt: null,
+        id: { not: updatedAuthorization.id },
+      },
+      data: {
+        archivedAt: nowForArchive,
+        smtStatus: "archived",
+        smtStatusMessage: "Superseded by newer authorization",
+        revokedReason: "replaced_by_new_authorization",
+      },
+    });
+
+    const promotion = await setPrimaryHouse(user.id, house.id);
+
+    const conflictResult = await archiveConflictingAuthorizations({
+      newAuthorizationId: updatedAuthorization.id,
+      newHouseId: house.id,
+      userId: user.id,
+      esiid: houseEsiid,
+      meterNumber,
+    });
+
     const shouldAwardSmartMeterEntry =
       !agreementsEnabled || smtResult?.ok || smtResult?.subscriptionAlreadyActive;
 
@@ -394,6 +439,10 @@ export async function POST(req: NextRequest) {
         esiid: updatedAuthAny.esiid,
         smtStatus: updatedAuthAny.smtStatus ?? null,
         smtStatusMessage: updatedAuthAny.smtStatusMessage ?? null,
+        meta: {
+          supersededHouseIds: promotion.archivedHouseIds,
+          displacedUserIds: conflictResult.displacedUserIds,
+        },
       },
       { status: 201 },
     );

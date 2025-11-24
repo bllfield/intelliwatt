@@ -74,8 +74,8 @@ export default async function ProfilePage() {
     );
   }
 
-  const houseAddress = await prismaAny.houseAddress.findFirst({
-    where: { userId: user.id },
+  let houseAddress = await prismaAny.houseAddress.findFirst({
+    where: { userId: user.id, archivedAt: null, isPrimary: true } as any,
     orderBy: { createdAt: "desc" },
     select: {
       id: true,
@@ -86,13 +86,34 @@ export default async function ProfilePage() {
       addressZip5: true,
       esiid: true,
       utilityName: true,
-    },
+      isPrimary: true,
+      archivedAt: true,
+    } as any,
   });
+
+  if (!houseAddress) {
+    houseAddress = await prismaAny.houseAddress.findFirst({
+      where: { userId: user.id },
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        addressLine1: true,
+        addressLine2: true,
+        addressCity: true,
+        addressState: true,
+        addressZip5: true,
+        esiid: true,
+        utilityName: true,
+        isPrimary: true,
+        archivedAt: true,
+      } as any,
+    });
+  }
 
   const latestAuthorization = await prismaAny.smtAuthorization.findFirst({
     where: houseAddress
-      ? { userId: user.id, houseAddressId: houseAddress.id }
-      : { userId: user.id },
+      ? ({ userId: user.id, houseAddressId: houseAddress.id, archivedAt: null } as any)
+      : ({ userId: user.id, archivedAt: null } as any),
     orderBy: { createdAt: "desc" },
     select: {
       id: true,
@@ -104,7 +125,7 @@ export default async function ProfilePage() {
       authorizationEndDate: true,
       customerName: true,
       contactPhone: true,
-    },
+    } as any,
   });
 
   const contactName =

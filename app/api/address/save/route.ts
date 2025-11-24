@@ -7,6 +7,7 @@ import { resolveAddressToEsiid } from "@/lib/resolver/addressToEsiid";
 import { wattbuyEsiidDisabled } from "@/lib/flags";
 import { extractWattbuyEsiid, cleanEsiid } from "@/lib/smt/esiid";
 import { queueMeterInfoForHouse } from "@/lib/smt/meterInfo";
+import { archiveAuthorizationsForHouse, setPrimaryHouse } from "@/lib/house/promote";
 
 let userProfileAttentionColumnsAvailable: boolean | null = null;
 let houseAddressUserEmailColumnAvailable: boolean | null = null;
@@ -90,6 +91,22 @@ type SaveAddressBody = {
   smartMeterConsentDate?: string | null;
 };
 
+const toOptionalString = (value: any): string | null => {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.length > 0 ? toOptionalString(value[0]) : null;
+  }
+
+  if (value !== null && value !== undefined && typeof value !== "object") {
+    return String(value);
+  }
+
+  return null;
+};
+
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as SaveAddressBody;
@@ -132,7 +149,7 @@ export async function POST(req: NextRequest) {
 
     const houseAddressEmailAvailable = await ensureHouseAddressUserEmailColumn();
 
-    const selectFields = {
+    const selectFields: any = {
       id: true,
       userId: true,
       houseId: true,
@@ -153,6 +170,8 @@ export async function POST(req: NextRequest) {
       utilityPhone: true,
       createdAt: true,
       updatedAt: true,
+  isPrimary: true,
+  archivedAt: true,
       ...(houseAddressEmailAvailable ? { userEmail: true } : {}),
     };
 
@@ -172,19 +191,27 @@ export async function POST(req: NextRequest) {
     const normalizedStateLower = (normalized.addressState ?? "").trim().toLowerCase();
     const normalizedZip = (normalized.addressZip5 ?? "").trim();
 
-    const existingAddress = await prisma.houseAddress.findFirst({
-      where: { userId },
+    let existingAddress: any = await prisma.houseAddress.findFirst({
+      where: { userId, archivedAt: null, isPrimary: true } as any,
       orderBy: { createdAt: "desc" },
       select: selectFields,
     });
 
-    const existingLine1Lower = existingAddress?.addressLine1?.trim().toLowerCase() ?? "";
-    const existingLine2Lower = existingAddress?.addressLine2?.trim().toLowerCase() ?? "";
-    const existingCityLower = existingAddress?.addressCity?.trim().toLowerCase() ?? "";
-    const existingStateLower = existingAddress?.addressState?.trim().toLowerCase() ?? "";
-    const existingZip = existingAddress?.addressZip5?.trim() ?? "";
-    const normalizedLine2Lower = (normalized.addressLine2 ?? "").trim().toLowerCase();
-    const existingPlaceId = existingAddress?.placeId?.trim() ?? "";
+    if (!existingAddress) {
+      existingAddress = await prisma.houseAddress.findFirst({
+        where: { userId },
+        orderBy: { createdAt: "desc" },
+        select: selectFields,
+      });
+    }
+
+    const existingLine1Lower = String(existingAddress?.addressLine1 ?? "").trim().toLowerCase();
+    const existingLine2Lower = String(existingAddress?.addressLine2 ?? "").trim().toLowerCase();
+    const existingCityLower = String(existingAddress?.addressCity ?? "").trim().toLowerCase();
+    const existingStateLower = String(existingAddress?.addressState ?? "").trim().toLowerCase();
+    const existingZip = String(existingAddress?.addressZip5 ?? "").trim();
+    const normalizedLine2Lower = String(normalized.addressLine2 ?? "").trim().toLowerCase();
+    const existingPlaceId = String(existingAddress?.placeId ?? "").trim();
     const normalizedPlaceId = (normalized.placeId ?? "").trim();
     const existingLat = existingAddress?.lat ?? null;
     const existingLng = existingAddress?.lng ?? null;
@@ -226,7 +253,7 @@ export async function POST(req: NextRequest) {
       ? (wattbuyEsiid ?? null)
       : cleanedHintEsiid ?? existingCleanEsiid ?? wattbuyEsiid ?? undefined;
 
-    const addressData = {
+    const addressData: any = {
       userId,
       houseId: body.houseId ?? null,
       ...(houseAddressEmailAvailable ? { userEmail: resolvedUserEmail } : {}),
@@ -258,9 +285,11 @@ export async function POST(req: NextRequest) {
         : undefined,
       rawGoogleJson: body.googlePlaceDetails as any,
       rawWattbuyJson: body.wattbuyJson as any,
+      isPrimary: true,
+      archivedAt: null,
     };
 
-    let record = existingAddress
+    let record: any = existingAddress
       ? await prisma.houseAddress.update({
           where: { id: existingAddress.id },
           data: addressData,
@@ -307,14 +336,14 @@ export async function POST(req: NextRequest) {
               });
 
               record = await prisma.$transaction(async (tx) => {
-                await tx.houseAddress.update({
+                await (tx as any).houseAddress.update({
                   where: { id: conflicting.id },
                   data: {
                     esiid: null,
                     tdspSlug: null,
                     utilityName: null,
                     utilityPhone: null,
-                  },
+                  } as any,
                 });
 
                 if (attentionColumnsAvailable) {
@@ -329,16 +358,18 @@ export async function POST(req: NextRequest) {
                   );
                 }
 
-                const nextUtilityName = lookup.utility ?? record.utilityName ?? null;
-                const nextTdspSlug = lookup.territory ?? record.tdspSlug ?? null;
-                const takeoverUpdate = {
+                const nextUtilityName =
+                  toOptionalString(lookup.utility) ?? toOptionalString(record.utilityName) ?? null;
+                const nextTdspSlug =
+                  toOptionalString(lookup.territory) ?? toOptionalString(record.tdspSlug) ?? null;
+                const takeoverUpdate: any = {
                   esiid: lookup.esiid,
                   utilityName: nextUtilityName,
                   tdspSlug: nextTdspSlug,
                   ...(houseAddressEmailAvailable ? { userEmail: resolvedUserEmail } : {}),
                 };
 
-                const updatedRecord = await tx.houseAddress.update({
+                const updatedRecord = await (tx as any).houseAddress.update({
                   where: { id: record.id },
                   data: takeoverUpdate,
                   select: selectFields,
@@ -348,7 +379,7 @@ export async function POST(req: NextRequest) {
               });
             } else {
               const recordIdToDelete = record.id;
-              const sameUserUpdate = {
+              const sameUserUpdate: any = {
                 addressLine1: normalized.addressLine1,
                 addressLine2: normalized.addressLine2 ?? null,
                 addressCity: normalized.addressCity,
@@ -362,14 +393,20 @@ export async function POST(req: NextRequest) {
                 addressValidated: normalized.addressValidated,
                 validationSource: validationSource as "GOOGLE" | "USER" | "NONE" | "OTHER",
                 esiid: lookup.esiid,
-                utilityName: lookup.utility ?? conflicting.utilityName ?? null,
-                tdspSlug: lookup.territory ?? conflicting.tdspSlug ?? null,
+                utilityName:
+                  toOptionalString(lookup.utility) ??
+                  toOptionalString(conflicting.utilityName) ??
+                  null,
+                tdspSlug:
+                  toOptionalString(lookup.territory) ??
+                  toOptionalString(conflicting.tdspSlug) ??
+                  null,
                 rawGoogleJson: body.googlePlaceDetails as any,
                 rawWattbuyJson: body.wattbuyJson as any,
                 ...(houseAddressEmailAvailable ? { userEmail: resolvedUserEmail } : {}),
               };
 
-              record = await prisma.houseAddress.update({
+              record = await (prisma as any).houseAddress.update({
                 where: { id: conflicting.id },
                 data: sameUserUpdate,
                 select: selectFields,
@@ -384,16 +421,18 @@ export async function POST(req: NextRequest) {
               }
             }
           } else {
-            const nextUtilityName = lookup.utility ?? record.utilityName ?? null;
-            const nextTdspSlug = lookup.territory ?? record.tdspSlug ?? null;
-            const standardUpdate = {
+            const nextUtilityName =
+              toOptionalString(lookup.utility) ?? toOptionalString(record.utilityName) ?? null;
+            const nextTdspSlug =
+              toOptionalString(lookup.territory) ?? toOptionalString(record.tdspSlug) ?? null;
+            const standardUpdate: any = {
               esiid: lookup.esiid,
               utilityName: nextUtilityName,
               tdspSlug: nextTdspSlug,
               ...(houseAddressEmailAvailable ? { userEmail: resolvedUserEmail } : {}),
             };
 
-            record = await prisma.houseAddress.update({
+            record = await (prisma as any).houseAddress.update({
               where: { id: record.id },
               data: standardUpdate,
               select: selectFields,
@@ -427,6 +466,23 @@ export async function POST(req: NextRequest) {
         console.warn("[address/save] resolveAddressToEsiid failed", resolveErr);
       }
     }
+
+    const archivedOnThisHouse =
+      addressChanged && record?.id ? await archiveAuthorizationsForHouse(record.id, "address_replaced") : 0;
+
+    const promotion = await setPrimaryHouse(userId, record.id);
+
+    const refreshedRecord = (await prisma.houseAddress.findUnique({
+      where: { id: record.id },
+      select: selectFields,
+    })) as any;
+
+    if (refreshedRecord) {
+      record = refreshedRecord;
+    }
+
+    const previousAuthorizationArchived =
+      archivedOnThisHouse > 0 || promotion.archivedHouseIds.length > 0;
 
     if (record.houseId && record.esiid) {
       queueMeterInfoForHouse({ houseId: record.houseId, esiid: record.esiid }).catch((err) => {
@@ -481,6 +537,14 @@ export async function POST(req: NextRequest) {
         utility: { name: record.utilityName, phone: record.utilityPhone },
         createdAt: record.createdAt,
         updatedAt: record.updatedAt,
+        isPrimary: Boolean(record?.isPrimary),
+        archivedAt: record.archivedAt,
+      },
+      meta: {
+        previousAuthorizationArchived,
+        warning: previousAuthorizationArchived
+          ? "Your previous Smart Meter Texas authorization was archived. Submit a new authorization for this address to resume data sync."
+          : null,
       },
     });
   } catch (err: any) {
