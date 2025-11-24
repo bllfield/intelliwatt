@@ -201,6 +201,15 @@ export default function AdminDashboard() {
                 Upload the latest PUCT REP CSV to refresh the internal Retail Electric Provider list
               </div>
             </a>
+            <a
+              href="/admin/efl/tests"
+              className="block p-4 border-2 border-brand-blue/20 rounded-lg hover:border-brand-blue hover:bg-brand-blue/5 transition-colors"
+            >
+              <div className="font-semibold text-brand-navy mb-1">🧪 EFL Fact Card Engine</div>
+              <div className="text-sm text-brand-navy/60">
+                Run EFL PlanRules smoke tests to verify extraction and pricing helpers
+              </div>
+            </a>
           </div>
         </section>
 
