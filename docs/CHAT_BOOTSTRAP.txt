@@ -170,7 +170,7 @@ When pulling changes directly on the droplet:
   git pull origin main
 
 Then restart the services so the new code is live:
-
+sudo journalctl -u smt-webhook.service -n 200 -f
   sudo systemctl restart smt-webhook.service
   sudo systemctl restart smt-ingest.service
 
@@ -180,15 +180,15 @@ DROPLET LOG TAILING (LAST 5 MINUTES)
 ------------------------------------
 
 On the droplet, run as `root` or prefix with `sudo`:
-
+FROM ROOT
 cd /home/deploy/apps/intelliwatt
 git pull origin main
 sudo cp deploy/droplet/webhook_server.py /home/deploy/webhook_server.py
 sudo systemctl restart smt-webhook.service
 
-sudo journalctl -u smt-webhook.service -f
 
-- `sudo journalctl -u smt-webhook.service -n 200 -f`
+
+- ``sudo journalctl -u smt-webhook.service -f
 - `sudo journalctl -u smt-webhook.service --since "5 minutes ago" --no-pager`
 - `sudo journalctl -u smt-ingest.service --since "5 minutes ago" --no-pager`
 
