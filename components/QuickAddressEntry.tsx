@@ -8,9 +8,16 @@ import { parseGooglePlace, buildLegacyPlace, type ParsedPlace } from '@/lib/goog
 interface QuickAddressEntryProps {
   onAddressSubmitted: (address: string) => void;
   userAddress?: string;
+  redirectOnSuccess?: boolean;
+  onSaveResult?: (data: any) => void;
 }
 
-export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: QuickAddressEntryProps) {
+export default function QuickAddressEntry({
+  onAddressSubmitted,
+  userAddress,
+  redirectOnSuccess = true,
+  onSaveResult,
+}: QuickAddressEntryProps) {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
   const [address, setAddress] = useState(userAddress || '');
@@ -319,7 +326,18 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
         
         const savedEsiid = data?.address?.esiid ?? null;
         await wait(savedEsiid ? 800 : 2500);
-        router.push('/dashboard/api#smt');
+        if (redirectOnSuccess) {
+          router.push('/dashboard/api#smt');
+        }
+        if (onSaveResult) {
+          onSaveResult(data);
+        }
+        if (redirectOnSuccess) {
+          router.push('/dashboard/api#smt');
+        }
+        if (onSaveResult) {
+          onSaveResult(null);
+        }
       } else {
         const error = await response.json();
         console.error('Address save failed:', error);

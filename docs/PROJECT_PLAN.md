@@ -82,6 +82,25 @@
 
 ---
 
+### PC-2025-11-24-E — Profile Editor & Address Replacement UX
+
+**Rationale:**
+- The profile dashboard needed to match the navy/neon design guardrail and expose editable contact details ahead of soft launch.
+- Changing a service address should warn the customer that their previous SMT agreement is archived immediately and guide them back to the API page to reconnect.
+
+**Scope:**
+- `components/profile/ProfileContactForm.tsx`: new client form that updates full name, phone, and login email via `/api/user/profile` (normalises email, enforces uniqueness, refreshes the page, resets the auth cookie).
+- `components/profile/ProfileAddressSection.tsx`: renders a neon card with current address/utility/ESIID, shows the archive warning, uses the updated `QuickAddressEntry` to save a new address, and surfaces the “Connect to SMT” call-to-action modal after success.
+- `components/QuickAddressEntry.tsx`: now accepts `redirectOnSuccess` and `onSaveResult` hooks so other flows (profile) can reuse the component without auto-navigating to `/dashboard/api`.
+- `app/api/user/profile/route.ts`: new `PATCH` endpoint that updates the signed-in user and their profile (transactional, resets auth cookie on email change).
+- `app/dashboard/profile/page.tsx`: redesigned to navy/neon cards, embeds the new client forms, and only reads active house / SMT data.
+
+**Notes:**
+- Address saves still flow through `/api/address/save` and trigger the new archive logic.
+- Post-save modal drives customers directly to `/dashboard/api#smt` to reconnect.
+
+---
+
 ### PC-2025-11-23-RATE-DETAILS — Optional Current Rate Details Step
 
 **Rationale:**
