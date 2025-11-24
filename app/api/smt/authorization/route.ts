@@ -384,8 +384,15 @@ export async function POST(req: NextRequest) {
       meterNumber,
     });
 
+    const finalStatus = (updatedAuthorization.smtStatus ?? smtResult?.status ?? "")
+      .toString()
+      .toLowerCase();
     const shouldAwardSmartMeterEntry =
-      !agreementsEnabled || smtResult?.ok || smtResult?.subscriptionAlreadyActive;
+      !agreementsEnabled ||
+      finalStatus === "" ||
+      finalStatus === "active" ||
+      finalStatus === "already_active" ||
+      smtResult?.subscriptionAlreadyActive;
 
     if (shouldAwardSmartMeterEntry) {
       await ensureEntryAmount(user.id, "smart_meter_connect", 10, house.id);
