@@ -130,7 +130,7 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
 
   const containerClasses = showHeader
     ? "space-y-3 rounded-xl border border-slate-200 bg-white/80 p-4 shadow-sm backdrop-blur"
-    : "space-y-3";
+    : "space-y-3 rounded-2xl border border-brand-blue/10 bg-white p-4 shadow";
 
   return (
     <div className={containerClasses}>
@@ -185,7 +185,7 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
 
       <form
         onSubmit={handleSubmit}
-        className={`space-y-3 ${showHeader ? "" : "-mt-2 sm:-mt-3"}`}
+        className={`space-y-3 ${showHeader ? "" : "pt-2"}`}
       >
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-1">

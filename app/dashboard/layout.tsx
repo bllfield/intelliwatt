@@ -1,4 +1,5 @@
 import IdleGuard from '@/components/IdleGuard';
+import DashboardHeader from '@/components/DashboardHeader';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -6,29 +7,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <div className="min-h-screen bg-brand-white text-brand-navy">
         {/* Main Content Area */}
         <div className="flex flex-col min-w-0">
-          {/* Updated header with reduced height */}
-          <header className="px-4 py-0.5 bg-brand-navy text-brand-blue font-bold shadow-lg border-b border-brand-blue/20">
-            <div className="max-w-6xl mx-auto flex justify-between items-center">
-              <div className="flex items-center space-x-4">
-                <a href="/dashboard" className="text-xl font-bold text-brand-blue hover:text-brand-white transition-colors">Dashboard</a>
-              </div>
-              <nav className="hidden md:flex space-x-6 text-sm">
-                <a href="/dashboard/entries" className="text-brand-blue hover:text-brand-white transition-colors">Entries</a>
-                <a href="/dashboard/plans" className="text-brand-blue hover:text-brand-white transition-colors">Plans</a>
-                <a href="/dashboard/home" className="text-brand-blue hover:text-brand-white transition-colors">Home Info</a>
-                <a href="/dashboard/appliances" className="text-brand-blue hover:text-brand-white transition-colors">Appliances</a>
-                <a href="/dashboard/api" className="text-brand-blue hover:text-brand-white transition-colors">API Connect</a>
-                <a href="/dashboard/analysis" className="text-brand-blue hover:text-brand-white transition-colors">Analysis</a>
-                <a href="/dashboard/manual-entry" className="text-brand-blue hover:text-brand-white transition-colors">Manual Entry</a>
-                <a href="/dashboard/usage" className="text-brand-blue hover:text-brand-white transition-colors">Usage</a>
-                <a href="/dashboard/referrals" className="text-brand-blue hover:text-brand-white transition-colors">Referrals</a>
-                <a href="/dashboard/upgrades" className="text-brand-blue hover:text-brand-white transition-colors">Upgrades</a>
-              </nav>
-              <div className="md:hidden">
-                <span className="text-sm text-brand-blue">Menu</span>
-              </div>
-            </div>
-          </header>
+          <DashboardHeader />
           
           <main className="flex-1 p-6 max-w-6xl mx-auto w-full">{children}</main>
           

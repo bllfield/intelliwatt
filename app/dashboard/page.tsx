@@ -82,20 +82,26 @@ export default function DashboardPage() {
             <p className="text-xl text-brand-white mb-4 max-w-4xl mx-auto leading-relaxed">
               Your FREE AI-powered energy optimization dashboard. Track savings, manage your plan, and earn rewards.
             </p>
-            {/* Smart Meter + Referral CTA with stacked, high-contrast lines */}
-            <div className="mb-8 flex items-center justify-center gap-4">
-              <span className="relative inline-block w-64 h-24">
-                <Image src="/Hitthejackwatt-Logo.png" alt="HitTheJackWatt" fill className="object-contain" />
+            {/* Smart Meter + Referral CTA */}
+            <div className="mb-8 flex flex-col items-center gap-4 text-center md:flex-row md:justify-center md:text-left">
+              <span className="relative inline-block h-24 w-full max-w-xs sm:h-28 sm:max-w-sm md:h-24 md:w-64">
+                <Image
+                  src="/Hitthejackwatt-Logo.png"
+                  alt="HitTheJackWatt"
+                  fill
+                  className="object-contain"
+                  priority
+                />
               </span>
-              <div className="inline-flex flex-col items-center text-center gap-1 bg-[#39FF14]/10 border border-[#39FF14]/40 px-6 py-4 rounded-full shadow-lg shadow-[#39FF14]/10 ring-1 ring-[#39FF14]/30">
-                <span className="text-lg md:text-xl font-extrabold leading-tight">
+              <div className="inline-flex w-full max-w-xl flex-col items-center gap-2 rounded-2xl border border-[#39FF14]/40 bg-[#39FF14]/10 px-6 py-4 text-center shadow-lg shadow-[#39FF14]/10 ring-1 ring-[#39FF14]/30 md:items-start md:text-left">
+                <span className="text-lg font-extrabold leading-tight text-brand-white md:text-xl">
                   <span style={{ color: '#39FF14' }}>⚡ Connect your smart meter data</span>
                   <span className="mx-1 text-brand-white">for</span>
                   <span style={{ color: '#39FF14' }}>10 jackpot entries!!</span>
                 </span>
-                <span className="text-sm md:text-base font-bold leading-tight">
+                <span className="text-sm font-bold leading-tight text-brand-white md:text-base">
                   <span style={{ color: '#BF00FF' }}>👥 Refer a Friend:</span>
-                  <span className="mx-1 text-brand-white"> </span>
+                  <span className="mx-1 text-brand-white" />
                   <span style={{ color: '#39FF14' }}>5 jackpot entries per signup!!</span>
                 </span>
               </div>
