@@ -238,39 +238,39 @@ export default function DashboardPage() {
 
       {/* Call to Action - Show if no address entered */}
       {!userAddress && (
-        <section className="py-16 px-4 bg-brand-navy">
+        <section className="py-16 px-4 bg-brand-white">
           <div className="max-w-4xl mx-auto text-center">
-            <div className="bg-brand-navy p-8 rounded-2xl border border-brand-cyan/30 shadow-lg">
-              <div className="w-16 h-16 bg-brand-cyan rounded-full flex items-center justify-center mx-auto mb-6">
+            <div className="bg-white p-8 rounded-2xl border-2 border-brand-navy shadow-lg">
+              <div className="w-16 h-16 bg-brand-cyan rounded-full flex items-center justify-center mx-auto mb-6 shadow">
                 <span className="text-brand-navy text-2xl">⚡</span>
               </div>
-              <h2 className="text-3xl font-bold text-brand-cyan mb-4">
-                Ready to Start <span className="text-brand-cyan">Saving</span>?
+              <h2 className="text-3xl font-bold text-brand-navy mb-4">
+                Ready to Start <span className="text-brand-blue">Saving</span>?
               </h2>
-              <p className="text-lg text-brand-cyan mb-8 max-w-2xl mx-auto">
+              <p className="text-lg text-brand-navy mb-8 max-w-2xl mx-auto">
                 Enter your service address above to unlock personalized energy plan recommendations and start tracking your savings.
               </p>
               <div className="grid md:grid-cols-3 gap-6 text-center">
-                <div className="bg-brand-navy/40 p-6 rounded-xl border border-brand-cyan/30 shadow-md">
+                <div className="bg-white p-6 rounded-xl border border-brand-navy shadow-sm">
                   <div className="w-12 h-12 bg-brand-navy rounded-full flex items-center justify-center mb-4 mx-auto">
                     <span className="text-brand-cyan text-xl">🔍</span>
                   </div>
-                  <h3 className="text-xl font-bold text-brand-cyan mb-2">Find Best Plans</h3>
-                  <p className="text-brand-cyan text-sm">Get personalized recommendations based on your usage patterns</p>
+                  <h3 className="text-xl font-bold text-brand-navy mb-2">Find Best Plans</h3>
+                  <p className="text-brand-navy text-sm">Get personalized recommendations based on your usage patterns</p>
                 </div>
-                <div className="bg-brand-navy/40 p-6 rounded-xl border border-brand-cyan/30 shadow-md">
+                <div className="bg-white p-6 rounded-xl border border-brand-navy shadow-sm">
                   <div className="w-12 h-12 bg-brand-navy rounded-full flex items-center justify-center mb-4 mx-auto">
                     <span className="text-brand-cyan text-xl">📊</span>
                   </div>
-                  <h3 className="text-xl font-bold text-brand-cyan mb-2">Track Usage</h3>
-                  <p className="text-brand-cyan text-sm">Monitor your energy consumption and identify savings opportunities</p>
+                  <h3 className="text-xl font-bold text-brand-navy mb-2">Track Usage</h3>
+                  <p className="text-brand-navy text-sm">Monitor your energy consumption and identify savings opportunities</p>
                 </div>
-                <div className="bg-brand-navy/40 p-6 rounded-xl border border-brand-cyan/30 shadow-md">
+                <div className="bg-white p-6 rounded-xl border border-brand-navy shadow-sm">
                   <div className="w-12 h-12 bg-brand-navy rounded-full flex items-center justify-center mb-4 mx-auto">
                     <span className="text-brand-cyan text-xl">💰</span>
                   </div>
-                  <h3 className="text-xl font-bold text-brand-cyan mb-2">Save Money</h3>
-                  <p className="text-brand-cyan text-sm">Optimize your plan selection to reduce your monthly energy bills</p>
+                  <h3 className="text-xl font-bold text-brand-navy mb-2">Save Money</h3>
+                  <p className="text-brand-navy text-sm">Optimize your plan selection to reduce your monthly energy bills</p>
                 </div>
               </div>
             </div>
@@ -354,17 +354,23 @@ export default function DashboardPage() {
             
             <div className="grid md:grid-cols-2 gap-8">
               <div className="bg-brand-navy p-8 rounded-2xl text-center">
+                <div className="w-12 h-12 bg-brand-cyan rounded-full flex items-center justify-center mx-auto mb-4">
+                  <span className="text-brand-navy text-xl">❓</span>
+                </div>
                 <h3 className="text-2xl font-bold text-brand-white mb-4">Need Help?</h3>
                 <p className="text-brand-white mb-6">Get support or view our FAQ</p>
-                <Link href="/faq" className="inline-block bg-brand-blue text-brand-navy font-bold py-3 px-6 rounded-xl border-2 border-brand-blue hover:border-brand-white transition-all duration-300">
+                <Link href="/faq" className="inline-block bg-brand-white text-brand-navy font-bold py-3 px-6 rounded-xl border-2 border-brand-white hover:border-brand-cyan transition-all duration-300">
                   Get Help
                 </Link>
               </div>
               
               <div className="bg-brand-navy p-8 rounded-2xl text-center">
+                <div className="w-12 h-12 bg-brand-cyan rounded-full flex items-center justify-center mx-auto mb-4">
+                  <span className="text-brand-navy text-xl">⚙️</span>
+                </div>
                 <h3 className="text-2xl font-bold text-brand-white mb-4">Settings</h3>
                 <p className="text-brand-white mb-6">Manage your account preferences</p>
-                <Link href="/dashboard/settings" className="inline-block bg-brand-blue text-brand-navy font-bold py-3 px-6 rounded-xl border-2 border-brand-blue hover:border-brand-white transition-all duration-300">
+                <Link href="/dashboard/settings" className="inline-block bg-brand-white text-brand-navy font-bold py-3 px-6 rounded-xl border-2 border-brand-white hover:border-brand-cyan transition-all duration-300">
                   Manage Settings
                 </Link>
               </div>
