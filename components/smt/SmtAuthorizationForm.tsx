@@ -129,14 +129,14 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
   }
 
   const containerClasses = showHeader
-    ? "space-y-3 rounded-xl border border-slate-200 bg-white/80 p-4 shadow-sm backdrop-blur"
-    : "space-y-3 rounded-2xl border border-brand-blue/10 bg-white p-4 shadow";
+    ? "w-full max-w-full space-y-3 rounded-xl border border-slate-200 bg-white/80 p-4 shadow-sm backdrop-blur"
+    : "w-full max-w-full space-y-3 rounded-2xl border border-brand-blue/10 bg-white p-4 shadow";
 
   return (
     <div className={containerClasses}>
       {showHeader && (
         <>
-          <div className="grid gap-3 rounded-lg bg-brand-navy p-3 text-xs text-brand-cyan sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 rounded-lg bg-brand-navy p-3 text-xs text-brand-cyan sm:grid-cols-2">
             <div className="space-y-1">
               <div className="text-sm font-semibold uppercase tracking-wide text-brand-cyan">
                 Service Address on File
@@ -187,7 +187,7 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
         onSubmit={handleSubmit}
         className={`space-y-3 ${showHeader ? "" : "pt-2"}`}
       >
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div className="space-y-1">
             <label
               htmlFor="customerName"
@@ -292,7 +292,7 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
           <button
             type="submit"
             disabled={isPending}
-            className="w-full rounded-full bg-brand-navy px-4 py-2 text-sm font-semibold uppercase tracking-wide text-brand-cyan shadow-[0_0_20px_rgba(16,182,231,0.45)] transition focus:outline-none focus:ring-2 focus:ring-brand-cyan focus:ring-offset-2 focus:ring-offset-brand-navy disabled:cursor-not-allowed disabled:opacity-70"
+            className="w-full rounded-full bg-brand-navy px-4 py-2 text-sm font-semibold uppercase tracking-wide text-brand-cyan shadow-[0_0_20px_rgba(16,182,231,0.45)] transition focus:outline-none focus:ring-2 focus:ring-brand-cyan focus:ring-offset-2 focus:ring-offset-brand-navy disabled:cursor-not-allowed disabled:opacity-70 max-[480px]:text-xs"
           >
             AUTHORIZE OR UPDATE AUTHORIZATION
           </button>

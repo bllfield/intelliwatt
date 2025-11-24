@@ -199,7 +199,7 @@ export default async function ApiConnectPage() {
   const readyForSmt = Boolean(user && houseAddress && hasEsiid && hasTdspOrUtility);
 
   return (
-    <div className="min-h-[calc(100vh-120px)] bg-slate-50/60 py-12">
+    <div className="min-h-[calc(100vh-120px)] overflow-x-hidden bg-slate-50/60 py-12">
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-12 px-4 sm:px-6 lg:px-0">
         <section
           id="smt"
@@ -221,6 +221,10 @@ export default async function ApiConnectPage() {
                   Authorize IntelliWatt to sync with your utility&apos;s smart meter. We only use this
                   secure connection to pull usage and billing intervals so plan insights stay accurate
                   automatically.
+                </p>
+                <p className="rounded-md bg-brand-blue/5 px-3 py-2 text-[0.7rem] font-medium text-brand-blue sm:text-xs">
+                  Tip: Landscape mode gives extra room for the agreement form, but the page now stays fully
+                  readable in portrait view too.
                 </p>
               </div>
             </header>
@@ -255,11 +259,11 @@ export default async function ApiConnectPage() {
             </div>
 
             {readyForSmt && (
-              <div className="space-y-6 rounded-3xl border border-brand-navy/15 bg-white/90 p-4 shadow-[0_18px_60px_rgba(16,46,90,0.06)] backdrop-blur sm:p-6 md:p-8">
-                <div className="grid gap-6 lg:grid-cols-[1.1fr,1fr] lg:items-start">
+              <div className="space-y-6 rounded-3xl border border-brand-navy/15 bg-white/90 p-4 shadow-[0_18px_60px_rgba(16,46,90,0.06)] backdrop-blur max-[480px]:p-3 sm:p-6 md:p-8">
+                <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.1fr,1fr] lg:items-start">
                   <div className="order-2 space-y-4 lg:order-1">
                     <div className="rounded-2xl border border-brand-cyan/40 bg-brand-navy p-5 text-sm text-brand-cyan shadow-[0_10px_30px_rgba(16,182,231,0.18)] sm:p-6">
-                      <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                         <div className="space-y-1">
                           <h2 className="text-sm font-semibold uppercase tracking-wide text-brand-cyan">
                             Service address on file
