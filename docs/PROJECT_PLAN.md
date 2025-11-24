@@ -110,6 +110,25 @@
 
 ---
 
+### PC-2025-11-24-F — Bulk Archive Non-Keeper Demo Users
+
+- Added `scripts/sql/bulk_archive_non_keeper_users.sql`, which archives `HouseAddress` and `SmtAuthorization` rows for every user except the five keeper emails (`omoneo@o2epcm.com`, `cgoldstein@seia.com`, `whill@hilltrans.com`, `erhamilton@messer.com`, `zander86@gmail.com`).
+- One-time pre-launch cleanup to remove demo/test clutter; not intended as a recurring scheduled job.
+- Run manually against the DigitalOcean `defaultdb` using the standard app credentials, e.g. `psql "$DATABASE_URL" -f scripts/sql/bulk_archive_non_keeper_users.sql`.
+- Always capture a snapshot or `pg_dump` backup before executing the script.
+- Script is idempotent-ish: re-running will keep houses archived and SMT agreements marked `bulk_archive`.
+
+---
+
+### PC-2025-11-24-G — Delete Non-Keeper Demo Users
+
+- Added `scripts/sql/delete_non_keeper_users.sql` to remove `User` rows (and related `Entry`, `Referral`, `UserProfile`, `SmtAuthorization`, and `HouseAddress` records) for all non-keeper emails, leaving only the five keeper accounts.
+- Intended as a follow-up “data reset” after the archive script; not a recurring job.
+- Execute manually against the DO `defaultdb` via: `psql "$DATABASE_URL" -f scripts/sql/delete_non_keeper_users.sql`.
+- Take a DB snapshot or `pg_dump` before running. Once executed, the admin dashboard user list will only show the keeper accounts.
+
+---
+
 ### PC-2025-11-23-RATE-DETAILS — Optional Current Rate Details Step
 
 **Rationale:**
