@@ -9,7 +9,7 @@
 - Insert an optional **Current Rate Details** step between SMT usage import and the Rate Plan Analyzer output:
   - Address → SMT API Authorization → Usage Normalization → **Current Rate Details (optional)** → Rate Plan Analyzer → Home Details → Appliances → Upgrades → Optimal Energy.
 - Step definition:
-  - Title: “Current Rate Details” with copy explaining the richer comparison (current vs recommended vs renewal) and the +10 jackpot entries reward.
+  - Title: "Current Rate Details" with copy explaining the richer comparison (current vs recommended vs renewal) and the +10 jackpot entries reward.
   - Two input paths:
     1. **Upload your bill** (photo/image/PDF) for future OCR-based extraction.
     2. **Manual entry** for:
@@ -41,14 +41,14 @@ Add a vendor-agnostic EFL link runner to the admin console so ops can validate a
 **Changes:**
 
 - **Admin Modules:**  
-  - New card on `/admin/modules`: **“EFL Link Runner”**.  
+  - New card on `/admin/modules`: **"EFL Link Runner"**.  
   - Links to `/admin/efl/links`.
 
 - **EFL Link Runner (`/admin/efl/links`):**  
   - Accepts any EFL PDF URL (WattBuy, REP portals, manually pasted links).  
   - Fetches the PDF and computes its SHA-256 hash via `computePdfSha256`.  
   - Shows basic HTTP metadata (content-type, content-length when available).  
-  - Provides a one-click **“Open EFL PDF in new tab”** link for manual inspection.
+  - Provides a one-click **"Open EFL PDF in new tab"** link for manual inspection.
 
 **Notes:**
 
@@ -2200,7 +2200,7 @@ Smart Meter Texas as of November 17, 2025.
   - To safely align schema without touching data:
     1. Set `DATABASE_URL` to the DO `defaultdb` connection string on the droplet.
     2. Marked `20251123035440_puct_rep_dev_setup` as rolled back via `npx prisma migrate resolve --rolled-back 20251123035440_puct_rep_dev_setup`.
-    3. Resolved DO’s “remaining connection slots are reserved for roles with the SUPERUSER attribute” error by terminating excess connections in the DO UI, then re-running the Prisma command.
+    3. Resolved DO's "remaining connection slots are reserved for roles with the SUPERUSER attribute" error by terminating excess connections in the DO UI, then re-running the Prisma command.
     4. Applied `npx prisma migrate deploy` from the droplet, which successfully ran `20251123035440_puct_rep_dev_setup` using the idempotent SQL.
 - Result: The DO `defaultdb` schema now matches the current Prisma migration history for `SmtAuthorization`, `PuctRep`, and `ErcotEsiidIndex`, without dropping or altering existing data.
 - NOTE: The historical migration `20251107020101_add_ercot_esiid_index` remains present in the DO migrations table but not in the local `prisma/migrations` directory. Its effects are functionally superseded by `20251123035440_puct_rep_dev_setup`. We handle this by not rewriting historical migrations and relying on idempotent SQL in the newer migration instead.
@@ -2929,3 +2929,19 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
 **Status**
 
 - COMPLETE (contract stub delivered; AI integration remains a future task).
+
+---
+
+### PC-2025-11-24-COLOR-GUARDRAIL — Navy + Neon Blue UI Palette
+
+**Scope**
+
+- Established a visual guardrail that customer-facing surfaces use:
+  - `bg-brand-navy` (navy) as the primary background for feature boxes.
+  - `text-brand-cyan` (neon blue) as the default headline/body text color.
+  - Icon treatments: navy backgrounds (`bg-brand-navy`) with neon icon glyphs (`text-brand-cyan`), except for hero callouts where the icon circle flips (neon background, navy glyph) for contrast.
+- Updated landing and dashboard sections to follow this pattern; future pages should avoid light neon-blue wash backgrounds unless explicitly called out.
+
+**Status**
+
+- COMPLETE — Palette guidance documented; apply on new UI work to maintain consistency.

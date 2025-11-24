@@ -53,9 +53,9 @@ export default function EntriesPage() {
       {/* Entries Overview */}
       <section className="py-16 px-4 bg-brand-white">
         <div className="max-w-4xl mx-auto">
-          <div className="bg-brand-white p-8 rounded-2xl border-2 border-brand-navy shadow-lg mb-8">
+          <div className="bg-brand-white p-8 rounded-2xl border-2 border-brand-navy shadow-lg mb-8 text-center">
             <h2 className="text-2xl font-bold text-brand-navy mb-6">Your Entries Summary</h2>
-            
+
             <div className="grid md:grid-cols-2 gap-6 mb-8">
               {entries.length === 0 ? (
                 <div className="col-span-2 text-center py-8">
@@ -63,23 +63,19 @@ export default function EntriesPage() {
                 </div>
               ) : (
                 entries.map(entry => (
-                  <div key={entry.id} className="flex items-center justify-between p-4 bg-brand-navy border border-brand-navy rounded-lg">
-                    <div className="flex items-center space-x-3">
-                      <span className="text-brand-blue text-xl">🔲</span>
-                      <span className="text-brand-white font-medium">{entry.type}</span>
-                    </div>
+                  <div key={entry.id} className="flex flex-col items-center gap-3 p-4 bg-brand-navy border border-brand-navy rounded-lg text-center">
+                    <span className="text-brand-blue text-xl">🔲</span>
+                    <span className="text-brand-white font-medium">{entry.type}</span>
                     <span className="bg-brand-white text-brand-navy px-3 py-1 rounded-full text-sm font-semibold">
                       {entry.amount} {entry.amount === 1 ? 'Entry' : 'Entries'}
                     </span>
                   </div>
                 ))
               )}
-              
-              <div className="flex items-center justify-between p-4 bg-brand-navy border border-brand-navy rounded-lg">
-                <div className="flex items-center space-x-3">
-                  <span className="text-brand-blue text-xl">🔲</span>
-                  <span className="text-brand-white font-medium">Referred Friends</span>
-                </div>
+
+              <div className="flex flex-col items-center gap-3 p-4 bg-brand-navy border border-brand-navy rounded-lg text-center">
+                <span className="text-brand-blue text-xl">🔲</span>
+                <span className="text-brand-white font-medium">Referred Friends</span>
                 <span className="bg-brand-white text-brand-navy px-3 py-1 rounded-full text-sm font-semibold">5+ Entries</span>
               </div>
             </div>
@@ -102,11 +98,11 @@ export default function EntriesPage() {
             How to <span className="text-brand-blue">Earn More</span> Entries
           </h2>
           
-          <div className="grid md:grid-cols-2 gap-8">
+          <div className="grid md:grid-cols-2 gap-8 text-center">
             <div className="bg-brand-white p-6 rounded-2xl border-2 border-brand-navy">
               <h3 className="text-xl font-bold text-brand-navy mb-4">Complete Your Profile</h3>
               <p className="text-brand-navy mb-4">Add your home details and preferences to earn your first entry.</p>
-              <button className="bg-brand-navy text-brand-blue font-bold py-2 px-4 rounded-lg border-2 border-brand-navy hover:border-brand-blue transition-all duration-300">
+              <button className="bg-brand-navy text-brand-blue font-bold py-2 px-4 rounded-lg border-2 border-brand-navy hover:border-brand-blue transition-all duration-300 mx-auto">
                 Complete Profile
               </button>
             </div>
@@ -114,7 +110,7 @@ export default function EntriesPage() {
             <div className="bg-brand-white p-6 rounded-2xl border-2 border-brand-navy">
               <h3 className="text-xl font-bold text-brand-navy mb-4">Connect Smart Meter</h3>
               <p className="text-brand-navy mb-4">Link your Smart Meter Texas account for automatic data access.</p>
-              <button className="bg-brand-navy text-brand-blue font-bold py-2 px-4 rounded-lg border-2 border-brand-navy hover:border-brand-blue transition-all duration-300">
+              <button className="bg-brand-navy text-brand-blue font-bold py-2 px-4 rounded-lg border-2 border-brand-navy hover:border-brand-blue transition-all duration-300 mx-auto">
                 Connect Meter
               </button>
             </div>
@@ -122,7 +118,7 @@ export default function EntriesPage() {
             <div className="bg-brand-white p-6 rounded-2xl border-2 border-brand-navy">
               <h3 className="text-xl font-bold text-brand-navy mb-4">Tag Appliances</h3>
               <p className="text-brand-navy mb-4">Add your major appliances to get more accurate recommendations.</p>
-              <button className="bg-brand-navy text-brand-blue font-bold py-2 px-4 rounded-lg border-2 border-brand-navy hover:border-brand-blue transition-all duration-300">
+              <button className="bg-brand-navy text-brand-blue font-bold py-2 px-4 rounded-lg border-2 border-brand-navy hover:border-brand-blue transition-all duration-300 mx-auto">
                 Add Appliances
               </button>
             </div>
@@ -130,7 +126,7 @@ export default function EntriesPage() {
             <div className="bg-brand-white p-6 rounded-2xl border-2 border-brand-navy">
               <h3 className="text-xl font-bold text-brand-navy mb-4">Refer Friends</h3>
               <p className="text-brand-navy mb-4">Invite friends and family to earn entries for each successful referral.</p>
-              <button className="bg-brand-navy text-brand-blue font-bold py-2 px-4 rounded-lg border-2 border-brand-navy hover:border-brand-blue transition-all duration-300">
+              <button className="bg-brand-navy text-brand-blue font-bold py-2 px-4 rounded-lg border-2 border-brand-navy hover:border-brand-blue transition-all duration-300 mx-auto">
                 Invite Friends
               </button>
             </div>
