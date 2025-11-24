@@ -370,11 +370,11 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
   return (
     <div className="bg-white/10 p-6 rounded-lg border border-white/20">
       <form onSubmit={handleSubmit} className="space-y-4">
-        <div className="flex items-center space-x-3">
-          <div className="w-8 h-8 bg-brand-blue rounded-full flex items-center justify-center">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="w-8 h-8 bg-brand-blue rounded-full flex items-center justify-center self-start sm:self-center">
             <span className="text-white text-sm">⚡</span>
           </div>
-          <div className="flex-1">
+          <div className="flex-1 w-full">
             <div className="relative">
               <div ref={containerRef} className="min-h-[44px]" />
               {useFallbackInput && (
@@ -400,7 +400,7 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
           </div>
           
           {/* Optional Unit/Apartment Number Field */}
-          <div className="flex-1">
+          <div className="flex-1 w-full sm:w-auto">
             <input
               type="text"
               placeholder="Unit/Apt # (optional)"
@@ -414,7 +414,7 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
           <button
             type="submit"
             disabled={!address.trim() || isSubmitting}
-            className="bg-brand-blue text-white px-6 py-3 text-sm font-medium rounded-md hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full sm:w-auto bg-brand-blue text-white px-6 py-3 text-sm font-medium rounded-md hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isSubmitting ? 'Connecting...' : 'Connect'}
           </button>

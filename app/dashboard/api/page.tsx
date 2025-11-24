@@ -257,8 +257,8 @@ export default async function ApiConnectPage() {
             {readyForSmt && (
               <div className="space-y-6 rounded-3xl border border-brand-navy/15 bg-white/90 p-8 shadow-[0_18px_60px_rgba(16,46,90,0.06)] backdrop-blur">
                 <div className="grid gap-6 lg:grid-cols-[1.1fr,1fr] lg:items-start">
-                  <div className="space-y-4">
-                    <div className="rounded-2xl border border-brand-cyan/40 bg-brand-navy p-6 text-sm text-brand-cyan shadow-[0_10px_30px_rgba(16,182,231,0.18)]">
+                  <div className="space-y-4 order-2 lg:order-1">
+                    <div className="rounded-2xl border border-brand-cyan/40 bg-brand-navy p-4 text-sm text-brand-cyan shadow-[0_10px_30px_rgba(16,182,231,0.18)] sm:p-6">
                       <div className="grid gap-4 sm:grid-cols-2">
                         <div className="space-y-1">
                           <h2 className="text-sm font-semibold uppercase tracking-wide text-brand-cyan">
@@ -304,7 +304,7 @@ export default async function ApiConnectPage() {
                     </div>
 
                     {existingAuth && (
-                      <div className="rounded-2xl border border-brand-cyan/40 bg-brand-navy p-6 text-xs text-brand-cyan shadow-[0_10px_30px_rgba(16,182,231,0.18)]">
+                      <div className="rounded-2xl border border-brand-cyan/40 bg-brand-navy p-4 text-xs text-brand-cyan shadow-[0_10px_30px_rgba(16,182,231,0.18)] sm:p-6">
                         <div className="flex flex-wrap items-center gap-3">
                           <span className="text-[0.7rem] font-semibold uppercase tracking-wide">
                             SMT authorization last submitted{" "}
@@ -328,7 +328,7 @@ export default async function ApiConnectPage() {
                     )}
                   </div>
 
-                  <div className="rounded-2xl border border-brand-blue/10 bg-white/80 p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
+                  <div className="order-1 rounded-2xl border border-brand-blue/10 bg-white/80 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)] lg:order-2 sm:p-6">
                     <SmtAuthorizationForm
                       contactEmail={userEmail}
                       houseAddressId={houseAddress.id}
