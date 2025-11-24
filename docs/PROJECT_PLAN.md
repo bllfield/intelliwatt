@@ -1,3 +1,42 @@
+### PC-2025-11-24-A — Jackpot Entry Automation Baseline
+
+**Rationale:**
+- Soft launch requires the live jackpot counter to reflect the actions customers can complete today (signup, SMT authorization, manual usage entry, referrals).
+- The previous demo hooks (e.g., dashboard visit auto-credit) skewed totals and masked real progress.
+
+**Scope:**
+- `app/login/magic/route.ts`: award the **signup** entry when a brand-new user finishes the magic-link flow.
+- `app/api/smt/authorization/route.ts`: award/upgrade the **smart_meter_connect** entry to 10 when SMT authorization succeeds (or remains at 10 when the droplet reports “already active”).
+- `components/SmartMeterSection.tsx`: manual fallback now grants 5 entries and prevents double-awards; success toast fires `entriesUpdated`.
+- `app/api/user/entries/route.ts`: allow raising the amount for an existing entry (e.g., manual → live SMT) while keeping idempotency.
+- `components/smt/SmtAuthorizationForm.tsx`: notify listeners after a successful submission so counters refresh instantly.
+- `lib/hitthejackwatt/opportunities.ts`: retire the `dashboard_visit` placeholder, clarify the manual vs. automated SMT reward copy.
+- Removed the old “dashboard visit = 1 entry” demo hook from `app/dashboard/page.tsx`.
+
+**Verification:**
+- Tested with a fresh magic-link signup, manual SMT fallback, and full SMT authorization: counters now show 1 → 6 → 11.
+- Referral flow already live; ensured referral awards still bypass the single-entry guard.
+- `/dashboard/entries` still uses mock data (follow-up task), but `/api/user/entries` now returns accurate totals for client widgets.
+
+---
+
+### PC-2025-11-24-B — Dashboard Module & SMT Card Refresh
+
+**Rationale:**
+- Customers should see all dashboard modules immediately, even before address capture, to preview the full experience.
+- The SMT CTA card looked off-center and inconsistent with the navy/neon palette guardrail.
+
+**Scope:**
+- `app/dashboard/page.tsx`:
+  - Dashboard module grid now renders unconditionally (still links to gated flows).
+  - SMT info block centered, with updated typography and CTA styling.
+- `app/dashboard/optimal/page.tsx`: placeholder page wired for the new “Optimal Energy” tile so navigation is complete.
+
+**Notes:**
+- No behavior change for SMT ingestion—purely layout/visibility adjustments.
+
+---
+
 ### PC-2025-11-23-RATE-DETAILS — Optional Current Rate Details Step
 
 **Rationale:**
