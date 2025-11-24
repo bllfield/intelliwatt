@@ -83,7 +83,7 @@ export default function DashboardPage() {
               Your FREE AI-powered energy optimization dashboard. Track savings, manage your plan, and earn rewards.
             </p>
             {/* Smart Meter + Referral CTA */}
-            <div className="mb-8 flex flex-col items-center gap-4 text-center md:flex-row md:justify-center">
+            <div className="mb-8 flex flex-col items-center gap-4 text-center">
               <span className="relative inline-block h-24 w-full max-w-xs sm:h-28 sm:max-w-sm md:h-24 md:w-64">
                 <Image
                   src="/Hitthejackwatt-Logo.png"
