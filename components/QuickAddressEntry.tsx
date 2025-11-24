@@ -80,15 +80,22 @@ export default function QuickAddressEntry({ onAddressSubmitted, userAddress }: Q
           'w-full px-4 py-3 text-sm bg-white border border-brand-blue/30 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-blue focus:border-brand-blue text-brand-navy placeholder-brand-navy/60';
         widget.className = widgetClassName;
         widget.style.setProperty('--gmpx-color-surface', '#ffffff');
-        widget.style.setProperty('--gmpx-color-on-surface', '#0f172a'); // slate-900
+        widget.style.setProperty('--gmpx-color-surface-variant', '#ffffff');
+        widget.style.setProperty('--gmpx-color-on-surface', '#0f172a');
+        widget.style.setProperty('--gmpx-color-on-surface-variant', '#0f172a');
+        widget.style.setProperty('--gmpx-color-on-primary', '#0f172a');
+        widget.style.setProperty('--gmpx-color-on-secondary', '#0f172a');
         widget.style.setProperty('--gmpx-color-primary', '#1d4ed8');
         widget.style.setProperty('--gmpx-font-family', 'inherit');
         widget.style.setProperty('--gmpx-shape-corner-full', '0.75rem');
         widget.style.setProperty('--gmpx-typography-body1-text-color', '#0f172a');
         widget.style.setProperty('--gmpx-typography-body2-text-color', '#0f172a');
         widget.style.setProperty('--gmpx-typography-caption-text-color', '#0f172a');
+        widget.style.setProperty('--gmpx-typography-headline6-text-color', '#0f172a');
+        widget.style.setProperty('--gmpx-typography-subtitle1-text-color', '#0f172a');
         widget.style.setProperty('--gmpx-size-base', '48px');
         widget.style.setProperty('--gmpx-size-line-height', '1.4');
+        widget.style.color = '#0f172a';
         widget.placeholder = 'Enter your service address...';
 
         if (addressValueRef.current) {
