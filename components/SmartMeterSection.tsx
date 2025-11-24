@@ -184,9 +184,6 @@ export default function SmartMeterSection() {
           <p className="text-sm text-brand-navy mb-2">Prefer to enter details manually?</p>
           <button
             onClick={async () => {
-              if (status === 'manual') {
-                return;
-              }
               setStatus('manual');
               if (manualAwarded) {
                 return;

@@ -12,6 +12,8 @@ type ExistingSmtAuthorization = {
   smtSubscriptionId: string | null;
   subscriptionAlreadyActive?: boolean | null;
   meterNumber?: string | null;
+  authorizationStartDate?: Date | null;
+  authorizationEndDate?: Date | null;
 };
 
 export const dynamic = "force-dynamic";
@@ -67,6 +69,8 @@ export default async function ApiConnectPage() {
         smtAgreementId: true,
         smtSubscriptionId: true,
         meterNumber: true,
+        authorizationStartDate: true,
+        authorizationEndDate: true,
       },
     })) as ExistingSmtAuthorization | null;
   }
@@ -327,6 +331,16 @@ export default async function ApiConnectPage() {
                         ) : null}
                         {statusSecondaryMessage ? (
                           <p className="mt-1 text-xs leading-relaxed text-brand-cyan/80">{statusSecondaryMessage}</p>
+                        ) : null}
+                        {existingAuth?.authorizationEndDate ? (
+                          <p className="mt-3 text-xs text-brand-cyan/70">
+                            Authorization expires{" "}
+                            {existingAuth.authorizationEndDate.toLocaleDateString(undefined, {
+                              month: "short",
+                              day: "numeric",
+                              year: "numeric",
+                            })}
+                          </p>
                         ) : null}
                       </div>
                     )}
