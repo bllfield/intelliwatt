@@ -99,9 +99,23 @@ Three detail levels:
 
 ### 3.1 Entry point
 
-- `computePlanCost(input: PlanCostEngineInput): PlanCostResult` (stubbed)
+- `computePlanCost(input: PlanCostEngineInput): PlanCostResult`
 
-### 3.2 Expected behavior (future implementation)
+**Status:** Implemented in `lib/planAnalyzer/planCostEngine.ts` as a pure function
+that consumes `PlanCostEngineInput` and returns `PlanCostResult`. This initial
+version:
+
+- Uses the EFL PlanRules helpers (`getIntervalPricingForTimestamp`, `computeIntervalCharge`) to price each interval.
+- Aggregates interval charges into daily and monthly summaries using Luxon for timezone-aware bucketing.
+- Applies a simple base-charge model:
+  - Full base charge is applied once per calendar month in monthly summaries.
+  - A prorated base charge is applied per day in daily summaries.
+- Leaves TDSP delivery modeling and complex bill-credit rules as TODO (currently set to 0).
+
+Future iterations will refine TDSP/bill-credit modeling without changing the
+top-level function signature.
+
+### 3.2 Expected behavior
 
 Given `RatePlanWithRules`, `IntervalUsagePoint[]`, and an IANA timezone:
 
@@ -111,7 +125,7 @@ Given `RatePlanWithRules`, `IntervalUsagePoint[]`, and an IANA timezone:
    - Emit `PlanIntervalCost`.
 2. Group by local day/month (using `tz`):
    - Sum kWh and dollar amounts.
-   - Apply base charges and bill credits.
+   - Apply base charges and bill credits (TDSP + promo credits remain TODO).
 3. Return `PlanCostResult` (interval detail, daily/monthly rollups, total).
 
 The engine remains pure and testable — no DB/HTTP.
@@ -146,9 +160,8 @@ Currently propagates the `computePlanCost` stub error until that function is imp
 ## 6. Implementation Progress
 
 - [x] Core Plan Analyzer types (`lib/planAnalyzer/planTypes.ts`)
-- [x] Per-plan cost engine stub (`lib/planAnalyzer/planCostEngine.ts`)
+- [x] Per-plan cost engine implementation (`lib/planAnalyzer/planCostEngine.ts`) — TDSP delivery + complex bill credits still TODO
 - [x] Multi-plan analyzer stub (`lib/planAnalyzer/multiPlanAnalyzer.ts`)
-- [ ] Per-plan cost engine implementation
 - [ ] Admin test harness for Plan Analyzer
 - [ ] HTTP endpoints for single-plan and multi-plan analysis
 - [ ] UI components for IntelliWatt usage-based estimates/comparisons
