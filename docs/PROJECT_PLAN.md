@@ -37,6 +37,27 @@
 
 ---
 
+### PC-2025-11-24-C — Profile Snapshot & SMT Expiration Surfacing
+
+**Rationale:**
+- Soft-launch users need a read-only profile view that reflects what IntelliWatt already knows before we enable editing.
+- Support team requested quick access to SMT agreement metadata (activation/expiration) on both the profile and API connect screens.
+
+**Scope:**
+- `app/dashboard/profile/page.tsx`:
+  - Promoted to a server-rendered page that pulls `User`/`UserProfile`, the latest `HouseAddress`, and most recent `SmtAuthorization`.
+  - Renders account, contact, service address (with ESIID + utility), SMT status, meter number, authorization start/end dates, and a “Revoke SMT access” card labeled under construction.
+  - Falls back to friendly copy (“Not provided”) when fields are blank; no mutation logic introduced.
+- `app/dashboard/api/page.tsx`:
+  - SMT status card now shows the authorization expiration date beside the submission timestamp, using the stored `authorizationEndDate`.
+- `components/SmartMeterSection.tsx`:
+  - Removed redundant type guard when switching to manual entry (retains behaviour, satisfies TS narrowing).
+
+**Notes:**
+- Entire feature remains read-only; edit/revoke flows will follow once APIs are available.
+
+---
+
 ### PC-2025-11-23-RATE-DETAILS — Optional Current Rate Details Step
 
 **Rationale:**
