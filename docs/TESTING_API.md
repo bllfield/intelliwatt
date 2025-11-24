@@ -180,6 +180,37 @@ Run these checks whenever:
 
 ---
 
+## Plan Analyzer Engine Admin Tests (/admin/plan-analyzer/tests)
+
+Use this page to validate the Plan Analyzer Engine in isolation. It runs entirely in memory with synthetic inputs and is safe to execute in any environment.
+
+### Purpose
+
+- Confirm `computePlanCost` produces interval, daily, and monthly rollups for a sample plan.
+- Confirm `comparePlans` ranks multiple plans correctly.
+- Provide deterministic JSON output that surfaces regressions when PlanRules or costing logic changes.
+
+### How to run
+
+1. Sign in with admin access.
+2. Visit `/admin/modules` and select **Plan Analyzer Engine**, or navigate directly to `/admin/plan-analyzer/tests`.
+3. The page automatically:
+   - Builds a 24-interval usage profile for `America/Chicago`.
+   - Creates two example PlanRules:
+     - Free Nights: 0¢ from 21:00–07:00, 15¢ daytime.
+     - Flat Rate: 13¢ all hours.
+   - Invokes `computePlanCost` for the Free Nights plan.
+   - Invokes `comparePlans` for both plans and sorts by total cost.
+
+### Expected output
+
+- **Single Plan Cost Result** — full `PlanCostResult` JSON (interval costs, daily/monthly summaries, totals).
+- **Multi-Plan Comparison Result** — `PlanComparisonResult` JSON with per-plan results and `sortedPlanIds`.
+- No network or database activity; repeated visits yield identical data.
+- If errors appear (thrown exceptions or missing fields), fix the Plan Analyzer implementation before wiring live SMT/WattBuy data.
+
+---
+
 ## WattBuy API Testing
 
 ### Retail Rates Endpoints

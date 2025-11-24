@@ -2883,3 +2883,49 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
 **Status**
 
 - COMPLETE — EFL Link Runner is now part of the standard admin smoke-test suite.
+
+### PC-2025-11-23-PLAN-ANALYZER-ADMIN-TESTS: Plan Analyzer Engine Admin Harness
+
+**Rationale**
+
+- The Plan Analyzer Engine (per-plan costing + comparisons) needs an admin-only test bed before wiring real SMT/Green Button usage or WattBuy plans. This harness provides quick validation that library functions behave deterministically with synthetic data.
+
+**Scope**
+
+- Added a **Plan Analyzer Engine** tile to the Admin Modules catalog (`lib/catalog/modules.ts` → `/admin/modules`).
+- Implemented `/admin/plan-analyzer/tests`:
+  - Builds a 24-interval synthetic usage profile in `America/Chicago`.
+  - Defines two example PlanRules (Free Nights vs Flat 13¢).
+  - Runs `computePlanCost` for a single plan and `comparePlans` for both.
+  - Renders the JSON output (PlanCostResult + PlanComparisonResult) for operator review.
+- Updated documentation (`docs/PLAN_ANALYZER_ENGINE.md`, `docs/TESTING_API.md`) to log the harness and expected behavior.
+
+**Guardrails**
+
+- No Prisma/DB or external HTTP calls; everything runs in memory on each request.
+- Results must remain deterministic; changes to PlanRules helpers or cost math should keep this harness green or update the snapshots/docs.
+- Future integration work (customer-facing APIs/UI) must keep this admin page updated or add new scenarios.
+
+**Status**
+
+- COMPLETE — Admin harness in place and documented; ready for future TDSP/bill-credit enhancements.
+
+---
+
+### PC-2025-11-23-EFL-AI-CONTRACT-STUB — EFL AI Extraction Contract Stub (Step 3a)
+
+**Scope**
+
+- Added `lib/efl/planAiExtractor.ts` to define the AI extraction contract for PlanRules:
+  - Types for deterministic EFL input (`EflTextExtractionInput`) and extraction metadata/result structures.
+  - `extractPlanRulesFromEflText(input, opts)` helper that currently returns `ok: false` with a clear "not implemented" warning.
+- No AI calls, persistence, or RatePlan wiring yet—this is a pure contract layer to unblock future AI work.
+
+**Guardrails**
+
+- Guarded by documentation only; no runtime consumers should treat the stub as production-ready.
+- Keeps the helper pure and side-effect free so it can be safely imported without triggering network calls.
+
+**Status**
+
+- COMPLETE (contract stub delivered; AI integration remains a future task).

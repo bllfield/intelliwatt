@@ -288,11 +288,14 @@ Until those steps are executed, this document is the **authoritative naming and 
     - A pluggable `PdfTextExtractor` interface for deterministic PDF→text conversion.
     - `deterministicEflExtract` to produce cleaned `rawText`, extract `repPuctCertificate` and `eflVersionCode`, and emit warnings when either is missing.
   - No AI or database wiring yet; this layer remains standalone and source-agnostic.
-- [x] **Step 3 – AI Extraction Layer (EFL text → PlanRules)**
-  - Implemented pure helper module `lib/efl/aiExtraction.ts`.
-  - Added `buildPlanRulesExtractionPrompt` to generate the strict extraction prompt.
-  - Added `extractPlanRulesFromEflText`, which accepts deterministic extract output, calls an injected `PlanRulesModelCaller`, and normalizes the result into `planRules`, `parseConfidence`, `parseWarnings`, with `source = "efl_pdf"`.
-  - Remains vendor-agnostic; higher layers supply the actual LLM integration.
+- [ ] **Step 3 – AI Extraction Layer (EFL text → PlanRules)**
+  - [x] **Step 3a – AI extraction contract stub (no model calls yet)**
+    - Added `lib/efl/planAiExtractor.ts` defining:
+      - `extractPlanRulesFromEflText(input, opts)` contract.
+      - Deterministic input/result types (`EflTextExtractionInput`, `PlanRulesExtractionResult`, etc.).
+    - Current behavior returns `ok: false` with a clear "not implemented" warning; no AI calls or persistence.
+  - [ ] **Step 3b – Model wiring + validation** (pending)
+    - Will invoke the configured AI model, validate PlanRules JSON, and populate real confidence/warning metadata.
 - [x] **Step 2a – EFL Link Runner admin utility**
   - Added a vendor-agnostic admin page at `/admin/efl/links` (EFL Link Runner).
   - Lets ops paste any EFL PDF URL (WattBuy, REP portal, manual), fetch the PDF, compute `eflPdfSha256` via `computePdfSha256`, inspect basic headers, and open the EFL in a new tab.
@@ -302,6 +305,9 @@ Until those steps are executed, this document is the **authoritative naming and 
 
 ## Next Steps (Planned)
 
+- **Step 3b – AI Extraction Model Wiring**
+  - Implement real AI invocation + validation in `extractPlanRulesFromEflText`.
+  - Populate `planRules`, confidence scores, and warnings from model output.
 - **Step 4 – RatePlan Integration**
   - Link `RatePlan` entries to EFL-backed plan versions.
   - Ensure plan cards and Plan Analyzer pull from EFL-only rule sets.

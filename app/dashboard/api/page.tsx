@@ -210,7 +210,7 @@ export default async function ApiConnectPage() {
 
           <div className="relative z-10 flex flex-col gap-10 p-8 sm:p-10">
             <header className="space-y-4">
-              <span className="inline-flex items-center gap-2 rounded-full bg-brand-blue/10 px-4 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-brand-blue">
+              <span className="inline-flex items-center gap-2 rounded-full bg-brand-navy px-4 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-brand-cyan">
                 Utility Integrations
               </span>
               <div className="space-y-3">
@@ -222,7 +222,7 @@ export default async function ApiConnectPage() {
                   secure connection to pull usage and billing intervals so plan insights stay accurate
                   automatically.
                 </p>
-                <p className="rounded-md bg-brand-blue/5 px-3 py-2 text-[0.7rem] font-medium text-brand-blue sm:text-xs">
+                <p className="rounded-md bg-brand-navy px-3 py-2 text-[0.7rem] font-medium text-brand-cyan sm:text-xs">
                   Tip: Landscape mode gives extra room for the agreement form, but the page now stays fully
                   readable in portrait view too.
                 </p>
@@ -368,17 +368,17 @@ export default async function ApiConnectPage() {
               </p>
             </div>
 
-            <div className="flex flex-col gap-4 rounded-2xl border border-brand-blue/20 bg-gradient-to-r from-brand-blue/15 via-brand-cyan/10 to-brand-blue/5 px-6 py-6 text-center text-brand-navy shadow-[0_12px_32px_rgba(16,46,90,0.12)] sm:flex-row sm:items-center sm:justify-between sm:text-left">
+            <div className="flex flex-col gap-4 rounded-2xl border border-brand-cyan/40 bg-brand-navy px-6 py-6 text-center text-brand-cyan shadow-[0_12px_32px_rgba(16,46,90,0.12)] sm:flex-row sm:items-center sm:justify-between sm:text-left">
               <div>
-                <p className="text-sm font-semibold uppercase tracking-[0.3em] text-brand-blue">
+                <p className="text-sm font-semibold uppercase tracking-[0.3em] text-brand-cyan">
                   Coming Soon
                 </p>
-                <p className="mt-2 text-base font-medium text-brand-navy">
+                <p className="mt-2 text-base font-medium text-brand-cyan">
                   Automatic OAuth logins and synced device APIs are on the way.
                 </p>
               </div>
               <div className="flex justify-center sm:justify-end">
-                <span className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-xs font-semibold uppercase tracking-wide text-brand-blue shadow-[0_10px_30px_rgba(16,46,90,0.08)]">
+                <span className="inline-flex items-center gap-2 rounded-full bg-brand-navy px-4 py-2 text-xs font-semibold uppercase tracking-wide text-brand-cyan shadow-[0_10px_30px_rgba(16,46,90,0.08)]">
                   Preview Access
                 </span>
               </div>

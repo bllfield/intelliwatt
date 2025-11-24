@@ -144,11 +144,20 @@ The engine remains pure and testable — no DB/HTTP.
 2. Sort results by `totalCostDollars`.
 3. Return per-plan results plus sorted plan IDs.
 
-Currently propagates the `computePlanCost` stub error until that function is implemented.
+---
+
+## 5. Admin Test Harness
+
+- Route: `/admin/plan-analyzer/tests`
+- Purpose: exercise `computePlanCost` (single plan) and `comparePlans` (multi plan) using synthetic usage and example PlanRules.
+- Behavior:
+  - Purely in-memory; no Prisma, SMT, WattBuy, or external HTTP calls.
+  - Renders JSON output for both the single-plan and multi-plan scenarios so ops can sanity-check totals and sorted plan IDs.
+- Module card: available on the Admin Modules page as **Plan Analyzer Engine**.
 
 ---
 
-## 5. Integration Notes
+## 6. Integration Notes
 
 - **WattBuy**: discovery & compliance (plan metadata, EFL URLs). No pricing math.
 - **EFL Fact Card Engine**: owns PlanRules extracted from PDFs.
@@ -157,12 +166,12 @@ Currently propagates the `computePlanCost` stub error until that function is imp
 
 ---
 
-## 6. Implementation Progress
+## 7. Implementation Progress
 
 - [x] Core Plan Analyzer types (`lib/planAnalyzer/planTypes.ts`)
 - [x] Per-plan cost engine implementation (`lib/planAnalyzer/planCostEngine.ts`) — TDSP delivery + complex bill credits still TODO
-- [x] Multi-plan analyzer stub (`lib/planAnalyzer/multiPlanAnalyzer.ts`)
-- [ ] Admin test harness for Plan Analyzer
+- [x] Multi-plan analyzer (`lib/planAnalyzer/multiPlanAnalyzer.ts`)
+- [x] Admin test harness for Plan Analyzer (`/admin/plan-analyzer/tests`)
 - [ ] HTTP endpoints for single-plan and multi-plan analysis
 - [ ] UI components for IntelliWatt usage-based estimates/comparisons
 

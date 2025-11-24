@@ -142,6 +142,15 @@ export const modulesCatalog: ModuleDef[] = [
     inputs: ['EFL PDF URL'],
     outputs: ['PDF headers', 'SHA-256 fingerprint'],
     estDevTime: '0.5d'
+  },
+  {
+    id: 77,
+    name: 'Plan Analyzer Engine',
+    purpose: 'Library harness for per-plan and multi-plan costing',
+    endpoint: '/admin/plan-analyzer/tests',
+    inputs: ['Synthetic usage', 'PlanRules samples'],
+    outputs: ['PlanCostResult JSON', 'PlanComparisonResult JSON'],
+    estDevTime: '0.5d'
   }
   // Add future modules here as project evolves
 ]
