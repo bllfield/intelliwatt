@@ -7,7 +7,12 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
   try {
-    const { email } = await request.json();
+    const payload = await request.json();
+    const email = payload?.email;
+    const referralCode =
+      typeof payload?.referralCode === "string" && payload.referralCode.trim().length > 0
+        ? payload.referralCode.trim()
+        : undefined;
 
     if (!email || !email.includes('@')) {
       return NextResponse.json({ error: 'Valid email is required' }, { status: 400 });
@@ -26,13 +31,15 @@ export async function POST(request: NextRequest) {
       
       // Create the magic link URL
       const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://intelliwatt.com');
-      magicLink = `${baseUrl}/login/magic?token=${token}`;
+      const referralQuery = referralCode ? `&ref=${encodeURIComponent(referralCode)}` : '';
+      magicLink = `${baseUrl}/login/magic?token=${token}${referralQuery}`;
     } catch (dbError) {
       console.error('Database error:', dbError);
       // If database is not available, create a temporary token for testing
       token = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://intelliwatt.com');
-      magicLink = `${baseUrl}/login/magic?token=${token}`;
+      const referralQuery = referralCode ? `&ref=${encodeURIComponent(referralCode)}` : '';
+      magicLink = `${baseUrl}/login/magic?token=${token}${referralQuery}`;
       console.log('Using temporary token due to database unavailability');
     }
 

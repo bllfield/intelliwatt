@@ -10,6 +10,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const token = searchParams.get('token');
+  const referralTokenFromQuery = searchParams.get('ref');
 
   if (!token) {
     return new Response('Missing token', { status: 400 });
@@ -46,7 +47,13 @@ export async function GET(req: Request) {
     }
 
     const cookieStore = cookies();
-    const referrerToken = cookieStore.get('intelliwatt_referrer')?.value;
+    const cookieReferralToken = cookieStore.get('intelliwatt_referrer')?.value;
+    const referrerToken =
+      (typeof referralTokenFromQuery === 'string' && referralTokenFromQuery.trim().length > 0
+        ? referralTokenFromQuery.trim()
+        : null) ||
+      cookieReferralToken ||
+      null;
 
     // Normalize email to lowercase for consistent storage and lookup
     const normalizedEmail = normalizeEmail(record.email);
