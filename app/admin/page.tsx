@@ -84,6 +84,27 @@ interface EntryExpiryDigest {
   email: string | null;
 }
 
+interface ReferralRecord {
+  id: string;
+  status: 'PENDING' | 'QUALIFIED' | 'CANCELLED';
+  referredEmail: string;
+  createdAt: string;
+  qualifiedAt: string | null;
+  entryAwardedAt: string | null;
+  referredBy: {
+    id: string;
+    email: string;
+  };
+  referredUser: {
+    id: string;
+    email: string;
+  } | null;
+  entry: {
+    id: string;
+    createdAt: string;
+  } | null;
+}
+
 interface TestimonialRecord {
   id: string;
   status: 'PENDING' | 'APPROVED' | 'REJECTED';
@@ -107,6 +128,8 @@ interface SummaryStats {
   pendingSmtRevocations: number;
   testimonialSubmissionCount: number;
   testimonialPendingCount: number;
+  referralPendingCount: number;
+  referralQualifiedCount: number;
 }
 
 const currencyFormatter = new Intl.NumberFormat('en-US', {
@@ -130,6 +153,7 @@ export default function AdminDashboard() {
   const [expiringEntries, setExpiringEntries] = useState<EntryExpiryDigest[]>([]);
   const [summary, setSummary] = useState<SummaryStats | null>(null);
   const [testimonials, setTestimonials] = useState<TestimonialRecord[]>([]);
+  const [referrals, setReferrals] = useState<ReferralRecord[]>([]);
 
   // Fetch real data from API
   useEffect(() => {
@@ -144,6 +168,7 @@ export default function AdminDashboard() {
           flaggedRes,
           expiringRes,
           testimonialsRes,
+          referralsRes,
         ] = await Promise.all([
           fetch('/api/admin/stats/summary'),
           fetch('/api/admin/users'),
@@ -153,6 +178,7 @@ export default function AdminDashboard() {
           fetch('/api/admin/houses/flagged'),
           fetch('/api/admin/hitthejackwatt/expiring'),
           fetch('/api/admin/testimonials'),
+          fetch('/api/admin/referrals'),
         ]);
 
         if (summaryRes.ok) {
@@ -218,6 +244,14 @@ export default function AdminDashboard() {
         } else {
           console.error('Failed to fetch testimonials:', testimonialsRes.status, testimonialsRes.statusText);
         }
+
+        if (referralsRes.ok) {
+          const referralsData = await referralsRes.json();
+          console.log('Fetched referrals:', referralsData);
+          setReferrals(referralsData);
+        } else {
+          console.error('Failed to fetch referrals:', referralsRes.status, referralsRes.statusText);
+        }
       } catch (error) {
         console.error('Error fetching admin data:', error);
       }
@@ -264,6 +298,15 @@ export default function AdminDashboard() {
     APPROVED: 'border border-emerald-400/40 bg-emerald-400/10 text-emerald-600',
     REJECTED: 'border border-rose-400/40 bg-rose-400/10 text-rose-600',
   };
+  const referralPendingTotal =
+    summary?.referralPendingCount ?? referrals.filter((record) => record.status === 'PENDING').length;
+  const referralQualifiedTotal =
+    summary?.referralQualifiedCount ?? referrals.filter((record) => record.status === 'QUALIFIED').length;
+  const referralStatusStyles: Record<ReferralRecord['status'], string> = {
+    PENDING: 'border border-amber-400/40 bg-amber-400/10 text-amber-600',
+    QUALIFIED: 'border border-emerald-400/40 bg-emerald-400/10 text-emerald-600',
+    CANCELLED: 'border border-rose-400/40 bg-rose-400/10 text-rose-600',
+  };
 
   const flaggedReplacements = flaggedRecords.filter(
     (record) => record.attentionCode === 'smt_replaced',
@@ -280,6 +323,8 @@ export default function AdminDashboard() {
     { label: 'Appliances #', value: applianceCount.toLocaleString() },
     { label: 'Testimonials', value: testimonialsTotal.toLocaleString() },
     { label: 'Testimonials Pending', value: testimonialsPendingCount.toLocaleString() },
+    { label: 'Referrals Pending', value: referralPendingTotal.toLocaleString() },
+    { label: 'Referrals Qualified', value: referralQualifiedTotal.toLocaleString() },
     { label: 'SMT Revocations Pending', value: pendingRevocationsCount.toLocaleString() },
     { label: 'Total Commissions', value: currencyFormatter.format(totalCommissions) },
     { label: 'Net Finance', value: currencyFormatter.format(totalFinance) },
@@ -517,6 +562,77 @@ export default function AdminDashboard() {
                       </tr>
                     );
                   })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        {/* Referral Progress */}
+        <section className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
+          <h2 className="text-2xl font-bold text-brand-navy mb-2">🤝 Referral Progress</h2>
+          <p className="text-sm text-brand-navy/70 mb-4">
+            Referrers earn their bonus entry once the invited member shares usage through Smart Meter Texas or a manual upload.
+            Track pending invites below and confirm when entries are awarded automatically.
+          </p>
+          {referrals.length === 0 ? (
+            <div className="rounded-md border border-brand-navy/10 bg-brand-navy/5 px-4 py-6 text-center text-brand-navy/70">
+              No referrals recorded yet.
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-brand-navy/10">
+              <table className="min-w-full divide-y divide-brand-navy/10">
+                <thead className="bg-brand-navy/5">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-brand-navy/60">
+                      Referrer
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-brand-navy/60">
+                      Invitee
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-brand-navy/60">
+                      Status
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-brand-navy/60">
+                      Qualified
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-brand-navy/60">
+                      Entry Awarded
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-brand-navy/10 bg-white">
+                  {referrals.map((record) => (
+                    <tr key={record.id}>
+                      <td className="px-4 py-3 text-sm text-brand-navy">
+                        <div className="font-semibold">{record.referredBy.email}</div>
+                        <div className="text-xs text-brand-navy/60">
+                          Created {new Date(record.createdAt).toLocaleString()}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-brand-navy">
+                        <div>{record.referredEmail}</div>
+                        {record.referredUser ? (
+                          <div className="text-xs text-brand-navy/60">User ID: {record.referredUser.id}</div>
+                        ) : (
+                          <div className="text-xs text-brand-navy/50">User not linked yet</div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span
+                          className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wide ${referralStatusStyles[record.status]}`}
+                        >
+                          {record.status.toLowerCase()}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-brand-navy">
+                        {record.qualifiedAt ? new Date(record.qualifiedAt).toLocaleString() : '—'}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-brand-navy">
+                        {record.entryAwardedAt ? new Date(record.entryAwardedAt).toLocaleString() : 'Pending'}
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>

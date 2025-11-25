@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import { db } from '@/lib/db';
 import { normalizeEmail } from '@/lib/utils/email';
 import { refreshUserEntryStatuses } from '@/lib/hitthejackwatt/entryLifecycle';
+import { qualifyReferralsForUser } from '@/lib/referral/qualify';
 
 type EntryRow = {
   id: string;
@@ -174,6 +175,10 @@ export async function POST(request: NextRequest) {
 
         await refreshUserEntryStatuses(user.id);
 
+        if (type === 'smart_meter_connect') {
+          await qualifyReferralsForUser(user.id);
+        }
+
         const updatedEntry = updated as any;
 
         return NextResponse.json({
@@ -199,6 +204,10 @@ export async function POST(request: NextRequest) {
           } as any,
         });
         await refreshUserEntryStatuses(user.id);
+
+        if (type === 'smart_meter_connect') {
+          await qualifyReferralsForUser(user.id);
+        }
       }
 
       return NextResponse.json({
@@ -228,6 +237,10 @@ export async function POST(request: NextRequest) {
     });
 
     await refreshUserEntryStatuses(user.id);
+
+    if (type === 'smart_meter_connect') {
+      await qualifyReferralsForUser(user.id);
+    }
 
     const createdEntry = entry as any;
 

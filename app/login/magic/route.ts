@@ -76,31 +76,34 @@ export async function GET(req: Request) {
     // Process referral if token exists and user is new
     if (referrerToken && isNewUser) {
       const referralData = verifyReferralToken(referrerToken);
-      
+
       if (referralData && referralData.userId !== user.id) {
-        // Check if referral already exists
-        const existingReferral = await db.referral.findFirst({
+        const prismaAny = db as any;
+        const existingReferral = await prismaAny.referral.findFirst({
           where: {
             referredById: referralData.userId,
             referredEmail: normalizedEmail,
           },
         });
 
-        if (!existingReferral) {
-          // Create referral record
-          await db.referral.create({
+        if (existingReferral) {
+          await prismaAny.referral.update({
+            where: { id: existingReferral.id },
+            data: {
+              referredUserId: user.id,
+              status:
+                existingReferral.status === 'QUALIFIED'
+                  ? existingReferral.status
+                  : 'PENDING',
+            },
+          });
+        } else {
+          await prismaAny.referral.create({
             data: {
               referredById: referralData.userId,
               referredEmail: normalizedEmail,
-            },
-          });
-
-          // Award 1 entry to the referrer
-          await db.entry.create({
-            data: {
-              userId: referralData.userId,
-              type: 'referral',
-              amount: 1,
+              referredUserId: user.id,
+              status: 'PENDING',
             },
           });
         }

@@ -17,6 +17,7 @@ model User {
   entries           Entry[]            @relation("UserEntries")
   jackpotPayouts    JackpotPayout[]
   referrals         Referral[]         @relation("UserReferrals")
+  incomingReferrals Referral[]         @relation("UserReferralInvitee")
   sessions          Session[]
   usage             UsageData[]
   profile           UserProfile?
@@ -160,8 +161,19 @@ model Referral {
   id            String   @id @default(cuid())
   referredById  String
   referredEmail String
+  referredUserId String?
+  status         ReferralStatus @default(PENDING)
+  qualifiedAt    DateTime?
+  entryAwardedAt DateTime?
   createdAt     DateTime @default(now())
   referredBy    User     @relation("UserReferrals", fields: [referredById], references: [id])
+  referredUser  User?    @relation("UserReferralInvitee", fields: [referredUserId], references: [id])
+  entry         Entry?   @relation("ReferralEntry")
+
+  @@index([referredById])
+  @@index([referredEmail])
+  @@index([referredUserId])
+  @@index([status])
 }
 
 model Entry {
@@ -173,6 +185,8 @@ model Entry {
   user      User     @relation("UserEntries", fields: [userId], references: [id])
   houseId   String?
   house     HouseAddress? @relation(fields: [houseId], references: [id])
+  referralId String? @unique
+  referral   Referral?    @relation("ReferralEntry", fields: [referralId], references: [id])
   status        EntryStatus @default(ACTIVE)
   expiresAt     DateTime?
   lastValidated DateTime?
@@ -185,6 +199,7 @@ model Entry {
   @@index([houseId])
   @@index([expiresAt])
   @@index([status])
+  @@index([referralId])
   @@unique([manualUsageId])
 }
 
@@ -239,6 +254,12 @@ enum EntryStatus {
   ACTIVE
   EXPIRING_SOON
   EXPIRED
+}
+
+enum ReferralStatus {
+  PENDING
+  QUALIFIED
+  CANCELLED
 }
 
 enum TestimonialStatus {
