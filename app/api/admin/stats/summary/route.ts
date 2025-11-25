@@ -1,7 +1,16 @@
+import { Prisma } from '@prisma/client';
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
+
+function isTestimonialTableMissing(error: unknown) {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === 'P2021' &&
+    /TestimonialSubmission/i.test(error.message)
+  );
+}
 
 export async function GET() {
   try {
@@ -16,8 +25,6 @@ export async function GET() {
       pendingSmtRevocations,
       smtUserResults,
       manualUserResults,
-      totalTestimonials,
-      pendingTestimonials,
     ] = await Promise.all([
       prisma.user.count(),
       prisma.smtAuthorization.count({
@@ -43,10 +50,6 @@ export async function GET() {
         select: { userId: true },
         distinct: ['userId'],
       }),
-      prismaAny.testimonialSubmission.count(),
-      prismaAny.testimonialSubmission.count({
-        where: { status: 'PENDING' },
-      }),
     ]);
 
     const usageUserSet = new Set<string>();
@@ -55,6 +58,23 @@ export async function GET() {
     }
     for (const record of manualUserResults) {
       usageUserSet.add(record.userId);
+    }
+
+    let totalTestimonials = 0;
+    let pendingTestimonials = 0;
+
+    try {
+      totalTestimonials = await prismaAny.testimonialSubmission.count();
+      pendingTestimonials = await prismaAny.testimonialSubmission.count({
+        where: { status: 'PENDING' },
+      });
+    } catch (error) {
+      if (!isTestimonialTableMissing(error)) {
+        throw error;
+      }
+      if (process.env.NODE_ENV !== 'production') {
+        console.warn('[admin stats] Testimonial table missing; counters defaulting to zero.');
+      }
     }
 
     return NextResponse.json({

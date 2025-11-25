@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
@@ -6,6 +7,14 @@ import { ProfileAddressSection } from "@/components/profile/ProfileAddressSectio
 import { ProfileTestimonialCard } from "@/components/profile/ProfileTestimonialCard";
 import { RevokeSmartMeterButton } from "@/components/profile/RevokeSmartMeterButton";
 const COMMISSION_STATUS_ALLOWLIST = ["pending", "submitted", "approved", "completed", "paid"];
+
+function isTestimonialTableMissing(error: unknown) {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === "P2021" &&
+    /TestimonialSubmission/i.test(error.message)
+  );
+}
 
 
 export const dynamic = "force-dynamic";
@@ -219,7 +228,7 @@ export default async function ProfilePage() {
     entries: house.entries,
   }));
 
-  const [currentPlan, qualifyingCommission, testimonialSubmission] = await Promise.all([
+  const [currentPlan, qualifyingCommission] = await Promise.all([
     prismaAny.utilityPlan.findFirst({
       where: { userId: user.id, isCurrent: true },
       select: { id: true },
@@ -236,18 +245,34 @@ export default async function ProfilePage() {
       },
       select: { id: true },
     }),
-    prismaAny.testimonialSubmission.findFirst({
+  ]);
+
+  let testimonialSubmission: {
+    status: string;
+    content: string;
+    submittedAt: Date;
+    entryAwardedAt: Date | null;
+  } | null = null;
+
+  try {
+    testimonialSubmission = await prismaAny.testimonialSubmission.findFirst({
       where: { userId: user.id },
       orderBy: { submittedAt: "desc" },
       select: {
-        id: true,
         status: true,
         content: true,
         submittedAt: true,
         entryAwardedAt: true,
       },
-    }),
-  ]);
+    });
+  } catch (error) {
+    if (!isTestimonialTableMissing(error)) {
+      throw error;
+    }
+    if (process.env.NODE_ENV !== "production") {
+      console.warn("[profile] Skipping testimonial lookup; table missing.");
+    }
+  }
 
   const testimonialEligible = Boolean(currentPlan) || Boolean(qualifyingCommission);
   const testimonialSummary = testimonialSubmission

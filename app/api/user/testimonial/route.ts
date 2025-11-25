@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import { normalizeEmail } from '@/lib/utils/email';
 import { refreshUserEntryStatuses } from '@/lib/hitthejackwatt/entryLifecycle';
@@ -9,6 +10,14 @@ export const dynamic = 'force-dynamic';
 const COMMISSION_STATUS_ALLOWLIST = ['pending', 'submitted', 'approved', 'completed', 'paid'];
 const TESTIMONIAL_STATUS_REJECTED = 'REJECTED';
 const TESTIMONIAL_STATUS_PENDING = 'PENDING';
+
+function isTestimonialTableMissing(error: unknown) {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === 'P2021' &&
+    /TestimonialSubmission/i.test(error.message)
+  );
+}
 
 function sanitizeContent(value: unknown): string {
   if (typeof value !== 'string') {
@@ -57,7 +66,7 @@ export async function POST(request: NextRequest) {
 
     const prismaAny = prisma as any;
 
-    const [qualifyingCommission, currentPlan, existingSubmission] = await Promise.all([
+    const [qualifyingCommission, currentPlan] = await Promise.all([
       prisma.commissionRecord.findFirst({
         where: {
           userId: user.id,
@@ -74,10 +83,6 @@ export async function POST(request: NextRequest) {
         where: { userId: user.id, isCurrent: true },
         select: { id: true },
       }),
-      prismaAny.testimonialSubmission.findFirst({
-        where: { userId: user.id },
-        orderBy: { submittedAt: 'desc' },
-      }),
     ]);
 
     if (!qualifyingCommission && !currentPlan) {
@@ -88,6 +93,29 @@ export async function POST(request: NextRequest) {
         },
         { status: 403 },
       );
+    }
+
+    let existingSubmission: {
+      id: string;
+      status: string;
+    } | null = null;
+
+    try {
+      existingSubmission = await prismaAny.testimonialSubmission.findFirst({
+        where: { userId: user.id },
+        orderBy: { submittedAt: 'desc' },
+      });
+    } catch (error) {
+      if (isTestimonialTableMissing(error)) {
+        return NextResponse.json(
+          {
+            error:
+              'Testimonials are not enabled yet. Please contact an administrator to run the latest database migration.',
+          },
+          { status: 503 },
+        );
+      }
+      throw error;
     }
 
     if (existingSubmission && existingSubmission.status !== TESTIMONIAL_STATUS_REJECTED) {
