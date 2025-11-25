@@ -35,10 +35,27 @@ export default function BenefitsPage() {
 
         <div className="relative z-10 max-w-4xl mx-auto text-center">
           <h1 className="text-4xl md:text-6xl font-bold text-brand-white mb-6">
-            Why Join <span className="text-brand-blue">HitTheJackWatt™</span>?
+            Why Join{' '}
+            <a
+              href="https://www.hitthejackwatt.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-brand-blue transition hover:text-brand-cyan"
+            >
+              HitTheJackWatt™
+            </a>
+            ?
           </h1>
           <p className="text-xl text-brand-white/90 max-w-3xl mx-auto leading-relaxed">
-            HitTheJackWatt™ rewards smart energy decisions—no pressure, no sales, just savings and prizes that grow with the community.
+            <a
+              href="https://www.hitthejackwatt.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-semibold text-brand-blue transition hover:text-brand-cyan"
+            >
+              HitTheJackWatt™
+            </a>{' '}
+            rewards smart energy decisions—no pressure, no sales, just savings and prizes that grow with the community.
           </p>
         </div>
       </section>

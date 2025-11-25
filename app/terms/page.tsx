@@ -22,8 +22,17 @@ export default function TermsOfServicePage() {
         <div className="bg-gradient-to-br from-brand-blue/5 to-brand-cyan/10 p-8 rounded-2xl border border-brand-blue/10 backdrop-blur-sm text-brand-white">
           <SectionTitle>1. Acceptance of Terms</SectionTitle>
           <Paragraph>
-            By accessing or using HitTheJackWatt™.com or the IntelliWatt™ portal, you agree to be bound by these Terms of
-            Service and our Privacy Policy. If you do not agree, please do not use the website or related services.
+            By accessing or using{' '}
+            <a
+              href="https://www.hitthejackwatt.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-semibold text-brand-blue underline decoration-transparent transition hover:decoration-brand-blue"
+            >
+              HitTheJackWatt™.com
+            </a>{' '}
+            or the IntelliWatt™ portal, you agree to be bound by these Terms of Service and our Privacy Policy. If you do not
+            agree, please do not use the website or related services.
           </Paragraph>
 
           <SectionTitle>2. Use of the Site</SectionTitle>
@@ -34,7 +43,16 @@ export default function TermsOfServicePage() {
 
           <SectionTitle>3. Entries and Eligibility</SectionTitle>
           <Paragraph>
-            Participation in the HitTheJackWatt™ drawing system is governed by the{' '}
+            Participation in the{' '}
+            <a
+              href="https://www.hitthejackwatt.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-semibold text-brand-blue underline decoration-transparent transition hover:decoration-brand-blue"
+            >
+              HitTheJackWatt™
+            </a>{' '}
+            drawing system is governed by the{' '}
             <a href="/rules" className="text-brand-blue underline">
               Official Rules
             </a>

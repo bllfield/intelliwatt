@@ -8,8 +8,16 @@ const faqItems: { question: string; answer: ReactNode }[] = [
     question: 'What is HitTheJackWatt™?',
     answer: (
       <p>
-        HitTheJackWatt™ is a free monthly drawing where members can win cash by securely sharing their energy data and
-        referring friends. The jackpot grows as more people switch to a better plan through IntelliWatt™.
+        <a
+          href="https://www.hitthejackwatt.com"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-semibold text-[#00F0FF] underline drop-shadow-[0_0_12px_rgba(0,240,255,0.8)]"
+        >
+          HitTheJackWatt™
+        </a>{' '}
+        is a free monthly drawing where members can win cash by securely sharing their energy data and referring friends.
+        The jackpot grows as more people switch to a better plan through IntelliWatt™.
       </p>
     ),
   },
@@ -75,10 +83,27 @@ const faqItems: { question: string; answer: ReactNode }[] = [
             IntelliWatt™
           </a>{' '}
           is the secure user portal where your entries, insights, and plan recommendations live. When you log in using a
-          magic link you land on the IntelliWatt™ dashboard—the brains behind HitTheJackWatt™.
+          magic link you land on the IntelliWatt™ dashboard—the brains behind{' '}
+          <a
+            href="https://www.hitthejackwatt.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-semibold text-[#00F0FF] underline drop-shadow-[0_0_12px_rgba(0,240,255,0.8)]"
+          >
+            HitTheJackWatt™
+          </a>
+          .
         </p>
         <p>
-          HitTheJackWatt™ and{' '}
+          <a
+            href="https://www.hitthejackwatt.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-semibold text-[#00F0FF] underline drop-shadow-[0_0_12px_rgba(0,240,255,0.8)]"
+          >
+            HitTheJackWatt™
+          </a>{' '}
+          and{' '}
           <a
             href="https://www.intelli-watt.com"
             className="font-semibold text-[#00F0FF] underline drop-shadow-[0_0_12px_rgba(0,240,255,0.8)]"
@@ -229,6 +254,31 @@ const faqItems: { question: string; answer: ReactNode }[] = [
 ];
 
 export default function FAQPage() {
+  const renderQuestion = (text: string) => {
+    if (!text.includes('HitTheJackWatt')) {
+      return text;
+    }
+
+    const parts = text.split(/(HitTheJackWatt™(?:\.com)?)/g);
+
+    return parts.map((part, index) => {
+      if (/^HitTheJackWatt™(?:\.com)?$/.test(part)) {
+        return (
+          <a
+            key={`htjw-${index}`}
+            href="https://www.hitthejackwatt.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-semibold text-[#00F0FF] underline drop-shadow-[0_0_12px_rgba(0,240,255,0.8)]"
+          >
+            {part}
+          </a>
+        );
+      }
+
+      return part;
+    });
+  };
 
   return (
     <div className="min-h-screen bg-brand-white">
@@ -259,7 +309,7 @@ export default function FAQPage() {
                 className="bg-brand-navy p-8 rounded-2xl border border-brand-blue/40 shadow-[0_20px_60px_rgba(0,0,0,0.45)] hover:border-brand-blue/80 transition-all duration-300"
               >
                 <h3 className="text-2xl font-bold text-[#00F0FF] drop-shadow-[0_0_12px_rgba(0,240,255,0.6)] mb-4">
-                  {question}
+                  {renderQuestion(question)}
                 </h3>
                 <div className="text-[#00E0FF] text-lg leading-relaxed space-y-3 drop-shadow-[0_0_10px_rgba(0,224,255,0.35)]">
                   {answer}

@@ -43,14 +43,35 @@ export function CurrentRateDetailsForm({
         <h1 className="text-2xl font-semibold">
           Current Rate Details{" "}
           <span className="text-sm font-normal text-slate-500">
-            (Optional, +1 HitTheJackWatt entry)
+            (Optional, +1{' '}
+            <a
+              href="https://www.hitthejackwatt.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-semibold text-brand-blue underline decoration-transparent transition hover:decoration-brand-blue"
+            >
+              HitTheJackWatt™
+            </a>{' '}
+            entry)
           </span>
         </h1>
         <p className="text-sm text-slate-600">
           Add your current electricity plan so we can show how your costs will change when your
           plan comes due, assuming similar usage. If you skip this step, we&apos;ll still analyze
           your real usage and recommend the best plans. Completing it earns{" "}
-          <strong>+1 HitTheJackWatt jackpot entry</strong> and unlocks a richer comparison.
+          <strong>
+            +1{' '}
+            <a
+              href="https://www.hitthejackwatt.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-brand-blue underline decoration-transparent transition hover:decoration-brand-blue"
+            >
+              HitTheJackWatt™
+            </a>{" "}
+            jackpot entry
+          </strong>{" "}
+          and unlocks a richer comparison.
         </p>
       </div>
 

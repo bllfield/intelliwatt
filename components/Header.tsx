@@ -37,15 +37,20 @@ export default function Header() {
             </Link>
 
             <div className="hidden items-center gap-4 border-l border-brand-blue/20 pl-3 sm:flex">
-              <div className="relative h-[4.068rem] w-[11.3904rem]">
+              <a
+                href="https://www.hitthejackwatt.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="relative h-[4.068rem] w-[11.3904rem]"
+              >
                 <Image
                   src="/Hitthejackwatt-Logo.png"
-                  alt="HitTheJackWatt"
+                  alt="HitTheJackWatt™"
                   fill
                   className="object-contain"
                   priority
                 />
-              </div>
+              </a>
               <div className="flex flex-col items-center text-xs leading-tight">
                 <div className="font-semibold" style={{ color: '#39FF14' }}>
                   Total Entries

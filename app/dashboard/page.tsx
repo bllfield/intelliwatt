@@ -69,15 +69,20 @@ export default function DashboardPage() {
             </p>
             {/* Smart Meter + Referral CTA */}
             <div className="mb-8 flex flex-col items-center gap-4 text-center">
-              <span className="relative inline-block h-24 w-full max-w-xs sm:h-28 sm:max-w-sm md:h-24 md:w-64">
+              <a
+                href="https://www.hitthejackwatt.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="relative inline-block h-24 w-full max-w-xs sm:h-28 sm:max-w-sm md:h-24 md:w-64"
+              >
                 <Image
                   src="/Hitthejackwatt-Logo.png"
-                  alt="HitTheJackWatt"
+                  alt="HitTheJackWatt™"
                   fill
                   className="object-contain"
                   priority
                 />
-              </span>
+              </a>
               <div className="inline-flex w-full max-w-xl flex-col items-center gap-2 rounded-2xl border border-[#39FF14]/40 bg-[#39FF14]/10 px-6 py-4 text-center shadow-lg shadow-[#39FF14]/10 ring-1 ring-[#39FF14]/30">
                 <span className="text-lg font-extrabold leading-tight text-brand-white md:text-xl">
                   <span style={{ color: '#39FF14' }}>⚡ Connect your smart meter data</span>

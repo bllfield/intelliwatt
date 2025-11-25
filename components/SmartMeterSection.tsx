@@ -90,7 +90,14 @@ export default function SmartMeterSection({ houseId }: SmartMeterSectionProps) {
           <div className="absolute inset-0 bg-black/50 flex items-center justify-center p-4">
             <div className="bg-white text-brand-navy rounded-xl p-6 max-w-sm w-full shadow-xl">
               <div className="flex items-center gap-3 mb-3">
-                <img src="/Hitthejackwatt-Logo.png" alt="HitTheJackWatt" className="w-10 h-6 object-contain" />
+                <a
+                  href="https://www.hitthejackwatt.com"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex"
+                >
+                  <img src="/Hitthejackwatt-Logo.png" alt="HitTheJackWatt™" className="w-10 h-6 object-contain" />
+                </a>
                 <h3 className="text-xl font-bold">Jackpot entries earned!</h3>
               </div>
               <p className="mb-4">You just earned <span className="font-bold" style={{ color: '#39FF14' }}>1 jackpot entry</span> for connecting your smart meter.</p>

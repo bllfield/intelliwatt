@@ -13,7 +13,17 @@ export default function CurrentRateDetailsPage() {
             Current Rate <span className="text-brand-blue">Details</span>
           </h1>
           <p className="text-xl text-brand-white/90 max-w-3xl mx-auto leading-relaxed">
-            Share your current electricity plan so IntelliWatt™ can highlight how costs shift when the contract renews. Completing this step earns one HitTheJackWatt™ entry.
+            Share your current electricity plan so IntelliWatt™ can highlight how costs shift when the contract renews.
+            Completing this step earns one{' '}
+            <a
+              href="https://www.hitthejackwatt.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-semibold text-brand-blue underline decoration-transparent transition hover:decoration-brand-blue"
+            >
+              HitTheJackWatt™
+            </a>{' '}
+            entry.
           </p>
         </div>
       </section>

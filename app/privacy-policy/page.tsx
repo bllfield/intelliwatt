@@ -23,8 +23,16 @@ export default function PrivacyPolicy() {
           <Paragraph>
             IntelliWatt™ is built to save you money—not guess about your bill. To recommend the right electricity plan for
             <em> your</em> home, we need the same information every provider, broker, or advisor needs: your real usage
-            data. This policy explains how we collect, use, and safeguard that information for both IntelliWatt™ and the
-            HitTheJackWatt™ rewards program.
+            data. This policy explains how we collect, use, and safeguard that information for both IntelliWatt™ and the{' '}
+            <a
+              href="https://www.hitthejackwatt.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-semibold text-brand-blue underline decoration-transparent transition hover:decoration-brand-blue"
+            >
+              HitTheJackWatt™
+            </a>{' '}
+            rewards program.
           </Paragraph>
 
           <SectionTitle>How We Use Your Electricity Usage Data</SectionTitle>
@@ -64,8 +72,17 @@ export default function PrivacyPolicy() {
 
           <SectionTitle>Data Sharing and Privacy</SectionTitle>
           <Paragraph>
-            We take your privacy seriously. Here is how we handle your electricity usage data in connection with
-            IntelliWatt™ and HitTheJackWatt™:
+            We take your privacy seriously. Here is how we handle your electricity usage data in connection with IntelliWatt™
+            and{' '}
+            <a
+              href="https://www.hitthejackwatt.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-semibold text-brand-blue underline decoration-transparent transition hover:decoration-brand-blue"
+            >
+              HitTheJackWatt™
+            </a>
+            :
           </Paragraph>
           <ul className="list-disc list-inside space-y-2 mb-4">
             <li>
@@ -103,7 +120,18 @@ export default function PrivacyPolicy() {
             <li>
               Analyze your electricity usage and compare plans available through our provider network to estimate savings.
             </li>
-            <li>Calculate and manage entries in the HitTheJackWatt™ monthly drawings.</li>
+            <li>
+              Calculate and manage entries in the{' '}
+              <a
+                href="https://www.hitthejackwatt.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-semibold text-brand-blue underline decoration-transparent transition hover:decoration-brand-blue"
+              >
+                HitTheJackWatt™
+              </a>{' '}
+              monthly drawings.
+            </li>
             <li>Notify you of drawing results, new ways to earn entries, or meaningful plan changes.</li>
             <li>Inform you of cost-saving energy opportunities, including solar or efficiency upgrades when available.</li>
             <li>Improve the IntelliWatt™ experience using aggregated, de-identified insights.</li>

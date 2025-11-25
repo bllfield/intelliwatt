@@ -15,7 +15,15 @@ export default function RulesPage() {
 
       <main className="relative max-w-4xl mx-auto px-6 py-12">
         <h1 className="text-4xl font-bold mb-8 text-brand-blue">
-          HitTheJackWatt™ Monthly Jackpot – Official Rules
+          <a
+            href="https://www.hitthejackwatt.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline decoration-transparent transition hover:decoration-brand-blue"
+          >
+            HitTheJackWatt™
+          </a>{' '}
+          Monthly Jackpot – Official Rules
         </h1>
 
         <div className="bg-gradient-to-br from-brand-blue/5 to-brand-cyan/10 p-8 rounded-2xl border border-brand-blue/10 backdrop-blur-sm text-brand-white space-y-6">
@@ -42,8 +50,16 @@ export default function RulesPage() {
 
           <SectionTitle>3. How to Enter</SectionTitle>
           <p>
-            There are multiple ways to earn entries in the HitTheJackWatt™ Sweepstakes. No purchase or plan switch
-            is required to enter or win. Void where prohibited.
+            There are multiple ways to earn entries in the{' '}
+            <a
+              href="https://www.hitthejackwatt.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-semibold text-brand-blue underline decoration-transparent transition hover:decoration-brand-blue"
+            >
+              HitTheJackWatt™
+            </a>{' '}
+            Sweepstakes. No purchase or plan switch is required to enter or win. Void where prohibited.
           </p>
 
           <SubTitle>3.1 Usage-Based Entry (Primary Methods)</SubTitle>
