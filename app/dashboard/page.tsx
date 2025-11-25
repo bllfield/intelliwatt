@@ -2,9 +2,306 @@
 
 import Image from 'next/image';
 import Link from 'next/link';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type ReactNode } from 'react';
 import SmartMeterSection from '../../components/SmartMeterSection';
 import QuickAddressEntry from '../../components/QuickAddressEntry';
+
+const ICON_COLOR = '#00F0FF';
+
+const IconChip = ({ children }: { children: ReactNode }) => (
+  <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl border border-[#00F0FF]/40 bg-brand-navy/70 shadow-[0_0_25px_rgba(0,240,255,0.25)] transition-all duration-300 group-hover:border-[#00F0FF] group-hover:shadow-[0_0_30px_rgba(0,240,255,0.45)]">
+    {children}
+  </div>
+);
+
+const ApiIcon = () => (
+  <svg
+    className="h-8 w-8 text-[#00F0FF]"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={1.8}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <circle cx={6} cy={6} r={2.4} />
+    <circle cx={18} cy={6} r={2.4} />
+    <circle cx={12} cy={17.5} r={2.6} />
+    <path d="M7.4 7.5l3.3 5.9" />
+    <path d="M16.6 7.5l-3.3 5.9" />
+    <path d="M6 8.7v5.9" />
+    <path d="M18 8.7v5.9" />
+  </svg>
+);
+
+const UsageIcon = () => (
+  <svg
+    className="h-8 w-8 text-[#00F0FF]"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={1.8}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M4 19h16" />
+    <path d="M6 14l3.5-4.5 3 3.5L17 7l1.5 2.8" />
+  </svg>
+);
+
+const CurrentRateIcon = () => (
+  <svg
+    className="h-8 w-8 text-[#00F0FF]"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={1.8}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M7 4h10a2 2 0 012 2v12a2 2 0 01-2 2H7a2 2 0 01-2-2V6a2 2 0 012-2z" />
+    <path d="M9 8h6" />
+    <path d="M9 12h6" />
+    <path d="M9 16h3" />
+  </svg>
+);
+
+const PlansIcon = () => (
+  <svg
+    className="h-8 w-8 text-[#00F0FF]"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={1.8}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <rect x={6} y={5} width={12} height={7} rx={1.5} />
+    <path d="M5 12h14v7a1 1 0 01-1 1H6a1 1 0 01-1-1v-7z" />
+  </svg>
+);
+
+const HomeIcon = () => (
+  <svg
+    className="h-8 w-8 text-[#00F0FF]"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={1.8}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M4 11l8-6 8 6" />
+    <path d="M6 10v9a1 1 0 001 1h4v-5h2v5h4a1 1 0 001-1v-9" />
+  </svg>
+);
+
+const AppliancesIcon = () => (
+  <svg
+    className="h-8 w-8 text-[#00F0FF]"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={1.8}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M8 3h8v6H8z" />
+    <path d="M6 9h12v9a2 2 0 01-2 2H8a2 2 0 01-2-2z" />
+    <path d="M10 13h4" />
+    <path d="M10 16h4" />
+  </svg>
+);
+
+const UpgradesIcon = () => (
+  <svg
+    className="h-8 w-8 text-[#00F0FF]"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={1.8}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M12 3v12" />
+    <path d="M8.5 7.5L12 3l3.5 4.5" />
+    <path d="M6 15h12v3a2 2 0 01-2 2H8a2 2 0 01-2-2z" />
+  </svg>
+);
+
+const AnalysisIcon = () => (
+  <svg
+    className="h-8 w-8 text-[#00F0FF]"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={1.8}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <circle cx={10.5} cy={10.5} r={5.5} />
+    <path d="M15.5 15.5L19 19" />
+    <path d="M8.5 10.5l1.8 1.8 3-3.2" />
+  </svg>
+);
+
+const OptimalEnergyIcon = () => (
+  <svg
+    className="h-8 w-8 text-[#00F0FF]"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={1.8}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M13 2L6 13h5v9l7-11h-5z" />
+  </svg>
+);
+
+const EntriesIcon = () => (
+  <svg
+    className="h-8 w-8 text-[#00F0FF]"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={1.8}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M5 6a2 2 0 012-2h10a2 2 0 012 2v3a1 1 0 01-1 1h0a2 2 0 000 4h0a1 1 0 011 1v3a2 2 0 01-2 2H7a2 2 0 01-2-2z" />
+    <path d="M9 9h6" />
+    <path d="M9 15h4" />
+  </svg>
+);
+
+const ReferralsIcon = () => (
+  <svg
+    className="h-8 w-8 text-[#00F0FF]"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={1.8}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M12 14a4 4 0 014 4v1.5H8V18a4 4 0 014-4z" />
+    <path d="M12 11a3 3 0 100-6 3 3 0 000 6z" />
+    <path d="M5 18.5V18a4 4 0 013-3.87" />
+    <path d="M19 18.5V18a4 4 0 00-3-3.87" />
+    <path d="M7.5 7.5a2.5 2.5 0 115 0" />
+  </svg>
+);
+
+const ProfileIcon = () => (
+  <svg
+    className="h-8 w-8 text-[#00F0FF]"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={1.8}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M12 12a4 4 0 100-8 4 4 0 000 8z" />
+    <path d="M6 20a6 6 0 0112 0" />
+  </svg>
+);
+
+type DashboardCard = {
+  title: string;
+  description: string;
+  cta: string;
+  href: string;
+  Icon: () => JSX.Element;
+};
+
+const DASHBOARD_CARDS: DashboardCard[] = [
+  {
+    title: 'API Connect',
+    description: 'Connect third-party services and integrations',
+    cta: 'Manage APIs',
+    href: '/dashboard/api',
+    Icon: ApiIcon,
+  },
+  {
+    title: 'Usage',
+    description: 'View detailed usage patterns and insights',
+    cta: 'View Analysis',
+    href: '/dashboard/usage',
+    Icon: UsageIcon,
+  },
+  {
+    title: 'Current Rate',
+    description: 'Upload your bill or enter plan details to earn 1 entry',
+    cta: 'Add Current Rate',
+    href: '/dashboard/current-rate',
+    Icon: CurrentRateIcon,
+  },
+  {
+    title: 'Plans',
+    description: 'Compare plans and find the best rates',
+    cta: 'Compare Plans',
+    href: '/dashboard/plans',
+    Icon: PlansIcon,
+  },
+  {
+    title: 'Home Info',
+    description: 'Keep your address and preferences current',
+    cta: 'Update Home Info',
+    href: '/dashboard/home',
+    Icon: HomeIcon,
+  },
+  {
+    title: 'Appliances',
+    description: 'Track individual appliance usage',
+    cta: 'Manage Appliances',
+    href: '/dashboard/appliances',
+    Icon: AppliancesIcon,
+  },
+  {
+    title: 'Upgrades',
+    description: 'Explore premium features',
+    cta: 'View Upgrades',
+    href: '/dashboard/upgrades',
+    Icon: UpgradesIcon,
+  },
+  {
+    title: 'Analysis',
+    description: 'Dive into detailed energy analytics',
+    cta: 'Analyze Usage',
+    href: '/dashboard/analysis',
+    Icon: AnalysisIcon,
+  },
+  {
+    title: 'Optimal Energy',
+    description: 'See IntelliWatt’s recommended optimal plan for your home',
+    cta: 'View Recommendation',
+    href: '/dashboard/optimal',
+    Icon: OptimalEnergyIcon,
+  },
+  {
+    title: 'Entries',
+    description: 'Track your jackpot entries and rewards',
+    cta: 'View Entries',
+    href: '/dashboard/entries',
+    Icon: EntriesIcon,
+  },
+  {
+    title: 'Referrals',
+    description: 'Earn rewards by referring friends',
+    cta: 'Invite Friends',
+    href: '/dashboard/referrals',
+    Icon: ReferralsIcon,
+  },
+  {
+    title: 'Profile',
+    description: 'Update your contact details and notification preferences',
+    cta: 'Manage Profile',
+    href: '/dashboard/profile',
+    Icon: ProfileIcon,
+  },
+];
 
 export default function DashboardPage() {
   const [mounted, setMounted] = useState(false);
@@ -120,155 +417,30 @@ export default function DashboardPage() {
 
 
       {/* Dashboard Grid */}
-      <section className="py-16 px-4 bg-brand-white">
-            <div className="max-w-6xl mx-auto">
-              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8 text-center">
-                {/* API Connect */}
-                <div className="bg-brand-white p-8 rounded-2xl border-2 border-brand-navy shadow-lg hover:border-brand-blue transition-all duration-300 group">
-                  <div className="w-16 h-16 bg-brand-navy rounded-full flex items-center justify-center mb-6 mx-auto group-hover:scale-110 transition-transform duration-300">
-                    <span className="text-brand-cyan text-2xl">🔌</span>
-                  </div>
-                  <h3 className="text-2xl font-bold text-brand-navy mb-4">API Connect</h3>
-                  <p className="text-brand-navy mb-6 mx-auto max-w-xs">Connect third-party services and integrations</p>
-                  <Link href="/dashboard/api" className="inline-block bg-brand-navy text-brand-blue font-bold py-3 px-6 rounded-xl border-2 border-brand-navy hover:border-brand-blue transition-all duration-300 mx-auto">
-                    Manage APIs
-                  </Link>
-                </div>
-
-                {/* Usage */}
-                <div className="bg-brand-white p-8 rounded-2xl border-2 border-brand-navy shadow-lg hover:border-brand-blue transition-all duration-300 group">
-                  <div className="w-16 h-16 bg-brand-navy rounded-full flex items-center justify-center mb-6 mx-auto group-hover:scale-110 transition-transform duration-300">
-                    <span className="text-brand-cyan text-2xl">📊</span>
-                  </div>
-                  <h3 className="text-2xl font-bold text-brand-navy mb-4">Usage</h3>
-                  <p className="text-brand-navy mb-6 mx-auto max-w-xs">View detailed usage patterns and insights</p>
-                  <Link href="/dashboard/usage" className="inline-block bg-brand-navy text-brand-blue font-bold py-3 px-6 rounded-xl border-2 border-brand-navy hover:border-brand-blue transition-all duration-300 mx-auto">
-                    View Analysis
-                  </Link>
-                </div>
-
-                {/* Current Rate */}
-                <div className="bg-brand-white p-8 rounded-2xl border-2 border-brand-navy shadow-lg hover:border-brand-blue transition-all duration-300 group">
-                  <div className="w-16 h-16 bg-brand-navy rounded-full flex items-center justify-center mb-6 mx-auto group-hover:scale-110 transition-transform duration-300">
-                    <span className="text-brand-cyan text-2xl">🧾</span>
-                  </div>
-                  <h3 className="text-2xl font-bold text-brand-navy mb-4">Current Rate</h3>
-                  <p className="text-brand-navy mb-6 mx-auto max-w-xs">Upload your bill or enter plan details to earn 1 entry</p>
-                  <Link href="/dashboard/current-rate" className="inline-block bg-brand-navy text-brand-blue font-bold py-3 px-6 rounded-xl border-2 border-brand-navy hover:border-brand-blue transition-all duration-300 mx-auto">
-                    Add Current Rate
-                  </Link>
-                </div>
-
-                {/* Plans */}
-                <div className="bg-brand-white p-8 rounded-2xl border-2 border-brand-navy shadow-lg hover:border-brand-blue transition-all duration-300 group">
-                  <div className="w-16 h-16 bg-brand-navy rounded-full flex items-center justify-center mb-6 mx-auto group-hover:scale-110 transition-transform duration-300">
-                    <span className="text-brand-cyan text-2xl">☀️</span>
-                  </div>
-                  <h3 className="text-2xl font-bold text-brand-navy mb-4">Plans</h3>
-                  <p className="text-brand-navy mb-6 mx-auto max-w-xs">Compare plans and find the best rates</p>
-                  <Link href="/dashboard/plans" className="inline-block bg-brand-navy text-brand-blue font-bold py-3 px-6 rounded-xl border-2 border-brand-navy hover:border-brand-blue transition-all duration-300 mx-auto">
-                    Compare Plans
-                  </Link>
-                </div>
-
-                {/* Home Info */}
-                <div className="bg-brand-white p-8 rounded-2xl border-2 border-brand-navy shadow-lg hover:border-brand-blue transition-all duration-300 group">
-                  <div className="w-16 h-16 bg-brand-navy rounded-full flex items-center justify-center mb-6 mx-auto group-hover:scale-110 transition-transform duration-300">
-                    <span className="text-brand-cyan text-2xl">🏡</span>
-                  </div>
-                  <h3 className="text-2xl font-bold text-brand-navy mb-4">Home Info</h3>
-                  <p className="text-brand-navy mb-6 mx-auto max-w-xs">Keep your address and preferences current</p>
-                  <Link href="/dashboard/home" className="inline-block bg-brand-navy text-brand-blue font-bold py-3 px-6 rounded-xl border-2 border-brand-navy hover:border-brand-blue transition-all duration-300 mx-auto">
-                    Update Home Info
-                  </Link>
-                </div>
-
-                {/* Appliances */}
-                <div className="bg-brand-white p-8 rounded-2xl border-2 border-brand-navy shadow-lg hover:border-brand-blue transition-all duration-300 group">
-                  <div className="w-16 h-16 bg-brand-navy rounded-full flex items-center justify-center mb-6 mx-auto group-hover:scale-110 transition-transform duration-300">
-                    <span className="text-brand-cyan text-2xl">🏠</span>
-                  </div>
-                  <h3 className="text-2xl font-bold text-brand-navy mb-4">Appliances</h3>
-                  <p className="text-brand-navy mb-6 mx-auto max-w-xs">Track individual appliance usage</p>
-                  <Link href="/dashboard/appliances" className="inline-block bg-brand-navy text-brand-blue font-bold py-3 px-6 rounded-xl border-2 border-brand-navy hover:border-brand-blue transition-all duration-300 mx-auto">
-                    Manage Appliances
-                  </Link>
-                </div>
-
-                {/* Upgrades */}
-                <div className="bg-brand-white p-8 rounded-2xl border-2 border-brand-navy shadow-lg hover:border-brand-blue transition-all duration-300 group">
-                  <div className="w-16 h-16 bg-brand-navy rounded-full flex items-center justify-center mb-6 mx-auto group-hover:scale-110 transition-transform duration-300">
-                    <span className="text-brand-cyan text-2xl">🚀</span>
-                  </div>
-                  <h3 className="text-2xl font-bold text-brand-navy mb-4">Upgrades</h3>
-                  <p className="text-brand-navy mb-6 mx-auto max-w-xs">Explore premium features</p>
-                  <Link href="/dashboard/upgrades" className="inline-block bg-brand-navy text-brand-blue font-bold py-3 px-6 rounded-xl border-2 border-brand-navy hover:border-brand-blue transition-all duration-300 mx-auto">
-                    View Upgrades
-                  </Link>
-                </div>
-
-                {/* Analysis */}
-                <div className="bg-brand-white p-8 rounded-2xl border-2 border-brand-navy shadow-lg hover:border-brand-blue transition-all duration-300 group">
-                  <div className="w-16 h-16 bg-brand-navy rounded-full flex items-center justify-center mb-6 mx-auto group-hover:scale-110 transition-transform duration-300">
-                    <span className="text-brand-cyan text-2xl">📈</span>
-                  </div>
-                  <h3 className="text-2xl font-bold text-brand-navy mb-4">Analysis</h3>
-                  <p className="text-brand-navy mb-6 mx-auto max-w-xs">Dive into detailed energy analytics</p>
-                  <Link href="/dashboard/analysis" className="inline-block bg-brand-navy text-brand-blue font-bold py-3 px-6 rounded-xl border-2 border-brand-navy hover:border-brand-blue transition-all duration-300 mx-auto">
-                    Analyze Usage
-                  </Link>
-                </div>
-
-                {/* Optimal Energy */}
-                <div className="bg-brand-white p-8 rounded-2xl border-2 border-brand-navy shadow-lg hover:border-brand-blue transition-all duration-300 group">
-                  <div className="w-16 h-16 bg-brand-navy rounded-full flex items-center justify-center mb-6 mx-auto group-hover:scale-110 transition-transform duration-300">
-                    <span className="text-brand-cyan text-2xl">⚡</span>
-                  </div>
-                  <h3 className="text-2xl font-bold text-brand-navy mb-4">Optimal Energy</h3>
-                  <p className="text-brand-navy mb-6 mx-auto max-w-xs">See IntelliWatt’s recommended optimal plan for your home</p>
-                  <Link href="/dashboard/optimal" className="inline-block bg-brand-navy text-brand-blue font-bold py-3 px-6 rounded-xl border-2 border-brand-navy hover:border-brand-blue transition-all duration-300 mx-auto">
-                    View Recommendation
-                  </Link>
-                </div>
-
-                {/* Entries */}
-                <div className="bg-brand-white p-8 rounded-2xl border-2 border-brand-navy shadow-lg hover:border-brand-blue transition-all duration-300 group">
-                  <div className="w-16 h-16 bg-brand-navy rounded-full flex items-center justify-center mb-6 mx-auto group-hover:scale-110 transition-transform duration-300">
-                    <span className="text-brand-cyan text-2xl">🎰</span>
-                  </div>
-                  <h3 className="text-2xl font-bold text-brand-navy mb-4">Entries</h3>
-                  <p className="text-brand-navy mb-6 mx-auto max-w-xs">Track your jackpot entries and rewards</p>
-                  <Link href="/dashboard/entries" className="inline-block bg-brand-navy text-brand-blue font-bold py-3 px-6 rounded-xl border-2 border-brand-navy hover:border-brand-blue transition-all duration-300 mx-auto">
-                    View Entries
-                  </Link>
-                </div>
-
-                {/* Referrals */}
-                <div className="bg-brand-white p-8 rounded-2xl border-2 border-brand-navy shadow-lg hover:border-brand-blue transition-all duration-300 group">
-                  <div className="w-16 h-16 bg-brand-navy rounded-full flex items-center justify-center mb-6 mx-auto group-hover:scale-110 transition-transform duration-300">
-                    <span className="text-brand-cyan text-2xl">👥</span>
-                  </div>
-                  <h3 className="text-2xl font-bold text-brand-navy mb-4">Referrals</h3>
-                  <p className="text-brand-navy mb-6 mx-auto max-w-xs">Earn rewards by referring friends</p>
-                  <Link href="/dashboard/referrals" className="inline-block bg-brand-navy text-brand-blue font-bold py-3 px-6 rounded-xl border-2 border-brand-navy hover:border-brand-blue transition-all duration-300 mx-auto">
-                    Invite Friends
-                  </Link>
-                </div>
-
-                {/* Profile */}
-                <div className="bg-brand-white p-8 rounded-2xl border-2 border-brand-navy shadow-lg hover:border-brand-blue transition-all duration-300 group">
-                  <div className="w-16 h-16 bg-brand-navy rounded-full flex items-center justify-center mb-6 mx-auto group-hover:scale-110 transition-transform duration-300">
-                    <span className="text-brand-cyan text-2xl">👤</span>
-                  </div>
-                  <h3 className="text-2xl font-bold text-brand-navy mb-4">Profile</h3>
-                  <p className="text-brand-navy mb-6 mx-auto max-w-xs">Update your contact details and notification preferences</p>
-                  <Link href="/dashboard/profile" className="inline-block bg-brand-navy text-brand-blue font-bold py-3 px-6 rounded-xl border-2 border-brand-navy hover:border-brand-blue transition-all duration-300 mx-auto">
-                    Manage Profile
-                  </Link>
-                </div>
+      <section className="bg-brand-white py-16 px-4">
+        <div className="mx-auto max-w-6xl">
+          <div className="grid gap-8 text-center md:grid-cols-2 lg:grid-cols-3">
+            {DASHBOARD_CARDS.map(({ title, description, cta, href, Icon }) => (
+              <div
+                key={title}
+                className="group rounded-2xl border border-[#00F0FF]/30 bg-brand-navy/95 p-8 shadow-[0_30px_60px_rgba(10,20,60,0.5)] transition-all duration-300 hover:border-[#00F0FF]/80 hover:shadow-[0_38px_80px_rgba(0,240,255,0.35)]"
+              >
+                <IconChip>
+                  <Icon />
+                </IconChip>
+                <h3 className="text-2xl font-semibold text-[#00F0FF] mb-3">{title}</h3>
+                <p className="text-base text-[#9DFBFF] mb-6 mx-auto max-w-xs">{description}</p>
+                <Link
+                  href={href}
+                  className="inline-flex items-center justify-center gap-2 rounded-full border border-[#00F0FF]/60 bg-transparent px-6 py-3 text-sm font-semibold uppercase tracking-wide text-[#00F0FF] transition-all duration-300 hover:border-[#00F0FF] hover:bg-[#00F0FF]/10"
+                >
+                  {cta}
+                </Link>
               </div>
-            </div>
-          </section>
+            ))}
+          </div>
+        </div>
+      </section>
 
 
       {/* Call to Action - Show if no address entered */}
