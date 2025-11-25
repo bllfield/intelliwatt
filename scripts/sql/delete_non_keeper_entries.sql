@@ -21,17 +21,7 @@ WHERE lower("email") IN (
 
 CREATE TEMP TABLE target_users AS
 SELECT id
-FROM "User"
-WHERE id NOT IN (SELECT id FROM keeper_users)
-UNION
-SELECT id
-FROM "User"
-WHERE lower("email") IN (
-  'test@intelliwatt.com',
-  'user@intelliwatt.com',
-  'demo@intelliwatt.com',
-  'sample@intelliwatt.com'
-);
+FROM "User";
 
 WITH deleted_entries AS (
   DELETE FROM "Entry"

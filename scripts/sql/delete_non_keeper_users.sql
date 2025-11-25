@@ -21,17 +21,7 @@ WHERE lower("email") IN (
 
 CREATE TEMP TABLE target_users AS
 SELECT id
-FROM "User"
-WHERE id NOT IN (SELECT id FROM keeper_users)
-UNION
-SELECT id
-FROM "User"
-WHERE lower("email") IN (
-  'test@intelliwatt.com',
-  'user@intelliwatt.com',
-  'demo@intelliwatt.com',
-  'sample@intelliwatt.com'
-);
+FROM "User";
 
 WITH entry_delete AS (
   DELETE FROM "Entry"
@@ -55,12 +45,12 @@ session_delete AS (
 ),
 commission_delete AS (
   DELETE FROM "CommissionRecord"
-  WHERE "userId" IN (SELECT id FROM non_keeper_users)
+  WHERE "userId" IN (SELECT id FROM target_users)
   RETURNING id
 ),
 jackpot_delete AS (
   DELETE FROM "JackpotPayout"
-  WHERE "userId" IN (SELECT id FROM non_keeper_users)
+  WHERE "userId" IN (SELECT id FROM target_users)
   RETURNING id
 ),
 referral_delete AS (
