@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-const benefits: Array<{ icon: string; text: string }> = [
+const benefits = [
   { icon: '🎯', text: 'Completely free to join—no purchases or commitments required.' },
   { icon: '💸', text: 'Earn entries by connecting Smart Meter Texas, uploading usage, and completing your profile details.' },
   { icon: '🔁', text: 'Keep profile entries active by refreshing your usage data at least every 12 months.' },
@@ -17,7 +17,7 @@ const benefits: Array<{ icon: string; text: string }> = [
   { icon: '📱', text: 'Optimized for mobile so you can check entries and insights from any device.' },
   { icon: '🧠', text: 'Powered by AI that blends usage, weather, and efficiency data for smarter guidance.' },
   { icon: '🎉', text: 'Prefer mail-in? The AMOE postcard option keeps entries available without sharing usage.' },
-];
+] as const satisfies Array<{ icon: string; text: string }>;
 
 const Section = ({ children }: { children: ReactNode }) => (
   <section className="py-16 px-4 bg-white">
@@ -48,12 +48,15 @@ export default function BenefitsPage() {
           {benefits.map((benefit) => (
             <div
               key={benefit.text}
-              className="flex items-start gap-4 rounded-2xl border border-brand-navy/10 bg-brand-navy/5 p-6 shadow-sm hover:border-brand-blue/40 transition-colors"
+              className="flex items-start gap-4 rounded-2xl border border-brand-blue/30 bg-brand-navy p-6 shadow-[0_15px_40px_rgba(15,23,42,0.3)] transition hover:border-brand-blue/60"
             >
-              <span className="text-3xl" aria-hidden>
+              <span
+                aria-hidden
+                className="mt-1 flex h-10 w-10 items-center justify-center rounded-full bg-brand-blue/20 text-lg text-brand-blue shadow-[0_10px_20px_rgba(59,130,246,0.35)]"
+              >
                 {benefit.icon}
               </span>
-              <p className="text-brand-navy leading-relaxed">{benefit.text}</p>
+              <p className="text-brand-blue/90 leading-relaxed">{benefit.text}</p>
             </div>
           ))}
         </div>
