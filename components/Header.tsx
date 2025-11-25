@@ -9,9 +9,12 @@ const navLinks = [
   { href: '/how-it-works', label: 'How It Works' },
   { href: '/benefits', label: 'Benefits' },
   { href: '/faq', label: 'FAQ' },
+  { href: '/security', label: 'Security' },
   { href: '/privacy-policy', label: 'Privacy' },
   { href: '/rules', label: 'Rules' },
 ];
+
+const AUTH_PATH = '/join';
 
 export default function Header() {
   const [isOpen, setIsOpen] = useState(false);
@@ -74,6 +77,15 @@ export default function Header() {
             ))}
           </nav>
 
+          <div className="hidden md:flex items-center">
+            <Link
+              href={AUTH_PATH}
+              className="inline-flex items-center rounded-full border border-brand-blue/40 px-4 py-2 text-sm font-semibold text-brand-blue transition hover:border-brand-blue hover:text-brand-white"
+            >
+              Join / Login
+            </Link>
+          </div>
+
           <button
             type="button"
             onClick={handleToggle}
@@ -101,6 +113,13 @@ export default function Header() {
                 {label}
               </Link>
             ))}
+            <Link
+              href={AUTH_PATH}
+              onClick={handleClose}
+              className="mt-2 rounded-md px-2 py-2 text-center font-semibold transition hover:bg-brand-blue/10 hover:text-brand-white"
+            >
+              Join / Login
+            </Link>
           </nav>
         ) : null}
       </div>

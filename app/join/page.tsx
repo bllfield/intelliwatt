@@ -240,7 +240,7 @@ function JoinPageContent() {
           {/* Bottom Footer */}
           <div className="border-t border-brand-blue/20 pt-8 text-center">
             <p className="text-brand-white">
-              © 2024 IntelliWatt™. All rights reserved. Patent pending.
+              IntelliWatt™ | A service of Intellipath Solutions LLC | © 2024 HitTheJackWatt™
             </p>
           </div>
         </div>
