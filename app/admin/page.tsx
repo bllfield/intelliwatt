@@ -329,6 +329,7 @@ export default function AdminDashboard() {
     QUALIFIED: 'border border-emerald-400/40 bg-emerald-400/10 text-emerald-600',
     CANCELLED: 'border border-rose-400/40 bg-rose-400/10 text-rose-600',
   };
+  const pendingReferrals = referrals.filter((record) => record.status === 'PENDING');
 
   const flaggedReplacements = flaggedRecords.filter(
     (record) => record.attentionCode === 'smt_replaced',
@@ -611,10 +612,14 @@ export default function AdminDashboard() {
         {/* Referral Progress */}
         <section className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
           <h2 className="text-2xl font-bold text-brand-navy mb-2">🤝 Referral Progress</h2>
-          <p className="text-sm text-brand-navy/70 mb-4">
-            Referrers earn their bonus entry once the invited member shares usage through Smart Meter Texas or a manual upload.
-            Track pending invites below and confirm when entries are awarded automatically.
-          </p>
+          <div className="flex flex-wrap items-center gap-3 text-sm text-brand-navy/80 mb-4">
+            <span>
+              Referrers earn their bonus entry once the invited member shares usage through Smart Meter Texas or a manual upload.
+            </span>
+            <span className="inline-flex items-center rounded-full border border-amber-400/40 bg-amber-400/10 px-3 py-0.5 text-xs font-semibold uppercase tracking-wide text-amber-600">
+              Pending: {pendingReferrals.length.toLocaleString()}
+            </span>
+          </div>
           {referrals.length === 0 ? (
             <div className="rounded-md border border-brand-navy/10 bg-brand-navy/5 px-4 py-6 text-center text-brand-navy/70">
               No referrals recorded yet.
@@ -670,6 +675,65 @@ export default function AdminDashboard() {
                       </td>
                       <td className="px-4 py-3 text-sm text-brand-navy">
                         {record.entryAwardedAt ? new Date(record.entryAwardedAt).toLocaleString() : 'Pending'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        {/* Pending Referral Validation */}
+        <section className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
+          <h2 className="text-2xl font-bold text-brand-navy mb-2">⏳ Referrals Awaiting Invitee Usage</h2>
+          <p className="text-sm text-brand-navy/70 mb-4">
+            These invitations have not qualified yet. Once the invitee completes a Smart Meter Texas connection or manual usage upload,
+            the referral will be replayed automatically and the bonus entry will be awarded.
+          </p>
+          {pendingReferrals.length === 0 ? (
+            <div className="rounded-md border border-brand-navy/10 bg-brand-navy/5 px-4 py-6 text-center text-brand-navy/70">
+              No pending referrals currently waiting on invitee validation.
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-brand-navy/10">
+              <table className="min-w-full divide-y divide-brand-navy/10">
+                <thead className="bg-brand-navy/5">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-brand-navy/60">
+                      Referrer
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-brand-navy/60">
+                      Invitee Email
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-brand-navy/60">
+                      Invitee Account
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-brand-navy/60">
+                      Invited On
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-brand-navy/10 bg-white">
+                  {pendingReferrals.map((record) => (
+                    <tr key={`${record.id}-pending`}>
+                      <td className="px-4 py-3 text-sm text-brand-navy">
+                        <div className="font-semibold">{record.referredBy.email}</div>
+                        <div className="text-xs text-brand-navy/50">ID · {record.referredBy.id}</div>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-brand-navy">{record.referredEmail}</td>
+                      <td className="px-4 py-3 text-sm text-brand-navy">
+                        {record.referredUser ? (
+                          <>
+                            <div>{record.referredUser.email}</div>
+                            <div className="text-xs text-brand-navy/50">ID · {record.referredUser.id}</div>
+                          </>
+                        ) : (
+                          <span className="text-brand-navy/50 text-xs italic">User not linked</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-brand-navy">
+                        {new Date(record.createdAt).toLocaleString()}
                       </td>
                     </tr>
                   ))}
