@@ -21,7 +21,8 @@ WHERE lower("email") IN (
 
 CREATE TEMP TABLE target_users AS
 SELECT id
-FROM "User";
+FROM "User"
+WHERE id NOT IN (SELECT id FROM keeper_users);
 
 WITH entry_delete AS (
   DELETE FROM "Entry"
