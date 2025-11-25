@@ -66,6 +66,21 @@ interface EntryExpiryDigest {
   email: string | null;
 }
 
+interface SummaryStats {
+  totalUsers: number;
+  activeSmtAuthorizations: number;
+  activeManualUploads: number;
+  totalUsageCustomers: number;
+  activeHouseCount: number;
+  applianceCount: number;
+}
+
+const currencyFormatter = new Intl.NumberFormat('en-US', {
+  style: 'currency',
+  currency: 'USD',
+  maximumFractionDigits: 2,
+});
+
 export default function AdminDashboard() {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
@@ -79,12 +94,14 @@ export default function AdminDashboard() {
   const [financeRecords, setFinanceRecords] = useState<FinanceRecord[]>([]);
   const [flaggedHouses, setFlaggedHouses] = useState<FlaggedHouseRecord[]>([]);
   const [expiringEntries, setExpiringEntries] = useState<EntryExpiryDigest[]>([]);
+  const [summary, setSummary] = useState<SummaryStats | null>(null);
 
   // Fetch real data from API
   useEffect(() => {
     const fetchData = async () => {
       try {
         const [
+          summaryRes,
           usersRes,
           commissionsRes,
           jackpotRes,
@@ -92,6 +109,7 @@ export default function AdminDashboard() {
           flaggedRes,
           expiringRes,
         ] = await Promise.all([
+          fetch('/api/admin/stats/summary'),
           fetch('/api/admin/users'),
           fetch('/api/admin/commissions'),
           fetch('/api/admin/jackpot'),
@@ -99,6 +117,14 @@ export default function AdminDashboard() {
           fetch('/api/admin/houses/flagged'),
           fetch('/api/admin/hitthejackwatt/expiring'),
         ]);
+
+        if (summaryRes.ok) {
+          const summaryData = await summaryRes.json();
+          console.log('Fetched summary stats:', summaryData);
+          setSummary(summaryData);
+        } else {
+          console.error('Failed to fetch summary stats:', summaryRes.status, summaryRes.statusText);
+        }
 
         if (usersRes.ok) {
           const usersData = await usersRes.json();
@@ -178,6 +204,26 @@ export default function AdminDashboard() {
   const totalFinance = financeRecords.reduce((sum, f) => sum + (f.type === 'income' ? f.amount : -f.amount), 0);
   const formatTimestamp = (value: string | null) => (value ? new Date(value).toLocaleString() : '—');
   const expiringSoonCount = expiringEntries.filter((entry) => entry.status === 'EXPIRING_SOON').length;
+  const totalUsersCount = summary?.totalUsers ?? users.length;
+  const smtApiCount = summary?.activeSmtAuthorizations ?? 0;
+  const manualEntriesCount = summary?.activeManualUploads ?? 0;
+  const totalUsageCustomers = summary?.totalUsageCustomers ?? 0;
+  const houseDetailsCount = summary?.activeHouseCount ?? 0;
+  const applianceCount = summary?.applianceCount ?? 0;
+
+  const overviewStats = [
+    { label: 'Users', value: totalUsersCount.toLocaleString() },
+    { label: "SMT API's", value: smtApiCount.toLocaleString() },
+    { label: 'Manual Entries', value: manualEntriesCount.toLocaleString() },
+    { label: 'Total Usage Customers', value: totalUsageCustomers.toLocaleString() },
+    { label: 'House Details #', value: houseDetailsCount.toLocaleString() },
+    { label: 'Appliances #', value: applianceCount.toLocaleString() },
+    { label: 'Total Commissions', value: currencyFormatter.format(totalCommissions) },
+    { label: 'Net Finance', value: currencyFormatter.format(totalFinance) },
+    { label: 'Pending Jackpot Payouts', value: pendingJackpot.toLocaleString() },
+    { label: 'Homes flagged for SMT replacement email', value: flaggedHouses.length.toLocaleString() },
+    { label: 'Entries expiring within 30 days', value: expiringSoonCount.toLocaleString() },
+  ];
 
   return (
     <div className="min-h-screen bg-brand-navy">
@@ -193,31 +239,13 @@ export default function AdminDashboard() {
 
       <div className="max-w-7xl mx-auto px-4 py-8">
         {/* Stats Overview */}
-        <div className="grid md:grid-cols-4 gap-6 mb-8">
-          <div className="bg-brand-white rounded-lg p-6 shadow-lg">
-            <div className="text-2xl font-bold text-brand-navy">{users.length}</div>
-            <div className="text-brand-navy/60">Total Users</div>
-          </div>
-          <div className="bg-brand-white rounded-lg p-6 shadow-lg">
-            <div className="text-2xl font-bold text-brand-navy">${totalCommissions.toFixed(2)}</div>
-            <div className="text-brand-navy/60">Total Commissions</div>
-          </div>
-          <div className="bg-brand-white rounded-lg p-6 shadow-lg">
-            <div className="text-2xl font-bold text-brand-navy">{pendingJackpot}</div>
-            <div className="text-brand-navy/60">Pending Jackpot Payouts</div>
-          </div>
-          <div className="bg-brand-white rounded-lg p-6 shadow-lg">
-            <div className="text-2xl font-bold text-brand-navy">${totalFinance.toFixed(2)}</div>
-            <div className="text-brand-navy/60">Net Finance</div>
-          </div>
-          <div className="bg-brand-white rounded-lg p-6 shadow-lg md:col-span-2 lg:col-span-1">
-            <div className="text-2xl font-bold text-brand-navy">{flaggedHouses.length}</div>
-            <div className="text-brand-navy/60">Homes flagged for SMT replacement email</div>
-          </div>
-          <div className="bg-brand-white rounded-lg p-6 shadow-lg md:col-span-2 lg:col-span-1">
-            <div className="text-2xl font-bold text-brand-navy">{expiringSoonCount}</div>
-            <div className="text-brand-navy/60">Entries expiring within 30 days</div>
-          </div>
+        <div className="grid gap-6 mb-8 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {overviewStats.map((stat) => (
+            <div key={stat.label} className="bg-brand-white rounded-lg p-6 shadow-lg">
+              <div className="text-2xl font-bold text-brand-navy">{stat.value}</div>
+              <div className="text-brand-navy/60">{stat.label}</div>
+            </div>
+          ))}
         </div>
 
         {/* Quick Links / Tools Section */}
