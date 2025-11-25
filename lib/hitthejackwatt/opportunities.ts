@@ -2,7 +2,6 @@
 // Defines all entry types and their amounts
 
 export type EntryType =
-  | 'signup'
   | 'smart_meter_connect'
   | 'current_plan_details'
   | 'home_details_complete'
@@ -19,13 +18,6 @@ export interface EntryOpportunity {
 }
 
 export const ENTRY_OPPORTUNITIES: Record<EntryType, EntryOpportunity> = {
-  signup: {
-    id: 'signup',
-    label: 'Sign up at HitTheJackWatt™.com',
-    description: 'Create your account',
-    amount: 1,
-    maxPerUser: 1,
-  },
   smart_meter_connect: {
     id: 'smart_meter_connect',
     label: 'Authorize Smart Meter Texas',
