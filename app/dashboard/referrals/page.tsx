@@ -87,7 +87,7 @@ export default function ReferralsPage() {
           </h1>
           <div className="inline-block bg-[#39FF14]/20 border border-[#39FF14]/40 px-4 py-2 rounded-full mb-6">
             <span className="text-[#39FF14] font-semibold">
-              🎁 Earn 5 jackpot entries for each friend who signs up!
+              🎁 Earn 1 jackpot entry for each friend who signs up!
             </span>
           </div>
           <p className="text-xl text-brand-white mb-8 max-w-2xl mx-auto">
@@ -192,7 +192,7 @@ export default function ReferralsPage() {
                 </li>
                 <li className="flex items-start space-x-2">
                   <span style={{ color: '#BF00FF' }} className="text-lg">✓</span>
-                  <span>You earn <strong style={{ color: '#39FF14' }}>5 entries</strong> per successful referral</span>
+                <span>You earn <strong style={{ color: '#39FF14' }}>1 entry</strong> per successful referral</span>
                 </li>
                 <li className="flex items-start space-x-2">
                   <span style={{ color: '#BF00FF' }} className="text-lg">✓</span>

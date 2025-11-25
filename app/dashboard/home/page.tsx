@@ -14,13 +14,13 @@ export default function HomePage() {
   }, []);
 
   const handleComplete = async () => {
-    // Award 10 entries when home details are completed
+    // Award 1 entry when home details are completed
     // This will be called when user actually completes the form
     try {
       await fetch('/api/user/entries', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'home_details_complete', amount: 10 }),
+        body: JSON.stringify({ type: 'home_details_complete', amount: 1 }),
       });
       window.dispatchEvent(new CustomEvent('entriesUpdated'));
       setHasCompleted(true);
@@ -47,14 +47,14 @@ export default function HomePage() {
           {!hasCompleted && (
             <div className="inline-block bg-[#39FF14]/20 border border-[#39FF14]/40 px-4 py-2 rounded-full mb-6">
               <span className="text-[#39FF14] font-semibold">
-                🎁 Complete this form to earn 10 jackpot entries!
+                🎁 Complete this form to earn 1 jackpot entry!
               </span>
             </div>
           )}
           {hasCompleted && (
             <div className="inline-block bg-[#BF00FF]/20 border border-[#BF00FF]/40 px-4 py-2 rounded-full mb-6">
               <span className="text-[#BF00FF] font-semibold">
-                ✓ You earned 10 jackpot entries for completing home details!
+                ✓ You earned 1 jackpot entry for completing home details!
               </span>
             </div>
           )}
@@ -83,7 +83,7 @@ export default function HomePage() {
                 <div className="bg-brand-navy/5 p-6 rounded-xl border border-brand-navy/20 mb-6">
                   <p className="text-sm text-brand-navy mb-4">
                     <span style={{ color: '#39FF14' }} className="font-semibold">
-                      Complete the following to earn 10 entries:
+                      Complete the following to earn your home profile entry:
                     </span>
                   </p>
                   <ul className="text-left text-sm text-brand-navy space-y-2 max-w-md mx-auto">

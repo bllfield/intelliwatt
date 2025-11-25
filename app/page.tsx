@@ -148,12 +148,12 @@ function LandingPageContent() {
               <div className="bg-brand-navy/60 border border-brand-blue/20 rounded-2xl p-4 mt-6 text-center">
                 <div className="text-brand-white/90 text-sm">
                   <span className="font-semibold">Authorize Smart Meter Texas</span>
-                  <span className="ml-2" style={{ color: '#39FF14' }}>10 jackpot entries available</span>
+                  <span className="ml-2" style={{ color: '#39FF14' }}>Earn 1 jackpot entry</span>
                 </div>
                 <div className="mt-3 text-brand-white/90 text-sm">
                   <span className="font-semibold">Refer a Friend</span>
                   <span className="ml-2">Each friend who signs up earns you</span>
-                  <span className="ml-2" style={{ color: '#39FF14' }}>5 jackpot entries</span>
+                  <span className="ml-2" style={{ color: '#39FF14' }}>1 jackpot entry</span>
                 </div>
               </div>
             </div>

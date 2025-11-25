@@ -116,5 +116,5 @@
   - Renewal timing and assumptions for scenario modeling (“current/renewal vs recommended plan”).
 - **UX Contract:**
   - Optional but recommended; customers can skip without blocking plan analysis.
-  - Completing it awards **+10 HitTheJackWatt** entries (to be wired in later steps).
+  - Completing it awards **+1 HitTheJackWatt** entry (to be wired in later steps).
   - Upload flow triggers OCR pipelines; manual entry pathways remain available at all times.

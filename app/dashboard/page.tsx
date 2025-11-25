@@ -82,12 +82,12 @@ export default function DashboardPage() {
                 <span className="text-lg font-extrabold leading-tight text-brand-white md:text-xl">
                   <span style={{ color: '#39FF14' }}>⚡ Connect your smart meter data</span>
                   <span className="mx-1 text-brand-white">for</span>
-                  <span style={{ color: '#39FF14' }}>10 jackpot entries!!</span>
+                  <span style={{ color: '#39FF14' }}>1 jackpot entry!</span>
                 </span>
                 <span className="text-sm font-bold leading-tight text-brand-white md:text-base">
                   <span style={{ color: '#BF00FF' }}>👥 Refer a Friend:</span>
                   <span className="mx-1 text-brand-white" />
-                  <span style={{ color: '#39FF14' }}>5 jackpot entries per signup!!</span>
+                  <span style={{ color: '#39FF14' }}>1 jackpot entry per signup!</span>
                 </span>
               </div>
             </div>
@@ -148,7 +148,7 @@ export default function DashboardPage() {
                     <span className="text-brand-cyan text-2xl">🧾</span>
                   </div>
                   <h3 className="text-2xl font-bold text-brand-navy mb-4">Current Rate</h3>
-                  <p className="text-brand-navy mb-6 mx-auto max-w-xs">Upload your bill or enter plan details for +10 entries</p>
+                  <p className="text-brand-navy mb-6 mx-auto max-w-xs">Upload your bill or enter plan details to earn 1 entry</p>
                   <Link href="/dashboard/current-rate" className="inline-block bg-brand-navy text-brand-blue font-bold py-3 px-6 rounded-xl border-2 border-brand-navy hover:border-brand-blue transition-all duration-300 mx-auto">
                     Add Current Rate
                   </Link>

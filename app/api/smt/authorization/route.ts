@@ -395,7 +395,7 @@ export async function POST(req: NextRequest) {
       smtResult?.subscriptionAlreadyActive;
 
     if (shouldAwardSmartMeterEntry) {
-      await ensureEntryAmount(user.id, "smart_meter_connect", 10, house.id);
+      await ensureEntryAmount(user.id, "smart_meter_connect", 1, house.id);
     }
 
     const webhookUrl = process.env.DROPLET_WEBHOOK_URL;

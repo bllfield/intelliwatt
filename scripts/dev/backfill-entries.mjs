@@ -37,7 +37,7 @@ async function backfillSmartMeterEntries() {
       data: {
         userId: auth.userId,
         type: 'smart_meter_connect',
-        amount: 10,
+        amount: 1,
         houseId: auth.houseId,
       },
     });
@@ -74,7 +74,7 @@ async function backfillReferralEntries() {
         data: {
           userId: referral.referredById,
           type: 'referral',
-          amount: 5,
+          amount: 1,
         },
       });
       created += 1;

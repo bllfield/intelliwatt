@@ -6,15 +6,15 @@
 
 **Scope:**
 - `app/login/magic/route.ts`: award the **signup** entry when a brand-new user finishes the magic-link flow.
-- `app/api/smt/authorization/route.ts`: award/upgrade the **smart_meter_connect** entry to 10 when SMT authorization succeeds (or remains at 10 when the droplet reports “already active”).
-- `components/SmartMeterSection.tsx`: manual fallback now grants 5 entries and prevents double-awards; success toast fires `entriesUpdated`.
+- `app/api/smt/authorization/route.ts`: award/upgrade the **smart_meter_connect** entry to 1 when SMT authorization succeeds (or remains at 1 when the droplet reports “already active”).
+- `components/SmartMeterSection.tsx`: manual fallback now grants 1 entry and prevents double-awards; success toast fires `entriesUpdated`.
 - `app/api/user/entries/route.ts`: allow raising the amount for an existing entry (e.g., manual → live SMT) while keeping idempotency.
 - `components/smt/SmtAuthorizationForm.tsx`: notify listeners after a successful submission so counters refresh instantly.
 - `lib/hitthejackwatt/opportunities.ts`: retire the `dashboard_visit` placeholder, clarify the manual vs. automated SMT reward copy.
 - Removed the old “dashboard visit = 1 entry” demo hook from `app/dashboard/page.tsx`.
 
 **Verification:**
-- Tested with a fresh magic-link signup, manual SMT fallback, and full SMT authorization: counters now show 1 → 6 → 11.
+- Tested with a fresh magic-link signup, manual SMT fallback, and full SMT authorization: counters now show 1 → 2 → 3.
 - Referral flow already live; ensured referral awards still bypass the single-entry guard.
 - `/dashboard/entries` still uses mock data (follow-up task), but `/api/user/entries` now returns accurate totals for client widgets.
 
@@ -134,13 +134,13 @@
 **Rationale:**
 - Many users already have a fixed-rate plan that will renew or roll to a different rate at contract end.
 - Capturing plan name, effective rate(s), and contract expiration lets IntelliWatt show how costs change when the existing contract renews under similar usage.
-- Tying this step to +10 HitTheJackWatt entries deepens engagement and encourages richer data capture.
+- Tying this step to a HitTheJackWatt entry deepens engagement and encourages richer data capture.
 
 **Scope:**
 - Insert an optional **Current Rate Details** step between SMT usage import and the Rate Plan Analyzer output:
   - Address → SMT API Authorization → Usage Normalization → **Current Rate Details (optional)** → Rate Plan Analyzer → Home Details → Appliances → Upgrades → Optimal Energy.
 - Step definition:
-  - Title: "Current Rate Details" with copy explaining the richer comparison (current vs recommended vs renewal) and the +10 jackpot entries reward.
+  - Title: "Current Rate Details" with copy explaining the richer comparison (current vs recommended vs renewal) and the single-entry reward.
   - Two input paths:
     1. **Upload your bill** (photo/image/PDF) for future OCR-based extraction.
     2. **Manual entry** for:
@@ -159,7 +159,7 @@
 - Define a `CurrentPlan`/`CurrentRateDetails` CDM with schema/API.
 - Wire Billing OCR outputs so uploaded bills auto-fill the form with user confirmation.
 - Feed confirmed current plan data into the Plan Analyzer results (current vs recommended vs renewal).
-- Integrate the +10 HitTheJackWatt entries in the jackpot calculator and official rules.
+- Integrate the updated 1-entry reward in the jackpot calculator and official rules.
 - Customer-facing plan analysis will optionally incorporate a Current Rate Details step (plan name, rates, expiration) to compare IntelliWatt recommendations against the user's existing contract and projected renewal costs.
 
 ---

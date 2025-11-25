@@ -21,30 +21,37 @@ const CATEGORY_CARDS: CategoryConfig[] = [
   {
     id: "smart_meter_connect",
     title: "Smart Meter Authorization",
-    description: "Connect Smart Meter Texas to unlock automated usage and +10 entries.",
+    description: "Connect Smart Meter Texas to unlock automated usage and earn 1 entry.",
     ctaLabel: "Go to API Connect",
     ctaHref: "/dashboard/api#smt",
   },
   {
     id: "referral",
     title: "Referrals",
-    description: "Share your referral link and earn +5 entries per successful signup.",
+    description: "Share your referral link and earn 1 entry per successful signup.",
     ctaLabel: "Invite Friends",
     ctaHref: "/dashboard/referrals",
   },
   {
     id: "current_plan_details",
     title: "Current Plan Details",
-    description: "Enter your current rate plan to highlight savings opportunities.",
+    description: "Enter your current rate plan to highlight savings opportunities and log 1 entry.",
     ctaLabel: "Add Plan Details",
     ctaHref: "/dashboard/home#current-plan-details",
   },
   {
     id: "home_details_complete",
     title: "Home Details",
-    description: "Complete your home profile for personalized analysis and +10 entries.",
+    description: "Complete your home profile for personalized analysis and earn 1 entry.",
     ctaLabel: "Complete Home Details",
     ctaHref: "/dashboard/home",
+  },
+  {
+    id: "appliance_details_complete",
+    title: "Appliance Details",
+    description: "List your major appliances to log an additional entry.",
+    ctaLabel: "Manage Appliances",
+    ctaHref: "/dashboard/appliances",
   },
 ];
 
@@ -243,7 +250,7 @@ export default function EntriesPage() {
             <div className="bg-white p-6 rounded-3xl border-2 border-brand-navy shadow-[0_15px_35px_rgba(15,23,42,0.2)]">
               <h3 className="text-xl font-bold text-brand-navy mb-4">Complete Your Profile</h3>
               <p className="text-brand-navy/80 mb-4">
-                Add your home details and preferences to earn your first jackpot entries.
+                Add your home details and preferences to earn your first jackpot entry.
               </p>
               <a
                 href="/dashboard/profile"
@@ -256,7 +263,7 @@ export default function EntriesPage() {
             <div className="bg-white p-6 rounded-3xl border-2 border-brand-navy shadow-[0_15px_35px_rgba(15,23,42,0.2)]">
               <h3 className="text-xl font-bold text-brand-navy mb-4">Connect Smart Meter</h3>
               <p className="text-brand-navy/80 mb-4">
-                Link your Smart Meter Texas account for automated usage and +10 entries.
+                Link your Smart Meter Texas account for automated usage and 1 entry.
               </p>
               <a
                 href="/dashboard/api#smt"
@@ -282,13 +289,26 @@ export default function EntriesPage() {
             <div className="bg-white p-6 rounded-3xl border-2 border-brand-navy shadow-[0_15px_35px_rgba(15,23,42,0.2)]">
               <h3 className="text-xl font-bold text-brand-navy mb-4">Refer Friends</h3>
               <p className="text-brand-navy/80 mb-4">
-                Invite friends and family—earn +5 entries for each successful referral.
+                Invite friends and family—earn 1 entry for each successful referral.
               </p>
               <a
                 href="/dashboard/referrals"
                 className="inline-flex items-center rounded-full border border-brand-navy px-5 py-2 text-sm font-semibold uppercase tracking-wide text-brand-navy transition hover:border-brand-blue hover:text-brand-blue"
               >
                 Share Referral Link
+              </a>
+            </div>
+
+            <div className="bg-white p-6 rounded-3xl border-2 border-brand-navy shadow-[0_15px_35px_rgba(15,23,42,0.2)]">
+              <h3 className="text-xl font-bold text-brand-navy mb-4">Appliance Details</h3>
+              <p className="text-brand-navy/80 mb-4">
+                Add your major appliances so we can tailor upgrade tips—and earn 1 entry.
+              </p>
+              <a
+                href="/dashboard/appliances"
+                className="inline-flex items-center rounded-full border border-brand-navy px-5 py-2 text-sm font-semibold uppercase tracking-wide text-brand-navy transition hover:border-brand-blue hover:text-brand-blue"
+              >
+                Manage Appliances
               </a>
             </div>
           </div>

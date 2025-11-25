@@ -105,12 +105,12 @@ export async function GET(req: Request) {
             },
           });
 
-          // Award 5 entries to the referrer
+          // Award 1 entry to the referrer
           await db.entry.create({
             data: {
               userId: referralData.userId,
               type: 'referral',
-              amount: 5,
+              amount: 1,
             },
           });
         }

@@ -34,14 +34,14 @@ export default function SmartMeterSection({ houseId }: SmartMeterSectionProps) {
 
     if (res.ok) {
       setStatus('connected');
-      // Award 10 entries for connecting smart meter
+      // Award 1 entry for connecting smart meter
       try {
         await fetch('/api/user/entries', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             type: 'smart_meter_connect',
-            amount: 10,
+            amount: 1,
             ...(houseId ? { houseId } : {}),
           }),
         });
@@ -93,7 +93,7 @@ export default function SmartMeterSection({ houseId }: SmartMeterSectionProps) {
                 <img src="/Hitthejackwatt-Logo.png" alt="HitTheJackWatt" className="w-10 h-6 object-contain" />
                 <h3 className="text-xl font-bold">Jackpot entries earned!</h3>
               </div>
-              <p className="mb-4">You just earned <span className="font-bold" style={{ color: '#39FF14' }}>10 jackpot entries</span> for connecting your smart meter.</p>
+              <p className="mb-4">You just earned <span className="font-bold" style={{ color: '#39FF14' }}>1 jackpot entry</span> for connecting your smart meter.</p>
               <a href="/dashboard/home" className="inline-block bg-brand-navy text-brand-blue font-bold py-2 px-4 rounded-lg border-2 border-brand-navy hover:border-brand-blue transition-all duration-300">Add Home Details →</a>
               <button onClick={() => setShowAwardModal(false)} className="ml-3 inline-block text-sm underline">Dismiss</button>
             </div>
@@ -114,7 +114,7 @@ export default function SmartMeterSection({ houseId }: SmartMeterSectionProps) {
           <p className="text-lg text-brand-navy mb-6">You chose not to connect automatically. Enter your details manually below.</p>
           {manualAwarded ? (
             <div className="mb-4 inline-block rounded-full border border-brand-navy bg-brand-navy/10 px-4 py-2 text-sm font-semibold" style={{ color: '#39FF14' }}>
-              ✓ 5 jackpot entries added for manual usage entry
+              ✓ 1 jackpot entry added for manual usage entry
             </div>
           ) : null}
           {/* TODO: Add manual entry fields later */}
@@ -145,7 +145,7 @@ export default function SmartMeterSection({ houseId }: SmartMeterSectionProps) {
             <label className="block text-brand-navy font-semibold mb-2">
               Service Address
               <span className="ml-2 text-sm font-normal" style={{ color: '#39FF14' }}>
-                🎁 Earn 10 more jackpot entries by connecting your smart meter
+                🎁 Earn 1 jackpot entry by connecting your smart meter
               </span>
             </label>
             <input
@@ -202,7 +202,7 @@ export default function SmartMeterSection({ houseId }: SmartMeterSectionProps) {
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
                     type: 'smart_meter_connect',
-                    amount: 5,
+                    amount: 1,
                     ...(houseId ? { houseId } : {}),
                   }),
                 });

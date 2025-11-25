@@ -8,7 +8,7 @@
    - Backend triggers agreement/subscription and begins pulling usage/billing.
 3. **Usage Normalization**
    - Normalize SMT interval/billing (or alternate sources) into canonical usage for the last 12 months.
-4. **Current Rate Details (Optional, +10 Entries)**
+4. **Current Rate Details (Optional, +1 Entry)**
    - Screen title: “Current Rate Details — Add your current plan info for a more detailed comparison.”
    - Paths:
      - **Upload your bill** (photo/image/PDF) for future OCR extraction.
@@ -16,7 +16,7 @@
    - Copy explicitly states:
      - Step is optional; skipping still yields usage-based recommendations.
      - Completing it shows how current contract costs compare against IntelliWatt recommendations and projected renewal costs.
-     - Completing grants **+10 HitTheJackWatt jackpot entries.**
+    - Completing grants **+1 HitTheJackWatt jackpot entry.**
 5. **Rate Plan Analyzer Output**
    - Recommend plans based on real usage.
    - When Current Rate Details are provided, include “current vs recommended vs renewal” cost comparisons.

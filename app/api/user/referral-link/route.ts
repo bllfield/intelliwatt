@@ -86,7 +86,7 @@ export async function GET(request: NextRequest) {
       referralLink,
       token,
       vanityCode,
-      message: 'Share this link to earn 5 entries per friend who signs up!',
+      message: 'Share this link to earn 1 entry per friend who signs up!',
     });
   } catch (error) {
     console.error('Error generating referral link:', error);

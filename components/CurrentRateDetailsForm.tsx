@@ -43,14 +43,14 @@ export function CurrentRateDetailsForm({
         <h1 className="text-2xl font-semibold">
           Current Rate Details{" "}
           <span className="text-sm font-normal text-slate-500">
-            (Optional, +10 HitTheJackWatt entries)
+            (Optional, +1 HitTheJackWatt entry)
           </span>
         </h1>
         <p className="text-sm text-slate-600">
           Add your current electricity plan so we can show how your costs will change when your
           plan comes due, assuming similar usage. If you skip this step, we&apos;ll still analyze
           your real usage and recommend the best plans. Completing it earns{" "}
-          <strong>+10 HitTheJackWatt jackpot entries</strong> and unlocks a richer comparison.
+          <strong>+1 HitTheJackWatt jackpot entry</strong> and unlocks a richer comparison.
         </p>
       </div>
 
