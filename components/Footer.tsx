@@ -7,13 +7,13 @@ export default function Footer() {
         <div className="grid grid-cols-1 gap-8 md:grid-cols-4">
           <div className="col-span-1 md:col-span-2">
             <div className="mb-6 flex items-center">
-              <div className="relative mr-4 h-16 w-32">
+              <a href="/" className="relative mr-4 h-16 w-32">
                 <img
                   src="/IntelliWatt Logo TM.png"
                   alt="IntelliWatt™ Logo"
                   className="h-full w-full object-contain"
                 />
-              </div>
+              </a>
             </div>
             <p className="mb-6 max-w-md text-lg leading-relaxed text-brand-white">
               Stop overpaying for power with our AI-powered energy plan optimization.
