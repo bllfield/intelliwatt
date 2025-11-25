@@ -55,6 +55,8 @@ export async function GET() {
       return NextResponse.json({ connected: false });
     }
 
+    const address = authorization.houseAddress ?? null;
+
     return NextResponse.json({
       connected: true,
       authorization: {
@@ -64,13 +66,15 @@ export async function GET() {
         authorizationStartDate: authorization.authorizationStartDate?.toISOString() ?? null,
         authorizationEndDate: authorization.authorizationEndDate?.toISOString() ?? null,
         tdspName: authorization.tdspName ?? null,
-        houseAddress: {
-          line1: authorization.houseAddress.addressLine1,
-          line2: authorization.houseAddress.addressLine2,
-          city: authorization.houseAddress.addressCity,
-          state: authorization.houseAddress.addressState,
-          zip5: authorization.houseAddress.addressZip5,
-        },
+        houseAddress: address
+          ? {
+              line1: address.addressLine1,
+              line2: address.addressLine2,
+              city: address.addressCity,
+              state: address.addressState,
+              zip5: address.addressZip5,
+            }
+          : null,
       },
     });
   } catch (error) {
