@@ -22,6 +22,7 @@ model User {
   utilityPlans      UtilityPlan[]
   smtAuthorizations SmtAuthorization[]
   manualUsageUploads ManualUsageUpload[]
+  entryExpiryDigests EntryExpiryDigest[] @relation("EntryExpiryDigestUser")
 }
 
 model UserProfile {
@@ -178,6 +179,7 @@ model Entry {
   manualUsageId String?
   manualUsage   ManualUsageUpload? @relation("EntryManualUsage", fields: [manualUsageId], references: [id])
   statusLogs    EntryStatusLog[]
+  expiryDigest  EntryExpiryDigest? @relation("EntryExpiryDigestEntry")
 
   @@index([houseId])
   @@index([expiresAt])
@@ -224,8 +226,8 @@ model EntryExpiryDigest {
   status     EntryStatus
   expiresAt  DateTime?
   recordedAt DateTime @default(now())
-  entry      Entry    @relation(fields: [entryId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  entry      Entry    @relation("EntryExpiryDigestEntry", fields: [entryId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  user       User     @relation("EntryExpiryDigestUser", fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
 
   @@index([userId])
   @@index([status])
