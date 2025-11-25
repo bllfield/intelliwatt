@@ -306,15 +306,40 @@ const DASHBOARD_CARDS: DashboardCard[] = [
 export default function DashboardPage() {
   const [mounted, setMounted] = useState(false);
   const [userAddress, setUserAddress] = useState<string>('');
+  const [storageKey, setStorageKey] = useState('intelliwatt_user_address');
+
+  const resolveStorageKey = () => {
+    if (typeof document === 'undefined') {
+      return 'intelliwatt_user_address';
+    }
+    const cookies = document.cookie.split(';').map((entry) => entry.trim());
+    const sessionCookie = cookies.find((entry) => entry.startsWith('intelliwatt_user='));
+    if (!sessionCookie) {
+      return 'intelliwatt_user_address_guest';
+    }
+    const value = sessionCookie.split('=').slice(1).join('=') || 'guest';
+    return `intelliwatt_user_address_${value.toLowerCase()}`;
+  };
 
   useEffect(() => {
     setMounted(true);
 
-    const savedAddress = typeof window !== 'undefined'
-      ? localStorage.getItem('intelliwatt_user_address')
-      : null;
-    if (savedAddress) {
-      setUserAddress(savedAddress);
+    if (typeof window !== 'undefined') {
+      const key = resolveStorageKey();
+      setStorageKey(key);
+
+      const legacy = localStorage.getItem('intelliwatt_user_address');
+      if (legacy && key !== 'intelliwatt_user_address') {
+        localStorage.setItem(key, legacy);
+        localStorage.removeItem('intelliwatt_user_address');
+      }
+
+      const savedAddress = localStorage.getItem(key);
+      if (savedAddress) {
+        setUserAddress(savedAddress);
+      } else {
+        setUserAddress('');
+      }
     }
   }, []);
 
@@ -324,8 +349,9 @@ export default function DashboardPage() {
     if (typeof window !== 'undefined') {
       if (!address) {
         localStorage.removeItem('intelliwatt_user_address');
+        localStorage.removeItem(storageKey);
       } else {
-        localStorage.setItem('intelliwatt_user_address', address);
+        localStorage.setItem(storageKey, address);
       }
     }
 
