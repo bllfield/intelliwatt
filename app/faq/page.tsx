@@ -68,7 +68,10 @@ const faqItems: { question: string; answer: ReactNode }[] = [
     answer: (
       <>
         <p>
-          <a href="https://www.intelli-watt.com" className="text-brand-blue underline">
+          <a
+            href="https://www.intelli-watt.com"
+            className="font-semibold text-[#00F0FF] underline drop-shadow-[0_0_12px_rgba(0,240,255,0.8)]"
+          >
             IntelliWatt™
           </a>{' '}
           is the secure user portal where your entries, insights, and plan recommendations live. When you log in using a
@@ -76,11 +79,17 @@ const faqItems: { question: string; answer: ReactNode }[] = [
         </p>
         <p>
           HitTheJackWatt™ and{' '}
-          <a href="https://www.intelli-watt.com" className="text-brand-blue underline">
+          <a
+            href="https://www.intelli-watt.com"
+            className="font-semibold text-[#00F0FF] underline drop-shadow-[0_0_12px_rgba(0,240,255,0.8)]"
+          >
             IntelliWatt™
           </a>{' '}
           are operated by{' '}
-          <a href="https://www.intellipath-solutions.com" className="text-brand-blue underline">
+          <a
+            href="https://www.intellipath-solutions.com"
+            className="font-semibold text-[#4169E1] underline drop-shadow-[0_0_6px_rgba(65,105,225,0.5)]"
+          >
             Intellipath Solutions LLC
           </a>
           , a Texas-based energy intelligence company.
@@ -102,7 +111,7 @@ const faqItems: { question: string; answer: ReactNode }[] = [
     answer: (
       <>
         <p>You can earn entries by:</p>
-        <ul className="list-disc list-inside space-y-1">
+        <ul className="list-disc list-inside space-y-1 marker:text-[#00E0FF]">
           <li>1 for connecting Smart Meter Texas (where available) or uploading usage manually</li>
           <li>1 for adding your current electricity plan information</li>
           <li>1 for completing your home details</li>
@@ -123,7 +132,10 @@ const faqItems: { question: string; answer: ReactNode }[] = [
     answer: (
       <p>
         The jackpot grows as members switch to plans through{' '}
-        <a href="https://www.intelli-watt.com" className="text-brand-blue underline">
+        <a
+          href="https://www.intelli-watt.com"
+          className="font-semibold text-[#00F0FF] underline drop-shadow-[0_0_12px_rgba(0,240,255,0.8)]"
+        >
           IntelliWatt™
         </a>
         . It resets after each drawing and then starts growing again.
@@ -244,10 +256,14 @@ export default function FAQPage() {
             {faqItems.map(({ question, answer }) => (
               <div
                 key={question}
-                className="bg-brand-white p-8 rounded-2xl border-2 border-brand-navy shadow-lg hover:border-brand-blue transition-all duration-300"
+                className="bg-brand-navy p-8 rounded-2xl border border-brand-blue/40 shadow-[0_20px_60px_rgba(0,0,0,0.45)] hover:border-brand-blue/80 transition-all duration-300"
               >
-                <h3 className="text-2xl font-bold text-brand-navy mb-4">{question}</h3>
-                <div className="text-brand-navy text-lg leading-relaxed space-y-3">{answer}</div>
+                <h3 className="text-2xl font-bold text-[#00F0FF] drop-shadow-[0_0_12px_rgba(0,240,255,0.6)] mb-4">
+                  {question}
+                </h3>
+                <div className="text-[#00E0FF] text-lg leading-relaxed space-y-3 drop-shadow-[0_0_10px_rgba(0,224,255,0.35)]">
+                  {answer}
+                </div>
               </div>
             ))}
           </div>
