@@ -31,6 +31,7 @@ export default function SmartMeterSection({ houseId }: SmartMeterSectionProps) {
   const [manualAwarded, setManualAwarded] = useState(false);
   const [authorizationInfo, setAuthorizationInfo] = useState<AuthorizationSummary | null>(null);
   const [checkingStatus, setCheckingStatus] = useState(true);
+  const [hasShownEmailReminder, setHasShownEmailReminder] = useState(false);
 
   useEffect(() => {
     setMounted(true);
@@ -66,6 +67,13 @@ export default function SmartMeterSection({ houseId }: SmartMeterSectionProps) {
     if (!mounted) return;
     fetchAuthorizationStatus();
   }, [mounted, fetchAuthorizationStatus]);
+
+  useEffect(() => {
+    if (status === 'connected' && authorizationInfo && !hasShownEmailReminder) {
+      setShowEmailReminder(true);
+      setHasShownEmailReminder(true);
+    }
+  }, [status, authorizationInfo, hasShownEmailReminder]);
 
   const formattedAddress = authorizationInfo
     ? [
@@ -108,6 +116,7 @@ export default function SmartMeterSection({ houseId }: SmartMeterSectionProps) {
         window.dispatchEvent(new CustomEvent('entriesUpdated'));
         setShowAwardModal(true);
         setShowEmailReminder(true);
+        setHasShownEmailReminder(true);
       } catch (error) {
         console.error('Error awarding entries:', error);
       }
