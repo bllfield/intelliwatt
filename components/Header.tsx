@@ -7,6 +7,7 @@ import ClientEntriesCounter from './ClientEntriesCounter';
 
 const navLinks = [
   { href: '/how-it-works', label: 'How It Works' },
+  { href: '/benefits', label: 'Benefits' },
   { href: '/faq', label: 'FAQ' },
   { href: '/privacy-policy', label: 'Privacy' },
   { href: '/rules', label: 'Rules' },
