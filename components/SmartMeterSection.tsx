@@ -1,9 +1,24 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 type SmartMeterSectionProps = {
   houseId?: string | null;
+};
+
+type AuthorizationSummary = {
+  id: string;
+  esiid: string | null;
+  meterNumber: string | null;
+  authorizationEndDate: string | null;
+  tdspName: string | null;
+  houseAddress: {
+    line1: string;
+    line2: string | null;
+    city: string;
+    state: string;
+    zip5: string;
+  };
 };
 
 export default function SmartMeterSection({ houseId }: SmartMeterSectionProps) {
@@ -13,10 +28,53 @@ export default function SmartMeterSection({ houseId }: SmartMeterSectionProps) {
   const [status, setStatus] = useState<'idle' | 'connecting' | 'connected' | 'manual'>('idle');
   const [showAwardModal, setShowAwardModal] = useState(false);
   const [manualAwarded, setManualAwarded] = useState(false);
+  const [authorizationInfo, setAuthorizationInfo] = useState<AuthorizationSummary | null>(null);
+  const [checkingStatus, setCheckingStatus] = useState(true);
 
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  const fetchAuthorizationStatus = useCallback(async () => {
+    try {
+      setCheckingStatus(true);
+      const response = await fetch('/api/user/smt/status', { cache: 'no-store' });
+      if (!response.ok) {
+        setAuthorizationInfo(null);
+        setStatus('idle');
+        return;
+      }
+      const payload = await response.json();
+      if (payload.connected) {
+        setAuthorizationInfo(payload.authorization as AuthorizationSummary);
+        setStatus('connected');
+      } else {
+        setAuthorizationInfo(null);
+        setStatus('idle');
+      }
+    } catch (error) {
+      console.error('Failed to load SMT authorization status', error);
+      setAuthorizationInfo(null);
+      setStatus('idle');
+    } finally {
+      setCheckingStatus(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!mounted) return;
+    fetchAuthorizationStatus();
+  }, [mounted, fetchAuthorizationStatus]);
+
+  const formattedAddress = authorizationInfo
+    ? [
+        authorizationInfo.houseAddress.line1,
+        authorizationInfo.houseAddress.line2,
+        `${authorizationInfo.houseAddress.city}, ${authorizationInfo.houseAddress.state} ${authorizationInfo.houseAddress.zip5}`,
+      ]
+        .filter(Boolean)
+        .join('\n')
+    : '';
 
   const handleConnect = async () => {
     if (!consent || !address) {
@@ -51,6 +109,7 @@ export default function SmartMeterSection({ houseId }: SmartMeterSectionProps) {
       } catch (error) {
         console.error('Error awarding entries:', error);
       }
+      await fetchAuthorizationStatus();
     } else {
       setStatus('idle');
       alert('Something went wrong connecting your Smart Meter.');
@@ -76,7 +135,7 @@ export default function SmartMeterSection({ houseId }: SmartMeterSectionProps) {
     );
   }
 
-  if (status === 'connected') {
+  if (status === 'connected' && authorizationInfo) {
     return (
       <section className="bg-gradient-to-r from-green-600 to-green-700 text-white p-8 rounded-2xl shadow-lg mb-6 border border-green-500/20 relative">
         <div className="text-center">
@@ -85,6 +144,38 @@ export default function SmartMeterSection({ houseId }: SmartMeterSectionProps) {
           </div>
           <h2 className="text-3xl font-bold mb-3">Smart Meter Connected!</h2>
           <p className="text-lg text-green-100">Your usage, plan, and ESIID data are now loaded into your dashboard.</p>
+        </div>
+        <div className="mt-6 grid gap-4 rounded-2xl border border-white/20 bg-white/10 p-4 text-left text-sm text-green-50 md:grid-cols-2">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-green-200">Service address</p>
+            <pre className="mt-2 whitespace-pre-line font-sans text-sm">{formattedAddress}</pre>
+          </div>
+          <div className="space-y-2">
+            {authorizationInfo.esiid ? (
+              <p>
+                <span className="font-semibold">ESIID · </span>
+                {authorizationInfo.esiid}
+              </p>
+            ) : null}
+            {authorizationInfo.meterNumber ? (
+              <p>
+                <span className="font-semibold">Meter · </span>
+                {authorizationInfo.meterNumber}
+              </p>
+            ) : null}
+            {authorizationInfo.tdspName ? (
+              <p>
+                <span className="font-semibold">Utility · </span>
+                {authorizationInfo.tdspName}
+              </p>
+            ) : null}
+            {authorizationInfo.authorizationEndDate ? (
+              <p>
+                <span className="font-semibold">Authorization valid until · </span>
+                {new Date(authorizationInfo.authorizationEndDate).toLocaleDateString()}
+              </p>
+            ) : null}
+          </div>
         </div>
         {showAwardModal && (
           <div className="absolute inset-0 bg-black/50 flex items-center justify-center p-4">
