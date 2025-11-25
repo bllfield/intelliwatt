@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 interface User {
@@ -154,116 +154,119 @@ export default function AdminDashboard() {
   const [summary, setSummary] = useState<SummaryStats | null>(null);
   const [testimonials, setTestimonials] = useState<TestimonialRecord[]>([]);
   const [referrals, setReferrals] = useState<ReferralRecord[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
 
   // Fetch real data from API
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const [
-          summaryRes,
-          usersRes,
-          commissionsRes,
-          jackpotRes,
-          financeRes,
-          flaggedRes,
-          expiringRes,
-          testimonialsRes,
-          referralsRes,
-        ] = await Promise.all([
-          fetch('/api/admin/stats/summary'),
-          fetch('/api/admin/users'),
-          fetch('/api/admin/commissions'),
-          fetch('/api/admin/jackpot'),
-          fetch('/api/admin/finance'),
-          fetch('/api/admin/houses/flagged'),
-          fetch('/api/admin/hitthejackwatt/expiring'),
-          fetch('/api/admin/testimonials'),
-          fetch('/api/admin/referrals'),
-        ]);
+  const fetchData = useCallback(async () => {
+    try {
+      setRefreshing(true);
+      const [
+        summaryRes,
+        usersRes,
+        commissionsRes,
+        jackpotRes,
+        financeRes,
+        flaggedRes,
+        expiringRes,
+        testimonialsRes,
+        referralsRes,
+      ] = await Promise.all([
+        fetch('/api/admin/stats/summary'),
+        fetch('/api/admin/users'),
+        fetch('/api/admin/commissions'),
+        fetch('/api/admin/jackpot'),
+        fetch('/api/admin/finance'),
+        fetch('/api/admin/houses/flagged'),
+        fetch('/api/admin/hitthejackwatt/expiring'),
+        fetch('/api/admin/testimonials'),
+        fetch('/api/admin/referrals'),
+      ]);
 
-        if (summaryRes.ok) {
-          const summaryData = await summaryRes.json();
-          console.log('Fetched summary stats:', summaryData);
-          setSummary(summaryData);
-        } else {
-          console.error('Failed to fetch summary stats:', summaryRes.status, summaryRes.statusText);
-        }
-
-        if (usersRes.ok) {
-          const usersData = await usersRes.json();
-          console.log('Fetched users data:', usersData);
-          setUsers(usersData);
-        } else {
-          console.error('Failed to fetch users:', usersRes.status, usersRes.statusText);
-        }
-
-        if (commissionsRes.ok) {
-          const commissionsData = await commissionsRes.json();
-          console.log('Fetched commissions data:', commissionsData);
-          setCommissions(commissionsData);
-        } else {
-          console.error('Failed to fetch commissions:', commissionsRes.status, commissionsRes.statusText);
-        }
-
-        if (jackpotRes.ok) {
-          const jackpotData = await jackpotRes.json();
-          console.log('Fetched jackpot data:', jackpotData);
-          setJackpotPayouts(jackpotData);
-        } else {
-          console.error('Failed to fetch jackpot:', jackpotRes.status, jackpotRes.statusText);
-        }
-
-        if (financeRes.ok) {
-          const financeData = await financeRes.json();
-          console.log('Fetched finance data:', financeData);
-          setFinanceRecords(financeData);
-        } else {
-          console.error('Failed to fetch finance:', financeRes.status, financeRes.statusText);
-        }
-
-        if (flaggedRes.ok) {
-          const flaggedData = await flaggedRes.json();
-          console.log('Fetched flagged houses:', flaggedData);
-          setFlaggedRecords(flaggedData);
-        } else {
-          console.error('Failed to fetch flagged houses:', flaggedRes.status, flaggedRes.statusText);
-        }
-
-        if (expiringRes.ok) {
-          const expiryData = await expiringRes.json();
-          console.log('Fetched expiring entries:', expiryData);
-          setExpiringEntries(expiryData);
-        } else {
-          console.error('Failed to fetch expiring entries:', expiringRes.status, expiringRes.statusText);
-        }
-
-        if (testimonialsRes.ok) {
-          const testimonialData = await testimonialsRes.json();
-          console.log('Fetched testimonials:', testimonialData);
-          setTestimonials(testimonialData);
-        } else {
-          console.error('Failed to fetch testimonials:', testimonialsRes.status, testimonialsRes.statusText);
-        }
-
-        if (referralsRes.ok) {
-          const referralsData = await referralsRes.json();
-          console.log('Fetched referrals:', referralsData);
-          setReferrals(referralsData);
-        } else {
-          console.error('Failed to fetch referrals:', referralsRes.status, referralsRes.statusText);
-        }
-      } catch (error) {
-        console.error('Error fetching admin data:', error);
+      if (summaryRes.ok) {
+        const summaryData = await summaryRes.json();
+        console.log('Fetched summary stats:', summaryData);
+        setSummary(summaryData);
+      } else {
+        console.error('Failed to fetch summary stats:', summaryRes.status, summaryRes.statusText);
       }
-    };
 
+      if (usersRes.ok) {
+        const usersData = await usersRes.json();
+        console.log('Fetched users data:', usersData);
+        setUsers(usersData);
+      } else {
+        console.error('Failed to fetch users:', usersRes.status, usersRes.statusText);
+      }
+
+      if (commissionsRes.ok) {
+        const commissionsData = await commissionsRes.json();
+        console.log('Fetched commissions data:', commissionsData);
+        setCommissions(commissionsData);
+      } else {
+        console.error('Failed to fetch commissions:', commissionsRes.status, commissionsRes.statusText);
+      }
+
+      if (jackpotRes.ok) {
+        const jackpotData = await jackpotRes.json();
+        console.log('Fetched jackpot data:', jackpotData);
+        setJackpotPayouts(jackpotData);
+      } else {
+        console.error('Failed to fetch jackpot:', jackpotRes.status, jackpotRes.statusText);
+      }
+
+      if (financeRes.ok) {
+        const financeData = await financeRes.json();
+        console.log('Fetched finance data:', financeData);
+        setFinanceRecords(financeData);
+      } else {
+        console.error('Failed to fetch finance:', financeRes.status, financeRes.statusText);
+      }
+
+      if (flaggedRes.ok) {
+        const flaggedData = await flaggedRes.json();
+        console.log('Fetched flagged houses:', flaggedData);
+        setFlaggedRecords(flaggedData);
+      } else {
+        console.error('Failed to fetch flagged houses:', flaggedRes.status, flaggedRes.statusText);
+      }
+
+      if (expiringRes.ok) {
+        const expiryData = await expiringRes.json();
+        console.log('Fetched expiring entries:', expiryData);
+        setExpiringEntries(expiryData);
+      } else {
+        console.error('Failed to fetch expiring entries:', expiringRes.status, expiringRes.statusText);
+      }
+
+      if (testimonialsRes.ok) {
+        const testimonialData = await testimonialsRes.json();
+        console.log('Fetched testimonials:', testimonialData);
+        setTestimonials(testimonialData);
+      } else {
+        console.error('Failed to fetch testimonials:', testimonialsRes.status, testimonialsRes.statusText);
+      }
+
+      if (referralsRes.ok) {
+        const referralsData = await referralsRes.json();
+        console.log('Fetched referrals:', referralsData);
+        setReferrals(referralsData);
+      } else {
+        console.error('Failed to fetch referrals:', referralsRes.status, referralsRes.statusText);
+      }
+    } catch (error) {
+      console.error('Error fetching admin data:', error);
+    } finally {
+      setRefreshing(false);
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
     setMounted(true);
     document.title = 'Admin Dashboard - IntelliWatt™';
-    
-    fetchData().finally(() => {
-      setLoading(false);
-    });
-  }, []);
+
+    fetchData();
+  }, [fetchData]);
 
   // Prevent hydration mismatch by not rendering until mounted
   if (!mounted) {
@@ -340,7 +343,17 @@ export default function AdminDashboard() {
         <div className="max-w-7xl mx-auto px-4 py-6">
           <div className="flex justify-between items-center">
             <h1 className="text-3xl font-bold text-brand-white">Admin Dashboard</h1>
-            <div className="text-brand-blue">Logged in as: {adminEmail}</div>
+            <div className="flex flex-wrap items-center gap-3 text-sm text-brand-blue">
+              <button
+                type="button"
+                onClick={fetchData}
+                disabled={refreshing}
+                className="inline-flex items-center gap-2 rounded-full border border-brand-blue/40 bg-brand-blue/10 px-4 py-2 font-semibold uppercase tracking-wide text-brand-blue transition hover:border-brand-blue hover:bg-brand-blue/20 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {refreshing ? 'Refreshing…' : 'Refresh data'}
+              </button>
+              <span className="text-brand-blue/80">Logged in as: {adminEmail}</span>
+            </div>
           </div>
         </div>
       </div>
