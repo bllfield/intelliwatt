@@ -395,23 +395,25 @@ export async function POST(req: NextRequest) {
       finalStatus === "already_active" ||
       smtResult?.subscriptionAlreadyActive;
 
+    const hasContactDetails = trimmedCustomerName.length > 0 || !!normalizedContactPhone;
+
+    if (hasContactDetails) {
+      await prisma.userProfile.upsert({
+        where: { userId: user.id },
+        update: {
+          ...(trimmedCustomerName.length > 0 ? { fullName: trimmedCustomerName } : {}),
+          ...(normalizedContactPhone ? { phone: normalizedContactPhone } : {}),
+        },
+        create: {
+          userId: user.id,
+          fullName: trimmedCustomerName.length > 0 ? trimmedCustomerName : null,
+          phone: normalizedContactPhone ?? null,
+        },
+      });
+    }
+
     if (shouldAwardSmartMeterEntry) {
       await ensureEntryAmount(user.id, "smart_meter_connect", 1, house.id);
-      await prisma.userProfile.updateMany({
-        where: { userId: user.id },
-        data: {
-          fullName: trimmedCustomerName,
-          phone: normalizedContactPhone,
-        },
-      });
-    } else if (trimmedCustomerName || normalizedContactPhone) {
-      await prisma.userProfile.updateMany({
-        where: { userId: user.id },
-        data: {
-          fullName: trimmedCustomerName || undefined,
-          phone: normalizedContactPhone || undefined,
-        },
-      });
     }
 
     await refreshUserEntryStatuses(user.id);
