@@ -9,7 +9,7 @@ const benefits = [
   { icon: '🏠', text: 'See where your home uses energy and uncover opportunities to reduce waste.' },
   { icon: '⚡', text: 'Secure Smart Meter Texas integration lets IntelliWatt™ pull usage data automatically with your permission.' },
   { icon: '📈', text: 'Track usage trends over time and receive tailored recommendations.' },
-  { icon: '👥', text: 'Earn an entry for every friend who shares their usage—referrals have no cap.' },
+  { icon: '👥', text: 'Earn an entry for every friend who shares their usage—referrals have no cap and never expire.' },
   { icon: '🗣️', text: 'Eligible customers can submit testimonials for an additional entry that never expires.' },
   { icon: '📊', text: 'Personalized savings reports highlight best-fit plans, appliances, and upgrades.' },
   { icon: '🚫', text: 'No pressure—recommendations always focus on what saves you the most.' },
