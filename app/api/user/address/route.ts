@@ -109,26 +109,6 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Create an entry for address completion
-    await db.entry.create({
-      data: {
-        userId: user.id,
-        type: 'address_completed',
-        amount: 1
-      }
-    });
-
-    // If Smart Meter consent given, create another entry
-    if (smartMeterConsent) {
-      await db.entry.create({
-        data: {
-          userId: user.id,
-          type: 'smart_meter_consent',
-          amount: 1
-        }
-      });
-    }
-
     return NextResponse.json({
       success: true,
       profile: {
@@ -139,8 +119,8 @@ export async function POST(request: NextRequest) {
         smartMeterConsent: profile.smartMeterConsent,
         smartMeterConsentDate: profile.smartMeterConsentDate
       },
-      message: addressValid 
-        ? 'Address validated successfully! ESIID found.' 
+      message: addressValid
+        ? 'Address validated successfully! ESIID found.'
         : 'Address saved. ESIID lookup will be retried later.'
     });
 
