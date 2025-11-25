@@ -135,11 +135,17 @@ function JoinPageContent() {
       </section>
 
       {/* Benefits Section */}
-      <section className="py-16 px-4 bg-brand-navy">
+      <section className="py-24 px-4 bg-brand-white">
         <div className="max-w-5xl mx-auto">
-          <h2 className="text-3xl font-bold text-brand-white text-center mb-12">
-            Why Join <span className="text-brand-blue">IntelliWatt™</span>?
-          </h2>
+          <div className="text-center mb-16">
+            <h2 className="text-3xl md:text-5xl font-bold text-brand-navy mb-4">
+              Why Join <span className="text-brand-blue">IntelliWatt™</span>?
+            </h2>
+            <p className="text-lg text-brand-navy/80 max-w-3xl mx-auto leading-relaxed">
+              Unlock personalized savings insights, jackpot entries, and AI-powered recommendations that stay in sync with your
+              home’s real energy usage.
+            </p>
+          </div>
 
           <div className="grid gap-6 md:grid-cols-2">
             {[
@@ -162,12 +168,15 @@ function JoinPageContent() {
             ].map((benefit) => (
               <div
                 key={benefit.text}
-                className="flex items-start gap-4 bg-brand-navy/60 border border-brand-blue/30 rounded-xl p-6 text-left hover:border-brand-blue transition-colors"
+                className="flex items-start gap-4 rounded-2xl border border-brand-blue/30 bg-brand-navy p-6 shadow-[0_15px_40px_rgba(15,23,42,0.3)] transition hover:border-brand-blue/60"
               >
-                <span className="text-3xl" aria-hidden>
+                <span
+                  aria-hidden
+                  className="mt-1 flex h-10 w-10 items-center justify-center rounded-full bg-brand-blue/20 text-lg text-[#00E0FF] shadow-[0_10px_25px_rgba(0,224,255,0.45)]"
+                >
                   {benefit.icon}
                 </span>
-                <p className="text-brand-white leading-relaxed">{benefit.text}</p>
+                <p className="text-brand-white/90 leading-relaxed">{benefit.text}</p>
               </div>
             ))}
           </div>
