@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
 import { SmtAuthorizationForm } from "@/components/smt/SmtAuthorizationForm";
 import SmtAddressCaptureCard from "@/components/smt/SmtAddressCaptureCard";
+import SmtManualFallbackCard from "@/components/smt/SmtManualFallbackCard";
 
 type ExistingSmtAuthorization = {
   id: string;
@@ -344,90 +345,85 @@ export default async function ApiConnectPage() {
             ) : null}
 
             {readyForSmt && (
-              <div className="space-y-6 rounded-3xl border border-brand-navy/15 bg-white/90 p-4 text-center shadow-[0_18px_60px_rgba(16,46,90,0.06)] backdrop-blur max-[480px]:p-3 sm:p-6 md:p-8">
-                <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.1fr,1fr] lg:items-start">
-                  <div className="order-2 space-y-4 lg:order-1">
-                    <div className="rounded-2xl border border-brand-cyan/40 bg-brand-navy p-5 text-sm text-brand-cyan shadow-[0_10px_30px_rgba(16,182,231,0.18)] sm:p-6">
-                      <div className="grid grid-cols-1 gap-4">
-                        <div className="space-y-1">
-                          <h2 className="text-sm font-semibold uppercase tracking-wide text-brand-cyan">
-                            Service address on file
-                          </h2>
-                          <div className="space-y-0.5 text-brand-cyan">
-                            <div>{serviceAddressLine1}</div>
-                            {serviceAddressLine2 ? <div>{serviceAddressLine2}</div> : null}
-                            <div>
-                              {serviceCity}, {serviceState} {serviceZip}
-                            </div>
-                            <div>
-                              <span className="font-semibold">ESIID · </span>
-                              {houseAddress.esiid ?? "—"}
-                            </div>
-                            <div>
-                              <span className="font-semibold">Utility · </span>
-                              {tdspName ?? "—"}
-                            </div>
+              <>
+                <div className="space-y-6 rounded-3xl border border-brand-navy/15 bg-white/90 p-4 shadow-[0_18px_60px_rgba(16,46,90,0.06)] backdrop-blur max-[480px]:p-3 sm:p-6 md:p-8">
+                  <div className="rounded-2xl border border-brand-cyan/40 bg-brand-navy p-5 text-sm text-brand-cyan shadow-[0_10px_30px_rgba(16,182,231,0.18)] sm:p-6">
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                      <div className="space-y-1">
+                        <h2 className="text-sm font-semibold uppercase tracking-wide text-brand-cyan">
+                          Service address on file
+                        </h2>
+                        <div className="space-y-0.5 text-brand-cyan/90">
+                          <div>{serviceAddressLine1}</div>
+                          {serviceAddressLine2 ? <div>{serviceAddressLine2}</div> : null}
+                          <div>
+                            {serviceCity}, {serviceState} {serviceZip}
                           </div>
-                        </div>
-                        <div className="space-y-1">
-                          <h3 className="text-sm font-semibold uppercase tracking-wide text-brand-cyan">
-                            Utility integrations
-                          </h3>
-                          <div className="space-y-0.5">
-                            <div>
-                              <span className="font-semibold">Contact Email · </span>
-                              {userEmail || "—"}
-                            </div>
+                          <div>
+                            <span className="font-semibold">ESIID · </span>
+                            {houseAddress.esiid ?? "—"}
+                          </div>
+                          <div>
+                            <span className="font-semibold">Utility · </span>
+                            {tdspName ?? "—"}
                           </div>
                         </div>
                       </div>
-                      {existingAuth && (
-                        <div className="mt-4 rounded-lg border border-brand-cyan/45 bg-brand-navy/60 p-3 text-xs leading-relaxed text-brand-cyan">
-                          <p>
-                            We already have a valid Smart Meter Texas authorization for this address. You can submit this form again to
-                            refresh or update your authorization, especially if you’ve changed providers, revoked consent in Smart Meter Texas,
-                            or updated your information.
-                          </p>
+                      <div className="space-y-1">
+                        <h3 className="text-sm font-semibold uppercase tracking-wide text-brand-cyan">
+                          Utility integrations
+                        </h3>
+                        <div className="space-y-0.5 text-brand-cyan/90">
+                          <div>
+                            <span className="font-semibold">Contact Email · </span>
+                            {userEmail || "—"}
+                          </div>
                         </div>
-                      )}
+                      </div>
                     </div>
-
                     {existingAuth && (
-                      <div className="rounded-2xl border border-brand-cyan/40 bg-brand-navy p-5 text-xs text-brand-cyan shadow-[0_10px_30px_rgba(16,182,231,0.18)] sm:p-6">
-                        <div className="flex flex-wrap items-center justify-center gap-3">
-                          <span className="text-[0.7rem] font-semibold uppercase tracking-wide">
-                            SMT authorization last submitted{" "}
-                            {existingAuth.createdAt.toLocaleDateString(undefined, {
-                              month: "short",
-                              day: "numeric",
-                              year: "numeric",
-                            })}
-                          </span>
-                          {statusLabel ? (
-                            <span className={statusBadgeStyles[statusTone]}>{statusLabel}</span>
-                          ) : null}
-                        </div>
-                        {statusMessage ? (
-                          <p className="mt-2 text-xs leading-relaxed text-brand-cyan/90">{statusMessage}</p>
-                        ) : null}
-                        {statusSecondaryMessage ? (
-                          <p className="mt-1 text-xs leading-relaxed text-brand-cyan/80">{statusSecondaryMessage}</p>
-                        ) : null}
-                        {existingAuth?.authorizationEndDate ? (
-                          <p className="mt-3 text-xs text-brand-cyan/70">
-                            Authorization expires{" "}
-                            {existingAuth.authorizationEndDate.toLocaleDateString(undefined, {
-                              month: "short",
-                              day: "numeric",
-                              year: "numeric",
-                            })}
-                          </p>
-                        ) : null}
+                      <div className="mt-4 rounded-lg border border-brand-cyan/45 bg-brand-navy/60 p-3 text-xs leading-relaxed text-brand-cyan/80">
+                        We already have a valid Smart Meter Texas authorization for this address. Submit the form again if you
+                        need to refresh your consent (for example after changing providers or revoking access in SMT).
                       </div>
                     )}
                   </div>
 
-                  <div className="order-1 rounded-2xl border border-brand-blue/10 bg-white p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)] lg:order-2 sm:p-6">
+                  {existingAuth && (
+                    <div className="rounded-2xl border border-brand-cyan/40 bg-brand-navy p-5 text-xs text-brand-cyan shadow-[0_10px_30px_rgba(16,182,231,0.18)] sm:p-6">
+                      <div className="flex flex-wrap items-center justify-center gap-3 text-center md:justify-between md:text-left">
+                        <span className="text-[0.7rem] font-semibold uppercase tracking-wide">
+                          SMT authorization last submitted{" "}
+                          {existingAuth.createdAt.toLocaleDateString(undefined, {
+                            month: "short",
+                            day: "numeric",
+                            year: "numeric",
+                          })}
+                        </span>
+                        {statusLabel ? (
+                          <span className={statusBadgeStyles[statusTone]}>{statusLabel}</span>
+                        ) : null}
+                      </div>
+                      {statusMessage ? (
+                        <p className="mt-2 text-xs leading-relaxed text-brand-cyan/90 text-left">{statusMessage}</p>
+                      ) : null}
+                      {statusSecondaryMessage ? (
+                        <p className="mt-1 text-xs leading-relaxed text-brand-cyan/80 text-left">{statusSecondaryMessage}</p>
+                      ) : null}
+                      {existingAuth?.authorizationEndDate ? (
+                        <p className="mt-3 text-xs text-brand-cyan/70 text-left">
+                          Authorization expires{" "}
+                          {existingAuth.authorizationEndDate.toLocaleDateString(undefined, {
+                            month: "short",
+                            day: "numeric",
+                            year: "numeric",
+                          })}
+                        </p>
+                      ) : null}
+                    </div>
+                  )}
+
+                  <div className="rounded-2xl border border-brand-blue/10 bg-white p-4 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.7)] sm:p-6">
                     <SmtAuthorizationForm
                       contactEmail={userEmail}
                       houseAddressId={houseAddress.id}
@@ -446,7 +442,9 @@ export default async function ApiConnectPage() {
                     />
                   </div>
                 </div>
-              </div>
+
+                <SmtManualFallbackCard houseAddressId={houseAddress?.id ?? null} />
+              </>
             )}
           </div>
         </section>

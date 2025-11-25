@@ -224,20 +224,37 @@ export default function SmartMeterSection({ houseId }: SmartMeterSectionProps) {
 
         {showEmailReminder && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-            <div className="w-full max-w-md rounded-3xl border border-brand-blue/40 bg-brand-navy p-6 text-brand-cyan shadow-[0_24px_60px_rgba(16,46,90,0.55)]">
+            <div className="w-full max-w-xl rounded-3xl border border-brand-blue/40 bg-brand-navy p-6 text-brand-cyan shadow-[0_24px_60px_rgba(16,46,90,0.55)]">
               <h3 className="text-lg font-semibold uppercase tracking-[0.3em] text-brand-cyan/60">
-                Confirm SMT access
+                Check your inbox — action required
               </h3>
-              <p className="mt-4 text-sm text-brand-cyan/85">
-                Smart Meter Texas will send you an email shortly to confirm this agreement. Please check your
-                inbox within the next 10 minutes and approve the request so IntelliWatt can keep syncing your usage data.
+              <p className="mt-4 text-sm leading-relaxed text-brand-cyan/80">
+                We just asked Smart Meter Texas to authorize IntelliWatt. Look for an email from{" "}
+                <span className="font-semibold text-brand-cyan">info@communications.smartmetertexas.com</span> with the
+                subject “Authorization to allow Intelliwatt to access your electricity information”.
+              </p>
+              <ul className="mt-4 space-y-3 rounded-2xl border border-brand-blue/30 bg-brand-blue/5 px-4 py-3 text-sm text-brand-cyan/85">
+                <li>
+                  • Open the email and click <span className="font-semibold text-brand-cyan">Confirm</span> to approve the
+                  request before it expires.
+                </li>
+                <li>
+                  • If you did not expect the request, choose <span className="font-semibold text-brand-cyan">Did Not Request</span>{" "}
+                  or contact support immediately.
+                </li>
+                <li>
+                  • You can always revoke this authorization later from your IntelliWatt profile.
+                </li>
+              </ul>
+              <p className="mt-4 text-xs uppercase tracking-wide text-brand-cyan/60">
+                Confirm the email first, then acknowledge below.
               </p>
               <div className="mt-6 flex justify-end">
                 <button
                   onClick={() => setShowEmailReminder(false)}
-                  className="inline-flex items-center rounded-full border border-brand-cyan/60 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-brand-cyan transition hover:border-brand-blue hover:text-brand-blue"
+                  className="inline-flex items-center rounded-full border border-brand-cyan/60 bg-brand-cyan/10 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-brand-cyan transition hover:border-brand-blue hover:text-brand-blue"
                 >
-                  Got it
+                  I approved the email from SMT
                 </button>
               </div>
             </div>
