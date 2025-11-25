@@ -15,6 +15,51 @@ function LandingPageContent() {
   const source = searchParams?.get('source');
   const showJackpotBanner = from === 'htjw' || source === 'jackpot';
 
+  const testimonials = [
+    {
+      name: 'Jessica L.',
+      initials: 'JL',
+      location: 'Fort Worth, TX',
+      quote:
+        "I didn't realize I was overpaying by $75/month. The site helped me switch in minutes. No calls, no hassle — just cheaper power. And now I'm entered every month for free money!",
+    },
+    {
+      name: 'Marcus R.',
+      initials: 'MR',
+      location: 'Dallas, TX',
+      quote:
+        "I referred my sister and 3 friends, and each one unlocked another entry for me. If I win this jackpot, I'm taking my family on a weekend getaway.",
+    },
+    {
+      name: 'Sandra M.',
+      initials: 'SM',
+      location: 'Arlington, TX',
+      quote:
+        "I switched to a plan that's 4¢ cheaper per kWh and I didn't have to pay anything. I like that this isn't some scammy sales site. It's legit.",
+    },
+    {
+      name: 'Michelle T.',
+      initials: 'MT',
+      location: 'San Antonio, TX',
+      quote:
+        "As a single mom with three kids, every dollar counts. HitTheJackWatt™ found me a plan that's saving me over $600 a year. That's a month of groceries for us!",
+    },
+    {
+      name: 'Robert K.',
+      initials: 'RK',
+      location: 'Austin, TX',
+      quote:
+        "I'm skeptical of most 'free' things, but this was actually free and saved me money. No spam calls, no high-pressure sales, just good information and a better rate.",
+    },
+    {
+      name: 'Tyler J.',
+      initials: 'TJ',
+      location: 'Frisco, TX',
+      quote:
+        "The energy insights were eye-opening. I had no idea my gaming PC was costing me that much to run! Made some easy adjustments and now I'm saving about 15% on my bill.",
+    },
+  ];
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email) return;
@@ -370,46 +415,24 @@ function LandingPageContent() {
             What Our <span className="text-brand-blue">Users</span> Say
           </h2>
           
-          {/* Testimonials Placeholder */}
           <div className="grid md:grid-cols-3 gap-8 mb-20">
-            <div className="bg-brand-white p-8 rounded-2xl border border-brand-navy shadow-lg">
-              <div className="flex items-center mb-4">
-                <div className="w-12 h-12 bg-brand-navy rounded-full flex items-center justify-center mr-4">
-                  <span className="text-brand-blue font-bold">JS</span>
+            {testimonials.map(({ name, initials, location, quote }) => (
+              <div
+                key={name}
+                className="bg-brand-white p-8 rounded-2xl border border-brand-navy shadow-lg transition-transform duration-300 hover:-translate-y-2 hover:shadow-2xl"
+              >
+                <div className="flex items-center mb-4">
+                  <div className="w-12 h-12 bg-brand-navy rounded-full flex items-center justify-center mr-4 shadow-[0_0_18px_rgba(22,55,130,0.35)]">
+                    <span className="text-brand-blue font-bold">{initials}</span>
+                  </div>
+                  <div>
+                    <h4 className="text-brand-navy font-semibold">{name}</h4>
+                    <p className="text-brand-navy/70 text-sm">{location}</p>
+                  </div>
                 </div>
-                <div>
-                  <h4 className="text-brand-navy font-semibold">John Smith</h4>
-                  <p className="text-brand-navy text-sm">Homeowner</p>
-                </div>
+                <p className="text-brand-navy italic leading-relaxed">"{quote}"</p>
               </div>
-              <p className="text-brand-navy italic">"Testimonial 1 coming soon..."</p>
-            </div>
-            
-            <div className="bg-brand-white p-8 rounded-2xl border border-brand-navy shadow-lg">
-              <div className="flex items-center mb-4">
-                <div className="w-12 h-12 bg-brand-navy rounded-full flex items-center justify-center mr-4">
-                  <span className="text-brand-blue font-bold">MJ</span>
-                </div>
-                <div>
-                  <h4 className="text-brand-navy font-semibold">Mary Johnson</h4>
-                  <p className="text-brand-navy text-sm">Business Owner</p>
-                </div>
-              </div>
-              <p className="text-brand-navy italic">"Testimonial 2 coming soon..."</p>
-            </div>
-            
-            <div className="bg-brand-white p-8 rounded-2xl border border-brand-navy shadow-lg">
-              <div className="flex items-center mb-4">
-                <div className="w-12 h-12 bg-brand-navy rounded-full flex items-center justify-center mr-4">
-                  <span className="text-brand-blue font-bold">RW</span>
-                </div>
-                <div>
-                  <h4 className="text-brand-navy font-semibold">Robert Wilson</h4>
-                  <p className="text-brand-navy text-sm">Property Manager</p>
-                </div>
-              </div>
-              <p className="text-brand-navy italic">"Testimonial 3 coming soon..."</p>
-            </div>
+            ))}
           </div>
           
           {/* Trust Indicators */}

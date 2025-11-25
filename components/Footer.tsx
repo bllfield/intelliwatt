@@ -88,7 +88,7 @@ export default function Footer() {
               <li><a href="/rules" className="transition-colors hover:text-brand-white">Rules</a></li>
               <li>
                 <a
-                  href="https://www.intellipath-solutions.com/about.html"
+                  href="https://www.intellipath-solutions.com/index.html"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="transition-colors hover:text-brand-white"

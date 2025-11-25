@@ -3,7 +3,10 @@ import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
 import { ProfileContactForm } from "@/components/profile/ProfileContactForm";
 import { ProfileAddressSection } from "@/components/profile/ProfileAddressSection";
+import { ProfileTestimonialCard } from "@/components/profile/ProfileTestimonialCard";
 import { RevokeSmartMeterButton } from "@/components/profile/RevokeSmartMeterButton";
+const COMMISSION_STATUS_ALLOWLIST = ["pending", "submitted", "approved", "completed", "paid"];
+
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -216,6 +219,48 @@ export default async function ProfilePage() {
     entries: house.entries,
   }));
 
+  const [currentPlan, qualifyingCommission, testimonialSubmission] = await Promise.all([
+    prismaAny.utilityPlan.findFirst({
+      where: { userId: user.id, isCurrent: true },
+      select: { id: true },
+    }),
+    prismaAny.commissionRecord.findFirst({
+      where: {
+        userId: user.id,
+        status: { in: COMMISSION_STATUS_ALLOWLIST },
+        OR: [
+          { type: { contains: "switch", mode: "insensitive" } },
+          { type: { contains: "plan", mode: "insensitive" } },
+          { type: { contains: "upgrade", mode: "insensitive" } },
+        ],
+      },
+      select: { id: true },
+    }),
+    prismaAny.testimonialSubmission.findFirst({
+      where: { userId: user.id },
+      orderBy: { submittedAt: "desc" },
+      select: {
+        id: true,
+        status: true,
+        content: true,
+        submittedAt: true,
+        entryAwardedAt: true,
+      },
+    }),
+  ]);
+
+  const testimonialEligible = Boolean(currentPlan) || Boolean(qualifyingCommission);
+  const testimonialSummary = testimonialSubmission
+    ? {
+        status: testimonialSubmission.status as "PENDING" | "APPROVED" | "REJECTED",
+        content: testimonialSubmission.content,
+        submittedAt: testimonialSubmission.submittedAt.toISOString(),
+        entryAwardedAt: testimonialSubmission.entryAwardedAt
+          ? testimonialSubmission.entryAwardedAt.toISOString()
+          : null,
+      }
+    : null;
+
   return (
     <div className="min-h-screen bg-white py-12 px-4 text-brand-navy">
       <div className="mx-auto flex max-w-6xl flex-col gap-10">
@@ -258,6 +303,8 @@ export default async function ProfilePage() {
             cumulativeEntries={cumulativeEntries}
           />
         </div>
+
+        <ProfileTestimonialCard eligible={testimonialEligible} submission={testimonialSummary} />
 
         <section className="rounded-3xl border border-brand-cyan/40 bg-brand-navy p-6 text-brand-cyan shadow-[0_0_35px_rgba(56,189,248,0.28)]">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">

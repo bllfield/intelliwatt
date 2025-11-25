@@ -84,6 +84,19 @@ interface EntryExpiryDigest {
   email: string | null;
 }
 
+interface TestimonialRecord {
+  id: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  content: string;
+  submittedAt: string;
+  entryAwardedAt: string | null;
+  user: {
+    id: string;
+    email: string;
+    createdAt: string;
+  };
+}
+
 interface SummaryStats {
   totalUsers: number;
   activeSmtAuthorizations: number;
@@ -92,6 +105,8 @@ interface SummaryStats {
   activeHouseCount: number;
   applianceCount: number;
   pendingSmtRevocations: number;
+  testimonialSubmissionCount: number;
+  testimonialPendingCount: number;
 }
 
 const currencyFormatter = new Intl.NumberFormat('en-US', {
@@ -114,6 +129,7 @@ export default function AdminDashboard() {
   const [flaggedRecords, setFlaggedRecords] = useState<FlaggedHouseRecord[]>([]);
   const [expiringEntries, setExpiringEntries] = useState<EntryExpiryDigest[]>([]);
   const [summary, setSummary] = useState<SummaryStats | null>(null);
+  const [testimonials, setTestimonials] = useState<TestimonialRecord[]>([]);
 
   // Fetch real data from API
   useEffect(() => {
@@ -127,6 +143,7 @@ export default function AdminDashboard() {
           financeRes,
           flaggedRes,
           expiringRes,
+          testimonialsRes,
         ] = await Promise.all([
           fetch('/api/admin/stats/summary'),
           fetch('/api/admin/users'),
@@ -135,6 +152,7 @@ export default function AdminDashboard() {
           fetch('/api/admin/finance'),
           fetch('/api/admin/houses/flagged'),
           fetch('/api/admin/hitthejackwatt/expiring'),
+          fetch('/api/admin/testimonials'),
         ]);
 
         if (summaryRes.ok) {
@@ -192,6 +210,14 @@ export default function AdminDashboard() {
         } else {
           console.error('Failed to fetch expiring entries:', expiringRes.status, expiringRes.statusText);
         }
+
+        if (testimonialsRes.ok) {
+          const testimonialData = await testimonialsRes.json();
+          console.log('Fetched testimonials:', testimonialData);
+          setTestimonials(testimonialData);
+        } else {
+          console.error('Failed to fetch testimonials:', testimonialsRes.status, testimonialsRes.statusText);
+        }
       } catch (error) {
         console.error('Error fetching admin data:', error);
       }
@@ -229,6 +255,15 @@ export default function AdminDashboard() {
   const totalUsageCustomers = summary?.totalUsageCustomers ?? 0;
   const applianceCount = summary?.applianceCount ?? 0;
   const pendingRevocationsCount = summary?.pendingSmtRevocations ?? 0;
+  const testimonialsTotal =
+    summary?.testimonialSubmissionCount ?? testimonials.length;
+  const testimonialsPendingCount =
+    summary?.testimonialPendingCount ?? testimonials.filter((record) => record.status === 'PENDING').length;
+  const testimonialStatusStyles: Record<TestimonialRecord['status'], string> = {
+    PENDING: 'border border-amber-400/40 bg-amber-400/10 text-amber-600',
+    APPROVED: 'border border-emerald-400/40 bg-emerald-400/10 text-emerald-600',
+    REJECTED: 'border border-rose-400/40 bg-rose-400/10 text-rose-600',
+  };
 
   const flaggedReplacements = flaggedRecords.filter(
     (record) => record.attentionCode === 'smt_replaced',
@@ -243,6 +278,8 @@ export default function AdminDashboard() {
     { label: 'Manual Entries', value: manualEntriesCount.toLocaleString() },
     { label: 'Total Usage Customers', value: totalUsageCustomers.toLocaleString() },
     { label: 'Appliances #', value: applianceCount.toLocaleString() },
+    { label: 'Testimonials', value: testimonialsTotal.toLocaleString() },
+    { label: 'Testimonials Pending', value: testimonialsPendingCount.toLocaleString() },
     { label: 'SMT Revocations Pending', value: pendingRevocationsCount.toLocaleString() },
     { label: 'Total Commissions', value: currencyFormatter.format(totalCommissions) },
     { label: 'Net Finance', value: currencyFormatter.format(totalFinance) },
@@ -412,6 +449,74 @@ export default function AdminDashboard() {
                       </td>
                     </tr>
                   ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        {/* Customer Testimonials */}
+        <section className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
+          <h2 className="text-2xl font-bold text-brand-navy mb-2">🗣️ Customer Testimonials</h2>
+          <p className="text-sm text-brand-navy/70 mb-4">
+            Testimonials unlock only after a customer switches plans or completes an IntelliPath upgrade. Monitor pending
+            submissions here and follow up when additional verification is required.
+          </p>
+          {testimonials.length === 0 ? (
+            <div className="rounded-md border border-brand-navy/10 bg-brand-navy/5 px-4 py-6 text-center text-brand-navy/70">
+              No testimonials submitted yet.
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-brand-navy/10">
+              <table className="min-w-full divide-y divide-brand-navy/10">
+                <thead className="bg-brand-navy/5">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-brand-navy/60">
+                      Customer
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-brand-navy/60">
+                      Status
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-brand-navy/60">
+                      Entry Awarded
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-brand-navy/60">
+                      Submitted
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-brand-navy/60">
+                      Testimonial
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-brand-navy/10 bg-white">
+                  {testimonials.map((record) => {
+                    const snippet =
+                      record.content.length > 200 ? `${record.content.slice(0, 200)}…` : record.content;
+                    return (
+                      <tr key={record.id}>
+                        <td className="px-4 py-3 text-sm text-brand-navy">
+                          <div className="font-semibold">{record.user.email}</div>
+                          <div className="text-xs text-brand-navy/60">
+                            Customer since {formatTimestamp(record.user.createdAt)}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span
+                            className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wide ${testimonialStatusStyles[record.status]}`}
+                          >
+                            {record.status.toLowerCase()}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-sm text-brand-navy">
+                          {record.entryAwardedAt ? formatTimestamp(record.entryAwardedAt) : '—'}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-brand-navy">
+                          {formatTimestamp(record.submittedAt)}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-brand-navy/80">{snippet}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

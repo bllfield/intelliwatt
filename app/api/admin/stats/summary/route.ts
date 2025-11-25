@@ -16,6 +16,8 @@ export async function GET() {
       pendingSmtRevocations,
       smtUserResults,
       manualUserResults,
+      totalTestimonials,
+      pendingTestimonials,
     ] = await Promise.all([
       prisma.user.count(),
       prisma.smtAuthorization.count({
@@ -41,6 +43,10 @@ export async function GET() {
         select: { userId: true },
         distinct: ['userId'],
       }),
+      prismaAny.testimonialSubmission.count(),
+      prismaAny.testimonialSubmission.count({
+        where: { status: 'PENDING' },
+      }),
     ]);
 
     const usageUserSet = new Set<string>();
@@ -59,6 +65,8 @@ export async function GET() {
       applianceCount,
       pendingSmtRevocations,
       totalUsageCustomers: usageUserSet.size,
+      testimonialSubmissionCount: totalTestimonials,
+      testimonialPendingCount: pendingTestimonials,
     });
   } catch (error) {
     console.error('Error fetching admin summary stats:', error);

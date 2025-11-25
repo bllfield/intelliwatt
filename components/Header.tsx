@@ -13,6 +13,11 @@ const navLinks = [
   { href: '/security', label: 'Security' },
   { href: '/privacy-policy', label: 'Privacy' },
   { href: '/rules', label: 'Rules' },
+  {
+    href: 'https://www.intellipath-solutions.com/index.html',
+    label: 'About Us',
+    external: true,
+  },
 ];
 
 const AUTH_PATH = '/join';
@@ -114,10 +119,12 @@ export default function Header() {
             </div>
 
             <nav className="hidden items-center space-x-6 text-sm md:flex">
-              {navLinks.map(({ href, label }) => (
+              {navLinks.map(({ href, label, external }) => (
                 <Link
                   key={href}
                   href={href}
+                  target={external ? '_blank' : undefined}
+                  rel={external ? 'noopener noreferrer' : undefined}
                   className="text-brand-blue transition-colors hover:text-brand-white"
                 >
                   {label}
@@ -161,16 +168,18 @@ export default function Header() {
               id="mobile-nav"
               className="flex flex-col gap-2 rounded-lg border border-brand-blue/30 bg-brand-navy/95 p-4 text-sm text-brand-blue md:hidden"
             >
-              {navLinks.map(({ href, label }) => (
-                <Link
-                  key={href}
-                  href={href}
-                  onClick={handleClose}
-                  className="rounded-md px-2 py-2 transition hover:bg-brand-blue/10 hover:text-brand-white"
-                >
-                  {label}
-                </Link>
-              ))}
+            {navLinks.map(({ href, label, external }) => (
+              <Link
+                key={href}
+                href={href}
+                target={external ? '_blank' : undefined}
+                rel={external ? 'noopener noreferrer' : undefined}
+                onClick={handleClose}
+                className="rounded-md px-2 py-2 transition hover:bg-brand-blue/10 hover:text-brand-white"
+              >
+                {label}
+              </Link>
+            ))}
               {authChecked && isAuthenticated ? (
                 <button
                   onClick={() => {

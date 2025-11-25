@@ -13,6 +13,7 @@ model User {
   createdAt         DateTime           @default(now())
   referredById      String?
   commissions       CommissionRecord[]
+  testimonials      TestimonialSubmission[]
   entries           Entry[]            @relation("UserEntries")
   jackpotPayouts    JackpotPayout[]
   referrals         Referral[]         @relation("UserReferrals")
@@ -238,6 +239,28 @@ enum EntryStatus {
   ACTIVE
   EXPIRING_SOON
   EXPIRED
+}
+
+enum TestimonialStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model TestimonialSubmission {
+  id             String             @id @default(cuid())
+  userId         String
+  content        String
+  status         TestimonialStatus  @default(PENDING)
+  submittedAt    DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  publishedAt    DateTime?
+  entryAwardedAt DateTime?
+  source         String?
+  user           User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([userId])
 }
 model Session {
   id        String   @id @default(cuid())
