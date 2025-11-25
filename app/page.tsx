@@ -85,7 +85,7 @@ function LandingPageContent() {
           <div className="text-center mb-16">
             {/* Logo */}
             <div className="flex justify-center mb-8">
-              <div className="relative w-48 h-24">
+              <div className="relative w-[36rem] h-[18rem]">
                 <Image
                   src="/IntelliWatt Logo TM.png"
                   alt="IntelliWatt™ Logo"
