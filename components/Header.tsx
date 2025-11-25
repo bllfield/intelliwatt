@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import ClientEntriesCounter from './ClientEntriesCounter';
@@ -16,11 +16,44 @@ const navLinks = [
 
 const AUTH_PATH = '/join';
 
+function hasAuthCookie() {
+  if (typeof document === 'undefined') {
+    return false;
+  }
+  return document.cookie
+    .split(';')
+    .map((cookie) => cookie.trim())
+    .some((cookie) => cookie.startsWith('intelliwatt_user='));
+}
+
 export default function Header() {
   const [isOpen, setIsOpen] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+
+  useEffect(() => {
+    setIsAuthenticated(hasAuthCookie());
+  }, []);
 
   const handleToggle = () => setIsOpen((prev) => !prev);
   const handleClose = () => setIsOpen(false);
+
+  const handleLogout = async () => {
+    if (isLoggingOut) return;
+    setIsLoggingOut(true);
+    try {
+      await fetch('/api/user/logout', {
+        method: 'POST',
+      });
+      setIsAuthenticated(false);
+      if (typeof window !== 'undefined') {
+        window.location.href = '/';
+      }
+    } catch (error) {
+      console.error('Failed to log out', error);
+      setIsLoggingOut(false);
+    }
+  };
 
   return (
     <header className="border-b border-brand-blue/20 bg-brand-navy px-4 py-2 text-brand-blue shadow-lg">
@@ -78,12 +111,22 @@ export default function Header() {
           </nav>
 
           <div className="hidden md:flex items-center">
-            <Link
-              href={AUTH_PATH}
-              className="inline-flex items-center rounded-full border border-brand-blue/40 px-4 py-2 text-sm font-semibold text-brand-blue transition hover:border-brand-blue hover:text-brand-white"
-            >
-              Join / Login
-            </Link>
+            {isAuthenticated ? (
+              <button
+                onClick={handleLogout}
+                disabled={isLoggingOut}
+                className="inline-flex items-center rounded-full border border-brand-blue/40 px-4 py-2 text-sm font-semibold text-brand-blue transition hover:border-brand-blue hover:text-brand-white disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {isLoggingOut ? 'Logging out…' : 'Logout'}
+              </button>
+            ) : (
+              <Link
+                href={AUTH_PATH}
+                className="inline-flex items-center rounded-full border border-brand-blue/40 px-4 py-2 text-sm font-semibold text-brand-blue transition hover:border-brand-blue hover:text-brand-white"
+              >
+                Join / Login
+              </Link>
+            )}
           </div>
 
           <button
@@ -113,13 +156,26 @@ export default function Header() {
                 {label}
               </Link>
             ))}
-            <Link
-              href={AUTH_PATH}
-              onClick={handleClose}
-              className="mt-2 rounded-md px-2 py-2 text-center font-semibold transition hover:bg-brand-blue/10 hover:text-brand-white"
-            >
-              Join / Login
-            </Link>
+            {isAuthenticated ? (
+              <button
+                onClick={() => {
+                  handleClose();
+                  handleLogout();
+                }}
+                disabled={isLoggingOut}
+                className="mt-2 rounded-md px-2 py-2 text-center font-semibold transition hover:bg-brand-blue/10 hover:text-brand-white disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {isLoggingOut ? 'Logging out…' : 'Logout'}
+              </button>
+            ) : (
+              <Link
+                href={AUTH_PATH}
+                onClick={handleClose}
+                className="mt-2 rounded-md px-2 py-2 text-center font-semibold transition hover:bg-brand-blue/10 hover:text-brand-white"
+              >
+                Join / Login
+              </Link>
+            )}
           </nav>
         ) : null}
       </div>
