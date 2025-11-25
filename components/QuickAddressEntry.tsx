@@ -12,6 +12,12 @@ interface QuickAddressEntryProps {
   onSaveResult?: (data: any) => void;
   houseIdForSave?: string | null;
   keepOtherHouses?: boolean;
+  saveMode?: 'persist' | 'capture';
+  heading?: string;
+  subheading?: string;
+  helperText?: string;
+  className?: string;
+  submitLabel?: string;
 }
 
 export default function QuickAddressEntry({
@@ -21,6 +27,12 @@ export default function QuickAddressEntry({
   onSaveResult,
   houseIdForSave = null,
   keepOtherHouses = false,
+  saveMode = 'persist',
+  heading = 'Service address',
+  subheading = 'We use your address to match the right utility and pull Smart Meter Texas data.',
+  helperText,
+  className,
+  submitLabel = 'Save address',
 }: QuickAddressEntryProps) {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
@@ -297,6 +309,15 @@ export default function QuickAddressEntry({
         };
       }
 
+      if (saveMode === 'capture') {
+        onAddressSubmitted(normalizedAddress);
+        setError(null);
+        placeDetailsRef.current = null;
+        setPlaceDetails(null);
+        parsedAddressRef.current = null;
+        return;
+      }
+
       // Save address to database using the new API
       console.log('Sending address save request:', {
         googlePlaceDetails: legacyPlace,
@@ -310,43 +331,43 @@ export default function QuickAddressEntry({
           googlePlaceDetails: legacyPlace,
           unitNumber: unitNumber.trim() || undefined,
           keepOtherHouses,
-        })
+        }),
       });
 
       console.log('Address save response:', response.status, response.statusText);
 
-      if (response.ok) {
-        const data = await response.json();
-        console.log('Address saved successfully:', data);
-        
-        // Store the address in localStorage for persistence
-        localStorage.setItem('intelliwatt_user_address', normalizedAddress);
-        
-        // Call the parent callback
-        onAddressSubmitted(normalizedAddress);
-        setError(null);
-        placeDetailsRef.current = null;
-        setPlaceDetails(null);
-        parsedAddressRef.current = null;
-        
-        const savedEsiid = data?.address?.esiid ?? null;
-        await wait(savedEsiid ? 800 : 2500);
-        if (redirectOnSuccess) {
-          router.push('/dashboard/api#smt');
-        }
-        if (onSaveResult) {
-          onSaveResult(data);
-        }
-        if (redirectOnSuccess) {
-          router.push('/dashboard/api#smt');
-        }
-        if (onSaveResult) {
-          onSaveResult(null);
-        }
-      } else {
+      if (!response.ok) {
         const error = await response.json();
         console.error('Address save failed:', error);
         throw new Error(error.error || 'Failed to save address');
+      }
+
+      const data = await response.json();
+      console.log('Address saved successfully:', data);
+      
+      // Store the address in localStorage for persistence
+      localStorage.setItem('intelliwatt_user_address', normalizedAddress);
+      
+      // Call the parent callback
+      onAddressSubmitted(normalizedAddress);
+      setError(null);
+      placeDetailsRef.current = null;
+      setPlaceDetails(null);
+      parsedAddressRef.current = null;
+      
+      const savedEsiid = data?.address?.esiid ?? null;
+      await wait(savedEsiid ? 800 : 2500);
+      if (redirectOnSuccess) {
+        router.push('/dashboard/api#smt');
+      }
+      if (onSaveResult) {
+        onSaveResult(data);
+      }
+      if (redirectOnSuccess) {
+        router.push('/dashboard/api#smt');
+      }
+      if (onSaveResult) {
+        onSaveResult(null);
       }
     } catch (error) {
       console.error('Error saving address:', error);
@@ -367,106 +388,134 @@ export default function QuickAddressEntry({
     );
   }
 
-  // If user already has an address, show a summary
-  if (userAddress) {
-    return (
-      <div className="bg-green-500/20 p-6 rounded-lg border border-green-400/30">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-3">
-            <div className="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center">
-              <span className="text-white text-sm">✓</span>
-            </div>
-            <div>
-              <p className="text-sm font-medium text-green-100">Service Address Connected</p>
-              <p className="text-xs text-green-200">{userAddress}</p>
-            </div>
-          </div>
-          <button
-            onClick={() => {
-              const widget = autocompleteElementRef.current;
-              if (widget && containerRef.current?.contains(widget)) {
-                containerRef.current.removeChild(widget);
-                autocompleteElementRef.current = null;
-              }
-              placeDetailsRef.current = null;
-              parsedAddressRef.current = null;
-              setPlaceDetails(null);
-              setAddress('');
-              addressValueRef.current = '';
-              setUnitNumber('');
-              setUseFallbackInput(true);
-              setReinitNonce((nonce) => nonce + 1);
-              onAddressSubmitted('');
-            }}
-            className="text-xs text-green-200 hover:text-green-100 underline"
-          >
-            Change
-          </button>
-        </div>
-      </div>
-    );
-  }
+  const baseClass =
+    'rounded-2xl border border-[#00F0FF]/30 bg-brand-navy/95 p-6 text-brand-cyan shadow-[0_24px_70px_rgba(0,240,255,0.12)] sm:p-8';
+  const containerClass = className ? `${baseClass} ${className}` : baseClass;
+  const hasSavedAddress = Boolean(userAddress);
+
+  const resetAddress = () => {
+    const widget = autocompleteElementRef.current;
+    if (widget && containerRef.current?.contains(widget)) {
+      containerRef.current.removeChild(widget);
+      autocompleteElementRef.current = null;
+    }
+    placeDetailsRef.current = null;
+    parsedAddressRef.current = null;
+    setPlaceDetails(null);
+    setAddress('');
+    addressValueRef.current = '';
+    setUnitNumber('');
+    setUseFallbackInput(true);
+    setReinitNonce((nonce) => nonce + 1);
+    onAddressSubmitted('');
+  };
 
   return (
-    <div className="bg-white/10 p-6 rounded-lg border border-white/20">
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          <div className="w-8 h-8 bg-brand-blue rounded-full flex items-center justify-center self-start sm:self-center">
-            <span className="text-white text-sm">⚡</span>
-          </div>
-          <div className="flex-1 w-full">
-            <div className="relative">
-              <div ref={containerRef} className="min-h-[44px]" />
-              {useFallbackInput && (
-                <input
-                  type="text"
-                  placeholder="Enter your service address..."
-                  value={address}
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    addressValueRef.current = value;
-                    setAddress(value);
-                    parsedAddressRef.current = null;
-                    placeDetailsRef.current = null;
-                    setPlaceDetails(null);
-                    setError(null);
-                  }}
-                  className="w-full px-4 py-3 text-sm bg-white/90 border border-white/30 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-blue focus:border-brand-blue text-brand-navy placeholder-brand-navy/60"
-                  disabled={isSubmitting}
-                />
-              )}
-              <input type="hidden" name="serviceAddress" value={address} readOnly />
+    <div className={containerClass}>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="space-y-2">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-[#00F0FF]/70">
+            {heading}
+          </p>
+          <p className="text-xs leading-relaxed text-[#9DFBFF]/75 max-w-xl">{subheading}</p>
+          {helperText ? (
+            <p className="text-[11px] leading-relaxed text-[#9DFBFF]/55">{helperText}</p>
+          ) : null}
+        </div>
+        {hasSavedAddress ? (
+          <button
+            onClick={resetAddress}
+            className="inline-flex items-center rounded-full border border-[#00F0FF]/30 px-4 py-1 text-[11px] font-semibold uppercase tracking-wide text-[#00F0FF] transition hover:border-[#00F0FF] hover:text-white"
+          >
+            Change address
+          </button>
+        ) : null}
+      </div>
+
+      <div className="mt-6 space-y-5">
+        {hasSavedAddress ? (
+          <div className="rounded-xl border border-[#39FF14]/30 bg-[#39FF14]/10 px-4 py-4 text-sm text-[#39FF14] shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
+            <div className="flex items-start gap-3">
+              <div className="mt-1 flex h-7 w-7 items-center justify-center rounded-full border border-[#39FF14]/40 bg-[#39FF14]/15 text-xs font-bold text-[#39FF14]">
+                ✓
+              </div>
+              <div className="space-y-1">
+                <p className="text-sm font-semibold uppercase tracking-wide">
+                  Address on file
+                </p>
+                <p className="whitespace-pre-line text-xs text-[#39FF14]/80">{userAddress}</p>
+              </div>
             </div>
           </div>
-          
-          {/* Optional Unit/Apartment Number Field */}
-          <div className="flex-1 w-full sm:w-auto">
-            <input
-              type="text"
-              placeholder="Unit/Apt # (optional)"
-              value={unitNumber}
-              onChange={(e) => setUnitNumber(e.target.value)}
-              className="w-full px-4 py-3 text-sm bg-white/90 border border-white/30 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-blue focus:border-brand-blue text-brand-navy placeholder-brand-navy/60"
-              disabled={isSubmitting}
-            />
+        ) : null}
+
+        {!hasSavedAddress ? (
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)] lg:grid-cols-[minmax(0,2fr),minmax(0,1fr)]">
+              <div className="space-y-2">
+                <label className="text-[11px] font-semibold uppercase tracking-wide text-[#9DFBFF]/70">
+                  Street address
+                </label>
+                <div className="relative rounded-xl border border-[#00F0FF]/20 bg-white/95 px-3 py-2 shadow-[0_10px_30px_rgba(0,240,255,0.08)]">
+                  <div ref={containerRef} className="min-h-[46px]" />
+                  {useFallbackInput && (
+                    <input
+                      type="text"
+                      placeholder="Start typing your service address..."
+                      value={address}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        addressValueRef.current = value;
+                        setAddress(value);
+                        parsedAddressRef.current = null;
+                        placeDetailsRef.current = null;
+                        setPlaceDetails(null);
+                        setError(null);
+                      }}
+                      className="w-full border-none bg-transparent text-sm text-brand-navy placeholder-brand-navy/40 focus:outline-none"
+                      disabled={isSubmitting}
+                    />
+                  )}
+                  <input type="hidden" name="serviceAddress" value={address} readOnly />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[11px] font-semibold uppercase tracking-wide text-[#9DFBFF]/70">
+                  Unit / apartment (optional)
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g., Apt 1203"
+                  value={unitNumber}
+                  onChange={(e) => setUnitNumber(e.target.value)}
+                  className="w-full rounded-xl border border-[#00F0FF]/20 bg-white/95 px-4 py-3 text-sm text-brand-navy placeholder-brand-navy/40 shadow-[0_10px_30px_rgba(0,240,255,0.08)] focus:outline-none focus:ring-2 focus:ring-[#00F0FF]/60"
+                  disabled={isSubmitting}
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-[11px] uppercase tracking-wide text-[#9DFBFF]/60">
+                Saving this address updates your IntelliWatt dashboard and unlocks smart meter syncing.
+              </p>
+              <button
+                type="submit"
+                disabled={!address.trim() || isSubmitting}
+                className="inline-flex items-center justify-center rounded-full border border-[#00F0FF]/60 bg-[#00F0FF]/15 px-6 py-2 text-sm font-semibold uppercase tracking-wide text-[#00F0FF] transition hover:border-[#00F0FF] hover:bg-[#00F0FF]/25 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isSubmitting ? 'Saving…' : submitLabel}
+              </button>
+            </div>
+          </form>
+        ) : null}
+
+        {error && !hasSavedAddress ? (
+          <div className="rounded-lg border border-rose-400/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-100">
+            {error}
           </div>
-          
-          <button
-            type="submit"
-            disabled={!address.trim() || isSubmitting}
-            className="w-full sm:w-auto bg-brand-blue text-white px-6 py-3 text-sm font-medium rounded-md hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {isSubmitting ? 'Connecting...' : 'Connect'}
-          </button>
-        </div>
-
-      {error && (
-        <p className="text-sm text-red-300">
-          {error}
-        </p>
-      )}
-
-      </form>
+        ) : null}
+      </div>
     </div>
   );
 }

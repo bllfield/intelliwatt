@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import QuickAddressEntry from '@/components/QuickAddressEntry';
 
 type SmartMeterSectionProps = {
   houseId?: string | null;
@@ -281,57 +282,45 @@ export default function SmartMeterSection({ houseId }: SmartMeterSectionProps) {
         </p>
       </div>
 
-      {/* Connection Form */}
-      <div className="bg-white p-6 rounded-xl border border-brand-navy">
-        <div className="space-y-4">
-          <div>
-            <label className="block text-brand-navy font-semibold mb-2">
-              Service Address
-              <span className="ml-2 text-sm font-normal" style={{ color: '#39FF14' }}>
-                🎁 Earn 1 jackpot entry by connecting your smart meter
-              </span>
-            </label>
-            <input
-              type="text"
-              placeholder="Enter your service address..."
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              className="w-full px-4 py-3 rounded-lg bg-white border-2 border-brand-navy text-brand-navy placeholder-brand-navy/40 focus:outline-none focus:ring-2 focus:ring-brand-blue focus:border-brand-blue transition-all duration-300 shadow-sm"
-            />
-          </div>
+      <div className="space-y-6">
+        <QuickAddressEntry
+          onAddressSubmitted={(value) => {
+            setAddress(value);
+            if (!value) {
+              setConsent(false);
+            }
+          }}
+          userAddress={address || undefined}
+          redirectOnSuccess={false}
+          keepOtherHouses={false}
+          saveMode="capture"
+          heading="Service address"
+          subheading="Confirm the service address tied to your electric account so IntelliWatt can submit the correct Smart Meter request."
+          helperText="If you moved recently, update the Profile page first so your address stays in sync."
+          submitLabel="Use this address"
+        />
 
-          <label className="flex items-start space-x-3 text-sm cursor-pointer group">
-            <input 
-              type="checkbox" 
-              checked={consent} 
-              onChange={() => setConsent(!consent)}
-              className="mt-1 w-4 h-4 text-brand-blue bg-white border-brand-navy rounded focus:ring-brand-blue focus:ring-2"
-            />
-            <span className="text-brand-navy group-hover:text-brand-blue transition-colors">
-              I agree to allow IntelliWatt to securely access my Smart Meter Texas data for automatic plan optimization and savings calculations.
-            </span>
-          </label>
+        <label className="flex items-start gap-3 rounded-2xl border border-brand-navy/20 bg-brand-navy/5 px-4 py-3 text-sm text-brand-navy">
+          <input
+            type="checkbox"
+            checked={consent}
+            onChange={() => setConsent(!consent)}
+            className="mt-1 h-4 w-4 rounded border-brand-navy text-brand-blue focus:ring-2 focus:ring-brand-blue"
+          />
+          <span>
+            I agree to allow IntelliWatt to securely access my Smart Meter Texas data for automatic plan optimization and savings calculations.
+          </span>
+        </label>
 
-          <button
-            onClick={handleConnect}
-            disabled={status === 'connecting'}
-            className="w-full bg-brand-navy text-brand-blue font-bold py-4 px-6 rounded-xl border-2 border-brand-navy hover:border-brand-blue hover:text-brand-blue hover:bg-brand-navy transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {status === 'connecting' ? (
-              <span className="flex items-center justify-center">
-                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-brand-blue" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                Connecting...
-              </span>
-            ) : (
-              'Connect My Smart Meter →'
-            )}
-          </button>
-        </div>
+        <button
+          onClick={handleConnect}
+          disabled={status === 'connecting'}
+          className="w-full rounded-full border-2 border-brand-navy bg-brand-navy py-4 text-sm font-semibold uppercase tracking-wide text-brand-blue transition hover:border-brand-blue hover:text-brand-blue disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {status === 'connecting' ? 'Connecting…' : 'Connect my smart meter'}
+        </button>
 
-        <div className="text-center mt-6 pt-6 border-t border-brand-navy/30">
+        <div className="rounded-2xl border border-brand-navy/20 bg-brand-navy/5 px-4 py-3 text-center text-sm text-brand-navy">
           <p className="text-sm text-brand-navy mb-2">Prefer to enter details manually?</p>
           <button
             onClick={async () => {
@@ -376,9 +365,9 @@ export default function SmartMeterSection({ houseId }: SmartMeterSectionProps) {
                 alert('We could not record your manual entry right now. Please try again.');
               }
             }}
-            className="text-brand-blue underline hover:text-brand-white transition-colors font-medium"
+            className="text-brand-blue underline hover:text-brand-navy transition-colors font-medium"
           >
-            Enter Smart Meter Details Manually
+            Enter Smart Meter details manually
           </button>
         </div>
       </div>

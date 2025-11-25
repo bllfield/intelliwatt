@@ -13,6 +13,7 @@ export async function GET() {
       activeSmtAuthorizations,
       activeManualUploads,
       applianceCount,
+      pendingSmtRevocations,
       smtUserResults,
       manualUserResults,
     ] = await Promise.all([
@@ -24,6 +25,12 @@ export async function GET() {
         where: { expiresAt: { gte: now } },
       }),
       prismaAny.appliance.count(),
+      prisma.userProfile.count({
+        where: {
+          esiidAttentionRequired: true,
+          esiidAttentionCode: 'smt_revoke_requested',
+        },
+      }),
       prisma.smtAuthorization.findMany({
         where: { archivedAt: null },
         select: { userId: true },
@@ -50,6 +57,7 @@ export async function GET() {
       activeManualUploads,
       activeHouseCount: 0,
       applianceCount,
+      pendingSmtRevocations,
       totalUsageCustomers: usageUserSet.size,
     });
   } catch (error) {

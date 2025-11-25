@@ -117,7 +117,7 @@ export default function Footer() {
         </div>
 
         <div className="mt-8 border-t border-brand-blue/20 pt-6 text-center text-sm text-brand-blue/60">
-          <p>IntelliWatt™ | A service of Intellipath Solutions LLC | © 2024 HitTheJackWatt™</p>
+          <p>IntelliWatt™ | A service of Intellipath Solutions LLC | © 2025 HitTheJackWatt™</p>
         </div>
       </div>
     </footer>

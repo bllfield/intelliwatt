@@ -13,18 +13,10 @@ type ManualState = 'idle' | 'submitting' | 'success' | 'error';
 
 export default function SmtAddressCaptureCard({ houseAddressId = null, initialAddress = null }: Props) {
   const router = useRouter();
+  const [savedAddress, setSavedAddress] = useState(initialAddress ?? '');
   const [addressReady, setAddressReady] = useState(Boolean(initialAddress && initialAddress.trim().length > 0));
-  const [addressMessage, setAddressMessage] = useState<string | null>(null);
   const [manualState, setManualState] = useState<ManualState>('idle');
   const [manualMessage, setManualMessage] = useState<string | null>(null);
-
-  const handleAddressResult = (result: any) => {
-    if (result) {
-      setAddressReady(true);
-      setAddressMessage('Service address saved. We’ll refresh your utility details automatically.');
-      setTimeout(() => router.refresh(), 600);
-    }
-  };
 
   const handleManualFallback = async () => {
     if (manualState === 'submitting') {
@@ -36,7 +28,7 @@ export default function SmtAddressCaptureCard({ houseAddressId = null, initialAd
       return;
     }
 
-    setManualState('submitting');
+      setManualState('submitting');
     setManualMessage(null);
 
     try {
@@ -94,36 +86,28 @@ export default function SmtAddressCaptureCard({ houseAddressId = null, initialAd
   };
 
   return (
-    <div className="space-y-6 rounded-3xl border border-brand-navy/15 bg-white/90 p-4 shadow-[0_18px_60px_rgba(16,46,90,0.06)] max-[480px]:p-3 sm:p-6 md:p-8">
-      <div>
-        <h2 className="text-lg font-semibold text-brand-navy sm:text-xl">Add your service address</h2>
-        <p className="mt-2 text-sm leading-relaxed text-brand-slate">
-          We’ll match this address to your utility and pull the correct ESIID so Smart Meter Texas can connect.
-          Manual entry is available if your utility connection isn’t ready yet.
-        </p>
-      </div>
-
+    <div className="space-y-6">
       <QuickAddressEntry
         onAddressSubmitted={(value) => {
-          setAddressReady(Boolean(value && value.trim().length > 0));
-          if (!value) {
-            setAddressMessage(null);
+          const next = value ?? '';
+          setSavedAddress(next);
+          const ready = Boolean(next && next.trim().length > 0);
+          setAddressReady(ready);
+          if (ready) {
+            router.refresh();
           }
         }}
-        userAddress={initialAddress ?? undefined}
+        userAddress={savedAddress || undefined}
         redirectOnSuccess={false}
         houseIdForSave={houseAddressId ?? null}
         keepOtherHouses={false}
-        onSaveResult={handleAddressResult}
+        heading="Service address"
+        subheading="Save the address you want IntelliWatt to analyze. We’ll automatically sync the correct utility and ESIID."
+        helperText="Need to switch homes later? Update the address here first, then reconnect Smart Meter Texas."
+        submitLabel="Save service address"
       />
 
-      {addressMessage ? (
-        <div className="rounded-2xl border border-emerald-400/40 bg-emerald-500/10 px-4 py-3 text-xs text-emerald-900">
-          {addressMessage}
-        </div>
-      ) : null}
-
-      <div className="rounded-2xl border border-brand-blue/15 bg-brand-blue/5 px-4 py-4 text-sm text-brand-navy shadow-[0_8px_24px_rgba(16,46,90,0.08)]">
+      <div className="rounded-2xl border border-brand-blue/25 bg-brand-blue/10 px-5 py-5 text-sm text-brand-navy shadow-[0_12px_40px_rgba(16,46,90,0.12)]">
         <p className="font-semibold text-brand-navy">Need to log usage manually?</p>
         <p className="mt-1 text-brand-navy/70">
           If your utility account isn’t ready yet, record a manual placeholder so your rewards stay active. You
@@ -150,5 +134,3 @@ export default function SmtAddressCaptureCard({ houseAddressId = null, initialAd
     </div>
   );
 }
-
-

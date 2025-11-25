@@ -48,12 +48,30 @@ interface FlaggedHouseDetail {
   utilityName: string | null;
 }
 
+interface FlaggedAuthorizationDetail {
+  id: string;
+  meterNumber: string | null;
+  esiid: string | null;
+  archivedAt: string | null;
+  authorizationEndDate: string | null;
+  smtStatusMessage: string | null;
+  houseAddress: {
+    addressLine1: string;
+    addressLine2: string | null;
+    addressCity: string;
+    addressState: string;
+    addressZip5: string;
+  } | null;
+}
+
 interface FlaggedHouseRecord {
   userId: string;
   email: string | null;
   esiid: string | null;
   attentionAt: string | null;
+  attentionCode: string | null;
   houses: FlaggedHouseDetail[];
+  authorizations: FlaggedAuthorizationDetail[];
 }
 
 interface EntryExpiryDigest {
@@ -73,6 +91,7 @@ interface SummaryStats {
   totalUsageCustomers: number;
   activeHouseCount: number;
   applianceCount: number;
+  pendingSmtRevocations: number;
 }
 
 const currencyFormatter = new Intl.NumberFormat('en-US', {
@@ -92,7 +111,7 @@ export default function AdminDashboard() {
   const [commissions, setCommissions] = useState<Commission[]>([]);
   const [jackpotPayouts, setJackpotPayouts] = useState<JackpotPayout[]>([]);
   const [financeRecords, setFinanceRecords] = useState<FinanceRecord[]>([]);
-  const [flaggedHouses, setFlaggedHouses] = useState<FlaggedHouseRecord[]>([]);
+  const [flaggedRecords, setFlaggedRecords] = useState<FlaggedHouseRecord[]>([]);
   const [expiringEntries, setExpiringEntries] = useState<EntryExpiryDigest[]>([]);
   const [summary, setSummary] = useState<SummaryStats | null>(null);
 
@@ -161,7 +180,7 @@ export default function AdminDashboard() {
         if (flaggedRes.ok) {
           const flaggedData = await flaggedRes.json();
           console.log('Fetched flagged houses:', flaggedData);
-          setFlaggedHouses(flaggedData);
+          setFlaggedRecords(flaggedData);
         } else {
           console.error('Failed to fetch flagged houses:', flaggedRes.status, flaggedRes.statusText);
         }
@@ -208,20 +227,27 @@ export default function AdminDashboard() {
   const smtApiCount = summary?.activeSmtAuthorizations ?? 0;
   const manualEntriesCount = summary?.activeManualUploads ?? 0;
   const totalUsageCustomers = summary?.totalUsageCustomers ?? 0;
-  const houseDetailsCount = summary?.activeHouseCount ?? 0;
   const applianceCount = summary?.applianceCount ?? 0;
+  const pendingRevocationsCount = summary?.pendingSmtRevocations ?? 0;
+
+  const flaggedReplacements = flaggedRecords.filter(
+    (record) => record.attentionCode === 'smt_replaced',
+  );
+  const flaggedRevocations = flaggedRecords.filter(
+    (record) => record.attentionCode === 'smt_revoke_requested',
+  );
 
   const overviewStats = [
     { label: 'Users', value: totalUsersCount.toLocaleString() },
     { label: "SMT API's", value: smtApiCount.toLocaleString() },
     { label: 'Manual Entries', value: manualEntriesCount.toLocaleString() },
     { label: 'Total Usage Customers', value: totalUsageCustomers.toLocaleString() },
-    { label: 'House Details #', value: houseDetailsCount.toLocaleString() },
     { label: 'Appliances #', value: applianceCount.toLocaleString() },
+    { label: 'SMT Revocations Pending', value: pendingRevocationsCount.toLocaleString() },
     { label: 'Total Commissions', value: currencyFormatter.format(totalCommissions) },
     { label: 'Net Finance', value: currencyFormatter.format(totalFinance) },
     { label: 'Pending Jackpot Payouts', value: pendingJackpot.toLocaleString() },
-    { label: 'Homes flagged for SMT replacement email', value: flaggedHouses.length.toLocaleString() },
+    { label: 'Homes flagged for SMT replacement email', value: flaggedReplacements.length.toLocaleString() },
     { label: 'Entries expiring within 30 days', value: expiringSoonCount.toLocaleString() },
   ];
 
@@ -408,14 +434,14 @@ export default function AdminDashboard() {
                 </tr>
               </thead>
               <tbody>
-                {flaggedHouses.length === 0 ? (
+                {flaggedReplacements.length === 0 ? (
                   <tr>
                     <td colSpan={4} className="py-8 px-4 text-center text-brand-navy/60">
                       No displaced homes waiting for outreach.
                     </td>
                   </tr>
                 ) : (
-                  flaggedHouses.map((record) => (
+                  flaggedReplacements.map((record) => (
                     <tr key={`${record.userId}-${record.esiid ?? 'no-esiid'}`} className="border-b border-brand-navy/10 hover:bg-brand-navy/5">
                       <td className="py-3 px-4 text-brand-navy">{record.email ?? 'Unknown'}</td>
                       <td className="py-3 px-4 text-brand-navy">{record.esiid ?? '—'}</td>
@@ -442,6 +468,78 @@ export default function AdminDashboard() {
                                   ) : null}
                                   {house.utilityName ? (
                                     <div className="text-xs text-brand-navy/70">Utility: {house.utilityName}</div>
+                                  ) : null}
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
+          <h2 className="text-2xl font-bold text-brand-navy mb-2">🛑 SMT Revocations Awaiting Manual Disconnect</h2>
+          <p className="text-sm text-brand-navy/70 mb-4">
+            Customers who revoked SMT access are queued here so operations can finish the manual disconnect inside Smart
+            Meter Texas. Once the revocation is processed, clear the flag on their profile.
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-brand-navy/20">
+                  <th className="text-left py-3 px-4 text-brand-navy font-semibold">User Email</th>
+                  <th className="text-left py-3 px-4 text-brand-navy font-semibold">ESIID</th>
+                  <th className="text-left py-3 px-4 text-brand-navy font-semibold">Revocation Logged</th>
+                  <th className="text-left py-3 px-4 text-brand-navy font-semibold">Archived Authorizations</th>
+                </tr>
+              </thead>
+              <tbody>
+                {flaggedRevocations.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="py-8 px-4 text-center text-brand-navy/60">
+                      No customer-requested SMT revocations awaiting action.
+                    </td>
+                  </tr>
+                ) : (
+                  flaggedRevocations.map((record) => (
+                    <tr key={`${record.userId}-revocation`} className="border-b border-brand-navy/10 hover:bg-brand-navy/5">
+                      <td className="py-3 px-4 text-brand-navy">{record.email ?? 'Unknown'}</td>
+                      <td className="py-3 px-4 text-brand-navy">{record.esiid ?? '—'}</td>
+                      <td className="py-3 px-4 text-brand-navy">{formatTimestamp(record.attentionAt)}</td>
+                      <td className="py-3 px-4 text-brand-navy">
+                        {record.authorizations.length === 0 ? (
+                          <span className="text-brand-navy/60 text-xs">Awaiting archival details.</span>
+                        ) : (
+                          <ul className="space-y-2">
+                            {record.authorizations.map((auth) => {
+                              const addressLine = auth.houseAddress
+                                ? [
+                                    auth.houseAddress.addressLine1 ?? '',
+                                    auth.houseAddress.addressLine2 ?? '',
+                                    `${auth.houseAddress.addressCity ?? ''}, ${auth.houseAddress.addressState ?? ''} ${
+                                      auth.houseAddress.addressZip5 ?? ''
+                                    }`,
+                                  ]
+                                    .filter((part) => part && part.trim().length > 0)
+                                    .join('\n')
+                                : null;
+                              return (
+                                <li key={auth.id} className="border border-brand-navy/10 rounded-md p-3 bg-brand-navy/5 whitespace-pre-line">
+                                  {addressLine ? <div className="font-semibold">{addressLine}</div> : null}
+                                  <div className="text-xs text-brand-navy/70 mt-1">
+                                    SMT archived: {formatTimestamp(auth.archivedAt)}
+                                  </div>
+                                  <div className="text-xs text-brand-navy/70">
+                                    Meter: {auth.meterNumber ?? '—'} · Authorization end: {formatTimestamp(auth.authorizationEndDate)}
+                                  </div>
+                                  {auth.smtStatusMessage ? (
+                                    <div className="text-xs text-brand-navy/60 mt-1">{auth.smtStatusMessage}</div>
                                   ) : null}
                                 </li>
                               );

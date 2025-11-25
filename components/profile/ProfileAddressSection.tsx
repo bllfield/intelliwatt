@@ -260,6 +260,11 @@ export function ProfileAddressSection({
             onSaveResult={handleAddressSaved}
             houseIdForSave={editingHouseId}
             keepOtherHouses={editorMode === "add"}
+            heading={editorMode === "update" ? "Update service address" : "Add a new service address"}
+            subheading="IntelliWatt uses your saved homes to keep Smart Meter Texas data in sync."
+            helperText="Saving here will archive any previous SMT authorizations tied to this home."
+            submitLabel={editorMode === "update" ? "Save address" : "Add home"}
+            className="border-brand-cyan/40 bg-brand-navy/90 text-brand-cyan"
           />
         </div>
       ) : null}

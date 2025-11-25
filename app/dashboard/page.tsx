@@ -380,14 +380,16 @@ export default function DashboardPage() {
                   priority
                 />
               </a>
-              <div className="inline-flex w-full max-w-xl flex-col items-center gap-2 rounded-2xl border border-[#39FF14]/40 bg-[#39FF14]/10 px-6 py-4 text-center shadow-lg shadow-[#39FF14]/10 ring-1 ring-[#39FF14]/30">
+                <div className="inline-flex w-full max-w-xl flex-col items-center gap-2 rounded-2xl border border-[#39FF14]/40 bg-[#39FF14]/10 px-6 py-4 text-center shadow-lg shadow-[#39FF14]/10 ring-1 ring-[#39FF14]/30">
                 <span className="text-lg font-extrabold leading-tight text-brand-white md:text-xl">
                   <span style={{ color: '#39FF14' }}>⚡ Connect your smart meter data</span>
                   <span className="mx-1 text-brand-white">for</span>
                   <span style={{ color: '#39FF14' }}>1 jackpot entry!</span>
                 </span>
                 <span className="text-sm font-bold leading-tight text-brand-white md:text-base">
-                  <span style={{ color: '#BF00FF' }}>👥 Refer a Friend:</span>
+                    <Link href="/dashboard/referrals" style={{ color: '#BF00FF' }} className="hover:underline">
+                      👥 Refer a Friend:
+                    </Link>
                   <span className="mx-1 text-brand-white" />
                   <span style={{ color: '#39FF14' }}>1 jackpot entry per signup!</span>
                 </span>

@@ -567,7 +567,7 @@ const LandingPage: React.FC = () => {
                   An <span className="text-brand-blue font-semibold">IntelliPath Solutions</span> Company
                 </p>
                 <p className="text-brand-cyan text-sm">
-                  IntelliWatt™ | A service of Intellipath Solutions LLC | © 2024 HitTheJackWatt™
+                  IntelliWatt™ | A service of Intellipath Solutions LLC | © 2025 HitTheJackWatt™
                 </p>
               </div>
               <div className="flex space-x-6">

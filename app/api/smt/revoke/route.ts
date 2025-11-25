@@ -43,6 +43,9 @@ export async function POST(request: NextRequest) {
       select: {
         id: true,
         archivedAt: true,
+        houseId: true,
+        houseAddressId: true,
+        esiid: true,
       },
     });
 
@@ -59,13 +62,21 @@ export async function POST(request: NextRequest) {
 
     const now = new Date();
 
-    await prisma.smtAuthorization.update({
+    const archivedAuthorization = await prisma.smtAuthorization.update({
       where: { id: authorization.id },
       data: {
         archivedAt: now,
         smtStatus: 'archived',
         smtStatusMessage: 'Customer requested revocation',
         revokedReason: 'customer_requested',
+      },
+      select: {
+        id: true,
+        houseId: true,
+        houseAddressId: true,
+        esiid: true,
+        meterNumber: true,
+        authorizationEndDate: true,
       },
     });
 
@@ -76,6 +87,20 @@ export async function POST(request: NextRequest) {
         esiidAttentionCode: 'smt_revoke_requested',
         esiidAttentionAt: now,
       },
+    });
+
+    const entryWhere: Record<string, any> = {
+      userId: user.id,
+      type: 'smart_meter_connect',
+    };
+    if (archivedAuthorization?.houseId) {
+      entryWhere.houseId = archivedAuthorization.houseId;
+    } else {
+      entryWhere.houseId = null;
+    }
+
+    await prisma.entry.deleteMany({
+      where: entryWhere,
     });
 
     await refreshUserEntryStatuses(user.id);

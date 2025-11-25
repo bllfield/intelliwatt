@@ -150,7 +150,9 @@ function LandingPageContent() {
                   <span className="font-semibold">Authorize Smart Meter Texas</span>
                 </div>
                 <div className="mt-3 text-brand-white/90 text-sm">
-                  <span className="font-semibold">Refer a Friend</span>
+                  <Link href="/dashboard/referrals" className="font-semibold text-brand-cyan hover:text-brand-blue transition-colors duration-300">
+                    Refer a Friend
+                  </Link>
                   <span className="ml-2">Each friend who signs up earns you</span>
                   <span className="ml-2" style={{ color: '#39FF14' }}>1 jackpot entry</span>
                 </div>
