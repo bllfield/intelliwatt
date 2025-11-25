@@ -148,7 +148,6 @@ function LandingPageContent() {
               <div className="bg-brand-navy/60 border border-brand-blue/20 rounded-2xl p-4 mt-6 text-center">
                 <div className="text-brand-white/90 text-sm">
                   <span className="font-semibold">Authorize Smart Meter Texas</span>
-                  <span className="ml-2" style={{ color: '#39FF14' }}>Earn 1 jackpot entry</span>
                 </div>
                 <div className="mt-3 text-brand-white/90 text-sm">
                   <span className="font-semibold">Refer a Friend</span>
@@ -224,7 +223,7 @@ function LandingPageContent() {
                   <div className="w-8 h-8 bg-brand-navy rounded-full flex items-center justify-center mr-4">
                     <span className="text-brand-blue font-bold">✓</span>
                   </div>
-                  <span className="text-lg">Automatic plan switching</span>
+                  <span className="text-lg">Advanced energy analysis</span>
                 </div>
                 <div className="flex items-center text-brand-navy">
                   <div className="w-8 h-8 bg-brand-navy rounded-full flex items-center justify-center mr-4">

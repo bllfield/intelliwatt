@@ -1,3 +1,4 @@
+import Image from 'next/image';
 import Link from 'next/link';
 
 export default function HowItWorksPage() {
@@ -100,8 +101,16 @@ export default function HowItWorksPage() {
             {/* Step 2 Detail */}
             <div className="flex flex-col md:flex-row-reverse items-center gap-8">
               <div className="flex-shrink-0">
-                <div className="w-32 h-32 bg-brand-white rounded-full flex items-center justify-center">
-                  <span className="text-brand-blue text-4xl">🤖</span>
+                <div className="relative w-32 h-32 bg-brand-white rounded-full flex items-center justify-center shadow-[0_15px_40px_rgba(15,23,42,0.25)]">
+                  <Image
+                    src="/Intelliwatt Bot Final Gif.gif"
+                    alt="IntelliWatt Bot"
+                    width={70}
+                    height={70}
+                    className="rounded-full object-contain"
+                    unoptimized
+                    priority
+                  />
                 </div>
               </div>
               <div className="flex-1">
