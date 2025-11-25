@@ -125,7 +125,14 @@ function JoinPageContent() {
             <div className="mt-6 text-center">
               <p className="text-brand-navy text-sm">
                 Already have an account?{' '}
-                <a href="/login" className="text-brand-blue underline hover:text-brand-navy transition-colors">
+                <a
+                  href="/login"
+                  className="text-brand-navy underline transition-colors hover:text-brand-blue relative inline-flex items-center justify-center"
+                  style={{
+                    textShadow:
+                      '0 0 6px rgba(0, 224, 255, 0.65), 0 0 12px rgba(0, 224, 255, 0.45), 0 0 18px rgba(0, 224, 255, 0.25)',
+                  }}
+                >
                   Sign in here
                 </a>
               </p>
