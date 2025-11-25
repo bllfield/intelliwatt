@@ -175,43 +175,43 @@ export default function HowItWorksPage() {
           </h2>
           
           <div className="grid md:grid-cols-2 gap-8">
-            <div className="bg-brand-white p-8 rounded-2xl border-2 border-brand-navy shadow-lg">
-              <h3 className="text-xl font-bold text-brand-navy mb-4">Smart Meter Integration</h3>
-              <p className="text-brand-navy mb-4">
+            <div className="bg-brand-navy border border-brand-blue/30 rounded-2xl p-6">
+              <h3 className="text-xl font-bold text-[#00E0FF] mb-4">Smart Meter Integration</h3>
+              <p className="text-[#00E0FF]/80 mb-4">
                 Direct integration with Smart Meter Texas provides real-time, accurate usage data for the most precise recommendations.
               </p>
-              <ul className="text-brand-navy space-y-2">
-                <li className="flex items-center">
-                  <span className="text-brand-blue mr-2">✓</span>
+              <ul className="space-y-2 text-[#00E0FF]">
+                <li className="flex items-center gap-2">
+                  <span className="text-brand-blue">✓</span>
                   Real-time data access
                 </li>
-                <li className="flex items-center">
-                  <span className="text-brand-blue mr-2">✓</span>
+                <li className="flex items-center gap-2">
+                  <span className="text-brand-blue">✓</span>
                   Bank-level security
                 </li>
-                <li className="flex items-center">
-                  <span className="text-brand-blue mr-2">✓</span>
+                <li className="flex items-center gap-2">
+                  <span className="text-brand-blue">✓</span>
                   No manual data entry needed
                 </li>
               </ul>
             </div>
-            
-            <div className="bg-brand-white p-8 rounded-2xl border-2 border-brand-navy shadow-lg">
-              <h3 className="text-xl font-bold text-brand-navy mb-4">AI Engine</h3>
-              <p className="text-brand-navy mb-4">
+
+            <div className="bg-brand-navy border border-brand-blue/30 rounded-2xl p-6">
+              <h3 className="text-xl font-bold text-[#00E0FF] mb-4">AI Engine</h3>
+              <p className="text-[#00E0FF]/80 mb-4">
                 Our proprietary AI algorithms analyze millions of data points to find the optimal energy plan for your specific needs.
               </p>
-              <ul className="text-brand-navy space-y-2">
-                <li className="flex items-center">
-                  <span className="text-brand-blue mr-2">✓</span>
+              <ul className="space-y-2 text-[#00E0FF]">
+                <li className="flex items-center gap-2">
+                  <span className="text-brand-blue">✓</span>
                   Advanced machine learning algorithms
                 </li>
-                <li className="flex items-center">
-                  <span className="text-brand-blue mr-2">✓</span>
+                <li className="flex items-center gap-2">
+                  <span className="text-brand-blue">✓</span>
                   Continuous learning
                 </li>
-                <li className="flex items-center">
-                  <span className="text-brand-blue mr-2">✓</span>
+                <li className="flex items-center gap-2">
+                  <span className="text-brand-blue">✓</span>
                   Weather normalization
                 </li>
               </ul>
