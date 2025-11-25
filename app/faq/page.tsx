@@ -12,7 +12,7 @@ const faqItems: { question: string; answer: ReactNode }[] = [
           href="https://www.hitthejackwatt.com"
           target="_blank"
           rel="noopener noreferrer"
-          className="font-semibold text-[#00F0FF] underline drop-shadow-[0_0_12px_rgba(0,240,255,0.8)]"
+          className="font-semibold text-[#39FF14] underline drop-shadow-[0_0_12px_rgba(57,255,20,0.8)]"
         >
           HitTheJackWatt™
         </a>{' '}
@@ -77,8 +77,8 @@ const faqItems: { question: string; answer: ReactNode }[] = [
       <>
         <p>
           <a
-            href="https://www.intelli-watt.com"
-            className="font-semibold text-[#00F0FF] underline drop-shadow-[0_0_12px_rgba(0,240,255,0.8)]"
+            href="https://www.intelliwatt.com"
+            className="font-semibold text-[#00E0FF] underline drop-shadow-[0_0_12px_rgba(0,224,255,0.8)]"
           >
             IntelliWatt™
           </a>{' '}
@@ -88,7 +88,7 @@ const faqItems: { question: string; answer: ReactNode }[] = [
             href="https://www.hitthejackwatt.com"
             target="_blank"
             rel="noopener noreferrer"
-            className="font-semibold text-[#00F0FF] underline drop-shadow-[0_0_12px_rgba(0,240,255,0.8)]"
+            className="font-semibold text-[#39FF14] underline drop-shadow-[0_0_12px_rgba(57,255,20,0.8)]"
           >
             HitTheJackWatt™
           </a>
@@ -99,21 +99,21 @@ const faqItems: { question: string; answer: ReactNode }[] = [
             href="https://www.hitthejackwatt.com"
             target="_blank"
             rel="noopener noreferrer"
-            className="font-semibold text-[#00F0FF] underline drop-shadow-[0_0_12px_rgba(0,240,255,0.8)]"
+            className="font-semibold text-[#39FF14] underline drop-shadow-[0_0_12px_rgba(57,255,20,0.8)]"
           >
             HitTheJackWatt™
           </a>{' '}
           and{' '}
           <a
-            href="https://www.intelli-watt.com"
-            className="font-semibold text-[#00F0FF] underline drop-shadow-[0_0_12px_rgba(0,240,255,0.8)]"
+            href="https://www.intelliwatt.com"
+            className="font-semibold text-[#00E0FF] underline drop-shadow-[0_0_12px_rgba(0,224,255,0.8)]"
           >
             IntelliWatt™
           </a>{' '}
           are operated by{' '}
           <a
             href="https://www.intellipath-solutions.com"
-            className="font-semibold text-[#4169E1] underline drop-shadow-[0_0_6px_rgba(65,105,225,0.5)]"
+            className="font-semibold text-[#4169E1] underline"
           >
             Intellipath Solutions LLC
           </a>
@@ -158,8 +158,8 @@ const faqItems: { question: string; answer: ReactNode }[] = [
       <p>
         The jackpot grows as members switch to plans through{' '}
         <a
-          href="https://www.intelli-watt.com"
-          className="font-semibold text-[#00F0FF] underline drop-shadow-[0_0_12px_rgba(0,240,255,0.8)]"
+          href="https://www.intelliwatt.com"
+          className="font-semibold text-[#00E0FF] underline drop-shadow-[0_0_12px_rgba(0,224,255,0.8)]"
         >
           IntelliWatt™
         </a>
@@ -269,7 +269,7 @@ export default function FAQPage() {
             href="https://www.hitthejackwatt.com"
             target="_blank"
             rel="noopener noreferrer"
-            className="font-semibold text-[#00F0FF] underline drop-shadow-[0_0_12px_rgba(0,240,255,0.8)]"
+            className="font-semibold text-[#39FF14] underline drop-shadow-[0_0_12px_rgba(57,255,20,0.8)]"
           >
             {part}
           </a>
@@ -308,10 +308,10 @@ export default function FAQPage() {
                 key={question}
                 className="bg-brand-navy p-8 rounded-2xl border border-brand-blue/40 shadow-[0_20px_60px_rgba(0,0,0,0.45)] hover:border-brand-blue/80 transition-all duration-300"
               >
-                <h3 className="text-2xl font-bold text-[#00F0FF] drop-shadow-[0_0_12px_rgba(0,240,255,0.6)] mb-4">
+                <h3 className="text-2xl font-bold text-[#00E0FF] mb-4">
                   {renderQuestion(question)}
                 </h3>
-                <div className="text-[#00E0FF] text-lg leading-relaxed space-y-3 drop-shadow-[0_0_10px_rgba(0,224,255,0.35)]">
+                <div className="text-brand-white text-lg leading-relaxed space-y-3">
                   {answer}
                 </div>
               </div>
