@@ -1,58 +1,222 @@
 'use client';
 
-import { useState } from 'react';
 import Image from 'next/image';
+import type { ReactNode } from 'react';
 
-interface FAQItem {
-  question: string;
-  answer: string;
-}
-
-const faqData: FAQItem[] = [
+const faqItems: { question: string; answer: ReactNode }[] = [
   {
-    question: "How does IntelliWatt™ save me money?",
-    answer: "IntelliWatt uses AI to analyze your actual energy usage patterns and automatically finds the best electricity plan for your specific needs. We handle the switching process and continuously monitor for better options."
+    question: 'What is HitTheJackWatt™?',
+    answer: (
+      <p>
+        HitTheJackWatt™ is a free monthly drawing where members can win cash by securely sharing their energy data and
+        referring friends. The jackpot grows as more people switch to a better plan through IntelliWatt™.
+      </p>
+    ),
   },
   {
-    question: "Is IntelliWatt™ really free?",
-    answer: "Yes! IntelliWatt is completely free to use. We earn commissions from energy providers when we switch you to a better plan, so you save money and we earn money — it's a win-win."
+    question: 'How much does it cost to join?',
+    answer: <p>Nothing. It is completely free to enter, earn entries, and win—no purchase necessary.</p>,
   },
   {
-    question: "How do Jackpot entries work?",
-    answer: "Every action you take on IntelliWatt earns you entries into our monthly jackpot drawing. Complete your profile, refer friends, and use our features to earn more entries and increase your chances of winning."
+    question: 'What is IntelliWatt™? Why am I redirected there after signing up?',
+    answer: (
+      <>
+        <p>
+          <a href="https://www.intelli-watt.com" className="text-brand-blue underline">
+            IntelliWatt™
+          </a>{' '}
+          is the secure user portal where your entries, insights, and plan recommendations live. When you log in using a
+          magic link you land on the IntelliWatt™ dashboard—the brains behind HitTheJackWatt™.
+        </p>
+        <p>
+          HitTheJackWatt™ and{' '}
+          <a href="https://www.intelli-watt.com" className="text-brand-blue underline">
+            IntelliWatt™
+          </a>{' '}
+          are operated by{' '}
+          <a href="https://www.intellipath-solutions.com" className="text-brand-blue underline">
+            Intellipath Solutions LLC
+          </a>
+          , a Texas-based energy intelligence company.
+        </p>
+      </>
+    ),
   },
   {
-    question: "Is my data secure?",
-    answer: "Absolutely. We use bank-level encryption to protect your data. We only access the information needed to find you the best energy plan, and we never sell your personal information to third parties."
+    question: 'Is it safe to connect my smart meter?',
+    answer: (
+      <p>
+        Yes. We use Smart Meter Texas—the official state data portal. You control access and can revoke it at any time.
+        Usage data is encrypted in transit and at rest, we never sell personal information, and aggregated insights are
+        de-identified.
+      </p>
+    ),
   },
   {
-    question: "How accurate are the savings estimates?",
-    answer: "Our AI engine achieves 94% accuracy by using your actual smart meter data and accounting for weather patterns, seasonal changes, and your unique usage habits. No estimates or averages — just real data."
+    question: 'What do you do with my data?',
+    answer: (
+      <p>
+        We analyze your bill, compare plans from our growing provider network (starting with WattBuy), estimate savings,
+        and manage your jackpot entries. We do not sell or rent personal data; any aggregate analysis is de-identified.
+      </p>
+    ),
   },
   {
-    question: "What if I'm not satisfied with the switch?",
-    answer: "We stand behind our recommendations. If you're not happy with your new plan, we'll help you switch back or find a better option. Your satisfaction is our priority."
+    question: 'What kind of data do you use to make recommendations?',
+    answer: (
+      <p>
+        We combine Smart Meter Texas data (with your permission) or your uploaded bill with home and appliance details. Our
+        algorithm models hourly usage to match you with the lowest-cost plan available through our provider network.
+      </p>
+    ),
   },
   {
-    question: "Do I need a smart meter to use IntelliWatt?",
-    answer: "While smart meter data provides the most accurate results, you can also manually enter your usage data. We'll work with whatever information you can provide to find you the best plan."
+    question: 'Do you always show the cheapest electricity plan?',
+    answer: (
+      <p>
+        Not always. We show the best-fit plan based on how your home actually uses energy. Some low advertised rates cost
+        more once fees, tiers, or time-of-use differences are factored in. We calculate total cost—not just cents per kWh.
+      </p>
+    ),
   },
   {
-    question: "How often does IntelliWatt check for better plans?",
-    answer: "We continuously monitor the market and your usage patterns. You'll receive alerts whenever we find a plan that could save you money, typically checking monthly or when new plans become available."
-  }
+    question: "What happens if the best plan doesn't pay you a commission?",
+    answer: (
+      <p>
+        We still recommend it. We only add $5 to the jackpot when a member picks a plan that pays us a referral fee, but our
+        guidance always centers on what saves you the most.
+      </p>
+    ),
+  },
+  {
+    question: 'What if I already have solar panels?',
+    answer: (
+      <p>
+        We support solar homes. Mark solar in your profile and IntelliWatt™ looks for buyback plans and time-of-use rates
+        that fit your setup. Planning solar? You can simulate savings before you install.
+      </p>
+    ),
+  },
+  {
+    question: 'What happens after I sign up?',
+    answer: (
+      <p>
+        You will get recommendations when your current plan comes due—or sooner if switching early could save you money.
+        You also earn entries in the monthly jackpot and can update your info or switch plans whenever you like.
+      </p>
+    ),
+  },
+  {
+    question: 'How do I earn entries?',
+    answer: (
+      <>
+        <p>You can earn entries by:</p>
+        <ul className="list-disc list-inside space-y-1">
+          <li>1 for connecting Smart Meter Texas (where available) or uploading usage manually</li>
+          <li>1 for adding your current electricity plan information</li>
+          <li>1 for completing your home details</li>
+          <li>1 for completing your appliance details</li>
+          <li>1 for every referral who connects SMT or uploads usage</li>
+          <li>1 for submitting a testimonial if you switched through IntelliWatt™ or completed an IntelliPath upgrade</li>
+          <li>1 per person per calendar month via the free Alternate Method of Entry (AMOE) postcard</li>
+        </ul>
+        <p className="mt-3">
+          Usage- and profile-based entries remain active while we have usage data from the past 12 months. Referral and
+          testimonial entries never expire. AMOE entries count for the drawing period in which they are received.
+        </p>
+      </>
+    ),
+  },
+  {
+    question: 'When is the drawing held?',
+    answer: <p>A winner is drawn once the jackpot reaches at least $500. If it does not, entries roll over to the next drawing.</p>,
+  },
+  {
+    question: 'How often is the jackpot drawn?',
+    answer: (
+      <p>
+        Drawings occur monthly on the 5th. Keep your usage data current (within 12 months) so profile entries remain active.
+        Referral, testimonial, and AMOE entries remain active without expiring.
+      </p>
+    ),
+  },
+  {
+    question: 'How big is the jackpot?',
+    answer: (
+      <p>
+        The jackpot grows as members switch to plans through{' '}
+        <a href="https://www.intelli-watt.com" className="text-brand-blue underline">
+          IntelliWatt™
+        </a>
+        . It resets after each drawing and then starts growing again.
+      </p>
+    ),
+  },
+  {
+    question: 'Where does the jackpot money come from?',
+    answer: (
+      <p>
+        When someone selects a plan that pays IntelliWatt™ a referral commission, we add $5 to the jackpot. Not all plans
+        pay us, but when they do, the value goes back to the community.
+      </p>
+    ),
+  },
+  {
+    question: 'Do I have to switch plans to win?',
+    answer: <p>No. You can participate and win without switching, though switching helps grow the jackpot.</p>,
+  },
+  {
+    question: 'How are winners chosen?',
+    answer: <p>Each entry is one ticket in the monthly drawing. Winners are picked at random and notified via email or SMS.</p>,
+  },
+  {
+    question: 'How will I know if I win?',
+    answer: (
+      <p>
+        IntelliWatt™ notifies winners by email and/or text. Keep your contact info current—sometimes we even surprise winners
+        in person.
+      </p>
+    ),
+  },
+  {
+    question: 'Will I get spam calls or emails?',
+    answer: (
+      <p>
+        Never. We do not sell your information and we do not allow third-party spam. All communication comes directly from us
+        and only when helpful.
+      </p>
+    ),
+  },
+  {
+    question: 'What’s the catch?',
+    answer: (
+      <p>
+        There isn’t one. IntelliWatt™ earns referral compensation when you switch through us—similar to a broker. That funds
+        the jackpot and keeps the service free.
+      </p>
+    ),
+  },
+  {
+    question: 'How many times can I win?',
+    answer: (
+      <p>
+        There is no limit. As long as your qualifying entries remain active (and usage-based entries stay current), you are
+        eligible for every drawing.
+      </p>
+    ),
+  },
+  {
+    question: 'Do you only recommend plans that pay you?',
+    answer: (
+      <p>
+        No. We always recommend the plan that saves you the most based on real usage. If you choose a plan that pays us, we
+        add $5 to the jackpot on your behalf.
+      </p>
+    ),
+  },
 ];
 
 export default function FAQPage() {
-  const [openItems, setOpenItems] = useState<number[]>([]);
-
-  const toggleItem = (index: number) => {
-    setOpenItems(prev => 
-      prev.includes(index) 
-        ? prev.filter(i => i !== index)
-        : [...prev, index]
-    );
-  };
 
   return (
     <div className="min-h-screen bg-brand-white">
@@ -77,77 +241,15 @@ export default function FAQPage() {
       <section className="py-24 px-4 bg-brand-white">
         <div className="max-w-4xl mx-auto">
           <div className="space-y-8">
-            {/* FAQ Item 1 */}
-            <div className="bg-brand-white p-8 rounded-2xl border-2 border-brand-navy shadow-lg hover:border-brand-blue transition-all duration-300">
-              <h3 className="text-2xl font-bold text-brand-navy mb-4">How does IntelliWatt™ work?</h3>
-              <p className="text-brand-navy text-lg leading-relaxed">
-                IntelliWatt™ connects to your smart meter or analyzes your energy bills to understand your unique usage patterns. 
-                Our AI then finds the perfect energy plan that matches your specific needs, potentially saving you hundreds of dollars annually.
-              </p>
-            </div>
-
-            {/* FAQ Item 2 */}
-            <div className="bg-brand-white p-8 rounded-2xl border-2 border-brand-navy shadow-lg hover:border-brand-blue transition-all duration-300">
-              <h3 className="text-2xl font-bold text-brand-navy mb-4">Is IntelliWatt™ really free?</h3>
-              <p className="text-brand-navy text-lg leading-relaxed">
-                Yes! IntelliWatt™ is completely free to use. We make money through partnerships with energy providers when you switch to a better plan, 
-                but there are no hidden fees or charges for our service.
-              </p>
-            </div>
-
-            {/* FAQ Item 3 */}
-            <div className="bg-brand-white p-8 rounded-2xl border-2 border-brand-navy shadow-lg hover:border-brand-blue transition-all duration-300">
-              <h3 className="text-2xl font-bold text-brand-navy mb-4">How much can I save?</h3>
-              <p className="text-brand-navy text-lg leading-relaxed">
-                Our users save an average of $847 annually, but your savings depend on your current plan and usage patterns. 
-                Some users save as much as $1,200+ per year by switching to optimized plans.
-              </p>
-            </div>
-
-            {/* FAQ Item 4 */}
-            <div className="bg-brand-white p-8 rounded-2xl border-2 border-brand-navy shadow-lg hover:border-brand-blue transition-all duration-300">
-              <h3 className="text-2xl font-bold text-brand-navy mb-4">What if I don't have a smart meter?</h3>
-              <p className="text-brand-navy text-lg leading-relaxed">
-                No problem! You can upload your recent energy bills and we'll analyze your usage patterns from that data. 
-                While smart meter data provides the most accurate results, we can still find significant savings with bill data.
-              </p>
-            </div>
-
-            {/* FAQ Item 5 */}
-            <div className="bg-brand-white p-8 rounded-2xl border-2 border-brand-navy shadow-lg hover:border-brand-blue transition-all duration-300">
-              <h3 className="text-2xl font-bold text-brand-navy mb-4">Is my data secure?</h3>
-              <p className="text-brand-navy text-lg leading-relaxed">
-                Absolutely. We use bank-level encryption to protect your data. We never sell your personal information and only use your usage data 
-                to find better energy plans for you.
-              </p>
-            </div>
-
-            {/* FAQ Item 6 */}
-            <div className="bg-brand-white p-8 rounded-2xl border-2 border-brand-navy shadow-lg hover:border-brand-blue transition-all duration-300">
-              <h3 className="text-2xl font-bold text-brand-navy mb-4">How long does it take to see savings?</h3>
-              <p className="text-brand-navy text-lg leading-relaxed">
-                You'll see savings on your very next bill after switching to a better plan. The switching process typically takes 1-2 billing cycles, 
-                and we handle all the paperwork for you.
-              </p>
-            </div>
-
-            {/* FAQ Item 7 */}
-            <div className="bg-brand-white p-8 rounded-2xl border-2 border-brand-navy shadow-lg hover:border-brand-blue transition-all duration-300">
-              <h3 className="text-2xl font-bold text-brand-navy mb-4">What if I'm not satisfied?</h3>
-              <p className="text-brand-navy text-lg leading-relaxed">
-                We're confident you'll love the savings, but if you're not satisfied, you can cancel anytime with no fees. 
-                We'll even help you switch back to your previous provider if needed.
-              </p>
-            </div>
-
-            {/* FAQ Item 8 */}
-            <div className="bg-brand-white p-8 rounded-2xl border-2 border-brand-navy shadow-lg hover:border-brand-blue transition-all duration-300">
-              <h3 className="text-2xl font-bold text-brand-navy mb-4">Do you work with all energy providers?</h3>
-              <p className="text-brand-navy text-lg leading-relaxed">
-                We have access to most of the major energy providers in your area to ensure you get access to the best available plans. 
-                Our AI analyzes all available options to find the perfect match for your usage patterns.
-              </p>
-            </div>
+            {faqItems.map(({ question, answer }) => (
+              <div
+                key={question}
+                className="bg-brand-white p-8 rounded-2xl border-2 border-brand-navy shadow-lg hover:border-brand-blue transition-all duration-300"
+              >
+                <h3 className="text-2xl font-bold text-brand-navy mb-4">{question}</h3>
+                <div className="text-brand-navy text-lg leading-relaxed space-y-3">{answer}</div>
+              </div>
+            ))}
           </div>
         </div>
       </section>

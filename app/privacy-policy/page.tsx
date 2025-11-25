@@ -1,74 +1,172 @@
-import React from "react";
+import type { ReactNode } from 'react';
+
+const SectionTitle = ({ children }: { children: ReactNode }) => (
+  <h2 className="text-2xl font-semibold mt-10 mb-4 text-brand-blue">{children}</h2>
+);
+
+const Paragraph = ({ children }: { children: ReactNode }) => (
+  <p className="text-brand-white leading-relaxed mb-4">{children}</p>
+);
 
 export default function PrivacyPolicy() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-brand-navy via-brand-navy to-brand-navy relative overflow-hidden">
-      {/* Background Pattern */}
       <div className="absolute inset-0 opacity-10">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(0,240,255,0.1),transparent_50%)]"></div>
       </div>
 
-      <main className="relative max-w-4xl mx-auto px-6 py-12">
-        <h1 className="text-4xl font-bold mb-6 text-brand-blue">Privacy Policy</h1>
+      <main className="relative max-w-4xl mx-auto px-6 py-12 space-y-6">
+        <h1 className="text-4xl font-bold text-brand-blue">Privacy Policy</h1>
+        <p className="text-brand-white font-semibold">Effective Date: May 17, 2025</p>
 
-        <div className="bg-gradient-to-br from-brand-blue/5 to-brand-cyan/10 p-8 rounded-2xl border border-brand-blue/10 backdrop-blur-sm">
-          <p className="mb-4 text-brand-white">
-            At IntelliWatt, your privacy is important to us. This Privacy Policy explains how we collect, use, and protect your information—especially when using Smart Meter Texas (SMT) data to provide energy optimization and plan recommendations.
-          </p>
+        <div className="bg-gradient-to-br from-brand-blue/5 to-brand-cyan/10 p-8 rounded-2xl border border-brand-blue/10 backdrop-blur-sm text-brand-white">
+          <Paragraph>
+            IntelliWatt™ is built to save you money—not guess about your bill. To recommend the right electricity plan for
+            <em> your</em> home, we need the same information every provider, broker, or advisor needs: your real usage
+            data. This policy explains how we collect, use, and safeguard that information for both IntelliWatt™ and the
+            HitTheJackWatt™ rewards program.
+          </Paragraph>
 
-          <h2 className="text-2xl font-semibold mt-8 mb-4 text-brand-blue">1. Information We Collect</h2>
-          <p className="mb-4 text-brand-white">
-            With your explicit consent, IntelliWatt may collect smart meter data from Smart Meter Texas (SMT), including your ESIID, 15-minute usage history, meter reads, and related energy attributes. We may also collect your name, address, phone number, and email for account verification and energy plan matching.
-          </p>
+          <SectionTitle>How We Use Your Electricity Usage Data</SectionTitle>
+          <Paragraph>
+            Every home is different, and so is every usage pattern. When you share your usage data with us, our systems can
+            understand details such as:
+          </Paragraph>
+          <ul className="list-disc list-inside space-y-2 mb-4">
+            <li>How much power you use during the day versus at night</li>
+            <li>Seasonal swings and shoulder-month usage changes</li>
+            <li>The share of your bill driven by HVAC or other large systems</li>
+            <li>How much energy you use during peak vs. off-peak hours</li>
+            <li>Whether “free nights,” “free weekends,” solar buyback, or other plan types could save you money</li>
+          </ul>
+          <Paragraph>
+            The more accurate your usage data, the better IntelliWatt™ can analyze your real costs. We compare your usage
+            against plans available through our growing provider network—starting with WattBuy—to estimate what each plan
+            would have cost you. Then we highlight the lowest-priced options for your specific pattern.
+          </Paragraph>
+          <Paragraph>
+            Without usage data, IntelliWatt™ can’t run the full analysis engine. Sharing your usage allows us to do real
+            math on your situation instead of relying on generic averages.
+          </Paragraph>
+          <Paragraph>You can provide your usage in two primary ways:</Paragraph>
+          <ul className="list-disc list-inside space-y-2 mb-4">
+            <li>
+              <strong>Smart Meter Texas (SMT):</strong> Connect your account so we can securely access your interval data.
+            </li>
+            <li>
+              <strong>Manual upload:</strong> Upload a bill, CSV, or Green Button file with your usage history.
+            </li>
+          </ul>
+          <Paragraph>
+            To keep results and profile-based entries active, we recommend keeping at least the most recent 12 months of
+            usage data on file.
+          </Paragraph>
 
-          <h2 className="text-2xl font-semibold mt-8 mb-4 text-brand-blue">2. How We Use Your Data</h2>
-          <p className="mb-4 text-brand-white">
-            Your energy data is used to:
-          </p>
-          <ul className="list-disc list-inside mb-4 text-brand-white">
-            <li>Monitor your electricity usage patterns</li>
-            <li>Recommend lower-cost energy plans</li>
-            <li>Simulate solar and battery solutions</li>
-            <li>Evaluate home efficiency opportunities</li>
+          <SectionTitle>Data Sharing and Privacy</SectionTitle>
+          <Paragraph>
+            We take your privacy seriously. Here is how we handle your electricity usage data in connection with
+            IntelliWatt™ and HitTheJackWatt™:
+          </Paragraph>
+          <ul className="list-disc list-inside space-y-2 mb-4">
+            <li>
+              <strong>No sale of personal data:</strong> We do not sell or rent your personal information or individual
+              usage data to third-party marketers.
+            </li>
+            <li>
+              <strong>Service use only:</strong> Usage data is used to analyze bills, recommend plans, estimate savings, and
+              operate IntelliWatt™ features.
+            </li>
+            <li>
+              <strong>Aggregated analysis:</strong> We may combine your data with others in aggregated, de-identified form
+              to improve our models. Those aggregates cannot reasonably be traced back to you.
+            </li>
+            <li>
+              <strong>Limited partner sharing:</strong> When needed to deliver the service (e.g., to compare plans or
+              facilitate a switch), we share limited information with trusted partners under strict contractual controls.
+            </li>
+            <li>
+              <strong>Your control:</strong> You may revoke SMT access or request deletion of your account and associated
+              data (subject to legal retention requirements) by contacting us.
+            </li>
           </ul>
 
-          <h2 className="text-2xl font-semibold mt-8 mb-4 text-brand-blue">3. Customer Consent & Authorization</h2>
-          <p className="mb-4 text-brand-white">
-            Access to your Smart Meter Texas data is only granted after you provide explicit authorization. You may revoke this access at any time by contacting us at <a href="mailto:support@intelliwatt.com" className="text-brand-blue underline hover:text-brand-cyan transition-colors duration-200">support@intelliwatt.com</a>.
-          </p>
+          <SectionTitle>1. Information IntelliWatt™ Collects</SectionTitle>
+          <Paragraph>
+            With your consent, IntelliWatt™ may collect Smart Meter Texas interval data, manual usage uploads, and details
+            you provide about your home and household. We also collect account information such as name, email, phone
+            number, and zip code when you sign up or complete profile forms.
+          </Paragraph>
 
-          <h2 className="text-2xl font-semibold mt-8 mb-4 text-brand-blue">4. Data Sharing</h2>
-          <p className="mb-4 text-brand-white">
-            We do not sell or rent your data. We may share it only with partners who help us analyze energy usage, simulate solar systems, or facilitate plan switching—with strict contractual requirements to protect your information.
-          </p>
-
-          <h2 className="text-2xl font-semibold mt-8 mb-4 text-brand-blue">5. Security Practices</h2>
-          <p className="mb-4 text-brand-white">
-            We use encryption, role-based access controls, and secure data storage to protect your information. Access to SMT and customer data is limited to authorized personnel only.
-          </p>
-
-          <h2 className="text-2xl font-semibold mt-8 mb-4 text-brand-blue">6. Your Rights</h2>
-          <p className="mb-4 text-brand-white">
-            You can:
-          </p>
-          <ul className="list-disc list-inside mb-4 text-brand-white">
-            <li>Revoke consent to access your SMT data</li>
-            <li>Request deletion of your account and associated data</li>
-            <li>Update your contact or energy plan info at any time</li>
+          <SectionTitle>2. How IntelliWatt™ Uses Your Information</SectionTitle>
+          <Paragraph>Your data allows us to:</Paragraph>
+          <ul className="list-disc list-inside space-y-2 mb-4">
+            <li>
+              Analyze your electricity usage and compare plans available through our provider network to estimate savings.
+            </li>
+            <li>Calculate and manage entries in the HitTheJackWatt™ monthly drawings.</li>
+            <li>Notify you of drawing results, new ways to earn entries, or meaningful plan changes.</li>
+            <li>Inform you of cost-saving energy opportunities, including solar or efficiency upgrades when available.</li>
+            <li>Improve the IntelliWatt™ experience using aggregated, de-identified insights.</li>
           </ul>
 
-          <h2 className="text-2xl font-semibold mt-8 mb-4 text-brand-blue">7. Contact Us</h2>
-          <p className="mb-4 text-brand-white">
-            If you have any questions about this Privacy Policy, or if you wish to revoke access to your data, please contact us at:
-          </p>
-          <p className="mb-4 text-brand-white">
-            <strong>Email:</strong>{" "}
-            <a href="mailto:support@intelliwatt.com" className="text-brand-blue underline hover:text-brand-cyan transition-colors duration-200">
-              support@intelliwatt.com
+          <SectionTitle>3. Sharing of Information</SectionTitle>
+          <Paragraph>
+            IntelliWatt™ does <strong>not</strong> sell or share personal information with third parties for marketing
+            purposes. We share data only with trusted service providers necessary to operate the platform (for example,
+            secure payment processors, WattBuy, or retail electric providers), and always under contractual privacy
+            protections.
+          </Paragraph>
+
+          <SectionTitle>4. Data Retention</SectionTitle>
+          <Paragraph>
+            IntelliWatt™ retains your data only as long as needed to operate the program and meet applicable legal or
+            regulatory requirements.
+          </Paragraph>
+
+          <SectionTitle>5. Your Choices</SectionTitle>
+          <Paragraph>
+            You may opt out of non-essential communications, request deletion of your account, or update your information
+            at any time by contacting us at{' '}
+            <a href="mailto:privacy@intelli-watt.com" className="text-brand-blue underline">
+              privacy@intelli-watt.com
             </a>
-          </p>
+            .
+          </Paragraph>
+
+          <SectionTitle>6. Security</SectionTitle>
+          <Paragraph>
+            IntelliWatt™ uses industry-standard administrative, technical, and physical safeguards—including encryption and
+            role-based access controls—to protect your data from unauthorized access or disclosure.
+          </Paragraph>
+
+          <SectionTitle>7. Updates to This Policy</SectionTitle>
+          <Paragraph>
+            We may update this Privacy Policy periodically. Continued use of the site after changes are posted constitutes
+            acceptance of the revised policy.
+          </Paragraph>
+
+          <SectionTitle>8. Contact Us</SectionTitle>
+          <Paragraph>
+            If you have questions or concerns about this Privacy Policy, or if you wish to revoke access to your data,
+            please contact us at{' '}
+            <a href="mailto:privacy@intelli-watt.com" className="text-brand-blue underline">
+              privacy@intelli-watt.com
+            </a>
+            .
+          </Paragraph>
+          <Paragraph>
+            <a href="https://www.intelli-watt.com" className="text-brand-blue underline">
+              IntelliWatt™
+            </a>{' '}
+            is a registered DBA of{' '}
+            <a href="https://www.intellipath-solutions.com" className="text-brand-blue underline">
+              Intellipath Solutions LLC
+            </a>
+            .
+          </Paragraph>
         </div>
       </main>
     </div>
   );
-} 
+}
+

@@ -136,35 +136,40 @@ function JoinPageContent() {
 
       {/* Benefits Section */}
       <section className="py-16 px-4 bg-brand-navy">
-        <div className="max-w-4xl mx-auto">
+        <div className="max-w-5xl mx-auto">
           <h2 className="text-3xl font-bold text-brand-white text-center mb-12">
             Why Join <span className="text-brand-blue">IntelliWatt™</span>?
           </h2>
-          
-          <div className="grid md:grid-cols-3 gap-8">
-            <div className="text-center">
-              <div className="w-16 h-16 bg-brand-white rounded-full flex items-center justify-center mx-auto mb-6">
-                <span className="text-brand-blue text-2xl">💰</span>
+
+          <div className="grid gap-6 md:grid-cols-2">
+            {[
+              { icon: '🎯', text: 'Completely free to join—no purchases or commitments required.' },
+              { icon: '💸', text: 'Earn entries for connecting Smart Meter Texas, uploading usage, and completing your profile.' },
+              { icon: '🔁', text: 'Keep profile entries active by refreshing your usage data at least every 12 months.' },
+              { icon: '💰', text: 'Monthly jackpot grows by $5 whenever a member switches to a commissionable plan through IntelliWatt™.' },
+              { icon: '🏆', text: 'One verified winner is selected every month and paid via digital wallet or check.' },
+              { icon: '🏠', text: 'View insights into how your home uses energy and where waste might be hiding.' },
+              { icon: '⚡', text: 'Secure Smart Meter Texas integration lets IntelliWatt™ pull usage data automatically.' },
+              { icon: '📈', text: 'Track usage trends over time and receive data-backed recommendations.' },
+              { icon: '👥', text: 'Earn a referral entry for every friend who connects SMT or uploads usage—no referral cap.' },
+              { icon: '🗣️', text: 'Eligible customers can submit testimonials for an additional entry that never expires.' },
+              { icon: '📊', text: 'Personalized savings reports highlight best-fit plans, appliances, and upgrades.' },
+              { icon: '🚫', text: 'No pressure, ever—IntelliWatt™ only recommends what saves you the most.' },
+              { icon: '🔒', text: 'Usage data is protected with secure handling and never sold to third parties.' },
+              { icon: '📱', text: 'Optimized for mobile so you can check entries and insights from any device.' },
+              { icon: '🧠', text: 'Powered by AI that blends usage, weather, and efficiency data for smarter guidance.' },
+              { icon: '🎉', text: 'Stay eligible without spending money—AMOE postcard entries are always available.' },
+            ].map((benefit) => (
+              <div
+                key={benefit.text}
+                className="flex items-start gap-4 bg-brand-navy/60 border border-brand-blue/30 rounded-xl p-6 text-left hover:border-brand-blue transition-colors"
+              >
+                <span className="text-3xl" aria-hidden>
+                  {benefit.icon}
+                </span>
+                <p className="text-brand-white leading-relaxed">{benefit.text}</p>
               </div>
-              <h3 className="text-xl font-bold text-brand-white mb-4">Save Money</h3>
-              <p className="text-brand-white">Average savings of $200-500 per year on electricity bills</p>
-            </div>
-            
-            <div className="text-center">
-              <div className="w-16 h-16 bg-brand-white rounded-full flex items-center justify-center mx-auto mb-6">
-                <span className="text-brand-blue text-2xl">🎁</span>
-              </div>
-              <h3 className="text-xl font-bold text-brand-white mb-4">Earn Rewards</h3>
-              <p className="text-brand-white">Get Jackpot entries for every action and referral</p>
-            </div>
-            
-            <div className="text-center">
-              <div className="w-16 h-16 bg-brand-white rounded-full flex items-center justify-center mx-auto mb-6">
-                <span className="text-brand-blue text-2xl">⚡</span>
-              </div>
-              <h3 className="text-xl font-bold text-brand-white mb-4">Stay Informed</h3>
-              <p className="text-brand-white">Real-time alerts when better plans become available</p>
-            </div>
+            ))}
           </div>
         </div>
       </section>
