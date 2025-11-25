@@ -27,6 +27,7 @@ export default function SmartMeterSection({ houseId }: SmartMeterSectionProps) {
   const [consent, setConsent] = useState(false);
   const [status, setStatus] = useState<'idle' | 'connecting' | 'connected' | 'manual'>('idle');
   const [showAwardModal, setShowAwardModal] = useState(false);
+  const [showEmailReminder, setShowEmailReminder] = useState(false);
   const [manualAwarded, setManualAwarded] = useState(false);
   const [authorizationInfo, setAuthorizationInfo] = useState<AuthorizationSummary | null>(null);
   const [checkingStatus, setCheckingStatus] = useState(true);
@@ -106,6 +107,7 @@ export default function SmartMeterSection({ houseId }: SmartMeterSectionProps) {
         // Refresh entry indicators
         window.dispatchEvent(new CustomEvent('entriesUpdated'));
         setShowAwardModal(true);
+        setShowEmailReminder(true);
       } catch (error) {
         console.error('Error awarding entries:', error);
       }
@@ -188,7 +190,7 @@ export default function SmartMeterSection({ houseId }: SmartMeterSectionProps) {
         </div>
 
         {showAwardModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4">
             <div className="bg-white text-brand-navy rounded-xl p-6 max-w-sm w-full shadow-xl">
               <div className="flex items-center gap-3 mb-3">
                 <a
@@ -206,6 +208,28 @@ export default function SmartMeterSection({ houseId }: SmartMeterSectionProps) {
               </p>
               <a href="/dashboard/home" className="inline-block bg-brand-navy text-brand-blue font-bold py-2 px-4 rounded-lg border-2 border-brand-navy hover:border-brand-blue transition-all duration-300">Add Home Details →</a>
               <button onClick={() => setShowAwardModal(false)} className="ml-3 inline-block text-sm underline">Dismiss</button>
+            </div>
+          </div>
+        )}
+
+        {showEmailReminder && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+            <div className="w-full max-w-md rounded-3xl border border-brand-blue/40 bg-brand-navy p-6 text-brand-cyan shadow-[0_24px_60px_rgba(16,46,90,0.55)]">
+              <h3 className="text-lg font-semibold uppercase tracking-[0.3em] text-brand-cyan/60">
+                Confirm SMT access
+              </h3>
+              <p className="mt-4 text-sm text-brand-cyan/85">
+                Smart Meter Texas will send you an email shortly to confirm this agreement. Please check your
+                inbox within the next 10 minutes and approve the request so IntelliWatt can keep syncing your usage data.
+              </p>
+              <div className="mt-6 flex justify-end">
+                <button
+                  onClick={() => setShowEmailReminder(false)}
+                  className="inline-flex items-center rounded-full border border-brand-cyan/60 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-brand-cyan transition hover:border-brand-blue hover:text-brand-blue"
+                >
+                  Got it
+                </button>
+              </div>
             </div>
           </div>
         )}
