@@ -39,7 +39,7 @@ const CATEGORY_CARDS: CategoryConfig[] = [
   {
     id: "current_plan_details",
     title: "Current Plan Details",
-    description: "Enter your current rate plan to highlight savings opportunities and log 1 entry.",
+    description: "Enter your current rate plan to highlight savings opportunities and log 1 entry—earn 1 entry.",
     ctaLabel: "Add Plan Details",
     ctaHref: "/dashboard/current-rate",
   },
@@ -334,19 +334,6 @@ export default function EntriesPage() {
 
           <div className="grid md:grid-cols-2 gap-8 text-center">
             <div className="bg-white p-6 rounded-3xl border-2 border-brand-navy shadow-[0_15px_35px_rgba(15,23,42,0.2)]">
-              <h3 className="text-xl font-bold text-brand-navy mb-4">Complete Your Profile</h3>
-              <p className="text-brand-navy/80 mb-4">
-                Add your home details and preferences to earn your first jackpot entry.
-              </p>
-              <a
-                href="/dashboard/profile"
-                className="inline-flex items-center rounded-full border border-brand-navy px-5 py-2 text-sm font-semibold uppercase tracking-wide text-brand-navy transition hover:border-brand-blue hover:text-brand-blue"
-              >
-                Update Profile
-              </a>
-            </div>
-
-            <div className="bg-white p-6 rounded-3xl border-2 border-brand-navy shadow-[0_15px_35px_rgba(15,23,42,0.2)]">
               <h3 className="text-xl font-bold text-brand-navy mb-4">Connect Smart Meter</h3>
               <p className="text-brand-navy/80 mb-4">
                 Link your Smart Meter Texas account for automated usage and 1 entry.
@@ -362,7 +349,7 @@ export default function EntriesPage() {
             <div className="bg-white p-6 rounded-3xl border-2 border-brand-navy shadow-[0_15px_35px_rgba(15,23,42,0.2)]">
               <h3 className="text-xl font-bold text-brand-navy mb-4">Current Plan Details</h3>
               <p className="text-brand-navy/80 mb-4">
-                Upload your current electric plan or enter details manually to spotlight savings.
+                Upload your current electric plan or enter details manually to spotlight savings—and earn 1 entry.
               </p>
               <a
                 href="/dashboard/home#current-plan-details"
