@@ -155,6 +155,7 @@ export default function AdminDashboard() {
   const [testimonials, setTestimonials] = useState<TestimonialRecord[]>([]);
   const [referrals, setReferrals] = useState<ReferralRecord[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [recalculating, setRecalculating] = useState(false);
 
   // Fetch real data from API
   const fetchData = useCallback(async () => {
@@ -261,6 +262,24 @@ export default function AdminDashboard() {
     }
   }, []);
 
+  const handleRecalculateReferrals = useCallback(async () => {
+    try {
+      setRecalculating(true);
+      const response = await fetch('/api/admin/referrals/recalculate', {
+        method: 'POST',
+      });
+
+      if (!response.ok) {
+        console.error('Failed to recalculate referrals', response.status, response.statusText);
+      }
+    } catch (error) {
+      console.error('Error recalculating referrals:', error);
+    } finally {
+      setRecalculating(false);
+      fetchData();
+    }
+  }, [fetchData]);
+
   useEffect(() => {
     setMounted(true);
     document.title = 'Admin Dashboard - IntelliWatt™';
@@ -344,6 +363,14 @@ export default function AdminDashboard() {
           <div className="flex justify-between items-center">
             <h1 className="text-3xl font-bold text-brand-white">Admin Dashboard</h1>
             <div className="flex flex-wrap items-center gap-3 text-sm text-brand-blue">
+              <button
+                type="button"
+                onClick={handleRecalculateReferrals}
+                disabled={recalculating || refreshing}
+                className="inline-flex items-center gap-2 rounded-full border border-brand-blue/40 bg-brand-blue/10 px-4 py-2 font-semibold uppercase tracking-wide text-brand-blue transition hover:border-brand-blue hover:bg-brand-blue/20 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {recalculating ? 'Replaying referrals…' : 'Re-run referral sync'}
+              </button>
               <button
                 type="button"
                 onClick={fetchData}
