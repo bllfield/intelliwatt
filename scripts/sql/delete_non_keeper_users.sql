@@ -19,29 +19,38 @@ WHERE lower("email") IN (
   'zander86@gmail.com'
 );
 
-CREATE TEMP TABLE non_keeper_users AS
+CREATE TEMP TABLE target_users AS
 SELECT id
 FROM "User"
-WHERE id NOT IN (SELECT id FROM keeper_users);
+WHERE id NOT IN (SELECT id FROM keeper_users)
+UNION
+SELECT id
+FROM "User"
+WHERE lower("email") IN (
+  'test@intelliwatt.com',
+  'user@intelliwatt.com',
+  'demo@intelliwatt.com',
+  'sample@intelliwatt.com'
+);
 
 WITH entry_delete AS (
   DELETE FROM "Entry"
-  WHERE "userId" IN (SELECT id FROM non_keeper_users)
+  WHERE "userId" IN (SELECT id FROM target_users)
   RETURNING id
 ),
 usage_delete AS (
   DELETE FROM "UsageData"
-  WHERE "userId" IN (SELECT id FROM non_keeper_users)
+  WHERE "userId" IN (SELECT id FROM target_users)
   RETURNING id
 ),
 plan_delete AS (
   DELETE FROM "UtilityPlan"
-  WHERE "userId" IN (SELECT id FROM non_keeper_users)
+  WHERE "userId" IN (SELECT id FROM target_users)
   RETURNING id
 ),
 session_delete AS (
   DELETE FROM "Session"
-  WHERE "userId" IN (SELECT id FROM non_keeper_users)
+  WHERE "userId" IN (SELECT id FROM target_users)
   RETURNING id
 ),
 commission_delete AS (
@@ -56,32 +65,32 @@ jackpot_delete AS (
 ),
 referral_delete AS (
   DELETE FROM "Referral"
-  WHERE "referredById" IN (SELECT id FROM non_keeper_users)
+  WHERE "referredById" IN (SELECT id FROM target_users)
   RETURNING id
 ),
 profile_delete AS (
   DELETE FROM "UserProfile"
-  WHERE "userId" IN (SELECT id FROM non_keeper_users)
+  WHERE "userId" IN (SELECT id FROM target_users)
   RETURNING id
 ),
 auth_delete AS (
   DELETE FROM "SmtAuthorization"
-  WHERE "userId" IN (SELECT id FROM non_keeper_users)
+  WHERE "userId" IN (SELECT id FROM target_users)
   RETURNING id
 ),
 house_delete AS (
   DELETE FROM "HouseAddress"
-  WHERE "userId" IN (SELECT id FROM non_keeper_users)
+  WHERE "userId" IN (SELECT id FROM target_users)
   RETURNING id
 ),
 user_delete AS (
   DELETE FROM "User"
-  WHERE id IN (SELECT id FROM non_keeper_users)
+  WHERE id IN (SELECT id FROM target_users)
   RETURNING id
 )
 SELECT
   (SELECT COUNT(*) FROM keeper_users) AS keeper_count,
-  (SELECT COUNT(*) FROM non_keeper_users) AS users_removed,
+  (SELECT COUNT(*) FROM target_users) AS users_removed,
   (SELECT COUNT(*) FROM entry_delete) AS entries_deleted,
   (SELECT COUNT(*) FROM usage_delete) AS usage_deleted,
   (SELECT COUNT(*) FROM plan_delete) AS plans_deleted,

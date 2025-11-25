@@ -1,4 +1,5 @@
--- Delete jackpot entries for every user except the five designated keeper accounts.
+-- Delete SMT authorizations for every user except the five keeper accounts,
+-- plus a short list of reusable QA/test emails.
 -- Keeper emails (case-insensitive):
 --   omoneo@o2epcm.com
 --   cgoldstein@seia.com
@@ -33,15 +34,15 @@ WHERE lower("email") IN (
   'sample@intelliwatt.com'
 );
 
-WITH deleted_entries AS (
-  DELETE FROM "Entry"
+WITH deleted_authorizations AS (
+  DELETE FROM "SmtAuthorization"
   WHERE "userId" IN (SELECT id FROM target_users)
   RETURNING id
 )
 SELECT
   (SELECT COUNT(*) FROM keeper_users) AS keeper_count,
-  (SELECT COUNT(*) FROM target_users) AS non_keeper_count,
-  (SELECT COUNT(*) FROM deleted_entries) AS entries_deleted;
+  (SELECT COUNT(*) FROM target_users) AS users_targeted,
+  (SELECT COUNT(*) FROM deleted_authorizations) AS authorizations_deleted;
 
 COMMIT;
 
