@@ -16,23 +16,36 @@ const navLinks = [
 
 const AUTH_PATH = '/join';
 
-function hasAuthCookie() {
-  if (typeof document === 'undefined') {
-    return false;
-  }
-  return document.cookie
-    .split(';')
-    .map((cookie) => cookie.trim())
-    .some((cookie) => cookie.startsWith('intelliwatt_user='));
-}
-
 export default function Header() {
   const [isOpen, setIsOpen] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   useEffect(() => {
-    setIsAuthenticated(hasAuthCookie());
+    let cancelled = false;
+    const checkStatus = async () => {
+      try {
+        const response = await fetch('/api/user/status', { cache: 'no-store' });
+        if (!cancelled) {
+          setIsAuthenticated(response.ok);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setIsAuthenticated(false);
+        }
+      } finally {
+        if (!cancelled) {
+          setAuthChecked(true);
+        }
+      }
+    };
+
+    checkStatus();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const handleToggle = () => setIsOpen((prev) => !prev);
@@ -111,7 +124,7 @@ export default function Header() {
           </nav>
 
           <div className="hidden md:flex items-center">
-            {isAuthenticated ? (
+            {authChecked && isAuthenticated ? (
               <button
                 onClick={handleLogout}
                 disabled={isLoggingOut}
@@ -156,7 +169,7 @@ export default function Header() {
                 {label}
               </Link>
             ))}
-            {isAuthenticated ? (
+            {authChecked && isAuthenticated ? (
               <button
                 onClick={() => {
                   handleClose();
@@ -182,4 +195,5 @@ export default function Header() {
     </header>
   );
 }
+
 
