@@ -56,6 +56,16 @@ interface FlaggedHouseRecord {
   houses: FlaggedHouseDetail[];
 }
 
+interface EntryExpiryDigest {
+  entryId: string;
+  userId: string;
+  entryType: string;
+  status: 'ACTIVE' | 'EXPIRING_SOON' | 'EXPIRED';
+  expiresAt: string | null;
+  recordedAt: string;
+  email: string | null;
+}
+
 export default function AdminDashboard() {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
@@ -68,17 +78,26 @@ export default function AdminDashboard() {
   const [jackpotPayouts, setJackpotPayouts] = useState<JackpotPayout[]>([]);
   const [financeRecords, setFinanceRecords] = useState<FinanceRecord[]>([]);
   const [flaggedHouses, setFlaggedHouses] = useState<FlaggedHouseRecord[]>([]);
+  const [expiringEntries, setExpiringEntries] = useState<EntryExpiryDigest[]>([]);
 
   // Fetch real data from API
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [usersRes, commissionsRes, jackpotRes, financeRes, flaggedRes] = await Promise.all([
+        const [
+          usersRes,
+          commissionsRes,
+          jackpotRes,
+          financeRes,
+          flaggedRes,
+          expiringRes,
+        ] = await Promise.all([
           fetch('/api/admin/users'),
           fetch('/api/admin/commissions'),
           fetch('/api/admin/jackpot'),
           fetch('/api/admin/finance'),
-          fetch('/api/admin/houses/flagged')
+          fetch('/api/admin/houses/flagged'),
+          fetch('/api/admin/hitthejackwatt/expiring'),
         ]);
 
         if (usersRes.ok) {
@@ -120,6 +139,14 @@ export default function AdminDashboard() {
         } else {
           console.error('Failed to fetch flagged houses:', flaggedRes.status, flaggedRes.statusText);
         }
+
+        if (expiringRes.ok) {
+          const expiryData = await expiringRes.json();
+          console.log('Fetched expiring entries:', expiryData);
+          setExpiringEntries(expiryData);
+        } else {
+          console.error('Failed to fetch expiring entries:', expiringRes.status, expiringRes.statusText);
+        }
       } catch (error) {
         console.error('Error fetching admin data:', error);
       }
@@ -150,6 +177,7 @@ export default function AdminDashboard() {
   const pendingJackpot = jackpotPayouts.filter(j => !j.paid).length;
   const totalFinance = financeRecords.reduce((sum, f) => sum + (f.type === 'income' ? f.amount : -f.amount), 0);
   const formatTimestamp = (value: string | null) => (value ? new Date(value).toLocaleString() : '—');
+  const expiringSoonCount = expiringEntries.filter((entry) => entry.status === 'EXPIRING_SOON').length;
 
   return (
     <div className="min-h-screen bg-brand-navy">
@@ -185,6 +213,10 @@ export default function AdminDashboard() {
           <div className="bg-brand-white rounded-lg p-6 shadow-lg md:col-span-2 lg:col-span-1">
             <div className="text-2xl font-bold text-brand-navy">{flaggedHouses.length}</div>
             <div className="text-brand-navy/60">Homes flagged for SMT replacement email</div>
+          </div>
+          <div className="bg-brand-white rounded-lg p-6 shadow-lg md:col-span-2 lg:col-span-1">
+            <div className="text-2xl font-bold text-brand-navy">{expiringSoonCount}</div>
+            <div className="text-brand-navy/60">Entries expiring within 30 days</div>
           </div>
         </div>
 
@@ -264,6 +296,72 @@ export default function AdminDashboard() {
               </div>
             </a>
           </div>
+        </section>
+
+        {/* Entry Expiration Digest */}
+        <section className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
+          <h2 className="text-2xl font-bold text-brand-navy mb-4">⚠️ Jackpot Entry Expiration</h2>
+          <p className="text-brand-navy/70 mb-4">
+            Entries listed here are either expiring within the next 30 days or already expired due to missing usage
+            data. Use this list to queue customer outreach and keep reward eligibility up to date. The daily cron clears
+            and repopulates this table automatically. To force a refresh manually, call the secured endpoint
+            <code className="mx-1 rounded bg-brand-navy/10 px-1 py-0.5 text-xs text-brand-navy">POST /api/admin/hitthejackwatt/refresh</code>
+            with the admin token.
+          </p>
+          {expiringEntries.length === 0 ? (
+            <div className="rounded-md border border-brand-navy/10 bg-brand-navy/5 px-4 py-6 text-center text-brand-navy/70">
+              No expiring entries detected in the latest digest.
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-brand-navy/10">
+              <table className="min-w-full divide-y divide-brand-navy/10">
+                <thead className="bg-brand-navy/5">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-brand-navy/60">
+                      User
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-brand-navy/60">
+                      Entry Type
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-brand-navy/60">
+                      Status
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-brand-navy/60">
+                      Expires At
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-brand-navy/60">
+                      Recorded
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-brand-navy/10 bg-white">
+                  {expiringEntries.map((entry) => (
+                    <tr key={entry.entryId}>
+                      <td className="px-4 py-3 text-sm text-brand-navy">{entry.email ?? entry.userId}</td>
+                      <td className="px-4 py-3 text-sm text-brand-navy capitalize">
+                        {entry.entryType.replace(/_/g, ' ')}
+                      </td>
+                      <td className="px-4 py-3 text-sm font-semibold">
+                        {entry.status === 'EXPIRING_SOON' ? (
+                          <span className="text-amber-600">Expiring Soon</span>
+                        ) : entry.status === 'EXPIRED' ? (
+                          <span className="text-rose-600">Expired</span>
+                        ) : (
+                          <span className="text-emerald-600">Active</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-brand-navy">
+                        {entry.expiresAt ? new Date(entry.expiresAt).toLocaleString() : '—'}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-brand-navy/70">
+                        {new Date(entry.recordedAt).toLocaleString()}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </section>
 
         <section className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">

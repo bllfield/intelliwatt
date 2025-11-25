@@ -21,6 +21,7 @@ model User {
   profile           UserProfile?
   utilityPlans      UtilityPlan[]
   smtAuthorizations SmtAuthorization[]
+  manualUsageUploads ManualUsageUpload[]
 }
 
 model UserProfile {
@@ -170,10 +171,72 @@ model Entry {
   user      User     @relation("UserEntries", fields: [userId], references: [id])
   houseId   String?
   house     HouseAddress? @relation(fields: [houseId], references: [id])
+  status        EntryStatus @default(ACTIVE)
+  expiresAt     DateTime?
+  lastValidated DateTime?
+  expirationReason String?
+  manualUsageId String?
+  manualUsage   ManualUsageUpload? @relation("EntryManualUsage", fields: [manualUsageId], references: [id])
+  statusLogs    EntryStatusLog[]
 
   @@index([houseId])
+  @@index([expiresAt])
+  @@index([status])
+  @@unique([manualUsageId])
 }
 
+model EntryStatusLog {
+  id        String      @id @default(cuid())
+  entryId   String
+  previous  EntryStatus?
+  next      EntryStatus
+  reason    String?
+  createdAt DateTime     @default(now())
+  entry     Entry        @relation(fields: [entryId], references: [id])
+
+  @@index([entryId])
+  @@index([createdAt])
+}
+
+model ManualUsageUpload {
+  id        String   @id @default(cuid())
+  userId    String
+  houseId   String?
+  source    String   @default("manual")
+  uploadedAt DateTime @default(now())
+  expiresAt DateTime
+  metadata  Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id])
+  house     HouseAddress? @relation(fields: [houseId], references: [id])
+  entry     Entry?    @relation("EntryManualUsage")
+
+  @@index([userId])
+  @@index([houseId])
+  @@index([expiresAt])
+}
+
+model EntryExpiryDigest {
+  entryId    String   @id
+  userId     String
+  entryType  String
+  status     EntryStatus
+  expiresAt  DateTime?
+  recordedAt DateTime @default(now())
+  entry      Entry    @relation(fields: [entryId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@index([recordedAt])
+}
+
+enum EntryStatus {
+  ACTIVE
+  EXPIRING_SOON
+  EXPIRED
+}
 model Session {
   id        String   @id @default(cuid())
   userId    String
@@ -400,6 +463,7 @@ model HouseAddress {
 
   smtAuthorizations SmtAuthorization[]
   entries           Entry[]
+  manualUsageUploads ManualUsageUpload[]
 
   @@index([placeId])
   @@index([addressState, addressZip5])

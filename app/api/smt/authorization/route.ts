@@ -7,6 +7,7 @@ import { createAgreementAndSubscription } from "@/lib/smt/agreements";
 import { waitForMeterInfo } from "@/lib/smt/meterInfo";
 import { archiveConflictingAuthorizations, setPrimaryHouse } from "@/lib/house/promote";
 import { Entry } from "@prisma/client";
+import { refreshUserEntryStatuses } from "@/lib/hitthejackwatt/entryLifecycle";
 
 type SmtAuthorizationBody = {
   houseAddressId: string;
@@ -396,6 +397,11 @@ export async function POST(req: NextRequest) {
 
     if (shouldAwardSmartMeterEntry) {
       await ensureEntryAmount(user.id, "smart_meter_connect", 1, house.id);
+    }
+
+    await refreshUserEntryStatuses(user.id);
+    for (const displacedId of conflictResult.displacedUserIds ?? []) {
+      await refreshUserEntryStatuses(displacedId);
     }
 
     const webhookUrl = process.env.DROPLET_WEBHOOK_URL;

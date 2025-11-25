@@ -7,6 +7,10 @@ interface EntryData {
   type: string;
   amount: number;
   createdAt: string;
+  status: 'ACTIVE' | 'EXPIRING_SOON' | 'EXPIRED';
+  expiresAt: string | null;
+  manualUsageId: string | null;
+  lastValidated: string | null;
 }
 
 type CategoryConfig = {
@@ -37,7 +41,7 @@ const CATEGORY_CARDS: CategoryConfig[] = [
     title: "Current Plan Details",
     description: "Enter your current rate plan to highlight savings opportunities and log 1 entry.",
     ctaLabel: "Add Plan Details",
-    ctaHref: "/dashboard/home#current-plan-details",
+    ctaHref: "/dashboard/current-rate",
   },
   {
     id: "home_details_complete",
@@ -97,18 +101,63 @@ export default function EntriesPage() {
   }, [fetchEntries]);
 
   const totalEntries = useMemo(
-    () => entries.reduce((total, entry) => total + entry.amount, 0),
+    () =>
+      entries
+        .filter((entry) => entry.status === 'ACTIVE')
+        .reduce((total, entry) => total + entry.amount, 0),
     [entries],
   );
 
   const categoryTotals = useMemo(() => {
     const map = new Map<string, number>();
     for (const entry of entries) {
+      if (entry.status !== 'ACTIVE') continue;
       const current = map.get(entry.type) ?? 0;
       map.set(entry.type, current + entry.amount);
     }
     return map;
   }, [entries]);
+
+  const categoryExpiryMeta = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        expiringSoonCount: number;
+        expiredCount: number;
+        nextExpiry: Date | null;
+      }
+    >();
+
+    for (const entry of entries) {
+      const meta = map.get(entry.type) ?? {
+        expiringSoonCount: 0,
+        expiredCount: 0,
+        nextExpiry: null,
+      };
+
+      if (entry.status === 'EXPIRING_SOON' && entry.expiresAt) {
+        meta.expiringSoonCount += entry.amount;
+        const expiryDate = new Date(entry.expiresAt);
+        if (!meta.nextExpiry || expiryDate < meta.nextExpiry) {
+          meta.nextExpiry = expiryDate;
+        }
+      } else if (entry.status === 'EXPIRED') {
+        meta.expiredCount += entry.amount;
+      }
+
+      map.set(entry.type, meta);
+    }
+
+    return map;
+  }, [entries]);
+
+  const expiringSoonTotal = useMemo(
+    () =>
+      entries
+        .filter((entry) => entry.status === 'EXPIRING_SOON')
+        .reduce((sum, entry) => sum + entry.amount, 0),
+    [entries],
+  );
 
   const neonValueClass = (count: number) =>
     count > 0 ? "text-[#39FF14]" : "text-[#ff1493]";
@@ -158,21 +207,39 @@ export default function EntriesPage() {
             <div className="grid gap-6 md:grid-cols-2">
               {CATEGORY_CARDS.map((card) => {
                 const count = categoryTotals.get(card.id) ?? 0;
+                const meta = categoryExpiryMeta.get(card.id);
+                let statusBanner: React.ReactNode = null;
+
+                if (meta) {
+                  if (meta.expiredCount > 0) {
+                    statusBanner = (
+                      <span className="inline-flex items-center rounded-full border border-rose-300 bg-rose-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-rose-200">
+                        Entries expired
+                      </span>
+                    );
+                  } else if (meta.expiringSoonCount > 0 && meta.nextExpiry) {
+                    statusBanner = (
+                      <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-400/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-amber-200">
+                        Expires {meta.nextExpiry.toLocaleDateString()}
+                      </span>
+                    );
+                  }
+                }
+
                 return (
                   <div
                     key={card.id}
-                    className="rounded-3xl border border-brand-cyan/40 bg-brand-navy p-6 text-brand-cyan shadow-[0_0_30px_rgba(56,189,248,0.22)] flex flex-col gap-4"
+                    className="flex flex-col gap-4 rounded-3xl border border-brand-cyan/40 bg-brand-navy p-6 text-brand-cyan shadow-[0_0_30px_rgba(56,189,248,0.22)]"
                   >
                     <div className="flex items-center justify-between">
                       <h3 className="text-lg font-semibold uppercase tracking-wide text-brand-cyan">
                         {card.title}
                       </h3>
-                      <span
-                        className={`text-3xl font-bold ${neonValueClass(count)}`}
-                      >
+                      <span className={`text-3xl font-bold ${neonValueClass(count)}`}>
                         {count}
                       </span>
                     </div>
+                    {statusBanner}
                     <p className="text-sm text-brand-cyan/80 leading-relaxed">
                       {card.description}
                     </p>
@@ -195,7 +262,9 @@ export default function EntriesPage() {
                   {totalEntries}
                 </span>
                 <p className="text-sm text-brand-cyan/80 text-center">
-                  Keep completing actions to boost your odds in the next drawing.
+                  {expiringSoonTotal > 0
+                    ? `${expiringSoonTotal} entr${expiringSoonTotal === 1 ? 'y is' : 'ies are'} expiring soon. Refresh your usage data to keep them active.`
+                    : 'Keep completing actions to boost your odds in the next drawing.'}
                 </p>
               </div>
             </div>
@@ -216,7 +285,7 @@ export default function EntriesPage() {
                   .map((entry) => (
                     <div
                       key={entry.id}
-                      className="flex flex-col rounded-2xl border border-brand-cyan/30 bg-brand-navy/70 px-5 py-4 md:flex-row md:items-center md:justify-between"
+                      className="flex flex-col gap-3 rounded-2xl border border-brand-cyan/30 bg-brand-navy/70 px-5 py-4 md:flex-row md:items-center md:justify-between"
                     >
                       <div>
                         <p className="text-sm uppercase tracking-wide text-brand-cyan/60">
@@ -226,11 +295,28 @@ export default function EntriesPage() {
                           {entry.type.replace(/_/g, " ")}
                         </p>
                       </div>
-                      <span
-                        className={`mt-3 inline-flex items-center justify-center rounded-full px-4 py-1 text-sm font-semibold md:mt-0 ${neonValueClass(entry.amount)}`}
-                      >
-                        +{entry.amount} {entry.amount === 1 ? "Entry" : "Entries"}
-                      </span>
+                      <div className="flex flex-col items-start gap-2 md:flex-row md:items-center md:gap-3">
+                        <span
+                          className={`inline-flex items-center justify-center rounded-full px-4 py-1 text-sm font-semibold ${neonValueClass(entry.amount)}`}
+                        >
+                          +{entry.amount} {entry.amount === 1 ? "Entry" : "Entries"}
+                        </span>
+                        {entry.status !== 'ACTIVE' ? (
+                          <span
+                            className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold tracking-wide ${
+                              entry.status === 'EXPIRING_SOON'
+                                ? 'border border-amber-300 text-amber-200'
+                                : 'border border-rose-300 text-rose-300'
+                            }`}
+                          >
+                            {entry.status === 'EXPIRING_SOON'
+                              ? entry.expiresAt
+                                ? `Expiring ${new Date(entry.expiresAt).toLocaleDateString()}`
+                                : 'Expiring soon'
+                              : 'Expired'}
+                          </span>
+                        ) : null}
+                      </div>
                     </div>
                   ))}
               </div>

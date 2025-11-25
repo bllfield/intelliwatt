@@ -204,21 +204,40 @@ export default function SmartMeterSection({ houseId }: SmartMeterSectionProps) {
                 return;
               }
               try {
-                const response = await fetch('/api/user/entries', {
+                const manualResponse = await fetch('/api/user/manual-usage', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    ...(houseId ? { houseId } : {}),
+                  }),
+                });
+
+                if (!manualResponse.ok) {
+                  throw new Error('Unable to record manual usage');
+                }
+
+                const manualData = await manualResponse.json();
+
+                const entryResponse = await fetch('/api/user/entries', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
                     type: 'smart_meter_connect',
                     amount: 1,
+                    manualUsageId: manualData.id,
                     ...(houseId ? { houseId } : {}),
                   }),
                 });
-                if (response.ok) {
-                  setManualAwarded(true);
-                  window.dispatchEvent(new CustomEvent('entriesUpdated'));
+
+                if (!entryResponse.ok) {
+                  throw new Error('Unable to award manual entry');
                 }
+
+                setManualAwarded(true);
+                window.dispatchEvent(new CustomEvent('entriesUpdated'));
               } catch (error) {
                 console.error('Error awarding manual smart meter entries:', error);
+                alert('We could not record your manual entry right now. Please try again.');
               }
             }}
             className="text-brand-blue underline hover:text-brand-white transition-colors font-medium"

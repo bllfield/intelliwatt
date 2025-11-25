@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, FormEvent } from "react";
+import React, { useState, FormEvent, useEffect } from "react";
 
 type CurrentRateDetailsFormProps = {
   onContinue?: (data: {
@@ -24,17 +24,66 @@ export function CurrentRateDetailsForm({
   const [contractExpiration, setContractExpiration] = useState("");
   const [notes, setNotes] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [hasAwarded, setHasAwarded] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
-  function handleSubmit(e: FormEvent) {
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const stored = localStorage.getItem("intelliwatt_current_plan_details_complete");
+      if (stored === "true") {
+        setHasAwarded(true);
+      }
+    }
+  }, []);
+
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    onContinue?.({
+    setIsSubmitting(true);
+    setStatusMessage(null);
+
+    const payload = {
       planName,
       primaryRateCentsPerKwh,
       baseFeeDollars,
       contractExpiration,
       notes,
       hasUpload: !!file,
-    });
+    };
+
+    try {
+      const response = await fetch("/api/user/entries", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "current_plan_details", amount: 1 }),
+      });
+
+      if (response.ok) {
+        const data = await response.json().catch(() => null);
+        const alreadyAwarded = data?.message === "Entry already awarded";
+
+        setHasAwarded(true);
+        setStatusMessage(
+          alreadyAwarded
+            ? "You've already earned an entry for sharing your current plan details."
+            : "✓ Entry added! Your current plan details are now counted toward the jackpot."
+        );
+        if (typeof window !== "undefined") {
+          localStorage.setItem("intelliwatt_current_plan_details_complete", "true");
+        }
+        window.dispatchEvent(new CustomEvent("entriesUpdated"));
+      } else {
+        const errorData = await response.json().catch(() => null);
+        throw new Error(errorData?.error ?? "Something went wrong awarding your entry.");
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unable to record your entry right now.";
+      setStatusMessage(message);
+    } finally {
+      setIsSubmitting(false);
+      onContinue?.(payload);
+    }
   }
 
   return (
@@ -161,12 +210,23 @@ export function CurrentRateDetailsForm({
         </div>
       </div>
 
+      {statusMessage ? (
+        <div
+          className={`rounded-xl border px-4 py-3 text-sm ${
+            hasAwarded ? "border-emerald-300 bg-emerald-50 text-emerald-700" : "border-rose-300 bg-rose-50 text-rose-600"
+          }`}
+        >
+          {statusMessage}
+        </div>
+      ) : null}
+
       <form onSubmit={handleSubmit} className="flex items-center gap-3">
         <button
           type="submit"
-          className="inline-flex items-center rounded-md bg-black px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+          disabled={isSubmitting || hasAwarded}
+          className="inline-flex items-center rounded-md bg-black px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          Continue with these details
+          {hasAwarded ? "Entry Recorded ✓" : isSubmitting ? "Saving..." : "Continue with these details"}
         </button>
         <button
           type="button"

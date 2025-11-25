@@ -1,9 +1,10 @@
 // Entry opportunities configuration for HitTheJackWatt
 // Defines all entry types and their amounts
 
-export type EntryType = 
+export type EntryType =
   | 'signup'
   | 'smart_meter_connect'
+  | 'current_plan_details'
   | 'home_details_complete'
   | 'appliance_details_complete'
   | 'referral'
@@ -29,6 +30,13 @@ export const ENTRY_OPPORTUNITIES: Record<EntryType, EntryOpportunity> = {
     id: 'smart_meter_connect',
     label: 'Authorize Smart Meter Texas',
     description: 'Connect your smart meter data (manual entry counts as well)',
+    amount: 1,
+    maxPerUser: 1,
+  },
+  current_plan_details: {
+    id: 'current_plan_details',
+    label: 'Add Current Plan Details',
+    description: 'Upload your bill or enter rate details manually',
     amount: 1,
     maxPerUser: 1,
   },
