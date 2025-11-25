@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
 import { ProfileContactForm } from "@/components/profile/ProfileContactForm";
 import { ProfileAddressSection } from "@/components/profile/ProfileAddressSection";
+import { RevokeSmartMeterButton } from "@/components/profile/RevokeSmartMeterButton";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -319,16 +320,15 @@ export default async function ProfilePage() {
           )}
         </section>
 
-        <section className="rounded-3xl border border-brand-cyan/30 bg-brand-navy p-6 text-center text-brand-cyan shadow-[0_0_35px_rgba(56,189,248,0.28)]">
+        <section className="rounded-3xl border border-brand-cyan/30 bg-brand-navy p-6 text-brand-cyan shadow-[0_0_35px_rgba(56,189,248,0.28)]">
           <h2 className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-cyan/60">
             Revoke SMT access
           </h2>
           <p className="mt-3 text-sm text-brand-cyan/80">
-            We’re wrapping up the self-service revoke flow. In the meantime, contact support if you need to remove IntelliWatt’s SMT access.
+            Need to turn off Smart Meter Texas sharing? Submit the request below. We’ll archive your
+            authorization immediately and email you once the disconnect is confirmed.
           </p>
-          <span className="mt-4 inline-flex items-center rounded-full border border-brand-cyan/40 bg-brand-cyan/10 px-4 py-1 text-xs font-semibold uppercase tracking-wide text-brand-cyan">
-            Under construction
-          </span>
+          <RevokeSmartMeterButton authorizationId={smtAuthorization?.id ?? null} />
         </section>
       </div>
     </div>

@@ -397,6 +397,21 @@ export async function POST(req: NextRequest) {
 
     if (shouldAwardSmartMeterEntry) {
       await ensureEntryAmount(user.id, "smart_meter_connect", 1, house.id);
+      await prisma.userProfile.updateMany({
+        where: { userId: user.id },
+        data: {
+          fullName: trimmedCustomerName,
+          phone: normalizedContactPhone,
+        },
+      });
+    } else if (trimmedCustomerName || normalizedContactPhone) {
+      await prisma.userProfile.updateMany({
+        where: { userId: user.id },
+        data: {
+          fullName: trimmedCustomerName || undefined,
+          phone: normalizedContactPhone || undefined,
+        },
+      });
     }
 
     await refreshUserEntryStatuses(user.id);
