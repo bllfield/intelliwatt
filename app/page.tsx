@@ -295,20 +295,20 @@ function LandingPageContent() {
           </div>
           
           <div className="grid md:grid-cols-2 gap-8 mb-16">
-            <div className="bg-brand-white p-8 rounded-2xl border border-brand-navy hover:border-brand-blue transition-all duration-300 group shadow-lg text-center">
-              <div className="w-12 h-12 bg-brand-navy rounded-lg flex items-center justify-center mb-4 mx-auto group-hover:scale-110 transition-transform duration-300">
-                <svg className="w-6 h-6 text-brand-blue" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div className="bg-brand-navy p-8 rounded-2xl border border-brand-blue/40 shadow-[0_30px_80px_rgba(0,0,0,0.45)] text-center transition-all duration-300 group hover:border-brand-blue/80">
+              <div className="w-16 h-16 bg-brand-navy/60 border border-brand-blue/50 rounded-2xl flex items-center justify-center mb-4 mx-auto shadow-[0_0_30px_rgba(0,224,255,0.65)] group-hover:shadow-[0_0_40px_rgba(0,224,255,0.85)] transition-all duration-300">
+                <svg className="w-8 h-8 text-[#00E0FF]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
               </div>
-              <h3 className="text-xl font-semibold text-brand-navy mb-3">Real Smart Meter Data</h3>
-              <p className="text-brand-navy">Uses actual usage data — no estimates or averages</p>
+              <h3 className="text-xl font-semibold text-[#00E0FF] mb-3">Real Smart Meter Data</h3>
+              <p className="text-brand-white/90">Uses actual usage data — no estimates or averages</p>
             </div>
-            
-            <div className="bg-brand-white p-8 rounded-2xl border border-brand-navy hover:border-brand-blue transition-all duration-300 group shadow-lg text-center">
-              <div className="w-12 h-12 bg-brand-navy rounded-lg flex items-center justify-center mb-4 mx-auto group-hover:scale-110 transition-transform duration-300">
+
+            <div className="bg-brand-navy p-8 rounded-2xl border border-brand-blue/40 shadow-[0_30px_80px_rgba(0,0,0,0.45)] text-center transition-all duration-300 group hover:border-brand-blue/80">
+              <div className="w-16 h-16 bg-brand-navy/60 border border-brand-blue/50 rounded-2xl flex items-center justify-center mb-4 mx-auto shadow-[0_0_30px_rgba(0,224,255,0.65)] group-hover:shadow-[0_0_40px_rgba(0,224,255,0.85)] transition-all duration-300">
                 <svg
-                  className="w-7 h-7 text-brand-blue"
+                  className="w-9 h-9 text-[#00E0FF]"
                   fill="none"
                   stroke="currentColor"
                   strokeWidth={1.8}
@@ -321,38 +321,41 @@ function LandingPageContent() {
                   />
                 </svg>
               </div>
-              <h3 className="text-xl font-semibold text-brand-navy mb-3">Weather & Season Normalization</h3>
-              <p className="text-brand-navy">Accounts for weather, usage timing, and seasonal changes</p>
+              <h3 className="text-xl font-semibold text-[#00E0FF] mb-3">Weather &amp; Season Normalization</h3>
+              <p className="text-brand-white/90">Accounts for weather, usage timing, and seasonal changes</p>
             </div>
-            
-            <div className="bg-brand-white p-8 rounded-2xl border border-brand-navy hover:border-brand-blue transition-all duration-300 group shadow-lg text-center">
-              <div className="w-12 h-12 bg-brand-navy rounded-lg flex items-center justify-center mb-4 mx-auto group-hover:scale-110 transition-transform duration-300">
-                <svg className="w-6 h-6 text-brand-blue" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+
+            <div className="bg-brand-navy p-8 rounded-2xl border border-brand-blue/40 shadow-[0_30px_80px_rgba(0,0,0,0.45)] text-center transition-all duration-300 group hover:border-brand-blue/80">
+              <div className="w-16 h-16 bg-brand-navy/60 border border-brand-blue/50 rounded-2xl flex items-center justify-center mb-4 mx-auto shadow-[0_0_30px_rgba(0,224,255,0.65)] group-hover:shadow-[0_0_40px_rgba(0,224,255,0.85)] transition-all duration-300">
+                <svg className="w-8 h-8 text-[#00E0FF]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                 </svg>
               </div>
-              <h3 className="text-xl font-semibold text-brand-navy mb-3">Pattern Matching</h3>
-              <p className="text-brand-navy">Matches your home's unique usage pattern to the best-fit plan</p>
+              <h3 className="text-xl font-semibold text-[#00E0FF] mb-3">Pattern Matching</h3>
+              <p className="text-brand-white/90">Matches your home's unique usage pattern to the best-fit plan</p>
             </div>
-            
-            <div className="bg-brand-white p-8 rounded-2xl border border-brand-navy hover-border-brand-blue transition-all duration-300 group shadow-lg text-center">
-              <div className="w-12 h-12 bg-brand-navy rounded-lg flex items-center justify-center mb-4 mx-auto group-hover:scale-110 transition-transform duration-300">
-                <svg className="w-6 h-6 text-brand-blue" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+
+            <div className="bg-brand-navy p-8 rounded-2xl border border-brand-blue/40 shadow-[0_30px_80px_rgba(0,0,0,0.45)] text-center transition-all duration-300 group hover:border-brand-blue/80">
+              <div className="w-16 h-16 bg-brand-navy/60 border border-brand-blue/50 rounded-2xl flex items-center justify-center mb-4 mx-auto shadow-[0_0_30px_rgba(0,224,255,0.65)] group-hover:shadow-[0_0_40px_rgba(0,224,255,0.85)] transition-all duration-300">
+                <svg className="w-8 h-8 text-[#00E0FF]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                 </svg>
               </div>
-              <h3 className="text-xl font-semibold text-brand-navy mb-3">Patent-Pending Engine</h3>
-              <p className="text-brand-navy">Advanced switching engine — only available at IntelliWatt™</p>
+              <h3 className="text-xl font-semibold text-[#00E0FF] mb-3">Patent-Pending Engine</h3>
+              <p className="text-brand-white/90">
+                Advanced switching engine — only available at{' '}
+                <span className="font-semibold text-[#00E0FF] drop-shadow-[0_0_12px_rgba(0,224,255,0.8)]">IntelliWatt™</span>
+              </p>
             </div>
-            
-            <div className="bg-brand-white p-8 rounded-2xl border border-brand-navy hover:border-brand-blue transition-all duration-300 group shadow-lg md:col-span-2 text-center">
-              <div className="w-12 h-12 bg-brand-navy rounded-lg flex items-center justify-center mb-4 mx-auto group-hover:scale-110 transition-transform duration-300">
-                <svg className="w-6 h-6 text-brand-blue" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+
+            <div className="bg-brand-navy p-8 rounded-2xl border border-brand-blue/40 shadow-[0_30px_80px_rgba(0,0,0,0.45)] text-center transition-all duration-300 group hover:border-brand-blue/80 md:col-span-2">
+              <div className="w-16 h-16 bg-brand-navy/60 border border-brand-blue/50 rounded-2xl flex items-center justify-center mb-4 mx-auto shadow-[0_0_30px_rgba(0,224,255,0.65)] group-hover:shadow-[0_0_40px_rgba(0,224,255,0.85)] transition-all duration-300">
+                <svg className="w-8 h-8 text-[#00E0FF]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                 </svg>
               </div>
-              <h3 className="text-xl font-semibold text-brand-navy mb-3">Continuous Monitoring</h3>
-              <p className="text-brand-navy">Re-checks automatically so you never overpay again</p>
+              <h3 className="text-xl font-semibold text-[#00E0FF] mb-3">Continuous Monitoring</h3>
+              <p className="text-brand-white/90">Re-checks automatically so you never overpay again</p>
             </div>
           </div>
         </div>

@@ -17,7 +17,11 @@ const faqItems: { question: string; answer: ReactNode }[] = [
           HitTheJackWatt™
         </a>{' '}
         is a free monthly drawing where members can win cash by securely sharing their energy data and referring friends.
-        The jackpot grows as more people switch to a better plan through IntelliWatt™.
+        The jackpot grows as more people switch to a better plan through{' '}
+        <span className="font-semibold text-[#00E0FF] underline drop-shadow-[0_0_12px_rgba(0,224,255,0.8)]">
+          IntelliWatt™
+        </span>
+        .
       </p>
     ),
   },
