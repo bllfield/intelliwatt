@@ -1,23 +1,23 @@
 import type { ReactNode } from 'react';
 
 const benefits = [
-  { icon: '🎯', text: 'Completely free to join—no purchases or commitments required.' },
-  { icon: '💸', text: 'Earn entries by connecting Smart Meter Texas, uploading usage, and completing your profile details.' },
-  { icon: '🔁', text: 'Keep profile entries active by refreshing your usage data at least every 12 months.' },
-  { icon: '💰', text: 'Monthly jackpot grows by $5 whenever a member switches to a commissionable plan through IntelliWatt™.' },
-  { icon: '🏆', text: 'One verified winner is selected monthly and paid via digital wallet or check.' },
-  { icon: '🏠', text: 'See where your home uses energy and uncover opportunities to reduce waste.' },
-  { icon: '⚡', text: 'Secure Smart Meter Texas integration lets IntelliWatt™ pull usage data automatically with your permission.' },
-  { icon: '📈', text: 'Track usage trends over time and receive tailored recommendations.' },
-  { icon: '👥', text: 'Earn an entry for every friend who shares their usage—referrals have no cap and never expire.' },
-  { icon: '🗣️', text: 'Eligible customers can submit testimonials for an additional entry that never expires.' },
-  { icon: '📊', text: 'Personalized savings reports highlight best-fit plans, appliances, and upgrades.' },
-  { icon: '🚫', text: 'No pressure—recommendations always focus on what saves you the most.' },
-  { icon: '🔒', text: 'Usage data is safeguarded with secure handling and is never sold to third parties.' },
-  { icon: '📱', text: 'Optimized for mobile so you can check entries and insights from any device.' },
-  { icon: '🧠', text: 'Powered by AI that blends usage, weather, and efficiency data for smarter guidance.' },
-  { icon: '🎉', text: 'Prefer mail-in? The AMOE postcard option keeps entries available without sharing usage.' },
-] as const satisfies Array<{ icon: string; text: string }>;
+  { id: 1, icon: '🎯', text: 'Completely free to join—no purchases or commitments required.' },
+  { id: 2, icon: '🏆', text: 'One verified winner is selected monthly and paid via digital wallet or check.' },
+  { id: 3, icon: '💰', text: 'Monthly jackpot grows by $5 whenever a member switches to a commissionable plan through IntelliWatt™.' },
+  { id: 4, icon: '💸', text: 'Earn entries by connecting Smart Meter Texas, uploading usage, and completing your profile details.' },
+  { id: 5, icon: '⚡', text: 'Secure Smart Meter Texas integration lets IntelliWatt™ pull usage data automatically with your permission.' },
+  { id: 6, icon: '🔒', text: 'Usage data is safeguarded with secure handling and is never sold to third parties.' },
+  { id: 7, icon: '👥', text: 'Earn an entry for every friend who shares their usage—referrals have no cap and never expire.' },
+  { id: 8, icon: '🏠', text: 'See where your home uses energy and uncover opportunities to reduce waste.' },
+  { id: 9, icon: '📊', text: 'Personalized savings reports highlight best-fit plans, appliances, and upgrades.' },
+  { id: 10, icon: '📈', text: 'Track usage trends over time and receive tailored recommendations.' },
+  { id: 11, icon: '🚫', text: 'No pressure—recommendations always focus on what saves you the most.' },
+  { id: 12, icon: '🧠', text: 'Powered by AI that blends usage, weather, and efficiency data for smarter guidance.' },
+  { id: 13, icon: '📱', text: 'Optimized for mobile so you can check entries and insights from any device.' },
+  { id: 14, icon: '🗣️', text: 'Eligible customers can submit testimonials for an additional entry that never expires.' },
+  { id: 15, icon: '🔁', text: 'Keep profile entries active by refreshing your usage data at least every 12 months.' },
+  { id: 16, icon: '🎉', text: 'Prefer mail-in? The AMOE postcard option keeps entries available without sharing usage.' },
+] as const satisfies Array<{ id: number; icon: string; text: string }>;
 
 const Section = ({ children }: { children: ReactNode }) => (
   <section className="py-16 px-4 bg-white">
@@ -44,10 +44,10 @@ export default function BenefitsPage() {
       </section>
 
       <Section>
-        <div className="grid gap-6 md:grid-cols-2">
+        <ul className="grid gap-6 md:grid-cols-2">
           {benefits.map((benefit) => (
-            <div
-              key={benefit.text}
+            <li
+              key={benefit.id}
               className="flex items-start gap-4 rounded-2xl border border-brand-blue/30 bg-brand-navy p-6 shadow-[0_15px_40px_rgba(15,23,42,0.3)] transition hover:border-brand-blue/60"
             >
               <span
@@ -57,9 +57,9 @@ export default function BenefitsPage() {
                 {benefit.icon}
               </span>
               <p className="text-brand-blue/90 leading-relaxed">{benefit.text}</p>
-            </div>
+            </li>
           ))}
-        </div>
+        </ul>
       </Section>
 
       <Section>

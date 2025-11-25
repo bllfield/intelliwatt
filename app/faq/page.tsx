@@ -18,28 +18,12 @@ const faqItems: { question: string; answer: ReactNode }[] = [
     answer: <p>Nothing. It is completely free to enter, earn entries, and win—no purchase necessary.</p>,
   },
   {
-    question: 'What is IntelliWatt™? Why am I redirected there after signing up?',
+    question: 'What’s the catch?',
     answer: (
-      <>
-        <p>
-          <a href="https://www.intelli-watt.com" className="text-brand-blue underline">
-            IntelliWatt™
-          </a>{' '}
-          is the secure user portal where your entries, insights, and plan recommendations live. When you log in using a
-          magic link you land on the IntelliWatt™ dashboard—the brains behind HitTheJackWatt™.
-        </p>
-        <p>
-          HitTheJackWatt™ and{' '}
-          <a href="https://www.intelli-watt.com" className="text-brand-blue underline">
-            IntelliWatt™
-          </a>{' '}
-          are operated by{' '}
-          <a href="https://www.intellipath-solutions.com" className="text-brand-blue underline">
-            Intellipath Solutions LLC
-          </a>
-          , a Texas-based energy intelligence company.
-        </p>
-      </>
+      <p>
+        There isn’t one. IntelliWatt™ earns referral compensation when you switch through us—similar to a broker. That funds
+        the jackpot and keeps the service free.
+      </p>
     ),
   },
   {
@@ -49,6 +33,15 @@ const faqItems: { question: string; answer: ReactNode }[] = [
         Yes. We use Smart Meter Texas—the official state data portal. You control access and can revoke it at any time.
         Usage data is encrypted in transit and at rest, we never sell personal information, and aggregated insights are
         de-identified.
+      </p>
+    ),
+  },
+  {
+    question: 'Will I get spam calls or emails?',
+    answer: (
+      <p>
+        Never. We do not sell your information and we do not allow third-party spam. All communication comes directly from us
+        and only when helpful.
       </p>
     ),
   },
@@ -71,30 +64,28 @@ const faqItems: { question: string; answer: ReactNode }[] = [
     ),
   },
   {
-    question: 'Do you always show the cheapest electricity plan?',
+    question: 'What is IntelliWatt™? Why am I redirected there after signing up?',
     answer: (
-      <p>
-        Not always. We show the best-fit plan based on how your home actually uses energy. Some low advertised rates cost
-        more once fees, tiers, or time-of-use differences are factored in. We calculate total cost—not just cents per kWh.
-      </p>
-    ),
-  },
-  {
-    question: "What happens if the best plan doesn't pay you a commission?",
-    answer: (
-      <p>
-        We still recommend it. We only add $5 to the jackpot when a member picks a plan that pays us a referral fee, but our
-        guidance always centers on what saves you the most.
-      </p>
-    ),
-  },
-  {
-    question: 'What if I already have solar panels?',
-    answer: (
-      <p>
-        We support solar homes. Mark solar in your profile and IntelliWatt™ looks for buyback plans and time-of-use rates
-        that fit your setup. Planning solar? You can simulate savings before you install.
-      </p>
+      <>
+        <p>
+          <a href="https://www.intelli-watt.com" className="text-brand-blue underline">
+            IntelliWatt™
+          </a>{' '}
+          is the secure user portal where your entries, insights, and plan recommendations live. When you log in using a
+          magic link you land on the IntelliWatt™ dashboard—the brains behind HitTheJackWatt™.
+        </p>
+        <p>
+          HitTheJackWatt™ and{' '}
+          <a href="https://www.intelli-watt.com" className="text-brand-blue underline">
+            IntelliWatt™
+          </a>{' '}
+          are operated by{' '}
+          <a href="https://www.intellipath-solutions.com" className="text-brand-blue underline">
+            Intellipath Solutions LLC
+          </a>
+          , a Texas-based energy intelligence company.
+        </p>
+      </>
     ),
   },
   {
@@ -128,19 +119,6 @@ const faqItems: { question: string; answer: ReactNode }[] = [
     ),
   },
   {
-    question: 'When is the drawing held?',
-    answer: <p>A winner is drawn once the jackpot reaches at least $500. If it does not, entries roll over to the next drawing.</p>,
-  },
-  {
-    question: 'How often is the jackpot drawn?',
-    answer: (
-      <p>
-        Drawings occur monthly on the 5th. Keep your usage data current (within 12 months) so profile entries remain active.
-        Referral, testimonial, and AMOE entries remain active without expiring.
-      </p>
-    ),
-  },
-  {
     question: 'How big is the jackpot?',
     answer: (
       <p>
@@ -162,8 +140,57 @@ const faqItems: { question: string; answer: ReactNode }[] = [
     ),
   },
   {
+    question: 'How often is the jackpot drawn?',
+    answer: (
+      <p>
+        Drawings occur monthly on the 5th. Keep your usage data current (within 12 months) so profile entries remain active.
+        Referral, testimonial, and AMOE entries remain active without expiring.
+      </p>
+    ),
+  },
+  {
+    question: 'When is the drawing held?',
+    answer: <p>A winner is drawn once the jackpot reaches at least $500. If it does not, entries roll over to the next drawing.</p>,
+  },
+  {
     question: 'Do I have to switch plans to win?',
     answer: <p>No. You can participate and win without switching, though switching helps grow the jackpot.</p>,
+  },
+  {
+    question: 'Do you always show the cheapest electricity plan?',
+    answer: (
+      <p>
+        Not always. We show the best-fit plan based on how your home actually uses energy. Some low advertised rates cost
+        more once fees, tiers, or time-of-use differences are factored in. We calculate total cost—not just cents per kWh.
+      </p>
+    ),
+  },
+  {
+    question: "What happens if the best plan doesn't pay you a commission?",
+    answer: (
+      <p>
+        We still recommend it. We only add $5 to the jackpot when a member picks a plan that pays us a referral fee, but our
+        guidance always centers on what saves you the most.
+      </p>
+    ),
+  },
+  {
+    question: 'Do you only recommend plans that pay you?',
+    answer: (
+      <p>
+        No. We always recommend the plan that saves you the most based on real usage. If you choose a plan that pays us, we
+        add $5 to the jackpot on your behalf.
+      </p>
+    ),
+  },
+  {
+    question: 'How many times can I win?',
+    answer: (
+      <p>
+        There is no limit. As long as your qualifying entries remain active (and usage-based entries stay current), you are
+        eligible for every drawing.
+      </p>
+    ),
   },
   {
     question: 'How are winners chosen?',
@@ -179,38 +206,11 @@ const faqItems: { question: string; answer: ReactNode }[] = [
     ),
   },
   {
-    question: 'Will I get spam calls or emails?',
+    question: 'What if I already have solar panels?',
     answer: (
       <p>
-        Never. We do not sell your information and we do not allow third-party spam. All communication comes directly from us
-        and only when helpful.
-      </p>
-    ),
-  },
-  {
-    question: 'What’s the catch?',
-    answer: (
-      <p>
-        There isn’t one. IntelliWatt™ earns referral compensation when you switch through us—similar to a broker. That funds
-        the jackpot and keeps the service free.
-      </p>
-    ),
-  },
-  {
-    question: 'How many times can I win?',
-    answer: (
-      <p>
-        There is no limit. As long as your qualifying entries remain active (and usage-based entries stay current), you are
-        eligible for every drawing.
-      </p>
-    ),
-  },
-  {
-    question: 'Do you only recommend plans that pay you?',
-    answer: (
-      <p>
-        No. We always recommend the plan that saves you the most based on real usage. If you choose a plan that pays us, we
-        add $5 to the jackpot on your behalf.
+        We support solar homes. Mark solar in your profile and IntelliWatt™ looks for buyback plans and time-of-use rates
+        that fit your setup. Planning solar? You can simulate savings before you install.
       </p>
     ),
   },
