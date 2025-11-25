@@ -12,7 +12,6 @@ export async function GET() {
       totalUsers,
       activeSmtAuthorizations,
       activeManualUploads,
-      activeHouseCount,
       applianceCount,
       smtUserResults,
       manualUserResults,
@@ -23,9 +22,6 @@ export async function GET() {
       }),
       prismaAny.manualUsageUpload.count({
         where: { expiresAt: { gte: now } },
-      }),
-      prisma.houseAddress.count({
-        where: { archivedAt: null },
       }),
       prismaAny.appliance.count(),
       prisma.smtAuthorization.findMany({
@@ -52,7 +48,7 @@ export async function GET() {
       totalUsers,
       activeSmtAuthorizations,
       activeManualUploads,
-      activeHouseCount,
+      activeHouseCount: 0,
       applianceCount,
       totalUsageCustomers: usageUserSet.size,
     });

@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
 import { SmtAuthorizationForm } from "@/components/smt/SmtAuthorizationForm";
+import SmtAddressCaptureCard from "@/components/smt/SmtAddressCaptureCard";
 
 type ExistingSmtAuthorization = {
   id: string;
@@ -138,6 +139,7 @@ export default async function ApiConnectPage() {
   const isAlreadyActiveSuccess = ok && subscriptionAlreadyActive;
   const isError = normalizedStatus === "error";
   const isPending = normalizedStatus === "pending";
+  const hasActiveAuthorization = ok;
 
   let statusLabel: string | null = null;
   let statusTone: "success" | "warning" | "error" | "neutral" = "neutral";
@@ -230,6 +232,16 @@ export default async function ApiConnectPage() {
     "";
 
   const readyForSmt = Boolean(user && houseAddress && hasEsiid && hasTdspOrUtility);
+  const serviceAddressDisplay = houseAddress
+    ? [
+        serviceAddressLine1,
+        serviceAddressLine2,
+        [serviceCity, serviceState, serviceZip].filter((part) => part && String(part).trim().length > 0).join(", "),
+      ]
+        .filter((part) => typeof part === "string" && part.trim().length > 0)
+        .join("\n")
+    : null;
+  const showAddressCaptureCard = Boolean(user) && !hasActiveAuthorization;
 
   return (
     <div className="min-h-[calc(100vh-120px)] overflow-x-hidden bg-slate-50/60 py-12">
@@ -290,6 +302,13 @@ export default async function ApiConnectPage() {
                 </div>
               )}
             </div>
+
+            {showAddressCaptureCard ? (
+              <SmtAddressCaptureCard
+                houseAddressId={houseAddress?.id ?? null}
+                initialAddress={serviceAddressDisplay}
+              />
+            ) : null}
 
             {readyForSmt && (
               <div className="space-y-6 rounded-3xl border border-brand-navy/15 bg-white/90 p-4 text-center shadow-[0_18px_60px_rgba(16,46,90,0.06)] backdrop-blur max-[480px]:p-3 sm:p-6 md:p-8">

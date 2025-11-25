@@ -195,7 +195,7 @@ cd /home/deploy/apps/intelliwatt
 git pull origin main
 sudo cp deploy/droplet/webhook_server.py /home/deploy/webhook_server.py
 sudo systemctl restart smt-webhook.service
-
+sudo systemctl restart smt-ingest.service
 
 
 - ``sudo journalctl -u smt-webhook.service -f
