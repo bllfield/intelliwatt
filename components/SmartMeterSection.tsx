@@ -117,7 +117,7 @@ export default function SmartMeterSection({ houseId }: SmartMeterSectionProps) {
   };
 
   // Prevent hydration mismatch by not rendering until mounted
-  if (!mounted) {
+  if (!mounted || checkingStatus) {
     return (
       <section className="bg-white p-8 rounded-2xl border border-brand-navy mb-6 shadow-lg">
         <div className="text-center">
@@ -137,48 +137,58 @@ export default function SmartMeterSection({ houseId }: SmartMeterSectionProps) {
 
   if (status === 'connected' && authorizationInfo) {
     return (
-      <section className="bg-gradient-to-r from-green-600 to-green-700 text-white p-8 rounded-2xl shadow-lg mb-6 border border-green-500/20 relative">
-        <div className="text-center">
-          <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4">
-            <span className="text-2xl">✅</span>
+      <section className="bg-gradient-to-r from-green-600 to-green-700 text-white p-6 rounded-2xl shadow-lg mb-6 border border-green-500/20">
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/20">
+              <span className="text-xl">✅</span>
+            </div>
+            <div>
+              <h2 className="text-2xl font-bold">Smart Meter Connected!</h2>
+              <p className="text-sm text-green-100">
+                Your usage, plan, and ESIID data are now loaded into your dashboard.
+              </p>
+            </div>
           </div>
-          <h2 className="text-3xl font-bold mb-3">Smart Meter Connected!</h2>
-          <p className="text-lg text-green-100">Your usage, plan, and ESIID data are now loaded into your dashboard.</p>
+
+          <div className="grid gap-4 rounded-2xl border border-white/20 bg-white/10 p-4 text-sm text-green-50 lg:grid-cols-2">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-green-200">Service address</p>
+              <pre className="mt-2 whitespace-pre-line font-sans text-sm leading-tight">
+                {formattedAddress}
+              </pre>
+            </div>
+            <div className="grid gap-2">
+              {authorizationInfo.esiid ? (
+                <p>
+                  <span className="font-semibold">ESIID · </span>
+                  {authorizationInfo.esiid}
+                </p>
+              ) : null}
+              {authorizationInfo.meterNumber ? (
+                <p>
+                  <span className="font-semibold">Meter · </span>
+                  {authorizationInfo.meterNumber}
+                </p>
+              ) : null}
+              {authorizationInfo.tdspName ? (
+                <p>
+                  <span className="font-semibold">Utility · </span>
+                  {authorizationInfo.tdspName}
+                </p>
+              ) : null}
+              {authorizationInfo.authorizationEndDate ? (
+                <p>
+                  <span className="font-semibold">Authorization valid until · </span>
+                  {new Date(authorizationInfo.authorizationEndDate).toLocaleDateString()}
+                </p>
+              ) : null}
+            </div>
+          </div>
         </div>
-        <div className="mt-6 grid gap-4 rounded-2xl border border-white/20 bg-white/10 p-4 text-left text-sm text-green-50 md:grid-cols-2">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-green-200">Service address</p>
-            <pre className="mt-2 whitespace-pre-line font-sans text-sm">{formattedAddress}</pre>
-          </div>
-          <div className="space-y-2">
-            {authorizationInfo.esiid ? (
-              <p>
-                <span className="font-semibold">ESIID · </span>
-                {authorizationInfo.esiid}
-              </p>
-            ) : null}
-            {authorizationInfo.meterNumber ? (
-              <p>
-                <span className="font-semibold">Meter · </span>
-                {authorizationInfo.meterNumber}
-              </p>
-            ) : null}
-            {authorizationInfo.tdspName ? (
-              <p>
-                <span className="font-semibold">Utility · </span>
-                {authorizationInfo.tdspName}
-              </p>
-            ) : null}
-            {authorizationInfo.authorizationEndDate ? (
-              <p>
-                <span className="font-semibold">Authorization valid until · </span>
-                {new Date(authorizationInfo.authorizationEndDate).toLocaleDateString()}
-              </p>
-            ) : null}
-          </div>
-        </div>
+
         {showAwardModal && (
-          <div className="absolute inset-0 bg-black/50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
             <div className="bg-white text-brand-navy rounded-xl p-6 max-w-sm w-full shadow-xl">
               <div className="flex items-center gap-3 mb-3">
                 <a
@@ -191,7 +201,9 @@ export default function SmartMeterSection({ houseId }: SmartMeterSectionProps) {
                 </a>
                 <h3 className="text-xl font-bold">Jackpot entries earned!</h3>
               </div>
-              <p className="mb-4">You just earned <span className="font-bold" style={{ color: '#39FF14' }}>1 jackpot entry</span> for connecting your smart meter.</p>
+              <p className="mb-4">
+                You just earned <span className="font-bold" style={{ color: '#39FF14' }}>1 jackpot entry</span> for connecting your smart meter.
+              </p>
               <a href="/dashboard/home" className="inline-block bg-brand-navy text-brand-blue font-bold py-2 px-4 rounded-lg border-2 border-brand-navy hover:border-brand-blue transition-all duration-300">Add Home Details →</a>
               <button onClick={() => setShowAwardModal(false)} className="ml-3 inline-block text-sm underline">Dismiss</button>
             </div>
