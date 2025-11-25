@@ -17,6 +17,24 @@ git add .; git commit -m "message"
 
 ---
 
+## 🧹 Keeper Cleanup Runbook (Chat Only)
+
+- Always let the Cursor chat agent execute each command so we keep a full transcript.
+- Capture a DigitalOcean snapshot or `pg_dump` before touching production data.
+
+**Command Prompt sequence (run in repo root):**
+1. `npx prisma db execute --file "scripts\sql\bulk_archive_non_keeper_users.sql" --schema prisma\schema.prisma`
+2. `npx prisma db execute --file "scripts\sql\delete_non_keeper_users.sql" --schema prisma\schema.prisma`
+3. Optional polish:  
+   `npx prisma db execute --file "scripts\sql\delete_non_keeper_entries.sql" --schema prisma\schema.prisma`  
+   `npx prisma db execute --file "scripts\sql\delete_non_keeper_smt_authorizations.sql" --schema prisma\schema.prisma`
+4. Reseed keepers: `node scripts\dev\seed-keeper-users.mjs`
+5. Verify with `npx prisma db execute --stdin --schema prisma\schema.prisma` and `SELECT COUNT(*) FROM "User";` (expect `5`).
+
+If verification does not return `5`, stop and investigate before loading any additional fixtures.
+
+---
+
 ## 🚀 Production Access
 
 - **URL**: https://intelliwatt.com (Vercel)

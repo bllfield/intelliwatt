@@ -1,3 +1,34 @@
+### PC-2025-11-25-K — Keeper Cleanup Runbook (Chat-Driven)
+
+**Rationale:**
+- Standardize full database resets so the keeper cleanup always runs end-to-end without manual guesswork.
+- Ensure the keeper accounts are restored immediately after a wipe.
+
+**Scope:**
+- Applies to the DigitalOcean `defaultdb` connection exposed via `DATABASE_URL`.
+- Commands must be executed from Cursor chat so the full transcript is preserved.
+- Always capture a snapshot or `pg_dump` before starting.
+
+**Runbook (Cursor executes for you):**
+1. Confirm a current DO backup/snapshot exists.
+2. Open Windows **Command Prompt** in the repo root and run  
+   `npx prisma db execute --file "scripts\sql\bulk_archive_non_keeper_users.sql" --schema prisma\schema.prisma`
+3. Immediately follow with  
+   `npx prisma db execute --file "scripts\sql\delete_non_keeper_users.sql" --schema prisma\schema.prisma`
+4. Optional but safe to re-run for a spotless state:  
+   `npx prisma db execute --file "scripts\sql\delete_non_keeper_entries.sql" --schema prisma\schema.prisma`  
+   `npx prisma db execute --file "scripts\sql\delete_non_keeper_smt_authorizations.sql" --schema prisma\schema.prisma`
+5. Reseed the keeper emails:  
+   `node scripts\dev\seed-keeper-users.mjs`
+6. Verify the reset (still in Command Prompt):  
+   `npx prisma db execute --stdin --schema prisma\schema.prisma`  
+   Paste `SELECT COUNT(*) FROM "User";` and confirm it returns `5`.
+7. If verification fails, stop and investigate before reseeding any demo/test data.
+
+**Guardrail:** Do not deviate from this flow or attempt ad-hoc partial cleanups. Always request the Cursor chat agent to run these commands so the process remains repeatable.
+
+---
+
 ### PC-2025-11-24-A — Jackpot Entry Automation Baseline
 
 **Rationale:**

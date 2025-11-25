@@ -11,6 +11,16 @@ Follow docs/CHATGPT_HOUSE_RULES.md:
 - Default model: GPT-5 Codex
 - Wait for me to say “done” after each step
 
+Keeper Cleanup Runbook (Chat executes every command):
+- Confirm a DO snapshot/pg_dump before modifying the production database.
+- Run (Windows Command Prompt, repo root): 
+  1. `npx prisma db execute --file "scripts\sql\bulk_archive_non_keeper_users.sql" --schema prisma\schema.prisma`
+  2. `npx prisma db execute --file "scripts\sql\delete_non_keeper_users.sql" --schema prisma\schema.prisma`
+  3. Optional polish: `npx prisma db execute --file "scripts\sql\delete_non_keeper_entries.sql" --schema prisma\schema.prisma` and `npx prisma db execute --file "scripts\sql\delete_non_keeper_smt_authorizations.sql" --schema prisma\schema.prisma`
+  4. Reseed keepers: `node scripts\dev\seed-keeper-users.mjs`
+  5. Verify: `npx prisma db execute --stdin --schema prisma\schema.prisma` then `SELECT COUNT(*) FROM "User";` (expect `5`).
+- If verification fails, stop and investigate—do not proceed with additional seeding.
+
 ========================================
 SMT AUTH STATE (DO NOT REGRESS)
 ========================================
