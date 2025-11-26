@@ -320,6 +320,21 @@ const DASHBOARD_CARDS: DashboardCard[] = [
   },
 ];
 
+function highlightEntryText(text: string) {
+  return text.split(/(1 entry)/gi).map((part, index) => {
+    const normalized = part.trim().toLowerCase();
+    if (normalized === '1 entry') {
+      return (
+        <span key={`entry-${index}`} style={{ color: '#39FF14' }}>
+          {part}
+        </span>
+      );
+    }
+
+    return <span key={`text-${index}`}>{part}</span>;
+  });
+}
+
 export default function DashboardPage() {
 const [mounted, setMounted] = useState(false);
   const [userAddress, setUserAddress] = useState<string>('');
@@ -450,7 +465,9 @@ const [mounted, setMounted] = useState(false);
                   <Icon />
                 </IconChip>
                 <h3 className="mb-3 text-2xl font-semibold text-[#00F0FF]">{title}</h3>
-                <p className="mx-auto mb-6 max-w-xs text-base text-white">{description}</p>
+                <p className="mx-auto mb-6 max-w-xs text-base text-white">
+                  {highlightEntryText(description)}
+                </p>
                 <Link
                   href={href}
                   className="inline-flex items-center justify-center gap-2 rounded-full border border-[#00F0FF]/60 bg-transparent px-6 py-3 text-sm font-semibold uppercase tracking-wide text-[#00F0FF] transition-all duration-300 hover:border-[#00F0FF] hover:bg-[#00F0FF]/10"

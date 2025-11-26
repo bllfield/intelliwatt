@@ -54,11 +54,26 @@ const CATEGORY_CARDS: CategoryConfig[] = [
   {
     id: "appliance_details_complete",
     title: "Appliance Details",
-    description: "List your major appliances to log an additional entry.",
+    description: "List your major appliances to log an additional 1 entry.",
     ctaLabel: "Manage Appliances",
     ctaHref: "/dashboard/appliances",
   },
 ];
+
+function highlightEntryText(text: string) {
+  return text.split(/(1 entry)/gi).map((part, index) => {
+    const normalized = part.trim().toLowerCase();
+    if (normalized === "1 entry") {
+      return (
+        <span key={`entry-${index}`} style={{ color: "#39FF14" }}>
+          {part}
+        </span>
+      );
+    }
+
+    return <span key={`text-${index}`}>{part}</span>;
+  });
+}
 
 export default function EntriesPage() {
   const [entries, setEntries] = useState<EntryData[]>([]);
@@ -226,7 +241,7 @@ export default function EntriesPage() {
                     </div>
                     {statusBanner}
                     <p className="text-sm text-brand-cyan/80 leading-relaxed">
-                      {card.description}
+                      {highlightEntryText(card.description)}
                     </p>
                     {card.ctaHref && card.ctaLabel ? (
                       <a
@@ -334,7 +349,7 @@ export default function EntriesPage() {
             <div className="bg-brand-navy p-6 rounded-3xl border-2 border-[#BF00FF]/40 shadow-[0_15px_35px_rgba(15,23,42,0.4)]">
               <h3 className="text-xl font-bold mb-4" style={{ color: '#BF00FF' }}>Current Plan Details</h3>
               <p className="mb-4 text-brand-white/80">
-                Upload your current electric plan or enter details manually to spotlight savings—and earn <span style={{ color: '#BF00FF' }}>1 entry</span>.
+                Upload your current electric plan or enter details manually to spotlight savings—and earn <span style={{ color: '#39FF14' }}>1 entry</span>.
               </p>
               <a
                 href="/dashboard/home#current-plan-details"
@@ -347,7 +362,7 @@ export default function EntriesPage() {
             <div className="bg-brand-navy p-6 rounded-3xl border-2 border-[#FF52FF]/40 shadow-[0_15px_35px_rgba(15,23,42,0.4)]">
               <h3 className="text-xl font-bold mb-4" style={{ color: '#FF52FF' }}>Refer Friends</h3>
               <p className="mb-4 text-brand-white/80">
-                Invite friends and family—earn <span style={{ color: '#FF52FF' }}>1 entry</span> for each successful referral.
+                Invite friends and family—earn <span style={{ color: '#39FF14' }}>1 entry</span> for each successful referral.
               </p>
               <a
                 href="/dashboard/referrals"
@@ -360,7 +375,7 @@ export default function EntriesPage() {
             <div className="bg-brand-navy p-6 rounded-3xl border-2 border-[#FFA7FF]/40 shadow-[0_15px_35px_rgba(15,23,42,0.4)]">
               <h3 className="text-xl font-bold mb-4" style={{ color: '#FFA7FF' }}>Appliance Details</h3>
               <p className="mb-4 text-brand-white/80">
-                Add your major appliances so we can tailor upgrade tips—and earn <span style={{ color: '#FFA7FF' }}>1 entry</span>.
+                Add your major appliances so we can tailor upgrade tips—and earn <span style={{ color: '#39FF14' }}>1 entry</span>.
               </p>
               <a
                 href="/dashboard/appliances"
