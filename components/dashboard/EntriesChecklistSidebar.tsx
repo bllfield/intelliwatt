@@ -254,16 +254,17 @@ export default function EntriesChecklistSidebar() {
                   className="flex items-start gap-3 rounded-3xl border border-[#BF00FF]/50 bg-brand-navy/80 p-3 shadow-[0_10px_30px_rgba(10,20,60,0.35)]"
                 >
                   <span
-                    className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border-2 text-sm font-bold"
+                    className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full border-2 text-base font-black"
                     style={{
                       borderColor: '#BF00FF',
-                      color: item.isComplete ? NEON_GREEN : NEON_PINK,
+                      backgroundColor: item.isComplete ? 'rgba(57,255,20,0.14)' : 'rgba(255,82,255,0.14)',
+                      color: item.isComplete ? '#39FF14' : '#FF1493',
                       textShadow: item.isComplete
-                        ? '0 0 14px rgba(57,255,20,0.95)'
-                        : '0 0 14px rgba(255,82,255,0.95)',
+                        ? '0 0 22px rgba(57,255,20,1), 0 0 35px rgba(57,255,20,0.85)'
+                        : '0 0 22px rgba(255,20,147,1), 0 0 35px rgba(255,20,147,0.85)',
                       boxShadow: item.isComplete
-                        ? '0 0 20px rgba(57,255,20,0.6)'
-                        : '0 0 20px rgba(255,82,255,0.6)',
+                        ? '0 0 28px rgba(57,255,20,0.75)'
+                        : '0 0 28px rgba(255,20,147,0.75)',
                     }}
                     aria-hidden="true"
                   >
