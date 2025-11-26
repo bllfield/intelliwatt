@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo, useCallback } from "react";
+import DashboardHero from "@/components/dashboard/DashboardHero";
 
 interface EntryData {
   id: string;
@@ -172,22 +173,11 @@ export default function EntriesPage() {
 
   return (
     <div className="min-h-screen bg-white">
-      {/* Hero Section */}
-      <section className="px-4 py-8">
-        <div className="relative mx-auto max-w-5xl overflow-hidden rounded-3xl border border-brand-cyan/30 bg-brand-navy shadow-[0_24px_70px_rgba(16,46,90,0.4)]">
-          <div className="absolute inset-0 bg-gradient-to-br from-brand-navy via-brand-navy to-brand-navy/95">
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(0,240,255,0.12),transparent_55%)]" />
-          </div>
-          <div className="relative z-10 px-6 py-10 text-center text-brand-white sm:px-10 sm:py-12">
-            <h1 className="text-3xl font-semibold sm:text-5xl">
-              Jackpot <span className="text-brand-blue">Entries</span>
-            </h1>
-            <p className="mx-auto mt-4 max-w-2xl text-base leading-relaxed text-brand-white/85 sm:text-lg">
-              Track your entries and see your chances of winning the monthly jackpot drawing.
-            </p>
-          </div>
-        </div>
-      </section>
+      <DashboardHero
+        title="Jackpot"
+        highlight="Entries"
+        description="Track your entries and see your chances of winning the monthly jackpot drawing."
+      />
 
       {/* Entries Overview */}
       <section className="py-16 px-4 bg-white">

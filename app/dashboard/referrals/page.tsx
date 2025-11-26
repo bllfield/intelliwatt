@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import DashboardHero from '@/components/dashboard/DashboardHero';
 
 interface ReferralData {
   referralLink: string;
@@ -75,25 +76,15 @@ export default function ReferralsPage() {
 
   return (
     <div className="min-h-screen bg-brand-white">
-      {/* Hero Section */}
-      <section className="px-4 py-8">
-        <div className="relative mx-auto max-w-5xl overflow-hidden rounded-3xl border border-brand-cyan/30 bg-brand-navy shadow-[0_24px_70px_rgba(16,46,90,0.4)]">
-          <div className="absolute inset-0 bg-gradient-to-br from-brand-navy via-brand-navy to-brand-navy/95">
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(0,240,255,0.12),transparent_55%)]" />
-          </div>
-          <div className="relative z-10 px-6 py-10 text-center text-brand-white sm:px-10 sm:py-12">
-            <h1 className="text-3xl font-semibold sm:text-5xl">
-              Refer <span className="text-brand-blue">Friends</span>
-            </h1>
-            <div className="mt-5 inline-flex items-center justify-center rounded-full border border-[#39FF14]/40 bg-[#39FF14]/15 px-5 py-2 text-sm font-semibold uppercase tracking-wide text-[#39FF14] sm:text-base">
-              🎁 Earn 1 jackpot entry for each friend who signs up!
-            </div>
-            <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-brand-white/85 sm:text-lg">
-              Share your referral link and unlock unlimited bonus entries through successful referrals.
-            </p>
-          </div>
+      <DashboardHero
+        title="Refer"
+        highlight="Friends"
+        description="Share your referral link and unlock unlimited bonus entries through successful referrals."
+      >
+        <div className="inline-flex items-center justify-center rounded-full border border-[#39FF14]/40 bg-[#39FF14]/15 px-5 py-2 text-xs font-semibold uppercase tracking-wide text-[#39FF14] sm:text-sm">
+          🎁 Earn 1 jackpot entry for each friend who signs up!
         </div>
-      </section>
+      </DashboardHero>
 
       {/* Stats Section */}
       <section className="py-8 px-4 bg-brand-white">
