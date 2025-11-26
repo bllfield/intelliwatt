@@ -180,7 +180,7 @@ export default function EntriesPage() {
       />
 
       {/* Entries Overview */}
-      <section className="pt-6 pb-12 px-4 bg-white">
+      <section className="pt-4 pb-8 px-4 bg-white">
         <div className="max-w-5xl mx-auto">
           <div className="bg-white p-8 rounded-3xl border border-brand-cyan/20 shadow-[0_0_35px_rgba(56,189,248,0.2)] mb-10">
             <h2 className="text-2xl font-bold text-brand-navy mb-2 text-center">Your Entries Summary</h2>

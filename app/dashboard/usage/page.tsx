@@ -9,7 +9,7 @@ export default function UsagePage() {
         description="Track your electricity consumption patterns, surface peak intervals, and uncover the fastest ways to cut waste."
       />
 
-      <section className="bg-brand-white pt-6 pb-12 px-4">
+      <section className="bg-brand-white pt-4 pb-8 px-4">
         <div className="mx-auto max-w-4xl space-y-8">
           <div className="rounded-3xl border border-brand-cyan/30 bg-brand-navy p-8 text-brand-cyan shadow-[0_30px_60px_rgba(10,20,60,0.45)] text-center">
             <div className="text-5xl mb-4">⚡</div>

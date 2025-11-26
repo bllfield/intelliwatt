@@ -107,7 +107,7 @@ export default function ReferralsPage() {
       </section>
 
       {/* Referral Link Section */}
-      <section className="pt-6 pb-12 px-4 bg-brand-white">
+      <section className="pt-4 pb-8 px-4 bg-brand-white">
         <div className="max-w-4xl mx-auto">
           <div className="bg-white p-8 rounded-2xl border-2 border-brand-navy shadow-lg">
             <div className="text-center mb-8">

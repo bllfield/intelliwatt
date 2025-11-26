@@ -288,13 +288,12 @@ export default async function ProfilePage() {
     : null;
 
   return (
-    <div className="min-h-screen bg-white py-8 px-4 text-brand-navy">
+    <div className="min-h-screen bg-white py-4 px-4 text-brand-navy">
       <div className="mx-auto flex max-w-6xl flex-col gap-10">
         <DashboardHero
           title="Profile"
           highlight="& Home"
           description="Manage your IntelliWatt contact preferences, connect additional homes, and keep Smart Meter Texas authorizations current. Each home earns its own entries once SMT is connected."
-          eyebrow="Account Center"
         />
 
         <div className="grid gap-6 lg:grid-cols-[1fr,1fr]">

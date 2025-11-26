@@ -9,7 +9,7 @@ export default function UpgradesPage() {
         description="We’re building an engine that weighs insulation, HVAC, solar, storage, windows, and smart-home upgrades against your actual usage—so you only invest where the math wins."
       />
 
-      <section className="bg-brand-white pt-6 pb-12 px-4">
+      <section className="bg-brand-white pt-4 pb-8 px-4">
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-8">
           <div className="rounded-3xl border border-brand-cyan/30 bg-brand-navy p-8 text-brand-cyan shadow-[0_30px_60px_rgba(10,20,60,0.45)]">
             <h2 className="text-2xl font-semibold text-brand-cyan">Coming Soon: Renovation ROI Scorecards</h2>
