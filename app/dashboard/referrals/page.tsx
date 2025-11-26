@@ -76,23 +76,22 @@ export default function ReferralsPage() {
   return (
     <div className="min-h-screen bg-brand-white">
       {/* Hero Section */}
-      <section className="relative bg-brand-navy py-16 px-4 overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-br from-brand-navy via-brand-navy to-brand-navy/95">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(0,240,255,0.1),transparent_50%)]"></div>
-        </div>
-        
-        <div className="relative z-10 max-w-4xl mx-auto text-center">
-          <h1 className="text-4xl md:text-5xl font-bold text-brand-white mb-4">
-            Refer <span className="text-brand-blue">Friends</span>
-          </h1>
-          <div className="inline-block bg-[#39FF14]/20 border border-[#39FF14]/40 px-4 py-2 rounded-full mb-6">
-            <span className="text-[#39FF14] font-semibold">
-              🎁 Earn 1 jackpot entry for each friend who signs up!
-            </span>
+      <section className="px-4 py-8">
+        <div className="relative mx-auto max-w-5xl overflow-hidden rounded-3xl border border-brand-cyan/30 bg-brand-navy shadow-[0_24px_70px_rgba(16,46,90,0.4)]">
+          <div className="absolute inset-0 bg-gradient-to-br from-brand-navy via-brand-navy to-brand-navy/95">
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(0,240,255,0.12),transparent_55%)]" />
           </div>
-          <p className="text-xl text-brand-white mb-8 max-w-2xl mx-auto">
-            Share your referral link and unlock unlimited bonus entries through successful referrals.
-          </p>
+          <div className="relative z-10 px-6 py-10 text-center text-brand-white sm:px-10 sm:py-12">
+            <h1 className="text-3xl font-semibold sm:text-5xl">
+              Refer <span className="text-brand-blue">Friends</span>
+            </h1>
+            <div className="mt-5 inline-flex items-center justify-center rounded-full border border-[#39FF14]/40 bg-[#39FF14]/15 px-5 py-2 text-sm font-semibold uppercase tracking-wide text-[#39FF14] sm:text-base">
+              🎁 Earn 1 jackpot entry for each friend who signs up!
+            </div>
+            <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-brand-white/85 sm:text-lg">
+              Share your referral link and unlock unlimited bonus entries through successful referrals.
+            </p>
+          </div>
         </div>
       </section>
 

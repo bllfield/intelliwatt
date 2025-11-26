@@ -173,19 +173,19 @@ export default function EntriesPage() {
   return (
     <div className="min-h-screen bg-white">
       {/* Hero Section */}
-      <section className="relative bg-brand-navy py-20 px-4 overflow-hidden">
-        {/* Background Pattern */}
-        <div className="absolute inset-0 bg-gradient-to-br from-brand-navy via-brand-navy to-brand-navy/95">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(0,240,255,0.1),transparent_50%)]"></div>
-        </div>
-        
-        <div className="relative z-10 max-w-4xl mx-auto text-center">
-          <h1 className="text-4xl md:text-6xl font-bold text-brand-white mb-6">
-            Jackpot <span className="text-brand-blue">Entries</span>
-          </h1>
-          <p className="text-xl text-brand-white mb-8 max-w-2xl mx-auto leading-relaxed">
-            Track your entries and see your chances of winning the monthly jackpot drawing.
-          </p>
+      <section className="px-4 py-8">
+        <div className="relative mx-auto max-w-5xl overflow-hidden rounded-3xl border border-brand-cyan/30 bg-brand-navy shadow-[0_24px_70px_rgba(16,46,90,0.4)]">
+          <div className="absolute inset-0 bg-gradient-to-br from-brand-navy via-brand-navy to-brand-navy/95">
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(0,240,255,0.12),transparent_55%)]" />
+          </div>
+          <div className="relative z-10 px-6 py-10 text-center text-brand-white sm:px-10 sm:py-12">
+            <h1 className="text-3xl font-semibold sm:text-5xl">
+              Jackpot <span className="text-brand-blue">Entries</span>
+            </h1>
+            <p className="mx-auto mt-4 max-w-2xl text-base leading-relaxed text-brand-white/85 sm:text-lg">
+              Track your entries and see your chances of winning the monthly jackpot drawing.
+            </p>
+          </div>
         </div>
       </section>
 
