@@ -33,7 +33,7 @@ export default function OptimalEnergyPage() {
             </ul>
           </div>
 
-          <div className="flex flex-col items-center gap-4 rounded-3xl border border-brand-cyan/25 bg-brand-navy/80 p-8 text-center text-brand-cyan shadow-[0_24px_50px_rgba(10,20,60,0.4)] sm:flex-row sm:justify-between">
+          <div className="flex flex-col items-center gap-4 rounded-3xl border border-brand-cyan/25 bg-brand-navy p-8 text-center text-brand-cyan shadow-[0_24px_50px_rgba(10,20,60,0.4)] sm:flex-row sm:justify-between">
             <p className="text-sm text-brand-cyan/75">
               While we finalize the switching experience, explore the analysis lab to see projected savings based on your current usage profile.
             </p>

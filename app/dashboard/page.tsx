@@ -9,7 +9,7 @@ import QuickAddressEntry from '../../components/QuickAddressEntry';
 const ICON_COLOR = '#00F0FF';
 
 const IconChip = ({ children }: { children: ReactNode }) => (
-  <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl border border-[#00F0FF]/40 bg-brand-navy/70 shadow-[0_0_25px_rgba(0,240,255,0.25)] transition-all duration-300 group-hover:border-[#00F0FF] group-hover:shadow-[0_0_30px_rgba(0,240,255,0.45)]">
+  <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl border border-[#00F0FF]/40 bg-brand-navy shadow-[0_0_25px_rgba(0,240,255,0.25)] transition-all duration-300 group-hover:border-[#00F0FF] group-hover:shadow-[0_0_30px_rgba(0,240,255,0.45)]">
     {children}
   </div>
 );
@@ -451,7 +451,7 @@ export default function DashboardPage() {
             {DASHBOARD_CARDS.map(({ title, description, cta, href, Icon }) => (
               <div
                 key={title}
-                className="group rounded-2xl border border-[#00F0FF]/30 bg-brand-navy/95 p-8 shadow-[0_30px_60px_rgba(10,20,60,0.5)] transition-all duration-300 hover:border-[#00F0FF]/80 hover:shadow-[0_38px_80px_rgba(0,240,255,0.35)]"
+                className="group rounded-2xl border border-[#00F0FF]/30 bg-brand-navy p-8 shadow-[0_30px_60px_rgba(10,20,60,0.5)] transition-all duration-300 hover:border-[#00F0FF]/80 hover:shadow-[0_38px_80px_rgba(0,240,255,0.35)]"
               >
                 <IconChip>
                   <Icon />

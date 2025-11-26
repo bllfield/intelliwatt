@@ -34,7 +34,7 @@ export default function PlansPage() {
             </ul>
           </div>
 
-          <div className="rounded-3xl border border-brand-cyan/25 bg-brand-navy/80 p-8 text-center text-brand-cyan shadow-[0_24px_50px_rgba(10,20,60,0.4)]">
+          <div className="rounded-3xl border border-brand-cyan/25 bg-brand-navy p-8 text-center text-brand-cyan shadow-[0_24px_50px_rgba(10,20,60,0.4)]">
             <p className="text-sm text-brand-cyan/75">
               Add your current rate details now so we can flag bill changes early and make your next switch effortless.
             </p>

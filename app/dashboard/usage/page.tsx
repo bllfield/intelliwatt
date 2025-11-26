@@ -20,7 +20,7 @@ export default function UsagePage() {
             </p>
           </div>
 
-          <div className="rounded-3xl border border-brand-cyan/25 bg-brand-navy/80 p-8 text-brand-cyan shadow-[0_24px_50px_rgba(10,20,60,0.4)]">
+          <div className="rounded-3xl border border-brand-cyan/25 bg-brand-navy p-8 text-brand-cyan shadow-[0_24px_50px_rgba(10,20,60,0.4)]">
             <h3 className="text-lg font-semibold uppercase tracking-[0.3em] text-brand-cyan/70 text-center mb-6">
               Features on the roadmap
             </h3>

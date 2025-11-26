@@ -37,7 +37,7 @@ export default function UpgradesPage() {
             </ul>
           </div>
 
-          <div className="rounded-3xl border border-brand-cyan/25 bg-brand-navy/80 p-8 text-center text-brand-cyan shadow-[0_24px_50px_rgba(10,20,60,0.4)]">
+          <div className="rounded-3xl border border-brand-cyan/25 bg-brand-navy p-8 text-center text-brand-cyan shadow-[0_24px_50px_rgba(10,20,60,0.4)]">
             <p className="text-sm text-brand-cyan/75">
               Keep your wish list handy—the upgrade wizard will arrive with personalized alerts the moment we crunch the final savings models for your home.
             </p>

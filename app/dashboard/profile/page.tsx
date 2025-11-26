@@ -78,7 +78,7 @@ export default async function ProfilePage() {
   if (!sessionEmail) {
     return (
       <div className="min-h-[70vh] bg-brand-navy py-20 px-4">
-        <div className="mx-auto max-w-xl rounded-3xl border border-brand-cyan/30 bg-brand-navy/70 p-10 text-center text-brand-cyan shadow-[0_24px_70px_rgba(16,46,90,0.5)]">
+      <div className="mx-auto max-w-xl rounded-3xl border border-brand-cyan/30 bg-brand-navy p-10 text-center text-brand-cyan shadow-[0_24px_70px_rgba(16,46,90,0.5)]">
           <h1 className="text-3xl font-semibold uppercase tracking-wide text-brand-cyan">Profile</h1>
           <p className="mt-4 text-sm text-brand-cyan/70">
             Sign in to view and update your IntelliWatt profile.
@@ -109,7 +109,7 @@ export default async function ProfilePage() {
   if (!user) {
     return (
       <div className="min-h-[70vh] bg-brand-navy py-20 px-4">
-        <div className="mx-auto max-w-xl rounded-3xl border border-brand-cyan/30 bg-brand-navy/70 p-10 text-center text-brand-cyan shadow-[0_24px_70px_rgba(16,46,90,0.5)]">
+        <div className="mx-auto max-w-xl rounded-3xl border border-brand-cyan/30 bg-brand-navy p-10 text-center text-brand-cyan shadow-[0_24px_70px_rgba(16,46,90,0.5)]">
           <h1 className="text-3xl font-semibold uppercase tracking-wide text-brand-cyan">Profile</h1>
           <p className="mt-4 text-sm text-brand-cyan/70">
             We couldn’t find your account details. Try signing out and back in, or contact support if the issue persists.
@@ -307,7 +307,7 @@ export default async function ProfilePage() {
                 initialPhone={user.profile?.phone ?? ""}
                 initialName={user.profile?.fullName ?? ""}
               />
-              <dl className="rounded-2xl border border-brand-cyan/30 bg-brand-navy/60 p-4 text-sm text-brand-cyan">
+              <dl className="rounded-2xl border border-brand-cyan/30 bg-brand-navy p-4 text-sm text-brand-cyan">
                 <div className="flex justify-between gap-4">
                   <dt className="text-xs font-semibold uppercase tracking-wide text-brand-cyan/70">
                     Member since
@@ -347,7 +347,7 @@ export default async function ProfilePage() {
 
           {smtAuthorization ? (
             <dl className="mt-6 grid gap-4 text-sm text-brand-cyan sm:grid-cols-2">
-              <div className="rounded-2xl border border-brand-cyan/30 bg-brand-navy/60 p-4">
+          <div className="rounded-2xl border border-brand-cyan/30 bg-brand-navy p-4">
                 <dt className="text-xs font-semibold uppercase tracking-wide text-brand-cyan/70">
                   Meter number
                 </dt>
@@ -355,7 +355,7 @@ export default async function ProfilePage() {
                   {smtAuthorization.meterNumber ?? "Not available"}
                 </dd>
               </div>
-              <div className="rounded-2xl border border-brand-cyan/30 bg-brand-navy/60 p-4">
+              <div className="rounded-2xl border border-brand-cyan/30 bg-brand-navy p-4">
                 <dt className="text-xs font-semibold uppercase tracking-wide text-brand-cyan/70">
                   Authorized on
                 </dt>
@@ -363,7 +363,7 @@ export default async function ProfilePage() {
                   {formatDate(smtAuthorization.authorizationStartDate) ?? "—"}
                 </dd>
               </div>
-              <div className="rounded-2xl border border-brand-cyan/30 bg-brand-navy/60 p-4">
+              <div className="rounded-2xl border border-brand-cyan/30 bg-brand-navy p-4">
                 <dt className="text-xs font-semibold uppercase tracking-wide text-brand-cyan/70">
                   Expires
                 </dt>
@@ -371,7 +371,7 @@ export default async function ProfilePage() {
                   {formatDate(smtAuthorization.authorizationEndDate) ?? "Not available"}
                 </dd>
               </div>
-              <div className="rounded-2xl border border-brand-cyan/30 bg-brand-navy/60 p-4">
+              <div className="rounded-2xl border border-brand-cyan/30 bg-brand-navy p-4">
                 <dt className="text-xs font-semibold uppercase tracking-wide text-brand-cyan/70">
                   SMT message
                 </dt>

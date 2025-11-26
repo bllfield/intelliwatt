@@ -270,7 +270,7 @@ export default function EntriesPage() {
                   .map((entry) => (
                     <div
                       key={entry.id}
-                      className="flex flex-col gap-3 rounded-2xl border border-brand-cyan/30 bg-brand-navy/70 px-5 py-4 md:flex-row md:items-center md:justify-between"
+                    className="flex flex-col gap-3 rounded-2xl border border-brand-cyan/30 bg-brand-navy px-5 py-4 md:flex-row md:items-center md:justify-between"
                     >
                       <div>
                         <p className="text-sm uppercase tracking-wide text-brand-cyan/60">
@@ -318,7 +318,7 @@ export default function EntriesPage() {
           </h2>
 
           <div className="grid md:grid-cols-2 gap-8 text-center">
-            <div className="bg-brand-navy/95 p-6 rounded-3xl border-2 border-[#39FF14]/40 shadow-[0_15px_35px_rgba(15,23,42,0.4)]">
+            <div className="bg-brand-navy p-6 rounded-3xl border-2 border-[#39FF14]/40 shadow-[0_15px_35px_rgba(15,23,42,0.4)]">
               <h3 className="text-xl font-bold mb-4" style={{ color: '#39FF14' }}>Connect Smart Meter</h3>
               <p className="mb-4 text-brand-white/80">
                 Link your Smart Meter Texas account for automated usage and <span style={{ color: '#39FF14' }}>1 entry</span>.
@@ -331,7 +331,7 @@ export default function EntriesPage() {
               </a>
             </div>
 
-            <div className="bg-brand-navy/95 p-6 rounded-3xl border-2 border-[#BF00FF]/40 shadow-[0_15px_35px_rgba(15,23,42,0.4)]">
+            <div className="bg-brand-navy p-6 rounded-3xl border-2 border-[#BF00FF]/40 shadow-[0_15px_35px_rgba(15,23,42,0.4)]">
               <h3 className="text-xl font-bold mb-4" style={{ color: '#BF00FF' }}>Current Plan Details</h3>
               <p className="mb-4 text-brand-white/80">
                 Upload your current electric plan or enter details manually to spotlight savings—and earn <span style={{ color: '#BF00FF' }}>1 entry</span>.
@@ -344,7 +344,7 @@ export default function EntriesPage() {
               </a>
             </div>
 
-            <div className="bg-brand-navy/95 p-6 rounded-3xl border-2 border-[#FF52FF]/40 shadow-[0_15px_35px_rgba(15,23,42,0.4)]">
+            <div className="bg-brand-navy p-6 rounded-3xl border-2 border-[#FF52FF]/40 shadow-[0_15px_35px_rgba(15,23,42,0.4)]">
               <h3 className="text-xl font-bold mb-4" style={{ color: '#FF52FF' }}>Refer Friends</h3>
               <p className="mb-4 text-brand-white/80">
                 Invite friends and family—earn <span style={{ color: '#FF52FF' }}>1 entry</span> for each successful referral.
@@ -357,7 +357,7 @@ export default function EntriesPage() {
               </a>
             </div>
 
-            <div className="bg-brand-navy/95 p-6 rounded-3xl border-2 border-[#FFA7FF]/40 shadow-[0_15px_35px_rgba(15,23,42,0.4)]">
+            <div className="bg-brand-navy p-6 rounded-3xl border-2 border-[#FFA7FF]/40 shadow-[0_15px_35px_rgba(15,23,42,0.4)]">
               <h3 className="text-xl font-bold mb-4" style={{ color: '#FFA7FF' }}>Appliance Details</h3>
               <p className="mb-4 text-brand-white/80">
                 Add your major appliances so we can tailor upgrade tips—and earn <span style={{ color: '#FFA7FF' }}>1 entry</span>.

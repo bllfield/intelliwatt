@@ -361,7 +361,7 @@ export default async function ApiConnectPage() {
                     </div>
                   </div>
                   {existingAuth && (
-                    <div className="mt-4 rounded-lg border border-brand-cyan/45 bg-brand-navy/60 p-3 text-xs leading-relaxed text-brand-cyan/80">
+                  <div className="mt-4 rounded-lg border border-brand-cyan/45 bg-brand-navy p-3 text-xs leading-relaxed text-brand-cyan/80">
                       We already have a valid Smart Meter Texas authorization for this address. Submit the form again if you need to refresh your consent (for example after changing providers or revoking access in SMT).
                     </div>
                   )}
