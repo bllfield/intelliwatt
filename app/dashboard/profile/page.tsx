@@ -6,6 +6,7 @@ import { ProfileContactForm } from "@/components/profile/ProfileContactForm";
 import { ProfileAddressSection } from "@/components/profile/ProfileAddressSection";
 import { ProfileTestimonialCard } from "@/components/profile/ProfileTestimonialCard";
 import { RevokeSmartMeterButton } from "@/components/profile/RevokeSmartMeterButton";
+import DashboardHero from "@/components/dashboard/DashboardHero";
 const COMMISSION_STATUS_ALLOWLIST = ["pending", "submitted", "approved", "completed", "paid"];
 
 function isTestimonialTableMissing(error: unknown) {
@@ -289,15 +290,12 @@ export default async function ProfilePage() {
   return (
     <div className="min-h-screen bg-white py-12 px-4 text-brand-navy">
       <div className="mx-auto flex max-w-6xl flex-col gap-10">
-        <header className="rounded-3xl border border-brand-cyan/30 bg-brand-navy p-8 text-center text-brand-cyan shadow-[0_0_35px_rgba(56,189,248,0.35)]">
-          <p className="text-[11px] uppercase tracking-[0.4em] text-brand-cyan/70">Account Center</p>
-          <h1 className="mt-3 text-4xl font-semibold uppercase tracking-wide text-brand-cyan">
-            Profile & Home
-          </h1>
-          <p className="mx-auto mt-4 max-w-2xl text-sm text-brand-cyan/80">
-            Manage your IntelliWatt contact preferences, connect additional homes, and keep Smart Meter Texas authorizations current. Each home earns its own entries once SMT is connected.
-          </p>
-        </header>
+        <DashboardHero
+          title="Profile"
+          highlight="& Home"
+          description="Manage your IntelliWatt contact preferences, connect additional homes, and keep Smart Meter Texas authorizations current. Each home earns its own entries once SMT is connected."
+          eyebrow="Account Center"
+        />
 
         <div className="grid gap-6 lg:grid-cols-[1fr,1fr]">
           <section className="rounded-3xl border border-brand-cyan/30 bg-brand-navy p-6 text-brand-cyan shadow-[0_0_35px_rgba(56,189,248,0.28)]">
