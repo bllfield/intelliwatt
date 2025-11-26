@@ -425,9 +425,8 @@ export default async function ApiConnectPage() {
             </>
           )}
 
-          <div className="relative overflow-hidden rounded-3xl border border-brand-blue/15 bg-white shadow-[0_24px_70px_rgba(16,46,90,0.06)]">
-            <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-brand-blue/10 via-transparent to-brand-cyan/15 opacity-70" />
-            <div className="relative z-10 flex flex-col gap-6 p-8 sm:p-10 text-center">
+          <div className="rounded-3xl border border-brand-navy bg-white shadow-[0_24px_70px_rgba(16,46,90,0.06)]">
+            <div className="flex flex-col gap-6 p-8 text-center sm:p-10">
               <div className="flex flex-col gap-3">
                 <h2 className="text-2xl font-semibold tracking-tight text-brand-navy">Smart Home Devices</h2>
                 <p className="mx-auto max-w-3xl text-sm leading-relaxed text-brand-slate">
