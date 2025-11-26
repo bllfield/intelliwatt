@@ -9,7 +9,7 @@ import QuickAddressEntry from '../../components/QuickAddressEntry';
 const ICON_COLOR = '#00F0FF';
 
 const IconChip = ({ children }: { children: ReactNode }) => (
-  <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl border border-[#00F0FF]/40 bg-brand-navy shadow-[0_0_25px_rgba(0,240,255,0.25)] transition-all duration-300 group-hover:border-[#00F0FF] group-hover:shadow-[0_0_30px_rgba(0,240,255,0.45)]">
+  <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-3xl border border-[#00F0FF]/40 bg-brand-navy shadow-[0_0_25px_rgba(0,240,255,0.25)] transition-all duration-300 group-hover:border-[#00F0FF] group-hover:shadow-[0_0_30px_rgba(0,240,255,0.45)]">
     {children}
   </div>
 );
@@ -451,7 +451,7 @@ export default function DashboardPage() {
             {DASHBOARD_CARDS.map(({ title, description, cta, href, Icon }) => (
               <div
                 key={title}
-                className="group rounded-2xl border border-[#00F0FF]/30 bg-brand-navy p-8 shadow-[0_30px_60px_rgba(10,20,60,0.5)] transition-all duration-300 hover:border-[#00F0FF]/80 hover:shadow-[0_38px_80px_rgba(0,240,255,0.35)]"
+                className="group rounded-3xl border border-[#00F0FF]/30 bg-brand-navy p-8 shadow-[0_30px_60px_rgba(10,20,60,0.5)] transition-all duration-300 hover:border-[#00F0FF]/80 hover:shadow-[0_38px_80px_rgba(0,240,255,0.35)]"
               >
                 <IconChip>
                   <Icon />
@@ -475,8 +475,8 @@ export default function DashboardPage() {
       {!userAddress && (
         <section className="py-16 px-4 bg-brand-white">
           <div className="max-w-4xl mx-auto text-center">
-            <div className="bg-white p-8 rounded-2xl border-2 border-brand-navy shadow-lg">
-              <div className="w-16 h-16 bg-brand-cyan rounded-full flex items-center justify-center mx-auto mb-6 shadow">
+            <div className="rounded-3xl border-2 border-brand-navy bg-white p-8 shadow-lg">
+              <div className="w-16 h-16 rounded-full bg-brand-cyan shadow flex items-center justify-center mx-auto mb-6">
                 <span className="text-brand-navy text-2xl">⚡</span>
               </div>
               <h2 className="text-3xl font-bold text-brand-navy mb-4">
@@ -486,22 +486,22 @@ export default function DashboardPage() {
                 Enter your service address above to unlock personalized energy plan recommendations and start tracking your savings.
               </p>
               <div className="grid md:grid-cols-3 gap-6 text-center">
-                <div className="bg-white p-6 rounded-xl border border-brand-navy shadow-sm">
-                  <div className="w-12 h-12 bg-brand-navy rounded-full flex items-center justify-center mb-4 mx-auto">
+                <div className="rounded-2xl border border-brand-navy bg-white p-6 shadow-sm">
+                  <div className="w-12 h-12 rounded-full bg-brand-navy flex items-center justify-center mb-4 mx-auto">
                     <span className="text-brand-cyan text-xl">🔍</span>
                   </div>
                   <h3 className="text-xl font-bold text-brand-navy mb-2">Find Best Plans</h3>
                   <p className="text-brand-navy text-sm">Get personalized recommendations based on your usage patterns</p>
                 </div>
-                <div className="bg-white p-6 rounded-xl border border-brand-navy shadow-sm">
-                  <div className="w-12 h-12 bg-brand-navy rounded-full flex items-center justify-center mb-4 mx-auto">
+                <div className="rounded-2xl border border-brand-navy bg-white p-6 shadow-sm">
+                  <div className="w-12 h-12 rounded-full bg-brand-navy flex items-center justify-center mb-4 mx-auto">
                     <span className="text-brand-cyan text-xl">📊</span>
                   </div>
                   <h3 className="text-xl font-bold text-brand-navy mb-2">Track Usage</h3>
                   <p className="text-brand-navy text-sm">Monitor your energy consumption and identify savings opportunities</p>
                 </div>
-                <div className="bg-white p-6 rounded-xl border border-brand-navy shadow-sm">
-                  <div className="w-12 h-12 bg-brand-navy rounded-full flex items-center justify-center mb-4 mx-auto">
+                <div className="rounded-2xl border border-brand-navy bg-white p-6 shadow-sm">
+                  <div className="w-12 h-12 rounded-full bg-brand-navy flex items-center justify-center mb-4 mx-auto">
                     <span className="text-brand-cyan text-xl">💰</span>
                   </div>
                   <h3 className="text-xl font-bold text-brand-navy mb-2">Save Money</h3>
@@ -523,7 +523,7 @@ export default function DashboardPage() {
       )}
 
       <section className="px-4 mt-8">
-        <div className="max-w-3xl mx-auto border border-brand-navy/20 rounded-2xl p-8 bg-white shadow-sm text-center">
+        <div className="max-w-3xl mx-auto rounded-3xl border border-brand-navy/20 bg-white p-8 text-center shadow-sm">
           <h2 className="text-2xl font-semibold text-brand-navy">
             Smart Meter Texas (SMT)
           </h2>
@@ -588,8 +588,8 @@ export default function DashboardPage() {
             </h2>
             
             <div className="grid md:grid-cols-2 gap-8">
-              <div className="bg-brand-navy p-8 rounded-2xl text-center">
-                <div className="w-12 h-12 bg-brand-cyan rounded-full flex items-center justify-center mx-auto mb-4">
+            <div className="rounded-3xl bg-brand-navy p-8 text-center">
+                <div className="w-12 h-12 rounded-full bg-brand-cyan flex items-center justify-center mx-auto mb-4">
                   <span className="text-brand-navy text-xl">❓</span>
                 </div>
                 <h3 className="text-2xl font-bold text-brand-white mb-4">Need Help?</h3>
@@ -599,8 +599,8 @@ export default function DashboardPage() {
                 </Link>
               </div>
               
-              <div className="bg-brand-navy p-8 rounded-2xl text-center">
-                <div className="w-12 h-12 bg-brand-cyan rounded-full flex items-center justify-center mx-auto mb-4">
+              <div className="rounded-3xl bg-brand-navy p-8 text-center">
+                <div className="w-12 h-12 rounded-full bg-brand-cyan flex items-center justify-center mx-auto mb-4">
                   <span className="text-brand-navy text-xl">⚙️</span>
                 </div>
                 <h3 className="text-2xl font-bold text-brand-white mb-4">Settings</h3>
