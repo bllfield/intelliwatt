@@ -150,24 +150,26 @@ export default function EntriesChecklistSidebar() {
     setIsOpen((prev) => !prev);
   };
 
+  const rows = useMemo(() => checklistRows, [checklistRows]);
+
   return (
     <div className="fixed left-0 top-1/2 z-50 -translate-y-1/2">
       <button
         type="button"
         onClick={toggleOpen}
-        className="group relative flex -translate-x-[75%] items-center justify-center rounded-r-3xl border border-[#39FF14]/60 bg-[#39FF14] px-3 py-2 text-xs font-bold uppercase tracking-[0.3em] text-brand-navy transition hover:-translate-x-[65%] hover:shadow-[0_0_25px_rgba(57,255,20,0.55)]"
+        className="group relative flex -translate-x-[75%] items-center justify-center rounded-r-3xl border border-[#BF00FF]/70 bg-[#39FF14] px-2 py-3 text-xs font-bold uppercase tracking-[0.3em] text-[#BF00FF] transition hover:-translate-x-[65%] hover:shadow-[0_0_25px_rgba(191,0,255,0.55)]"
         aria-expanded={isOpen}
         aria-controls="entries-checklist-panel"
       >
         <span className="text-xs" style={{ writingMode: 'vertical-rl' }}>
-          ENTRIES DETAILS
+          ENTRIES
         </span>
       </button>
 
       {isOpen ? (
         <div
           id="entries-checklist-panel"
-          className="ml-3 w-[300px] max-w-[85vw] rounded-3xl border-2 border-[#39FF14]/40 bg-brand-navy p-5 text-brand-cyan shadow-[0_30px_80px_rgba(10,20,60,0.55)]"
+          className="ml-3 w-[260px] max-w-[80vw] rounded-3xl border-2 border-[#39FF14]/40 bg-brand-navy p-4 text-brand-cyan shadow-[0_30px_80px_rgba(10,20,60,0.55)]"
         >
           <div className="mb-4 text-center">
             <h2
@@ -176,6 +178,14 @@ export default function EntriesChecklistSidebar() {
             >
               Get your Entries! to Win!!
             </h2>
+            <button
+              type="button"
+              onClick={toggleOpen}
+              className="mt-2 inline-flex h-6 w-6 items-center justify-center rounded-full border border-[#FF52FF]/60 text-[#FF52FF] text-sm font-bold shadow-[0_0_18px_rgba(255,82,255,0.45)]"
+              aria-label="Close entries checklist"
+            >
+              ✖
+            </button>
           </div>
 
           {loading ? (
@@ -183,24 +193,27 @@ export default function EntriesChecklistSidebar() {
           ) : error ? (
             <p className="text-center text-sm text-rose-300">{error}</p>
           ) : (
-            <div className="space-y-4">
-              {checklistRows.map((item) => (
+            <div className="max-h-[60vh] space-y-3 overflow-y-auto pr-1">
+              {rows.map((item) => (
                 <div
                   key={item.id}
                   className="flex items-start gap-3 rounded-3xl border border-[#BF00FF]/50 bg-brand-navy/80 p-4 shadow-[0_10px_30px_rgba(10,20,60,0.35)]"
                 >
                   <span
-                    className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full border-2 text-xl font-bold shadow-[0_0_18px_rgba(191,0,255,0.35)] ${
-                      item.isComplete
-                        ? 'border-[#BF00FF] text-[#39FF14]'
-                        : 'border-[#BF00FF] text-[#FF52FF]'
-                    }`}
+                    className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full border-2 text-lg font-bold shadow-[0_0_18px_rgba(191,0,255,0.35)]"
+                    style={{
+                      borderColor: '#BF00FF',
+                      color: item.isComplete ? NEON_GREEN : NEON_PINK,
+                      textShadow: item.isComplete
+                        ? '0 0 12px rgba(57,255,20,0.6)'
+                        : '0 0 12px rgba(255,82,255,0.6)',
+                    }}
                     aria-hidden="true"
                   >
                     {item.isComplete ? '✔' : '✖'}
                   </span>
-                  <div className="space-y-1">
-                    <div className="text-sm font-semibold" style={{ color: NEON_PURPLE }}>
+                  <div className="space-y-1 text-xs">
+                    <div className="font-semibold" style={{ color: NEON_PURPLE }}>
                       {item.title}
                     </div>
                     <div className="text-xs font-semibold" style={{ color: NEON_GREEN }}>
