@@ -25,15 +25,25 @@ export default function ReferralsPage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        // Fetch referral link
-        const linkResponse = await fetch('/api/user/referral-link');
+        const [linkResponse, statsResponse] = await Promise.all([
+          fetch('/api/user/referral-link', { cache: 'no-store' }),
+          fetch('/api/user/referral-stats', { cache: 'no-store' }),
+        ]);
+
         if (linkResponse.ok) {
           const linkData = await linkResponse.json();
           setReferralData(linkData);
         }
-        setStats({ totalReferrals: 0, totalEntries: 0 });
+
+        if (statsResponse.ok) {
+          const statsData = (await statsResponse.json()) as ReferralStats;
+          setStats(statsData);
+        } else {
+          setStats({ totalReferrals: 0, totalEntries: 0 });
+        }
       } catch (error) {
         console.error('Error fetching referral data:', error);
+        setStats({ totalReferrals: 0, totalEntries: 0 });
       } finally {
         setLoading(false);
       }
