@@ -202,7 +202,7 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
     <div className={containerClasses}>
       {showHeader && (
         <>
-          <div className="grid gap-3 rounded-lg bg-brand-navy p-3 text-center text-xs text-brand-cyan sm:grid-cols-2">
+          <div className="grid gap-3 rounded-lg border-2 border-brand-blue bg-brand-navy p-3 text-center text-xs text-brand-cyan sm:grid-cols-2">
             <div className="space-y-1">
               <div className="text-sm font-semibold uppercase tracking-wide text-brand-cyan">
                 Service Address on File
@@ -235,7 +235,7 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
           </div>
 
           {hasActiveAuth && (
-            <div className="space-y-1 rounded-lg border border-brand-cyan/40 bg-brand-navy p-3 text-center text-xs text-brand-cyan">
+            <div className="space-y-1 rounded-lg border-2 border-brand-blue bg-brand-navy p-3 text-center text-xs text-brand-cyan">
               <div className="text-sm font-semibold uppercase tracking-wide">
                 Active SMT authorization already on file
               </div>
@@ -326,7 +326,7 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
         </div>
 
         <div className="space-y-2">
-          <div className="max-h-48 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs leading-relaxed text-slate-700">
+          <div className="max-h-48 overflow-y-auto rounded-lg border border-brand-navy bg-white/10 p-3 text-xs leading-relaxed text-slate-700">
             <p className="font-medium text-slate-900">Smart Meter Texas Authorization Terms</p>
             <ul className="mt-2 list-disc space-y-1 pl-4">
               <li>

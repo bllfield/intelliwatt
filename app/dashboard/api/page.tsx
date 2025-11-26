@@ -325,8 +325,8 @@ export default async function ApiConnectPage() {
 
           {readyForSmt && (
             <>
-              <div className="space-y-4 rounded-3xl border border-brand-cyan/20 bg-white/95 p-4 shadow-[0_18px_60px_rgba(16,46,90,0.06)] backdrop-blur max-[480px]:p-3 sm:p-6 md:p-7">
-                <div className="rounded-2xl border border-brand-cyan/40 bg-brand-navy p-4 text-sm text-brand-cyan shadow-[0_10px_30px_rgba(16,182,231,0.18)] sm:p-5">
+              <div className="space-y-4 rounded-3xl border-2 border-brand-navy bg-brand-navy/90 p-4 shadow-[0_18px_60px_rgba(16,46,90,0.18)] backdrop-blur max-[480px]:p-3 sm:p-6 md:p-7">
+                <div className="rounded-2xl border-2 border-brand-blue bg-brand-navy p-4 text-sm text-brand-cyan shadow-[0_10px_30px_rgba(16,182,231,0.18)] sm:p-5">
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                     <div className="space-y-1">
                       <h2 className="text-sm font-semibold uppercase tracking-wide text-brand-cyan">
@@ -368,7 +368,7 @@ export default async function ApiConnectPage() {
                 </div>
 
                 {existingAuth && (
-                  <div className="rounded-2xl border border-brand-cyan/40 bg-brand-navy p-4 text-xs text-brand-cyan shadow-[0_10px_30px_rgba(16,182,231,0.18)] sm:p-5">
+                  <div className="rounded-2xl border-2 border-brand-blue bg-brand-navy p-4 text-xs text-brand-cyan shadow-[0_10px_30px_rgba(16,182,231,0.18)] sm:p-5">
                     <div className="flex flex-wrap items-center justify-center gap-3 text-center md:justify-between md:text-left">
                       <span className="text-[0.7rem] font-semibold uppercase tracking-wide">
                         SMT authorization last submitted{" "}
@@ -421,7 +421,9 @@ export default async function ApiConnectPage() {
                 </div>
               </div>
 
-              <SmtManualFallbackCard houseAddressId={houseAddress?.id ?? null} />
+              <div className="rounded-3xl border border-brand-navy bg-brand-navy/80 p-5 text-brand-cyan shadow-[0_12px_32px_rgba(16,46,90,0.2)] sm:p-6">
+                <SmtManualFallbackCard houseAddressId={houseAddress?.id ?? null} />
+              </div>
             </>
           )}
 
