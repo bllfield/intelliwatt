@@ -212,26 +212,23 @@ export default function EntriesChecklistSidebar() {
                   >
                     {item.isComplete ? '✔' : '✖'}
                   </span>
-                  <div className="space-y-1 text-xs">
+                  <div className="flex-1 space-y-1 text-xs">
                     <div className="font-semibold" style={{ color: NEON_PURPLE }}>
                       {item.title}
                     </div>
-                    <div className="text-xs font-semibold" style={{ color: NEON_GREEN }}>
+                    <div className="font-semibold" style={{ color: NEON_GREEN }}>
                       {item.statusText}
-                    </div>
-                    <div className="text-xs" style={{ color: NEON_GREEN }}>
-                      {item.detail}
                     </div>
                     {item.note ? (
                       <div className="text-[11px] text-brand-cyan/70">{item.note}</div>
                     ) : null}
-                    <Link
-                      href={item.href}
-                      className="inline-flex text-[11px] font-semibold uppercase tracking-wide text-[#39FF14] underline-offset-4 hover:underline"
-                    >
-                      Go to {item.title}
-                    </Link>
                   </div>
+                  <Link
+                    href={item.href}
+                    className="inline-flex text-[11px] font-semibold uppercase tracking-wide text-[#39FF14] underline-offset-4 hover:underline"
+                  >
+                    Go to {item.title}
+                  </Link>
                 </div>
               ))}
 
