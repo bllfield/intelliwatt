@@ -105,6 +105,25 @@ interface ReferralRecord {
   } | null;
 }
 
+interface SmtEmailConfirmationRecord {
+  id: string;
+  userId: string;
+  email: string | null;
+  status: 'PENDING' | 'DECLINED';
+  confirmedAt: string | null;
+  createdAt: string;
+  authorizationEndDate: string | null;
+  smtStatus: string | null;
+  smtStatusMessage: string | null;
+  houseAddress: {
+    addressLine1: string;
+    addressLine2: string | null;
+    addressCity: string;
+    addressState: string;
+    addressZip5: string;
+  } | null;
+}
+
 interface TestimonialRecord {
   id: string;
   status: 'PENDING' | 'APPROVED' | 'REJECTED';
@@ -130,6 +149,9 @@ interface SummaryStats {
   testimonialPendingCount: number;
   referralPendingCount: number;
   referralQualifiedCount: number;
+  pendingSmtEmailConfirmations: number;
+  declinedSmtEmailConfirmations: number;
+  approvedSmtEmailConfirmations: number;
 }
 
 const currencyFormatter = new Intl.NumberFormat('en-US', {
@@ -154,6 +176,10 @@ export default function AdminDashboard() {
   const [summary, setSummary] = useState<SummaryStats | null>(null);
   const [testimonials, setTestimonials] = useState<TestimonialRecord[]>([]);
   const [referrals, setReferrals] = useState<ReferralRecord[]>([]);
+  const [emailConfirmations, setEmailConfirmations] = useState<{
+    pending: SmtEmailConfirmationRecord[];
+    declined: SmtEmailConfirmationRecord[];
+  }>({ pending: [], declined: [] });
   const [refreshing, setRefreshing] = useState(false);
   const [recalculatingReferrals, setRecalculatingReferrals] = useState(false);
   const [recalculatingEntries, setRecalculatingEntries] = useState(false);
@@ -172,6 +198,7 @@ export default function AdminDashboard() {
         expiringRes,
         testimonialsRes,
         referralsRes,
+        emailConfirmationsRes,
       ] = await Promise.all([
         fetch('/api/admin/stats/summary'),
         fetch('/api/admin/users'),
@@ -182,6 +209,7 @@ export default function AdminDashboard() {
         fetch('/api/admin/hitthejackwatt/expiring'),
         fetch('/api/admin/testimonials'),
         fetch('/api/admin/referrals'),
+        fetch('/api/admin/smt/email-confirmations'),
       ]);
 
       if (summaryRes.ok) {
@@ -254,6 +282,18 @@ export default function AdminDashboard() {
         setReferrals(referralsData);
       } else {
         console.error('Failed to fetch referrals:', referralsRes.status, referralsRes.statusText);
+      }
+
+      if (emailConfirmationsRes.ok) {
+        const confirmationsData = await emailConfirmationsRes.json();
+        console.log('Fetched SMT email confirmations:', confirmationsData);
+        setEmailConfirmations(confirmationsData);
+      } else {
+        console.error(
+          'Failed to fetch SMT email confirmations:',
+          emailConfirmationsRes.status,
+          emailConfirmationsRes.statusText,
+        );
       }
     } catch (error) {
       console.error('Error fetching admin data:', error);
@@ -330,10 +370,13 @@ export default function AdminDashboard() {
   const totalUsageCustomers = summary?.totalUsageCustomers ?? 0;
   const applianceCount = summary?.applianceCount ?? 0;
   const pendingRevocationsCount = summary?.pendingSmtRevocations ?? 0;
-  const testimonialsTotal =
-    summary?.testimonialSubmissionCount ?? testimonials.length;
-  const testimonialsPendingCount =
-    summary?.testimonialPendingCount ?? testimonials.filter((record) => record.status === 'PENDING').length;
+  const testimonialsTotal = summary?.testimonialSubmissionCount ?? testimonials.length;
+  const testimonialsPendingCount = summary?.testimonialPendingCount ?? testimonials.filter((record) => record.status === 'PENDING').length;
+  const pendingEmailConfirmationsCount =
+    summary?.pendingSmtEmailConfirmations ?? emailConfirmations.pending.length;
+  const declinedEmailConfirmationsCount =
+    summary?.declinedSmtEmailConfirmations ?? emailConfirmations.declined.length;
+  const approvedEmailConfirmationsCount = summary?.approvedSmtEmailConfirmations ?? 0;
   const testimonialStatusStyles: Record<TestimonialRecord['status'], string> = {
     PENDING: 'border border-amber-400/40 bg-amber-400/10 text-amber-600',
     APPROVED: 'border border-emerald-400/40 bg-emerald-400/10 text-emerald-600',
@@ -356,6 +399,12 @@ export default function AdminDashboard() {
   const flaggedRevocations = flaggedRecords.filter(
     (record) => record.attentionCode === 'smt_revoke_requested',
   );
+  const flaggedEmailPending = flaggedRecords.filter(
+    (record) => record.attentionCode === 'smt_email_pending',
+  );
+  const flaggedEmailDeclined = flaggedRecords.filter(
+    (record) => record.attentionCode === 'smt_email_declined',
+  );
 
   const overviewStats = [
     { label: 'Users', value: totalUsersCount.toLocaleString() },
@@ -367,6 +416,10 @@ export default function AdminDashboard() {
     { label: 'Testimonials Pending', value: testimonialsPendingCount.toLocaleString() },
     { label: 'Referrals Pending', value: referralPendingTotal.toLocaleString() },
     { label: 'Referrals Qualified', value: referralQualifiedTotal.toLocaleString() },
+    { label: 'SMT Email Confirmations Pending', value: pendingEmailConfirmationsCount.toLocaleString() },
+    { label: 'SMT Email Confirmations Declined', value: declinedEmailConfirmationsCount.toLocaleString() },
+    { label: 'SMT Email Confirmations Approved', value: approvedEmailConfirmationsCount.toLocaleString() },
+    { label: 'SMT Email Follow-ups Flagged', value: flaggedEmailPending.length.toLocaleString() },
     { label: 'SMT Revocations Pending', value: pendingRevocationsCount.toLocaleString() },
     { label: 'Total Commissions', value: currencyFormatter.format(totalCommissions) },
     { label: 'Net Finance', value: currencyFormatter.format(totalFinance) },
@@ -771,6 +824,119 @@ export default function AdminDashboard() {
         </section>
 
         <section className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
+          <h2 className="text-2xl font-bold text-brand-navy mb-2">📧 SMT Email Confirmations</h2>
+          <p className="text-sm text-brand-navy/70 mb-4">
+            Customers listed here still need to act on the Smart Meter Texas authorization email. Follow up with pending
+            confirmations to keep their entries active. Declined responses automatically disable their SMT entry and flag the
+            account for manual review.
+          </p>
+          <div className="grid gap-6 lg:grid-cols-2">
+            <div className="rounded-xl border border-brand-navy/10 bg-brand-navy/5 p-4">
+              <h3 className="text-lg font-semibold text-brand-navy mb-3">Pending acknowledgements</h3>
+              {emailConfirmations.pending.length === 0 ? (
+                <div className="rounded-md border border-brand-navy/10 bg-white px-4 py-6 text-center text-brand-navy/70">
+                  No outstanding confirmations waiting on customers.
+                </div>
+              ) : (
+                <div className="overflow-x-auto rounded-lg border border-brand-navy/10 bg-white">
+                  <table className="min-w-full divide-y divide-brand-navy/10 text-sm text-brand-navy">
+                    <thead className="bg-brand-navy/5">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-brand-navy/60">
+                          Customer
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-brand-navy/60">
+                          Requested
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-brand-navy/60">
+                          Address
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-brand-navy/10">
+                      {emailConfirmations.pending.map((record) => {
+                        const address = record.houseAddress
+                          ? [
+                              record.houseAddress.addressLine1,
+                              record.houseAddress.addressLine2,
+                              `${record.houseAddress.addressCity}, ${record.houseAddress.addressState} ${record.houseAddress.addressZip5}`,
+                            ]
+                              .filter(Boolean)
+                              .join('\n')
+                          : '—';
+                        return (
+                          <tr key={`${record.id}-pending`} className="align-top">
+                            <td className="whitespace-nowrap px-4 py-3">
+                              <div className="font-semibold">{record.email ?? 'Unknown email'}</div>
+                              <div className="text-xs text-brand-navy/50">User ID · {record.userId}</div>
+                            </td>
+                            <td className="px-4 py-3 text-xs text-brand-navy/70">
+                              {new Date(record.createdAt).toLocaleString()}
+                            </td>
+                            <td className="px-4 py-3 text-xs text-brand-navy/80 whitespace-pre-line">{address}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+            <div className="rounded-xl border border-brand-navy/10 bg-brand-navy/5 p-4">
+              <h3 className="text-lg font-semibold text-brand-navy mb-3">Declined or revoked</h3>
+              {emailConfirmations.declined.length === 0 ? (
+                <div className="rounded-md border border-brand-navy/10 bg-white px-4 py-6 text-center text-brand-navy/70">
+                  No recent declines recorded.
+                </div>
+              ) : (
+                <div className="overflow-x-auto rounded-lg border border-brand-navy/10 bg-white">
+                  <table className="min-w-full divide-y divide-brand-navy/10 text-sm text-brand-navy">
+                    <thead className="bg-brand-navy/5">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-brand-navy/60">
+                          Customer
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-brand-navy/60">
+                          Declined At
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-brand-navy/60">
+                          Notes
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-brand-navy/10">
+                      {emailConfirmations.declined.map((record) => (
+                        <tr key={`${record.id}-declined`} className="align-top">
+                          <td className="whitespace-nowrap px-4 py-3">
+                            <div className="font-semibold">{record.email ?? 'Unknown email'}</div>
+                            <div className="text-xs text-brand-navy/50">User ID · {record.userId}</div>
+                          </td>
+                          <td className="px-4 py-3 text-xs text-brand-navy/70">
+                            {record.confirmedAt ? new Date(record.confirmedAt).toLocaleString() : '—'}
+                          </td>
+                          <td className="px-4 py-3 text-xs text-brand-navy/80 space-y-1">
+                            {record.smtStatusMessage ? (
+                              <div>{record.smtStatusMessage}</div>
+                            ) : (
+                              <div className="italic text-brand-navy/50">No SMT status message recorded</div>
+                            )}
+                            {record.authorizationEndDate ? (
+                              <div className="text-brand-navy/60">
+                                Authorization end {new Date(record.authorizationEndDate).toLocaleDateString()}
+                              </div>
+                            ) : null}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
+
+        <section className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
           <h2 className="text-2xl font-bold text-brand-navy mb-2">🚨 Houses Awaiting Notification</h2>
           <p className="text-sm text-brand-navy/70 mb-4">
             These users lost SMT access when another account took their service address. Send the replacement email and help them reconnect.
@@ -892,6 +1058,130 @@ export default function AdminDashboard() {
                                   </div>
                                   {auth.smtStatusMessage ? (
                                     <div className="text-xs text-brand-navy/60 mt-1">{auth.smtStatusMessage}</div>
+                                  ) : null}
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
+          <h2 className="text-2xl font-bold text-brand-navy mb-2">⏳ SMT Emails Awaiting Confirmation</h2>
+          <p className="text-sm text-brand-navy/70 mb-4">
+            These customers submitted the Smart Meter Texas authorization form but have not yet confirmed the follow-up
+            email. We flagged their accounts as not approved so the ops team can monitor progress and nudge them when
+            needed. Once they approve, the flag clears automatically and their referrers become eligible for entries.
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-brand-navy/20">
+                  <th className="text-left py-3 px-4 text-brand-navy font-semibold">User Email</th>
+                  <th className="text-left py-3 px-4 text-brand-navy font-semibold">Flagged</th>
+                  <th className="text-left py-3 px-4 text-brand-navy font-semibold">Homes on File</th>
+                </tr>
+              </thead>
+              <tbody>
+                {flaggedEmailPending.length === 0 ? (
+                  <tr>
+                    <td colSpan={3} className="py-8 px-4 text-center text-brand-navy/60">
+                      No SMT confirmations waiting on customer approval.
+                    </td>
+                  </tr>
+                ) : (
+                  flaggedEmailPending.map((record) => (
+                    <tr
+                      key={`${record.userId}-pending`}
+                      className="border-b border-brand-navy/10 hover:bg-brand-navy/5"
+                    >
+                      <td className="py-3 px-4 text-brand-navy">{record.email ?? 'Unknown'}</td>
+                      <td className="py-3 px-4 text-brand-navy">{formatTimestamp(record.attentionAt)}</td>
+                      <td className="py-3 px-4 text-brand-navy">
+                        {record.houses.length === 0 ? (
+                          <span className="text-brand-navy/60 text-xs">No active homes on file.</span>
+                        ) : (
+                          <ul className="space-y-2">
+                            {record.houses.map((house) => {
+                              const line2 = house.addressLine2 ? `${house.addressLine2}\n` : '';
+                              const addressBlock = `${house.addressLine1}\n${line2}${house.addressCity}, ${house.addressState} ${house.addressZip5}`;
+                              return (
+                                <li
+                                  key={house.id}
+                                  className="border border-brand-navy/10 rounded-md p-3 bg-brand-navy/5 whitespace-pre-line"
+                                >
+                                  <div className="font-semibold">{addressBlock}</div>
+                                  {house.esiid ? (
+                                    <div className="text-xs text-brand-navy/70 mt-1">ESIID: {house.esiid}</div>
+                                  ) : null}
+                                  {house.utilityName ? (
+                                    <div className="text-xs text-brand-navy/70 mt-1">Utility: {house.utilityName}</div>
+                                  ) : null}
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
+          <h2 className="text-2xl font-bold text-brand-navy mb-2">⚠️ SMT Emails Declined</h2>
+          <p className="text-sm text-brand-navy/70 mb-4">
+            These customers reported that they declined or revoked the Smart Meter Texas authorization email.
+            Their smart meter entries are disabled until they re-authorize and confirm the follow-up email. Track
+            outreach here so we can reactivate them quickly once they approve.
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-brand-navy/20">
+                  <th className="text-left py-3 px-4 text-brand-navy font-semibold">User Email</th>
+                  <th className="text-left py-3 px-4 text-brand-navy font-semibold">Flagged</th>
+                  <th className="text-left py-3 px-4 text-brand-navy font-semibold">Homes on File</th>
+                </tr>
+              </thead>
+              <tbody>
+                {flaggedEmailDeclined.length === 0 ? (
+                  <tr>
+                    <td colSpan={3} className="py-8 px-4 text-center text-brand-navy/60">
+                      No SMT declines waiting on follow-up.
+                    </td>
+                  </tr>
+                ) : (
+                  flaggedEmailDeclined.map((record) => (
+                    <tr key={`${record.userId}-declined`} className="border-b border-brand-navy/10 hover:bg-brand-navy/5">
+                      <td className="py-3 px-4 text-brand-navy">{record.email ?? 'Unknown'}</td>
+                      <td className="py-3 px-4 text-brand-navy">{formatTimestamp(record.attentionAt)}</td>
+                      <td className="py-3 px-4 text-brand-navy">
+                        {record.houses.length === 0 ? (
+                          <span className="text-brand-navy/60 text-xs">No active homes on file.</span>
+                        ) : (
+                          <ul className="space-y-2">
+                            {record.houses.map((house) => {
+                              const line2 = house.addressLine2 ? `${house.addressLine2}\n` : '';
+                              const addressBlock = `${house.addressLine1}\n${line2}${house.addressCity}, ${house.addressState} ${house.addressZip5}`;
+                              return (
+                                <li key={house.id} className="border border-brand-navy/10 rounded-md p-3 bg-brand-navy/5 whitespace-pre-line">
+                                  <div className="font-semibold">{addressBlock}</div>
+                                  {house.esiid ? (
+                                    <div className="text-xs text-brand-navy/70 mt-1">ESIID: {house.esiid}</div>
+                                  ) : null}
+                                  {house.utilityName ? (
+                                    <div className="text-xs text-brand-navy/70 mt-1">Utility: {house.utilityName}</div>
                                   ) : null}
                                 </li>
                               );

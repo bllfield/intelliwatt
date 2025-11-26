@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useTransition, FormEvent } from "react";
+import React, { useEffect, useState, useTransition, FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { RepSelector } from "@/components/smt/RepSelector";
 
@@ -54,9 +54,30 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
   const [showEmailReminder, setShowEmailReminder] = useState(false);
+  const [emailConfirmationSubmitting, setEmailConfirmationSubmitting] = useState<
+    "idle" | "approved" | "declined"
+  >("idle");
+  const [emailConfirmationError, setEmailConfirmationError] = useState<string | null>(null);
   const router = useRouter();
 
   const hasActiveAuth = Boolean(existingAuth);
+
+  useEffect(() => {
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    if (!showEmailReminder) {
+      return;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [showEmailReminder]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -131,6 +152,46 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
         }
       })();
     });
+  }
+
+  async function handleEmailConfirmationChoice(choice: "approved" | "declined") {
+    if (emailConfirmationSubmitting !== "idle") {
+      return;
+    }
+
+    setEmailConfirmationSubmitting(choice);
+    setEmailConfirmationError(null);
+
+    try {
+      const response = await fetch("/api/user/smt/email-confirmation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: choice }),
+      });
+
+      if (!response.ok) {
+        const data = await response
+          .json()
+          .catch(() => ({ error: "Unable to record confirmation status" }));
+        throw new Error(data?.error ?? "Unable to record confirmation status");
+      }
+
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("entriesUpdated"));
+      }
+
+      setShowEmailReminder(false);
+      router.refresh();
+    } catch (error) {
+      console.error("Failed to update SMT email confirmation status", error);
+      setEmailConfirmationError(
+        error instanceof Error
+          ? error.message
+          : "We could not record your response right now. Please try again.",
+      );
+    } finally {
+      setEmailConfirmationSubmitting("idle");
+    }
   }
 
   const containerClasses = showHeader
@@ -324,8 +385,16 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
       </form>
       {showEmailReminder && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-          <div className="w-full max-w-xl rounded-3xl border border-brand-blue/40 bg-brand-navy p-6 text-brand-cyan shadow-[0_24px_60px_rgba(16,46,90,0.55)]">
-            <h3 className="text-lg font-semibold uppercase tracking-[0.3em] text-brand-cyan/60">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="smt-email-reminder-title"
+            className="w-full max-w-xl rounded-3xl border border-brand-blue/40 bg-brand-navy p-6 text-brand-cyan shadow-[0_24px_60px_rgba(16,46,90,0.55)]"
+          >
+            <h3
+              id="smt-email-reminder-title"
+              className="text-lg font-semibold uppercase tracking-[0.3em] text-brand-cyan/60"
+            >
               Check your inbox — action required
             </h3>
             <p className="mt-4 text-sm leading-relaxed text-brand-cyan/80">
@@ -347,15 +416,33 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
               </li>
             </ul>
             <p className="mt-4 text-xs uppercase tracking-wide text-brand-cyan/60">
-              Confirm the email first, then acknowledge below.
+              Confirm the email first, then choose the option that reflects what you did.
             </p>
-            <div className="mt-6 flex justify-end">
+            {emailConfirmationError ? (
+              <div className="mt-4 rounded-md border border-rose-400/40 bg-rose-400/10 px-4 py-3 text-xs text-rose-200">
+                {emailConfirmationError}
+              </div>
+            ) : null}
+            <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">
               <button
                 type="button"
-                onClick={() => setShowEmailReminder(false)}
-                className="inline-flex items-center rounded-full border border-brand-cyan/60 bg-brand-cyan/10 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-brand-cyan transition hover:border-brand-blue hover:text-brand-blue"
+                onClick={() => handleEmailConfirmationChoice("declined")}
+                disabled={emailConfirmationSubmitting !== "idle"}
+                className="inline-flex items-center justify-center rounded-full border border-rose-400/60 bg-rose-400/10 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-rose-200 transition hover:border-rose-300 hover:text-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                I approved the email from SMT
+                {emailConfirmationSubmitting === "declined"
+                  ? "Recording decline…"
+                  : "I declined or revoked the SMT email"}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleEmailConfirmationChoice("approved")}
+                disabled={emailConfirmationSubmitting !== "idle"}
+                className="inline-flex items-center justify-center rounded-full border border-brand-cyan/60 bg-brand-cyan/10 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-brand-cyan transition hover:border-brand-blue hover:text-brand-blue disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {emailConfirmationSubmitting === "approved"
+                  ? "Saving approval…"
+                  : "I approved the email from SMT"}
               </button>
             </div>
           </div>

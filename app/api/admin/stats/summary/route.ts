@@ -27,6 +27,9 @@ export async function GET() {
       manualUserResults,
       referralPendingCountBase,
       referralQualifiedCountBase,
+      pendingSmtEmailConfirmations,
+      declinedSmtEmailConfirmations,
+      approvedSmtEmailConfirmations,
     ] = await Promise.all([
       prisma.user.count(),
       prisma.smtAuthorization.count({
@@ -57,6 +60,24 @@ export async function GET() {
       }),
       prismaAny.referral.count({
         where: { status: 'QUALIFIED' },
+      }),
+      prismaAny.smtAuthorization.count({
+        where: {
+          archivedAt: null,
+          emailConfirmationStatus: 'PENDING',
+        },
+      }),
+      prismaAny.smtAuthorization.count({
+        where: {
+          archivedAt: null,
+          emailConfirmationStatus: 'DECLINED',
+        },
+      }),
+      prismaAny.smtAuthorization.count({
+        where: {
+          archivedAt: null,
+          emailConfirmationStatus: 'APPROVED',
+        },
       }),
     ]);
 
@@ -99,6 +120,9 @@ export async function GET() {
       testimonialPendingCount: pendingTestimonials,
       referralPendingCount,
       referralQualifiedCount,
+      pendingSmtEmailConfirmations,
+      declinedSmtEmailConfirmations,
+      approvedSmtEmailConfirmations,
     });
   } catch (error) {
     console.error('Error fetching admin summary stats:', error);

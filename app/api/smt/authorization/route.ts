@@ -357,6 +357,23 @@ export async function POST(req: NextRequest) {
           })
         : created;
 
+    const attentionTimestamp = new Date();
+
+    await prisma.userProfile.upsert({
+      where: { userId: user.id },
+      update: {
+        esiidAttentionRequired: true,
+        esiidAttentionCode: "smt_email_pending",
+        esiidAttentionAt: attentionTimestamp,
+      },
+      create: {
+        userId: user.id,
+        esiidAttentionRequired: true,
+        esiidAttentionCode: "smt_email_pending",
+        esiidAttentionAt: attentionTimestamp,
+      },
+    });
+
     const updatedAuthAny = updatedAuthorization as any;
 
     const nowForArchive = new Date();

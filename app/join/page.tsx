@@ -22,7 +22,7 @@ function JoinPageContent() {
 
   useEffect(() => {
     if (referralCode) {
-      window.location.replace(`/landing?ref=${encodeURIComponent(referralCode)}`);
+      window.location.replace(`/?ref=${encodeURIComponent(referralCode)}`);
     }
   }, [referralCode]);
 

@@ -13,13 +13,15 @@ type AuthorizationSummary = {
   meterNumber: string | null;
   authorizationEndDate: string | null;
   tdspName: string | null;
+  emailConfirmationStatus: 'PENDING' | 'APPROVED' | 'DECLINED';
+  emailConfirmationAt: string | null;
   houseAddress: {
     line1: string;
     line2: string | null;
     city: string;
     state: string;
     zip5: string;
-  };
+  } | null;
 };
 
 export default function SmartMeterSection({ houseId }: SmartMeterSectionProps) {
@@ -32,11 +34,27 @@ export default function SmartMeterSection({ houseId }: SmartMeterSectionProps) {
   const [manualAwarded, setManualAwarded] = useState(false);
   const [authorizationInfo, setAuthorizationInfo] = useState<AuthorizationSummary | null>(null);
   const [checkingStatus, setCheckingStatus] = useState(true);
-  const [hasShownEmailReminder, setHasShownEmailReminder] = useState(false);
+  const [emailConfirmationSubmitting, setEmailConfirmationSubmitting] = useState<
+    'idle' | 'approved' | 'declined'
+  >('idle');
+  const [emailConfirmationError, setEmailConfirmationError] = useState<string | null>(null);
 
-  const reminderStorageKey = authorizationInfo
-    ? `intelliwatt_smt_email_reminder_${authorizationInfo.id}`
-    : null;
+  useEffect(() => {
+    if (typeof document === 'undefined') {
+      return;
+    }
+
+    if (!showEmailReminder) {
+      return;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [showEmailReminder]);
 
   useEffect(() => {
     setMounted(true);
@@ -74,30 +92,15 @@ export default function SmartMeterSection({ houseId }: SmartMeterSectionProps) {
   }, [mounted, fetchAuthorizationStatus]);
 
   useEffect(() => {
-    if (!authorizationInfo) {
+    if (!authorizationInfo || status !== 'connected') {
       setShowEmailReminder(false);
-      setHasShownEmailReminder(false);
       return;
     }
-    if (typeof window === "undefined") {
-      return;
-    }
-    const key = `intelliwatt_smt_email_reminder_${authorizationInfo.id}`;
-    const alreadyAcknowledged = localStorage.getItem(key) === "true";
-    setHasShownEmailReminder(alreadyAcknowledged);
 
-    if (status === "connected" && !alreadyAcknowledged) {
-      setShowEmailReminder(true);
-      setHasShownEmailReminder(true);
-      localStorage.setItem(key, "true");
-    }
-
-    if (status !== "connected") {
-      setShowEmailReminder(false);
-    }
+    setShowEmailReminder(authorizationInfo.emailConfirmationStatus === 'PENDING');
   }, [authorizationInfo, status]);
 
-  const formattedAddress = authorizationInfo
+  const formattedAddress = authorizationInfo?.houseAddress
     ? [
         authorizationInfo.houseAddress.line1,
         authorizationInfo.houseAddress.line2,
@@ -137,12 +140,6 @@ export default function SmartMeterSection({ houseId }: SmartMeterSectionProps) {
         // Refresh entry indicators
         window.dispatchEvent(new CustomEvent('entriesUpdated'));
         setShowAwardModal(true);
-        setShowEmailReminder(true);
-        const key = reminderStorageKey;
-        if (typeof window !== "undefined" && key) {
-          localStorage.setItem(key, "true");
-        }
-        setHasShownEmailReminder(true);
       } catch (error) {
         console.error('Error awarding entries:', error);
       }
@@ -152,6 +149,45 @@ export default function SmartMeterSection({ houseId }: SmartMeterSectionProps) {
       alert('Something went wrong connecting your Smart Meter.');
     }
   };
+
+  const handleEmailConfirmationChoice = useCallback(
+    async (choice: 'approved' | 'declined') => {
+      if (emailConfirmationSubmitting !== 'idle') {
+        return;
+      }
+
+      setEmailConfirmationSubmitting(choice);
+      setEmailConfirmationError(null);
+
+      try {
+        const response = await fetch('/api/user/smt/email-confirmation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: choice }),
+        });
+
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({ error: 'Unable to record confirmation status' }));
+          throw new Error(data?.error ?? 'Unable to record confirmation status');
+        }
+
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('entriesUpdated'));
+        }
+
+        await fetchAuthorizationStatus();
+        setShowEmailReminder(false);
+      } catch (error) {
+        console.error('Failed to update SMT email confirmation status', error);
+        setEmailConfirmationError(
+          error instanceof Error ? error.message : 'We could not record your response right now. Please try again.',
+        );
+      } finally {
+        setEmailConfirmationSubmitting('idle');
+      }
+    },
+    [emailConfirmationSubmitting, fetchAuthorizationStatus],
+  );
 
   // Prevent hydration mismatch by not rendering until mounted
   if (!mounted || checkingStatus) {
@@ -220,6 +256,30 @@ export default function SmartMeterSection({ houseId }: SmartMeterSectionProps) {
                   {new Date(authorizationInfo.authorizationEndDate).toLocaleDateString()}
                 </p>
               ) : null}
+              <p
+                className={
+                  authorizationInfo.emailConfirmationStatus === 'DECLINED'
+                    ? 'font-semibold text-rose-200'
+                    : authorizationInfo.emailConfirmationStatus === 'APPROVED'
+                    ? 'text-emerald-200'
+                    : 'text-brand-cyan/70'
+                }
+              >
+                <span className="font-semibold">Email confirmation · </span>
+                {authorizationInfo.emailConfirmationStatus === 'APPROVED'
+                  ? `Approved${
+                      authorizationInfo.emailConfirmationAt
+                        ? ` ${new Date(authorizationInfo.emailConfirmationAt).toLocaleDateString()}`
+                        : ''
+                    }`
+                  : authorizationInfo.emailConfirmationStatus === 'DECLINED'
+                  ? `Declined${
+                      authorizationInfo.emailConfirmationAt
+                        ? ` ${new Date(authorizationInfo.emailConfirmationAt).toLocaleDateString()}`
+                        : ''
+                    }`
+                  : 'Pending customer action'}
+              </p>
             </div>
           </div>
         </div>
@@ -254,7 +314,7 @@ export default function SmartMeterSection({ houseId }: SmartMeterSectionProps) {
                 Check your inbox — action required
               </h3>
               <p className="mt-4 text-sm leading-relaxed text-brand-cyan/80">
-                We just asked Smart Meter Texas to authorize IntelliWatt. Look for an email from{" "}
+                We just asked Smart Meter Texas to authorize IntelliWatt. Look for an email from{' '}
                 <span className="font-semibold text-brand-cyan">info@communications.smartmetertexas.com</span> with the
                 subject “Authorization to allow Intelliwatt to access your electricity information”.
               </p>
@@ -264,7 +324,7 @@ export default function SmartMeterSection({ houseId }: SmartMeterSectionProps) {
                   request before it expires.
                 </li>
                 <li>
-                  • If you did not expect the request, choose <span className="font-semibold text-brand-cyan">Did Not Request</span>{" "}
+                  • If you did not expect the request, choose <span className="font-semibold text-brand-cyan">Did Not Request</span>{' '}
                   or contact support immediately.
                 </li>
                 <li>
@@ -272,19 +332,29 @@ export default function SmartMeterSection({ houseId }: SmartMeterSectionProps) {
                 </li>
               </ul>
               <p className="mt-4 text-xs uppercase tracking-wide text-brand-cyan/60">
-                Confirm the email first, then acknowledge below.
+                Tell us what happened after you reviewed the email so we can keep your rewards accurate.
               </p>
-              <div className="mt-6 flex justify-end">
+              {emailConfirmationError ? (
+                <p className="mt-4 rounded-lg border border-rose-400/40 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">
+                  {emailConfirmationError}
+                </p>
+              ) : null}
+              <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">
                 <button
-                  onClick={() => {
-                    setShowEmailReminder(false);
-                    if (typeof window !== "undefined" && reminderStorageKey) {
-                      localStorage.setItem(reminderStorageKey, "true");
-                    }
-                  }}
-                  className="inline-flex items-center rounded-full border border-brand-cyan/60 bg-brand-cyan/10 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-brand-cyan transition hover:border-brand-blue hover:text-brand-blue"
+                  type="button"
+                  onClick={() => handleEmailConfirmationChoice('declined')}
+                  disabled={emailConfirmationSubmitting !== 'idle'}
+                  className="inline-flex items-center justify-center rounded-full border border-rose-400/60 bg-rose-400/10 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-rose-200 transition hover:border-rose-300 hover:text-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  I approved the email from SMT
+                  {emailConfirmationSubmitting === 'declined' ? 'Recording…' : 'I declined or revoked the request'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleEmailConfirmationChoice('approved')}
+                  disabled={emailConfirmationSubmitting !== 'idle'}
+                  className="inline-flex items-center justify-center rounded-full border border-brand-cyan/60 bg-brand-cyan/10 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-brand-cyan transition hover:border-brand-blue hover:text-brand-blue disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {emailConfirmationSubmitting === 'approved' ? 'Saving…' : 'I approved the email from SMT'}
                 </button>
               </div>
             </div>

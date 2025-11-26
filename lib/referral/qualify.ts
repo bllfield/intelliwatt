@@ -79,9 +79,27 @@ export async function recalculateAllReferrals() {
           type: 'smart_meter_connect',
           status: { in: ['ACTIVE', 'EXPIRING_SOON'] },
         },
+        select: {
+          id: true,
+          manualUsageId: true,
+        },
       });
 
-      qualifies = Boolean(qualifyingEntry);
+      if (qualifyingEntry) {
+        if (qualifyingEntry.manualUsageId) {
+          qualifies = true;
+        } else {
+          const approvedAuthorization = await prismaAny.smtAuthorization.findFirst({
+            where: {
+              userId: referredUserId,
+              archivedAt: null,
+              emailConfirmationStatus: 'APPROVED',
+            },
+          });
+
+          qualifies = Boolean(approvedAuthorization);
+        }
+      }
     }
 
     if (qualifies) {

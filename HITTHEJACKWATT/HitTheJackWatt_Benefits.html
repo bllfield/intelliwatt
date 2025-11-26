@@ -1,0 +1,808 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Benefits | Hit The JackWatt™</title>
+    <meta name="description" content="Discover the full list of benefits of joining HitTheJackWatt™ — free entries, monthly jackpots, energy savings, and more.">
+    
+    <!-- Favicons -->
+    <link rel="shortcut icon" href="my_favicon/favicon_new.ico">
+    <link rel="icon" type="image/svg+xml" href="my_favicon/favicon_new.ico">
+    <link rel="icon" type="image/png" sizes="96x96" href="my_favicon/favicon-96x96_new.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+    <link rel="manifest" href="/site.webmanifest">
+    <!-- End Favicons -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;900&family=VT323&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        :root {
+            --neon-pink: #ff00ff;
+            --neon-blue: #00ffff;
+            --neon-green: #39ff14;
+            --neon-yellow: #ffff00;
+            --dark-blue: #001f3f;
+            --deep-purple: #120038;
+            --section-spacing: 5rem;
+            --text-spacing: 1.5rem;
+        }
+        
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            font-family: 'Montserrat', sans-serif;
+            background-color: var(--deep-purple);
+            background-image: linear-gradient(135deg, rgba(18, 0, 56, 1) 0%, rgba(36, 0, 70, 1) 100%);
+            color: white;
+            line-height: 1.6;
+            overflow-x: hidden;
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 2rem;
+            position: relative;
+            z-index: 1;
+        }
+        
+        /* Header, navigation and logo */
+        .nav-container {
+            position: sticky;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 100;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem 2rem;
+            background: rgba(18, 0, 56, 0.8);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.2);
+        }
+        
+        .nav-logo {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: white;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .nav-logo img {
+            height: 2.2rem;
+            width: auto;
+        }
+        
+        .nav-logo span {
+            color: var(--neon-green);
+            text-shadow: 0 0 10px var(--neon-green), 0 0 20px var(--neon-green), 0 0 30px var(--neon-green);
+            animation: flicker 3s infinite alternate;
+        }
+        
+        .main-jackwatt-animation {
+            color: var(--neon-green);
+            text-shadow: 0 0 10px var(--neon-green), 0 0 20px var(--neon-green), 0 0 30px var(--neon-green);
+            animation: flicker 3s infinite alternate;
+        }
+        
+        @keyframes flicker {
+            0%, 19.999%, 22%, 62.999%, 64%, 64.999%, 70%, 100% {
+                opacity: 0.99;
+                text-shadow: 0 0 10px var(--neon-green), 0 0 20px var(--neon-green), 0 0 30px var(--neon-green);
+            }
+            20%, 21.999%, 63%, 63.999%, 65%, 69.999% {
+                opacity: 0.4;
+                text-shadow: none;
+            }
+        }
+        
+        .nav-links {
+            display: flex;
+            gap: 1.5rem;
+        }
+        
+        .nav-links a {
+            color: white;
+            text-decoration: none;
+            font-weight: 500;
+            font-size: 0.9rem;
+            letter-spacing: 0.5px;
+            transition: all 0.3s ease;
+            padding: 0.5rem 0;
+            position: relative;
+        }
+        
+        .nav-links a:hover {
+            color: var(--neon-green);
+        }
+        
+        .nav-links a::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 0;
+            height: 2px;
+            background: var(--neon-green);
+            transition: width 0.3s ease;
+        }
+        
+        .nav-links a:hover::after {
+            width: 100%;
+        }
+
+        /* Benefits content */
+        .benefits-container {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            padding: 3rem;
+            margin: 4rem 0;
+            backdrop-filter: blur(5px);
+            box-shadow: 0 15px 30px rgba(0, 0, 0, 0.3);
+        }
+        
+        .page-title {
+            font-size: 2.8rem;
+            font-weight: 800;
+            text-align: center;
+            margin-bottom: 2.5rem;
+            color: var(--neon-blue);
+            text-shadow: 0 0 10px rgba(0, 255, 255, 0.3);
+            position: relative;
+        }
+        
+        .page-title::after {
+            content: '';
+            position: absolute;
+            bottom: -15px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 100px;
+            height: 3px;
+            background: linear-gradient(90deg, transparent, var(--neon-blue), transparent);
+        }
+        
+        .intro-text {
+            font-size: 1.2rem;
+            text-align: center;
+            margin-bottom: 2.5rem;
+            max-width: 800px;
+            margin-left: auto;
+            margin-right: auto;
+            color: rgba(255, 255, 255, 0.9);
+        }
+        
+        ul.benefits-list {
+            list-style-type: none;
+            padding: 0;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        
+        ul.benefits-list li {
+            display: flex;
+            align-items: baseline;
+            margin-bottom: 1.2rem;
+            padding: 0.8rem 1.2rem;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 10px;
+            transition: all 0.3s ease;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        
+        ul.benefits-list li:hover {
+            transform: translateY(-3px);
+            background: rgba(57, 255, 20, 0.1);
+            border-color: rgba(57, 255, 20, 0.3);
+            box-shadow: 0 10px 15px rgba(0, 0, 0, 0.2);
+        }
+        
+        ul.benefits-list li .icon {
+            font-size: 1.3rem;
+            margin-right: 1rem;
+            color: var(--neon-green);
+        }
+        
+        ul.benefits-list li .text {
+            flex: 1;
+            font-size: 1.1rem;
+        }
+        
+        ul.benefits-list strong {
+            color: var(--neon-yellow);
+            font-weight: 600;
+        }
+        
+        .conclusion {
+            margin-top: 2.5rem;
+            text-align: center;
+            font-size: 1.3rem;
+            font-weight: 600;
+            color: var(--neon-green);
+            padding: 1rem;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 10px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-left: auto;
+            margin-right: auto;
+            width: 100%;
+            max-width: 800px;
+        }
+        
+        /* Footer */
+        .footer {
+            text-align: center;
+            padding: 4rem 2rem 2rem;
+            margin-top: 4rem;
+            position: relative;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .footer-content {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+        }
+        
+        .footer-logo {
+            font-size: 1.5rem;
+            font-weight: 700;
+        }
+        
+        .footer-logo span {
+            color: var(--neon-green);
+        }
+        
+        .footer-links {
+            display: flex;
+            gap: 1.5rem;
+        }
+        
+        .footer-links a {
+            color: rgba(255, 255, 255, 0.7);
+            text-decoration: none;
+            font-size: 0.9rem;
+            transition: all 0.3s ease;
+        }
+        
+        .footer-links a:hover {
+            color: var(--neon-blue);
+        }
+        
+        .footer-social {
+            display: flex;
+            gap: 1rem;
+        }
+        
+        .footer-social a {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            transition: all 0.3s ease;
+            text-decoration: none;
+        }
+        
+        .footer-social a:hover {
+            background: var(--neon-green);
+            color: var(--deep-purple);
+            transform: translateY(-3px);
+            text-decoration: none;
+        }
+        
+        .footer-copyright {
+            font-size: 0.9rem;
+            color: rgba(255, 255, 255, 0.5);
+            margin-top: 2rem;
+        }
+        
+        /* Responsive design */
+        @media (max-width: 992px) {
+            .footer-content {
+                flex-direction: column;
+                gap: 1.5rem;
+            }
+            
+            .footer-links, .footer-social {
+                margin-top: 1rem;
+            }
+        }
+        
+        @media (max-width: 768px) {
+            .nav-container {
+                padding: 1rem;
+            }
+            
+            .nav-links {
+                gap: 1rem;
+            }
+            
+            .nav-links a {
+                font-size: 0.8rem;
+            }
+            
+            .page-title {
+                font-size: 2.2rem;
+            }
+            
+            .benefits-container {
+                padding: 2rem;
+            }
+            
+            ul.benefits-list li {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            
+            ul.benefits-list li .icon {
+                margin-bottom: 0.5rem;
+                font-size: 1.5rem;
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .container {
+                padding: 0 1rem;
+            }
+            
+            .benefits-container {
+                padding: 1.5rem;
+                margin: 2rem 0;
+            }
+            
+            .page-title {
+                font-size: 1.8rem;
+            }
+            
+            .footer-links {
+                flex-direction: column;
+                gap: 1rem;
+            }
+        }
+        /* Mobile menu styles */
+    .mobile-menu-toggle {
+      display: none;
+      cursor: pointer;
+      z-index: 1000;
+    }
+    
+    .hamburger {
+      width: 30px;
+      height: 20px;
+      position: relative;
+      margin: 0;
+      transform: rotate(0deg);
+      transition: .5s ease-in-out;
+    }
+    
+    .hamburger span {
+      display: block;
+      position: absolute;
+      height: 3px;
+      width: 100%;
+      background: var(--neon-green);
+      border-radius: 9px;
+      opacity: 1;
+      left: 0;
+      transform: rotate(0deg);
+      transition: .25s ease-in-out;
+      box-shadow: 0 0 8px var(--neon-green);
+    }
+    
+    .hamburger span:nth-child(1) {
+      top: 0px;
+    }
+    
+    .hamburger span:nth-child(2) {
+      top: 8px;
+    }
+    
+    .hamburger span:nth-child(3) {
+      top: 16px;
+    }
+    
+    .hamburger.open span:nth-child(1) {
+      top: 8px;
+      transform: rotate(135deg);
+    }
+    
+    .hamburger.open span:nth-child(2) {
+      opacity: 0;
+      left: -60px;
+    }
+    
+    .hamburger.open span:nth-child(3) {
+      top: 8px;
+      transform: rotate(-135deg);
+    }
+    
+    body.menu-open { overflow: hidden; }
+    
+    .mobile-close-btn {
+      position: absolute;
+      top: 15px;
+      right: 15px;
+      font-size: 30px;
+      color: var(--neon-green);
+      cursor: pointer;
+      width: 40px;
+      height: 40px;
+      display: none; /* Hide by default */
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      background: rgba(0, 0, 0, 0.3);
+      transition: all 0.3s ease;
+      box-shadow: 0 0 10px var(--neon-green);
+    }
+    
+    .mobile-close-btn:hover {
+      transform: scale(1.1);
+      background: rgba(0, 0, 0, 0.5);
+    }
+    
+    @media (max-width: 768px) {
+      .mobile-menu-toggle {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      
+      .nav-links {
+        position: fixed;
+        top: 0;
+        right: -120%;
+        width: 200px; max-width: 80%;
+        height: 100vh;
+        background: rgba(18, 0, 56, 0.98);
+        backdrop-filter: blur(15px);
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 1rem;
+        transition: right 0.3s ease;
+        z-index: 9999;
+        padding: 5rem 1rem 2rem;
+        box-shadow: -5px 0 30px rgba(0, 0, 0, 0.7);
+        visibility: hidden;
+        opacity: 0;
+      }
+      
+      .nav-links.active {
+        right: 0;
+        visibility: visible;
+        opacity: 1;
+      }
+      
+      .nav-links a {
+        font-size: 1.1rem;
+        padding: 0.8rem 0;
+        width: 100%;
+        text-align: center;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      }
+      
+      .nav-links a:last-child {
+        border-bottom: none;
+      }
+      
+      .mobile-close-btn {
+        display: flex; /* Only show on mobile */
+      }
+    }
+    
+    /* Add the CSS for the Call-to-Action section */
+    .cta-container {
+        background: rgba(57, 255, 20, 0.1);
+        border: 1px solid rgba(57, 255, 20, 0.3);
+        border-radius: 15px;
+        padding: 2.5rem;
+        margin: 4rem auto 2rem;
+        text-align: center;
+        max-width: 800px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+    }
+    
+    .cta-container h3 {
+        font-size: 2rem;
+        color: var(--neon-green);
+        margin-bottom: 1rem;
+        text-shadow: 0 0 10px rgba(57, 255, 20, 0.3);
+    }
+    
+    .cta-container p {
+        font-size: 1.2rem;
+        margin-bottom: 2rem;
+        color: white;
+        max-width: 600px;
+        margin-left: auto;
+        margin-right: auto;
+    }
+    
+    .cta-button {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.8rem;
+        padding: 1rem 2.5rem;
+        background: var(--neon-green);
+        color: var(--deep-purple);
+        font-weight: 700;
+        font-size: 1.2rem;
+        border-radius: 30px;
+        text-decoration: none;
+        transition: all 0.3s ease;
+        box-shadow: 0 0 15px rgba(57, 255, 20, 0.4);
+    }
+    
+    .cta-button:hover {
+        background: var(--neon-yellow);
+        transform: translateY(-5px);
+        box-shadow: 0 10px 20px rgba(0, 0, 0, 0.3), 0 0 20px var(--neon-yellow);
+    }
+    
+    .cta-button i {
+        font-size: 0.9rem;
+        transition: transform 0.3s ease;
+    }
+    
+    .cta-button:hover i {
+        transform: translateX(5px);
+    }
+    
+    @media (max-width: 768px) {
+        .cta-container {
+            padding: 2rem 1.5rem;
+            margin: 3rem auto 2rem;
+        }
+        
+        .cta-container h3 {
+            font-size: 1.7rem;
+        }
+        
+        .cta-container p {
+            font-size: 1.1rem;
+            margin-bottom: 1.5rem;
+        }
+        
+        .cta-button {
+            padding: 0.8rem 2rem;
+            font-size: 1.1rem;
+        }
+    }
+    
+    @media (max-width: 480px) {
+        .cta-container {
+            padding: 1.5rem 1rem;
+        }
+        
+        .cta-container h3 {
+            font-size: 1.5rem;
+        }
+        
+        .cta-button {
+            width: 100%;
+            justify-content: center;
+        }
+    }
+    </style>
+</head>
+<body>
+    <nav class="nav-container">
+      <a href="index.html" class="nav-logo">
+        <img src="Hitthejackwatt_Icon.png" alt="Hit The JackWatt™">
+        Hit The <span>JackWatt™</span>
+      </a>
+      <!-- Hamburger menu icon for mobile -->
+      <div class="mobile-menu-toggle">
+        <div class="hamburger">
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+      </div>
+      <div class="nav-links">
+        <div class="mobile-close-btn">&times;</div>
+        <a href="index.html#how-it-works">How It Works</a>
+        <a href="HitTheJackWatt_Benefits.html">Benefits</a>
+        <a href="HitTheJackWatt_Testimonials.html">Testimonials</a>
+        <a href="HitTheJackWatt_FAQ.html">FAQs</a>
+        <a href="index.html#signup">Sign Up</a>
+        <a href="HitTheJackWatt_Official_Rules.html">Official Rules</a>
+      </div>
+    </nav>
+
+    <div class="container">
+        <div class="benefits-container">
+            <h1 class="page-title">Why Join HitTheJackWatt™?</h1>
+            <p class="intro-text">HitTheJackWatt™ is built to reward smart energy decisions — no pressure, no sales, just savings and prizes.</p>
+            
+            <ul class="benefits-list">
+                <li>
+                    <span class="icon">🎯</span>
+                    <span class="text"><strong>Completely free to join</strong> — no purchases, no commitments.</span>
+                </li>
+                <li>
+                    <span class="icon">💸</span>
+                    <span class="text"><strong>Earn entries for each action</strong> — connect Smart Meter Texas or upload usage, add your current plan, and complete your home and appliance details (1 entry each).</span>
+                </li>
+                <li>
+                    <span class="icon">🔁</span>
+                    <span class="text"><strong>Keep entries active with fresh usage</strong> — refresh your usage data at least every 12 months to keep profile-based entries in the drawings. Referral and testimonial entries never expire, and AMOE postcard entries count only for the drawing period in which they are received.</span>
+                </li>
+                <li>
+                    <span class="icon">💰</span>
+                    <span class="text"><strong>Monthly jackpot grows with success</strong> — $5 added for every user who switches plans through <a href="https://www.intelli-watt.com" style="color:inherit;">IntelliWatt™</a>.</span>
+                </li>
+                <li>
+                    <span class="icon">🏆</span>
+                    <span class="text"><strong>One winner selected monthly</strong> — real cash paid out securely by check or digital wallet.</span>
+                </li>
+                <li>
+                    <span class="icon">🏠</span>
+                    <span class="text"><strong>Get insights into your home's energy usage</strong> — see where your energy goes and how to reduce waste.</span>
+                </li>
+                <li>
+                    <span class="icon">⚡</span>
+                    <span class="text"><strong>Smart Meter Texas integration</strong> — let us securely pull usage data for you (with your permission).</span>
+                </li>
+                <li>
+                    <span class="icon">📈</span>
+                    <span class="text"><strong>Track your energy behavior over time</strong> — get tips based on your real usage.</span>
+                </li>
+                <li>
+                    <span class="icon">👥</span>
+                    <span class="text"><strong>Earn 1 referral entry per friend</strong> — when they share their usage, their entry boosts your odds. No referral limit.</span>
+                </li>
+                <li>
+                    <span class="icon">🗣️</span>
+                    <span class="text"><strong>Share a testimonial for 1 more entry</strong> — available only to real customers who switch through IntelliWatt™ or complete an IntelliPath upgrade. Testimonial entries never expire.</span>
+                </li>
+                <li>
+                    <span class="icon">📊</span>
+                    <span class="text"><strong>Personalized energy savings reports</strong> — see which plans, appliances, or upgrades could save you money.</span>
+                </li>
+                <li>
+                    <span class="icon">🚫</span>
+                    <span class="text"><strong>No pressure, ever</strong> — we never sell or spam. Our mission is to help you save.</span>
+                </li>
+                <li>
+                    <span class="icon">🔒</span>
+                    <span class="text"><strong>Your data is protected</strong> — we use secure methods and never sell your personal info.</span>
+                </li>
+                <li>
+                    <span class="icon">📱</span>
+                    <span class="text"><strong>Built for mobile users</strong> — join and track entries from any device.</span>
+                </li>
+                <li>
+                    <span class="icon">🧠</span>
+                    <span class="text"><strong>Powered by AI</strong> — smarter recommendations based on real usage, weather, and efficiency data.</span>
+                </li>
+                <li>
+                    <span class="icon">🤖</span>
+                    <span class="text"><strong>Unbiased plan recommendations</strong> — always based on what saves you the most, not what pays us.</span>
+                </li>
+                <li>
+                    <span class="icon">🎉</span>
+                    <span class="text"><strong>Chance to win without spending a dime</strong> — entries are free, and an AMOE postcard option is available if you prefer not to share usage.</span>
+                </li>
+            </ul>
+            
+            <p class="conclusion"><strong>The earlier you join, the better your odds — just keep your usage current so your profile entries stay active.</strong></p>
+        </div>
+
+        <!-- Add Sign Up CTA -->
+        <div class="cta-container">
+            <h3>Ready to Start Winning?</h3>
+            <p>Sign up now to get your first entry and start maximizing your chances to win!</p>
+            <a href="index.html#signup" class="cta-button">Sign Up Now <i class="fas fa-arrow-right"></i></a>
+        </div>
+
+        <div class="footer">
+            <div class="footer-content">
+                <div class="footer-logo">
+                    <img src="Hitthejackwatt_Icon.png" alt="Hit The JackWatt™" style="height: 2.2rem; width: auto; margin-right: 0.5rem;">
+                    Hit The <span class="main-jackwatt-animation">JackWatt™</span>
+                </div>
+                <div class="footer-links">
+                    <a href="HitTheJackWatt_Privacy_Policy.html">Privacy Policy</a>
+                    <a href="HitTheJackWatt_Terms_of_Service.html">Terms of Service</a>
+                    <a href="HitTheJackWatt_Official_Rules.html">Official Rules</a>
+                    <a href="mailto:admin@hitthejackwatt.com">Contact Us</a>
+                </div>
+                <div class="footer-social">
+                    <a href="#" aria-label="Facebook"><i class="fab fa-facebook-f"></i></a>
+                    <a href="#" aria-label="X"><i class="fa-brands fa-x-twitter"></i></a>
+                    <a href="#" aria-label="Instagram"><i class="fab fa-instagram"></i></a>
+                    <a href="#" aria-label="YouTube"><i class="fab fa-youtube"></i></a>
+                    <a href="#" aria-label="TikTok"><i class="fab fa-tiktok"></i></a>
+                </div>
+            </div>
+            <div class="footer-copyright">
+                Powered by <a href="https://www.intelli-watt.com" style="color:inherit; text-decoration:inherit;">IntelliWatt™</a> | A service of <a href="https://www.intellipath-solutions.com" style="color:inherit; text-decoration:inherit;">Intellipath Solutions LLC</a> | © 2025 HitTheJackWatt™
+            </div>
+        </div>
+    </div>
+<script>
+    // Mobile menu toggle
+    document.addEventListener('DOMContentLoaded', function() {
+      const mobileMenuToggle = document.querySelector('.mobile-menu-toggle');
+      const hamburger = document.querySelector('.hamburger');
+      const navLinks = document.querySelector('.nav-links');
+      const body = document.body;
+      
+      // Toggle menu when hamburger is clicked
+      mobileMenuToggle.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        // If the menu is currently closed, show it first
+        if (!navLinks.classList.contains('active')) {
+          navLinks.style.display = 'flex';
+        }
+        
+        hamburger.classList.toggle('open');
+        navLinks.classList.toggle('active');
+        body.classList.toggle('menu-open');
+        
+        // If we're closing the menu, hide it after animation
+        if (!navLinks.classList.contains('active')) {
+          setTimeout(function() {
+            navLinks.style.display = 'none';
+          }, 300);
+        }
+      });
+      
+      // Close menu when a link is clicked
+      const navLinksItems = document.querySelectorAll('.nav-links a');
+      navLinksItems.forEach(item => {
+        item.addEventListener('click', function() {
+          hamburger.classList.remove('open');
+          navLinks.classList.remove('active');
+          body.classList.remove('menu-open');
+        });
+      });
+      
+      // Close button functionality
+      const closeBtn = document.querySelector('.mobile-close-btn');
+      if (closeBtn) {
+        closeBtn.addEventListener('click', function() {
+          hamburger.classList.remove('open');
+          navLinks.classList.remove('active');
+          body.classList.remove('menu-open');
+          
+          // Force menu to be invisible after animation completes
+          setTimeout(function() {
+            if (!navLinks.classList.contains('active')) {
+              navLinks.style.display = 'none';
+            }
+          }, 300);
+        });
+      }
+    });
+</script>
+</body>
+</html>
+
+
+

@@ -1,0 +1,2808 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="description" content="Hit The JackWatt™ - Save on your electricity bills and win cash prizes"/>
+  
+  <!-- Open Graph Meta Tags -->
+  <meta property="og:title" content="Hit The JackWatt™ - Win Big by Saving on Energy!" />
+  <meta property="og:description" content="Join the free energy rewards platform that helps you lower your bills and gives you a shot at monthly jackpots." />
+  <meta property="og:image" content="https://hitthejackwatt.com/assets/cell-link-image.jpg" />
+  <meta property="og:url" content="https://hitthejackwatt.com" />
+  <meta property="og:type" content="website" />
+
+  <!-- Twitter Card Meta Tags -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Hit The JackWatt™ - Win Big by Saving on Energy!" />
+  <meta name="twitter:description" content="Explore your energy usage, earn entries, and hit the jackpot – all for free." />
+  <meta name="twitter:image" content="https://hitthejackwatt.com/assets/cell-link-image.jpg" />
+
+  <title>Hit The JackWatt™ | Slash Your Energy Bill — and Hit the JackWatt™ (Vercel Deploy)</title>
+  <!-- Favicons -->
+  <link rel="shortcut icon" href="my_favicon/favicon_new.ico">
+  <link rel="icon" type="image/svg+xml" href="my_favicon/favicon_new.ico">
+  <link rel="icon" type="image/png" sizes="96x96" href="my_favicon/favicon-96x96_new.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/site.webmanifest">
+  <!-- End Favicons -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;900&family=VT323&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="mobile-fix.css">
+  <style>
+    :root {
+      --deep-purple: #120038;
+      --neon-green: #39ff14;
+      --neon-blue: #00ffff;
+      --neon-pink: #ff00ff;
+      --neon-yellow: #ffff00;
+      --section-spacing: 5rem;
+      --text-spacing: 1.5rem;
+    }
+    
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    
+    body {
+      font-family: 'Montserrat', sans-serif;
+      background-color: var(--deep-purple);
+      background-image: linear-gradient(135deg, rgba(18, 0, 56, 1) 0%, rgba(36, 0, 70, 1) 100%);
+      color: white;
+      line-height: 1.6;
+      overflow-x: hidden;
+      width: 100%;
+    }
+    
+    .hero {
+      min-height: 100vh;
+      background: radial-gradient(ellipse at center, rgba(36, 0, 70, 0.8) 0%, rgba(18, 0, 56, 1) 70%);
+      background-size: 200% 200%;
+      padding: 2rem;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-start;
+      align-items: center;
+      position: relative;
+      width: 100%;
+      max-width: 100vw;
+    }
+    
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxkZWZzPjxwYXR0ZXJuIGlkPSJncmlkIiB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHBhdHRlcm5Vbml0cz0idXNlclNwYWNlT25Vc2UiPjxwYXRoIGQ9Ik0gNDAgMCBMIDAgMCAwIDQwIiBmaWxsPSJub25lIiBzdHJva2U9IiMzMzMzOTkiIHN0cm9rZS13aWR0aD0iMC41Ii8+PC9wYXR0ZXJuPjwvZGVmcz48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSJ1cmwoI2dyaWQpIiAvPjwvc3ZnPg==');
+      opacity: 0.1;
+      pointer-events: none;
+    }
+    
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 2rem;
+      position: relative;
+      z-index: 1;
+    }
+    
+    /* Header, navigation and logo */
+    header {
+      position: relative;
+      width: 100%;
+      padding: 0.5rem 0;
+      margin-bottom: 2rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 2rem;
+      position: relative;
+            z-index: 1;
+    }
+        
+        /* Header, navigation and logo */
+    .nav-container {
+      position: sticky;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 100;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1rem 2rem;
+      background: rgba(18, 0, 56, 0.8);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      box-shadow: 0 4px 30px rgba(0, 0, 0, 0.2);
+    }
+        
+    .nav-logo {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: white;
+      text-decoration: none;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    
+    .nav-logo span {
+      color: var(--neon-green);
+      text-shadow: 0 0 10px var(--neon-green), 0 0 20px var(--neon-green), 0 0 30px var(--neon-green);
+      animation: flicker 3s infinite alternate;
+    }
+    
+    .nav-logo img {
+      height: 2.2rem;
+      width: auto;
+    }
+        
+    .nav-links {
+      display: flex;
+      gap: 1.5rem;
+    }
+        
+    .nav-links a {
+      color: white;
+      text-decoration: none;
+      font-weight: 500;
+      font-size: 0.9rem;
+      letter-spacing: 0.5px;
+      transition: all 0.3s ease;
+      padding: 0.5rem 0;
+      position: relative;
+    }
+        
+    .nav-links a:hover {
+      color: var(--neon-green);
+    }
+        
+    .nav-links a::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      width: 0;
+      height: 2px;
+      background: var(--neon-green);
+      transition: width 0.3s ease;
+    }
+        
+    .nav-links a:hover::after {
+       width: 100%;
+    }
+    
+    .header-content {
+      margin-top: 2rem;
+      margin-bottom: 1rem; /* Added reduced bottom margin */
+      text-align: center;
+    }
+    
+    .logo {
+      font-size: 4rem;
+      font-weight: 900;
+      margin-bottom: 1rem;
+      position: relative;
+      display: block;
+      text-align: center;
+      margin-left: auto;
+      margin-right: auto;
+      letter-spacing: 2px;
+    }
+    
+    .powered-by-text { font-size: 0.4em; font-weight: normal; display: block; margin-top: 0.3rem; color: white; }
+    
+    .intelliwatt { 
+      color: var(--neon-blue); 
+      text-shadow: 0 0 10px var(--neon-blue), 0 0 20px var(--neon-blue); 
+      font-weight: bold;
+      animation: pulse-intelliwatt 3s infinite alternate; 
+    }
+    
+    @keyframes pulse-intelliwatt {
+      0% {
+        color: var(--neon-blue);
+        text-shadow: 0 0 5px var(--neon-blue), 0 0 10px var(--neon-blue);
+      }
+      100% {
+        color: #50f0ff;
+        text-shadow: 0 0 10px var(--neon-blue), 0 0 20px var(--neon-blue), 0 0 30px rgba(0, 255, 255, 0.6);
+      }
+    }
+    
+    .logo-tagline {
+      font-size: 1.2rem;
+      font-weight: normal;
+      margin-top: 0.2rem;
+      color: white;
+    }
+    
+    .logo-tagline span {
+      color: var(--neon-blue);
+      text-shadow: 0 0 10px var(--neon-blue);
+      animation: none;
+    }
+    
+    .logo::after {
+      content: "";
+      position: absolute;
+      bottom: -10px;
+      left: 0;
+      width: 100%;
+      height: 3px;
+      background: linear-gradient(90deg, transparent, var(--neon-pink), transparent);
+    }
+    
+    .tagline {
+      font-size: 2.2rem;
+      margin-bottom: 1rem;
+      text-align: center;
+      font-weight: 700;
+      color: var(--neon-pink);
+      text-shadow: 0 0 10px var(--neon-pink), 0 0 20px rgba(255, 0, 255, 0.5);
+    }
+    
+    .subheadline {
+      font-size: 1.3rem;
+      color: white;
+      text-align: center;
+      margin-bottom: 0;
+      max-width: 800px;
+      margin-left: auto;
+      margin-right: auto;
+      line-height: 1.7;
+    }
+    
+    .subheadline strong, 
+    .subheadline span.highlight {
+      color: var(--neon-yellow);
+      text-shadow: 0 0 10px var(--neon-yellow);
+      font-weight: bold;
+    }
+    
+    .subheadline span.highlight {
+      color: var(--neon-yellow);
+      text-shadow: 0 0 10px var(--neon-yellow), 0 0 20px var(--neon-yellow);
+      font-weight: bold;
+      animation: pulse-yellow 2s infinite alternate;
+    }
+    
+    @keyframes pulse-yellow {
+      0% {
+        text-shadow: 0 0 5px var(--neon-yellow), 0 0 10px var(--neon-yellow);
+      }
+      100% {
+        text-shadow: 0 0 10px var(--neon-yellow), 0 0 20px var(--neon-yellow), 0 0 30px rgba(255, 255, 0, 0.5);
+      }
+    }
+    
+    /* Jackpot section */
+    .jackpot-container {
+      position: relative;
+      background: transparent;
+      text-align: center;
+      padding: 0;
+      margin: 3rem auto !important; /* Reduced from 6rem to 3rem */
+      max-width: 1200px;
+      border-radius: 20px;
+      border: 2px solid rgba(255, 0, 255, 0.3);
+      box-shadow: 0 0 30px rgba(255, 0, 255, 0.2);
+      overflow: visible; /* Changed from hidden to allow testimonials to be visible */
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 350px;
+    }
+    
+    .jackpot-svg-container {
+      position: relative;
+      width: 100%;
+      height: 260px;
+      overflow: hidden;
+    }
+    
+    .openart-svg {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scale(6.0);
+      transform-origin: center 57%;
+    }
+    
+    .jackpot-content {
+      position: relative;
+      z-index: 2;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      padding: 1rem 1.5rem;
+      background-color: rgba(18, 0, 56, 0.9);
+      border-radius: 0;
+      margin: 0;
+      width: 100%;
+      border-bottom: 1px solid rgba(255, 0, 255, 0.3);
+    }
+    
+    .jackpot-label-container {
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 10px;
+      margin-bottom: 0.3rem;
+    }
+    
+    .jackpot-label {
+      font-size: 1.8rem;
+      color: var(--neon-yellow);
+      text-shadow: 0 0 8px var(--neon-yellow), 0 0 16px var(--neon-yellow), 0 0 24px var(--neon-yellow);
+      letter-spacing: 2px;
+      font-weight: 700;
+      text-transform: uppercase;
+      margin-bottom: 0;
+    }
+    
+    .sample-tag {
+      display: inline-block;
+      background-color: rgba(0, 0, 0, 0.5);
+      color: var(--neon-yellow);
+      font-size: 0.9rem;
+      padding: 0.2rem 0.6rem;
+      border-radius: 4px;
+      border: 1px solid var(--neon-yellow);
+      letter-spacing: 1px;
+      position: relative;
+      z-index: 1;
+      margin: 0;
+    }
+    
+    .jackpot-container p {
+      font-size: 1.1rem;
+      opacity: 0.9;
+      margin: 0 0 0.5rem 0;
+      color: white;
+      text-shadow: 0 0 10px rgba(255, 255, 255, 0.8);
+    }
+    
+    #jackpot {
+      font-family: 'VT323', monospace;
+      font-size: 5.5rem;
+      color: var(--neon-green);
+      text-shadow: 0 0 10px var(--neon-green), 0 0 20px var(--neon-green), 0 0 30px var(--neon-green);
+      margin: 0;
+      padding: 0.3rem 2rem;
+      background: transparent;
+      border-radius: 5px;
+      min-width: 300px;
+      position: relative;
+      z-index: 2;
+      display: inline-block;
+      line-height: 1;
+    }
+    
+    .jackpot-active {
+      animation: slot-win 0.5s ease infinite alternate;
+    }
+    
+    @keyframes slot-win {
+      0% {
+        text-shadow: 0 0 10px var(--neon-green), 0 0 20px var(--neon-green);
+        transform: scale(1);
+      }
+      100% {
+        text-shadow: 0 0 20px var(--neon-green), 0 0 40px var(--neon-green), 0 0 60px var(--neon-green);
+        transform: scale(1.05);
+      }
+    }
+    
+    @media (max-width: 768px) {
+      .jackpot-container {
+        flex-direction: column;
+        min-height: auto;
+        padding: 0 1rem;
+      }
+      
+      .jackpot-svg-container {
+        width: 100%;
+        height: 200px; /* Reduced height on mobile */
+      }
+      
+      #jackpot {
+        font-size: 4rem;
+        min-width: 240px;
+        padding: 0.5rem 1rem;
+      }
+      
+      .jackpot-label {
+        font-size: 1.5rem;
+      }
+      
+      /* Reduce the scale of the slot machine image on mobile */
+      .openart-svg {
+        transform: scale(2.53);
+        transform-origin: center 60%;
+      }
+    }
+    
+    @media (max-width: 480px) {
+      .jackpot-container {
+        min-height: 280px;
+      }
+      
+      .jackpot-label {
+        font-size: 1.3rem;
+      }
+      
+      #jackpot {
+        font-size: 3.5rem;
+        min-width: 200px;
+        padding: 0.3rem 1rem;
+      }
+      
+      /* Further reduce scale for smaller devices */
+      .openart-svg {
+        transform: scale(1.87);
+        transform-origin: center 60%;
+      }
+    }
+    
+    /* Value proposition */
+    .value-prop {
+      margin: var(--section-spacing) 0;
+      text-align: center;
+      opacity: 0;
+      transform: translateY(20px);
+      animation: fadeInUp 0.6s forwards;
+      animation-delay: 0.3s;
+    }
+    
+    .value-prop:nth-child(3) {
+      animation-delay: 0.4s;
+    }
+    
+    .value-prop:nth-child(4) {
+      animation-delay: 0.5s;
+    }
+    
+    .value-prop:nth-child(5) {
+      animation-delay: 0.6s;
+    }
+    
+    @keyframes fadeInUp {
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+    
+    .catchphrase {
+      font-size: 2.8rem;
+      font-weight: 900;
+      margin: 0 0 var(--text-spacing);
+      position: relative;
+      display: inline-block;
+      color: white;
+      text-shadow: 0 0 10px rgba(255, 255, 255, 0.2);
+      width: 100%;
+      text-align: center;
+      line-height: 1.2;
+    }
+    
+    .catchphrase span {
+      color: var(--neon-pink);
+      text-shadow: 0 0 10px rgba(255, 0, 255, 0.5);
+    }
+    
+    .explanation {
+      font-size: 1.2rem;
+      line-height: 1.8;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 2.5rem;
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 15px;
+      text-align: center;
+      backdrop-filter: blur(5px);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+    
+    .explanation p + p {
+      margin-top: 1rem;
+    }
+    
+    .highlight {
+      color: var(--neon-blue);
+      font-weight: bold;
+      text-shadow: 0 0 10px var(--neon-blue), 0 0 15px var(--neon-blue);
+      animation: pulse-highlight 2s infinite alternate;
+    }
+    
+    @keyframes pulse-highlight {
+      0% {
+        text-shadow: 0 0 5px var(--neon-blue), 0 0 10px var(--neon-blue);
+      }
+      100% {
+        text-shadow: 0 0 10px var(--neon-blue), 0 0 20px var(--neon-blue), 0 0 30px rgba(0, 255, 255, 0.5);
+      }
+    }
+    
+    /* Steps section */
+    .steps-section {
+      margin: var(--section-spacing) 0;
+      padding: 5rem 1rem 2rem;
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 20px;
+      position: relative;
+      overflow: hidden;
+      box-shadow: 0 15px 30px rgba(0, 0, 0, 0.3);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+    
+    .steps-section::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: radial-gradient(circle at top right, rgba(57, 255, 20, 0.15), transparent 60%);
+      pointer-events: none;
+    }
+    
+    .steps-heading {
+      font-size: 2.8rem;
+      margin-bottom: 1rem;
+      text-align: center;
+      position: relative;
+      color: white;
+    }
+    
+    .steps-intro {
+      text-align: center;
+      font-size: 1.4rem;
+      color: var(--neon-blue);
+      margin-bottom: 3rem;
+      max-width: 800px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    
+    .steps-heading::after {
+      content: '';
+      position: absolute;
+      bottom: -10px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 100px;
+      height: 3px;
+      background: linear-gradient(90deg, transparent, var(--neon-green), transparent);
+    }
+    
+    .steps-new {
+      display: flex;
+      flex-direction: column;
+      gap: 2.5rem;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    
+    .step-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 1.5rem;
+      background: rgba(18, 0, 56, 0.7);
+      border-radius: 15px;
+      padding: 2rem;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      transition: all 0.3s ease;
+      position: relative;
+      overflow: hidden;
+    }
+    
+    .step-item:hover {
+      transform: translateY(-8px);
+      box-shadow: 0 15px 30px rgba(0, 0, 0, 0.3);
+      border-color: var(--neon-green);
+    }
+    
+    .step-number-new {
+      background: var(--neon-yellow);
+      color: var(--deep-purple);
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      font-size: 1.8rem;
+      flex-shrink: 0;
+      box-shadow: 0 0 15px var(--neon-yellow);
+    }
+    
+    .step-content {
+      flex: 1;
+    }
+    
+    .step-title-new {
+      font-size: 1.5rem;
+      margin-bottom: 0.8rem;
+      color: var(--neon-green);
+      font-weight: 700;
+    }
+    
+    .step-description {
+      font-size: 1.1rem;
+      line-height: 1.6;
+      color: rgba(255, 255, 255, 0.9);
+    }
+    
+    /* Stats banner */
+    .stats-banner {
+      display: flex;
+      justify-content: space-around;
+      align-items: center;
+      flex-wrap: wrap;
+      margin: 4rem auto;
+      padding: 2rem;
+      background: rgba(0, 0, 0, 0.3);
+      border-radius: 15px;
+      max-width: 900px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      backdrop-filter: blur(15px);
+    }
+    
+    .stat-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 1rem 2rem;
+    }
+    
+    .stat-number {
+      font-size: 3rem;
+      font-weight: 900;
+      color: var(--neon-blue);
+      margin-bottom: 0.5rem;
+      text-shadow: 0 0 10px rgba(0, 255, 255, 0.5);
+    }
+    
+    .stat-label {
+      font-size: 1rem;
+      color: white;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    
+    /* Special callouts */
+    .solar-callout {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      color: var(--neon-green); 
+      font-weight: 500; 
+      margin: 3rem auto; 
+      max-width: 900px;
+      padding: 2rem;
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 15px;
+      box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
+      border: 1px solid rgba(57, 255, 20, 0.2);
+      text-align: left;
+    }
+    
+    .solar-callout h3 {
+      margin-bottom: 0.5rem;
+      font-size: 1.3rem;
+      color: var(--neon-green);
+    }
+    
+    .solar-callout p {
+      font-size: 1.1rem;
+      color: white;
+      line-height: 1.6;
+    }
+    
+    .solar-icon {
+      font-size: 3.5rem;
+      color: var(--neon-green);
+      text-shadow: 0 0 10px var(--neon-green);
+    }
+    
+    /* CTA Section */
+    .cta-section {
+      margin: var(--section-spacing) 0;
+      text-align: center;
+    }
+    
+    .cta-heading {
+      font-size: 2.8rem;
+      margin-bottom: 2rem;
+      color: white;
+      position: relative;
+      display: inline-block;
+    }
+    
+    .cta-heading::after {
+      content: '';
+      position: absolute;
+      bottom: -10px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 100px;
+      height: 3px;
+      background: linear-gradient(90deg, transparent, var(--neon-blue), transparent);
+    }
+    
+    .sign-up-form {
+      max-width: 600px;
+      margin: 3rem auto;
+      padding: 3rem;
+      background: rgba(0, 0, 0, 0.3);
+      border-radius: 15px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      box-shadow: 0 15px 35px rgba(0, 0, 0, 0.3);
+      backdrop-filter: blur(15px);
+    }
+    
+    .form-heading {
+      margin-bottom: 1.5rem;
+      font-size: 1.8rem;
+      color: white;
+    }
+    
+    .form-group {
+      display: flex;
+      margin-top: 2rem;
+      position: relative;
+    }
+    
+    .email-input {
+      flex: 1;
+      padding: 1.2rem;
+      padding-right: 120px;
+      border: none;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.1);
+      color: white;
+      font-size: 1.1rem;
+      outline: none;
+      transition: all 0.3s ease;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    
+    .email-input:focus {
+      background: rgba(255, 255, 255, 0.2);
+      box-shadow: 0 0 10px var(--neon-blue);
+      border-color: var(--neon-blue);
+    }
+    
+    .submit-btn {
+      position: absolute;
+      right: 5px;
+      top: 5px;
+      bottom: 5px;
+      padding: 0 1.5rem;
+      border: none;
+      border-radius: 6px;
+      background: var(--neon-green);
+      color: var(--deep-purple);
+      font-weight: 600;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      letter-spacing: 1px;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    
+    .submit-btn:hover {
+      background: var(--neon-yellow);
+      box-shadow: 0 0 15px var(--neon-yellow);
+    }
+    
+    .submit-btn i {
+      font-size: 0.9rem;
+      transition: transform 0.3s ease;
+    }
+    
+    .submit-btn:hover i {
+      transform: translateX(4px);
+    }
+    
+    .form-help {
+      margin-top: 1.5rem;
+      font-size: 0.9rem;
+      color: rgba(255, 255, 255, 0.7);
+    }
+    
+    .form-help a {
+      color: var(--neon-green);
+      text-decoration: none;
+      transition: all 0.3s ease;
+    }
+    
+    .form-help a:hover {
+      color: var(--neon-yellow);
+      text-shadow: 0 0 5px var(--neon-yellow);
+    }
+    
+    .thank-you-message {
+      padding: 2rem;
+      border: 1px solid var(--neon-green);
+      border-radius: 10px;
+      background: rgba(57, 255, 20, 0.1);
+      animation: glow 2s infinite alternate;
+    }
+    
+    .thank-you-message h3 {
+      color: var(--neon-green);
+      margin-bottom: 1rem;
+      font-size: 1.5rem;
+    }
+    
+    @keyframes glow {
+      0% {
+        box-shadow: 0 0 5px var(--neon-green);
+      }
+      100% {
+        box-shadow: 0 0 20px var(--neon-green);
+      }
+    }
+    
+    /* States list */
+    .states-list {
+      text-align: center; 
+      padding: 3rem 2rem; 
+      background: rgba(0, 0, 0, 0.2);
+      margin: 3rem auto;
+      border-radius: 15px;
+      max-width: 900px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+    }
+    
+    .states-list h4 {
+      color: white;
+      font-size: 1.3rem;
+      margin-bottom: 1.5rem;
+      font-weight: 600;
+    }
+    
+    .states-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 1rem;
+      margin: 1.5rem 0;
+    }
+    
+    .states-grid span {
+      color: rgba(255, 255, 255, 0.8);
+      font-size: 1rem;
+      padding: 0.5rem;
+      background: rgba(0, 0, 0, 0.3);
+      border-radius: 5px;
+      transition: all 0.3s ease;
+    }
+    
+    .states-grid span:hover {
+      color: white;
+      background: rgba(0, 255, 255, 0.1);
+      transform: translateY(-3px);
+    }
+    
+    .states-more {
+      color: rgba(255, 255, 255, 0.5);
+      font-style: italic;
+      margin-top: 1rem;
+    }
+    
+    /* Footer */
+    .footer {
+      text-align: center;
+      padding: 4rem 2rem 2rem;
+      margin-top: 4rem;
+      position: relative;
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    
+    .footer-content {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 2rem;
+    }
+    
+    .footer-logo {
+      font-size: 1.5rem;
+      font-weight: 700;
+    }
+    
+    .footerh1.logo > span:first-child {
+      color: var(--neon-green);
+    }
+    
+    .footer-links {
+      display: flex;
+      gap: 1.5rem;
+    }
+    
+    .footer-links a {
+      color: rgba(255, 255, 255, 0.7);
+      text-decoration: none;
+      font-size: 0.9rem;
+      transition: all 0.3s ease;
+    }
+    
+    .footer-links a:hover {
+      color: var(--neon-blue);
+    }
+    
+    .footer-social {
+      display: flex;
+      gap: 1rem;
+    }
+    
+    .footer-social a {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.1);
+      color: white;
+      transition: all 0.3s ease;
+      text-decoration: none;
+    }
+    
+    .footer-social a:hover {
+      background: var(--neon-green);
+      color: var(--deep-purple);
+      transform: translateY(-3px);
+      text-decoration: none;
+    }
+    
+    .footer-copyright {
+      font-size: 0.9rem;
+      color: rgba(255, 255, 255, 0.5);
+      margin-top: 2rem;
+    }
+    
+    .energy-tagline {
+      color: #7fdbff; 
+      font-weight: bold; 
+      margin-top: 20px; 
+      padding: 0.8rem 1.5rem;
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 8px;
+      display: inline-block;
+    }
+    
+    /* Animations */
+    @keyframes flicker {
+      0%, 19.999%, 22%, 62.999%, 64%, 64.999%, 70%, 100% {
+        opacity: 0.99;
+        text-shadow: 0 0 10px var(--neon-green), 0 0 20px var(--neon-green), 0 0 30px var(--neon-green);
+      }
+      20%, 21.999%, 63%, 63.999%, 65%, 69.999% {
+        opacity: 0.4;
+        text-shadow: none;
+      }
+    }
+    
+    @keyframes rotate {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    
+    @media (max-width: 992px) {
+      .footer-content {
+        flex-direction: column;
+        gap: 1.5rem;
+      }
+      
+      .footer-links, .footer-social {
+        margin-top: 1rem;
+      }
+    }
+    
+    @media (max-width: 768px) {
+      :root {
+        --section-spacing: 3.5rem;
+        --text-spacing: 1.2rem;
+      }
+      
+      .nav-container {
+        padding: 1rem;
+      }
+      
+      .nav-links {
+        gap: 1rem;
+      }
+      
+      .nav-links a {
+        font-size: 0.8rem;
+      }
+      
+      .header-content {
+        margin-top: 1rem;
+      }
+      
+      .logo {
+        font-size: 3rem;
+        margin-bottom: 0.5rem;
+      }
+      
+      .tagline {
+        font-size: 1.8rem;
+        margin-bottom: 0.8rem;
+      }
+      
+      .subheadline {
+        font-size: 1.1rem;
+      }
+      
+      .catchphrase {
+        font-size: 2.2rem;
+      }
+      
+      #jackpot {
+        font-size: 4rem;
+        min-width: 240px;
+      }
+      
+      .steps-heading {
+        font-size: 2.2rem;
+      }
+      
+      .steps-intro {
+        font-size: 1.2rem;
+      }
+      
+      .step-item {
+        flex-direction: column;
+        align-items: flex-start;
+        padding: 1.5rem;
+      }
+      
+      .step-number-new {
+        margin-bottom: 1rem;
+      }
+      
+      .stats-banner {
+        flex-direction: column;
+        gap: 1rem;
+      }
+      
+      .solar-callout {
+        flex-direction: column;
+        text-align: center;
+        gap: 1rem;
+      }
+      
+      .solar-icon {
+        margin-bottom: 1rem;
+      }
+      
+      .explanation, .sign-up-form {
+        padding: 1.5rem;
+      }
+      
+      .form-group {
+        flex-direction: column;
+      }
+      
+      .email-input {
+        padding-right: 1.2rem;
+        margin-bottom: 1rem;
+      }
+      
+      .submit-btn {
+        position: static;
+        width: 100%;
+        padding: 1rem;
+      }
+    }
+    
+    @media (max-width: 480px) {
+      .container {
+        padding: 0 1rem;
+      }
+      
+      .logo {
+        font-size: 2.5rem;
+      }
+      
+      .tagline {
+        font-size: 1.5rem;
+      }
+      
+      .jackpot-label {
+        font-size: 1.3rem;
+      }
+      
+      #jackpot {
+        font-size: 3.5rem;
+        min-width: 200px;
+        padding: 0.3rem 1rem;
+      }
+      
+      .catchphrase {
+        font-size: 1.8rem;
+      }
+      
+      .step-number-new {
+        width: 40px;
+        height: 40px;
+        font-size: 1.2rem;
+      }
+      
+      .states-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+      
+      .footer-links {
+        flex-direction: column;
+        gap: 1rem;
+      }
+      
+      .header-content {
+        margin-top: 0.5rem;
+      }
+    }
+    
+    /* Mascot section */
+    .mascot-section {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 3rem;
+      margin: var(--section-spacing) 0;
+      padding: 3rem;
+      background: rgba(18, 0, 56, 0.6);
+      border-radius: 20px;
+      border: 1px solid rgba(0, 255, 255, 0.15);
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+      position: relative;
+      backdrop-filter: blur(15px);
+      overflow: hidden;
+    }
+    
+    .mascot-section::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: radial-gradient(circle at 30% 70%, rgba(57, 255, 20, 0.03), transparent 60%),
+                  radial-gradient(circle at 70% 30%, rgba(0, 255, 255, 0.03), transparent 60%);
+      pointer-events: none;
+      border-radius: 20px;
+    }
+    
+    /* SVG Bot Styles */
+    .intelliwatt-bot {
+      flex-shrink: 0;
+      width: 200px;
+      display: flex;
+      justify-content: flex-start;
+      align-items: center;
+    }
+    
+    .intelliwatt-bot img {
+      max-width: 100%;
+      max-height: 250px;
+      width: auto;
+      height: auto;
+      object-fit: contain;
+      filter: drop-shadow(0 8px 20px rgba(0, 0, 0, 0.2));
+      animation: float 6s ease-in-out infinite;
+      transition: all 0.3s ease;
+    }
+    
+    .intelliwatt-bot img:hover {
+      transform: scale(1.05);
+    }
+    
+    @keyframes float {
+      0%, 100% { transform: translateY(0); }
+      40% { transform: translateY(-10px); }
+      60% { transform: translateY(-6px); }
+    }
+    
+    .mascot-content {
+      flex: 1;
+      max-width: 600px;
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+    
+    .mascot-heading {
+      font-size: 2rem;
+      color: var(--neon-blue);
+      text-shadow: 0 0 5px rgba(0, 255, 255, 0.2);
+      font-weight: 700;
+      position: relative;
+      display: inline-block;
+      margin-bottom: 0.5rem;
+    }
+    
+    .mascot-heading::after {
+      content: '';
+      position: absolute;
+      bottom: -10px;
+      left: 0;
+      width: 60px;
+      height: 2px;
+      background: var(--neon-blue);
+      box-shadow: 0 0 8px var(--neon-blue);
+    }
+    
+    .mascot-subheading {
+      font-size: 1.3rem;
+      color: var(--neon-green);
+      margin-bottom: 1rem;
+      font-weight: 600;
+    }
+    
+    .mascot-text {
+      font-size: 1.15rem;
+      line-height: 1.6;
+      color: rgba(255, 255, 255, 0.95);
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+      margin-bottom: 0.5rem;
+    }
+    
+    .mascot-feature {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      margin-top: 0.5rem;
+    }
+    
+    .feature-icon {
+      color: var(--neon-green);
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      font-size: 1.2rem;
+      width: 30px;
+      height: 30px;
+      background: rgba(57, 255, 20, 0.1);
+      border-radius: 50%;
+    }
+    
+    .feature-text {
+      font-size: 1.05rem;
+      color: rgba(255, 255, 255, 0.9);
+    }
+    
+    @media (max-width: 768px) {
+      .mascot-section {
+        flex-direction: column;
+        padding: 2.5rem 2rem;
+        gap: 1rem;
+      }
+      
+      .intelliwatt-bot {
+        width: 180px;
+        height: 260px;
+      }
+      
+      .mascot-heading {
+        font-size: 1.8rem;
+        text-align: center;
+      }
+      
+      .mascot-heading::after {
+        left: 50%;
+        transform: translateX(-50%);
+      }
+      
+      .mascot-text {
+        text-align: center;
+      }
+      
+      .mascot-content {
+        align-items: center;
+      }
+    }
+    
+    /* Testimonials section styles */
+    .testimonials-section {
+      margin: var(--section-spacing) 0;
+      padding: 5rem 1rem 2rem;
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 20px;
+      position: relative;
+      overflow: hidden;
+      box-shadow: 0 15px 30px rgba(0, 0, 0, 0.3);
+      border: 1px solid rgba(0, 255, 255, 0.1);
+    }
+    
+    .testimonials-section::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: radial-gradient(circle at bottom left, rgba(255, 0, 255, 0.05), transparent 60%),
+                  radial-gradient(circle at top right, rgba(0, 255, 255, 0.05), transparent 60%);
+      pointer-events: none;
+    }
+    
+    .testimonials-heading {
+      font-size: 2.4rem;
+      margin-bottom: 3rem;
+      text-align: center;
+      position: relative;
+      color: white;
+    }
+    
+    .testimonials-heading::after {
+      content: '';
+      position: absolute;
+      bottom: -10px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 100px;
+      height: 3px;
+      background: linear-gradient(90deg, transparent, var(--neon-pink), transparent);
+    }
+    
+    .testimonials-slider {
+      display: flex;
+      gap: 1rem;
+      overflow-x: auto;
+      padding: 1rem 0.5rem;
+      margin: 0 -0.5rem;
+      -ms-overflow-style: none;  /* Hide scrollbar IE and Edge */
+      scrollbar-width: none;  /* Hide scrollbar Firefox */
+    }
+    
+    .testimonials-slider::-webkit-scrollbar {
+      display: none; /* Hide scrollbar Chrome, Safari, Opera */
+    }
+    
+    .testimonial-card {
+      flex: 0 0 auto;
+      width: 100%;
+      max-width: 400px;
+      min-width: 280px;
+      background: rgba(18, 0, 56, 0.7);
+      border-radius: 15px;
+      padding: 2rem;
+      box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      transition: all 0.3s ease;
+      position: relative;
+      overflow: hidden;
+    }
+    
+    .testimonial-card::before {
+      content: '"';
+      position: absolute;
+      top: -30px;
+      left: 10px;
+      font-size: 8rem;
+      color: rgba(255, 0, 255, 0.1);
+      font-family: sans-serif;
+      line-height: 1;
+    }
+    
+    .testimonial-card:hover {
+      transform: translateY(-5px);
+      border-color: var(--neon-pink);
+      box-shadow: 0 15px 30px rgba(0, 0, 0, 0.3);
+    }
+    
+    .testimonial-quote p {
+      font-size: 1.1rem;
+      line-height: 1.7;
+      margin-bottom: 1.5rem;
+      position: relative;
+      z-index: 1;
+    }
+    
+    .testimonial-author {
+      margin-top: 1rem;
+    }
+    
+    .author-name {
+      font-weight: 600;
+      color: var(--neon-blue);
+      margin-bottom: 0.2rem;
+    }
+    
+    .author-location {
+      font-style: italic;
+      font-size: 0.9rem;
+      color: rgba(255, 255, 255, 0.7);
+    }
+    
+    .testimonials-link {
+      text-align: center;
+      margin-top: 2.5rem;
+    }
+    
+    .more-testimonials-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.8rem;
+      padding: 0.8rem 1.5rem;
+      background: rgba(255, 255, 255, 0.1);
+      color: white;
+      border-radius: 30px;
+      text-decoration: none;
+      transition: all 0.3s ease;
+      font-weight: 500;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    
+    .more-testimonials-btn i {
+      transition: transform 0.3s ease;
+    }
+    
+    .more-testimonials-btn:hover {
+      background: var(--neon-pink);
+      color: white;
+      transform: translateY(-3px);
+      box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
+    }
+    
+    .more-testimonials-btn:hover i {
+      transform: translateX(5px);
+    }
+    
+    @media (max-width: 768px) {
+      .testimonial-card {
+        min-width: 100%;
+      }
+      
+      .testimonials-section {
+        padding: 3rem 1.5rem;
+      }
+      
+      .testimonials-heading {
+        font-size: 2rem;
+      }
+    }
+    
+    @media (max-width: 480px) {
+      .testimonials-heading {
+        font-size: 1.8rem;
+      }
+      
+      .testimonial-quote p {
+        font-size: 1rem;
+      }
+    }
+    
+    /* IntelliWatt Branding Section */
+    .intelliwatt-branding {
+      margin: var(--section-spacing) 0;
+      padding: 3rem 2rem;
+      background: rgba(0, 0, 0, 0.3);
+      border-radius: 20px;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+      border: 1px solid rgba(0, 255, 255, 0.2);
+      box-shadow: 0 15px 30px rgba(0, 0, 0, 0.3);
+    }
+    
+    .intelliwatt-branding::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: radial-gradient(circle at bottom right, rgba(0, 255, 255, 0.15), transparent 60%);
+      pointer-events: none;
+    }
+    
+        .intelliwatt-content {      position: relative;      z-index: 1;      max-width: 800px;      margin: 0 auto;    }        .intelliwatt-heading {      font-size: 2.5rem;      margin-bottom: 1.5rem;      color: white;    }        .intelliwatt-heading span {      color: var(--neon-blue);      text-shadow: 0 0 10px var(--neon-blue);    }        .intelliwatt-text {      font-size: 1.2rem;      line-height: 1.8;      margin-bottom: 1.5rem;      color: rgba(255, 255, 255, 0.95);    }    .intelliwatt-text:not(:last-of-type) {      margin-bottom: 1.2rem;    }        .intelliwatt-cta {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.8rem;
+      padding: 1rem 2rem;
+      background: var(--neon-blue);
+      color: var(--deep-purple);
+      font-weight: 600;
+      font-size: 1.1rem;
+      border-radius: 30px;
+      text-decoration: none;
+      transition: all 0.3s ease;
+      box-shadow: 0 0 15px rgba(0, 255, 255, 0.4);
+    }
+    
+    .intelliwatt-cta i {
+      transition: transform 0.3s ease;
+    }
+    
+    .intelliwatt-cta:hover {
+      background: white;
+      box-shadow: 0 0 20px rgba(0, 255, 255, 0.6);
+      transform: translateY(-3px);
+    }
+    
+    .intelliwatt-cta:hover i {
+      transform: translateX(5px);
+    }
+    
+    @media (max-width: 768px) {
+      .intelliwatt-branding {
+        padding: 2.5rem 1.5rem;
+      }
+      
+      .intelliwatt-heading {
+        font-size: 2rem;
+      }
+      
+      .intelliwatt-text {
+        font-size: 1.1rem;
+      }
+    }
+    
+    @media (max-width: 480px) {
+      .intelliwatt-heading {
+        font-size: 1.8rem;
+      }
+      
+      .intelliwatt-text {
+        font-size: 1rem;
+      }
+      
+      .intelliwatt-cta {
+        padding: 0.8rem 1.5rem;
+        font-size: 1rem;
+      }
+    }
+    
+    /* Main JackWatt animation */
+    .main-jackwatt-animation {
+      color: var(--neon-green);
+      text-shadow: 0 0 10px var(--neon-green), 0 0 20px var(--neon-green), 0 0 30px var(--neon-green);
+      animation: flicker 3s infinite alternate;
+    }
+    
+        /* Mobile menu styles */
+    .mobile-menu-toggle {
+      display: none;
+      cursor: pointer;
+      z-index: 1000;
+    }
+    
+    .hamburger {
+      width: 30px;
+      height: 20px;
+      position: relative;
+      margin: 0;
+      transform: rotate(0deg);
+      transition: .5s ease-in-out;
+    }
+    
+    .hamburger span {
+      display: block;
+      position: absolute;
+      height: 3px;
+      width: 100%;
+      background: var(--neon-green);
+      border-radius: 9px;
+      opacity: 1;
+      left: 0;
+      transform: rotate(0deg);
+      transition: .25s ease-in-out;
+      box-shadow: 0 0 8px var(--neon-green);
+    }
+    
+    .hamburger span:nth-child(1) {
+      top: 0px;
+    }
+    
+    .hamburger span:nth-child(2) {
+      top: 8px;
+    }
+    
+    .hamburger span:nth-child(3) {
+      top: 16px;
+    }
+    
+    .hamburger.open span:nth-child(1) {
+      top: 8px;
+      transform: rotate(135deg);
+    }
+    
+    .hamburger.open span:nth-child(2) {
+      opacity: 0;
+      left: -60px;
+    }
+    
+    .hamburger.open span:nth-child(3) {
+      top: 8px;
+      transform: rotate(-135deg);
+    }
+    
+    body.menu-open { overflow: hidden; }
+    
+    .mobile-close-btn {
+      position: absolute;
+      top: 15px;
+      right: 15px;
+      font-size: 30px;
+      color: var(--neon-green);
+      cursor: pointer;
+      width: 40px;
+      height: 40px;
+      display: none; /* Hide by default */
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      background: rgba(0, 0, 0, 0.3);
+      transition: all 0.3s ease;
+      box-shadow: 0 0 10px var(--neon-green);
+    }
+    
+    .mobile-close-btn:hover {
+      transform: scale(1.1);
+      background: rgba(0, 0, 0, 0.5);
+    }
+    
+    @media (max-width: 768px) {
+      .mobile-menu-toggle {
+        display: flex;
+        align-items: center;
+        justify-content: flex-start;
+      }
+      
+      .nav-links {
+        position: fixed;
+        top: 0;
+        right: -120%;
+        width: 200px; max-width: 80%;
+        height: 100vh;
+        background: rgba(18, 0, 56, 0.98);
+        backdrop-filter: blur(15px);
+        flex-direction: column;
+        align-items: center;
+        justify-content: flex-start;
+        gap: 1rem;
+        transition: right 0.3s ease;
+        z-index: 9999;
+        padding: 5rem 1rem 2rem;
+        box-shadow: -5px 0 30px rgba(0, 0, 0, 0.7);
+        visibility: hidden;
+        opacity: 0;
+      }
+      
+      .nav-links.active {
+        right: 0;
+        visibility: visible;
+        opacity: 1;
+      }
+      
+      .nav-links a {
+        font-size: 1.1rem;
+        padding: 0.8rem 0;
+        width: 100%;
+        text-align: center;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      }
+      
+      .nav-links a:last-child {
+        border-bottom: none;
+      }
+      
+      .mobile-close-btn {
+        display: flex; /* Only show on mobile */
+      }
+    }
+    
+    /* Floating mini testimonials */
+    .floating-testimonial {
+      position: absolute;
+      width: 200px; /* Slightly narrower to fit better */
+      background: rgba(18, 0, 56, 0.9); /* More opaque background */
+      border-radius: 10px;
+      padding: 1.2rem;
+      box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3), 0 0 10px rgba(0, 255, 255, 0.2);
+      border: 1px solid rgba(0, 255, 255, 0.4); /* More visible border */
+      backdrop-filter: blur(5px);
+      z-index: 2;
+      transform: rotate(-5deg);
+      transition: all 0.3s ease;
+      animation: float-testimonial 6s ease-in-out infinite;
+      pointer-events: none;
+    }
+    
+    @keyframes float-testimonial {
+      0%, 100% { transform: rotate(-5deg) translateY(0); }
+      50% { transform: rotate(-5deg) translateY(-10px); }
+    }
+    
+    @keyframes float-testimonial-right {
+      0%, 100% { transform: rotate(5deg) translateY(0); }
+      50% { transform: rotate(5deg) translateY(-12px); }
+    }
+    
+    .floating-testimonial:hover {
+      transform: rotate(0deg) translateY(-5px);
+      box-shadow: 0 15px 30px rgba(0, 0, 0, 0.4), 0 0 15px var(--neon-blue);
+      border-color: var(--neon-green);
+      animation-play-state: paused;
+    }
+    
+    .floating-testimonial.right {
+      transform: rotate(5deg);
+      animation: float-testimonial-right 7s ease-in-out infinite;
+    }
+    
+    .floating-testimonial.right:hover {
+      transform: rotate(0deg) translateY(-5px);
+      animation-play-state: paused;
+    }
+    
+    .floating-testimonial::before {
+      content: '"';
+      position: absolute;
+      top: -15px;
+      left: 10px;
+      font-size: 4rem;
+      color: rgba(255, 0, 255, 0.2);
+      font-family: sans-serif;
+      line-height: 1;
+    }
+    
+    .floating-testimonial:after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(120deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0) 50%);
+      border-radius: 10px;
+      pointer-events: none;
+    }
+    
+    .floating-testimonial p {
+      font-size: 0.9rem;
+      line-height: 1.5;
+      margin-bottom: 0.8rem;
+      position: relative;
+      z-index: 1;
+      font-style: italic;
+      color: rgba(255, 255, 255, 0.95);
+      text-shadow: 0 1px 1px rgba(0, 0, 0, 0.5);
+    }
+    
+    .floating-testimonial .mini-author-name {
+      font-weight: 600;
+      font-size: 0.8rem;
+      color: var(--neon-blue);
+      margin-bottom: 0;
+    }
+    
+    .floating-testimonial .mini-author-location {
+      font-style: italic;
+      font-size: 0.7rem;
+      color: rgba(255, 255, 255, 0.7);
+    }
+    
+    .testimonial-2 {
+      position: fixed;
+      top: 45%; 
+      right: 15px; /* Absolute position from the right edge */
+      transform: rotate(5deg);
+    }
+    
+    .testimonial-3 {
+      position: fixed;
+      top: 60%; 
+      left: 15px;
+      transform: rotate(-5deg);
+    }
+    
+    .testimonial-4 {
+      position: fixed;
+      top: 75%; 
+      right: 15px;
+      transform: rotate(5deg);
+    }
+    
+    /* Hide testimonials at smaller screen sizes where they might overlap */
+    @media (max-width: 1400px) {
+      .floating-testimonial {
+        display: none;
+      }
+    }
+    
+    /* Mobile styles for jackpot testimonials */
+    @media (max-width: 768px) {
+      /* Setup container ordering */
+      .jackpot-container {
+        display: flex;
+        flex-direction: column;
+      }
+      
+      /* Add bottom margin to svg container */
+      .jackpot-svg-container {
+        margin-bottom: 1.5rem;
+      }
+      
+      /* Hide original testimonials in content section */
+      .jackpot-content > div > div:first-child,
+      .jackpot-content > div > div:last-child {
+        display: none !important;
+      }
+      
+      /* Add mobile testimonials at the bottom */
+      .mobile-testimonials {
+        display: none !important; /* Hidden by default on ALL devices */
+      }
+      
+      /* Show on mobile only */
+      @media (max-width: 768px) {
+        .mobile-testimonials {
+          display: flex !important; /* Override to show ONLY on mobile */
+        }
+        
+        .mobile-testimonial {
+          width: 85%;
+          margin: 0 auto;
+          padding: 1rem;
+          background-color: rgba(18, 0, 56, 0.95);
+          border-radius: 10px;
+          border: 1.5px solid rgba(57, 255, 20, 0.5);
+          box-shadow: 0 8px 25px rgba(0, 0, 0, 0.5), 0 0 15px rgba(0, 255, 255, 0.3);
+          text-align: left;
+        }
+        
+        .mobile-testimonial p:first-child {
+          font-size: 0.9rem;
+          line-height: 1.5;
+          margin-bottom: 0.8rem;
+          font-style: italic;
+          color: rgba(255, 255, 255, 0.95);
+          text-shadow: 0 1px 1px rgba(0, 0, 0, 0.5);
+        }
+        
+        .mobile-testimonial p:nth-child(2) {
+          font-weight: 600;
+          font-size: 0.8rem;
+          color: #00ffff;
+          margin-bottom: 0;
+        }
+        
+        .mobile-testimonial p:last-child {
+          font-style: italic;
+          font-size: 0.7rem;
+          color: rgba(255, 255, 255, 0.7);
+        }
+      }
+    }
+    
+    /* Hide floating testimonials on mobile */
+    @media (max-width: 768px) {
+      .floating-testimonial.testimonial-2,
+      .floating-testimonial.testimonial-3,
+      .floating-testimonial.testimonial-4 {
+        display: none !important;
+      }
+    }
+    
+    /* Mobile testimonials - hide completely on desktop */
+    .mobile-testimonials {
+      display: none !important; /* Hidden by default on ALL devices */
+    }
+    
+    /* Show mobile testimonials ONLY on mobile */
+    @media (max-width: 768px) {
+      .mobile-testimonials {
+        display: flex !important; /* Override to show ONLY on mobile */
+        flex-direction: column;
+        gap: 1rem;
+        width: 100%;
+        margin-top: 0;
+      }
+    }
+    
+    /* Add this to the existing styles */
+    .neon-blue-text {
+        color: var(--neon-blue) !important;
+        text-shadow: 0 0 10px var(--neon-blue) !important;
+        transition: all 0.3s ease;
+    }
+    .neon-blue-text:hover {
+        text-shadow: 0 0 15px var(--neon-blue), 0 0 25px var(--neon-blue) !important;
+    }
+
+    /* Mobile Testimonial Styles */
+    .mobile-testimonial {
+      width: 90%;
+      margin: 1rem auto 0;
+      padding: 1.2rem 1rem;
+      background-color: rgba(18, 0, 56, 0.95);
+      border-radius: 10px;
+      border: 1.5px solid rgba(57, 255, 20, 0.5);
+      box-shadow: 0 8px 25px rgba(0, 0, 0, 0.5), 0 0 15px rgba(0, 255, 255, 0.3);
+      text-align: left;
+      font-size: 1rem;
+      line-height: 1.6;
+    }
+
+    /* Mobile Form Optimizations */
+    @media (max-width: 768px) {
+      .email-input {
+        font-size: 1.1rem;
+        padding: 1.2rem;
+        border-radius: 8px;
+        margin-bottom: 1rem;
+        width: 100%;
+      }
+
+      .submit-btn {
+        padding: 1.2rem;
+        font-size: 1.1rem;
+        width: 100%;
+        margin-top: 0.5rem;
+        border-radius: 8px;
+      }
+
+      .form-group {
+        flex-direction: column;
+      }
+    }
+
+    /* Sticky CTA Bar */
+    .sticky-cta-bar {
+      position: fixed;
+      bottom: 0;
+      width: 100%;
+      background: var(--neon-green);
+      color: var(--deep-purple);
+      text-align: center;
+      padding: 1rem;
+      font-size: 1.2rem;
+      font-weight: bold;
+      z-index: 999;
+      box-shadow: 0 -2px 20px rgba(0,0,0,0.4);
+    }
+
+    .sticky-cta-bar a {
+      color: var(--deep-purple);
+      text-decoration: none;
+    }
+
+    @media (min-width: 768px) {
+      .sticky-cta-bar { 
+        display: none; 
+      }
+    }
+
+    /* Mobile Legal Links */
+    .mobile-legal-links {
+      text-align: center;
+      font-size: 0.85rem;
+      padding: 0.8rem 1rem;
+      background: rgba(0,0,0,0.3);
+      margin-bottom: 3.5rem; /* Space for sticky CTA bar */
+    }
+
+    @media (min-width: 768px) {
+      .mobile-legal-links {
+        display: none;
+      }
+    }
+    </style>
+</head>
+<body>
+  <!-- Floating Testimonials -->
+  <div class="floating-testimonial testimonial-2 right">
+    <p>"The process was so easy - I just entered my info and got the perfect plan recommendation when my plan came due."</p>
+    <p class="mini-author-name">- Sarah T.</p>
+    <p class="mini-author-location">Austin, TX</p>
+  </div>
+  
+  <div class="floating-testimonial testimonial-3">
+    <p>"Not only do I save on my electricity bill, they gave me good info on where my energy is going."</p>
+    <p class="mini-author-name">- David K.</p>
+    <p class="mini-author-location">Houston, TX</p>
+  </div>
+  
+  <div class="floating-testimonial testimonial-4 right">
+    <p>"<a href="https://www.intelli-watt.com" style="color:inherit; text-decoration:inherit;">IntelliWatt™</a> showed me exactly how my AC was affecting my bill. Switched to a time-of-use plan and saving $45/month."</p>
+    <p class="mini-author-name">- Jennifer L.</p>
+    <p class="mini-author-location">San Antonio, TX</p>
+  </div>
+  
+  <div class="nav-container">
+      <a href="index.html" class="nav-logo">
+        <img src="Hitthejackwatt_Icon.png" alt="Hit The JackWatt™">
+        Hit The <span>JackWatt™</span>
+      </a>
+      
+      <!-- Hamburger menu icon for mobile -->
+      <div class="mobile-menu-toggle">
+        <div class="hamburger">
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+      </div>
+      
+      <div class="nav-links">
+        <div class="mobile-close-btn">&times;</div>
+        <a href="#how-it-works">How It Works</a>
+        <a href="./HitTheJackWatt_Benefits.html">Benefits</a>
+        <a href="./HitTheJackWatt_Testimonials.html">Testimonials</a>
+        <a href="./HitTheJackWatt_FAQ.html">FAQs</a>
+        <a href="#signup">Sign Up</a>
+        <a href="./HitTheJackWatt_Official_Rules.html">Official Rules</a>
+      </div>
+    </div>
+    
+    <div class="container">
+      <header>
+        <div class="header-content">
+          <h1 class="logo">
+            <div style="display: flex; align-items: center; justify-content: center; gap: 1rem;">
+              <img src="Hitthejackwatt_Icon.png" alt="Hit The JackWatt™" style="height: 4.8rem; width: auto;">
+              <span>Hit The <span class="main-jackwatt-animation">JackWatt™</span></span>
+            </div>
+            <br><span class="powered-by-text">Powered by <span class="intelliwatt"><a href="https://www.intelli-watt.com" style="color:inherit; text-decoration:inherit;">IntelliWatt™</a></span></span>
+          </h1>
+          <p class="tagline">Slash Your Energy Bill — and Hit the JackWatt™</p>
+          <p class="subheadline"><a href="https://www.intelli-watt.com" style="color:inherit; text-decoration:inherit;">IntelliWatt™</a> shows you the best electricity plan for your home — based on your real usage</p>
+
+          <!-- Trust Badges -->
+          <div style="margin-top: 1.5rem; text-align: center;">
+            <span style="background: rgba(0,0,0,0.3); padding: 0.5rem 1rem; border-radius: 8px; font-weight: bold; color: var(--neon-yellow); display: inline-block;">
+              ✅ 100% Free Service – No Catch
+            </span>
+            <span style="background: rgba(0,0,0,0.3); padding: 0.5rem 1rem; border-radius: 8px; font-weight: bold; color: var(--neon-blue); display: inline-block; margin-left: 1rem;">
+              ⚡ Powered by IntelliWatt™
+            </span>
+          </div>
+        </div>
+      </header>
+      
+      <!-- Quick Signup Form - Near the top for immediate conversion -->
+      <div class="quick-signup-section">
+        <div class="quick-signup-form">
+          <h3>🎁 Enter to Win Free Cash</h3>
+          <p>Enter your email and we'll send you a secure link to access your dashboard!</p>
+          
+          <form id="quick-entry-form" method="POST" action="/api/enter-jackpot">
+            <div class="form-group">
+              <input type="email" name="email" required
+                     placeholder="Enter your email"
+                     class="email-input">
+              <button type="submit" class="submit-btn">
+                <span>Enter Now</span>
+                <i class="fas fa-arrow-right"></i>
+              </button>
+            </div>
+            
+            <label class="text-sm text-white block mb-4" style="margin-top: 1rem;">
+              <input type="checkbox" name="consent" required class="mr-2" />
+              I agree to receive Jackpot updates and energy plan alerts from IntelliWatt™.
+            </label>
+          </form>
+          
+          <div id="quick-entry-success" style="display:none;" class="thank-you-message">
+            <h3>📧 Check Your Email!</h3>
+            <p>We've sent you a secure magic link to access your IntelliWatt™ dashboard.</p>
+            <p><strong>Click the link in your email to:</strong></p>
+            <ul style="text-align: left; margin: 1rem 0;">
+              <li>Access your personal dashboard</li>
+              <li>Unlock every way to earn entries</li>
+              <li>Get personalized energy plan recommendations</li>
+            </ul>
+            <p style="font-size: 0.9rem; color: rgba(255,255,255,0.8);">
+              <em>Magic link expires in 15 minutes. Check your spam folder if you don't see it.</em>
+            </p>
+          </div>
+          
+          <p class="form-help">
+            By entering, you agree to our <a href="HitTheJackWatt_Official_Rules.html">Official Rules</a>
+          </p>
+        </div>
+      </div>
+      
+      <div class="jackpot-container">
+        <div class="jackpot-content">
+          <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+            <!-- Left testimonial -->
+            <div style="width: 160px; text-align: left; padding: 10px; background-color: rgba(18, 0, 56, 0.95); border-radius: 10px; border: 1.5px solid rgba(57, 255, 20, 0.5); box-shadow: 0 8px 25px rgba(0, 0, 0, 0.5), 0 0 15px rgba(0, 255, 255, 0.3); transform: rotate(-3deg); margin-right: 20px;">
+              <p style="font-size: 0.9rem; line-height: 1.5; margin-bottom: 0.8rem; font-style: italic; color: rgba(255, 255, 255, 0.95); text-shadow: 0 1px 1px rgba(0, 0, 0, 0.5);">"I saved $75 last month with <a href="https://www.intelli-watt.com" style="color:inherit; text-decoration:inherit;">IntelliWatt™</a>'s recommended plan!"</p>
+              <p style="font-weight: 600; font-size: 0.8rem; color: #00ffff; margin-bottom: 0;">- Jennifer S.</p>
+              <p style="font-style: italic; font-size: 0.7rem; color: rgba(255, 255, 255, 0.7);">Dallas, TX</p>
+            </div>
+          
+            <!-- Middle content with jackpot -->
+            <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;">
+              <div class="jackpot-label-container">
+                <div class="jackpot-label">CURRENT JACKPOT</div>
+                <div class="sample-tag">Sample</div>
+              </div>
+              <p>A new winner every month</p>
+              <div id="jackpot"></div>
+            </div>
+            
+            <!-- Right testimonial -->
+            <div style="width: 160px; text-align: left; padding: 10px; background-color: rgba(18, 0, 56, 0.95); border-radius: 10px; border: 1.5px solid rgba(57, 255, 20, 0.5); box-shadow: 0 8px 25px rgba(0, 0, 0, 0.5), 0 0 15px rgba(0, 255, 255, 0.3); transform: rotate(3deg); margin-left: 20px;">
+              <p style="font-size: 0.9rem; line-height: 1.5; margin-bottom: 0.8rem; font-style: italic; color: rgba(255, 255, 255, 0.95); text-shadow: 0 1px 1px rgba(0, 0, 0, 0.5);">"I was overpaying by $90 a month! Now I'm saving big time."</p>
+              <p style="font-weight: 600; font-size: 0.8rem; color: #00ffff; margin-bottom: 0;">- Michael R.</p>
+              <p style="font-style: italic; font-size: 0.7rem; color: rgba(255, 255, 255, 0.7);">Dallas, TX</p>
+            </div>
+          </div>
+        </div>
+        
+        <div class="jackpot-svg-container">
+          <object data="assets/images/openart-image_3RWs6nGG_1747517410954_raw.svg" type="image/svg+xml" class="openart-svg"></object>
+        </div>
+        
+        <!-- Mobile testimonials - only visible on small screens -->
+        <div class="mobile-testimonials">
+          <div class="mobile-testimonial">
+            <p>"I saved $75 last month with <a href="https://www.intelli-watt.com" style="color:inherit; text-decoration:inherit;">IntelliWatt™</a>'s recommended plan!"</p>
+            <p>- Jennifer S.</p>
+            <p>Dallas, TX</p>
+          </div>
+          <div class="mobile-testimonial">
+            <p>"I was overpaying by $90 a month! Now I'm saving big time."</p>
+            <p>- Michael R.</p>
+            <p>Dallas, TX</p>
+          </div>
+        </div>
+      </div>
+      
+      <div class="value-prop">
+        <h2 class="catchphrase">Double the Benefits: <span>Save & Win</span></h2>
+        <div class="explanation">
+          <p><span class="highlight">HitTheJackWatt™.com</span> offers two incredible ways to benefit: Our advanced rate shopper finds you the best electricity plan based on your actual usage data, potentially saving you hundreds per year. Plus, by sharing your energy data, you're automatically entered into our monthly jackpot drawing for a chance to win cash prizes!</p>
+          <p style="margin-top: 10px;">It's a win-win: guaranteed savings on your bills and a shot at hitting the jackpot—all completely <span class="highlight">FREE</span>.</p>
+        </div>
+      </div>
+      
+      <div class="value-prop">
+        <h2 class="catchphrase">We Always Recommend What's <span>Best For You</span></h2>
+        <div class="explanation">
+          <p><strong>Some energy plans pay us. Some don't.</strong> But we'll always show you the best option for your home, based on your actual usage and our AI-powered analysis.</p>
+          <p>When you switch to a plan that pays us a commission, we put <strong>$5 into the Jackpot</strong> on your behalf. If the best plan doesn't pay us? We'll still show it.</p>
+          <p><em>No gimmicks. No bias. Just real savings backed by data.</em></p>
+        </div>
+      </div>
+      
+      <div class="steps-section" id="how-it-works">
+        <h2 class="steps-heading">How to Earn Entries</h2>
+        <p class="steps-intro">It's simple, free, and always <strong>No Purchase Necessary</strong>. A purchase or plan switch will not increase your chances of winning.</p>
+        
+        <div class="steps-new">
+          <div class="step-item">
+            <div class="step-number-new">1</div>
+            <div class="step-content">
+              <h3 class="step-title-new">Share your usage (1 entry)</h3>
+              <p class="step-description">Connect your Smart Meter Texas account where available, or upload a recent bill/CSV/Green Button file. Either method earns one entry and lets IntelliWatt™ analyze your real usage.</p>
+            </div>
+          </div>
+          
+          <div class="step-item">
+            <div class="step-number-new">2</div>
+            <div class="step-content">
+              <h3 class="step-title-new">Add your details (up to 3 more entries)</h3>
+              <p class="step-description">Add your current electricity plan, complete your home profile, and list your appliances — each action earns one more entry and sharpens your recommendations. Keep your usage data updated at least every 12 months so these entries stay active.</p>
+            </div>
+          </div>
+          
+          <div class="step-item">
+            <div class="step-number-new">3</div>
+            <div class="step-content">
+              <h3 class="step-title-new">Refer friends who share their usage</h3>
+              <p class="step-description">Invite friends and family. When a referral connects SMT or uploads their usage, you earn one entry that never expires — and there’s no cap on how many referral entries you can collect.</p>
+            </div>
+          </div>
+          
+          <div class="step-item">
+            <div class="step-number-new">4</div>
+            <div class="step-content">
+              <h3 class="step-title-new">Share a real-customer testimonial</h3>
+              <p class="step-description">Switched plans through IntelliWatt™ or completed an IntelliPath upgrade? Unlock one testimonial entry that never expires by sharing your experience.</p>
+            </div>
+          </div>
+
+          <div class="step-item">
+            <div class="step-number-new">5</div>
+            <div class="step-content">
+              <h3 class="step-title-new">Use the free AMOE</h3>
+              <p class="step-description">Prefer not to share usage? Mail a postcard entry (details in the Official Rules) for one entry per person per calendar month. AMOE entries never expire.</p>
+            </div>
+          </div>
+        </div>
+        <p class="steps-intro" style="margin-top: 1.5rem;">Entries earned from usage data or profile details remain active while IntelliWatt™ has usage from the last 12 months. Refresh your data anytime to keep them in the drawing.</p>
+      </div>
+
+      <div class="value-prop htjw-usage-powers-savings">
+        <h2 class="catchphrase">Your usage powers your savings</h2>
+        <div class="explanation">
+          <p>Our system finds the best plan for your home based on how you actually use electricity. <strong>Real data = real savings.</strong></p>
+          <p>Provide your usage through:</p>
+          <ul>
+            <li><strong>Smart Meter Texas</strong>, or</li>
+            <li><strong>A bill / CSV / Green Button upload</strong></li>
+          </ul>
+          <p>Your entries stay active as long as your usage is up to date.</p>
+          <p class="htjw-provider-note">We compare plans from our growing provider network and always recommend the lowest-priced option based on your actual usage. More REPs are being added regularly.</p>
+        </div>
+      </div>
+      
+      <div class="cta-section" id="signup">
+        <h2 class="cta-heading">Ready to Hit the JackWatt?</h2>
+        <p class="text-brand-cyan text-lg mb-6">
+          Powered by IntelliWatt™ — entering boosts your odds and unlocks smarter energy savings.
+        </p>
+        
+        <div class="sign-up-form">
+          <h3 class="form-heading">Enter the Jackpot</h3>
+          <p style="margin-bottom: 15px;">Enter your email and we'll send you a secure magic link to access your dashboard and unlock more entries.</p>
+          
+          <form id="jackpot-entry-form" method="POST" action="/api/enter-jackpot">
+            <div class="form-group">
+              <input type="email" name="email" required
+                     placeholder="Enter your email"
+                     class="email-input">
+            </div>
+            
+            <div class="form-group" style="margin-top: 1rem;">
+              <input type="text" name="zip" 
+                     placeholder="Zip Code (optional)"
+                     class="email-input">
+            </div>
+            
+            <label class="text-sm text-white block mb-4" style="margin-top: 1rem;">
+              <input type="checkbox" name="consent" required class="mr-2" />
+              I agree to receive Jackpot updates and energy plan alerts from IntelliWatt™.
+            </label>
+            
+            <button type="submit" class="submit-btn" style="position: static; width: 100%; margin-top: 1rem; padding: 1.2rem; font-size: 1.2rem; font-weight: 700; border-radius: 8px; background: var(--neon-green); color: var(--deep-purple); border: none; cursor: pointer; transition: all 0.3s ease;">
+              <span>Enter Now</span>
+              <i class="fas fa-arrow-right"></i>
+            </button>
+          </form>
+          
+          <div id="jackpot-entry-success" style="display:none;" class="thank-you-message">
+            <h3>📧 Check Your Email!</h3>
+            <p>We've sent you a secure magic link to access your IntelliWatt™ dashboard.</p>
+            <p><strong>Click the link in your email to:</strong></p>
+            <ul style="text-align: left; margin: 1rem 0;">
+              <li>Access your personal dashboard</li>
+              <li>Unlock every way to earn entries</li>
+              <li>Get personalized energy plan recommendations</li>
+            </ul>
+            <p style="font-size: 0.9rem; color: rgba(255,255,255,0.8);">
+              <em>Magic link expires in 15 minutes. Check your spam folder if you don't see it.</em>
+            </p>
+          </div>
+        </div>
+      </div>
+      
+      <div class="stats-banner">
+        <div class="stat-item">
+          <span class="stat-number">$312</span>
+          <span class="stat-label">Avg. Annual Savings</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-number">2</span>
+          <span class="stat-label">Minutes to Set Up</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-number">100%</span>
+          <span class="stat-label">Free Service</span>
+        </div>
+      </div>
+      
+      <div class="value-prop">
+        <h2 class="catchphrase">Your bill just became a <span>lottery ticket.</span></h2>
+        <div class="explanation">
+          <p>When you share your energy usage data, you earn entries into our monthly <strong>cash jackpot</strong>. The more complete your profile, the better we can help you save — and the more chances you have to win. Every month, we give away cash prizes to our users. No strings. No gimmicks.</p>
+          <p style="margin-top: 10px;">Keep your usage data current so your profile-based entries stay active. Referral and testimonial entries never expire, and AMOE postcard entries count only for the drawing period in which they are received.</p>
+        </div>
+      </div>
+      
+      <!-- Testimonials Section -->
+      <div class="testimonials-section">
+        <h2 class="testimonials-heading">What Our Users Say</h2>
+        <div class="testimonials-slider">
+          <div class="testimonial-card">
+            <div class="testimonial-quote">
+              <p>"I filled out my home and appliance info and now I'm seeing actual insights on where I'm using energy. Can't wait to see how this evolves."</p>
+              <div class="testimonial-author">
+                <p class="author-name">– Brian C.</p>
+                <p class="author-location">Plano, TX</p>
+              </div>
+            </div>
+          </div>
+          
+          <div class="testimonial-card">
+            <div class="testimonial-quote">
+              <p>"I didn't realize I was overpaying by $75/month. The site helped me switch in minutes. No calls, no hassle — just cheaper power. And now I'm entered every month for free money!"</p>
+              <div class="testimonial-author">
+                <p class="author-name">– Jessica L.</p>
+                <p class="author-location">Fort Worth, TX</p>
+              </div>
+            </div>
+          </div>
+          
+          <div class="testimonial-card">
+            <div class="testimonial-quote">
+              <p>"Even if I don't win the jackpot, just saving $50/month on electricity is a win for me."</p>
+              <div class="testimonial-author">
+                <p class="author-name">– Naomi W.</p>
+                <p class="author-location">Houston, TX</p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="testimonials-link">
+          <a href="./HitTheJackWatt_Testimonials.html" class="more-testimonials-btn">
+            <span>More Success Stories</span>
+            <i class="fas fa-arrow-right"></i>
+          </a>
+        </div>
+      </div>
+      
+      <div class="mascot-section">
+        <div class="intelliwatt-bot">
+          <img src="assets/images/intelliwatt-bot.gif" alt="IntelliWatt™ Bot">
+        </div>
+        <div class="mascot-content">
+          <h3 class="mascot-heading">Meet the <a href="https://www.intelli-watt.com" style="color:inherit; text-decoration:inherit;" class="neon-blue-text">IntelliWatt™</a> Bot</h3>
+          <p class="mascot-subheading">Your free, energy assistant. Just plug in your info, and it watches the rates so you don't have to.</p>
+          <p class="mascot-text">Our <a href="https://www.intelli-watt.com" style="color:inherit; text-decoration:inherit;" class="neon-blue-text">IntelliWatt™</a> Bot uses advanced algorithms to compare plans available through our growing provider network and match you with the one that maximizes your savings.</p>
+          
+          <div class="mascot-feature">
+            <div class="feature-icon"><i class="fas fa-bolt"></i></div>
+            <div class="feature-text">Personalized energy insights based on your actual usage data</div>
+          </div>
+          
+          <div class="mascot-feature">
+            <div class="feature-icon"><i class="fas fa-search-dollar"></i></div>
+            <div class="feature-text">Finds hidden savings opportunities other comparison tools miss</div>
+          </div>
+          
+          <div class="mascot-feature">
+            <div class="feature-icon"><i class="fas fa-clock"></i></div>
+            <div class="feature-text">Automatically alerts you when better plans become available</div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="value-prop">
+        <h2 class="catchphrase">Knowledge is power. <span>Literally.</span></h2>
+        <div class="explanation">
+          <p>Our rate shopper is the first energy platform that rewards you just for sharing your real energy usage. When you sign up, we'll use your smart meter data or bill to calculate the best electricity plan for your home — no guesswork, no spreadsheets. And yes, it's <span class="highlight">100% FREE</span>, forever.</p>
+        </div>
+      </div>
+      
+      <div class="value-prop">
+        <h2 class="catchphrase">Fun vibes. <span>Serious savings.</span></h2>
+        <div class="explanation">
+          <p>While the jackpot adds excitement, our rate shopper delivers <span class="highlight">guaranteed savings</span>. The average household saves <span class="highlight">$312 per year</span> using our recommendations. <a href="https://www.intelli-watt.com" style="color:inherit; text-decoration:inherit;" class="neon-blue-text">IntelliWatt™</a> analyzes your actual usage patterns and matches them against plans available through our growing provider network — all so you don't have to.</p>
+          <p style="margin-top: 10px;"><a href="https://www.intelli-watt.com" style="color:inherit; text-decoration:inherit;" class="neon-blue-text">IntelliWatt™</a> uses Smart Meter Texas data and real-time plan information from licensed brokers to ensure you always get the most accurate recommendations.</p>
+        </div>
+      </div>
+      
+      <div class="solar-callout">
+        <i class="fas fa-solar-panel solar-icon"></i>
+        <div>
+          <h3>Already have solar — or thinking about it?</h3>
+          <p>Use our free simulator to see what your bill could look like after solar, and which plan will save you the most.</p>
+        </div>
+      </div>
+      
+      <div class="value-prop">
+        <h2 class="catchphrase">Plug in. Power up. <span>Get paid.</span></h2>
+        <div class="explanation">
+          <p>Join thousands of smart energy users who are saving money and winning big. Our platform is designed to make energy management simple, rewarding, and maybe even a little exciting. The jackpot is our way of making energy fun, but our core mission is helping you keep more money in your wallet every month.</p>
+          <p style="margin-top: 10px;">Sign up now and forget about it—<a href="https://www.intelli-watt.com" style="color:inherit; text-decoration:inherit;" class="neon-blue-text">IntelliWatt™</a> will alert you when your current plan expires with your perfect match. No commitment, no pressure. <a href="https://www.intelli-watt.com" style="color:inherit; text-decoration:inherit;" class="neon-blue-text">IntelliWatt™</a> notifies you with the best options, and you decide if they're right for you. Energy savings on autopilot.</p>
+          <p class="energy-tagline">
+            No pressure. No pitch. Just better options backed by your data.
+          </p>
+        </div>
+      </div>
+      
+      <div class="states-list">
+        <h4>Coming soon to:</h4>
+        <div class="states-grid">
+          <span>Texas</span>
+          <span>Illinois</span>
+          <span>Ohio</span>
+          <span>Pennsylvania</span>
+          <span>New Jersey</span>
+          <span>Maryland</span>
+          <span>Michigan</span>
+          <span>New York</span>
+          <span>Connecticut</span>
+          <span>New Hampshire</span>
+          <span>Delaware</span>
+          <span>Maine</span>
+          <span>Rhode Island</span>
+          <span>Washington D.C.</span>
+        </div>
+        <p class="states-more">and more coming soon</p>
+      </div>
+      
+      <!-- IntelliWatt Branding Section -->
+      <div class="intelliwatt-branding">
+              <div class="intelliwatt-content">          <h2 class="intelliwatt-heading">Powered by <span><a href="https://www.intelli-watt.com" style="color:inherit; text-decoration:inherit;" class="neon-blue-text">IntelliWatt™</a></span></h2>          <p class="intelliwatt-text">Finding the right electricity plan shouldn't require a PhD in fine print. That's why we built <a href="https://www.intelli-watt.com" style="color:inherit; text-decoration:inherit;" class="neon-blue-text">IntelliWatt™</a> — a smarter platform that makes energy comparisons simple, honest, and personalized to how your home actually uses power.</p>          <p class="intelliwatt-text">We don't just scan the rates — we analyze your real usage patterns to match you with the most cost-effective plan for your household. No guesswork. No gimmicks. Just data working for your wallet.</p>          <p class="intelliwatt-text">And this is just the beginning. <a href="https://www.intelli-watt.com" style="color:inherit; text-decoration:inherit;" class="neon-blue-text">IntelliWatt™</a> is quietly building the tools every homeowner will need to take full control of their energy future — starting with what matters most: the bill.</p>          <a href="https://www.intelli-watt.com" class="intelliwatt-cta">            <span>Go to IntelliWatt™ Portal</span>            <i class="fas fa-arrow-right"></i>          </a>        </div>
+      </div>
+      
+      <div class="footer">
+        <div class="footer-content">
+          <div class="footer-logo">
+            <img src="Hitthejackwatt_Icon.png" alt="Hit The JackWatt™" style="height: 2.2rem; width: auto; margin-right: 0.5rem;">
+            Hit The <span class="main-jackwatt-animation">JackWatt™</span>
+          </div>
+          <div class="footer-links">
+            <a href="./HitTheJackWatt_Privacy_Policy.html">Privacy Policy</a>
+            <a href="./HitTheJackWatt_Terms_of_Service.html">Terms of Service</a>
+            <a href="./HitTheJackWatt_Official_Rules.html">Official Rules</a>
+            <a href="mailto:admin@hitthejackwatt.com">Contact Us</a>
+          </div>
+          <div class="footer-social">
+            <a href="#" aria-label="Facebook"><i class="fab fa-facebook-f"></i></a>
+            <a href="#" aria-label="X"><i class="fa-brands fa-x-twitter"></i></a>
+            <a href="#" aria-label="Instagram"><i class="fab fa-instagram"></i></a>
+            <a href="#" aria-label="YouTube"><i class="fab fa-youtube"></i></a>
+            <a href="#" aria-label="TikTok"><i class="fab fa-tiktok"></i></a>
+          </div>
+        </div>
+        <div class="footer-copyright">
+          Powered by <a href="https://www.intelli-watt.com" style="color:inherit; text-decoration:inherit;" class="neon-blue-text">IntelliWatt™</a> | A service of <a href="https://www.intellipath-solutions.com" style="color:inherit; text-decoration:inherit;">Intellipath Solutions LLC</a> | © 2025 HitTheJackWatt™
+        </div>
+        <p class="text-sm text-gray-400 mt-4">
+          By entering, you agree to the <a href="HitTheJackWatt_Official_Rules.html" class="underline text-white">Official Rules</a>.
+        </p>
+      </div>
+</div>
+
+<script>
+    // Jackpot animation script
+    const jackpot = document.getElementById("jackpot");
+    let amount = 0;
+    const target = 25000;
+    const animationDuration = 10000; // 10 seconds in milliseconds
+    const interval = setInterval(() => {
+      if (amount < target) {
+        amount += 5; // Increment by $5 each time
+        jackpot.textContent = `$${amount.toLocaleString()}`;
+      } else {
+        jackpot.textContent = "$25,000";
+        jackpot.classList.add("jackpot-active");
+        clearInterval(interval);
+      }
+    }, 2); // Adjust interval timing to complete in approximately 10 seconds (25000/5 = 5000 steps * 2ms = 10000ms)
+    
+    // Form submission script (uses XMLHttpRequest for maximum compatibility)
+    function submitForm(event) {
+      event.preventDefault();
+      
+      // Get the form and email value
+      var form = document.getElementById('emailForm');
+      var email = document.getElementById('formEmail').value;
+      
+      // Show "Sending..." text on button
+      var button = document.getElementById('submitButton');
+      button.innerHTML = "Sending...";
+      button.disabled = true;
+      
+      // Create a simple XMLHttpRequest (old school but widely compatible)
+      var xhr = new XMLHttpRequest();
+      xhr.open('POST', 'https://formspree.io/f/mqaqyzeb');
+      xhr.setRequestHeader('Accept', 'application/json');
+      xhr.setRequestHeader('Content-Type', 'application/json');
+      
+      xhr.onload = function() {
+        if (xhr.status === 200) {
+          // Success! Hide form, show thank you
+          document.getElementById('emailFormContainer').style.display = 'none';
+          document.getElementById('thankYouMessage').style.display = 'block';
+        } else {
+          // Error handling
+          alert('Something went wrong. Please try again or email us directly.');
+          button.innerHTML = "Get Early Access";
+          button.disabled = false;
+        }
+      };
+      
+      xhr.onerror = function() {
+        // Network error handling
+        alert('Network error occurred. Please try again or email us directly.');
+        button.innerHTML = "Get Early Access";
+        button.disabled = false;
+      };
+      
+      // Send the data as plain text for maximum compatibility
+      xhr.send(JSON.stringify({email: email}));
+      
+      // Always return false to prevent default form submission
+      return false;
+    }
+    
+    // Mobile menu toggle
+    document.addEventListener('DOMContentLoaded', function() {
+      const mobileMenuToggle = document.querySelector('.mobile-menu-toggle');
+      const hamburger = document.querySelector('.hamburger');
+      const navLinks = document.querySelector('.nav-links');
+      const body = document.body;
+      
+      // Toggle menu when hamburger is clicked
+      mobileMenuToggle.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        // If the menu is currently closed, show it first
+        if (!navLinks.classList.contains('active')) {
+          navLinks.style.display = 'flex';
+        }
+        
+        hamburger.classList.toggle('open');
+        navLinks.classList.toggle('active');
+        body.classList.toggle('menu-open');
+        
+        // If we're closing the menu, hide it after animation
+        if (!navLinks.classList.contains('active')) {
+          setTimeout(function() {
+            navLinks.style.display = 'none';
+          }, 300);
+        }
+      });
+      
+      // Close menu when a link is clicked
+      const navLinksItems = document.querySelectorAll('.nav-links a');
+      navLinksItems.forEach(item => {
+        item.addEventListener('click', function() {
+          hamburger.classList.remove('open');
+          navLinks.classList.remove('active');
+          body.classList.remove('menu-open');
+        });
+      });
+      
+      // Close button functionality
+      const closeBtn = document.querySelector('.mobile-close-btn');
+      if (closeBtn) {
+        closeBtn.addEventListener('click', function() {
+          hamburger.classList.remove('open');
+          navLinks.classList.remove('active');
+          body.classList.remove('menu-open');
+          
+          // Force menu to be invisible after animation completes
+          setTimeout(function() {
+            if (!navLinks.classList.contains('active')) {
+              navLinks.style.display = 'none';
+            }
+          }, 300);
+        });
+      }
+    });
+    
+    // Randomize floating testimonial positions for more natural look
+    document.addEventListener('DOMContentLoaded', function() {
+      const testimonials = document.querySelectorAll('.floating-testimonial');
+      
+      // Initially hide all floating testimonials
+      testimonials.forEach(testimonial => {
+        testimonial.style.display = 'none';
+      });
+      
+      // Show testimonials only when scrolling to appropriate locations
+      window.addEventListener('scroll', function() {
+        const scrollPosition = window.scrollY;
+        const windowHeight = window.innerHeight;
+        
+        // Show second testimonial around the middle sections
+        if (scrollPosition > windowHeight * 1.2 && scrollPosition < windowHeight * 2.0) {
+          document.querySelector('.testimonial-2').style.display = 'block';
+        } else {
+          document.querySelector('.testimonial-2').style.display = 'none';
+        }
+        
+        // Show third testimonial further down
+        if (scrollPosition > windowHeight * 2.0 && scrollPosition < windowHeight * 2.8) {
+          document.querySelector('.testimonial-3').style.display = 'block';
+        } else {
+          document.querySelector('.testimonial-3').style.display = 'none';
+        }
+        
+        // Show fourth testimonial toward the bottom of the page, but not too far down
+        if (scrollPosition > windowHeight * 2.8 && scrollPosition < windowHeight * 3.8) {
+          document.querySelector('.testimonial-4').style.display = 'block';
+        } else {
+          document.querySelector('.testimonial-4').style.display = 'none';
+        }
+      });
+      
+      // Trigger scroll event initially to set correct state
+      window.dispatchEvent(new Event('scroll'));
+      
+      testimonials.forEach(testimonial => {
+        // Add small rotation randomization
+        const rotationBase = testimonial.classList.contains('right') ? 5 : -5;
+        const rotationOffset = (Math.random() * 3) - 1.5; // -1.5 to +1.5 degrees
+        
+        // Apply random rotation
+        const newRotation = rotationBase + rotationOffset;
+        
+        // For right-side testimonials
+        if (testimonial.classList.contains('right')) {
+          testimonial.style.transform = `rotate(${newRotation}deg)`;
+          testimonial.style.animationDuration = (6 + Math.random() * 2) + 's'; // 6-8s
+        } else {
+          // For left-side testimonials
+          testimonial.style.transform = `rotate(${newRotation}deg)`;
+          testimonial.style.animationDuration = (5 + Math.random() * 2) + 's'; // 5-7s
+        }
+      });
+    });
+
+    // Magic Link API Integration - Send email with magic link
+    async function sendMagicLink(email, zip = null) {
+      try {
+        console.log('Attempting to send magic link to:', email);
+        console.log('API endpoint:', 'https://intelliwatt.com/api/external/magic-link');
+        
+        // Try the primary API endpoint
+        const response = await fetch('https://intelliwatt.com/api/external/magic-link', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            email: email,
+            zip: zip,
+            source: 'hitthejackwatt'
+          })
+        });
+
+        console.log('Response status:', response.status);
+        console.log('Response headers:', response.headers);
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({ message: 'Unknown error' }));
+          console.error('API error response:', errorData);
+          throw new Error(errorData.message || 'Failed to send magic link');
+        }
+
+        const data = await response.json();
+        console.log('Success response:', data);
+        return { success: true, data };
+      } catch (error) {
+        console.error('Magic link error details:', error);
+        console.error('Error type:', error.constructor.name);
+        console.error('Error message:', error.message);
+        
+        // If it's a CORS or network error, show helpful message
+        if (error.message.includes('Failed to fetch') || error.message.includes('CORS')) {
+          return { 
+            success: false, 
+            error: 'Unable to connect to IntelliWatt™. Please try again or contact support.' 
+          };
+        }
+        
+        return { success: false, error: error.message };
+      }
+    }
+
+    // Quick entry form handler
+    document.getElementById('quick-entry-form').addEventListener('submit', async function(e) {
+      e.preventDefault();
+      
+      const email = this.querySelector('input[name="email"]').value;
+      const button = this.querySelector('button[type="submit"]');
+      const originalButtonText = button.innerHTML;
+      
+      // Show loading state
+      button.innerHTML = '<span>Sending...</span>';
+      button.disabled = true;
+      
+      try {
+        const result = await sendMagicLink(email);
+        
+        if (result.success) {
+          document.getElementById('quick-entry-success').style.display = 'block';
+          this.style.display = 'none';
+        } else {
+          throw new Error(result.error);
+        }
+      } catch (error) {
+        let errorMessage = 'Something went wrong. Please try again.';
+        
+        if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+          errorMessage = 'Connection failed. Please check your internet connection and try again.';
+        } else if (error.message.includes('Invalid email')) {
+          errorMessage = 'Please enter a valid email address.';
+        } else if (error.message) {
+          errorMessage = error.message;
+        }
+        
+        alert('Error: ' + errorMessage);
+        button.innerHTML = originalButtonText;
+        button.disabled = false;
+      }
+    });
+
+    // Jackpot entry form handler
+    document.getElementById('jackpot-entry-form').addEventListener('submit', async function(e) {
+      e.preventDefault();
+      
+      const email = this.querySelector('input[name="email"]').value;
+      const zip = this.querySelector('input[name="zip"]').value;
+      const button = this.querySelector('button[type="submit"]');
+      const originalButtonText = button.innerHTML;
+      
+      // Show loading state
+      button.innerHTML = '<span>Sending...</span>';
+      button.disabled = true;
+      
+      try {
+        const result = await sendMagicLink(email, zip);
+        
+        if (result.success) {
+          document.getElementById('jackpot-entry-success').style.display = 'block';
+          this.style.display = 'none';
+        } else {
+          throw new Error(result.error);
+        }
+      } catch (error) {
+        let errorMessage = 'Something went wrong. Please try again.';
+        
+        if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+          errorMessage = 'Connection failed. Please check your internet connection and try again.';
+        } else if (error.message.includes('Invalid email')) {
+          errorMessage = 'Please enter a valid email address.';
+        } else if (error.message) {
+          errorMessage = error.message;
+        }
+        
+        alert('Error: ' + errorMessage);
+        button.innerHTML = originalButtonText;
+        button.disabled = false;
+      }
+    });
+</script>
+
+<!-- Mobile Legal Links -->
+<div class="mobile-legal-links">
+  <a href="HitTheJackWatt_Terms_of_Service.html" style="color: white;">Terms</a> |
+  <a href="HitTheJackWatt_Privacy_Policy.html" style="color: white;">Privacy</a>
+</div>
+
+<!-- Sticky CTA Bar -->
+<div class="sticky-cta-bar">
+  <a href="#signup">🎁 Enter to Win Free – Save on Power</a>
+</div>
+
+</body>
+</html>
+

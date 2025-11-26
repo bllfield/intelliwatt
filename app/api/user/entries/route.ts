@@ -128,6 +128,34 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
+    const attemptReferralQualification = async () => {
+      if (type !== 'smart_meter_connect') {
+        return;
+      }
+
+      if (manualUsage) {
+        await qualifyReferralsForUser(user.id);
+        return;
+      }
+
+      const authorization = await (db as any).smtAuthorization.findFirst({
+        where: {
+          userId: user.id,
+          archivedAt: null,
+        },
+        orderBy: {
+          createdAt: 'desc',
+        },
+        select: {
+          emailConfirmationStatus: true,
+        },
+      });
+
+      if (authorization?.emailConfirmationStatus === 'APPROVED') {
+        await qualifyReferralsForUser(user.id);
+      }
+    };
+
     if (houseId) {
       const ownsHouse = await db.houseAddress.findFirst({
         where: { id: houseId, userId: user.id },
@@ -176,7 +204,7 @@ export async function POST(request: NextRequest) {
         await refreshUserEntryStatuses(user.id);
 
         if (type === 'smart_meter_connect') {
-          await qualifyReferralsForUser(user.id);
+          await attemptReferralQualification();
         }
 
         const updatedEntry = updated as any;
@@ -206,7 +234,7 @@ export async function POST(request: NextRequest) {
         await refreshUserEntryStatuses(user.id);
 
         if (type === 'smart_meter_connect') {
-          await qualifyReferralsForUser(user.id);
+          await attemptReferralQualification();
         }
       }
 
@@ -239,7 +267,7 @@ export async function POST(request: NextRequest) {
     await refreshUserEntryStatuses(user.id);
 
     if (type === 'smart_meter_connect') {
-      await qualifyReferralsForUser(user.id);
+      await attemptReferralQualification();
     }
 
     const createdEntry = entry as any;

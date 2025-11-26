@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Privacy Policy | Hit The JackWatt™</title>
+    
+    <!-- Favicons -->
+    <link rel="shortcut icon" href="my_favicon/favicon_new.ico">
+    <link rel="icon" type="image/svg+xml" href="my_favicon/favicon_new.ico">
+    <link rel="icon" type="image/png" sizes="96x96" href="my_favicon/favicon-96x96_new.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+    <link rel="manifest" href="/site.webmanifest">
+    <!-- End Favicons -->
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;900&family=VT323&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        :root {
+            --neon-pink: #ff00ff;
+            --neon-blue: #00ffff;
+            --neon-green: #39ff14;
+            --neon-yellow: #ffff00;
+            --dark-blue: #001f3f;
+            --deep-purple: #120038;
+            --section-spacing: 5rem;
+            --text-spacing: 1.5rem;
+        }
+        
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            font-family: 'Montserrat', sans-serif;
+            background-color: var(--deep-purple);
+            background-image: linear-gradient(135deg, rgba(18, 0, 56, 1) 0%, rgba(36, 0, 70, 1) 100%);
+            color: white;
+            line-height: 1.6;
+            overflow-x: hidden;
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 2rem;
+            position: relative;
+            z-index: 1;
+        }
+        
+        /* Header, navigation and logo */
+        .nav-container {
+            position: sticky;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 100;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem 2rem;
+            background: rgba(18, 0, 56, 0.8);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.2);
+        }
+        
+        .nav-logo {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: white;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .nav-logo img {
+            height: 2.2rem;
+            width: auto;
+        }
+        
+        .nav-logo span {
+            color: var(--neon-green);
+            text-shadow: 0 0 10px var(--neon-green), 0 0 20px var(--neon-green), 0 0 30px var(--neon-green);
+            animation: flicker 3s infinite alternate;
+        }
+        
+        .main-jackwatt-animation {
+            color: var(--neon-green);
+            text-shadow: 0 0 10px var(--neon-green), 0 0 20px var(--neon-green), 0 0 30px var(--neon-green);
+            animation: flicker 3s infinite alternate;
+        }
+        
+        @keyframes flicker {
+            0%, 19.999%, 22%, 62.999%, 64%, 64.999%, 70%, 100% {
+                opacity: 0.99;
+                text-shadow: 0 0 10px var(--neon-green), 0 0 20px var(--neon-green), 0 0 30px var(--neon-green);
+            }
+            20%, 21.999%, 63%, 63.999%, 65%, 69.999% {
+                opacity: 0.4;
+                text-shadow: none;
+            }
+        }
+        
+        .nav-links {
+            display: flex;
+            gap: 1.5rem;
+        }
+        
+        .nav-links a {
+            color: white;
+            text-decoration: none;
+            font-weight: 500;
+            font-size: 0.9rem;
+            letter-spacing: 0.5px;
+            transition: all 0.3s ease;
+            padding: 0.5rem 0;
+            position: relative;
+        }
+        
+        .nav-links a:hover {
+            color: var(--neon-green);
+        }
+        
+        .nav-links a::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 0;
+            height: 2px;
+            background: var(--neon-green);
+            transition: width 0.3s ease;
+        }
+        
+        .nav-links a:hover::after {
+            width: 100%;
+        }
+
+        /* Privacy Policy content */
+        .privacy-container {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            padding: 3rem;
+            margin: 4rem 0;
+            backdrop-filter: blur(5px);
+            box-shadow: 0 15px 30px rgba(0, 0, 0, 0.3);
+        }
+        
+        .page-title {
+            font-size: 2.8rem;
+            font-weight: 800;
+            text-align: center;
+            margin-bottom: 3rem;
+            color: var(--neon-blue);
+            text-shadow: 0 0 10px rgba(0, 255, 255, 0.3);
+            position: relative;
+        }
+        
+        .page-title::after {
+            content: '';
+            position: absolute;
+            bottom: -15px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 100px;
+            height: 3px;
+            background: linear-gradient(90deg, transparent, var(--neon-blue), transparent);
+        }
+        
+        .effective-date {
+            text-align: center;
+            margin-bottom: 2.5rem;
+            font-size: 1.1rem;
+            color: rgba(255, 255, 255, 0.8);
+            font-style: italic;
+        }
+        
+        h2 {
+            font-size: 1.6rem;
+            margin-top: 2.5rem;
+            margin-bottom: 1rem;
+            color: var(--neon-green);
+            border-bottom: 1px solid rgba(57, 255, 20, 0.3);
+            padding-bottom: 0.5rem;
+        }
+        
+        p {
+            margin-bottom: 1.5rem;
+            font-size: 1.1rem;
+            color: rgba(255, 255, 255, 0.9);
+        }
+        
+        ul {
+            margin: 1rem 0 2rem 1.5rem;
+            color: rgba(255, 255, 255, 0.9);
+        }
+        
+        li {
+            margin-bottom: 0.5rem;
+            font-size: 1.1rem;
+        }
+        
+        a {
+            color: var(--neon-blue);
+            text-decoration: none;
+            transition: all 0.3s ease;
+        }
+        
+        a:hover {
+            text-shadow: 0 0 8px var(--neon-blue);
+        }
+        
+        /* Footer */
+        .footer {
+            text-align: center;
+            padding: 4rem 2rem 2rem;
+            margin-top: 4rem;
+            position: relative;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .footer-content {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+        }
+        
+        .footer-logo {
+            font-size: 1.5rem;
+            font-weight: 700;
+        }
+        
+        .footer-logo span {
+            color: var(--neon-green);
+        }
+        
+        .footer-links {
+            display: flex;
+            gap: 1.5rem;
+        }
+        
+        .footer-links a {
+            color: rgba(255, 255, 255, 0.7);
+            text-decoration: none;
+            font-size: 0.9rem;
+            transition: all 0.3s ease;
+        }
+        
+        .footer-links a:hover {
+            color: var(--neon-blue);
+        }
+        
+        .footer-social {
+            display: flex;
+            gap: 1rem;
+        }
+        
+        .footer-social a {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            transition: all 0.3s ease;
+            text-decoration: none;
+        }
+        
+        .footer-social a:hover {
+            background: var(--neon-green);
+            color: var(--deep-purple);
+            transform: translateY(-3px);
+            text-decoration: none;
+        }
+        
+        .footer-copyright {
+            font-size: 0.9rem;
+            color: rgba(255, 255, 255, 0.5);
+            margin-top: 2rem;
+        }
+        
+        /* Responsive design */
+        @media (max-width: 992px) {
+            .footer-content {
+                flex-direction: column;
+                gap: 1.5rem;
+            }
+            
+            .footer-links, .footer-social {
+                margin-top: 1rem;
+            }
+        }
+        
+        @media (max-width: 768px) {
+            .nav-container {
+                padding: 1rem;
+            }
+            
+            .nav-links {
+                gap: 1rem;
+            }
+            
+            .nav-links a {
+                font-size: 0.8rem;
+            }
+            
+            .page-title {
+                font-size: 2.2rem;
+            }
+            
+            .privacy-container {
+                padding: 2rem;
+            }
+            
+            h2 {
+                font-size: 1.4rem;
+            }
+            
+            p, li {
+                font-size: 1rem;
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .container {
+                padding: 0 1rem;
+            }
+            
+            .privacy-container {
+                padding: 1.5rem;
+                margin: 2rem 0;
+            }
+            
+            .page-title {
+                font-size: 1.8rem;
+            }
+            
+            .footer-links {
+                flex-direction: column;
+                gap: 1rem;
+            }
+        }
+        /* Mobile menu styles */
+    .mobile-menu-toggle {
+      display: none;
+      cursor: pointer;
+      z-index: 1000;
+    }
+    
+    .hamburger {
+      width: 30px;
+      height: 20px;
+      position: relative;
+      margin: 0;
+      transform: rotate(0deg);
+      transition: .5s ease-in-out;
+    }
+    
+    .hamburger span {
+      display: block;
+      position: absolute;
+      height: 3px;
+      width: 100%;
+      background: var(--neon-green);
+      border-radius: 9px;
+      opacity: 1;
+      left: 0;
+      transform: rotate(0deg);
+      transition: .25s ease-in-out;
+      box-shadow: 0 0 8px var(--neon-green);
+    }
+    
+    .hamburger span:nth-child(1) {
+      top: 0px;
+    }
+    
+    .hamburger span:nth-child(2) {
+      top: 8px;
+    }
+    
+    .hamburger span:nth-child(3) {
+      top: 16px;
+    }
+    
+    .hamburger.open span:nth-child(1) {
+      top: 8px;
+      transform: rotate(135deg);
+    }
+    
+    .hamburger.open span:nth-child(2) {
+      opacity: 0;
+      left: -60px;
+    }
+    
+    .hamburger.open span:nth-child(3) {
+      top: 8px;
+      transform: rotate(-135deg);
+    }
+    
+    body.menu-open { overflow: hidden; }
+    
+    .mobile-close-btn {
+      position: absolute;
+      top: 15px;
+      right: 15px;
+      font-size: 30px;
+      color: var(--neon-green);
+      cursor: pointer;
+      width: 40px;
+      height: 40px;
+      display: none; /* Hide by default */
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      background: rgba(0, 0, 0, 0.3);
+      transition: all 0.3s ease;
+      box-shadow: 0 0 10px var(--neon-green);
+    }
+    
+    .mobile-close-btn:hover {
+      transform: scale(1.1);
+      background: rgba(0, 0, 0, 0.5);
+    }
+    
+    @media (max-width: 768px) {
+      .mobile-menu-toggle {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      
+      .nav-links {
+        position: fixed;
+        top: 0;
+        right: -120%;
+        width: 200px; max-width: 80%;
+        height: 100vh;
+        background: rgba(18, 0, 56, 0.98);
+        backdrop-filter: blur(15px);
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 1rem;
+        transition: right 0.3s ease;
+        z-index: 9999;
+        padding: 5rem 1rem 2rem;
+        box-shadow: -5px 0 30px rgba(0, 0, 0, 0.7);
+        visibility: hidden;
+        opacity: 0;
+      }
+      
+      .nav-links.active {
+        right: 0;
+        visibility: visible;
+        opacity: 1;
+      }
+      
+      .nav-links a {
+        font-size: 1.1rem;
+        padding: 0.8rem 0;
+        width: 100%;
+        text-align: center;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      }
+      
+      .nav-links a:last-child {
+        border-bottom: none;
+      }
+      
+      .mobile-close-btn {
+        display: flex; /* Only show on mobile */
+      }
+    }
+    /* Add this to the existing styles */
+    .neon-blue-text {
+        color: var(--neon-blue) !important;
+        text-shadow: 0 0 10px var(--neon-blue) !important;
+        transition: all 0.3s ease;
+    }
+    .neon-blue-text:hover {
+        text-shadow: 0 0 15px var(--neon-blue), 0 0 25px var(--neon-blue) !important;
+    }
+    </style>
+</head>
+<body>
+    <nav class="nav-container">
+      <a href="index.html" class="nav-logo">
+        <img src="Hitthejackwatt_Icon.png" alt="Hit The JackWatt™">
+        Hit The <span>JackWatt™</span>
+      </a>
+      <!-- Hamburger menu icon for mobile -->
+      <div class="mobile-menu-toggle">
+          <div class="hamburger">
+              <span></span>
+              <span></span>
+              <span></span>
+          </div>
+      </div>
+      <div class="nav-links">
+          <div class="mobile-close-btn">&times;</div>
+          <a href="index.html#how-it-works">How It Works</a>
+          <a href="HitTheJackWatt_Benefits.html">Benefits</a>
+          <a href="HitTheJackWatt_Testimonials.html">Testimonials</a>
+          <a href="HitTheJackWatt_FAQ.html">FAQs</a>
+          <a href="index.html#signup">Sign Up</a>
+          <a href="HitTheJackWatt_Official_Rules.html">Official Rules</a>
+      </div>
+    </nav>
+
+    <div class="container">
+        <div class="privacy-container">
+            <h1 class="page-title">Privacy Policy</h1>
+            <p class="effective-date">Effective Date: May 17, 2025</p>
+            
+            <h2>How We Use Your Electricity Usage Data</h2>
+            <p>IntelliWatt is built to save you money – not guess about your bill. Every home is different, every usage pattern is different, and every electricity plan charges differently. To recommend the right plan for <em>your</em> home, we need the same thing every energy provider, broker, and advisor needs: your real electricity usage.</p>
+
+            <p>Your usage data helps our system understand things like:</p>
+            <ul>
+                <li>How much power you use during the day versus at night</li>
+                <li>Seasonal patterns and shoulder-month swings</li>
+                <li>How much of your bill is driven by HVAC load</li>
+                <li>How you use power during peak vs. off-peak hours</li>
+                <li>Whether “free nights,” “free weekends,” “solar days,” or other plan types might save you money</li>
+            </ul>
+
+            <p>The more accurate your data, the more accurate your savings. Our system compares your usage against plans available through our growing provider network (starting with WattBuy) to estimate what each plan would have cost you based on your actual usage. Then we highlight the lowest-priced options for your specific pattern.</p>
+
+            <p>Without usage data, IntelliWatt can’t run the full analysis engine. That means fewer insights, less personalized recommendations, and a higher risk of missing savings opportunities. Sharing your usage allows us to do real math on your situation instead of relying on guesses or generic averages.</p>
+
+            <p>You can provide your usage in two main ways:</p>
+            <ul>
+                <li><strong>Smart Meter Texas (where available):</strong> Connect your SMT account so we can securely read your interval data.</li>
+                <li><strong>Manual upload:</strong> Upload a bill, CSV, or Green Button file with your usage history.</li>
+            </ul>
+
+            <p>To keep your results and any entries that depend on usage active, we need reasonably current data. That’s why certain features and entries work best when your usage information covers at least the most recent 12 months.</p>
+
+            <h3>Data Sharing and Privacy</h3>
+            <p>We take your privacy seriously. Here is how we handle your electricity usage data in connection with HitTheJackWatt and IntelliWatt:</p>
+            <ul>
+                <li><strong>No sale of personal data:</strong> We do not sell or rent your personal information or individual usage data to third-party marketers.</li>
+                <li><strong>Service use only:</strong> We use your usage data to analyze your electricity bill, compare plans available through our provider network, estimate potential savings, and operate and improve the IntelliWatt service.</li>
+                <li><strong>Aggregated, de-identified analysis:</strong> We may combine your usage data with data from other users in an aggregated and de-identified form (for example, to study usage patterns by region or plan type, or to improve our recommendation models). When we do this, we remove personal identifiers so the aggregated data cannot reasonably be linked back to you.</li>
+                <li><strong>Limited sharing with partners:</strong> When needed to deliver the service (for example, to compare plans or facilitate a plan switch), we may share limited information with trusted partners such as WattBuy or Retail Electric Providers, subject to appropriate contractual and privacy protections.</li>
+                <li><strong>Your control:</strong> If you disconnect Smart Meter Texas access or stop uploading usage, we will no longer receive updated usage data from you. You may also contact us if you have questions about how your data is handled or if you wish to request deletion, subject to any legal obligations we may have to retain certain records.</li>
+            </ul>
+
+
+            <h2>1. Information <a href="https://www.intelli-watt.com" class="neon-blue-text">IntelliWatt™</a> Collects</h2>
+            <p><a href="https://www.intelli-watt.com" class="neon-blue-text">IntelliWatt™</a> collects the following types of information from users:</p>
+            <ul>
+                <li>Personal Information: such as name, email address, phone number, and zip code when you sign up or complete forms.</li>
+                <li>Energy Usage Data: when you authorize us to access your Smart Meter Texas account, connect other services or devices via API, or provide usage details manually (including interval data, billing history, and plan details, where available).</li>
+                <li>Home Characteristics: details that affect energy use, such as square footage, year built, insulation quality, window type, number of stories, foundation type, thermostat settings, and HVAC or water-heating system types.</li>
+                <li>Appliance &amp; Device Characteristics: information about appliances and other energy-related equipment in your home (for example HVAC units, water heaters, pool pumps, refrigerators/freezers, EV chargers, smart thermostats, and other devices you choose to enter), including data points like quantity, age, efficiency level, and usage patterns.</li>
+                <li>Referral and Entry Activity: including number of referrals, entries earned, HitTheJackWatt participation, and other portal engagement activity related to promotions and rewards.</li>
+            </ul>
+
+            <h2>2. How <a href="https://www.intelli-watt.com" class="neon-blue-text">IntelliWatt™</a> Uses Your Information</h2>
+            <p>Your data is used to:</p>
+            <ul>
+                <li>Analyze your electricity usage and compare plans available through our provider network to estimate potential savings for your home.</li>
+                <li>Calculate and manage entries in the HitTheJackWatt™ monthly drawings.</li>
+                <li>Notify you of drawing results and new ways to earn entries.</li>
+                <li>Inform you of cost-saving energy opportunities, if available.</li>
+                <li>Improve the IntelliWatt™ experience using aggregated, de-identified insights.</li>
+            </ul>
+
+            <h2>3. Sharing of Information</h2>
+            <p><a href="https://www.intelli-watt.com" class="neon-blue-text">IntelliWatt™</a> does <strong>not</strong> sell or share your personal information with third parties for marketing purposes. Your information may be shared only with trusted service providers as necessary to operate our platform (for example, secure payment processors, WattBuy, or Retail Electric Providers involved in delivering plan comparisons), and always subject to appropriate contractual and privacy protections.</p>
+
+            <h2>4. Data Retention</h2>
+            <p><a href="https://www.intelli-watt.com" class="neon-blue-text">IntelliWatt™</a> retains your data only as long as needed to operate the program and maintain compliance with applicable regulations.</p>
+
+            <h2>5. Your Choices</h2>
+            <p>You may request to opt out of communications, delete your account, or update your information at any time by contacting us at <a href="mailto:privacy@intelli-watt.com">privacy@intelli-watt.com</a>.</p>
+
+            <h2>6. Security</h2>
+            <p><a href="https://www.intelli-watt.com" class="neon-blue-text">IntelliWatt™</a> uses reasonable administrative and technical safeguards to protect your data against unauthorized access or disclosure.</p>
+
+            <h2>7. Updates to This Policy</h2>
+            <p><a href="https://www.intelli-watt.com" class="neon-blue-text">IntelliWatt™</a> may update this Privacy Policy periodically. Continued use of the site after changes are posted constitutes acceptance of the revised policy.</p>
+
+            <h2>8. Contact Us</h2>
+            <p>If you have questions or concerns about this Privacy Policy, please contact us at <a href="mailto:privacy@intelli-watt.com">privacy@intelli-watt.com</a>.</p>
+            
+            <p style="color: white; font-weight: normal;"><a href="https://www.intelli-watt.com" class="neon-blue-text">IntelliWatt™</a> is a registered DBA of <a href="https://www.intellipath-solutions.com">Intellipath Solutions LLC</a>.</p>
+        </div>
+
+        <div class="footer">
+            <div class="footer-content">
+                <div class="footer-logo">
+                    <img src="Hitthejackwatt_Icon.png" alt="Hit The JackWatt™" style="height: 2.2rem; width: auto; margin-right: 0.5rem;">
+                    Hit The <span class="main-jackwatt-animation">JackWatt™</span>
+                </div>
+                <div class="footer-links">
+                    <a href="HitTheJackWatt_Privacy_Policy.html">Privacy Policy</a>
+                    <a href="HitTheJackWatt_Terms_of_Service.html">Terms of Service</a>
+                    <a href="HitTheJackWatt_Official_Rules.html">Official Rules</a>
+                    <a href="mailto:admin@hitthejackwatt.com">Contact Us</a>
+                </div>
+                <div class="footer-social">
+                    <a href="#" aria-label="Facebook"><i class="fab fa-facebook-f"></i></a>
+                    <a href="#" aria-label="X"><i class="fa-brands fa-x-twitter"></i></a>
+                    <a href="#" aria-label="Instagram"><i class="fab fa-instagram"></i></a>
+                    <a href="#" aria-label="YouTube"><i class="fab fa-youtube"></i></a>
+                    <a href="#" aria-label="TikTok"><i class="fab fa-tiktok"></i></a>
+                </div>
+            </div>
+            <div class="footer-copyright">
+                Powered by <a href="https://www.intelli-watt.com" style="color:inherit; text-decoration:inherit;">IntelliWatt™</a> | A service of <a href="https://www.intellipath-solutions.com" style="color:inherit; text-decoration:inherit;">Intellipath Solutions LLC</a> | © 2025 HitTheJackWatt™
+            </div>
+        </div>
+    </div>
+<script>
+    // Mobile menu toggle
+    document.addEventListener('DOMContentLoaded', function() {
+      const mobileMenuToggle = document.querySelector('.mobile-menu-toggle');
+      const hamburger = document.querySelector('.hamburger');
+      const navLinks = document.querySelector('.nav-links');
+      const body = document.body;
+      
+      // Toggle menu when hamburger is clicked
+      mobileMenuToggle.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        // If the menu is currently closed, show it first
+        if (!navLinks.classList.contains('active')) {
+          navLinks.style.display = 'flex';
+        }
+        
+        hamburger.classList.toggle('open');
+        navLinks.classList.toggle('active');
+        body.classList.toggle('menu-open');
+        
+        // If we're closing the menu, hide it after animation
+        if (!navLinks.classList.contains('active')) {
+          setTimeout(function() {
+            navLinks.style.display = 'none';
+          }, 300);
+        }
+      });
+      
+      // Close menu when a link is clicked
+      const navLinksItems = document.querySelectorAll('.nav-links a');
+      navLinksItems.forEach(item => {
+        item.addEventListener('click', function() {
+          hamburger.classList.remove('open');
+          navLinks.classList.remove('active');
+          body.classList.remove('menu-open');
+        });
+      });
+      
+      // Close button functionality
+      const closeBtn = document.querySelector('.mobile-close-btn');
+      if (closeBtn) {
+        closeBtn.addEventListener('click', function() {
+          hamburger.classList.remove('open');
+          navLinks.classList.remove('active');
+          body.classList.remove('menu-open');
+          
+          // Force menu to be invisible after animation completes
+          setTimeout(function() {
+            if (!navLinks.classList.contains('active')) {
+              navLinks.style.display = 'none';
+            }
+          }, 300);
+        });
+      }
+    });
+</script>
+</body>
+</html>
+
+
+
+

@@ -8,7 +8,9 @@ export async function GET(_req: NextRequest) {
     const profiles = await prisma.userProfile.findMany({
       where: {
         esiidAttentionRequired: true,
-        esiidAttentionCode: { in: ["smt_replaced", "smt_revoke_requested"] },
+        esiidAttentionCode: {
+          in: ["smt_replaced", "smt_revoke_requested", "smt_email_declined", "smt_email_pending"],
+        },
       },
       select: {
         userId: true,
@@ -28,11 +30,14 @@ export async function GET(_req: NextRequest) {
     const flagged = await Promise.all(
       profiles.map(async (profile) => {
         const isRevocation = profile.esiidAttentionCode === "smt_revoke_requested";
+        const isEmailDeclined = profile.esiidAttentionCode === "smt_email_declined";
+        const isEmailPending = profile.esiidAttentionCode === "smt_email_pending";
+        const showActiveHouses = isRevocation || isEmailDeclined || isEmailPending;
 
         const houses = (await prismaAny.houseAddress.findMany({
           where: {
             userId: profile.userId,
-            ...(isRevocation
+            ...(showActiveHouses
               ? { archivedAt: null }
               : { archivedAt: { not: null } }),
           },

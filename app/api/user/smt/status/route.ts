@@ -24,7 +24,9 @@ export async function GET() {
       return NextResponse.json({ connected: false }, { status: 404 });
     }
 
-    const authorization = await prisma.smtAuthorization.findFirst({
+    const prismaAny = prisma as any;
+
+    const authorization = await prismaAny.smtAuthorization.findFirst({
       where: {
         userId: user.id,
         archivedAt: null,
@@ -39,6 +41,8 @@ export async function GET() {
         authorizationStartDate: true,
         authorizationEndDate: true,
         tdspName: true,
+        emailConfirmationStatus: true,
+        emailConfirmationAt: true,
         houseAddress: {
           select: {
             addressLine1: true,
@@ -66,6 +70,8 @@ export async function GET() {
         authorizationStartDate: authorization.authorizationStartDate?.toISOString() ?? null,
         authorizationEndDate: authorization.authorizationEndDate?.toISOString() ?? null,
         tdspName: authorization.tdspName ?? null,
+        emailConfirmationStatus: authorization.emailConfirmationStatus,
+        emailConfirmationAt: authorization.emailConfirmationAt?.toISOString() ?? null,
         houseAddress: address
           ? {
               line1: address.addressLine1,
