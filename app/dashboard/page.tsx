@@ -3,7 +3,6 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import { useState, useEffect, type ReactNode } from 'react';
-import SmartMeterSection from '../../components/SmartMeterSection';
 
 const ICON_COLOR = '#00F0FF';
 
@@ -516,15 +515,6 @@ const [userAddress, setUserAddress] = useState<string>('');
                 </div>
               </div>
             </div>
-          </div>
-        </section>
-      )}
-
-      {/* Smart Meter Connection Section - Only show if address is entered */}
-      {userAddress && (
-        <section className="py-16 px-4 bg-brand-navy">
-          <div className="max-w-4xl mx-auto">
-            <SmartMeterSection />
           </div>
         </section>
       )}
