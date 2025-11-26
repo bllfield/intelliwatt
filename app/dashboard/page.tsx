@@ -4,7 +4,6 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { useState, useEffect, type ReactNode } from 'react';
 import SmartMeterSection from '../../components/SmartMeterSection';
-import QuickAddressEntry from '../../components/QuickAddressEntry';
 
 const ICON_COLOR = '#00F0FF';
 
@@ -208,6 +207,25 @@ const ProfileIcon = () => (
   </svg>
 );
 
+const DASHBOARD_BENEFITS: Array<{ icon: string; text: string }> = [
+  { icon: '🎯', text: 'Completely free to join—no purchases or commitments required.' },
+  { icon: '🏆', text: 'One verified winner is selected monthly and paid via digital wallet or check.' },
+  { icon: '💰', text: 'Monthly jackpot grows by $5 whenever a member switches to a commissionable plan through IntelliWatt™.' },
+  { icon: '💸', text: 'Earn entries by connecting Smart Meter Texas, uploading usage, and completing your profile details.' },
+  { icon: '⚡', text: 'Secure Smart Meter Texas integration lets IntelliWatt™ pull usage data automatically with your permission.' },
+  { icon: '🔒', text: 'Usage data is safeguarded with secure handling and is never sold to third parties.' },
+  { icon: '👥', text: 'Earn an entry for every friend who shares their usage—referrals have no cap and never expire.' },
+  { icon: '🏠', text: 'See where your home uses energy and uncover opportunities to reduce waste.' },
+  { icon: '📊', text: 'Personalized savings reports highlight best-fit plans, appliances, and upgrades.' },
+  { icon: '📈', text: 'Track usage trends over time and receive tailored recommendations.' },
+  { icon: '🚫', text: 'No pressure—recommendations always focus on what saves you the most.' },
+  { icon: '🧠', text: 'Powered by AI that blends usage, weather, and efficiency data for smarter guidance.' },
+  { icon: '📱', text: 'Optimized for mobile so you can check entries and insights from any device.' },
+  { icon: '🗣️', text: 'Eligible customers can submit testimonials for an additional entry that never expires.' },
+  { icon: '🔁', text: 'Keep profile entries active by refreshing your usage data at least every 12 months.' },
+  { icon: '🎉', text: 'Prefer mail-in? The AMOE postcard option keeps entries available without sharing usage.' },
+];
+
 type DashboardCard = {
   title: string;
   description: string;
@@ -304,9 +322,8 @@ const DASHBOARD_CARDS: DashboardCard[] = [
 ];
 
 export default function DashboardPage() {
-  const [mounted, setMounted] = useState(false);
-  const [userAddress, setUserAddress] = useState<string>('');
-  const [storageKey, setStorageKey] = useState('intelliwatt_user_address');
+const [mounted, setMounted] = useState(false);
+const [userAddress, setUserAddress] = useState<string>('');
 
   const resolveStorageKey = () => {
     if (typeof document === 'undefined') {
@@ -324,41 +341,21 @@ export default function DashboardPage() {
   useEffect(() => {
     setMounted(true);
 
-    if (typeof window !== 'undefined') {
-      const key = resolveStorageKey();
-      setStorageKey(key);
+  if (typeof window === 'undefined') {
+    return;
+  }
 
-      const legacy = localStorage.getItem('intelliwatt_user_address');
-      if (legacy && key !== 'intelliwatt_user_address') {
-        localStorage.setItem(key, legacy);
-        localStorage.removeItem('intelliwatt_user_address');
-      }
+  const key = resolveStorageKey();
 
-      const savedAddress = localStorage.getItem(key);
-      if (savedAddress) {
-        setUserAddress(savedAddress);
-      } else {
-        setUserAddress('');
-      }
-    }
-  }, []);
-
-  const handleAddressSubmitted = async (address: string) => {
-    setUserAddress(address);
-
-    if (typeof window !== 'undefined') {
-      if (!address) {
-        localStorage.removeItem('intelliwatt_user_address');
-        localStorage.removeItem(storageKey);
-      } else {
-        localStorage.setItem(storageKey, address);
-      }
+  const legacy = localStorage.getItem('intelliwatt_user_address');
+  if (legacy && key !== 'intelliwatt_user_address') {
+    localStorage.setItem(key, legacy);
+    localStorage.removeItem('intelliwatt_user_address');
     }
 
-    if (!address) {
-      return;
-    }
-  };
+  const savedAddress = localStorage.getItem(key);
+  setUserAddress(savedAddress ?? '');
+}, []);
 
   // Prevent hydration mismatch
   if (!mounted) {
@@ -422,12 +419,22 @@ export default function DashboardPage() {
               </div>
             </div>
             
-            {/* Address Entry - Right below hero text - Updated */}
-            <div className="max-w-2xl mx-auto mb-8">
-              <QuickAddressEntry 
-                onAddressSubmitted={handleAddressSubmitted}
-                userAddress={userAddress}
-              />
+            {/* Benefits Overview */}
+            <div className="mx-auto mb-8 max-w-5xl rounded-3xl border-2 border-brand-blue/50 bg-brand-navy p-6 text-brand-cyan shadow-[0_18px_50px_rgba(16,46,90,0.32)] sm:p-8">
+              <h2 className="text-center text-2xl font-semibold uppercase tracking-[0.3em] text-brand-cyan/70">
+                Benefits of IntelliWatt
+              </h2>
+              <div className="mt-6 grid gap-4 sm:grid-cols-2">
+                {DASHBOARD_BENEFITS.map(({ icon, text }) => (
+                  <div
+                    key={text}
+                    className="flex items-start gap-3 rounded-2xl border border-brand-blue/30 bg-brand-navy/70 p-4 text-left text-sm leading-relaxed text-brand-cyan"
+                  >
+                    <span className="text-xl sm:text-2xl">{icon}</span>
+                    <p>{text}</p>
+                  </div>
+                ))}
+              </div>
             </div>
             
             {/* Beta & Free Banners */}
