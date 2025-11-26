@@ -68,11 +68,13 @@ const CHECKLIST: ChecklistItem[] = [
 const NEON_PURPLE = '#BF00FF';
 const NEON_GREEN = '#39FF14';
 const NEON_PINK = '#FF52FF';
+const TAB_LABEL = ['E', 'N', 'T', 'R', 'I', 'E', 'S'];
 export default function EntriesChecklistSidebar() {
   const [isOpen, setIsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<EntryResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [supportsVerticalLabel, setSupportsVerticalLabel] = useState(true);
 
   const fetchEntries = async () => {
     try {
@@ -109,6 +111,19 @@ export default function EntriesChecklistSidebar() {
 
     window.addEventListener('entriesUpdated', handler);
     return () => window.removeEventListener('entriesUpdated', handler);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.CSS?.supports) {
+      return;
+    }
+
+    const hasWritingMode = window.CSS.supports('writing-mode', 'vertical-rl');
+    const hasTextOrientation = window.CSS.supports('text-orientation', 'upright');
+
+    if (!hasWritingMode || !hasTextOrientation) {
+      setSupportsVerticalLabel(false);
+    }
   }, []);
 
   const totalsByType = useMemo(() => {
@@ -163,14 +178,35 @@ export default function EntriesChecklistSidebar() {
         <span
           className="text-sm font-semibold leading-tight"
           style={{
-            writingMode: 'vertical-rl',
-            textOrientation: 'upright',
-            letterSpacing: '0.4em',
             color: NEON_PURPLE,
             textShadow: '0 0 12px rgba(191,0,255,0.75)',
+            minHeight: supportsVerticalLabel ? '6rem' : undefined,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
           }}
         >
-          ENTRIES
+          {supportsVerticalLabel ? (
+            <span
+              aria-hidden="true"
+              style={{
+                writingMode: 'vertical-rl',
+                textOrientation: 'upright',
+                letterSpacing: '0.4em',
+              }}
+            >
+              ENTRIES
+            </span>
+          ) : (
+            <span className="flex flex-col items-center gap-[0.35rem] leading-none">
+              {TAB_LABEL.map((char, index) => (
+                <span key={`${char}-${index}`} className="block">
+                  {char}
+                </span>
+              ))}
+            </span>
+          )}
+          <span className="sr-only">Entries checklist</span>
         </span>
       </button>
 
