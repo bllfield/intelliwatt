@@ -19,21 +19,24 @@ export async function GET(req: Request) {
   // Handle temporary tokens (when database is not available)
   if (token.startsWith('temp_')) {
     console.log('Temporary token used - database not available');
-    // For temporary tokens, create a basic user session
     const cookieStore = cookies();
-    
-    // Set login cookie with a placeholder email
     cookieStore.set({
       name: 'intelliwatt_user',
-      value: 'temp_user@intelliwatt.com',
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      value: '',
+      expires: new Date(0),
       path: '/',
-      maxAge: 60 * 60 * 24 * 7,
     });
 
-    return NextResponse.redirect(new URL('/dashboard', req.url));
+    const trimmedReferral =
+      typeof referralTokenFromQuery === 'string' && referralTokenFromQuery.trim().length > 0
+        ? referralTokenFromQuery.trim()
+        : null;
+
+    const redirectTarget = trimmedReferral
+      ? `/join?ref=${encodeURIComponent(trimmedReferral)}`
+      : '/join';
+
+    return NextResponse.redirect(new URL(redirectTarget, req.url));
   }
 
   // Handle real tokens from database

@@ -3,9 +3,31 @@ import { prisma } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
+type RawAuthorization = {
+  id: string;
+  userId: string;
+  emailConfirmationStatus: 'PENDING' | 'DECLINED' | 'APPROVED';
+  emailConfirmationAt: Date | null;
+  createdAt: Date;
+  authorizationEndDate: Date | null;
+  smtStatus: string | null;
+  smtStatusMessage: string | null;
+  houseAddress: {
+    addressLine1: string | null;
+    addressLine2: string | null;
+    addressCity: string | null;
+    addressState: string | null;
+    addressZip5: string | null;
+  } | null;
+  user: {
+    email: string | null;
+  } | null;
+};
+
 export async function GET() {
   try {
-    const authorizations = await prisma.smtAuthorization.findMany({
+    const prismaAny = prisma as any;
+    const authorizations = (await prismaAny.smtAuthorization.findMany({
       where: {
         archivedAt: null,
         emailConfirmationStatus: {
@@ -39,7 +61,7 @@ export async function GET() {
           },
         },
       },
-    });
+    })) as RawAuthorization[];
 
     const mapped = authorizations.map((auth) => ({
       id: auth.id,

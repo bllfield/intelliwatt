@@ -208,7 +208,7 @@ export default function Header() {
       </div>
     </header>
 
-    {(authChecked && isAuthenticated && pathname.startsWith(DASHBOARD_PREFIX)) ? <DashboardHeader /> : null}
+    {authChecked && isAuthenticated ? <DashboardHeader /> : null}
   </>
   );
 }
