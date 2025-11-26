@@ -41,10 +41,10 @@ type OffersResponse = {
 export default function AdminOffersExplorer() {
   // ---- form
   const [mode, setMode] = useState<'address' | 'esiid'>('address');
-  const [address, setAddress] = useState('8808 Las Vegas Ct');
-  const [city, setCity] = useState('White Settlement');
+  const [address, setAddress] = useState('1234 Sample Street');
+  const [city, setCity] = useState('Sample City');
   const [state, setState] = useState('TX');
-  const [zip, setZip] = useState('76108');
+  const [zip, setZip] = useState('75000');
   const [esiid, setEsiid] = useState('');
 
   // ---- results

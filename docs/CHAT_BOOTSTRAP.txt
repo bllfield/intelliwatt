@@ -10,6 +10,30 @@ Follow docs/CHATGPT_HOUSE_RULES.md:
 - No extra fluff; only what’s required to make it function
 - Default model: GPT-5 Codex
 - Wait for me to say “done” after each step
+- Before asking the user to add or change anything, search the repo. If the value or script already exists, paste it directly—do not tell the user to create what’s already here.
+- If a command needs root (or deploy), spell out the transition steps every time (e.g., `exit` back to root, or `sudo -iu deploy` from root) before giving the command—never assume the user is already at the right prompt.
+
+========================================
+DATABASE CONNECTION (ALL ENVIRONMENTS)
+========================================
+
+Use the pooled URL (port 25061) everywhere; keep the direct URL (25060) only for Prisma migrate:
+
+```
+DATABASE_URL="postgresql://doadmin:AVNS_lUXcN2ftFFu6XUIc5G0@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25061/app-pool?sslmode=require&pgbouncer=true"
+DIRECT_URL="postgresql://doadmin:AVNS_lUXcN2ftFFu6XUIc5G0@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25060/defaultdb?sslmode=require"
+```
+
+- Add both lines to local `.env`, `.env.production.local`, Vercel env vars, and the droplet.
+- Droplet command:
+  ```bash
+  sudo nano /etc/environment    # append the two lines
+  source /etc/environment
+  ```
+  Restart services afterwards (`sudo systemctl restart <service>`).
+- Prisma schema already expects `url` + `directUrl`; leave them in place.
+- Prisma Studio uses `DATABASE_URL`, so it now goes through PgBouncer. Close Studio when finished.
+- Never assume you are already the correct user on the droplet. Always show the login step and, when needed, switching users (`sudo -iu deploy`) plus the `cd` command before running anything.
 
 Keeper Cleanup Runbook (Chat executes every command):
 - Confirm a DO snapshot/pg_dump before modifying the production database.

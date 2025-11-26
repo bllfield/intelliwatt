@@ -47,6 +47,24 @@ If verification does not return `5`, stop and investigate before loading any add
 - **Production**: Read-only for verified flows and data queries only
 - **Safety**: Avoid modifying production data during development
 
+### Database URLs (copy/paste everywhere)
+```
+DATABASE_URL="postgresql://doadmin:AVNS_lUXcN2ftFFu6XUIc5G0@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25061/app-pool?sslmode=require&pgbouncer=true"
+DIRECT_URL="postgresql://doadmin:AVNS_lUXcN2ftFFu6XUIc5G0@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25060/defaultdb?sslmode=require"
+```
+- Add both lines to local `.env`, `.env.production.local`, Vercel env vars, and the droplet (`sudo nano /etc/environment`; `source /etc/environment`; restart services).
+- Prisma schema already uses `url` + `directUrl`; leave them.
+- Prisma Studio uses `DATABASE_URL`, so it now hits PgBouncer—close Studio when finished.
+- When providing droplet instructions, always include the login and directory steps first, e.g.:
+  ```
+  ssh root@<droplet-ip>
+  sudo -iu deploy
+  cd /home/deploy/apps/intelliwatt
+  ```
+  Never assume the user is already on the right account or path.
+- Before telling the user to add or change any value, search the repo. If it already exists, paste it directly instead of asking for it.
+- If you need to switch users during a session, spell out the transition (for example, `exit` to leave `deploy` back to root, or `sudo -iu deploy` before running deploy-only commands).
+
 ---
 
 ## 📊 Current Database State

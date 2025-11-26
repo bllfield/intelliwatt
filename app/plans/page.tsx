@@ -129,7 +129,7 @@ export default function PlansPage() {
           <input
             value={esiid}
             onChange={(e) => setEsiid(e.target.value)}
-            placeholder="e.g., 10443720004529147"
+            placeholder="e.g., 12345678901234567"
             className="mt-1 w-full rounded-xl border px-3 py-2"
           />
           <p className="text-xs text-gray-500 mt-1">If you provide an ESIID, the address is not required.</p>
@@ -140,7 +140,7 @@ export default function PlansPage() {
           <input
             value={line1}
             onChange={(e) => setLine1(e.target.value)}
-            placeholder="8808 Las Vegas Ct"
+            placeholder="1234 Sample Street"
             className="mt-1 w-full rounded-xl border px-3 py-2"
           />
         </div>
@@ -149,7 +149,7 @@ export default function PlansPage() {
           <input
             value={city}
             onChange={(e) => setCity(e.target.value)}
-            placeholder="White Settlement"
+            placeholder="Sample City"
             className="mt-1 w-full rounded-xl border px-3 py-2"
           />
         </div>
@@ -167,7 +167,7 @@ export default function PlansPage() {
           <input
             value={zip}
             onChange={(e) => setZip(e.target.value)}
-            placeholder="76108"
+            placeholder="75000"
             className="mt-1 w-full rounded-xl border px-3 py-2"
           />
         </div>

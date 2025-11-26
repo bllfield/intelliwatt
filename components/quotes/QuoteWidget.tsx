@@ -108,7 +108,7 @@ export default function QuoteWidget({
             <label className="block text-sm font-medium mb-1">Street address</label>
             <input
               className="w-full rounded-lg border px-3 py-2"
-              placeholder="8808 Las Vegas Ct"
+              placeholder="1234 Sample Street"
               value={address}
               onChange={(e) => setAddress(e.target.value)}
               autoComplete="address-line1"
@@ -119,7 +119,7 @@ export default function QuoteWidget({
             <label className="block text-sm font-medium mb-1">City</label>
             <input
               className="w-full rounded-lg border px-3 py-2"
-              placeholder="White Settlement"
+              placeholder="Sample City"
               value={city}
               onChange={(e) => setCity(e.target.value)}
               autoComplete="address-level2"
@@ -141,7 +141,7 @@ export default function QuoteWidget({
             <label className="block text-sm font-medium mb-1">ZIP</label>
             <input
               className="w-full rounded-lg border px-3 py-2"
-              placeholder="76108"
+              placeholder="75000"
               value={zip}
               onChange={(e) => setZip(e.target.value)}
               inputMode="numeric"

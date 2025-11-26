@@ -401,7 +401,41 @@ Invoke-RestMethod -Headers $headers -Uri "https://intelliwatt.com/api/admin/env-
 
 ## Database Connection
 
-- **Environment Variable**: `DATABASE_URL` (DigitalOcean connection string)
+- **Primary Runtime URL (`DATABASE_URL`)**
+  - Must point at the DigitalOcean PgBouncer pool on port `25061`.
+  - Example (replace the password with the current value from DO):
+    ```
+    postgresql://doadmin:AVNS_lUXcN2ftFFu6XUIc5G0@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25061/app-pool?sslmode=require&pgbouncer=true
+    ```
+  - This URL is required in **all** environments: local `.env`, `.env.production.local`, Vercel env vars, and the droplet.
+
+- **Direct URL for Prisma (`DIRECT_URL`)**
+  - Used only by `prisma migrate` / `prisma db execute`.
+  - Same credentials, but port `25060` and no `pgbouncer=true`:
+    ```
+    postgresql://doadmin:AVNS_lUXcN2ftFFu6XUIc5G0@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25060/defaultdb?sslmode=require
+    ```
+  - Keep this alongside `DATABASE_URL` in every `.env` so Prisma can read both.
+
+- **Droplet update (run exactly as written when connected as `root`)**
+  ```bash
+  sudo nano /etc/environment
+  ```
+  Paste the two lines below at the end of the file, then save (`Ctrl+O`, Enter) and exit (`Ctrl+X`):
+  ```dotenv
+  DATABASE_URL="postgresql://doadmin:AVNS_lUXcN2ftFFu6XUIc5G0@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25061/app-pool?sslmode=require&pgbouncer=true"
+  DIRECT_URL="postgresql://doadmin:AVNS_lUXcN2ftFFu6XUIc5G0@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25060/defaultdb?sslmode=require"
+  ```
+  Reload the session so the env vars are active:
+  ```bash
+  source /etc/environment
+  ```
+  Restart any services or scripts after updating.
+
+- **Prisma Studio**
+  - Uses whichever value `DATABASE_URL` currently holds.
+  - Always close Studio (`Ctrl+C`) when finished so pooled connections are released.
+
 - **Migration Status**: Applied (HouseAddress model exists)
 - **Client Import**: `import { prisma } from '@/lib/db'`
 

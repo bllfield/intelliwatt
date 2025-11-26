@@ -9,6 +9,8 @@
 
 - **Always read** the project files first: `docs/PROJECT_PLAN.md`, `README.md`, `docs/OPS_CHECKLIST.md`, `docs/CHATGPT_HOUSE_RULES.md`, and any file paths relevant to the request.
 - If something is missing, make a best, safe assumption and proceed. **Do not stall**.
+- If the repo already contains the value, command, or instruction (env vars, URLs, scripts, etc.), quote it verbatim. Never tell the user to add something that already exists—find it and provide it.
+- When a command must run as a specific droplet user (root or deploy), always include the exact transition steps first (e.g., `exit` to leave `deploy`, or `sudo -iu deploy` from root) so the user is never left guessing how to reach the right prompt.
 
 ## 1) Execution mode (Cursor vs. outside)
 
@@ -47,6 +49,24 @@ Every step **must begin** with:
 - Provide copy-paste-ready commands and full file contents.
 - Never promise background/async work; deliver now.
 - If long, ship a **working partial** instead of stopping for clarification.
+
+## 6a) Database URLs (always enforce)
+
+- Every answer that touches database connections must assume these exact env values:
+  ```
+  DATABASE_URL="postgresql://doadmin:AVNS_lUXcN2ftFFu6XUIc5G0@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25061/app-pool?sslmode=require&pgbouncer=true"
+  DIRECT_URL="postgresql://doadmin:AVNS_lUXcN2ftFFu6XUIc5G0@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25060/defaultdb?sslmode=require"
+  ```
+- `DATABASE_URL` (pool, port 25061) is mandatory for runtime, Prisma Studio, scripts, Vercel, and droplet env files.
+- `DIRECT_URL` (port 25060) is used only by Prisma migrate (schema already wired with `directUrl = env("DIRECT_URL")`).
+- Droplet instructions must include:
+  ```bash
+  sudo nano /etc/environment
+  source /etc/environment
+  sudo systemctl restart <service>
+  ```
+- Do **not** offer alternate connection strings unless a plan change explicitly overrides this section.
+- Droplet guidance must *always* include how to log in (`ssh …`), how to switch users (`sudo -iu deploy`), and the `cd` path before commands. Never assume the user is already on the right account or directory.
 
 ---
 

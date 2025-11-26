@@ -55,7 +55,7 @@ export function NormalizeLatestButton({ action }: NormalizeLatestButtonProps) {
             value={esiid}
             onChange={(event) => setEsiid(event.target.value)}
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
-            placeholder="10443720004529147"
+            placeholder="12345678901234567"
             autoComplete="off"
           />
         </div>

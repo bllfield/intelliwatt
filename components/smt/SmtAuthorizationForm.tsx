@@ -242,7 +242,7 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
             htmlFor="meterNumber"
             className="block text-xs font-medium text-slate-800"
           >
-            Meter number (optional)
+            Enter your meter number
           </label>
           <input
             id="meterNumber"
@@ -252,12 +252,13 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
             value={meterNumber}
             onChange={(event) => setMeterNumber(event.target.value)}
             disabled={isPending}
-            placeholder="As shown on your bill (e.g., 142606737LG)"
+            placeholder="Meter number from your bill (e.g., 123456789LG)"
             inputMode="text"
             autoComplete="off"
+            required
           />
           <p className="text-[11px] text-slate-500">
-            We’ll attempt to pull this automatically, but if you know it, enter the meter number from your electric bill to speed things up.
+            You can find this printed near “Meter Number” or “ESI Meter” on your electric bill, or on the faceplate of your physical meter next to the barcode.
           </p>
         </div>
 
