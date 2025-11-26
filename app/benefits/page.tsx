@@ -33,29 +33,12 @@ export default function BenefitsPage() {
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(0,240,255,0.1),transparent_55%)]" />
         </div>
 
-        <div className="relative z-10 max-w-4xl mx-auto text-center">
-          <h1 className="text-4xl md:text-6xl font-bold text-brand-white mb-6">
-            Why Join{' '}
-            <a
-              href="https://www.hitthejackwatt.com"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-brand-blue transition hover:text-brand-cyan"
-            >
-              HitTheJackWatt™
-            </a>
-            ?
+        <div className="relative z-10 mx-auto max-w-4xl text-center">
+          <h1 className="text-4xl font-bold text-brand-white md:text-6xl">
+            Why Join <span className="text-brand-blue transition hover:text-brand-cyan">IntelliWatt™</span>?
           </h1>
-          <p className="text-xl text-brand-white/90 max-w-3xl mx-auto leading-relaxed">
-            <a
-              href="https://www.hitthejackwatt.com"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-semibold text-brand-blue transition hover:text-brand-cyan"
-            >
-              HitTheJackWatt™
-            </a>{' '}
-            rewards smart energy decisions—no pressure, no sales, just savings and prizes that grow with the community.
+          <p className="mx-auto mt-6 max-w-3xl text-xl leading-relaxed text-brand-white/90">
+            IntelliWatt™ rewards smart energy decisions—no pressure, no sales, just savings and prizes that grow with the community.
           </p>
         </div>
       </section>
