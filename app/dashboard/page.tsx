@@ -457,7 +457,7 @@ export default function DashboardPage() {
                   <Icon />
                 </IconChip>
                 <h3 className="text-2xl font-semibold text-[#00F0FF] mb-3">{title}</h3>
-                <p className="text-base text-[#9DFBFF] mb-6 mx-auto max-w-xs">{description}</p>
+                <p className="text-base text-white mb-6 mx-auto max-w-xs">{description}</p>
                 <Link
                   href={href}
                   className="inline-flex items-center justify-center gap-2 rounded-full border border-[#00F0FF]/60 bg-transparent px-6 py-3 text-sm font-semibold uppercase tracking-wide text-[#00F0FF] transition-all duration-300 hover:border-[#00F0FF] hover:bg-[#00F0FF]/10"
