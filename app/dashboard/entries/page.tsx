@@ -182,12 +182,7 @@ export default function EntriesPage() {
       {/* Entries Overview */}
       <section className="pt-4 pb-8 px-4 bg-white">
         <div className="max-w-5xl mx-auto">
-          <div className="bg-white p-8 rounded-3xl border border-brand-cyan/20 shadow-[0_0_35px_rgba(56,189,248,0.2)] mb-10">
-            <h2 className="text-2xl font-bold text-brand-navy mb-2 text-center">Your Entries Summary</h2>
-            <p className="text-sm text-brand-slate/80 text-center mb-10">
-              Every action below contributes to your monthly jackpot chances. Keep the neon numbers glowing green!
-            </p>
-
+          <div className="bg-white p-8 rounded-3xl border border-brand-cyan/20 shadow-[0_0_35px_rgba(56,189,248,0.2)] mb-8">
             {error ? (
               <div className="rounded-2xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-600 text-center mb-10">
                 {error}
