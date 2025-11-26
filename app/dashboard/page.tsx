@@ -322,7 +322,7 @@ const DASHBOARD_CARDS: DashboardCard[] = [
 
 export default function DashboardPage() {
 const [mounted, setMounted] = useState(false);
-const [userAddress, setUserAddress] = useState<string>('');
+  const [userAddress, setUserAddress] = useState<string>('');
 
   const resolveStorageKey = () => {
     if (typeof document === 'undefined') {
@@ -372,83 +372,70 @@ const [userAddress, setUserAddress] = useState<string>('');
   return (
     <div className="min-h-screen bg-brand-white">
       {/* Hero Section */}
-      <section className="relative bg-brand-navy py-20 px-4 overflow-hidden">
-        {/* Background Pattern */}
-        <div className="absolute inset-0 bg-gradient-to-br from-brand-navy via-brand-navy to-brand-navy/95">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(0,240,255,0.1),transparent_50%)]"></div>
-        </div>
-        
-        <div className="relative z-10 max-w-6xl mx-auto">
-          <div className="text-center mb-16">
-            <h1 className="text-4xl md:text-6xl font-bold text-brand-white mb-6">
-              Welcome to <span className="text-brand-blue">IntelliWatt™</span>
-            </h1>
-            <p className="text-xl text-brand-white mb-4 max-w-4xl mx-auto leading-relaxed">
-              Your FREE AI-powered energy optimization dashboard. Track savings, manage your plan, and earn rewards.
-            </p>
-            {/* Smart Meter + Referral CTA */}
-            <div className="mb-8 flex flex-col items-center gap-4 text-center">
-              <a
-                href="https://www.hitthejackwatt.com"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="relative inline-block h-24 w-full max-w-xs sm:h-28 sm:max-w-sm md:h-24 md:w-64"
-              >
-                <Image
-                  src="/Hitthejackwatt-Logo.png"
-                  alt="HitTheJackWatt™"
-                  fill
-                  className="object-contain"
-                  priority
-                />
-              </a>
-                <div className="inline-flex w-full max-w-xl flex-col items-center gap-2 rounded-2xl border border-[#39FF14]/40 bg-[#39FF14]/10 px-6 py-4 text-center shadow-lg shadow-[#39FF14]/10 ring-1 ring-[#39FF14]/30">
-                <span className="text-lg font-extrabold leading-tight text-brand-white md:text-xl">
-                  <span style={{ color: '#39FF14' }}>⚡ Connect your smart meter data</span>
-                  <span className="mx-1 text-brand-white">for</span>
-                  <span style={{ color: '#39FF14' }}>1 jackpot entry!</span>
-                </span>
-                <span className="text-sm font-bold leading-tight text-brand-white md:text-base">
-                    <Link href="/dashboard/referrals" style={{ color: '#BF00FF' }} className="hover:underline">
-                      👥 Refer a Friend:
-                    </Link>
-                  <span className="mx-1 text-brand-white" />
-                  <span style={{ color: '#39FF14' }}>1 jackpot entry per signup!</span>
-                </span>
-              </div>
+      <section className="bg-brand-navy py-16 px-4">
+        <div className="mx-auto max-w-6xl rounded-3xl border-2 border-[#00F0FF]/40 bg-brand-navy/85 p-8 text-center shadow-[0_30px_80px_rgba(10,20,60,0.55)] backdrop-blur sm:p-12">
+          <h1 className="text-4xl font-bold text-brand-white sm:text-5xl md:text-6xl">
+            Welcome to <span className="text-brand-blue">IntelliWatt™</span>
+          </h1>
+          <p className="mx-auto mt-4 max-w-4xl text-lg leading-relaxed text-brand-white/85 sm:text-xl">
+            Your FREE AI-powered energy optimization dashboard. Track savings, manage your plan, and earn rewards.
+          </p>
+          <div className="mt-8 flex flex-col items-center gap-4">
+            <a
+              href="https://www.hitthejackwatt.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="relative inline-block h-24 w-full max-w-xs sm:h-28 sm:max-w-sm md:h-24 md:w-64"
+            >
+              <Image
+                src="/Hitthejackwatt-Logo.png"
+                alt="HitTheJackWatt™"
+                fill
+                className="object-contain"
+                priority
+              />
+            </a>
+            <div className="inline-flex w-full max-w-xl flex-col items-center gap-2 rounded-3xl border border-[#39FF14]/40 bg-[#39FF14]/10 px-6 py-4 text-center shadow-lg shadow-[#39FF14]/12 ring-1 ring-[#39FF14]/30">
+              <span className="text-lg font-extrabold leading-tight text-brand-white md:text-xl">
+                <span style={{ color: '#39FF14' }}>⚡ Connect your smart meter data</span>
+                <span className="mx-1 text-brand-white">for</span>
+                <span style={{ color: '#39FF14' }}>1 jackpot entry!</span>
+              </span>
+              <span className="text-sm font-bold leading-tight text-brand-white md:text-base">
+                <Link href="/dashboard/referrals" style={{ color: '#BF00FF' }} className="hover:underline">
+                  👥 Refer a Friend:
+                </Link>
+                <span className="mx-1 text-brand-white" />
+                <span style={{ color: '#39FF14' }}>1 jackpot entry per signup!</span>
+              </span>
             </div>
-            
-            {/* Benefits Overview */}
-            <div className="mx-auto mb-8 max-w-5xl rounded-3xl border-2 border-brand-blue/50 bg-brand-navy p-6 text-brand-cyan shadow-[0_18px_50px_rgba(16,46,90,0.32)] sm:p-8">
-              <h2 className="text-center text-2xl font-semibold uppercase tracking-[0.3em] text-brand-cyan/70">
-                Benefits of IntelliWatt
-              </h2>
-              <div className="mt-6 grid gap-4 sm:grid-cols-2">
-                {DASHBOARD_BENEFITS.map(({ icon, text }) => (
-                  <div
-                    key={text}
-                    className="flex items-start gap-3 rounded-2xl border border-brand-blue/30 bg-brand-navy/70 p-4 text-left text-sm leading-relaxed text-brand-cyan"
-                  >
-                    <span className="text-xl sm:text-2xl">{icon}</span>
-                    <p>{text}</p>
-                  </div>
-                ))}
-              </div>
+          </div>
+          <div className="mx-auto mt-10 max-w-5xl rounded-3xl border-2 border-brand-blue/40 bg-brand-navy/90 p-6 text-brand-cyan shadow-[0_18px_55px_rgba(16,46,90,0.35)] sm:p-8">
+            <h2 className="text-center text-2xl font-semibold uppercase tracking-[0.3em] text-brand-cyan/70">
+              Benefits of IntelliWatt
+            </h2>
+            <div className="mt-6 grid gap-4 text-left sm:grid-cols-2">
+              {DASHBOARD_BENEFITS.map(({ icon, text }) => (
+                <div
+                  key={text}
+                  className="flex items-start gap-3 rounded-3xl border border-brand-blue/35 bg-brand-navy p-4 text-sm leading-relaxed text-brand-cyan"
+                >
+                  <span className="text-xl sm:text-2xl">{icon}</span>
+                  <p>{text}</p>
+                </div>
+              ))}
             </div>
-            
-            {/* Beta & Free Banners */}
-            <div className="flex flex-col items-center gap-2 mb-8">
-              <div className="inline-block bg-brand-blue text-brand-navy px-6 py-2 rounded-full font-semibold">
-                🚀 Beta Version - New Features Coming Soon!
-              </div>
-              <div className="inline-block bg-white/10 text-white px-4 py-1.5 rounded-full font-semibold border border-white/20">
-                💸 100% Free — No fees, ever
-              </div>
+          </div>
+          <div className="mt-8 inline-flex flex-wrap items-center justify-center gap-3">
+            <div className="inline-flex items-center rounded-full border border-brand-blue/50 bg-brand-blue px-6 py-2 text-sm font-semibold uppercase tracking-wide text-brand-navy">
+              🚀 Beta Version — New features launching soon
+            </div>
+            <div className="inline-flex items-center rounded-full border border-white/30 bg-white/10 px-5 py-1.5 text-sm font-semibold uppercase tracking-wide text-brand-white">
+              💸 100% Free — No fees, ever
             </div>
           </div>
         </div>
       </section>
-
 
       {/* Dashboard Grid */}
       <section className="bg-brand-white py-16 px-4">
@@ -462,8 +449,8 @@ const [userAddress, setUserAddress] = useState<string>('');
                 <IconChip>
                   <Icon />
                 </IconChip>
-                <h3 className="text-2xl font-semibold text-[#00F0FF] mb-3">{title}</h3>
-                <p className="text-base text-white mb-6 mx-auto max-w-xs">{description}</p>
+                <h3 className="mb-3 text-2xl font-semibold text-[#00F0FF]">{title}</h3>
+                <p className="mx-auto mb-6 max-w-xs text-base text-white">{description}</p>
                 <Link
                   href={href}
                   className="inline-flex items-center justify-center gap-2 rounded-full border border-[#00F0FF]/60 bg-transparent px-6 py-3 text-sm font-semibold uppercase tracking-wide text-[#00F0FF] transition-all duration-300 hover:border-[#00F0FF] hover:bg-[#00F0FF]/10"
@@ -475,7 +462,6 @@ const [userAddress, setUserAddress] = useState<string>('');
           </div>
         </div>
       </section>
-
 
       {/* Call to Action - Show if no address entered */}
       {!userAddress && (
@@ -519,56 +505,29 @@ const [userAddress, setUserAddress] = useState<string>('');
         </section>
       )}
 
-      <section className="px-4 mt-8">
-        <div className="max-w-3xl mx-auto rounded-3xl border border-brand-navy/20 bg-white p-8 text-center shadow-sm">
-          <h2 className="text-2xl font-semibold text-brand-navy">
-            Smart Meter Texas (SMT)
-          </h2>
-          <p className="mt-3 text-base text-brand-navy max-w-2xl mx-auto">
-            Connect directly to your smart meter so IntelliWatt can automatically pull your real interval and billing data.
-          </p>
-          <div className="mt-6 flex justify-center">
-            <Link
-              href="/dashboard/api#smt"
-              className="inline-flex items-center px-5 py-3 rounded-xl bg-brand-navy text-brand-blue text-sm font-bold border-2 border-brand-navy hover:border-brand-blue transition-all duration-300"
-            >
-              Connect SMT
-            </Link>
-          </div>
-        </div>
-      </section>
-
       {/* Stats Section - Only show if address is entered */}
       {userAddress && (
         <section className="py-16 px-4 bg-brand-navy">
-          <div className="max-w-6xl mx-auto">
-            <h2 className="text-3xl font-bold text-brand-white text-center mb-12">
+          <div className="mx-auto max-w-6xl rounded-3xl border border-brand-cyan/40 bg-brand-navy/90 p-8 text-center shadow-[0_24px_70px_rgba(16,46,90,0.45)] sm:p-10">
+            <h2 className="text-3xl font-bold text-brand-white text-center mb-10">
               Your <span className="text-brand-blue">Savings</span> Summary
             </h2>
             
-            <div className="grid md:grid-cols-4 gap-8">
-              <div className="text-center">
-                <div className="text-4xl font-bold text-brand-blue mb-2">
-                  ${annualSavings}
-                </div>
+            <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-2xl border border-brand-blue/35 bg-brand-navy/75 p-6 text-center shadow-[0_18px_45px_rgba(10,20,60,0.35)]">
+                <div className="text-4xl font-bold text-brand-blue mb-2">${annualSavings}</div>
                 <div className="text-brand-white">Annual Savings</div>
               </div>
-              <div className="text-center">
-                <div className="text-4xl font-bold text-brand-blue mb-2">
-                  {accuracyRate}%
-                </div>
+              <div className="rounded-2xl border border-brand-blue/35 bg-brand-navy/75 p-6 text-center shadow-[0_18px_45px_rgba(10,20,60,0.35)]">
+                <div className="text-4xl font-bold text-brand-blue mb-2">{accuracyRate}%</div>
                 <div className="text-brand-white">Accuracy Rate</div>
               </div>
-              <div className="text-center">
-                <div className="text-4xl font-bold text-brand-blue mb-2">
-                  {totalEntries}
-                </div>
+              <div className="rounded-2xl border border-brand-blue/35 bg-brand-navy/75 p-6 text-center shadow-[0_18px_45px_rgba(10,20,60,0.35)]">
+                <div className="text-4xl font-bold text-brand-blue mb-2">{totalEntries}</div>
                 <div className="text-brand-white">Jackpot Entries</div>
               </div>
-              <div className="text-center">
-                <div className="text-4xl font-bold text-brand-blue mb-2">
-                  {totalReferrals}
-                </div>
+              <div className="rounded-2xl border border-brand-blue/35 bg-brand-navy/75 p-6 text-center shadow-[0_18px_45px_rgba(10,20,60,0.35)]">
+                <div className="text-4xl font-bold text-brand-blue mb-2">{totalReferrals}</div>
                 <div className="text-brand-white">Referred Friends</div>
               </div>
             </div>
