@@ -80,7 +80,7 @@ export default function Header() {
   return (
     <>
     <header className="border-b border-brand-blue/20 bg-brand-navy px-4 py-2 text-brand-blue shadow-lg">
-      <div className="mx-auto flex max-w-6xl flex-col gap-3">
+      <div className="mx-auto max-w-6xl px-0 sm:px-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-4">
             <Link href="/" onClick={handleClose}>

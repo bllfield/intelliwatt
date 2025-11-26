@@ -48,15 +48,12 @@ export default function BenefitsPage() {
           {benefits.map((benefit) => (
             <li
               key={benefit.id}
-              className="flex items-start gap-4 rounded-2xl border border-brand-blue/30 bg-brand-navy p-6 shadow-[0_15px_40px_rgba(15,23,42,0.3)] transition hover:border-brand-blue/60"
+              className="flex items-start gap-4 rounded-2xl border border-[#00F0FF]/30 bg-brand-navy p-6 shadow-[0_18px_40px_rgba(15,23,42,0.35)] transition hover:border-[#00F0FF]/60"
             >
-              <span
-                aria-hidden
-                className="mt-1 flex h-10 w-10 items-center justify-center rounded-full bg-brand-blue/20 text-lg text-brand-blue shadow-[0_10px_20px_rgba(59,130,246,0.35)]"
-              >
-                {benefit.icon}
-              </span>
-              <p className="text-brand-blue/90 leading-relaxed">{benefit.text}</p>
+              <div className="mt-0.5 flex h-12 w-12 items-center justify-center rounded-2xl border border-[#00F0FF]/40 bg-brand-navy/70 shadow-[0_0_22px_rgba(0,240,255,0.28)]">
+                <span className="text-xl text-[#00F0FF]">{benefit.icon}</span>
+              </div>
+              <p className="text-[#00F0FF]/80 leading-relaxed">{benefit.text}</p>
             </li>
           ))}
         </ul>
