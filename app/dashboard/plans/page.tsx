@@ -10,7 +10,7 @@ export default function PlansPage() {
         description="We monitor pricing from multiple providers and stack it against your actual usage data. When your current plan stops delivering, IntelliWatt surfaces better options automatically."
       />
 
-      <section className="bg-brand-white py-16 px-4">
+      <section className="bg-brand-white pt-6 pb-12 px-4">
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-8">
           <div className="rounded-3xl border border-brand-cyan/30 bg-brand-navy p-8 text-brand-cyan shadow-[0_30px_60px_rgba(10,20,60,0.45)]">
             <h2 className="text-2xl font-semibold text-brand-cyan">Coming Soon: Live Plan Comparisons</h2>

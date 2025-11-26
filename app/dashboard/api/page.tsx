@@ -255,7 +255,7 @@ export default async function ApiConnectPage() {
         description="Authorize IntelliWatt to sync with your utility’s smart meter. We only use this secure connection to pull usage and billing intervals so plan insights stay accurate automatically."
       />
 
-      <section className="bg-brand-white py-12 px-4">
+      <section className="bg-brand-white pt-6 pb-12 px-4">
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-10">
           {!existingAuth && (
             <div className="flex flex-col items-center gap-4 text-center">

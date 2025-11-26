@@ -87,7 +87,7 @@ export default function ReferralsPage() {
       </DashboardHero>
 
       {/* Stats Section */}
-      <section className="py-8 px-4 bg-brand-white">
+      <section className="pt-4 pb-8 px-4 bg-brand-white">
         <div className="max-w-4xl mx-auto">
           <div className="grid md:grid-cols-2 gap-6 mb-8">
             <div className="bg-brand-navy p-6 rounded-xl text-center border border-brand-blue/20">
@@ -107,7 +107,7 @@ export default function ReferralsPage() {
       </section>
 
       {/* Referral Link Section */}
-      <section className="py-16 px-4 bg-brand-white">
+      <section className="pt-6 pb-12 px-4 bg-brand-white">
         <div className="max-w-4xl mx-auto">
           <div className="bg-white p-8 rounded-2xl border-2 border-brand-navy shadow-lg">
             <div className="text-center mb-8">

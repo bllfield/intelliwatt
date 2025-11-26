@@ -288,7 +288,7 @@ export default async function ProfilePage() {
     : null;
 
   return (
-    <div className="min-h-screen bg-white py-12 px-4 text-brand-navy">
+    <div className="min-h-screen bg-white py-8 px-4 text-brand-navy">
       <div className="mx-auto flex max-w-6xl flex-col gap-10">
         <DashboardHero
           title="Profile"
