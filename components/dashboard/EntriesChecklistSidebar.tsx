@@ -68,8 +68,6 @@ const CHECKLIST: ChecklistItem[] = [
 const NEON_PURPLE = '#BF00FF';
 const NEON_GREEN = '#39FF14';
 const NEON_PINK = '#FF52FF';
-const TAB_LABEL = ['E', 'N', 'T', 'R', 'I', 'E', 'S'];
-
 export default function EntriesChecklistSidebar() {
   const [isOpen, setIsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -163,14 +161,16 @@ export default function EntriesChecklistSidebar() {
         aria-controls="entries-checklist-panel"
       >
         <span
-          className="flex flex-col items-center gap-[0.35rem] text-sm font-semibold leading-none"
-          style={{ color: NEON_PURPLE, textShadow: '0 0 12px rgba(191,0,255,0.75)' }}
+          className="text-sm font-semibold leading-tight"
+          style={{
+            writingMode: 'vertical-rl',
+            textOrientation: 'upright',
+            letterSpacing: '0.4em',
+            color: NEON_PURPLE,
+            textShadow: '0 0 12px rgba(191,0,255,0.75)',
+          }}
         >
-          {TAB_LABEL.map((char, index) => (
-            <span key={`${char}-${index}`} className="block">
-              {char}
-            </span>
-          ))}
+          ENTRIES
         </span>
       </button>
 
