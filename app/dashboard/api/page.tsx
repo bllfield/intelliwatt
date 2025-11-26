@@ -421,9 +421,7 @@ export default async function ApiConnectPage() {
                 </div>
               </div>
 
-              <div className="rounded-3xl border border-brand-navy bg-brand-navy/80 p-5 text-brand-cyan shadow-[0_12px_32px_rgba(16,46,90,0.2)] sm:p-6">
-                <SmtManualFallbackCard houseAddressId={houseAddress?.id ?? null} />
-              </div>
+              <SmtManualFallbackCard houseAddressId={houseAddress?.id ?? null} />
             </>
           )}
 
