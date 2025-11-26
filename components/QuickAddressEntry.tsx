@@ -55,6 +55,42 @@ export default function QuickAddressEntry({
   }, []);
 
   useEffect(() => {
+    if (!mounted || typeof window === 'undefined') {
+      return;
+    }
+
+    const googleObj = (window as any).google;
+    if (googleObj?.maps?.importLibrary) {
+      setReinitNonce((prev) => prev + 1);
+      return;
+    }
+
+    const script = document.querySelector<HTMLScriptElement>(
+      'script[src*="maps.googleapis.com/maps/api/js"]',
+    );
+    if (!script) {
+      const timeout = window.setTimeout(() => {
+        const readyObj = (window as any).google;
+        if (readyObj?.maps?.importLibrary) {
+          setReinitNonce((prev) => prev + 1);
+        }
+      }, 1200);
+      return () => window.clearTimeout(timeout);
+    }
+
+    const handleLoad = () => {
+      if ((window as any).google?.maps?.importLibrary) {
+        setReinitNonce((prev) => prev + 1);
+      }
+    };
+
+    script.addEventListener('load', handleLoad);
+    return () => {
+      script.removeEventListener('load', handleLoad);
+    };
+  }, [mounted]);
+
+  useEffect(() => {
     addressValueRef.current = address;
   }, [address]);
 

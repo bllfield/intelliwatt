@@ -157,8 +157,8 @@ export default function PrivacyPolicy() {
             <Paragraph>
               You may opt out of non-essential communications, request deletion of your account, or update your information at
               any time by contacting us at{' '}
-              <a href="mailto:privacy@intelli-watt.com" className="font-semibold text-[#00E0FF] underline">
-                privacy@intelli-watt.com
+              <a href="mailto:privacy@intelliwatt.com" className="font-semibold text-[#00E0FF] underline">
+                privacy@intelliwatt.com
               </a>
               .
             </Paragraph>
@@ -179,8 +179,8 @@ export default function PrivacyPolicy() {
             <Paragraph>
               If you have questions or concerns about this Privacy Policy, or if you wish to revoke access to your data, contact
               us at{' '}
-              <a href="mailto:privacy@intelli-watt.com" className="font-semibold text-[#00E0FF] underline">
-                privacy@intelli-watt.com
+              <a href="mailto:privacy@intelliwatt.com" className="font-semibold text-[#00E0FF] underline">
+                privacy@intelliwatt.com
               </a>
               .
             </Paragraph>
