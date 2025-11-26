@@ -16,14 +16,14 @@ export default function DashboardHero({
   children,
 }: DashboardHeroProps) {
   return (
-    <section className="bg-brand-navy px-4 py-8 sm:py-9 md:py-10 border-b border-brand-blue/20">
-      <div className="mx-auto max-w-4xl text-center space-y-4">
+    <section className="bg-brand-navy px-4 py-6 sm:py-7 md:py-8">
+      <div className="mx-auto max-w-4xl text-center space-y-3">
         {eyebrow ? (
-          <div className="inline-flex rounded-full border border-brand-blue/30 bg-brand-blue/10 px-3 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-brand-blue/80">
+          <p className="text-[0.7rem] font-semibold uppercase tracking-[0.28em] text-brand-blue/70">
             {eyebrow}
-          </div>
+          </p>
         ) : null}
-        <h1 className="text-3xl font-semibold text-brand-white sm:text-4xl">
+        <h1 className="text-3xl font-semibold text-brand-white sm:text-[2.35rem]">
           {title}
           {highlight ? (
             <>
@@ -32,10 +32,10 @@ export default function DashboardHero({
             </>
           ) : null}
         </h1>
-        <p className="mx-auto max-w-2xl text-lg leading-relaxed text-brand-white/90">
+        <p className="mx-auto max-w-2xl text-base leading-relaxed text-brand-white/85">
           {description}
         </p>
-        {children ? <div className="mt-6 flex justify-center">{children}</div> : null}
+        {children ? <div className="mt-4 flex justify-center">{children}</div> : null}
       </div>
     </section>
   );

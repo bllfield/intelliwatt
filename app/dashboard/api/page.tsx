@@ -260,7 +260,7 @@ export default async function ApiConnectPage() {
         </p>
       </DashboardHero>
 
-      <section className="bg-brand-white py-16 px-4">
+      <section className="bg-brand-white py-12 px-4">
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-10">
           {!existingAuth && (
             <div className="flex flex-col items-center gap-4 text-center">
