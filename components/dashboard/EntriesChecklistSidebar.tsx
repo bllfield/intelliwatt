@@ -74,7 +74,7 @@ export default function EntriesChecklistSidebar() {
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<EntryResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [supportsVerticalLabel, setSupportsVerticalLabel] = useState(true);
+  const [supportsVerticalLabel, setSupportsVerticalLabel] = useState<boolean | null>(null);
 
   const fetchEntries = async () => {
     try {
@@ -114,16 +114,20 @@ export default function EntriesChecklistSidebar() {
   }, []);
 
   useEffect(() => {
-    if (typeof window === 'undefined' || !window.CSS?.supports) {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const cssSupports = typeof window.CSS?.supports === 'function';
+    if (!cssSupports) {
+      setSupportsVerticalLabel(false);
       return;
     }
 
     const hasWritingMode = window.CSS.supports('writing-mode', 'vertical-rl');
     const hasTextOrientation = window.CSS.supports('text-orientation', 'upright');
 
-    if (!hasWritingMode || !hasTextOrientation) {
-      setSupportsVerticalLabel(false);
-    }
+    setSupportsVerticalLabel(hasWritingMode && hasTextOrientation);
   }, []);
 
   const totalsByType = useMemo(() => {
@@ -175,39 +179,45 @@ export default function EntriesChecklistSidebar() {
         aria-expanded={isOpen}
         aria-controls="entries-checklist-panel"
       >
-        <span
-          className="text-sm font-semibold leading-tight"
-          style={{
-            color: NEON_PURPLE,
-            textShadow: '0 0 12px rgba(191,0,255,0.75)',
-            minHeight: supportsVerticalLabel ? '6rem' : undefined,
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          {supportsVerticalLabel ? (
-            <span
-              aria-hidden="true"
-              style={{
-                writingMode: 'vertical-rl',
-                textOrientation: 'upright',
-                letterSpacing: '0.4em',
-              }}
-            >
-              ENTRIES
-            </span>
-          ) : (
-            <span className="flex flex-col items-center gap-[0.35rem] leading-none">
-              {TAB_LABEL.map((char, index) => (
-                <span key={`${char}-${index}`} className="block">
-                  {char}
-                </span>
-              ))}
-            </span>
-          )}
-          <span className="sr-only">Entries checklist</span>
-        </span>
+        {supportsVerticalLabel === null ? (
+          <span
+            className="flex flex-col items-center gap-[0.35rem] text-sm font-semibold leading-none"
+            style={{ color: NEON_PURPLE, textShadow: '0 0 12px rgba(191,0,255,0.75)' }}
+          >
+            {TAB_LABEL.map((char, index) => (
+              <span key={`${char}-${index}`} className="block">
+                {char}
+              </span>
+            ))}
+            <span className="sr-only">Entries checklist</span>
+          </span>
+        ) : supportsVerticalLabel ? (
+          <span
+            className="text-sm font-semibold leading-tight"
+            style={{
+              writingMode: 'vertical-rl',
+              textOrientation: 'upright',
+              letterSpacing: '0.4em',
+              color: NEON_PURPLE,
+              textShadow: '0 0 12px rgba(191,0,255,0.75)',
+            }}
+          >
+            ENTRIES
+            <span className="sr-only">Entries checklist</span>
+          </span>
+        ) : (
+          <span
+            className="flex flex-col items-center gap-[0.35rem] text-sm font-semibold leading-none"
+            style={{ color: NEON_PURPLE, textShadow: '0 0 12px rgba(191,0,255,0.75)' }}
+          >
+            {TAB_LABEL.map((char, index) => (
+              <span key={`${char}-${index}`} className="block">
+                {char}
+              </span>
+            ))}
+            <span className="sr-only">Entries checklist</span>
+          </span>
+        )}
       </button>
 
       {isOpen ? (
