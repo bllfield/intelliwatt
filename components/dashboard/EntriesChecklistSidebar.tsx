@@ -235,7 +235,7 @@ export default function EntriesChecklistSidebar() {
             <button
               type="button"
               onClick={toggleOpen}
-              className="mt-2 inline-flex h-6 w-6 items-center justify-center rounded-full border border-[#FF52FF]/60 text-[#FF52FF] text-sm font-bold shadow-[0_0_18px_rgba(255,82,255,0.45)]"
+              className="mt-2 inline-flex h-6 w-6 items-center justify-center rounded-full border border-rose-500/70 bg-rose-500/15 text-sm font-bold text-rose-400 shadow-[0_0_18px_rgba(239,68,68,0.45)] hover:bg-rose-500/25 hover:text-rose-300"
               aria-label="Close entries checklist"
             >
               ✖
