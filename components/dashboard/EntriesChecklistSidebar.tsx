@@ -69,8 +69,6 @@ const NEON_PURPLE = '#BF00FF';
 const NEON_GREEN = '#39FF14';
 const NEON_PINK = '#FF52FF';
 
-const TAB_LABEL = ['E', 'N', 'T', 'R', 'I', 'E', 'S'];
-
 export default function EntriesChecklistSidebar() {
   const [isOpen, setIsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -132,9 +130,9 @@ export default function EntriesChecklistSidebar() {
 
       let statusText: string;
       if (item.unlimited) {
-        statusText = earned > 0 ? `${earned} entries earned` : 'No entries earned yet';
+        statusText = earned > 0 ? `${earned} Entries Earned` : 'No Entries Earned Yet';
       } else {
-        statusText = isComplete ? '1 entry earned' : '1 entry available';
+        statusText = isComplete ? '1 Entry Earned' : '1 Entry Available';
       }
 
       return {
@@ -159,17 +157,21 @@ export default function EntriesChecklistSidebar() {
       <button
         type="button"
         onClick={toggleOpen}
-        className="group relative flex -translate-x-[75%] items-center justify-center rounded-r-3xl border border-[#BF00FF]/70 bg-[#39FF14] px-2 py-3 text-xs font-bold uppercase tracking-[0.3em] text-[#BF00FF] transition hover:-translate-x-[65%] hover:shadow-[0_0_25px_rgba(191,0,255,0.55)]"
+        className="group relative flex -translate-x-[75%] items-center justify-center rounded-r-3xl border border-[#BF00FF]/70 bg-[#39FF14] px-2 py-3 text-xs font-bold uppercase text-[#BF00FF] transition hover:-translate-x-[65%] hover:shadow-[0_0_25px_rgba(191,0,255,0.55)]"
         aria-expanded={isOpen}
         aria-controls="entries-checklist-panel"
       >
         <span
-          className="flex flex-col items-center text-[0.75rem] font-semibold leading-none"
-          style={{ color: NEON_PURPLE, textShadow: '0 0 12px rgba(191,0,255,0.75)' }}
+          className="text-sm font-semibold"
+          style={{
+            writingMode: 'vertical-rl',
+            textOrientation: 'upright',
+            letterSpacing: '0.4em',
+            color: NEON_PURPLE,
+            textShadow: '0 0 12px rgba(191,0,255,0.75)',
+          }}
         >
-          {TAB_LABEL.map((char, index) => (
-            <span key={`${char}-${index}`}>{char}</span>
-          ))}
+          ENTRIES
         </span>
       </button>
 
@@ -207,38 +209,37 @@ export default function EntriesChecklistSidebar() {
                   className="flex items-start gap-3 rounded-3xl border border-[#BF00FF]/50 bg-brand-navy/80 p-3 shadow-[0_10px_30px_rgba(10,20,60,0.35)]"
                 >
                   <span
-                    className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border-2 text-sm font-bold"
+                    className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border-2 text-sm font-bold ${
+                      item.isComplete ? 'text-[#39FF14]' : 'text-[#FF52FF]'
+                    }`}
                     style={{
                       borderColor: '#BF00FF',
-                      color: item.isComplete ? NEON_GREEN : NEON_PINK,
                       textShadow: item.isComplete
-                        ? '0 0 12px rgba(57,255,20,0.9)'
-                        : '0 0 12px rgba(255,82,255,0.9)',
+                        ? '0 0 14px rgba(57,255,20,0.95)'
+                        : '0 0 14px rgba(255,82,255,0.95)',
                       boxShadow: item.isComplete
-                        ? '0 0 18px rgba(57,255,20,0.55)'
-                        : '0 0 18px rgba(255,82,255,0.55)',
+                        ? '0 0 20px rgba(57,255,20,0.6)'
+                        : '0 0 20px rgba(255,82,255,0.6)',
                     }}
                     aria-hidden="true"
                   >
                     {item.isComplete ? '✔' : '✖'}
                   </span>
                   <div className="flex-1 space-y-1 text-xs">
-                    <div className="font-semibold" style={{ color: NEON_PURPLE }}>
+                    <Link
+                      href={item.href}
+                      className="font-semibold uppercase tracking-wide text-[#BF00FF] underline-offset-4 hover:underline"
+                      style={{ textShadow: '0 0 12px rgba(191,0,255,0.75)' }}
+                    >
                       {item.title}
-                    </div>
-                    <div className="font-semibold" style={{ color: NEON_GREEN }}>
+                    </Link>
+                    <div className="font-semibold uppercase tracking-wide" style={{ color: NEON_GREEN }}>
                       {item.statusText}
                     </div>
                     {item.note ? (
-                      <div className="text-[11px] text-brand-cyan/70">{item.note}</div>
+                      <div className="text-[11px] uppercase tracking-wide text-brand-cyan/70">{item.note}</div>
                     ) : null}
                   </div>
-                  <Link
-                    href={item.href}
-                    className="inline-flex text-[11px] font-semibold uppercase tracking-wide text-[#39FF14] underline-offset-4 hover:underline"
-                  >
-                    Go to {item.title}
-                  </Link>
                 </div>
               ))}
 
