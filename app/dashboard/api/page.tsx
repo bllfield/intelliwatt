@@ -255,8 +255,8 @@ export default async function ApiConnectPage() {
         description="Authorize IntelliWatt to sync with your utility’s smart meter. We only use this secure connection to pull usage and billing intervals so plan insights stay accurate automatically."
       />
 
-      <section className="bg-brand-white pt-4 pb-8 px-4">
-        <div className="mx-auto flex w-full max-w-5xl flex-col gap-10">
+      <section className="bg-brand-white pt-3 pb-8 px-4">
+        <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
           {!existingAuth && (
             <div className="flex flex-col items-center gap-4 text-center">
               <a
@@ -273,7 +273,7 @@ export default async function ApiConnectPage() {
                   priority
                 />
               </a>
-              <div className="inline-flex w-full max-w-xl flex-col items-center gap-2 rounded-2xl border border-[#39FF14]/40 bg-[#39FF14]/10 px-6 py-4 text-center shadow-lg shadow-[#39FF14]/15 ring-1 ring-[#39FF14]/25">
+              <div className="inline-flex w-full max-w-xl flex-col items-center gap-2 rounded-2xl border border-[#39FF14]/40 bg-[#39FF14]/10 px-5 py-3 text-center shadow-lg shadow-[#39FF14]/15 ring-1 ring-[#39FF14]/25">
                 <span className="text-base font-extrabold leading-tight text-brand-navy md:text-lg">
                   <span style={{ color: '#39FF14' }}>⚡ Connect your smart meter data</span>
                   <span className="mx-1 text-brand-navy">for</span>
@@ -290,7 +290,7 @@ export default async function ApiConnectPage() {
             </div>
           )}
 
-          <div className="space-y-4">
+          <div className="space-y-3">
             {!user && (
               <div className="rounded-2xl border border-amber-200/70 bg-amber-100/40 px-5 py-4 text-center text-sm font-medium text-amber-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]">
                 Sign in to connect Smart Meter Texas.
@@ -325,8 +325,8 @@ export default async function ApiConnectPage() {
 
           {readyForSmt && (
             <>
-              <div className="space-y-6 rounded-3xl border border-brand-cyan/20 bg-white/95 p-4 shadow-[0_18px_60px_rgba(16,46,90,0.06)] backdrop-blur max-[480px]:p-3 sm:p-6 md:p-8">
-                <div className="rounded-2xl border border-brand-cyan/40 bg-brand-navy p-5 text-sm text-brand-cyan shadow-[0_10px_30px_rgba(16,182,231,0.18)] sm:p-6">
+              <div className="space-y-4 rounded-3xl border border-brand-cyan/20 bg-white/95 p-4 shadow-[0_18px_60px_rgba(16,46,90,0.06)] backdrop-blur max-[480px]:p-3 sm:p-6 md:p-7">
+                <div className="rounded-2xl border border-brand-cyan/40 bg-brand-navy p-4 text-sm text-brand-cyan shadow-[0_10px_30px_rgba(16,182,231,0.18)] sm:p-5">
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                     <div className="space-y-1">
                       <h2 className="text-sm font-semibold uppercase tracking-wide text-brand-cyan">
@@ -368,7 +368,7 @@ export default async function ApiConnectPage() {
                 </div>
 
                 {existingAuth && (
-                  <div className="rounded-2xl border border-brand-cyan/40 bg-brand-navy p-5 text-xs text-brand-cyan shadow-[0_10px_30px_rgba(16,182,231,0.18)] sm:p-6">
+                  <div className="rounded-2xl border border-brand-cyan/40 bg-brand-navy p-4 text-xs text-brand-cyan shadow-[0_10px_30px_rgba(16,182,231,0.18)] sm:p-5">
                     <div className="flex flex-wrap items-center justify-center gap-3 text-center md:justify-between md:text-left">
                       <span className="text-[0.7rem] font-semibold uppercase tracking-wide">
                         SMT authorization last submitted{" "}
