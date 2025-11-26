@@ -345,7 +345,10 @@ export default function FAQPage() {
       {/* About IntelliWatt Section */}
       <section className="py-20 px-4">
         <div className="max-w-4xl mx-auto space-y-16 text-brand-navy">
-          <div className="bg-brand-navy text-brand-cyan rounded-3xl border border-brand-blue/40 shadow-[0_24px_70px_rgba(16,46,90,0.45)] p-8 sm:p-10">
+          <div
+            id="about-intelliwatt"
+            className="bg-brand-navy text-brand-cyan rounded-3xl border border-brand-blue/40 shadow-[0_24px_70px_rgba(16,46,90,0.45)] p-8 sm:p-10"
+          >
             <h2 className="text-3xl font-bold text-[#00E0FF] mb-6">About IntelliWatt</h2>
             <div className="space-y-4 text-brand-cyan/85 leading-relaxed">
               <p>

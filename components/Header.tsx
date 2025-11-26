@@ -7,7 +7,13 @@ import ClientEntriesCounter from './ClientEntriesCounter';
 import DashboardHeader from './DashboardHeader';
 import { usePathname } from 'next/navigation';
 
-const navLinks = [
+type NavLink = {
+  href: string;
+  label: string;
+  external?: boolean;
+};
+
+const navLinks: NavLink[] = [
   { href: '/how-it-works', label: 'How It Works' },
   { href: '/benefits', label: 'Benefits' },
   { href: '/faq', label: 'FAQ' },
@@ -15,9 +21,8 @@ const navLinks = [
   { href: '/privacy-policy', label: 'Privacy' },
   { href: '/rules', label: 'Rules' },
   {
-    href: 'https://www.intellipath-solutions.com/index.html',
+    href: '/faq#about-intelliwatt',
     label: 'About Us',
-    external: true,
   },
 ];
 

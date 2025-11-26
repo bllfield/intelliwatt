@@ -1,5 +1,7 @@
 'use client';
 
+import Link from 'next/link';
+
 export default function Footer() {
   return (
     <footer className="bg-brand-navy text-brand-blue py-8 px-4">
@@ -87,14 +89,9 @@ export default function Footer() {
               <li><a href="/privacy-policy" className="transition-colors hover:text-brand-white">Privacy Policy</a></li>
               <li><a href="/rules" className="transition-colors hover:text-brand-white">Rules</a></li>
               <li>
-                <a
-                  href="https://www.intellipath-solutions.com/index.html"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="transition-colors hover:text-brand-white"
-                >
+                <Link href="/faq#about-intelliwatt" className="transition-colors hover:text-brand-white">
                   About Us
-                </a>
+                </Link>
               </li>
             </ul>
           </div>

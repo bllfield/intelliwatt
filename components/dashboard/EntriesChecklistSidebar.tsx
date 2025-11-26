@@ -132,7 +132,7 @@ export default function EntriesChecklistSidebar() {
       if (item.unlimited) {
         statusText = earned > 0 ? `${earned} entries earned` : 'No entries earned yet';
       } else {
-        statusText = isComplete ? `${amountNeeded} entry earned` : `${amountNeeded} entry available`;
+        statusText = isComplete ? '1 entry earned' : '1 entry available';
       }
 
       return {
@@ -169,7 +169,7 @@ export default function EntriesChecklistSidebar() {
       {isOpen ? (
         <div
           id="entries-checklist-panel"
-          className="ml-3 w-[260px] max-w-[80vw] rounded-3xl border-2 border-[#39FF14]/40 bg-brand-navy p-4 text-brand-cyan shadow-[0_30px_80px_rgba(10,20,60,0.55)]"
+          className="ml-3 w-[240px] max-w-[80vw] rounded-3xl border-2 border-[#39FF14]/40 bg-brand-navy p-4 text-brand-cyan shadow-[0_30px_80px_rgba(10,20,60,0.55)]"
         >
           <div className="mb-4 text-center">
             <h2
@@ -193,14 +193,14 @@ export default function EntriesChecklistSidebar() {
           ) : error ? (
             <p className="text-center text-sm text-rose-300">{error}</p>
           ) : (
-            <div className="max-h-[60vh] space-y-3 overflow-y-auto pr-1">
+            <div className="max-h-[50vh] space-y-3 overflow-y-auto pr-1">
               {rows.map((item) => (
                 <div
                   key={item.id}
-                  className="flex items-start gap-3 rounded-3xl border border-[#BF00FF]/50 bg-brand-navy/80 p-4 shadow-[0_10px_30px_rgba(10,20,60,0.35)]"
+                  className="flex items-start gap-3 rounded-3xl border border-[#BF00FF]/50 bg-brand-navy/80 p-3 shadow-[0_10px_30px_rgba(10,20,60,0.35)]"
                 >
                   <span
-                    className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full border-2 text-lg font-bold shadow-[0_0_18px_rgba(191,0,255,0.35)]"
+                    className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border-2 text-sm font-bold shadow-[0_0_18px_rgba(191,0,255,0.35)]"
                     style={{
                       borderColor: '#BF00FF',
                       color: item.isComplete ? NEON_GREEN : NEON_PINK,
