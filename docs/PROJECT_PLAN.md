@@ -81,12 +81,12 @@ This Plan Change supersedes any prior instructions that defaulted to the direct 
 
 **Scope:**
 - `app/login/magic/route.ts`: award the **signup** entry when a brand-new user finishes the magic-link flow.
-- `app/api/smt/authorization/route.ts`: award/upgrade the **smart_meter_connect** entry to 1 when SMT authorization succeeds (or remains at 1 when the droplet reports “already active”).
+- `app/api/smt/authorization/route.ts`: award/upgrade the **smart_meter_connect** entry to 1 when SMT authorization succeeds (or remains at 1 when the droplet reports "already active").
 - `components/SmartMeterSection.tsx`: manual fallback now grants 1 entry and prevents double-awards; success toast fires `entriesUpdated`.
 - `app/api/user/entries/route.ts`: allow raising the amount for an existing entry (e.g., manual → live SMT) while keeping idempotency.
 - `components/smt/SmtAuthorizationForm.tsx`: notify listeners after a successful submission so counters refresh instantly.
 - `lib/hitthejackwatt/opportunities.ts`: retire the `dashboard_visit` placeholder, clarify the manual vs. automated SMT reward copy.
-- Removed the old “dashboard visit = 1 entry” demo hook from `app/dashboard/page.tsx`.
+- Removed the old "dashboard visit = 1 entry" demo hook from `app/dashboard/page.tsx`.
 
 **Verification:**
 - Tested with a fresh magic-link signup, manual SMT fallback, and full SMT authorization: counters now show 1 → 2 → 3.
@@ -105,7 +105,7 @@ This Plan Change supersedes any prior instructions that defaulted to the direct 
 - `app/dashboard/page.tsx`:
   - Dashboard module grid now renders unconditionally (still links to gated flows).
   - SMT info block centered, with updated typography and CTA styling.
-- `app/dashboard/optimal/page.tsx`: placeholder page wired for the new “Optimal Energy” tile so navigation is complete.
+- `app/dashboard/optimal/page.tsx`: placeholder page wired for the new "Optimal Energy" tile so navigation is complete.
 
 **Notes:**
 - No behavior change for SMT ingestion—purely layout/visibility adjustments.
@@ -121,8 +121,8 @@ This Plan Change supersedes any prior instructions that defaulted to the direct 
 **Scope:**
 - `app/dashboard/profile/page.tsx`:
   - Promoted to a server-rendered page that pulls `User`/`UserProfile`, the latest `HouseAddress`, and most recent `SmtAuthorization`.
-  - Renders account, contact, service address (with ESIID + utility), SMT status, meter number, authorization start/end dates, and a “Revoke SMT access” card labeled under construction.
-  - Falls back to friendly copy (“Not provided”) when fields are blank; no mutation logic introduced.
+  - Renders account, contact, service address (with ESIID + utility), SMT status, meter number, authorization start/end dates, and a "Revoke SMT access" card labeled under construction.
+  - Falls back to friendly copy ("Not provided") when fields are blank; no mutation logic introduced.
 - `app/dashboard/api/page.tsx`:
   - SMT status card now shows the authorization expiration date beside the submission timestamp, using the stored `authorizationEndDate`.
 - `components/SmartMeterSection.tsx`:
@@ -146,7 +146,7 @@ This Plan Change supersedes any prior instructions that defaulted to the direct 
   - Saving a *new* address archives any existing SMT authorizations tied to the prior house and promotes the latest address to `isPrimary=true`.
   - Response now returns a warning flag if a prior authorization was archived so the UI can inform the user that reconnecting SMT is required.
 - **SMT Authorization (`app/api/smt/authorization/route.ts`):**
-  - Requires the submitted `houseAddressId` to be the caller’s primary, non-archived house.
+  - Requires the submitted `houseAddressId` to be the caller's primary, non-archived house.
   - After SMT confirms, archives earlier authorizations for that house, promotes the house to primary, and revokes conflicting authorizations (same ESIID/meter) for other users while flagging them for outreach (`esiidAttentionRequired`).
   - Response metadata includes which houses were superseded and any displaced user IDs (for email workflows).
 - **UI Queries (`app/dashboard/api/page.tsx`, `app/dashboard/profile/page.tsx`):** Only read the active (`archivedAt IS NULL`, `isPrimary = TRUE`) house and SMT authorization, so superseded data never surfaces after an address/ownership change.
@@ -165,14 +165,14 @@ This Plan Change supersedes any prior instructions that defaulted to the direct 
 
 **Scope:**
 - `components/profile/ProfileContactForm.tsx`: new client form that updates full name, phone, and login email via `/api/user/profile` (normalises email, enforces uniqueness, refreshes the page, resets the auth cookie).
-- `components/profile/ProfileAddressSection.tsx`: renders a neon card with current address/utility/ESIID, shows the archive warning, uses the updated `QuickAddressEntry` to save a new address, and surfaces the “Connect to SMT” call-to-action modal after success.
+- `components/profile/ProfileAddressSection.tsx`: renders a neon card with current address/utility/ESIID, shows the archive warning, uses the updated `QuickAddressEntry` to save a new address, and surfaces the "Connect to SMT" call-to-action modal after success.
 - `components/QuickAddressEntry.tsx`: now accepts `redirectOnSuccess` and `onSaveResult` hooks so other flows (profile) can reuse the component without auto-navigating to `/dashboard/api`.
 - `app/api/user/profile/route.ts`: new `PATCH` endpoint that updates the signed-in user and their profile (transactional, resets auth cookie on email change).
 - `app/dashboard/profile/page.tsx`: redesigned to navy/neon cards, embeds the new client forms, only reads active house / SMT data, and now lists every active home with per-house entry totals and SMT state.
 - `app/api/address/save/route.ts`: after promoting the newest house to primary, automatically deletes any newly archived houses that never collected SMT authorizations so each user keeps a single active address record.
 - `lib/house/promote.ts`: gained a `keepOthers` flag to support multi-home accounts without archiving sibling houses.
 - `app/api/user/house/select/route.ts`: POST endpoint that switches the active house (marks `isPrimary=true`) while leaving other houses intact.
-- `components/profile/ProfileAddressSection.tsx`: now handles multiple homes, enforces “SMT first” gating for extra homes, shows per-home entry counts, and lets the user switch the active house.
+- `components/profile/ProfileAddressSection.tsx`: now handles multiple homes, enforces "SMT first" gating for extra homes, shows per-home entry counts, and lets the user switch the active house.
 - `components/QuickAddressEntry.tsx`: accepts `houseIdForSave` so we can update an existing home in-place or create a new one.
 - `app/api/user/entries/route.ts`: entries can be scoped to a `houseId`, so SMT bonuses are tracked per home. `Entry` records gained an optional `houseId` column.
 - `app/api/smt/authorization/route.ts`: awards SMT entries against the authorized house and preserves other homes while switching primaries.
@@ -198,7 +198,7 @@ This Plan Change supersedes any prior instructions that defaulted to the direct 
 ### PC-2025-11-24-G — Delete Non-Keeper Demo Users
 
 - Added `scripts/sql/delete_non_keeper_users.sql` to remove `User` rows (and related `Entry`, `Referral`, `UserProfile`, `SmtAuthorization`, and `HouseAddress` records) for all non-keeper emails, leaving only the five keeper accounts.
-- Intended as a follow-up “data reset” after the archive script; not a recurring job.
+- Intended as a follow-up "data reset" after the archive script; not a recurring job.
 - Execute manually against the DO `defaultdb` via: `psql "$DATABASE_URL" -f scripts/sql/delete_non_keeper_users.sql`.
 - Take a DB snapshot or `pg_dump` before running. Once executed, the admin dashboard user list will only show the keeper accounts.
 
@@ -483,6 +483,7 @@ Guardrails
 - RAW vendor payloads remain captured before normalization.
 - No new PII is logged; structured warnings continue to reference meter IDs only.
 - [x] Apply PUCT REP / ERCOT alignment migration (`20251123035440_puct_rep_dev_setup`) to DO `defaultdb` via droplet `npx prisma migrate deploy`.
+- [x] Apply SMT email confirmation migration (`20251126000000_add_email_confirmation_status`) to DO `defaultdb` via droplet `npx prisma migrate deploy`.
 
 PC-2025-11-01: ESIID Resolver — Use WattBuy Electricity Info Endpoint
 
