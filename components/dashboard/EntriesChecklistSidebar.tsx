@@ -175,7 +175,7 @@ export default function EntriesChecklistSidebar() {
       <button
         type="button"
         onClick={toggleOpen}
-        className="group relative flex -translate-x-[40%] items-center justify-center rounded-r-3xl border border-[#BF00FF]/70 bg-[#39FF14] px-2 py-3 text-xs font-bold uppercase text-[#BF00FF] transition hover:-translate-x-[28%] hover:shadow-[0_0_25px_rgba(191,0,255,0.55)] sm:-translate-x-[65%] sm:hover:-translate-x-[55%]"
+        className="group relative flex -translate-x-[15%] items-center justify-center rounded-r-3xl border border-[#BF00FF]/70 bg-[#39FF14] px-2 py-3 text-xs font-bold uppercase text-[#BF00FF] transition hover:-translate-x-[2%] hover:shadow-[0_0_25px_rgba(191,0,255,0.55)] sm:-translate-x-[35%] sm:hover:-translate-x-[25%]"
         aria-expanded={isOpen}
         aria-controls="entries-checklist-panel"
       >
