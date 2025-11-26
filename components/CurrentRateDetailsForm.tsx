@@ -87,122 +87,101 @@ export function CurrentRateDetailsForm({
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
-      <div className="space-y-2">
-        <h1 className="text-2xl font-semibold">
-          Current Rate Details{" "}
-          <span className="text-sm font-normal text-slate-500">
-            (Optional, +1{' '}
-            <a
-              href="https://www.hitthejackwatt.com"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-semibold text-brand-blue underline decoration-transparent transition hover:decoration-brand-blue"
-            >
-              HitTheJackWatt™
-            </a>{' '}
-            entry)
-          </span>
-        </h1>
-        <p className="text-sm text-slate-600">
-          Add your current electricity plan so we can show how your costs will change when your
-          plan comes due, assuming similar usage. If you skip this step, we&apos;ll still analyze
-          your real usage and recommend the best plans. Completing it earns{" "}
-          <strong>
-            +1{' '}
-            <a
-              href="https://www.hitthejackwatt.com"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-brand-blue underline decoration-transparent transition hover:decoration-brand-blue"
-            >
-              HitTheJackWatt™
-            </a>{" "}
-            jackpot entry
-          </strong>{" "}
-          and unlocks a richer comparison.
+    <div className="space-y-8">
+      <div className="rounded-2xl border border-brand-navy/25 bg-brand-navy/90 p-6 text-brand-cyan shadow-[0_18px_40px_rgba(16,46,90,0.35)]">
+        <h2 className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-cyan/70">
+          Optional · +1 HitTheJackWatt™ Entry
+        </h2>
+        <p className="mt-3 text-base font-semibold text-brand-cyan">
+          Capture today&apos;s plan so renewal pricing lines up with IntelliWatt recommendations.
+        </p>
+        <p className="mt-3 text-sm leading-relaxed text-brand-cyan/85">
+          Upload a recent bill or enter the details manually—you still keep full usage analysis. Completing this step earns an extra
+          jackpot entry and unlocks richer savings comparisons.
         </p>
       </div>
 
-      <div className="grid gap-6 md:grid-cols-2">
-        <div className="space-y-3 rounded-xl border bg-white p-4 text-center">
-          <h2 className="text-base font-medium">Option 1: Upload your bill</h2>
-          <p className="text-xs text-slate-500">
-            On mobile, take a clear photo of the first page of your bill. On desktop, upload a PDF
-            or image file. We&apos;ll use this later to auto-read your plan name, rate, and contract
-            expiration.
+      <div className="grid gap-6 lg:grid-cols-[0.95fr,1.05fr]">
+        <div className="space-y-4 rounded-2xl border border-brand-blue/20 bg-white/95 p-6 shadow-sm">
+          <h2 className="text-base font-semibold text-brand-navy">Option 1 · Upload your latest bill</h2>
+          <p className="text-sm text-brand-slate">
+            On mobile, snap a clear photo. On desktop, upload the PDF. We&apos;ll use it later to auto-detect your plan name, rate, and
+            contract expiration.
           </p>
-          <input
-            type="file"
-            accept="image/*,application/pdf"
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-            className="block w-full text-sm text-center"
-          />
+          <label className="flex w-full cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-brand-blue/30 bg-brand-blue/5 p-6 text-center text-sm text-brand-navy transition hover:border-brand-blue/60 hover:bg-brand-blue/10">
+            <span className="font-semibold">Drag your file here or click to browse</span>
+            <span className="mt-1 text-xs text-brand-slate">Accepted formats: PDF, JPG, PNG</span>
+            <input
+              type="file"
+              accept="image/*,application/pdf"
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              className="hidden"
+            />
+          </label>
           {file ? (
-            <p className="text-xs text-slate-500">
-              Selected: {file.name}
+            <p className="rounded-lg border border-brand-blue/25 bg-brand-blue/5 px-3 py-2 text-xs text-brand-navy">
+              Selected file: <span className="font-semibold">{file.name}</span>
             </p>
           ) : null}
         </div>
 
-        <div className="space-y-3 rounded-xl border bg-white p-4">
-          <h2 className="text-base font-medium">Option 2: Enter it manually</h2>
-          <p className="text-xs text-slate-500">
-            You can usually find this near the top of your bill or in the Electricity Facts Label
-            section.
+        <div className="space-y-4 rounded-2xl border border-brand-blue/20 bg-white/95 p-6 shadow-sm">
+          <h2 className="text-base font-semibold text-brand-navy">Option 2 · Enter plan details manually</h2>
+          <p className="text-sm text-brand-slate">
+            Most bills list these near the header or inside the Electricity Facts Label (EFL) section.
           </p>
 
-          <label className="block space-y-1 text-sm">
-            <span>Plan name</span>
+          <label className="block space-y-1 text-sm text-brand-navy">
+            <span className="font-semibold uppercase tracking-wide text-brand-navy/80">Plan name</span>
             <input
               type="text"
               value={planName}
               onChange={(e) => setPlanName(e.target.value)}
-              className="mt-1 w-full rounded-md border px-2 py-1 text-sm"
-              placeholder="e.g. Free Nights & Solar Days 12"
+              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm transition focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/40"
+              placeholder="e.g., Free Nights & Solar Days 12"
             />
           </label>
 
-          <label className="block space-y-1 text-sm">
-            <span>Energy rate (¢/kWh)</span>
+          <label className="block space-y-1 text-sm text-brand-navy">
+            <span className="font-semibold uppercase tracking-wide text-brand-navy/80">Energy rate (¢/kWh)</span>
             <input
               type="number"
               inputMode="decimal"
               value={primaryRateCentsPerKwh}
               onChange={(e) => setPrimaryRateCentsPerKwh(e.target.value)}
-              className="mt-1 w-full rounded-md border px-2 py-1 text-sm"
-              placeholder="e.g. 13.9"
+              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm transition focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/40"
+              placeholder="e.g., 13.9"
             />
           </label>
 
-          <label className="block space-y-1 text-sm">
-            <span>Base charge ($/month, if any)</span>
+          <label className="block space-y-1 text-sm text-brand-navy">
+            <span className="font-semibold uppercase tracking-wide text-brand-navy/80">Base charge ($/month)</span>
             <input
               type="number"
               inputMode="decimal"
               value={baseFeeDollars}
               onChange={(e) => setBaseFeeDollars(e.target.value)}
-              className="mt-1 w-full rounded-md border px-2 py-1 text-sm"
-              placeholder="e.g. 4.95"
+              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm transition focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/40"
+              placeholder="e.g., 4.95"
             />
           </label>
 
-          <label className="block space-y-1 text-sm">
-            <span>Contract expiration date</span>
+          <label className="block space-y-1 text-sm text-brand-navy">
+            <span className="font-semibold uppercase tracking-wide text-brand-navy/80">Contract expiration date</span>
             <input
               type="date"
               value={contractExpiration}
               onChange={(e) => setContractExpiration(e.target.value)}
-              className="mt-1 w-full rounded-md border px-2 py-1 text-sm"
+              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm transition focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/40"
             />
           </label>
 
-          <label className="block space-y-1 text-sm">
-            <span>Notes (optional)</span>
+          <label className="block space-y-1 text-sm text-brand-navy">
+            <span className="font-semibold uppercase tracking-wide text-brand-navy/80">Notes (optional)</span>
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              className="mt-1 w-full rounded-md border px-2 py-1 text-sm"
+              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm transition focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/40"
               placeholder="Free nights/weekends, tiered pricing, bill credits, etc."
               rows={4}
             />
@@ -212,29 +191,36 @@ export function CurrentRateDetailsForm({
 
       {statusMessage ? (
         <div
-          className={`rounded-xl border px-4 py-3 text-sm ${
-            hasAwarded ? "border-emerald-300 bg-emerald-50 text-emerald-700" : "border-rose-300 bg-rose-50 text-rose-600"
+          className={`rounded-2xl border px-5 py-4 text-sm shadow-sm ${
+            hasAwarded
+              ? "border-emerald-400/40 bg-emerald-50 text-emerald-700"
+              : "border-rose-400/40 bg-rose-50 text-rose-700"
           }`}
         >
           {statusMessage}
         </div>
       ) : null}
 
-      <form onSubmit={handleSubmit} className="flex items-center gap-3">
-        <button
-          type="submit"
-          disabled={isSubmitting || hasAwarded}
-          className="inline-flex items-center rounded-md bg-black px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {hasAwarded ? "Entry Recorded ✓" : isSubmitting ? "Saving..." : "Continue with these details"}
-        </button>
-        <button
-          type="button"
-          onClick={onSkip}
-          className="text-sm text-slate-500 underline underline-offset-4 hover:text-slate-700"
-        >
-          Skip this step and go to plan results
-        </button>
+      <form onSubmit={handleSubmit} className="flex flex-col items-center gap-4 sm:flex-row sm:justify-between">
+        <div className="flex items-center gap-3">
+          <button
+            type="submit"
+            disabled={isSubmitting || hasAwarded}
+            className="inline-flex items-center rounded-full bg-brand-navy px-5 py-2 text-sm font-semibold uppercase tracking-wide text-brand-cyan shadow-[0_8px_24px_rgba(16,46,90,0.25)] transition hover:bg-brand-navy/90 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {hasAwarded ? "Entry Recorded ✓" : isSubmitting ? "Saving..." : "Finish current rate details"}
+          </button>
+          <button
+            type="button"
+            onClick={onSkip}
+            className="text-sm font-semibold text-brand-navy underline decoration-dashed underline-offset-4 transition hover:text-brand-blue"
+          >
+            Skip for now
+          </button>
+        </div>
+        <p className="text-xs text-brand-slate">
+          Your responses stay private—we only use them to compare renewal costs to IntelliWatt savings.
+        </p>
       </form>
     </div>
   );
