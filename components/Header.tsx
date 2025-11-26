@@ -5,6 +5,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import ClientEntriesCounter from './ClientEntriesCounter';
 import DashboardHeader from './DashboardHeader';
+import { usePathname } from 'next/navigation';
 
 const navLinks = [
   { href: '/how-it-works', label: 'How It Works' },
@@ -21,12 +22,14 @@ const navLinks = [
 ];
 
 const AUTH_PATH = '/join';
+const DASHBOARD_PREFIX = '/dashboard';
 
 export default function Header() {
   const [isOpen, setIsOpen] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const pathname = usePathname();
 
   useEffect(() => {
     let cancelled = false;
@@ -205,8 +208,8 @@ export default function Header() {
       </div>
     </header>
 
-      {authChecked && isAuthenticated ? <DashboardHeader /> : null}
-    </>
+    {(authChecked && isAuthenticated && pathname.startsWith(DASHBOARD_PREFIX)) ? <DashboardHeader /> : null}
+  </>
   );
 }
 

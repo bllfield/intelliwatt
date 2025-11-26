@@ -14,10 +14,15 @@ function JoinPageContent() {
   // Set referral cookie when ref parameter is present
   useEffect(() => {
     if (referralCode) {
-      // Set cookie for 90 days
       const expiryDate = new Date();
       expiryDate.setTime(expiryDate.getTime() + 90 * 24 * 60 * 60 * 1000);
       document.cookie = `intelliwatt_referrer=${referralCode}; expires=${expiryDate.toUTCString()}; path=/; SameSite=Lax`;
+    }
+  }, [referralCode]);
+
+  useEffect(() => {
+    if (referralCode) {
+      window.location.replace(`/landing?ref=${encodeURIComponent(referralCode)}`);
     }
   }, [referralCode]);
 
