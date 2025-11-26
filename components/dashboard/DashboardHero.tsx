@@ -16,7 +16,7 @@ export default function DashboardHero({
   children,
 }: DashboardHeroProps) {
   return (
-    <section className="relative bg-brand-navy py-20 px-4 overflow-hidden">
+    <section className="relative bg-brand-navy px-4 py-12 sm:py-14 md:py-16 overflow-hidden">
       <div className="absolute inset-0 bg-gradient-to-br from-brand-navy via-brand-navy to-brand-navy/95">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(0,240,255,0.12),transparent_55%)]" />
       </div>
