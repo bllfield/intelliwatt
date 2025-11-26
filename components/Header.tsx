@@ -29,7 +29,7 @@ export default function Header() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
-  const pathname = usePathname();
+  const pathname = usePathname() || '';
 
   useEffect(() => {
     let cancelled = false;
