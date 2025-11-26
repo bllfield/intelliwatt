@@ -4,6 +4,7 @@ import React, { useState, FormEvent, useEffect } from "react";
 
 type CurrentRateDetailsFormProps = {
   onContinue?: (data: {
+    electricCompany: string;
     planName: string;
     primaryRateCentsPerKwh: string;
     baseFeeDollars: string;
@@ -18,6 +19,7 @@ export function CurrentRateDetailsForm({
   onContinue,
   onSkip,
 }: CurrentRateDetailsFormProps) {
+  const [electricCompany, setElectricCompany] = useState("");
   const [planName, setPlanName] = useState("");
   const [primaryRateCentsPerKwh, setPrimaryRateCentsPerKwh] = useState("");
   const [baseFeeDollars, setBaseFeeDollars] = useState("");
@@ -43,6 +45,7 @@ export function CurrentRateDetailsForm({
     setStatusMessage(null);
 
     const payload = {
+      electricCompany,
       planName,
       primaryRateCentsPerKwh,
       baseFeeDollars,
@@ -133,6 +136,17 @@ export function CurrentRateDetailsForm({
           <p className="text-sm text-brand-slate">
             Most bills list these near the header or inside the Electricity Facts Label (EFL) section.
           </p>
+
+          <label className="block space-y-1 text-sm text-brand-navy">
+            <span className="font-semibold uppercase tracking-wide text-brand-navy/80">Electric company name</span>
+            <input
+              type="text"
+              value={electricCompany}
+              onChange={(e) => setElectricCompany(e.target.value)}
+              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm transition focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/40"
+              placeholder="e.g., Sample Energy Co."
+            />
+          </label>
 
           <label className="block space-y-1 text-sm text-brand-navy">
             <span className="font-semibold uppercase tracking-wide text-brand-navy/80">Plan name</span>
