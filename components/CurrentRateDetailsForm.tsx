@@ -88,7 +88,7 @@ export function CurrentRateDetailsForm({
 
   return (
     <div className="space-y-8">
-      <div className="rounded-2xl border border-brand-navy/25 bg-brand-navy/90 p-6 text-brand-cyan shadow-[0_18px_40px_rgba(16,46,90,0.35)]">
+      <div className="rounded-3xl border-2 border-brand-navy bg-brand-navy p-6 text-brand-cyan shadow-[0_18px_40px_rgba(16,46,90,0.38)] sm:p-7">
         <h2 className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-cyan/70">
           Optional · +1 HitTheJackWatt™ Entry
         </h2>
