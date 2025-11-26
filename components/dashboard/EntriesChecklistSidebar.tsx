@@ -68,6 +68,7 @@ const CHECKLIST: ChecklistItem[] = [
 const NEON_PURPLE = '#BF00FF';
 const NEON_GREEN = '#39FF14';
 const NEON_PINK = '#FF52FF';
+const TAB_LABEL = ['E', 'N', 'T', 'R', 'I', 'E', 'S'];
 
 export default function EntriesChecklistSidebar() {
   const [isOpen, setIsOpen] = useState(false);
@@ -162,16 +163,14 @@ export default function EntriesChecklistSidebar() {
         aria-controls="entries-checklist-panel"
       >
         <span
-          className="text-sm font-semibold"
-          style={{
-            writingMode: 'vertical-rl',
-            textOrientation: 'upright',
-            letterSpacing: '0.4em',
-            color: NEON_PURPLE,
-            textShadow: '0 0 12px rgba(191,0,255,0.75)',
-          }}
+          className="flex flex-col items-center gap-[0.35rem] text-sm font-semibold leading-none"
+          style={{ color: NEON_PURPLE, textShadow: '0 0 12px rgba(191,0,255,0.75)' }}
         >
-          ENTRIES
+          {TAB_LABEL.map((char, index) => (
+            <span key={`${char}-${index}`} className="block">
+              {char}
+            </span>
+          ))}
         </span>
       </button>
 
@@ -209,11 +208,10 @@ export default function EntriesChecklistSidebar() {
                   className="flex items-start gap-3 rounded-3xl border border-[#BF00FF]/50 bg-brand-navy/80 p-3 shadow-[0_10px_30px_rgba(10,20,60,0.35)]"
                 >
                   <span
-                    className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border-2 text-sm font-bold ${
-                      item.isComplete ? 'text-[#39FF14]' : 'text-[#FF52FF]'
-                    }`}
+                    className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border-2 text-sm font-bold"
                     style={{
                       borderColor: '#BF00FF',
+                      color: item.isComplete ? NEON_GREEN : NEON_PINK,
                       textShadow: item.isComplete
                         ? '0 0 14px rgba(57,255,20,0.95)'
                         : '0 0 14px rgba(255,82,255,0.95)',
@@ -228,8 +226,8 @@ export default function EntriesChecklistSidebar() {
                   <div className="flex-1 space-y-1 text-xs">
                     <Link
                       href={item.href}
-                      className="font-semibold uppercase tracking-wide text-[#BF00FF] underline-offset-4 hover:underline"
-                      style={{ textShadow: '0 0 12px rgba(191,0,255,0.75)' }}
+                      className="font-semibold uppercase tracking-wide underline-offset-4 hover:underline"
+                      style={{ color: NEON_PURPLE, textShadow: '0 0 12px rgba(191,0,255,0.75)' }}
                     >
                       {item.title}
                     </Link>
