@@ -102,7 +102,7 @@ export function CurrentRateDetailsForm({
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[0.95fr,1.05fr]">
-        <div className="space-y-4 rounded-2xl border border-brand-navy bg-white p-6 shadow-sm">
+        <div className="space-y-4 rounded-3xl border-2 border-brand-navy bg-white p-6 shadow-sm sm:p-7">
           <h2 className="text-base font-semibold text-brand-navy">Option 1 · Upload your latest bill</h2>
           <p className="text-sm text-brand-slate">
             On mobile, snap a clear photo. On desktop, upload the PDF. We&apos;ll use it later to auto-detect your plan name, rate, and
@@ -125,7 +125,7 @@ export function CurrentRateDetailsForm({
           ) : null}
         </div>
 
-        <div className="space-y-4 rounded-2xl border border-brand-navy bg-white p-6 shadow-sm">
+        <div className="space-y-4 rounded-3xl border-2 border-brand-navy bg-white p-6 shadow-sm sm:p-7">
           <h2 className="text-base font-semibold text-brand-navy">Option 2 · Enter plan details manually</h2>
           <p className="text-sm text-brand-slate">
             Most bills list these near the header or inside the Electricity Facts Label (EFL) section.

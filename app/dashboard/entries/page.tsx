@@ -312,12 +312,12 @@ export default function EntriesPage() {
 
       {/* How to Earn More */}
       <section className="py-16 px-4 bg-brand-navy">
-        <div className="max-w-5xl mx-auto">
-          <h2 className="text-3xl font-bold text-brand-white text-center mb-12">
+        <div className="max-w-5xl mx-auto rounded-3xl border border-brand-blue/40 bg-brand-navy/90 px-6 py-10 shadow-[0_20px_60px_rgba(10,20,60,0.45)] sm:px-8">
+          <h2 className="text-3xl font-bold text-brand-white text-center mb-10">
             How to <span className="text-brand-blue">Earn More</span> Entries
           </h2>
 
-          <div className="grid md:grid-cols-2 gap-8 text-center">
+          <div className="grid gap-8 text-center md:grid-cols-2">
             <div className="bg-brand-navy p-6 rounded-3xl border-2 border-[#39FF14]/40 shadow-[0_15px_35px_rgba(15,23,42,0.4)]">
               <h3 className="text-xl font-bold mb-4" style={{ color: '#39FF14' }}>Connect Smart Meter</h3>
               <p className="mb-4 text-brand-white/80">

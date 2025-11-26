@@ -425,7 +425,7 @@ export default async function ApiConnectPage() {
             </>
           )}
 
-          <div className="rounded-3xl border border-brand-navy bg-white shadow-[0_24px_70px_rgba(16,46,90,0.06)]">
+          <div className="rounded-3xl border-2 border-brand-navy bg-white shadow-[0_24px_70px_rgba(16,46,90,0.08)]">
             <div className="flex flex-col gap-6 p-8 text-center sm:p-10">
               <div className="flex flex-col gap-3">
                 <h2 className="text-2xl font-semibold tracking-tight text-brand-navy">Smart Home Devices</h2>
