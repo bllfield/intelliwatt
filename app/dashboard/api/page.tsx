@@ -250,15 +250,10 @@ export default async function ApiConnectPage() {
   return (
     <div id="smt" className="min-h-screen bg-brand-white">
       <DashboardHero
-        eyebrow="Utility Integrations"
         title="Connect"
         highlight="Smart Meter Texas"
         description="Authorize IntelliWatt to sync with your utility’s smart meter. We only use this secure connection to pull usage and billing intervals so plan insights stay accurate automatically."
-      >
-        <p className="rounded-full border border-brand-blue/50 bg-brand-blue/15 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-brand-blue">
-          Tip: Landscape mode gives extra room for the agreement form, but the page now stays fully readable in portrait view too.
-        </p>
-      </DashboardHero>
+      />
 
       <section className="bg-brand-white py-12 px-4">
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-10">

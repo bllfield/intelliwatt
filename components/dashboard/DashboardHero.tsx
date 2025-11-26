@@ -16,8 +16,8 @@ export default function DashboardHero({
   children,
 }: DashboardHeroProps) {
   return (
-    <section className="bg-brand-navy px-4 py-6 sm:py-7 md:py-8">
-      <div className="mx-auto max-w-4xl text-center space-y-3">
+    <section className="bg-brand-navy px-4 py-5 sm:py-6 md:py-7">
+      <div className="mx-auto max-w-4xl text-center space-y-2">
         {eyebrow ? (
           <p className="text-[0.7rem] font-semibold uppercase tracking-[0.28em] text-brand-blue/70">
             {eyebrow}
@@ -35,7 +35,7 @@ export default function DashboardHero({
         <p className="mx-auto max-w-2xl text-base leading-relaxed text-brand-white/85">
           {description}
         </p>
-        {children ? <div className="mt-4 flex justify-center">{children}</div> : null}
+        {children ? <div className="mt-3 flex justify-center">{children}</div> : null}
       </div>
     </section>
   );

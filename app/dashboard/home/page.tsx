@@ -33,7 +33,6 @@ export default function HomePage() {
   return (
     <div className="min-h-screen bg-brand-white">
       <DashboardHero
-        eyebrow="Home Profile Blueprint"
         title="Home"
         highlight="Details"
         description="Soon you’ll be able to lock in every detail—square footage, HVAC, insulation, and more—so IntelliWatt can forecast renewal costs with laser accuracy and reward you for keeping your profile current."

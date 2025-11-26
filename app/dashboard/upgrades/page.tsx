@@ -4,7 +4,6 @@ export default function UpgradesPage() {
   return (
     <div className="min-h-screen bg-brand-white">
       <DashboardHero
-        eyebrow="Upgrade Launchpad"
         title="Home"
         highlight="Upgrades"
         description="We’re building an engine that weighs insulation, HVAC, solar, storage, windows, and smart-home upgrades against your actual usage—so you only invest where the math wins."

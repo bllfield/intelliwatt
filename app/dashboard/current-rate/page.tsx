@@ -7,7 +7,6 @@ export default function CurrentRatePage() {
   return (
     <div className="min-h-screen bg-brand-white">
       <DashboardHero
-        eyebrow="Current Plan Snapshot"
         title="Current"
         highlight="Rate"
         description="Share the plan you’re on today so IntelliWatt can highlight how renewal pricing compares to our recommendations. Upload a bill or enter the details manually—you’ll still get personalized matches either way."

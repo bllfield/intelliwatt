@@ -4,7 +4,6 @@ export default function AppliancesPage() {
   return (
     <div className="min-h-screen bg-brand-white">
       <DashboardHero
-        eyebrow="Smart Appliance Hub"
         title="Smart"
         highlight="Appliances"
         description="Soon you’ll sync washers, dryers, EV chargers, thermostats, and more—so IntelliWatt can pinpoint energy hogs, trigger savings automations, and reward you for staying efficient."

@@ -4,7 +4,6 @@ export default function UsagePage() {
   return (
     <div className="min-h-screen bg-brand-white">
       <DashboardHero
-        eyebrow="Usage Intelligence"
         title="Energy"
         highlight="Usage"
         description="Track your electricity consumption patterns, surface peak intervals, and uncover the fastest ways to cut waste."

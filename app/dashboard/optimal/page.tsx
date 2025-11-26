@@ -5,7 +5,6 @@ export default function OptimalEnergyPage() {
   return (
     <div className="min-h-screen bg-brand-white">
       <DashboardHero
-        eyebrow="Optimal Energy Engine"
         title="Optimal"
         highlight="Energy"
         description="We’re dialing in a concierge that compares every live offer, projected renewal, and hidden fee—then auto-populates a switch plan you can trust."

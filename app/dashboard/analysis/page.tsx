@@ -4,7 +4,6 @@ export default function AnalysisPage() {
   return (
     <div className="min-h-screen bg-brand-white">
       <DashboardHero
-        eyebrow="Energy Intelligence Lab"
         title="Energy"
         highlight="Analysis"
         description="Our analytics cockpit is almost ready—expect intuitive charts, anomaly alerts, and action cards that translate raw usage into crystal-clear next steps."
