@@ -2,6 +2,45 @@
 
 import Image from 'next/image';
 import type { ReactNode } from 'react';
+import Link from "next/link";
+import Layout from "../layout";
+import IdleGuard from "@/components/IdleGuard";
+
+const RoyalBlueLink = ({ href, children }: { href: string; children: React.ReactNode }) => (
+  <Link
+    href={href}
+    target="_blank"
+    rel="noopener noreferrer"
+    className="font-semibold"
+    style={{ color: "#4169E1", textDecoration: "underline" }}
+  >
+    {children}
+  </Link>
+);
+
+const NeonBlueLink = ({ href, children }: { href: string; children: React.ReactNode }) => (
+  <Link
+    href={href}
+    target="_blank"
+    rel="noopener noreferrer"
+    className="font-semibold"
+    style={{ color: "#00E0FF", textShadow: "0 0 12px rgba(0,224,255,0.7)", textDecoration: "underline" }}
+  >
+    {children}
+  </Link>
+);
+
+const NeonGreenLink = ({ href, children }: { href: string; children: React.ReactNode }) => (
+  <Link
+    href={href}
+    target="_blank"
+    rel="noopener noreferrer"
+    className="font-semibold"
+    style={{ color: "#39FF14", textShadow: "0 0 12px rgba(57,255,20,0.7)", textDecoration: "underline" }}
+  >
+    {children}
+  </Link>
+);
 
 const faqItems: { question: string; answer: ReactNode }[] = [
   {
@@ -303,23 +342,55 @@ export default function FAQPage() {
         </div>
       </section>
 
-      {/* FAQ Content */}
-      <section className="py-24 px-4 bg-brand-white">
-        <div className="max-w-4xl mx-auto">
-          <div className="space-y-8">
-            {faqItems.map(({ question, answer }) => (
-              <div
-                key={question}
-                className="bg-brand-navy p-8 rounded-2xl border border-brand-blue/40 shadow-[0_20px_60px_rgba(0,0,0,0.45)] hover:border-brand-blue/80 transition-all duration-300"
-              >
-                <h3 className="text-2xl font-bold text-[#00E0FF] mb-4">
-                  {renderQuestion(question)}
-                </h3>
-                <div className="text-brand-white text-lg leading-relaxed space-y-3">
-                  {answer}
+      {/* About IntelliWatt Section */}
+      <section className="py-20 px-4">
+        <div className="max-w-4xl mx-auto space-y-16 text-brand-navy">
+          <div className="bg-brand-navy text-brand-cyan rounded-3xl border border-brand-blue/40 shadow-[0_24px_70px_rgba(16,46,90,0.45)] p-8 sm:p-10">
+            <h2 className="text-3xl font-bold text-[#00E0FF] mb-6">About IntelliWatt</h2>
+            <div className="space-y-4 text-brand-cyan/85 leading-relaxed">
+              <p>
+                Welcome. If you came to us from <NeonGreenLink href="https://www.hitthejackwatt.com">HitTheJackWatt™</NeonGreenLink>, our friendly public-facing gateway, you’re in the right place. What starts as an easy, approachable entry becomes something powerful behind the scenes.
+              </p>
+              <p>
+                <NeonBlueLink href="https://www.intelliwatt.com">IntelliWatt™</NeonBlueLink> was built to help homeowners make sense of their energy world. We use your real energy usage—whether from smart meter feeds, uploads, or device data—and turn it into clear, honest insight: what you’re paying now, where you might save, and what options make sense for your home and budget.
+              </p>
+              <p>
+                We believe energy decisions should be simple to understand, not confusing or pressured. That is why we give you real numbers, honest trade-offs, and genuine choices, and then let you decide what is right for you.
+              </p>
+              <p>
+                If you ever choose to act—maybe switch electricity plans, explore solar or batteries, or upgrade your home—that is great. If you want help coordinating with trusted partners, that is where <RoyalBlueLink href="https://www.intellipath-solutions.com">Intellipath Solutions LLC</RoyalBlueLink>, the parent company behind <NeonBlueLink href="https://www.intelliwatt.com">IntelliWatt</NeonBlueLink>, can step in. There is no sales force knocking at your door; only optional support for projects you decide to take on.
+              </p>
+              <p>
+                Our commitment is straightforward: transparency, empowerment, and respect. The more data you share—meter history, home details, appliance usage, solar or battery interest—the sharper and more personalized our guidance becomes. We build tools that help you understand your options, weigh them honestly, and decide what fits your life.
+              </p>
+              <p>
+                Whether you are casually exploring or serious about savings, we are here to help you see clearly, compare realistically, and choose confidently.
+              </p>
+              <p className="font-semibold" style={{ color: '#39FF14' }}>
+                Your energy. Your data. Your choice.
+              </p>
+              <p>
+                If you want to learn more about the company behind it all and see our full vision, visit <RoyalBlueLink href="https://www.intellipath-solutions.com">Intellipath Solutions LLC</RoyalBlueLink>.
+              </p>
+            </div>
+          </div>
+          {/* FAQ Content */}
+          <div className="max-w-4xl mx-auto">
+            <div className="space-y-8">
+              {faqItems.map(({ question, answer }) => (
+                <div
+                  key={question}
+                  className="bg-brand-navy p-8 rounded-2xl border border-brand-blue/40 shadow-[0_20px_60px_rgba(0,0,0,0.45)] hover:border-brand-blue/80 transition-all duration-300"
+                >
+                  <h3 className="text-2xl font-bold text-[#00E0FF] mb-4">
+                    {renderQuestion(question)}
+                  </h3>
+                  <div className="text-brand-white text-lg leading-relaxed space-y-3">
+                    {answer}
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         </div>
       </section>
