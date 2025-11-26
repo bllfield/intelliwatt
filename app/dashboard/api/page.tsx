@@ -6,6 +6,7 @@ import { normalizeEmail } from "@/lib/utils/email";
 import { SmtAuthorizationForm } from "@/components/smt/SmtAuthorizationForm";
 import SmtAddressCaptureCard from "@/components/smt/SmtAddressCaptureCard";
 import SmtManualFallbackCard from "@/components/smt/SmtManualFallbackCard";
+import DashboardHero from "@/components/dashboard/DashboardHero";
 
 type ExistingSmtAuthorization = {
   id: string;
@@ -247,240 +248,217 @@ export default async function ApiConnectPage() {
   const showAddressCaptureCard = Boolean(user) && !hasActiveAuthorization;
 
   return (
-    <div className="min-h-[calc(100vh-120px)] overflow-x-hidden bg-slate-50/60 py-12">
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-12 px-4 sm:px-6 lg:px-0">
-        <section
-          id="smt"
-          className="relative overflow-hidden rounded-3xl border border-brand-navy/10 bg-white shadow-[0_28px_80px_rgba(16,46,90,0.08)]"
-        >
-          <div className="pointer-events-none absolute inset-x-0 -top-48 h-72 bg-gradient-to-br from-brand-blue/20 via-white to-brand-cyan/10 blur-3xl opacity-80" />
-          <div className="pointer-events-none absolute inset-y-0 right-0 hidden w-1/2 bg-gradient-to-bl from-brand-cyan/10 via-transparent to-brand-blue/10 md:block" />
+    <div id="smt" className="min-h-screen bg-brand-white">
+      <DashboardHero
+        eyebrow="Utility Integrations"
+        title="Connect"
+        highlight="Smart Meter Texas"
+        description="Authorize IntelliWatt to sync with your utility’s smart meter. We only use this secure connection to pull usage and billing intervals so plan insights stay accurate automatically."
+      >
+        <p className="rounded-full border border-brand-blue/50 bg-brand-blue/15 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-brand-blue">
+          Tip: Landscape mode gives extra room for the agreement form, but the page now stays fully readable in portrait view too.
+        </p>
+      </DashboardHero>
 
-          <div className="relative z-10 flex flex-col gap-10 p-8 sm:p-10">
-            <header className="space-y-4 text-center">
-              <span className="inline-flex items-center gap-2 rounded-full bg-brand-navy px-4 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-brand-cyan">
-                Utility Integrations
-              </span>
-              <div className="space-y-3">
-                <h1 className="text-3xl font-semibold tracking-tight text-brand-navy sm:text-4xl">
-                  Connect Smart Meter Texas
-                </h1>
-                <p className="mx-auto max-w-2xl text-sm leading-relaxed text-brand-slate">
-                  Authorize IntelliWatt to sync with your utility&apos;s smart meter. We only use this
-                  secure connection to pull usage and billing intervals so plan insights stay accurate
-                  automatically.
-                </p>
-                <p className="rounded-md bg-brand-navy px-3 py-2 text-[0.7rem] font-medium text-brand-cyan sm:text-xs">
-                  Tip: Landscape mode gives extra room for the agreement form, but the page now stays fully
-                  readable in portrait view too.
-                </p>
-              </div>
-            </header>
-
-            <div className="space-y-4">
-              {!existingAuth && (
-                <div className="flex flex-col items-center gap-4 text-center">
-                  <a
-                    href="https://www.hitthejackwatt.com"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="relative inline-block h-24 w-full max-w-xs sm:h-28 sm:max-w-sm md:h-24 md:w-64"
-                  >
-                    <Image
-                      src="/Hitthejackwatt-Logo.png"
-                      alt="HitTheJackWatt™"
-                      fill
-                      className="object-contain"
-                      priority
-                    />
-                  </a>
-                  <div className="inline-flex w-full max-w-xl flex-col items-center gap-2 rounded-2xl border border-[#39FF14]/40 bg-[#39FF14]/10 px-6 py-4 text-center shadow-lg shadow-[#39FF14]/15 ring-1 ring-[#39FF14]/25">
-                    <span className="text-base font-extrabold leading-tight text-brand-navy md:text-lg">
-                      <span style={{ color: '#39FF14' }}>⚡ Connect your smart meter data</span>
-                      <span className="mx-1 text-brand-navy">for</span>
-                      <span style={{ color: '#39FF14' }}>1 jackpot entry!</span>
-                    </span>
-                    <span className="text-sm font-bold leading-tight text-brand-navy md:text-base">
-                      <Link href="/dashboard/referrals" style={{ color: '#BF00FF' }} className="hover:underline">
-                        👥 Refer a Friend:
-                      </Link>
-                      <span className="mx-1 text-brand-navy" />
-                      <span style={{ color: '#39FF14' }}>1 jackpot entry per signup!</span>
-                    </span>
-                  </div>
-                </div>
-              )}
-
-              {!user && (
-                <div className="rounded-2xl border border-amber-200/70 bg-amber-100/40 px-5 py-4 text-center text-sm font-medium text-amber-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]">
-                  Sign in to connect Smart Meter Texas.
-                </div>
-              )}
-
-              {user && !houseAddress && (
-                <div className="rounded-2xl border border-amber-200/70 bg-amber-100/40 px-5 py-4 text-center text-sm font-medium text-amber-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]">
-                  We don’t have a service address on file yet. Add your address first and then return
-                  here to authorize SMT.
-                </div>
-              )}
-
-              {user && houseAddress && !hasEsiid && (
-                <div className="rounded-2xl border border-amber-200/70 bg-amber-100/40 px-5 py-4 text-center text-sm font-medium text-amber-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]">
-                  We have your address, but we couldn’t resolve an ESIID yet. Complete the rate lookup
-                  step so we can match you with the correct utility meter.
-                </div>
-              )}
-
-              {user && houseAddress && hasEsiid && !hasTdspOrUtility && (
-                <div className="rounded-2xl border border-amber-200/70 bg-amber-100/40 px-5 py-4 text-center text-sm font-medium text-amber-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]">
-                  We found an ESIID, but utility details are still syncing. Once the TDSP information
-                  appears, you’ll be ready to authorize SMT.
-                </div>
-              )}
-            </div>
-
-            {showAddressCaptureCard ? (
-              <SmtAddressCaptureCard
-                houseAddressId={houseAddress?.id ?? null}
-                initialAddress={serviceAddressDisplay}
-              />
-            ) : null}
-
-            {readyForSmt && (
-              <>
-                <div className="space-y-6 rounded-3xl border border-brand-navy/15 bg-white/90 p-4 shadow-[0_18px_60px_rgba(16,46,90,0.06)] backdrop-blur max-[480px]:p-3 sm:p-6 md:p-8">
-                  <div className="rounded-2xl border border-brand-cyan/40 bg-brand-navy p-5 text-sm text-brand-cyan shadow-[0_10px_30px_rgba(16,182,231,0.18)] sm:p-6">
-                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                      <div className="space-y-1">
-                        <h2 className="text-sm font-semibold uppercase tracking-wide text-brand-cyan">
-                          Service address on file
-                        </h2>
-                        <div className="space-y-0.5 text-brand-cyan/90">
-                          <div>{serviceAddressLine1}</div>
-                          {serviceAddressLine2 ? <div>{serviceAddressLine2}</div> : null}
-                          <div>
-                            {serviceCity}, {serviceState} {serviceZip}
-                          </div>
-                          <div>
-                            <span className="font-semibold">ESIID · </span>
-                            {houseAddress.esiid ?? "—"}
-                          </div>
-                          <div>
-                            <span className="font-semibold">Utility · </span>
-                            {tdspName ?? "—"}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="space-y-1">
-                        <h3 className="text-sm font-semibold uppercase tracking-wide text-brand-cyan">
-                          Utility integrations
-                        </h3>
-                        <div className="space-y-0.5 text-brand-cyan/90">
-                          <div>
-                            <span className="font-semibold">Contact Email · </span>
-                            {userEmail || "—"}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                    {existingAuth && (
-                      <div className="mt-4 rounded-lg border border-brand-cyan/45 bg-brand-navy/60 p-3 text-xs leading-relaxed text-brand-cyan/80">
-                        We already have a valid Smart Meter Texas authorization for this address. Submit the form again if you
-                        need to refresh your consent (for example after changing providers or revoking access in SMT).
-                      </div>
-                    )}
-                  </div>
-
-                  {existingAuth && (
-                    <div className="rounded-2xl border border-brand-cyan/40 bg-brand-navy p-5 text-xs text-brand-cyan shadow-[0_10px_30px_rgba(16,182,231,0.18)] sm:p-6">
-                      <div className="flex flex-wrap items-center justify-center gap-3 text-center md:justify-between md:text-left">
-                        <span className="text-[0.7rem] font-semibold uppercase tracking-wide">
-                          SMT authorization last submitted{" "}
-                          {existingAuth.createdAt.toLocaleDateString(undefined, {
-                            month: "short",
-                            day: "numeric",
-                            year: "numeric",
-                          })}
-                        </span>
-                        {statusLabel ? (
-                          <span className={statusBadgeStyles[statusTone]}>{statusLabel}</span>
-                        ) : null}
-                      </div>
-                      {statusMessage ? (
-                        <p className="mt-2 text-xs leading-relaxed text-brand-cyan/90 text-left">{statusMessage}</p>
-                      ) : null}
-                      {statusSecondaryMessage ? (
-                        <p className="mt-1 text-xs leading-relaxed text-brand-cyan/80 text-left">{statusSecondaryMessage}</p>
-                      ) : null}
-                      {existingAuth?.authorizationEndDate ? (
-                        <p className="mt-3 text-xs text-brand-cyan/70 text-left">
-                          Authorization expires{" "}
-                          {existingAuth.authorizationEndDate.toLocaleDateString(undefined, {
-                            month: "short",
-                            day: "numeric",
-                            year: "numeric",
-                          })}
-                        </p>
-                      ) : null}
-                    </div>
-                  )}
-
-                  <div className="rounded-2xl border border-brand-blue/10 bg-white p-4 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.7)] sm:p-6">
-                    <SmtAuthorizationForm
-                      contactEmail={userEmail}
-                      houseAddressId={houseAddress.id}
-                      houseId={houseAddress.houseId ?? undefined}
-                      esiid={houseAddress.esiid ?? undefined}
-                      tdspCode={tdspCode}
-                      tdspName={tdspName}
-                      serviceAddressLine1={serviceAddressLine1}
-                      serviceAddressLine2={serviceAddressLine2}
-                      serviceCity={serviceCity}
-                      serviceState={serviceState}
-                      serviceZip={serviceZip}
-                      existingAuth={existingAuth}
-                      initialMeterNumber={existingAuth?.meterNumber ?? undefined}
-                      showHeader={false}
-                    />
-                  </div>
-                </div>
-
-                <SmtManualFallbackCard houseAddressId={houseAddress?.id ?? null} />
-              </>
-            )}
-          </div>
-        </section>
-
-        <section className="relative overflow-hidden rounded-3xl border border-brand-blue/15 bg-white shadow-[0_24px_70px_rgba(16,46,90,0.06)]">
-          <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-brand-blue/10 via-transparent to-brand-cyan/15 opacity-70" />
-          <div className="relative z-10 flex flex-col gap-6 p-8 sm:p-10 text-center">
-            <div className="flex flex-col gap-3">
-              <h2 className="text-2xl font-semibold tracking-tight text-brand-navy">Smart Home Devices</h2>
-              <p className="mx-auto max-w-3xl text-sm leading-relaxed text-brand-slate">
-                Connect your Emporia Vue, Sense, Nest, Tesla, or Enphase devices to unlock richer
-                insights and earn bonus jackpot entries. Device integrations are rolling out soon—get
-                on the early access list so you’re first in line.
-              </p>
-            </div>
-
-            <div className="flex flex-col gap-4 rounded-2xl border border-brand-cyan/40 bg-brand-navy px-6 py-6 text-center text-brand-cyan shadow-[0_12px_32px_rgba(16,46,90,0.12)] sm:flex-row sm:items-center sm:justify-between">
-              <div className="mx-auto sm:mx-0">
-                <p className="text-sm font-semibold uppercase tracking-[0.3em] text-brand-cyan">
-                  Coming Soon
-                </p>
-                <p className="mt-2 text-base font-medium text-brand-cyan">
-                  Automatic OAuth logins and synced device APIs are on the way.
-                </p>
-              </div>
-              <div className="flex justify-center sm:justify-end">
-                <span className="inline-flex items-center gap-2 rounded-full bg-brand-navy px-4 py-2 text-xs font-semibold uppercase tracking-wide text-brand-cyan shadow-[0_10px_30px_rgba(16,46,90,0.08)]">
-                  Preview Access
+      <section className="bg-brand-white py-16 px-4">
+        <div className="mx-auto flex w-full max-w-5xl flex-col gap-10">
+          {!existingAuth && (
+            <div className="flex flex-col items-center gap-4 text-center">
+              <a
+                href="https://www.hitthejackwatt.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="relative inline-block h-24 w-full max-w-xs sm:h-28 sm:max-w-sm md:h-24 md:w-64"
+              >
+                <Image
+                  src="/Hitthejackwatt-Logo.png"
+                  alt="HitTheJackWatt™"
+                  fill
+                  className="object-contain"
+                  priority
+                />
+              </a>
+              <div className="inline-flex w-full max-w-xl flex-col items-center gap-2 rounded-2xl border border-[#39FF14]/40 bg-[#39FF14]/10 px-6 py-4 text-center shadow-lg shadow-[#39FF14]/15 ring-1 ring-[#39FF14]/25">
+                <span className="text-base font-extrabold leading-tight text-brand-navy md:text-lg">
+                  <span style={{ color: '#39FF14' }}>⚡ Connect your smart meter data</span>
+                  <span className="mx-1 text-brand-navy">for</span>
+                  <span style={{ color: '#39FF14' }}>1 jackpot entry!</span>
+                </span>
+                <span className="text-sm font-bold leading-tight text-brand-navy md:text-base">
+                  <Link href="/dashboard/referrals" style={{ color: '#BF00FF' }} className="hover:underline">
+                    👥 Refer a Friend:
+                  </Link>
+                  <span className="mx-1 text-brand-navy" />
+                  <span style={{ color: '#39FF14' }}>1 jackpot entry per signup!</span>
                 </span>
               </div>
             </div>
+          )}
+
+          <div className="space-y-4">
+            {!user && (
+              <div className="rounded-2xl border border-amber-200/70 bg-amber-100/40 px-5 py-4 text-center text-sm font-medium text-amber-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]">
+                Sign in to connect Smart Meter Texas.
+              </div>
+            )}
+
+            {user && !houseAddress && (
+              <div className="rounded-2xl border border-amber-200/70 bg-amber-100/40 px-5 py-4 text-center text-sm font-medium text-amber-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]">
+                We don’t have a service address on file yet. Add your address first and then return here to authorize SMT.
+              </div>
+            )}
+
+            {user && houseAddress && !hasEsiid && (
+              <div className="rounded-2xl border border-amber-200/70 bg-amber-100/40 px-5 py-4 text-center text-sm font-medium text-amber-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]">
+                We have your address, but we couldn’t resolve an ESIID yet. Complete the rate lookup step so we can match you with the correct utility meter.
+              </div>
+            )}
+
+            {user && houseAddress && hasEsiid && !hasTdspOrUtility && (
+              <div className="rounded-2xl border border-amber-200/70 bg-amber-100/40 px-5 py-4 text-center text-sm font-medium text-amber-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]">
+                We found an ESIID, but utility details are still syncing. Once the TDSP information appears, you’ll be ready to authorize SMT.
+              </div>
+            )}
           </div>
-        </section>
-      </div>
+
+          {showAddressCaptureCard ? (
+            <SmtAddressCaptureCard
+              houseAddressId={houseAddress?.id ?? null}
+              initialAddress={serviceAddressDisplay}
+            />
+          ) : null}
+
+          {readyForSmt && (
+            <>
+              <div className="space-y-6 rounded-3xl border border-brand-cyan/20 bg-white/95 p-4 shadow-[0_18px_60px_rgba(16,46,90,0.06)] backdrop-blur max-[480px]:p-3 sm:p-6 md:p-8">
+                <div className="rounded-2xl border border-brand-cyan/40 bg-brand-navy p-5 text-sm text-brand-cyan shadow-[0_10px_30px_rgba(16,182,231,0.18)] sm:p-6">
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <div className="space-y-1">
+                      <h2 className="text-sm font-semibold uppercase tracking-wide text-brand-cyan">
+                        Service address on file
+                      </h2>
+                      <div className="space-y-0.5 text-brand-cyan/90">
+                        <div>{serviceAddressLine1}</div>
+                        {serviceAddressLine2 ? <div>{serviceAddressLine2}</div> : null}
+                        <div>
+                          {serviceCity}, {serviceState} {serviceZip}
+                        </div>
+                        <div>
+                          <span className="font-semibold">ESIID · </span>
+                          {houseAddress.esiid ?? "—"}
+                        </div>
+                        <div>
+                          <span className="font-semibold">Utility · </span>
+                          {tdspName ?? "—"}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <h3 className="text-sm font-semibold uppercase tracking-wide text-brand-cyan">
+                        Utility integrations
+                      </h3>
+                      <div className="space-y-0.5 text-brand-cyan/90">
+                        <div>
+                          <span className="font-semibold">Contact Email · </span>
+                          {userEmail || "—"}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  {existingAuth && (
+                    <div className="mt-4 rounded-lg border border-brand-cyan/45 bg-brand-navy/60 p-3 text-xs leading-relaxed text-brand-cyan/80">
+                      We already have a valid Smart Meter Texas authorization for this address. Submit the form again if you need to refresh your consent (for example after changing providers or revoking access in SMT).
+                    </div>
+                  )}
+                </div>
+
+                {existingAuth && (
+                  <div className="rounded-2xl border border-brand-cyan/40 bg-brand-navy p-5 text-xs text-brand-cyan shadow-[0_10px_30px_rgba(16,182,231,0.18)] sm:p-6">
+                    <div className="flex flex-wrap items-center justify-center gap-3 text-center md:justify-between md:text-left">
+                      <span className="text-[0.7rem] font-semibold uppercase tracking-wide">
+                        SMT authorization last submitted{" "}
+                        {existingAuth.createdAt.toLocaleDateString(undefined, {
+                          month: "short",
+                          day: "numeric",
+                          year: "numeric",
+                        })}
+                      </span>
+                      {statusLabel ? (
+                        <span className={statusBadgeStyles[statusTone]}>{statusLabel}</span>
+                      ) : null}
+                    </div>
+                    {statusMessage ? (
+                      <p className="mt-2 text-xs leading-relaxed text-brand-cyan/90 text-left">{statusMessage}</p>
+                    ) : null}
+                    {statusSecondaryMessage ? (
+                      <p className="mt-1 text-xs leading-relaxed text-brand-cyan/80 text-left">{statusSecondaryMessage}</p>
+                    ) : null}
+                    {existingAuth?.authorizationEndDate ? (
+                      <p className="mt-3 text-xs text-brand-cyan/70 text-left">
+                        Authorization expires{" "}
+                        {existingAuth.authorizationEndDate.toLocaleDateString(undefined, {
+                          month: "short",
+                          day: "numeric",
+                          year: "numeric",
+                        })}
+                      </p>
+                    ) : null}
+                  </div>
+                )}
+
+                <div className="rounded-2xl border border-brand-blue/10 bg-white p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)] sm:p-6">
+                  <SmtAuthorizationForm
+                    contactEmail={userEmail}
+                    houseAddressId={houseAddress.id}
+                    houseId={houseAddress.houseId ?? undefined}
+                    esiid={houseAddress.esiid ?? undefined}
+                    tdspCode={tdspCode}
+                    tdspName={tdspName}
+                    serviceAddressLine1={serviceAddressLine1}
+                    serviceAddressLine2={serviceAddressLine2}
+                    serviceCity={serviceCity}
+                    serviceState={serviceState}
+                    serviceZip={serviceZip}
+                    existingAuth={existingAuth}
+                    initialMeterNumber={existingAuth?.meterNumber ?? undefined}
+                    showHeader={false}
+                  />
+                </div>
+              </div>
+
+              <SmtManualFallbackCard houseAddressId={houseAddress?.id ?? null} />
+            </>
+          )}
+
+          <div className="relative overflow-hidden rounded-3xl border border-brand-blue/15 bg-white shadow-[0_24px_70px_rgba(16,46,90,0.06)]">
+            <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-brand-blue/10 via-transparent to-brand-cyan/15 opacity-70" />
+            <div className="relative z-10 flex flex-col gap-6 p-8 sm:p-10 text-center">
+              <div className="flex flex-col gap-3">
+                <h2 className="text-2xl font-semibold tracking-tight text-brand-navy">Smart Home Devices</h2>
+                <p className="mx-auto max-w-3xl text-sm leading-relaxed text-brand-slate">
+                  Connect your Emporia Vue, Sense, Nest, Tesla, or Enphase devices to unlock richer insights and earn bonus jackpot entries. Device integrations are rolling out soon—get on the early access list so you’re first in line.
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-4 rounded-2xl border border-brand-cyan/40 bg-brand-navy px-6 py-6 text-center text-brand-cyan shadow-[0_12px_32px_rgba(16,46,90,0.12)] sm:flex-row sm:items-center sm:justify-between">
+                <div className="mx-auto sm:mx-0">
+                  <p className="text-sm font-semibold uppercase tracking-[0.3em] text-brand-cyan">
+                    Coming Soon
+                  </p>
+                  <p className="mt-2 text-base font-medium text-brand-cyan">
+                    Automatic OAuth logins and synced device APIs are on the way.
+                  </p>
+                </div>
+                <div className="flex justify-center sm:justify-end">
+                  <span className="inline-flex items-center gap-2 rounded-full bg-brand-navy px-4 py-2 text-xs font-semibold uppercase tracking-wide text-brand-cyan shadow-[0_10px_30px_rgba(16,46,90,0.08)]">
+                    Preview Access
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
     </div>
   );
 } 

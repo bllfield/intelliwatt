@@ -1,29 +1,21 @@
 "use client";
 
 import { CurrentRateDetailsForm } from "@/components/CurrentRateDetailsForm";
+import DashboardHero from "@/components/dashboard/DashboardHero";
 
 export default function CurrentRatePage() {
   return (
-    <div className="min-h-[calc(100vh-120px)] overflow-x-hidden bg-slate-50/60 py-12">
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-12 px-4 sm:px-6 lg:px-0">
-        <section className="relative overflow-hidden rounded-3xl border border-brand-navy/10 bg-white shadow-[0_28px_80px_rgba(16,46,90,0.08)]">
-          <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-brand-blue/15 via-transparent to-brand-cyan/20 opacity-80" />
-          <div className="relative z-10 space-y-8 p-6 sm:p-10">
-            <header className="space-y-4 text-center">
-              <span className="inline-flex items-center gap-2 rounded-full bg-brand-navy px-4 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-brand-cyan">
-                Current Plan Snapshot
-              </span>
-              <div className="space-y-3">
-                <h1 className="text-3xl font-semibold tracking-tight text-brand-navy sm:text-4xl">
-                  Record your current electricity rate
-                </h1>
-                <p className="mx-auto max-w-2xl text-sm leading-relaxed text-brand-slate">
-                  Share the plan you&apos;re on today so IntelliWatt can highlight how renewal pricing compares to our recommendations.
-                  Upload a bill or enter the details manually—you&apos;ll still get personalized plan matches either way.
-                </p>
-              </div>
-            </header>
+    <div className="min-h-screen bg-brand-white">
+      <DashboardHero
+        eyebrow="Current Plan Snapshot"
+        title="Current"
+        highlight="Rate"
+        description="Share the plan you’re on today so IntelliWatt can highlight how renewal pricing compares to our recommendations. Upload a bill or enter the details manually—you’ll still get personalized matches either way."
+      />
 
+      <section className="bg-brand-white py-16 px-4">
+        <div className="mx-auto max-w-5xl">
+          <div className="rounded-3xl border border-brand-cyan/25 bg-white p-8 shadow-[0_28px_60px_rgba(16,46,90,0.12)]">
             <CurrentRateDetailsForm
               onContinue={(data) => {
                 console.log("Current rate details submitted:", data);
@@ -33,8 +25,8 @@ export default function CurrentRatePage() {
               }}
             />
           </div>
-        </section>
-      </div>
+        </div>
+      </section>
     </div>
   );
 }
