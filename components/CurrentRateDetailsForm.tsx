@@ -213,7 +213,7 @@ export function CurrentRateDetailsForm({
           <button
             type="button"
             onClick={onSkip}
-            className="text-sm font-semibold text-brand-navy underline decoration-dashed underline-offset-4 transition hover:text-brand-blue"
+            className="text-sm font-semibold text-brand-blue underline decoration-dashed underline-offset-4 transition hover:text-brand-blue/80"
           >
             Skip for now
           </button>
