@@ -88,11 +88,7 @@ export default function Footer() {
               <li><a href="/security" className="transition-colors hover:text-brand-white">Security</a></li>
               <li><a href="/privacy-policy" className="transition-colors hover:text-brand-white">Privacy Policy</a></li>
               <li><a href="/rules" className="transition-colors hover:text-brand-white">Rules</a></li>
-              <li>
-                <Link href="/faq#about-intelliwatt" className="transition-colors hover:text-brand-white">
-                  About Us
-                </Link>
-              </li>
+              <li><Link href="/about" className="transition-colors hover:text-brand-white">About Us</Link></li>
             </ul>
           </div>
 

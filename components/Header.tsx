@@ -20,10 +20,7 @@ const navLinks: NavLink[] = [
   { href: '/security', label: 'Security' },
   { href: '/privacy-policy', label: 'Privacy' },
   { href: '/rules', label: 'Rules' },
-  {
-    href: '/faq#about-intelliwatt',
-    label: 'About Us',
-  },
+  { href: '/about', label: 'About Us' },
 ];
 
 const AUTH_PATH = '/join';
