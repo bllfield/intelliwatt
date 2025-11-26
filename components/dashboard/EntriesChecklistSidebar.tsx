@@ -161,8 +161,11 @@ export default function EntriesChecklistSidebar() {
         aria-expanded={isOpen}
         aria-controls="entries-checklist-panel"
       >
-        <span className="text-xs" style={{ writingMode: 'vertical-rl' }}>
-          ENTRIES
+        <span
+          className="text-xs font-semibold"
+          style={{ writingMode: 'vertical-rl', letterSpacing: '0.35em', color: NEON_PURPLE, textShadow: '0 0 12px rgba(191,0,255,0.75)' }}
+        >
+          E N T R I E S
         </span>
       </button>
 
