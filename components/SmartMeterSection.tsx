@@ -34,6 +34,10 @@ export default function SmartMeterSection({ houseId }: SmartMeterSectionProps) {
   const [checkingStatus, setCheckingStatus] = useState(true);
   const [hasShownEmailReminder, setHasShownEmailReminder] = useState(false);
 
+  const reminderStorageKey = authorizationInfo
+    ? `intelliwatt_smt_email_reminder_${authorizationInfo.id}`
+    : null;
+
   useEffect(() => {
     setMounted(true);
   }, []);
@@ -70,11 +74,28 @@ export default function SmartMeterSection({ houseId }: SmartMeterSectionProps) {
   }, [mounted, fetchAuthorizationStatus]);
 
   useEffect(() => {
-    if (status === 'connected' && authorizationInfo && !hasShownEmailReminder) {
+    if (!authorizationInfo) {
+      setShowEmailReminder(false);
+      setHasShownEmailReminder(false);
+      return;
+    }
+    if (typeof window === "undefined") {
+      return;
+    }
+    const key = `intelliwatt_smt_email_reminder_${authorizationInfo.id}`;
+    const alreadyAcknowledged = localStorage.getItem(key) === "true";
+    setHasShownEmailReminder(alreadyAcknowledged);
+
+    if (status === "connected" && !alreadyAcknowledged) {
       setShowEmailReminder(true);
       setHasShownEmailReminder(true);
+      localStorage.setItem(key, "true");
     }
-  }, [status, authorizationInfo, hasShownEmailReminder]);
+
+    if (status !== "connected") {
+      setShowEmailReminder(false);
+    }
+  }, [authorizationInfo, status]);
 
   const formattedAddress = authorizationInfo
     ? [
@@ -117,6 +138,10 @@ export default function SmartMeterSection({ houseId }: SmartMeterSectionProps) {
         window.dispatchEvent(new CustomEvent('entriesUpdated'));
         setShowAwardModal(true);
         setShowEmailReminder(true);
+        const key = reminderStorageKey;
+        if (typeof window !== "undefined" && key) {
+          localStorage.setItem(key, "true");
+        }
         setHasShownEmailReminder(true);
       } catch (error) {
         console.error('Error awarding entries:', error);
@@ -251,7 +276,12 @@ export default function SmartMeterSection({ houseId }: SmartMeterSectionProps) {
               </p>
               <div className="mt-6 flex justify-end">
                 <button
-                  onClick={() => setShowEmailReminder(false)}
+                  onClick={() => {
+                    setShowEmailReminder(false);
+                    if (typeof window !== "undefined" && reminderStorageKey) {
+                      localStorage.setItem(reminderStorageKey, "true");
+                    }
+                  }}
                   className="inline-flex items-center rounded-full border border-brand-cyan/60 bg-brand-cyan/10 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-brand-cyan transition hover:border-brand-blue hover:text-brand-blue"
                 >
                   I approved the email from SMT
