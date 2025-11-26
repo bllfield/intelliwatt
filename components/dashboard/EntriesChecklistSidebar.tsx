@@ -163,9 +163,12 @@ export default function EntriesChecklistSidebar() {
         aria-expanded={isOpen}
         aria-controls="entries-checklist-panel"
       >
-        <span className="flex flex-col items-center text-xs font-semibold" style={{ color: NEON_PURPLE, textShadow: '0 0 12px rgba(191,0,255,0.75)' }}>
-          {TAB_LABEL.map((char) => (
-            <span key={char}>{char}</span>
+        <span
+          className="flex flex-col items-center text-[0.75rem] font-semibold leading-none"
+          style={{ color: NEON_PURPLE, textShadow: '0 0 12px rgba(191,0,255,0.75)' }}
+        >
+          {TAB_LABEL.map((char, index) => (
+            <span key={`${char}-${index}`}>{char}</span>
           ))}
         </span>
       </button>
