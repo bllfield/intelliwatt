@@ -133,7 +133,72 @@ function JoinPageContent() {
               </p>
             </div>
 
-            <div className="max-w-3xl mx-auto grid gap-4 md:grid-cols-2 mb-8">
+            <div className="mb-8 inline-block bg-white/10 text-white px-4 py-1.5 rounded-full font-semibold border border-white/20">
+              💸 100% Free — No fees, ever
+            </div>
+
+            <div className="max-w-md mx-auto">
+              <div className="bg-brand-navy/60 border border-brand-blue/20 rounded-2xl p-4 mb-6 text-center">
+                <div className="flex items-center justify-center gap-2 mb-2">
+                  <span className="text-[#BF00FF] text-lg">✓</span>
+                  <span className="text-brand-white font-semibold">Visit Dashboard - Submit Email Below</span>
+                </div>
+                <div className="text-brand-white/90 text-sm">
+                  Access your dashboard for the first time to create your account
+                  <br />
+                  <span style={{ color: '#39FF14' }}>1 jackpot entry available</span>
+                </div>
+              </div>
+              {!submitted ? (
+                <div className="rounded-3xl border border-brand-blue/40 bg-brand-navy/70 p-6 shadow-[0_20px_60px_rgba(0,0,0,0.4)]">
+                  <p className="text-brand-white text-center font-semibold text-lg mb-5">
+                    Join now. Your dashboard, recommendations, and entries are waiting.
+                  </p>
+                  <form onSubmit={handleSubmit} className="space-y-4">
+                    <label className="block text-brand-white/80 text-sm font-semibold uppercase tracking-wide">
+                      Email address
+                    </label>
+                    <input
+                      type="email"
+                      placeholder="Enter the email you check the most"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      className="w-full px-6 py-4 rounded-full bg-brand-white text-brand-navy placeholder-brand-navy/60 focus:outline-none focus:ring-2 focus:ring-brand-blue text-lg"
+                      required
+                    />
+                    <button
+                      type="submit"
+                      disabled={isSubmitting}
+                      className="w-full bg-[#39FF14] text-brand-navy font-extrabold py-4 px-8 rounded-full text-lg hover:bg-[#5FFF2A] transition-all duration-300 transform hover:scale-105 shadow-lg hover:shadow-[0_0_25px_rgba(57,255,20,0.4)] disabled:opacity-50"
+                    >
+                      {isSubmitting ? 'Sending…' : 'Join IntelliWatt For Free'}
+                    </button>
+                    <p className="text-xs text-brand-white/70 text-center">
+                      No password to remember. We email you a secure link so you can join instantly.
+                    </p>
+                  </form>
+                </div>
+              ) : (
+                <div className="bg-brand-white p-6 rounded-2xl text-brand-navy text-center shadow-[0_20px_60px_rgba(0,0,0,0.25)]">
+                  <h3 className="text-xl font-bold mb-2">Check Your Email!</h3>
+                  <p>We just sent you a magic link. Open it within 15 minutes to finish joining IntelliWatt.</p>
+                </div>
+              )}
+              <div className="bg-brand-navy/60 border border-brand-blue/20 rounded-2xl p-4 mt-6 text-center">
+                <div className="text-brand-white/90 text-sm">
+                  <span className="font-semibold">Authorize Smart Meter Texas</span>
+                </div>
+                <div className="mt-3 text-brand-white/90 text-sm">
+                  <Link href="/dashboard/referrals" className="font-semibold text-brand-cyan hover:text-brand-blue transition-colors duration-300">
+                    Refer a Friend
+                  </Link>
+                  <span className="ml-2">Each friend who signs up earns you</span>
+                  <span className="ml-2" style={{ color: '#39FF14' }}>1 jackpot entry</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="max-w-3xl mx-auto grid gap-4 md:grid-cols-2 mt-10">
               <div className="rounded-2xl border border-[#39FF14]/50 bg-[#39FF14]/10 p-4 text-center shadow-[0_0_25px_rgba(57,255,20,0.25)]">
                 <p className="text-xs uppercase tracking-[0.2em] text-[#39FF14] font-semibold mb-2">HitTheJackWatt Jackpot</p>
                 <p className="text-brand-white text-lg font-semibold leading-relaxed">
