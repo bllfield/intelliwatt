@@ -60,7 +60,19 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
   const [emailConfirmationError, setEmailConfirmationError] = useState<string | null>(null);
   const router = useRouter();
 
+  const reminderStorageKey = `smt-email-reminder:${houseAddressId}`;
   const hasActiveAuth = Boolean(existingAuth);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const storedReminder = window.localStorage.getItem(reminderStorageKey);
+    if (storedReminder === "pending") {
+      setShowEmailReminder(true);
+    }
+  }, [reminderStorageKey]);
 
   useEffect(() => {
     if (typeof document === "undefined") {
@@ -78,6 +90,18 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
       document.body.style.overflow = previousOverflow;
     };
   }, [showEmailReminder]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    if (showEmailReminder) {
+      window.localStorage.setItem(reminderStorageKey, "pending");
+    } else {
+      window.localStorage.removeItem(reminderStorageKey);
+    }
+  }, [showEmailReminder, reminderStorageKey]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -181,6 +205,9 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
       }
 
       setShowEmailReminder(false);
+      if (typeof window !== "undefined") {
+        window.localStorage.removeItem(reminderStorageKey);
+      }
       router.refresh();
     } catch (error) {
       console.error("Failed to update SMT email confirmation status", error);
