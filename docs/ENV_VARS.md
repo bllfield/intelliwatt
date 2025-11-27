@@ -14,6 +14,9 @@
 - `DROPLET_WEBHOOK_SECRET` — Shared secret sent in header `x-intelliwatt-secret` for SMT webhook authentication. Alias: `INTELLIWATT_WEBHOOK_SECRET`
 - `GREENBUTTON_API_KEY` — (future) Green Button API access
 
+## Databases
+- `CURRENT_PLAN_DATABASE_URL` — **Separate PostgreSQL database dedicated to the Current Plan / Current Rate module.** Must not reuse the primary `DATABASE_URL`. Point this to a distinct database instance (e.g., `intelliwatt_current_plan`) created just for manual plan entries and bill uploads.
+
 ## SMT Inline Ingest (Vercel ↔ Droplet)
 - **Vercel env (required):**
   - `ADMIN_TOKEN`

@@ -27,6 +27,27 @@
   - ⬜ **API Dataset Normalization**:
     - Separate per-API raw datasets (WattBuy, EnergyBot, etc.) and a master normalized dataset with null-safe handling so empty fields don’t break the UI.
 
+### Current Plan Module Progress (Updated 2025-11-27)
+
+- **Dedicated Current Plan datastore**
+  - ✅ Added `prisma/current-plan.schema.prisma` with its own datasource (`CURRENT_PLAN_DATABASE_URL`) so manual entries and bill uploads never touch the master Prisma schema.
+  - ✅ Introduced `lib/prismaCurrentPlan.ts` plus `/api/current-plan/manual` and `/api/current-plan/upload` to persist structured plan data and raw bill bytes into the standalone database.
+  - ⬜ NEXT: Pull the Current Plan database into the master normalization pipeline so the rate analyzer can consume these entries.
+
+- **Developer notes**
+  - Local (PowerShell):
+    ```
+    npx prisma generate --schema=prisma/current-plan.schema.prisma
+    npx prisma migrate dev --schema=prisma/current-plan.schema.prisma --name init_current_plan_db
+    ```
+  - Production rollout:
+    - Create a separate PostgreSQL database (e.g., `intelliwatt_current_plan`) via DigitalOcean.
+    - Set `CURRENT_PLAN_DATABASE_URL` in Vercel and droplet environments before deploying.
+    - After deploy, run:
+      ```
+      npx prisma migrate deploy --schema=prisma/current-plan.schema.prisma
+      ```
+
 ### PC-2025-11-25-K — Keeper Cleanup Runbook (Chat-Driven)
 
 **Rationale:**

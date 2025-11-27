@@ -1,0 +1,53 @@
+generator currentPlanClient {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/current-plan-client"
+}
+
+datasource currentPlanDb {
+  provider = "postgresql"
+  url      = env("CURRENT_PLAN_DATABASE_URL")
+}
+
+enum CurrentPlanRateType {
+  FIXED
+  VARIABLE
+  TIME_OF_USE
+  OTHER
+}
+
+model CurrentPlanManualEntry {
+  id                 String               @id @default(cuid())
+  userId             String
+  houseId            String?
+  providerName       String
+  planName           String
+  rateType           CurrentPlanRateType
+  energyRateCents    Decimal              @db.Decimal(8, 4)
+  baseMonthlyFee     Decimal?             @db.Decimal(8, 2)
+  termLengthMonths   Int?
+  contractEndDate    DateTime?
+  earlyTerminationFee Decimal?            @db.Decimal(8, 2)
+  esiId              String?
+  accountNumberLast4 String?
+  notes              String?              @db.Text
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+
+  @@index([userId])
+  @@index([userId, houseId])
+}
+
+model CurrentPlanBillUpload {
+  id         String   @id @default(cuid())
+  userId     String
+  houseId    String?
+  filename   String
+  mimeType   String
+  sizeBytes  Int
+  billData   Bytes
+  uploadedAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([userId, houseId])
+}
+
