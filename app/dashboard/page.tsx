@@ -477,19 +477,35 @@ const [mounted, setMounted] = useState(false);
                 <span style={{ color: '#39FF14' }}>1 jackpot entry per signup!</span>
               </span>
             </Link>
+            <Link
+              href="/dashboard/referrals"
+              className="inline-flex w-full max-w-xl flex-col items-center gap-2 rounded-3xl border border-[#39FF14]/40 bg-[#39FF14]/10 px-6 py-5 text-center shadow-lg shadow-[#39FF14]/12 ring-1 ring-[#39FF14]/30 transition duration-300 hover:border-[#BF00FF]/50 hover:shadow-[#BF00FF]/20"
+            >
+              <span className="text-xl font-black uppercase tracking-[0.3em] text-[#BF00FF] drop-shadow-[0_0_18px_rgba(191,0,255,0.6)] md:text-2xl">
+                CLICK HERE!!
+              </span>
+              <span className="text-lg font-extrabold leading-tight text-brand-white md:text-xl text-balance">
+                <span style={{ color: '#39FF14' }}>👥 Refer friends &amp; family</span>
+                <span className="mx-1 text-brand-white">to earn</span>
+                <span style={{ color: '#39FF14' }}>unlimited jackpot entries!</span>
+              </span>
+              <span className="text-sm font-bold leading-tight text-brand-white md:text-base text-balance">
+                Share your link, copy ready-to-post messages, and watch your entries stack up.
+              </span>
+            </Link>
           </div>
           <div className="mx-auto mt-10 max-w-5xl rounded-3xl border-2 border-brand-blue/40 bg-brand-navy/90 p-6 text-brand-cyan shadow-[0_18px_55px_rgba(16,46,90,0.35)] sm:p-8">
-            <h2 className="text-center text-2xl font-semibold uppercase tracking-[0.3em] text-brand-cyan/70">
+            <h2 className="mx-auto max-w-2xl text-center text-2xl font-semibold uppercase tracking-[0.12em] text-brand-cyan/70 sm:tracking-[0.3em]">
               Benefits of IntelliWatt
             </h2>
-            <div className="mt-6 grid gap-4 text-left sm:grid-cols-2">
+            <div className="mt-6 grid gap-4 justify-items-center text-center sm:grid-cols-2 sm:justify-items-stretch sm:text-left">
               {DASHBOARD_BENEFITS.map(({ icon, text }) => (
                 <div
                   key={text}
-                  className="flex items-start gap-3 rounded-3xl border border-brand-blue/35 bg-brand-navy p-4 text-sm leading-relaxed text-brand-cyan"
+                  className="flex flex-col items-center gap-3 rounded-3xl border border-brand-blue/35 bg-brand-navy p-4 text-sm leading-relaxed text-brand-cyan sm:flex-row sm:items-start sm:text-left"
                 >
-                  <span className="text-xl sm:text-2xl">{icon}</span>
-                  <p>{text}</p>
+                  <span className="text-xl sm:text-2xl sm:pt-1">{icon}</span>
+                  <p className="max-w-xs sm:max-w-none">{text}</p>
                 </div>
               ))}
             </div>

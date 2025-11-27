@@ -1,6 +1,32 @@
 ## TODO
 - [ ] Add meter number photo uploader to the SMT authorization flow so customers can upload a picture of their bill or meter for verification.
 
+### Referral Flow & Sharing Progress (Updated 2025-11-27)
+
+- **Referral Token Flow**
+  - ✅ IntelliWatt `/join` and `/login` pages now read `?ref=` from the URL and include it as `ref` in the magic-link email form submissions.
+  - ✅ HitTheJackWatt landing page reads `?ref=` and can propagate it through outgoing links/forms to IntelliWatt.
+  - ✅ HitTheJackWatt magic-link email sender now injects the `ref` value into the IntelliWatt dashboard/login URL (Phase 2 of the referral flow).
+
+- **Referral Sharing Tools**
+  - ✅ Referral dashboard page now includes a **Referral Sharing Tools** section with:
+    - A HitTheJackWatt-focused share block (jackpot/drawing message + referral URL).
+    - An IntelliWatt-focused share block (plan-savings / smart-meter automation message + referral URL).
+    - Each block has a pre-written social media message, a “Copy message” button, and multi-network share links using the latest ad creatives.
+  - ✅ IntelliWatt universal social-media referral ad creative (neon IntelliWatt branding, no platform icons) defined for future export/use.
+  - ⬜ OPTIONAL: Generate multiple ad sizes (square, story, landscape) and wire in per-user referral URLs for downloadable creatives.
+
+- **Remaining To-Dos from the current checklist**
+  - ⬜ **Current Rate Page (MVP)** with image upload or manual entry and “we’re working hard to unlock these features” messaging across:
+    - Usage, Plans, Home Info, Appliances, Upgrades, Analysis, Optimal Energy.
+  - ⬜ **Pop-Up Flow** to guide entries in order: SMT → Current Rate → Referrals, with an option to skip directly to Referrals at each step.
+  - ⬜ **Additional SMT Endpoints + Daily Poll** for agreement statuses:
+    - acknowledged / approved / revoked / declined / cancel.
+  - ⬜ **Real-Time SMT Approval Check**:
+    - When the user clicks “I approved it,” call SMT API and show status; if not approved, show a clear “not approved yet” message.
+  - ⬜ **API Dataset Normalization**:
+    - Separate per-API raw datasets (WattBuy, EnergyBot, etc.) and a master normalized dataset with null-safe handling so empty fields don’t break the UI.
+
 ### PC-2025-11-25-K — Keeper Cleanup Runbook (Chat-Driven)
 
 **Rationale:**
