@@ -77,8 +77,8 @@ function LandingPageContent() {
       if (response.ok) {
         setSubmitted(true);
         setShowSuccessPopup(true);
-        // Auto-hide popup after 5 seconds
-        setTimeout(() => setShowSuccessPopup(false), 5000);
+        // Auto-hide popup after 15 seconds
+        setTimeout(() => setShowSuccessPopup(false), 15000);
       } else {
         alert(data.error || 'Failed to send magic link. Please try again.');
       }
@@ -92,32 +92,43 @@ function LandingPageContent() {
   return (
     <div className="min-h-screen bg-brand-white">
       {/* Success Popup */}
-      {showSuccessPopup && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4 shadow-xl">
-            <div className="text-center">
-              <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-green-100 mb-4">
-                <svg className="h-6 w-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>
-                </svg>
-              </div>
-              <h3 className="text-lg font-medium text-gray-900 mb-2">Magic Link Sent!</h3>
-              <p className="text-sm text-gray-600 mb-4">
-                We've sent a magic link to <strong>{email}</strong>. Please check your inbox and click the link to access your dashboard.
-              </p>
-              <p className="text-xs text-gray-500 mb-4">
-                The link will expire in 15 minutes. If you don't see the email, check your spam folder.
-              </p>
-              <button
-                onClick={() => setShowSuccessPopup(false)}
-                className="w-full bg-brand-blue text-white py-2 px-4 rounded-md hover:bg-blue-600 transition-colors"
-              >
-                Got it!
-              </button>
+      {showSuccessPopup ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
+          <div className="w-full max-w-xl rounded-3xl border border-brand-blue/40 bg-brand-navy px-8 py-10 text-center text-brand-cyan shadow-[0_30px_90px_rgba(9,16,34,0.7)]">
+            <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full border border-brand-blue/50 bg-brand-blue/10">
+              <svg className="h-8 w-8 text-[#39FF14]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>
+              </svg>
             </div>
+            <h2 className="text-2xl font-bold uppercase tracking-[0.2em] text-brand-cyan/70">Magic Link Sent!</h2>
+            <p className="mt-4 text-lg leading-relaxed text-brand-white">
+              We emailed a secure magic link to <span className="font-semibold text-[#39FF14]">{email}</span>.
+              Keep this window open and follow the steps below:
+            </p>
+            <ul className="mt-6 space-y-3 rounded-2xl border border-brand-blue/40 bg-brand-blue/10 px-6 py-5 text-left text-sm text-brand-cyan/80">
+              <li>
+                <span className="font-semibold text-brand-cyan">1.</span> Look for an email titled{" "}
+                <span className="font-semibold text-brand-white">"Your IntelliWatt Magic Link"</span>.
+              </li>
+              <li>
+                <span className="font-semibold text-brand-cyan">2.</span> Check spam, junk, or promotions folders if it is not in your main inbox.
+              </li>
+              <li>
+                <span className="font-semibold text-brand-cyan">3.</span> Tap the link within <span className="font-semibold text-brand-white">15 minutes</span> to open your HitTheJackWatt™ dashboard powered by IntelliWatt.
+              </li>
+            </ul>
+            <p className="mt-6 text-xs uppercase tracking-[0.3em] text-brand-cyan/60">
+              If you didn’t request this email, you can ignore it.
+            </p>
+            <button
+              onClick={() => setShowSuccessPopup(false)}
+              className="mt-8 inline-flex items-center justify-center rounded-full border border-brand-blue/60 bg-brand-blue/10 px-8 py-3 text-sm font-semibold uppercase tracking-wide text-brand-cyan transition hover:border-brand-blue hover:bg-brand-blue/20"
+            >
+              Got it!
+            </button>
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* Hero Section */}
       <section className="relative bg-brand-navy py-20 px-4 overflow-hidden">
