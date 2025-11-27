@@ -92,43 +92,60 @@ function LandingPageContent() {
   return (
     <div className="min-h-screen bg-brand-white">
       {/* Success Popup */}
-      {showSuccessPopup ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
-          <div className="w-full max-w-xl rounded-3xl border border-brand-blue/40 bg-brand-navy px-8 py-10 text-center text-brand-cyan shadow-[0_30px_90px_rgba(9,16,34,0.7)]">
-            <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full border border-brand-blue/50 bg-brand-blue/10">
-              <svg className="h-8 w-8 text-[#39FF14]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>
-              </svg>
+        {showSuccessPopup && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
+            <div className="w-full max-w-2xl rounded-3xl border border-brand-blue/40 bg-brand-navy px-8 py-10 text-brand-cyan shadow-[0_30px_90px_rgba(9,16,34,0.7)]">
+              <div className="grid gap-4 md:grid-cols-2 md:items-center">
+                <div className="text-center md:text-left">
+                  <div className="mx-auto md:mx-0 mb-6 flex h-16 w-16 items-center justify-center rounded-full border border-brand-blue/50 bg-brand-blue/10">
+                    <svg className="h-8 w-8 text-[#39FF14]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>
+                    </svg>
+                  </div>
+                  <h2 className="text-2xl font-bold uppercase tracking-[0.2em] text-brand-cyan/70">Magic Link Sent!</h2>
+                  <p className="mt-4 text-base leading-relaxed text-brand-white/90">
+                    We emailed a secure magic link to <span className="font-semibold text-[#39FF14]">{email}</span>. Keep this window open and follow the steps below:
+                  </p>
+                  <ul className="mt-4 space-y-2 rounded-2xl border border-brand-blue/40 bg-brand-blue/10 px-5 py-4 text-left text-sm text-brand-cyan/80">
+                    <li>
+                      <span className="font-semibold text-brand-cyan">1.</span> Look for an email titled{" "}
+                      <span className="font-semibold text-brand-white">"Your IntelliWatt Magic Link"</span>.
+                    </li>
+                    <li>
+                      <span className="font-semibold text-brand-cyan">2.</span> Check spam, junk, or promotions folders if it isn’t in your main inbox.
+                    </li>
+                    <li>
+                      <span className="font-semibold text-brand-cyan">3.</span> Tap the link within <span className="font-semibold text-brand-white">15 minutes</span> to open your HitTheJackWatt™ dashboard powered by IntelliWatt.
+                    </li>
+                  </ul>
+                </div>
+                <div className="space-y-4">
+                  <div className="rounded-2xl border border-brand-blue/40 bg-brand-blue/10 p-4 text-left text-sm text-brand-cyan/80">
+                    <p className="text-xs uppercase tracking-[0.3em] text-brand-cyan/60 mb-2">HitTheJackWatt Jackpot</p>
+                    <p className="text-sm text-brand-white/90">
+                      Earn <span className="text-[#39FF14] font-semibold">1 entry</span> when you authorize Smart Meter Texas or connect with Green Button. It grows the community jackpot.
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-[#BF00FF]/50 bg-[#BF00FF]/10 p-4 text-left text-sm text-[#FFD5F5]/90">
+                    <p className="text-xs uppercase tracking-[0.3em] text-[#FF3BCE]/80 mb-2">HitTheJackWatt Referrals</p>
+                    <p>
+                      Earn <span className="font-semibold text-white">unlimited entries</span> for every friend or family member you refer who connects usage.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setShowSuccessPopup(false)}
+                    className="w-full rounded-full border border-brand-blue/60 bg-brand-blue/10 px-8 py-3 text-sm font-semibold uppercase tracking-wide text-brand-cyan transition hover:border-brand-blue hover:bg-brand-blue/20"
+                  >
+                    Got it!
+                  </button>
+                  <p className="text-center text-xs uppercase tracking-[0.3em] text-brand-cyan/60">
+                    If you didn’t request this email, you can ignore it.
+                  </p>
+                </div>
+              </div>
             </div>
-            <h2 className="text-2xl font-bold uppercase tracking-[0.2em] text-brand-cyan/70">Magic Link Sent!</h2>
-            <p className="mt-4 text-lg leading-relaxed text-brand-white">
-              We emailed a secure magic link to <span className="font-semibold text-[#39FF14]">{email}</span>.
-              Keep this window open and follow the steps below:
-            </p>
-            <ul className="mt-6 space-y-3 rounded-2xl border border-brand-blue/40 bg-brand-blue/10 px-6 py-5 text-left text-sm text-brand-cyan/80">
-              <li>
-                <span className="font-semibold text-brand-cyan">1.</span> Look for an email titled{" "}
-                <span className="font-semibold text-brand-white">"Your IntelliWatt Magic Link"</span>.
-              </li>
-              <li>
-                <span className="font-semibold text-brand-cyan">2.</span> Check spam, junk, or promotions folders if it is not in your main inbox.
-              </li>
-              <li>
-                <span className="font-semibold text-brand-cyan">3.</span> Tap the link within <span className="font-semibold text-brand-white">15 minutes</span> to open your HitTheJackWatt™ dashboard powered by IntelliWatt.
-              </li>
-            </ul>
-            <p className="mt-6 text-xs uppercase tracking-[0.3em] text-brand-cyan/60">
-              If you didn’t request this email, you can ignore it.
-            </p>
-            <button
-              onClick={() => setShowSuccessPopup(false)}
-              className="mt-8 inline-flex items-center justify-center rounded-full border border-brand-blue/60 bg-brand-blue/10 px-8 py-3 text-sm font-semibold uppercase tracking-wide text-brand-cyan transition hover:border-brand-blue hover:bg-brand-blue/20"
-            >
-              Got it!
-            </button>
           </div>
-        </div>
-      ) : null}
+        )}
 
       {/* Hero Section */}
       <section className="relative bg-brand-navy py-20 px-4 overflow-hidden">
@@ -216,10 +233,20 @@ function LandingPageContent() {
                   </form>
                 </div>
               ) : (
-                <div className="bg-brand-white p-6 rounded-2xl text-brand-navy text-center shadow-[0_20px_60px_rgba(0,0,0,0.25)]">
-                  <h3 className="text-xl font-bold mb-2">Check Your Email!</h3>
-                  <p>We just sent you a magic link. Open it within 15 minutes to finish joining IntelliWatt.</p>
-                </div>
+            <div className="grid md:grid-cols-2 gap-4 mt-10">
+              <div className="rounded-2xl border border-[#39FF14]/50 bg-[#39FF14]/10 p-4 text-center shadow-[0_0_25px_rgba(57,255,20,0.25)]">
+                <p className="text-xs uppercase tracking-[0.2em] text-[#39FF14] font-semibold mb-2">HitTheJackWatt Jackpot</p>
+                <p className="text-brand-white text-lg font-semibold leading-relaxed">
+                  Earn <span className="text-[#39FF14]">1 HitTheJackWatt entry</span> when you authorize Smart Meter Texas or connect with Green Button.
+                </p>
+              </div>
+              <div className="rounded-2xl border border-[#BF00FF]/50 bg-[#BF00FF]/10 p-4 text-center shadow-[0_0_25px_rgba(191,0,255,0.25)]">
+                <p className="text-xs uppercase tracking-[0.2em] text-[#FF3BCE] font-semibold mb-2">HitTheJackWatt Referrals</p>
+                <p className="text-brand-white text-lg font-semibold leading-relaxed">
+                  Earn <span className="text-[#FF3BCE]">unlimited entries</span> for every friend or family member you refer.
+                </p>
+              </div>
+            </div>
               )}
             </div>
 
