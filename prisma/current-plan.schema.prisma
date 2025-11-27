@@ -1,6 +1,6 @@
 generator currentPlanClient {
   provider = "prisma-client-js"
-  output   = "../node_modules/.prisma/current-plan-client"
+  output   = "../node_modules/@prisma/current-plan-client"
 }
 
 datasource currentPlanDb {
