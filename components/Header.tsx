@@ -24,6 +24,7 @@ const navLinks: NavLink[] = [
 ];
 
 const AUTH_PATH = '/login';
+const JOIN_PATH = '/join';
 const DASHBOARD_PREFIX = '/dashboard';
 
 export default function Header() {
@@ -137,7 +138,7 @@ export default function Header() {
             ))}
           </nav>
 
-          <div className="hidden md:flex items-center">
+          <div className="hidden md:flex items-center gap-3">
             {authChecked && isAuthenticated ? (
               <button
                 onClick={handleLogout}
@@ -147,12 +148,20 @@ export default function Header() {
                 {isLoggingOut ? 'Logging out…' : 'Logout'}
               </button>
             ) : (
-              <Link
-                href={AUTH_PATH}
-                className="inline-flex items-center rounded-full border border-brand-blue/40 px-4 py-2 text-sm font-semibold text-brand-blue transition hover:border-brand-blue hover:text-brand-white"
-              >
-                User Dashboard
-              </Link>
+              <>
+                <Link
+                  href={JOIN_PATH}
+                  className="inline-flex items-center rounded-full border border-brand-blue/40 px-4 py-2 text-sm font-semibold text-brand-blue transition hover:border-brand-blue hover:text-brand-white"
+                >
+                  Join
+                </Link>
+                <Link
+                  href={AUTH_PATH}
+                  className="inline-flex items-center rounded-full border border-brand-blue/40 px-4 py-2 text-sm font-semibold text-brand-blue transition hover:border-brand-blue hover:text-brand-white"
+                >
+                  User Dashboard
+                </Link>
+              </>
             )}
           </div>
 
@@ -197,13 +206,22 @@ export default function Header() {
                 {isLoggingOut ? 'Logging out…' : 'Logout'}
               </button>
             ) : (
-              <Link
-                href={AUTH_PATH}
-                onClick={handleClose}
-                className="mt-2 rounded-md px-2 py-2 text-center font-semibold transition hover:bg-brand-blue/10 hover:text-brand-white"
-              >
-                User Dashboard
-              </Link>
+              <>
+                <Link
+                  href={JOIN_PATH}
+                  onClick={handleClose}
+                  className="mt-2 rounded-md px-2 py-2 text-center font-semibold transition hover:bg-brand-blue/10 hover:text-brand-white"
+                >
+                  Join
+                </Link>
+                <Link
+                  href={AUTH_PATH}
+                  onClick={handleClose}
+                  className="rounded-md px-2 py-2 text-center font-semibold transition hover:bg-brand-blue/10 hover:text-brand-white"
+                >
+                  User Dashboard
+                </Link>
+              </>
             )}
           </nav>
         ) : null}

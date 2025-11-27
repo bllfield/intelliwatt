@@ -106,62 +106,69 @@ function JoinPageContent() {
             <h1 className="text-5xl md:text-7xl font-bold text-brand-white mb-6">
               Stop <span className="text-brand-blue">Overpaying</span> for Power
             </h1>
-            <p className="text-xl md:text-2xl text-brand-white mb-4 max-w-4xl mx-auto leading-relaxed">
-              AI-powered energy plan optimization that uses your actual usage data to find the perfect plan for your home, FREE of charge.
-            </p>
-            <div className="mb-8 inline-block bg-white/10 text-white px-4 py-1.5 rounded-full font-semibold border border-white/20">
-              💸 100% Free — No fees, ever
-            </div>
-            
-            <div className="max-w-md mx-auto">
-              <div className="bg-brand-navy/60 border border-brand-blue/20 rounded-2xl p-4 mb-6 text-center">
-                <div className="flex items-center justify-center gap-2 mb-2">
-                  <span className="text-[#BF00FF] text-lg">✓</span>
-                  <span className="text-brand-white font-semibold">Visit Dashboard - Submit Email Below</span>
+            <div className="mb-10 space-y-4 text-brand-white max-w-3xl mx-auto text-left md:text-center">
+              <p className="text-xl md:text-2xl leading-relaxed">
+                Join IntelliWatt today to unlock free, personalized energy insights and tools that show you exactly how to save.
+              </p>
+              <div className="grid gap-3 text-base md:grid-cols-2 md:text-lg">
+                <div className="flex items-center gap-3 rounded-xl bg-white/10 px-4 py-3 border border-white/15">
+                  <span className="text-[#39FF14] text-2xl">✔</span>
+                  <span>Join for free and connect your energy data in minutes.</span>
                 </div>
-                <div className="text-brand-white/90 text-sm">
-                  Access your dashboard for the first time to create your account
-                  <br />
-                  <span style={{ color: '#39FF14' }}>1 jackpot entry available</span>
+                <div className="flex items-center gap-3 rounded-xl bg-white/10 px-4 py-3 border border-white/15">
+                  <span className="text-[#39FF14] text-2xl">✔</span>
+                  <span>Get data-backed plan recommendations tailored to your home.</span>
+                </div>
+                <div className="flex items-center gap-3 rounded-xl bg-white/10 px-4 py-3 border border-white/15">
+                  <span className="text-[#39FF14] text-2xl">✔</span>
+                  <span>Access tools that reveal usage spikes, hidden fees, and savings opportunities.</span>
+                </div>
+                <div className="flex items-center gap-3 rounded-xl bg-white/10 px-4 py-3 border border-white/15">
+                  <span className="text-[#39FF14] text-2xl">✔</span>
+                  <span>Earn entries in the HitTheJackWatt jackpot every step of the way.</span>
                 </div>
               </div>
+              <p className="text-lg text-brand-white/80 md:text-xl">
+                Start with your email—no credit card required. We’ll send a secure magic link so you can join now and see where you can save.
+              </p>
+            </div>
+
+            <div className="max-w-xl mx-auto">
               {!submitted ? (
-                <form onSubmit={handleSubmit} className="space-y-4">
-                  <input
-                    type="email"
-                    placeholder="Enter your email address"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="w-full px-6 py-4 rounded-full bg-brand-white text-brand-navy placeholder-brand-navy/60 focus:outline-none focus:ring-2 focus:ring-brand-blue text-lg"
-                    required
-                  />
-                  <button
-                    type="submit"
-                    disabled={isSubmitting}
-                    className="w-full bg-brand-blue text-brand-navy font-bold py-4 px-8 rounded-full text-lg hover:bg-brand-cyan transition-all duration-300 transform hover:scale-105 shadow-lg hover:shadow-brand-blue/25 disabled:opacity-50"
-                  >
-                    {isSubmitting ? 'Sending...' : 'Get Access to Dashboard'}
-                  </button>
-                </form>
+                <div className="rounded-3xl border border-brand-blue/40 bg-brand-navy/70 p-6 shadow-[0_20px_60px_rgba(0,0,0,0.4)]">
+                  <p className="text-brand-white text-center font-semibold text-lg mb-5">
+                    Join now. Your dashboard, recommendations, and entries are waiting.
+                  </p>
+                  <form onSubmit={handleSubmit} className="space-y-4">
+                    <label className="block text-brand-white/80 text-sm font-semibold uppercase tracking-wide">
+                      Email address
+                    </label>
+                    <input
+                      type="email"
+                      placeholder="Enter the email you check the most"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      className="w-full px-6 py-4 rounded-full bg-brand-white text-brand-navy placeholder-brand-navy/60 focus:outline-none focus:ring-2 focus:ring-brand-blue text-lg"
+                      required
+                    />
+                    <button
+                      type="submit"
+                      disabled={isSubmitting}
+                      className="w-full bg-[#39FF14] text-brand-navy font-extrabold py-4 px-8 rounded-full text-lg hover:bg-[#5FFF2A] transition-all duration-300 transform hover:scale-105 shadow-lg hover:shadow-[0_0_25px_rgba(57,255,20,0.4)] disabled:opacity-50"
+                    >
+                      {isSubmitting ? 'Sending…' : 'Join IntelliWatt For Free'}
+                    </button>
+                    <p className="text-xs text-brand-white/70 text-center">
+                      No password to remember. We email you a secure link so you can join instantly.
+                    </p>
+                  </form>
+                </div>
               ) : (
-                <div className="bg-brand-white p-6 rounded-2xl text-brand-navy">
+                <div className="bg-brand-white p-6 rounded-2xl text-brand-navy text-center shadow-[0_20px_60px_rgba(0,0,0,0.25)]">
                   <h3 className="text-xl font-bold mb-2">Check Your Email!</h3>
-                  <p>We've sent you a magic link to access your IntelliWatt dashboard.</p>
+                  <p>We just sent you a magic link. Open it within 15 minutes to finish joining IntelliWatt.</p>
                 </div>
               )}
-
-              <div className="bg-brand-navy/60 border border-brand-blue/20 rounded-2xl p-4 mt-6 text-center">
-                <div className="text-brand-white/90 text-sm">
-                  <span className="font-semibold">Authorize Smart Meter Texas</span>
-                </div>
-                <div className="mt-3 text-brand-white/90 text-sm">
-                  <Link href="/dashboard/referrals" className="font-semibold text-brand-cyan hover:text-brand-blue transition-colors duration-300">
-                    Refer a Friend
-                  </Link>
-                  <span className="mx-2 text-brand-white/60">•</span>
-                  <span>Earn entries for every friend who connects or uploads usage</span>
-                </div>
-              </div>
             </div>
           </div>
         </div>
