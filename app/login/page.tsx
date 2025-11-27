@@ -68,28 +68,39 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen bg-brand-white">
       {showSuccessPopup ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 text-center shadow-2xl">
-            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100">
-              <svg className="h-6 w-6 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
+          <div className="w-full max-w-xl rounded-3xl border border-brand-blue/40 bg-brand-navy px-8 py-10 text-center text-brand-cyan shadow-[0_30px_90px_rgba(9,16,34,0.7)]">
+            <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full border border-brand-blue/50 bg-brand-blue/10">
+              <svg className="h-8 w-8 text-[#39FF14]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>
               </svg>
             </div>
-            <h2 className="mb-2 text-xl font-semibold text-brand-navy">Magic Link Sent</h2>
-            <p className="text-brand-navy/80">
-              We emailed a secure login link to <strong>{lastSubmittedEmail}</strong>. Keep this window open while you:
+            <h2 className="text-2xl font-bold uppercase tracking-[0.2em] text-brand-cyan/70">Magic Link Sent!</h2>
+            <p className="mt-4 text-lg leading-relaxed text-brand-white">
+              We emailed a secure magic link to <span className="font-semibold text-[#39FF14]">{lastSubmittedEmail}</span>.
+              Keep this window open and follow the steps below:
             </p>
-            <ul className="mt-4 space-y-2 text-left text-brand-navy/80">
-              <li>• Look for our message titled "Your IntelliWatt Magic Link".</li>
-              <li>• Check spam, junk, or promotions tabs if it is not in your main inbox.</li>
-              <li>• Tap the link within 15 minutes to open your dashboard—no password required.</li>
+            <ul className="mt-6 space-y-3 rounded-2xl border border-brand-blue/40 bg-brand-blue/10 px-6 py-5 text-left text-sm text-brand-cyan/80">
+              <li>
+                <span className="font-semibold text-brand-cyan">1.</span> Look for an email titled{" "}
+                <span className="font-semibold text-brand-white">"Your IntelliWatt Magic Link"</span>.
+              </li>
+              <li>
+                <span className="font-semibold text-brand-cyan">2.</span> Check spam, junk, or promotions folders if it is not in your main inbox.
+              </li>
+              <li>
+                <span className="font-semibold text-brand-cyan">3.</span> Tap the link within <span className="font-semibold text-brand-white">15 minutes</span> to open your HitTheJackWatt™ dashboard powered by IntelliWatt.
+              </li>
             </ul>
+            <p className="mt-6 text-xs uppercase tracking-[0.3em] text-brand-cyan/60">
+              If you didn’t request this email, you can ignore it.
+            </p>
             <button
               type="button"
               onClick={() => setShowSuccessPopup(false)}
-              className="mt-6 inline-flex items-center justify-center rounded-full bg-brand-blue px-6 py-3 font-semibold text-brand-navy transition hover:bg-brand-cyan"
+              className="mt-8 inline-flex items-center justify-center rounded-full border border-brand-blue/60 bg-brand-blue/10 px-8 py-3 text-sm font-semibold uppercase tracking-wide text-brand-cyan transition hover:border-brand-blue hover:bg-brand-blue/20"
             >
-              Got it
+              Got it!
             </button>
           </div>
         </div>
