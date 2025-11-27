@@ -23,7 +23,7 @@ const navLinks: NavLink[] = [
   { href: '/about', label: 'About Us' },
 ];
 
-const AUTH_PATH = '/join';
+const AUTH_PATH = '/login';
 const DASHBOARD_PREFIX = '/dashboard';
 
 export default function Header() {
@@ -151,7 +151,7 @@ export default function Header() {
                 href={AUTH_PATH}
                 className="inline-flex items-center rounded-full border border-brand-blue/40 px-4 py-2 text-sm font-semibold text-brand-blue transition hover:border-brand-blue hover:text-brand-white"
               >
-                Join / Login
+                User Dashboard
               </Link>
             )}
           </div>
@@ -202,7 +202,7 @@ export default function Header() {
                 onClick={handleClose}
                 className="mt-2 rounded-md px-2 py-2 text-center font-semibold transition hover:bg-brand-blue/10 hover:text-brand-white"
               >
-                Join / Login
+                User Dashboard
               </Link>
             )}
           </nav>
