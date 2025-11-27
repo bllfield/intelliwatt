@@ -1,7 +1,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import Image from 'next/image';
+import { getReferralTokenFromSearchParams, REFERRAL_QUERY_PARAM } from '@/lib/referral';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -10,6 +12,8 @@ export default function LoginPage() {
   const [showSuccessPopup, setShowSuccessPopup] = useState(false);
   const [lastSubmittedEmail, setLastSubmittedEmail] = useState('');
   const [popupTimeoutId, setPopupTimeoutId] = useState<number | null>(null);
+  const searchParams = useSearchParams();
+  const referralToken = getReferralTokenFromSearchParams(searchParams ?? undefined);
 
   useEffect(() => {
     return () => {
@@ -30,7 +34,7 @@ export default function LoginPage() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email, referralCode: referralToken || undefined }),
       });
 
       const data = await response.json();
@@ -148,6 +152,9 @@ export default function LoginPage() {
             </div>
 
             <form onSubmit={handleSubmit} className="mt-8 space-y-4">
+              {referralToken && (
+                <input type="hidden" name={REFERRAL_QUERY_PARAM} value={referralToken} />
+              )}
               <label className="block text-brand-white font-semibold" htmlFor="email">
                 Email address
               </label>

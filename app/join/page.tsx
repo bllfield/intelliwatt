@@ -4,6 +4,7 @@ import { useState, Suspense, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
+import { getReferralTokenFromSearchParams, REFERRAL_QUERY_PARAM } from '@/lib/referral';
 
 function JoinPageContent() {
   const [email, setEmail] = useState('');
@@ -11,16 +12,16 @@ function JoinPageContent() {
   const [submitted, setSubmitted] = useState(false);
   const [showSuccessPopup, setShowSuccessPopup] = useState(false);
   const searchParams = useSearchParams();
-  const referralCode = searchParams?.get('ref');
+  const referralToken = getReferralTokenFromSearchParams(searchParams ?? undefined);
 
   // Set referral cookie when ref parameter is present
   useEffect(() => {
-    if (referralCode) {
+    if (referralToken) {
       const expiryDate = new Date();
       expiryDate.setTime(expiryDate.getTime() + 90 * 24 * 60 * 60 * 1000);
-      document.cookie = `intelliwatt_referrer=${referralCode}; expires=${expiryDate.toUTCString()}; path=/; SameSite=Lax`;
+      document.cookie = `intelliwatt_referrer=${referralToken}; expires=${expiryDate.toUTCString()}; path=/; SameSite=Lax`;
     }
-  }, [referralCode]);
+  }, [referralToken]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -36,7 +37,7 @@ function JoinPageContent() {
         },
         body: JSON.stringify({ 
           email,
-          referralCode: referralCode || undefined
+          referralCode: referralToken || undefined
         }),
       });
 
@@ -166,6 +167,9 @@ function JoinPageContent() {
                     Join now. Your dashboard, recommendations, and entries are waiting.
                   </p>
                   <form onSubmit={handleSubmit} className="space-y-4">
+                    {referralToken && (
+                      <input type="hidden" name={REFERRAL_QUERY_PARAM} value={referralToken} />
+                    )}
                     <label className="block text-brand-white/80 text-sm font-semibold uppercase tracking-wide">
                       Email address
                     </label>
