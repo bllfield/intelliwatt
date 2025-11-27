@@ -5,10 +5,11 @@
   "main": "index.js",
   "scripts": {
     "dev": "next dev",
-    "build": "prisma generate && next build",
+    "build": "npm run prisma:generate-all && next build",
     "start": "next start",
     "lint": "next lint",
-    "postinstall": "prisma generate",
+    "postinstall": "npm run prisma:generate-all",
+    "prisma:generate-all": "node scripts/prisma/generate-all.js",
     "admin:summary": "tsx ./scripts/admin/smoke.ts summary",
     "admin:catch": "tsx ./scripts/admin/smoke.ts catch",
     "address:esiid": "tsx ./scripts/admin/resolve.ts address",
