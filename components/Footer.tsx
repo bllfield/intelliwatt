@@ -97,7 +97,12 @@ export default function Footer() {
             <ul className="space-y-2 text-sm text-brand-blue/80">
               <li>
                 <a href="/join" className="transition-colors hover:text-brand-white">
-                  Join / Login
+                  Join
+                </a>
+              </li>
+              <li>
+                <a href="/login" className="transition-colors hover:text-brand-white">
+                  User Dashboard
                 </a>
               </li>
               <li>

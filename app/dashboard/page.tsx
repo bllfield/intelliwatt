@@ -575,47 +575,9 @@ const [mounted, setMounted] = useState(false);
         </section>
       )}
 
-      {/* Quick Actions and Insights - Only show if address is entered */}
+      {/* Insights and Quick Actions - Only show if address is entered */}
       {userAddress && (
         <>
-          <section className="py-16 px-4 bg-brand-white">
-            <div className="max-w-4xl mx-auto">
-              <h2 className="text-3xl font-bold text-brand-navy text-center mb-12">
-                Quick <span className="text-brand-blue">Actions</span>
-              </h2>
-
-              <div className="grid md:grid-cols-2 gap-8">
-                <div className="rounded-3xl bg-brand-navy p-8 text-center">
-                  <div className="w-12 h-12 rounded-full bg-brand-cyan flex items-center justify-center mx-auto mb-4">
-                    <span className="text-brand-navy text-xl">❓</span>
-                  </div>
-                  <h3 className="text-2xl font-bold text-brand-white mb-4">Need Help?</h3>
-                  <p className="text-brand-white mb-6">Get support or view our FAQ</p>
-                  <Link
-                    href="/faq"
-                    className="inline-block bg-brand-white text-brand-navy font-bold py-3 px-6 rounded-xl border-2 border-brand-white hover:border-brand-cyan transition-all duration-300"
-                  >
-                    Get Help
-                  </Link>
-                </div>
-
-                <div className="rounded-3xl bg-brand-navy p-8 text-center">
-                  <div className="w-12 h-12 rounded-full bg-brand-cyan flex items-center justify-center mx-auto mb-4">
-                    <span className="text-brand-navy text-xl">⚙️</span>
-                  </div>
-                  <h3 className="text-2xl font-bold text-brand-white mb-4">Settings</h3>
-                  <p className="text-brand-white mb-6">Manage your account preferences</p>
-                  <Link
-                    href="/dashboard/profile"
-                    className="inline-block bg-brand-white text-brand-navy font-bold py-3 px-6 rounded-xl border-2 border-brand-white hover:border-brand-cyan transition-all duration-300"
-                  >
-                    Manage Settings
-                  </Link>
-                </div>
-              </div>
-            </div>
-          </section>
-
           <section className="py-24 px-4 bg-brand-white">
             <div className="max-w-6xl mx-auto">
               <div className="grid md:grid-cols-2 gap-12 items-center">
@@ -819,6 +781,44 @@ const [mounted, setMounted] = useState(false);
                 <div className="rounded-2xl border border-brand-blue/35 bg-brand-navy/75 p-6 text-center shadow-[0_18px_45px_rgba(10,20,60,0.35)]">
                   <div className="text-4xl font-bold text-brand-blue mb-2">{totalReferrals}</div>
                   <div className="text-brand-white">Referred Friends</div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="py-16 px-4 bg-brand-white">
+            <div className="max-w-4xl mx-auto">
+              <h2 className="text-3xl font-bold text-brand-navy text-center mb-12">
+                Quick <span className="text-brand-blue">Actions</span>
+              </h2>
+
+              <div className="grid md:grid-cols-2 gap-8">
+                <div className="rounded-3xl bg-brand-navy p-8 text-center">
+                  <div className="w-12 h-12 rounded-full bg-brand-cyan flex items-center justify-center mx-auto mb-4">
+                    <span className="text-brand-navy text-xl">❓</span>
+                  </div>
+                  <h3 className="text-2xl font-bold text-brand-white mb-4">Need Help?</h3>
+                  <p className="text-brand-white mb-6">Get support or view our FAQ</p>
+                  <Link
+                    href="/faq"
+                    className="inline-block bg-brand-white text-brand-navy font-bold py-3 px-6 rounded-xl border-2 border-brand-white hover:border-brand-cyan transition-all duration-300"
+                  >
+                    Get Help
+                  </Link>
+                </div>
+
+                <div className="rounded-3xl bg-brand-navy p-8 text-center">
+                  <div className="w-12 h-12 rounded-full bg-brand-cyan flex items-center justify-center mx-auto mb-4">
+                    <span className="text-brand-navy text-xl">⚙️</span>
+                  </div>
+                  <h3 className="text-2xl font-bold text-brand-white mb-4">Settings</h3>
+                  <p className="text-brand-white mb-6">Manage your account preferences</p>
+                  <Link
+                    href="/dashboard/profile"
+                    className="inline-block bg-brand-white text-brand-navy font-bold py-3 px-6 rounded-xl border-2 border-brand-white hover:border-brand-cyan transition-all duration-300"
+                  >
+                    Manage Settings
+                  </Link>
                 </div>
               </div>
             </div>

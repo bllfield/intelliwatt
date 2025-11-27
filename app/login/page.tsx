@@ -45,7 +45,7 @@ export default function LoginPage() {
           text: `Magic link sent! We just emailed ${email}. Click it within 15 minutes to open your dashboard.`,
         });
         setShowSuccessPopup(true);
-        const timeout = window.setTimeout(() => setShowSuccessPopup(false), 5000);
+        const timeout = window.setTimeout(() => setShowSuccessPopup(false), 15000);
         setPopupTimeoutId(timeout);
         setEmail('');
       } else {
@@ -77,9 +77,13 @@ export default function LoginPage() {
             </div>
             <h2 className="mb-2 text-xl font-semibold text-brand-navy">Magic Link Sent</h2>
             <p className="text-brand-navy/80">
-              We sent a secure login link to <strong>{lastSubmittedEmail}</strong>. Check your inbox (or spam folder) and click it
-              within 15 minutes to jump into your dashboard.
+              We emailed a secure login link to <strong>{lastSubmittedEmail}</strong>. Keep this window open while you:
             </p>
+            <ul className="mt-4 space-y-2 text-left text-brand-navy/80">
+              <li>• Look for our message titled "Your IntelliWatt Magic Link".</li>
+              <li>• Check spam, junk, or promotions tabs if it is not in your main inbox.</li>
+              <li>• Tap the link within 15 minutes to open your dashboard—no password required.</li>
+            </ul>
             <button
               type="button"
               onClick={() => setShowSuccessPopup(false)}

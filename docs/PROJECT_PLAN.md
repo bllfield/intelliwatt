@@ -202,6 +202,12 @@ This Plan Change supersedes any prior instructions that defaulted to the direct 
 - Execute manually against the DO `defaultdb` via: `psql "$DATABASE_URL" -f scripts/sql/delete_non_keeper_users.sql`.
 - Take a DB snapshot or `pg_dump` before running. Once executed, the admin dashboard user list will only show the keeper accounts.
 
+### PC-2025-11-27-FAQ — Public FAQ refresh (intelliwatt.com)
+
+- Updated the public-facing FAQ to focus on IntelliWatt as the primary experience while clearly explaining HitTheJackWatt as the gamified entry point and IntelliPath Solutions LLC as the parent company.
+- Consolidated brand relationship copy (“How HitTheJackWatt, IntelliWatt, and IntelliPath Solutions Work Together”) and synced terminology across sections.
+- Clarified that plan comparisons and modeling use Smart Meter Texas 15-minute interval usage (not generic hourly averages), keeping data expectations consistent across marketing and product.
+
 ---
 
 ### PC-2025-11-23-RATE-DETAILS — Optional Current Rate Details Step
