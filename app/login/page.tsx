@@ -1,11 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import { getReferralTokenFromSearchParams, REFERRAL_QUERY_PARAM } from '@/lib/referral';
 
-export default function LoginPage() {
+function LoginPageContent() {
   const [email, setEmail] = useState('');
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -13,7 +13,7 @@ export default function LoginPage() {
   const [lastSubmittedEmail, setLastSubmittedEmail] = useState('');
   const [popupTimeoutId, setPopupTimeoutId] = useState<number | null>(null);
   const searchParams = useSearchParams();
-  const referralToken = getReferralTokenFromSearchParams(searchParams ?? undefined);
+  const referralToken = getReferralTokenFromSearchParams(searchParams);
 
   useEffect(() => {
     return () => {
@@ -191,5 +191,13 @@ export default function LoginPage() {
         </div>
       </section>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <LoginPageContent />
+    </Suspense>
   );
 }

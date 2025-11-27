@@ -6,7 +6,8 @@ type SearchParamsInput =
   | URLSearchParams
   | ReadonlyURLSearchParams
   | Record<string, string | string[] | undefined>
-  | undefined;
+  | undefined
+  | null;
 
 export function getReferralTokenFromSearchParams(
   searchParams?: SearchParamsInput,
