@@ -20,7 +20,57 @@ export default function ReferralsPage() {
   const [referralData, setReferralData] = useState<ReferralData | null>(null);
   const [stats, setStats] = useState<ReferralStats | null>(null);
   const [loading, setLoading] = useState(true);
-  const [copied, setCopied] = useState(false);
+  const [copiedTarget, setCopiedTarget] = useState<string | null>(null);
+
+  const referralToken = referralData?.token ?? '';
+  const hitTheJackWattUrl = referralToken
+    ? `https://hitthejackwatt.com/?ref=${encodeURIComponent(referralToken)}`
+    : 'https://hitthejackwatt.com/';
+  const intelliWattUrl = referralToken
+    ? `https://intelliwatt.com/?ref=${encodeURIComponent(referralToken)}`
+    : 'https://intelliwatt.com/';
+  const hitTheJackWattMessage = referralToken
+    ? `I'm using HitTheJackWatt™ to get free entries into a monthly cash drawing just for sharing my energy data. It’s completely free to join, and they use my smart meter to find better electricity plans without costing me anything. Use my link to sign up and we’ll both get extra entries in the jackpot: ${hitTheJackWattUrl}`
+    : 'Your referral link will appear here once your referral token is ready.';
+  const intelliWattMessage = referralToken
+    ? `I'm using IntelliWatt™ to watch my power usage and get notified when it's time to switch to a cheaper energy plan. It’s free, and it uses my actual smart meter data to find better deals without me having to do anything. Use my link to get set up: ${intelliWattUrl}`
+    : 'Your referral link will appear here once your referral token is ready.';
+  const hitTheJackWattShares = [
+    {
+      label: 'Facebook',
+      href: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(hitTheJackWattUrl)}`,
+    },
+    {
+      label: 'X',
+      href: `https://twitter.com/intent/tweet?text=${encodeURIComponent(hitTheJackWattMessage)}`,
+    },
+    {
+      label: 'LinkedIn',
+      href: `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(hitTheJackWattUrl)}`,
+    },
+    {
+      label: 'WhatsApp',
+      href: `https://api.whatsapp.com/send?text=${encodeURIComponent(hitTheJackWattMessage)}`,
+    },
+  ];
+  const intelliWattShares = [
+    {
+      label: 'Facebook',
+      href: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(intelliWattUrl)}`,
+    },
+    {
+      label: 'X',
+      href: `https://twitter.com/intent/tweet?text=${encodeURIComponent(intelliWattMessage)}`,
+    },
+    {
+      label: 'LinkedIn',
+      href: `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(intelliWattUrl)}`,
+    },
+    {
+      label: 'WhatsApp',
+      href: `https://api.whatsapp.com/send?text=${encodeURIComponent(intelliWattMessage)}`,
+    },
+  ];
 
   useEffect(() => {
     const fetchData = async () => {
@@ -56,8 +106,8 @@ export default function ReferralsPage() {
     if (referralData?.referralLink) {
       try {
         await navigator.clipboard.writeText(referralData.referralLink);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
+        setCopiedTarget('link');
+        setTimeout(() => setCopiedTarget(null), 2000);
       } catch (error) {
         console.error('Failed to copy:', error);
       }
@@ -68,11 +118,25 @@ export default function ReferralsPage() {
     if (referralData?.vanityCode) {
       try {
         await navigator.clipboard.writeText(referralData.vanityCode);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
+        setCopiedTarget('code');
+        setTimeout(() => setCopiedTarget(null), 2000);
       } catch (error) {
         console.error('Failed to copy:', error);
       }
+    }
+  };
+
+  const handleCopyMessage = async (message: string, key: string) => {
+    if (!message) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(message);
+      setCopiedTarget(key);
+      setTimeout(() => setCopiedTarget(null), 2000);
+    } catch (error) {
+      console.error('Failed to copy:', error);
     }
   };
 
@@ -149,7 +213,7 @@ export default function ReferralsPage() {
                     onClick={handleCopyLink}
                     className="bg-brand-navy text-brand-blue font-bold py-3 px-6 rounded-lg border-2 border-brand-navy hover:border-brand-blue transition-all duration-300 whitespace-nowrap"
                   >
-                    {copied ? 'Copied!' : 'Copy Link'}
+                    {copiedTarget === 'link' ? 'Copied!' : 'Copy Link'}
                   </button>
                 </div>
               </div>
@@ -170,7 +234,7 @@ export default function ReferralsPage() {
                     onClick={handleCopyCode}
                     className="bg-brand-navy text-brand-blue font-bold py-3 px-6 rounded-lg border-2 border-brand-navy hover:border-brand-blue transition-all duration-300 whitespace-nowrap"
                   >
-                    {copied ? 'Copied!' : 'Copy Code'}
+                    {copiedTarget === 'code' ? 'Copied!' : 'Copy Code'}
                   </button>
                 </div>
               </div>
@@ -199,6 +263,87 @@ export default function ReferralsPage() {
                   <span>Unlimited bonus entries from referrals!</span>
                 </li>
               </ul>
+            </div>
+
+            {/* Sharing Tools */}
+            <div className="mt-10 space-y-6">
+              <h3 className="text-2xl font-bold text-brand-navy">Referral Sharing Tools</h3>
+              <p className="text-brand-navy/80">
+                Share your referral story anywhere your friends hang out. Copy the message or jump straight into a
+                social post with your link embedded.
+              </p>
+
+              <div className="grid gap-6 md:grid-cols-2">
+                <div className="bg-brand-navy/5 p-6 rounded-xl border border-brand-navy/20 space-y-4">
+                  <div>
+                    <h4 className="text-xl font-semibold text-brand-navy">HitTheJackWatt™ Spotlight</h4>
+                    <p className="text-sm text-brand-navy/80">
+                      Highlight the free jackpot angle to excite friends about stacking bonus entries alongside you.
+                    </p>
+                  </div>
+                  <textarea
+                    readOnly
+                    className="w-full text-sm rounded-lg border-2 border-brand-navy bg-brand-navy/5 p-3 text-brand-navy resize-none"
+                    rows={5}
+                    value={hitTheJackWattMessage}
+                  />
+                  <div className="flex flex-wrap gap-3">
+                    <button
+                      type="button"
+                      onClick={() => handleCopyMessage(hitTheJackWattMessage, 'hjw-message')}
+                      className="bg-brand-navy text-brand-blue font-bold py-2.5 px-4 rounded-lg border-2 border-brand-navy hover:border-brand-blue transition-all duration-300"
+                    >
+                      {copiedTarget === 'hjw-message' ? 'Copied!' : 'Copy message'}
+                    </button>
+                    {hitTheJackWattShares.map((share) => (
+                      <a
+                        key={`hit-${share.label}`}
+                        href={share.href}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="bg-brand-blue/10 text-brand-navy font-semibold py-2.5 px-4 rounded-lg border border-brand-blue/40 hover:border-brand-blue transition-all duration-300"
+                      >
+                        Share on {share.label}
+                      </a>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="bg-brand-navy/5 p-6 rounded-xl border border-brand-navy/20 space-y-4">
+                  <div>
+                    <h4 className="text-xl font-semibold text-brand-navy">IntelliWatt™ Savings Story</h4>
+                    <p className="text-sm text-brand-navy/80">
+                      Focus on real usage tracking and plan monitoring so friends see the long-term savings angle.
+                    </p>
+                  </div>
+                  <textarea
+                    readOnly
+                    className="w-full text-sm rounded-lg border-2 border-brand-navy bg-brand-navy/5 p-3 text-brand-navy resize-none"
+                    rows={5}
+                    value={intelliWattMessage}
+                  />
+                  <div className="flex flex-wrap gap-3">
+                    <button
+                      type="button"
+                      onClick={() => handleCopyMessage(intelliWattMessage, 'iw-message')}
+                      className="bg-brand-navy text-brand-blue font-bold py-2.5 px-4 rounded-lg border-2 border-brand-navy hover:border-brand-blue transition-all duration-300"
+                    >
+                      {copiedTarget === 'iw-message' ? 'Copied!' : 'Copy message'}
+                    </button>
+                    {intelliWattShares.map((share) => (
+                      <a
+                        key={`iw-${share.label}`}
+                        href={share.href}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="bg-brand-blue/10 text-brand-navy font-semibold py-2.5 px-4 rounded-lg border border-brand-blue/40 hover:border-brand-blue transition-all duration-300"
+                      >
+                        Share on {share.label}
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
