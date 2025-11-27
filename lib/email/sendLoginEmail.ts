@@ -41,32 +41,40 @@ export async function sendLoginEmail(email: string, link: string, subject?: stri
         ? 'Here is your secure link to access the IntelliWatt admin panel.'
         : 'Here is your secure magic link to open your HitTheJackWatt energy dashboard powered by IntelliWatt.';
       const actionCopy = isAdmin ? 'Open Admin Panel' : 'Open My HitTheJackWatt Dashboard';
+      const siteBase =
+        process.env.NEXT_PUBLIC_BASE_URL ||
+        (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://intelliwatt.com');
+      const hitLogoUrl = `${siteBase}/Hitthejackwatt-Logo.png`;
+      const intelliwattLogoUrl = `${siteBase}/IntelliWatt%20Logo%20TM.png`;
       const html = `
-        <div style="font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; line-height: 1.6; color: #0f172a; max-width: 600px; margin: 0 auto; padding: 24px;">
-          <h1 style="font-size: 22px; margin-bottom: 16px; color: #0f172a;">${heading}</h1>
-          <p style="margin-bottom: 16px;">${intro}</p>
-          ${
-            isAdmin
-              ? ''
-              : "<p style=\"margin-bottom: 16px; color: #1e293b; font-weight: 600;\">HitTheJackWatt™ is powered by IntelliWatt — your free energy dashboard.</p>"
-          }
-          <p style="margin-bottom: 16px;">Click the button below to continue:</p>
-          <p style="margin: 24px 0;">
-            <a
-              href="${link}"
-              style="display: inline-block; padding: 12px 24px; border-radius: 9999px; background: #0f172a; color: #ffffff; text-decoration: none; font-weight: 600;"
-            >
-              ${actionCopy}
-            </a>
-          </p>
-          <p style="margin-bottom: 16px;">
-            If the button does not work, copy and paste this link into your browser:
-          </p>
-          <p style="word-break: break-all; font-size: 13px; color: #475569; margin-bottom: 24px;">${link}</p>
-          <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
-          <p style="font-size: 13px; color: #475569;">
-            This link will expire in 15 minutes. If you did not request this email, you can safely ignore it.
-          </p>
+        <div style="margin:0; padding:48px 16px; background-color:#0b1120; font-family: 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;">
+          <div style="max-width:600px; margin:0 auto; background-color:#0f172a; border-radius:24px; border:1px solid rgba(56,189,248,0.25); padding:32px;">
+            ${
+              isAdmin
+                ? ''
+                : `<div style="text-align:center; margin-bottom:24px;">
+                    <img src="${hitLogoUrl}" alt="HitTheJackWatt Logo" style="max-width:220px; width:100%; height:auto; display:block; margin:0 auto 16px;" />
+                    <img src="${intelliwattLogoUrl}" alt="IntelliWatt Logo" style="max-width:200px; width:100%; height:auto; display:block; margin:0 auto;" />
+                  </div>`
+            }
+            <h1 style="font-size:24px; margin:0 0 16px; color:#ffffff; font-weight:700;">${heading}</h1>
+            <p style="margin:0 0 16px; color:#cbd5f5;">${intro}</p>
+            ${
+              isAdmin
+                ? ''
+                : '<p style="margin:0 0 16px; color:#39FF14; font-weight:600;">HitTheJackWatt™ is powered by IntelliWatt — your free energy dashboard.</p>'
+            }
+            <p style="margin:0 0 20px; color:#cbd5f5;">Click the button below to continue:</p>
+            <p style="margin:24px 0;">
+              <a href="${link}" style="display:inline-block; padding:14px 28px; border-radius:9999px; background:#39FF14; color:#0b1120; text-decoration:none; font-weight:700; letter-spacing:0.02em;">
+                ${actionCopy}
+              </a>
+            </p>
+            <p style="margin:0 0 16px; color:#cbd5f5;">If the button doesn’t work, copy and paste this link into your browser:</p>
+            <p style="word-break:break-all; font-size:13px; color:#94a3b8; margin-bottom:24px;">${link}</p>
+            <hr style="border:none; border-top:1px solid rgba(148,163,184,0.2); margin:24px 0;" />
+            <p style="font-size:13px; color:#94a3b8;">This link will expire in 15 minutes. If you did not request this email, you can safely ignore it.</p>
+          </div>
         </div>
       `;
 
@@ -75,7 +83,7 @@ ${heading}
 
 ${intro}
 
-${isAdmin ? '' : 'HitTheJackWatt is powered by IntelliWatt — your free energy dashboard.\n\n'}
+${isAdmin ? '' : 'HitTheJackWatt is powered by IntelliWatt — your free energy dashboard.\n'}
 ${link}
 
 This link will expire in 15 minutes. If you did not request this email, you can safely ignore it.
