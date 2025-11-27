@@ -22,14 +22,14 @@ model CurrentPlanManualEntry {
   providerName       String
   planName           String
   rateType           CurrentPlanRateType
-  energyRateCents    Decimal              @db.Decimal(8, 4)
-  baseMonthlyFee     Decimal?             @db.Decimal(8, 2)
+  energyRateCents    Decimal              @currentPlanDb.Decimal(8, 4)
+  baseMonthlyFee     Decimal?             @currentPlanDb.Decimal(8, 2)
   termLengthMonths   Int?
   contractEndDate    DateTime?
-  earlyTerminationFee Decimal?            @db.Decimal(8, 2)
+  earlyTerminationFee Decimal?            @currentPlanDb.Decimal(8, 2)
   esiId              String?
   accountNumberLast4 String?
-  notes              String?              @db.Text
+  notes              String?              @currentPlanDb.Text
   createdAt          DateTime             @default(now())
   updatedAt          DateTime             @updatedAt
 
