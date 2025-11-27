@@ -1,8 +1,10 @@
 'use client';
 
+import Image from 'next/image';
 import { useState, useEffect } from 'react';
-import Link from 'next/link';
 import DashboardHero from '@/components/dashboard/DashboardHero';
+import hitTheJackWattAd from '@/hitthejackwatt ad.png';
+import intelliWattAd from '@/INTELLIWATT AD 2.png';
 
 interface ReferralData {
   referralLink: string;
@@ -35,42 +37,40 @@ export default function ReferralsPage() {
   const intelliWattMessage = referralToken
     ? `I'm using IntelliWatt™ to watch my power usage and get notified when it's time to switch to a cheaper energy plan. It’s free, and it uses my actual smart meter data to find better deals without me having to do anything. Use my link to get set up: ${intelliWattUrl}`
     : 'Your referral link will appear here once your referral token is ready.';
-  const hitTheJackWattShares = [
-    {
-      label: 'Facebook',
-      href: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(hitTheJackWattUrl)}`,
-    },
-    {
-      label: 'X',
-      href: `https://twitter.com/intent/tweet?text=${encodeURIComponent(hitTheJackWattMessage)}`,
-    },
-    {
-      label: 'LinkedIn',
-      href: `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(hitTheJackWattUrl)}`,
-    },
-    {
-      label: 'WhatsApp',
-      href: `https://api.whatsapp.com/send?text=${encodeURIComponent(hitTheJackWattMessage)}`,
-    },
-  ];
-  const intelliWattShares = [
-    {
-      label: 'Facebook',
-      href: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(intelliWattUrl)}`,
-    },
-    {
-      label: 'X',
-      href: `https://twitter.com/intent/tweet?text=${encodeURIComponent(intelliWattMessage)}`,
-    },
-    {
-      label: 'LinkedIn',
-      href: `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(intelliWattUrl)}`,
-    },
-    {
-      label: 'WhatsApp',
-      href: `https://api.whatsapp.com/send?text=${encodeURIComponent(intelliWattMessage)}`,
-    },
-  ];
+  const shareNetworks = ['Facebook', 'X', 'LinkedIn', 'WhatsApp', 'Instagram'] as const;
+  const buildShareHref = (
+    network: (typeof shareNetworks)[number],
+    url: string,
+    message: string
+  ) => {
+    switch (network) {
+      case 'Facebook':
+        return `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}`;
+      case 'X':
+        return `https://twitter.com/intent/tweet?text=${encodeURIComponent(message)}`;
+      case 'LinkedIn':
+        return `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(url)}`;
+      case 'WhatsApp':
+        return `https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`;
+      case 'Instagram':
+      default:
+        return `https://www.instagram.com/?url=${encodeURIComponent(url)}`;
+    }
+  };
+
+  const hitTheJackWattShares = shareNetworks.map((network) => ({
+    label: network,
+    href: buildShareHref(network, hitTheJackWattUrl, hitTheJackWattMessage),
+    image: hitTheJackWattAd,
+    alt: 'HitTheJackWatt referral graphic',
+  }));
+
+  const intelliWattShares = shareNetworks.map((network) => ({
+    label: network,
+    href: buildShareHref(network, intelliWattUrl, intelliWattMessage),
+    image: intelliWattAd,
+    alt: 'IntelliWatt referral graphic',
+  }));
 
   useEffect(() => {
     const fetchData = async () => {
@@ -287,7 +287,7 @@ export default function ReferralsPage() {
                     rows={5}
                     value={hitTheJackWattMessage}
                   />
-                  <div className="flex flex-wrap gap-3">
+                  <div className="flex flex-wrap gap-4">
                     <button
                       type="button"
                       onClick={() => handleCopyMessage(hitTheJackWattMessage, 'hjw-message')}
@@ -301,9 +301,18 @@ export default function ReferralsPage() {
                         href={share.href}
                         target="_blank"
                         rel="noreferrer"
-                        className="bg-brand-blue/10 text-brand-navy font-semibold py-2.5 px-4 rounded-lg border border-brand-blue/40 hover:border-brand-blue transition-all duration-300"
+                        className="group w-40 overflow-hidden rounded-xl border border-brand-blue/40 bg-brand-blue/10 p-3 text-center text-sm font-semibold text-brand-navy transition-all duration-300 hover:border-brand-blue focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/70"
+                        title={`Share on ${share.label}`}
+                        aria-label={`Share on ${share.label}`}
                       >
-                        Share on {share.label}
+                        <div className="relative mx-auto mb-2 h-24 w-full overflow-hidden rounded-lg bg-white">
+                          <Image
+                            src={share.image}
+                            alt={share.alt}
+                            className="h-full w-full object-contain"
+                          />
+                        </div>
+                        <span>Share on {share.label}</span>
                       </a>
                     ))}
                   </div>
@@ -322,7 +331,7 @@ export default function ReferralsPage() {
                     rows={5}
                     value={intelliWattMessage}
                   />
-                  <div className="flex flex-wrap gap-3">
+                  <div className="flex flex-wrap gap-4">
                     <button
                       type="button"
                       onClick={() => handleCopyMessage(intelliWattMessage, 'iw-message')}
@@ -336,9 +345,18 @@ export default function ReferralsPage() {
                         href={share.href}
                         target="_blank"
                         rel="noreferrer"
-                        className="bg-brand-blue/10 text-brand-navy font-semibold py-2.5 px-4 rounded-lg border border-brand-blue/40 hover:border-brand-blue transition-all duration-300"
+                        className="group w-40 overflow-hidden rounded-xl border border-brand-blue/40 bg-brand-blue/10 p-3 text-center text-sm font-semibold text-brand-navy transition-all duration-300 hover:border-brand-blue focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/70"
+                        title={`Share on ${share.label}`}
+                        aria-label={`Share on ${share.label}`}
                       >
-                        Share on {share.label}
+                        <div className="relative mx-auto mb-2 h-24 w-full overflow-hidden rounded-lg bg-white">
+                          <Image
+                            src={share.image}
+                            alt={share.alt}
+                            className="h-full w-full object-contain"
+                          />
+                        </div>
+                        <span>Share on {share.label}</span>
                       </a>
                     ))}
                   </div>
