@@ -345,11 +345,11 @@ export default function ReferralsPage() {
                     rows={5}
                     value={hitTheJackWattMessage}
                   />
-                  <div className="flex flex-wrap gap-4">
+                  <div className="grid gap-4 sm:grid-cols-2">
                     <button
                       type="button"
                       onClick={() => handleCopyMessage(hitTheJackWattMessage, 'hjw-message')}
-                      className="bg-brand-navy text-brand-blue font-bold py-2.5 px-4 rounded-lg border-2 border-brand-navy hover:border-brand-blue transition-all duration-300"
+                      className="w-full rounded-lg border-2 border-brand-navy bg-brand-navy px-4 py-2.5 font-bold text-brand-blue transition-all duration-300 hover:border-brand-blue sm:col-span-2"
                     >
                       {copiedTarget === 'hjw-message' ? 'Copied!' : 'Copy message'}
                     </button>
@@ -359,11 +359,11 @@ export default function ReferralsPage() {
                         href={share.href}
                         target="_blank"
                         rel="noreferrer"
-                        className="group w-40 overflow-hidden rounded-xl border border-brand-blue/40 bg-brand-blue/10 p-3 text-center text-sm font-semibold text-brand-navy transition-all duration-300 hover:border-brand-blue focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/70"
+                        className="group flex flex-col overflow-hidden rounded-xl border border-brand-blue/40 bg-brand-blue/10 p-3 text-center text-sm font-semibold text-brand-navy transition-all duration-300 hover:border-brand-blue focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/70"
                         title={`Share on ${share.label}`}
                         aria-label={`Share on ${share.label}`}
                       >
-                        <div className="relative mx-auto mb-2 h-24 w-full overflow-hidden rounded-lg bg-white">
+                        <div className="relative mb-2 aspect-[4/3] w-full overflow-hidden rounded-lg bg-white">
                           <Image
                             src={share.image}
                             alt={share.alt}
@@ -389,11 +389,11 @@ export default function ReferralsPage() {
                     rows={5}
                     value={intelliWattMessage}
                   />
-                  <div className="flex flex-wrap gap-4">
+                  <div className="grid gap-4 sm:grid-cols-2">
                     <button
                       type="button"
                       onClick={() => handleCopyMessage(intelliWattMessage, 'iw-message')}
-                      className="bg-brand-navy text-brand-blue font-bold py-2.5 px-4 rounded-lg border-2 border-brand-navy hover:border-brand-blue transition-all duration-300"
+                      className="w-full rounded-lg border-2 border-brand-navy bg-brand-navy px-4 py-2.5 font-bold text-brand-blue transition-all duration-300 hover:border-brand-blue sm:col-span-2"
                     >
                       {copiedTarget === 'iw-message' ? 'Copied!' : 'Copy message'}
                     </button>
@@ -403,11 +403,11 @@ export default function ReferralsPage() {
                         href={share.href}
                         target="_blank"
                         rel="noreferrer"
-                        className="group w-40 overflow-hidden rounded-xl border border-brand-blue/40 bg-brand-blue/10 p-3 text-center text-sm font-semibold text-brand-navy transition-all duration-300 hover:border-brand-blue focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/70"
+                        className="group flex flex-col overflow-hidden rounded-xl border border-brand-blue/40 bg-brand-blue/10 p-3 text-center text-sm font-semibold text-brand-navy transition-all duration-300 hover:border-brand-blue focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/70"
                         title={`Share on ${share.label}`}
                         aria-label={`Share on ${share.label}`}
                       >
-                        <div className="relative mx-auto mb-2 h-24 w-full overflow-hidden rounded-lg bg-white">
+                        <div className="relative mb-2 aspect-[4/3] w-full overflow-hidden rounded-lg bg-white">
                           <Image
                             src={share.image}
                             alt={share.alt}
