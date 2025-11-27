@@ -225,6 +225,56 @@ const DASHBOARD_BENEFITS: Array<{ icon: string; text: string }> = [
   { icon: '🎉', text: 'Prefer mail-in? The AMOE postcard option keeps entries available without sharing usage.' },
 ];
 
+const DASHBOARD_TESTIMONIALS: Array<{
+  name: string;
+  initials: string;
+  location: string;
+  quote: string;
+}> = [
+  {
+    name: 'Jessica L.',
+    initials: 'JL',
+    location: 'Fort Worth, TX',
+    quote:
+      "I didn't realize I was overpaying by $75/month. The site helped me switch in minutes. No calls, no hassle — just cheaper power. And now I'm entered every month for free money!",
+  },
+  {
+    name: 'Marcus R.',
+    initials: 'MR',
+    location: 'Dallas, TX',
+    quote:
+      "I referred my sister and 3 friends, and each one unlocked another entry for me. If I win this jackpot, I'm taking my family on a weekend getaway.",
+  },
+  {
+    name: 'Sandra M.',
+    initials: 'SM',
+    location: 'Arlington, TX',
+    quote:
+      "I switched to a plan that's 4¢ cheaper per kWh and I didn't have to pay anything. I like that this isn't some scammy sales site. It's legit.",
+  },
+  {
+    name: 'Michelle T.',
+    initials: 'MT',
+    location: 'San Antonio, TX',
+    quote:
+      "As a single mom with three kids, every dollar counts. HitTheJackWatt™ found me a plan that's saving me over $600 a year. That's a month of groceries for us!",
+  },
+  {
+    name: 'Robert K.',
+    initials: 'RK',
+    location: 'Austin, TX',
+    quote:
+      "I'm skeptical of most 'free' things, but this was actually free and saved me money. No spam calls, no high-pressure sales, just good information and a better rate.",
+  },
+  {
+    name: 'Tyler J.',
+    initials: 'TJ',
+    location: 'Frisco, TX',
+    quote:
+      "The energy insights were eye-opening. I had no idea my gaming PC was costing me that much to run! Made some easy adjustments and now I'm saving about 15% on my bill.",
+  },
+];
+
 type DashboardCard = {
   title: string;
   description: string;
@@ -525,69 +575,255 @@ const [mounted, setMounted] = useState(false);
         </section>
       )}
 
-      {/* Stats Section - Only show if address is entered */}
+      {/* Quick Actions and Insights - Only show if address is entered */}
       {userAddress && (
-        <section className="py-16 px-4 bg-brand-navy">
-          <div className="mx-auto max-w-6xl rounded-3xl border border-brand-cyan/40 bg-brand-navy/90 p-8 text-center shadow-[0_24px_70px_rgba(16,46,90,0.45)] sm:p-10">
-            <h2 className="text-3xl font-bold text-brand-white text-center mb-10">
-              Your <span className="text-brand-blue">Savings</span> Summary
-            </h2>
-            
-            <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
-              <div className="rounded-2xl border border-brand-blue/35 bg-brand-navy/75 p-6 text-center shadow-[0_18px_45px_rgba(10,20,60,0.35)]">
-                <div className="text-4xl font-bold text-brand-blue mb-2">${annualSavings}</div>
-                <div className="text-brand-white">Annual Savings</div>
-              </div>
-              <div className="rounded-2xl border border-brand-blue/35 bg-brand-navy/75 p-6 text-center shadow-[0_18px_45px_rgba(10,20,60,0.35)]">
-                <div className="text-4xl font-bold text-brand-blue mb-2">{accuracyRate}%</div>
-                <div className="text-brand-white">Accuracy Rate</div>
-              </div>
-              <div className="rounded-2xl border border-brand-blue/35 bg-brand-navy/75 p-6 text-center shadow-[0_18px_45px_rgba(10,20,60,0.35)]">
-                <div className="text-4xl font-bold text-brand-blue mb-2">{totalEntries}</div>
-                <div className="text-brand-white">Jackpot Entries</div>
-              </div>
-              <div className="rounded-2xl border border-brand-blue/35 bg-brand-navy/75 p-6 text-center shadow-[0_18px_45px_rgba(10,20,60,0.35)]">
-                <div className="text-4xl font-bold text-brand-blue mb-2">{totalReferrals}</div>
-                <div className="text-brand-white">Referred Friends</div>
-              </div>
-            </div>
-          </div>
-        </section>
-      )}
+        <>
+          <section className="py-16 px-4 bg-brand-white">
+            <div className="max-w-4xl mx-auto">
+              <h2 className="text-3xl font-bold text-brand-navy text-center mb-12">
+                Quick <span className="text-brand-blue">Actions</span>
+              </h2>
 
-      {/* Quick Actions - Only show if address is entered */}
-      {userAddress && (
-        <section className="py-16 px-4 bg-brand-white">
-          <div className="max-w-4xl mx-auto">
-            <h2 className="text-3xl font-bold text-brand-navy text-center mb-12">
-              Quick <span className="text-brand-blue">Actions</span>
-            </h2>
-            
-            <div className="grid md:grid-cols-2 gap-8">
-            <div className="rounded-3xl bg-brand-navy p-8 text-center">
-                <div className="w-12 h-12 rounded-full bg-brand-cyan flex items-center justify-center mx-auto mb-4">
-                  <span className="text-brand-navy text-xl">❓</span>
+              <div className="grid md:grid-cols-2 gap-8">
+                <div className="rounded-3xl bg-brand-navy p-8 text-center">
+                  <div className="w-12 h-12 rounded-full bg-brand-cyan flex items-center justify-center mx-auto mb-4">
+                    <span className="text-brand-navy text-xl">❓</span>
+                  </div>
+                  <h3 className="text-2xl font-bold text-brand-white mb-4">Need Help?</h3>
+                  <p className="text-brand-white mb-6">Get support or view our FAQ</p>
+                  <Link
+                    href="/faq"
+                    className="inline-block bg-brand-white text-brand-navy font-bold py-3 px-6 rounded-xl border-2 border-brand-white hover:border-brand-cyan transition-all duration-300"
+                  >
+                    Get Help
+                  </Link>
                 </div>
-                <h3 className="text-2xl font-bold text-brand-white mb-4">Need Help?</h3>
-                <p className="text-brand-white mb-6">Get support or view our FAQ</p>
-                <Link href="/faq" className="inline-block bg-brand-white text-brand-navy font-bold py-3 px-6 rounded-xl border-2 border-brand-white hover:border-brand-cyan transition-all duration-300">
-                  Get Help
-                </Link>
-              </div>
-              
-              <div className="rounded-3xl bg-brand-navy p-8 text-center">
-                <div className="w-12 h-12 rounded-full bg-brand-cyan flex items-center justify-center mx-auto mb-4">
-                  <span className="text-brand-navy text-xl">⚙️</span>
+
+                <div className="rounded-3xl bg-brand-navy p-8 text-center">
+                  <div className="w-12 h-12 rounded-full bg-brand-cyan flex items-center justify-center mx-auto mb-4">
+                    <span className="text-brand-navy text-xl">⚙️</span>
+                  </div>
+                  <h3 className="text-2xl font-bold text-brand-white mb-4">Settings</h3>
+                  <p className="text-brand-white mb-6">Manage your account preferences</p>
+                  <Link
+                    href="/dashboard/profile"
+                    className="inline-block bg-brand-white text-brand-navy font-bold py-3 px-6 rounded-xl border-2 border-brand-white hover:border-brand-cyan transition-all duration-300"
+                  >
+                    Manage Settings
+                  </Link>
                 </div>
-                <h3 className="text-2xl font-bold text-brand-white mb-4">Settings</h3>
-                <p className="text-brand-white mb-6">Manage your account preferences</p>
-                <Link href="/dashboard/settings" className="inline-block bg-brand-white text-brand-navy font-bold py-3 px-6 rounded-xl border-2 border-brand-white hover:border-brand-cyan transition-all duration-300">
-                  Manage Settings
-                </Link>
               </div>
             </div>
-          </div>
-        </section>
+          </section>
+
+          <section className="py-24 px-4 bg-brand-white">
+            <div className="max-w-6xl mx-auto">
+              <div className="grid md:grid-cols-2 gap-12 items-center">
+                <div className="text-center md:text-left">
+                  <div className="mb-8 p-6 bg-brand-navy rounded-2xl shadow-lg">
+                    <p className="text-brand-white text-lg italic mb-2">
+                      "I analyze your energy usage patterns and find the perfect plan for your unique needs. No more guesswork — just smart, data-driven recommendations!"
+                    </p>
+                    <p className="text-brand-blue font-semibold">— IntelliWatt Bot</p>
+                  </div>
+
+                  <div className="relative w-80 h-80 mx-auto md:mx-0 mb-8">
+                    <Image
+                      src="/Intelliwatt Bot Final Gif.gif"
+                      alt="IntelliWatt Bot"
+                      fill
+                      className="object-contain"
+                      unoptimized
+                    />
+                  </div>
+                </div>
+
+                <div className="text-center md:text-left">
+                  <h2 className="text-4xl md:text-5xl font-bold text-brand-navy mb-6">
+                    Meet Your <span className="text-brand-blue">AI Energy Assistant</span> — IntelliWatt Bot
+                  </h2>
+                  <p className="text-xl text-brand-navy mb-8 leading-relaxed">
+                    Our intelligent bot analyzes your energy usage patterns and finds the perfect plan for your unique needs. No more guesswork — just smart, data-driven recommendations.
+                  </p>
+
+                  <div className="space-y-4 mb-8">
+                    <div className="flex items-center text-brand-navy">
+                      <div className="w-8 h-8 bg-brand-navy rounded-full flex items-center justify-center mr-4">
+                        <span className="text-brand-blue font-bold">✓</span>
+                      </div>
+                      <span className="text-lg">24/7 energy monitoring</span>
+                    </div>
+                    <div className="flex items-center text-brand-navy">
+                      <div className="w-8 h-8 bg-brand-navy rounded-full flex items-center justify-center mr-4">
+                        <span className="text-brand-blue font-bold">✓</span>
+                      </div>
+                      <span className="text-lg">Advanced energy analysis</span>
+                    </div>
+                    <div className="flex items-center text-brand-navy">
+                      <div className="w-8 h-8 bg-brand-navy rounded-full flex items-center justify-center mr-4">
+                        <span className="text-brand-blue font-bold">✓</span>
+                      </div>
+                      <span className="text-lg">Real-time savings alerts</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="py-24 px-4 bg-brand-navy">
+            <div className="max-w-6xl mx-auto">
+              <div className="text-center mb-20">
+                <h2 className="text-4xl md:text-5xl font-bold text-brand-white mb-6">
+                  Why <span className="text-brand-blue">IntelliWatt™</span> Works Better
+                </h2>
+                <p className="text-xl text-brand-white max-w-4xl mx-auto leading-relaxed">
+                  We don't just show you prices — we calculate what your home actually needs using advanced AI algorithms.
+                </p>
+              </div>
+
+              <div className="grid md:grid-cols-2 gap-8 mb-16">
+                <div className="bg-brand-navy p-8 rounded-2xl border border-brand-blue/40 shadow-[0_30px_80px_rgba(0,0,0,0.45)] text-center transition-all duration-300 group hover:border-brand-blue/80">
+                  <div className="w-16 h-16 bg-brand-navy/60 border border-brand-blue/50 rounded-2xl flex items-center justify-center mb-4 mx-auto shadow-[0_0_30px_rgba(0,224,255,0.65)] group-hover:shadow-[0_0_40px_rgba(0,224,255,0.85)] transition-all duration-300">
+                    <svg className="w-8 h-8 text-[#00E0FF]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </div>
+                  <h3 className="text-xl font-semibold text-[#00E0FF] mb-3">Real Smart Meter Data</h3>
+                  <p className="text-brand-white/90">Uses actual usage data — no estimates or averages</p>
+                </div>
+
+                <div className="bg-brand-navy p-8 rounded-2xl border border-brand-blue/40 shadow-[0_30px_80px_rgba(0,0,0,0.45)] text-center transition-all duration-300 group hover:border-brand-blue/80">
+                  <div className="w-16 h-16 bg-brand-navy/60 border border-brand-blue/50 rounded-2xl flex items-center justify-center mb-4 mx-auto shadow-[0_0_30px_rgba(0,224,255,0.65)] group-hover:shadow-[0_0_40px_rgba(0,224,255,0.85)] transition-all duration-300">
+                    <svg className="w-9 h-9 text-[#00E0FF]" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 5V3m0 18v-2m7-7h2M3 12h2m13.364-6.364l1.414-1.414M5.222 18.778l1.414-1.414m0-10.728L5.222 4.222M18.778 18.778l-1.414-1.414M12 8a4 4 0 100 8 4 4 0 000-8z" />
+                    </svg>
+                  </div>
+                  <h3 className="text-xl font-semibold text-[#00E0FF] mb-3">Weather &amp; Season Normalization</h3>
+                  <p className="text-brand-white/90">Accounts for weather, usage timing, and seasonal changes</p>
+                </div>
+
+                <div className="bg-brand-navy p-8 rounded-2xl border border-brand-blue/40 shadow-[0_30px_80px_rgba(0,0,0,0.45)] text-center transition-all duration-300 group hover:border-brand-blue/80">
+                  <div className="w-16 h-16 bg-brand-navy/60 border border-brand-blue/50 rounded-2xl flex items-center justify-center mb-4 mx-auto shadow-[0_0_30px_rgba(0,224,255,0.65)] group-hover:shadow-[0_0_40px_rgba(0,224,255,0.85)] transition-all duration-300">
+                    <svg className="w-8 h-8 text-[#00E0FF]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                    </svg>
+                  </div>
+                  <h3 className="text-xl font-semibold text-[#00E0FF] mb-3">Pattern Matching</h3>
+                  <p className="text-brand-white/90">Matches your home's unique usage pattern to the best-fit plan</p>
+                </div>
+
+                <div className="bg-brand-navy p-8 rounded-2xl border border-brand-blue/40 shadow-[0_30px_80px_rgba(0,0,0,0.45)] text-center transition-all duration-300 group hover:border-brand-blue/80">
+                  <div className="w-16 h-16 bg-brand-navy/60 border border-brand-blue/50 rounded-2xl flex items-center justify-center mb-4 mx-auto shadow-[0_0_30px_rgba(0,224,255,0.65)] group-hover:shadow-[0_0_40px_rgba(0,224,255,0.85)] transition-all duration-300">
+                    <svg className="w-8 h-8 text-[#00E0FF]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                  </div>
+                  <h3 className="text-xl font-semibold text-[#00E0FF] mb-3">Patent-Pending Engine</h3>
+                  <p className="text-brand-white/90">
+                    Advanced switching engine — only available at{' '}
+                    <span className="font-semibold text-[#00E0FF] drop-shadow-[0_0_12px_rgba(0,224,255,0.8)]">IntelliWatt™</span>
+                  </p>
+                </div>
+
+                <div className="bg-brand-navy p-8 rounded-2xl border border-brand-blue/40 shadow-[0_30px_80px_rgba(0,0,0,0.45)] text-center transition-all duration-300 group hover:border-brand-blue/80 md:col-span-2">
+                  <div className="w-16 h-16 bg-brand-navy/60 border border-brand-blue/50 rounded-2xl flex items-center justify-center mb-4 mx-auto shadow-[0_0_30px_rgba(0,224,255,0.65)] group-hover:shadow-[0_0_40px_rgba(0,224,255,0.85)] transition-all duration-300">
+                    <svg className="w-8 h-8 text-[#00E0FF]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                  </div>
+                  <h3 className="text-xl font-semibold text-[#00E0FF] mb-3">Continuous Monitoring</h3>
+                  <p className="text-brand-white/90">Re-checks automatically so you never overpay again</p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="py-24 px-4 bg-brand-navy">
+            <div className="max-w-6xl mx-auto">
+              <h2 className="text-4xl md:text-5xl font-bold text-brand-white text-center mb-20">
+                What Our <span className="text-brand-blue">Users</span> Say
+              </h2>
+
+              <div className="grid md:grid-cols-3 gap-8 mb-20">
+                {DASHBOARD_TESTIMONIALS.map(({ name, initials, location, quote }) => (
+                  <div
+                    key={name}
+                    className="bg-brand-white p-8 rounded-2xl border border-brand-navy shadow-lg transition-transform duration-300 hover:-translate-y-2 hover:shadow-2xl"
+                  >
+                    <div className="flex items-center mb-4">
+                      <div className="w-12 h-12 bg-brand-navy rounded-full flex items-center justify-center mr-4 shadow-[0_0_18px_rgba(22,55,130,0.35)]">
+                        <span className="text-brand-blue font-bold">{initials}</span>
+                      </div>
+                      <div>
+                        <h4 className="text-brand-navy font-semibold">{name}</h4>
+                        <p className="text-brand-navy/70 text-sm">{location}</p>
+                      </div>
+                    </div>
+                    <p className="text-brand-navy italic leading-relaxed">"{quote}"</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid md:grid-cols-3 gap-8">
+                <div className="text-center group">
+                  <div className="w-20 h-20 bg-brand-blue rounded-full flex items-center justify-center mx-auto mb-6 shadow-lg group-hover:shadow-brand-blue/50 transition-all duration-300 transform group-hover:scale-110">
+                    <svg className="w-10 h-10 text-brand-navy" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </div>
+                  <h3 className="text-xl font-semibold text-brand-white mb-2">100% Free</h3>
+                  <p className="text-brand-white">No hidden fees or charges</p>
+                </div>
+                <div className="text-center group">
+                  <div className="w-20 h-20 bg-brand-blue rounded-full flex items-center justify-center mx-auto mb-6 shadow-lg group-hover:shadow-brand-blue/50 transition-all duration-300 transform group-hover:scale-110">
+                    <svg className="w-10 h-10 text-brand-navy" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                    </svg>
+                  </div>
+                  <h3 className="text-xl font-semibold text-brand-white mb-2">Secure Data</h3>
+                  <p className="text-brand-white">Bank-level encryption</p>
+                </div>
+                <div className="text-center group">
+                  <div className="w-20 h-20 bg-brand-blue rounded-full flex items-center justify-center mx-auto mb-6 shadow-lg group-hover:shadow-brand-blue/50 transition-all duration-300 transform group-hover:scale-110">
+                    <svg className="w-10 h-10 text-brand-navy" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                  </div>
+                  <h3 className="text-xl font-semibold text-brand-white mb-2">AI-Powered</h3>
+                  <p className="text-brand-white">Advanced algorithms</p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="py-16 px-4 bg-brand-navy">
+            <div className="mx-auto max-w-6xl rounded-3xl border border-brand-cyan/40 bg-brand-navy/90 p-8 text-center shadow-[0_24px_70px_rgba(16,46,90,0.45)] sm:p-10">
+              <h2 className="text-3xl font-bold text-brand-white text-center mb-10">
+                Your <span className="text-brand-blue">Savings</span> Summary
+              </h2>
+
+              <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="rounded-2xl border border-brand-blue/35 bg-brand-navy/75 p-6 text-center shadow-[0_18px_45px_rgba(10,20,60,0.35)]">
+                  <div className="text-4xl font-bold text-brand-blue mb-2">${annualSavings}</div>
+                  <div className="text-brand-white">Annual Savings</div>
+                </div>
+                <div className="rounded-2xl border border-brand-blue/35 bg-brand-navy/75 p-6 text-center shadow-[0_18px_45px_rgba(10,20,60,0.35)]">
+                  <div className="text-4xl font-bold text-brand-blue mb-2">{accuracyRate}%</div>
+                  <div className="text-brand-white">Accuracy Rate</div>
+                </div>
+                <div className="rounded-2xl border border-brand-blue/35 bg-brand-navy/75 p-6 text-center shadow-[0_18px_45px_rgba(10,20,60,0.35)]">
+                  <div className="text-4xl font-bold text-brand-blue mb-2">{totalEntries}</div>
+                  <div className="text-brand-white">Jackpot Entries</div>
+                </div>
+                <div className="rounded-2xl border border-brand-blue/35 bg-brand-navy/75 p-6 text-center shadow-[0_18px_45px_rgba(10,20,60,0.35)]">
+                  <div className="text-4xl font-bold text-brand-blue mb-2">{totalReferrals}</div>
+                  <div className="text-brand-white">Referred Friends</div>
+                </div>
+              </div>
+            </div>
+          </section>
+        </>
       )}
     </div>
   );

@@ -58,7 +58,7 @@ const faqGroups: FAQGroup[] = [
           <>
             <p>Most sites show you advertised rates, which can be misleading. IntelliWatt uses:</p>
             <ul className="list-disc list-inside space-y-1 marker:text-[#00E0FF]">
-              <li>your actual hourly usage</li>
+              <li>your actual 15-minute interval usage</li>
               <li>real plan structures, fees, tiers, and delivery charges</li>
               <li>your home profile and appliances</li>
             </ul>
