@@ -126,6 +126,20 @@ export default function ReferralsPage() {
     }
   };
 
+  const handleCopyHitTheJackWattLink = async () => {
+    if (!hitTheJackWattUrl) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(hitTheJackWattUrl);
+      setCopiedTarget('hjw-link');
+      setTimeout(() => setCopiedTarget(null), 2000);
+    } catch (error) {
+      console.error('Failed to copy:', error);
+    }
+  };
+
   const handleCopyMessage = async (message: string, key: string) => {
     if (!message) {
       return;
@@ -197,7 +211,7 @@ export default function ReferralsPage() {
             </div>
 
             {/* Referral Link */}
-            <div className="space-y-4 mb-8">
+            <div className="space-y-6 mb-8">
               <div>
                 <label className="block text-brand-navy font-semibold mb-2">
                   Shareable Link
@@ -236,6 +250,50 @@ export default function ReferralsPage() {
                   >
                     {copiedTarget === 'code' ? 'Copied!' : 'Copy Code'}
                   </button>
+                </div>
+              </div>
+
+              {/* HitTheJackWatt Quick Share */}
+              <div className="grid gap-6 md:grid-cols-2">
+                <div className="space-y-2">
+                  <label className="block text-brand-navy font-semibold">
+                    HitTheJackWatt Link
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={hitTheJackWattUrl}
+                      readOnly
+                      className="flex-1 px-4 py-3 rounded-lg bg-brand-navy/5 border-2 border-brand-navy text-brand-navy"
+                    />
+                    <button
+                      onClick={handleCopyHitTheJackWattLink}
+                      className="bg-brand-navy text-brand-blue font-bold py-3 px-6 rounded-lg border-2 border-brand-navy hover:border-brand-blue transition-all duration-300 whitespace-nowrap"
+                    >
+                      {copiedTarget === 'hjw-link' ? 'Copied!' : 'Copy Link'}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="block text-brand-navy font-semibold">
+                    HitTheJackWatt Post Caption
+                  </label>
+                  <textarea
+                    readOnly
+                    rows={4}
+                    value={hitTheJackWattMessage}
+                    className="w-full px-4 py-3 rounded-lg bg-brand-navy/5 border-2 border-brand-navy text-brand-navy resize-none"
+                  />
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => handleCopyMessage(hitTheJackWattMessage, 'hjw-message')}
+                      className="bg-brand-navy text-brand-blue font-bold py-2.5 px-4 rounded-lg border-2 border-brand-navy hover:border-brand-blue transition-all duration-300"
+                    >
+                      {copiedTarget === 'hjw-message' ? 'Copied!' : 'Copy Caption'}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
