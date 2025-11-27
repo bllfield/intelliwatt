@@ -175,17 +175,6 @@ function LandingPageContent() {
             </div>
 
             <div className="max-w-md mx-auto">
-              <div className="bg-brand-navy/60 border border-brand-blue/20 rounded-2xl p-4 mb-6 text-center">
-                <div className="flex items-center justify-center gap-2 mb-2">
-                  <span className="text-[#BF00FF] text-lg">✓</span>
-                  <span className="text-brand-white font-semibold">Visit Dashboard - Submit Email Below</span>
-                </div>
-                <div className="text-brand-white/90 text-sm">
-                  Access your dashboard for the first time to create your account
-                  <br />
-                  <span style={{ color: '#39FF14' }}>1 jackpot entry available</span>
-                </div>
-              </div>
               {!submitted ? (
                 <div className="rounded-3xl border border-brand-blue/40 bg-brand-navy/70 p-6 shadow-[0_20px_60px_rgba(0,0,0,0.4)]">
                   <p className="text-brand-white text-center font-semibold text-lg mb-5">
@@ -221,18 +210,6 @@ function LandingPageContent() {
                   <p>We just sent you a magic link. Open it within 15 minutes to finish joining IntelliWatt.</p>
                 </div>
               )}
-              <div className="bg-brand-navy/60 border border-brand-blue/20 rounded-2xl p-4 mt-6 text-center">
-                <div className="text-brand-white/90 text-sm">
-                  <span className="font-semibold">Authorize Smart Meter Texas</span>
-                </div>
-                <div className="mt-3 text-brand-white/90 text-sm">
-                  <Link href="/dashboard/referrals" className="font-semibold text-brand-cyan hover:text-brand-blue transition-colors duration-300">
-                    Refer a Friend
-                  </Link>
-                  <span className="ml-2">Each friend who signs up earns you</span>
-                  <span className="ml-2" style={{ color: '#39FF14' }}>1 jackpot entry</span>
-                </div>
-              </div>
             </div>
 
             <div className="max-w-3xl mx-auto grid gap-4 md:grid-cols-2 mt-10">
