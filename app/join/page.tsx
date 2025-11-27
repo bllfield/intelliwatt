@@ -133,6 +133,21 @@ function JoinPageContent() {
               </p>
             </div>
 
+            <div className="max-w-3xl mx-auto grid gap-4 md:grid-cols-2 mb-8">
+              <div className="rounded-2xl border border-[#39FF14]/50 bg-[#39FF14]/10 p-4 text-center shadow-[0_0_25px_rgba(57,255,20,0.25)]">
+                <p className="text-xs uppercase tracking-[0.2em] text-[#39FF14] font-semibold mb-2">HitTheJackWatt Jackpot</p>
+                <p className="text-brand-white text-lg font-semibold leading-relaxed">
+                  Earn <span className="text-[#39FF14]">1 HitTheJackWatt entry</span> when you authorize Smart Meter Texas or connect with Green Button.
+                </p>
+              </div>
+              <div className="rounded-2xl border border-[#BF00FF]/50 bg-[#BF00FF]/10 p-4 text-center shadow-[0_0_25px_rgba(191,0,255,0.25)]">
+                <p className="text-xs uppercase tracking-[0.2em] text-[#FF3BCE] font-semibold mb-2">HitTheJackWatt Referrals</p>
+                <p className="text-brand-white text-lg font-semibold leading-relaxed">
+                  Earn <span className="text-[#FF3BCE]">unlimited entries</span> for every friend or family member you refer.
+                </p>
+              </div>
+            </div>
+
             <div className="max-w-xl mx-auto">
               {!submitted ? (
                 <div className="rounded-3xl border border-brand-blue/40 bg-brand-navy/70 p-6 shadow-[0_20px_60px_rgba(0,0,0,0.4)]">
