@@ -1,10 +1,8 @@
-import type { ReadonlyURLSearchParams } from "next/navigation";
-
 export const REFERRAL_QUERY_PARAM = "ref";
 
 type SearchParamsInput =
   | URLSearchParams
-  | ReadonlyURLSearchParams
+  | (Pick<URLSearchParams, "get"> & { [key: string]: any })
   | Record<string, string | string[] | undefined>
   | undefined
   | null;

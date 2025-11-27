@@ -7,7 +7,7 @@ export async function createMagicToken(email: string): Promise<string> {
   return token;
 }
 
-export async function storeToken(email: string, token: string) {
+export async function storeToken(email: string, token: string, referralToken?: string) {
   const expiresAt = new Date(Date.now() + 1000 * 60 * 15); // 15 min from now
   const normalizedEmail = normalizeEmail(email);
 
@@ -16,7 +16,8 @@ export async function storeToken(email: string, token: string) {
       email: normalizedEmail,
       token,
       expiresAt,
-      used: false
+      used: false,
+      referralToken,
     }
   });
 } 

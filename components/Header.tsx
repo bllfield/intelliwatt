@@ -155,12 +155,12 @@ export default function Header() {
                 >
                   Join
                 </Link>
-                <Link
-                  href={AUTH_PATH}
-                  className="inline-flex items-center rounded-full border border-brand-blue/40 px-4 py-2 text-sm font-semibold text-brand-blue transition hover:border-brand-blue hover:text-brand-white"
-                >
+              <Link
+                href={AUTH_PATH}
+                className="inline-flex items-center rounded-full border border-brand-blue/40 px-4 py-2 text-sm font-semibold text-brand-blue transition hover:border-brand-blue hover:text-brand-white"
+              >
                   User Dashboard
-                </Link>
+              </Link>
               </>
             )}
           </div>
@@ -214,13 +214,13 @@ export default function Header() {
                 >
                   Join
                 </Link>
-                <Link
-                  href={AUTH_PATH}
-                  onClick={handleClose}
+              <Link
+                href={AUTH_PATH}
+                onClick={handleClose}
                   className="rounded-md px-2 py-2 text-center font-semibold transition hover:bg-brand-blue/10 hover:text-brand-white"
-                >
+              >
                   User Dashboard
-                </Link>
+              </Link>
               </>
             )}
           </nav>

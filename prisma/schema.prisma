@@ -305,6 +305,7 @@ model MagicLinkToken {
   expiresAt DateTime
   createdAt DateTime @default(now())
   used      Boolean  @default(false)
+  referralToken String?
 }
 
 model FinanceRecord {
