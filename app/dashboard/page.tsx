@@ -410,20 +410,23 @@ const [mounted, setMounted] = useState(false);
                 priority
               />
             </a>
-            <div className="inline-flex w-full max-w-xl flex-col items-center gap-2 rounded-3xl border border-[#39FF14]/40 bg-[#39FF14]/10 px-6 py-4 text-center shadow-lg shadow-[#39FF14]/12 ring-1 ring-[#39FF14]/30">
+            <Link
+              href="/dashboard/api"
+              className="inline-flex w-full max-w-xl flex-col items-center gap-2 rounded-3xl border border-[#39FF14]/40 bg-[#39FF14]/10 px-6 py-5 text-center shadow-lg shadow-[#39FF14]/12 ring-1 ring-[#39FF14]/30 transition duration-300 hover:border-[#BF00FF]/50 hover:shadow-[#BF00FF]/20"
+            >
+              <span className="text-xl font-black uppercase tracking-[0.3em] text-[#BF00FF] drop-shadow-[0_0_18px_rgba(191,0,255,0.6)] md:text-2xl">
+                CLICK HERE!!
+              </span>
               <span className="text-lg font-extrabold leading-tight text-brand-white md:text-xl">
                 <span style={{ color: '#39FF14' }}>⚡ Connect your smart meter data</span>
                 <span className="mx-1 text-brand-white">for</span>
                 <span style={{ color: '#39FF14' }}>1 jackpot entry!</span>
               </span>
               <span className="text-sm font-bold leading-tight text-brand-white md:text-base">
-                <Link href="/dashboard/referrals" style={{ color: '#BF00FF' }} className="hover:underline">
-                  👥 Refer a Friend:
-                </Link>
-                <span className="mx-1 text-brand-white" />
+                <span className="mr-1 text-[#FF3BCE]">👥 Refer a Friend:</span>
                 <span style={{ color: '#39FF14' }}>1 jackpot entry per signup!</span>
               </span>
-            </div>
+            </Link>
           </div>
           <div className="mx-auto mt-10 max-w-5xl rounded-3xl border-2 border-brand-blue/40 bg-brand-navy/90 p-6 text-brand-cyan shadow-[0_18px_55px_rgba(16,46,90,0.35)] sm:p-8">
             <h2 className="text-center text-2xl font-semibold uppercase tracking-[0.3em] text-brand-cyan/70">
