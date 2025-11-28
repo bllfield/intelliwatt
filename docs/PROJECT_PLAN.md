@@ -49,7 +49,8 @@
       npx prisma migrate deploy --schema=prisma/current-plan.schema.prisma
       ```
 - [x] Design a unified `RateStructure` contract for manual Current Plan entries (supports FIXED, VARIABLE, TIME_OF_USE) so the rate comparison engine can use the same logic on user-entered plans and vendor offers.
-- [ ] Wire the Current Plan UI + DB to capture `RateStructure` for variable and TOU plans (additional form fields + DB storage) after the initial fixed-rate wiring and entry counter integration are stable.
+- [x] Wire the Current Plan UI + DB to capture `RateStructure` for variable and TOU plans (additional form fields + DB storage) after the initial fixed-rate wiring and entry counter integration are stable.
+- [ ] Normalize vendor offer ingestion to populate the shared `RateStructure`, then adapt the comparison engine to cost fixed, variable, and TOU offers with the same code path as user-entered plans.
 
 ### PC-2025-11-25-K — Keeper Cleanup Runbook (Chat-Driven)
 

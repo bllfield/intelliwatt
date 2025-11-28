@@ -2,13 +2,49 @@
 
 import React, { useState, FormEvent, useEffect } from "react";
 
-type RateType = "FIXED" | "VARIABLE" | "TIME_OF_USE" | "OTHER";
+type RateType = "FIXED" | "VARIABLE" | "TIME_OF_USE";
+
+type FixedRateStructure = {
+  type: "FIXED";
+  energyRateCents: number;
+  baseMonthlyFeeCents?: number;
+};
+
+type VariableRateIndexType = "ERCOT" | "FUEL" | "OTHER";
+
+type VariableRateStructure = {
+  type: "VARIABLE";
+  currentBillEnergyRateCents: number;
+  baseMonthlyFeeCents?: number;
+  indexType?: VariableRateIndexType;
+  variableNotes?: string;
+};
+
+type DayCode = "MON" | "TUE" | "WED" | "THU" | "FRI" | "SAT" | "SUN";
+
+type TimeOfUseTier = {
+  label: string;
+  priceCents: number;
+  startTime: string;
+  endTime: string;
+  daysOfWeek: DayCode[] | "ALL";
+  monthsOfYear?: number[];
+};
+
+type TimeOfUseRateStructure = {
+  type: "TIME_OF_USE";
+  baseMonthlyFeeCents?: number;
+  tiers: TimeOfUseTier[];
+};
+
+type RateStructure = FixedRateStructure | VariableRateStructure | TimeOfUseRateStructure;
 
 type ManualEntryPayload = {
   providerName: string;
   planName: string;
   rateType: RateType;
-  energyRateCents: number;
+  rateStructure: RateStructure;
+  energyRateCents?: number | null;
   baseMonthlyFee?: number | null;
   termLengthMonths?: number | null;
   contractEndDate?: string | null;
@@ -26,10 +62,62 @@ type CurrentRateDetailsFormProps = {
 
 const RATE_TYPE_OPTIONS: Array<{ value: RateType; label: string }> = [
   { value: "FIXED", label: "Fixed rate" },
-  { value: "VARIABLE", label: "Variable rate" },
-  { value: "TIME_OF_USE", label: "Time-of-use" },
-  { value: "OTHER", label: "Other / not sure" },
+  { value: "VARIABLE", label: "Variable / indexed rate" },
+  { value: "TIME_OF_USE", label: "Time-of-use (different rates by time of day)" },
 ];
+
+const VARIABLE_INDEX_OPTIONS: Array<{ value: VariableRateIndexType; label: string }> = [
+  { value: "ERCOT", label: "ERCOT market index" },
+  { value: "FUEL", label: "Fuel / commodity index" },
+  { value: "OTHER", label: "Other index" },
+];
+
+const DAY_OPTIONS: Array<{ value: DayCode; label: string }> = [
+  { value: "MON", label: "Mon" },
+  { value: "TUE", label: "Tue" },
+  { value: "WED", label: "Wed" },
+  { value: "THU", label: "Thu" },
+  { value: "FRI", label: "Fri" },
+  { value: "SAT", label: "Sat" },
+  { value: "SUN", label: "Sun" },
+];
+
+const MONTH_OPTIONS: Array<{ value: number; label: string }> = [
+  { value: 1, label: "Jan" },
+  { value: 2, label: "Feb" },
+  { value: 3, label: "Mar" },
+  { value: 4, label: "Apr" },
+  { value: 5, label: "May" },
+  { value: 6, label: "Jun" },
+  { value: 7, label: "Jul" },
+  { value: 8, label: "Aug" },
+  { value: 9, label: "Sep" },
+  { value: 10, label: "Oct" },
+  { value: 11, label: "Nov" },
+  { value: 12, label: "Dec" },
+];
+
+type TimeOfUseTierForm = {
+  id: string;
+  label: string;
+  priceCents: string;
+  startTime: string;
+  endTime: string;
+  useAllDays: boolean;
+  selectedDays: DayCode[];
+  selectedMonths: number[];
+};
+
+const createEmptyTier = (): TimeOfUseTierForm => ({
+  id: typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2),
+  label: "",
+  priceCents: "",
+  startTime: "",
+  endTime: "",
+  useAllDays: true,
+  selectedDays: [],
+  selectedMonths: [],
+});
 
 export function CurrentRateDetailsForm({
   onContinue,
@@ -40,6 +128,9 @@ export function CurrentRateDetailsForm({
   const [rateType, setRateType] = useState<RateType>("FIXED");
   const [primaryRateCentsPerKwh, setPrimaryRateCentsPerKwh] = useState("");
   const [baseFeeDollars, setBaseFeeDollars] = useState("");
+  const [variableIndexType, setVariableIndexType] = useState<VariableRateIndexType | "">("");
+  const [variableNotes, setVariableNotes] = useState("");
+  const [touTiers, setTouTiers] = useState<TimeOfUseTierForm[]>([createEmptyTier()]);
   const [termLengthMonths, setTermLengthMonths] = useState("");
   const [earlyTerminationFee, setEarlyTerminationFee] = useState("");
   const [contractExpiration, setContractExpiration] = useState("");
@@ -63,12 +154,92 @@ export function CurrentRateDetailsForm({
     }
   }, []);
 
+  useEffect(() => {
+    if (rateType !== "VARIABLE") {
+      setVariableIndexType("");
+      setVariableNotes("");
+    }
+  }, [rateType]);
+
+  useEffect(() => {
+    if (rateType === "TIME_OF_USE" && touTiers.length === 0) {
+      setTouTiers([createEmptyTier()]);
+    }
+  }, [rateType, touTiers.length]);
+
+  const updateTier = (id: string, updater: (tier: TimeOfUseTierForm) => TimeOfUseTierForm) => {
+    setTouTiers((tiers) => tiers.map((tier) => (tier.id === id ? updater(tier) : tier)));
+  };
+
+  const handleAddTier = () => {
+    setTouTiers((tiers) => [...tiers, createEmptyTier()]);
+  };
+
+  const handleRemoveTier = (id: string) => {
+    setTouTiers((tiers) => (tiers.length <= 1 ? tiers : tiers.filter((tier) => tier.id !== id)));
+  };
+
+  const toggleTierDay = (id: string, day: DayCode) => {
+    updateTier(id, (tier) => {
+      if (tier.useAllDays) {
+        return tier;
+      }
+      const exists = tier.selectedDays.includes(day);
+      const nextDays = exists
+        ? tier.selectedDays.filter((d) => d !== day)
+        : [...tier.selectedDays, day];
+      return {
+        ...tier,
+        selectedDays: nextDays.sort(
+          (a, b) => DAY_OPTIONS.findIndex((opt) => opt.value === a) - DAY_OPTIONS.findIndex((opt) => opt.value === b),
+        ),
+      };
+    });
+  };
+
+  const toggleTierMonth = (id: string, month: number) => {
+    updateTier(id, (tier) => {
+      const exists = tier.selectedMonths.includes(month);
+      const nextMonths = exists
+        ? tier.selectedMonths.filter((m) => m !== month)
+        : [...tier.selectedMonths, month];
+      return {
+        ...tier,
+        selectedMonths: nextMonths.sort((a, b) => a - b),
+      };
+    });
+  };
+
   const parseNumber = (value: string) => {
     if (!value || value.trim().length === 0) {
       return null;
     }
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : null;
+  };
+
+  const toMonthlyFeeCents = (value: number | null) => {
+    if (value === null || Number.isNaN(value)) {
+      return undefined;
+    }
+    return Math.round(value * 100);
+  };
+
+  const isValidTime = (value: string) => {
+    if (!/^\d{2}:\d{2}$/.test(value)) {
+      return false;
+    }
+    const [hoursStr, minutesStr] = value.split(":");
+    const hours = Number(hoursStr);
+    const minutes = Number(minutesStr);
+    return Number.isInteger(hours) && Number.isInteger(minutes) && hours >= 0 && hours < 24 && minutes >= 0 && minutes < 60;
+  };
+
+  const withCentsPrecision = (value: number | null) => {
+    if (value === null) {
+      return null;
+    }
+    return Number(value.toFixed(4));
   };
 
   async function uploadBill(options: { silent?: boolean } = {}): Promise<boolean> {
@@ -143,7 +314,6 @@ export function CurrentRateDetailsForm({
     const validationErrors: string[] = [];
     const providerName = electricCompany.trim();
     const currentPlanName = planName.trim();
-    const energyRate = parseNumber(primaryRateCentsPerKwh);
     const baseCharge = parseNumber(baseFeeDollars);
     const termLength = parseNumber(termLengthMonths);
     const earlyTermination = parseNumber(earlyTerminationFee);
@@ -158,9 +328,6 @@ export function CurrentRateDetailsForm({
     }
     if (!currentPlanName) {
       validationErrors.push("Enter your plan name.");
-    }
-    if (energyRate === null || energyRate <= 0) {
-      validationErrors.push("Energy rate must be a positive number.");
     }
     if (baseFeeDollars.trim().length > 0 && (baseCharge === null || baseCharge < 0)) {
       validationErrors.push("Base charge must be zero or a positive number.");
@@ -182,6 +349,120 @@ export function CurrentRateDetailsForm({
       validationErrors.push("Account number (last digits) must be 8 characters or fewer.");
     }
 
+    let energyRateForPayload: number | null = null;
+    let rateStructure: RateStructure | null = null;
+
+    if (rateType === "FIXED") {
+      const fixedRate = parseNumber(primaryRateCentsPerKwh);
+      if (fixedRate === null || fixedRate <= 0) {
+        validationErrors.push("Energy rate must be a positive number.");
+      } else {
+        energyRateForPayload = fixedRate;
+        const baseMonthlyFeeCents = toMonthlyFeeCents(baseCharge);
+        rateStructure = {
+          type: "FIXED",
+          energyRateCents: withCentsPrecision(fixedRate) ?? fixedRate,
+          ...(baseMonthlyFeeCents !== undefined ? { baseMonthlyFeeCents } : {}),
+        };
+      }
+    } else if (rateType === "VARIABLE") {
+      const variableRate = parseNumber(primaryRateCentsPerKwh);
+      if (variableRate === null || variableRate <= 0) {
+        validationErrors.push("Current bill energy rate must be a positive number.");
+      } else {
+        energyRateForPayload = variableRate;
+      }
+      const baseMonthlyFeeCents = toMonthlyFeeCents(baseCharge);
+      const trimmedVariableNotes = variableNotes.trim();
+      if (variableRate !== null && variableRate > 0) {
+        rateStructure = {
+          type: "VARIABLE",
+          currentBillEnergyRateCents: withCentsPrecision(variableRate) ?? variableRate,
+          ...(baseMonthlyFeeCents !== undefined ? { baseMonthlyFeeCents } : {}),
+          ...(variableIndexType ? { indexType: variableIndexType } : {}),
+          ...(trimmedVariableNotes ? { variableNotes: trimmedVariableNotes } : {}),
+        };
+      }
+    } else if (rateType === "TIME_OF_USE") {
+      const sanitizedTiers: TimeOfUseTier[] = [];
+
+      touTiers.forEach((tier, index) => {
+        const label = tier.label.trim();
+        if (!label) {
+          validationErrors.push(`Tier ${index + 1}: Enter a label (e.g., Peak, Off-Peak).`);
+        }
+
+        const price = parseNumber(tier.priceCents);
+        if (price === null || price < 0) {
+          validationErrors.push(`Tier ${index + 1}: Price must be zero or a positive number.`);
+        }
+
+        if (!tier.startTime || !isValidTime(tier.startTime)) {
+          validationErrors.push(`Tier ${index + 1}: Start time must use 24-hour HH:MM (e.g., 21:00).`);
+        }
+        if (!tier.endTime || !isValidTime(tier.endTime)) {
+          validationErrors.push(`Tier ${index + 1}: End time must use 24-hour HH:MM (e.g., 06:00).`);
+        }
+
+        if (!tier.useAllDays && tier.selectedDays.length === 0) {
+          validationErrors.push(`Tier ${index + 1}: Select at least one day or choose All days.`);
+        }
+
+        const invalidMonth = tier.selectedMonths.some((month) => month < 1 || month > 12);
+        if (invalidMonth) {
+          validationErrors.push(`Tier ${index + 1}: Months must be between 1 and 12.`);
+        }
+
+        if (
+          label &&
+          price !== null &&
+          price >= 0 &&
+          tier.startTime &&
+          isValidTime(tier.startTime) &&
+          tier.endTime &&
+          isValidTime(tier.endTime) &&
+          (tier.useAllDays || tier.selectedDays.length > 0) &&
+          !invalidMonth
+        ) {
+          const daysOfWeek: DayCode[] | "ALL" = tier.useAllDays
+            ? "ALL"
+            : [...tier.selectedDays].sort(
+                (a, b) => DAY_OPTIONS.findIndex((opt) => opt.value === a) - DAY_OPTIONS.findIndex((opt) => opt.value === b),
+              );
+
+          const monthsOfYear =
+            tier.selectedMonths.length > 0 ? [...tier.selectedMonths].sort((a, b) => a - b) : undefined;
+
+          sanitizedTiers.push({
+            label,
+            priceCents: withCentsPrecision(price) ?? price,
+            startTime: tier.startTime,
+            endTime: tier.endTime,
+            daysOfWeek,
+            ...(monthsOfYear ? { monthsOfYear } : {}),
+          });
+        }
+      });
+
+      if (sanitizedTiers.length === 0) {
+        validationErrors.push("Add at least one time-of-use tier with pricing, times, and day coverage.");
+      }
+
+      const baseMonthlyFeeCents = toMonthlyFeeCents(baseCharge);
+      if (sanitizedTiers.length > 0) {
+        rateStructure = {
+          type: "TIME_OF_USE",
+          tiers: sanitizedTiers,
+          ...(baseMonthlyFeeCents !== undefined ? { baseMonthlyFeeCents } : {}),
+        };
+      }
+      energyRateForPayload = null;
+    }
+
+    if (!rateStructure) {
+      validationErrors.push("Provide rate details for the selected plan type.");
+    }
+
     if (validationErrors.length > 0) {
       setStatusMessage(validationErrors.join(" "));
       setHasAwarded(false);
@@ -193,7 +474,8 @@ export function CurrentRateDetailsForm({
       providerName,
       planName: currentPlanName,
       rateType,
-      energyRateCents: energyRate ?? 0,
+      rateStructure: rateStructure!,
+      energyRateCents: energyRateForPayload,
       baseMonthlyFee: baseCharge ?? null,
       termLengthMonths:
         termLengthMonths.trim().length > 0 ? Number(Math.round(termLength ?? 0)) : null,
@@ -372,20 +654,26 @@ export function CurrentRateDetailsForm({
             </select>
           </label>
 
-          <label className="block space-y-1 text-sm text-brand-navy">
-            <span className="font-semibold uppercase tracking-wide text-brand-navy/80">Energy rate (¢/kWh)</span>
-            <input
-              type="number"
-              inputMode="decimal"
-              value={primaryRateCentsPerKwh}
-              onChange={(e) => setPrimaryRateCentsPerKwh(e.target.value)}
-              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm transition focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/40"
-              placeholder="e.g., 13.9"
-            />
-          </label>
+          {rateType !== "TIME_OF_USE" ? (
+            <label className="block space-y-1 text-sm text-brand-navy">
+              <span className="font-semibold uppercase tracking-wide text-brand-navy/80">
+                {rateType === "VARIABLE" ? "Current bill energy rate (¢/kWh)" : "Flat energy rate (¢/kWh)"}
+              </span>
+              <input
+                type="number"
+                inputMode="decimal"
+                value={primaryRateCentsPerKwh}
+                onChange={(e) => setPrimaryRateCentsPerKwh(e.target.value)}
+                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm transition focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/40"
+                placeholder={rateType === "VARIABLE" ? "e.g., 14.5" : "e.g., 13.9"}
+              />
+            </label>
+          ) : null}
 
           <label className="block space-y-1 text-sm text-brand-navy">
-            <span className="font-semibold uppercase tracking-wide text-brand-navy/80">Base charge ($/month)</span>
+            <span className="font-semibold uppercase tracking-wide text-brand-navy/80">
+              Base monthly fee ($/month, optional)
+            </span>
             <input
               type="number"
               inputMode="decimal"
@@ -395,6 +683,212 @@ export function CurrentRateDetailsForm({
               placeholder="e.g., 4.95"
             />
           </label>
+
+          {rateType === "VARIABLE" ? (
+            <>
+              <label className="block space-y-1 text-sm text-brand-navy">
+                <span className="font-semibold uppercase tracking-wide text-brand-navy/80">Index type</span>
+                <select
+                  value={variableIndexType}
+                  onChange={(e) => setVariableIndexType(e.target.value as VariableRateIndexType | "")}
+                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm transition focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/40"
+                >
+                  <option value="">Select index type</option>
+                  {VARIABLE_INDEX_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="block space-y-1 text-sm text-brand-navy">
+                <span className="font-semibold uppercase tracking-wide text-brand-navy/80">
+                  Index notes (optional)
+                </span>
+                <textarea
+                  value={variableNotes}
+                  onChange={(e) => setVariableNotes(e.target.value)}
+                  rows={3}
+                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm transition focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/40"
+                  placeholder="e.g., Rate resets monthly based on ERCOT balancing market."
+                />
+              </label>
+            </>
+          ) : null}
+
+          {rateType === "TIME_OF_USE" ? (
+            <div className="space-y-4 rounded-2xl border border-brand-blue/30 bg-brand-blue/5 p-4">
+              <p className="text-sm text-brand-navy">
+                Define each time-of-use tier below. Add blocks for free nights, peak hours, weekends, or seasonal pricing.
+              </p>
+
+              {touTiers.map((tier, index) => (
+                <div
+                  key={tier.id}
+                  className="space-y-3 rounded-2xl border border-brand-blue/30 bg-white p-4 shadow-sm transition"
+                >
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-semibold uppercase tracking-wide text-brand-navy/90">
+                      Tier {index + 1}
+                    </h3>
+                    {touTiers.length > 1 ? (
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveTier(tier.id)}
+                        className="text-xs font-semibold uppercase tracking-wide text-rose-600 transition hover:text-rose-700"
+                      >
+                        Remove
+                      </button>
+                    ) : null}
+                  </div>
+
+                  <label className="block space-y-1 text-sm text-brand-navy">
+                    <span className="font-semibold uppercase tracking-wide text-brand-navy/80">Tier label</span>
+                    <input
+                      type="text"
+                      value={tier.label}
+                      onChange={(e) =>
+                        updateTier(tier.id, (prev) => ({
+                          ...prev,
+                          label: e.target.value,
+                        }))
+                      }
+                      className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm transition focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/40"
+                      placeholder="e.g., Free Nights, Peak, Off-Peak"
+                    />
+                  </label>
+
+                  <label className="block space-y-1 text-sm text-brand-navy">
+                    <span className="font-semibold uppercase tracking-wide text-brand-navy/80">Price (¢/kWh)</span>
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      value={tier.priceCents}
+                      onChange={(e) =>
+                        updateTier(tier.id, (prev) => ({
+                          ...prev,
+                          priceCents: e.target.value,
+                        }))
+                      }
+                      className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm transition focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/40"
+                      placeholder="e.g., 0 or 18.5"
+                    />
+                  </label>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="block space-y-1 text-sm text-brand-navy">
+                      <span className="font-semibold uppercase tracking-wide text-brand-navy/80">Start time</span>
+                      <input
+                        type="time"
+                        value={tier.startTime}
+                        onChange={(e) =>
+                          updateTier(tier.id, (prev) => ({
+                            ...prev,
+                            startTime: e.target.value,
+                          }))
+                        }
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm transition focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/40"
+                      />
+                    </label>
+                    <label className="block space-y-1 text-sm text-brand-navy">
+                      <span className="font-semibold uppercase tracking-wide text-brand-navy/80">End time</span>
+                      <input
+                        type="time"
+                        value={tier.endTime}
+                        onChange={(e) =>
+                          updateTier(tier.id, (prev) => ({
+                            ...prev,
+                            endTime: e.target.value,
+                          }))
+                        }
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm transition focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/40"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-brand-navy/80">
+                      <input
+                        type="checkbox"
+                        checked={tier.useAllDays}
+                        onChange={() =>
+                          updateTier(tier.id, (prev) => ({
+                            ...prev,
+                            useAllDays: !prev.useAllDays,
+                            selectedDays:
+                              prev.useAllDays === false
+                                ? prev.selectedDays
+                                : prev.selectedDays.length > 0
+                                ? prev.selectedDays
+                                : ["MON"],
+                          }))
+                        }
+                        className="h-4 w-4 rounded border-brand-blue text-brand-blue focus:ring-brand-blue"
+                      />
+                      <span>Apply every day</span>
+                    </label>
+                    {!tier.useAllDays ? (
+                      <div className="flex flex-wrap gap-2">
+                        {DAY_OPTIONS.map((day) => (
+                          <label
+                            key={`${tier.id}-${day.value}`}
+                            className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold ${
+                              tier.selectedDays.includes(day.value)
+                                ? "border-brand-blue bg-brand-blue/10 text-brand-blue"
+                                : "border-slate-300 text-brand-slate"
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              className="h-3 w-3 rounded border-brand-blue text-brand-blue focus:ring-brand-blue"
+                              checked={tier.selectedDays.includes(day.value)}
+                              onChange={() => toggleTierDay(tier.id, day.value)}
+                            />
+                            {day.label}
+                          </label>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="space-y-1">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-brand-navy/80">
+                      Months (optional)
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {MONTH_OPTIONS.map((month) => (
+                        <label
+                          key={`${tier.id}-month-${month.value}`}
+                          className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold ${
+                            tier.selectedMonths.includes(month.value)
+                              ? "border-brand-blue bg-brand-blue/10 text-brand-blue"
+                              : "border-slate-300 text-brand-slate"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            className="h-3 w-3 rounded border-brand-blue text-brand-blue focus:ring-brand-blue"
+                            checked={tier.selectedMonths.includes(month.value)}
+                            onChange={() => toggleTierMonth(tier.id, month.value)}
+                          />
+                          {month.label}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ))}
+
+              <button
+                type="button"
+                onClick={handleAddTier}
+                className="inline-flex items-center rounded-full border border-brand-blue px-4 py-2 text-xs font-semibold uppercase tracking-wide text-brand-blue transition hover:bg-brand-blue/10"
+              >
+                + Add another time-of-use tier
+              </button>
+            </div>
+          ) : null}
 
           <label className="block space-y-1 text-sm text-brand-navy">
             <span className="font-semibold uppercase tracking-wide text-brand-navy/80">Term length (months)</span>
@@ -441,7 +935,7 @@ export function CurrentRateDetailsForm({
             />
           </label>
 
-  <label className="block space-y-1 text-sm text-brand-navy">
+          <label className="block space-y-1 text-sm text-brand-navy">
             <span className="font-semibold uppercase tracking-wide text-brand-navy/80">Account number (last digits)</span>
             <input
               type="text"
