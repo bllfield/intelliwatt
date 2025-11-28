@@ -17,11 +17,26 @@ const DAY_ORDER: Array<'MON' | 'TUE' | 'WED' | 'THU' | 'FRI' | 'SAT' | 'SUN'> = 
   'SAT',
   'SUN',
 ];
+const VALID_MONTHS = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+
+type BillCreditRule = {
+  label: string;
+  creditAmountCents: number;
+  minUsageKWh: number;
+  maxUsageKWh?: number | null;
+  monthsOfYear?: number[] | null;
+};
+
+type BillCreditStructure = {
+  hasBillCredit: boolean;
+  rules: BillCreditRule[];
+};
 
 type FixedRateStructure = {
   type: 'FIXED';
   energyRateCents: number;
   baseMonthlyFeeCents?: number;
+  billCredits?: BillCreditStructure | null;
 };
 
 type VariableRateStructure = {
@@ -30,6 +45,7 @@ type VariableRateStructure = {
   baseMonthlyFeeCents?: number;
   indexType?: 'ERCOT' | 'FUEL' | 'OTHER';
   variableNotes?: string;
+  billCredits?: BillCreditStructure | null;
 };
 
 type TimeOfUseTier = {
@@ -45,6 +61,7 @@ type TimeOfUseRateStructure = {
   type: 'TIME_OF_USE';
   baseMonthlyFeeCents?: number;
   tiers: TimeOfUseTier[];
+  billCredits?: BillCreditStructure | null;
 };
 
 type RateStructure = FixedRateStructure | VariableRateStructure | TimeOfUseRateStructure;
@@ -57,7 +74,6 @@ type ManualEntryPayload = {
   rateType?: unknown;
   energyRateCents?: unknown;
   baseMonthlyFee?: unknown;
-  billCreditDollars?: unknown;
   rateStructure?: unknown;
   termLengthMonths?: unknown;
   contractEndDate?: unknown;
@@ -172,10 +188,119 @@ export async function POST(request: NextRequest) {
     };
 
     const rawRateStructure = isPlainObject(body.rateStructure) ? body.rateStructure : null;
+    let billCredits: BillCreditStructure = { hasBillCredit: false, rules: [] };
     let rateStructure: RateStructure | null = null;
 
     if (rateType && rateType !== 'OTHER') {
       if (rawRateStructure) {
+        if ('billCredits' in rawRateStructure) {
+          const rawBillCredits = rawRateStructure.billCredits as unknown;
+          if (rawBillCredits === null || rawBillCredits === undefined) {
+            billCredits = { hasBillCredit: false, rules: [] };
+          } else if (!isPlainObject(rawBillCredits)) {
+            errors.push('billCredits must be an object when provided.');
+          } else {
+            const hasBillCredit = rawBillCredits.hasBillCredit === true;
+            const rawRules = Array.isArray(rawBillCredits.rules) ? rawBillCredits.rules : [];
+            const normalizedRules: BillCreditRule[] = [];
+
+            rawRules.forEach((ruleRaw, index) => {
+              if (!isPlainObject(ruleRaw)) {
+                errors.push(`billCredits.rules[${index}] must be an object.`);
+                return;
+              }
+
+              const label =
+                typeof ruleRaw.label === 'string' && ruleRaw.label.trim().length > 0
+                  ? ruleRaw.label.trim().slice(0, 200)
+                  : '';
+              if (!label) {
+                errors.push(`billCredits.rules[${index}].label is required.`);
+              }
+
+              const creditAmountValue = parseNumber(ruleRaw.creditAmountCents);
+              if (creditAmountValue === null || creditAmountValue <= 0) {
+                errors.push(`billCredits.rules[${index}].creditAmountCents must be a positive number.`);
+              }
+
+              const minUsageValue = parseNumber(ruleRaw.minUsageKWh);
+              if (minUsageValue === null || minUsageValue < 0) {
+                errors.push(`billCredits.rules[${index}].minUsageKWh must be zero or greater.`);
+              }
+
+              const maxUsageValueRaw = parseNumber(ruleRaw.maxUsageKWh);
+              let maxUsageValue: number | undefined;
+              if (maxUsageValueRaw !== null) {
+                if (maxUsageValueRaw < 0) {
+                  errors.push(`billCredits.rules[${index}].maxUsageKWh must be zero or greater.`);
+                } else if (minUsageValue !== null && maxUsageValueRaw < minUsageValue) {
+                  errors.push(
+                    `billCredits.rules[${index}].maxUsageKWh must be greater than or equal to minUsageKWh.`,
+                  );
+                } else {
+                  maxUsageValue = maxUsageValueRaw;
+                }
+              }
+
+              let monthsOfYear: number[] | undefined;
+              if ('monthsOfYear' in ruleRaw && ruleRaw.monthsOfYear != null) {
+                if (!Array.isArray(ruleRaw.monthsOfYear)) {
+                  errors.push(`billCredits.rules[${index}].monthsOfYear must be an array when provided.`);
+                } else {
+                  const parsedMonths: number[] = [];
+                  let monthError = false;
+                  ruleRaw.monthsOfYear.forEach((monthValue: unknown) => {
+                    const monthNumber = parseNumber(monthValue);
+                    if (
+                      monthNumber === null ||
+                      !Number.isInteger(monthNumber) ||
+                      !VALID_MONTHS.has(monthNumber)
+                    ) {
+                      monthError = true;
+                    } else {
+                      parsedMonths.push(monthNumber);
+                    }
+                  });
+                  if (monthError) {
+                    errors.push(
+                      `billCredits.rules[${index}].monthsOfYear must contain integers between 1 and 12.`,
+                    );
+                  } else if (parsedMonths.length > 0) {
+                    monthsOfYear = Array.from(new Set(parsedMonths)).sort((a, b) => a - b);
+                  }
+                }
+              }
+
+              if (
+                label &&
+                creditAmountValue !== null &&
+                creditAmountValue > 0 &&
+                minUsageValue !== null &&
+                minUsageValue >= 0
+              ) {
+                normalizedRules.push({
+                  label,
+                  creditAmountCents: Math.round(creditAmountValue),
+                  minUsageKWh: minUsageValue,
+                  ...(typeof maxUsageValue === 'number' ? { maxUsageKWh: maxUsageValue } : {}),
+                  ...(monthsOfYear ? { monthsOfYear } : {}),
+                });
+              }
+            });
+
+            if (hasBillCredit) {
+              if (normalizedRules.length === 0) {
+                errors.push('billCredits.rules must contain at least one rule when hasBillCredit is true.');
+                billCredits = { hasBillCredit: false, rules: [] };
+              } else {
+                billCredits = { hasBillCredit: true, rules: normalizedRules };
+              }
+            } else {
+              billCredits = { hasBillCredit: false, rules: normalizedRules };
+            }
+          }
+        }
+
         const structureType =
           typeof rawRateStructure.type === 'string'
             ? (rawRateStructure.type as string).toUpperCase()
@@ -201,6 +326,7 @@ export async function POST(request: NextRequest) {
                   ...(baseMonthlyFeeCentsValue !== null && baseMonthlyFeeCentsValue >= 0
                     ? { baseMonthlyFeeCents: Math.round(baseMonthlyFeeCentsValue) }
                     : {}),
+                  billCredits,
                 };
               }
               break;
@@ -241,6 +367,7 @@ export async function POST(request: NextRequest) {
                     : {}),
                   ...(indexType ? { indexType } : {}),
                   ...(variableNotes ? { variableNotes } : {}),
+                  billCredits,
                 };
               }
               break;
@@ -378,6 +505,7 @@ export async function POST(request: NextRequest) {
                   ...(baseMonthlyFeeCentsValue !== null && baseMonthlyFeeCentsValue >= 0
                     ? { baseMonthlyFeeCents: Math.round(baseMonthlyFeeCentsValue) }
                     : {}),
+                  billCredits,
                 };
               }
               break;
@@ -399,13 +527,11 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const billCreditInput = parseNumber(body.billCreditDollars);
-    let billCredit: CurrentPlanPrisma.Decimal | null = null;
-    if (billCreditInput !== null) {
-      if (billCreditInput < 0) {
-        errors.push('billCreditDollars cannot be negative.');
-      } else {
-        billCredit = decimalFromNumber(billCreditInput, 8, 2);
+    let billCreditSummary: CurrentPlanPrisma.Decimal | null = null;
+    if (billCredits.hasBillCredit && billCredits.rules.length > 0) {
+      const maxCreditCents = Math.max(...billCredits.rules.map((rule) => rule.creditAmountCents));
+      if (maxCreditCents > 0) {
+        billCreditSummary = decimalFromNumber(maxCreditCents / 100, 8, 2);
       }
     }
 
@@ -517,7 +643,7 @@ export async function POST(request: NextRequest) {
         rateType,
         energyRateCents: energyRateCents ?? undefined,
         baseMonthlyFee,
-        billCreditDollars: billCredit ?? undefined,
+        billCreditDollars: billCreditSummary ?? undefined,
         termLengthMonths: termLengthMonths ?? undefined,
         contractEndDate: contractEndDate ?? undefined,
         earlyTerminationFee,

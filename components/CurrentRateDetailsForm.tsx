@@ -4,23 +4,22 @@ import React, { useState, FormEvent, useEffect } from "react";
 
 type RateType = "FIXED" | "VARIABLE" | "TIME_OF_USE";
 
-type FixedRateStructure = {
-  type: "FIXED";
-  energyRateCents: number;
-  baseMonthlyFeeCents?: number;
-};
-
 type VariableRateIndexType = "ERCOT" | "FUEL" | "OTHER";
 
-type VariableRateStructure = {
-  type: "VARIABLE";
-  currentBillEnergyRateCents: number;
-  baseMonthlyFeeCents?: number;
-  indexType?: VariableRateIndexType;
-  variableNotes?: string;
+type DayCode = "MON" | "TUE" | "WED" | "THU" | "FRI" | "SAT" | "SUN";
+
+type BillCreditRule = {
+  label: string;
+  creditAmountCents: number;
+  minUsageKWh: number;
+  maxUsageKWh?: number;
+  monthsOfYear?: number[];
 };
 
-type DayCode = "MON" | "TUE" | "WED" | "THU" | "FRI" | "SAT" | "SUN";
+type BillCreditStructure = {
+  hasBillCredit: boolean;
+  rules: BillCreditRule[];
+};
 
 type TimeOfUseTier = {
   label: string;
@@ -31,9 +30,26 @@ type TimeOfUseTier = {
   monthsOfYear?: number[];
 };
 
-type TimeOfUseRateStructure = {
-  type: "TIME_OF_USE";
+type BaseRateStructure = {
+  type: RateType;
   baseMonthlyFeeCents?: number;
+  billCredits?: BillCreditStructure | null;
+};
+
+type FixedRateStructure = BaseRateStructure & {
+  type: "FIXED";
+  energyRateCents: number;
+};
+
+type VariableRateStructure = BaseRateStructure & {
+  type: "VARIABLE";
+  currentBillEnergyRateCents: number;
+  indexType?: VariableRateIndexType;
+  variableNotes?: string;
+};
+
+type TimeOfUseRateStructure = BaseRateStructure & {
+  type: "TIME_OF_USE";
   tiers: TimeOfUseTier[];
 };
 
@@ -46,7 +62,6 @@ type ManualEntryPayload = {
   rateStructure: RateStructure;
   energyRateCents?: number | null;
   baseMonthlyFee?: number | null;
-  billCreditDollars?: number | null;
   termLengthMonths?: number | null;
   contractEndDate?: string | null;
   earlyTerminationFee?: number | null;
@@ -120,6 +135,26 @@ const createEmptyTier = (): TimeOfUseTierForm => ({
   selectedMonths: [],
 });
 
+type BillCreditRuleForm = {
+  id: string;
+  label: string;
+  creditAmount: string;
+  minUsage: string;
+  maxUsage: string;
+  applyAllMonths: boolean;
+  selectedMonths: number[];
+};
+
+const createEmptyBillCreditRule = (): BillCreditRuleForm => ({
+  id: typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2),
+  label: "",
+  creditAmount: "",
+  minUsage: "",
+  maxUsage: "",
+  applyAllMonths: true,
+  selectedMonths: [],
+});
+
 export function CurrentRateDetailsForm({
   onContinue,
   onSkip,
@@ -129,10 +164,11 @@ export function CurrentRateDetailsForm({
   const [rateType, setRateType] = useState<RateType>("FIXED");
   const [primaryRateCentsPerKwh, setPrimaryRateCentsPerKwh] = useState("");
   const [baseFeeDollars, setBaseFeeDollars] = useState("");
-  const [billCreditDollars, setBillCreditDollars] = useState("");
   const [variableIndexType, setVariableIndexType] = useState<VariableRateIndexType | "">("");
   const [variableNotes, setVariableNotes] = useState("");
   const [touTiers, setTouTiers] = useState<TimeOfUseTierForm[]>([createEmptyTier()]);
+  const [includeBillCredits, setIncludeBillCredits] = useState(false);
+  const [billCreditRules, setBillCreditRules] = useState<BillCreditRuleForm[]>([createEmptyBillCreditRule()]);
   const [termLengthMonths, setTermLengthMonths] = useState("");
   const [earlyTerminationFee, setEarlyTerminationFee] = useState("");
   const [contractExpiration, setContractExpiration] = useState("");
@@ -168,6 +204,12 @@ export function CurrentRateDetailsForm({
       setTouTiers([createEmptyTier()]);
     }
   }, [rateType, touTiers.length]);
+
+  useEffect(() => {
+    if (includeBillCredits && billCreditRules.length === 0) {
+      setBillCreditRules([createEmptyBillCreditRule()]);
+    }
+  }, [includeBillCredits, billCreditRules.length]);
 
   const updateTier = (id: string, updater: (tier: TimeOfUseTierForm) => TimeOfUseTierForm) => {
     setTouTiers((tiers) => tiers.map((tier) => (tier.id === id ? updater(tier) : tier)));
@@ -207,6 +249,32 @@ export function CurrentRateDetailsForm({
         : [...tier.selectedMonths, month];
       return {
         ...tier,
+        selectedMonths: nextMonths.sort((a, b) => a - b),
+      };
+    });
+  };
+
+  const updateBillCreditRule = (id: string, updater: (rule: BillCreditRuleForm) => BillCreditRuleForm) => {
+    setBillCreditRules((rules) => rules.map((rule) => (rule.id === id ? updater(rule) : rule)));
+  };
+
+  const handleAddBillCreditRule = () => {
+    setBillCreditRules((rules) => [...rules, createEmptyBillCreditRule()]);
+  };
+
+  const handleRemoveBillCreditRule = (id: string) => {
+    setBillCreditRules((rules) => (rules.length <= 1 ? rules : rules.filter((rule) => rule.id !== id)));
+  };
+
+  const toggleBillCreditMonth = (id: string, month: number) => {
+    updateBillCreditRule(id, (rule) => {
+      if (rule.applyAllMonths) {
+        return rule;
+      }
+      const exists = rule.selectedMonths.includes(month);
+      const nextMonths = exists ? rule.selectedMonths.filter((m) => m !== month) : [...rule.selectedMonths, month];
+      return {
+        ...rule,
         selectedMonths: nextMonths.sort((a, b) => a - b),
       };
     });
@@ -317,7 +385,6 @@ export function CurrentRateDetailsForm({
     const providerName = electricCompany.trim();
     const currentPlanName = planName.trim();
     const baseCharge = parseNumber(baseFeeDollars);
-    const billCredit = parseNumber(billCreditDollars);
     const termLength = parseNumber(termLengthMonths);
     const earlyTermination = parseNumber(earlyTerminationFee);
     const contractDate = contractExpiration.trim().length > 0 ? new Date(contractExpiration) : null;
@@ -340,8 +407,71 @@ export function CurrentRateDetailsForm({
         validationErrors.push("Term length must be a whole number of months greater than zero.");
       }
     }
-    if (billCreditDollars.trim().length > 0 && (billCredit === null || billCredit < 0)) {
-      validationErrors.push("Bill credit must be zero or a positive number.");
+    let billCreditsStructure: BillCreditStructure = { hasBillCredit: false, rules: [] };
+    if (includeBillCredits) {
+      const sanitizedRules: BillCreditRule[] = [];
+      billCreditRules.forEach((rule, index) => {
+        const label = rule.label.trim();
+        if (!label) {
+          validationErrors.push(`Bill credit ${index + 1}: Enter a label (e.g., $100 credit at 1000–2000 kWh).`);
+        }
+
+        const creditAmountValue = parseNumber(rule.creditAmount);
+        if (creditAmountValue === null || creditAmountValue <= 0) {
+          validationErrors.push(`Bill credit ${index + 1}: Credit amount must be a positive number.`);
+        }
+
+        const minUsageValue = parseNumber(rule.minUsage);
+        if (minUsageValue === null || minUsageValue < 0) {
+          validationErrors.push(`Bill credit ${index + 1}: Minimum usage must be zero or greater.`);
+        }
+
+        const maxUsageValueRaw = parseNumber(rule.maxUsage);
+        let maxUsageValue: number | undefined;
+        if (maxUsageValueRaw !== null) {
+          if (maxUsageValueRaw < 0) {
+            validationErrors.push(`Bill credit ${index + 1}: Maximum usage must be zero or greater.`);
+          } else if (minUsageValue !== null && maxUsageValueRaw < minUsageValue) {
+            validationErrors.push(`Bill credit ${index + 1}: Maximum usage must be greater than or equal to minimum usage.`);
+          } else {
+            maxUsageValue = maxUsageValueRaw;
+          }
+        }
+
+        if (
+          label &&
+          creditAmountValue !== null &&
+          creditAmountValue > 0 &&
+          minUsageValue !== null &&
+          minUsageValue >= 0
+        ) {
+        if (!rule.applyAllMonths && rule.selectedMonths.length === 0) {
+          validationErrors.push(`Bill credit ${index + 1}: Select at least one month or enable "Applies all months."`);
+        }
+
+        const monthsOfYear =
+          rule.applyAllMonths || rule.selectedMonths.length === 0
+            ? undefined
+            : [...rule.selectedMonths].sort((a, b) => a - b);
+
+          sanitizedRules.push({
+            label,
+            creditAmountCents: Math.round(creditAmountValue * 100),
+            minUsageKWh: minUsageValue,
+            ...(typeof maxUsageValue === "number" ? { maxUsageKWh: maxUsageValue } : {}),
+            ...(monthsOfYear ? { monthsOfYear } : {}),
+          });
+        }
+      });
+
+      if (sanitizedRules.length === 0) {
+        validationErrors.push("Add at least one bill credit rule or turn off bill credits.");
+      } else {
+        billCreditsStructure = {
+          hasBillCredit: true,
+          rules: sanitizedRules,
+        };
+      }
     }
     if (earlyTerminationFee.trim().length > 0) {
       if (earlyTermination === null || earlyTermination < 0) {
@@ -369,6 +499,7 @@ export function CurrentRateDetailsForm({
           type: "FIXED",
           energyRateCents: withCentsPrecision(fixedRate) ?? fixedRate,
           ...(baseMonthlyFeeCents !== undefined ? { baseMonthlyFeeCents } : {}),
+          billCredits: billCreditsStructure,
         };
       }
     } else if (rateType === "VARIABLE") {
@@ -385,6 +516,7 @@ export function CurrentRateDetailsForm({
           type: "VARIABLE",
           currentBillEnergyRateCents: withCentsPrecision(variableRate) ?? variableRate,
           ...(baseMonthlyFeeCents !== undefined ? { baseMonthlyFeeCents } : {}),
+          billCredits: billCreditsStructure,
           ...(variableIndexType ? { indexType: variableIndexType } : {}),
           ...(trimmedVariableNotes ? { variableNotes: trimmedVariableNotes } : {}),
         };
@@ -460,6 +592,7 @@ export function CurrentRateDetailsForm({
           type: "TIME_OF_USE",
           tiers: sanitizedTiers,
           ...(baseMonthlyFeeCents !== undefined ? { baseMonthlyFeeCents } : {}),
+          billCredits: billCreditsStructure,
         };
       }
       energyRateForPayload = null;
@@ -483,7 +616,6 @@ export function CurrentRateDetailsForm({
       rateStructure: rateStructure!,
       energyRateCents: energyRateForPayload,
       baseMonthlyFee: baseCharge ?? null,
-      billCreditDollars: billCredit ?? null,
       termLengthMonths:
         termLengthMonths.trim().length > 0 ? Number(Math.round(termLength ?? 0)) : null,
       contractEndDate: contractDate ? contractDate.toISOString() : null,
@@ -691,19 +823,166 @@ export function CurrentRateDetailsForm({
             />
           </label>
 
-          <label className="block space-y-1 text-sm text-brand-navy">
-            <span className="font-semibold uppercase tracking-wide text-brand-navy/80">
-              Bill credit ($, optional)
-            </span>
-            <input
-              type="number"
-              inputMode="decimal"
-              value={billCreditDollars}
-              onChange={(e) => setBillCreditDollars(e.target.value)}
-              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm transition focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/40"
-              placeholder="e.g., 100"
-            />
-          </label>
+          <div className="space-y-3 rounded-2xl border border-brand-blue/30 bg-brand-blue/5 p-4">
+            <label className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-brand-navy/80">
+              <input
+                type="checkbox"
+                checked={includeBillCredits}
+                onChange={(e) => setIncludeBillCredits(e.target.checked)}
+                className="h-4 w-4 rounded border-brand-blue text-brand-blue focus:ring-brand-blue"
+              />
+              <span>Bill credits (if applicable)</span>
+            </label>
+
+            {includeBillCredits
+              ? billCreditRules.map((rule, index) => (
+                  <div
+                    key={rule.id}
+                    className="space-y-3 rounded-2xl border border-brand-blue/30 bg-white p-4 shadow-sm transition"
+                  >
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-semibold uppercase tracking-wide text-brand-navy/90">
+                        Bill Credit {index + 1}
+                      </h3>
+                      {billCreditRules.length > 1 ? (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveBillCreditRule(rule.id)}
+                          className="text-xs font-semibold uppercase tracking-wide text-rose-600 transition hover:text-rose-700"
+                        >
+                          Remove
+                        </button>
+                      ) : null}
+                    </div>
+
+                    <label className="block space-y-1 text-sm text-brand-navy">
+                      <span className="font-semibold uppercase tracking-wide text-brand-navy/80">Credit label</span>
+                      <input
+                        type="text"
+                        value={rule.label}
+                        onChange={(e) =>
+                          updateBillCreditRule(rule.id, (prev) => ({
+                            ...prev,
+                            label: e.target.value,
+                          }))
+                        }
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm transition focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/40"
+                        placeholder="e.g., $100 credit at 1000–2000 kWh"
+                      />
+                    </label>
+
+                    <div className="grid gap-4 sm:grid-cols-3">
+                      <label className="block space-y-1 text-sm text-brand-navy">
+                        <span className="font-semibold uppercase tracking-wide text-brand-navy/80">Credit amount ($)</span>
+                        <input
+                          type="number"
+                          inputMode="decimal"
+                          value={rule.creditAmount}
+                          onChange={(e) =>
+                            updateBillCreditRule(rule.id, (prev) => ({
+                              ...prev,
+                              creditAmount: e.target.value,
+                            }))
+                          }
+                          className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm transition focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/40"
+                          placeholder="e.g., 100"
+                        />
+                      </label>
+
+                      <label className="block space-y-1 text-sm text-brand-navy">
+                        <span className="font-semibold uppercase tracking-wide text-brand-navy/80">
+                          Minimum usage (kWh)
+                        </span>
+                        <input
+                          type="number"
+                          inputMode="decimal"
+                          value={rule.minUsage}
+                          onChange={(e) =>
+                            updateBillCreditRule(rule.id, (prev) => ({
+                              ...prev,
+                              minUsage: e.target.value,
+                            }))
+                          }
+                          className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm transition focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/40"
+                          placeholder="e.g., 1000"
+                        />
+                      </label>
+
+                      <label className="block space-y-1 text-sm text-brand-navy">
+                        <span className="font-semibold uppercase tracking-wide text-brand-navy/80">
+                          Maximum usage (kWh, optional)
+                        </span>
+                        <input
+                          type="number"
+                          inputMode="decimal"
+                          value={rule.maxUsage}
+                          onChange={(e) =>
+                            updateBillCreditRule(rule.id, (prev) => ({
+                              ...prev,
+                              maxUsage: e.target.value,
+                            }))
+                          }
+                          className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm transition focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/40"
+                          placeholder="Leave blank if no upper limit"
+                        />
+                      </label>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-brand-navy/80">
+                        <input
+                          type="checkbox"
+                          checked={rule.applyAllMonths}
+                          onChange={() =>
+                            updateBillCreditRule(rule.id, (prev) => ({
+                              ...prev,
+                              applyAllMonths: !prev.applyAllMonths,
+                              selectedMonths:
+                            prev.applyAllMonths === false ? prev.selectedMonths : [],
+                            }))
+                          }
+                          className="h-4 w-4 rounded border-brand-blue text-brand-blue focus:ring-brand-blue"
+                        />
+                        <span>Applies all months</span>
+                      </label>
+
+                      {!rule.applyAllMonths ? (
+                        <div className="flex flex-wrap gap-2">
+                          {MONTH_OPTIONS.map((month) => (
+                            <label
+                              key={`${rule.id}-month-${month.value}`}
+                              className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold ${
+                                rule.selectedMonths.includes(month.value)
+                                  ? "border-brand-blue bg-brand-blue/10 text-brand-blue"
+                                  : "border-slate-300 text-brand-slate"
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                className="h-3 w-3 rounded border-brand-blue text-brand-blue focus:ring-brand-blue"
+                                checked={rule.selectedMonths.includes(month.value)}
+                                onChange={() => toggleBillCreditMonth(rule.id, month.value)}
+                              />
+                              {month.label}
+                            </label>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                ))
+              : null}
+
+            {includeBillCredits ? (
+              <button
+                type="button"
+                onClick={handleAddBillCreditRule}
+                className="inline-flex items-center rounded-full border border-brand-blue px-4 py-2 text-xs font-semibold uppercase tracking-wide text-brand-blue transition hover:bg-brand-blue/10"
+              >
+                + Add another bill credit
+              </button>
+            ) : null}
+          </div>
 
           {rateType === "VARIABLE" ? (
             <>
