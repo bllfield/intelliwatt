@@ -26,6 +26,7 @@
     - When the user clicks “I approved it,” call SMT API and show status; if not approved, show a clear “not approved yet” message.
   - ⬜ **API Dataset Normalization**:
     - Separate per-API raw datasets (WattBuy, EnergyBot, etc.) and a master normalized dataset with null-safe handling so empty fields don’t break the UI.
+  - The `RateStructure` contract in `docs/API_CONTRACTS.md` is the shared shape for user-entered current plans and normalized vendor offers so the rate engine can cost fixed, variable, and TOU plans uniformly.
 
 ### Current Plan Module Progress (Updated 2025-11-27)
 
@@ -47,6 +48,8 @@
       ```
       npx prisma migrate deploy --schema=prisma/current-plan.schema.prisma
       ```
+- [x] Design a unified `RateStructure` contract for manual Current Plan entries (supports FIXED, VARIABLE, TIME_OF_USE) so the rate comparison engine can use the same logic on user-entered plans and vendor offers.
+- [ ] Wire the Current Plan UI + DB to capture `RateStructure` for variable and TOU plans (additional form fields + DB storage) after the initial fixed-rate wiring and entry counter integration are stable.
 
 ### PC-2025-11-25-K — Keeper Cleanup Runbook (Chat-Driven)
 

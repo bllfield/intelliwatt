@@ -140,6 +140,64 @@ model HouseAddress {
 }
 ```
 
+## Current Plan Manual Entry – Rate Structure Contract
+
+### Rate Structure Object
+Manual current plan entries and the internal rate comparison engine share a unified `rateStructure` payload. All rate structures must include a `type` field whose value is a `RateType` enum aligned with the database (`FIXED`, `VARIABLE`, `TIME_OF_USE`). Downstream systems rely on this shape for automated costing—no human interpretation required.
+
+```ts
+type RateType = 'FIXED' | 'VARIABLE' | 'TIME_OF_USE'
+
+interface FixedRateStructure {
+  type: 'FIXED'
+  energyRateCents: number          // flat ¢/kWh for all hours
+  baseMonthlyFeeCents?: number     // base charge (monthly) in cents
+}
+
+interface VariableRateStructure {
+  type: 'VARIABLE'
+  currentBillEnergyRateCents: number   // ¢/kWh for the most recent bill
+  baseMonthlyFeeCents?: number
+  indexType?: 'ERCOT' | 'FUEL' | 'OTHER'  // optional classifier to match EFL/rate engine
+  variableNotes?: string                 // optional, display-only descriptor
+}
+
+interface TimeOfUseTier {
+  label: string                     // e.g. "Free Nights", "Peak", "Off-Peak"
+  priceCents: number                // ¢/kWh for this tier (0 allowed for "free")
+  startTime: string                 // "HH:MM" 24h, local time (e.g. "21:00")
+  endTime: string                   // "HH:MM" 24h (e.g. "06:00")
+  daysOfWeek: ('MON'|'TUE'|'WED'|'THU'|'FRI'|'SAT'|'SUN')[] | 'ALL'
+  monthsOfYear?: number[]           // [1..12] when seasonal; omit for all-year tiers
+}
+
+interface TimeOfUseRateStructure {
+  type: 'TIME_OF_USE'
+  baseMonthlyFeeCents?: number
+  tiers: TimeOfUseTier[]
+}
+
+type RateStructure =
+  | FixedRateStructure
+  | VariableRateStructure
+  | TimeOfUseRateStructure
+```
+
+- `RateType` must stay in sync with the Prisma enum used for persisted plans.
+- `RateStructure` is machine-usable: the rate engine can simulate hourly or interval costs from this data without manual intervention.
+- `variableNotes` is for presentation only; pricing logic depends on `currentBillEnergyRateCents` and `indexType`.
+
+### Manual Entry UI Expectations
+- **Step 1 — Plan type selection:** `Fixed rate`, `Variable / Indexed rate`, or `Time-of-Use (different rates by time of day)`.
+- **Step 2 — Type-specific inputs:**
+  - **Fixed:** Provider, Plan Name (existing fields), Flat Energy Rate (¢/kWh), optional Base Monthly Fee → produces `type: 'FIXED'`.
+  - **Variable / Indexed:** Provider, Plan Name, Current bill effective energy rate (¢/kWh), optional Base Monthly Fee, Index Type select (`ERCOT`, `Fuel`, `Other`), optional notes → produces `type: 'VARIABLE'`.
+  - **Time-of-Use:** Provider, Plan Name, optional Base Monthly Fee, plus dynamic tiers (label, price, start time, end time, days of week with "All days" helper, optional months Jan–Dec) with add/remove controls → produces `type: 'TIME_OF_USE'` with `tiers`.
+
+### Shared Rate Engine Contract
+- The rate comparison engine ingests the same `RateStructure` shape for manual current plans and normalized vendor offers.
+- Normalizing all sources to this contract keeps comparison logic consistent between a user’s current plan and third-party plans surfaced in IntelliWatt recommendations.
+
 ## Validation Rules
 
 ### Address Validation
