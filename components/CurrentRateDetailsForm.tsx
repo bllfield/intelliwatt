@@ -46,6 +46,7 @@ type ManualEntryPayload = {
   rateStructure: RateStructure;
   energyRateCents?: number | null;
   baseMonthlyFee?: number | null;
+  billCreditDollars?: number | null;
   termLengthMonths?: number | null;
   contractEndDate?: string | null;
   earlyTerminationFee?: number | null;
@@ -128,6 +129,7 @@ export function CurrentRateDetailsForm({
   const [rateType, setRateType] = useState<RateType>("FIXED");
   const [primaryRateCentsPerKwh, setPrimaryRateCentsPerKwh] = useState("");
   const [baseFeeDollars, setBaseFeeDollars] = useState("");
+  const [billCreditDollars, setBillCreditDollars] = useState("");
   const [variableIndexType, setVariableIndexType] = useState<VariableRateIndexType | "">("");
   const [variableNotes, setVariableNotes] = useState("");
   const [touTiers, setTouTiers] = useState<TimeOfUseTierForm[]>([createEmptyTier()]);
@@ -315,6 +317,7 @@ export function CurrentRateDetailsForm({
     const providerName = electricCompany.trim();
     const currentPlanName = planName.trim();
     const baseCharge = parseNumber(baseFeeDollars);
+    const billCredit = parseNumber(billCreditDollars);
     const termLength = parseNumber(termLengthMonths);
     const earlyTermination = parseNumber(earlyTerminationFee);
     const contractDate = contractExpiration.trim().length > 0 ? new Date(contractExpiration) : null;
@@ -336,6 +339,9 @@ export function CurrentRateDetailsForm({
       if (termLength === null || termLength <= 0 || !Number.isInteger(termLength)) {
         validationErrors.push("Term length must be a whole number of months greater than zero.");
       }
+    }
+    if (billCreditDollars.trim().length > 0 && (billCredit === null || billCredit < 0)) {
+      validationErrors.push("Bill credit must be zero or a positive number.");
     }
     if (earlyTerminationFee.trim().length > 0) {
       if (earlyTermination === null || earlyTermination < 0) {
@@ -477,6 +483,7 @@ export function CurrentRateDetailsForm({
       rateStructure: rateStructure!,
       energyRateCents: energyRateForPayload,
       baseMonthlyFee: baseCharge ?? null,
+      billCreditDollars: billCredit ?? null,
       termLengthMonths:
         termLengthMonths.trim().length > 0 ? Number(Math.round(termLength ?? 0)) : null,
       contractEndDate: contractDate ? contractDate.toISOString() : null,
@@ -681,6 +688,20 @@ export function CurrentRateDetailsForm({
               onChange={(e) => setBaseFeeDollars(e.target.value)}
               className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm transition focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/40"
               placeholder="e.g., 4.95"
+            />
+          </label>
+
+          <label className="block space-y-1 text-sm text-brand-navy">
+            <span className="font-semibold uppercase tracking-wide text-brand-navy/80">
+              Bill credit ($, optional)
+            </span>
+            <input
+              type="number"
+              inputMode="decimal"
+              value={billCreditDollars}
+              onChange={(e) => setBillCreditDollars(e.target.value)}
+              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm transition focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/40"
+              placeholder="e.g., 100"
             />
           </label>
 

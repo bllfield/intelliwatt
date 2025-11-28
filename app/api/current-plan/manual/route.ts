@@ -57,6 +57,7 @@ type ManualEntryPayload = {
   rateType?: unknown;
   energyRateCents?: unknown;
   baseMonthlyFee?: unknown;
+  billCreditDollars?: unknown;
   rateStructure?: unknown;
   termLengthMonths?: unknown;
   contractEndDate?: unknown;
@@ -398,6 +399,16 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    const billCreditInput = parseNumber(body.billCreditDollars);
+    let billCredit: CurrentPlanPrisma.Decimal | null = null;
+    if (billCreditInput !== null) {
+      if (billCreditInput < 0) {
+        errors.push('billCreditDollars cannot be negative.');
+      } else {
+        billCredit = decimalFromNumber(billCreditInput, 8, 2);
+      }
+    }
+
     const termLengthInput = parseNumber(body.termLengthMonths);
     let termLengthMonths: number | null = null;
     if (termLengthInput !== null) {
@@ -506,6 +517,7 @@ export async function POST(request: NextRequest) {
         rateType,
         energyRateCents: energyRateCents ?? undefined,
         baseMonthlyFee,
+        billCreditDollars: billCredit ?? undefined,
         termLengthMonths: termLengthMonths ?? undefined,
         contractEndDate: contractEndDate ?? undefined,
         earlyTerminationFee,

@@ -27,6 +27,7 @@
   - ⬜ **API Dataset Normalization**:
     - Separate per-API raw datasets (WattBuy, EnergyBot, etc.) and a master normalized dataset with null-safe handling so empty fields don’t break the UI.
   - The `RateStructure` contract in `docs/API_CONTRACTS.md` is the shared shape for user-entered current plans and normalized vendor offers so the rate engine can cost fixed, variable, and TOU plans uniformly.
+  - Store `billCredits` alongside each plan’s `RateStructure` so the comparison engine can apply credits automatically when monthly usage falls inside the configured ranges.
 
 ### Current Plan Module Progress (Updated 2025-11-27)
 
@@ -50,6 +51,8 @@
       ```
 - [x] Design a unified `RateStructure` contract for manual Current Plan entries (supports FIXED, VARIABLE, TIME_OF_USE) so the rate comparison engine can use the same logic on user-entered plans and vendor offers.
 - [x] Wire the Current Plan UI + DB to capture `RateStructure` for variable and TOU plans (additional form fields + DB storage) after the initial fixed-rate wiring and entry counter integration are stable.
+- [x] Define `BillCreditStructure` (BillCreditRule + BillCreditStructure) in `docs/API_CONTRACTS.md` and attach it to `RateStructure` via `billCredits`.
+- [ ] Add a Bill Credits UI section to the Current Plan manual entry form (Option 2) and persist the resulting `BillCreditStructure` so the rate engine can simulate bill-credit plans.
 - [ ] Normalize vendor offer ingestion to populate the shared `RateStructure`, then adapt the comparison engine to cost fixed, variable, and TOU offers with the same code path as user-entered plans.
 
 ### PC-2025-11-25-K — Keeper Cleanup Runbook (Chat-Driven)

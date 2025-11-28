@@ -148,20 +148,6 @@ Manual current plan entries and the internal rate comparison engine share a unif
 ```ts
 type RateType = 'FIXED' | 'VARIABLE' | 'TIME_OF_USE'
 
-interface FixedRateStructure {
-  type: 'FIXED'
-  energyRateCents: number          // flat ¢/kWh for all hours
-  baseMonthlyFeeCents?: number     // base charge (monthly) in cents
-}
-
-interface VariableRateStructure {
-  type: 'VARIABLE'
-  currentBillEnergyRateCents: number   // ¢/kWh for the most recent bill
-  baseMonthlyFeeCents?: number
-  indexType?: 'ERCOT' | 'FUEL' | 'OTHER'  // optional classifier to match EFL/rate engine
-  variableNotes?: string                 // optional, display-only descriptor
-}
-
 interface TimeOfUseTier {
   label: string                     // e.g. "Free Nights", "Peak", "Off-Peak"
   priceCents: number                // ¢/kWh for this tier (0 allowed for "free")
@@ -171,9 +157,27 @@ interface TimeOfUseTier {
   monthsOfYear?: number[]           // [1..12] when seasonal; omit for all-year tiers
 }
 
-interface TimeOfUseRateStructure {
-  type: 'TIME_OF_USE'
+interface BaseRateStructure {
+  type: RateType
   baseMonthlyFeeCents?: number
+  // Optional bill credits applied at the bill level.
+  billCredits?: BillCreditStructure | null
+}
+
+interface FixedRateStructure extends BaseRateStructure {
+  type: 'FIXED'
+  energyRateCents: number          // flat ¢/kWh for all hours
+}
+
+interface VariableRateStructure extends BaseRateStructure {
+  type: 'VARIABLE'
+  currentBillEnergyRateCents: number   // ¢/kWh for the most recent bill
+  indexType?: 'ERCOT' | 'FUEL' | 'OTHER'  // optional classifier to match EFL/rate engine
+  variableNotes?: string                 // optional, display-only descriptor
+}
+
+interface TimeOfUseRateStructure extends BaseRateStructure {
+  type: 'TIME_OF_USE'
   tiers: TimeOfUseTier[]
 }
 
@@ -187,6 +191,31 @@ type RateStructure =
 - `RateStructure` is machine-usable: the rate engine can simulate hourly or interval costs from this data without manual intervention.
 - `variableNotes` is for presentation only; pricing logic depends on `currentBillEnergyRateCents` and `indexType`.
 
+### Bill Credit Structure
+
+```ts
+// Applies to typical Texas “bill credit” plans where you get a fixed
+// dollar credit when your monthly usage falls within a kWh range.
+interface BillCreditRule {
+  label: string
+  creditAmountCents: number          // positive value, e.g. 10000 = $100 credit
+
+  // Monthly kWh usage range where this credit applies.
+  minUsageKWh: number                // inclusive lower bound, e.g. 1000
+  maxUsageKWh?: number               // optional upper bound, e.g. 2000; if omitted = no upper limit
+
+  // Optional seasonality. If omitted, credit applies all year.
+  monthsOfYear?: number[]            // 1..12 for Jan..Dec
+}
+
+interface BillCreditStructure {
+  hasBillCredit: boolean
+  rules: BillCreditRule[]
+}
+```
+
+Bill credits are modeled as one or more `BillCreditRule` entries. Each rule describes a flat credit amount (in cents), the monthly usage range where it applies, and optional seasonal months. The rate engine can simulate any month’s bill, determine which rules apply based on kWh usage, and subtract the credit amount from the total. This mirrors common TX EFL language such as “$100 bill credit when usage is between 1000 and 2000 kWh.”
+
 ### Manual Entry UI Expectations
 - **Step 1 — Plan type selection:** `Fixed rate`, `Variable / Indexed rate`, or `Time-of-Use (different rates by time of day)`.
 - **Step 2 — Type-specific inputs:**
@@ -194,9 +223,44 @@ type RateStructure =
   - **Variable / Indexed:** Provider, Plan Name, Current bill effective energy rate (¢/kWh), optional Base Monthly Fee, Index Type select (`ERCOT`, `Fuel`, `Other`), optional notes → produces `type: 'VARIABLE'`.
   - **Time-of-Use:** Provider, Plan Name, optional Base Monthly Fee, plus dynamic tiers (label, price, start time, end time, days of week with "All days" helper, optional months Jan–Dec) with add/remove controls → produces `type: 'TIME_OF_USE'` with `tiers`.
 
+#### Manual Entry – Bill Credits
+- Add a **“Bill credits (if applicable)”** section beneath the manual entry fields.
+- UI elements:
+  - Toggle/checkbox: “This plan includes bill credits.”
+  - When enabled, show one or more **Bill Credit** blocks (Bill Credit 1, Bill Credit 2, …) with:
+    - Credit label (text, e.g., “$100 credit at 1000–2000 kWh”)
+    - Credit amount ($)
+    - Minimum monthly usage (kWh)
+    - Maximum monthly usage (kWh, optional if no cap)
+    - Months (optional checkboxes Jan–Dec with an “All months” helper)
+  - Button: “+ Add another bill credit” to append additional rules.
+- Submitted data must map to:
+  ```ts
+  billCredits: {
+    hasBillCredit: boolean
+    rules: BillCreditRule[]
+  }
+  ```
+  Example input — $100 credit between 1000 and 2000 kWh for all months — becomes:
+  ```json
+  {
+    "hasBillCredit": true,
+    "rules": [
+      {
+        "label": "User-entered label",
+        "creditAmountCents": 10000,
+        "minUsageKWh": 1000,
+        "maxUsageKWh": 2000,
+        "monthsOfYear": null
+      }
+    ]
+  }
+  ```
+
 ### Shared Rate Engine Contract
 - The rate comparison engine ingests the same `RateStructure` shape for manual current plans and normalized vendor offers.
 - Normalizing all sources to this contract keeps comparison logic consistent between a user’s current plan and third-party plans surfaced in IntelliWatt recommendations.
+- When simulating monthly bills, the engine evaluates `billCredits.rules`, applies credits where `minUsageKWh <= usage < maxUsageKWh` (or no max), and subtracts the credit amount from that month’s total—uniformly across fixed, variable, and TOU plans because the data hangs off `BaseRateStructure`.
 
 ## Validation Rules
 

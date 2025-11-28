@@ -24,6 +24,7 @@ model CurrentPlanManualEntry {
   rateType           CurrentPlanRateType
   energyRateCents    Decimal?             @currentPlanDb.Decimal(8, 4)
   baseMonthlyFee     Decimal?             @currentPlanDb.Decimal(8, 2)
+  billCreditDollars  Decimal?             @currentPlanDb.Decimal(8, 2)
   termLengthMonths   Int?
   contractEndDate    DateTime?
   earlyTerminationFee Decimal?            @currentPlanDb.Decimal(8, 2)
