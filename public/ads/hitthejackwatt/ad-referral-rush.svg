@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1200" height="1200" viewBox="0 0 1200 1200" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="referral-night" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0%" stop-color="#1a003d"/>
+      <stop offset="50%" stop-color="#32004f"/>
+      <stop offset="100%" stop-color="#4c0060"/>
+    </linearGradient>
+    <radialGradient id="referral-magenta" cx="0.78" cy="0.25" r="0.85">
+      <stop offset="0%" stop-color="#ff00ff" stop-opacity="0.46"/>
+      <stop offset="60%" stop-color="#ff00ff" stop-opacity="0.16"/>
+      <stop offset="100%" stop-color="#ff00ff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="referral-green" cx="0.2" cy="0.8" r="0.75">
+      <stop offset="0%" stop-color="#39ff14" stop-opacity="0.32"/>
+      <stop offset="55%" stop-color="#39ff14" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#39ff14" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="referral-grid" width="52" height="52" patternUnits="userSpaceOnUse">
+      <path d="M0 0h52v52H0z" fill="none" stroke="#4a1b72" stroke-width="1"/>
+      <circle cx="26" cy="26" r="3" fill="#ff00ff" opacity="0.18"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="1200" fill="url(#referral-night)"/>
+  <rect width="1200" height="1200" fill="url(#referral-grid)" opacity="0.22"/>
+  <rect width="1200" height="1200" fill="url(#referral-magenta)"/>
+  <rect width="1200" height="1200" fill="url(#referral-green)"/>
+  <circle cx="260" cy="340" r="220" fill="#39ff14" opacity="0.16"/>
+  <circle cx="940" cy="900" r="260" fill="#ff00ff" opacity="0.18"/>
+  <rect x="120" y="210" width="340" height="40" rx="20" fill="rgba(0,0,0,0.4)" stroke="#ff00ff" stroke-width="2"/>
+  <text x="150" y="238" fill="#ff7bff" font-family="Montserrat, 'Segoe UI', sans-serif" font-size="22" font-weight="700" letter-spacing="4">
+    REFERRAL POWER-UP
+  </text>
+  <text x="120" y="320" fill="#ffffff" font-family="Montserrat, 'Segoe UI', sans-serif" font-size="64" font-weight="600" letter-spacing="5">
+    HitTheJackWatt<tspan font-size="26" baseline-shift="super">&#8482;</tspan>
+  </text>
+  <text x="120" y="410" fill="#ff00ff" font-family="Montserrat, 'Segoe UI', sans-serif" font-size="130" font-weight="900" letter-spacing="4">
+    INVITE &amp; WIN
+  </text>
+  <text x="120" y="500" fill="#39ff14" font-family="Montserrat, 'Segoe UI', sans-serif" font-size="86" font-weight="800">
+    DOUBLE ENTRIES
+  </text>
+  <text x="120" y="575" fill="#ffe9ff" font-family="Montserrat, 'Segoe UI', sans-serif" font-size="34" font-weight="600">
+    Share your jackpot link. We handle the follow-up, you bank the bonus entries.
+  </text>
+  <text x="120" y="630" fill="#f7c9ff" font-family="Montserrat, 'Segoe UI', sans-serif" font-size="30" font-weight="400">
+    • Every qualified friend earns you both a verified HitTheJackWatt jackpot entry.
+  </text>
+  <text x="120" y="680" fill="#f7c9ff" font-family="Montserrat, 'Segoe UI', sans-serif" font-size="30" font-weight="400">
+    • Automated reminders keep invitees on track through Smart Meter Texas or manual uploads.
+  </text>
+  <text x="120" y="730" fill="#f7c9ff" font-family="Montserrat, 'Segoe UI', sans-serif" font-size="30" font-weight="400">
+    • Track invite status, payouts, and testimonials inside the IntelliWatt referral hub.
+  </text>
+  <rect x="120" y="810" width="560" height="118" rx="59" fill="#39ff14" opacity="0.94"/>
+  <text x="165" y="885" fill="#061521" font-family="Montserrat, 'Segoe UI', sans-serif" font-size="44" font-weight="800" letter-spacing="1">
+    Send My HitTheJackWatt Referral Link
+  </text>
+  <text x="120" y="995" fill="#ffb7ff" font-family="Montserrat, 'Segoe UI', sans-serif" font-size="28" font-weight="500">
+    Monthly drawings • Verified entries • Official rules apply • Powered by IntelliWatt
+  </text>
+</svg>
+

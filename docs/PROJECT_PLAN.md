@@ -1,3 +1,39 @@
+## Module Databases & Env Setup
+
+- [x] Define module database env vars in `ENV_VARS.md` (`CURRENT_PLAN_DATABASE_URL`, `USAGE_DATABASE_URL`, `HOME_DETAILS_DATABASE_URL`, `APPLIANCES_DATABASE_URL`, `UPGRADES_DATABASE_URL`, `OFFERS_DATABASE_URL`, `REFERRALS_DATABASE_URL`) so each subsystem can run on its own database.
+- [ ] Create each corresponding database on the DigitalOcean Postgres cluster (e.g., `intelliwatt_current_plan`, `intelliwatt_usage`, `intelliwatt_home_details`, etc.).
+- [ ] Add every module DB connection string to Vercel Project Settings (prod) and `.env` (dev), using the exact variable names documented in `ENV_VARS.md`.
+- [ ] Gradually refactor Usage, Home Details, Appliances, Upgrades, Offers, and Referrals to follow the Current Plan pattern: module DB ingestion → normalize into the master DB.
+- Current Plan is the **first module** fully wired to a separate database and normalized into the master dataset. Usage, Home Details, Appliances, Upgrades, Offers, and Referrals will follow the same "module DB → normalization → master DB" pattern using the env vars defined in `docs/ENV_VARS.md`.
+
+### Current Plan Module Migrations
+
+- Schema: `prisma/current-plan/schema.prisma`
+- Migrations dir: `prisma/current-plan/migrations`
+- Database: `CURRENT_PLAN_DATABASE_URL` → `intelliwatt_current_plan`
+
+Dev (PowerShell, repo root):
+```powershell
+# Generate Current Plan Prisma client
+npx prisma generate --schema=prisma/current-plan/schema.prisma
+
+# Create/apply module migrations (baseline + future)
+npx prisma migrate dev `
+  --schema=prisma/current-plan/schema.prisma `
+  --migrations-dir=prisma/current-plan/migrations `
+  --name init_current_plan_module
+```
+
+Prod / droplet:
+```bash
+npx prisma migrate deploy \
+  --schema=prisma/current-plan/schema.prisma \
+  --migrations-dir=prisma/current-plan/migrations
+```
+
+Notes:
+- Before Nov 2025 the module attempted to share `prisma/migrations` with the master schema, which caused drift and table-not-found errors. As of now the Current Plan module uses its own schema + migrations directory; a fresh baseline should be generated against an empty `intelliwatt_current_plan` database.
+- The master schema (`prisma/schema.prisma`) continues to use `prisma/migrations`. Do **not** mix Current Plan migrations into that folder.
 ## TODO
 - [ ] Add meter number photo uploader to the SMT authorization flow so customers can upload a picture of their bill or meter for verification.
 
@@ -14,6 +50,7 @@
     - An IntelliWatt-focused share block (plan-savings / smart-meter automation message + referral URL).
     - Each block has a pre-written social media message, a “Copy message” button, and multi-network share links using the latest ad creatives.
   - ✅ IntelliWatt universal social-media referral ad creative (neon IntelliWatt branding, no platform icons) defined for future export/use.
+- [x] Create initial HitTheJackWatt™ Facebook ad copy library (marketing/hitthejackwatt_facebook_ads.md) for referral and jackpot promotion.
   - ⬜ OPTIONAL: Generate multiple ad sizes (square, story, landscape) and wire in per-user referral URLs for downloadable creatives.
 
 - **Remaining To-Dos from the current checklist**
@@ -52,8 +89,13 @@
 - [x] Design a unified `RateStructure` contract for manual Current Plan entries (supports FIXED, VARIABLE, TIME_OF_USE) so the rate comparison engine can use the same logic on user-entered plans and vendor offers.
 - [x] Wire the Current Plan UI + DB to capture `RateStructure` for variable and TOU plans (additional form fields + DB storage) after the initial fixed-rate wiring and entry counter integration are stable.
 - [x] Define `BillCreditStructure` (BillCreditRule + BillCreditStructure) in `docs/API_CONTRACTS.md` and attach it to `RateStructure` via `billCredits`.
-- [ ] Add a Bill Credits UI section to the Current Plan manual entry form (Option 2) and persist the resulting `BillCreditStructure` so the rate engine can simulate bill-credit plans.
+- [x] Wire the Current Rate manual entry form to `/api/current-plan/manual` so the module DB stores the full `RateStructure` object (fixed, variable, TOU, and bill credits).
+- [x] Normalize manual Current Plan entries into the master `NormalizedCurrentPlan` table for downstream rate comparisons.
+- [x] Run Prisma generate + migrate for the Current Plan module schema and master schema (dev + prod) so the pipeline is live end-to-end.
 - [ ] Normalize vendor offer ingestion to populate the shared `RateStructure`, then adapt the comparison engine to cost fixed, variable, and TOU offers with the same code path as user-entered plans.
+- [ ] Use `NormalizedCurrentPlan` in the Rate Plan Analyzer UI (future step once normalization + master data is live).
+
+<!-- Dev + Prod Prisma migrations completed for Current Plan module + master schema on 2025-11-28 -->
 
 ### PC-2025-11-25-K — Keeper Cleanup Runbook (Chat-Driven)
 

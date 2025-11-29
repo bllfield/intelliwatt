@@ -7,6 +7,13 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum RateType {
+  FIXED
+  VARIABLE
+  TIME_OF_USE
+  OTHER
+}
+
 model User {
   id                String             @id @default(cuid())
   email             String             @unique
@@ -233,6 +240,29 @@ model ManualUsageUpload {
   @@index([userId])
   @@index([houseId])
   @@index([expiresAt])
+}
+
+model NormalizedCurrentPlan {
+  id                  String   @id @default(cuid())
+  userId              String?
+  homeId              String?
+  providerName        String
+  planName            String
+  rateType            RateType
+  rateStructure       Json
+  flatEnergyRateCents Decimal? @db.Decimal(8, 4)
+  baseMonthlyFeeCents Decimal? @db.Decimal(10, 2)
+  termLengthMonths    Int?
+  contractEndDate     DateTime?
+  sourceModule        String   @default("current-plan")
+  sourceEntryId       String
+  sourceUpdatedAt     DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([userId])
+  @@index([homeId])
+  @@unique([sourceModule, sourceEntryId])
 }
 
 model EntryExpiryDigest {

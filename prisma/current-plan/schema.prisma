@@ -1,6 +1,11 @@
+/// NOTE: This schema uses its own migrations directory:
+///   prisma/current-plan/migrations
+/// Run Prisma CLI with:
+///   --schema=prisma/current-plan/schema.prisma
+///   --migrations-dir=prisma/current-plan/migrations
 generator currentPlanClient {
   provider = "prisma-client-js"
-  output   = "../node_modules/@prisma/current-plan-client"
+  output   = "../../node_modules/@prisma/current-plan-client"
 }
 
 datasource currentPlanDb {
@@ -32,6 +37,7 @@ model CurrentPlanManualEntry {
   accountNumberLast4 String?
   notes              String?              @currentPlanDb.Text
   rateStructure      Json?
+  normalizedAt       DateTime?
   createdAt          DateTime             @default(now())
   updatedAt          DateTime             @updatedAt
 

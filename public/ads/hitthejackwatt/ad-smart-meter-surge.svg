@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1200" height="1200" viewBox="0 0 1200 1200" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="smart-night" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0%" stop-color="#0c0630"/>
+      <stop offset="50%" stop-color="#05194b"/>
+      <stop offset="100%" stop-color="#003c5f"/>
+    </linearGradient>
+    <radialGradient id="smart-cyan" cx="0.75" cy="0.25" r="0.9">
+      <stop offset="0%" stop-color="#00ffff" stop-opacity="0.45"/>
+      <stop offset="60%" stop-color="#00ffff" stop-opacity="0.14"/>
+      <stop offset="100%" stop-color="#00ffff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="smart-green" cx="0.18" cy="0.78" r="0.8">
+      <stop offset="0%" stop-color="#39ff14" stop-opacity="0.32"/>
+      <stop offset="55%" stop-color="#39ff14" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#39ff14" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="smart-lines" width="56" height="56" patternUnits="userSpaceOnUse">
+      <path d="M0 0h56v56H0z" fill="none" stroke="#1c4870" stroke-width="1"/>
+      <circle cx="0" cy="0" r="2" fill="#00ffff" opacity="0.15"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="1200" fill="url(#smart-night)"/>
+  <rect width="1200" height="1200" fill="url(#smart-lines)" opacity="0.22"/>
+  <rect width="1200" height="1200" fill="url(#smart-cyan)"/>
+  <rect width="1200" height="1200" fill="url(#smart-green)"/>
+  <circle cx="280" cy="320" r="210" fill="#00ffff" opacity="0.18"/>
+  <path d="M220 860 C420 680 610 1040 820 860" stroke="#00ffff" stroke-width="18" stroke-linecap="round" stroke-linejoin="round" opacity="0.35" fill="none"/>
+  <path d="M760 290 C910 380 840 520 960 630" stroke="#39ff14" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" opacity="0.35" fill="none"/>
+  <rect x="120" y="200" width="300" height="40" rx="20" fill="rgba(0,0,0,0.35)" stroke="#00ffff" stroke-width="2"/>
+  <text x="150" y="228" fill="#00ffff" font-family="Montserrat, 'Segoe UI', sans-serif" font-size="22" font-weight="700" letter-spacing="4">
+    SMART METER MODE
+  </text>
+  <text x="120" y="310" fill="#ffffff" font-family="Montserrat, 'Segoe UI', sans-serif" font-size="64" font-weight="600" letter-spacing="5">
+    HitTheJackWatt<tspan font-size="26" baseline-shift="super">&#8482;</tspan>
+  </text>
+  <text x="120" y="408" fill="#00ffff" font-family="Montserrat, 'Segoe UI', sans-serif" font-size="120" font-weight="900" letter-spacing="3">
+    AUTOPILOT
+  </text>
+  <text x="120" y="488" fill="#39ff14" font-family="Montserrat, 'Segoe UI', sans-serif" font-size="82" font-weight="800">
+    SMART METER SYNC
+  </text>
+  <text x="120" y="565" fill="#e3fbff" font-family="Montserrat, 'Segoe UI', sans-serif" font-size="34" font-weight="600">
+    Connect once. Let IntelliWatt pull verified usage every day.
+  </text>
+  <text x="120" y="620" fill="#b9eaff" font-family="Montserrat, 'Segoe UI', sans-serif" font-size="30" font-weight="400">
+    • Automated Smart Meter Texas interval imports keep jackpot entries active.
+  </text>
+  <text x="120" y="670" fill="#b9eaff" font-family="Montserrat, 'Segoe UI', sans-serif" font-size="30" font-weight="400">
+    • See live usage insights, alerts, and jackpot status in the IntelliWatt dashboard.
+  </text>
+  <text x="120" y="720" fill="#b9eaff" font-family="Montserrat, 'Segoe UI', sans-serif" font-size="30" font-weight="400">
+    • Layer manual uploads any time for extra context or bonus entry checks.
+  </text>
+  <rect x="120" y="800" width="560" height="118" rx="59" fill="#00ffff" opacity="0.92"/>
+  <text x="165" y="875" fill="#012035" font-family="Montserrat, 'Segoe UI', sans-serif" font-size="44" font-weight="800" letter-spacing="1">
+    Sync My Smart Meter with IntelliWatt
+  </text>
+  <text x="120" y="990" fill="#8dd6ff" font-family="Montserrat, 'Segoe UI', sans-serif" font-size="28" font-weight="500">
+    Free to join • Cancel anytime • Encrypted SMT connections handled for you
+  </text>
+</svg>
+

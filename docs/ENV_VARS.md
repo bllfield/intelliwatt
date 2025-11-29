@@ -15,7 +15,23 @@
 - `GREENBUTTON_API_KEY` — (future) Green Button API access
 
 ## Databases
+- `DATABASE_URL` — Primary IntelliWatt application database (master normalized dataset; used by `prisma/schema.prisma`).
 - `CURRENT_PLAN_DATABASE_URL` — **Separate PostgreSQL database dedicated to the Current Plan / Current Rate module.** Must not reuse the primary `DATABASE_URL`. Point this to a distinct database instance (e.g., `intelliwatt_current_plan`) created just for manual plan entries and bill uploads.
+- `USAGE_DATABASE_URL` — Module DB for raw and processed usage data (SMT intervals, Green Button uploads, manual entries) before normalization into master usage tables.
+- `HOME_DETAILS_DATABASE_URL` — Module DB for home characteristics and energy-impact factors (square footage, insulation, windows, thermostat habits, HVAC type, etc.).
+- `APPLIANCES_DATABASE_URL` — Module DB for appliance inventory, schedules, and per-appliance usage modeling (including future photo/label analysis).
+- `UPGRADES_DATABASE_URL` — Module DB for energy-efficiency upgrades, quotes, financing options, and scenario planning.
+- `OFFERS_DATABASE_URL` — Module DB for third-party plan offers and rate card data prior to mapping into the master normalized offers dataset.
+- `REFERRALS_DATABASE_URL` — Module DB for referrals, HitTheJackWatt entries, referral tracking, and jackpot accounting.
+
+### Database Setup Notes
+- Each module DB should live on the same DigitalOcean Postgres cluster as the main `DATABASE_URL`, but use a unique database name (e.g., `intelliwatt_current_plan`, `intelliwatt_usage`, `intelliwatt_home_details`, etc.).
+- In **dev**, define these URLs in `.env` (never commit secrets).
+- In **prod**, configure each env var in Vercel Project Settings → Environment Variables.
+- Prisma schemas:
+  - `prisma/schema.prisma` → uses `DATABASE_URL` (master DB).
+  - `prisma/current-plan.schema.prisma` → uses `CURRENT_PLAN_DATABASE_URL` (Current Plan module).
+  - Future module schemas will follow the same pattern (`*.schema.prisma` pointing at their corresponding `*_DATABASE_URL`).
 
 ## SMT Inline Ingest (Vercel ↔ Droplet)
 - **Vercel env (required):**

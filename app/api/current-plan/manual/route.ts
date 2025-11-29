@@ -4,6 +4,7 @@ import { normalizeEmail } from '@/lib/utils/email';
 import { prisma } from '@/lib/db';
 import { getCurrentPlanPrisma, CurrentPlanPrisma } from '@/lib/prismaCurrentPlan';
 import { ensureCurrentPlanEntry } from '@/lib/current-plan/ensureEntry';
+import { normalizeCurrentPlanForUserOrHome } from '@/lib/normalization/currentPlan';
 
 const VALID_RATE_TYPES = new Set(['FIXED', 'VARIABLE', 'TIME_OF_USE', 'OTHER']);
 const VALID_VARIABLE_INDEX_TYPES = new Set(['ERCOT', 'FUEL', 'OTHER']);
@@ -633,29 +634,54 @@ export async function POST(request: NextRequest) {
     }
 
     const currentPlanPrisma = getCurrentPlanPrisma();
+    const manualEntryDelegate = currentPlanPrisma.currentPlanManualEntry as any;
 
-    const entry = await currentPlanPrisma.currentPlanManualEntry.create({
-      data: {
+    const entryData = {
         userId: user.id,
-        houseId,
+      houseId: houseId ?? null,
         providerName,
         planName,
         rateType,
-        energyRateCents: energyRateCents ?? undefined,
+      energyRateCents: energyRateCents ?? undefined,
         baseMonthlyFee,
-        billCreditDollars: billCreditSummary ?? undefined,
+      billCreditDollars: billCreditSummary ?? undefined,
         termLengthMonths: termLengthMonths ?? undefined,
         contractEndDate: contractEndDate ?? undefined,
         earlyTerminationFee,
         esiId,
         accountNumberLast4,
         notes,
-        rateStructure: rateStructure ?? undefined,
+      rateStructure: rateStructure ?? undefined,
+      normalizedAt: null,
+    };
+
+    const existingEntry = await manualEntryDelegate.findFirst({
+      where: {
+        userId: user.id,
+        ...(houseId ? { houseId } : { houseId: null }),
       },
+      orderBy: { updatedAt: 'desc' },
+      select: { id: true },
+    });
+
+    const entry = existingEntry
+      ? await manualEntryDelegate.update({
+          where: { id: existingEntry.id },
+          data: entryData,
+          select: { id: true },
+        })
+      : await manualEntryDelegate.create({
+          data: entryData,
       select: { id: true },
     });
 
     const entryResult = await ensureCurrentPlanEntry(user.id, houseId);
+
+    try {
+      await normalizeCurrentPlanForUserOrHome({ userId: user.id, homeId: houseId ?? undefined });
+    } catch (normalizationError) {
+      console.error('[current-plan/manual] Failed to normalize current plan', normalizationError);
+    }
 
     return NextResponse.json({
       ok: true,

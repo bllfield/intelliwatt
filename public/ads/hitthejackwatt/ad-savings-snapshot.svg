@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1200" height="1200" viewBox="0 0 1200 1200" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="savings-night" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0%" stop-color="#031527"/>
+      <stop offset="50%" stop-color="#062b3f"/>
+      <stop offset="100%" stop-color="#0d4253"/>
+    </linearGradient>
+    <radialGradient id="savings-cyan" cx="0.78" cy="0.24" r="0.85">
+      <stop offset="0%" stop-color="#00f3ff" stop-opacity="0.45"/>
+      <stop offset="55%" stop-color="#00f3ff" stop-opacity="0.16"/>
+      <stop offset="100%" stop-color="#00f3ff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="savings-green" cx="0.25" cy="0.78" r="0.8">
+      <stop offset="0%" stop-color="#39ff14" stop-opacity="0.32"/>
+      <stop offset="55%" stop-color="#39ff14" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#39ff14" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="savings-mesh" width="60" height="60" patternUnits="userSpaceOnUse">
+      <path d="M0 0h60v60H0z" fill="none" stroke="#135572" stroke-width="1"/>
+      <path d="M0 60L60 0" stroke="#0a3c54" stroke-width="1" opacity="0.4"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="1200" fill="url(#savings-night)"/>
+  <rect width="1200" height="1200" fill="url(#savings-mesh)" opacity="0.25"/>
+  <rect width="1200" height="1200" fill="url(#savings-cyan)"/>
+  <rect width="1200" height="1200" fill="url(#savings-green)"/>
+  <circle cx="920" cy="320" r="240" fill="#00f3ff" opacity="0.16"/>
+  <circle cx="260" cy="880" r="260" fill="#39ff14" opacity="0.14"/>
+  <path d="M220 780 C400 600 640 900 860 720" stroke="#00f3ff" stroke-width="18" stroke-linecap="round" stroke-linejoin="round" opacity="0.42" fill="none"/>
+  <text x="120" y="240" fill="#39ff14" font-family="Montserrat, 'Segoe UI', sans-serif" font-size="60" font-weight="700" letter-spacing="5">
+    HitTheJackWatt<tspan font-size="26" baseline-shift="super">&#8482;</tspan>
+  </text>
+  <text x="120" y="336" fill="#ffffff" font-family="Montserrat, 'Segoe UI', sans-serif" font-size="120" font-weight="900" letter-spacing="4">
+    SAVINGS RADAR
+  </text>
+  <text x="120" y="420" fill="#00f3ff" font-family="Montserrat, 'Segoe UI', sans-serif" font-size="86" font-weight="800">
+    SCAN. VERIFY. SAVE.
+  </text>
+  <text x="120" y="500" fill="#d2fff0" font-family="Montserrat, 'Segoe UI', sans-serif" font-size="36" font-weight="600">
+    Real usage analysis meets jackpot rewards—all inside the IntelliWatt dashboard.
+  </text>
+  <text x="120" y="560" fill="#b4ffe0" font-family="Montserrat, 'Segoe UI', sans-serif" font-size="30" font-weight="400">
+    • Upload a recent bill for baseline insights, then automate Smart Meter Texas pulls for full accuracy.
+  </text>
+  <text x="120" y="610" fill="#b4ffe0" font-family="Montserrat, 'Segoe UI', sans-serif" font-size="30" font-weight="400">
+    • Compare your contract against curated Texas retail rate options vetted by IntelliWatt.
+  </text>
+  <text x="120" y="660" fill="#b4ffe0" font-family="Montserrat, 'Segoe UI', sans-serif" font-size="30" font-weight="400">
+    • Earn HitTheJackWatt jackpot entries every time you complete a verified energy milestone.
+  </text>
+  <rect x="120" y="750" width="580" height="118" rx="59" fill="#00f3ff" opacity="0.92"/>
+  <text x="165" y="825" fill="#012734" font-family="Montserrat, 'Segoe UI', sans-serif" font-size="44" font-weight="800" letter-spacing="1">
+    Launch My IntelliWatt Savings Dashboard
+  </text>
+  <text x="120" y="955" fill="#9dffe0" font-family="Montserrat, 'Segoe UI', sans-serif" font-size="28" font-weight="500">
+    IntelliWatt by Intellipath Solutions • Preview upgrades before you switch • Official rules apply
+  </text>
+</svg>
+

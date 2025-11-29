@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1200" height="1200" viewBox="0 0 1200 1200" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="jackpot-night" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0%" stop-color="#120038"/>
+      <stop offset="55%" stop-color="#240046"/>
+      <stop offset="100%" stop-color="#3a0061"/>
+    </linearGradient>
+    <radialGradient id="jackpot-neon" cx="0.82" cy="0.22" r="0.85">
+      <stop offset="0%" stop-color="#ff00ff" stop-opacity="0.45"/>
+      <stop offset="55%" stop-color="#ff00ff" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#ff00ff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="jackpot-glow" cx="0.18" cy="0.75" r="0.75">
+      <stop offset="0%" stop-color="#39ff14" stop-opacity="0.38"/>
+      <stop offset="55%" stop-color="#39ff14" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#39ff14" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="jackpot-grid" width="48" height="48" patternUnits="userSpaceOnUse">
+      <path d="M48 0H0V48" fill="none" stroke="#4c3a7a" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="1200" fill="url(#jackpot-night)"/>
+  <rect width="1200" height="1200" fill="url(#jackpot-grid)" opacity="0.28"/>
+  <rect width="1200" height="1200" fill="url(#jackpot-neon)"/>
+  <rect width="1200" height="1200" fill="url(#jackpot-glow)"/>
+  <circle cx="250" cy="360" r="190" fill="#00ffff" opacity="0.16"/>
+  <circle cx="970" cy="900" r="250" fill="#ff00ff" opacity="0.14"/>
+  <rect x="120" y="220" width="200" height="36" rx="18" fill="rgba(0,0,0,0.35)" stroke="#39ff14" stroke-width="2"/>
+  <text x="150" y="246" fill="#39ff14" font-family="Montserrat, 'Segoe UI', sans-serif" font-size="22" font-weight="700" letter-spacing="4">
+    LIVE JACKPOT
+  </text>
+  <text x="120" y="325" fill="#ffffff" font-family="Montserrat, 'Segoe UI', sans-serif" font-size="60" font-weight="600" letter-spacing="6">
+    HitTheJackWatt<tspan font-size="26" baseline-shift="super">&#8482;</tspan>
+  </text>
+  <text x="120" y="425" fill="#ff00ff" font-family="Montserrat, 'Segoe UI', sans-serif" font-size="150" font-weight="900" letter-spacing="4">
+    JACKPOT
+  </text>
+  <text x="120" y="515" fill="#ffffff" font-family="Montserrat, 'Segoe UI', sans-serif" font-size="88" font-weight="800" letter-spacing="2">
+    JUMPSTART
+  </text>
+  <text x="120" y="600" fill="#ffff68" font-family="Montserrat, 'Segoe UI', sans-serif" font-size="36" font-weight="600" letter-spacing="1">
+    Slash your bill. Stay in every monthly drawing.
+  </text>
+  <text x="120" y="660" fill="#cfc4ff" font-family="Montserrat, 'Segoe UI', sans-serif" font-size="30" font-weight="400">
+    Authorize Smart Meter Texas once and watch entries stack on autopilot.
+  </text>
+  <text x="120" y="710" fill="#cfc4ff" font-family="Montserrat, 'Segoe UI', sans-serif" font-size="30" font-weight="400">
+    IntelliWatt tracks verified usage, recommends smarter plans, and keeps you jackpot-ready.
+  </text>
+  <rect x="120" y="785" width="520" height="118" rx="59" fill="#39ff14" opacity="0.95"/>
+  <text x="165" y="860" fill="#0d0b26" font-family="Montserrat, 'Segoe UI', sans-serif" font-size="44" font-weight="800" letter-spacing="1">
+    Activate My Jackpot Dashboard
+  </text>
+  <text x="120" y="980" fill="#9ad6ff" font-family="Montserrat, 'Segoe UI', sans-serif" font-size="28" font-weight="500">
+    Powered by IntelliWatt • Official rules apply • Free to join
+  </text>
+</svg>
+
