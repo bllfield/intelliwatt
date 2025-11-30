@@ -17,9 +17,27 @@ async function run(command, args) {
   });
 }
 
+const path = require('path');
+const fs = require('fs');
+
 async function main() {
   await run('npx', ['prisma', 'generate']);
-  await run('npx', ['prisma', 'generate', '--schema=prisma/current-plan.schema.prisma']);
+
+  const repoRoot = path.join(__dirname, '..', '..');
+  const candidateSchemas = [
+    path.join(repoRoot, 'prisma', 'current-plan', 'schema.prisma'),
+    path.join(repoRoot, 'prisma', 'current-plan.schema.prisma'),
+  ];
+
+  const currentPlanSchema = candidateSchemas.find((schemaPath) => fs.existsSync(schemaPath));
+
+  if (!currentPlanSchema) {
+    throw new Error('Could not locate current plan Prisma schema in prisma/current-plan/');
+  }
+
+  const schemaArg = `--schema=${path.relative(process.cwd(), currentPlanSchema).replace(/\\/g, '/')}`;
+
+  await run('npx', ['prisma', 'generate', schemaArg]);
 }
 
 main().catch((error) => {
