@@ -1,4 +1,4 @@
-import { PrismaClient as WattbuyOffersPrismaClient } from '@/.prisma/wattbuy-offers-client';
+import { PrismaClient as WattbuyOffersPrismaClient } from '../../.prisma/wattbuy-offers-client';
 
 declare global {
   // eslint-disable-next-line no-var

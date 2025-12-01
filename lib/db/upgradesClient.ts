@@ -1,4 +1,4 @@
-import { PrismaClient as UpgradesPrismaClient } from '@/.prisma/upgrades-client';
+import { PrismaClient as UpgradesPrismaClient } from '../../.prisma/upgrades-client';
 
 declare global {
   // eslint-disable-next-line no-var

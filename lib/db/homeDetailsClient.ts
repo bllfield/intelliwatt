@@ -1,4 +1,4 @@
-import { PrismaClient as HomeDetailsPrismaClient } from '@/.prisma/home-details-client';
+import { PrismaClient as HomeDetailsPrismaClient } from '../../.prisma/home-details-client';
 
 declare global {
   // eslint-disable-next-line no-var

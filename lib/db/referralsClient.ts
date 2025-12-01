@@ -1,4 +1,4 @@
-import { PrismaClient as ReferralsPrismaClient } from '@/.prisma/referrals-client';
+import { PrismaClient as ReferralsPrismaClient } from '../../.prisma/referrals-client';
 
 declare global {
   // eslint-disable-next-line no-var
