@@ -11,13 +11,7 @@ import { cleanEsiid, resolveSmtEsiid } from '@/lib/smt/esiid';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const routeSegmentConfig = {
-  api: {
-    bodyParser: {
-      sizeLimit: '25mb',
-    },
-  },
-};
+export const sizeLimit = '25mb';
 
 const WEBHOOK_HEADERS = ['x-intelliwatt-secret', 'x-smt-secret', 'x-webhook-secret'] as const;
 
