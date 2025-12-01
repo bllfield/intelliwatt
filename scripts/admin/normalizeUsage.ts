@@ -62,7 +62,7 @@ function parseArgs(argv: string[]): CliArgs {
   return args;
 }
 
-async function main() {
+async function run() {
   const adminToken = process.env.ADMIN_TOKEN;
   if (!adminToken) {
     console.error(
@@ -125,7 +125,7 @@ async function main() {
 }
 
 // Node 18+ has global fetch; if not available, this will throw before main.
-main().catch((err) => {
+run().catch((err) => {
   console.error('Unexpected error:', err);
   process.exitCode = 1;
 });
