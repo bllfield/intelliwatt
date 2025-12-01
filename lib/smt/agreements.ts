@@ -66,23 +66,71 @@ async function postToSmtProxy(
   path: string,
   body: Record<string, unknown> = {},
 ): Promise<any> {
-  const response = await fetch(buildProxyUrl(path), {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      ...(SMT_PROXY_TOKEN ? { Authorization: `Bearer ${SMT_PROXY_TOKEN}` } : {}),
-    },
-    body: JSON.stringify(body),
-  });
+  const url = buildProxyUrl(path);
+  const bodyPreview = (() => {
+    try {
+      return JSON.stringify(body).slice(0, 500);
+    } catch {
+      return "[unserializable-body]";
+    }
+  })();
 
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(
-      `SMT proxy ${path} HTTP ${response.status}: ${text.slice(0, 500)}`,
+  console.log(
+    `[SMT_PROXY] request path=${path} url=${url} body=${bodyPreview}`,
+  );
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(SMT_PROXY_TOKEN
+          ? { Authorization: `Bearer ${SMT_PROXY_TOKEN}` }
+          : {}),
+      },
+      body: JSON.stringify(body),
+    });
+  } catch (error) {
+    console.error("[SMT_PROXY] network error path=%s", path, error);
+    throw error;
+  }
+
+  const status = response.status;
+  let rawText = "";
+  try {
+    rawText = await response.text();
+  } catch (error) {
+    console.error(
+      "[SMT_PROXY] failed to read response body path=%s status=%s error=%o",
+      path,
+      status,
+      error,
     );
   }
 
-  return response.json();
+  console.log(
+    `[SMT_PROXY] response path=${path} status=${status} bodySnip=${rawText.slice(
+      0,
+      500,
+    )}`,
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      `SMT proxy ${path} HTTP ${status}: ${rawText.slice(0, 500)}`,
+    );
+  }
+
+  if (!rawText) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(rawText);
+  } catch {
+    return { rawText };
+  }
 }
 
 export async function getSmtAgreementStatus(esiid: string) {
