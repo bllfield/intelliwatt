@@ -25,6 +25,7 @@ export function RevokeSmartMeterButton({ authorizationId }: Props) {
       const response = await fetch("/api/smt/revoke", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ authorizationId }),
       });
 
