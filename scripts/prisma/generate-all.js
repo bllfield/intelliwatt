@@ -1,4 +1,6 @@
 const { spawn } = require('child_process');
+const path = require('path');
+const fs = require('fs');
 
 async function run(command, args) {
   return new Promise((resolve, reject) => {
@@ -17,27 +19,59 @@ async function run(command, args) {
   });
 }
 
-const path = require('path');
-const fs = require('fs');
+const MODULE_SCHEMAS = [
+  {
+    name: 'current-plan',
+    candidates: ['prisma/current-plan/schema.prisma', 'prisma/current-plan.schema.prisma'],
+  },
+  {
+    name: 'usage',
+    candidates: ['prisma/usage/schema.prisma'],
+  },
+  {
+    name: 'home-details',
+    candidates: ['prisma/home-details/schema.prisma'],
+  },
+  {
+    name: 'appliances',
+    candidates: ['prisma/appliances/schema.prisma'],
+  },
+  {
+    name: 'upgrades',
+    candidates: ['prisma/upgrades/schema.prisma'],
+  },
+  {
+    name: 'wattbuy-offers',
+    candidates: ['prisma/wattbuy-offers/schema.prisma'],
+  },
+  {
+    name: 'referrals',
+    candidates: ['prisma/referrals/schema.prisma'],
+  },
+];
+
+async function generateForSchema(relativeSchemaPath) {
+  const schemaArg = `--schema=${relativeSchemaPath}`;
+  await run('npx', ['prisma', 'generate', schemaArg]);
+}
 
 async function main() {
   await run('npx', ['prisma', 'generate']);
 
-  const repoRoot = path.join(__dirname, '..', '..');
-  const candidateSchemas = [
-    path.join(repoRoot, 'prisma', 'current-plan', 'schema.prisma'),
-    path.join(repoRoot, 'prisma', 'current-plan.schema.prisma'),
-  ];
+  for (const module of MODULE_SCHEMAS) {
+    const schemaPath = module.candidates
+      .map((candidate) => path.resolve(candidate))
+      .find((candidatePath) => fs.existsSync(candidatePath));
 
-  const currentPlanSchema = candidateSchemas.find((schemaPath) => fs.existsSync(schemaPath));
+    if (!schemaPath) {
+      console.warn(`[prisma:generate-all] Skipping ${module.name}, schema not found at ${module.candidates.join(', ')}`);
+      continue;
+    }
 
-  if (!currentPlanSchema) {
-    throw new Error('Could not locate current plan Prisma schema in prisma/current-plan/');
+    const relativeSchemaPath = path.relative(process.cwd(), schemaPath).replace(/\\/g, '/');
+    console.log(`[prisma:generate-all] Generating Prisma client for ${module.name} (${relativeSchemaPath})`);
+    await generateForSchema(relativeSchemaPath);
   }
-
-  const schemaArg = `--schema=${path.relative(process.cwd(), currentPlanSchema).replace(/\\/g, '/')}`;
-
-  await run('npx', ['prisma', 'generate', schemaArg]);
 }
 
 main().catch((error) => {
@@ -45,4 +79,3 @@ main().catch((error) => {
   console.error(error);
   process.exit(1);
 });
-
