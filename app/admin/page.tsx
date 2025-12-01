@@ -625,6 +625,76 @@ export default function AdminDashboard() {
           </div>
         </section>
 
+        {/* Prisma Studio Shortcuts */}
+        <section className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
+          <h2 className="text-2xl font-bold text-brand-navy mb-3">🛠️ Prisma Studio Shortcuts</h2>
+          <p className="text-sm text-brand-navy/70 mb-4">
+            Copy any block below into a local PowerShell window to open Prisma Studio for the selected database.
+            Each command sets the appropriate connection string and binds Studio to its own port.
+          </p>
+          <div className="space-y-4 rounded-xl border border-brand-navy/10 bg-brand-navy/5 p-4 text-sm font-mono text-brand-navy">
+            <div>
+              <div className="font-semibold text-brand-navy mb-1">Master (pooled via DATABASE_URL)</div>
+              <code className="block whitespace-pre-wrap">
+                {`$env:DATABASE_URL = "postgresql://doadmin:AVNS_lUXcN2ftFFu6XUIc5G0@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25061/app-pool?sslmode=require&pgbouncer=true"
+npx prisma studio --browser none --port 5555`}
+              </code>
+            </div>
+            <div>
+              <div className="font-semibold text-brand-navy mb-1">Current Plan module</div>
+              <code className="block whitespace-pre-wrap">
+                {`$env:CURRENT_PLAN_DATABASE_URL = "postgresql://doadmin:AVNS_lUXcN2ftFFu6XUIc5G0@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25060/intelliwatt_current_plan?sslmode=require"
+npx prisma studio --schema=prisma/current-plan/schema.prisma --browser none --port 5556`}
+              </code>
+            </div>
+            <div>
+              <div className="font-semibold text-brand-navy mb-1">Usage module</div>
+              <code className="block whitespace-pre-wrap">
+                {`$env:USAGE_DATABASE_URL = "postgresql://doadmin:AVNS_lUXcN2ftFFu6XUIc5G0@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25060/intelliwatt_usage?sslmode=require"
+npx prisma studio --schema=prisma/usage/schema.prisma --browser none --port 5557`}
+              </code>
+            </div>
+            <div>
+              <div className="font-semibold text-brand-navy mb-1">Home Details module</div>
+              <code className="block whitespace-pre-wrap">
+                {`$env:DATABASE_URL = "postgresql://doadmin:AVNS_lUXcN2ftFFu6XUIc5G0@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25060/intelliwatt_home_details?sslmode=require"
+npx prisma studio --browser none --port 5558`}
+              </code>
+            </div>
+            <div>
+              <div className="font-semibold text-brand-navy mb-1">Appliances module</div>
+              <code className="block whitespace-pre-wrap">
+                {`$env:DATABASE_URL = "postgresql://doadmin:AVNS_lUXcN2ftFFu6XUIc5G0@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25060/intelliwatt_appliances?sslmode=require"
+npx prisma studio --browser none --port 5559`}
+              </code>
+            </div>
+            <div>
+              <div className="font-semibold text-brand-navy mb-1">Upgrades module</div>
+              <code className="block whitespace-pre-wrap">
+                {`$env:DATABASE_URL = "postgresql://doadmin:AVNS_lUXcN2ftFFu6XUIc5G0@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25060/intelliwatt_upgrades?sslmode=require"
+npx prisma studio --browser none --port 5560`}
+              </code>
+            </div>
+            <div>
+              <div className="font-semibold text-brand-navy mb-1">WattBuy Offers module</div>
+              <code className="block whitespace-pre-wrap">
+                {`$env:DATABASE_URL = "postgresql://doadmin:AVNS_lUXcN2ftFFu6XUIc5G0@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25060/intelliwatt_wattbuy_offers?sslmode=require"
+npx prisma studio --browser none --port 5561`}
+              </code>
+            </div>
+            <div>
+              <div className="font-semibold text-brand-navy mb-1">Referrals module</div>
+              <code className="block whitespace-pre-wrap">
+                {`$env:DATABASE_URL = "postgresql://doadmin:AVNS_lUXcN2ftFFu6XUIc5G0@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25060/intelliwatt_referrals?sslmode=require"
+npx prisma studio --browser none --port 5562`}
+              </code>
+            </div>
+            <p className="text-xs text-brand-navy/60">
+              Tip: run each pair in a fresh window, and stop the Studio process when finished (Ctrl+C or closing the console).
+            </p>
+          </div>
+        </section>
+
         {/* Quick Links / Tools Section */}
         <section className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
           <h2 className="text-2xl font-bold text-brand-navy mb-4">🔧 Admin Tools</h2>
