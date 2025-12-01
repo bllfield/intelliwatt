@@ -88,6 +88,11 @@ export default function SMTInspector() {
   const [rawFileContent, setRawFileContent] = useState<string | null>(null);
   const [rawFileBase64, setRawFileBase64] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [usageHouseId, setUsageHouseId] = useState('');
+  const [usageEsiid, setUsageEsiid] = useState('');
+  const [usageSource, setUsageSource] = useState<string>('');
+  const [usageStart, setUsageStart] = useState('');
+  const [usageEnd, setUsageEnd] = useState('');
 
   const ready = useMemo(() => Boolean(token), [token]);
 
@@ -199,6 +204,45 @@ export default function SMTInspector() {
     } catch (e: any) {
       setDownloadError(e?.message || 'Download failed');
     }
+  }
+
+  async function triggerUsageNormalize() {
+    if (!token) { alert('Set x-admin-token first'); return; }
+    const houseId = usageHouseId.trim();
+    const esiid = usageEsiid.trim();
+    if (!houseId && !esiid) {
+      alert('Provide a houseId or ESIID for usage normalization.');
+      return;
+    }
+
+    const payload: Record<string, unknown> = {};
+    if (houseId) payload.houseId = houseId;
+    if (esiid) payload.esiid = esiid;
+    if (usageSource) payload.source = usageSource;
+
+    if (usageStart) {
+      const date = new Date(usageStart);
+      if (Number.isNaN(date.getTime())) {
+        alert('Start time is invalid.');
+        return;
+      }
+      payload.start = date.toISOString();
+    }
+
+    if (usageEnd) {
+      const date = new Date(usageEnd);
+      if (Number.isNaN(date.getTime())) {
+        alert('End time is invalid.');
+        return;
+      }
+      payload.end = date.toISOString();
+    }
+
+    await hit('/api/admin/usage/normalize', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
   }
 
   async function testIngest() {
@@ -507,6 +551,76 @@ export default function SMTInspector() {
             </button>
           </div>
         </div>
+      </section>
+
+      <section className="p-4 rounded-2xl border">
+        <h2 className="font-medium mb-3">Usage Normalization Trigger</h2>
+        <p className="text-sm text-gray-600 mb-3">
+          Calls <code>/api/admin/usage/normalize</code> to pull raw intervals from the Usage module DB and upsert them
+          into the master <code>SmtInterval</code> table. Provide at least a houseId or ESIID. Optional filters limit the
+          window or source.
+        </p>
+        <div className="grid gap-3 md:grid-cols-2">
+          <div>
+            <label className="block text-sm mb-1">House ID</label>
+            <input
+              type="text"
+              className="w-full rounded-lg border px-3 py-2"
+              placeholder="UUID (optional)"
+              value={usageHouseId}
+              onChange={(e) => setUsageHouseId(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="block text-sm mb-1">ESIID</label>
+            <input
+              type="text"
+              className="w-full rounded-lg border px-3 py-2"
+              placeholder="17-18 digit ESIID"
+              value={usageEsiid}
+              onChange={(e) => setUsageEsiid(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="block text-sm mb-1">Source</label>
+            <select
+              className="w-full rounded-lg border px-3 py-2"
+              value={usageSource}
+              onChange={(e) => setUsageSource(e.target.value)}
+            >
+              <option value="">(any)</option>
+              <option value="smt">smt</option>
+              <option value="green_button">green_button</option>
+              <option value="manual">manual</option>
+              <option value="other">other</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm mb-1">Start (UTC)</label>
+            <input
+              type="datetime-local"
+              className="w-full rounded-lg border px-3 py-2"
+              value={usageStart}
+              onChange={(e) => setUsageStart(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="block text-sm mb-1">End (UTC)</label>
+            <input
+              type="datetime-local"
+              className="w-full rounded-lg border px-3 py-2"
+              value={usageEnd}
+              onChange={(e) => setUsageEnd(e.target.value)}
+            />
+          </div>
+        </div>
+        <button
+          onClick={triggerUsageNormalize}
+          className="mt-4 px-4 py-2 rounded-lg border bg-blue-50 font-semibold hover:bg-blue-100"
+          disabled={loading || !ready}
+        >
+          {loading ? 'Running…' : 'Normalize Usage'}
+        </button>
       </section>
 
       <section className="p-4 rounded-2xl border">
