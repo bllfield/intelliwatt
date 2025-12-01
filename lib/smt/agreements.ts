@@ -147,6 +147,66 @@ export async function getSmtAgreementEsiids(
   });
 }
 
+export async function terminateSmtAgreement(
+  agreementNumber: number | string,
+  retailCustomerEmail: string,
+) {
+  if (
+    agreementNumber === null ||
+    agreementNumber === undefined ||
+    (typeof agreementNumber !== "number" && typeof agreementNumber !== "string")
+  ) {
+    throw new Error("terminateSmtAgreement: agreementNumber is required");
+  }
+
+  if (!retailCustomerEmail || typeof retailCustomerEmail !== "string") {
+    throw new Error("terminateSmtAgreement: retailCustomerEmail is required");
+  }
+
+  const numeric =
+    typeof agreementNumber === "number"
+      ? agreementNumber
+      : Number.parseInt(String(agreementNumber), 10);
+
+  if (!numeric || Number.isNaN(numeric)) {
+    throw new Error("terminateSmtAgreement: agreementNumber invalid");
+  }
+
+  return postToSmtProxy("/smt/agreements/terminate", {
+    agreementNumber: numeric,
+    retailCustomerEmail: retailCustomerEmail.trim(),
+  });
+}
+
+export interface SmtMyAgreementsFilter {
+  agreementNumber?: number | string;
+  statusReason?: string | null;
+}
+
+export async function getSmtMyAgreements(
+  filter: SmtMyAgreementsFilter = {},
+) {
+  const payload: Record<string, unknown> = {};
+
+  if (
+    filter.agreementNumber !== undefined &&
+    filter.agreementNumber !== null
+  ) {
+    const raw = filter.agreementNumber;
+    const numeric =
+      typeof raw === "number" ? raw : Number.parseInt(String(raw), 10);
+    if (!Number.isNaN(numeric)) {
+      payload.agreementNumber = numeric;
+    }
+  }
+
+  if (filter.statusReason && typeof filter.statusReason === "string") {
+    payload.statusReason = filter.statusReason;
+  }
+
+  return postToSmtProxy("/smt/agreements/myagreements", payload);
+}
+
 // SMT agreement/subscription identity wiring.
 // These must match what’s configured in the SMT portal.
 const SMT_USERNAME = (
