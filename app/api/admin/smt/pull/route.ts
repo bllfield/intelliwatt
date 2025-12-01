@@ -11,7 +11,7 @@ import { cleanEsiid, resolveSmtEsiid } from '@/lib/smt/esiid';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const config = {
+export const routeSegmentConfig = {
   api: {
     bodyParser: {
       sizeLimit: '25mb',
