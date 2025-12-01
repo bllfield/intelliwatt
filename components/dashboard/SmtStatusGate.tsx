@@ -53,6 +53,8 @@ export function SmtStatusGate({ homeId }: SmtStatusGateProps) {
     return "ERROR";
   }, []);
 
+  const hasAutoRefreshedRef = React.useRef(false);
+
   const fetchStatus = React.useCallback(
     async (options: { refresh?: boolean } = {}) => {
       if (!homeId) return;
@@ -90,7 +92,17 @@ export function SmtStatusGate({ homeId }: SmtStatusGateProps) {
           : null;
 
         setAuth(authorization);
-        setStatus(mapStatus(authorization));
+        const nextStatus = mapStatus(authorization);
+        setStatus(nextStatus);
+
+        if (
+          !options.refresh &&
+          !hasAutoRefreshedRef.current &&
+          (nextStatus === "PENDING" || nextStatus === "none" || nextStatus === "unknown")
+        ) {
+          hasAutoRefreshedRef.current = true;
+          void fetchStatus({ refresh: true });
+        }
       } catch (err: unknown) {
         console.error("SmtStatusGate fetchStatus error:", err);
         const message = err instanceof Error ? err.message : "Failed to load SMT status";
@@ -105,6 +117,7 @@ export function SmtStatusGate({ homeId }: SmtStatusGateProps) {
 
   React.useEffect(() => {
     if (!homeId) return;
+    hasAutoRefreshedRef.current = false;
     fetchStatus({ refresh: false });
   }, [homeId, fetchStatus]);
 
