@@ -1,0 +1,17 @@
+/// Module schema for Referrals database. Migrations live in prisma/referrals/migrations.
+generator referralsClient {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+  output        = "../../.prisma/referrals-client"
+}
+
+datasource referralsDb {
+  provider = "postgresql"
+  url      = env("REFERRALS_DATABASE_URL")
+}
+
+model ReferralsModuleBootstrap {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+}
+

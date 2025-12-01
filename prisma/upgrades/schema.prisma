@@ -1,0 +1,17 @@
+/// Module schema for Upgrades database. Migrations live in prisma/upgrades/migrations.
+generator upgradesClient {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+  output        = "../../.prisma/upgrades-client"
+}
+
+datasource upgradesDb {
+  provider = "postgresql"
+  url      = env("UPGRADES_DATABASE_URL")
+}
+
+model UpgradesModuleBootstrap {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+}
+

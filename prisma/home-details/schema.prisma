@@ -1,0 +1,17 @@
+/// Module schema for Home Details database. Migrations live in prisma/home-details/migrations.
+generator homeDetailsClient {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+  output        = "../../.prisma/home-details-client"
+}
+
+datasource homeDetailsDb {
+  provider = "postgresql"
+  url      = env("HOME_DETAILS_DATABASE_URL")
+}
+
+model HomeDetailsModuleBootstrap {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+}
+

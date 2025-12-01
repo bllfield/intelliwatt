@@ -1,0 +1,17 @@
+/// Module schema for Appliances database. Migrations live in prisma/appliances/migrations.
+generator appliancesClient {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+  output        = "../../.prisma/appliances-client"
+}
+
+datasource appliancesDb {
+  provider = "postgresql"
+  url      = env("APPLIANCES_DATABASE_URL")
+}
+
+model AppliancesModuleBootstrap {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+}
+
