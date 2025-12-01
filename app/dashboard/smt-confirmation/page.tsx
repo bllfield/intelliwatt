@@ -80,8 +80,8 @@ export default async function SmtConfirmationPage() {
     authorization?.smtStatusMessage && authorization.smtStatusMessage.trim().length > 0
       ? authorization.smtStatusMessage
       : isDeclined
-      ? "You declined the Smart Meter Texas email. Approve the request to continue using IntelliWatt features."
-      : "We’re waiting on the Smart Meter Texas email confirmation. Approve it so we can access your data.";
+      ? "Smart Meter Texas shows the email was declined. We cannot sync usage until it is approved."
+      : "We’re waiting on the Smart Meter Texas email confirmation. Approve it to enable IntelliWatt features.";
 
   return (
     <div className="flex min-h-[80vh] items-center justify-center bg-brand-navy px-4 py-12 text-brand-cyan">

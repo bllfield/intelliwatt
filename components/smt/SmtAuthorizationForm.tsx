@@ -91,33 +91,12 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
   }, [reminderStorageKey]);
 
   useEffect(() => {
-    if (typeof document === "undefined") {
-      return;
-    }
-
-    if (!showEmailReminder) {
-      return;
-    }
-
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-
-    return () => {
-      document.body.style.overflow = previousOverflow;
-    };
-  }, [showEmailReminder]);
-
-  useEffect(() => {
     if (typeof window === "undefined") {
       return;
     }
 
-    if (showEmailReminder) {
-      window.localStorage.setItem(reminderStorageKey, "pending");
-    } else {
-      window.localStorage.removeItem(reminderStorageKey);
-    }
-  }, [showEmailReminder, reminderStorageKey]);
+    window.localStorage.removeItem(reminderStorageKey);
+  }, [reminderStorageKey]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();

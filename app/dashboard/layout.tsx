@@ -54,7 +54,7 @@ async function isSmtConfirmationRequired(): Promise<boolean> {
       archivedAt: null,
     },
     orderBy: { createdAt: 'desc' },
-    select: { smtStatus: true },
+    select: { smtStatus: true, smtStatusMessage: true },
   });
 
   if (!authorization) {
@@ -62,9 +62,16 @@ async function isSmtConfirmationRequired(): Promise<boolean> {
   }
 
   const normalizedStatus = (authorization.smtStatus ?? '').toLowerCase();
-  const isPending = normalizedStatus === 'pending' || normalizedStatus === '';
+  const normalizedMessage = (authorization.smtStatusMessage ?? '').toLowerCase();
 
-  return isPending;
+  const isExplicitPending = normalizedStatus === 'pending' || normalizedStatus === '';
+  const messageImpliesPending =
+    normalizedMessage.includes('waiting on customer') ||
+    normalizedMessage.includes('waiting for customer') ||
+    normalizedMessage.includes('email sent') ||
+    normalizedMessage.includes('pending approval');
+
+  return isExplicitPending || messageImpliesPending;
 }
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
