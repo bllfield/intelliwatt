@@ -130,6 +130,37 @@ Notes:
   - Main production DB: master migrations up to date; `20251130225951_add_normalized_current_plan` deployed with `npx prisma migrate deploy --schema=prisma/schema.prisma`.
 - Any prior drift (ERCOT index, SMT column type, etc.) was resolved by rebuilding dev and re-running migrate deploy in prod. No further migration repair is required for this slice.
 
+### Usage Module Database (`intelliwatt_usage`)
+
+- Connection: `USAGE_DATABASE_URL`
+- Prisma schema: `prisma/usage/schema.prisma`
+- Migrations directory: `prisma/usage/migrations`
+- Purpose: store raw/slice-specific usage data before it is normalized into the master dataset (future `NormalizedUsage` pipeline).
+
+#### Usage module migration commands (dev)
+
+```bash
+# Generate Usage module Prisma client
+npx prisma generate --schema=prisma/usage/schema.prisma
+
+# Create/apply the initial Usage module migration
+npx prisma migrate dev \
+  --schema=prisma/usage/schema.prisma \
+  --migrations-dir=prisma/usage/migrations \
+  --name init_usage_module
+```
+
+#### Usage module migration commands (prod)
+
+```bash
+# With USAGE_DATABASE_URL configured in the production environment:
+npx prisma migrate deploy --schema=prisma/usage/schema.prisma
+```
+
+Notes:
+- Usage module migrations are totally isolated from the master schema; do not place master migrations in `prisma/usage/migrations`.
+- Always manage Usage tables through migrations—no manual DDL against `intelliwatt_usage`.
+
 ### PC-2025-11-25-K — Keeper Cleanup Runbook (Chat-Driven)
 
 **Rationale:**

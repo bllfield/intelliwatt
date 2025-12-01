@@ -1,0 +1,22 @@
+/// NOTE: This schema is dedicated to the Usage module.
+/// - Uses its own migrations directory: prisma/usage/migrations
+/// - Points at USAGE_DATABASE_URL for its datasource.
+/// - Generate/run Prisma commands with:
+///     --schema=prisma/usage/schema.prisma
+///     --migrations-dir=prisma/usage/migrations
+
+generator usageClient {
+  provider = "prisma-client-js"
+  output   = "../../node_modules/@prisma/usage-client"
+}
+
+datasource usageDb {
+  provider = "postgresql"
+  url      = env("USAGE_DATABASE_URL")
+}
+
+model UsageModuleBootstrap {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+}
+
