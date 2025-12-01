@@ -41,6 +41,11 @@ export function RevokeSmartMeterButton({ authorizationId }: Props) {
       setMessage(
         "We received your revocation request. Our team will disable SMT access and follow up shortly."
       );
+      if (typeof window !== "undefined") {
+        Object.keys(window.localStorage)
+          .filter((key) => key.startsWith("smt-email-reminder:"))
+          .forEach((key) => window.localStorage.removeItem(key));
+      }
       router.refresh();
     } catch (error) {
       console.error("Failed to revoke SMT access", error);
