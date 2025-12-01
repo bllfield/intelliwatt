@@ -23,16 +23,16 @@ model UsageModuleBootstrap {
 
 model UsageIntervalModule {
   id        String   @id @default(cuid())
-  userId    String
-  source    String
-  interval  String
-  data      Json
-  startDate DateTime
-  endDate   DateTime
+  esiid     String
+  meter     String
+  ts        DateTime
+  kwh       Decimal  @db.Decimal(10, 5)
+  filled    Boolean  @default(false)
+  source    String?
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  @@index([userId])
-  @@index([source])
-  @@index([startDate, endDate])
+  @@unique([esiid, meter, ts])
+  @@index([esiid, meter, ts])
 }
 
