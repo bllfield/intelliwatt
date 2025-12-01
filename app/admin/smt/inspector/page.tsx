@@ -47,18 +47,15 @@ const SMT_TOOLS: Tool[] = [
     title: 'Admin SMT Trigger (Webhook)',
     desc: 'Posts { esiid, meter } to /api/admin/smt/pull using x-admin-token (server) → droplet webhook.',
   },
-  // Upcoming tools (placeholders per PC-2025-11-12-F nav lock)
   {
     href: '/admin/smt/agreements',
     title: 'Agreements (New/List/Status/Terminate)',
-    desc: 'Customer data sharing agreements.',
-    paused: true,
+    desc: 'Admin toolbox for SMT agreements: status, ESIIDs, terminate, MyAgreements, report status.',
   },
   {
     href: '/admin/smt/subscriptions',
     title: 'Subscriptions (New/List/Unsubscribe)',
-    desc: 'Ongoing delivery to SFTP/Callback.',
-    paused: true,
+    desc: 'SMT subscription utilities: list active/closed subscriptions and check report status.',
   },
   {
     href: '/admin/smt/enrollments',
