@@ -161,6 +161,44 @@ Notes:
 - Usage module migrations are totally isolated from the master schema; do not place master migrations in `prisma/usage/migrations`.
 - Always manage Usage tables through migrations—no manual DDL against `intelliwatt_usage`.
 
+#### Usage module status — December 2025
+
+- Schema now includes `UsageIntervalModule` (mirrors `SmtInterval` fields/casing) and `UsageModuleBootstrap`.
+- `lib/usage/dualWriteUsageIntervals.ts` writes SMT-normalized rows to both `SmtInterval` (master) and `UsageIntervalModule` (module DB); `/api/admin/smt/pull` is already calling the helper.
+- Dev database `intelliwatt_usage` is in sync after `npx prisma migrate dev --schema=prisma/usage/schema.prisma --name add_usage_interval_module`.
+- Next actions:
+  - Record a `add_usage_interval_module` migration in `prisma/usage/migrations` (if the command above reports “Already in sync”, create the migration with `--create-only` and re-run) and commit it once verified.
+  - Extend dual-write coverage to Green Button + manual usage paths before we build the `NormalizedUsage` pipeline.
+
+#### PowerShell runbook — Module Prisma CLI (all modules)
+
+Use this pattern for every module database (current-plan, usage, home-details, appliances, upgrades, wattbuy-offers, referrals) to avoid the common Windows errors we’ve hit:
+
+1. **Open a fresh PowerShell session** in the repo root. Kill any stuck Prisma/Node processes first if Studio or CLI was left running:
+   ```powershell
+   Get-Process prisma, node -ErrorAction SilentlyContinue | Stop-Process
+   ```
+2. **Bypass the execution policy** for the session so `npx` scripts can run:
+   ```powershell
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+   ```
+3. **Set the module’s datasource URL** (substitute the correct env var):
+   ```powershell
+   $env:USAGE_DATABASE_URL = "postgresql://…:25060/intelliwatt_usage?sslmode=require"
+   ```
+4. **Generate the client** and **apply/create the migration**:
+   ```powershell
+   npx prisma generate --schema=prisma/usage/schema.prisma
+   npx prisma migrate dev --schema=prisma/usage/schema.prisma --name <migration_name>
+   ```
+   - If Prisma reports “Already in sync, no schema change,” but you expect a new table/view, re-run with `--create-only` to capture the migration diff before applying it.
+5. **Deploy** with `npx prisma migrate deploy --schema=…` once the migration file is committed and ready for staging/production.
+
+Helpful reminders:
+- Always include `binaryTargets = ["native", "rhel-openssl-3.0.x"]` in every module schema generator.
+- Prisma Studio must run on unique ports per module: `npx prisma studio --schema=… --port 5556`, etc.
+- Keep module migrations and master migrations in their own directories; never cross-wire datasource URLs.
+
 #### Prisma Generator Binary Targets
 
 When updating module Prisma schemas, always include Linux engine binaries for Vercel:

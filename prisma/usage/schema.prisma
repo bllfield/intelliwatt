@@ -26,7 +26,7 @@ model UsageIntervalModule {
   esiid     String
   meter     String
   ts        DateTime
-  kwh       Decimal  @db.Decimal(10, 5)
+  kwh       Decimal  @usageDb.Decimal(10, 5)
   filled    Boolean  @default(false)
   source    String?
   createdAt DateTime @default(now())
