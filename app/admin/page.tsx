@@ -184,7 +184,9 @@ export default function AdminDashboard() {
   const [recalculatingReferrals, setRecalculatingReferrals] = useState(false);
   const [recalculatingEntries, setRecalculatingEntries] = useState(false);
   const [copiedAdId, setCopiedAdId] = useState<string | null>(null);
+  const [copiedSmtHelper, setCopiedSmtHelper] = useState<'payload' | 'curl' | null>(null);
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const smtCopyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Fetch real data from API
   const fetchData = useCallback(async () => {
@@ -354,10 +356,26 @@ export default function AdminDashboard() {
     }
   }, []);
 
+  const handleCopySmtHelper = useCallback(async (type: 'payload' | 'curl', value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedSmtHelper(type);
+      if (smtCopyTimeoutRef.current) {
+        clearTimeout(smtCopyTimeoutRef.current);
+      }
+      smtCopyTimeoutRef.current = setTimeout(() => setCopiedSmtHelper(null), 2000);
+    } catch (error) {
+      console.error('Failed to copy SMT helper content:', error);
+    }
+  }, []);
+
   useEffect(() => {
     return () => {
       if (copyTimeoutRef.current) {
         clearTimeout(copyTimeoutRef.current);
+      }
+      if (smtCopyTimeoutRef.current) {
+        clearTimeout(smtCopyTimeoutRef.current);
       }
     };
   }, []);
@@ -395,6 +413,21 @@ export default function AdminDashboard() {
   const pendingRevocationsCount = summary?.pendingSmtRevocations ?? 0;
   const testimonialsTotal = summary?.testimonialSubmissionCount ?? testimonials.length;
   const testimonialsPendingCount = summary?.testimonialPendingCount ?? testimonials.filter((record) => record.status === 'PENDING').length;
+  const smtPayloadTemplate = `{
+  "mode": "inline",
+  "encoding": "base64",
+  "content_b64": "<BASE64_CSV_BYTES>",
+  "esiid": "10443720000000000",
+  "meter": "M1",
+  "source": "adhoc-test",
+  "filename": "20251201T0100_IntervalData.csv"
+}`;
+
+  const smtCurlCommand = `curl -X POST https://intelliwatt.com/api/admin/smt/pull \\
+  -H "Content-Type: application/json" \\
+  -H "x-admin-token: $env:ADMIN_TOKEN" \\
+  -d @payload.json`;
+
   const pendingEmailConfirmationsCount =
     summary?.pendingSmtEmailConfirmations ?? emailConfirmations.pending.length;
   const declinedEmailConfirmationsCount =
@@ -691,6 +724,49 @@ npx prisma studio --browser none --port 5562`}
             </div>
             <p className="text-xs text-brand-navy/60">
               Tip: run each pair in a fresh window, and stop the Studio process when finished (Ctrl+C or closing the console).
+            </p>
+          </div>
+        </section>
+
+        {/* SMT Inline Ingest Test Harness */}
+        <section className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
+          <h2 className="text-2xl font-bold text-brand-navy mb-3">⚡ SMT Inline Ingest Tester</h2>
+          <p className="text-sm text-brand-navy/70 mb-4">
+            Use this template with <code className="font-mono text-xs">POST /api/admin/smt/pull</code>. Replace the base64 content with a real SMT CSV to
+            confirm dual writes into <code className="font-mono text-xs">SmtInterval</code> (master) and <code className="font-mono text-xs">UsageIntervalModule</code> (usage module).
+          </p>
+          <div className="space-y-4">
+            <div className="bg-brand-navy/5 border border-brand-navy/10 rounded-xl p-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-semibold text-brand-navy">Payload JSON</span>
+                <button
+                  type="button"
+                  onClick={() => handleCopySmtHelper('payload', smtPayloadTemplate)}
+                  className="rounded-full border border-brand-blue/40 bg-brand-blue/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-brand-blue transition hover:border-brand-blue hover:bg-brand-blue/20"
+                >
+                  {copiedSmtHelper === 'payload' ? 'Copied!' : 'Copy JSON'}
+                </button>
+              </div>
+              <pre className="whitespace-pre-wrap text-xs font-mono text-brand-navy">{smtPayloadTemplate}</pre>
+            </div>
+
+            <div className="bg-brand-navy/5 border border-brand-navy/10 rounded-xl p-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-semibold text-brand-navy">cURL command</span>
+                <button
+                  type="button"
+                  onClick={() => handleCopySmtHelper('curl', smtCurlCommand)}
+                  className="rounded-full border border-brand-blue/40 bg-brand-blue/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-brand-blue transition hover:border-brand-blue hover:bg-brand-blue/20"
+                >
+                  {copiedSmtHelper === 'curl' ? 'Copied!' : 'Copy command'}
+                </button>
+              </div>
+              <pre className="whitespace-pre-wrap text-xs font-mono text-brand-navy">{smtCurlCommand}</pre>
+            </div>
+
+            <p className="text-xs text-brand-navy/60">
+              Admin smoke tests should live here so QA can copy/paste without hunting through docs. After posting, open Prisma Studio for both schemas to verify
+              matching rows exist.
             </p>
           </div>
         </section>

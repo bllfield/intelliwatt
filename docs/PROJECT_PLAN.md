@@ -169,6 +169,7 @@ Notes:
 - Next actions:
   - Record a `add_usage_interval_module` migration in `prisma/usage/migrations` (if the command above reports “Already in sync”, create the migration with `--create-only` and re-run) and commit it once verified.
   - Extend dual-write coverage to Green Button + manual usage paths before we build the `NormalizedUsage` pipeline.
+- Admin QA harness lives on `app/admin/page.tsx` (“SMT Inline Ingest Tester”). Any future ingest smoke tests must expose copy/paste-ready payloads/commands in the admin dashboard so operators can exercise secured endpoints without digging through docs.
 
 #### PowerShell runbook — Module Prisma CLI (all modules)
 
