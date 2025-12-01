@@ -97,6 +97,39 @@ Notes:
 
 <!-- Dev + Prod Prisma migrations completed for Current Plan module + master schema on 2025-11-28 -->
 
+### Current Plan / Current Rate Page — Status
+
+- UI: Complete (manual entry + bill upload live in production UI).
+- Module DB: `intelliwatt_current_plan` (via `CURRENT_PLAN_DATABASE_URL`) managed exclusively through `prisma/current-plan/schema.prisma` and the `prisma/current-plan/migrations` folder.
+- Module migrations: Baseline (`20251128232427_init_current_plan_module`) created and applied to dev; production deploy uses `npx prisma migrate deploy --schema=prisma/current-plan/schema.prisma`.
+
+### Normalized Current Plan Dataset
+
+- Master schema now includes the `NormalizedCurrentPlan` model storing normalized snapshots of each user’s current rate structure (tiers, TOU bands, bill credits) sourced from the module DB.
+- Dev migration applied: `20251130225951_add_normalized_current_plan` (`npx prisma migrate dev --schema=prisma/schema.prisma --name add_normalized_current_plan` against `intelliwatt_main_dev`).
+- Normalization pipeline: `/api/current-plan/manual` writes to module DB → `lib/normalization/currentPlan.ts` hydrates master data → `NormalizedCurrentPlan` persists in the main schema.
+
+#### Deploying the `NormalizedCurrentPlan` migration to production
+
+1. Ensure production `DATABASE_URL` points at the pooled Postgres connection (port 25061) and `DIRECT_URL` (if set) targets the direct port (25060) for the same database.
+2. From a controlled shell with production env vars loaded, run:
+
+   ```bash
+   npx prisma migrate deploy --schema=prisma/schema.prisma
+   ```
+
+   This applies all pending master migrations—including `20251130225951_add_normalized_current_plan`—to the production main database.
+3. Continue managing current-plan module migrations separately via `prisma/current-plan/schema.prisma` and `CURRENT_PLAN_DATABASE_URL`; do not mix module migrations into the master schema.
+
+#### Deployment Status (Current Plan / Current Rate)
+
+- **Dev**
+  - Module DB `intelliwatt_current_plan`: baseline migration applied via `prisma/current-plan/schema.prisma` + `prisma/current-plan/migrations`.
+  - Main dev DB `intelliwatt_main_dev`: all master migrations applied, including `20251130225951_add_normalized_current_plan`.
+- **Prod**
+  - Main production DB: master migrations up to date; `20251130225951_add_normalized_current_plan` deployed with `npx prisma migrate deploy --schema=prisma/schema.prisma`.
+- Any prior drift (ERCOT index, SMT column type, etc.) was resolved by rebuilding dev and re-running migrate deploy in prod. No further migration repair is required for this slice.
+
 ### PC-2025-11-25-K — Keeper Cleanup Runbook (Chat-Driven)
 
 **Rationale:**
