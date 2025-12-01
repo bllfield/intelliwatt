@@ -21,3 +21,18 @@ model UsageModuleBootstrap {
   createdAt DateTime @default(now())
 }
 
+model UsageIntervalModule {
+  id        String   @id @default(cuid())
+  userId    String
+  source    String
+  interval  String
+  data      Json
+  startDate DateTime
+  endDate   DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([source])
+  @@index([startDate, endDate])
+}
+
