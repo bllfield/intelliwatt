@@ -597,8 +597,9 @@ export default function SMTInspector() {
         <div>
           <h2 className="text-lg font-semibold">⚡ Inline SMT Ingest Test</h2>
           <p className="text-sm text-gray-600">
-            Post directly to <code>/api/admin/smt/pull</code> with the admin token. Use this for small CSV samples to verify dual writes into the master
-            <code>SmtInterval</code> table and the module <code>UsageIntervalModule</code>.
+            Post directly to <code>/api/admin/smt/pull</code> with the admin token. Use this for <strong>small CSV samples (≤ 1&nbsp;MB)</strong> to verify dual
+            writes into the master <code>SmtInterval</code> table and the module <code>UsageIntervalModule</code>. For full-size files keep using the Raw SMT UI
+            (streams through the droplet/manual proxy).
           </p>
         </div>
         <form onSubmit={sendInlinePayload} className="space-y-4">
