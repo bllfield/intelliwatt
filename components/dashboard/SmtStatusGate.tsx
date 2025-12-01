@@ -46,26 +46,32 @@ export function SmtStatusGate({ homeId }: SmtStatusGateProps) {
     const body = document.body;
     const shouldLock = status === "PENDING" || status === "DECLINED";
 
-    if (shouldLock) {
-      if (body.dataset.originalOverflow === undefined) {
-        body.dataset.originalOverflow = body.style.overflow ?? "";
+    const lock = () => {
+      if (!body.dataset.smtGateLocked) {
+        body.dataset.smtGateLocked = "true";
+        body.dataset.smtGateOriginalOverflow = body.style.overflow ?? "";
       }
       body.style.overflow = "hidden";
+    };
 
-      return () => {
-        const stored = body.dataset.originalOverflow;
-        body.style.overflow = stored ?? "";
-        delete body.dataset.originalOverflow;
-      };
+    const unlock = () => {
+      if (body.dataset.smtGateLocked) {
+        const original = body.dataset.smtGateOriginalOverflow ?? "";
+        body.style.overflow = original;
+        delete body.dataset.smtGateLocked;
+        delete body.dataset.smtGateOriginalOverflow;
+      }
+    };
+
+    if (shouldLock) {
+      lock();
+    } else {
+      unlock();
     }
 
-    if (body.dataset.originalOverflow !== undefined) {
-      const stored = body.dataset.originalOverflow;
-      body.style.overflow = stored ?? "";
-      delete body.dataset.originalOverflow;
-    }
-
-    return undefined;
+    return () => {
+      unlock();
+    };
   }, [status]);
 
   const mapStatus = React.useCallback((row: AuthorizationStatus | null): StatusState => {
