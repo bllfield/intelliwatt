@@ -118,6 +118,35 @@ export async function getSmtReportStatus(
   return postToSmtProxy("/smt/report-status", payload);
 }
 
+/**
+ * Get list of ESIIDs tied to a specific Energy Data Sharing Agreement.
+ * Wraps droplet /smt/agreements/esiids.
+ */
+export async function getSmtAgreementEsiids(
+  agreementNumber: number | string,
+) {
+  if (
+    agreementNumber === null ||
+    agreementNumber === undefined ||
+    (typeof agreementNumber !== "number" && typeof agreementNumber !== "string")
+  ) {
+    throw new Error("getSmtAgreementEsiids: agreementNumber is required");
+  }
+
+  const numeric =
+    typeof agreementNumber === "number"
+      ? agreementNumber
+      : Number.parseInt(agreementNumber, 10);
+
+  if (!numeric || Number.isNaN(numeric)) {
+    throw new Error("getSmtAgreementEsiids: agreementNumber invalid");
+  }
+
+  return postToSmtProxy("/smt/agreements/esiids", {
+    agreementNumber: numeric,
+  });
+}
+
 // SMT agreement/subscription identity wiring.
 // These must match what’s configured in the SMT portal.
 const SMT_USERNAME = (
