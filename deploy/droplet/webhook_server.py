@@ -847,6 +847,10 @@ class H(BaseHTTPRequestHandler):
 
     def _ensure_proxy_auth(self) -> bool:
         if not SMT_PROXY_TOKEN:
+            print(
+                "[SMT_DEBUG] proxy_auth path=%s error=token_not_configured" % (getattr(self, "path", "?"),),
+                flush=True,
+            )
             self._write_json(
                 500,
                 {"ok": False, "error": "smt_proxy_token_not_configured"},
@@ -855,14 +859,26 @@ class H(BaseHTTPRequestHandler):
 
         auth_header = self.headers.get("Authorization") or ""
         if not auth_header.startswith("Bearer "):
+            print(
+                "[SMT_DEBUG] proxy_auth path=%s error=missing_bearer_header" % (getattr(self, "path", "?"),),
+                flush=True,
+            )
             self._write_json(401, {"ok": False, "error": "unauthorized"})
             return False
 
         incoming_token = auth_header.split(" ", 1)[1].strip()
         if incoming_token != SMT_PROXY_TOKEN:
+            print(
+                "[SMT_DEBUG] proxy_auth path=%s error=token_mismatch" % (getattr(self, "path", "?"),),
+                flush=True,
+            )
             self._write_json(401, {"ok": False, "error": "unauthorized"})
             return False
 
+        print(
+            "[SMT_DEBUG] proxy_auth path=%s status=accepted" % (getattr(self, "path", "?"),),
+            flush=True,
+        )
         return True
 
     def _read_json_payload(self, *, allow_empty: bool) -> Optional[Dict[str, Any]]:
