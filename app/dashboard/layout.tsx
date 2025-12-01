@@ -1,4 +1,4 @@
-import { cookies, headers } from 'next/headers';
+import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 
 import IdleGuard from '@/components/IdleGuard';
@@ -9,7 +9,7 @@ import { normalizeEmail } from '@/lib/utils/email';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-async function shouldForceSmtConfirmation(): Promise<boolean> {
+async function isSmtConfirmationRequired(): Promise<boolean> {
   const cookieStore = cookies();
   const sessionEmail = cookieStore.get('intelliwatt_user')?.value ?? null;
 
@@ -63,29 +63,15 @@ async function shouldForceSmtConfirmation(): Promise<boolean> {
 
   const normalizedStatus = (authorization.smtStatus ?? '').toLowerCase();
   const isPending = normalizedStatus === 'pending' || normalizedStatus === '';
-  const isDeclined = normalizedStatus === 'declined';
 
-  return isPending || isDeclined;
+  return isPending;
 }
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const headerList = headers();
-  const nextUrlHeader =
-    headerList.get('next-url') ??
-    headerList.get('x-invoke-path') ??
-    headerList.get('x-invoke-url') ??
-    '';
-  const pathname = nextUrlHeader.split('?')[0];
-  const isConfirmationRoute = pathname.startsWith('/dashboard/smt-confirmation');
+  const shouldLock = await isSmtConfirmationRequired();
 
-  const forceConfirmation = await shouldForceSmtConfirmation();
-
-  if (forceConfirmation && !isConfirmationRoute) {
+  if (shouldLock) {
     redirect('/dashboard/smt-confirmation');
-  }
-
-  if (!forceConfirmation && isConfirmationRoute) {
-    redirect('/dashboard/api');
   }
 
   return (
