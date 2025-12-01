@@ -75,6 +75,22 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
   }, [reminderStorageKey]);
 
   useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const handleConfirmed = () => {
+      setShowEmailReminder(false);
+      window.localStorage.removeItem(reminderStorageKey);
+    };
+
+    window.addEventListener("smt-email-confirmed", handleConfirmed);
+    return () => {
+      window.removeEventListener("smt-email-confirmed", handleConfirmed);
+    };
+  }, [reminderStorageKey]);
+
+  useEffect(() => {
     if (typeof document === "undefined") {
       return;
     }
@@ -433,7 +449,7 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
             role="dialog"
             aria-modal="true"
             aria-labelledby="smt-email-reminder-title"
-            className="w-full max-w-xl rounded-3xl border border-brand-blue/40 bg-brand-navy p-6 text-brand-cyan shadow-[0_24px_60px_rgba(16,46,90,0.55)]"
+            className="w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-3xl border border-brand-blue/40 bg-brand-navy p-6 text-brand-cyan shadow-[0_24px_60px_rgba(16,46,90,0.55)] sm:p-8"
           >
             <h3
               id="smt-email-reminder-title"

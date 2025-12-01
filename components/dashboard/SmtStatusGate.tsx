@@ -187,6 +187,18 @@ export function SmtStatusGate({ homeId }: SmtStatusGateProps) {
           throw new Error(message);
         }
 
+        if (typeof window !== "undefined") {
+          Object.keys(window.localStorage)
+            .filter((key) => key.startsWith("smt-email-reminder:"))
+            .forEach((key) => window.localStorage.removeItem(key));
+
+          window.dispatchEvent(
+            new CustomEvent("smt-email-confirmed", {
+              detail: { status: choice },
+            }),
+          );
+        }
+
         await fetchStatus({ refresh: true });
       } catch (err) {
         const message =
