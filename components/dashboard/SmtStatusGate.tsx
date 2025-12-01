@@ -44,8 +44,7 @@ export function SmtStatusGate({ homeId }: SmtStatusGateProps) {
     }
 
     const body = document.body;
-    const shouldLock =
-      status === "PENDING" || status === "DECLINED" || status === "unknown";
+    const shouldLock = status === "PENDING" || status === "DECLINED";
 
     if (shouldLock) {
       if (body.dataset.originalOverflow === undefined) {
