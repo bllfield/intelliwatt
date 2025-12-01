@@ -159,7 +159,6 @@ async function upsertNormalizedChunk(
         },
       }),
     ),
-    { timeout: 60_000 },
   );
 
   const inserted = chunk.filter((row) => !existingSet.has(normalizedKey(row))).length;
