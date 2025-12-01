@@ -65,11 +65,16 @@ export async function POST(request: NextRequest) {
 
     const now = new Date();
 
-    if (authorization.smtAgreementId && authorization.contactEmail) {
+    const retailEmail =
+      authorization.contactEmail && authorization.contactEmail.trim().length > 0
+        ? authorization.contactEmail.trim()
+        : userEmail;
+
+    if (authorization.smtAgreementId && retailEmail) {
       try {
         await terminateSmtAgreement(
           authorization.smtAgreementId,
-          authorization.contactEmail,
+          retailEmail,
         );
       } catch (terminateError) {
         console.error(
