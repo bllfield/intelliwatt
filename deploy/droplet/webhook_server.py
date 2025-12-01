@@ -1393,6 +1393,13 @@ class H(BaseHTTPRequestHandler):
                 )
                 return
 
+        print(
+            "[SMT_DEBUG] /smt/agreements/myagreements request "
+            f"agreementNumber={(agreement_number if agreement_number is not None else '<none>')!r} "
+            f"statusReason={(status_reason or '<none>')!r}",
+            flush=True,
+        )
+
         try:
             status, data = smt_my_agreements(agreement_number, status_reason or None)
         except SmtProxyRequestError as exc:
@@ -1415,6 +1422,19 @@ class H(BaseHTTPRequestHandler):
             logging.exception("[SMT_PROXY] /smt/agreements/myagreements unexpected_error")
             self._write_json(500, {"ok": False, "error": "Unexpected SMT proxy error"})
             return
+
+        try:
+            body_snip = (
+                json.dumps(data, separators=(",", ":")) if isinstance(data, (dict, list)) else repr(data)
+            )
+        except Exception:
+            body_snip = repr(data)
+
+        print(
+            "[SMT_DEBUG] /smt/agreements/myagreements response "
+            f"httpStatus={status!r} body={_smt_snip(body_snip, limit=800)}",
+            flush=True,
+        )
 
         self._write_json(
             200,

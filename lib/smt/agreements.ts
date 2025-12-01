@@ -236,8 +236,7 @@ export async function refreshSmtAuthorizationStatus(authId: string) {
 
   let json: any;
   try {
-    json = await postToSmtProxy("", {
-      action: "agreement_status",
+    json = await getSmtMyAgreements({
       agreementNumber: auth.smtAgreementId,
     });
   } catch (error) {
@@ -276,17 +275,36 @@ export async function refreshSmtAuthorizationStatus(authId: string) {
     return { ok: false as const, reason: "smt-error" as const, raw: json };
   }
 
-  const agreement =
+  const agreementPayload = json.agreements;
+  let agreement: any =
     json.agreement ??
-    (Array.isArray(json.agreements) ? json.agreements[0] : undefined) ??
     json.agreementStatus ??
     undefined;
 
+  if (!agreement && Array.isArray(agreementPayload)) {
+    agreement = agreementPayload[0];
+  } else if (
+    !agreement &&
+    agreementPayload &&
+    typeof agreementPayload === "object"
+  ) {
+    const maybeList =
+      (agreementPayload as Record<string, unknown>).agreements ??
+      (agreementPayload as Record<string, unknown>).AgreementList ??
+      (agreementPayload as Record<string, unknown>).AgreementDetails;
+    if (Array.isArray(maybeList) && maybeList.length > 0) {
+      agreement = maybeList[0];
+    }
+  }
+
   const rawStatus: string | null =
-    agreement?.status ??
-    agreement?.statusReason ??
-    json.statusReason ??
-    null;
+    (agreement && typeof agreement === "object"
+      ? ((agreement as Record<string, unknown>).status as string | null | undefined) ??
+        ((agreement as Record<string, unknown>).Status as string | null | undefined) ??
+        ((agreement as Record<string, unknown>).statusReason as string | null | undefined) ??
+        ((agreement as Record<string, unknown>).StatusReason as string | null | undefined)
+      : null) ??
+    (typeof json.statusReason === "string" ? json.statusReason : null);
 
   const localStatus = mapSmtAgreementStatus(rawStatus);
 
