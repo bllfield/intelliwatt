@@ -13,7 +13,8 @@ const TABLE_WHITELIST = new Set([
   'RatePlan',
   'RawSmtFile',
   'SmtInterval',
-  'SmtBillingRead'
+  'SmtBillingRead',
+  'NormalizedCurrentPlan'
 ]);
 
 // Modest cap to keep responses efficient on Vercel functions

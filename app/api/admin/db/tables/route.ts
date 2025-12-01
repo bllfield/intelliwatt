@@ -13,7 +13,8 @@ const TABLE_WHITELIST = [
   // 'ErcotEsiidIndex', // Removed: ESIID lookup now uses WattBuy, not ERCOT database
   'RatePlan',
   'RawSmtFile',
-  'SmtInterval'
+  'SmtInterval',
+  'NormalizedCurrentPlan'
 ] as const;
 
 type Whitelisted = typeof TABLE_WHITELIST[number];
