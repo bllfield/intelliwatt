@@ -49,6 +49,17 @@ Notes:
 - All SMT admin routes are **internal tools only** (no public UI yet) and do not change existing customer-facing SMT flows.
 - SMT calls remain droplet-only; Vercel routes talk to the droplet, not SMT directly.
 
+### PC-2025-11-30: SMT Agreement Status Refresh + Dashboard Gate (Phase 1)
+- Added `refreshSmtAuthorizationStatus(authId)` helper in `lib/smt/agreements.ts` to map SMT agreement status into local `smtStatus` / `smtStatusMessage` fields.
+- Added `/api/smt/authorization/status` (GET/POST) so dashboards can poll the latest authorization for a home and request a live refresh when the customer returns from the SMT email.
+- Added an admin cron endpoint `POST /api/admin/smt/cron/status` (x-admin-token) sized for hourly Vercel Cron jobs that re-check pending SMT authorizations in small batches.
+- Added `components/dashboard/SmtStatusGate.tsx`, a reusable overlay that:
+  - Calls `/api/smt/authorization/status` for the provided `homeId`.
+  - Shows a blocking popup while SMT status is pending, with a manual “Refresh Status” trigger.
+  - Shows an undismissable warning when SMT access is declined, explaining the impact on plan recommendations and jackpot entries.
+  - Renders nothing when SMT access is active/expired, keeping the dashboard experience unchanged.
+- Next step: mount `<SmtStatusGate homeId={...} />` in `app/dashboard/page.tsx` once the active home id is exposed to the component tree.
+
 ## Module Databases & Env Setup
 
 - [x] Define module database env vars in `ENV_VARS.md` (`CURRENT_PLAN_DATABASE_URL`, `USAGE_DATABASE_URL`, `HOME_DETAILS_DATABASE_URL`, `APPLIANCES_DATABASE_URL`, `UPGRADES_DATABASE_URL`, `OFFERS_DATABASE_URL`, `REFERRALS_DATABASE_URL`) so each subsystem can run on its own database.
