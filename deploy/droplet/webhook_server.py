@@ -194,6 +194,34 @@ def maybe_hydrate_meter_number(step: Dict[str, Any]) -> Optional[str]:
     return meter_number
 
 
+def _strip_meter_numbers_from_body(body: Dict[str, Any]) -> None:
+    """
+    Remove any meter number fields so we can exercise the SMT agreement flow
+    with ESIID-only payloads.
+    """
+
+    if not isinstance(body, dict):
+        return
+
+    customer_meter_list = body.get("customerMeterList")
+    if isinstance(customer_meter_list, list):
+        for entry in customer_meter_list:
+            if isinstance(entry, dict):
+                entry.pop("meterNumber", None)
+                entry.pop("meter_number", None)
+                entry.pop("meterSerialNumber", None)
+                entry.pop("utilityMeterId", None)
+
+    # Recurse into nested dictionaries in case the structure changes in future payloads.
+    for value in body.values():
+        if isinstance(value, dict):
+            _strip_meter_numbers_from_body(value)
+        elif isinstance(value, list):
+            for item in value:
+                if isinstance(item, dict):
+                    _strip_meter_numbers_from_body(item)
+
+
 def run_default_command() -> bytes:
     """
     Default behavior for generic "smt-now" triggers.
@@ -655,6 +683,18 @@ class H(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _handle_agreements(self) -> None:
+        self._handle_agreements_common(
+            remove_meter=False,
+            log_prefix="/agreements",
+        )
+
+    def _handle_agreements_no_meter(self) -> None:
+        self._handle_agreements_common(
+            remove_meter=True,
+            log_prefix="/agreements-no-meter",
+        )
+
+    def _handle_agreements_common(self, *, remove_meter: bool, log_prefix: str) -> None:
         if not SMT_PROXY_TOKEN:
             self._write_json(
                 500,
@@ -699,6 +739,8 @@ class H(BaseHTTPRequestHandler):
         )
 
         action = payload.get("action")
+        if action is None:
+            action = "create_agreement_and_subscription"
         if action != "create_agreement_and_subscription":
             self._write_json(
                 400, {"ok": False, "error": "unsupported_action", "action": action}
@@ -774,10 +816,15 @@ class H(BaseHTTPRequestHandler):
         hydrated_meter_number: Optional[str] = None
         for step in validated_steps:
             step_name = step.get("name")
-            if isinstance(step_name, str) and step_name.lower() == "newagreement":
-                hydrated_meter_number = maybe_hydrate_meter_number(step)
+            if not isinstance(step_name, str):
+                continue
+            body = step.get("body")
+            if remove_meter and isinstance(body, dict):
+                _strip_meter_numbers_from_body(body)
+            if step_name.lower() == "newagreement":
+                if not remove_meter:
+                    hydrated_meter_number = maybe_hydrate_meter_number(step)
                 # Override PUCT ROR number in agreement body
-                body = step.get("body")
                 if isinstance(body, dict):
                     meter_list = body.get("customerMeterList")
                     if isinstance(meter_list, list) and meter_list:
@@ -786,11 +833,17 @@ class H(BaseHTTPRequestHandler):
                             entry["PUCTRORNumber"] = rep_puct_number
                 break
 
-        if hydrated_meter_number:
+        if hydrated_meter_number and not remove_meter:
             logging.info("Final meter number for agreement: %s", hydrated_meter_number)
 
+        action_for_log = (
+            "create_agreement_and_subscription_no_meter"
+            if remove_meter
+            else action
+        )
+
         print(
-            f"[SMT_PROXY] /agreements action={action} steps={len(validated_steps)}",
+            f"[SMT_PROXY] {log_prefix} action={action_for_log} steps={len(validated_steps)}",
             flush=True,
         )
 
@@ -900,6 +953,10 @@ class H(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path == "/agreements":
             self._handle_agreements()
+            return
+
+        if self.path == "/agreements-no-meter":
+            self._handle_agreements_no_meter()
             return
 
         if self.path != "/trigger/smt-now":
