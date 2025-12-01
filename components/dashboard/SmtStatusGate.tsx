@@ -38,6 +38,37 @@ export function SmtStatusGate({ homeId }: SmtStatusGateProps) {
   >("idle");
   const [confirmationError, setConfirmationError] = React.useState<string | null>(null);
 
+  React.useEffect(() => {
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    const body = document.body;
+    const shouldLock =
+      status === "PENDING" || status === "DECLINED" || status === "unknown";
+
+    if (shouldLock) {
+      if (body.dataset.originalOverflow === undefined) {
+        body.dataset.originalOverflow = body.style.overflow ?? "";
+      }
+      body.style.overflow = "hidden";
+
+      return () => {
+        const stored = body.dataset.originalOverflow;
+        body.style.overflow = stored ?? "";
+        delete body.dataset.originalOverflow;
+      };
+    }
+
+    if (body.dataset.originalOverflow !== undefined) {
+      const stored = body.dataset.originalOverflow;
+      body.style.overflow = stored ?? "";
+      delete body.dataset.originalOverflow;
+    }
+
+    return undefined;
+  }, [status]);
+
   const mapStatus = React.useCallback((row: AuthorizationStatus | null): StatusState => {
     if (!row) return "none";
     const raw = row.smtStatus ?? "";
