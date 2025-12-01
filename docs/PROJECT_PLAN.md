@@ -58,6 +58,7 @@ Notes:
   - Provides explicit “Approved” / “Declined” actions that call the existing confirmation API and refresh /api/smt/authorization/status.
   - Is the only accessible dashboard page while an authorization is pending or declined (layout-level redirect).
 - Removed the legacy `SmtStatusGate` overlay in favor of the dedicated confirmation page.
+- Customer-facing agreement flow now posts only to SMT `/v2/NewAgreement/`; the legacy `/v2/NewSubscription/` call is skipped to avoid redundant CSP enrollments.
 
 ## Module Databases & Env Setup
 

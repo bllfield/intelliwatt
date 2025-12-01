@@ -534,61 +534,6 @@ function buildNewAgreementPayload(
   };
 }
 
-function buildNewSubscriptionPayload(
-  input: {
-    esiid: string;
-    historicalMonthsBack: number;
-    includeInterval: boolean;
-  },
-): NewSubscriptionPayload {
-  const esiid = normalizeEsiid(input.esiid);
-  const identity = buildSmtIdentity();
-
-  const includeInterval = Boolean(input.includeInterval);
-  const subscriptionDuration = resolveSubscriptionDuration(
-    Math.max(1, Math.round(input.historicalMonthsBack || 12)),
-  );
-
-  const reportFormat: ReportFormat = includeInterval ? "LSE" : "CSV";
-  const dataType: DataType = includeInterval ? "INTERVAL" : "MONTHLY";
-  const deliveryMode: DeliveryMode = "FTP";
-  const payload: NewSubscriptionPayload = {
-    trans_id: buildTransId(),
-    requestorID: identity.requestorID,
-    requesterType: "CSP",
-    requesterAuthenticationID: identity.requesterAuthenticationID,
-    subscriptionType: "CSPENROLL",
-    historicalSubscriptionDuration: subscriptionDuration,
-    reportFormat,
-    dataType,
-    deliveryMode,
-    SMTTermsandConditions: "Y",
-  };
-  return payload;
-}
-
-type SmtSubscriptionRaw = {
-  statusCode?: string | null;
-  statusReason?: string | null;
-  [key: string]: unknown;
-};
-
-function normalizeSubscriptionStatus(raw: SmtSubscriptionRaw | null | undefined) {
-  const statusCode = (raw?.statusCode ?? "").toString().trim();
-  const statusReason = (raw?.statusReason ?? "").toString().trim();
-  const reasonLower = statusReason.toLowerCase();
-  const alreadyActive =
-    statusCode === "0001" && reasonLower.includes("subcription is already active");
-  const ok = statusCode === "0000" || alreadyActive;
-  return {
-    ok,
-    alreadyActive,
-    statusCode,
-    statusReason,
-    raw,
-  };
-}
-
 export async function createAgreementAndSubscription(
   payload: SmtAgreementRequest,
 ): Promise<SmtAgreementResult> {
@@ -651,12 +596,6 @@ export async function createAgreementAndSubscription(
       agreementDurationMonths: monthsBack,
     });
 
-    const subscriptionBody = buildNewSubscriptionPayload({
-      esiid: payload.esiid,
-      historicalMonthsBack: monthsBack,
-      includeInterval,
-    });
-
     const steps = [
       {
         name: "NewAgreement",
@@ -664,13 +603,6 @@ export async function createAgreementAndSubscription(
         username: SMT_USERNAME,
         serviceId: SMT_SERVICE_ID,
         body: agreementBody,
-      },
-      {
-        name: "NewSubscription",
-        path: "/v2/NewSubscription/",
-        username: SMT_USERNAME,
-        serviceId: SMT_SERVICE_ID,
-        body: subscriptionBody,
       },
     ];
 
@@ -681,10 +613,6 @@ export async function createAgreementAndSubscription(
       agreement: {
         name: "NewAgreement",
         body: agreementBody,
-      },
-      subscription: {
-        name: "NewSubscription",
-        body: subscriptionBody,
       },
     };
 
@@ -714,28 +642,17 @@ export async function createAgreementAndSubscription(
     const agreementResult = resultsArray.find(
       (entry: any) => entry?.name === "NewAgreement",
     );
-    const subscriptionResult = resultsArray.find(
-      (entry: any) => entry?.name === "NewSubscription",
-    );
-    const subscriptionNormalized = normalizeSubscriptionStatus(
-      subscriptionResult?.data as SmtSubscriptionRaw,
-    );
-
     return {
-      ok: !!json?.ok && subscriptionNormalized.ok,
+      ok: !!json?.ok,
       agreementId:
         agreementResult?.data?.agreementId ??
         agreementResult?.data?.AgreementID ??
-        undefined,
-      subscriptionId:
-        subscriptionResult?.data?.subscriptionId ??
-        subscriptionResult?.data?.SubscriptionID ??
         undefined,
       status: json?.status ?? (json?.ok ? "active" : "error"),
       message: json?.message ?? json?.error ?? undefined,
       backfillRequestedAt: json?.backfillRequestedAt ?? undefined,
       backfillCompletedAt: json?.backfillCompletedAt ?? undefined,
-      subscriptionAlreadyActive: subscriptionNormalized.alreadyActive,
+      subscriptionAlreadyActive: false,
     };
   } catch (err: any) {
     return {

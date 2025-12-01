@@ -413,7 +413,7 @@ export async function runSmtAgreementTest(
       meterNumber,
       repPuctNumber: String(repNumeric),
     });
-    messages.push("SMT agreement/subscription request completed.");
+    messages.push("SMT agreement request completed.");
   } catch (err) {
     errors.push(
       `Agreement call threw: ${err instanceof Error ? err.message : String(err)}`,
