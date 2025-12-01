@@ -280,6 +280,23 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
         onSubmit={handleSubmit}
         className={`space-y-3 ${showHeader ? "" : "pt-2"}`}
       >
+        <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-[11px] leading-relaxed text-slate-700">
+          <p>
+            By continuing, you authorize{" "}
+            <strong>IntelliPath Solutions LLC (IntelliWatt™)</strong> to access your
+            electricity usage information from Smart Meter Texas, your Transmission and Distribution Service Provider (TDSP),
+            and your Retail Electric Provider (REP). This access is limited to analyzing your usage and identifying better rate plans.
+          </p>
+          <p>
+            You also authorize IntelliPath Solutions LLC to electronically sign any required Letters of Authorization on your behalf,
+            consistent with ERCOT and SMT rules, so we can retrieve up to 12 months of interval, meter, and billing data.
+            This authorization does not enroll you in a new plan or change your service without your separate confirmation.
+          </p>
+          <p>
+            A copy of the authorization terms is available on request and will reflect the details you provide in this portal at the
+            time of consent.
+          </p>
+        </div>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div className="space-y-1">
             <label
