@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 
 type Json = any;
 type InspectResult = {
@@ -67,6 +67,16 @@ const SMT_TOOLS: Tool[] = [
   },
 ];
 
+const SMT_INLINE_DEFAULT = {
+  esiid: '',
+  meter: '',
+  source: 'adhoc-test',
+  filename: 'InlineUpload.csv',
+  base64: '',
+  encoding: 'base64',
+  mode: 'inline',
+};
+
 export default function SMTInspector() {
   const { token, setToken } = useLocalToken();
   const [result, setResult] = useState<InspectResult | null>(null);
@@ -87,8 +97,127 @@ export default function SMTInspector() {
   const [rawFileContent, setRawFileContent] = useState<string | null>(null);
   const [rawFileBase64, setRawFileBase64] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [inlineForm, setInlineForm] = useState({ ...SMT_INLINE_DEFAULT });
+  const [inlineLoading, setInlineLoading] = useState(false);
+  const [inlineResult, setInlineResult] = useState<{ ok: boolean; status: number; body: unknown } | null>(null);
 
   const ready = useMemo(() => Boolean(token), [token]);
+  const inlineTemplateJson = useMemo(
+    () =>
+      JSON.stringify(
+        {
+          mode: 'inline',
+          encoding: 'base64',
+          content_b64: '<BASE64_CSV_BYTES>',
+          esiid: '10443720000000000',
+          meter: 'M1',
+          source: 'adhoc-test',
+          filename: 'InlineUpload.csv',
+        },
+        null,
+        2,
+      ),
+    [],
+  );
+  const inlineCurl = useMemo(
+    () =>
+      `curl -X POST https://intelliwatt.com/api/admin/smt/pull \\
+  -H "Content-Type: application/json" \\
+  -H "x-admin-token: $env:ADMIN_TOKEN" \\
+  -d @payload.json`,
+    [],
+  );
+
+  const handleInlineChange = useCallback(
+    (field: 'esiid' | 'meter' | 'source' | 'filename' | 'base64') =>
+      (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+        const value = event.target.value;
+        setInlineForm((prev) => ({
+          ...prev,
+          [field]: value,
+        }));
+      },
+    [],
+  );
+
+  const handleInlineFile = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result === 'string') {
+        const base64 = result.substring(result.indexOf(',') + 1);
+        setInlineForm((prev) => ({
+          ...prev,
+          base64,
+          filename: file.name || prev.filename,
+        }));
+      }
+    };
+    reader.readAsDataURL(file);
+  }, []);
+
+  const resetInlineForm = useCallback(() => {
+    setInlineForm({ ...SMT_INLINE_DEFAULT });
+    setInlineResult(null);
+  }, []);
+
+  const sendInlinePayload = useCallback(
+    async (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      if (!token) {
+        alert('Set x-admin-token first');
+        return;
+      }
+      if (!inlineForm.base64.trim()) {
+        setInlineResult({ ok: false, status: 0, body: { error: 'Provide SMT CSV base64 data or upload a file.' } });
+        return;
+      }
+
+      const payload = {
+        mode: inlineForm.mode,
+        encoding: inlineForm.encoding,
+        content_b64: inlineForm.base64.trim(),
+        esiid: inlineForm.esiid || undefined,
+        meter: inlineForm.meter || undefined,
+        source: inlineForm.source || undefined,
+        filename: inlineForm.filename || undefined,
+      };
+
+      setInlineLoading(true);
+      setInlineResult(null);
+      try {
+        const response = await fetch('/api/admin/smt/pull', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-admin-token': token,
+          },
+          body: JSON.stringify(payload),
+        });
+        const body = await response
+          .clone()
+          .json()
+          .catch(() => response.text().catch(() => ''));
+        setInlineResult({ ok: response.ok, status: response.status, body });
+      } catch (error: any) {
+        setInlineResult({ ok: false, status: 0, body: { error: error?.message || 'Request failed' } });
+      } finally {
+        setInlineLoading(false);
+      }
+    },
+    [inlineForm, token],
+  );
+
+  const copyInlineValue = useCallback(async (value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      alert('Copied to clipboard');
+    } catch (error: any) {
+      alert(error?.message || 'Failed to copy text');
+    }
+  }, []);
 
   async function hit(path: string, options?: RequestInit) {
     if (!token) { alert('Set x-admin-token first'); return; }
@@ -463,6 +592,137 @@ export default function SMTInspector() {
           </li>
         ))}
       </ul>
+
+      <section className="p-4 rounded-2xl border space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold">⚡ Inline SMT Ingest Test</h2>
+          <p className="text-sm text-gray-600">
+            Post directly to <code>/api/admin/smt/pull</code> with the admin token. Use this for small CSV samples to verify dual writes into the master
+            <code>SmtInterval</code> table and the module <code>UsageIntervalModule</code>.
+          </p>
+        </div>
+        <form onSubmit={sendInlinePayload} className="space-y-4">
+          <div className="grid md:grid-cols-2 gap-4">
+            <label className="flex flex-col text-xs font-semibold text-gray-700 gap-1">
+              ESIID (optional)
+              <input
+                type="text"
+                value={inlineForm.esiid}
+                onChange={handleInlineChange('esiid')}
+                className="rounded-lg border px-3 py-2 text-sm"
+                placeholder="10443720000000000"
+              />
+            </label>
+            <label className="flex flex-col text-xs font-semibold text-gray-700 gap-1">
+              Meter (optional)
+              <input
+                type="text"
+                value={inlineForm.meter}
+                onChange={handleInlineChange('meter')}
+                className="rounded-lg border px-3 py-2 text-sm"
+                placeholder="M1"
+              />
+            </label>
+            <label className="flex flex-col text-xs font-semibold text-gray-700 gap-1">
+              Source (optional)
+              <input
+                type="text"
+                value={inlineForm.source}
+                onChange={handleInlineChange('source')}
+                className="rounded-lg border px-3 py-2 text-sm"
+                placeholder="adhoc-test"
+              />
+            </label>
+            <label className="flex flex-col text-xs font-semibold text-gray-700 gap-1">
+              Filename (optional)
+              <input
+                type="text"
+                value={inlineForm.filename}
+                onChange={handleInlineChange('filename')}
+                className="rounded-lg border px-3 py-2 text-sm"
+                placeholder="InlineUpload.csv"
+              />
+            </label>
+          </div>
+          <div className="flex flex-col text-xs font-semibold text-gray-700 gap-2">
+            SMT CSV file (auto converts to base64)
+            <input type="file" accept=".csv" onChange={handleInlineFile} className="rounded-lg border px-3 py-2 text-sm" />
+          </div>
+          <label className="flex flex-col text-xs font-semibold text-gray-700 gap-2">
+            Base64 SMT CSV
+            <textarea
+              rows={6}
+              value={inlineForm.base64}
+              onChange={handleInlineChange('base64')}
+              className="rounded-lg border px-3 py-2 font-mono text-xs"
+              placeholder="<BASE64_CSV_BYTES>"
+            />
+          </label>
+          <div className="flex flex-wrap gap-3">
+            <button
+              type="submit"
+              disabled={inlineLoading || !ready}
+              className="inline-flex items-center gap-2 rounded-full border border-blue-400 bg-blue-50 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-blue-700 transition hover:border-blue-500 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {inlineLoading ? 'Sending…' : 'Send to /api/admin/smt/pull'}
+            </button>
+            <button
+              type="button"
+              onClick={resetInlineForm}
+              className="inline-flex items-center gap-2 rounded-full border border-gray-300 bg-white px-4 py-2 text-xs font-semibold uppercase tracking-wide text-gray-700 shadow-sm transition hover:border-blue-400 hover:text-blue-600"
+            >
+              Reset form
+            </button>
+          </div>
+        </form>
+        {inlineResult && (
+          <div className="rounded-lg border border-gray-200 bg-white p-3 text-xs text-gray-800">
+            <div className="mb-2 font-semibold">
+              Response:{' '}
+              <span className={inlineResult.ok ? 'text-emerald-600' : 'text-rose-600'}>
+                {inlineResult.status}
+              </span>
+            </div>
+            <pre className="whitespace-pre-wrap break-words font-mono">
+              {typeof inlineResult.body === 'string'
+                ? inlineResult.body
+                : JSON.stringify(inlineResult.body, null, 2)}
+            </pre>
+          </div>
+        )}
+        <div className="grid md:grid-cols-2 gap-4">
+          <div className="bg-gray-50 border border-dashed rounded-lg p-3 text-xs font-mono text-gray-800">
+            <div className="flex items-center justify-between mb-2 font-semibold text-gray-700">
+              Payload template
+              <button
+                type="button"
+                onClick={() => copyInlineValue(inlineTemplateJson)}
+                className="rounded-full border border-blue-400 bg-blue-50 px-3 py-1 text-xs uppercase tracking-wide text-blue-700 hover:bg-blue-100"
+              >
+                Copy JSON
+              </button>
+            </div>
+            <pre className="whitespace-pre-wrap">{inlineTemplateJson}</pre>
+          </div>
+          <div className="bg-gray-50 border border-dashed rounded-lg p-3 text-xs font-mono text-gray-800">
+            <div className="flex items-center justify-between mb-2 font-semibold text-gray-700">
+              curl command
+              <button
+                type="button"
+                onClick={() => copyInlineValue(inlineCurl)}
+                className="rounded-full border border-blue-400 bg-blue-50 px-3 py-1 text-xs uppercase tracking-wide text-blue-700 hover:bg-blue-100"
+              >
+                Copy command
+              </button>
+            </div>
+            <pre className="whitespace-pre-wrap">{inlineCurl}</pre>
+          </div>
+        </div>
+        <p className="text-xs text-gray-600">
+          After a successful POST, confirm rows in both schemas: <code>SmtInterval</code> (master DB) and
+          <code>UsageIntervalModule</code> (usage module). This keeps admin smoke tests self-serve and copy/paste ready per PC-2025-11-27.
+        </p>
+      </section>
 
       <section className="grid md:grid-cols-2 gap-4">
         <div className="p-4 rounded-2xl border">

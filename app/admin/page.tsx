@@ -1,16 +1,6 @@
 'use client';
 
-import { ChangeEvent, FormEvent, useCallback, useEffect, useRef, useState } from 'react';
-
-const SMT_INLINE_DEFAULT = {
-  esiid: '',
-  meter: '',
-  source: 'adhoc-test',
-  filename: 'InlineUpload.csv',
-  base64: '',
-  encoding: 'base64',
-  mode: 'inline',
-};
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 interface User {
@@ -194,12 +184,7 @@ export default function AdminDashboard() {
   const [recalculatingReferrals, setRecalculatingReferrals] = useState(false);
   const [recalculatingEntries, setRecalculatingEntries] = useState(false);
   const [copiedAdId, setCopiedAdId] = useState<string | null>(null);
-  const [copiedSmtHelper, setCopiedSmtHelper] = useState<'payload' | 'curl' | null>(null);
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const smtCopyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [smtTestPayload, setSmtTestPayload] = useState(() => ({ ...SMT_INLINE_DEFAULT }));
-  const [smtTestLoading, setSmtTestLoading] = useState(false);
-  const [smtTestResult, setSmtTestResult] = useState<{ status: number; ok: boolean; body: unknown } | null>(null);
 
   // Fetch real data from API
   const fetchData = useCallback(async () => {
@@ -369,117 +354,10 @@ export default function AdminDashboard() {
     }
   }, []);
 
-  const handleCopySmtHelper = useCallback(async (type: 'payload' | 'curl', value: string) => {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopiedSmtHelper(type);
-      if (smtCopyTimeoutRef.current) {
-        clearTimeout(smtCopyTimeoutRef.current);
-      }
-      smtCopyTimeoutRef.current = setTimeout(() => setCopiedSmtHelper(null), 2000);
-    } catch (error) {
-      console.error('Failed to copy SMT helper content:', error);
-    }
-  }, []);
-
-  const handleSmtInputChange = useCallback(
-    (field: 'esiid' | 'meter' | 'source' | 'filename' | 'base64') =>
-      (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-        const value = event.target.value;
-        setSmtTestPayload((prev) => ({
-          ...prev,
-          [field]: value,
-        }));
-      },
-    [],
-  );
-
-  const handleSmtFileChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result;
-      if (typeof result === 'string') {
-        const base64 = result.substring(result.indexOf(',') + 1);
-        setSmtTestPayload((prev) => ({
-          ...prev,
-          base64,
-          filename: file.name || prev.filename,
-        }));
-      }
-    };
-    reader.readAsDataURL(file);
-  }, []);
-
-  const handleSmtSubmit = useCallback(
-    async (event: FormEvent<HTMLFormElement>) => {
-      event.preventDefault();
-      if (!smtTestPayload.base64.trim()) {
-        setSmtTestResult({
-          ok: false,
-          status: 0,
-          body: { error: 'Provide SMT CSV base64 data or upload a file before sending.' },
-        });
-        return;
-      }
-
-      const payload = {
-        mode: smtTestPayload.mode,
-        encoding: smtTestPayload.encoding,
-        content_b64: smtTestPayload.base64.trim(),
-        esiid: smtTestPayload.esiid || undefined,
-        meter: smtTestPayload.meter || undefined,
-        source: smtTestPayload.source || undefined,
-        filename: smtTestPayload.filename || undefined,
-      };
-
-      setSmtTestLoading(true);
-      setSmtTestResult(null);
-      try {
-        const response = await fetch('/api/admin/smt/pull', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(payload),
-        });
-        const body = await response
-          .clone()
-          .json()
-          .catch(() => response.text().catch(() => ''));
-
-        setSmtTestResult({
-          ok: response.ok,
-          status: response.status,
-          body,
-        });
-      } catch (error) {
-        setSmtTestResult({
-          ok: false,
-          status: 0,
-          body: { error: (error as Error).message },
-        });
-      } finally {
-        setSmtTestLoading(false);
-      }
-    },
-    [smtTestPayload],
-  );
-
-  const handleSmtReset = useCallback(() => {
-    setSmtTestPayload({ ...SMT_INLINE_DEFAULT });
-    setSmtTestResult(null);
-  }, []);
-
   useEffect(() => {
     return () => {
       if (copyTimeoutRef.current) {
         clearTimeout(copyTimeoutRef.current);
-      }
-      if (smtCopyTimeoutRef.current) {
-        clearTimeout(smtCopyTimeoutRef.current);
       }
     };
   }, []);
@@ -517,21 +395,6 @@ export default function AdminDashboard() {
   const pendingRevocationsCount = summary?.pendingSmtRevocations ?? 0;
   const testimonialsTotal = summary?.testimonialSubmissionCount ?? testimonials.length;
   const testimonialsPendingCount = summary?.testimonialPendingCount ?? testimonials.filter((record) => record.status === 'PENDING').length;
-  const smtPayloadTemplate = `{
-  "mode": "inline",
-  "encoding": "base64",
-  "content_b64": "<BASE64_CSV_BYTES>",
-  "esiid": "10443720000000000",
-  "meter": "M1",
-  "source": "adhoc-test",
-  "filename": "20251201T0100_IntervalData.csv"
-}`;
-
-  const smtCurlCommand = `curl -X POST https://intelliwatt.com/api/admin/smt/pull \\
-  -H "Content-Type: application/json" \\
-  -H "x-admin-token: $env:ADMIN_TOKEN" \\
-  -d @payload.json`;
-
   const pendingEmailConfirmationsCount =
     summary?.pendingSmtEmailConfirmations ?? emailConfirmations.pending.length;
   const declinedEmailConfirmationsCount =
@@ -828,141 +691,6 @@ npx prisma studio --browser none --port 5562`}
             </div>
             <p className="text-xs text-brand-navy/60">
               Tip: run each pair in a fresh window, and stop the Studio process when finished (Ctrl+C or closing the console).
-            </p>
-          </div>
-        </section>
-
-        {/* SMT Inline Ingest Test Harness */}
-        <section className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
-          <h2 className="text-2xl font-bold text-brand-navy mb-3">⚡ SMT Inline Ingest Tester</h2>
-          <p className="text-sm text-brand-navy/70 mb-4">
-            Use this template with <code className="font-mono text-xs">POST /api/admin/smt/pull</code>. Replace the base64 content with a real SMT CSV to
-            confirm dual writes into <code className="font-mono text-xs">SmtInterval</code> (master) and <code className="font-mono text-xs">UsageIntervalModule</code> (usage module).
-          </p>
-          <div className="space-y-4">
-            <form onSubmit={handleSmtSubmit} className="bg-brand-navy/5 border border-brand-navy/10 rounded-xl p-4 space-y-4">
-              <div className="grid gap-4 md:grid-cols-2">
-                <label className="flex flex-col text-xs font-semibold text-brand-navy gap-1">
-                  ESIID (optional)
-                  <input
-                    type="text"
-                    value={smtTestPayload.esiid}
-                    onChange={handleSmtInputChange('esiid')}
-                    className="rounded-md border border-brand-navy/20 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/40"
-                    placeholder="10443720000000000"
-                  />
-                </label>
-                <label className="flex flex-col text-xs font-semibold text-brand-navy gap-1">
-                  Meter (optional)
-                  <input
-                    type="text"
-                    value={smtTestPayload.meter}
-                    onChange={handleSmtInputChange('meter')}
-                    className="rounded-md border border-brand-navy/20 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/40"
-                    placeholder="M1"
-                  />
-                </label>
-                <label className="flex flex-col text-xs font-semibold text-brand-navy gap-1">
-                  Source (optional)
-                  <input
-                    type="text"
-                    value={smtTestPayload.source}
-                    onChange={handleSmtInputChange('source')}
-                    className="rounded-md border border-brand-navy/20 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/40"
-                    placeholder="adhoc-test"
-                  />
-                </label>
-                <label className="flex flex-col text-xs font-semibold text-brand-navy gap-1">
-                  Filename (optional)
-                  <input
-                    type="text"
-                    value={smtTestPayload.filename}
-                    onChange={handleSmtInputChange('filename')}
-                    className="rounded-md border border-brand-navy/20 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/40"
-                    placeholder="InlineUpload.csv"
-                  />
-                </label>
-              </div>
-              <div className="flex flex-col gap-2 text-xs font-semibold text-brand-navy">
-                <span>CSV file (auto-converts to base64)</span>
-                <input
-                  type="file"
-                  accept=".csv"
-                  onChange={handleSmtFileChange}
-                  className="rounded-md border border-brand-navy/20 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/40"
-                />
-              </div>
-              <label className="flex flex-col gap-2 text-xs font-semibold text-brand-navy">
-                Base64 SMT CSV
-                <textarea
-                  rows={6}
-                  value={smtTestPayload.base64}
-                  onChange={handleSmtInputChange('base64')}
-                  className="rounded-md border border-brand-navy/20 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/40"
-                  placeholder="<BASE64_CSV_BYTES>"
-                />
-              </label>
-              <div className="flex flex-wrap gap-3">
-                <button
-                  type="submit"
-                  disabled={smtTestLoading}
-                  className="inline-flex items-center gap-2 rounded-full border border-brand-blue/40 bg-brand-blue/10 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-brand-blue transition hover:border-brand-blue hover:bg-brand-blue/20 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {smtTestLoading ? 'Sending…' : 'Send to /api/admin/smt/pull'}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSmtReset}
-                  className="inline-flex items-center gap-2 rounded-full border border-brand-navy/20 bg-white px-4 py-2 text-xs font-semibold uppercase tracking-wide text-brand-navy shadow-sm transition hover:border-brand-blue/40 hover:text-brand-blue"
-                >
-                  Reset form
-                </button>
-              </div>
-              {smtTestResult && (
-                <div className="rounded-md border border-brand-navy/10 bg-white p-3 text-xs text-brand-navy">
-                  <div className="mb-2 font-semibold">
-                    Response: <span className={smtTestResult.ok ? 'text-emerald-600' : 'text-rose-600'}>{smtTestResult.status}</span>
-                  </div>
-                  <pre className="whitespace-pre-wrap break-words text-xs font-mono">
-                    {typeof smtTestResult.body === 'string'
-                      ? smtTestResult.body
-                      : JSON.stringify(smtTestResult.body, null, 2)}
-                  </pre>
-                </div>
-              )}
-            </form>
-
-            <div className="bg-brand-navy/5 border border-brand-navy/10 rounded-xl p-4">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-semibold text-brand-navy">Payload JSON</span>
-                <button
-                  type="button"
-                  onClick={() => handleCopySmtHelper('payload', smtPayloadTemplate)}
-                  className="rounded-full border border-brand-blue/40 bg-brand-blue/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-brand-blue transition hover:border-brand-blue hover:bg-brand-blue/20"
-                >
-                  {copiedSmtHelper === 'payload' ? 'Copied!' : 'Copy JSON'}
-                </button>
-              </div>
-              <pre className="whitespace-pre-wrap text-xs font-mono text-brand-navy">{smtPayloadTemplate}</pre>
-            </div>
-
-            <div className="bg-brand-navy/5 border border-brand-navy/10 rounded-xl p-4">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-semibold text-brand-navy">cURL command</span>
-                <button
-                  type="button"
-                  onClick={() => handleCopySmtHelper('curl', smtCurlCommand)}
-                  className="rounded-full border border-brand-blue/40 bg-brand-blue/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-brand-blue transition hover:border-brand-blue hover:bg-brand-blue/20"
-                >
-                  {copiedSmtHelper === 'curl' ? 'Copied!' : 'Copy command'}
-                </button>
-              </div>
-              <pre className="whitespace-pre-wrap text-xs font-mono text-brand-navy">{smtCurlCommand}</pre>
-            </div>
-
-            <p className="text-xs text-brand-navy/60">
-              Admin smoke tests should live here so QA can copy/paste without hunting through docs. After posting, open Prisma Studio for both schemas to verify
-              matching rows exist.
             </p>
           </div>
         </section>
