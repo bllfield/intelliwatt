@@ -38,6 +38,52 @@ const SMT_PROXY_AGREEMENTS_URL =
 
 const SMT_PROXY_TOKEN = process.env.SMT_PROXY_TOKEN || "";
 
+function resolveProxyBaseUrl(): string {
+  if (!SMT_PROXY_AGREEMENTS_URL) {
+    throw new Error("SMT_PROXY_AGREEMENTS_URL/SMT_PROXY_URL not configured");
+  }
+
+  try {
+    const url = new URL(SMT_PROXY_AGREEMENTS_URL);
+    if (url.pathname.endsWith("/agreements")) {
+      url.pathname = url.pathname.replace(/\/agreements$/, "");
+    }
+    return url.toString().replace(/\/+$/, "");
+  } catch {
+    // If SMT_PROXY_AGREEMENTS_URL is not a full URL, fall back to string operations.
+    return SMT_PROXY_AGREEMENTS_URL.replace(/\/agreements\/?$/, "");
+  }
+}
+
+export async function getSmtAgreementStatus(esiid: string) {
+  const proxyBase = resolveProxyBaseUrl();
+  const targetUrl = `${proxyBase}/smt/agreements/myagreements`;
+
+  const sanitizedEsiid = normalizeEsiid(esiid);
+
+  const response = await fetch(targetUrl, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...(SMT_PROXY_TOKEN ? { Authorization: `Bearer ${SMT_PROXY_TOKEN}` } : {}),
+    },
+    body: JSON.stringify({
+      // Future droplet revisions may filter by ESIID; for now we pass it through.
+      esiid: sanitizedEsiid,
+    }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(
+      `SMT proxy status HTTP ${response.status}: ${text.slice(0, 500)}`,
+    );
+  }
+
+  const json = await response.json();
+  return json;
+}
+
 // SMT agreement/subscription identity wiring.
 // These must match what’s configured in the SMT portal.
 const SMT_USERNAME = (
