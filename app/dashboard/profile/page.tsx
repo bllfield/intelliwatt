@@ -6,6 +6,7 @@ import { ProfileContactForm } from "@/components/profile/ProfileContactForm";
 import { ProfileAddressSection } from "@/components/profile/ProfileAddressSection";
 import { ProfileTestimonialCard } from "@/components/profile/ProfileTestimonialCard";
 import { RevokeSmartMeterButton } from "@/components/profile/RevokeSmartMeterButton";
+import { SmtTerminateButton } from "@/components/smt/SmtTerminateButton";
 import DashboardHero from "@/components/dashboard/DashboardHero";
 const COMMISSION_STATUS_ALLOWLIST = ["pending", "submitted", "approved", "completed", "paid"];
 
@@ -205,6 +206,8 @@ export default async function ProfilePage() {
           meterNumber: true,
           authorizationStartDate: true,
           authorizationEndDate: true,
+          smtAgreementId: true,
+          contactEmail: true,
         },
       })
     : null;
@@ -346,7 +349,8 @@ export default async function ProfilePage() {
           </div>
 
           {smtAuthorization ? (
-            <dl className="mt-6 grid gap-4 text-sm text-brand-cyan sm:grid-cols-2">
+            <>
+              <dl className="mt-6 grid gap-4 text-sm text-brand-cyan sm:grid-cols-2">
           <div className="rounded-2xl border border-brand-cyan/30 bg-brand-navy p-4">
                 <dt className="text-xs font-semibold uppercase tracking-wide text-brand-cyan/70">
                   Meter number
@@ -381,7 +385,17 @@ export default async function ProfilePage() {
                     : "No additional status reported."}
                 </dd>
               </div>
-            </dl>
+              </dl>
+
+              {smtAuthorization.smtAgreementId && smtAuthorization.contactEmail ? (
+                <div className="mt-4">
+                  <SmtTerminateButton
+                    agreementNumber={smtAuthorization.smtAgreementId}
+                    retailCustomerEmail={smtAuthorization.contactEmail}
+                  />
+                </div>
+              ) : null}
+            </>
           ) : (
             <div className="mt-6 rounded-2xl border border-brand-blue/40 bg-brand-blue/10 p-4 text-sm text-brand-blue">
               You haven’t authorized Smart Meter Texas access yet for this home. Head to the API connect page to get started.
