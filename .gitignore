@@ -53,6 +53,7 @@ coverage/
 
 # Generated files
 /lib/generated/prisma
+.prisma/
 
 .vercel
 .env*.local

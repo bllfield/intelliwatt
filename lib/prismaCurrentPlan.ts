@@ -1,4 +1,7 @@
-import { PrismaClient as CurrentPlanPrismaClient, Prisma } from '@prisma/current-plan-client';
+import {
+  PrismaClient as CurrentPlanPrismaClient,
+  Prisma,
+} from '@/.prisma/current-plan-client';
 
 declare global {
   // eslint-disable-next-line no-var

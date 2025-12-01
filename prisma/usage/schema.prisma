@@ -8,7 +8,7 @@
 generator usageClient {
   provider      = "prisma-client-js"
   binaryTargets = ["native", "rhel-openssl-3.0.x"]
-  output        = "../../node_modules/@prisma/usage-client"
+  output        = "../../.prisma/usage-client"
 }
 
 datasource usageDb {
