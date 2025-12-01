@@ -102,6 +102,22 @@ export async function listSmtSubscriptions(serviceType?: string) {
   return postToSmtProxy("/smt/subscriptions/list", payload);
 }
 
+export async function getSmtReportStatus(
+  correlationId: string,
+  serviceType?: string,
+) {
+  if (!correlationId || typeof correlationId !== "string") {
+    throw new Error("getSmtReportStatus: correlationId is required");
+  }
+
+  const payload: Record<string, unknown> = { correlationId };
+  if (serviceType && typeof serviceType === "string") {
+    payload.serviceType = serviceType;
+  }
+
+  return postToSmtProxy("/smt/report-status", payload);
+}
+
 // SMT agreement/subscription identity wiring.
 // These must match what’s configured in the SMT portal.
 const SMT_USERNAME = (
