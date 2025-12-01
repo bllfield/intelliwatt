@@ -38,42 +38,6 @@ export function SmtStatusGate({ homeId }: SmtStatusGateProps) {
   >("idle");
   const [confirmationError, setConfirmationError] = React.useState<string | null>(null);
 
-  React.useEffect(() => {
-    if (typeof document === "undefined") {
-      return;
-    }
-
-    const body = document.body;
-    const shouldLock = status === "PENDING" || status === "DECLINED";
-
-    const lock = () => {
-      if (!body.dataset.smtGateLocked) {
-        body.dataset.smtGateLocked = "true";
-        body.dataset.smtGateOriginalOverflow = body.style.overflow ?? "";
-      }
-      body.style.overflow = "hidden";
-    };
-
-    const unlock = () => {
-      if (body.dataset.smtGateLocked) {
-        const original = body.dataset.smtGateOriginalOverflow ?? "";
-        body.style.overflow = original;
-        delete body.dataset.smtGateLocked;
-        delete body.dataset.smtGateOriginalOverflow;
-      }
-    };
-
-    if (shouldLock) {
-      lock();
-    } else {
-      unlock();
-    }
-
-    return () => {
-      unlock();
-    };
-  }, [status]);
-
   const mapStatus = React.useCallback((row: AuthorizationStatus | null): StatusState => {
     if (!row) return "none";
     const raw = row.smtStatus ?? "";
