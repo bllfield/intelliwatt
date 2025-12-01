@@ -99,9 +99,31 @@ export async function POST(request: NextRequest) {
       entryWhere.houseId = null;
     }
 
-    await prisma.entry.deleteMany({
+    const entriesToDelete = await prisma.entry.findMany({
       where: entryWhere,
+      select: { id: true },
     });
+
+    if (entriesToDelete.length > 0) {
+      const entryIds = entriesToDelete.map((entry) => entry.id);
+
+      await prisma.$transaction([
+        prisma.entryStatusLog.deleteMany({
+          where: {
+            entryId: {
+              in: entryIds,
+            },
+          },
+        }),
+        prisma.entry.deleteMany({
+          where: {
+            id: {
+              in: entryIds,
+            },
+          },
+        }),
+      ]);
+    }
 
     await refreshUserEntryStatuses(user.id);
 
