@@ -89,18 +89,29 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    const entryWhere: Record<string, any> = {
-      userId: user.id,
-      type: 'smart_meter_connect',
-    };
+    const houseConditions: Array<{ houseId: string | null }> = [];
+    const candidateHouseIds = new Set<string | null>();
+
     if (archivedAuthorization?.houseId) {
-      entryWhere.houseId = archivedAuthorization.houseId;
-    } else {
-      entryWhere.houseId = null;
+      candidateHouseIds.add(archivedAuthorization.houseId);
+    }
+    if (archivedAuthorization?.houseAddressId) {
+      candidateHouseIds.add(archivedAuthorization.houseAddressId);
+    }
+    if (candidateHouseIds.size === 0) {
+      candidateHouseIds.add(null);
     }
 
+    candidateHouseIds.forEach((value) => {
+      houseConditions.push({ houseId: value });
+    });
+
     const entriesToDelete = await prisma.entry.findMany({
-      where: entryWhere,
+      where: {
+        userId: user.id,
+        type: 'smart_meter_connect',
+        OR: houseConditions,
+      },
       select: { id: true },
     });
 

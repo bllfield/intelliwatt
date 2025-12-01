@@ -137,7 +137,7 @@ export function SmtStatusGate({ homeId }: SmtStatusGateProps) {
     : "You declined Smart Meter Texas access. Personalized energy analysis and jackpot entries are paused until you authorize sharing again.";
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 px-4">
+    <div className="fixed inset-0 z-40 flex min-h-screen items-center justify-center bg-black/60 px-4 py-6">
       <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-2xl">
         <h2 className="text-lg font-semibold text-gray-900">Smart Meter Texas Authorization Required</h2>
         <p className="mt-3 text-sm text-gray-700">{message}</p>
