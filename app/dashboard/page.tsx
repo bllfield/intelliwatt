@@ -4,8 +4,6 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { useState, useEffect, type ReactNode } from 'react';
 
-import { SmtStatusGate } from '@/components/dashboard/SmtStatusGate';
-
 const ICON_COLOR = '#00F0FF';
 
 const IconChip = ({ children }: { children: ReactNode }) => (
@@ -467,7 +465,6 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-brand-white">
-      {homeId ? <SmtStatusGate homeId={homeId} /> : null}
       {/* Hero Section */}
       <section className="bg-brand-navy py-16 px-4">
         <div className="mx-auto max-w-6xl rounded-3xl border-2 border-[#00F0FF]/40 bg-brand-navy/85 p-8 text-center shadow-[0_30px_80px_rgba(10,20,60,0.55)] backdrop-blur sm:p-12">
