@@ -55,33 +55,51 @@ function resolveProxyBaseUrl(): string {
   }
 }
 
-export async function getSmtAgreementStatus(esiid: string) {
-  const proxyBase = resolveProxyBaseUrl();
-  const targetUrl = `${proxyBase}/smt/agreements/myagreements`;
+function buildProxyUrl(path: string): string {
+  const base = resolveProxyBaseUrl().replace(/\/+$/, "");
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  return `${base}${normalizedPath}`;
+}
 
-  const sanitizedEsiid = normalizeEsiid(esiid);
-
-  const response = await fetch(targetUrl, {
+async function postToSmtProxy(
+  path: string,
+  body: Record<string, unknown> = {},
+): Promise<any> {
+  const response = await fetch(buildProxyUrl(path), {
     method: "POST",
     headers: {
       "content-type": "application/json",
       ...(SMT_PROXY_TOKEN ? { Authorization: `Bearer ${SMT_PROXY_TOKEN}` } : {}),
     },
-    body: JSON.stringify({
-      // Future droplet revisions may filter by ESIID; for now we pass it through.
-      esiid: sanitizedEsiid,
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {
     const text = await response.text();
     throw new Error(
-      `SMT proxy status HTTP ${response.status}: ${text.slice(0, 500)}`,
+      `SMT proxy ${path} HTTP ${response.status}: ${text.slice(0, 500)}`,
     );
   }
 
-  const json = await response.json();
-  return json;
+  return response.json();
+}
+
+export async function getSmtAgreementStatus(esiid: string) {
+  const sanitizedEsiid = normalizeEsiid(esiid);
+  return postToSmtProxy("/smt/agreements/myagreements", {
+    esiid: sanitizedEsiid,
+  });
+}
+
+/**
+ * List SMT subscriptions for our CSP via the droplet proxy.
+ */
+export async function listSmtSubscriptions(serviceType?: string) {
+  const payload: Record<string, unknown> = {};
+  if (serviceType && typeof serviceType === "string") {
+    payload.serviceType = serviceType;
+  }
+  return postToSmtProxy("/smt/subscriptions/list", payload);
 }
 
 // SMT agreement/subscription identity wiring.
