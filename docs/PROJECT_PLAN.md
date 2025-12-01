@@ -161,6 +161,16 @@ Notes:
 - Usage module migrations are totally isolated from the master schema; do not place master migrations in `prisma/usage/migrations`.
 - Always manage Usage tables through migrations—no manual DDL against `intelliwatt_usage`.
 
+#### Prisma Generator Binary Targets
+
+When updating module Prisma schemas, always include Linux engine binaries for Vercel:
+
+```prisma
+binaryTargets = ["native", "rhel-openssl-3.0.x"]
+```
+
+This applies to every custom generator (Current Plan, Usage, etc.) and prevents the “Prisma Client could not locate the Query Engine for runtime rhel-openssl-3.0.x” error during serverless execution.
+
 ### PC-2025-11-25-K — Keeper Cleanup Runbook (Chat-Driven)
 
 **Rationale:**

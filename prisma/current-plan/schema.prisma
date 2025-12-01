@@ -4,8 +4,9 @@
 ///   --schema=prisma/current-plan/schema.prisma
 ///   --migrations-dir=prisma/current-plan/migrations
 generator currentPlanClient {
-  provider = "prisma-client-js"
-  output   = "../../node_modules/@prisma/current-plan-client"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+  output        = "../../node_modules/@prisma/current-plan-client"
 }
 
 datasource currentPlanDb {
