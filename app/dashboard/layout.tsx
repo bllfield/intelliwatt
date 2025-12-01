@@ -70,14 +70,12 @@ async function shouldForceSmtConfirmation(): Promise<boolean> {
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const headerList = headers();
-  const currentUrl = headerList.get('next-url') ?? '';
-  let pathname = '';
-  try {
-    pathname = new URL(currentUrl).pathname;
-  } catch {
-    pathname = currentUrl;
-  }
-
+  const nextUrlHeader =
+    headerList.get('next-url') ??
+    headerList.get('x-invoke-path') ??
+    headerList.get('x-invoke-url') ??
+    '';
+  const pathname = nextUrlHeader.split('?')[0];
   const isConfirmationRoute = pathname.startsWith('/dashboard/smt-confirmation');
 
   const forceConfirmation = await shouldForceSmtConfirmation();

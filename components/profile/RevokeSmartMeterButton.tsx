@@ -48,6 +48,7 @@ export function RevokeSmartMeterButton({ authorizationId }: Props) {
           .forEach((key) => window.localStorage.removeItem(key));
       }
       router.refresh();
+      router.push("/dashboard/smt-confirmation");
     } catch (error) {
       console.error("Failed to revoke SMT access", error);
       setStatus("error");
