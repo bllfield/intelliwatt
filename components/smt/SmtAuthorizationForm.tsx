@@ -91,6 +91,22 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
   }, [reminderStorageKey]);
 
   useEffect(() => {
+    if (!showEmailReminder) {
+      return;
+    }
+
+    const status = (existingAuth?.smtStatus ?? "").toString().toLowerCase();
+    const hasActivePendingAuth = existingAuth && status === "pending";
+
+    if (!hasActivePendingAuth) {
+      setShowEmailReminder(false);
+      if (typeof window !== "undefined") {
+        window.localStorage.removeItem(reminderStorageKey);
+      }
+    }
+  }, [existingAuth, reminderStorageKey, showEmailReminder]);
+
+  useEffect(() => {
     if (typeof document === "undefined") {
       return;
     }
