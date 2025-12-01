@@ -1,4 +1,5 @@
 import { randomBytes } from "crypto";
+import { prisma } from "@/lib/db";
 
 export type SmtAgreementRequest = {
   esiid: string;
@@ -176,6 +177,134 @@ export async function terminateSmtAgreement(
     agreementNumber: numeric,
     retailCustomerEmail: retailCustomerEmail.trim(),
   });
+}
+
+// Local SMT agreement status classification used by the app.
+export type LocalSmtStatus =
+  | "PENDING"
+  | "ACTIVE"
+  | "DECLINED"
+  | "EXPIRED"
+  | "ERROR";
+
+export function mapSmtAgreementStatus(
+  rawStatus: string | null | undefined,
+): LocalSmtStatus {
+  if (!rawStatus) return "ERROR";
+  const s = rawStatus.toLowerCase();
+
+  if (s.includes("pending")) return "PENDING";
+  if (s === "act" || s.includes("active")) return "ACTIVE";
+  if (
+    s.includes("not accepted") ||
+    s.includes("declined") ||
+    s.includes("nacom")
+  ) {
+    return "DECLINED";
+  }
+  if (
+    s.includes("completed") ||
+    s.includes("expire in last 45 days") ||
+    s.includes("terminated in last 45 days") ||
+    s.includes("terminated")
+  ) {
+    return "EXPIRED";
+  }
+
+  return "ERROR";
+}
+
+/**
+ * Refresh SMT agreement status for a given SmtAuthorization by calling
+ * the SMT droplet and normalizing the result into local status fields.
+ *
+ * This does NOT throw on SMT errors; it records an "ERROR" status on the
+ * SmtAuthorization row instead.
+ */
+export async function refreshSmtAuthorizationStatus(authId: string) {
+  const auth = await prisma.smtAuthorization.findUnique({
+    where: { id: authId },
+  });
+
+  if (!auth) {
+    return { ok: false as const, reason: "no-auth" as const };
+  }
+
+  if (!auth.smtAgreementId) {
+    return { ok: false as const, reason: "no-agreement" as const };
+  }
+
+  let json: any;
+  try {
+    json = await postToSmtProxy("", {
+      action: "agreement_status",
+      agreementNumber: auth.smtAgreementId,
+    });
+  } catch (error) {
+    console.error(
+      "[SMT] refreshSmtAuthorizationStatus: SMT proxy request failed",
+      error,
+    );
+
+    await prisma.smtAuthorization.update({
+      where: { id: auth.id },
+      data: {
+        smtStatus: "ERROR",
+        smtStatusMessage:
+          "Unable to contact SMT proxy for agreement status refresh",
+      },
+    });
+
+    return { ok: false as const, reason: "network-error" as const };
+  }
+
+  if (!json?.ok) {
+    const msg =
+      json?.errorMessage ||
+      json?.statusReason ||
+      json?.error ||
+      "SMT agreement status check failed";
+
+    await prisma.smtAuthorization.update({
+      where: { id: auth.id },
+      data: {
+        smtStatus: "ERROR",
+        smtStatusMessage: msg,
+      },
+    });
+
+    return { ok: false as const, reason: "smt-error" as const, raw: json };
+  }
+
+  const agreement =
+    json.agreement ??
+    (Array.isArray(json.agreements) ? json.agreements[0] : undefined) ??
+    json.agreementStatus ??
+    undefined;
+
+  const rawStatus: string | null =
+    agreement?.status ??
+    agreement?.statusReason ??
+    json.statusReason ??
+    null;
+
+  const localStatus = mapSmtAgreementStatus(rawStatus);
+
+  const updated = await prisma.smtAuthorization.update({
+    where: { id: auth.id },
+    data: {
+      smtStatus: localStatus,
+      smtStatusMessage: rawStatus,
+      // TODO: add smtStatusUpdatedAt once the column exists.
+    },
+  });
+
+  return {
+    ok: true as const,
+    status: localStatus,
+    authorization: updated,
+    raw: json,
+  };
 }
 
 export interface SmtMyAgreementsFilter {
