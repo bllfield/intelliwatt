@@ -33,6 +33,10 @@ export function SmtStatusGate({ homeId }: SmtStatusGateProps) {
   const [auth, setAuth] = React.useState<AuthorizationStatus | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [confirmationLoading, setConfirmationLoading] = React.useState<
+    "idle" | "approved" | "declined"
+  >("idle");
+  const [confirmationError, setConfirmationError] = React.useState<string | null>(null);
 
   const mapStatus = React.useCallback((row: AuthorizationStatus | null): StatusState => {
     if (!row) return "none";
@@ -121,6 +125,52 @@ export function SmtStatusGate({ homeId }: SmtStatusGateProps) {
     fetchStatus({ refresh: false });
   }, [homeId, fetchStatus]);
 
+  const handleEmailConfirmation = React.useCallback(
+    async (choice: "approved" | "declined") => {
+      if (!homeId || confirmationLoading !== "idle") {
+        return;
+      }
+
+      setConfirmationLoading(choice);
+      setConfirmationError(null);
+      try {
+        const response = await fetch("/api/user/smt/email-confirmation", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ status: choice }),
+        });
+
+        let payload: any = null;
+        try {
+          payload = await response.json();
+        } catch {
+          // ignore JSON parse issues; payload stays null
+        }
+
+        if (!response.ok || (payload && payload.ok === false)) {
+          const message =
+            payload?.error ||
+            payload?.message ||
+            "Unable to record your confirmation. Please try again.";
+          throw new Error(message);
+        }
+
+        await fetchStatus({ refresh: true });
+      } catch (err) {
+        const message =
+          err instanceof Error
+            ? err.message
+            : "Unable to record your confirmation. Please try again.";
+        setConfirmationError(message);
+      } finally {
+        setConfirmationLoading("idle");
+      }
+    },
+    [confirmationLoading, fetchStatus, homeId],
+  );
+
   if (status === "unknown" || status === "none") {
     return null;
   }
@@ -138,7 +188,7 @@ export function SmtStatusGate({ homeId }: SmtStatusGateProps) {
 
   return (
     <div className="fixed inset-0 z-40 flex min-h-screen items-center justify-center bg-black/60 px-4 py-6">
-      <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-2xl">
+      <div className="w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-6 shadow-2xl sm:max-h-[90vh] sm:p-8">
         <h2 className="text-lg font-semibold text-gray-900">Smart Meter Texas Authorization Required</h2>
         <p className="mt-3 text-sm text-gray-700">{message}</p>
 
@@ -147,6 +197,9 @@ export function SmtStatusGate({ homeId }: SmtStatusGateProps) {
         ) : null}
 
         {error ? <p className="mt-2 text-xs text-red-600">{error}</p> : null}
+        {confirmationError ? (
+          <p className="mt-2 text-xs text-red-600">{confirmationError}</p>
+        ) : null}
 
         <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           {showPending ? (
@@ -170,6 +223,43 @@ export function SmtStatusGate({ homeId }: SmtStatusGateProps) {
             </p>
           ) : null}
         </div>
+
+        {showPending ? (
+          <div className="mt-6 space-y-4">
+            <p className="text-xs text-gray-600">
+              Already clicked the Smart Meter Texas email? Let us know below so we can refresh the status
+              immediately.
+            </p>
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <button
+                type="button"
+                onClick={() => handleEmailConfirmation("approved")}
+                disabled={confirmationLoading !== "idle"}
+                className="inline-flex items-center justify-center rounded-md border border-emerald-500 px-3 py-2 text-sm font-medium text-emerald-700 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {confirmationLoading === "approved" ? "Submitting…" : "I approved the SMT email"}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleEmailConfirmation("declined")}
+                disabled={confirmationLoading !== "idle"}
+                className="inline-flex items-center justify-center rounded-md border border-rose-500 px-3 py-2 text-sm font-medium text-rose-600 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {confirmationLoading === "declined" ? "Submitting…" : "I declined SMT access"}
+              </button>
+              <a
+                href="/dashboard/api"
+                className="inline-flex items-center justify-center rounded-md border border-blue-400 px-3 py-2 text-sm font-medium text-blue-600 transition hover:bg-blue-50"
+              >
+                Update SMT form
+              </a>
+            </div>
+            <p className="text-xs text-gray-500">
+              If you need to start over, open the SMT authorization form to re-send the email or correct your
+              details.
+            </p>
+          </div>
+        ) : null}
 
         {showDeclined ? (
           <p className="mt-3 text-xs font-semibold text-red-600">
