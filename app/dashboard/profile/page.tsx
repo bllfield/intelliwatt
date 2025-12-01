@@ -8,6 +8,7 @@ import { ProfileTestimonialCard } from "@/components/profile/ProfileTestimonialC
 import { RevokeSmartMeterButton } from "@/components/profile/RevokeSmartMeterButton";
 import { SmtTerminateButton } from "@/components/smt/SmtTerminateButton";
 import DashboardHero from "@/components/dashboard/DashboardHero";
+import { SmtStatusBanner } from "@/components/account/SmtStatusBanner";
 const COMMISSION_STATUS_ALLOWLIST = ["pending", "submitted", "approved", "completed", "paid"];
 
 function isTestimonialTableMissing(error: unknown) {
@@ -290,6 +291,8 @@ export default async function ProfilePage() {
       }
     : null;
 
+  const activeHomeId = activeHouseDetails?.id ?? null;
+
   return (
     <div className="min-h-screen bg-white py-4 px-4 text-brand-navy">
       <div className="mx-auto flex max-w-6xl flex-col gap-10">
@@ -298,6 +301,8 @@ export default async function ProfilePage() {
           highlight="& Home"
           description="Manage your IntelliWatt contact preferences, connect additional homes, and keep Smart Meter Texas authorizations current. Each home earns its own entries once SMT is connected."
         />
+
+        {activeHomeId ? <SmtStatusBanner homeId={activeHomeId} /> : null}
 
         <div className="grid gap-6 lg:grid-cols-[1fr,1fr]">
           <section className="rounded-3xl border border-brand-cyan/30 bg-brand-navy p-6 text-brand-cyan shadow-[0_0_35px_rgba(56,189,248,0.28)]">

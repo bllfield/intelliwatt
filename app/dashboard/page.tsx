@@ -4,6 +4,8 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { useState, useEffect, type ReactNode } from 'react';
 
+import { SmtStatusGate } from '@/components/dashboard/SmtStatusGate';
+
 const ICON_COLOR = '#00F0FF';
 
 const IconChip = ({ children }: { children: ReactNode }) => (
@@ -386,8 +388,9 @@ function highlightEntryText(text: string) {
 }
 
 export default function DashboardPage() {
-const [mounted, setMounted] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const [userAddress, setUserAddress] = useState<string>('');
+  const [homeId, setHomeId] = useState<string | null>(null);
 
   const resolveStorageKey = () => {
     if (typeof document === 'undefined') {
@@ -405,21 +408,49 @@ const [mounted, setMounted] = useState(false);
   useEffect(() => {
     setMounted(true);
 
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  const key = resolveStorageKey();
-
-  const legacy = localStorage.getItem('intelliwatt_user_address');
-  if (legacy && key !== 'intelliwatt_user_address') {
-    localStorage.setItem(key, legacy);
-    localStorage.removeItem('intelliwatt_user_address');
+    if (typeof window === 'undefined') {
+      return;
     }
 
-  const savedAddress = localStorage.getItem(key);
-  setUserAddress(savedAddress ?? '');
-}, []);
+    const key = resolveStorageKey();
+
+    const legacy = localStorage.getItem('intelliwatt_user_address');
+    if (legacy && key !== 'intelliwatt_user_address') {
+      localStorage.setItem(key, legacy);
+      localStorage.removeItem('intelliwatt_user_address');
+    }
+
+    const savedAddress = localStorage.getItem(key);
+    setUserAddress(savedAddress ?? '');
+
+    let cancelled = false;
+    const loadDashboard = async () => {
+      try {
+        const response = await fetch('/api/admin/user/dashboard', {
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          cache: 'no-store',
+        });
+        if (!response.ok) {
+          return;
+        }
+        const data = await response.json();
+        const dashboardHomeId = data?.address?.id;
+        if (!cancelled && typeof dashboardHomeId === 'string' && dashboardHomeId.length > 0) {
+          setHomeId(dashboardHomeId);
+        }
+      } catch (error) {
+        console.warn('Dashboard homeId fetch failed', error);
+      }
+    };
+
+    void loadDashboard();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Prevent hydration mismatch
   if (!mounted) {
@@ -436,6 +467,7 @@ const [mounted, setMounted] = useState(false);
 
   return (
     <div className="min-h-screen bg-brand-white">
+      {homeId ? <SmtStatusGate homeId={homeId} /> : null}
       {/* Hero Section */}
       <section className="bg-brand-navy py-16 px-4">
         <div className="mx-auto max-w-6xl rounded-3xl border-2 border-[#00F0FF]/40 bg-brand-navy/85 p-8 text-center shadow-[0_30px_80px_rgba(10,20,60,0.55)] backdrop-blur sm:p-12">
