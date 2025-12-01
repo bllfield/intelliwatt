@@ -1,3 +1,54 @@
+## PC-2025-11-30-SMT-ADMIN-MGMT
+
+Scope: SMT agreement/subscription admin tools + usage normalization trigger
+
+- Added internal SMT admin API routes (Vercel, admin-only via `x-admin-token`):
+  - `POST /api/admin/smt/agreements/status`  
+    - Input: `{ esiid }`  
+    - Uses `getSmtAgreementStatus(esiid)` → droplet `/agreements/status` → SMT status APIs.
+  - `POST /api/admin/smt/agreements/cancel`  
+    - Input: `{ esiid }`  
+    - Uses `cancelSmtAgreementAndSubscription(esiid)` → droplet `/agreements/cancel` → SMT terminate subscription + agreement.
+  - `POST /api/admin/smt/subscriptions/list`  
+    - Input (optional): `{ serviceType?: "ADHOC" | "SUBSCRIPTION" }`  
+    - Uses `listSmtSubscriptions()` → droplet `/smt/subscriptions/list` → SMT `Mysubscriptions`.
+  - `POST /api/admin/smt/report-status`  
+    - Input: `{ correlationId, serviceType? }`  
+    - Uses `getSmtReportStatus()` → droplet `/smt/report-status` → SMT `reportrequeststatus`.
+  - `POST /api/admin/smt/agreements/esiids`  
+    - Input: `{ agreementNumber }`  
+    - Uses `getSmtAgreementEsiids()` → droplet `/smt/agreements/esiids` → SMT `AgreementESIIDs`.
+  - `POST /api/admin/smt/agreements/terminate`  
+    - Input: `{ agreementNumber, retailCustomerEmail }`  
+    - Uses `terminateSmtAgreement()` → droplet `/smt/agreements/terminate` → SMT `Terminateagreement`.
+  - `POST /api/admin/smt/agreements/myagreements`  
+    - Input: `{ agreementNumber?, statusReason? }`  
+    - Uses `getSmtMyAgreements()` → droplet `/smt/agreements/myagreements` → SMT `MyAgreements` / agreement status list.
+
+- Usage normalization (new admin trigger; normalizer itself already existed):
+  - Route: `POST /api/admin/usage/normalize`
+    - Guarded by `x-admin-token = ADMIN_TOKEN`.
+    - Body:
+      ```jsonc
+      {
+        "houseId"?: string,
+        "esiid"?: string,
+        "source"?: "smt" | "green_button" | "manual" | "other",
+        "start"?: "ISO date string",
+        "end"?: "ISO date string"
+      }
+      ```
+    - Calls `normalizeRawUsageToMaster(filter: UsageSourceFilter)` from `lib/usage/normalize.ts`.
+    - Behavior:
+      - Reads raw intervals from usage DB (`UsageIntervalModule`).
+      - Maps to CDM `NormalizedUsageRow`.
+      - Upserts into master `SmtInterval` in chunks.
+      - Returns `{ ok, rawCount, insertedCount, updatedCount }`.
+
+Notes:
+- All SMT admin routes are **internal tools only** (no public UI yet) and do not change existing customer-facing SMT flows.
+- SMT calls remain droplet-only; Vercel routes talk to the droplet, not SMT directly.
+
 ## Module Databases & Env Setup
 
 - [x] Define module database env vars in `ENV_VARS.md` (`CURRENT_PLAN_DATABASE_URL`, `USAGE_DATABASE_URL`, `HOME_DETAILS_DATABASE_URL`, `APPLIANCES_DATABASE_URL`, `UPGRADES_DATABASE_URL`, `OFFERS_DATABASE_URL`, `REFERRALS_DATABASE_URL`) so each subsystem can run on its own database.

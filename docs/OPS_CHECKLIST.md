@@ -1,3 +1,99 @@
+## SMT · Admin Tools & Usage Normalization (Internal Only)
+
+### Preconditions
+- `ADMIN_TOKEN` is set in the Vercel environment and known only to operators.
+- Droplet SMT proxy is healthy (`smt-webhook.service` running, JWT token test works).
+
+### Check SMT Agreement / Subscription Status
+1. From a secure terminal (PowerShell or HTTP client), call:
+   - URL: `POST https://intelliwatt.com/api/admin/smt/agreements/status`
+   - Headers: `x-admin-token: $ADMIN_TOKEN`
+   - Body:
+     ```json
+     { "esiid": "<ESIID>" }
+     ```
+2. Inspect `status` payload returned from droplet/SMT to confirm:
+   - Agreement active / pending / terminated.
+   - Subscription status (if present).
+
+### Cancel SMT Agreement + Subscription (User Requests Disconnect)
+1. Confirm user identity and document their request (ticket).
+2. Call:
+   - URL: `POST /api/admin/smt/agreements/cancel`
+   - Body:
+     ```json
+     { "esiid": "<ESIID>" }
+     ```
+3. Verify response:
+   - `ok: true` and droplet/SMT statusCode indicates success (or already-terminated).
+4. Log the action in the user’s record (include timestamp and ESID).
+
+### List SMT Subscriptions (CSP-wide)
+1. Call:
+   - URL: `POST /api/admin/smt/subscriptions/list`
+   - Body (optional):
+     ```json
+     { "serviceType": "SUBSCRIPTION" }
+     ```
+2. Use results to troubleshoot duplicate or stale subscriptions before creating new ones.
+
+### Agreement ESIIDs, Terminate Agreement, and MyAgreements
+- **List ESIIDs for an Agreement**  
+  - `POST /api/admin/smt/agreements/esiids` with `{ "agreementNumber": <number> }`.
+- **Terminate a specific Agreement**  
+  - `POST /api/admin/smt/agreements/terminate` with:
+    ```json
+    {
+      "agreementNumber": <number>,
+      "retailCustomerEmail": "customer@example.com"
+    }
+    ```
+- **List / filter CSP Agreements**  
+  - `POST /api/admin/smt/agreements/myagreements` with optional:
+    ```json
+    {
+      "agreementNumber": <number>,
+      "statusReason": "PEN" | "ACT" | "COM" | "NACOM"
+    }
+    ```
+
+### Check SMT Report Status (Ad-hoc / Subscription Reports)
+1. After triggering an SMT report (interval/usage fetch), capture the `correlationId`.
+2. Call:
+   - URL: `POST /api/admin/smt/report-status`
+   - Body:
+     ```json
+     {
+       "correlationId": "<corr-id-from-SMT>",
+       "serviceType": "ADHOC"
+     }
+     ```
+3. Use returned status fields (status, statusCode, statusReason) to debug stuck or delayed reports.
+
+### Normalize Usage from Usage DB → Master SmtInterval
+1. Identify the `houseId` and/or `esiid` whose raw usage has already been ingested into the **usage** DB.
+2. Call:
+   - URL: `POST /api/admin/usage/normalize`
+   - Headers: `x-admin-token: $ADMIN_TOKEN`
+   - Body:
+     ```json
+     {
+       "houseId": "<house-id-or-empty>",
+       "esiid": "<ESIID-or-empty>",
+       "source": "smt",
+       "start": "2025-01-01T00:00:00.000Z",
+       "end":   "2025-12-31T23:59:59.999Z"
+     }
+     ```
+3. Confirm response summary:
+   - `rawCount` > 0
+   - `insertedCount` + `updatedCount` matches expectations.
+4. Spot-check master DB (`SmtInterval`) for new/updated normalized rows before running any downstream analytics.
+
+Notes:
+- All admin endpoints are **non-user-facing** and must only be used by trusted operators.
+- Never expose `ADMIN_TOKEN` in logs, UI, or client-side code.
+
 # OPS: ERCOT Daily Ingest & DB Explorer — Checklist
 
 ## Daily Cron (Vercel)
