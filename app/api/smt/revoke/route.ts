@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import { prisma } from '@/lib/db';
 import { normalizeEmail } from '@/lib/utils/email';
 import { refreshUserEntryStatuses } from '@/lib/hitthejackwatt/entryLifecycle';
+import { terminateSmtAgreement } from '@/lib/smt/agreements';
 
 export const dynamic = 'force-dynamic';
 
@@ -46,6 +47,8 @@ export async function POST(request: NextRequest) {
         houseId: true,
         houseAddressId: true,
         esiid: true,
+        contactEmail: true,
+        smtAgreementId: true,
       },
     });
 
@@ -61,6 +64,27 @@ export async function POST(request: NextRequest) {
     }
 
     const now = new Date();
+
+    if (authorization.smtAgreementId && authorization.contactEmail) {
+      try {
+        await terminateSmtAgreement(
+          authorization.smtAgreementId,
+          authorization.contactEmail,
+        );
+      } catch (terminateError) {
+        console.error(
+          '[smt/revoke] Failed to terminate SMT agreement via proxy',
+          terminateError,
+        );
+        return NextResponse.json(
+          {
+            error:
+              'We could not reach Smart Meter Texas to terminate the data sharing agreement. Please try again or contact support.',
+          },
+          { status: 502 },
+        );
+      }
+    }
 
     const archivedAuthorization = await prisma.smtAuthorization.update({
       where: { id: authorization.id },
@@ -106,7 +130,7 @@ export async function POST(request: NextRequest) {
       houseConditions.push({ houseId: value });
     });
 
-    const entriesToDelete = await prisma.entry.findMany({
+    let entriesToDelete = await prisma.entry.findMany({
       where: {
         userId: user.id,
         type: 'smart_meter_connect',
@@ -114,6 +138,17 @@ export async function POST(request: NextRequest) {
       },
       select: { id: true },
     });
+
+    if (entriesToDelete.length === 0) {
+      entriesToDelete = await prisma.entry.findMany({
+        where: {
+          userId: user.id,
+          type: 'smart_meter_connect',
+          houseId: null,
+        },
+        select: { id: true },
+      });
+    }
 
     if (entriesToDelete.length > 0) {
       const entryIds = entriesToDelete.map((entry) => entry.id);
