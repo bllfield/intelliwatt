@@ -2,8 +2,10 @@ import os
 import json
 import subprocess
 import logging
+import secrets
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
@@ -87,6 +89,7 @@ SMT_PASSWORD = os.getenv("SMT_PASSWORD")
 SMT_PROXY_TOKEN = os.getenv("SMT_PROXY_TOKEN")
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "").strip()
 SMT_SERVICE_ID = os.getenv("SMT_SERVICE_ID", SMT_USERNAME)
+SMT_REQUESTOR_AUTH_ID = os.getenv("SMT_REQUESTOR_AUTH_ID", "").strip()
 
 APP_BASE_URL = (
     os.environ.get("APP_BASE_URL")
@@ -220,6 +223,166 @@ def _strip_meter_numbers_from_body(body: Dict[str, Any]) -> None:
             for item in value:
                 if isinstance(item, dict):
                     _strip_meter_numbers_from_body(item)
+
+
+def generate_trans_id(prefix: str = "TXID") -> str:
+    """
+    Generate a reasonably unique SMT transaction identifier that preserves
+    the familiar prefix + timestamp + random suffix structure.
+    """
+
+    millis = int(time.time() * 1000)
+    random_hex = secrets.token_hex(4).upper()
+    return f"{prefix}{millis}{random_hex}"
+
+
+def _smt_success(status: Any) -> bool:
+    return isinstance(status, int) and 200 <= status < 300
+
+
+class SmtProxyRequestError(Exception):
+    def __init__(self, status: int, payload: Any, url: Optional[str] = None):
+        message = f"SMT request failed with HTTP {status}"
+        if url:
+            message = f"{message} ({url})"
+        super().__init__(message)
+        self.status = status
+        self.payload = payload
+        self.url = url
+
+
+def _smt_base_ids() -> Tuple[str, str]:
+    """
+    Return the (requestorID, requesterAuthenticationID) pair used for SMT calls.
+    Raises if either value is missing so the caller surfaces a clear error.
+    """
+
+    requestor_id = (SMT_USERNAME or "").strip()
+    if not requestor_id:
+        raise ValueError("SMT_USERNAME is not configured")
+
+    requester_auth_id = (SMT_REQUESTOR_AUTH_ID or "").strip()
+    if not requester_auth_id:
+        raise ValueError("SMT_REQUESTOR_AUTH_ID is not configured")
+
+    return requestor_id, requester_auth_id
+
+
+def smt_report_status(correlation_id: str, service_type: Optional[str] = None) -> Tuple[int, Any]:
+    requestor_id, _auth_id = _smt_base_ids()
+    payload: Dict[str, Any] = {
+        "trans_id": generate_trans_id(prefix="RPTSTAT"),
+        "requestorID": requestor_id,
+        "correlationId": correlation_id,
+        "SMTTermsandConditions": "Y",
+    }
+    if service_type:
+        payload["serviceType"] = service_type
+
+    logging.info("[SMT_PROXY] ReportStatus payload=%s", json.dumps(payload))
+    response = smt_post("/v2/reportrequeststatus/", payload)
+    status = response.get("status")
+    data = response.get("data")
+    if not _smt_success(status):
+        raise SmtProxyRequestError(status or 0, data, response.get("url"))
+    return status or 200, data
+
+
+def smt_list_subscriptions() -> Tuple[int, Any]:
+    requestor_id, requester_auth_id = _smt_base_ids()
+    payload = {
+        "trans_id": generate_trans_id(prefix="SUBLIST"),
+        "requestorID": requestor_id,
+        "requesterAuthenticationID": requester_auth_id,
+        "SMTTermsandConditions": "Y",
+    }
+    logging.info("[SMT_PROXY] MySubscriptions payload=%s", json.dumps(payload))
+    response = smt_post("/v2/Mysubscriptions/", payload)
+    status = response.get("status")
+    data = response.get("data")
+    if not _smt_success(status):
+        raise SmtProxyRequestError(status or 0, data, response.get("url"))
+    return status or 200, data
+
+
+def smt_unsubscribe(subscription_number: str) -> Tuple[int, Any]:
+    requestor_id, requester_auth_id = _smt_base_ids()
+    payload = {
+        "trans_id": generate_trans_id(prefix="UNSUB"),
+        "requestorID": requestor_id,
+        "requesterAuthenticationID": requester_auth_id,
+        "subscriptionNumber": subscription_number,
+        "SMTTermsandConditions": "Y",
+    }
+    logging.info("[SMT_PROXY] UnSubscription payload=%s", json.dumps(payload))
+    response = smt_post("/v2/UnSubscription/", payload)
+    status = response.get("status") or 0
+    data = response.get("data")
+    return status, data
+
+
+def smt_agreement_esiids(agreement_number: int) -> Tuple[int, Any]:
+    requestor_id, requester_auth_id = _smt_base_ids()
+    payload = {
+        "trans_id": generate_trans_id(prefix="AGRIESI"),
+        "requestorID": requestor_id,
+        "requesterAuthenticationID": requester_auth_id,
+        "agreementNumber": agreement_number,
+        "SMTTermsandConditions": "Y",
+    }
+    logging.info("[SMT_PROXY] AgreementESIIDs payload=%s", json.dumps(payload))
+    response = smt_post("/v2/AgreementESIIDs/", payload)
+    status = response.get("status")
+    data = response.get("data")
+    if not _smt_success(status):
+        raise SmtProxyRequestError(status or 0, data, response.get("url"))
+    return status or 200, data
+
+
+def smt_terminate_agreement(agreement_number: int, retail_customer_email: str) -> Tuple[int, Any]:
+    requestor_id, requester_auth_id = _smt_base_ids()
+    payload = {
+        "trans_id": generate_trans_id(prefix="AGRTERM"),
+        "requestorID": requestor_id,
+        "requesterAuthenticationID": requester_auth_id,
+        "agreementList": [
+            {
+                "agreementNumber": agreement_number,
+                "retailCustomerEmail": retail_customer_email,
+            }
+        ],
+        "SMTTermsandConditions": "Y",
+    }
+    logging.info("[SMT_PROXY] Terminateagreement payload=%s", json.dumps(payload))
+    response = smt_post("/v2/Terminateagreement/", payload)
+    status = response.get("status") or 0
+    data = response.get("data")
+    return status, data
+
+
+def smt_my_agreements(
+    agreement_number: Optional[int] = None,
+    status_reason: Optional[str] = None,
+) -> Tuple[int, Any]:
+    requestor_id, requester_auth_id = _smt_base_ids()
+    payload: Dict[str, Any] = {
+        "trans_id": generate_trans_id(prefix="MYAGREE"),
+        "requestorID": requestor_id,
+        "requesterAuthenticationID": requester_auth_id,
+        "SMTTermsandConditions": "Y",
+    }
+    if agreement_number is not None:
+        payload["agreementNumber"] = agreement_number
+    if status_reason:
+        payload["statusReason"] = status_reason
+
+    logging.info("[SMT_PROXY] MyAgreements payload=%s", json.dumps(payload))
+    response = smt_post("/v2/myagreements/", payload)
+    status = response.get("status")
+    data = response.get("data")
+    if not _smt_success(status):
+        raise SmtProxyRequestError(status or 0, data, response.get("url"))
+    return status or 200, data
 
 
 def run_default_command() -> bytes:
@@ -682,6 +845,38 @@ class H(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _ensure_proxy_auth(self) -> bool:
+        if not SMT_PROXY_TOKEN:
+            self._write_json(
+                500,
+                {"ok": False, "error": "smt_proxy_token_not_configured"},
+            )
+            return False
+
+        auth_header = self.headers.get("Authorization") or ""
+        if not auth_header.startswith("Bearer "):
+            self._write_json(401, {"ok": False, "error": "unauthorized"})
+            return False
+
+        incoming_token = auth_header.split(" ", 1)[1].strip()
+        if incoming_token != SMT_PROXY_TOKEN:
+            self._write_json(401, {"ok": False, "error": "unauthorized"})
+            return False
+
+        return True
+
+    def _read_json_payload(self, *, allow_empty: bool) -> Optional[Dict[str, Any]]:
+        body_bytes = self._read_body_bytes()
+        if not body_bytes:
+            return {} if allow_empty else None
+        try:
+            payload = json.loads(body_bytes.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return None
+        if not isinstance(payload, dict):
+            return None
+        return payload
+
     def _handle_agreements(self) -> None:
         self._handle_agreements_common(
             remove_meter=False,
@@ -695,33 +890,11 @@ class H(BaseHTTPRequestHandler):
         )
 
     def _handle_agreements_common(self, *, remove_meter: bool, log_prefix: str) -> None:
-        if not SMT_PROXY_TOKEN:
-            self._write_json(
-                500,
-                {"ok": False, "error": "smt_proxy_token_not_configured"},
-            )
+        if not self._ensure_proxy_auth():
             return
 
-        auth_header = self.headers.get("Authorization") or ""
-        if not auth_header.startswith("Bearer "):
-            self._write_json(401, {"ok": False, "error": "unauthorized"})
-            return
-        incoming_token = auth_header.split(" ", 1)[1].strip()
-        if incoming_token != SMT_PROXY_TOKEN:
-            self._write_json(401, {"ok": False, "error": "unauthorized"})
-            return
-
-        body_bytes = self._read_body_bytes()
-        if not body_bytes:
-            self._write_json(400, {"ok": False, "error": "invalid_json"})
-            return
-        try:
-            payload = json.loads(body_bytes.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            self._write_json(400, {"ok": False, "error": "invalid_json"})
-            return
-
-        if not isinstance(payload, dict):
+        payload = self._read_json_payload(allow_empty=False)
+        if payload is None:
             self._write_json(400, {"ok": False, "error": "invalid_json"})
             return
 
@@ -950,6 +1123,269 @@ class H(BaseHTTPRequestHandler):
 
         self._write_json(200, response_payload)
 
+    def _handle_smt_report_status(self) -> None:
+        if not self._ensure_proxy_auth():
+            return
+
+        payload = self._read_json_payload(allow_empty=False)
+        if payload is None:
+            self._write_json(400, {"ok": False, "error": "invalid_json"})
+            return
+
+        correlation_id = str(payload.get("correlationId") or "").strip()
+        service_type = str(payload.get("serviceType") or "").strip()
+
+        if not correlation_id:
+            self._write_json(400, {"ok": False, "error": "missing_correlationId"})
+            return
+
+        try:
+            status, data = smt_report_status(correlation_id, service_type or None)
+        except SmtProxyRequestError as exc:
+            logging.error(
+                "[SMT_PROXY] /smt/report-status error status=%s payload_snip=%s",
+                exc.status,
+                json.dumps(exc.payload)[:500] if isinstance(exc.payload, (dict, list)) else str(exc.payload)[:500],
+            )
+            self._write_json(
+                502,
+                {
+                    "ok": False,
+                    "status": exc.status,
+                    "error": "smt_request_failed",
+                    "response": exc.payload,
+                },
+            )
+            return
+        except Exception:
+            logging.exception("[SMT_PROXY] /smt/report-status unexpected_error")
+            self._write_json(500, {"ok": False, "error": "Unexpected SMT proxy error"})
+            return
+
+        self._write_json(
+            200,
+            {
+                "ok": True,
+                "status": status,
+                "reportStatus": data,
+            },
+        )
+
+    def _handle_smt_subscriptions_list(self) -> None:
+        if not self._ensure_proxy_auth():
+            return
+
+        # Consume JSON body if present but allow empty payloads.
+        payload = self._read_json_payload(allow_empty=True)
+        if payload is None:
+            self._write_json(400, {"ok": False, "error": "invalid_json"})
+            return
+
+        try:
+            status, data = smt_list_subscriptions()
+        except SmtProxyRequestError as exc:
+            logging.error(
+                "[SMT_PROXY] /smt/subscriptions/list error status=%s payload_snip=%s",
+                exc.status,
+                json.dumps(exc.payload)[:500] if isinstance(exc.payload, (dict, list)) else str(exc.payload)[:500],
+            )
+            self._write_json(
+                502,
+                {
+                    "ok": False,
+                    "status": exc.status,
+                    "error": "smt_request_failed",
+                    "response": exc.payload,
+                },
+            )
+            return
+        except Exception:
+            logging.exception("[SMT_PROXY] /smt/subscriptions/list unexpected_error")
+            self._write_json(500, {"ok": False, "error": "Unexpected SMT proxy error"})
+            return
+
+        self._write_json(
+            200,
+            {
+                "ok": True,
+                "status": status,
+                "subscriptions": data,
+            },
+        )
+
+    def _handle_smt_subscriptions_unsubscribe(self) -> None:
+        if not self._ensure_proxy_auth():
+            return
+
+        payload = self._read_json_payload(allow_empty=False)
+        if payload is None:
+            self._write_json(400, {"ok": False, "error": "invalid_json"})
+            return
+
+        subscription_number = str(payload.get("subscriptionNumber") or "").strip()
+
+        if not subscription_number:
+            self._write_json(400, {"ok": False, "error": "missing_subscriptionNumber"})
+            return
+
+        status, data = smt_unsubscribe(subscription_number)
+        ok = _smt_success(status)
+        self._write_json(
+            200,
+            {
+                "ok": ok,
+                "status": status,
+                "response": data,
+            },
+        )
+
+    def _handle_smt_agreements_esiids(self) -> None:
+        if not self._ensure_proxy_auth():
+            return
+
+        payload = self._read_json_payload(allow_empty=False)
+        if payload is None:
+            self._write_json(400, {"ok": False, "error": "invalid_json"})
+            return
+
+        agreement_number_raw = payload.get("agreementNumber")
+        try:
+            agreement_number = int(str(agreement_number_raw).strip())
+        except (TypeError, ValueError):
+            self._write_json(
+                400,
+                {"ok": False, "error": "invalid_agreementNumber"},
+            )
+            return
+
+        try:
+            status, data = smt_agreement_esiids(agreement_number)
+        except SmtProxyRequestError as exc:
+            logging.error(
+                "[SMT_PROXY] /smt/agreements/esiids error status=%s payload_snip=%s",
+                exc.status,
+                json.dumps(exc.payload)[:500] if isinstance(exc.payload, (dict, list)) else str(exc.payload)[:500],
+            )
+            self._write_json(
+                502,
+                {
+                    "ok": False,
+                    "status": exc.status,
+                    "error": "smt_request_failed",
+                    "response": exc.payload,
+                },
+            )
+            return
+        except Exception:
+            logging.exception("[SMT_PROXY] /smt/agreements/esiids unexpected_error")
+            self._write_json(500, {"ok": False, "error": "Unexpected SMT proxy error"})
+            return
+
+        self._write_json(
+            200,
+            {
+                "ok": True,
+                "status": status,
+                "agreementESIIDs": data,
+            },
+        )
+
+    def _handle_smt_agreements_terminate(self) -> None:
+        if not self._ensure_proxy_auth():
+            return
+
+        payload = self._read_json_payload(allow_empty=False)
+        if payload is None:
+            self._write_json(400, {"ok": False, "error": "invalid_json"})
+            return
+
+        agreement_number_raw = payload.get("agreementNumber")
+        retail_customer_email = str(payload.get("retailCustomerEmail") or "").strip()
+
+        try:
+            agreement_number = int(str(agreement_number_raw).strip())
+        except (TypeError, ValueError):
+            self._write_json(
+                400,
+                {"ok": False, "error": "invalid_agreementNumber"},
+            )
+            return
+
+        if not retail_customer_email:
+            self._write_json(
+                400,
+                {"ok": False, "error": "missing_retailCustomerEmail"},
+            )
+            return
+
+        status, data = smt_terminate_agreement(agreement_number, retail_customer_email)
+        ok = _smt_success(status)
+        self._write_json(
+            200,
+            {
+                "ok": ok,
+                "status": status,
+                "response": data,
+            },
+        )
+
+    def _handle_smt_agreements_myagreements(self) -> None:
+        if not self._ensure_proxy_auth():
+            return
+
+        payload = self._read_json_payload(allow_empty=True)
+        if payload is None:
+            self._write_json(400, {"ok": False, "error": "invalid_json"})
+            return
+
+        agreement_number_value = payload.get("agreementNumber")
+        status_reason = str(payload.get("statusReason") or "").strip()
+
+        agreement_number: Optional[int]
+        if agreement_number_value is None or str(agreement_number_value).strip() == "":
+            agreement_number = None
+        else:
+            try:
+                agreement_number = int(str(agreement_number_value).strip())
+            except (TypeError, ValueError):
+                self._write_json(
+                    400,
+                    {"ok": False, "error": "invalid_agreementNumber"},
+                )
+                return
+
+        try:
+            status, data = smt_my_agreements(agreement_number, status_reason or None)
+        except SmtProxyRequestError as exc:
+            logging.error(
+                "[SMT_PROXY] /smt/agreements/myagreements error status=%s payload_snip=%s",
+                exc.status,
+                json.dumps(exc.payload)[:500] if isinstance(exc.payload, (dict, list)) else str(exc.payload)[:500],
+            )
+            self._write_json(
+                502,
+                {
+                    "ok": False,
+                    "status": exc.status,
+                    "error": "smt_request_failed",
+                    "response": exc.payload,
+                },
+            )
+            return
+        except Exception:
+            logging.exception("[SMT_PROXY] /smt/agreements/myagreements unexpected_error")
+            self._write_json(500, {"ok": False, "error": "Unexpected SMT proxy error"})
+            return
+
+        self._write_json(
+            200,
+            {
+                "ok": True,
+                "status": status,
+                "agreements": data,
+            },
+        )
+
     def do_POST(self):
         if self.path == "/agreements":
             self._handle_agreements()
@@ -957,6 +1393,30 @@ class H(BaseHTTPRequestHandler):
 
         if self.path == "/agreements-no-meter":
             self._handle_agreements_no_meter()
+            return
+
+        if self.path == "/smt/report-status":
+            self._handle_smt_report_status()
+            return
+
+        if self.path == "/smt/subscriptions/list":
+            self._handle_smt_subscriptions_list()
+            return
+
+        if self.path == "/smt/subscriptions/unsubscribe":
+            self._handle_smt_subscriptions_unsubscribe()
+            return
+
+        if self.path == "/smt/agreements/esiids":
+            self._handle_smt_agreements_esiids()
+            return
+
+        if self.path == "/smt/agreements/terminate":
+            self._handle_smt_agreements_terminate()
+            return
+
+        if self.path == "/smt/agreements/myagreements":
+            self._handle_smt_agreements_myagreements()
             return
 
         if self.path != "/trigger/smt-now":
