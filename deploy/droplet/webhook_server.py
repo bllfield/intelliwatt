@@ -1139,6 +1139,12 @@ class H(BaseHTTPRequestHandler):
             self._write_json(400, {"ok": False, "error": "missing_correlationId"})
             return
 
+        print(
+            "[SMT_DEBUG] /smt/report-status request "
+            f"correlationId={correlation_id!r} serviceType={(service_type or '<none>')!r}",
+            flush=True,
+        )
+
         try:
             status, data = smt_report_status(correlation_id, service_type or None)
         except SmtProxyRequestError as exc:
@@ -1161,6 +1167,19 @@ class H(BaseHTTPRequestHandler):
             logging.exception("[SMT_PROXY] /smt/report-status unexpected_error")
             self._write_json(500, {"ok": False, "error": "Unexpected SMT proxy error"})
             return
+
+        try:
+            body_snip = (
+                json.dumps(data, separators=(",", ":")) if isinstance(data, (dict, list)) else repr(data)
+            )
+        except Exception:
+            body_snip = repr(data)
+
+        print(
+            "[SMT_DEBUG] /smt/report-status response "
+            f"httpStatus={status!r} body={_smt_snip(body_snip, limit=800)}",
+            flush=True,
+        )
 
         self._write_json(
             200,
@@ -1318,8 +1337,28 @@ class H(BaseHTTPRequestHandler):
             )
             return
 
+        print(
+            "[SMT_DEBUG] /smt/agreements/terminate request "
+            f"agreementNumber={agreement_number!r} retailCustomerEmail={retail_customer_email!r}",
+            flush=True,
+        )
+
         status, data = smt_terminate_agreement(agreement_number, retail_customer_email)
         ok = _smt_success(status)
+
+        try:
+            body_snip = (
+                json.dumps(data, separators=(",", ":")) if isinstance(data, (dict, list)) else repr(data)
+            )
+        except Exception:
+            body_snip = repr(data)
+
+        print(
+            "[SMT_DEBUG] /smt/agreements/terminate response "
+            f"httpStatus={status!r} ok={ok} body={_smt_snip(body_snip, limit=800)}",
+            flush=True,
+        )
+
         self._write_json(
             200,
             {
