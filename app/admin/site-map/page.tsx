@@ -454,9 +454,9 @@ function group(routes: RouteInfo[]): Map<RouteStatus, RouteInfo[]> {
     grouped.set(route.status, list);
   }
 
-  for (const list of grouped.values()) {
+  grouped.forEach((list) => {
     list.sort((a, b) => a.route.localeCompare(b.route));
-  }
+  });
 
   return grouped;
 }
