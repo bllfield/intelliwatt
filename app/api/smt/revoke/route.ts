@@ -3,7 +3,10 @@ import { cookies } from 'next/headers';
 import { prisma } from '@/lib/db';
 import { normalizeEmail } from '@/lib/utils/email';
 import { refreshUserEntryStatuses } from '@/lib/hitthejackwatt/entryLifecycle';
-import { terminateSmtAgreement } from '@/lib/smt/agreements';
+import {
+  findAgreementForEsiid,
+  terminateSmtAgreement,
+} from '@/lib/smt/agreements';
 
 export const dynamic = 'force-dynamic';
 
@@ -70,10 +73,45 @@ export async function POST(request: NextRequest) {
         ? authorization.contactEmail.trim()
         : userEmail;
 
-    if (authorization.smtAgreementId && retailEmail) {
+    let agreementNumber: number | string | null = authorization.smtAgreementId ?? null;
+
+    if (!agreementNumber && authorization.esiid) {
+      try {
+        const lookup = await findAgreementForEsiid(authorization.esiid);
+        if (lookup.match?.agreementNumber) {
+          agreementNumber = lookup.match.agreementNumber;
+          await prisma.smtAuthorization.update({
+            where: { id: authorization.id },
+            data: {
+              smtAgreementId:
+                typeof agreementNumber === 'number'
+                  ? agreementNumber.toString()
+                  : agreementNumber,
+            },
+          });
+        }
+      } catch (lookupError) {
+        console.error(
+          '[smt/revoke] Failed to resolve SMT agreement number via proxy',
+          lookupError,
+        );
+      }
+    }
+
+    if (!agreementNumber) {
+      return NextResponse.json(
+        {
+          error:
+            'We could not locate an active SMT agreement number for this authorization. Please refresh the SMT status and try again.',
+        },
+        { status: 409 },
+      );
+    }
+
+    if (retailEmail) {
       try {
         await terminateSmtAgreement(
-          authorization.smtAgreementId,
+          agreementNumber,
           retailEmail,
         );
       } catch (terminateError) {

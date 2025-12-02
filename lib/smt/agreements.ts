@@ -372,6 +372,20 @@ export function mapSmtAgreementStatus(
   return "ERROR";
 }
 
+export interface SmtAgreementSummary {
+  agreementNumber?: number | null;
+  status?: string | null;
+  statusReason?: string | null;
+  esiid?: string | null;
+  raw?: any;
+}
+
+export interface AgreementLookupResult {
+  raw: any;
+  agreements: SmtAgreementSummary[];
+  match: SmtAgreementSummary | null;
+}
+
 /**
  * Refresh SMT agreement status for a given SmtAuthorization by calling
  * the SMT droplet and normalizing the result into local status fields.
@@ -382,21 +396,50 @@ export function mapSmtAgreementStatus(
 export async function refreshSmtAuthorizationStatus(authId: string) {
   const auth = await prisma.smtAuthorization.findUnique({
     where: { id: authId },
+    select: {
+      id: true,
+      smtAgreementId: true,
+      esiid: true,
+      houseAddressId: true,
+    },
   });
 
   if (!auth) {
     return { ok: false as const, reason: "no-auth" as const };
   }
 
-  if (!auth.smtAgreementId) {
-    return { ok: false as const, reason: "no-agreement" as const };
+  let esiid: string | undefined = auth.esiid ?? undefined;
+  const houseId = auth.houseAddressId;
+  if (
+    !esiid &&
+    typeof houseId === "string" &&
+    houseId.trim().length > 0
+  ) {
+    const resolvedHouseId = houseId;
+    const house = await prisma.houseAddress.findUnique({
+      where: { id: resolvedHouseId },
+      select: { esiid: true },
+    });
+    esiid = house?.esiid ?? undefined;
   }
 
-  let json: any;
-  try {
-    json = await getSmtMyAgreements({
-      agreementNumber: auth.smtAgreementId,
+  if (!esiid) {
+    const message = "No ESIID associated with this authorization.";
+    await prisma.smtAuthorization.update({
+      where: { id: auth.id },
+      data: {
+        smtStatus: "ERROR",
+        smtStatusMessage: message,
+      },
     });
+    return { ok: false as const, reason: "no-esiid" as const };
+  }
+
+  const targetEsiid = esiid;
+
+  let lookup: AgreementLookupResult;
+  try {
+    lookup = await findAgreementForEsiid(targetEsiid);
   } catch (error) {
     console.error(
       "[SMT] refreshSmtAuthorizationStatus: SMT proxy request failed",
@@ -415,71 +458,52 @@ export async function refreshSmtAuthorizationStatus(authId: string) {
     return { ok: false as const, reason: "network-error" as const };
   }
 
-  if (!json?.ok) {
-    const msg =
-      json?.errorMessage ||
-      json?.statusReason ||
-      json?.error ||
-      "SMT agreement status check failed";
-
+  const match = lookup.match;
+  if (!match) {
+    const message = "No SMT agreements returned for this ESIID.";
     await prisma.smtAuthorization.update({
       where: { id: auth.id },
       data: {
         smtStatus: "ERROR",
-        smtStatusMessage: msg,
+        smtStatusMessage: message,
       },
     });
 
-    return { ok: false as const, reason: "smt-error" as const, raw: json };
+    return {
+      ok: false as const,
+      reason: "no-agreement" as const,
+      raw: lookup.raw,
+      agreements: lookup.agreements,
+    };
   }
 
-  const agreementPayload = json.agreements;
-  let agreement: any =
-    json.agreement ??
-    json.agreementStatus ??
-    undefined;
-
-  if (!agreement && Array.isArray(agreementPayload)) {
-    agreement = agreementPayload[0];
-  } else if (
-    !agreement &&
-    agreementPayload &&
-    typeof agreementPayload === "object"
-  ) {
-    const maybeList =
-      (agreementPayload as Record<string, unknown>).agreements ??
-      (agreementPayload as Record<string, unknown>).AgreementList ??
-      (agreementPayload as Record<string, unknown>).AgreementDetails;
-    if (Array.isArray(maybeList) && maybeList.length > 0) {
-      agreement = maybeList[0];
-    }
-  }
-
-  const rawStatus: string | null =
-    (agreement && typeof agreement === "object"
-      ? ((agreement as Record<string, unknown>).status as string | null | undefined) ??
-        ((agreement as Record<string, unknown>).Status as string | null | undefined) ??
-        ((agreement as Record<string, unknown>).statusReason as string | null | undefined) ??
-        ((agreement as Record<string, unknown>).StatusReason as string | null | undefined)
-      : null) ??
-    (typeof json.statusReason === "string" ? json.statusReason : null);
+  const rawStatus =
+    match.statusReason ??
+    match.status ??
+    null;
 
   const localStatus = mapSmtAgreementStatus(rawStatus);
 
+  const updateData: Record<string, unknown> = {
+    smtStatus: localStatus,
+    smtStatusMessage: rawStatus,
+  };
+
+  if (match.agreementNumber && match.agreementNumber > 0) {
+    updateData.smtAgreementId = match.agreementNumber;
+  }
+
   const updated = await prisma.smtAuthorization.update({
     where: { id: auth.id },
-    data: {
-      smtStatus: localStatus,
-      smtStatusMessage: rawStatus,
-      // TODO: add smtStatusUpdatedAt once the column exists.
-    },
+    data: updateData,
   });
 
   return {
     ok: true as const,
     status: localStatus,
     authorization: updated,
-    raw: json,
+    raw: lookup.raw,
+    agreements: lookup.agreements,
   };
 }
 
@@ -553,6 +577,142 @@ function normalizeEsiid(esiid: string): string {
   }
   const trimmed = digits.slice(-17);
   return trimmed.padStart(17, "0");
+}
+
+const AGREEMENT_NUMBER_KEYS = [
+  "agreementNumber",
+  "AgreementNumber",
+  "agreementId",
+  "AgreementId",
+  "agreementID",
+  "AgreementID",
+  "agreement_id",
+];
+
+const AGREEMENT_STATUS_KEYS = ["status", "Status"];
+const AGREEMENT_STATUS_REASON_KEYS = [
+  "statusReason",
+  "StatusReason",
+  "agreementStatus",
+  "AgreementStatus",
+];
+const AGREEMENT_ESIID_KEYS = ["esiid", "ESIID", "esiId", "ESI_ID", "esi_id", "Esiid"];
+
+function toOptionalNumber(value: unknown): number | undefined {
+  if (value === null || value === undefined) return undefined;
+  const parsed = Number.parseInt(String(value).trim(), 10);
+  return Number.isNaN(parsed) ? undefined : parsed;
+}
+
+function toOptionalString(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const str = String(value).trim();
+  return str.length === 0 ? null : str;
+}
+
+function pickFirstKey<T>(
+  record: Record<string, unknown>,
+  keys: readonly string[],
+  transform: (value: unknown) => T,
+): T | undefined {
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(record, key)) {
+      const result = transform(record[key]);
+      if (result !== undefined && result !== null) {
+        return result as T;
+      }
+    }
+  }
+  return undefined;
+}
+
+function extractAgreementSummaries(raw: any): SmtAgreementSummary[] {
+  const summaries: SmtAgreementSummary[] = [];
+  const stack: any[] = [];
+  const seen = new Set<any>();
+
+  if (raw !== undefined) {
+    stack.push(raw);
+  }
+
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current || typeof current !== "object") {
+      continue;
+    }
+    if (seen.has(current)) {
+      continue;
+    }
+    seen.add(current);
+
+    if (Array.isArray(current)) {
+      for (const item of current) {
+        stack.push(item);
+      }
+      continue;
+    }
+
+    const record = current as Record<string, unknown>;
+    const agreementNumber = pickFirstKey(record, AGREEMENT_NUMBER_KEYS, toOptionalNumber);
+    const status = pickFirstKey(record, AGREEMENT_STATUS_KEYS, toOptionalString) ?? undefined;
+    const statusReason =
+      pickFirstKey(record, AGREEMENT_STATUS_REASON_KEYS, toOptionalString) ?? undefined;
+    const esiid = pickFirstKey(record, AGREEMENT_ESIID_KEYS, toOptionalString) ?? undefined;
+
+    if (
+      agreementNumber !== undefined ||
+      status !== undefined ||
+      statusReason !== undefined ||
+      esiid !== undefined
+    ) {
+      summaries.push({
+        agreementNumber: agreementNumber ?? null,
+        status: status ?? null,
+        statusReason: statusReason ?? null,
+        esiid: esiid ?? null,
+        raw: record,
+      });
+    }
+
+    for (const value of Object.values(record)) {
+      if (value && typeof value === "object") {
+        stack.push(value);
+      }
+    }
+  }
+
+  return summaries;
+}
+
+export async function findAgreementForEsiid(
+  esiid: string,
+): Promise<AgreementLookupResult> {
+  const sanitized = normalizeEsiid(esiid);
+  if (!sanitized || sanitized.trim().length === 0) {
+    throw new Error("findAgreementForEsiid: esiid is required");
+  }
+
+  const response = await getSmtAgreementStatus(sanitized);
+  const agreements = extractAgreementSummaries(response);
+  const normalizedTarget = normalizeEsiid(sanitized);
+
+  const matched =
+    agreements.find((agreement) => {
+      if (!agreement.esiid) return false;
+      try {
+        return normalizeEsiid(agreement.esiid) === normalizedTarget;
+      } catch {
+        return false;
+      }
+    }) ??
+    agreements.find((agreement) => agreement.agreementNumber !== null) ??
+    null;
+
+  return {
+    raw: response,
+    agreements,
+    match: matched ?? null,
+  };
 }
 
 interface SmtIdentity {
