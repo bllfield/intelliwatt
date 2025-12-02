@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback } from "react";
 import DashboardHero from "@/components/dashboard/DashboardHero";
+import LocalTime from "@/components/LocalTime";
 
 interface EntryData {
   id: string;
@@ -196,6 +197,11 @@ export default function EntriesPage() {
   const neonValueClass = (count: number) =>
     count > 0 ? "text-[#39FF14]" : "text-[#ff1493]";
 
+  const activityTimestamp = useCallback(
+    (entry: EntryData) => entry.lastValidated ?? entry.createdAt,
+    [],
+  );
+
   if (loading) {
     return (
       <div className="min-h-screen bg-white flex items-center justify-center">
@@ -301,16 +307,22 @@ export default function EntriesPage() {
               </div>
             ) : (
               <div className="grid gap-4">
-                {entries
-                  .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-                  .map((entry) => (
+                {[...entries]
+                  .sort(
+                    (a, b) =>
+                      new Date(activityTimestamp(b)).getTime() -
+                      new Date(activityTimestamp(a)).getTime(),
+                  )
+                  .map((entry) => {
+                    const primaryTimestamp = activityTimestamp(entry);
+                    return (
                     <div
                       key={entry.id}
                     className="flex flex-col gap-3 rounded-2xl border border-brand-cyan/30 bg-brand-navy px-5 py-4 md:flex-row md:items-center md:justify-between"
                     >
                       <div>
                         <p className="text-sm uppercase tracking-wide text-brand-cyan/60">
-                          {new Date(entry.createdAt).toLocaleString()}
+                          <LocalTime value={primaryTimestamp} fallback="—" />
                         </p>
                         <p className="text-brand-cyan font-medium">
                           {entry.type.replace(/_/g, " ")}
@@ -339,7 +351,8 @@ export default function EntriesPage() {
                         ) : null}
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
               </div>
             )}
           </div>
