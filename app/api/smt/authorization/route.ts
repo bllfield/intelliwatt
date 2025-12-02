@@ -327,9 +327,18 @@ export async function POST(req: NextRequest) {
         repPuctNumber,
       });
 
+      const agreementId =
+        smtResult.agreementId !== undefined && smtResult.agreementId !== null
+          ? String(smtResult.agreementId)
+          : null;
+      const subscriptionId =
+        smtResult.subscriptionId !== undefined && smtResult.subscriptionId !== null
+          ? String(smtResult.subscriptionId)
+          : null;
+
       smtUpdateData = {
-        smtAgreementId: smtResult.agreementId ?? null,
-        smtSubscriptionId: smtResult.subscriptionId ?? null,
+        smtAgreementId: agreementId,
+        smtSubscriptionId: subscriptionId,
         smtStatus: smtResult.status ?? null,
         smtStatusMessage: smtResult.message ?? null,
         smtBackfillRequestedAt: smtResult.backfillRequestedAt
