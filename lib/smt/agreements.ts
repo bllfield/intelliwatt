@@ -490,7 +490,7 @@ export async function refreshSmtAuthorizationStatus(authId: string) {
   };
 
   if (match.agreementNumber && match.agreementNumber > 0) {
-    updateData.smtAgreementId = match.agreementNumber;
+    updateData.smtAgreementId = String(match.agreementNumber);
   }
 
   const updated = await prisma.smtAuthorization.update({
