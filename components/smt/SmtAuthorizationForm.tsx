@@ -162,7 +162,7 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
           if (typeof window !== "undefined") {
             window.dispatchEvent(new CustomEvent("entriesUpdated"));
           }
-          router.refresh();
+          router.push("/dashboard/smt-confirmation");
         } catch (err) {
           console.error("SMT authorization submit error", err);
           setSubmitError(

@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
 import { SmtAuthorizationForm } from "@/components/smt/SmtAuthorizationForm";
@@ -143,7 +144,13 @@ export default async function ApiConnectPage() {
   const isAlreadyActiveSuccess = ok && subscriptionAlreadyActive;
   const isError = normalizedStatus === "error";
   const isPending = normalizedStatus === "pending";
+  const isDeclined = normalizedStatus === "declined";
+  const isInitialSubmission = existingAuth && normalizedStatus === "";
   const hasActiveAuthorization = ok;
+
+  if (existingAuth && (isPending || isDeclined || isInitialSubmission)) {
+    redirect("/dashboard/smt-confirmation");
+  }
 
   let statusLabel: string | null = null;
   let statusTone: "success" | "warning" | "error" | "neutral" = "neutral";
