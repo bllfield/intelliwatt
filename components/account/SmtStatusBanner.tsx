@@ -25,11 +25,13 @@ export function SmtStatusBanner({ homeId }: SmtStatusBannerProps) {
   const [message, setMessage] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [warning, setWarning] = React.useState<string | null>(null);
 
   const fetchStatus = React.useCallback(
     async (refresh: boolean) => {
       setLoading(true);
       setError(null);
+      setWarning(null);
       try {
         const targetUrl = refresh
           ? "/api/smt/authorization/status"
@@ -48,9 +50,13 @@ export function SmtStatusBanner({ homeId }: SmtStatusBannerProps) {
           throw new Error(json?.message || json?.error || "Failed to load SMT status");
         }
 
+        if (json?.warning && typeof json.warning === "string") {
+          setWarning(json.warning);
+        }
+
         const authorization = json.authorization;
         if (!authorization) {
-          setStatus("none");
+          setStatus("PENDING");
           setMessage(null);
         } else {
           setStatus(classifyStatus(authorization.smtStatus));
@@ -72,13 +78,14 @@ export function SmtStatusBanner({ homeId }: SmtStatusBannerProps) {
       setStatus("none");
       setMessage(null);
       setError(null);
+      setWarning(null);
       return;
     }
 
     void fetchStatus(false);
   }, [homeId, fetchStatus]);
 
-  if (!homeId || status === "none") {
+  if (!homeId) {
     return null;
   }
 
@@ -120,6 +127,7 @@ export function SmtStatusBanner({ homeId }: SmtStatusBannerProps) {
             Smart Meter Texas status: <span className="uppercase">{status}</span>
           </p>
           {message ? <p className="text-xs opacity-80">{message}</p> : null}
+          {warning ? <p className="text-xs text-amber-600">{warning}</p> : null}
           {error ? <p className="text-xs text-red-600">{error}</p> : null}
         </div>
 
