@@ -1291,11 +1291,28 @@ class H(BaseHTTPRequestHandler):
             response_steps.append(entry)
 
             step_name = (step.get("name") or "").lower()
-            status_code = smt_response.get("status")
+            status_raw = smt_response.get("status")
+            if isinstance(status_raw, int):
+                status_code: int = status_raw
+            else:
+                try:
+                    status_code = int(str(status_raw))
+                except (TypeError, ValueError):
+                    logging.warning(
+                        "SMT response missing integer status for step %s: %r",
+                        step_name or "<unknown>",
+                        status_raw,
+                    )
+                    status_code = 0
             data = smt_response.get("data")
+            subscription_payload: Optional[Dict[str, Any]]
+            if isinstance(data, dict):
+                subscription_payload = data
+            else:
+                subscription_payload = None
 
             if step_name == "newagreement":
-                if not (isinstance(status_code, int) and 200 <= status_code < 300):
+                if not 200 <= status_code < 300:
                     self._write_json(
                         502,
                         {
@@ -1312,7 +1329,7 @@ class H(BaseHTTPRequestHandler):
                     "body": data,
                 }
             elif step_name == "newsubscription":
-                normalized = _normalize_subscription_response(status_code, data)
+                normalized = _normalize_subscription_response(status_code, subscription_payload)
                 subscription_result = normalized
 
                 if normalized["ok"]:
