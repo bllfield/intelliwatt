@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { terminateSmtAgreement } from "@/lib/smt/agreements";
 
 export async function setPrimaryHouse(
   userId: string,
@@ -9,7 +10,7 @@ export async function setPrimaryHouse(
 
   const client = prisma as any;
 
-  return client.$transaction(async (tx: any) => {
+  const result = await client.$transaction(async (tx: any) => {
     const otherHouses = await tx.houseAddress.findMany({
       where: {
         userId,
@@ -95,14 +96,21 @@ export async function archiveConflictingAuthorizations({
 
   const client = prisma as any;
 
-  return client.$transaction(async (tx: any) => {
+  const result = await client.$transaction(async (tx: any) => {
     const orClauses = [
       { esiid },
       meterNumber && meterNumber.trim().length > 0 ? { meterNumber } : null,
     ].filter(Boolean) as { esiid?: string; meterNumber?: string }[];
 
     if (!orClauses.length) {
-      return { archivedAuthorizationIds: [] as string[], displacedUserIds: [] as string[] };
+      return {
+        archivedAuthorizationIds: [] as string[],
+        displacedUserIds: [] as string[],
+        displacedTargets: [] as Array<{
+          agreementId: string | null;
+          contactEmail: string | null;
+        }>,
+      };
     }
 
     const conflicts = await tx.smtAuthorization.findMany({
@@ -111,15 +119,32 @@ export async function archiveConflictingAuthorizations({
         id: { not: newAuthorizationId },
         OR: orClauses,
       },
-      select: { id: true, userId: true, houseAddressId: true },
+      select: {
+        id: true,
+        userId: true,
+        houseAddressId: true,
+        smtAgreementId: true,
+        contactEmail: true,
+      },
     });
 
     if (!conflicts.length) {
-      return { archivedAuthorizationIds: [] as string[], displacedUserIds: [] as string[] };
+      return {
+        archivedAuthorizationIds: [] as string[],
+        displacedUserIds: [] as string[],
+        displacedTargets: [] as Array<{
+          agreementId: string | null;
+          contactEmail: string | null;
+        }>,
+      };
     }
 
     const archivedAuthorizationIds: string[] = [];
     const displacedUserIds = new Set<string>();
+    const displacedTargets: Array<{
+      agreementId: string | null;
+      contactEmail: string | null;
+    }> = [];
 
     for (const auth of conflicts) {
       archivedAuthorizationIds.push(auth.id);
@@ -171,6 +196,11 @@ export async function archiveConflictingAuthorizations({
         });
       }
 
+      displacedTargets.push({
+        agreementId: auth.smtAgreementId ?? null,
+        contactEmail: auth.contactEmail ?? null,
+      });
+
       if (auth.userId !== userId) {
         displacedUserIds.add(auth.userId);
       }
@@ -206,7 +236,35 @@ export async function archiveConflictingAuthorizations({
     return {
       archivedAuthorizationIds,
       displacedUserIds: Array.from(displacedUserIds),
+      displacedTargets,
     };
   });
+
+  await terminateDisplacedAuthorizations(result.displacedTargets);
+
+  return {
+    archivedAuthorizationIds: result.archivedAuthorizationIds,
+    displacedUserIds: result.displacedUserIds,
+  };
+}
+
+async function terminateDisplacedAuthorizations(
+  targets: Array<{ agreementId: string | null; contactEmail: string | null }>,
+) {
+  for (const target of targets) {
+    const agreementId = target.agreementId;
+    const contactEmail = target.contactEmail?.trim();
+
+    if (!agreementId || !contactEmail) continue;
+
+    try {
+      await terminateSmtAgreement(agreementId, contactEmail);
+    } catch (error) {
+      console.error(
+        "[archiveConflictingAuthorizations] Failed to terminate displaced SMT agreement",
+        { agreementId, error },
+      );
+    }
+  }
 }
 
