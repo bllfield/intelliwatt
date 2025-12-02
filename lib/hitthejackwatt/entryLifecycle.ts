@@ -131,6 +131,8 @@ function computeEntryStatus(entry: EntryRecord, ctx: UsageContext) {
   const lastValidated = ctx.now;
 
   const isUsageDependent = USAGE_DEPENDENT_TYPES.has(entry.type);
+  const manualId = entry.manualUsageId ?? undefined;
+  const isManual = Boolean(manualId);
 
   if (!isUsageDependent) {
     return { status: 'ACTIVE', expiresAt: null, reason: null, lastValidated };
@@ -138,8 +140,8 @@ function computeEntryStatus(entry: EntryRecord, ctx: UsageContext) {
 
   let candidateExpiry: Date | null = null;
 
-  if (entry.manualUsageId) {
-    const manual = ctx.manualUploadsById.get(entry.manualUsageId);
+  if (isManual && manualId) {
+    const manual = ctx.manualUploadsById.get(manualId);
     if (manual) {
       candidateExpiry = manual.expiresAt;
     } else {
@@ -147,14 +149,14 @@ function computeEntryStatus(entry: EntryRecord, ctx: UsageContext) {
       status = 'EXPIRED';
       reason = 'Manual usage data removed';
     }
-  } else if (ctx.hasActiveSmt) {
-    candidateExpiry = ctx.activeSmtExpiry;
-  } else if (ctx.freshestManual) {
-    candidateExpiry = ctx.freshestManual.expiresAt;
   } else {
-    candidateExpiry = ctx.now;
-    status = 'EXPIRED';
-    reason = 'No active usage data connection';
+    if (ctx.hasActiveSmt) {
+      candidateExpiry = ctx.activeSmtExpiry;
+    } else {
+      candidateExpiry = ctx.now;
+      status = 'EXPIRED';
+      reason = 'No active usage data connection';
+    }
   }
 
   if (status !== 'EXPIRED') {
