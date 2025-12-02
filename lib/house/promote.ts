@@ -179,14 +179,22 @@ export async function archiveConflictingAuthorizations({
     if (displacedUserIds.size > 0) {
       const displaced = Array.from(displacedUserIds);
       try {
-        await tx.userProfile.updateMany({
-          where: { userId: { in: displaced } },
-          data: {
-            esiidAttentionRequired: true,
-            esiidAttentionCode: "smt_replaced",
-            esiidAttentionAt: now,
-          },
-        });
+        for (const displacedUserId of displaced) {
+          await tx.userProfile.upsert({
+            where: { userId: displacedUserId },
+            update: {
+              esiidAttentionRequired: true,
+              esiidAttentionCode: "smt_replaced",
+              esiidAttentionAt: now,
+            },
+            create: {
+              userId: displacedUserId,
+              esiidAttentionRequired: true,
+              esiidAttentionCode: "smt_replaced",
+              esiidAttentionAt: now,
+            },
+          });
+        }
       } catch (err) {
         console.warn(
           "[archiveConflictingAuthorizations] Failed to set attention flags; run prisma migrate deploy?",
