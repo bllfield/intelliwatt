@@ -53,14 +53,38 @@ export async function POST(request: Request) {
     if (status === 'approved') {
       await prisma.$transaction(async (tx) => {
         const txAny = tx as any;
-        await txAny.smtAuthorization.update({
+        const updatedAuthorization = await txAny.smtAuthorization.update({
           where: { id: authorization.id },
           data: {
             emailConfirmationStatus: 'APPROVED',
             emailConfirmationAt: now,
             smtStatusMessage: 'Customer confirmed SMT authorization email',
           },
+          select: {
+            id: true,
+            userId: true,
+            houseAddressId: true,
+            smtStatus: true,
+            smtAgreementId: true,
+            emailConfirmationStatus: true,
+          },
         });
+
+        if (updatedAuthorization?.houseAddressId) {
+          await tx.entry.updateMany({
+            where: {
+              userId: user.id,
+              type: 'smart_meter_connect',
+              houseId: updatedAuthorization.houseAddressId,
+            },
+            data: {
+              status: 'ACTIVE',
+              expiresAt: null,
+              expirationReason: null,
+              lastValidated: now,
+            },
+          });
+        }
 
         await tx.userProfile.updateMany({
           where: { userId: user.id },
@@ -80,14 +104,34 @@ export async function POST(request: Request) {
 
     await prisma.$transaction(async (tx) => {
       const txAny = tx as any;
-      await txAny.smtAuthorization.update({
+      const updatedAuthorization = await txAny.smtAuthorization.update({
         where: { id: authorization.id },
         data: {
           emailConfirmationStatus: 'DECLINED',
           emailConfirmationAt: now,
           smtStatusMessage: 'Customer declined SMT authorization email',
+          smtStatus: 'DECLINED',
+        },
+        select: {
+          houseAddressId: true,
         },
       });
+
+      if (updatedAuthorization?.houseAddressId) {
+        await tx.entry.updateMany({
+          where: {
+            userId: user.id,
+            type: 'smart_meter_connect',
+            houseId: updatedAuthorization.houseAddressId,
+          },
+          data: {
+            status: 'EXPIRED',
+            expiresAt: now,
+            expirationReason: 'smt_email_declined',
+            lastValidated: now,
+          },
+        });
+      }
 
       await tx.userProfile.updateMany({
         where: { userId: user.id },
@@ -95,19 +139,6 @@ export async function POST(request: Request) {
           esiidAttentionRequired: true,
           esiidAttentionCode: 'smt_email_declined',
           esiidAttentionAt: now,
-        },
-      });
-
-      await tx.entry.updateMany({
-        where: {
-          userId: user.id,
-          type: 'smart_meter_connect',
-          status: { in: ['ACTIVE', 'EXPIRING_SOON'] },
-        },
-        data: {
-          status: 'EXPIRED',
-          expiresAt: now,
-          expirationReason: 'smt_email_declined',
         },
       });
     });
