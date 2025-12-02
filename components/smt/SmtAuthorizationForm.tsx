@@ -428,7 +428,6 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
             role="dialog"
             aria-modal="true"
             aria-labelledby="smt-email-reminder-title"
-            aria-describedby="smt-email-reminder-body"
             className="w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-3xl border border-brand-blue/40 bg-brand-navy p-6 text-brand-cyan shadow-[0_24px_60px_rgba(16,46,90,0.55)] sm:p-8"
           >
             <h3
@@ -437,29 +436,27 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
             >
               Check your inbox — action required
             </h3>
-            <div id="smt-email-reminder-body">
-              <p className="mt-4 text-sm leading-relaxed text-brand-cyan/80">
-                We just asked Smart Meter Texas to authorize IntelliWatt. Look for an email from{" "}
-                <span className="font-semibold text-brand-cyan">info@communications.smartmetertexas.com</span> with the
-                subject “Authorization to allow Intelliwatt to access your electricity information”.
-              </p>
-              <ul className="mt-4 space-y-3 rounded-2xl border border-brand-blue/30 bg-brand-blue/5 px-4 py-3 text-sm text-brand-cyan/85">
-                <li>
-                  • Open the email and click <span className="font-semibold text-brand-cyan">Confirm</span> to approve the
-                  request before it expires.
-                </li>
-                <li>
-                  • If you did not expect the request, choose{" "}
-                  <span className="font-semibold text-brand-cyan">Did Not Request</span> or contact support immediately.
-                </li>
-                <li>
-                  • You can always revoke this authorization later from your IntelliWatt profile.
-                </li>
-              </ul>
-              <p className="mt-4 text-xs uppercase tracking-wide text-brand-cyan/60">
-                Confirm the email first, then choose the option that reflects what you did.
-              </p>
-            </div>
+            <p className="mt-4 text-sm leading-relaxed text-brand-cyan/80">
+              We just asked Smart Meter Texas to authorize IntelliWatt. Look for an email from{" "}
+              <span className="font-semibold text-brand-cyan">info@communications.smartmetertexas.com</span> with the
+              subject “Authorization to allow Intelliwatt to access your electricity information”.
+            </p>
+            <ul className="mt-4 space-y-3 rounded-2xl border border-brand-blue/30 bg-brand-blue/5 px-4 py-3 text-sm text-brand-cyan/85">
+              <li>
+                • Open the email and click <span className="font-semibold text-brand-cyan">Confirm</span> to approve the
+                request before it expires.
+              </li>
+              <li>
+                • If you did not expect the request, choose <span className="font-semibold text-brand-cyan">Did Not Request</span>{" "}
+                or contact support immediately.
+              </li>
+              <li>
+                • You can always revoke this authorization later from your IntelliWatt profile.
+              </li>
+            </ul>
+            <p className="mt-4 text-xs uppercase tracking-wide text-brand-cyan/60">
+              Confirm the email first, then choose the option that reflects what you did.
+            </p>
             {emailConfirmationError ? (
               <div className="mt-4 rounded-md border border-rose-400/40 bg-rose-400/10 px-4 py-3 text-xs text-rose-200">
                 {emailConfirmationError}

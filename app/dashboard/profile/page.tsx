@@ -6,9 +6,9 @@ import { ProfileContactForm } from "@/components/profile/ProfileContactForm";
 import { ProfileAddressSection } from "@/components/profile/ProfileAddressSection";
 import { ProfileTestimonialCard } from "@/components/profile/ProfileTestimonialCard";
 import { RevokeSmartMeterButton } from "@/components/profile/RevokeSmartMeterButton";
+import { SmtTerminateButton } from "@/components/smt/SmtTerminateButton";
 import DashboardHero from "@/components/dashboard/DashboardHero";
 import { SmtStatusBanner } from "@/components/account/SmtStatusBanner";
-import { SmtTerminateButton } from "@/components/smt/SmtTerminateButton";
 const COMMISSION_STATUS_ALLOWLIST = ["pending", "submitted", "approved", "completed", "paid"];
 
 function isTestimonialTableMissing(error: unknown) {
@@ -392,7 +392,14 @@ export default async function ProfilePage() {
               </div>
               </dl>
 
-              {/* Revocation controls live in the dedicated section below. */}
+              {smtAuthorization.smtAgreementId && smtAuthorization.contactEmail ? (
+                <div className="mt-4">
+                  <SmtTerminateButton
+                    agreementNumber={smtAuthorization.smtAgreementId}
+                    retailCustomerEmail={smtAuthorization.contactEmail}
+                  />
+                </div>
+              ) : null}
             </>
           ) : (
             <div className="mt-6 rounded-2xl border border-brand-blue/40 bg-brand-blue/10 p-4 text-sm text-brand-blue">
@@ -409,14 +416,7 @@ export default async function ProfilePage() {
             Need to turn off Smart Meter Texas sharing? Submit the request below. We’ll archive your
             authorization immediately and email you once the disconnect is confirmed.
           </p>
-        {smtAuthorization?.smtAgreementId && smtAuthorization.contactEmail ? (
-          <SmtTerminateButton
-            agreementNumber={smtAuthorization.smtAgreementId}
-            retailCustomerEmail={smtAuthorization.contactEmail}
-            className="mb-4"
-          />
-        ) : null}
-        <RevokeSmartMeterButton authorizationId={smtAuthorization?.id ?? null} />
+          <RevokeSmartMeterButton authorizationId={smtAuthorization?.id ?? null} />
         </section>
       </div>
     </div>
