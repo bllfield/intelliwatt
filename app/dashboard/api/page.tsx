@@ -145,7 +145,11 @@ export default async function ApiConnectPage() {
   const isError = normalizedStatus === "error";
   const isPending = normalizedStatus === "pending";
   const isDeclined = normalizedStatus === "declined";
-  const isInitialSubmission = existingAuth && normalizedStatus === "";
+  const isInitialSubmission =
+    existingAuth &&
+    (!existingAuth.smtStatus || existingAuth.smtStatus.trim().length === 0) &&
+    existingAuthStatusMessage &&
+    existingAuthStatusMessage.trim().length > 0;
   const hasActiveAuthorization = ok;
 
   if (existingAuth && (isPending || isDeclined || isInitialSubmission)) {

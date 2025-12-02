@@ -91,27 +91,21 @@ export default async function SmtConfirmationPage() {
             Smart Meter Texas Confirmation
           </h1>
           <p className="text-sm leading-relaxed text-brand-cyan/80">
-            We emailed{" "}
-            <span className="font-semibold text-brand-cyan">{user.email}</span> a Smart Meter
-            Texas authorization request. Approve it to unlock IntelliWatt features.
+            We emailed <span className="font-semibold text-brand-cyan">{user.email}</span> a Smart Meter Texas authorization request. Approve it to unlock IntelliWatt features.
           </p>
         </header>
 
         <section className="space-y-4 rounded-2xl border border-brand-cyan/40 bg-brand-navy p-6 text-sm">
-          <h2 className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-cyan/60">
-            Status
-          </h2>
+          <h2 className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-cyan/60">Status</h2>
           <p className="text-brand-cyan">{statusMessage}</p>
           <p className="text-xs text-brand-cyan/70">
-            If you do not see the email, check your spam folder. The sender is{" "}
-            <span className="font-semibold text-brand-cyan">info@communications.smartmetertexas.com</span>.
+            If you do not see the email, check your spam folder. The sender is
+            <span className="font-semibold text-brand-cyan"> info@communications.smartmetertexas.com</span>.
           </p>
         </section>
 
         <section className="space-y-3 rounded-2xl border border-brand-cyan/30 bg-brand-navy p-6 text-sm">
-          <h2 className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-cyan/60">
-            Service Address
-          </h2>
+          <h2 className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-cyan/60">Service Address</h2>
           <div className="text-brand-cyan">
             <div>{house.addressLine1}</div>
             {house.addressLine2 ? <div>{house.addressLine2}</div> : null}
@@ -133,9 +127,7 @@ export default async function SmtConfirmationPage() {
 
         <footer className="space-y-2 rounded-2xl border border-brand-cyan/20 bg-brand-navy/70 p-4 text-xs text-brand-cyan/70">
           <p>
-            Need help? Forward the SMT email to{" "}
-            <span className="font-semibold text-brand-cyan">support@intelliwatt.com</span> or contact us if
-            you did not request this authorization.
+            Need help? Forward the SMT email to <span className="font-semibold text-brand-cyan">support@intelliwatt.com</span> or contact us if you did not request this authorization.
           </p>
           <p>
             Once approved, we’ll automatically refresh the status and return you to the dashboard.
