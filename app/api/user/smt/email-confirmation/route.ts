@@ -7,6 +7,7 @@ import { normalizeEmail } from '@/lib/utils/email';
 import { qualifyReferralsForUser } from '@/lib/referral/qualify';
 import { refreshUserEntryStatuses } from '@/lib/hitthejackwatt/entryLifecycle';
 import { refreshSmtAuthorizationStatus } from '@/lib/smt/agreements';
+import { ensureSmartMeterEntry } from '@/lib/smt/ensureSmartMeterEntry';
 
 export const dynamic = 'force-dynamic';
 
@@ -203,72 +204,7 @@ export async function POST(request: Request) {
           },
         });
 
-        const existingEntry = await tx.entry.findFirst({
-          where: {
-            userId: user.id,
-            type: 'smart_meter_connect',
-            houseId: houseAddressId,
-          },
-          select: {
-            id: true,
-            status: true,
-            amount: true,
-          },
-        });
-
-        let entryId: string | null = null;
-        let previousStatus: EntryStatus | null = null;
-
-        if (existingEntry) {
-          entryId = existingEntry.id;
-          previousStatus = existingEntry.status as EntryStatus;
-
-          const updateData: Partial<{
-            amount: number;
-            status: EntryStatus;
-            expiresAt: Date | null;
-            expirationReason: string | null;
-            lastValidated: Date;
-          }> = {
-            status: EntryStatus.ACTIVE,
-            expiresAt: null,
-            expirationReason: null,
-            lastValidated: now,
-          };
-
-          if (existingEntry.amount < 1) {
-            updateData.amount = 1;
-          }
-
-          await tx.entry.update({
-            where: { id: existingEntry.id },
-            data: updateData,
-          });
-        } else {
-          const createdEntry = await tx.entry.create({
-            data: {
-              userId: user.id,
-              type: 'smart_meter_connect',
-              amount: 1,
-              houseId: houseAddressId,
-              status: EntryStatus.ACTIVE,
-              lastValidated: now,
-            },
-          });
-          entryId = createdEntry.id;
-          previousStatus = null;
-        }
-
-        if (entryId) {
-          await tx.entryStatusLog.create({
-            data: {
-              entryId,
-              previous: previousStatus,
-              next: EntryStatus.ACTIVE,
-              reason: 'smt_email_approved',
-            },
-          });
-        }
+        await ensureSmartMeterEntry(user.id, houseAddressId, now);
 
         await tx.userProfile.updateMany({
           where: { userId: user.id },
