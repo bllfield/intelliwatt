@@ -5,7 +5,7 @@ export async function setPrimaryHouse(
   userId: string,
   houseId: string,
   opts: { keepOthers?: boolean } = {},
-) {
+): Promise<{ archivedHouseIds: string[] }> {
   const now = new Date();
 
   const client = prisma as any;
@@ -56,6 +56,7 @@ export async function setPrimaryHouse(
 
     return { archivedHouseIds };
   });
+  return result;
 }
 
 export async function archiveAuthorizationsForHouse(houseId: string, reason: string) {
@@ -85,18 +86,27 @@ type ArchiveConflictParams = {
   meterNumber?: string | null;
 };
 
+type ArchiveConflictTransactionResult = {
+  archivedAuthorizationIds: string[];
+  displacedUserIds: string[];
+  displacedTargets: Array<{ agreementId: string | null; contactEmail: string | null }>;
+};
+
 export async function archiveConflictingAuthorizations({
   newAuthorizationId,
   newHouseId,
   userId,
   esiid,
   meterNumber,
-}: ArchiveConflictParams) {
+}: ArchiveConflictParams): Promise<{
+  archivedAuthorizationIds: string[];
+  displacedUserIds: string[];
+}> {
   const now = new Date();
 
   const client = prisma as any;
 
-  const result = await client.$transaction(async (tx: any) => {
+  const result = await client.$transaction(async (tx: any): Promise<ArchiveConflictTransactionResult> => {
     const orClauses = [
       { esiid },
       meterNumber && meterNumber.trim().length > 0 ? { meterNumber } : null,
