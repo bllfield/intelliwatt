@@ -5,6 +5,8 @@ import {
   type SmtMyAgreementsFilter,
 } from '@/lib/smt/agreements';
 
+export const dynamic = 'force-dynamic';
+
 function requireAdminToken(req: NextRequest): boolean {
   const token = req.headers.get('x-admin-token');
   const expected = process.env.ADMIN_TOKEN;

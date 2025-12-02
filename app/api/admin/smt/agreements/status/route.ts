@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { getSmtAgreementStatus } from '@/lib/smt/agreements';
 
+export const dynamic = 'force-dynamic';
+
 function requireAdminToken(req: NextRequest): boolean {
   const expected = process.env.ADMIN_TOKEN;
   if (!expected) {
