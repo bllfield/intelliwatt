@@ -103,6 +103,9 @@ export default async function ProfilePage() {
         select: {
           fullName: true,
           phone: true,
+          esiidAttentionRequired: true,
+          esiidAttentionCode: true,
+          esiidAttentionAt: true,
         },
       },
     },
@@ -292,6 +295,8 @@ export default async function ProfilePage() {
     : null;
 
   const activeHomeId = activeHouseDetails?.id ?? null;
+  const hasSmtDisplacementAlert =
+    Boolean(user.profile?.esiidAttentionRequired) && user.profile?.esiidAttentionCode === "smt_replaced";
 
   return (
     <div className="min-h-screen bg-white py-4 px-4 text-brand-navy">
@@ -301,6 +306,13 @@ export default async function ProfilePage() {
           highlight="& Home"
           description="Manage your IntelliWatt contact preferences, connect additional homes, and keep Smart Meter Texas authorizations current. Each home earns its own entries once SMT is connected."
         />
+
+        {hasSmtDisplacementAlert ? (
+          <div className="rounded-3xl border border-rose-400/40 bg-rose-500/10 p-5 text-sm text-rose-100 shadow-[0_18px_55px_rgba(190,24,55,0.22)]">
+            Another IntelliWatt household just claimed this Smart Meter Texas meter. Your previous authorization was
+            revoked automatically, so add your current service address again and reconnect to keep your entries active.
+          </div>
+        ) : null}
 
         {activeHomeId ? <SmtStatusBanner homeId={activeHomeId} /> : null}
 

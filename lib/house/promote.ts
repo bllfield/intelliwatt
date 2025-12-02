@@ -141,6 +141,36 @@ export async function archiveConflictingAuthorizations({
         });
       }
 
+      const displacedEntries = await tx.entry.findMany({
+        where: {
+          userId: auth.userId,
+          type: "smart_meter_connect",
+          houseId: auth.houseAddressId ?? null,
+        },
+        select: { id: true, status: true },
+      });
+
+      for (const entry of displacedEntries) {
+        await tx.entry.update({
+          where: { id: entry.id },
+          data: {
+            status: "EXPIRED",
+            expiresAt: now,
+            expirationReason: "Smart Meter Texas authorization replaced by another IntelliWatt household",
+            lastValidated: now,
+          },
+        });
+
+        await tx.entryStatusLog.create({
+          data: {
+            entryId: entry.id,
+            previous: entry.status,
+            next: "EXPIRED",
+            reason: "smt_replaced",
+          },
+        });
+      }
+
       if (auth.userId !== userId) {
         displacedUserIds.add(auth.userId);
       }

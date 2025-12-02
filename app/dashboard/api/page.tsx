@@ -63,7 +63,7 @@ export default async function ApiConnectPage() {
 
     if (!houseAddress) {
       houseAddress = await prisma.houseAddress.findFirst({
-        where: { userId: user.id },
+        where: { userId: user.id, archivedAt: null } as any,
         orderBy: { createdAt: "desc" },
         select: {
           id: true,
@@ -84,6 +84,18 @@ export default async function ApiConnectPage() {
   }
 
   const userEmail = user?.email ?? "";
+  const userProfile =
+    user &&
+    (await prisma.userProfile.findUnique({
+      where: { userId: user.id },
+      select: {
+        esiidAttentionRequired: true,
+        esiidAttentionCode: true,
+        esiidAttentionAt: true,
+      },
+    }));
+  const displacedAttention =
+    Boolean(userProfile?.esiidAttentionRequired) && userProfile?.esiidAttentionCode === "smt_replaced";
 
   let existingAuth: ExistingSmtAuthorization | null = null;
   if (user && houseAddress) {
@@ -257,6 +269,13 @@ export default async function ApiConnectPage() {
 
       <section className="bg-brand-white pt-3 pb-8 px-4">
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
+          {displacedAttention ? (
+            <div className="rounded-2xl border border-rose-400/40 bg-rose-500/10 px-5 py-4 text-sm text-rose-100 shadow-[0_18px_45px_rgba(190,18,60,0.18)]">
+              Another IntelliWatt household just connected this Smart Meter Texas meter. Your previous authorization was
+              removed, so add your current service address again below to reconnect and earn entries.
+            </div>
+          ) : null}
+
           {!existingAuth && (
             <div className="flex flex-col items-center gap-4 text-center">
               <a
