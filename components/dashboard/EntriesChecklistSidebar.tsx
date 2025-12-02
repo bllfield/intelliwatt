@@ -30,24 +30,28 @@ const CHECKLIST: ChecklistItem[] = [
     title: 'Usage Data (Auto or Manual)',
     detail: '1 Entry',
     href: '/dashboard/api',
+    note: 'Connect SMT, Green Button, or manual usage to unlock other entries',
   },
   {
     id: 'current_plan_details',
     title: 'Current Plan',
     detail: '1 Entry',
     href: '/dashboard/current-rate',
+    note: 'Requires active usage data in the last 12 months',
   },
   {
     id: 'home_details_complete',
     title: 'Home Info',
     detail: '1 Entry',
     href: '/dashboard/home',
+    note: 'Requires active usage data in the last 12 months',
   },
   {
     id: 'appliance_details_complete',
     title: 'Appliances',
     detail: '1 Entry',
     href: '/dashboard/appliances',
+    note: 'Requires active usage data in the last 12 months',
   },
   {
     id: 'referral',
@@ -55,12 +59,13 @@ const CHECKLIST: ChecklistItem[] = [
     detail: 'Unlimited entries and they never expire',
     href: '/dashboard/referrals',
     unlimited: true,
+    note: 'Available even without usage data',
   },
   {
     id: 'testimonial',
     title: 'Testimonial',
     detail: '1 Entry',
-    note: 'Available after a plan switch with IntelliWatt',
+    note: 'Available after an IntelliWatt plan switch with active usage',
     href: '/dashboard/profile',
   },
 ];

@@ -60,7 +60,31 @@ const CATEGORY_CARDS: CategoryConfig[] = [
     ctaLabel: "Manage Appliances",
     ctaHref: "/dashboard/appliances",
   },
+  {
+    id: "testimonial",
+    title: "Testimonial",
+    description: "Share your IntelliWatt experience after your plan switch to earn 1 entry that never expires.",
+    ctaLabel: "Submit Testimonial",
+    ctaHref: "/dashboard/profile#testimonial",
+  },
+  {
+    id: "testimonial",
+    title: "Testimonial",
+    description: "Share your IntelliWatt experience after your plan switch to earn 1 entry that never expires.",
+    ctaLabel: "Submit Testimonial",
+    ctaHref: "/dashboard/profile#testimonial",
+  },
 ];
+
+const USAGE_DEPENDENT_CARD_IDS = new Set<string>([
+  "current_plan_details",
+  "home_details_complete",
+  "appliance_details_complete",
+]);
+
+const TESTIMONIAL_CARD_ID = "testimonial";
+const REFERRAL_CARD_ID = "referral";
+const USAGE_ENTRY_CARD_ID = "smart_meter_connect";
 
 function highlightEntryText(text: string) {
   return text.split(/(1 entry)/gi).map((part, index) => {
@@ -186,6 +210,10 @@ export default function EntriesPage() {
     return map;
   }, [entries]);
 
+  const usageEntryMeta = categoryExpiryMeta.get(USAGE_ENTRY_CARD_ID);
+  const hasActiveUsage =
+    (usageEntryMeta?.activeCount ?? 0) + (usageEntryMeta?.expiringSoonCount ?? 0) > 0;
+
   const expiringSoonTotal = useMemo(
     () =>
       entries
@@ -236,6 +264,7 @@ export default function EntriesPage() {
                   (meta?.activeCount ?? 0) + (meta?.expiringSoonCount ?? 0);
                 const hasLiveEntries = liveCount > 0;
                 let statusBanner: React.ReactNode = null;
+                let availabilityMessage: string | null = null;
 
                 if (meta) {
                   if (meta.expiringSoonCount > 0 && meta.nextExpiry) {
@@ -251,6 +280,23 @@ export default function EntriesPage() {
                       </span>
                     );
                   }
+                }
+
+                if (card.id === TESTIMONIAL_CARD_ID && count === 0) {
+                  availabilityMessage =
+                    "Unlocks after you switch plans with IntelliWatt and keep usage data active.";
+                } else if (
+                  USAGE_DEPENDENT_CARD_IDS.has(card.id) &&
+                  !hasActiveUsage
+                ) {
+                  availabilityMessage =
+                    "Requires active usage data (SMT, Green Button, or manual upload).";
+                } else if (card.id === USAGE_ENTRY_CARD_ID && !hasActiveUsage) {
+                  availabilityMessage =
+                    "Connect SMT or upload usage to activate other profile entries.";
+                } else if (card.id === REFERRAL_CARD_ID && !hasActiveUsage) {
+                  availabilityMessage =
+                    "Available even without usage data—invite friends to earn entries now.";
                 }
 
                 return (
@@ -270,6 +316,11 @@ export default function EntriesPage() {
                     <p className="text-sm text-brand-cyan/80 leading-relaxed">
                       {highlightEntryText(card.description)}
                     </p>
+                    {availabilityMessage ? (
+                      <div className="rounded-xl border border-amber-400/50 bg-amber-500/10 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-amber-100">
+                        {availabilityMessage}
+                      </div>
+                    ) : null}
                     {card.ctaHref && card.ctaLabel ? (
                       <a
                         href={card.ctaHref}
@@ -281,6 +332,11 @@ export default function EntriesPage() {
                   </div>
                 );
               })}
+              {!hasActiveUsage ? (
+                <div className="rounded-2xl border border-amber-400/60 bg-amber-500/10 px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-amber-100">
+                  Active usage data unlocks Current Plan, Home Details, Appliance Details, and the Testimonial invite. Until then, referrals are the only entries available.
+                </div>
+              ) : null}
               <div className="rounded-3xl border border-brand-cyan/40 bg-brand-navy p-6 text-brand-cyan shadow-[0_0_30px_rgba(56,189,248,0.22)] flex flex-col items-center justify-center gap-3">
                 <h3 className="text-lg font-semibold uppercase tracking-wide text-brand-cyan">
                   Total Jackpot Entries

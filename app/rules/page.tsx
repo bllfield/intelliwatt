@@ -125,6 +125,11 @@ export default function RulesPage() {
               twelve (12) months. If your usage data becomes older than twelve (12) months, these entries expire until you
               reconnect SMT or upload updated usage data.
             </Paragraph>
+            <Paragraph>
+              <strong>Availability notice:</strong> Current Plan, Home Details, and Appliance entries stay locked until IntelliWatt
+              has active usage on file (via SMT, Green Button, or manual upload). Without current usage data these profile entries
+              remain unavailable.
+            </Paragraph>
 
             <SubTitle>3.3 Referral Entries</SubTitle>
             <Paragraph>
@@ -132,12 +137,20 @@ export default function RulesPage() {
               (SMT connection or manual upload). Referral entries do not expire and remain associated with your account unless it
               becomes ineligible.
             </Paragraph>
+            <Paragraph>
+              Referrals are the only entry path available while you are waiting on usage data to sync, so you can continue earning
+              entries even if SMT or manual uploads are still pending.
+            </Paragraph>
 
             <SubTitle>3.4 Testimonial Entries (Real Customers Only)</SubTitle>
             <Paragraph>
               Customers who switch plans through <Intelliwatt /> or complete an <IntellipathLink /> energy upgrade may be invited
               to submit a testimonial. A qualifying testimonial earns one (1) testimonial entry that does not expire. Providing a
               testimonial is optional and not required to enter or win.
+            </Paragraph>
+            <Paragraph>
+              Testimonial invitations are issued after your IntelliWatt plan switch is complete and usage remains active; the entry
+              unlocks only once those conditions are met.
             </Paragraph>
 
             <SubTitle>3.5 Alternate Method of Entry (AMOE)</SubTitle>
