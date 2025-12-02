@@ -386,7 +386,7 @@ function highlightEntryText(text: string) {
 }
 
 export default function DashboardPage() {
-  const [mounted, setMounted] = useState(false);
+const [mounted, setMounted] = useState(false);
   const [userAddress, setUserAddress] = useState<string>('');
   const [homeId, setHomeId] = useState<string | null>(null);
 
@@ -406,20 +406,20 @@ export default function DashboardPage() {
   useEffect(() => {
     setMounted(true);
 
-    if (typeof window === 'undefined') {
-      return;
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  const key = resolveStorageKey();
+
+  const legacy = localStorage.getItem('intelliwatt_user_address');
+  if (legacy && key !== 'intelliwatt_user_address') {
+    localStorage.setItem(key, legacy);
+    localStorage.removeItem('intelliwatt_user_address');
     }
 
-    const key = resolveStorageKey();
-
-    const legacy = localStorage.getItem('intelliwatt_user_address');
-    if (legacy && key !== 'intelliwatt_user_address') {
-      localStorage.setItem(key, legacy);
-      localStorage.removeItem('intelliwatt_user_address');
-    }
-
-    const savedAddress = localStorage.getItem(key);
-    setUserAddress(savedAddress ?? '');
+  const savedAddress = localStorage.getItem(key);
+  setUserAddress(savedAddress ?? '');
 
     let cancelled = false;
     const loadDashboard = async () => {
@@ -448,7 +448,7 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+}, []);
 
   // Prevent hydration mismatch
   if (!mounted) {

@@ -67,21 +67,31 @@ export default async function SmtConfirmationPage() {
     },
   });
 
-  const status = normalizeStatus(authorization?.smtStatus);
-  const isPending = status === "pending" || status === "";
-  const isDeclined = status === "declined";
-  const shouldRequireConfirmation = authorization && (isPending || isDeclined);
-
-  if (!shouldRequireConfirmation) {
+  if (!authorization) {
     redirect("/dashboard/api");
   }
 
-  const statusMessage =
-    authorization?.smtStatusMessage && authorization.smtStatusMessage.trim().length > 0
-      ? authorization.smtStatusMessage
-      : isDeclined
-      ? "Smart Meter Texas shows the email was declined. We cannot sync usage until it is approved."
-      : "We’re waiting on the Smart Meter Texas email confirmation. Approve it to enable IntelliWatt features.";
+  const status = normalizeStatus(authorization?.smtStatus);
+  const isPending = status === "pending" || status === "";
+  const isDeclined = status === "declined";
+  const isError = status === "error";
+  const isActive = status === "active" || status === "already_active";
+
+  const statusMessage = authorization.smtStatusMessage?.trim().length
+    ? authorization.smtStatusMessage!
+    : isDeclined
+    ? "Smart Meter Texas shows the email was declined. Approve it to unlock IntelliWatt features."
+    : isPending
+    ? "We’re waiting on the Smart Meter Texas email confirmation. Approve it to enable IntelliWatt features."
+    : isError
+    ? "We couldn’t complete your Smart Meter Texas authorization. Please try again or contact support."
+    : isActive
+    ? "Your Smart Meter Texas authorization is active. We’ll keep pulling usage automatically."
+    : "We’re processing your Smart Meter Texas authorization.";
+
+  const helperMessage = isActive
+    ? "You can safely return to the dashboard."
+    : "If you do not see the email, check your spam or promotions folder. The sender is info@communications.smartmetertexas.com.";
 
   return (
     <div className="flex min-h-[80vh] items-center justify-center bg-brand-navy px-4 py-12 text-brand-cyan">
@@ -91,16 +101,34 @@ export default async function SmtConfirmationPage() {
             Smart Meter Texas Confirmation
           </h1>
           <p className="text-sm leading-relaxed text-brand-cyan/80">
-            We emailed <span className="font-semibold text-brand-cyan">{user.email}</span> a Smart Meter Texas authorization request. Approve it to unlock IntelliWatt features.
+            We emailed <span className="font-semibold text-brand-cyan">{user.email}</span> a Smart Meter Texas authorization request.
           </p>
         </header>
 
         <section className="space-y-4 rounded-2xl border border-brand-cyan/40 bg-brand-navy p-6 text-sm">
           <h2 className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-cyan/60">Status</h2>
           <p className="text-brand-cyan">{statusMessage}</p>
+          <p className="text-xs text-brand-cyan/70">{helperMessage}</p>
+        </section>
+
+        <section className="space-y-4 rounded-2xl border border-brand-cyan/30 bg-brand-navy p-6 text-sm">
+          <h2 className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-cyan/60">How to approve the email</h2>
+          <ol className="space-y-3 text-left text-brand-cyan/90">
+            <li>
+              <span className="font-semibold">1.</span> Open your inbox and search for <span className="font-semibold">"Smart Meter Texas Authorization"</span> from <span className="font-mono text-brand-cyan">info@communications.smartmetertexas.com</span>.
+            </li>
+            <li>
+              <span className="font-semibold">2.</span> Click the approval link inside the email to authorize IntelliWatt (Intellipath Solutions LLC) to access your meter data.
+            </li>
+            <li>
+              <span className="font-semibold">3.</span> Return to this page and choose <span className="font-semibold">"I approved the SMT email"</span> so we can refresh your status immediately.
+            </li>
+            <li>
+              <span className="font-semibold">4.</span> If you accidentally declined the email, choose <span className="font-semibold">"I declined the SMT email"</span> so we can resubmit the request.
+            </li>
+          </ol>
           <p className="text-xs text-brand-cyan/70">
-            If you do not see the email, check your spam folder. The sender is
-            <span className="font-semibold text-brand-cyan"> info@communications.smartmetertexas.com</span>.
+            Tip: Add <span className="font-mono text-brand-cyan">info@communications.smartmetertexas.com</span> to your trusted senders list to prevent it from landing in spam.
           </p>
         </section>
 
@@ -123,14 +151,14 @@ export default async function SmtConfirmationPage() {
           </div>
         </section>
 
-        <SmtConfirmationActions homeId={house.id} />
+        {house ? <SmtConfirmationActions homeId={house.id} /> : null}
 
         <footer className="space-y-2 rounded-2xl border border-brand-cyan/20 bg-brand-navy/70 p-4 text-xs text-brand-cyan/70">
           <p>
             Need help? Forward the SMT email to <span className="font-semibold text-brand-cyan">support@intelliwatt.com</span> or contact us if you did not request this authorization.
           </p>
           <p>
-            Once approved, we’ll automatically refresh the status and return you to the dashboard.
+            Once approved, we’ll automatically refresh the status. Use the buttons above to tell us if you already approved or declined the email.
           </p>
         </footer>
       </div>
