@@ -7,6 +7,7 @@ import { SmtAuthorizationForm } from "@/components/smt/SmtAuthorizationForm";
 import SmtAddressCaptureCard from "@/components/smt/SmtAddressCaptureCard";
 import SmtManualFallbackCard from "@/components/smt/SmtManualFallbackCard";
 import DashboardHero from "@/components/dashboard/DashboardHero";
+import LocalTime from "@/components/LocalTime";
 
 type ExistingSmtAuthorization = {
   id: string;
@@ -391,11 +392,15 @@ export default async function ApiConnectPage() {
                     <div className="flex flex-wrap items-center justify-center gap-3 text-center md:justify-between md:text-left">
                       <span className="text-[0.7rem] font-semibold uppercase tracking-wide">
                         SMT authorization last submitted{" "}
-                        {existingAuth.createdAt.toLocaleDateString(undefined, {
-                          month: "short",
-                          day: "numeric",
-                          year: "numeric",
-                        })}
+                        <LocalTime
+                          value={existingAuth.createdAt.toISOString()}
+                          fallback=""
+                          options={{
+                            month: "short",
+                            day: "numeric",
+                            year: "numeric",
+                          }}
+                        />
                       </span>
                       {statusLabel ? (
                         <span className={statusBadgeStyles[statusTone]}>{statusLabel}</span>
@@ -410,11 +415,15 @@ export default async function ApiConnectPage() {
                     {existingAuth?.authorizationEndDate ? (
                       <p className="mt-3 text-xs text-brand-cyan/70 text-left">
                         Authorization expires{" "}
-                        {existingAuth.authorizationEndDate.toLocaleDateString(undefined, {
-                          month: "short",
-                          day: "numeric",
-                          year: "numeric",
-                        })}
+                        <LocalTime
+                          value={existingAuth.authorizationEndDate.toISOString()}
+                          fallback=""
+                          options={{
+                            month: "short",
+                            day: "numeric",
+                            year: "numeric",
+                          }}
+                        />
                       </p>
                     ) : null}
                   </div>
