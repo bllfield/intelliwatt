@@ -71,8 +71,10 @@ export async function GET(request: NextRequest) {
       lastValidated: entry.lastValidated,
     }));
 
-    const activeEntries = entries.filter((entry) => entry.status === 'ACTIVE');
-    const total = activeEntries.reduce((sum, entry) => sum + entry.amount, 0);
+    const countedEntries = entries.filter(
+      (entry) => entry.status === 'ACTIVE' || entry.status === 'EXPIRING_SOON',
+    );
+    const total = countedEntries.reduce((sum, entry) => sum + entry.amount, 0);
 
     return NextResponse.json({
       entries: entries.map((e) => ({
