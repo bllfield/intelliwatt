@@ -1,4 +1,4 @@
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 
 import IdleGuard from '@/components/IdleGuard';
@@ -75,6 +75,18 @@ async function isSmtConfirmationRequired(): Promise<boolean> {
 }
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
+  const headerList = headers();
+  const matchedPath =
+    headerList.get('x-matched-path') ??
+    headerList.get('x-pathname') ??
+    headerList.get('x-invoke-path') ??
+    '';
+  const isSmtConfirmationRoute = matchedPath.startsWith('/dashboard/smt-confirmation');
+
+  if (isSmtConfirmationRoute) {
+    return <>{children}</>;
+  }
+
   const shouldLock = await isSmtConfirmationRequired();
 
   if (shouldLock) {
