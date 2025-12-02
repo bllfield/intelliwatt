@@ -122,11 +122,43 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    await refreshSmtAuthorizationStatus(auth.id);
+    const refreshResult = await refreshSmtAuthorizationStatus(auth.id);
 
-    const updated = await prisma.smtAuthorization.findUnique({
-      where: { id: auth.id },
-    });
+    if (!refreshResult.ok) {
+      if (refreshResult.reason === "network-error") {
+        const updatedAuth = await prisma.smtAuthorization.findUnique({
+          where: { id: auth.id },
+        });
+
+        return NextResponse.json(
+          {
+            ok: true,
+            authorization: serializeAuthorization(updatedAuth),
+            warning:
+              refreshResult.message ??
+              "We’ll keep monitoring your Smart Meter Texas status. The SMT proxy did not respond to the latest check.",
+          },
+          { status: 200 },
+        );
+      }
+
+      return NextResponse.json(
+        {
+          ok: false,
+          error: refreshResult.reason ?? "status-refresh-failed",
+          message:
+            refreshResult.message ??
+            "Failed to refresh SMT authorization status",
+        },
+        { status: 502 },
+      );
+    }
+
+    const updated =
+      refreshResult.authorization ??
+      (await prisma.smtAuthorization.findUnique({
+        where: { id: auth.id },
+      }));
 
     return NextResponse.json(
       {

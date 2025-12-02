@@ -446,16 +446,14 @@ export async function refreshSmtAuthorizationStatus(authId: string) {
       error,
     );
 
-    await prisma.smtAuthorization.update({
-      where: { id: auth.id },
-      data: {
-        smtStatus: "ERROR",
-        smtStatusMessage:
-          "Unable to contact SMT proxy for agreement status refresh",
-      },
-    });
+    const message =
+      "Unable to contact SMT proxy for agreement status refresh";
 
-    return { ok: false as const, reason: "network-error" as const };
+    return {
+      ok: false as const,
+      reason: "network-error" as const,
+      message,
+    };
   }
 
   const match = lookup.match;
