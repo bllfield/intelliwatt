@@ -62,6 +62,93 @@ function buildProxyUrl(path: string): string {
   return `${base}${normalizedPath}`;
 }
 
+const LEGACY_ACTION_MAP: Record<string, string> = {
+  "/smt/agreements/myagreements": "myagreements",
+  "/smt/agreements/esiids": "agreement_esiids",
+  "/smt/agreements/terminate": "terminate_agreement",
+  "/smt/report-status": "report_status",
+  "/smt/subscriptions/list": "list_subscriptions",
+};
+
+async function callLegacyProxy(
+  action: string,
+  body: Record<string, unknown>,
+): Promise<any> {
+  if (!SMT_PROXY_AGREEMENTS_URL) {
+    throw new Error("SMT_PROXY_AGREEMENTS_URL/SMT_PROXY_URL not configured");
+  }
+
+  const payload = { ...body, action };
+  const bodyPreview = (() => {
+    try {
+      return JSON.stringify(payload).slice(0, 500);
+    } catch {
+      return "[unserializable-body]";
+    }
+  })();
+
+  console.log(
+    `[SMT_PROXY] legacy request action=${action} url=${SMT_PROXY_AGREEMENTS_URL} body=${bodyPreview}`,
+  );
+
+  let response: Response;
+  try {
+    response = await fetch(SMT_PROXY_AGREEMENTS_URL, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(SMT_PROXY_TOKEN
+          ? { Authorization: `Bearer ${SMT_PROXY_TOKEN}` }
+          : {}),
+      },
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    console.error(
+      "[SMT_PROXY] legacy network error action=%s error=%o",
+      action,
+      error,
+    );
+    throw error;
+  }
+
+  const status = response.status;
+  let rawText = "";
+  try {
+    rawText = await response.text();
+  } catch (error) {
+    console.error(
+      "[SMT_PROXY] legacy failed to read response action=%s status=%s error=%o",
+      action,
+      status,
+      error,
+    );
+  }
+
+  console.log(
+    `[SMT_PROXY] legacy response action=${action} status=${status} bodySnip=${rawText.slice(
+      0,
+      500,
+    )}`,
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      `SMT proxy legacy action ${action} HTTP ${status}: ${rawText.slice(0, 500)}`,
+    );
+  }
+
+  if (!rawText) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(rawText);
+  } catch {
+    return { rawText };
+  }
+}
+
 async function postToSmtProxy(
   path: string,
   body: Record<string, unknown> = {},
@@ -79,6 +166,8 @@ async function postToSmtProxy(
     `[SMT_PROXY] request path=${path} url=${url} body=${bodyPreview}`,
   );
 
+  const fallbackAction = LEGACY_ACTION_MAP[path];
+
   let response: Response;
   try {
     response = await fetch(url, {
@@ -93,6 +182,13 @@ async function postToSmtProxy(
     });
   } catch (error) {
     console.error("[SMT_PROXY] network error path=%s", path, error);
+    if (fallbackAction) {
+      console.warn(
+        "[SMT_PROXY] falling back to legacy action=%s after network error",
+        fallbackAction,
+      );
+      return callLegacyProxy(fallbackAction, body);
+    }
     throw error;
   }
 
@@ -109,18 +205,32 @@ async function postToSmtProxy(
     );
   }
 
+  if (!response.ok) {
+    console.warn(
+      "[SMT_PROXY] primary response path=%s status=%s bodySnip=%s",
+      path,
+      status,
+      rawText.slice(0, 500),
+    );
+    if (fallbackAction) {
+      console.warn(
+        "[SMT_PROXY] falling back to legacy action=%s after status=%s",
+        fallbackAction,
+        status,
+      );
+      return callLegacyProxy(fallbackAction, body);
+    }
+    throw new Error(
+      `SMT proxy ${path} HTTP ${status}: ${rawText.slice(0, 500)}`,
+    );
+  }
+
   console.log(
     `[SMT_PROXY] response path=${path} status=${status} bodySnip=${rawText.slice(
       0,
       500,
     )}`,
   );
-
-  if (!response.ok) {
-    throw new Error(
-      `SMT proxy ${path} HTTP ${status}: ${rawText.slice(0, 500)}`,
-    );
-  }
 
   if (!rawText) {
     return {};

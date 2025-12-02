@@ -914,6 +914,241 @@ class H(BaseHTTPRequestHandler):
             self._write_json(400, {"ok": False, "error": "invalid_json"})
             return
 
+        action = payload.get("action")
+        if action is None:
+            action = "create_agreement_and_subscription"
+        action_str = str(action).strip()
+
+        if action_str == "list_subscriptions":
+            service_type = str(payload.get("serviceType") or "").strip() or None
+            print(
+                "[SMT_DEBUG] /agreements legacy action=list_subscriptions serviceType=%r"
+                % (service_type or "<none>"),
+                flush=True,
+            )
+            try:
+                status, data = smt_list_subscriptions()
+            except SmtProxyRequestError as exc:
+                logging.error(
+                    "[SMT_PROXY] legacy list_subscriptions error status=%s payload_snip=%s",
+                    exc.status,
+                    json.dumps(exc.payload)[:500]
+                    if isinstance(exc.payload, (dict, list))
+                    else str(exc.payload)[:500],
+                )
+                self._write_json(
+                    502,
+                    {
+                        "ok": False,
+                        "status": exc.status,
+                        "error": "smt_request_failed",
+                        "response": exc.payload,
+                    },
+                )
+                return
+            except Exception:
+                logging.exception("[SMT_PROXY] legacy list_subscriptions unexpected_error")
+                self._write_json(500, {"ok": False, "error": "Unexpected SMT proxy error"})
+                return
+
+            self._write_json(
+                200,
+                {"ok": True, "status": status, "subscriptions": data},
+            )
+            return
+
+        if action_str == "report_status":
+            correlation_id = str(payload.get("correlationId") or "").strip()
+            service_type = str(payload.get("serviceType") or "").strip() or None
+            if not correlation_id:
+                self._write_json(
+                    400,
+                    {"ok": False, "error": "missing_correlationId"},
+                )
+                return
+
+            print(
+                "[SMT_DEBUG] /agreements legacy action=report_status correlationId=%r serviceType=%r"
+                % (correlation_id, service_type or "<none>"),
+                flush=True,
+            )
+
+            try:
+                status, data = smt_report_status(correlation_id, service_type)
+            except SmtProxyRequestError as exc:
+                logging.error(
+                    "[SMT_PROXY] legacy report_status error status=%s payload_snip=%s",
+                    exc.status,
+                    json.dumps(exc.payload)[:500]
+                    if isinstance(exc.payload, (dict, list))
+                    else str(exc.payload)[:500],
+                )
+                self._write_json(
+                    502,
+                    {
+                        "ok": False,
+                        "status": exc.status,
+                        "error": "smt_request_failed",
+                        "response": exc.payload,
+                    },
+                )
+                return
+            except Exception:
+                logging.exception("[SMT_PROXY] legacy report_status unexpected_error")
+                self._write_json(500, {"ok": False, "error": "Unexpected SMT proxy error"})
+                return
+
+            self._write_json(
+                200,
+                {"ok": True, "status": status, "reportStatus": data},
+            )
+            return
+
+        if action_str == "agreement_esiids":
+            raw_number = payload.get("agreementNumber")
+            try:
+                agreement_number = int(str(raw_number).strip())
+            except (TypeError, ValueError):
+                self._write_json(
+                    400,
+                    {"ok": False, "error": "invalid_agreementNumber"},
+                )
+                return
+
+            print(
+                "[SMT_DEBUG] /agreements legacy action=agreement_esiids agreementNumber=%r"
+                % agreement_number,
+                flush=True,
+            )
+
+            try:
+                status, data = smt_agreement_esiids(agreement_number)
+            except SmtProxyRequestError as exc:
+                logging.error(
+                    "[SMT_PROXY] legacy agreement_esiids error status=%s payload_snip=%s",
+                    exc.status,
+                    json.dumps(exc.payload)[:500]
+                    if isinstance(exc.payload, (dict, list))
+                    else str(exc.payload)[:500],
+                )
+                self._write_json(
+                    502,
+                    {
+                        "ok": False,
+                        "status": exc.status,
+                        "error": "smt_request_failed",
+                        "response": exc.payload,
+                    },
+                )
+                return
+            except Exception:
+                logging.exception("[SMT_PROXY] legacy agreement_esiids unexpected_error")
+                self._write_json(500, {"ok": False, "error": "Unexpected SMT proxy error"})
+                return
+
+            self._write_json(
+                200,
+                {"ok": True, "status": status, "agreementESIIDs": data},
+            )
+            return
+
+        if action_str == "terminate_agreement":
+            raw_number = payload.get("agreementNumber")
+            retail_email = str(payload.get("retailCustomerEmail") or "").strip()
+            try:
+                agreement_number = int(str(raw_number).strip())
+            except (TypeError, ValueError):
+                self._write_json(
+                    400,
+                    {"ok": False, "error": "invalid_agreementNumber"},
+                )
+                return
+
+            if not retail_email:
+                self._write_json(
+                    400,
+                    {"ok": False, "error": "missing_retailCustomerEmail"},
+                )
+                return
+
+            print(
+                "[SMT_DEBUG] /agreements legacy action=terminate_agreement agreementNumber=%r retailCustomerEmail=%r"
+                % (agreement_number, retail_email),
+                flush=True,
+            )
+
+            status, data = smt_terminate_agreement(agreement_number, retail_email)
+            ok = _smt_success(status)
+
+            self._write_json(
+                200,
+                {"ok": ok, "status": status, "response": data},
+            )
+            return
+
+        if action_str == "myagreements":
+            agreement_number_raw = payload.get("agreementNumber")
+            status_reason = str(payload.get("statusReason") or "").strip() or None
+
+            agreement_number: Optional[int]
+            if agreement_number_raw is None or str(agreement_number_raw).strip() == "":
+                agreement_number = None
+            else:
+                try:
+                    agreement_number = int(str(agreement_number_raw).strip())
+                except (TypeError, ValueError):
+                    self._write_json(
+                        400,
+                        {"ok": False, "error": "invalid_agreementNumber"},
+                    )
+                    return
+
+            print(
+                "[SMT_DEBUG] /agreements legacy action=myagreements agreementNumber=%r statusReason=%r"
+                % (
+                    agreement_number if agreement_number is not None else "<none>",
+                    status_reason or "<none>",
+                ),
+                flush=True,
+            )
+
+            try:
+                status, data = smt_my_agreements(agreement_number, status_reason)
+            except SmtProxyRequestError as exc:
+                logging.error(
+                    "[SMT_PROXY] legacy myagreements error status=%s payload_snip=%s",
+                    exc.status,
+                    json.dumps(exc.payload)[:500]
+                    if isinstance(exc.payload, (dict, list))
+                    else str(exc.payload)[:500],
+                )
+                self._write_json(
+                    502,
+                    {
+                        "ok": False,
+                        "status": exc.status,
+                        "error": "smt_request_failed",
+                        "response": exc.payload,
+                    },
+                )
+                return
+            except Exception:
+                logging.exception("[SMT_PROXY] legacy myagreements unexpected_error")
+                self._write_json(500, {"ok": False, "error": "Unexpected SMT proxy error"})
+                return
+
+            self._write_json(
+                200,
+                {"ok": True, "status": status, "agreements": data},
+            )
+            return
+
+        if action_str != "create_agreement_and_subscription":
+            self._write_json(
+                400, {"ok": False, "error": "unsupported_action", "action": action_str}
+            )
+            return
+
         rep_puct_number_default = 10052
         rep_puct_number_raw = payload.get("repPuctNumber") or payload.get("rep_puct_number")
         rep_puct_number = rep_puct_number_default
@@ -926,15 +1161,6 @@ class H(BaseHTTPRequestHandler):
             f"[SMT_DEBUG] /agreements using PUCTRORNumber={rep_puct_number}",
             flush=True,
         )
-
-        action = payload.get("action")
-        if action is None:
-            action = "create_agreement_and_subscription"
-        if action != "create_agreement_and_subscription":
-            self._write_json(
-                400, {"ok": False, "error": "unsupported_action", "action": action}
-            )
-            return
 
         steps: List[Dict[str, Any]] = []
         raw_steps = payload.get("steps")
