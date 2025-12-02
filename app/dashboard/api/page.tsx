@@ -16,11 +16,14 @@ type ExistingSmtAuthorization = {
   smtStatusMessage: string | null;
   smtAgreementId: string | null;
   smtSubscriptionId: string | null;
+  esiid?: string | null;
   subscriptionAlreadyActive?: boolean | null;
   meterNumber?: string | null;
   authorizationStartDate?: Date | null;
   authorizationEndDate?: Date | null;
   archivedAt?: Date | null;
+  tdspCode?: string | null;
+  tdspName?: string | null;
 };
 
 export const dynamic = "force-dynamic";
@@ -102,6 +105,9 @@ export default async function ApiConnectPage() {
         smtStatusMessage: true,
         smtAgreementId: true,
         smtSubscriptionId: true,
+        esiid: true,
+        tdspCode: true,
+        tdspName: true,
         meterNumber: true,
         authorizationStartDate: true,
         authorizationEndDate: true,
@@ -135,6 +141,7 @@ export default async function ApiConnectPage() {
     existingAuth?.subscriptionAlreadyActive === true ||
     normalizedStatus === "already_active" ||
     (existingAuthStatusMessage ?? "").toLowerCase().includes("already active");
+  const smtEsiid = existingAuth?.esiid ?? null;
 
   const ok =
     normalizedStatus === "active" ||
@@ -211,24 +218,36 @@ export default async function ApiConnectPage() {
     neutral: "rounded-full bg-brand-cyan/15 px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-brand-cyan",
   } as const;
 
-  const hasEsiid = Boolean(houseAddress?.esiid);
-  const rawTdspValues = houseAddress
-    ? [
-        houseAddress.tdspSlug,
-        (houseAddress as Record<string, any>)?.tdsp,
-        houseAddress.utilityName,
-        (houseAddress as Record<string, any>)?.utility?.name,
-      ].filter((value) => typeof value === "string" && value.trim().length > 0)
-    : [];
+  const normalizedEsiid = (() => {
+    const raw = houseAddress?.esiid ?? smtEsiid;
+    if (typeof raw !== "string") {
+      return raw ? String(raw) : null;
+    }
+    const trimmed = raw.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  })();
+  const hasEsiid = Boolean(normalizedEsiid);
+
+  const rawTdspValues = [
+    houseAddress?.tdspSlug,
+    (houseAddress as Record<string, any>)?.tdsp,
+    houseAddress?.utilityName,
+    (houseAddress as Record<string, any>)?.utility?.name,
+    existingAuth?.tdspName,
+    existingAuth?.tdspCode,
+  ].filter((value) => typeof value === "string" && value.trim().length > 0);
+
   const hasTdspOrUtility = rawTdspValues.length > 0;
 
   const tdspName =
     rawTdspValues.length > 0 ? String(rawTdspValues[0]).trim() : "Unknown Utility";
-  const tdspCode = houseAddress?.tdspSlug
-    ? String(houseAddress.tdspSlug).toUpperCase()
-    : rawTdspValues.length > 0
-    ? String(rawTdspValues[0]).replace(/\s+/g, "_").toUpperCase()
-    : "UNKNOWN";
+  const tdspCode = (
+    houseAddress?.tdspSlug ??
+    existingAuth?.tdspCode ??
+    (rawTdspValues.length > 0 ? String(rawTdspValues[0]).replace(/\s+/g, "_") : "UNKNOWN")
+  )
+    .toString()
+    .toUpperCase();
 
   const serviceAddressLine1 =
     (houseAddress as any)?.addressLine1 ??
@@ -351,7 +370,7 @@ export default async function ApiConnectPage() {
                         </div>
                         <div>
                           <span className="font-semibold">ESIID · </span>
-                          {houseAddress.esiid ?? "—"}
+                          {normalizedEsiid ?? "—"}
                         </div>
                         <div>
                           <span className="font-semibold">Utility · </span>
@@ -417,7 +436,7 @@ export default async function ApiConnectPage() {
                     contactEmail={userEmail}
                     houseAddressId={houseAddress.id}
                     houseId={houseAddress.houseId ?? undefined}
-                    esiid={houseAddress.esiid ?? undefined}
+                    esiid={normalizedEsiid ?? undefined}
                     tdspCode={tdspCode}
                     tdspName={tdspName}
                     serviceAddressLine1={serviceAddressLine1}
