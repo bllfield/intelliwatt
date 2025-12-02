@@ -81,16 +81,19 @@ export default async function DashboardLayout({ children }: { children: React.Re
     headerList.get('x-pathname') ??
     headerList.get('x-invoke-path') ??
     '';
+  const shouldLock = await isSmtConfirmationRequired();
   const isSmtConfirmationRoute = matchedPath.startsWith('/dashboard/smt-confirmation');
+
+  if (shouldLock) {
+    if (!isSmtConfirmationRoute) {
+      redirect('/dashboard/smt-confirmation');
+    }
+  } else if (isSmtConfirmationRoute) {
+    redirect('/dashboard');
+  }
 
   if (isSmtConfirmationRoute) {
     return <>{children}</>;
-  }
-
-  const shouldLock = await isSmtConfirmationRequired();
-
-  if (shouldLock) {
-    redirect('/dashboard/smt-confirmation');
   }
 
   return (
