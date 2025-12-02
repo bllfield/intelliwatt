@@ -60,6 +60,13 @@ Notes:
 - Removed the legacy `SmtStatusGate` overlay in favor of the dedicated confirmation page.
 - Customer-facing agreement flow now posts only to SMT `/v2/NewAgreement/`; the legacy `/v2/NewSubscription/` call is skipped to avoid redundant CSP enrollments.
 
+## PC-2025-12-02 · SMT Agreement Reconciliation & Legacy Fallbacks
+
+- **Agreement/Subscription IDs stored as strings.** Every path that persists SMT IDs (`createAgreementAndSubscription`, status refresh, revoke) now converts numbers to strings before writing to Prisma (`smtAgreementId`, `smtSubscriptionId` are varchar fields).
+- **Droplet fallback retained.** `postToSmtProxy()` auto-falls back to the legacy `/agreements` action payloads (e.g., `action="myagreements"`, `action="terminate_agreement"`) when the new `/smt/*` endpoints are unreachable, so older droplet configs still work. All handlers emit `[SMT_DEBUG]` request/response logs for traceability.
+- **Agreement lookup by ESIID.** New helper `findAgreementForEsiid(esiid)` calls the droplet `/smt/agreements/myagreements`, normalizes the response, and selects the best match for the target ESIID. `refreshSmtAuthorizationStatus()` and `/api/smt/revoke` use this helper to reconcile status or recover missing agreement numbers before hitting SMT.
+- **Status cron ready for scheduling.** `/api/admin/smt/cron/status` now uses the new lookup logic, letting Vercel Cron refresh pending authorizations (or all authorizations) on an hourly cadence. Ops must add a Vercel Cron job that POSTs to this route with `x-admin-token` so SMT revocations/approvals automatically sync with the dashboard.
+
 ## Module Databases & Env Setup
 
 - [x] Define module database env vars in `ENV_VARS.md` (`CURRENT_PLAN_DATABASE_URL`, `USAGE_DATABASE_URL`, `HOME_DETAILS_DATABASE_URL`, `APPLIANCES_DATABASE_URL`, `UPGRADES_DATABASE_URL`, `OFFERS_DATABASE_URL`, `REFERRALS_DATABASE_URL`) so each subsystem can run on its own database.

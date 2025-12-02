@@ -4,6 +4,18 @@
 - `ADMIN_TOKEN` is set in the Vercel environment and known only to operators.
 - Droplet SMT proxy is healthy (`smt-webhook.service` running, JWT token test works).
 
+### Schedule SMT Agreement Status Cron (Vercel)
+1. Add a managed cron job in Vercel (Project → Settings → Cron Jobs) or via `vercel.json`.
+2. Use an hourly cadence (e.g., `0 * * * *`) pointing to:
+   - Path: `POST /api/admin/smt/cron/status`
+   - Header: `x-admin-token: $ADMIN_TOKEN`
+   - Optional body (JSON) to widen scope:
+     ```json
+     { "status": "ALL", "limit": 100 }
+     ```
+3. Cron invokes `refreshSmtAuthorizationStatus()` for each row it scans, pulling the latest SMT status and updating `smtAgreementId`, `smtStatus`, and `smtStatusMessage`.
+4. Monitor Vercel function logs for `{ scanned, updated, failed }` to confirm the cron is running cleanly.
+
 ### Check SMT Agreement / Subscription Status
 1. From a secure terminal (PowerShell or HTTP client), call:
    - URL: `POST https://intelliwatt.com/api/admin/smt/agreements/status`
