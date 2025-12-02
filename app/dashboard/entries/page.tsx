@@ -7,6 +7,7 @@ interface EntryData {
   id: string;
   type: string;
   amount: number;
+  houseId?: string | null;
   createdAt: string;
   status: 'ACTIVE' | 'EXPIRING_SOON' | 'EXPIRED';
   expiresAt: string | null;
@@ -119,7 +120,9 @@ export default function EntriesPage() {
   const totalEntries = useMemo(
     () =>
       entries
-        .filter((entry) => entry.status === 'ACTIVE')
+        .filter(
+          (entry) => entry.status === 'ACTIVE' || entry.status === 'EXPIRING_SOON',
+        )
         .reduce((total, entry) => total + entry.amount, 0),
     [entries],
   );
@@ -127,7 +130,9 @@ export default function EntriesPage() {
   const categoryTotals = useMemo(() => {
     const map = new Map<string, number>();
     for (const entry of entries) {
-      if (entry.status !== 'ACTIVE') continue;
+      if (entry.status !== 'ACTIVE' && entry.status !== 'EXPIRING_SOON') {
+        continue;
+      }
       const current = map.get(entry.type) ?? 0;
       map.set(entry.type, current + entry.amount);
     }
@@ -138,6 +143,7 @@ export default function EntriesPage() {
     const map = new Map<
       string,
       {
+        activeCount: number;
         expiringSoonCount: number;
         expiredCount: number;
         nextExpiry: Date | null;
@@ -146,19 +152,31 @@ export default function EntriesPage() {
 
     for (const entry of entries) {
       const meta = map.get(entry.type) ?? {
+        activeCount: 0,
         expiringSoonCount: 0,
         expiredCount: 0,
         nextExpiry: null,
       };
 
-      if (entry.status === 'EXPIRING_SOON' && entry.expiresAt) {
-        meta.expiringSoonCount += entry.amount;
-        const expiryDate = new Date(entry.expiresAt);
-        if (!meta.nextExpiry || expiryDate < meta.nextExpiry) {
-          meta.nextExpiry = expiryDate;
+      switch (entry.status) {
+        case 'ACTIVE':
+          meta.activeCount += entry.amount;
+          break;
+        case 'EXPIRING_SOON': {
+          meta.expiringSoonCount += entry.amount;
+          if (entry.expiresAt) {
+            const expiryDate = new Date(entry.expiresAt);
+            if (!meta.nextExpiry || expiryDate < meta.nextExpiry) {
+              meta.nextExpiry = expiryDate;
+            }
+          }
+          break;
         }
-      } else if (entry.status === 'EXPIRED') {
-        meta.expiredCount += entry.amount;
+        case 'EXPIRED':
+          meta.expiredCount += entry.amount;
+          break;
+        default:
+          break;
       }
 
       map.set(entry.type, meta);
@@ -208,19 +226,22 @@ export default function EntriesPage() {
               {CATEGORY_CARDS.map((card) => {
                 const count = categoryTotals.get(card.id) ?? 0;
                 const meta = categoryExpiryMeta.get(card.id);
+                const liveCount =
+                  (meta?.activeCount ?? 0) + (meta?.expiringSoonCount ?? 0);
+                const hasLiveEntries = liveCount > 0;
                 let statusBanner: React.ReactNode = null;
 
                 if (meta) {
-                  if (meta.expiredCount > 0) {
-                    statusBanner = (
-                      <span className="inline-flex items-center rounded-full border border-rose-300 bg-rose-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-rose-200">
-                        Entries expired
-                      </span>
-                    );
-                  } else if (meta.expiringSoonCount > 0 && meta.nextExpiry) {
+                  if (meta.expiringSoonCount > 0 && meta.nextExpiry) {
                     statusBanner = (
                       <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-400/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-amber-200">
                         Expires {meta.nextExpiry.toLocaleDateString()}
+                      </span>
+                    );
+                  } else if (!hasLiveEntries && meta.expiredCount > 0) {
+                    statusBanner = (
+                      <span className="inline-flex items-center rounded-full border border-rose-300 bg-rose-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-rose-200">
+                        Entries expired
                       </span>
                     );
                   }

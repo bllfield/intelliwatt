@@ -8,7 +8,7 @@ export default function ClientEntriesCounter() {
     let isMounted = true;
     const fetchCount = async () => {
       try {
-        const res = await fetch('/api/user/entries');
+        const res = await fetch('/api/user/entries', { cache: 'no-store' });
         if (res.ok) {
           const data = await res.json();
           if (isMounted) setCount(data?.total ?? 0);
