@@ -59,13 +59,30 @@ export function SmtConfirmationActions({ homeId }: Props) {
     setState("refresh");
     setError(null);
     try {
-      await fetch("/api/smt/authorization/status", {
+      const res = await fetch("/api/smt/authorization/status", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ homeId }),
       });
+      const payload = (await res.json().catch(() => null)) as any;
+      const statusRaw =
+        typeof payload?.authorization?.smtStatus === "string"
+          ? payload.authorization.smtStatus.toLowerCase()
+          : null;
+      const statusMessage = payload?.authorization?.smtStatusMessage?.toLowerCase?.() ?? "";
+      const isActive =
+        statusRaw === "active" ||
+        statusRaw === "already_active" ||
+        statusMessage.includes("already active");
+
+      if (isActive) {
+        setState("idle");
+        router.push("/dashboard/api");
+        return;
+      }
+
       router.refresh();
     } catch (err) {
       const message =
