@@ -5,6 +5,8 @@ import { normalizeEmail } from '@/lib/utils/email';
 import { refreshUserEntryStatuses } from '@/lib/hitthejackwatt/entryLifecycle';
 import { qualifyReferralsForUser } from '@/lib/referral/qualify';
 
+const COMMISSION_STATUS_ALLOWLIST = ['pending', 'submitted', 'approved', 'completed', 'paid'];
+
 type EntryRow = {
   id: string;
   type: string;
@@ -43,23 +45,37 @@ export async function GET(request: NextRequest) {
 
     await refreshUserEntryStatuses(user.id);
 
-    const rawEntries = (await db.entry.findMany({
-      where: { userId: user.id },
-      orderBy: { createdAt: 'desc' },
-      select: {
-        id: true,
-        type: true,
-        amount: true,
-        houseId: true,
-        createdAt: true,
-        status: true,
-        expiresAt: true,
-        manualUsageId: true,
-        lastValidated: true,
-      } as any,
-    })) as any[];
+    const [rawEntries, qualifyingCommission] = await Promise.all([
+      db.entry.findMany({
+        where: { userId: user.id },
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          type: true,
+          amount: true,
+          houseId: true,
+          createdAt: true,
+          status: true,
+          expiresAt: true,
+          manualUsageId: true,
+          lastValidated: true,
+        } as any,
+      }) as Promise<any[]>,
+      db.commissionRecord.findFirst({
+        where: {
+          userId: user.id,
+          status: { in: COMMISSION_STATUS_ALLOWLIST },
+          OR: [
+            { type: { contains: 'switch', mode: 'insensitive' } },
+            { type: { contains: 'plan', mode: 'insensitive' } },
+            { type: { contains: 'upgrade', mode: 'insensitive' } },
+          ],
+        },
+        select: { id: true },
+      }),
+    ]);
 
-    const entries: EntryRow[] = rawEntries.map((entry: any) => ({
+    const entries: EntryRow[] = (rawEntries as any[]).map((entry: any) => ({
       id: entry.id,
       type: entry.type,
       amount: entry.amount,
@@ -75,6 +91,11 @@ export async function GET(request: NextRequest) {
       (entry) => entry.status === 'ACTIVE' || entry.status === 'EXPIRING_SOON',
     );
     const total = countedEntries.reduce((sum, entry) => sum + entry.amount, 0);
+    const hasActiveUsage = entries.some(
+      (entry) =>
+        entry.type === 'smart_meter_connect' &&
+        (entry.status === 'ACTIVE' || entry.status === 'EXPIRING_SOON'),
+    );
 
     return NextResponse.json({
       entries: entries.map((e) => ({
@@ -89,6 +110,8 @@ export async function GET(request: NextRequest) {
         lastValidated: e.lastValidated ? e.lastValidated.toISOString() : null,
       })),
       total,
+      hasActiveUsage,
+      testimonialEligible: Boolean(qualifyingCommission),
     });
   } catch (error) {
     console.error('Error fetching entries:', error);

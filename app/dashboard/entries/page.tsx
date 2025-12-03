@@ -98,6 +98,8 @@ export default function EntriesPage() {
   const [entries, setEntries] = useState<EntryData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [hasActiveUsage, setHasActiveUsage] = useState(false);
+  const [testimonialEligible, setTestimonialEligible] = useState(false);
 
   const fetchEntries = useCallback(async () => {
     try {
@@ -114,11 +116,31 @@ export default function EntriesPage() {
       }
 
       const payload = await response.json();
-      setEntries(payload.entries ?? []);
+      const entriesData: EntryData[] =
+        (payload.entries ?? []).map((entry: any) => ({
+          ...entry,
+          createdAt: entry.createdAt,
+          lastValidated: entry.lastValidated,
+        }));
+
+      setEntries(entriesData);
+      const usageFallback = entriesData.some(
+        (entry) =>
+          entry.type === USAGE_ENTRY_CARD_ID &&
+          (entry.status === "ACTIVE" || entry.status === "EXPIRING_SOON"),
+      );
+      setHasActiveUsage(
+        typeof payload.hasActiveUsage === "boolean" ? payload.hasActiveUsage : usageFallback,
+      );
+      setTestimonialEligible(
+        typeof payload.testimonialEligible === "boolean" ? payload.testimonialEligible : false,
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to load entries.";
       setError(message);
       setEntries([]);
+      setHasActiveUsage(false);
+      setTestimonialEligible(false);
     } finally {
       setLoading(false);
     }
@@ -203,10 +225,6 @@ export default function EntriesPage() {
     return map;
   }, [entries]);
 
-  const usageEntryMeta = categoryExpiryMeta.get(USAGE_ENTRY_CARD_ID);
-  const hasActiveUsage =
-    (usageEntryMeta?.activeCount ?? 0) + (usageEntryMeta?.expiringSoonCount ?? 0) > 0;
-
   const expiringSoonTotal = useMemo(
     () =>
       entries
@@ -258,6 +276,7 @@ export default function EntriesPage() {
                 const hasLiveEntries = liveCount > 0;
                 let statusBanner: React.ReactNode = null;
                 let availabilityMessage: string | null = null;
+                let availabilityTone: "locked" | "ready" | "warning" | null = null;
 
                 if (meta) {
                   if (meta.expiringSoonCount > 0 && meta.nextExpiry) {
@@ -275,29 +294,35 @@ export default function EntriesPage() {
                   }
                 }
 
-                if (
-                  card.id === "current_plan_details" &&
-                  hasActiveUsage &&
-                  !hasLiveEntries &&
-                  (meta?.expiredCount ?? 0) > 0
-                ) {
-                  availabilityMessage =
-                    "Usage reconnected. Reconfirm your saved plan to reactivate this entry.";
+                if (USAGE_DEPENDENT_CARD_IDS.has(card.id)) {
+                  if (!hasActiveUsage) {
+                    availabilityMessage =
+                      "Requires active usage data (SMT, Green Button, or manual upload).";
+                    availabilityTone = "locked";
+                  } else if (!hasLiveEntries) {
+                    if (
+                      card.id === "current_plan_details" &&
+                      (meta?.expiredCount ?? 0) > 0
+                    ) {
+                      availabilityMessage =
+                        "Usage reconnected. Reconfirm your saved plan to reactivate this entry.";
+                    } else {
+                      availabilityMessage = "Usage connected—complete this step to earn your entry.";
+                    }
+                    availabilityTone = "ready";
+                  }
                 } else if (card.id === TESTIMONIAL_CARD_ID && count === 0) {
                   availabilityMessage =
                     "Unlocks after you switch plans or do upgrades with IntelliWatt. This entry will not expire after meeting the switch or upgrade criteria and submitting a testimonial.";
-                } else if (
-                  USAGE_DEPENDENT_CARD_IDS.has(card.id) &&
-                  !hasActiveUsage
-                ) {
-                  availabilityMessage =
-                    "Requires active usage data (SMT, Green Button, or manual upload).";
+                  availabilityTone = testimonialEligible ? "ready" : "locked";
                 } else if (card.id === USAGE_ENTRY_CARD_ID && !hasActiveUsage) {
                   availabilityMessage =
                     "Connect SMT or upload usage to activate other profile entries.";
+                  availabilityTone = "ready";
                 } else if (card.id === REFERRAL_CARD_ID && !hasActiveUsage) {
                   availabilityMessage =
                     "Available even without usage data—invite friends to earn entries now. Referral entries never expire.";
+                  availabilityTone = "ready";
                 }
 
                 return (
@@ -320,9 +345,11 @@ export default function EntriesPage() {
                     {availabilityMessage ? (
                       <div
                         className={`rounded-xl px-3 py-2 text-[11px] font-semibold uppercase tracking-wide ${
-                          card.id === REFERRAL_CARD_ID && !hasActiveUsage
+                          availabilityTone === "ready"
                             ? "border border-[#39FF14]/60 bg-[#39FF14]/10 text-[#39FF14]"
-                            : "border border-amber-400/50 bg-amber-500/10 text-amber-100"
+                            : availabilityTone === "locked"
+                              ? "border border-[#FF52FF]/60 bg-[#FF52FF]/10 text-[#FF52FF]"
+                              : "border border-amber-400/50 bg-amber-500/10 text-amber-100"
                         }`}
                       >
                         {availabilityMessage}
