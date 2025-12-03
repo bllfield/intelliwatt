@@ -236,24 +236,18 @@ export default async function ProfilePage() {
     entries: house.entries,
   }));
 
-  const [currentPlan, qualifyingCommission] = await Promise.all([
-    prismaAny.utilityPlan.findFirst({
-      where: { userId: user.id, isCurrent: true },
-      select: { id: true },
-    }),
-    prismaAny.commissionRecord.findFirst({
-      where: {
-        userId: user.id,
-        status: { in: COMMISSION_STATUS_ALLOWLIST },
-        OR: [
-          { type: { contains: "switch", mode: "insensitive" } },
-          { type: { contains: "plan", mode: "insensitive" } },
-          { type: { contains: "upgrade", mode: "insensitive" } },
-        ],
-      },
-      select: { id: true },
-    }),
-  ]);
+  const qualifyingCommission = await prismaAny.commissionRecord.findFirst({
+    where: {
+      userId: user.id,
+      status: { in: COMMISSION_STATUS_ALLOWLIST },
+      OR: [
+        { type: { contains: "switch", mode: "insensitive" } },
+        { type: { contains: "plan", mode: "insensitive" } },
+        { type: { contains: "upgrade", mode: "insensitive" } },
+      ],
+    },
+    select: { id: true },
+  });
 
   let testimonialSubmission: {
     status: string;
@@ -282,7 +276,7 @@ export default async function ProfilePage() {
     }
   }
 
-  const testimonialEligible = Boolean(currentPlan) || Boolean(qualifyingCommission);
+  const testimonialEligible = Boolean(qualifyingCommission);
   const testimonialSummary = testimonialSubmission
     ? {
         status: testimonialSubmission.status as "PENDING" | "APPROVED" | "REJECTED",

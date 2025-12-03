@@ -138,7 +138,10 @@ Notes:
     - Preserve previously submitted Current Plan data when SMT usage lapses so the card shows the saved snapshot even while the entry is expired.
     - Add “Reconfirm plan” CTA on `/dashboard/current-rate` that re-validates the stored plan (or accepts new details) before re-awarding the entry once active usage returns.
     - Ensure `refreshUserEntryStatuses` unlocks the Current Plan entry automatically once usage data is active **and** the user reconfirms; surface the same pattern for Home Details + Appliances when those modules go live.
-    - Update usage-dependent entry copy/site messaging (entries page, checklist) to explain that referrals remain the only entry path without active usage data (completed 2025-12-02 UI pass).
+    - ✅ Update usage-dependent entry copy/site messaging (entries page, checklist) to explain that referrals remain the only entry path without active usage data.
+    - ✅ Add usage-aware banner on `/dashboard/current-rate` to direct customers to `/dashboard/api` when no SMT/manual usage is present.
+    - ✅ Implement testimonial eligibility guard that requires an IntelliWatt plan switch or upgrade (both API and UI).
+    - ✅ Clarify testimonial availability copy on `/dashboard/entries` and remove duplicate testimonial card; center the jackpot total callout.
 
 ### Current Plan Module Progress (Updated 2025-11-27)
 
@@ -168,7 +171,7 @@ Notes:
 - [x] Run Prisma generate + migrate for the Current Plan module schema and master schema (dev + prod) so the pipeline is live end-to-end.
 - [ ] Normalize vendor offer ingestion to populate the shared `RateStructure`, then adapt the comparison engine to cost fixed, variable, and TOU offers with the same code path as user-entered plans.
 - [ ] Use `NormalizedCurrentPlan` in the Rate Plan Analyzer UI (future step once normalization + master data is live).
-- [ ] Add reconfirmation UX + mutations so expired Current Plan entries can be re-awarded once usage data is back in sync (see “Usage-dependent entry reconfirm flows” checklist).
+- ✅ Add reconfirmation UX + mutations so expired Current Plan entries can be re-awarded once usage data is back in sync (see “Usage-dependent entry reconfirm flows” checklist).
 
 <!-- Dev + Prod Prisma migrations completed for Current Plan module + master schema on 2025-11-28 -->
 

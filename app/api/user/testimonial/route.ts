@@ -66,26 +66,20 @@ export async function POST(request: NextRequest) {
 
     const prismaAny = prisma as any;
 
-    const [qualifyingCommission, currentPlan] = await Promise.all([
-      prisma.commissionRecord.findFirst({
-        where: {
-          userId: user.id,
-          status: { in: COMMISSION_STATUS_ALLOWLIST },
-          OR: [
-            { type: { contains: 'switch', mode: 'insensitive' } },
-            { type: { contains: 'plan', mode: 'insensitive' } },
-            { type: { contains: 'upgrade', mode: 'insensitive' } },
-          ],
-        },
-        select: { id: true },
-      }),
-      prisma.utilityPlan.findFirst({
-        where: { userId: user.id, isCurrent: true },
-        select: { id: true },
-      }),
-    ]);
+    const qualifyingCommission = await prisma.commissionRecord.findFirst({
+      where: {
+        userId: user.id,
+        status: { in: COMMISSION_STATUS_ALLOWLIST },
+        OR: [
+          { type: { contains: 'switch', mode: 'insensitive' } },
+          { type: { contains: 'plan', mode: 'insensitive' } },
+          { type: { contains: 'upgrade', mode: 'insensitive' } },
+        ],
+      },
+      select: { id: true },
+    });
 
-    if (!qualifyingCommission && !currentPlan) {
+    if (!qualifyingCommission) {
       return NextResponse.json(
         {
           error:

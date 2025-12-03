@@ -973,6 +973,20 @@ export function CurrentRateDetailsForm({
 
   return (
     <div className="space-y-8">
+      {!hasActiveUsage ? (
+        <div className="rounded-3xl border border-amber-400/60 bg-amber-500/10 px-5 py-4 text-xs font-semibold uppercase tracking-wide text-amber-100 shadow-[0_18px_45px_rgba(190,146,18,0.18)]">
+          Current plan entries unlock only after IntelliWatt has active usage data. Connect Smart
+          Meter Texas or upload usage on{" "}
+          <a
+            href="/dashboard/api"
+            className="underline decoration-dotted underline-offset-4 text-amber-50 hover:text-white"
+          >
+            the API Connect page
+          </a>{" "}
+          to enable this step.
+        </div>
+      ) : null}
+
       <div className="rounded-3xl border border-brand-cyan/25 bg-white p-6 shadow-[0_24px_60px_rgba(16,46,90,0.12)]">
         <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div>

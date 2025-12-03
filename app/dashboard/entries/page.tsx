@@ -67,13 +67,6 @@ const CATEGORY_CARDS: CategoryConfig[] = [
     ctaLabel: "Submit Testimonial",
     ctaHref: "/dashboard/profile#testimonial",
   },
-  {
-    id: "testimonial",
-    title: "Testimonial",
-    description: "Share your IntelliWatt experience after your plan switch to earn 1 entry that never expires.",
-    ctaLabel: "Submit Testimonial",
-    ctaHref: "/dashboard/profile#testimonial",
-  },
 ];
 
 const USAGE_DEPENDENT_CARD_IDS = new Set<string>([
@@ -292,7 +285,7 @@ export default function EntriesPage() {
                     "Usage reconnected. Reconfirm your saved plan to reactivate this entry.";
                 } else if (card.id === TESTIMONIAL_CARD_ID && count === 0) {
                   availabilityMessage =
-                    "Unlocks after you switch plans with IntelliWatt and keep usage data active.";
+                    "Unlocks after you switch plans or do upgrades with IntelliWatt. This entry will not expire after meeting the switch or upgrade criteria and submitting a testimonial.";
                 } else if (
                   USAGE_DEPENDENT_CARD_IDS.has(card.id) &&
                   !hasActiveUsage
@@ -304,7 +297,7 @@ export default function EntriesPage() {
                     "Connect SMT or upload usage to activate other profile entries.";
                 } else if (card.id === REFERRAL_CARD_ID && !hasActiveUsage) {
                   availabilityMessage =
-                    "Available even without usage data—invite friends to earn entries now.";
+                    "Available even without usage data—invite friends to earn entries now. Referral entries never expire.";
                 }
 
                 return (
@@ -325,7 +318,13 @@ export default function EntriesPage() {
                       {highlightEntryText(card.description)}
                     </p>
                     {availabilityMessage ? (
-                      <div className="rounded-xl border border-amber-400/50 bg-amber-500/10 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-amber-100">
+                      <div
+                        className={`rounded-xl px-3 py-2 text-[11px] font-semibold uppercase tracking-wide ${
+                          card.id === REFERRAL_CARD_ID && !hasActiveUsage
+                            ? "border border-[#39FF14]/60 bg-[#39FF14]/10 text-[#39FF14]"
+                            : "border border-amber-400/50 bg-amber-500/10 text-amber-100"
+                        }`}
+                      >
                         {availabilityMessage}
                       </div>
                     ) : null}
@@ -345,7 +344,7 @@ export default function EntriesPage() {
                   Active usage data unlocks Current Plan, Home Details, Appliance Details, and the Testimonial invite. Until then, referrals are the only entries available.
                 </div>
               ) : null}
-              <div className="rounded-3xl border border-brand-cyan/40 bg-brand-navy p-6 text-brand-cyan shadow-[0_0_30px_rgba(56,189,248,0.22)] flex flex-col items-center justify-center gap-3">
+              <div className="rounded-3xl border border-brand-cyan/40 bg-brand-navy p-6 text-brand-cyan shadow-[0_0_30px_rgba(56,189,248,0.22)] flex flex-col items-center justify-center gap-3 md:col-span-2 md:max-w-md md:mx-auto">
                 <h3 className="text-lg font-semibold uppercase tracking-wide text-brand-cyan">
                   Total Jackpot Entries
                 </h3>
