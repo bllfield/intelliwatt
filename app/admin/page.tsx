@@ -212,6 +212,7 @@ export default function AdminDashboard() {
   const [greenButtonStatus, setGreenButtonStatus] = useState<string | null>(null);
   const [uploadingGreenButton, setUploadingGreenButton] = useState(false);
   const [greenButtonLog, setGreenButtonLog] = useState<string[]>([]);
+  const [greenButtonHouseId, setGreenButtonHouseId] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [recalculatingReferrals, setRecalculatingReferrals] = useState(false);
   const [recalculatingEntries, setRecalculatingEntries] = useState(false);
@@ -442,38 +443,67 @@ export default function AdminDashboard() {
         appendGreenButtonLog(
           `Preparing upload: ${greenButtonFile.name} (${formatBytes(greenButtonFile.size)})`,
         );
-
-        const formData = new FormData();
-        formData.append('file', greenButtonFile);
-        if (greenButtonUtility.trim().length > 0) {
-          formData.append('utilityName', greenButtonUtility.trim());
-        }
-        if (greenButtonAccount.trim().length > 0) {
-          formData.append('accountNumber', greenButtonAccount.trim());
-        }
-
-        appendGreenButtonLog('POST /api/admin/green-button/upload');
-        const response = await fetch('/api/admin/green-button/upload', {
+        const ticketResponse = await fetch('/api/green-button/upload-ticket', {
           method: 'POST',
-          body: formData,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ homeId: greenButtonHouseId || null }),
         });
         appendGreenButtonLog(
-          `Response received: ${response.status} ${response.statusText || ''}`.trim(),
+          `Ticket request: ${ticketResponse.status} ${ticketResponse.statusText || ''}`.trim(),
         );
-
-        if (!response.ok) {
-          const { raw, json } = await readResponseBody(response);
+        if (!ticketResponse.ok) {
+          const { raw, json } = await readResponseBody(ticketResponse);
           const detail =
             json?.detail ||
             json?.error ||
             (raw && raw.length > 0 ? raw : 'No additional details returned.');
-          const message = `Upload failed (${response.status} ${response.statusText}) — ${detail}`;
+          const message = `Ticket request failed (${ticketResponse.status} ${ticketResponse.statusText}) — ${detail}`;
+          setGreenButtonStatus(message);
+          appendGreenButtonLog(message);
+          return;
+        }
+        const ticket = await ticketResponse.json();
+        if (!ticket?.ok || !ticket.uploadUrl || !ticket.payload || !ticket.signature) {
+          const message = 'Ticket response missing required fields.';
+          setGreenButtonStatus(message);
+          appendGreenButtonLog(message);
+          return;
+        }
+        appendGreenButtonLog(`Ticket issued — expires ${ticket.expiresAt}`);
+
+        const dropletForm = new FormData();
+        dropletForm.append('file', greenButtonFile);
+        dropletForm.append('payload', ticket.payload);
+        dropletForm.append('signature', ticket.signature);
+        if (greenButtonUtility.trim().length > 0) {
+          dropletForm.append('utilityName', greenButtonUtility.trim());
+        }
+        if (greenButtonAccount.trim().length > 0) {
+          dropletForm.append('accountNumber', greenButtonAccount.trim());
+        }
+
+        appendGreenButtonLog(`POST ${ticket.uploadUrl}`);
+        const dropletResponse = await fetch(ticket.uploadUrl as string, {
+          method: 'POST',
+          body: dropletForm,
+          credentials: 'omit',
+        });
+        appendGreenButtonLog(
+          `Droplet response: ${dropletResponse.status} ${dropletResponse.statusText || ''}`.trim(),
+        );
+        if (!dropletResponse.ok) {
+          const { raw, json } = await readResponseBody(dropletResponse);
+          const detail =
+            json?.detail ||
+            json?.error ||
+            (raw && raw.length > 0 ? raw : 'No additional details returned.');
+          const message = `Droplet upload failed (${dropletResponse.status} ${dropletResponse.statusText}) — ${detail}`;
           setGreenButtonStatus(message);
           appendGreenButtonLog(message);
           return;
         }
 
-        const result = await response.json();
+        const result = await dropletResponse.json();
         const successMessage = `Upload stored and normalized (${result.intervalsCreated} intervals, ${Number(
           result.totalKwh ?? 0,
         ).toFixed(3)} kWh).`;
@@ -817,6 +847,22 @@ export default function AdminDashboard() {
                 {greenButtonStatus}
               </div>
             ) : null}
+            <div className="flex flex-col gap-2">
+              <label htmlFor="green-button-house" className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-navy">
+                House ID (optional)
+              </label>
+              <input
+                id="green-button-house"
+                type="text"
+                value={greenButtonHouseId}
+                onChange={(event) => setGreenButtonHouseId(event.target.value)}
+                placeholder="Link to a specific house address"
+                className="rounded-lg border border-brand-navy/20 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
+              />
+              <p className="text-xs text-brand-navy/60">
+                Ticket flow requires a valid house ID tied to the current account. Leave blank to use the default primary house when applicable.
+              </p>
+            </div>
           </form>
 
           {greenButtonLog.length > 0 ? (
