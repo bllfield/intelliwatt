@@ -211,12 +211,31 @@ export default function AdminDashboard() {
   const [greenButtonAccount, setGreenButtonAccount] = useState('');
   const [greenButtonStatus, setGreenButtonStatus] = useState<string | null>(null);
   const [uploadingGreenButton, setUploadingGreenButton] = useState(false);
+  const [greenButtonLog, setGreenButtonLog] = useState<string[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [recalculatingReferrals, setRecalculatingReferrals] = useState(false);
   const [recalculatingEntries, setRecalculatingEntries] = useState(false);
   const [copiedAdId, setCopiedAdId] = useState<string | null>(null);
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const greenButtonFileInputRef = useRef<HTMLInputElement | null>(null);
+  const appendGreenButtonLog = useCallback((message: string) => {
+    setGreenButtonLog((previous) => [
+      ...previous,
+      `${new Date().toLocaleTimeString()} — ${message}`,
+    ]);
+  }, []);
+  const readResponseBody = useCallback(async (response: Response) => {
+    const raw = await response.text();
+    let json: any = null;
+    if (raw) {
+      try {
+        json = JSON.parse(raw);
+      } catch {
+        json = null;
+      }
+    }
+    return { raw, json };
+  }, []);
 
   // Fetch real data from API
   const fetchData = useCallback(async () => {
@@ -410,13 +429,20 @@ export default function AdminDashboard() {
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault();
       if (!greenButtonFile) {
-        setGreenButtonStatus('Please choose a Green Button XML/CSV file before uploading.');
+        const message = 'Please choose a Green Button XML/CSV file before uploading.';
+        setGreenButtonStatus(message);
+        appendGreenButtonLog(message);
         return;
       }
 
       try {
         setUploadingGreenButton(true);
         setGreenButtonStatus('Uploading and normalizing…');
+        setGreenButtonLog([]);
+        appendGreenButtonLog(
+          `Preparing upload: ${greenButtonFile.name} (${formatBytes(greenButtonFile.size)})`,
+        );
+
         const formData = new FormData();
         formData.append('file', greenButtonFile);
         if (greenButtonUtility.trim().length > 0) {
@@ -426,46 +452,68 @@ export default function AdminDashboard() {
           formData.append('accountNumber', greenButtonAccount.trim());
         }
 
+        appendGreenButtonLog('POST /api/admin/green-button/upload');
         const response = await fetch('/api/admin/green-button/upload', {
           method: 'POST',
           body: formData,
         });
+        appendGreenButtonLog(
+          `Response received: ${response.status} ${response.statusText || ''}`.trim(),
+        );
 
         if (!response.ok) {
-          const data = await response.json().catch(() => null);
-          const errorMessage =
-            data?.error === 'no_readings'
-              ? 'No readings detected. Ensure the CSV/JSON contains timestamp/value columns.'
-              : data?.error === 'normalization_empty'
-                ? 'Normalization produced no intervals. Check the file format and try again.'
-                : data?.error
-                  ? `Upload failed: ${data.error}`
-                  : 'Upload failed. Please try again.';
-          setGreenButtonStatus(errorMessage);
+          const { raw, json } = await readResponseBody(response);
+          const detail =
+            json?.detail ||
+            json?.error ||
+            (raw && raw.length > 0 ? raw : 'No additional details returned.');
+          const message = `Upload failed (${response.status} ${response.statusText}) — ${detail}`;
+          setGreenButtonStatus(message);
+          appendGreenButtonLog(message);
           return;
         }
 
         const result = await response.json();
-        setGreenButtonStatus(
-          `Upload stored and normalized (${result.intervalsCreated} intervals, ${result.totalKwh.toFixed(
-            3,
-          )} kWh).`,
+        const successMessage = `Upload stored and normalized (${result.intervalsCreated} intervals, ${Number(
+          result.totalKwh ?? 0,
+        ).toFixed(3)} kWh).`;
+        setGreenButtonStatus(successMessage);
+        appendGreenButtonLog(
+          `Normalization complete: ${result.intervalsCreated} intervals, total ${Number(
+            result.totalKwh ?? 0,
+          ).toFixed(3)} kWh, rawId ${result.rawId}`,
         );
+
         setGreenButtonFile(null);
         if (greenButtonFileInputRef.current) {
           greenButtonFileInputRef.current.value = '';
         }
         setGreenButtonUtility('');
         setGreenButtonAccount('');
+
+        appendGreenButtonLog('Refreshing usage dashboard data…');
         await fetchData();
+        appendGreenButtonLog('Usage dashboard refreshed.');
       } catch (error) {
         console.error('Failed to upload Green Button file:', error);
-        setGreenButtonStatus('Upload failed due to a network error. Please try again.');
+        const message =
+          error instanceof Error
+            ? `Upload failed due to a network error: ${error.message}`
+            : 'Upload failed due to a network error. Please try again.';
+        setGreenButtonStatus(message);
+        appendGreenButtonLog(message);
       } finally {
         setUploadingGreenButton(false);
       }
     },
-    [greenButtonFile, greenButtonUtility, greenButtonAccount, fetchData],
+    [
+      greenButtonFile,
+      greenButtonUtility,
+      greenButtonAccount,
+      fetchData,
+      appendGreenButtonLog,
+      readResponseBody,
+    ],
   );
 
   useEffect(() => {
@@ -770,6 +818,19 @@ export default function AdminDashboard() {
               </div>
             ) : null}
           </form>
+
+          {greenButtonLog.length > 0 ? (
+            <div className="mt-4 rounded-2xl border border-brand-navy/10 bg-brand-navy/5 p-4">
+              <h3 className="text-sm font-semibold uppercase tracking-[0.3em] text-brand-navy/80">
+                Debug log
+              </h3>
+              <div className="mt-2 space-y-1 overflow-x-auto text-xs font-mono text-brand-navy">
+                {greenButtonLog.map((line, index) => (
+                  <div key={index}>{line}</div>
+                ))}
+              </div>
+            </div>
+          ) : null}
 
           <div className="mt-6 grid gap-6 lg:grid-cols-2">
             <div className="flex flex-col gap-3">
