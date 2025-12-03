@@ -137,6 +137,30 @@ interface TestimonialRecord {
   };
 }
 
+interface GreenButtonUploadSummary {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+  utilityName: string | null;
+  accountNumber: string | null;
+  capturedAt: string | null;
+  intervals: {
+    count: number;
+    totalKwh: number;
+  };
+}
+
+interface GreenButtonIntervalSample {
+  id: string;
+  rawId: string;
+  timestamp: string;
+  consumptionKwh: string;
+  intervalMinutes: number;
+}
+
 interface SummaryStats {
   totalUsers: number;
   activeSmtAuthorizations: number;
@@ -180,11 +204,19 @@ export default function AdminDashboard() {
     pending: SmtEmailConfirmationRecord[];
     declined: SmtEmailConfirmationRecord[];
   }>({ pending: [], declined: [] });
+  const [greenButtonUploads, setGreenButtonUploads] = useState<GreenButtonUploadSummary[]>([]);
+  const [greenButtonSamples, setGreenButtonSamples] = useState<GreenButtonIntervalSample[]>([]);
+  const [greenButtonFile, setGreenButtonFile] = useState<File | null>(null);
+  const [greenButtonUtility, setGreenButtonUtility] = useState('');
+  const [greenButtonAccount, setGreenButtonAccount] = useState('');
+  const [greenButtonStatus, setGreenButtonStatus] = useState<string | null>(null);
+  const [uploadingGreenButton, setUploadingGreenButton] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [recalculatingReferrals, setRecalculatingReferrals] = useState(false);
   const [recalculatingEntries, setRecalculatingEntries] = useState(false);
   const [copiedAdId, setCopiedAdId] = useState<string | null>(null);
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const greenButtonFileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Fetch real data from API
   const fetchData = useCallback(async () => {
@@ -201,6 +233,7 @@ export default function AdminDashboard() {
         testimonialsRes,
         referralsRes,
         emailConfirmationsRes,
+        greenButtonRes,
       ] = await Promise.all([
         fetch('/api/admin/stats/summary'),
         fetch('/api/admin/users'),
@@ -212,6 +245,7 @@ export default function AdminDashboard() {
         fetch('/api/admin/testimonials'),
         fetch('/api/admin/referrals'),
         fetch('/api/admin/smt/email-confirmations'),
+        fetch('/api/admin/green-button/records'),
       ]);
 
       if (summaryRes.ok) {
@@ -297,6 +331,15 @@ export default function AdminDashboard() {
           emailConfirmationsRes.statusText,
         );
       }
+
+      if (greenButtonRes.ok) {
+        const greenButtonData = await greenButtonRes.json();
+        console.log('Fetched Green Button records:', greenButtonData);
+        setGreenButtonUploads(greenButtonData.uploads ?? []);
+        setGreenButtonSamples(greenButtonData.sampleIntervals ?? []);
+      } else {
+        console.error('Failed to fetch Green Button records:', greenButtonRes.status, greenButtonRes.statusText);
+      }
     } catch (error) {
       console.error('Error fetching admin data:', error);
     } finally {
@@ -353,6 +396,77 @@ export default function AdminDashboard() {
       console.error('Failed to copy ad caption:', error);
     }
   }, []);
+
+  const handleGreenButtonFileChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    if (event.target.files && event.target.files.length > 0) {
+      setGreenButtonFile(event.target.files[0]);
+      setGreenButtonStatus(null);
+    } else {
+      setGreenButtonFile(null);
+    }
+  }, []);
+
+  const handleGreenButtonUpload = useCallback(
+    async (event: React.FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      if (!greenButtonFile) {
+        setGreenButtonStatus('Please choose a Green Button XML/CSV file before uploading.');
+        return;
+      }
+
+      try {
+        setUploadingGreenButton(true);
+        setGreenButtonStatus('Uploading and normalizing…');
+        const formData = new FormData();
+        formData.append('file', greenButtonFile);
+        if (greenButtonUtility.trim().length > 0) {
+          formData.append('utilityName', greenButtonUtility.trim());
+        }
+        if (greenButtonAccount.trim().length > 0) {
+          formData.append('accountNumber', greenButtonAccount.trim());
+        }
+
+        const response = await fetch('/api/admin/green-button/upload', {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!response.ok) {
+          const data = await response.json().catch(() => null);
+          const errorMessage =
+            data?.error === 'no_readings'
+              ? 'No readings detected. Ensure the CSV/JSON contains timestamp/value columns.'
+              : data?.error === 'normalization_empty'
+                ? 'Normalization produced no intervals. Check the file format and try again.'
+                : data?.error
+                  ? `Upload failed: ${data.error}`
+                  : 'Upload failed. Please try again.';
+          setGreenButtonStatus(errorMessage);
+          return;
+        }
+
+        const result = await response.json();
+        setGreenButtonStatus(
+          `Upload stored and normalized (${result.intervalsCreated} intervals, ${result.totalKwh.toFixed(
+            3,
+          )} kWh).`,
+        );
+        setGreenButtonFile(null);
+        if (greenButtonFileInputRef.current) {
+          greenButtonFileInputRef.current.value = '';
+        }
+        setGreenButtonUtility('');
+        setGreenButtonAccount('');
+        await fetchData();
+      } catch (error) {
+        console.error('Failed to upload Green Button file:', error);
+        setGreenButtonStatus('Upload failed due to a network error. Please try again.');
+      } finally {
+        setUploadingGreenButton(false);
+      }
+    },
+    [greenButtonFile, greenButtonUtility, greenButtonAccount, fetchData],
+  );
 
   useEffect(() => {
     return () => {
@@ -491,6 +605,16 @@ export default function AdminDashboard() {
     (record) => record.attentionCode === 'smt_email_declined',
   );
 
+  const formatBytes = (size: number) => {
+    if (!Number.isFinite(size) || size <= 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    const index = Math.min(Math.floor(Math.log(size) / Math.log(1024)), units.length - 1);
+    const value = size / Math.pow(1024, index);
+    return `${value.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
+  };
+
+  const formatKwh = (value: number) => value.toLocaleString(undefined, { maximumFractionDigits: 3 });
+
   const overviewStats = [
     { label: 'Users', value: totalUsersCount.toLocaleString() },
     { label: "SMT API's", value: smtApiCount.toLocaleString() },
@@ -561,6 +685,163 @@ export default function AdminDashboard() {
             </div>
           ))}
         </div>
+
+        {/* Green Button Upload Normalization */}
+        <section className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+            <div className="max-w-3xl">
+              <h2 className="text-2xl font-bold text-brand-navy mb-2">🌿 Green Button Usage Module</h2>
+              <p className="text-sm text-brand-navy/70">
+                Upload a Green Button CSV, XML, or JSON sample to exercise the usage-module pipeline. Files are stored in
+                the usage database only, normalized into 15-minute intervals, and never written to the production master
+                tables. Use this to validate parsing logic and double-check interval totals before we promote the pipeline.
+              </p>
+            </div>
+            <div className="rounded-full border border-brand-blue/30 bg-brand-blue/10 px-4 py-1 text-xs font-semibold uppercase tracking-[0.3em] text-brand-blue">
+              Usage DB only
+            </div>
+          </div>
+
+          <form onSubmit={handleGreenButtonUpload} className="mt-6 grid gap-4 rounded-2xl border border-brand-navy/10 bg-brand-navy/5 p-4 sm:grid-cols-2">
+            <div className="flex flex-col gap-2 sm:col-span-2">
+              <label htmlFor="green-button-file" className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-navy">
+                Green Button file (XML/CSV/JSON)
+              </label>
+              <input
+                ref={greenButtonFileInputRef}
+                id="green-button-file"
+                type="file"
+                accept=".csv,.xml,.json,text/csv,application/xml,application/json"
+                onChange={handleGreenButtonFileChange}
+                className="w-full rounded-lg border border-brand-navy/20 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
+              />
+              <p className="text-xs text-brand-navy/60">
+                Sample CSV headers supported: <code className="bg-brand-navy/10 px-1">timestamp,value</code>,{' '}
+                <code className="bg-brand-navy/10 px-1">start,end,value</code>, or JSON arrays with{' '}
+                <code className="bg-brand-navy/10 px-1">timestamp</code> / <code className="bg-brand-navy/10 px-1">value</code>.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <label htmlFor="green-button-utility" className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-navy">
+                Utility name (optional)
+              </label>
+              <input
+                id="green-button-utility"
+                type="text"
+                value={greenButtonUtility}
+                onChange={(event) => setGreenButtonUtility(event.target.value)}
+                placeholder="e.g., Oncor, CenterPoint"
+                className="rounded-lg border border-brand-navy/20 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
+              />
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <label htmlFor="green-button-account" className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-navy">
+                Account number (optional)
+              </label>
+              <input
+                id="green-button-account"
+                type="text"
+                value={greenButtonAccount}
+                onChange={(event) => setGreenButtonAccount(event.target.value)}
+                placeholder="Add context for the upload"
+                className="rounded-lg border border-brand-navy/20 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
+              />
+            </div>
+
+            <div className="flex flex-col gap-2 sm:col-span-2 sm:flex-row sm:items-center sm:justify-between">
+              <button
+                type="submit"
+                disabled={uploadingGreenButton}
+                className="inline-flex items-center justify-center rounded-full bg-brand-navy px-5 py-2 text-xs font-semibold uppercase tracking-wide text-brand-white shadow-[0_10px_35px_rgba(16,46,90,0.18)] transition hover:bg-brand-navy/90 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {uploadingGreenButton ? 'Uploading…' : 'Upload & normalize'}
+              </button>
+              <p className="text-xs text-brand-navy/60">
+                Max file size: 10&nbsp;MB. Normalized rows are stored in{' '}
+                <code className="bg-brand-navy/10 px-1 rounded-sm">usage.GreenButtonInterval</code>.
+              </p>
+            </div>
+
+            {greenButtonStatus ? (
+              <div className="sm:col-span-2 text-sm text-brand-navy">
+                {greenButtonStatus}
+              </div>
+            ) : null}
+          </form>
+
+          <div className="mt-6 grid gap-6 lg:grid-cols-2">
+            <div className="flex flex-col gap-3">
+              <h3 className="text-lg font-semibold text-brand-navy">Recent uploads</h3>
+              <div className="rounded-2xl border border-brand-navy/10 bg-brand-navy/5">
+                <div className="grid grid-cols-5 gap-3 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-brand-navy/70">
+                  <span>Filename</span>
+                  <span>Uploaded</span>
+                  <span>Size</span>
+                  <span>Intervals</span>
+                  <span>Total kWh</span>
+                </div>
+                <div className="divide-y divide-brand-navy/10">
+                  {greenButtonUploads.length === 0 ? (
+                    <div className="px-4 py-4 text-sm text-brand-navy/60">
+                      No uploads recorded yet. Use the form above to add a sample file.
+                    </div>
+                  ) : (
+                    greenButtonUploads.map((upload) => (
+                      <div key={upload.id} className="grid grid-cols-5 gap-3 px-4 py-3 text-sm text-brand-navy">
+                        <div className="truncate">{upload.filename}</div>
+                        <div>{formatTimestamp(upload.createdAt)}</div>
+                        <div>{formatBytes(upload.sizeBytes)}</div>
+                        <div>{upload.intervals.count.toLocaleString()}</div>
+                        <div>{formatKwh(upload.intervals.totalKwh)} kWh</div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              <h3 className="text-lg font-semibold text-brand-navy">Sample intervals (first 50 rows)</h3>
+              <div className="max-h-72 overflow-auto rounded-2xl border border-brand-navy/10 bg-brand-navy/5">
+                <table className="min-w-full divide-y divide-brand-navy/10 text-sm text-brand-navy">
+                  <thead className="bg-brand-white/60 text-xs font-semibold uppercase tracking-wide text-brand-navy/70">
+                    <tr>
+                      <th className="px-4 py-2 text-left">Timestamp (UTC)</th>
+                      <th className="px-4 py-2 text-left">kWh</th>
+                      <th className="px-4 py-2 text-left">Interval</th>
+                      <th className="px-4 py-2 text-left">Raw ID</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-brand-navy/10">
+                    {greenButtonSamples.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="px-4 py-4 text-center text-brand-navy/60">
+                          Upload a file to view normalized 15-minute rows.
+                        </td>
+                      </tr>
+                    ) : (
+                      greenButtonSamples.map((interval) => (
+                        <tr key={interval.id}>
+                          <td className="px-4 py-2">{formatTimestamp(interval.timestamp)}</td>
+                          <td className="px-4 py-2">{formatKwh(Number(interval.consumptionKwh))}</td>
+                          <td className="px-4 py-2">{interval.intervalMinutes} min</td>
+                          <td className="px-4 py-2 truncate">{interval.rawId}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-xs text-brand-navy/60">
+                These rows come directly from the usage database’s{' '}
+                <code className="bg-brand-navy/10 px-1 rounded-sm">GreenButtonInterval</code> table. Confirm totals before
+                wiring the production normalization jobs.
+              </p>
+            </div>
+          </div>
+        </section>
 
         {/* HitTheJackWatt Social Ads */}
         <section className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">

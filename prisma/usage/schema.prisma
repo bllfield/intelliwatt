@@ -58,3 +58,18 @@ model RawGreenButton {
   @@index([homeId])
   @@index([userId])
 }
+
+model GreenButtonInterval {
+  id              String   @id @default(cuid())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  rawId           String
+  homeId          String?
+  userId          String?
+  timestamp       DateTime
+  consumptionKwh  Decimal  @usageDb.Decimal(10, 5)
+  intervalMinutes Int      @default(15)
+
+  @@index([rawId])
+  @@index([homeId, timestamp])
+}
