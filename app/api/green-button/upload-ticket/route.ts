@@ -34,25 +34,29 @@ export async function POST(request: Request) {
     }
 
     const cookieStore = cookies();
-    const sessionEmail = cookieStore.get("intelliwatt_user")?.value ?? null;
+    const sessionEmailRaw = cookieStore.get("intelliwatt_user")?.value ?? null;
+    const adminCookie = cookieStore.get("intelliwatt_admin")?.value ?? null;
+    const headerAdminToken = request.headers.get("x-admin-token");
+    const configuredAdminToken = process.env.ADMIN_TOKEN ?? null;
+    const hasAdminHeader =
+      Boolean(configuredAdminToken) &&
+      Boolean(headerAdminToken) &&
+      headerAdminToken === configuredAdminToken;
+    const isAdminSession = Boolean(adminCookie) || hasAdminHeader;
 
-    if (!sessionEmail) {
+    let user: { id: string; email: string } | null = null;
+    if (sessionEmailRaw) {
+      const normalizedEmail = normalizeEmail(sessionEmailRaw);
+      user = await prisma.user.findUnique({
+        where: { email: normalizedEmail },
+        select: { id: true, email: true },
+      });
+    }
+
+    if (!user && !isAdminSession) {
       return NextResponse.json(
         { ok: false, error: "not_authenticated" },
         { status: 401 },
-      );
-    }
-
-    const normalizedEmail = normalizeEmail(sessionEmail);
-    const user = await prisma.user.findUnique({
-      where: { email: normalizedEmail },
-      select: { id: true, email: true },
-    });
-
-    if (!user) {
-      return NextResponse.json(
-        { ok: false, error: "user_not_found" },
-        { status: 404 },
       );
     }
 
@@ -72,10 +76,18 @@ export async function POST(request: Request) {
     }
 
     const house = await prisma.houseAddress.findFirst({
-      where: { id: homeId, userId: user.id, archivedAt: null },
+      where: isAdminSession
+        ? { id: homeId }
+        : {
+            id: homeId,
+            userId: user!.id,
+            archivedAt: null,
+          },
       select: {
         id: true,
+        userId: true,
         utilityName: true,
+        archivedAt: true,
       },
     });
 
@@ -86,12 +98,26 @@ export async function POST(request: Request) {
       );
     }
 
+    if (!house.userId) {
+      return NextResponse.json(
+        { ok: false, error: "house_missing_owner" },
+        { status: 500 },
+      );
+    }
+
+    if (!isAdminSession && house.archivedAt) {
+      return NextResponse.json(
+        { ok: false, error: "home_archived" },
+        { status: 404 },
+      );
+    }
+
     const issuedAt = new Date();
     const expiresAt = new Date(issuedAt.getTime() + DEFAULT_EXPIRATION_MS);
 
     const payload = {
       v: 1,
-      userId: user.id,
+      userId: house.userId,
       houseId: house.id,
       issuedAt: issuedAt.toISOString(),
       expiresAt: expiresAt.toISOString(),
@@ -110,6 +136,7 @@ export async function POST(request: Request) {
       expiresAt: payload.expiresAt,
       houseId: house.id,
       utilityName: house.utilityName ?? null,
+      admin: isAdminSession,
     });
   } catch (error) {
     console.error("[green-button/upload-ticket] failed", error);
@@ -119,5 +146,4 @@ export async function POST(request: Request) {
     );
   }
 }
-
 
