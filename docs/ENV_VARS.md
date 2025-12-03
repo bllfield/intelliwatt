@@ -13,6 +13,11 @@
 - `DROPLET_WEBHOOK_URL` — Droplet webhook URL for SMT data pull (e.g., `http://64.225.25.54:8787/trigger/smt-now`). Alias: `INTELLIWATT_WEBHOOK_URL`
 - `DROPLET_WEBHOOK_SECRET` — Shared secret sent in header `x-intelliwatt-secret` for SMT webhook authentication. Alias: `INTELLIWATT_WEBHOOK_SECRET`
 - `GREENBUTTON_API_KEY` — (future) Green Button API access
+- `GREEN_BUTTON_UPLOAD_SECRET` — Shared HMAC secret between Vercel and the droplet Green Button uploader (required for signed upload tickets).
+- `GREEN_BUTTON_UPLOAD_URL` — Server-side URL of the droplet `/upload` endpoint. Optional if using `NEXT_PUBLIC_GREEN_BUTTON_UPLOAD_URL`.
+- `NEXT_PUBLIC_GREEN_BUTTON_UPLOAD_URL` — Public URL exposed to the browser for the droplet `/upload` endpoint. Omit in preview/dev if the droplet isn’t reachable.
+- `GREEN_BUTTON_UPLOAD_MAX_BYTES` — Optional override for the 10 MB default upload limit (applies to both Vercel fallback route and droplet service).
+- `GREEN_BUTTON_UPLOAD_ALLOW_ORIGIN` — Optional CORS allowlist for the droplet uploader (defaults to `https://intelliwatt.com` when unset).
 
 ## Databases
 - `DATABASE_URL` — Primary IntelliWatt application database (master normalized dataset; used by `prisma/schema.prisma`).

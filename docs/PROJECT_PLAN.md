@@ -249,6 +249,26 @@ Notes:
   - Extend dual-write coverage to Green Button + manual usage paths before we build the `NormalizedUsage` pipeline.
 - Admin QA harness lives on `app/admin/page.tsx` (“SMT Inline Ingest Tester”). Any future ingest smoke tests must expose copy/paste-ready payloads/commands in the admin dashboard so operators can exercise secured endpoints without digging through docs.
 
+#### Green Button raw upload pipeline (Added 2025-12-03)
+
+- Added a droplet-hosted uploader (`scripts/droplet/green-button-upload-server.ts`) modeled after the SMT “Big-file Upload” path. It verifies signed tickets, enforces the 10 MB limit, writes raw bytes into `usage.RawGreenButton`, and records metadata in `GreenButtonUpload`.
+- Introduced `POST /api/green-button/upload-ticket` on Vercel to authenticate the user, confirm ownership of the target `houseId`, and issue a short-lived HMAC-signed payload for the droplet uploader.
+- Updated the dashboard Green Button uploader to request a ticket, stream files to the droplet endpoint, and fall back to `/api/green-button/upload` only if the droplet flow is unavailable. The client blocks files larger than 10 MB and surfaces clear success/error states.
+- New environment variables:
+  - **Vercel / app router**
+    - `GREEN_BUTTON_UPLOAD_SECRET` (shared HMAC key).
+    - `GREEN_BUTTON_UPLOAD_URL` or `NEXT_PUBLIC_GREEN_BUTTON_UPLOAD_URL` (public droplet `/upload` endpoint).
+    - Optional `GREEN_BUTTON_UPLOAD_MAX_BYTES` (defaults to 10 MB).
+  - **Droplet service**
+    - `GREEN_BUTTON_UPLOAD_SECRET` (must match Vercel).
+    - `DATABASE_URL` (master DB) and `USAGE_DATABASE_URL` (usage module DB).
+    - Optional `GREEN_BUTTON_UPLOAD_MAX_BYTES`, `GREEN_BUTTON_UPLOAD_PORT` (default `8091`), and `GREEN_BUTTON_UPLOAD_ALLOW_ORIGIN` (default `https://intelliwatt.com`).
+- Deployment checklist:
+  1. Configure the env vars above in both Vercel and the droplet process manager (systemd/pm2).
+  2. Deploy the web app so `/api/green-button/upload-ticket` is live.
+  3. Build/run the droplet service (TypeScript or compiled JS) and confirm `/health` exposes the expected configuration.
+  4. Verify a 10 MB XML/CSV upload succeeds through the droplet path and that the fallback `/api/green-button/upload` still works for smaller files or preview environments.
+
 #### PowerShell runbook — Module Prisma CLI (all modules)
 
 Use this pattern for every module database (current-plan, usage, home-details, appliances, upgrades, wattbuy-offers, referrals) to avoid the common Windows errors we’ve hit:
