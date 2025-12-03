@@ -8,6 +8,7 @@ import React, {
   useRef,
 } from "react";
 import LocalTime from "@/components/LocalTime";
+import Link from "next/link";
 
 type RateType = "FIXED" | "VARIABLE" | "TIME_OF_USE";
 
@@ -223,7 +224,7 @@ export function CurrentRateDetailsForm({
   const [esiId, setEsiId] = useState("");
   const [accountNumberLast4, setAccountNumberLast4] = useState("");
   const [notes, setNotes] = useState("");
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [billUploaded, setBillUploaded] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -554,7 +555,7 @@ export function CurrentRateDetailsForm({
   async function uploadBill(options: { silent?: boolean } = {}): Promise<boolean> {
     const { silent = false } = options;
 
-    if (!file) {
+    if (files.length === 0) {
       if (!silent) {
         setUploadStatus("Select a bill before uploading.");
       }
@@ -568,7 +569,9 @@ export function CurrentRateDetailsForm({
       }
 
       const formData = new FormData();
-      formData.append("billFile", file);
+      files.forEach((bill) => {
+        formData.append("billFile", bill);
+      });
 
       const response = await fetch("/api/current-plan/upload", {
         method: "POST",
@@ -596,12 +599,13 @@ export function CurrentRateDetailsForm({
       }
 
       setBillUploaded(true);
+      setFiles([]);
       if (!silent) {
         const message = entryAwarded
-          ? "✓ Bill uploaded and bonus entry recorded."
+          ? "✓ Bill pages uploaded and bonus entry recorded."
           : alreadyAwarded
-          ? "Bill uploaded. You've already earned the current plan entry."
-          : "✓ Bill uploaded and saved securely.";
+          ? "Bill pages uploaded. You've already earned the current plan entry."
+          : "✓ Bill pages uploaded and saved securely.";
         setUploadStatus(message);
       }
       await refreshPlan();
@@ -889,7 +893,7 @@ export function CurrentRateDetailsForm({
         }
       }
 
-      if (file && !billUploaded) {
+      if (files.length > 0 && !billUploaded) {
         const uploaded = await uploadBill({ silent: true });
         manualPayload.billUploaded = uploaded;
         if (!uploaded) {
@@ -1261,34 +1265,59 @@ export function CurrentRateDetailsForm({
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[0.95fr,1.05fr]">
-        <div className="space-y-4 rounded-3xl border-2 border-brand-navy bg-white p-6 shadow-sm sm:p-7">
+        <div
+          id="bill-upload"
+          className="space-y-4 rounded-3xl border-2 border-brand-navy bg-white p-6 shadow-sm sm:p-7"
+        >
           <h2 className="text-base font-semibold text-brand-navy">Option 1 · Upload your latest bill</h2>
           <p className="text-sm text-brand-slate">
             On mobile, snap a clear photo. On desktop, upload the PDF. We&apos;ll parse it soon to auto-fill your plan data.
           </p>
           <label className="flex w-full cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-brand-blue/30 bg-brand-blue/5 p-6 text-center text-sm text-brand-navy transition hover:border-brand-blue/60 hover:bg-brand-blue/10">
             <span className="font-semibold">Drag your file here or click to browse</span>
-            <span className="mt-1 text-xs text-brand-slate">Accepted formats: PDF, JPG, PNG</span>
+            <span className="mt-1 text-xs text-brand-slate">
+              Accepted formats: PDF, JPG, PNG — attach multiple pages if needed
+            </span>
             <input
               type="file"
               accept="image/*,application/pdf"
+              multiple
               onChange={(e) => {
-                setFile(e.target.files?.[0] ?? null);
+                const selected = Array.from(e.target.files ?? []);
+                if (selected.length > 0) {
+                  setFiles((prev) => [...prev, ...selected]);
+                } else {
+                  setFiles([]);
+                }
                 setBillUploaded(false);
                 setUploadStatus(null);
               }}
               className="hidden"
             />
           </label>
-          {file ? (
-            <p className="rounded-lg border border-brand-blue/25 bg-brand-blue/5 px-3 py-2 text-xs text-brand-navy">
-              Selected file: <span className="font-semibold">{file.name}</span>
-            </p>
+          {files.length > 0 ? (
+            <ul className="space-y-2 rounded-lg border border-brand-blue/25 bg-brand-blue/5 px-3 py-3 text-xs text-brand-navy">
+              {files.map((bill, index) => (
+                <li key={`${bill.name}-${bill.size}-${index}`} className="flex items-center justify-between gap-3">
+                  <span className="font-semibold truncate">{bill.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFiles((prev) => prev.filter((_, idx) => idx !== index));
+                      setBillUploaded(false);
+                    }}
+                    className="text-rose-600 hover:text-rose-700"
+                  >
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
           ) : null}
           <button
             type="button"
             onClick={() => uploadBill()}
-            disabled={!file || isUploading}
+            disabled={files.length === 0 || isUploading}
             className="inline-flex items-center rounded-full bg-brand-navy px-5 py-2 text-sm font-semibold uppercase tracking-wide text-brand-cyan shadow-[0_8px_24px_rgba(16,46,90,0.25)] transition hover:bg-brand-navy/90 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isUploading ? "Uploading…" : billUploaded ? "Bill Uploaded ✓" : "Upload bill now"}
@@ -1309,7 +1338,15 @@ export function CurrentRateDetailsForm({
           onSubmit={handleSubmit}
           className="space-y-4 rounded-3xl border-2 border-brand-navy bg-white p-6 shadow-sm sm:p-7"
         >
-          <h2 className="text-base font-semibold text-brand-navy">Option 2 · Enter plan details manually</h2>
+          <div className="flex items-start justify-between gap-3">
+            <h2 className="text-base font-semibold text-brand-navy">Option 2 · Enter plan details manually</h2>
+            <Link
+              href="#bill-upload"
+              className="text-xs font-semibold uppercase tracking-wide text-brand-blue underline decoration-dotted underline-offset-4 hover:text-brand-blue/80"
+            >
+              Prefer to upload your bill?
+            </Link>
+          </div>
           <p className="text-sm text-brand-slate">
             Most bills list these near the header or inside the Electricity Facts Label (EFL) section.
           </p>
