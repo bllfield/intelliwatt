@@ -302,7 +302,7 @@ export default async function ProfilePage() {
         />
 
         {hasSmtDisplacementAlert ? (
-          <div className="rounded-3xl border border-rose-400/40 bg-rose-500/10 p-5 text-sm text-rose-100 shadow-[0_18px_55px_rgba(190,24,55,0.22)]">
+          <div className="rounded-3xl border border-rose-400/40 bg-rose-500/10 p-5 text-sm text-brand-navy shadow-[0_18px_55px_rgba(190,24,55,0.22)]">
             Another IntelliWatt household just claimed this Smart Meter Texas meter. Your previous authorization was
             revoked automatically, so add your current service address again and reconnect to keep your entries active.
           </div>

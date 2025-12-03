@@ -974,12 +974,11 @@ export function CurrentRateDetailsForm({
   return (
     <div className="space-y-8">
       {!hasActiveUsage ? (
-        <div className="rounded-3xl border border-amber-400/60 bg-amber-500/10 px-5 py-4 text-xs font-semibold uppercase tracking-wide text-amber-100 shadow-[0_18px_45px_rgba(190,146,18,0.18)]">
-          Current plan entries unlock only after IntelliWatt has active usage data. Connect Smart
-          Meter Texas or upload usage on{" "}
+        <div className="rounded-3xl border border-rose-400/40 bg-rose-500/10 px-5 py-4 text-sm text-brand-navy shadow-[0_18px_45px_rgba(190,18,60,0.18)]">
+          Current plan entries unlock only after IntelliWatt has active usage data. Connect Smart Meter Texas or upload usage on{" "}
           <a
             href="/dashboard/api"
-            className="underline decoration-dotted underline-offset-4 text-amber-50 hover:text-white"
+            className="font-semibold underline decoration-dotted underline-offset-4 text-brand-navy hover:text-brand-navy/80"
           >
             the API Connect page
           </a>{" "}
