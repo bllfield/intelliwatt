@@ -9,6 +9,11 @@ interface User {
   createdAt: string;
   entries?: any[];
   referrals?: any[];
+  houseAddresses?: {
+    id: string;
+    archivedAt: string | null;
+    addressLine1?: string | null;
+  }[];
 }
 
 interface Commission {
@@ -1832,12 +1837,13 @@ npx prisma studio --browser none --port 5562`}
                   <th className="text-left py-3 px-4 text-brand-navy font-semibold">Joined</th>
                   <th className="text-left py-3 px-4 text-brand-navy font-semibold">Entries</th>
                   <th className="text-left py-3 px-4 text-brand-navy font-semibold">Referrals</th>
+                  <th className="text-left py-3 px-4 text-brand-navy font-semibold">House IDs</th>
                 </tr>
               </thead>
               <tbody>
                 {users.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="py-8 px-4 text-center text-brand-navy/60">
+                    <td colSpan={5} className="py-8 px-4 text-center text-brand-navy/60">
                       No users found
                     </td>
                   </tr>
@@ -1858,6 +1864,20 @@ npx prisma studio --browser none --port 5562`}
                         </td>
                         <td className="py-3 px-4 text-brand-navy">{totalEntries}</td>
                         <td className="py-3 px-4 text-brand-navy">{totalReferrals}</td>
+                        <td className="py-3 px-4 text-brand-navy font-mono text-xs">
+                          {user.houseAddresses && user.houseAddresses.length > 0 ? (
+                            <div className="flex flex-col gap-1">
+                              {user.houseAddresses.map((house) => (
+                                <span key={house.id}>
+                                  {house.id}
+                                  {house.archivedAt ? ' (archived)' : ''}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
                       </tr>
                     );
                   })
