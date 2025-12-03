@@ -5,7 +5,6 @@ import { normalizeEmail } from "@/lib/utils/email";
 import { ProfileContactForm } from "@/components/profile/ProfileContactForm";
 import { ProfileAddressSection } from "@/components/profile/ProfileAddressSection";
 import { ProfileTestimonialCard } from "@/components/profile/ProfileTestimonialCard";
-import { RevokeSmartMeterButton } from "@/components/profile/RevokeSmartMeterButton";
 import { SmtTerminateButton } from "@/components/smt/SmtTerminateButton";
 import DashboardHero from "@/components/dashboard/DashboardHero";
 import { SmtStatusBanner } from "@/components/account/SmtStatusBanner";
@@ -420,9 +419,11 @@ export default async function ProfilePage() {
           </h2>
           <p className="mt-3 text-sm text-brand-cyan/80">
             Need to turn off Smart Meter Texas sharing? Submit the request below. We’ll archive your
-            authorization immediately and email you once the disconnect is confirmed.
+            authorization immediately. Doing this will revoke all awarded entries for Usage, Current Plan, Home Details and Appliances.
           </p>
-          <RevokeSmartMeterButton authorizationId={smtAuthorization?.id ?? null} />
+          <p className="mt-3 text-xs text-brand-cyan/70">
+            Revoking access stops IntelliWatt from pulling Smart Meter Texas data, removes entries immediately. IntelliWatt will not be able to make personalized plan recommendations without correct usage data. If this is due to a move, please enter the new home information to restore your entries.
+          </p>
         </section>
       </div>
     </div>
