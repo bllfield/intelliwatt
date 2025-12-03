@@ -613,12 +613,37 @@ export default function AdminDashboard() {
           dropletForm.append('accountNumber', greenButtonAccount.trim());
         }
 
-        appendGreenButtonLog(`POST ${ticket.uploadUrl}`);
-        const dropletResponse = await fetch(ticket.uploadUrl as string, {
+        let dropletUrl = ticket.uploadUrl as string;
+        if (typeof window !== 'undefined' && window.location.protocol === 'https:' && dropletUrl.startsWith('http://')) {
+          const httpsUrl = dropletUrl.replace('http://', 'https://');
+          appendGreenButtonLog(
+            `Upload URL returned over http:// — attempting https fallback: ${httpsUrl}`,
+          );
+          dropletUrl = httpsUrl;
+        }
+
+        appendGreenButtonLog(`POST ${dropletUrl}`);
+        let dropletResponse: Response | null = null;
+        try {
+          dropletResponse = await fetch(dropletUrl, {
           method: 'POST',
           body: dropletForm,
           credentials: 'omit',
         });
+        } catch (error) {
+          appendGreenButtonLog(
+            `Droplet upload network error: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+
+        if (!dropletResponse) {
+          const message =
+            'Droplet upload blocked (likely due to mixed-content http:// URL). Configure GREEN_BUTTON_UPLOAD_URL with an https endpoint or tunnel through the API Connect fallback.';
+          setGreenButtonStatus(message);
+          appendGreenButtonLog(message);
+          return;
+        }
+
         appendGreenButtonLog(
           `Droplet response: ${dropletResponse.status} ${dropletResponse.statusText || ''}`.trim(),
         );
