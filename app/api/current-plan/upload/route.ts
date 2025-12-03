@@ -36,9 +36,10 @@ export async function POST(request: NextRequest) {
     }
 
     const formData = await request.formData();
-    const billFile = formData.get('billFile');
+    const billFilesRaw = formData.getAll('billFile');
+    const billFiles = billFilesRaw.filter((item): item is File => item instanceof File);
 
-    if (!(billFile instanceof File)) {
+    if (billFiles.length === 0) {
       return NextResponse.json({ error: 'billFile is required' }, { status: 400 });
     }
 
@@ -57,31 +58,34 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const arrayBuffer = await billFile.arrayBuffer();
-    if (arrayBuffer.byteLength === 0) {
-      return NextResponse.json({ error: 'Uploaded file is empty' }, { status: 400 });
-    }
-
-    if (arrayBuffer.byteLength > MAX_UPLOAD_BYTES) {
-      return NextResponse.json(
-        { error: `File exceeds ${MAX_UPLOAD_BYTES / (1024 * 1024)} MB limit` },
-        { status: 413 },
-      );
-    }
-
-    const buffer = Buffer.from(arrayBuffer);
     const currentPlanPrisma = getCurrentPlanPrisma();
 
-    await currentPlanPrisma.currentPlanBillUpload.create({
-      data: {
-        userId: user.id,
-        houseId,
-        filename: billFile.name?.slice(0, 255) ?? 'current-plan-upload',
-        mimeType: billFile.type?.slice(0, 128) ?? 'application/octet-stream',
-        sizeBytes: buffer.length,
-        billData: buffer,
-      },
-    });
+    for (const billFile of billFiles) {
+      const arrayBuffer = await billFile.arrayBuffer();
+      if (arrayBuffer.byteLength === 0) {
+        return NextResponse.json({ error: 'Uploaded file is empty' }, { status: 400 });
+      }
+
+      if (arrayBuffer.byteLength > MAX_UPLOAD_BYTES) {
+        return NextResponse.json(
+          { error: `File exceeds ${MAX_UPLOAD_BYTES / (1024 * 1024)} MB limit` },
+          { status: 413 },
+        );
+      }
+
+      const buffer = Buffer.from(arrayBuffer);
+
+      await currentPlanPrisma.currentPlanBillUpload.create({
+        data: {
+          userId: user.id,
+          houseId,
+          filename: billFile.name?.slice(0, 255) ?? 'current-plan-upload',
+          mimeType: billFile.type?.slice(0, 128) ?? 'application/octet-stream',
+          sizeBytes: buffer.length,
+          billData: buffer,
+        },
+      });
+    }
 
     const entryResult = await ensureCurrentPlanEntry(user.id, houseId);
 

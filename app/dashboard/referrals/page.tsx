@@ -170,7 +170,7 @@ export default function ReferralsPage() {
         description="Share your referral link and unlock unlimited bonus entries through successful referrals."
       >
         <div className="inline-flex items-center justify-center rounded-full border border-[#39FF14]/40 bg-[#39FF14]/15 px-5 py-2 text-xs font-semibold uppercase tracking-wide text-[#39FF14] sm:text-sm">
-          🎁 Earn 1 jackpot entry for each friend who signs up!
+          🎁 Earn 1 jackpot entry for each friend who signs up and shares their usage data!
         </div>
       </DashboardHero>
 
