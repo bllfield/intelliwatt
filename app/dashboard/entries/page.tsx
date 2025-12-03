@@ -366,11 +366,6 @@ export default function EntriesPage() {
                   </div>
                 );
               })}
-              {!hasActiveUsage ? (
-                <div className="rounded-2xl border border-amber-400/60 bg-amber-500/10 px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-amber-100">
-                  Active usage data unlocks Current Plan, Home Details, Appliance Details, and the Testimonial invite. Until then, referrals are the only entries available.
-                </div>
-              ) : null}
               <div className="rounded-3xl border border-brand-cyan/40 bg-brand-navy p-6 text-brand-cyan shadow-[0_0_30px_rgba(56,189,248,0.22)] flex flex-col items-center justify-center gap-3 md:col-span-2 md:max-w-md md:mx-auto">
                 <h3 className="text-lg font-semibold uppercase tracking-wide text-brand-cyan">
                   Total Jackpot Entries
