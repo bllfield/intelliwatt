@@ -218,6 +218,7 @@ export default function AdminDashboard() {
   const [uploadingGreenButton, setUploadingGreenButton] = useState(false);
   const [greenButtonLog, setGreenButtonLog] = useState<string[]>([]);
   const [greenButtonHouseId, setGreenButtonHouseId] = useState('');
+  const [adminToken, setAdminToken] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [recalculatingReferrals, setRecalculatingReferrals] = useState(false);
   const [recalculatingEntries, setRecalculatingEntries] = useState(false);
@@ -230,6 +231,26 @@ export default function AdminDashboard() {
       `${new Date().toLocaleTimeString()} — ${message}`,
     ]);
   }, []);
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    const storedToken = window.localStorage.getItem('intelliwattAdminToken');
+    if (storedToken) {
+      setAdminToken(storedToken);
+    }
+  }, []);
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    const trimmed = adminToken.trim();
+    if (trimmed.length > 0) {
+      window.localStorage.setItem('intelliwattAdminToken', trimmed);
+    } else {
+      window.localStorage.removeItem('intelliwattAdminToken');
+    }
+  }, [adminToken]);
   const readResponseBody = useCallback(async (response: Response) => {
     const raw = await response.text();
     let json: any = null;
@@ -242,6 +263,21 @@ export default function AdminDashboard() {
     }
     return { raw, json };
   }, []);
+  const withAdminHeaders = useCallback(
+    (init?: RequestInit): RequestInit => {
+      const headers = new Headers(init?.headers ?? {});
+      const token = adminToken.trim();
+      if (token.length > 0) {
+        headers.set('x-admin-token', token);
+      }
+      return { ...init, headers };
+    },
+    [adminToken],
+  );
+  const fetchWithAdmin = useCallback(
+    (input: RequestInfo | URL, init?: RequestInit) => fetch(input, withAdminHeaders(init)),
+    [withAdminHeaders],
+  );
 
   // Fetch real data from API
   const fetchData = useCallback(async () => {
@@ -260,17 +296,17 @@ export default function AdminDashboard() {
         emailConfirmationsRes,
         greenButtonRes,
       ] = await Promise.all([
-        fetch('/api/admin/stats/summary'),
-        fetch('/api/admin/users'),
-        fetch('/api/admin/commissions'),
-        fetch('/api/admin/jackpot'),
-        fetch('/api/admin/finance'),
-        fetch('/api/admin/houses/flagged'),
-        fetch('/api/admin/hitthejackwatt/expiring'),
-        fetch('/api/admin/testimonials'),
-        fetch('/api/admin/referrals'),
-        fetch('/api/admin/smt/email-confirmations'),
-        fetch('/api/admin/green-button/records'),
+        fetchWithAdmin('/api/admin/stats/summary'),
+        fetchWithAdmin('/api/admin/users'),
+        fetchWithAdmin('/api/admin/commissions'),
+        fetchWithAdmin('/api/admin/jackpot'),
+        fetchWithAdmin('/api/admin/finance'),
+        fetchWithAdmin('/api/admin/houses/flagged'),
+        fetchWithAdmin('/api/admin/hitthejackwatt/expiring'),
+        fetchWithAdmin('/api/admin/testimonials'),
+        fetchWithAdmin('/api/admin/referrals'),
+        fetchWithAdmin('/api/admin/smt/email-confirmations'),
+        fetchWithAdmin('/api/admin/green-button/records'),
       ]);
 
       if (summaryRes.ok) {
@@ -376,7 +412,7 @@ export default function AdminDashboard() {
   const handleRecalculateReferrals = useCallback(async () => {
     try {
       setRecalculatingReferrals(true);
-      const response = await fetch('/api/admin/referrals/recalculate', {
+      const response = await fetchWithAdmin('/api/admin/referrals/recalculate', {
         method: 'POST',
       });
 
@@ -394,7 +430,7 @@ export default function AdminDashboard() {
   const handleRecalculateEntries = useCallback(async () => {
     try {
       setRecalculatingEntries(true);
-      const response = await fetch('/api/admin/entries/recalculate', {
+      const response = await fetchWithAdmin('/api/admin/entries/recalculate', {
         method: 'POST',
       });
 
@@ -448,7 +484,7 @@ export default function AdminDashboard() {
         appendGreenButtonLog(
           `Preparing upload: ${greenButtonFile.name} (${formatBytes(greenButtonFile.size)})`,
         );
-        const ticketResponse = await fetch('/api/green-button/upload-ticket', {
+        const ticketResponse = await fetchWithAdmin('/api/green-button/upload-ticket', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ homeId: greenButtonHouseId || null }),
@@ -737,6 +773,24 @@ export default function AdminDashboard() {
           <div className="flex justify-between items-center">
             <h1 className="text-3xl font-bold text-brand-white">Admin Dashboard</h1>
             <div className="flex flex-wrap items-center gap-3 text-sm text-brand-blue">
+                <div className="flex items-center gap-2 rounded-full border border-brand-blue/30 bg-brand-blue/10 px-3 py-1">
+                  <input
+                    type="password"
+                    value={adminToken}
+                    onChange={(event) => setAdminToken(event.target.value)}
+                    placeholder="Admin token"
+                    className="w-40 bg-transparent text-xs font-semibold uppercase tracking-wide text-brand-blue placeholder:text-brand-blue/60 focus:outline-none"
+                  />
+                  {adminToken ? (
+                    <button
+                      type="button"
+                      onClick={() => setAdminToken('')}
+                      className="text-xs font-semibold uppercase tracking-wide text-brand-blue/70 transition hover:text-brand-blue"
+                    >
+                      Clear
+                    </button>
+                  ) : null}
+                </div>
               <button
                 type="button"
                 onClick={handleRecalculateEntries}
