@@ -39,6 +39,7 @@ model CurrentPlanManualEntry {
   notes              String?              @currentPlanDb.Text
   rateStructure      Json?
   normalizedAt       DateTime?
+  lastConfirmedAt    DateTime?
   createdAt          DateTime             @default(now())
   updatedAt          DateTime             @updatedAt
 

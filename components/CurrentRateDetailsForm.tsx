@@ -1,6 +1,13 @@
 "use client";
 
-import React, { useState, FormEvent, useEffect } from "react";
+import React, {
+  useState,
+  FormEvent,
+  useEffect,
+  useCallback,
+  useRef,
+} from "react";
+import LocalTime from "@/components/LocalTime";
 
 type RateType = "FIXED" | "VARIABLE" | "TIME_OF_USE";
 
@@ -69,6 +76,39 @@ type ManualEntryPayload = {
   accountNumberLast4?: string | null;
   notes?: string | null;
   billUploaded?: boolean;
+};
+
+type EntrySnapshot = {
+  id: string;
+  status: string;
+  expiresAt: string | null;
+  lastValidated: string | null;
+  updatedAt: string;
+  amount?: number;
+  houseId?: string | null;
+};
+
+type SavedPlanDetails = {
+  id: string;
+  userId: string;
+  houseId: string | null;
+  providerName: string;
+  planName: string;
+  rateType: string;
+  energyRateCents: number | null;
+  baseMonthlyFee: number | null;
+  billCreditDollars: number | null;
+  termLengthMonths: number | null;
+  contractEndDate: string | null;
+  earlyTerminationFee: number | null;
+  esiId: string | null;
+  accountNumberLast4: string | null;
+  notes: string | null;
+  rateStructure: any;
+  normalizedAt: string | null;
+  lastConfirmedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
 };
 
 type CurrentRateDetailsFormProps = {
@@ -159,6 +199,14 @@ export function CurrentRateDetailsForm({
   onContinue,
   onSkip,
 }: CurrentRateDetailsFormProps) {
+  const [savedPlan, setSavedPlan] = useState<SavedPlanDetails | null>(null);
+  const [planEntrySnapshot, setPlanEntrySnapshot] = useState<EntrySnapshot | null>(null);
+  const [usageSnapshot, setUsageSnapshot] = useState<EntrySnapshot | null>(null);
+  const [hasActiveUsage, setHasActiveUsage] = useState(false);
+  const [loadingSavedPlan, setLoadingSavedPlan] = useState(true);
+  const [savedPlanError, setSavedPlanError] = useState<string | null>(null);
+  const [reconfirming, setReconfirming] = useState(false);
+  const [reconfirmMessage, setReconfirmMessage] = useState<string | null>(null);
   const [electricCompany, setElectricCompany] = useState("");
   const [planName, setPlanName] = useState("");
   const [rateType, setRateType] = useState<RateType>("FIXED");
@@ -182,15 +230,103 @@ export function CurrentRateDetailsForm({
   const [hasAwarded, setHasAwarded] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
+  const formRef = useRef<HTMLFormElement | null>(null);
+  const isMountedRef = useRef(true);
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      const stored = localStorage.getItem("intelliwatt_current_plan_details_complete");
-      if (stored === "true") {
-        setHasAwarded(true);
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  const refreshPlan = useCallback(async () => {
+    if (!isMountedRef.current) {
+      return;
+    }
+    setLoadingSavedPlan(true);
+    setSavedPlanError(null);
+
+    try {
+      const response = await fetch("/api/current-plan/manual", {
+        method: "GET",
+        cache: "no-store",
+      });
+
+      if (!isMountedRef.current) {
+        return;
       }
+
+      if (response.status === 404) {
+        setSavedPlan(null);
+        setPlanEntrySnapshot(null);
+        setUsageSnapshot(null);
+        setHasActiveUsage(false);
+        setHasAwarded(false);
+        setReconfirmMessage(null);
+        setLoadingSavedPlan(false);
+        return;
+      }
+
+      const payload = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        const message =
+          payload?.error ?? "Unable to load your saved current plan.";
+        throw new Error(message);
+      }
+
+      if (!isMountedRef.current) {
+        return;
+      }
+
+      setSavedPlan(payload?.plan ?? null);
+      setPlanEntrySnapshot(payload?.entry ?? null);
+      setUsageSnapshot(payload?.usage ?? null);
+      setHasActiveUsage(Boolean(payload?.hasActiveUsage));
+
+      const entryStatus: string | null = payload?.entry?.status ?? null;
+      const entryActive =
+        entryStatus === "ACTIVE" || entryStatus === "EXPIRING_SOON";
+      setHasAwarded(entryActive);
+    } catch (error) {
+      if (!isMountedRef.current) {
+        return;
+      }
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Unable to load your saved current plan.";
+      setSavedPlanError(message);
+      setSavedPlan(null);
+      setPlanEntrySnapshot(null);
+      setUsageSnapshot(null);
+      setHasActiveUsage(false);
+      setHasAwarded(false);
+      setReconfirmMessage(null);
+    } finally {
+      if (!isMountedRef.current) {
+        return;
+      }
+      setLoadingSavedPlan(false);
     }
   }, []);
+
+  useEffect(() => {
+    refreshPlan().catch(() => {
+      /* handled in refreshPlan */
+    });
+
+    const handleEntriesUpdated = () => {
+      refreshPlan().catch(() => {
+        /* handled in refreshPlan */
+      });
+    };
+
+    window.addEventListener("entriesUpdated", handleEntriesUpdated);
+    return () => {
+      window.removeEventListener("entriesUpdated", handleEntriesUpdated);
+    };
+  }, [refreshPlan]);
 
   useEffect(() => {
     if (rateType !== "VARIABLE") {
@@ -312,6 +448,94 @@ export function CurrentRateDetailsForm({
     return Number(value.toFixed(4));
   };
 
+  const entryStatus = planEntrySnapshot?.status ?? null;
+  const usageStatus = usageSnapshot?.status ?? null;
+
+  const isEntryLive =
+    entryStatus === "ACTIVE" || entryStatus === "EXPIRING_SOON";
+
+  const toNumber = (value: unknown): number | null => {
+    if (value === null || value === undefined) {
+      return null;
+    }
+    if (typeof value === "number") {
+      return value;
+    }
+    if (typeof value === "string") {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    if (typeof value === "object" && value && "toNumber" in (value as Record<string, unknown>)) {
+      try {
+        const result = (value as { toNumber?: () => number }).toNumber?.();
+        return typeof result === "number" && Number.isFinite(result) ? result : null;
+      } catch {
+        return null;
+      }
+    }
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+
+  const formatRate = (value: number | null) => {
+    if (value === null || Number.isNaN(value)) {
+      return "—";
+    }
+    const trimmed = value.toFixed(4).replace(/(?:\.0+|0+)$/, "");
+    return `${trimmed} ¢/kWh`;
+  };
+
+  const formatCurrency = (value: number | null) => {
+    if (value === null || Number.isNaN(value)) {
+      return "—";
+    }
+    return `$${value.toFixed(2)}`;
+  };
+
+  const formatNumber = (value: number | null) => {
+    if (value === null || Number.isNaN(value)) {
+      return "—";
+    }
+    return `${value}`;
+  };
+
+  const statusBadgeClass = (status: string | null) => {
+    switch (status) {
+      case "ACTIVE":
+        return "rounded-full bg-emerald-500/15 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-200 border border-emerald-400/30";
+      case "EXPIRING_SOON":
+        return "rounded-full bg-amber-500/20 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-200 border border-amber-300/40";
+      case "EXPIRED":
+        return "rounded-full bg-rose-500/20 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-rose-200 border border-rose-300/40";
+      default:
+        return "rounded-full bg-slate-500/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-200 border border-slate-400/30";
+    }
+  };
+
+  const renderStatusBadge = (status: string | null, label: string) => (
+    <span className={statusBadgeClass(status)}>
+      {label}: {status ?? "—"}
+    </span>
+  );
+
+  const savedPlanRateStructure =
+    savedPlan && savedPlan.rateStructure && typeof savedPlan.rateStructure === "object"
+      ? savedPlan.rateStructure
+      : null;
+
+  const timeOfUseTiers: Array<any> =
+    savedPlanRateStructure && Array.isArray(savedPlanRateStructure.tiers)
+      ? savedPlanRateStructure.tiers
+      : [];
+
+  const billCreditRulesSummary: Array<any> =
+    savedPlanRateStructure &&
+    savedPlanRateStructure.billCredits &&
+    savedPlanRateStructure.billCredits.hasBillCredit &&
+    Array.isArray(savedPlanRateStructure.billCredits.rules)
+      ? savedPlanRateStructure.billCredits.rules
+      : [];
+
   async function uploadBill(options: { silent?: boolean } = {}): Promise<boolean> {
     const { silent = false } = options;
 
@@ -365,6 +589,7 @@ export function CurrentRateDetailsForm({
           : "✓ Bill uploaded and saved securely.";
         setUploadStatus(message);
       }
+      await refreshPlan();
       return true;
     } catch (error) {
       if (!silent) {
@@ -672,6 +897,9 @@ export function CurrentRateDetailsForm({
         : baseMessage;
 
       setStatusMessage(finalMessage);
+      if (!manualPayload.billUploaded) {
+        await refreshPlan();
+      }
       onContinue?.(manualPayload);
     } catch (error) {
       const message =
@@ -685,8 +913,309 @@ export function CurrentRateDetailsForm({
     }
   }
 
+  const handleReconfirm = useCallback(async () => {
+    if (!savedPlan) {
+      setReconfirmMessage("Save your current plan details first.");
+      return;
+    }
+
+    setReconfirmMessage(null);
+    setReconfirming(true);
+
+    try {
+      const response = await fetch("/api/current-plan/reconfirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ houseId: savedPlan.houseId }),
+      });
+
+      const payload = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        const message =
+          payload?.error ?? "Unable to reconfirm your current plan right now.";
+        throw new Error(message);
+      }
+
+      const entryStatus: string | null = payload?.entry?.status ?? null;
+      const usageStatus: string | null = payload?.usage?.status ?? null;
+      let message: string;
+      if (entryStatus === "ACTIVE") {
+        message = "Plan reconfirmed and your entry is active again.";
+      } else if (entryStatus === "EXPIRING_SOON") {
+        message = "Plan reconfirmed. Entry is expiring soon—keep usage connected.";
+      } else if (usageStatus === "ACTIVE" || usageStatus === "EXPIRING_SOON") {
+        message = "Plan reconfirmed. Entry will reactivate shortly.";
+      } else {
+        message =
+          "Plan reconfirmed. Reconnect SMT or upload fresh usage to reactivate the entry.";
+      }
+
+      window.dispatchEvent(new CustomEvent("entriesUpdated"));
+      await refreshPlan();
+      if (isMountedRef.current) {
+        setReconfirmMessage(message);
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Unable to reconfirm your current plan right now.";
+      if (isMountedRef.current) {
+        setReconfirmMessage(message);
+      }
+    } finally {
+      if (isMountedRef.current) {
+        setReconfirming(false);
+      }
+    }
+  }, [refreshPlan, savedPlan]);
+
   return (
     <div className="space-y-8">
+      <div className="rounded-3xl border border-brand-cyan/25 bg-white p-6 shadow-[0_24px_60px_rgba(16,46,90,0.12)]">
+        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+          <div>
+            <h2 className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-cyan/60">
+              Saved Plan Snapshot
+            </h2>
+            <p className="mt-2 text-sm text-brand-slate">
+              Review the plan you previously shared. Reconfirm whenever SMT or manual usage reconnects.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2 text-[10px] font-semibold uppercase tracking-wide">
+            {renderStatusBadge(entryStatus, "Current plan entry")}
+            {renderStatusBadge(usageStatus, "Usage connection")}
+          </div>
+        </div>
+
+        {loadingSavedPlan ? (
+          <div className="mt-4 rounded-2xl border border-brand-blue/25 bg-brand-blue/5 px-4 py-3 text-sm text-brand-blue">
+            Loading your saved plan…
+          </div>
+        ) : savedPlanError ? (
+          <div className="mt-4 rounded-2xl border border-rose-400/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+            {savedPlanError}
+          </div>
+        ) : savedPlan ? (
+          <>
+            <div className="mt-6 grid gap-4 md:grid-cols-2">
+              <div className="rounded-2xl border border-brand-cyan/20 bg-brand-navy/5 px-4 py-3 text-sm text-brand-navy">
+                <p className="text-xs font-semibold uppercase tracking-wide text-brand-navy/70">
+                  Provider
+                </p>
+                <p className="mt-1 font-semibold">{savedPlan.providerName}</p>
+              </div>
+              <div className="rounded-2xl border border-brand-cyan/20 bg-brand-navy/5 px-4 py-3 text-sm text-brand-navy">
+                <p className="text-xs font-semibold uppercase tracking-wide text-brand-navy/70">
+                  Plan name
+                </p>
+                <p className="mt-1 font-semibold">{savedPlan.planName}</p>
+              </div>
+              <div className="rounded-2xl border border-brand-cyan/20 bg-brand-navy/5 px-4 py-3 text-sm text-brand-navy">
+                <p className="text-xs font-semibold uppercase tracking-wide text-brand-navy/70">
+                  Rate type
+                </p>
+                <p className="mt-1 font-semibold">{savedPlan.rateType}</p>
+                <p className="mt-1 text-xs text-brand-slate">
+                  {savedPlan.rateType === "FIXED" || savedPlan.rateType === "VARIABLE"
+                    ? `Energy rate: ${formatRate(
+                        toNumber(
+                          savedPlan.energyRateCents ?? savedPlanRateStructure?.energyRateCents ?? null,
+                        ),
+                      )}`
+                    : savedPlan.rateType === "TIME_OF_USE"
+                    ? "Time-of-use pricing"
+                    : "See details below"}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-brand-cyan/20 bg-brand-navy/5 px-4 py-3 text-sm text-brand-navy">
+                <p className="text-xs font-semibold uppercase tracking-wide text-brand-navy/70">
+                  Base monthly fee
+                </p>
+                <p className="mt-1 font-semibold">{formatCurrency(savedPlan.baseMonthlyFee)}</p>
+              </div>
+              <div className="rounded-2xl border border-brand-cyan/20 bg-brand-navy/5 px-4 py-3 text-sm text-brand-navy">
+                <p className="text-xs font-semibold uppercase tracking-wide text-brand-navy/70">
+                  Term length
+                </p>
+                <p className="mt-1 font-semibold">
+                  {savedPlan.termLengthMonths ? `${savedPlan.termLengthMonths} months` : "—"}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-brand-cyan/20 bg-brand-navy/5 px-4 py-3 text-sm text-brand-navy">
+                <p className="text-xs font-semibold uppercase tracking-wide text-brand-navy/70">
+                  Contract end
+                </p>
+                <p className="mt-1 font-semibold">
+                  {savedPlan.contractEndDate ? (
+                    <LocalTime value={savedPlan.contractEndDate} />
+                  ) : (
+                    "—"
+                  )}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-brand-cyan/20 bg-brand-navy/5 px-4 py-3 text-sm text-brand-navy">
+                <p className="text-xs font-semibold uppercase tracking-wide text-brand-navy/70">
+                  Early termination fee
+                </p>
+                <p className="mt-1 font-semibold">
+                  {formatCurrency(savedPlan.earlyTerminationFee)}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-brand-cyan/20 bg-brand-navy/5 px-4 py-3 text-sm text-brand-navy">
+                <p className="text-xs font-semibold uppercase tracking-wide text-brand-navy/70">
+                  ESIID
+                </p>
+                <p className="mt-1 font-semibold">{savedPlan.esiId ?? "—"}</p>
+              </div>
+              <div className="rounded-2xl border border-brand-cyan/20 bg-brand-navy/5 px-4 py-3 text-sm text-brand-navy">
+                <p className="text-xs font-semibold uppercase tracking-wide text-brand-navy/70">
+                  Account (last digits)
+                </p>
+                <p className="mt-1 font-semibold">{savedPlan.accountNumberLast4 ?? "—"}</p>
+              </div>
+              <div className="rounded-2xl border border-brand-cyan/20 bg-brand-navy/5 px-4 py-3 text-sm text-brand-navy">
+                <p className="text-xs font-semibold uppercase tracking-wide text-brand-navy/70">
+                  Bill credit summary
+                </p>
+                <p className="mt-1 font-semibold">
+                  {formatCurrency(savedPlan.billCreditDollars)}
+                </p>
+              </div>
+            </div>
+
+            {savedPlanRateStructure?.type === "TIME_OF_USE" && timeOfUseTiers.length > 0 ? (
+              <div className="mt-5 space-y-2 rounded-2xl border border-brand-blue/25 bg-brand-blue/5 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-brand-blue">
+                  Time-of-use tiers
+                </p>
+                <div className="grid gap-3 text-xs text-brand-navy sm:grid-cols-2">
+                  {timeOfUseTiers.map((tier: any, index: number) => (
+                    <div
+                      key={`${tier.label ?? "tier"}-${index}`}
+                      className="rounded-xl border border-brand-blue/20 bg-white px-3 py-2 shadow-sm"
+                    >
+                      <p className="font-semibold text-brand-navy">
+                        {(tier.label as string) ?? `Tier ${index + 1}`}
+                      </p>
+                      <p className="mt-1 text-brand-slate">
+                        Rate: {formatRate(toNumber(tier.priceCents))}
+                      </p>
+                      <p className="text-brand-slate">
+                        Window: {tier.startTime ?? "—"} → {tier.endTime ?? "—"}
+                      </p>
+                      <p className="text-brand-slate">
+                        Days:{" "}
+                        {Array.isArray(tier.daysOfWeek)
+                          ? (tier.daysOfWeek as string[]).join(", ")
+                          : tier.daysOfWeek === "ALL"
+                          ? "All days"
+                          : "—"}
+                      </p>
+                      {Array.isArray(tier.monthsOfYear) && tier.monthsOfYear.length > 0 ? (
+                        <p className="text-brand-slate">
+                          Months: {tier.monthsOfYear.join(", ")}
+                        </p>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {billCreditRulesSummary.length > 0 ? (
+              <div className="mt-5 space-y-2 rounded-2xl border border-brand-blue/25 bg-brand-blue/5 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-brand-blue">
+                  Bill credit rules
+                </p>
+                <ul className="list-disc space-y-1 pl-5 text-xs text-brand-navy">
+                  {billCreditRulesSummary.map((rule: any, index: number) => {
+                    const creditAmount = toNumber(rule.creditAmountCents);
+                    return (
+                      <li key={`bill-credit-${index}`}>
+                        <span className="font-semibold">
+                          {rule.label ?? `Credit ${index + 1}`}
+                        </span>
+                        {rule.minUsageKWh != null ? ` · Min ${rule.minUsageKWh} kWh` : ""}
+                        {rule.maxUsageKWh != null ? ` · Max ${rule.maxUsageKWh} kWh` : ""}
+                        {creditAmount !== null ? ` · ${formatCurrency(creditAmount / 100)}` : ""}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ) : null}
+
+            {savedPlan.notes ? (
+              <div className="mt-5 rounded-2xl border border-brand-cyan/20 bg-brand-navy/5 px-4 py-3 text-sm text-brand-navy">
+                <p className="text-xs font-semibold uppercase tracking-wide text-brand-navy/70">
+                  Notes
+                </p>
+                <p className="mt-1 whitespace-pre-wrap text-brand-slate">{savedPlan.notes}</p>
+              </div>
+            ) : null}
+
+            <div className="mt-5 flex flex-wrap items-center gap-3 text-xs text-brand-slate">
+              <span>
+                Last updated: <LocalTime value={savedPlan.updatedAt} />
+              </span>
+              <span>
+                Last confirmed:{" "}
+                {savedPlan.lastConfirmedAt ? (
+                  <LocalTime value={savedPlan.lastConfirmedAt} />
+                ) : (
+                  "—"
+                )}
+              </span>
+            </div>
+
+            {!hasActiveUsage ? (
+              <div className="mt-4 rounded-xl border border-amber-400/60 bg-amber-500/10 px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-amber-100">
+                Reconnect SMT, Green Button, or upload usage to re-activate this entry after reconfirming.
+              </div>
+            ) : !isEntryLive && planEntrySnapshot ? (
+              <div className="mt-4 rounded-xl border border-brand-cyan/40 bg-brand-navy px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-brand-cyan">
+                Usage is active. Reconfirm your saved plan to re-award this entry.
+              </div>
+            ) : null}
+
+            <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleReconfirm}
+                  disabled={reconfirming || !savedPlan || loadingSavedPlan}
+                  className="inline-flex items-center rounded-full bg-brand-navy px-5 py-2 text-xs font-semibold uppercase tracking-wide text-brand-cyan shadow-[0_8px_24px_rgba(16,46,90,0.25)] transition hover:bg-brand-navy/90 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {reconfirming ? "Reconfirming…" : "Reconfirm saved plan"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                  className="inline-flex items-center rounded-full border border-brand-blue px-4 py-2 text-xs font-semibold uppercase tracking-wide text-brand-blue transition hover:bg-brand-blue/10"
+                >
+                  Update plan details
+                </button>
+              </div>
+              <div className="text-xs text-brand-slate">
+                Need to make changes? Update your info or reconfirm once usage reconnects.
+              </div>
+            </div>
+
+            {reconfirmMessage ? (
+              <div className="mt-3 rounded-xl border border-brand-blue/30 bg-brand-blue/5 px-4 py-3 text-xs text-brand-blue">
+                {reconfirmMessage}
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <div className="mt-4 rounded-2xl border border-brand-blue/25 bg-brand-blue/5 px-4 py-3 text-sm text-brand-slate">
+            No plan on file yet. Upload a bill or enter details below to earn the Current Plan entry once usage data is active.
+          </div>
+        )}
+      </div>
+
       <div className="rounded-3xl border-2 border-brand-navy bg-brand-navy p-6 text-brand-cyan shadow-[0_28px_60px_rgba(16,46,90,0.38)] sm:p-7">
         <h2
           className="text-xs font-semibold uppercase tracking-[0.3em]"
@@ -748,6 +1277,7 @@ export function CurrentRateDetailsForm({
         </div>
 
         <form
+          ref={formRef}
           onSubmit={handleSubmit}
           className="space-y-4 rounded-3xl border-2 border-brand-navy bg-white p-6 shadow-sm sm:p-7"
         >

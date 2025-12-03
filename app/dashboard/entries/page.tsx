@@ -282,7 +282,15 @@ export default function EntriesPage() {
                   }
                 }
 
-                if (card.id === TESTIMONIAL_CARD_ID && count === 0) {
+                if (
+                  card.id === "current_plan_details" &&
+                  hasActiveUsage &&
+                  !hasLiveEntries &&
+                  (meta?.expiredCount ?? 0) > 0
+                ) {
+                  availabilityMessage =
+                    "Usage reconnected. Reconfirm your saved plan to reactivate this entry.";
+                } else if (card.id === TESTIMONIAL_CARD_ID && count === 0) {
                   availabilityMessage =
                     "Unlocks after you switch plans with IntelliWatt and keep usage data active.";
                 } else if (

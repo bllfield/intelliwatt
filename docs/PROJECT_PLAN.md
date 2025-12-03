@@ -134,6 +134,11 @@ Notes:
     - Separate per-API raw datasets (WattBuy, EnergyBot, etc.) and a master normalized dataset with null-safe handling so empty fields don’t break the UI.
   - The `RateStructure` contract in `docs/API_CONTRACTS.md` is the shared shape for user-entered current plans and normalized vendor offers so the rate engine can cost fixed, variable, and TOU plans uniformly.
   - Store `billCredits` alongside each plan’s `RateStructure` so the comparison engine can apply credits automatically when monthly usage falls inside the configured ranges.
+  - ⬜ **Usage-dependent entry reconfirm flows (Added 2025-12-02)**:
+    - Preserve previously submitted Current Plan data when SMT usage lapses so the card shows the saved snapshot even while the entry is expired.
+    - Add “Reconfirm plan” CTA on `/dashboard/current-rate` that re-validates the stored plan (or accepts new details) before re-awarding the entry once active usage returns.
+    - Ensure `refreshUserEntryStatuses` unlocks the Current Plan entry automatically once usage data is active **and** the user reconfirms; surface the same pattern for Home Details + Appliances when those modules go live.
+    - Update usage-dependent entry copy/site messaging (entries page, checklist) to explain that referrals remain the only entry path without active usage data (completed 2025-12-02 UI pass).
 
 ### Current Plan Module Progress (Updated 2025-11-27)
 
@@ -163,6 +168,7 @@ Notes:
 - [x] Run Prisma generate + migrate for the Current Plan module schema and master schema (dev + prod) so the pipeline is live end-to-end.
 - [ ] Normalize vendor offer ingestion to populate the shared `RateStructure`, then adapt the comparison engine to cost fixed, variable, and TOU offers with the same code path as user-entered plans.
 - [ ] Use `NormalizedCurrentPlan` in the Rate Plan Analyzer UI (future step once normalization + master data is live).
+- [ ] Add reconfirmation UX + mutations so expired Current Plan entries can be re-awarded once usage data is back in sync (see “Usage-dependent entry reconfirm flows” checklist).
 
 <!-- Dev + Prod Prisma migrations completed for Current Plan module + master schema on 2025-11-28 -->
 

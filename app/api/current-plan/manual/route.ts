@@ -85,6 +85,29 @@ type ManualEntryPayload = {
   houseId?: unknown;
 };
 
+const decimalToNumber = (value: unknown): number | null => {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value === 'number') {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  if (typeof value === 'object' && value && 'toNumber' in (value as Record<string, unknown>)) {
+    try {
+      const result = (value as { toNumber?: () => number }).toNumber?.();
+      return typeof result === 'number' && Number.isFinite(result) ? result : null;
+    } catch {
+      return null;
+    }
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
 const decimalFromNumber = (
   value: number,
   precision: number,
@@ -94,6 +117,135 @@ const decimalFromNumber = (
   const rounded = Math.round(value * multiplier) / multiplier;
   return new CurrentPlanPrisma.Decimal(rounded.toFixed(scale));
 };
+
+export async function GET() {
+  try {
+    if (!process.env.CURRENT_PLAN_DATABASE_URL) {
+      return NextResponse.json(
+        { error: 'CURRENT_PLAN_DATABASE_URL is not configured' },
+        { status: 500 },
+      );
+    }
+
+    const cookieStore = cookies();
+    const userEmailRaw = cookieStore.get('intelliwatt_user')?.value ?? null;
+
+    if (!userEmailRaw) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    }
+
+    const userEmail = normalizeEmail(userEmailRaw);
+    const user = await prisma.user.findUnique({
+      where: { email: userEmail },
+      select: { id: true },
+    });
+
+    if (!user) {
+      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    }
+
+    const currentPlanPrisma = getCurrentPlanPrisma();
+    const manualEntryDelegate = currentPlanPrisma.currentPlanManualEntry as any;
+
+    const latestPlan = await manualEntryDelegate.findFirst({
+      where: { userId: user.id },
+      orderBy: { updatedAt: 'desc' },
+    });
+
+    const planEntry = await prisma.entry.findFirst({
+      where: {
+        userId: user.id,
+        type: 'current_plan_details',
+        ...(latestPlan?.houseId ? { houseId: latestPlan.houseId } : { houseId: null }),
+      },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        status: true,
+        expiresAt: true,
+        lastValidated: true,
+        amount: true,
+        houseId: true,
+      },
+    });
+
+    const usageEntry = await prisma.entry.findFirst({
+      where: {
+        userId: user.id,
+        type: 'smart_meter_connect',
+        ...(latestPlan?.houseId ? { houseId: latestPlan.houseId } : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        status: true,
+        expiresAt: true,
+        lastValidated: true,
+        houseId: true,
+      },
+    });
+
+    const usageStatus = usageEntry?.status ?? null;
+    const hasActiveUsage = usageStatus === 'ACTIVE' || usageStatus === 'EXPIRING_SOON';
+
+    const serializedPlan = latestPlan
+      ? {
+          id: latestPlan.id as string,
+          userId: latestPlan.userId as string,
+          houseId: latestPlan.houseId ?? null,
+          providerName: latestPlan.providerName as string,
+          planName: latestPlan.planName as string,
+          rateType: latestPlan.rateType as string,
+          energyRateCents: decimalToNumber(latestPlan.energyRateCents),
+          baseMonthlyFee: decimalToNumber(latestPlan.baseMonthlyFee),
+          billCreditDollars: decimalToNumber(latestPlan.billCreditDollars),
+          termLengthMonths: latestPlan.termLengthMonths ?? null,
+          contractEndDate: latestPlan.contractEndDate
+            ? (latestPlan.contractEndDate as Date).toISOString()
+            : null,
+          earlyTerminationFee: decimalToNumber(latestPlan.earlyTerminationFee),
+          esiId: latestPlan.esiId ?? null,
+          accountNumberLast4: latestPlan.accountNumberLast4 ?? null,
+          notes: latestPlan.notes ?? null,
+          rateStructure: latestPlan.rateStructure ?? null,
+          normalizedAt: latestPlan.normalizedAt
+            ? (latestPlan.normalizedAt as Date).toISOString()
+            : null,
+          lastConfirmedAt: latestPlan.lastConfirmedAt
+            ? (latestPlan.lastConfirmedAt as Date).toISOString()
+            : null,
+          createdAt: (latestPlan.createdAt as Date).toISOString(),
+          updatedAt: (latestPlan.updatedAt as Date).toISOString(),
+        }
+      : null;
+
+    return NextResponse.json({
+      ok: true,
+      plan: serializedPlan,
+      entry: planEntry
+        ? {
+            ...planEntry,
+            expiresAt: planEntry.expiresAt ? planEntry.expiresAt.toISOString() : null,
+            lastValidated: planEntry.lastValidated ? planEntry.lastValidated.toISOString() : null,
+          }
+        : null,
+      usage: usageEntry
+        ? {
+            ...usageEntry,
+            expiresAt: usageEntry.expiresAt ? usageEntry.expiresAt.toISOString() : null,
+            lastValidated: usageEntry.lastValidated ? usageEntry.lastValidated.toISOString() : null,
+          }
+        : null,
+      hasActiveUsage,
+    });
+  } catch (error) {
+    console.error('[current-plan/manual] Failed to fetch plan snapshot', error);
+    return NextResponse.json(
+      { error: 'Failed to fetch current plan snapshot' },
+      { status: 500 },
+    );
+  }
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -653,6 +805,7 @@ export async function POST(request: NextRequest) {
         notes,
       rateStructure: rateStructure ?? undefined,
       normalizedAt: null,
+      lastConfirmedAt: new Date(),
     };
 
     const existingEntry = await manualEntryDelegate.findFirst({
