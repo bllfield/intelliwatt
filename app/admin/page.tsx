@@ -457,7 +457,16 @@ export default function AdminDashboard() {
             json?.detail ||
             json?.error ||
             (raw && raw.length > 0 ? raw : 'No additional details returned.');
-          const message = `Ticket request failed (${ticketResponse.status} ${ticketResponse.statusText}) — ${detail}`;
+          let message = `Ticket request failed (${ticketResponse.status} ${ticketResponse.statusText}) — ${detail}`;
+          const errorCode = json?.error ?? json?.code ?? detail;
+          if (
+            ticketResponse.status === 503 &&
+            typeof errorCode === 'string' &&
+            errorCode.includes('green_button_upload_unavailable')
+          ) {
+            message +=
+              ' • Configure GREEN_BUTTON_UPLOAD_URL (or NEXT_PUBLIC_GREEN_BUTTON_UPLOAD_URL) and GREEN_BUTTON_UPLOAD_SECRET in Vercel env vars so the admin tool can reach the droplet uploader.';
+          }
           setGreenButtonStatus(message);
           appendGreenButtonLog(message);
           return;
