@@ -444,68 +444,6 @@ export default function EntriesPage() {
         </div>
       </section>
 
-      {/* How to Earn More */}
-      <section className="py-16 px-4 bg-brand-navy">
-        <div className="max-w-5xl mx-auto rounded-3xl border border-brand-blue/40 bg-brand-navy/90 px-6 py-10 shadow-[0_20px_60px_rgba(10,20,60,0.45)] sm:px-8">
-          <h2 className="text-3xl font-bold text-brand-white text-center mb-10">
-            How to <span className="text-brand-blue">Earn More</span> Entries
-          </h2>
-
-          <div className="grid gap-8 text-center md:grid-cols-2">
-            <div className="bg-brand-navy p-6 rounded-3xl border-2 border-[#39FF14]/40 shadow-[0_15px_35px_rgba(15,23,42,0.4)]">
-              <h3 className="text-xl font-bold mb-4" style={{ color: '#39FF14' }}>Connect Smart Meter</h3>
-              <p className="mb-4 text-brand-white/80">
-                Link your Smart Meter Texas account for automated usage and <span style={{ color: '#39FF14' }}>1 entry</span>.
-              </p>
-              <a
-                href="/dashboard/api#smt"
-                className="inline-flex items-center rounded-full border border-[#39FF14]/70 bg-[#39FF14]/10 px-5 py-2 text-sm font-semibold uppercase tracking-wide text-[#39FF14] transition hover:bg-[#39FF14]/20"
-              >
-                Connect SMT
-              </a>
-            </div>
-
-            <div className="bg-brand-navy p-6 rounded-3xl border-2 border-[#BF00FF]/40 shadow-[0_15px_35px_rgba(15,23,42,0.4)]">
-              <h3 className="text-xl font-bold mb-4" style={{ color: '#BF00FF' }}>Current Plan Details</h3>
-              <p className="mb-4 text-brand-white/80">
-                Upload your current electric plan or enter details manually to spotlight savings—and earn <span style={{ color: '#39FF14' }}>1 entry</span>.
-              </p>
-              <a
-                href="/dashboard/home#current-plan-details"
-                className="inline-flex items-center rounded-full border border-[#BF00FF]/70 bg-[#BF00FF]/10 px-5 py-2 text-sm font-semibold uppercase tracking-wide text-[#BF00FF] transition hover:bg-[#BF00FF]/20"
-              >
-                Add Plan Details
-              </a>
-            </div>
-
-            <div className="bg-brand-navy p-6 rounded-3xl border-2 border-[#FF52FF]/40 shadow-[0_15px_35px_rgba(15,23,42,0.4)]">
-              <h3 className="text-xl font-bold mb-4" style={{ color: '#FF52FF' }}>Refer Friends</h3>
-              <p className="mb-4 text-brand-white/80">
-                Invite friends and family—earn <span style={{ color: '#39FF14' }}>1 entry</span> for each successful referral.
-              </p>
-              <a
-                href="/dashboard/referrals"
-                className="inline-flex items-center rounded-full border border-[#FF52FF]/70 bg-[#FF52FF]/10 px-5 py-2 text-sm font-semibold uppercase tracking-wide text-[#FF52FF] transition hover:bg-[#FF52FF]/20"
-              >
-                Share Referral Link
-              </a>
-            </div>
-
-            <div className="bg-brand-navy p-6 rounded-3xl border-2 border-[#FFA7FF]/40 shadow-[0_15px_35px_rgba(15,23,42,0.4)]">
-              <h3 className="text-xl font-bold mb-4" style={{ color: '#FFA7FF' }}>Appliance Details</h3>
-              <p className="mb-4 text-brand-white/80">
-                Add your major appliances so we can tailor upgrade tips—and earn <span style={{ color: '#39FF14' }}>1 entry</span>.
-              </p>
-              <a
-                href="/dashboard/appliances"
-                className="inline-flex items-center rounded-full border border-[#FFA7FF]/70 bg-[#FFA7FF]/10 px-5 py-2 text-sm font-semibold uppercase tracking-wide text-[#FFA7FF] transition hover:bg-[#FFA7FF]/20"
-              >
-                Manage Appliances
-              </a>
-            </div>
-          </div>
-        </div>
-      </section>
     </div>
   );
 } 
