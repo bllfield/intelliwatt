@@ -116,9 +116,13 @@ export function normalizeGreenButtonReadingsTo15Min(
 
   const results: GreenButton15MinInterval[] = [];
 
-  for (const [ms, kwh] of buckets.entries()) {
-    if (!isFinite(kwh) || kwh < 0) continue;
-    if (maxKwh != null && kwh > maxKwh) continue;
+  buckets.forEach((kwh, ms) => {
+    if (!isFinite(kwh) || kwh < 0) {
+      return;
+    }
+    if (maxKwh != null && kwh > maxKwh) {
+      return;
+    }
 
     results.push({
       timestamp: new Date(ms),
@@ -126,7 +130,7 @@ export function normalizeGreenButtonReadingsTo15Min(
       intervalMinutes: 15,
       unit: "kWh",
     });
-  }
+  });
 
   // Sort by timestamp ascending.
   results.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
@@ -249,14 +253,14 @@ export function group15MinToMonthlyTotals(
   }
 
   const out: Array<{ year: number; month: number; kWh: number }> = [];
-  for (const [key, kWh] of map.entries()) {
+  map.forEach((kWh, key) => {
     const [y, m] = key.split("-");
     out.push({
       year: Number(y),
       month: Number(m),
       kWh,
     });
-  }
+  });
 
   // Sort by year, month.
   out.sort((a, b) => a.year - b.year || a.month - b.month);
