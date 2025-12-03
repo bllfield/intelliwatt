@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 interface User {
@@ -218,6 +218,8 @@ export default function AdminDashboard() {
   const [uploadingGreenButton, setUploadingGreenButton] = useState(false);
   const [greenButtonLog, setGreenButtonLog] = useState<string[]>([]);
   const [greenButtonHouseId, setGreenButtonHouseId] = useState('');
+  const [greenButtonUserEmail, setGreenButtonUserEmail] = useState('');
+  const [greenButtonUserId, setGreenButtonUserId] = useState('');
   const [adminToken, setAdminToken] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [recalculatingReferrals, setRecalculatingReferrals] = useState(false);
@@ -263,6 +265,52 @@ export default function AdminDashboard() {
     }
     return { raw, json };
   }, []);
+  const normalizedGreenButtonUserEmail = greenButtonUserEmail.trim().toLowerCase();
+  const selectedGreenButtonUser = useMemo(() => {
+    if (greenButtonUserId) {
+      return users.find((user) => user.id === greenButtonUserId) ?? null;
+    }
+    if (normalizedGreenButtonUserEmail.length > 0) {
+      return (
+        users.find((user) => user.email.toLowerCase() === normalizedGreenButtonUserEmail) ?? null
+      );
+    }
+    return null;
+  }, [greenButtonUserId, normalizedGreenButtonUserEmail, users]);
+  const availableHouseOptions = selectedGreenButtonUser?.houseAddresses ?? [];
+  const handleGreenButtonUserInputChange = useCallback(
+    (value: string) => {
+      setGreenButtonUserEmail(value);
+      const trimmed = value.trim().toLowerCase();
+      if (trimmed.length === 0) {
+        setGreenButtonUserId('');
+        return;
+      }
+      const match = users.find((user) => user.email.toLowerCase() === trimmed);
+      if (match) {
+        setGreenButtonUserId(match.id);
+      }
+    },
+    [users],
+  );
+  useEffect(() => {
+    if (!selectedGreenButtonUser) {
+      return;
+    }
+    if (greenButtonHouseId.trim().length > 0) {
+      const exists =
+        selectedGreenButtonUser.houseAddresses?.some((house) => house.id === greenButtonHouseId) ?? false;
+      if (exists) {
+        return;
+      }
+    }
+    const fallbackHouse =
+      selectedGreenButtonUser.houseAddresses?.find((house) => !house.archivedAt) ??
+      selectedGreenButtonUser.houseAddresses?.[0];
+    if (fallbackHouse) {
+      setGreenButtonHouseId(fallbackHouse.id);
+    }
+  }, [selectedGreenButtonUser, greenButtonHouseId]);
   const withAdminHeaders = useCallback(
     (init?: RequestInit): RequestInit => {
       const headers = new Headers(init?.headers ?? {});
@@ -484,10 +532,43 @@ export default function AdminDashboard() {
         appendGreenButtonLog(
           `Preparing upload: ${greenButtonFile.name} (${formatBytes(greenButtonFile.size)})`,
         );
+        let targetHouseId = greenButtonHouseId.trim();
+        if (!targetHouseId && selectedGreenButtonUser) {
+          const fallbackHouse =
+            selectedGreenButtonUser.houseAddresses?.find((house) => !house.archivedAt) ??
+            selectedGreenButtonUser.houseAddresses?.[0];
+          if (fallbackHouse) {
+            targetHouseId = fallbackHouse.id;
+            setGreenButtonHouseId(fallbackHouse.id);
+            appendGreenButtonLog(
+              `Using ${fallbackHouse.id} for ${selectedGreenButtonUser.email} (auto-selected)`,
+            );
+          }
+        }
+        if (!targetHouseId) {
+          const message =
+            'House ID required. Select a user and house from the dropdown or paste a house ID manually.';
+          setGreenButtonStatus(message);
+          appendGreenButtonLog(message);
+          return;
+        }
+
+        if (selectedGreenButtonUser) {
+          appendGreenButtonLog(
+            `Target user: ${selectedGreenButtonUser.email} · house ${targetHouseId}${
+              selectedGreenButtonUser.houseAddresses?.some(
+                (house) => house.id === targetHouseId && house.archivedAt,
+              )
+                ? ' (archived)'
+                : ''
+            }`,
+          );
+        }
+
         const ticketResponse = await fetchWithAdmin('/api/green-button/upload-ticket', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ homeId: greenButtonHouseId || null }),
+          body: JSON.stringify({ homeId: targetHouseId }),
         });
         appendGreenButtonLog(
           `Ticket request: ${ticketResponse.status} ${ticketResponse.statusText || ''}`.trim(),
@@ -590,9 +671,12 @@ export default function AdminDashboard() {
       greenButtonFile,
       greenButtonUtility,
       greenButtonAccount,
+      greenButtonHouseId,
+      selectedGreenButtonUser,
       fetchData,
       appendGreenButtonLog,
       readResponseBody,
+      fetchWithAdmin,
     ],
   );
 
@@ -868,6 +952,64 @@ export default function AdminDashboard() {
               </p>
             </div>
 
+            <div className="grid gap-3 sm:col-span-2 sm:grid-cols-2">
+              <div className="flex flex-col gap-2">
+                <label htmlFor="green-button-user" className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-navy">
+                  User email (optional)
+                </label>
+                <input
+                  id="green-button-user"
+                  list="green-button-user-options"
+                  value={greenButtonUserEmail}
+                  onChange={(event) => handleGreenButtonUserInputChange(event.target.value)}
+                  onBlur={(event) => handleGreenButtonUserInputChange(event.target.value)}
+                  placeholder="Start typing an IntelliWatt email"
+                  className="rounded-lg border border-brand-navy/20 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
+                />
+                <datalist id="green-button-user-options">
+                  {users.map((user) => (
+                    <option key={user.id} value={user.email} />
+                  ))}
+                </datalist>
+                <p className="text-xs text-brand-navy/60">
+                  Selecting a user auto-fills their active houses. Leave blank to paste any valid house ID manually.
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <label htmlFor="green-button-house" className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-navy">
+                  House ID
+                </label>
+                <input
+                  id="green-button-house"
+                  list="green-button-house-options"
+                  type="text"
+                  value={greenButtonHouseId}
+                  onChange={(event) => setGreenButtonHouseId(event.target.value)}
+                  placeholder="Select or paste the house ID for this upload"
+                  className="rounded-lg border border-brand-navy/20 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
+                />
+                <datalist id="green-button-house-options">
+                  {availableHouseOptions.map((house) => (
+                    <option
+                      key={house.id}
+                      value={house.id}
+                      label={
+                        house.addressLine1
+                          ? `${house.addressLine1}${house.archivedAt ? ' (archived)' : ''}`
+                          : house.archivedAt
+                          ? `${house.id} (archived)`
+                          : house.id
+                      }
+                    />
+                  ))}
+                </datalist>
+                <p className="text-xs text-brand-navy/60">
+                  Ticket flow requires a valid house ID. Choose from the list or paste one copied from the Users table.
+                </p>
+              </div>
+            </div>
+
             <div className="flex flex-col gap-2">
               <label htmlFor="green-button-utility" className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-navy">
                 Utility name (optional)
@@ -915,22 +1057,6 @@ export default function AdminDashboard() {
                 {greenButtonStatus}
               </div>
             ) : null}
-            <div className="flex flex-col gap-2">
-              <label htmlFor="green-button-house" className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-navy">
-                House ID (optional)
-              </label>
-              <input
-                id="green-button-house"
-                type="text"
-                value={greenButtonHouseId}
-                onChange={(event) => setGreenButtonHouseId(event.target.value)}
-                placeholder="Link to a specific house address"
-                className="rounded-lg border border-brand-navy/20 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
-              />
-              <p className="text-xs text-brand-navy/60">
-                Ticket flow requires a valid house ID tied to the current account. Leave blank to use the default primary house when applicable.
-              </p>
-            </div>
           </form>
 
           {greenButtonLog.length > 0 ? (
