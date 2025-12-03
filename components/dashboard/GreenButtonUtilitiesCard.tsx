@@ -1,9 +1,106 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-export default function GreenButtonHelpSection() {
+interface GreenButtonHelpSectionProps {
+  houseAddressId?: string | null;
+  defaultUtilityName?: string | null;
+}
+
+export default function GreenButtonHelpSection({
+  houseAddressId,
+  defaultUtilityName,
+}: GreenButtonHelpSectionProps) {
   const [open, setOpen] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [utilityName, setUtilityName] = useState(defaultUtilityName ?? "");
+  const [accountNumber, setAccountNumber] = useState("");
+  const [isUploading, setIsUploading] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [statusTone, setStatusTone] = useState<"success" | "error" | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    setUtilityName(defaultUtilityName ?? "");
+  }, [defaultUtilityName]);
+
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] ?? null;
+    if (!file) {
+      setSelectedFile(null);
+      return;
+    }
+
+    const lower = file.name.toLowerCase();
+    if (!lower.endsWith(".xml") && !lower.endsWith(".csv")) {
+      setStatusTone("error");
+      setStatusMessage("Select a Green Button XML or CSV file.");
+      event.target.value = "";
+      setSelectedFile(null);
+      return;
+    }
+
+    setStatusTone(null);
+    setStatusMessage(null);
+    setSelectedFile(file);
+  };
+
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!houseAddressId) {
+      setStatusTone("error");
+      setStatusMessage("Add your service address first so we can link this upload.");
+      return;
+    }
+    if (!selectedFile) {
+      setStatusTone("error");
+      setStatusMessage("Select a Green Button XML or CSV file to upload.");
+      return;
+    }
+
+    try {
+      setIsUploading(true);
+      setStatusTone(null);
+      setStatusMessage("Uploading your usage file…");
+
+      const formData = new FormData();
+      formData.append("file", selectedFile);
+      formData.append("homeId", houseAddressId);
+      if (utilityName.trim().length > 0) {
+        formData.append("utilityName", utilityName.trim());
+      }
+      if (accountNumber.trim().length > 0) {
+        formData.append("accountNumber", accountNumber.trim());
+      }
+
+      const response = await fetch("/api/green-button/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        const detail = typeof data?.error === "string" ? data.error : "Upload failed. Please try again.";
+        setStatusTone("error");
+        setStatusMessage(detail);
+        return;
+      }
+
+      setStatusTone("success");
+      setStatusMessage("Upload received! We’ll start parsing your usage data shortly.");
+      setSelectedFile(null);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    } catch (error) {
+      console.error("[GreenButtonHelpSection] upload failed", error);
+      setStatusTone("error");
+      setStatusMessage("Upload failed. Please check your connection and try again.");
+    } finally {
+      setIsUploading(false);
+    }
+  };
 
   return (
     <section
@@ -79,7 +176,8 @@ export default function GreenButtonHelpSection() {
             <button
               type="button"
               onClick={() => setOpen(true)}
-              className="inline-flex items-center rounded-full border border-brand-navy/30 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-brand-navy transition hover:border-brand-navy/60 hover:bg-brand-navy/5"
+              className="inline-flex items-center rounded-full border border-brand-navy/30 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide transition hover:border-brand-navy/60 hover:bg-brand-navy/5"
+              style={{ color: "#39FF14" }}
             >
               View utilities &amp; directory
             </button>
@@ -90,6 +188,99 @@ export default function GreenButtonHelpSection() {
             upload it here for IntelliWatt to analyze.
           </p>
         </div>
+      </div>
+
+      <div className="space-y-4 rounded-3xl border border-brand-navy/10 bg-brand-navy/5 p-5">
+        <h4 className="text-base font-semibold text-brand-navy">
+          Upload your Green Button file
+        </h4>
+
+        {!houseAddressId ? (
+          <p className="text-sm text-brand-slate">
+            Add your service address above to unlock the Green Button uploader.
+          </p>
+        ) : (
+          <form className="space-y-4" onSubmit={handleSubmit}>
+            <div className="flex flex-col gap-2">
+              <label htmlFor="green-button-file" className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-navy">
+                File (XML or CSV)
+              </label>
+              <input
+                id="green-button-file"
+                ref={fileInputRef}
+                type="file"
+                accept=".xml,.csv,application/xml,text/csv"
+                onChange={handleFileChange}
+                className="w-full rounded-lg border border-brand-navy/20 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
+                disabled={isUploading}
+              />
+              {selectedFile ? (
+                <p className="text-xs text-brand-slate">
+                  {selectedFile.name} · {(selectedFile.size / 1024).toFixed(1)} KB
+                </p>
+              ) : null}
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="flex flex-col gap-2">
+                <label htmlFor="green-button-utility" className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-navy">
+                  Utility name
+                </label>
+                <input
+                  id="green-button-utility"
+                  type="text"
+                  value={utilityName}
+                  onChange={(event) => setUtilityName(event.target.value)}
+                  placeholder="e.g. Oncor, CenterPoint"
+                  className="rounded-lg border border-brand-navy/20 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
+                  disabled={isUploading}
+                />
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <label htmlFor="green-button-account" className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-navy">
+                  Account number (optional)
+                </label>
+                <input
+                  id="green-button-account"
+                  type="text"
+                  value={accountNumber}
+                  onChange={(event) => setAccountNumber(event.target.value)}
+                  placeholder="Last few digits help us match the file"
+                  className="rounded-lg border border-brand-navy/20 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
+                  disabled={isUploading}
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <button
+                type="submit"
+                disabled={isUploading || !selectedFile}
+                className="inline-flex items-center justify-center rounded-full bg-brand-navy px-5 py-2 text-xs font-semibold uppercase tracking-wide text-white shadow-[0_10px_35px_rgba(16,46,90,0.18)] transition hover:bg-brand-navy/90 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isUploading ? "Uploading…" : "Upload usage file"}
+              </button>
+              <p className="text-xs text-brand-slate">
+                We’ll store the raw file securely in your usage vault and parse it for interval data.
+              </p>
+            </div>
+          </form>
+        )}
+
+        {statusMessage ? (
+          <div
+            className={`rounded-lg border px-3 py-2 text-xs ${
+              statusTone === "success"
+                ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                : statusTone === "error"
+                ? "border-rose-300 bg-rose-50 text-rose-700"
+                : "border-brand-navy/20 bg-white text-brand-slate"
+            }`}
+          >
+            {statusMessage}
+          </div>
+        ) : null}
       </div>
 
       {open ? (

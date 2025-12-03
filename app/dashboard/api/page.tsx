@@ -451,7 +451,10 @@ export default async function ApiConnectPage() {
               </div>
 
               <SmtManualFallbackCard houseAddressId={houseAddress?.id ?? null} />
-              <GreenButtonHelpSection />
+              <GreenButtonHelpSection
+                houseAddressId={houseAddress?.id ?? null}
+                defaultUtilityName={houseAddress?.utilityName ?? null}
+              />
             </>
           )}
 
