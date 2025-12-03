@@ -546,6 +546,11 @@ export function CurrentRateDetailsForm({
       ? savedPlanRateStructure.billCredits.rules
       : [];
 
+  const snapshotCardClasses =
+    "rounded-2xl border border-brand-cyan/40 bg-brand-navy/60 px-4 py-3 text-sm text-brand-cyan";
+  const snapshotLabelClasses =
+    "text-xs font-semibold uppercase tracking-wide text-brand-cyan/70";
+
   async function uploadBill(options: { silent?: boolean } = {}): Promise<boolean> {
     const { silent = false } = options;
 
@@ -996,13 +1001,13 @@ export function CurrentRateDetailsForm({
         </div>
       ) : null}
 
-      <div className="rounded-3xl border border-brand-cyan/25 bg-white p-6 shadow-[0_24px_60px_rgba(16,46,90,0.12)]">
+      <div className="rounded-3xl border border-brand-cyan/30 bg-brand-navy p-6 text-brand-cyan shadow-[0_24px_60px_rgba(16,46,90,0.25)]">
         <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div>
             <h2 className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-cyan/60">
               Saved Plan Snapshot
             </h2>
-            <p className="mt-2 text-sm text-brand-slate">
+            <p className="mt-2 text-sm text-brand-cyan/80">
               Review the plan you previously shared. Reconfirm whenever SMT or manual usage reconnects.
             </p>
           </div>
@@ -1023,24 +1028,24 @@ export function CurrentRateDetailsForm({
         ) : savedPlan ? (
           <>
             <div className="mt-6 grid gap-4 md:grid-cols-2">
-              <div className="rounded-2xl border border-brand-cyan/20 bg-brand-navy/5 px-4 py-3 text-sm text-brand-navy">
-                <p className="text-xs font-semibold uppercase tracking-wide text-brand-navy/70">
+              <div className={snapshotCardClasses}>
+                <p className={snapshotLabelClasses}>
                   Provider
                 </p>
                 <p className="mt-1 font-semibold">{savedPlan.providerName}</p>
               </div>
-              <div className="rounded-2xl border border-brand-cyan/20 bg-brand-navy/5 px-4 py-3 text-sm text-brand-navy">
-                <p className="text-xs font-semibold uppercase tracking-wide text-brand-navy/70">
+              <div className={snapshotCardClasses}>
+                <p className={snapshotLabelClasses}>
                   Plan name
                 </p>
                 <p className="mt-1 font-semibold">{savedPlan.planName}</p>
               </div>
-              <div className="rounded-2xl border border-brand-cyan/20 bg-brand-navy/5 px-4 py-3 text-sm text-brand-navy">
-                <p className="text-xs font-semibold uppercase tracking-wide text-brand-navy/70">
+              <div className={snapshotCardClasses}>
+                <p className={snapshotLabelClasses}>
                   Rate type
                 </p>
                 <p className="mt-1 font-semibold">{savedPlan.rateType}</p>
-                <p className="mt-1 text-xs text-brand-slate">
+                <p className="mt-1 text-xs text-brand-cyan/70">
                   {savedPlan.rateType === "FIXED" || savedPlan.rateType === "VARIABLE"
                     ? `Energy rate: ${formatRate(
                         toNumber(
@@ -1052,22 +1057,22 @@ export function CurrentRateDetailsForm({
                     : "See details below"}
                 </p>
               </div>
-              <div className="rounded-2xl border border-brand-cyan/20 bg-brand-navy/5 px-4 py-3 text-sm text-brand-navy">
-                <p className="text-xs font-semibold uppercase tracking-wide text-brand-navy/70">
+              <div className={snapshotCardClasses}>
+                <p className={snapshotLabelClasses}>
                   Base monthly fee
                 </p>
                 <p className="mt-1 font-semibold">{formatCurrency(savedPlan.baseMonthlyFee)}</p>
               </div>
-              <div className="rounded-2xl border border-brand-cyan/20 bg-brand-navy/5 px-4 py-3 text-sm text-brand-navy">
-                <p className="text-xs font-semibold uppercase tracking-wide text-brand-navy/70">
+              <div className={snapshotCardClasses}>
+                <p className={snapshotLabelClasses}>
                   Term length
                 </p>
                 <p className="mt-1 font-semibold">
                   {savedPlan.termLengthMonths ? `${savedPlan.termLengthMonths} months` : "—"}
                 </p>
               </div>
-              <div className="rounded-2xl border border-brand-cyan/20 bg-brand-navy/5 px-4 py-3 text-sm text-brand-navy">
-                <p className="text-xs font-semibold uppercase tracking-wide text-brand-navy/70">
+              <div className={snapshotCardClasses}>
+                <p className={snapshotLabelClasses}>
                   Contract end
                 </p>
                 <p className="mt-1 font-semibold">
@@ -1078,28 +1083,28 @@ export function CurrentRateDetailsForm({
                   )}
                 </p>
               </div>
-              <div className="rounded-2xl border border-brand-cyan/20 bg-brand-navy/5 px-4 py-3 text-sm text-brand-navy">
-                <p className="text-xs font-semibold uppercase tracking-wide text-brand-navy/70">
+              <div className={snapshotCardClasses}>
+                <p className={snapshotLabelClasses}>
                   Early termination fee
                 </p>
                 <p className="mt-1 font-semibold">
                   {formatCurrency(savedPlan.earlyTerminationFee)}
                 </p>
               </div>
-              <div className="rounded-2xl border border-brand-cyan/20 bg-brand-navy/5 px-4 py-3 text-sm text-brand-navy">
-                <p className="text-xs font-semibold uppercase tracking-wide text-brand-navy/70">
+              <div className={snapshotCardClasses}>
+                <p className={snapshotLabelClasses}>
                   ESIID
                 </p>
                 <p className="mt-1 font-semibold">{savedPlan.esiId ?? "—"}</p>
               </div>
-              <div className="rounded-2xl border border-brand-cyan/20 bg-brand-navy/5 px-4 py-3 text-sm text-brand-navy">
-                <p className="text-xs font-semibold uppercase tracking-wide text-brand-navy/70">
+              <div className={snapshotCardClasses}>
+                <p className={snapshotLabelClasses}>
                   Account (last digits)
                 </p>
                 <p className="mt-1 font-semibold">{savedPlan.accountNumberLast4 ?? "—"}</p>
               </div>
-              <div className="rounded-2xl border border-brand-cyan/20 bg-brand-navy/5 px-4 py-3 text-sm text-brand-navy">
-                <p className="text-xs font-semibold uppercase tracking-wide text-brand-navy/70">
+              <div className={snapshotCardClasses}>
+                <p className={snapshotLabelClasses}>
                   Bill credit summary
                 </p>
                 <p className="mt-1 font-semibold">
@@ -1109,26 +1114,26 @@ export function CurrentRateDetailsForm({
             </div>
 
             {savedPlanRateStructure?.type === "TIME_OF_USE" && timeOfUseTiers.length > 0 ? (
-              <div className="mt-5 space-y-2 rounded-2xl border border-brand-blue/25 bg-brand-blue/5 px-4 py-3">
-                <p className="text-xs font-semibold uppercase tracking-wide text-brand-blue">
+              <div className={`${snapshotCardClasses} mt-5 space-y-2`}>
+                <p className={snapshotLabelClasses}>
                   Time-of-use tiers
                 </p>
-                <div className="grid gap-3 text-xs text-brand-navy sm:grid-cols-2">
+                <div className="grid gap-3 text-xs text-brand-cyan sm:grid-cols-2">
                   {timeOfUseTiers.map((tier: any, index: number) => (
                     <div
                       key={`${tier.label ?? "tier"}-${index}`}
-                      className="rounded-xl border border-brand-blue/20 bg-white px-3 py-2 shadow-sm"
+                      className="rounded-xl border border-brand-cyan/30 bg-brand-navy/50 px-3 py-2 shadow-sm text-brand-cyan"
                     >
-                      <p className="font-semibold text-brand-navy">
+                      <p className="font-semibold text-brand-cyan">
                         {(tier.label as string) ?? `Tier ${index + 1}`}
                       </p>
-                      <p className="mt-1 text-brand-slate">
+                      <p className="mt-1 text-brand-cyan/70">
                         Rate: {formatRate(toNumber(tier.priceCents))}
                       </p>
-                      <p className="text-brand-slate">
+                      <p className="text-brand-cyan/70">
                         Window: {tier.startTime ?? "—"} → {tier.endTime ?? "—"}
                       </p>
-                      <p className="text-brand-slate">
+                      <p className="text-brand-cyan/70">
                         Days:{" "}
                         {Array.isArray(tier.daysOfWeek)
                           ? (tier.daysOfWeek as string[]).join(", ")
@@ -1137,7 +1142,7 @@ export function CurrentRateDetailsForm({
                           : "—"}
                       </p>
                       {Array.isArray(tier.monthsOfYear) && tier.monthsOfYear.length > 0 ? (
-                        <p className="text-brand-slate">
+                        <p className="text-brand-cyan/70">
                           Months: {tier.monthsOfYear.join(", ")}
                         </p>
                       ) : null}
@@ -1148,11 +1153,11 @@ export function CurrentRateDetailsForm({
             ) : null}
 
             {billCreditRulesSummary.length > 0 ? (
-              <div className="mt-5 space-y-2 rounded-2xl border border-brand-blue/25 bg-brand-blue/5 px-4 py-3">
-                <p className="text-xs font-semibold uppercase tracking-wide text-brand-blue">
+              <div className={`${snapshotCardClasses} mt-5 space-y-2`}>
+                <p className={snapshotLabelClasses}>
                   Bill credit rules
                 </p>
-                <ul className="list-disc space-y-1 pl-5 text-xs text-brand-navy">
+                <ul className="list-disc space-y-1 pl-5 text-xs text-brand-cyan/80">
                   {billCreditRulesSummary.map((rule: any, index: number) => {
                     const creditAmount = toNumber(rule.creditAmountCents);
                     return (
@@ -1171,15 +1176,15 @@ export function CurrentRateDetailsForm({
             ) : null}
 
             {savedPlan.notes ? (
-              <div className="mt-5 rounded-2xl border border-brand-cyan/20 bg-brand-navy/5 px-4 py-3 text-sm text-brand-navy">
-                <p className="text-xs font-semibold uppercase tracking-wide text-brand-navy/70">
+              <div className={`${snapshotCardClasses} mt-5 text-sm`}>
+                <p className={snapshotLabelClasses}>
                   Notes
                 </p>
-                <p className="mt-1 whitespace-pre-wrap text-brand-slate">{savedPlan.notes}</p>
+                <p className="mt-1 whitespace-pre-wrap text-brand-cyan/80">{savedPlan.notes}</p>
               </div>
             ) : null}
 
-            <div className="mt-5 flex flex-wrap items-center gap-3 text-xs text-brand-slate">
+            <div className="mt-5 flex flex-wrap items-center gap-3 text-xs text-brand-cyan/70">
               <span>
                 Last updated: <LocalTime value={savedPlan.updatedAt} />
               </span>
@@ -1221,7 +1226,7 @@ export function CurrentRateDetailsForm({
                   Update plan details
                 </button>
               </div>
-              <div className="text-xs text-brand-slate">
+              <div className="text-xs text-brand-cyan/80">
                 Need to make changes? Update your info or reconfirm once usage reconnects.
               </div>
             </div>
