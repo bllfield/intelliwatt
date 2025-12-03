@@ -15,23 +15,23 @@ enum RateType {
 }
 
 model User {
-  id                String             @id @default(cuid())
-  email             String             @unique
-  createdAt         DateTime           @default(now())
-  referredById      String?
-  commissions       CommissionRecord[]
-  testimonials      TestimonialSubmission[]
-  entries           Entry[]            @relation("UserEntries")
-  jackpotPayouts    JackpotPayout[]
-  referrals         Referral[]         @relation("UserReferrals")
-  incomingReferrals Referral[]         @relation("UserReferralInvitee")
-  sessions          Session[]
-  usage             UsageData[]
-  profile           UserProfile?
-  utilityPlans      UtilityPlan[]
-  smtAuthorizations SmtAuthorization[]
+  id                 String                  @id @default(cuid())
+  email              String                  @unique
+  createdAt          DateTime                @default(now())
+  referredById       String?
+  commissions        CommissionRecord[]
+  testimonials       TestimonialSubmission[]
+  entries            Entry[]                 @relation("UserEntries")
+  jackpotPayouts     JackpotPayout[]
+  referrals          Referral[]              @relation("UserReferrals")
+  incomingReferrals  Referral[]              @relation("UserReferralInvitee")
+  sessions           Session[]
+  usage              UsageData[]
+  profile            UserProfile?
+  utilityPlans       UtilityPlan[]
+  smtAuthorizations  SmtAuthorization[]
   manualUsageUploads ManualUsageUpload[]
-  entryExpiryDigests EntryExpiryDigest[] @relation("EntryExpiryDigestUser")
+  entryExpiryDigests EntryExpiryDigest[]     @relation("EntryExpiryDigestUser")
 }
 
 model UserProfile {
@@ -165,17 +165,17 @@ model UtilityPlan {
 }
 
 model Referral {
-  id            String   @id @default(cuid())
-  referredById  String
-  referredEmail String
+  id             String         @id @default(cuid())
+  referredById   String
+  referredEmail  String
   referredUserId String?
   status         ReferralStatus @default(PENDING)
   qualifiedAt    DateTime?
   entryAwardedAt DateTime?
-  createdAt     DateTime @default(now())
-  referredBy    User     @relation("UserReferrals", fields: [referredById], references: [id])
-  referredUser  User?    @relation("UserReferralInvitee", fields: [referredUserId], references: [id])
-  entry         Entry?   @relation("ReferralEntry")
+  createdAt      DateTime       @default(now())
+  referredBy     User           @relation("UserReferrals", fields: [referredById], references: [id])
+  referredUser   User?          @relation("UserReferralInvitee", fields: [referredUserId], references: [id])
+  entry          Entry?         @relation("ReferralEntry")
 
   @@index([referredById])
   @@index([referredEmail])
@@ -184,34 +184,34 @@ model Referral {
 }
 
 model Entry {
-  id        String   @id @default(cuid())
-  userId    String
-  type      String
-  amount    Int
-  createdAt DateTime @default(now())
-  user      User     @relation("UserEntries", fields: [userId], references: [id])
-  houseId   String?
-  house     HouseAddress? @relation(fields: [houseId], references: [id])
-  referralId String? @unique
-  referral   Referral?    @relation("ReferralEntry", fields: [referralId], references: [id])
-  status        EntryStatus @default(ACTIVE)
-  expiresAt     DateTime?
-  lastValidated DateTime?
+  id               String             @id @default(cuid())
+  userId           String
+  type             String
+  amount           Int
+  createdAt        DateTime           @default(now())
+  user             User               @relation("UserEntries", fields: [userId], references: [id])
+  houseId          String?
+  house            HouseAddress?      @relation(fields: [houseId], references: [id])
+  referralId       String?            @unique
+  referral         Referral?          @relation("ReferralEntry", fields: [referralId], references: [id])
+  status           EntryStatus        @default(ACTIVE)
+  expiresAt        DateTime?
+  lastValidated    DateTime?
   expirationReason String?
-  manualUsageId String?
-  manualUsage   ManualUsageUpload? @relation("EntryManualUsage", fields: [manualUsageId], references: [id])
-  statusLogs    EntryStatusLog[]
-  expiryDigest  EntryExpiryDigest? @relation("EntryExpiryDigestEntry")
+  manualUsageId    String?
+  manualUsage      ManualUsageUpload? @relation("EntryManualUsage", fields: [manualUsageId], references: [id])
+  statusLogs       EntryStatusLog[]
+  expiryDigest     EntryExpiryDigest? @relation("EntryExpiryDigestEntry")
 
+  @@unique([manualUsageId])
   @@index([houseId])
   @@index([expiresAt])
   @@index([status])
   @@index([referralId])
-  @@unique([manualUsageId])
 }
 
 model EntryStatusLog {
-  id        String      @id @default(cuid())
+  id        String       @id @default(cuid())
   entryId   String
   previous  EntryStatus?
   next      EntryStatus
@@ -224,18 +224,18 @@ model EntryStatusLog {
 }
 
 model ManualUsageUpload {
-  id        String   @id @default(cuid())
-  userId    String
-  houseId   String?
-  source    String   @default("manual")
-  uploadedAt DateTime @default(now())
-  expiresAt DateTime
-  metadata  Json?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  user      User     @relation(fields: [userId], references: [id])
-  house     HouseAddress? @relation(fields: [houseId], references: [id])
-  entry     Entry?    @relation("EntryManualUsage")
+  id         String        @id @default(cuid())
+  userId     String
+  houseId    String?
+  source     String        @default("manual")
+  uploadedAt DateTime      @default(now())
+  expiresAt  DateTime
+  metadata   Json?
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+  user       User          @relation(fields: [userId], references: [id])
+  house      HouseAddress? @relation(fields: [houseId], references: [id])
+  entry      Entry?        @relation("EntryManualUsage")
 
   @@index([userId])
   @@index([houseId])
@@ -243,37 +243,37 @@ model ManualUsageUpload {
 }
 
 model NormalizedCurrentPlan {
-  id                  String   @id @default(cuid())
+  id                  String    @id @default(cuid())
   userId              String?
   homeId              String?
   providerName        String
   planName            String
   rateType            RateType
   rateStructure       Json
-  flatEnergyRateCents Decimal? @db.Decimal(8, 4)
-  baseMonthlyFeeCents Decimal? @db.Decimal(10, 2)
+  flatEnergyRateCents Decimal?  @db.Decimal(8, 4)
+  baseMonthlyFeeCents Decimal?  @db.Decimal(10, 2)
   termLengthMonths    Int?
   contractEndDate     DateTime?
-  sourceModule        String   @default("current-plan")
+  sourceModule        String    @default("current-plan")
   sourceEntryId       String
   sourceUpdatedAt     DateTime?
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
+  @@unique([sourceModule, sourceEntryId])
   @@index([userId])
   @@index([homeId])
-  @@unique([sourceModule, sourceEntryId])
 }
 
 model EntryExpiryDigest {
-  entryId    String   @id
+  entryId    String      @id
   userId     String
   entryType  String
   status     EntryStatus
   expiresAt  DateTime?
-  recordedAt DateTime @default(now())
-  entry      Entry    @relation("EntryExpiryDigestEntry", fields: [entryId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  user       User     @relation("EntryExpiryDigestUser", fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  recordedAt DateTime    @default(now())
+  entry      Entry       @relation("EntryExpiryDigestEntry", fields: [entryId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  user       User        @relation("EntryExpiryDigestUser", fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
 
   @@index([userId])
   @@index([status])
@@ -305,20 +305,21 @@ enum SmtEmailConfirmationStatus {
 }
 
 model TestimonialSubmission {
-  id             String             @id @default(cuid())
+  id             String            @id @default(cuid())
   userId         String
   content        String
-  status         TestimonialStatus  @default(PENDING)
-  submittedAt    DateTime           @default(now())
-  updatedAt      DateTime           @updatedAt
+  status         TestimonialStatus @default(PENDING)
+  submittedAt    DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
   publishedAt    DateTime?
   entryAwardedAt DateTime?
   source         String?
-  user           User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user           User              @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([status])
   @@index([userId])
 }
+
 model Session {
   id        String   @id @default(cuid())
   userId    String
@@ -329,12 +330,12 @@ model Session {
 }
 
 model MagicLinkToken {
-  id        String   @id @default(cuid())
-  email     String
-  token     String   @unique
-  expiresAt DateTime
-  createdAt DateTime @default(now())
-  used      Boolean  @default(false)
+  id            String   @id @default(cuid())
+  email         String
+  token         String   @unique
+  expiresAt     DateTime
+  createdAt     DateTime @default(now())
+  used          Boolean  @default(false)
   referralToken String?
 }
 
@@ -544,15 +545,44 @@ model HouseAddress {
   archivedAt            DateTime?
   label                 String?          @db.VarChar(64)
 
-  smtAuthorizations SmtAuthorization[]
-  entries           Entry[]
+  smtAuthorizations  SmtAuthorization[]
+  entries            Entry[]
   manualUsageUploads ManualUsageUpload[]
+  greenButtonUploads GreenButtonUpload[]
 
   @@index([placeId])
   @@index([addressState, addressZip5])
   @@index([esiid])
   @@index([userEmail])
   @@index([userId, isPrimary])
+}
+
+model GreenButtonUpload {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  house   HouseAddress @relation(fields: [houseId], references: [id])
+  houseId String
+
+  utilityName   String?
+  accountNumber String?
+
+  fileName      String
+  fileType      String
+  fileSizeBytes Int?
+
+  storageKey String
+
+  dateRangeStart  DateTime?
+  dateRangeEnd    DateTime?
+  intervalMinutes Int?
+
+  parseStatus  String?
+  parseMessage String?
+
+  @@index([houseId])
+  @@index([dateRangeStart, dateRangeEnd])
 }
 
 model RawSmtFile {
@@ -707,11 +737,11 @@ model SmtAuthorization {
   smtBackfillCompletedAt DateTime?
   smtLastSyncAt          DateTime?
 
-  consentTextVersion String? @db.VarChar(50)
-  consentIp          String? @db.VarChar(64)
-  consentUserAgent   String? @db.VarChar(255)
-  archivedAt         DateTime?
-  revokedReason      String? @db.VarChar(100)
+  consentTextVersion      String?                    @db.VarChar(50)
+  consentIp               String?                    @db.VarChar(64)
+  consentUserAgent        String?                    @db.VarChar(255)
+  archivedAt              DateTime?
+  revokedReason           String?                    @db.VarChar(100)
   emailConfirmationStatus SmtEmailConfirmationStatus @default(PENDING)
   emailConfirmationAt     DateTime?
 

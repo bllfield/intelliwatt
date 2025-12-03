@@ -8,10 +8,14 @@ import SmtAddressCaptureCard from "@/components/smt/SmtAddressCaptureCard";
 import SmtManualFallbackCard from "@/components/smt/SmtManualFallbackCard";
 import DashboardHero from "@/components/dashboard/DashboardHero";
 import LocalTime from "@/components/LocalTime";
+import GreenButtonUtilitiesCard from "@/components/dashboard/GreenButtonUtilitiesCard";
 
 function GreenButtonInstructions() {
   return (
-    <div className="rounded-3xl border-2 border-brand-navy bg-white p-6 shadow-[0_24px_70px_rgba(16,46,90,0.08)] sm:p-8">
+    <div
+      id="green-button-instructions"
+      className="rounded-3xl border-2 border-brand-navy bg-white p-6 shadow-[0_24px_70px_rgba(16,46,90,0.08)] sm:p-8"
+    >
       <div className="space-y-4 text-sm leading-relaxed text-brand-slate">
         <div>
           <h2 className="text-2xl font-semibold tracking-tight text-brand-navy">
@@ -405,6 +409,7 @@ export default async function ApiConnectPage() {
           </div>
 
           <GreenButtonInstructions />
+          <GreenButtonUtilitiesCard />
 
           {showAddressCaptureCard ? (
             <SmtAddressCaptureCard
