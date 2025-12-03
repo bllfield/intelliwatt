@@ -5,7 +5,7 @@ import { prisma } from "@/lib/db";
 import { usagePrisma } from "@/lib/db/usageClient";
 import { normalizeEmail } from "@/lib/utils/email";
 
-const MAX_UPLOAD_BYTES = 5 * 1024 * 1024; // 5 MB safety limit
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB safety limit
 
 export const dynamic = "force-dynamic";
 
@@ -55,7 +55,7 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           ok: false,
-          error: "File too large for direct upload. Please contact support for assistance.",
+          error: "File exceeds the 10 MB upload limit. Please trim the export and try again.",
         },
         { status: 413 },
       );
@@ -74,19 +74,36 @@ export async function POST(request: Request) {
         : null;
     const mimeType = file.type && file.type.length > 0 ? file.type : "application/xml";
 
-    const rawRecord = await usagePrisma.rawGreenButton.create({
-      data: {
-        homeId: house.id,
-        userId: user.id,
-        utilityName,
-        accountNumber,
-        filename: file.name,
-        mimeType,
-        sizeBytes: buffer.length,
-        content: buffer,
-        sha256,
-      },
-    });
+    let rawRecord: { id: string } | null = null;
+    try {
+      rawRecord = await usagePrisma.rawGreenButton.create({
+        data: {
+          homeId: house.id,
+          userId: user.id,
+          utilityName,
+          accountNumber,
+          filename: file.name,
+          mimeType,
+          sizeBytes: buffer.length,
+          content: buffer,
+          sha256,
+        },
+        select: { id: true },
+      });
+    } catch (error: any) {
+      if (error?.code === "P2002") {
+        const existing = await usagePrisma.rawGreenButton.findUnique({
+          where: { sha256 },
+          select: { id: true },
+        });
+        if (!existing) {
+          throw error;
+        }
+        rawRecord = existing;
+      } else {
+        throw error;
+      }
+    }
 
     const uploadRecord = await (prisma as any).greenButtonUpload.create({
       data: {

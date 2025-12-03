@@ -19,6 +19,8 @@ export default function GreenButtonHelpSection({
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [statusTone, setStatusTone] = useState<"success" | "error" | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+  const MAX_UPLOAD_MB = MAX_UPLOAD_BYTES / (1024 * 1024);
 
   useEffect(() => {
     setUtilityName(defaultUtilityName ?? "");
@@ -39,6 +41,14 @@ export default function GreenButtonHelpSection({
       setSelectedFile(null);
       return;
     }
+
+     if (file.size > MAX_UPLOAD_BYTES) {
+       setStatusTone("error");
+       setStatusMessage(`File exceeds the ${MAX_UPLOAD_MB} MB limit. Please export a smaller window.`);
+       event.target.value = "";
+       setSelectedFile(null);
+       return;
+     }
 
     setStatusTone(null);
     setStatusMessage(null);
@@ -64,34 +74,104 @@ export default function GreenButtonHelpSection({
       setStatusTone(null);
       setStatusMessage("Uploading your usage file…");
 
-      const formData = new FormData();
-      formData.append("file", selectedFile);
-      formData.append("homeId", houseAddressId);
-      if (utilityName.trim().length > 0) {
-        formData.append("utilityName", utilityName.trim());
-      }
-      if (accountNumber.trim().length > 0) {
-        formData.append("accountNumber", accountNumber.trim());
+      const trimmedUtility = utilityName.trim();
+      const trimmedAccount = accountNumber.trim();
+      let uploadCompleted = false;
+
+      const attemptDropletUpload = async () => {
+        try {
+          const ticketRes = await fetch("/api/green-button/upload-ticket", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ homeId: houseAddressId }),
+          });
+
+          if (!ticketRes.ok) {
+            return false;
+          }
+
+          const ticket = await ticketRes.json();
+          if (!ticket?.ok || !ticket?.uploadUrl || !ticket?.payload || !ticket?.signature) {
+            return false;
+          }
+
+          const dropletForm = new FormData();
+          dropletForm.append("file", selectedFile);
+          dropletForm.append("payload", ticket.payload);
+          dropletForm.append("signature", ticket.signature);
+          if (trimmedUtility.length > 0) {
+            dropletForm.append("utilityName", trimmedUtility);
+          }
+          if (trimmedAccount.length > 0) {
+            dropletForm.append("accountNumber", trimmedAccount);
+          }
+
+          const dropletResponse = await fetch(ticket.uploadUrl as string, {
+            method: "POST",
+            body: dropletForm,
+            credentials: "omit",
+          });
+
+          if (!dropletResponse.ok) {
+            const data = await dropletResponse.json().catch(() => ({}));
+            const detail =
+              typeof data?.error === "string"
+                ? data.error
+                : "Upload failed on the secure uploader. Falling back to direct upload.";
+            setStatusTone("error");
+            setStatusMessage(detail);
+            return false;
+          }
+
+          uploadCompleted = true;
+          return true;
+        } catch (err) {
+          console.error("[GreenButtonHelpSection] droplet upload failed", err);
+          return false;
+        }
+      };
+
+      const dropletSuccess = await attemptDropletUpload();
+      if (dropletSuccess) {
+        setStatusTone("success");
+        setStatusMessage("Upload received! We’ll start parsing your usage data shortly.");
+        setSelectedFile(null);
+        if (fileInputRef.current) {
+          fileInputRef.current.value = "";
+        }
+        uploadCompleted = true;
       }
 
-      const response = await fetch("/api/green-button/upload", {
-        method: "POST",
-        body: formData,
-      });
+      if (!uploadCompleted) {
+        const fallbackForm = new FormData();
+        fallbackForm.append("file", selectedFile);
+        fallbackForm.append("homeId", houseAddressId);
+        if (trimmedUtility.length > 0) {
+          fallbackForm.append("utilityName", trimmedUtility);
+        }
+        if (trimmedAccount.length > 0) {
+          fallbackForm.append("accountNumber", trimmedAccount);
+        }
 
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        const detail = typeof data?.error === "string" ? data.error : "Upload failed. Please try again.";
-        setStatusTone("error");
-        setStatusMessage(detail);
-        return;
-      }
+        const response = await fetch("/api/green-button/upload", {
+          method: "POST",
+          body: fallbackForm,
+        });
 
-      setStatusTone("success");
-      setStatusMessage("Upload received! We’ll start parsing your usage data shortly.");
-      setSelectedFile(null);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({}));
+          const detail = typeof data?.error === "string" ? data.error : "Upload failed. Please try again.";
+          setStatusTone("error");
+          setStatusMessage(detail);
+          return;
+        }
+
+        setStatusTone("success");
+        setStatusMessage("Upload received! We’ll start parsing your usage data shortly.");
+        setSelectedFile(null);
+        if (fileInputRef.current) {
+          fileInputRef.current.value = "";
+        }
       }
     } catch (error) {
       console.error("[GreenButtonHelpSection] upload failed", error);
@@ -203,7 +283,7 @@ export default function GreenButtonHelpSection({
           <form className="space-y-4" onSubmit={handleSubmit}>
             <div className="flex flex-col gap-2">
               <label htmlFor="green-button-file" className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-navy">
-                File (XML or CSV)
+                File (XML or CSV · up to {MAX_UPLOAD_MB} MB)
               </label>
               <input
                 id="green-button-file"
