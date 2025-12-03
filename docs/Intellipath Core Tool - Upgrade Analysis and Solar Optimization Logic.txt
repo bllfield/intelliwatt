@@ -1,0 +1,1382 @@
+# Intellipath Core Tool: Upgrade Analysis & Solar Optimization System
+## Complete Logic and Implementation Guide
+
+---
+
+## EXECUTIVE SUMMARY
+
+The Intellipath tool is a comprehensive energy optimization platform that:
+
+1. **Analyzes current home energy consumption** using Green Button data or manual monthly/annual entries
+2. **Evaluates upgrade options** (insulation, windows, HVAC, appliances, solar)
+3. **Calculates utility rates** and current annual costs
+4. **Models solar production** based on location, system size, and weather
+5. **Performs ROI analysis** to determine which upgrades make financial sense
+6. **Optimizes battery usage** for cost savings with demand/export credits
+7. **Provides personalized recommendations** ranked by payback period
+
+The CORE GOAL: Determine the cheapest path to meet a home's energy needs long-term (buying current utility vs. upgrading vs. going solar vs. hybrid)
+
+---
+
+## SECTION 1: DATA INPUT PIPELINE
+
+### 1.1 Consumption Data Ingestion
+
+The tool accepts consumption data in THREE formats:
+
+#### FORMAT A: Green Button XML/CSV
+- Source: Utility company (standard format: meter reading at regular intervals)
+- Structure: timestamp, consumption (kWh), duration (seconds, usually 900 = 15 minutes)
+- Used for: Baseline actual consumption analysis
+- Function: parse_green_button_xml() → normalized 15-minute intervals
+- Database: consumption_data table (home_id, timestamp, consumption, interval_minutes)
+
+#### FORMAT B: Manual Monthly Input (User Entry)
+- Source: User provides 12 months of utility bills (kWh totals only)
+- Structure: {month: 1-12, total: kWh}
+- Used for: When Green Button not available
+- Function: monthly_to_intervals() → simulated 15-min intervals with weather normalization
+- Database: manual_monthly_input table
+- Result stored: consumption_data table (after conversion)
+
+#### FORMAT C: Manual Annual Input
+- Source: User provides one annual total + start/end date
+- Structure: {annual_usage: kWh, start_date, end_date}
+- Used for: Quick estimate without monthly breakdown
+- Function: annual_to_intervals() → daily distribution across year
+- Database: manual_annual table
+- Result: consumption_data table (after normalization)
+
+### 1.2 Bill Information Capture
+
+To calculate current utility costs:
+
+INPUTS REQUIRED:
+    - Last month bill amount ($)
+    - Last month consumption (kWh)
+    - Current utility rate ($/kWh) — calculated from above, OR
+    - Utility rate plan details (TOU pricing, tiered, flat, etc.)
+
+API Endpoint: POST /api/save_bill_info
+    {
+        home_id: "uuid",
+        last_bill_amount: 150.00,
+        last_bill_kwh: 900
+    }
+
+This enables:
+    - Current annual cost = (annual_kwh / last_bill_kwh) * last_bill_amount
+    - Average rate = last_bill_amount / last_bill_kwh
+
+LIMITATIONS:
+    - Doesn't account for demand charges, taxes, rider fees
+    - TOU rates not modeled (same rate used for all hours)
+    - Export credits (solar) assumed to be 50-70% of import rate
+
+---
+
+## SECTION 2: HOME PROFILE & UPGRADE OPTIONS
+
+### 2.1 Home Characteristics Inventory
+
+Stored in: home_details table (one record per home)
+
+THERMAL ENVELOPE:
+    - square_feet (numeric) — home size, directly affects load
+    - home_age (years) — older = less efficient
+    - insulation_type (string): poor, standard, good, excellent, fiberglass, cellulose, spray_foam
+    - window_type (string): single, double, triple
+    - foundation (string): crawl space, basement, slab (affects thermal loss)
+    - stories (integer): affects HVAC ductwork efficiency
+
+HVAC SYSTEM:
+    - heating_type (string): electric, gas, heat_pump
+    - heat_pump_type (string): standard, with_heat_strips
+    - cooling_system (string): central AC, window units, evaporative
+    - thermostats (numeric): thermostat age affects efficiency
+
+OCCUPANCY & BEHAVIOR:
+    - occupants_home (integer): retired/work-from-home person count
+    - occupants_work (integer): typical 8-hour absence
+    - occupants_school (integer): typical 6-hour absence
+    - summer_temp (°F): cooling setpoint
+    - winter_temp (°F): heating setpoint
+
+ENERGY FEATURES:
+    - led_lights (boolean): 20% reduction if true
+    - smart_thermostat (boolean): 10% reduction if true
+    - solar_panels (boolean): existing solar capacity
+    - battery_system (boolean): existing battery storage
+
+### 2.2 Appliance Inventory
+
+Stored in: appliance_details table (multiple records per home)
+
+CAPTURED VIA VISION AI:
+    - appliance_type (string): HVAC, water heater, refrigerator, washer, dryer, dishwasher, etc.
+    - brand (string): Carrier, Trane, GE, etc.
+    - year_manufactured (integer): age of unit
+    - energy_star (boolean): certified efficient
+    - estimated_kwh_per_year (float): annual consumption (calculated or extracted from label)
+    - condition (string): excellent, good, fair, poor
+
+CAPTURED BY IMAGE ANALYSIS:
+    - model_number (string): extracted from nameplate
+    - wattage (float): peak power consumption
+    - SEER rating (HVAC): Seasonal Energy Efficiency Ratio
+    - EER rating (HVAC): Energy Efficiency Ratio
+    - HSPF rating (heat pump): Heating Seasonal Performance Factor
+    - EF rating (water heater): Energy Factor
+    - CEE tier (appliance): Consortium for Energy Efficiency tier
+
+The system uses Google Vision API to read appliance nameplates and extract:
+    - Serial number (for warranty verification)
+    - Energy label data
+    - Installation date (if visible)
+    - Model specifics
+
+---
+
+## SECTION 3: UPGRADE OPTION EVALUATION
+
+### 3.1 Available Upgrade Categories
+
+The tool evaluates these upgrade paths:
+
+#### UPGRADE CATEGORY 1: Building Envelope
+PURPOSE: Reduce heating/cooling load
+
+OPTION 1A: Insulation Upgrade
+    Current State → Target State:
+        poor (R-10) → excellent (R-30+)
+        standard (R-15) → excellent (R-30+)
+    
+    Energy Reduction: 15-30%
+    Cost Range: $5,000-$15,000 (depends on home size)
+    Installation: 3-7 days
+    Payback Period: 12-25 years
+    
+OPTION 1B: Window Replacement
+    Current State → Target State:
+        Single pane (U=0.85) → Triple pane (U=0.20)
+        Double pane (U=0.35) → Triple pane (U=0.20)
+    
+    Energy Reduction: 10-20% (on heating/cooling)
+    Cost Range: $500-$1,500 per window, $8,000-$25,000 total
+    Payback Period: 15-30 years
+    
+OPTION 1C: Air Sealing
+    PURPOSE: Eliminate drafts and air leaks
+    Energy Reduction: 5-15%
+    Cost: $500-$2,000
+    Payback Period: 2-5 years (FASTEST ROI)
+    
+OPTION 1D: Attic/Foundation Insulation
+    PURPOSE: Targeted high-impact areas
+    Energy Reduction: 8-12%
+    Cost: $1,500-$4,000
+    Payback Period: 8-15 years
+
+#### UPGRADE CATEGORY 2: HVAC System Replacement
+PURPOSE: Reduce heating/cooling energy consumption
+
+OPTION 2A: Furnace Replacement (Gas → High-Efficiency Gas)
+    Current: AFUE 75-80%
+    New: AFUE 95%+
+    Energy Reduction: 15-20%
+    Cost: $5,000-$8,000
+    Payback Period: 10-15 years
+    
+OPTION 2B: Heat Pump Installation (Gas/Electric → Heat Pump)
+    Current: Electric coil or gas furnace
+    New: Heat pump (COP 3-4 in standard conditions)
+    Energy Reduction: 30-50% (heating/cooling)
+    Cost: $7,000-$12,000
+    Payback Period: 8-15 years
+    Additional benefit: Cooling upgrade included
+    
+OPTION 2C: Heat Pump with Heat Strips
+    PURPOSE: Cold climate homes that need backup heat
+    Heat strips kick in when temp drops below ~35°F
+    Efficiency: Still 40-50% better than all-electric
+    Cost: $9,000-$14,000
+    Payback Period: 10-18 years
+    
+OPTION 2D: Air Conditioner Replacement
+    If currently using window units or old central AC
+    Current: SEER 10-13
+    New: SEER 18-22
+    Energy Reduction: 25-35% (cooling load)
+    Cost: $3,500-$6,000
+    Payback Period: 8-12 years
+
+#### UPGRADE CATEGORY 3: Water Heating
+PURPOSE: Reduce water heating energy (typically 15-25% of total)
+
+OPTION 3A: Tank Water Heater Upgrade (Gas)
+    Current: 0.55-0.60 Energy Factor
+    New: 0.70+ Energy Factor
+    Energy Reduction: 15-20%
+    Cost: $1,200-$1,800
+    Payback Period: 10-15 years
+    
+OPTION 3B: Tankless Water Heater (Gas)
+    Current: Tank water heater
+    New: On-demand tankless
+    Energy Reduction: 20-30%
+    Cost: $2,000-$3,500
+    Payback Period: 8-12 years
+    Caveat: May require gas line upgrade
+    
+OPTION 3C: Heat Pump Water Heater
+    Current: Electric resistance or gas
+    New: Heat pump with COP ~2.5
+    Energy Reduction: 40-50%
+    Cost: $3,500-$5,500
+    Payback Period: 8-12 years
+    Installation: Requires floor space (not closet-friendly)
+    
+OPTION 3D: Solar Water Heater
+    Current: Any
+    New: Evacuated tube or flat-plate collector + backup tank
+    Energy Reduction: 50-80%
+    Cost: $4,000-$7,000
+    Payback Period: 8-15 years
+    Roof requirement: South-facing, unshaded
+
+#### UPGRADE CATEGORY 4: Lighting & Plug Loads
+PURPOSE: Reduce non-heating/cooling consumption
+
+OPTION 4A: LED Lighting Retrofit
+    Current: Incandescent/CFL
+    New: LED throughout
+    Energy Reduction: 75% of lighting load (~3-5% of total)
+    Cost: $800-$2,000 (whole house)
+    Payback Period: 2-4 years
+    Quick win: Recommend for all homes
+    
+OPTION 4B: Smart Thermostat Installation
+    Current: Manual or programmable
+    New: Smart thermostat with learning/remote control
+    Energy Reduction: 10-15% of heating/cooling
+    Cost: $250-$400 installed
+    Payback Period: 1-2 years
+    Quick win: Recommend for all homes
+
+#### UPGRADE CATEGORY 5: Appliance Replacement
+PURPOSE: Reduce plug load consumption
+
+APPLIANCES ANALYZED (for individual replacement):
+    - HVAC (covered separately above)
+    - Water heater (covered separately above)
+    - Refrigerator: 0.9 kWh/day (old) → 0.5 kWh/day (new ENERGY STAR)
+    - Washer/Dryer: 3-5 kWh per load (old) → 1.5-2 kWh (new)
+    - Dishwasher: 2-3 kWh per load (old) → 1.2 kWh (new)
+    - Pool pump: 1-3 kWh/day (can benefit from variable-speed)
+
+GENERAL PATTERN:
+    Old appliance (10+ years): Assumes lower ENERGY STAR standards
+    New ENERGY STAR appliance: 20-40% more efficient
+    
+    Cost: Varies by appliance type ($500-$3,000)
+    Payback Period: 8-15 years (longer than envelope or HVAC)
+    
+    Note: Recommend only if appliance is reaching end-of-life anyway
+
+#### UPGRADE CATEGORY 6: Solar Photovoltaic System
+PURPOSE: Generate renewable energy on-site
+
+OPTION 6A: Standard Grid-Tied Solar (No Battery)
+    Capacity Options: 3 kW, 5 kW, 7.5 kW, 10 kW, 12.5 kW
+    
+    Production Calculation:
+        Annual Production = System Size (kW) × Capacity Factor × 8760 hours
+        
+        Capacity Factor by region (typical):
+            Southwest (Arizona, Nevada): 20-23%
+            Southeast (Florida, Georgia): 15-18%
+            Mid-Atlantic (Maryland, Virginia): 14-17%
+            Pacific Northwest: 12-15%
+            Northeast (New England): 12-14%
+        
+        Example: 7.5 kW system in Maryland
+            Production = 7.5 × 0.16 × 8760 = 10,512 kWh/year
+    
+    Cost: $2.50-$3.00 per watt (installed)
+        7.5 kW = $18,750-$22,500
+        Includes panels, inverter, labor, permits
+        
+    Incentives:
+        Federal ITC: 30% tax credit (2024-2025)
+        State rebates: vary by location ($0-$0.50/watt)
+        Performance-based incentives: some states pay per kWh
+        
+        Effective cost after 30% ITC = $13,125-$15,750
+    
+    Financial Model:
+        Annual Savings = Annual Production × (Import Rate - Export Rate)
+            7.5 kW @ $0.30/kWh import, $0.05/kWh export:
+            = 10,512 × ($0.30 - 0.05) = $2,628/year
+        
+        Payback Period (before accounting for degradation):
+            = System Cost / Annual Savings
+            = $18,000 / $2,628 = 6.8 years
+        
+        Expected System Life: 25-30 years
+        Total 25-year value: $65,700 in savings
+        Degradation: ~0.5% per year (system produces 87% at year 25)
+
+OPTION 6B: Solar with Battery Storage
+    Add Tesla Powerwall (or similar): 13.5 kWh per battery
+    
+    Additional Cost: $6,000-$8,000 per battery (installed)
+    
+    Enhanced Financial Model:
+        - Shift consumption from peak hours to off-peak (time-shifting value)
+        - Backup power value (avoid outage costs)
+        - Potential demand charge reduction
+        
+        Example with one Powerwall:
+            Additional annual savings = $300-$600 (from TOU arbitrage)
+            Payback period for battery alone: 12-15 years
+    
+    Payback analysis for battery:
+        If utility has TOU rates:
+            Off-peak rate: $0.15/kWh
+            Peak rate: $0.45/kWh
+            Shift value: ($0.45 - $0.15) × shifted kWh
+            
+            1,800 kWh shifted × $0.30/kWh = $540/year additional savings
+            Payback: $7,500 / $540 = 13.9 years
+        
+        IMPORTANT: Battery cost rarely justifies itself on energy arbitrage alone
+        Recommended when:
+            - Utility outages frequent (backup value)
+            - Home has special needs (medical equipment, work-from-home)
+            - Demand charges significant
+            - Incentives available (rebates, tax credits)
+
+OPTION 6C: Solar + HVAC Heat Pump Combo
+    Combined strategy to maximize solar utilization
+    
+    Logic:
+        Traditional all-electric home: High consumption, harder to match with solar
+        Heat pump: Lower consumption, easier match
+        
+        Example calculation:
+            Current home: 10,000 kWh/year (old electric furnace + AC)
+            With heat pump: 6,500 kWh/year (35% reduction)
+            
+            6 kW solar produces: 9,000 kWh/year (depending on location)
+            Result: Produces MORE than needed, high export value
+            
+        Financial:
+            Heat pump cost: $8,000
+            Solar cost: $18,000
+            Total: $26,000 - $7,800 (30% ITC) = $18,200
+            
+            Annual savings:
+                - Heat pump reduces load: 3,500 × $0.30 = $1,050
+                - Solar cancels most remaining: 6,500 × $0.25 avg = $1,625
+                Total: $2,675/year
+            
+            Payback: $18,200 / $2,675 = 6.8 years
+            
+        This combo often has BETTER payback than either alone
+
+OPTION 6D: Maximize Solar (Oversized System)
+    Purpose: Cover 100% of consumption + export excess for credits
+    
+    Logic:
+        Standard rule: Size solar to = 100% of expected annual consumption
+        Oversized rule: Size solar to 120-130% of expected consumption
+        
+        Rationale:
+            - Degradation over time (system produces less each year)
+            - Seasonal mismatch (winter production < winter consumption in cold climates)
+            - Export credits provide value (even if lower than import rate)
+        
+        Example:
+            Home needs 10,000 kWh/year
+            Standard system: 6 kW (produces 10,000)
+            Oversized system: 8 kW (produces 13,500)
+            
+            Extra production: 3,500 kWh × $0.05 (export rate) = $175/year
+            Extra cost: 33% more system = +$6,000
+            Payback for extra panels: $6,000 / $175 = 34.3 years
+            
+            NOT RECOMMENDED unless:
+            - High export rates (net metering with good rates)
+            - Expecting future load increase (EV, pool pump)
+            - Energy independence goal (aesthetic preference over ROI)
+
+---
+
+## SECTION 4: COST-BENEFIT ANALYSIS ENGINE
+
+### 4.1 Annual Cost Calculation
+
+The core financial analysis compares three scenarios:
+
+#### SCENARIO A: Current State (Do Nothing)
+
+Annual Cost (Current) = Annual Consumption × Current Utility Rate
+
+Calculation:
+    IF bill information provided:
+        Current Rate = Last Bill $ / Last Bill kWh
+        Annual Consumption = estimated from Green Button / Manual entry
+        Annual Cost = Annual Consumption × Current Rate
+    
+    ELSE:
+        Use average US rate (~$0.14/kWh) or state average
+        Annual Cost = Annual Consumption × $0.14
+
+Example:
+    Home uses 12,000 kWh/year
+    Current rate: $0.28/kWh (includes demand charges averaged)
+    Annual Cost = 12,000 × $0.28 = $3,360
+
+INCLUDE rate escalation for multi-year analysis:
+    Utility rates typically increase 2-3% per year
+    5-year cost = Year 1 + Year 2 (×1.03) + Year 3 (×1.03²) ... Year 5
+    25-year cost = Sum of Year 1 through Year 25 with annual 2.5% escalation
+
+#### SCENARIO B: Upgrade Only (No Solar)
+
+Annual Cost (with Upgrade) = Reduced Consumption × Current Rate
+
+STEPS:
+1. Estimate energy reduction from upgrade
+   Example: Heat pump reduces heating load by 35%
+   - Heating load = 4,000 kWh/year (40% of total)
+   - Reduction = 4,000 × 0.35 = 1,400 kWh/year
+   - New annual consumption = 12,000 - 1,400 = 10,600 kWh
+
+2. Calculate new annual cost
+   New Annual Cost = 10,600 × $0.28 = $2,968
+   Annual Savings = $3,360 - $2,968 = $392/year
+
+3. Account for maintenance/degradation
+   - HVAC systems: +$200-$400/year for service
+   - Panels: +$100-$200/year for cleaning (rarely needed)
+   - Efficiency improvements: minimal O&M
+
+4. Calculate simple payback period
+   Payback = Upgrade Cost / Annual Savings
+   Example: Heat pump cost $8,000, saves $392/year
+   Payback = $8,000 / $392 = 20.4 years
+
+5. Calculate 25-year net present value (NPV)
+   
+   Discount rate (typical): 5% per year (time value of money)
+   
+   NPV = Sum of (Annual Savings / (1 + Discount Rate)^Year) - Initial Cost
+   
+   SIMPLER APPROACH:
+   - If payback > 15 years, it's often a poor investment
+   - If payback < 7 years, it's typically good
+   - 7-15 years: Consider other factors (comfort, resilience, etc.)
+
+#### SCENARIO C: Solar System Installation
+
+Annual Cost (with Solar) = 
+    Remaining Grid Consumption × Import Rate 
+    - Exported Solar × Export Rate 
+    - Annual Loan Payment (if financed)
+
+STEPS:
+1. Calculate solar production
+   Using SolarGraf data if available (month-by-month production profile):
+   - Integrates actual irradiance data for location
+   - Accounts for shading (if user specifies)
+   - Provides 25-year degradation estimate
+   
+   OR calculated from capacity factor:
+   Annual Production = System Size × Capacity Factor × 8760 hours
+   
+   Example: 7.5 kW system, 16% capacity factor
+   Production = 7.5 × 0.16 × 8760 = 10,512 kWh/year
+
+2. Determine grid consumption pattern
+   IF battery present:
+       - Charge during peak solar production
+       - Discharge during peak rate hours
+       - Model storage efficiency (round-trip ~85-90%)
+   ELSE:
+       - Consume solar directly (no shift)
+       - Export excess production immediately
+
+3. Calculate import vs. export
+   
+   WITH BATTERY:
+       Scenario: 7.5 kW solar, 1 Powerwall (13.5 kWh), consumes 12,000 kWh/year
+       
+       Production: 10,512 kWh/year
+       Storage capacity: 13.5 kWh × 365 days = 4,927 kWh/year available
+       
+       Result:
+           - Shifted solar direct use: 4,500 kWh (from production to evening use)
+           - Remaining solar: 6,012 kWh
+           - Grid import needed: 12,000 - 4,500 - 6,012 = 1,488 kWh
+           - Grid export: 6,012 kWh (daytime excess when battery full)
+       
+       Annual Cost = (1,488 × $0.30) - (6,012 × $0.05)
+       Annual Cost = $446.40 - $300.60 = $145.80
+
+   WITHOUT BATTERY:
+       Same 7.5 kW solar, 12,000 kWh consumption
+       
+       Production: 10,512 kWh/year
+       Direct use: min(10,512, 12,000) = 10,512 kWh
+       Grid import: 12,000 - 10,512 = 1,488 kWh
+       Grid export: 0 kWh (net metering credits used to offset imports)
+       
+       Annual Cost = 1,488 × $0.30 = $446.40
+
+4. Account for incentives and financing
+   
+   FEDERAL TAX CREDIT (30% ITC):
+       System cost: $22,500
+       Tax credit: $6,750 (if homeowner owes this much in taxes)
+       Effective cost: $15,750
+   
+   STATE REBATES (example: $0.30/watt):
+       7.5 kW × $0.30 = $2,250
+       Effective cost: $22,500 - $6,750 - $2,250 = $13,500
+   
+   FINANCING OPTION (Loan, HELOC, or Lease):
+       If loan: 10-year term, 5% interest
+       Annual payment = $13,500 × (0.05 × (1.05)^10) / ((1.05)^10 - 1)
+       Annual payment ≈ $1,390/year
+       
+       Total annual cost = Grid charges + Loan payment
+       = $146 + $1,390 = $1,536/year
+
+5. Calculate payback period with solar
+   
+   Annual savings = Current cost - Solar cost
+   = $3,360 - $1,536 = $1,824/year
+   
+   Payback = System cost / Annual savings
+   = $13,500 / $1,824 = 7.4 years
+   
+   IMPORTANT: Payback improves if rates escalate
+   With 2.5% annual rate increase:
+   5-year cost = 3,360 + 3,444 + 3,530 + 3,619 + 3,710 = $17,663
+   5-year solar cost = 1,536 × 5 = $7,680
+   5-year savings = $17,663 - $7,680 = $9,983
+
+#### SCENARIO D: Combination Upgrade + Solar
+
+The most complex scenario: Combine multiple interventions
+
+Example: Heat pump + 7.5 kW solar (no battery)
+
+STEP 1: Heat pump reduces consumption
+    Current: 12,000 kWh/year (with inefficient electric furnace)
+    With heat pump: 8,500 kWh/year (35% reduction)
+
+STEP 2: Solar production
+    7.5 kW system: 10,512 kWh/year
+    Can cover: 10,512 kWh of the 8,500 kWh need
+    
+    Import: 0 kWh (actually, system overproduces)
+    Export: 10,512 - 8,500 = 2,012 kWh
+    
+    Export credit: 2,012 × $0.05 = $100.60
+
+STEP 3: Annual cost
+    Grid import: 0
+    Solar export credit: -$100.60 (credit reduces bill)
+    Net annual cost: -$100.60 (utility owes us money!)
+    
+    BUT with rate escalation:
+    - Utility rates increase 2.5%/year
+    - Export credits may NOT increase (often frozen at installation)
+    - Net benefit erodes slightly over time
+
+STEP 4: Financial analysis
+    Combined cost:
+        Heat pump: $8,000
+        Solar: $15,750 (after tax credit)
+        Total: $23,750
+    
+    Financing (10-year loan):
+        Annual payment: ~$2,440/year
+    
+    Annual cash flow:
+        Savings from heat pump: $3,360 - (8,500 × $0.28) = $1,120
+        Solar export credit: $100
+        Total benefit: $1,220
+    
+    Annual net cost: $2,440 - $1,220 = $1,220/year additional cost
+    
+    BUT payback extends beyond loan term:
+    - Year 1-10: Pay $1,220/year extra (loan payment > savings)
+    - Year 11+: Savings continue, loan paid off
+    - Year 11-25: $1,220/year savings, zero loan payment
+    - 25-year total: $1,220 × 15 = $18,300 in pure savings
+
+---
+
+## SECTION 5: ROI RANKING AND RECOMMENDATIONS
+
+### 5.1 Upgrade Prioritization Algorithm
+
+The tool ranks all feasible upgrades by payback period:
+
+```
+Algorithm: CALCULATE_PAYBACK_FOR_EACH_UPGRADE
+
+FOR EACH upgrade option:
+    1. Calculate energy reduction in kWh/year
+    2. Calculate annual savings: kWh reduction × current rate
+    3. Account for maintenance costs (subtract from savings)
+    4. Payback = upgrade cost / annual savings
+    5. Mark as "quick win" if payback < 5 years
+    6. Mark as "good investment" if 5-12 years
+    7. Mark as "questionable" if > 15 years
+    
+OUTPUT: Ranked list from shortest to longest payback
+```
+
+### 5.2 Quick Win Strategies (Payback < 5 years)
+
+These upgrades should be recommended to ALL homeowners:
+
+1. **Air Sealing & Weatherstripping**
+   - Payback: 2-4 years
+   - Cost: $500-$2,000
+   - Savings: 5-15% of heating/cooling
+   - Difficulty: DIY-friendly
+
+2. **LED Lighting Retrofit**
+   - Payback: 2-4 years
+   - Cost: $800-$2,000 (whole house)
+   - Savings: 75% of lighting energy (3-5% of total)
+   - Difficulty: Easy DIY or contractor
+
+3. **Smart Thermostat**
+   - Payback: 1-2 years
+   - Cost: $250-$400
+   - Savings: 10-15% of HVAC (4-7% of total)
+   - Difficulty: DIY installation (most models)
+
+4. **Water Heater Insulation Jacket**
+   - Payback: < 1 year
+   - Cost: $30-$100
+   - Savings: 5-10% of water heating
+   - Difficulty: DIY (2 hours)
+
+RECOMMENDATION LOGIC:
+    IF payback < 5 years:
+        IF savings > 500 kWh/year:
+            Strongly recommend
+        ELSE:
+            Recommend with note "small impact"
+
+### 5.3 Good Investment Strategies (Payback 5-12 years)
+
+These are solid upgrades if homeowner intends to stay 10+ years:
+
+1. **Heat Pump Installation** (from gas furnace)
+   - Payback: 8-12 years
+   - Annual savings: $1,000-$2,000
+   - Bonus: Adds AC cooling (if none before)
+   - Consider: Requires electrical panel upgrade ($1,500+)
+
+2. **Insulation Upgrade** (attic/walls)
+   - Payback: 8-15 years
+   - Annual savings: $400-$800
+   - Consider: Combines well with heat pump
+
+3. **High-Efficiency AC** (if current very old)
+   - Payback: 8-12 years
+   - Annual savings: $200-$600 (cooling load only)
+   - Consider: Often bundled with furnace replacement
+
+4. **Tankless Water Heater** (gas)
+   - Payback: 8-12 years
+   - Annual savings: $100-$300
+   - Consider: Longer lifespan (20 years vs. 12 years)
+
+5. **Heat Pump Water Heater**
+   - Payback: 8-12 years
+   - Annual savings: $150-$400
+   - Consider: Newer technology, installer expertise needed
+
+RECOMMENDATION LOGIC:
+    IF payback 5-10 years AND annual savings > $400:
+        Recommend if customer plans to stay 10+ years
+    ELSE IF payback 10-12 years:
+        Note as "borderline" and flag other factors:
+        - Age of current equipment
+        - Comfort improvement value
+        - Resilience/backup power benefit
+
+### 5.4 Marginal ROI Strategies (Payback 12-20 years)
+
+Not recommended unless other factors present:
+
+1. **Window Replacement**
+   - Payback: 15-30 years
+   - Annual savings: $100-$300
+   - Usually not recommended UNLESS:
+     - Windows are failing/drafty
+     - Local incentives available
+     - Customer values aesthetic upgrade
+
+2. **Insulation Retrofit** (existing walls - expensive)
+   - Payback: 15-25 years
+   - Only if combined with other major renovation
+   - Usually not economically justified
+
+3. **HVAC System Replacement** (already efficient)
+   - Payback: 15-20 years
+   - Only justify if:
+     - Current system needs replacement anyway
+     - Targeting specific efficiency tier
+
+RECOMMENDATION LOGIC:
+    IF payback > 12 years:
+        Flag as NOT RECOMMENDED (unless customer pushes for it)
+        Only mention if addressing end-of-life replacement
+
+### 5.5 Solar Timing Decision Logic
+
+When to recommend solar (ignores payback, considers other factors):
+
+RECOMMEND IMMEDIATELY IF:
+    1. Payback < 8 years, AND
+    2. South-facing roof available, AND
+    3. No significant shading, AND
+    4. Customer homeowner (not renting)
+
+RECOMMEND WITH CAUTION IF:
+    1. Payback 8-12 years:
+        - Check for tree shading (may improve over time or degrade)
+        - Confirm utility rates not changing
+        - Verify 30% ITC still available
+    2. Large roof shading (East/West only):
+        - May still make sense, but payback extends to 10-14 years
+    3. Weak net metering terms:
+        - Export credits < 50% of import rate
+        - Recommend battery to increase value
+
+RECOMMEND AFTER OTHER UPGRADES IF:
+    1. High consumption (>15,000 kWh/year):
+        - First reduce with envelope + HVAC
+        - THEN add solar to smaller remaining load
+        - Rationale: 6 kW covers 10,000 kWh vs. 9 kW needed otherwise
+        - Example savings: $4,500 in solar hardware + $3,000 install = $7,500
+
+DO NOT RECOMMEND IF:
+    1. Payback > 15 years (unless customer insists)
+    2. Renter or uncertain tenure (< 5 years planned stay)
+    3. Home in permanent shade (north-facing lot, surrounded by trees)
+    4. Roof needs replacement soon (wait until new roof installed)
+    5. Roof condition poor (< 10 years remaining life)
+    6. Local HOA prohibits solar
+
+---
+
+## SECTION 6: UTILITY RATE ANALYSIS
+
+### 6.1 Rate Structure Variations
+
+Most utilities use complex rate structures. The tool must understand:
+
+#### RATE TYPE 1: Fixed Flat Rate
+- All kWh charged at same price: $0.28/kWh
+- Simplest scenario, used in this guide's examples
+- Reality: Rare (most utilities have tiered/TOU)
+
+#### RATE TYPE 2: Tiered (Increasing Block Tariff)
+- First X kWh at lower rate, excess at higher rate
+- Example (CA):
+  - 0-100% of baseline: $0.15/kWh (baseline)
+  - 101-130% baseline: $0.25/kWh
+  - 131%+ baseline: $0.35/kWh
+
+- Solar impact: HUGE benefit
+  - Reduces consumption in high-tier
+  - Saves $0.35/kWh instead of $0.15/kWh average
+  - Example: 10,000 kWh baseline, using 12,000 total
+    Without solar: 2,000 × $0.25 + 0 × $0.35 = $500 (overage)
+    With solar (5 kW): 12,000 - 7,500 = 4,500 kWh from grid
+                        4,500 all in baseline tier = $675
+    Net: Saves $500 + $675 credit = $1,175 vs. expected $1,000
+
+#### RATE TYPE 3: Time-of-Use (TOU) Pricing
+- Price varies by hour of day
+- Example (simple TOU):
+  - 6 AM - 9 AM: Peak $0.45/kWh
+  - 9 AM - 2 PM: Mid $0.30/kWh
+  - 2 PM - 9 PM: Peak $0.45/kWh
+  - 9 PM - 6 AM: Off-peak $0.12/kWh
+
+- Battery value: HIGH
+  - Shift consumption from peak ($0.45) to off-peak ($0.12)
+  - Spread = $0.33/kWh arbitrage value
+  - 1,000 kWh shifted × $0.33 = $330/year (battery more attractive)
+
+- Solar value: COMPLEX
+  - Summer production peaks at noon (mid-rate, not peak)
+  - Winter production lower
+  - Seasonal TOU rates (example: summer higher than winter)
+  - Requires month-by-month modeling
+
+#### RATE TYPE 4: Demand Charges
+- Monthly charge based on highest 15-minute demand in month
+- Example: $10 per kW of peak demand
+- Customer with 6 kW peak demand = $60/month = $720/year
+
+- HVAC impact: HUGE
+  - HVAC startup = 3-5 kW draw at once
+  - During winter morning startup (7-9 AM), may hit monthly peak
+  - More efficient HVAC = lower demand charges
+  - Example: 5 kW HVAC peak, 4 kW heat pump peak
+    Demand savings: (5 - 4) × $10 × 12 = $120/year
+
+- Solar with battery impact: VERY HIGH
+  - Battery discharges before grid pull
+  - Flattens demand spike
+  - Example: 6 kW Powerwall supplies 3 kW of morning startup
+    Reduces peak from 5 kW to 2 kW (demand charge $120/month → $80/month)
+    Battery value = $40/month × 12 = $480/year (from demand alone!)
+
+- Recommendation: ALWAYS model demand charges in commercial/large home scenarios
+
+### 6.2 Rate Escalation Projections
+
+Utility rates increase annually (typical: 2-4% per year)
+
+IMPACT ON PAYBACK CALCULATION:
+
+Year 1 electricity cost: 10,000 kWh × $0.30 = $3,000
+Year 2 cost (2.5% increase): 10,000 kWh × $0.3075 = $3,075
+Year 5 cost: 10,000 kWh × $0.3394 = $3,394
+Year 10 cost: 10,000 kWh × $0.3864 = $3,864
+Year 25 cost: 10,000 kWh × $0.6095 = $6,095
+
+BENEFIT FOR SOLAR/BATTERY:
+- No energy escalation (solar is fixed cost)
+- Battery value increases (more valuable to shift as rates rise)
+- Payback period SHORTENS over time
+
+SIMPLE CALCULATION:
+    System cost: $15,000
+    Year 1 savings: $2,000
+    Year 5 savings: $2,400 (due to 2.5% rate escalation)
+    Year 10 savings: $2,880
+    
+    Cumulative 10-year savings: $24,000
+    Payback still ~7 years, but NPV much stronger
+
+RECOMMENDATION:
+    Always include 2-3% annual escalation in 25-year analysis
+    Payback period (nominal) may be 8 years
+    But real value (present value) may be 6-7 years equivalent
+
+---
+
+## SECTION 7: DATA STORAGE AND ANALYSIS TABLES
+
+### 7.1 Core Database Schema
+
+```
+homes
+  ├─ home_id (PK)
+  ├─ zip_code
+  ├─ last_bill_amount
+  ├─ last_bill_kwh
+  └─ created_at
+
+home_details
+  ├─ home_id (FK → homes, PK)
+  ├─ square_feet
+  ├─ home_age
+  ├─ insulation_type
+  ├─ window_type
+  ├─ heating_type
+  ├─ summer_temp
+  ├─ winter_temp
+  ├─ led_lights
+  ├─ smart_thermostat
+  └─ created_at
+
+consumption_data
+  ├─ id (PK)
+  ├─ home_id (FK → homes)
+  ├─ timestamp
+  ├─ consumption (kWh)
+  ├─ interval_minutes (15, 30, or 60)
+  ├─ unit ("kWh")
+  └─ created_at
+
+appliance_details
+  ├─ id (PK)
+  ├─ home_id (FK → homes)
+  ├─ appliance_type
+  ├─ brand
+  ├─ year_manufactured
+  ├─ energy_star
+  ├─ estimated_kwh_per_year
+  └─ created_at
+
+manual_monthly_input
+  ├─ id (PK)
+  ├─ home_id (FK → homes)
+  ├─ month (1-12)
+  ├─ total (kWh)
+  ├─ day_of_bill (billing day)
+  └─ created_at
+
+manual_annual
+  ├─ id (PK)
+  ├─ home_id (FK → homes)
+  ├─ annual_usage (kWh)
+  ├─ start_date
+  ├─ end_date
+  └─ created_at
+
+appliance_analysis
+  ├─ id (PK)
+  ├─ home_id (FK → homes)
+  ├─ analysis_data (JSON - contains all calculated upgrades/recommendations)
+  └─ created_at
+```
+
+### 7.2 Analysis Data Structure (JSON)
+
+The `appliance_analysis.analysis_data` field stores complete upgrade recommendations:
+
+```json
+{
+  "analysis_metadata": {
+    "home_id": "abc-123",
+    "analysis_date": "2024-12-03",
+    "consumption_data_source": "manual_monthly",
+    "annual_consumption_kwh": 12000,
+    "current_utility_rate": 0.28,
+    "rate_escalation_percent": 2.5,
+    "analysis_years": 25
+  },
+  
+  "current_scenario": {
+    "annual_consumption_kwh": 12000,
+    "annual_cost_year_1": 3360,
+    "annual_cost_npv_25_years": 87500,
+    "breakdown": {
+      "heating_cooling": 4800,
+      "water_heating": 2400,
+      "lighting": 600,
+      "appliances": 2400,
+      "other": 1800
+    }
+  },
+  
+  "recommended_upgrades": [
+    {
+      "rank": 1,
+      "category": "Smart Thermostat",
+      "payback_years": 1.5,
+      "cost": 400,
+      "annual_savings": 280,
+      "energy_reduction_kwh": 1000,
+      "npv_25_years": 8500,
+      "recommendation": "Strongly recommend - quick payback",
+      "priority": "immediate"
+    },
+    {
+      "rank": 2,
+      "category": "LED Lighting Retrofit",
+      "payback_years": 3.2,
+      "cost": 1500,
+      "annual_savings": 450,
+      "energy_reduction_kwh": 1500,
+      "npv_25_years": 11200,
+      "recommendation": "Strongly recommend - quick payback",
+      "priority": "immediate"
+    },
+    {
+      "rank": 3,
+      "category": "Heat Pump Installation",
+      "payback_years": 9.5,
+      "cost": 8000,
+      "annual_savings": 1100,
+      "energy_reduction_kwh": 3500,
+      "npv_25_years": 18500,
+      "maintenance_cost_annual": 150,
+      "bonus": "Adds AC cooling if none present",
+      "recommendation": "Good investment if staying 10+ years",
+      "priority": "medium"
+    },
+    {
+      "rank": 4,
+      "category": "Solar PV System (7.5 kW)",
+      "payback_years": 7.2,
+      "cost": 22500,
+      "cost_after_tax_credit": 15750,
+      "annual_savings": 2200,
+      "energy_production_kwh": 10512,
+      "npv_25_years": 52000,
+      "financing_annual_payment_10yr": 1620,
+      "recommendation": "Recommend - good ROI, requires south-facing roof",
+      "priority": "high",
+      "solar_specific": {
+        "system_size_kw": 7.5,
+        "annual_production_kwh": 10512,
+        "capacity_factor": 0.16,
+        "solar_incentive_tax_credit_percent": 30,
+        "state_rebates_total": 1500,
+        "monitoring_available": true
+      }
+    }
+  ],
+  
+  "combined_scenarios": [
+    {
+      "name": "Heat Pump + Solar",
+      "upgrades": ["Heat Pump", "Solar 7.5 kW"],
+      "total_cost": 30500,
+      "total_cost_after_incentives": 21900,
+      "annual_combined_savings": 3500,
+      "payback_years": 6.2,
+      "npv_25_years": 75000,
+      "recommendation": "Excellent long-term value - covers 85% of consumption with solar"
+    },
+    {
+      "name": "All Quick Wins + Heat Pump",
+      "upgrades": ["Smart Thermostat", "LED Retrofit", "Heat Pump"],
+      "total_cost": 9900,
+      "annual_combined_savings": 1830,
+      "payback_years": 5.4,
+      "npv_25_years": 38000,
+      "recommendation": "Strong recommendation - reduces load before adding solar"
+    }
+  ],
+  
+  "equipment_replacement_schedule": [
+    {
+      "equipment": "Furnace (Current: 15 years old)",
+      "expected_failure_year": 3,
+      "replacement_cost": 5500,
+      "recommendation": "Plan replacement with heat pump upgrade",
+      "synergy": "Avoid redundant upgrades - do heat pump now instead of furnace repair"
+    },
+    {
+      "equipment": "Roof (Current: 12 years old)",
+      "expected_failure_year": 8,
+      "replacement_cost": 12000,
+      "recommendation": "Delay solar 5-8 years to install on new roof",
+      "synergy": "Solar after roof replacement avoids future re-mounting costs"
+    }
+  ]
+}
+```
+
+---
+
+## SECTION 8: IMPLEMENTATION ROADMAP
+
+### 8.1 Minimum Viable Product (MVP) - Phase 1
+
+DELIVERABLES:
+    1. Manual monthly/annual consumption entry UI
+    2. Basic consumption data normalization
+    3. Home profile data entry (3 pages max)
+    4. Simple cost calculation:
+        - Annual consumption × rate = annual cost
+        - 5 basic upgrades (thermostat, LED, air sealing, water heater, HVAC)
+        - Payback calculation for each
+    5. Ranked recommendation list
+
+NOT INCLUDED IN MVP:
+    - Solar integration
+    - TOU rate modeling
+    - Demand charges
+    - Battery optimization
+    - Appliance-specific analysis
+    - Multi-year NPV calculations
+
+TIME ESTIMATE: 3-4 weeks (1 developer)
+
+### 8.2 Phase 2: Solar & Financial Analysis
+
+ADD:
+    1. Solar production calculation (capacity factor method or SolarGraf)
+    2. Payback modeling with 25-year NPV
+    3. Multiple scenario comparison
+    4. Rate escalation modeling (2-4% annual)
+    5. Federal/state incentive calculator
+    6. Combined upgrade scenarios (e.g., HVAC + Solar)
+    7. Financing options (cash, loan, lease)
+
+TIME ESTIMATE: 4-6 weeks
+
+### 8.3 Phase 3: Advanced Features
+
+ADD:
+    1. Green Button XML parsing
+    2. Appliance inventory from vision API
+    3. TOU rate modeling (requires rate database)
+    4. Demand charge modeling
+    5. Equipment replacement scheduling
+    6. Shading analysis (tree growth, neighbor buildings)
+    7. Battery storage detailed modeling
+    8. Utility-specific rate optimization
+    9. PDF report generation
+    10. Customer portal (track recommendations, monitor solar, etc.)
+
+TIME ESTIMATE: 8-12 weeks
+
+---
+
+## SECTION 9: KEY FORMULAS & CALCULATIONS
+
+### 9.1 Energy Efficiency Formulas
+
+BUILDING ENVELOPE LOAD:
+    Q = U × A × ΔT
+    Where:
+        Q = heat flow (BTU/hr)
+        U = overall heat transfer coefficient (includes insulation)
+        A = surface area (sq ft)
+        ΔT = temperature difference (setpoint - outside temp, °F)
+
+SIMPLE APPROXIMATION FOR HOME:
+    Annual Heating Load ≈ (Square Feet / 1000) × Heating Degree Days × 0.5
+
+Heating Degree Days (HDD) = Sum of (65°F - avg daily temp) for all days where avg < 65°F
+    Example: Boston HDD ≈ 6,000, Phoenix HDD ≈ 1,400
+
+HVAC EFFICIENCY RATINGS:
+    SEER (AC): Seasonal Energy Efficiency Ratio
+        Higher = more efficient, typical range 13-22
+        Energy = Annual Consumption / SEER value
+        Example: 10,000 kWh cooling / 18 SEER = 555 kWh (if this were only cooling)
+    
+    AFUE (Furnace): Annual Fuel Utilization Efficiency
+        Higher = more efficient, typical range 80-97%
+        Energy = 1 / AFUE × heat demand
+        Example: 80% AFUE furnace uses 1.25 × heat demand
+    
+    HSPF (Heat Pump Heating): Heating Seasonal Performance Factor
+        Higher = more efficient, typical 8-12
+        Compare to electric: AFUE 100% = HSPF 3.41 (1 kWh heat = 1/3.41 kWh from grid)
+        Heat pump with HSPF 10 = 1 kWh heat = 1/10 kWh from grid = 70% reduction vs electric
+
+SOLAR PRODUCTION:
+    E = P × CF × t
+    Where:
+        E = annual energy production (kWh)
+        P = system size (kW)
+        CF = capacity factor (0.12-0.23 depending on location)
+        t = hours in year (8760)
+    
+    Example: 7.5 kW, 16% CF
+    E = 7.5 × 0.16 × 8760 = 10,512 kWh
+
+SOLAR PAYBACK:
+    Payback = System Cost / Annual Savings
+    
+    Annual Savings = (Production × Import Rate) - (Export × Export Rate) - O&M Costs - Loan Payment
+    
+    Better method (accounting for rate escalation):
+        NPV = Σ[(Annual Savings × (1 + Rate Escalation)^Year) / (1 + Discount Rate)^Year] - System Cost
+        Payback year = Year where NPV becomes positive
+
+### 9.2 Financial Calculation Examples
+
+SIMPLE PAYBACK (Most Common):
+    Cost: $8,000
+    Annual Saving: $400
+    Payback = $8,000 / $400 = 20 years
+    Simple but ignores: rate escalation, discount rate, system degradation
+
+NET PRESENT VALUE (More Accurate):
+    Discount rate: 5% (time value of money)
+    Project life: 25 years
+    
+    Year 1: Savings = $400, PV = $400 / 1.05^1 = $381
+    Year 2: Savings = $410 (with 2.5% escalation), PV = $410 / 1.05^2 = $371
+    Year 3: Savings = $420, PV = $420 / 1.05^3 = $362
+    ...
+    Year 25: Savings = $634, PV = $634 / 1.05^25 = $198
+    
+    Total PV of savings = $8,950
+    NPV = $8,950 - $8,000 = $950 (positive, so good investment)
+    
+    Payback (NPV method) ≈ 20 years (happens to match this example)
+
+FINANCING IMPACT:
+    Same upgrade, financed with 10-year loan at 5% interest:
+    
+    Monthly payment = $8,000 × [0.05/12 × (1 + 0.05/12)^120] / [(1 + 0.05/12)^120 - 1]
+    Monthly payment ≈ $76
+    Annual payment ≈ $912
+    
+    Annual savings: $400 (from energy reduction)
+    Annual cost: $912 (loan payment)
+    Net annual cost: -$512 (you pay $512 MORE per year for 10 years)
+    
+    Year 11+: Loan paid off, enjoy $400/year savings for next 15 years
+    Total 25-year cost: $512 × 10 + (-$400) × 15 = $5,120 - $6,000 = -$880 (actually saves $880)
+    
+    LESSON: Financing changes the cash flow timing significantly
+
+---
+
+## SECTION 10: DEPLOYMENT CHECKLIST
+
+### 10.1 Pre-Launch Requirements
+
+DATABASE:
+    ☐ SQLite database initialized with all tables
+    ☐ Relationships defined (foreign keys)
+    ☐ Sample data inserted for testing
+    ☐ Backup and recovery procedures documented
+
+API ENDPOINTS:
+    ☐ POST /save_address - creates home record
+    ☐ POST /save_home_details - stores profile
+    ☐ POST /save_bill_info - captures current utility costs
+    ☐ POST /upload_green_button - parses consumption data
+    ☐ POST /save_appliance_details - appliance inventory
+    ☐ GET /analyze_home/{home_id} - runs full analysis
+    ☐ GET /recommendations/{home_id} - returns ranked upgrades
+    ☐ POST /get_solar_estimate - calculates solar production
+
+FRONTEND:
+    ☐ Address entry with validation
+    ☐ Home profile wizard (3-5 pages)
+    ☐ Consumption input form (Green Button upload or manual monthly/annual)
+    ☐ Bill information form
+    ☐ Results dashboard with recommendations
+    ☐ Upgrade comparison table
+    ☐ Solar calculator (system size, production, cost, payback)
+    ☐ Report generation (PDF with charts)
+
+EXTERNAL INTEGRATIONS:
+    ☐ Google Vision API (for appliance analysis)
+    ☐ Weather API (NOAA or similar for solar modeling)
+    ☐ Rate database (utility rates by region, optional)
+    ☐ Zillow API (home value estimate, optional)
+    ☐ SolarGraf API (if using real solar data instead of capacity factor)
+
+TESTING:
+    ☐ Unit tests for all calculation functions
+    ☐ Integration tests for database operations
+    ☐ End-to-end tests for full workflow
+    ☐ Edge cases: very small home, very large home, extreme climates
+    ☐ Performance tests: 1,000+ homes in database
+    ☐ Security: Rate limiting, input validation, SQL injection prevention
+
+DOCUMENTATION:
+    ☐ User guide (how to input data, interpret recommendations)
+    ☐ FAQ (common questions about payback, ROI, solar)
+    ☐ API documentation (developers integrating Intellipath)
+    ☐ Calculation methodology document (what assumptions were made)
+
+### 10.2 User Onboarding
+
+MINIMUM DATA FOR BASIC ANALYSIS:
+    1. Address (or zip code)
+    2. Annual consumption (single number, OR 12 monthly values)
+    3. Current utility rate ($ per kWh)
+    4. Home size (sq ft)
+    5. Heating type (gas, electric, heat pump)
+
+OPTIONAL DATA FOR ENHANCED ANALYSIS:
+    - Home age and condition
+    - Appliance inventory (HVAC, water heater models)
+    - Windows and insulation type
+    - Occupancy patterns
+    - Solar potential (roof orientation, shading)
+
+OUTCOME: Ranked list of 8-12 recommended upgrades with costs and payback periods
+
+---
+
+## SECTION 11: COMMON PITFALLS & MITIGATION
+
+### 11.1 Calculation Errors
+
+PITFALL: Assuming all solar production is used locally (not exported)
+    REALITY: In low-consumption homes with good solar, much is exported
+    MITIGATION: Always calculate import vs. export separately
+    
+PITFALL: Not accounting for system degradation (panels lose ~0.5%/year efficiency)
+    REALITY: 25-year system produces 87% by year 25
+    MITIGATION: Apply 0.5% annual degradation to production estimates
+
+PITFALL: Using flat utility rate when actual rate is tiered
+    REALITY: Oversizes solar (tilted rates mean solar marginal value is higher)
+    MITIGATION: Always ask about tiered rates, model high-tier kWh separately
+
+PITFALL: Ignoring demand charges in commercial/large homes
+    REALITY: Demand charges can exceed energy charges (50% of bill)
+    MITIGATION: Always ask if customer has demand charges
+
+### 11.2 Scenario Selection Errors
+
+PITFALL: Recommending solar-only without addressing base load
+    REALITY: 15,000 kWh home requires 9 kW solar (huge, expensive)
+    MITIGATION: Recommend envelope + HVAC FIRST, then right-sized solar
+
+PITFALL: Recommending heat pump to all electric-heat homes
+    REALITY: Heat pump doesn't replace furnace in very cold climates (too costly)
+    MITIGATION: Flag heat pump less favorably if winter temps < -10°F frequent
+
+PITFALL: Assuming battery justified by energy arbitrage alone
+    REALITY: Without demand charges, battery payback ~15 years
+    MITIGATION: Only recommend battery if: TOU rates high, demand charges exist, or outages frequent
+
+### 11.3 Data Quality Issues
+
+PITFALL: User enters monthly data but doesn't account for weather variation
+    REALITY: January 2023 was warm, January 2024 was cold (same month, different consumption)
+    MITIGATION: Always note "based on one year of data, actual may vary"
+
+PITFALL: Bill information is wrong (user misreads or has promotional rate)
+    REALITY: Calculated rate is 50% off real rate
+    MITIGATION: Ask user to enter last 3 months' bills, average them
+
+PITFALL: Green Button data has gaps or errors (meter malfunction)
+    REALITY: Calculated annual consumption is wrong
+    MITIGATION: Validate Green Button data against user's electricity bill
+
+---
+
+## SECTION 12: ROADMAP MILESTONES
+
+Q1 2025: MVP Launch
+    - Manual consumption entry
+    - Basic cost analysis (current vs. upgrades)
+    - 5 quick-win recommendations
+    - Simple ROI calculator
+
+Q2 2025: Phase 2 - Solar & Financing
+    - Solar production calculator
+    - 25-year NPV analysis
+    - Financing options (cash, loan, lease)
+    - Combined scenario recommendations
+
+Q3 2025: Phase 3 - Advanced Features
+    - Green Button XML parsing
+    - Appliance vision AI integration
+    - TOU rate support
+    - Equipment replacement scheduling
+
+Q4 2025: Enterprise Features
+    - Contractor dashboard (manage multiple homes)
+    - Report generation (PDF, email delivery)
+    - Mobile app (iOS/Android)
+    - API for third-party integrations
+
+---
+
+End of Intellipath Core Tool Documentation

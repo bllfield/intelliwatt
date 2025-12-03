@@ -1,5 +1,9 @@
 import { prisma } from "@/lib/db";
-import { terminateSmtAgreement } from "@/lib/smt/agreements";
+import {
+  findAgreementForEsiid,
+  terminateSmtAgreement,
+  type SmtAgreementSummary,
+} from "@/lib/smt/agreements";
 
 export async function setPrimaryHouse(
   userId: string,
@@ -86,10 +90,17 @@ type ArchiveConflictParams = {
   meterNumber?: string | null;
 };
 
+type DisplacedTerminationTarget = {
+  agreementId: string | null;
+  contactEmail: string | null;
+  esiid: string | null;
+  userId: string;
+};
+
 type ArchiveConflictTransactionResult = {
   archivedAuthorizationIds: string[];
   displacedUserIds: string[];
-  displacedTargets: Array<{ agreementId: string | null; contactEmail: string | null }>;
+  displacedTargets: DisplacedTerminationTarget[];
 };
 
 export async function archiveConflictingAuthorizations({
@@ -116,10 +127,7 @@ export async function archiveConflictingAuthorizations({
       return {
         archivedAuthorizationIds: [] as string[],
         displacedUserIds: [] as string[],
-        displacedTargets: [] as Array<{
-          agreementId: string | null;
-          contactEmail: string | null;
-        }>,
+        displacedTargets: [] as DisplacedTerminationTarget[],
       };
     }
 
@@ -135,6 +143,7 @@ export async function archiveConflictingAuthorizations({
         houseAddressId: true,
         smtAgreementId: true,
         contactEmail: true,
+        esiid: true,
       },
     });
 
@@ -142,19 +151,13 @@ export async function archiveConflictingAuthorizations({
       return {
         archivedAuthorizationIds: [] as string[],
         displacedUserIds: [] as string[],
-        displacedTargets: [] as Array<{
-          agreementId: string | null;
-          contactEmail: string | null;
-        }>,
+        displacedTargets: [] as DisplacedTerminationTarget[],
       };
     }
 
     const archivedAuthorizationIds: string[] = [];
     const displacedUserIds = new Set<string>();
-    const displacedTargets: Array<{
-      agreementId: string | null;
-      contactEmail: string | null;
-    }> = [];
+    const displacedTargets: DisplacedTerminationTarget[] = [];
 
     for (const auth of conflicts) {
       archivedAuthorizationIds.push(auth.id);
@@ -209,6 +212,8 @@ export async function archiveConflictingAuthorizations({
       displacedTargets.push({
         agreementId: auth.smtAgreementId ?? null,
         contactEmail: auth.contactEmail ?? null,
+        esiid: auth.esiid ?? null,
+        userId: auth.userId,
       });
 
       if (auth.userId !== userId) {
@@ -259,22 +264,157 @@ export async function archiveConflictingAuthorizations({
 }
 
 async function terminateDisplacedAuthorizations(
-  targets: Array<{ agreementId: string | null; contactEmail: string | null }>,
+  targets: DisplacedTerminationTarget[],
 ) {
-  for (const target of targets) {
-    const agreementId = target.agreementId;
-    const contactEmail = target.contactEmail?.trim();
+  const attempted = new Set<string>();
+  const userEmailCache = new Map<string, string | null>();
 
-    if (!agreementId || !contactEmail) continue;
+  for (const target of targets) {
+    let agreementId = target.agreementId ?? null;
+    let email = target.contactEmail?.trim() ?? null;
+
+    if (!email) {
+      if (!userEmailCache.has(target.userId)) {
+        const user = await prisma.user.findUnique({
+          where: { id: target.userId },
+          select: { email: true },
+        });
+        userEmailCache.set(
+          target.userId,
+          user?.email ? user.email.trim() : null,
+        );
+      }
+      email = userEmailCache.get(target.userId) ?? null;
+    }
+
+    if (!agreementId && target.esiid) {
+      try {
+        const lookup = await findAgreementForEsiid(target.esiid);
+
+        const normalizedEmail = email?.toLowerCase() ?? null;
+
+        let candidate: SmtAgreementSummary | null = null;
+
+        if (normalizedEmail) {
+          candidate =
+            lookup.agreements.find((agreement) => {
+              const agreementEmail = extractEmailFromAgreement(agreement);
+              return (
+                agreementEmail && agreementEmail.toLowerCase() === normalizedEmail
+              );
+            }) ?? null;
+        }
+
+        if (!candidate) {
+          candidate =
+            lookup.agreements.find((agreement) =>
+              isAgreementLikelyActive(agreement),
+            ) ?? null;
+        }
+
+        if (!candidate) {
+          candidate = lookup.match ?? null;
+        }
+
+        if (candidate?.agreementNumber) {
+          agreementId = String(candidate.agreementNumber);
+          if (!email) {
+            const resolvedEmail = extractEmailFromAgreement(candidate);
+            email = resolvedEmail ? resolvedEmail.trim() : null;
+          }
+        }
+      } catch (error) {
+        console.error(
+          "[archiveConflictingAuthorizations] Failed to lookup displaced SMT agreement",
+          { esiid: target.esiid, error },
+        );
+      }
+    }
+
+    if (!agreementId || !email) {
+      console.warn(
+        "[archiveConflictingAuthorizations] Skipping SMT termination; missing agreement or email",
+        { agreementId, email, esiid: target.esiid, userId: target.userId },
+      );
+      continue;
+    }
+
+    email = email.trim();
+
+    const dedupeKey = `${agreementId.toString().toLowerCase()}::${email.toLowerCase()}`;
+    if (attempted.has(dedupeKey)) {
+      continue;
+    }
+    attempted.add(dedupeKey);
 
     try {
-      await terminateSmtAgreement(agreementId, contactEmail);
+      await terminateSmtAgreement(agreementId, email);
     } catch (error) {
       console.error(
         "[archiveConflictingAuthorizations] Failed to terminate displaced SMT agreement",
-        { agreementId, error },
+        { agreementId, email, error },
       );
     }
   }
 }
+
+function extractEmailFromAgreement(
+  agreement: SmtAgreementSummary | null,
+): string | null {
+  if (!agreement) return null;
+  return extractEmailFromRaw(agreement.raw);
+}
+
+function extractEmailFromRaw(value: any): string | null {
+  if (!value) return null;
+
+  if (typeof value === "string") {
+    if (value.includes("@")) {
+      return value;
+    }
+    return null;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const result = extractEmailFromRaw(item);
+      if (result) return result;
+    }
+    return null;
+  }
+
+  if (typeof value === "object") {
+    for (const [key, nested] of Object.entries(value)) {
+      if (
+        typeof nested === "string" &&
+        key.toLowerCase().includes("email") &&
+        nested.includes("@")
+      ) {
+        return nested;
+      }
+      const result = extractEmailFromRaw(nested);
+      if (result) return result;
+    }
+  }
+
+  return null;
+}
+
+function isAgreementLikelyActive(agreement: {
+  status?: string | null;
+  statusReason?: string | null;
+}): boolean {
+  const statusRaw =
+    agreement.status?.toLowerCase() ??
+    agreement.statusReason?.toLowerCase() ??
+    "";
+  if (!statusRaw) return false;
+
+  if (statusRaw.includes("non active") || statusRaw.includes("terminate")) {
+    return false;
+  }
+
+  return statusRaw.includes("active") || statusRaw === "act";
+}
+
 

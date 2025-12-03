@@ -1,0 +1,611 @@
+# Weather Normalization Logic for 15-Minute Interval Data
+## Complete Guide to Weather-Adjusted Energy Consumption
+
+This document describes the weather normalization logic used in the Intellipath project to convert manual monthly/annual energy entries into realistic 15-minute intervals with weather adjustments.
+
+---
+
+## Overview
+
+Weather normalization adjusts energy consumption calculations based on:
+1. Temperature (heating/cooling demand)
+2. Humidity (dehumidification load)
+3. Solar radiation (cooling load reduction)
+4. Home characteristics (HVAC system, thermostat settings, insulation)
+
+The approach is based on the principle that the entered monthly/annual data represents actual consumption under specific weather conditions. To distribute this data across the year with realistic variations, we:
+1. Calculate a base load from home characteristics
+2. Apply weather adjustments for each day/hour
+3. Apply time-of-day factors (peak/valley periods)
+4. Scale to match the entered annual/monthly totals
+
+---
+
+## Core Function: calculate_weather_adjusted_load()
+
+This is the main normalization function. Input a base load and weather data, get back the adjusted load.
+
+FUNCTION SIGNATURE:
+
+def calculate_weather_adjusted_load(base_load, weather, home_details):
+    """
+    Calculate weather-adjusted load based on specific day's weather and home settings.
+    
+    Args:
+        base_load: Base energy consumption (kWh) for typical conditions
+        weather: Dict with keys: temperature (°C), humidity (%), solar_radiation (W/m²)
+        home_details: Dict with home characteristics:
+            - winter_temp (°F): Heating setpoint (default 68)
+            - summer_temp (°F): Cooling setpoint (default 72)
+            - heating_type: 'electric', 'gas', or 'heat_pump'
+            - heat_pump_type: 'standard' or 'with_heat_strips'
+    
+    Returns:
+        Adjusted base load (kWh)
+    """
+
+---
+
+## Temperature Adjustment Logic
+
+Temperature adjustment varies based on heating type and how far from setpoints the actual temperature is.
+
+### Step 1: Convert temperatures to Celsius (for calculation)
+
+heating_setpoint_c = (heating_setpoint_fahrenheit - 32) * 5/9
+cooling_setpoint_c = (cooling_setpoint_fahrenheit - 32) * 5/9
+
+Example: 68°F = (68 - 32) * 5/9 = 20°C
+Example: 72°F = (72 - 32) * 5/9 = 22.2°C
+
+### Step 2: Calculate temperature difference from setpoint
+
+IF temperature < heating_setpoint_c:
+    temp_diff = heating_setpoint_c - temperature
+    
+    IF heating_type == 'gas':
+        temp_factor = 1 + (temp_diff * 0.005)  # 0.5% per °C
+        # Gas heating uses minimal electric load
+    
+    ELSE IF heating_type == 'heat_pump':
+        IF heat_pump_type == 'with_heat_strips':
+            IF temp_diff > 10:  # More than 10°C below setpoint
+                temp_factor = 1 + (temp_diff * 0.03)  # 3% per °C
+            ELSE:
+                temp_factor = 1 + (temp_diff * 0.015)  # 1.5% per °C
+        ELSE:  # standard heat pump
+            temp_factor = 1 + (temp_diff * 0.015)  # 1.5% per °C
+    
+    ELSE:  # electric heating
+        temp_factor = 1 + (temp_diff * 0.02)  # 2% per °C
+
+ELSE IF temperature > cooling_setpoint_c:
+    temp_diff = temperature - cooling_setpoint_c
+    temp_factor = 1 + (temp_diff * 0.02)  # 2% per °C for cooling
+
+ELSE:  # Within comfort range
+    temp_factor = 1.0  # No adjustment
+
+### Temperature Factor Examples:
+
+Scenario 1: Electric heating, winter temp set to 68°F (20°C), actual temp 40°F (4.4°C)
+    temp_diff = 20 - 4.4 = 15.6°C
+    temp_factor = 1 + (15.6 * 0.02) = 1.312  (31.2% increase)
+
+Scenario 2: Heat pump with heat strips, winter temp 68°F, actual temp 30°F (-1.1°C)
+    temp_diff = 20 - (-1.1) = 21.1°C (> 10)
+    temp_factor = 1 + (21.1 * 0.03) = 1.633  (63.3% increase - heat strips engaged)
+
+Scenario 3: Cooling, summer temp set to 72°F (22.2°C), actual temp 95°F (35°C)
+    temp_diff = 35 - 22.2 = 12.8°C
+    temp_factor = 1 + (12.8 * 0.02) = 1.256  (25.6% increase)
+
+---
+
+## Humidity Adjustment Logic
+
+Humidity affects dehumidification load (energy to remove moisture from air).
+
+### Formula:
+
+humidity_factor = 1 + (ABS(50 - actual_humidity) * 0.01)
+
+Where:
+    50 = baseline humidity (50% is comfortable and requires no special adjustment)
+    0.01 = 1% adjustment per 1% deviation from 50%
+
+### Humidity Factor Examples:
+
+IF humidity = 30%:
+    humidity_factor = 1 + (ABS(50 - 30) * 0.01) = 1 + (20 * 0.01) = 1.2  (20% increase)
+    (Dry air requires dehumidification to prevent static, increases HVAC work)
+
+IF humidity = 70%:
+    humidity_factor = 1 + (ABS(50 - 70) * 0.01) = 1 + (20 * 0.01) = 1.2  (20% increase)
+    (Humid air requires dehumidification, increases AC/dehumidifier work)
+
+IF humidity = 50%:
+    humidity_factor = 1 + (ABS(50 - 50) * 0.01) = 1.0  (no adjustment)
+    (Baseline - no special adjustment needed)
+
+---
+
+## Solar Radiation Adjustment Logic
+
+Solar radiation reduces cooling load by providing passive heating during winter and increases cooling load in summer. For simplicity, we treat it as a linear adjustment across all seasons.
+
+### Formula:
+
+solar_factor = 1 + (solar_radiation / 1000) * 0.1
+
+Where:
+    solar_radiation = actual solar radiation in W/m² (typical range 0-1000)
+    0.1 = 10% adjustment per 1000 W/m² of incident solar radiation
+
+### Interpretation:
+
+Positive adjustment: Actual solar radiation reduces net heating/cooling demand by providing free heat input or by increasing indoor temperature naturally.
+
+BUT ALSO: In summer, high solar radiation increases cooling load.
+
+For a more accurate model, you would want to track solar radiation by season, but this simple model treats solar as a beneficial load reduction on average.
+
+### Solar Factor Examples:
+
+IF solar_radiation = 200 W/m²:
+    solar_factor = 1 + (200 / 1000) * 0.1 = 1.02  (2% increase in base load)
+
+IF solar_radiation = 800 W/m²:
+    solar_factor = 1 + (800 / 1000) * 0.1 = 1.08  (8% increase in base load)
+
+IF solar_radiation = 0 W/m² (overcast day):
+    solar_factor = 1 + (0 / 1000) * 0.1 = 1.0  (no adjustment)
+
+---
+
+## Final Calculation
+
+Once you have all three factors, multiply them together:
+
+adjusted_load = base_load * temp_factor * humidity_factor * solar_factor
+
+### Complete Example:
+
+GIVEN:
+    base_load = 2.5 kWh (from home characteristics calculation)
+    actual_temperature = 5°C
+    heating_setpoint = 20°C (68°F)
+    heating_type = 'electric'
+    actual_humidity = 35%
+    solar_radiation = 300 W/m²
+
+CALCULATION:
+    temp_diff = 20 - 5 = 15°C
+    temp_factor = 1 + (15 * 0.02) = 1.30
+    
+    humidity_factor = 1 + (ABS(50 - 35) * 0.01) = 1 + (15 * 0.01) = 1.15
+    
+    solar_factor = 1 + (300 / 1000) * 0.1 = 1.03
+    
+    adjusted_load = 2.5 * 1.30 * 1.15 * 1.03
+    adjusted_load = 2.5 * 1.541 = 3.85 kWh
+
+INTERPRETATION: Cold day (5°C vs 20°C setpoint) + dry air + moderate sun = 54% increase in energy consumption
+
+---
+
+## Supporting Function: calculate_base_energy()
+
+This function wraps the weather adjustment with home characteristics and time-of-day factors.
+
+FUNCTION SIGNATURE:
+
+def calculate_base_energy(home, weather, is_weekday):
+    """
+    Calculate base energy use based on home characteristics and weather.
+    
+    Args:
+        home: Home object with attributes:
+            - square_feet: Home size
+            - insulation_type: 'poor', 'standard', 'good', 'excellent', etc.
+            - window_type: 'single', 'double', 'triple'
+            - occupants: Number of people
+            - led_lights: Boolean
+            - smart_thermostat: Boolean
+            - winter_temp: Heating setpoint (°F)
+            - summer_temp: Cooling setpoint (°F)
+        
+        weather: Weather dict with temperature, humidity, solar_radiation
+        
+        is_weekday: Boolean (True for Mon-Fri, False for Sat-Sun)
+    
+    Returns:
+        Energy consumption (kWh) with time-of-day factor applied
+    """
+
+### Step 1: Calculate Envelope Factor
+
+insulation_factors = {
+    "poor": 1.5,              # High heat loss
+    "standard": 1.0,          # Baseline
+    "good": 0.7,              # Good insulation
+    "excellent": 0.5,         # Very efficient
+    "fiberglass": 0.8,
+    "cellulose": 0.9,
+    "spray_foam": 0.6         # Most efficient
+}
+
+window_factors = {
+    "single": 1.3,            # Poor insulation
+    "single_pane": 1.3,
+    "double": 1.0,            # Standard
+    "double_pane": 1.0,
+    "triple": 0.8,            # Good insulation
+    "triple_pane": 0.8
+}
+
+envelope_factor = insulation_factor * window_factor
+
+### Step 2: Calculate Occupancy Factor
+
+occupancy_factor = 1 + (occupants - 2) * 0.1
+
+Meaning: Base occupancy is 2 people (factor = 1.0). Each additional person adds 10% to base load.
+
+Examples:
+    1 occupant: 1 + (1 - 2) * 0.1 = 0.9  (10% reduction)
+    2 occupants: 1 + (2 - 2) * 0.1 = 1.0 (baseline)
+    3 occupants: 1 + (3 - 2) * 0.1 = 1.1 (10% increase)
+    4 occupants: 1 + (4 - 2) * 0.1 = 1.2 (20% increase)
+
+### Step 3: Calculate Appliance Efficiency Factors
+
+led_factor = 0.8 if led_lights else 1.0    # 20% reduction with LED
+thermostat_factor = 0.9 if smart_thermostat else 1.0  # 10% reduction with smart thermostat
+
+### Step 4: Calculate Base Load
+
+base_load = (square_feet / 1000) * envelope_factor * occupancy_factor * led_factor * thermostat_factor
+
+Example:
+    square_feet = 2000
+    envelope_factor = 1.0 * 1.0 = 1.0 (standard insulation and windows)
+    occupancy_factor = 1.1 (3 occupants)
+    led_factor = 0.8 (has LED lights)
+    thermostat_factor = 0.9 (has smart thermostat)
+    
+    base_load = (2000 / 1000) * 1.0 * 1.1 * 0.8 * 0.9
+    base_load = 2.0 * 1.0 * 1.1 * 0.8 * 0.9
+    base_load = 1.584 kWh
+
+### Step 5: Apply Weather Adjustments
+
+weather_adjusted_load = base_load * temp_factor * humidity_factor * solar_factor
+
+(See weather adjustment section above for calculation details)
+
+### Step 6: Apply Time-of-Day Factor
+
+time_factor = get_time_factor(hour, is_weekday)
+final_load = weather_adjusted_load * time_factor
+
+(See time-of-day section below)
+
+---
+
+## Time-of-Day Factors
+
+Energy consumption varies by hour due to occupancy patterns and peak demand times.
+
+### Weekday Pattern (Monday-Friday):
+
+6 AM - 9 AM (Morning Peak):    1.4 - 1.8x   # Showers, breakfast, morning heating/AC
+10 AM - 4 PM (Mid-day):        0.8 - 1.2x   # People at work, lower load
+5 PM - 8 PM (Evening Peak):    1.4 - 1.8x   # Cooking, heating/cooling, evening use
+9 PM - 5 AM (Night):           0.3 - 0.5x   # Sleep, minimal load
+
+### Weekend Pattern (Saturday-Sunday):
+
+9 AM - 5 PM (Daytime):         1.1 - 1.3x   # People home, but spread out through day
+6 PM - 8 PM (Evening Peak):    1.4 - 1.8x   # Cooking, gathering
+All other hours (Night):       0.5 - 0.7x   # Sleep period
+
+### Implementation Code:
+
+def get_time_factor(hour, is_weekday):
+    """Get time-of-day variation factor."""
+    if is_weekday:
+        if 6 <= hour <= 9:          # Morning peak
+            return random.uniform(1.4, 1.8)
+        elif 17 <= hour <= 20:      # Evening peak (5 PM - 8 PM, 17:00 - 20:00 in 24h)
+            return random.uniform(1.4, 1.8)
+        elif 23 <= hour or hour <= 4:  # Night (11 PM - 4 AM)
+            return random.uniform(0.3, 0.5)
+        else:                       # Mid-day
+            return random.uniform(0.8, 1.2)
+    else:  # Weekend
+        if 9 <= hour <= 17:         # Daytime (9 AM - 5 PM)
+            return random.uniform(1.1, 1.3)
+        else:                       # Night
+            return random.uniform(0.5, 0.7)
+
+---
+
+## Weather Data Sources
+
+### Option 1: NOAA Historical Weather API
+
+The project uses NOAA (National Centers for Environmental Information) for historical weather data.
+
+FUNCTION: async def get_historical_weather(zip_code, years=1)
+
+Steps:
+1. Convert zip code to latitude/longitude (OpenStreetMap Nominatim)
+2. Find nearest NOAA weather station within search radius
+3. Query station for daily TMAX, TMIN, wind speed, precipitation
+4. Process into daily records with:
+    - temperature: Average of TMAX and TMIN (converted to Celsius)
+    - humidity: 50% (NOAA doesn't provide; use average)
+    - solar_radiation: 500 W/m² (NOAA doesn't provide; use average seasonal value)
+
+NOAA_API_TOKEN must be set in .env file:
+    NOAA_API_TOKEN=your_token_from_ncdc.noaa.gov
+
+### Option 2: Simulated Weather (Fallback)
+
+If NOAA API fails or token is not set, use seasonal patterns.
+
+FUNCTION: async def get_simulated_weather()
+
+Seasonal temperature ranges:
+    Winter (Days 1-90):     0-10°C
+    Spring (Days 91-180):   10-25°C
+    Summer (Days 181-270):  25-35°C
+    Fall (Days 271-365):    10-25°C
+
+Humidity: Random 30-70% (no seasonal variation)
+Solar radiation: Random 0-1000 W/m²
+
+---
+
+## Integration into Monthly-to-Interval Conversion
+
+To use weather normalization when converting monthly data:
+
+PSEUDO-CODE:
+
+FOR each month in monthly_data:
+    monthly_kwh = monthly_data[month]
+    month_start_date, month_end_date = get_billing_period(month)
+    
+    FOR each day in [month_start_date, month_end_date]:
+        weather = get_weather_data(day)
+        home_details = get_home_details(home_id)
+        base_load = calculate_base_energy(home, weather, is_weekday=is_weekday(day))
+        
+        FOR each 15-min interval in day:
+            hour = interval.hour
+            time_factor = get_time_factor(hour, is_weekday)
+            consumption = base_load * time_factor
+            
+            INSERT INTO consumption_data:
+                timestamp = interval_timestamp
+                consumption = consumption
+                home_id = home_id
+
+THEN (optional):
+    # Scale all 15-min intervals to match monthly total
+    scaling_factor = monthly_kwh / sum(all_intervals_for_month)
+    
+    FOR each interval in month:
+        interval.consumption *= scaling_factor
+
+---
+
+## Scaling/Normalization to Match Input Totals
+
+The weather-adjusted load provides realistic hourly/daily variation, but may not exactly match the user-entered monthly or annual totals. To ensure data integrity:
+
+APPROACH 1: Pro-Rata Scaling
+
+Calculate what the model produces, then scale all values proportionally:
+
+    model_total = sum(all_generated_intervals)
+    user_total = sum(user_entered_monthly_values)
+    scaling_factor = user_total / model_total
+    
+    FOR each interval:
+        interval.consumption *= scaling_factor
+
+Advantage: Preserves weather-based shape (peaks and valleys)
+Disadvantage: May distort original weather relationships if model is significantly off
+
+APPROACH 2: Preserve Base + Scale Variation
+
+Decompose each interval into baseline + variation:
+
+    base = calculate_base_energy(...)  # Weather-adjusted, time-of-day factored
+    baseline_total = sum(all_base_values)
+    scaling_factor = user_total / baseline_total
+    
+    FOR each interval:
+        interval.consumption = base * scaling_factor
+
+Advantage: Preserves the original weather shape more accurately
+Disadvantage: Simpler but potentially less flexible
+
+RECOMMENDED: Use Approach 1 (Pro-Rata Scaling) as it's transparent and preserves all calculated factors.
+
+---
+
+## Configuration Parameters Summary
+
+Key parameters that control weather normalization:
+
+1. TEMPERATURE ADJUSTMENTS:
+    Electric heating: 2% per °C below heating setpoint
+    Gas heating: 0.5% per °C below heating setpoint
+    Heat pump (standard): 1.5% per °C below heating setpoint
+    Heat pump (with heat strips): 1.5% per °C below setpoint, 3% per °C when >10°C below setpoint
+    Cooling: 2% per °C above cooling setpoint
+
+2. HUMIDITY ADJUSTMENTS:
+    1% adjustment per 1% deviation from 50% humidity baseline
+
+3. SOLAR ADJUSTMENTS:
+    10% adjustment per 1000 W/m² of solar radiation
+
+4. APPLIANCE EFFICIENCY:
+    LED lights: 20% reduction (0.8x factor)
+    Smart thermostat: 10% reduction (0.9x factor)
+
+5. OCCUPANCY:
+    10% increase per additional occupant above 2
+
+6. TIME-OF-DAY PEAKS:
+    Weekday morning (6-9 AM): 1.4-1.8x
+    Weekday evening (5-8 PM): 1.4-1.8x
+    Weekday night (11 PM-4 AM): 0.3-0.5x
+    Weekend daytime (9 AM-5 PM): 1.1-1.3x
+    Weekend night: 0.5-0.7x
+
+All parameters can be adjusted in configuration or as function arguments.
+
+---
+
+## Example: Complete Workflow
+
+INPUT:
+    - User enters: January 2024 = 1500 kWh
+    - Home: 2000 sq ft, standard insulation, double windows, 3 occupants, LED lights, smart thermostat
+    - Location: 80016 (Denver, CO)
+    - Heating: Electric, winter setpoint 68°F
+
+STEP 1: Get weather data for January
+
+    NOAA returns: Average January temp in Denver = 0°C, humidity = 35%, solar = 600 W/m²
+
+STEP 2: Calculate base load
+
+    base_load = (2000/1000) * (1.0 * 1.0) * 1.1 * 0.8 * 0.9 = 1.584 kWh
+
+STEP 3: Apply weather adjustments for Jan 1, cold day (example)
+
+    Temperature: -5°C vs 20°C setpoint
+        temp_diff = 20 - (-5) = 25°C
+        temp_factor = 1 + (25 * 0.02) = 1.5
+    
+    Humidity: 35% vs 50%
+        humidity_factor = 1 + (ABS(50 - 35) * 0.01) = 1.15
+    
+    Solar: 600 W/m²
+        solar_factor = 1 + (600 / 1000) * 0.1 = 1.06
+    
+    weather_adjusted = 1.584 * 1.5 * 1.15 * 1.06 = 2.91 kWh (baseline for day)
+
+STEP 4: Generate 15-min intervals with time-of-day factors
+
+    6 AM: 2.91 * 1.6 (morning peak, mid-range) = 4.66 kWh
+    12 PM: 2.91 * 1.0 (mid-day) = 2.91 kWh
+    6 PM: 2.91 * 1.6 (evening peak) = 4.66 kWh
+    11 PM: 2.91 * 0.4 (night, mid-range) = 1.16 kWh
+    
+    (Continue for all 96 intervals in day)
+
+STEP 5: Aggregate to daily total
+
+    All intervals summed = X kWh for Jan 1
+
+STEP 6: Repeat for all days in January
+
+    Jan 1 through Jan 31 = sum of all daily totals
+
+STEP 7: Scale to match user input
+
+    scaling_factor = 1500 kWh / (calculated_total)
+    
+    Apply scaling_factor to all January intervals
+
+RESULT: 1500 kWh total for January, distributed realistically across days and hours based on:
+    - Weather (cold day in Denver)
+    - Occupancy (3 people)
+    - Efficiency (LED + smart thermostat)
+    - Time-of-day patterns (peaks and valleys)
+    - Home characteristics (insulation, windows)
+
+---
+
+## Limitations and Considerations
+
+1. NOAA DATA GAPS:
+    - NOAA doesn't provide humidity (we use 50% baseline)
+    - NOAA doesn't provide solar radiation (we use average values)
+    - Consider adding NREL solar radiation API for better solar estimates
+
+2. SIMPLIFICATIONS:
+    - All appliances treated uniformly; doesn't model specific device behavior
+    - No modeling of occupancy schedules (assumes same weekday/weekend patterns)
+    - Solar radiation treated as uniform; actual solar depends on orientation and shading
+    - Time-of-day factors are random ranges; could use actual occupancy data
+
+3. SEASONAL VARIATIONS NOT MODELED:
+    - Daylight saving time affects occupancy patterns
+    - School/work schedules change seasonally
+    - Vacation periods not auto-detected (can be entered manually)
+
+4. HEATING SYSTEM COMPLEXITY:
+    - Heat pump COP (coefficient of performance) varies with temperature; simplified here
+    - Backup heating (heat strips) triggered at fixed threshold; real systems are more nuanced
+    - Gas heating electric load simplified; doesn't model pilot light, blower operation
+
+5. SOLAR LOADING:
+    - South-facing windows get more solar benefit; not modeled by orientation
+    - Window shading/curtains not considered
+    - Solar gain increases cooling load in summer; model treats as load reduction
+
+---
+
+## Customization Examples
+
+To change temperature adjustment factor:
+
+BEFORE:
+    temp_factor = 1 + (temp_diff * 0.02)  # 2% per °C
+
+AFTER (3% per °C for more sensitive model):
+    temp_factor = 1 + (temp_diff * 0.03)
+
+---
+
+To adjust time-of-day peak hours (e.g., shift to 7-10 AM and 6-9 PM):
+
+BEFORE:
+    if 6 <= hour <= 9:   # 6-9 AM
+        return random.uniform(1.4, 1.8)
+    elif 17 <= hour <= 20:  # 5-8 PM (17:00-20:00)
+        return random.uniform(1.4, 1.8)
+
+AFTER:
+    if 7 <= hour <= 10:   # 7-10 AM
+        return random.uniform(1.4, 1.8)
+    elif 18 <= hour <= 21:  # 6-9 PM (18:00-21:00)
+        return random.uniform(1.4, 1.8)
+
+---
+
+To add occupancy schedule (example):
+
+BEFORE:
+    occupancy_factor = 1 + (occupants - 2) * 0.1
+
+AFTER (weekday vs weekend):
+    IF is_weekday:
+        occupied_hours = 16  # Home from 5 PM to 9 AM
+    ELSE:
+        occupied_hours = 24  # Home all day
+    
+    occupancy_factor = 1 + ((occupants - 2) * 0.1 * (occupied_hours / 24))
+
+---
+
+End of Weather Normalization Logic Document
