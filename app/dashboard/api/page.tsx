@@ -8,78 +8,7 @@ import SmtAddressCaptureCard from "@/components/smt/SmtAddressCaptureCard";
 import SmtManualFallbackCard from "@/components/smt/SmtManualFallbackCard";
 import DashboardHero from "@/components/dashboard/DashboardHero";
 import LocalTime from "@/components/LocalTime";
-import GreenButtonUtilitiesCard from "@/components/dashboard/GreenButtonUtilitiesCard";
-
-function GreenButtonInstructions() {
-  return (
-    <div
-      id="green-button-instructions"
-      className="rounded-3xl border-2 border-brand-navy bg-white p-6 shadow-[0_24px_70px_rgba(16,46,90,0.08)] sm:p-8"
-    >
-      <div className="space-y-4 text-sm leading-relaxed text-brand-slate">
-        <div>
-          <h2 className="text-2xl font-semibold tracking-tight text-brand-navy">
-            Green Button usage data
-          </h2>
-          <p className="mt-2">
-            Green Button is a standardized download offered by many utilities so you can export the
-            same detailed usage history they see internally. Uploading it here lets IntelliWatt analyze
-            your real consumption patterns without waiting on Smart Meter Texas.
-          </p>
-        </div>
-
-        <div className="space-y-2 text-brand-navy">
-          <p className="font-semibold">How to download your Green Button file</p>
-          <ol className="list-decimal list-inside space-y-1 text-brand-slate">
-            <li>Log in to your electric utility’s online account.</li>
-            <li>
-              Browse to sections labeled{" "}
-              <span className="font-semibold">Usage</span>,{" "}
-              <span className="font-semibold">Energy Use</span>,{" "}
-              <span className="font-semibold">Usage History</span>, or a{" "}
-              <span className="font-semibold">Green Button / Download My Data</span> link.
-            </li>
-            <li>
-              When prompted for a date range, choose the{" "}
-              <span className="font-semibold">last 12 months</span> whenever possible. For newer homes,
-              export as much history as you have.
-            </li>
-            <li>
-              Download the file—preferably the Green Button{" "}
-              <span className="font-semibold">XML</span>. If XML isn’t offered, download the available
-              Green Button CSV instead.
-            </li>
-            <li>
-              Return to the <span className="font-semibold">Green Button Upload</span> step below and
-              upload that file so we can run the analysis.
-            </li>
-          </ol>
-        </div>
-
-        <div className="space-y-1 text-brand-navy">
-          <p className="font-semibold">How much data should I upload?</p>
-          <p className="text-brand-slate">
-            Uploading a full <span className="font-semibold">12 months</span> captures both summer and
-            winter usage peaks. If you do not have a year of history yet, send everything available—we
-            will still model your savings using what you provide.
-          </p>
-        </div>
-
-        <div className="space-y-1 text-brand-navy">
-          <p className="font-semibold">If you can’t find Green Button</p>
-          <p className="text-brand-slate">
-            Utilities sometimes relabel it as{" "}
-            <span className="font-semibold">Energy Insights</span>,{" "}
-            <span className="font-semibold">Usage History</span>, or{" "}
-            <span className="font-semibold">Download My Usage</span>. If you still can’t locate an
-            export, contact your utility’s support team and ask how to download your data in Green
-            Button format.
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
+import GreenButtonHelpSection from "@/components/dashboard/GreenButtonUtilitiesCard";
 
 type ExistingSmtAuthorization = {
   id: string;
@@ -408,9 +337,6 @@ export default async function ApiConnectPage() {
             )}
           </div>
 
-          <GreenButtonInstructions />
-          <GreenButtonUtilitiesCard />
-
           {showAddressCaptureCard ? (
             <SmtAddressCaptureCard
               houseAddressId={houseAddress?.id ?? null}
@@ -525,6 +451,7 @@ export default async function ApiConnectPage() {
               </div>
 
               <SmtManualFallbackCard houseAddressId={houseAddress?.id ?? null} />
+              <GreenButtonHelpSection />
             </>
           )}
 
