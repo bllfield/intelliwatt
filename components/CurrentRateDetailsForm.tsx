@@ -279,14 +279,17 @@ export function CurrentRateDetailsForm({
         return;
       }
 
+      const nextPlanEntrySnapshot = payload?.entry ?? null;
       setSavedPlan(payload?.plan ?? null);
-      setPlanEntrySnapshot(payload?.entry ?? null);
+      setPlanEntrySnapshot(nextPlanEntrySnapshot);
       setUsageSnapshot(payload?.usage ?? null);
-      setHasActiveUsage(Boolean(payload?.hasActiveUsage));
 
-      const entryStatus: string | null = payload?.entry?.status ?? null;
+      const entryStatus: string | null = nextPlanEntrySnapshot?.status ?? null;
       const entryActive =
         entryStatus === "ACTIVE" || entryStatus === "EXPIRING_SOON";
+      const usageActive = Boolean(payload?.hasActiveUsage);
+      setHasActiveUsage(usageActive || entryActive);
+
       setHasAwarded(entryActive);
     } catch (error) {
       if (!isMountedRef.current) {
@@ -511,6 +514,13 @@ export function CurrentRateDetailsForm({
         return "rounded-full bg-slate-500/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-200 border border-slate-400/30";
     }
   };
+
+  const derivedUsageStatus =
+    hasActiveUsage && isEntryLive
+      ? usageStatus === "ACTIVE" || usageStatus === "EXPIRING_SOON"
+        ? usageStatus
+        : "ACTIVE"
+      : usageStatus;
 
   const renderStatusBadge = (status: string | null, label: string) => (
     <span className={statusBadgeClass(status)}>
@@ -998,7 +1008,7 @@ export function CurrentRateDetailsForm({
           </div>
           <div className="flex flex-wrap gap-2 text-[10px] font-semibold uppercase tracking-wide">
             {renderStatusBadge(entryStatus, "Current plan entry")}
-            {renderStatusBadge(usageStatus, "Usage connection")}
+            {renderStatusBadge(derivedUsageStatus, "Usage connection")}
           </div>
         </div>
 
