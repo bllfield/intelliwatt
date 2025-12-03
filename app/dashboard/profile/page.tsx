@@ -396,15 +396,6 @@ export default async function ProfilePage() {
                 </dd>
               </div>
               </dl>
-
-              {smtAuthorization.smtAgreementId && smtAuthorization.contactEmail ? (
-                <div className="mt-4">
-                  <SmtTerminateButton
-                    agreementNumber={smtAuthorization.smtAgreementId}
-                    retailCustomerEmail={smtAuthorization.contactEmail}
-                  />
-                </div>
-              ) : null}
             </>
           ) : (
             <div className="mt-6 rounded-2xl border border-brand-blue/40 bg-brand-blue/10 p-4 text-sm text-brand-blue">
@@ -424,6 +415,14 @@ export default async function ProfilePage() {
           <p className="mt-3 text-xs text-brand-cyan/70">
             Revoking access stops IntelliWatt from pulling Smart Meter Texas data, removes entries immediately. IntelliWatt will not be able to make personalized plan recommendations without correct usage data. If this is due to a move, please enter the new home information to restore your entries.
           </p>
+          {smtAuthorization?.smtAgreementId && smtAuthorization?.contactEmail ? (
+            <div className="mt-5">
+              <SmtTerminateButton
+                agreementNumber={smtAuthorization.smtAgreementId}
+                retailCustomerEmail={smtAuthorization.contactEmail}
+              />
+            </div>
+          ) : null}
         </section>
       </div>
     </div>
