@@ -35,7 +35,6 @@ export function deriveSmtStatus(
 
   const rawStatus = (auth.smtStatus ?? "").toLowerCase();
   const alreadyActive =
-    auth.subscriptionAlreadyActive === true ||
     rawStatus === "already_active" ||
     (auth.smtStatusMessage ?? "").toLowerCase().includes("already active");
 

@@ -33,7 +33,6 @@ export type UsageEntryContext = {
     authorizationStartDate: Date | null;
     authorizationEndDate: Date | null;
     archivedAt: Date | null;
-    subscriptionAlreadyActive?: boolean | null;
   } | null;
   displacedAttention: boolean;
   greenButtonUpload: {
@@ -121,7 +120,6 @@ export async function loadUsageEntryContext(): Promise<UsageEntryContext> {
         authorizationStartDate: true,
         authorizationEndDate: true,
         archivedAt: true,
-        subscriptionAlreadyActive: true,
       },
     });
   }
