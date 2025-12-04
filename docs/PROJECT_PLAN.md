@@ -213,6 +213,7 @@ Notes:
 - Added `/api/user/usage` (GET) which aggregates 15-minute, hourly, daily, monthly, and annual buckets for each house. The handler inspects master `SmtInterval` rows and usage-db `GreenButtonInterval` rows, automatically selecting the source with the freshest timestamp so the dashboard always reflects the most recent upload.
 - `/dashboard/usage` is now live; the page fetches the endpoint above, surfaces coverage/total summaries, renders a 14-day daily table, and highlights recent peak intervals. Locked homes guide customers back to SMT reconnect or Green Button upload workflows while keeping referrals unlocked.
 - Manual usage normalization remains queued; once implemented it will plug into the same endpoint so the promotion logic (latest source wins) continues to hold.
+- Added `/admin/usage` Usage Test Console so Ops can run SMT + Green Button upload tests, monitor latest intervals/raw files, and review consolidated debugging output (leverages `/api/admin/usage/debug` + existing Green Button records endpoint).
 
 ### Usage Module Database (`intelliwatt_usage`)
 

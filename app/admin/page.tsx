@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 interface User {
@@ -142,30 +142,6 @@ interface TestimonialRecord {
   };
 }
 
-interface GreenButtonUploadSummary {
-  id: string;
-  createdAt: string;
-  updatedAt: string;
-  filename: string;
-  mimeType: string;
-  sizeBytes: number;
-  utilityName: string | null;
-  accountNumber: string | null;
-  capturedAt: string | null;
-  intervals: {
-    count: number;
-    totalKwh: number;
-  };
-}
-
-interface GreenButtonIntervalSample {
-  id: string;
-  rawId: string;
-  timestamp: string;
-  consumptionKwh: string;
-  intervalMinutes: number;
-}
-
 interface SummaryStats {
   totalUsers: number;
   activeSmtAuthorizations: number;
@@ -209,30 +185,12 @@ export default function AdminDashboard() {
     pending: SmtEmailConfirmationRecord[];
     declined: SmtEmailConfirmationRecord[];
   }>({ pending: [], declined: [] });
-  const [greenButtonUploads, setGreenButtonUploads] = useState<GreenButtonUploadSummary[]>([]);
-  const [greenButtonSamples, setGreenButtonSamples] = useState<GreenButtonIntervalSample[]>([]);
-  const [greenButtonFile, setGreenButtonFile] = useState<File | null>(null);
-  const [greenButtonUtility, setGreenButtonUtility] = useState('');
-  const [greenButtonAccount, setGreenButtonAccount] = useState('');
-  const [greenButtonStatus, setGreenButtonStatus] = useState<string | null>(null);
-  const [uploadingGreenButton, setUploadingGreenButton] = useState(false);
-  const [greenButtonLog, setGreenButtonLog] = useState<string[]>([]);
-  const [greenButtonHouseId, setGreenButtonHouseId] = useState('');
-  const [greenButtonUserEmail, setGreenButtonUserEmail] = useState('');
-  const [greenButtonUserId, setGreenButtonUserId] = useState('');
   const [adminToken, setAdminToken] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [recalculatingReferrals, setRecalculatingReferrals] = useState(false);
   const [recalculatingEntries, setRecalculatingEntries] = useState(false);
   const [copiedAdId, setCopiedAdId] = useState<string | null>(null);
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const greenButtonFileInputRef = useRef<HTMLInputElement | null>(null);
-  const appendGreenButtonLog = useCallback((message: string) => {
-    setGreenButtonLog((previous) => [
-      ...previous,
-      `${new Date().toLocaleTimeString()} — ${message}`,
-    ]);
-  }, []);
   useEffect(() => {
     if (typeof window === 'undefined') {
       return;
@@ -265,52 +223,6 @@ export default function AdminDashboard() {
     }
     return { raw, json };
   }, []);
-  const normalizedGreenButtonUserEmail = greenButtonUserEmail.trim().toLowerCase();
-  const selectedGreenButtonUser = useMemo(() => {
-    if (greenButtonUserId) {
-      return users.find((user) => user.id === greenButtonUserId) ?? null;
-    }
-    if (normalizedGreenButtonUserEmail.length > 0) {
-      return (
-        users.find((user) => user.email.toLowerCase() === normalizedGreenButtonUserEmail) ?? null
-      );
-    }
-    return null;
-  }, [greenButtonUserId, normalizedGreenButtonUserEmail, users]);
-  const availableHouseOptions = selectedGreenButtonUser?.houseAddresses ?? [];
-  const handleGreenButtonUserInputChange = useCallback(
-    (value: string) => {
-      setGreenButtonUserEmail(value);
-      const trimmed = value.trim().toLowerCase();
-      if (trimmed.length === 0) {
-        setGreenButtonUserId('');
-        return;
-      }
-      const match = users.find((user) => user.email.toLowerCase() === trimmed);
-      if (match) {
-        setGreenButtonUserId(match.id);
-      }
-    },
-    [users],
-  );
-  useEffect(() => {
-    if (!selectedGreenButtonUser) {
-      return;
-    }
-    if (greenButtonHouseId.trim().length > 0) {
-      const exists =
-        selectedGreenButtonUser.houseAddresses?.some((house) => house.id === greenButtonHouseId) ?? false;
-      if (exists) {
-        return;
-      }
-    }
-    const fallbackHouse =
-      selectedGreenButtonUser.houseAddresses?.find((house) => !house.archivedAt) ??
-      selectedGreenButtonUser.houseAddresses?.[0];
-    if (fallbackHouse) {
-      setGreenButtonHouseId(fallbackHouse.id);
-    }
-  }, [selectedGreenButtonUser, greenButtonHouseId]);
   const withAdminHeaders = useCallback(
     (init?: RequestInit): RequestInit => {
       const headers = new Headers(init?.headers ?? {});
@@ -342,7 +254,6 @@ export default function AdminDashboard() {
         testimonialsRes,
         referralsRes,
         emailConfirmationsRes,
-        greenButtonRes,
       ] = await Promise.all([
         fetchWithAdmin('/api/admin/stats/summary'),
         fetchWithAdmin('/api/admin/users'),
@@ -354,7 +265,6 @@ export default function AdminDashboard() {
         fetchWithAdmin('/api/admin/testimonials'),
         fetchWithAdmin('/api/admin/referrals'),
         fetchWithAdmin('/api/admin/smt/email-confirmations'),
-        fetchWithAdmin('/api/admin/green-button/records'),
       ]);
 
       if (summaryRes.ok) {
@@ -440,15 +350,6 @@ export default function AdminDashboard() {
           emailConfirmationsRes.statusText,
         );
       }
-
-      if (greenButtonRes.ok) {
-        const greenButtonData = await greenButtonRes.json();
-        console.log('Fetched Green Button records:', greenButtonData);
-        setGreenButtonUploads(greenButtonData.uploads ?? []);
-        setGreenButtonSamples(greenButtonData.sampleIntervals ?? []);
-      } else {
-        console.error('Failed to fetch Green Button records:', greenButtonRes.status, greenButtonRes.statusText);
-      }
     } catch (error) {
       console.error('Error fetching admin data:', error);
     } finally {
@@ -505,208 +406,6 @@ export default function AdminDashboard() {
       console.error('Failed to copy ad caption:', error);
     }
   }, []);
-
-  const handleGreenButtonFileChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
-    if (event.target.files && event.target.files.length > 0) {
-      setGreenButtonFile(event.target.files[0]);
-      setGreenButtonStatus(null);
-    } else {
-      setGreenButtonFile(null);
-    }
-  }, []);
-
-  const handleGreenButtonUpload = useCallback(
-    async (event: React.FormEvent<HTMLFormElement>) => {
-      event.preventDefault();
-      if (!greenButtonFile) {
-        const message = 'Please choose a Green Button XML/CSV file before uploading.';
-        setGreenButtonStatus(message);
-        appendGreenButtonLog(message);
-        return;
-      }
-
-      try {
-        setUploadingGreenButton(true);
-        setGreenButtonStatus('Uploading and normalizing…');
-        setGreenButtonLog([]);
-        appendGreenButtonLog(
-          `Preparing upload: ${greenButtonFile.name} (${formatBytes(greenButtonFile.size)})`,
-        );
-        let targetHouseId = greenButtonHouseId.trim();
-        if (!targetHouseId && selectedGreenButtonUser) {
-          const fallbackHouse =
-            selectedGreenButtonUser.houseAddresses?.find((house) => !house.archivedAt) ??
-            selectedGreenButtonUser.houseAddresses?.[0];
-          if (fallbackHouse) {
-            targetHouseId = fallbackHouse.id;
-            setGreenButtonHouseId(fallbackHouse.id);
-            appendGreenButtonLog(
-              `Using ${fallbackHouse.id} for ${selectedGreenButtonUser.email} (auto-selected)`,
-            );
-          }
-        }
-        if (!targetHouseId) {
-          const message =
-            'House ID required. Select a user and house from the dropdown or paste a house ID manually.';
-          setGreenButtonStatus(message);
-          appendGreenButtonLog(message);
-          return;
-        }
-
-        if (selectedGreenButtonUser) {
-          appendGreenButtonLog(
-            `Target user: ${selectedGreenButtonUser.email} · house ${targetHouseId}${
-              selectedGreenButtonUser.houseAddresses?.some(
-                (house) => house.id === targetHouseId && house.archivedAt,
-              )
-                ? ' (archived)'
-                : ''
-            }`,
-          );
-        }
-
-        const ticketResponse = await fetchWithAdmin('/api/green-button/upload-ticket', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ homeId: targetHouseId }),
-        });
-        appendGreenButtonLog(
-          `Ticket request: ${ticketResponse.status} ${ticketResponse.statusText || ''}`.trim(),
-        );
-        if (!ticketResponse.ok) {
-          const { raw, json } = await readResponseBody(ticketResponse);
-          const detail =
-            json?.detail ||
-            json?.error ||
-            (raw && raw.length > 0 ? raw : 'No additional details returned.');
-          let message = `Ticket request failed (${ticketResponse.status} ${ticketResponse.statusText}) — ${detail}`;
-          const errorCode = json?.error ?? json?.code ?? detail;
-          if (
-            ticketResponse.status === 503 &&
-            typeof errorCode === 'string' &&
-            errorCode.includes('green_button_upload_unavailable')
-          ) {
-            message +=
-              ' • Configure GREEN_BUTTON_UPLOAD_URL (or NEXT_PUBLIC_GREEN_BUTTON_UPLOAD_URL) and GREEN_BUTTON_UPLOAD_SECRET in Vercel env vars so the admin tool can reach the droplet uploader.';
-          }
-          setGreenButtonStatus(message);
-          appendGreenButtonLog(message);
-          return;
-        }
-        const ticket = await ticketResponse.json();
-        if (!ticket?.ok || !ticket.uploadUrl || !ticket.payload || !ticket.signature) {
-          const message = 'Ticket response missing required fields.';
-          setGreenButtonStatus(message);
-          appendGreenButtonLog(message);
-          return;
-        }
-        appendGreenButtonLog(`Ticket issued — expires ${ticket.expiresAt}`);
-
-        const dropletForm = new FormData();
-        dropletForm.append('file', greenButtonFile);
-        dropletForm.append('payload', ticket.payload);
-        dropletForm.append('signature', ticket.signature);
-        if (greenButtonUtility.trim().length > 0) {
-          dropletForm.append('utilityName', greenButtonUtility.trim());
-        }
-        if (greenButtonAccount.trim().length > 0) {
-          dropletForm.append('accountNumber', greenButtonAccount.trim());
-        }
-
-        let dropletUrl = ticket.uploadUrl as string;
-        if (typeof window !== 'undefined' && window.location.protocol === 'https:' && dropletUrl.startsWith('http://')) {
-          const httpsUrl = dropletUrl.replace('http://', 'https://');
-          appendGreenButtonLog(
-            `Upload URL returned over http:// — attempting https fallback: ${httpsUrl}`,
-          );
-          dropletUrl = httpsUrl;
-        }
-
-        appendGreenButtonLog(`POST ${dropletUrl}`);
-        let dropletResponse: Response | null = null;
-        try {
-          dropletResponse = await fetch(dropletUrl, {
-          method: 'POST',
-          body: dropletForm,
-          credentials: 'omit',
-        });
-        } catch (error) {
-          appendGreenButtonLog(
-            `Droplet upload network error: ${error instanceof Error ? error.message : String(error)}`,
-          );
-        }
-
-        if (!dropletResponse) {
-          const message =
-            'Droplet upload blocked (likely due to mixed-content http:// URL). Configure GREEN_BUTTON_UPLOAD_URL with an https endpoint or tunnel through the API Connect fallback.';
-          setGreenButtonStatus(message);
-          appendGreenButtonLog(message);
-          return;
-        }
-
-        appendGreenButtonLog(
-          `Droplet response: ${dropletResponse.status} ${dropletResponse.statusText || ''}`.trim(),
-        );
-        if (!dropletResponse.ok) {
-          const { raw, json } = await readResponseBody(dropletResponse);
-          const detail =
-            json?.detail ||
-            json?.error ||
-            (raw && raw.length > 0 ? raw : 'No additional details returned.');
-          const message = `Droplet upload failed (${dropletResponse.status} ${dropletResponse.statusText}) — ${detail}`;
-          setGreenButtonStatus(message);
-          appendGreenButtonLog(message);
-          return;
-        }
-
-        const result = await dropletResponse.json();
-        const successMessage = `Upload stored and normalized (${result.intervalsCreated} intervals, ${Number(
-          result.totalKwh ?? 0,
-        ).toFixed(3)} kWh).`;
-        setGreenButtonStatus(successMessage);
-        appendGreenButtonLog(
-          `Normalization complete: ${result.intervalsCreated} intervals, total ${Number(
-            result.totalKwh ?? 0,
-          ).toFixed(3)} kWh, rawId ${result.rawId}`,
-        );
-        if (Array.isArray(result.warnings) && result.warnings.length > 0) {
-          appendGreenButtonLog(`Warnings: ${result.warnings.join("; ")}`);
-        }
-
-        setGreenButtonFile(null);
-        if (greenButtonFileInputRef.current) {
-          greenButtonFileInputRef.current.value = '';
-        }
-        setGreenButtonUtility('');
-        setGreenButtonAccount('');
-
-        appendGreenButtonLog('Refreshing usage dashboard data…');
-        await fetchData();
-        appendGreenButtonLog('Usage dashboard refreshed.');
-      } catch (error) {
-        console.error('Failed to upload Green Button file:', error);
-        const message =
-          error instanceof Error
-            ? `Upload failed due to a network error: ${error.message}`
-            : 'Upload failed due to a network error. Please try again.';
-        setGreenButtonStatus(message);
-        appendGreenButtonLog(message);
-      } finally {
-        setUploadingGreenButton(false);
-      }
-    },
-    [
-      greenButtonFile,
-      greenButtonUtility,
-      greenButtonAccount,
-      greenButtonHouseId,
-      selectedGreenButtonUser,
-      fetchData,
-      appendGreenButtonLog,
-      readResponseBody,
-      fetchWithAdmin,
-    ],
-  );
 
   useEffect(() => {
     return () => {
@@ -845,16 +544,6 @@ export default function AdminDashboard() {
     (record) => record.attentionCode === 'smt_email_declined',
   );
 
-  const formatBytes = (size: number) => {
-    if (!Number.isFinite(size) || size <= 0) return '0 B';
-    const units = ['B', 'KB', 'MB', 'GB'];
-    const index = Math.min(Math.floor(Math.log(size) / Math.log(1024)), units.length - 1);
-    const value = size / Math.pow(1024, index);
-    return `${value.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
-  };
-
-  const formatKwh = (value: number) => value.toLocaleString(undefined, { maximumFractionDigits: 3 });
-
   const overviewStats = [
     { label: 'Users', value: totalUsersCount.toLocaleString() },
     { label: "SMT API's", value: smtApiCount.toLocaleString() },
@@ -943,234 +632,6 @@ export default function AdminDashboard() {
             </div>
           ))}
         </div>
-
-        {/* Green Button Upload Normalization */}
-        <section className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-            <div className="max-w-3xl">
-              <h2 className="text-2xl font-bold text-brand-navy mb-2">🌿 Green Button Usage Module</h2>
-              <p className="text-sm text-brand-navy/70">
-                Upload a Green Button CSV, XML, or JSON sample to exercise the usage-module pipeline. Files are stored in
-                the usage database only, normalized into 15-minute intervals, and never written to the production master
-                tables. Use this to validate parsing logic and double-check interval totals before we promote the pipeline.
-              </p>
-            </div>
-            <div className="rounded-full border border-brand-blue/30 bg-brand-blue/10 px-4 py-1 text-xs font-semibold uppercase tracking-[0.3em] text-brand-blue">
-              Usage DB only
-            </div>
-          </div>
-
-          <form onSubmit={handleGreenButtonUpload} className="mt-6 grid gap-4 rounded-2xl border border-brand-navy/10 bg-brand-navy/5 p-4 sm:grid-cols-2">
-            <div className="flex flex-col gap-2 sm:col-span-2">
-              <label htmlFor="green-button-file" className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-navy">
-                Green Button file (XML/CSV/JSON)
-              </label>
-              <input
-                ref={greenButtonFileInputRef}
-                id="green-button-file"
-                type="file"
-                accept=".csv,.xml,.json,text/csv,application/xml,application/json"
-                onChange={handleGreenButtonFileChange}
-                className="w-full rounded-lg border border-brand-navy/20 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
-              />
-              <p className="text-xs text-brand-navy/60">
-                Sample CSV headers supported: <code className="bg-brand-navy/10 px-1">timestamp,value</code>,{' '}
-                <code className="bg-brand-navy/10 px-1">start,end,value</code>, or JSON arrays with{' '}
-                <code className="bg-brand-navy/10 px-1">timestamp</code> / <code className="bg-brand-navy/10 px-1">value</code>.
-              </p>
-            </div>
-
-            <div className="grid gap-3 sm:col-span-2 sm:grid-cols-2">
-              <div className="flex flex-col gap-2">
-                <label htmlFor="green-button-user" className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-navy">
-                  User email (optional)
-                </label>
-                <input
-                  id="green-button-user"
-                  list="green-button-user-options"
-                  value={greenButtonUserEmail}
-                  onChange={(event) => handleGreenButtonUserInputChange(event.target.value)}
-                  onBlur={(event) => handleGreenButtonUserInputChange(event.target.value)}
-                  placeholder="Start typing an IntelliWatt email"
-                  className="rounded-lg border border-brand-navy/20 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
-                />
-                <datalist id="green-button-user-options">
-                  {users.map((user) => (
-                    <option key={user.id} value={user.email} />
-                  ))}
-                </datalist>
-                <p className="text-xs text-brand-navy/60">
-                  Selecting a user auto-fills their active houses. Leave blank to paste any valid house ID manually.
-                </p>
-              </div>
-
-              <div className="flex flex-col gap-2">
-                <label htmlFor="green-button-house" className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-navy">
-                  House ID
-                </label>
-                <input
-                  id="green-button-house"
-                  list="green-button-house-options"
-                  type="text"
-                  value={greenButtonHouseId}
-                  onChange={(event) => setGreenButtonHouseId(event.target.value)}
-                  placeholder="Select or paste the house ID for this upload"
-                  className="rounded-lg border border-brand-navy/20 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
-                />
-                <datalist id="green-button-house-options">
-                  {availableHouseOptions.map((house) => (
-                    <option
-                      key={house.id}
-                      value={house.id}
-                      label={
-                        house.addressLine1
-                          ? `${house.addressLine1}${house.archivedAt ? ' (archived)' : ''}`
-                          : house.archivedAt
-                          ? `${house.id} (archived)`
-                          : house.id
-                      }
-                    />
-                  ))}
-                </datalist>
-                <p className="text-xs text-brand-navy/60">
-                  Ticket flow requires a valid house ID. Choose from the list or paste one copied from the Users table.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <label htmlFor="green-button-utility" className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-navy">
-                Utility name (optional)
-              </label>
-              <input
-                id="green-button-utility"
-                type="text"
-                value={greenButtonUtility}
-                onChange={(event) => setGreenButtonUtility(event.target.value)}
-                placeholder="e.g., Oncor, CenterPoint"
-                className="rounded-lg border border-brand-navy/20 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
-              />
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <label htmlFor="green-button-account" className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-navy">
-                Account number (optional)
-              </label>
-              <input
-                id="green-button-account"
-                type="text"
-                value={greenButtonAccount}
-                onChange={(event) => setGreenButtonAccount(event.target.value)}
-                placeholder="Add context for the upload"
-                className="rounded-lg border border-brand-navy/20 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
-              />
-            </div>
-
-            <div className="flex flex-col gap-2 sm:col-span-2 sm:flex-row sm:items-center sm:justify-between">
-              <button
-                type="submit"
-                disabled={uploadingGreenButton}
-                className="inline-flex items-center justify-center rounded-full bg-brand-navy px-5 py-2 text-xs font-semibold uppercase tracking-wide text-brand-white shadow-[0_10px_35px_rgba(16,46,90,0.18)] transition hover:bg-brand-navy/90 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {uploadingGreenButton ? 'Uploading…' : 'Upload & normalize'}
-              </button>
-              <p className="text-xs text-brand-navy/60">
-                Max file size: 10&nbsp;MB. Normalized rows are stored in{' '}
-                <code className="bg-brand-navy/10 px-1 rounded-sm">usage.GreenButtonInterval</code>.
-              </p>
-            </div>
-
-            {greenButtonStatus ? (
-              <div className="sm:col-span-2 text-sm text-brand-navy">
-                {greenButtonStatus}
-              </div>
-            ) : null}
-          </form>
-
-          {greenButtonLog.length > 0 ? (
-            <div className="mt-4 rounded-2xl border border-brand-navy/10 bg-brand-navy/5 p-4">
-              <h3 className="text-sm font-semibold uppercase tracking-[0.3em] text-brand-navy/80">
-                Debug log
-              </h3>
-              <div className="mt-2 space-y-1 overflow-x-auto text-xs font-mono text-brand-navy">
-                {greenButtonLog.map((line, index) => (
-                  <div key={index}>{line}</div>
-                ))}
-              </div>
-            </div>
-          ) : null}
-
-          <div className="mt-6 grid gap-6 lg:grid-cols-2">
-            <div className="flex flex-col gap-3">
-              <h3 className="text-lg font-semibold text-brand-navy">Recent uploads</h3>
-              <div className="rounded-2xl border border-brand-navy/10 bg-brand-navy/5">
-                <div className="grid grid-cols-5 gap-3 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-brand-navy/70">
-                  <span>Filename</span>
-                  <span>Uploaded</span>
-                  <span>Size</span>
-                  <span>Intervals</span>
-                  <span>Total kWh</span>
-                </div>
-                <div className="divide-y divide-brand-navy/10">
-                  {greenButtonUploads.length === 0 ? (
-                    <div className="px-4 py-4 text-sm text-brand-navy/60">
-                      No uploads recorded yet. Use the form above to add a sample file.
-                    </div>
-                  ) : (
-                    greenButtonUploads.map((upload) => (
-                      <div key={upload.id} className="grid grid-cols-5 gap-3 px-4 py-3 text-sm text-brand-navy">
-                        <div className="truncate">{upload.filename}</div>
-                        <div>{formatTimestamp(upload.createdAt)}</div>
-                        <div>{formatBytes(upload.sizeBytes)}</div>
-                        <div>{upload.intervals.count.toLocaleString()}</div>
-                        <div>{formatKwh(upload.intervals.totalKwh)} kWh</div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-3">
-              <h3 className="text-lg font-semibold text-brand-navy">Sample intervals (first 50 rows)</h3>
-              <div className="max-h-72 overflow-auto rounded-2xl border border-brand-navy/10 bg-brand-navy/5">
-                <table className="min-w-full divide-y divide-brand-navy/10 text-sm text-brand-navy">
-                  <thead className="bg-brand-white/60 text-xs font-semibold uppercase tracking-wide text-brand-navy/70">
-                    <tr>
-                      <th className="px-4 py-2 text-left">Timestamp (UTC)</th>
-                      <th className="px-4 py-2 text-left">kWh</th>
-                      <th className="px-4 py-2 text-left">Interval</th>
-                      <th className="px-4 py-2 text-left">Raw ID</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-brand-navy/10">
-                    {greenButtonSamples.length === 0 ? (
-                      <tr>
-                        <td colSpan={4} className="px-4 py-4 text-center text-brand-navy/60">
-                          Upload a file to view normalized 15-minute rows.
-                        </td>
-                      </tr>
-                    ) : (
-                      greenButtonSamples.map((interval) => (
-                        <tr key={interval.id}>
-                          <td className="px-4 py-2">{formatTimestamp(interval.timestamp)}</td>
-                          <td className="px-4 py-2">{formatKwh(Number(interval.consumptionKwh))}</td>
-                          <td className="px-4 py-2">{interval.intervalMinutes} min</td>
-                          <td className="px-4 py-2 truncate">{interval.rawId}</td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-              <p className="text-xs text-brand-navy/60">
-                These rows come directly from the usage database’s{' '}
-                <code className="bg-brand-navy/10 px-1 rounded-sm">GreenButtonInterval</code> table. Confirm totals before
-                wiring the production normalization jobs.
-              </p>
-            </div>
-          </div>
-        </section>
 
         {/* HitTheJackWatt Social Ads */}
         <section className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
@@ -1322,6 +783,15 @@ npx prisma studio --browser none --port 5562`}
             >
               <div className="font-semibold text-brand-navy mb-1">📊 SMT Inspector</div>
               <div className="text-sm text-brand-navy/60">Test SMT ingest, upload, and health endpoints</div>
+            </a>
+            <a
+              href="/admin/usage"
+              className="block p-4 border-2 border-brand-blue/20 rounded-lg hover:border-brand-blue hover:bg-brand-blue/5 transition-colors"
+            >
+              <div className="font-semibold text-brand-navy mb-1">⚙️ Usage Test Suite</div>
+              <div className="text-sm text-brand-navy/60">
+                Exercise SMT + Green Button pipelines and monitor live usage debugging feeds
+              </div>
             </a>
             <a
               href="/admin/retail-rates"
