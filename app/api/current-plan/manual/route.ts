@@ -169,13 +169,14 @@ export async function GET() {
       },
     });
 
-    const usageEntry = await prisma.entry.findFirst({
+    const usageEntries = await prisma.entry.findMany({
       where: {
         userId: user.id,
         type: 'smart_meter_connect',
-        ...(latestPlan?.houseId ? { houseId: latestPlan.houseId } : {}),
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [
+        { createdAt: 'desc' },
+      ],
       select: {
         id: true,
         status: true,
@@ -185,8 +186,14 @@ export async function GET() {
       },
     });
 
-    const usageStatus = usageEntry?.status ?? null;
-    const hasActiveUsage = usageStatus === 'ACTIVE' || usageStatus === 'EXPIRING_SOON';
+    const usageEntry =
+      (latestPlan?.houseId
+        ? usageEntries.find((entry) => entry.houseId === latestPlan.houseId)
+        : null) ?? usageEntries[0] ?? null;
+
+    const hasActiveUsage = usageEntries.some(
+      (entry) => entry.status === 'ACTIVE' || entry.status === 'EXPIRING_SOON',
+    );
 
     const serializedPlan = latestPlan
       ? {
