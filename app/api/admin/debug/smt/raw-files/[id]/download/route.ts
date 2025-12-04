@@ -54,8 +54,9 @@ export async function GET(
 
   const filename = row.filename || `raw-smt-${row.id}.csv`;
   const contentType = row.content_type || 'application/octet-stream';
+  const body = row.content instanceof Buffer ? row.content : Buffer.from(row.content);
 
-  return new Response(row.content, {
+  return new Response(body, {
     status: 200,
     headers: {
       'content-type': contentType,
