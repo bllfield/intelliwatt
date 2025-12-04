@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { loadUsageEntryContext, UsageEntryContext } from "./context";
 import {
@@ -29,10 +30,25 @@ function formatServiceAddress(house: UsageEntryContext["houseAddress"]) {
   return parts.length > 0 ? parts : null;
 }
 
+function highlightEntriesText(text: string): ReactNode {
+  return text
+    .split(/(entries?|entry)/gi)
+    .filter((part) => part.length > 0)
+    .map((part, index) =>
+      /^(entry|entries)$/i.test(part) ? (
+        <span key={`entry-${index}`} className="font-semibold text-[#39FF14]">
+          {part}
+        </span>
+      ) : (
+        <span key={`text-${index}`}>{part}</span>
+      ),
+    );
+}
+
 type OptionCardProps = {
   title: string;
   subtitle: string;
-  description: string;
+  description: ReactNode;
   href: string;
   status: EntryStatus;
   disabled: boolean;
@@ -85,14 +101,16 @@ function OptionCard({
               </span>
             ) : null}
           </div>
-          {status.message ? (
-            <p className="mt-2 text-xs leading-snug text-brand-cyan/75">
-              {status.message}
-            </p>
-          ) : null}
-          {status.detail ? (
-            <p className="mt-1 text-xs text-brand-cyan/60">{status.detail}</p>
-          ) : null}
+        {status.message ? (
+          <p className="mt-2 text-xs leading-snug text-brand-cyan/75">
+            {typeof status.message === "string" ? highlightEntriesText(status.message) : status.message}
+          </p>
+        ) : null}
+        {status.detail ? (
+          <p className="mt-1 text-xs text-brand-cyan/60">
+            {typeof status.detail === "string" ? highlightEntriesText(status.detail) : status.detail}
+          </p>
+        ) : null}
           {status.expiresAt ? (
             <p className="mt-1 text-xs text-brand-cyan/60">
               Expires{" "}
@@ -114,8 +132,8 @@ function OptionCard({
             disabled
               ? "cursor-not-allowed border border-brand-cyan/20 bg-brand-navy/40 text-brand-cyan/50"
               : priority === "primary"
-              ? "border border-brand-cyan bg-brand-cyan text-brand-navy hover:bg-brand-cyan/90"
-              : "border border-brand-cyan/40 bg-brand-navy text-brand-cyan hover:border-brand-cyan/70 hover:bg-brand-navy/80"
+              ? "border border-[#39FF14] bg-[#39FF14] text-brand-navy hover:bg-[#39FF14]/90"
+              : "border border-[#39FF14]/50 bg-transparent text-[#39FF14] hover:border-[#39FF14] hover:bg-[#39FF14]/10"
           }`}
         >
           {buttonLabel}
@@ -218,11 +236,16 @@ export default async function UsageEntryHub() {
               </div>
 
               {smtStatus.message ? (
-                <p className="mt-3 text-sm text-brand-cyan/80">{smtStatus.message}</p>
+                <p className="mt-3 text-sm text-brand-cyan/80">
+                  {typeof smtStatus.message === "string"
+                    ? highlightEntriesText(smtStatus.message)
+                    : smtStatus.message}
+                </p>
               ) : null}
               {smtStatus.tone !== "success" ? (
                 <p className="mt-3 text-sm font-semibold text-brand-cyan">
-                  Connect Smart Meter Texas now to earn 1 jackpot entry instantly.
+                  Connect Smart Meter Texas now to earn{" "}
+                  <span className="text-[#39FF14]">1 jackpot entry</span> instantly.
                 </p>
               ) : null}
 
@@ -239,7 +262,11 @@ export default async function UsageEntryHub() {
             <OptionCard
               title="Smart Meter Texas"
               subtitle="Preferred"
-              description="Securely link SMT so IntelliWatt auto-syncs 15-minute usage and billing history. Unlocks the full experience."
+              description={
+                <span className="text-brand-cyan/85">
+                  Securely link SMT so IntelliWatt auto-syncs 15-minute usage and billing history. Unlocks the full experience.
+                </span>
+              }
               href="/dashboard/api/smt"
               status={smtStatus}
               disabled={!user || !hasHouseAddress}
@@ -250,7 +277,11 @@ export default async function UsageEntryHub() {
             <OptionCard
               title="Green Button Upload"
               subtitle="Utility exports"
-              description="Download your usage as a Green Button XML/CSV file and upload it here. Ideal if SMT isn’t available yet."
+              description={
+                <span className="text-brand-cyan/85">
+                  Download your usage as a Green Button XML/CSV file and upload it here. Ideal if SMT isn’t available yet.
+                </span>
+              }
               href="/dashboard/api/green-button"
               status={greenStatus}
               disabled={!user || !hasHouseAddress}
@@ -259,7 +290,13 @@ export default async function UsageEntryHub() {
             <OptionCard
               title="Manual Usage Placeholder"
               subtitle="Quick fallback"
-              description="Log a manual placeholder reading so jackpot entries stay active while you wait for live data."
+              description={
+                <span className="text-brand-cyan/85">
+                  Log a manual placeholder reading so{" "}
+                  <span className="font-semibold text-[#39FF14]">jackpot entries</span> stay active while you wait for live
+                  data.
+                </span>
+              }
               href="/dashboard/api/manual"
               status={manualStatus}
               disabled={!user || !hasHouseAddress}
