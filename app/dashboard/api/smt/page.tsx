@@ -5,7 +5,6 @@ import { deriveSmtStatus, statusBadgeStyles } from "../statusHelpers";
 import DashboardHero from "@/components/dashboard/DashboardHero";
 import SmtAddressCaptureCard from "@/components/smt/SmtAddressCaptureCard";
 import { SmtAuthorizationForm } from "@/components/smt/SmtAuthorizationForm";
-import SmtManualFallbackCard from "@/components/smt/SmtManualFallbackCard";
 import RefreshSmtButton from "@/components/smt/RefreshSmtButton";
 import LocalTime from "@/components/LocalTime";
 
@@ -128,28 +127,34 @@ export default async function UsageEntrySmartMeterPage() {
                   </p>
                 )}
               </div>
-              <div className="rounded-2xl border border-brand-cyan/40 bg-brand-navy px-4 py-3 text-xs text-brand-cyan/80">
-                <p className="font-semibold text-brand-cyan">Need another entry?</p>
-                <p className="mt-1 leading-relaxed">
-                  Upload a Green Button file or log a manual placeholder when SMT isn’t ready. You can always return here to
-                  refresh SMT access.
-                </p>
-                <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                  <Link
-                    href="/dashboard/api/green-button"
-                    className="inline-flex items-center rounded-full border border-brand-cyan/40 px-3 py-1 text-brand-cyan transition hover:border-brand-cyan hover:bg-brand-navy/60"
-                  >
-                    Green Button upload →
-                  </Link>
-                  <Link
-                    href="/dashboard/api/manual"
-                    className="inline-flex items-center rounded-full border border-brand-cyan/40 px-3 py-1 text-brand-cyan transition hover:border-brand-cyan hover:bg-brand-navy/60"
-                  >
-                    Manual placeholder →
-                  </Link>
-                </div>
+              <div className="flex flex-col items-start gap-2 text-left md:items-end md:text-right">
+                <span className={statusBadgeStyles[smtStatus.tone]}>{smtStatus.label}</span>
+                {existingAuthorization?.createdAt ? (
+                  <span className="text-xs text-brand-cyan/60">
+                    Last updated{" "}
+                    <LocalTime
+                      value={existingAuthorization.createdAt.toISOString()}
+                      options={{ month: "short", day: "numeric", year: "numeric" }}
+                      fallback="—"
+                    />
+                  </span>
+                ) : null}
+                {existingAuthorization?.authorizationEndDate ? (
+                  <span className="text-xs text-brand-cyan/60">
+                    Expires{" "}
+                    <LocalTime
+                      value={existingAuthorization.authorizationEndDate.toISOString()}
+                      options={{ month: "short", day: "numeric", year: "numeric" }}
+                      fallback="—"
+                    />
+                  </span>
+                ) : null}
               </div>
             </div>
+
+            {smtStatus.message ? (
+              <p className="mt-3 text-sm text-brand-cyan/80">{smtStatus.message}</p>
+            ) : null}
 
             <div className="mt-5">
               <SmtAddressCaptureCard
@@ -157,6 +162,12 @@ export default async function UsageEntrySmartMeterPage() {
                 initialAddress={serviceAddressDisplay}
               />
             </div>
+
+            {existingAuthorization ? (
+              <div className="mt-4 flex justify-end">
+                <RefreshSmtButton homeId={houseAddress.id} />
+              </div>
+            ) : null}
           </div>
 
           {!hasEsiid ? (
@@ -172,66 +183,25 @@ export default async function UsageEntrySmartMeterPage() {
           ) : null}
 
           {readyForSmt ? (
-            <div className="space-y-5">
-              <div className="rounded-3xl border border-brand-cyan/30 bg-brand-navy/90 p-6 text-brand-cyan shadow-[0_18px_60px_rgba(16,46,90,0.18)]">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="space-y-1">
-                    <p className="text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">
-                      SMT connection status
-                    </p>
-                    {existingAuthorization?.createdAt ? (
-                      <p className="text-xs text-brand-cyan/70">
-                        Last submitted{" "}
-                        <LocalTime
-                          value={existingAuthorization.createdAt.toISOString()}
-                          options={{ month: "short", day: "numeric", year: "numeric" }}
-                          fallback="—"
-                        />
-                      </p>
-                    ) : null}
-                  </div>
-                  <span className={statusBadgeStyles[smtStatus.tone]}>{smtStatus.label}</span>
-                </div>
-                {smtStatus.message ? (
-                  <p className="mt-3 text-sm text-brand-cyan/80">{smtStatus.message}</p>
-                ) : null}
-                {existingAuthorization?.authorizationEndDate ? (
-                  <p className="mt-2 text-xs text-brand-cyan/70">
-                    Authorization expires{" "}
-                    <LocalTime
-                      value={existingAuthorization.authorizationEndDate.toISOString()}
-                      options={{ month: "short", day: "numeric", year: "numeric" }}
-                      fallback="—"
-                    />
-                  </p>
-                ) : null}
-                <div className="mt-4">
-                  <RefreshSmtButton homeId={houseAddress.id} />
-                </div>
-              </div>
-
-              <div className="rounded-3xl border border-brand-cyan/20 bg-white p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
-                <SmtAuthorizationForm
-                  contactEmail={context.user?.email ?? ""}
-                  houseAddressId={houseAddress.id}
-                  houseId={houseAddress.houseId ?? undefined}
-                  esiid={houseAddress.esiid ?? undefined}
-                  tdspCode={tdspCode}
-                  tdspName={tdspName}
-                  serviceAddressLine1={serviceAddressLine1}
-                  serviceAddressLine2={serviceAddressLine2 ?? undefined}
-                  serviceCity={serviceCity}
-                  serviceState={serviceState}
-                  serviceZip={serviceZip}
-                  existingAuth={existingAuthorization ?? undefined}
-                  initialMeterNumber={existingAuthorization?.meterNumber ?? undefined}
-                  showHeader={false}
-                />
-              </div>
+            <div className="rounded-3xl border border-brand-cyan/20 bg-white p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
+              <SmtAuthorizationForm
+                contactEmail={context.user?.email ?? ""}
+                houseAddressId={houseAddress.id}
+                houseId={houseAddress.houseId ?? undefined}
+                esiid={houseAddress.esiid ?? undefined}
+                tdspCode={tdspCode}
+                tdspName={tdspName}
+                serviceAddressLine1={serviceAddressLine1}
+                serviceAddressLine2={serviceAddressLine2 ?? undefined}
+                serviceCity={serviceCity}
+                serviceState={serviceState}
+                serviceZip={serviceZip}
+                existingAuth={existingAuthorization ?? undefined}
+                initialMeterNumber={existingAuthorization?.meterNumber ?? undefined}
+                showHeader={false}
+              />
             </div>
           ) : null}
-
-          <SmtManualFallbackCard houseAddressId={houseAddress.id} />
         </div>
       </section>
     </div>
