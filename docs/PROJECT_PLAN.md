@@ -208,6 +208,12 @@ Notes:
   - Main production DB: master migrations up to date; `20251130225951_add_normalized_current_plan` deployed with `npx prisma migrate deploy --schema=prisma/schema.prisma`.
 - Any prior drift (ERCOT index, SMT column type, etc.) was resolved by rebuilding dev and re-running migrate deploy in prod. No further migration repair is required for this slice.
 
+## PC-2025-12-04 · Usage Dashboard Activation (SMT-first)
+
+- Added `/api/user/usage` (GET) which aggregates 15-minute, hourly, daily, monthly, and annual buckets for each house. The handler inspects master `SmtInterval` rows and usage-db `GreenButtonInterval` rows, automatically selecting the source with the freshest timestamp so the dashboard always reflects the most recent upload.
+- `/dashboard/usage` is now live; the page fetches the endpoint above, surfaces coverage/total summaries, renders a 14-day daily table, and highlights recent peak intervals. Locked homes guide customers back to SMT reconnect or Green Button upload workflows while keeping referrals unlocked.
+- Manual usage normalization remains queued; once implemented it will plug into the same endpoint so the promotion logic (latest source wins) continues to hold.
+
 ### Usage Module Database (`intelliwatt_usage`)
 
 - Connection: `USAGE_DATABASE_URL`
