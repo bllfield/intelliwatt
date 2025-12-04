@@ -108,7 +108,7 @@ interface GreenButtonIntervalSample {
   intervalMinutes: number;
 }
 
-const AUTO_REFRESH_MS = 180_000;
+const AUTO_REFRESH_MS = 300_000;
 
 const numberFormatter = new Intl.NumberFormat(undefined, {
   minimumFractionDigits: 0,

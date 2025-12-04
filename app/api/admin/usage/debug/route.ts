@@ -51,12 +51,22 @@ export async function GET(request: NextRequest) {
       usageLatestRowsRaw,
     ] = await Promise.all([
       prisma.smtInterval.aggregate({
+        where: {
+          ts: {
+            gte: recentCutoff,
+          },
+        },
         _count: { _all: true },
         _min: { ts: true },
         _max: { ts: true },
         _sum: { kwh: true },
       }),
       prisma.smtInterval.groupBy({
+        where: {
+          ts: {
+            gte: recentCutoff,
+          },
+        },
         by: ['esiid'],
         _count: { _all: true },
         _sum: { kwh: true },
@@ -69,6 +79,11 @@ export async function GET(request: NextRequest) {
         take: 15,
       }),
       prisma.smtInterval.findMany({
+        where: {
+          ts: {
+            gte: recentCutoff,
+          },
+        },
         orderBy: { ts: 'desc' },
         take: 25,
         select: {
@@ -96,6 +111,7 @@ export async function GET(request: NextRequest) {
       prisma.$queryRaw<{ count: bigint }[]>`
         SELECT COUNT(DISTINCT "esiid")::bigint AS count
         FROM "SmtInterval"
+        WHERE "ts" >= ${recentCutoff}
       `,
       usageClient.usageIntervalModule.aggregate({
         where: {
@@ -186,6 +202,7 @@ export async function GET(request: NextRequest) {
         topEsiids: smtTopEsiids,
         latestIntervals: smtLatestIntervals,
         rawFiles: smtRawFilesPayload,
+        windowDays: RECENT_USAGE_WINDOW_DAYS,
       },
       usageModule: {
         totals: usageTotals,

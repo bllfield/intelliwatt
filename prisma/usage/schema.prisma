@@ -73,5 +73,6 @@ model GreenButtonInterval {
 
   @@index([rawId])
   @@index([timestamp])
+  @@index([rawId, timestamp])
   @@index([homeId, timestamp])
 }
