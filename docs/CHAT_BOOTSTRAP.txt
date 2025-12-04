@@ -220,7 +220,14 @@ git pull origin main
 sudo cp deploy/droplet/webhook_server.py /home/deploy/webhook_server.py
 sudo systemctl restart smt-webhook.service
 sudo systemctl restart smt-ingest.service
+# From the repo checkout on the droplet (usually /home/deploy/apps/intelliwatt)
+sudo cp scripts/droplet/green-button-upload-server.ts /home/deploy/green-button-upload-server.ts
 
+# Bounce the uploader
+sudo systemctl restart green-button-upload.service
+
+# (Optional) confirm it came back clean
+sudo journalctl -u green-button-upload.service --since "5 minutes ago" --no-pager
 
 - ``sudo journalctl -u smt-webhook.service -f
 - `sudo journalctl -u smt-webhook.service --since "5 minutes ago" --no-pager`
