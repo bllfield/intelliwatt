@@ -517,7 +517,7 @@ export function CurrentRateDetailsForm({
   };
 
   const derivedUsageStatus =
-    hasActiveUsage && isEntryLive
+    hasActiveUsage
       ? usageStatus === "ACTIVE" || usageStatus === "EXPIRING_SOON"
         ? usageStatus
         : "ACTIVE"
