@@ -9,7 +9,7 @@ import RefreshSmtButton from "@/components/smt/RefreshSmtButton";
 import LocalTime from "@/components/LocalTime";
 
 export const dynamic = "force-dynamic";
-export const revalidate = 0;
+export const revalidate = 0; 
 
 function formatServiceAddress(context: Awaited<ReturnType<typeof loadUsageEntryContext>>) {
   const house = context.houseAddress;

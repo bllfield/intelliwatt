@@ -10,6 +10,7 @@ import {
 import SmtAddressCaptureCard from "@/components/smt/SmtAddressCaptureCard";
 import DashboardHero from "@/components/dashboard/DashboardHero";
 import LocalTime from "@/components/LocalTime";
+import RefreshSmtButton from "@/components/smt/RefreshSmtButton";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -37,6 +38,7 @@ type OptionCardProps = {
   disabled: boolean;
   disabledMessage?: string;
   priority?: "primary" | "secondary";
+  connectedCtaLabel?: string;
 };
 
 function OptionCard({
@@ -48,7 +50,15 @@ function OptionCard({
   disabled,
   disabledMessage,
   priority = "secondary",
+  connectedCtaLabel,
 }: OptionCardProps) {
+  const isConnected = status.tone === "success";
+  const buttonLabel = isConnected
+    ? connectedCtaLabel ?? (priority === "primary" ? "Update connection" : "Update entry")
+    : priority === "primary"
+    ? "Start connection"
+    : "Open entry flow";
+
   return (
     <div className="flex h-full flex-col justify-between rounded-3xl border border-brand-cyan/25 bg-brand-navy/90 p-5 text-brand-cyan shadow-[0_16px_45px_rgba(16,46,90,0.22)] transition hover:shadow-[0_20px_60px_rgba(16,46,90,0.28)]">
       <div className="space-y-3">
@@ -108,7 +118,7 @@ function OptionCard({
               : "border border-brand-cyan/40 bg-brand-navy text-brand-cyan hover:border-brand-cyan/70 hover:bg-brand-navy/80"
           }`}
         >
-          {priority === "primary" ? "Start connection" : "Open entry flow"}
+          {buttonLabel}
         </Link>
         {disabled && disabledMessage ? (
           <p className="text-center text-[0.7rem] text-brand-cyan/60">
@@ -177,16 +187,44 @@ export default async function UsageEntryHub() {
                     </p>
                   )}
                 </div>
-                <div className="flex min-w-[220px] flex-col gap-3">
-                  <div className="rounded-2xl border border-brand-cyan/40 bg-brand-navy px-4 py-3 text-xs text-brand-cyan/80">
-                    <p className="font-semibold text-brand-cyan">How the hub works</p>
-                    <p className="mt-1 leading-relaxed">
-                      Connect SMT first whenever possible. If your utility supports Green Button, upload a file next. Use the
-                      manual placeholder when neither option is ready—we’ll keep your jackpot entries active.
-                    </p>
-                  </div>
+                <div className="flex min-w-[220px] flex-col items-start gap-2 text-left text-xs md:items-end md:text-right">
+                  <span className={statusBadgeStyles[smtStatus.tone]}>{smtStatus.label}</span>
+                  {existingAuthorization?.createdAt ? (
+                    <span className="text-brand-cyan/60">
+                      Updated{" "}
+                      <LocalTime
+                        value={existingAuthorization.createdAt.toISOString()}
+                        options={{ month: "short", day: "numeric", year: "numeric" }}
+                        fallback="—"
+                      />
+                    </span>
+                  ) : null}
+                  {existingAuthorization?.authorizationEndDate ? (
+                    <span className="text-brand-cyan/60">
+                      Expires{" "}
+                      <LocalTime
+                        value={existingAuthorization.authorizationEndDate.toISOString()}
+                        options={{ month: "short", day: "numeric", year: "numeric" }}
+                        fallback="—"
+                      />
+                    </span>
+                  ) : null}
+                  {existingAuthorization && houseAddress?.id ? (
+                    <div className="pt-1">
+                      <RefreshSmtButton homeId={houseAddress.id} />
+                    </div>
+                  ) : null}
                 </div>
               </div>
+
+              {smtStatus.message ? (
+                <p className="mt-3 text-sm text-brand-cyan/80">{smtStatus.message}</p>
+              ) : null}
+              {smtStatus.tone !== "success" ? (
+                <p className="mt-3 text-sm font-semibold text-brand-cyan">
+                  Connect Smart Meter Texas now to earn 1 jackpot entry instantly.
+                </p>
+              ) : null}
 
               <div className="mt-5">
                 <SmtAddressCaptureCard
@@ -207,6 +245,7 @@ export default async function UsageEntryHub() {
               disabled={!user || !hasHouseAddress}
               disabledMessage={!user ? "Sign in to continue" : "Add your service address first"}
               priority="primary"
+              connectedCtaLabel="Update connection"
             />
             <OptionCard
               title="Green Button Upload"
