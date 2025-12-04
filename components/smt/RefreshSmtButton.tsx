@@ -9,6 +9,27 @@ interface RefreshSmtButtonProps {
 
 type RefreshState = 'idle' | 'success' | 'error';
 
+type UsageRefreshResponse = {
+  ok: boolean;
+  homes?: Array<{
+    homeId: string;
+    authorizationRefreshed: boolean;
+    authorizationMessage?: string;
+    pull: {
+      attempted: boolean;
+      ok: boolean;
+      status?: number;
+      message?: string;
+    };
+  }>;
+  normalization?: {
+    attempted: boolean;
+    ok: boolean;
+    status?: number;
+    message?: string;
+  };
+};
+
 export default function RefreshSmtButton({ homeId }: RefreshSmtButtonProps) {
   const router = useRouter();
   const [status, setStatus] = useState<RefreshState>('idle');
@@ -22,7 +43,7 @@ export default function RefreshSmtButton({ homeId }: RefreshSmtButtonProps) {
 
     startTransition(async () => {
       try {
-        const response = await fetch('/api/smt/authorization/status', {
+        const statusResponse = await fetch('/api/smt/authorization/status', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -30,18 +51,18 @@ export default function RefreshSmtButton({ homeId }: RefreshSmtButtonProps) {
           body: JSON.stringify({ homeId }),
         });
 
-        let payload: any = null;
+        let statusPayload: any = null;
         try {
-          payload = await response.json();
+          statusPayload = await statusResponse.json();
         } catch {
-          // ignore parse failure; handled below
+          statusPayload = null;
         }
 
-        if (!response.ok || !payload?.ok) {
+        if (!statusResponse.ok || !statusPayload?.ok) {
           throw new Error(
-            payload?.message ||
-              payload?.error ||
-              `Refresh failed with status ${response.status}`,
+            statusPayload?.message ||
+              statusPayload?.error ||
+              `SMT status refresh failed (${statusResponse.status})`,
           );
         }
 
@@ -51,38 +72,52 @@ export default function RefreshSmtButton({ homeId }: RefreshSmtButtonProps) {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({ homeId }),
-        }).catch((error) => {
-          throw new Error(
-            error instanceof Error
-              ? error.message
-              : 'Failed to refresh usage history.',
-          );
         });
 
-        let usagePayload: any = null;
+        let usagePayload: UsageRefreshResponse | null = null;
         try {
-          usagePayload = await usageResponse.json();
+          usagePayload = (await usageResponse.json()) as UsageRefreshResponse;
         } catch {
           usagePayload = null;
         }
 
         if (!usageResponse.ok || !usagePayload?.ok) {
           throw new Error(
-            usagePayload?.normalization?.result?.error ||
-              usagePayload?.error ||
-              `Usage refresh failed with status ${usageResponse.status}`,
+            usagePayload?.normalization?.message ||
+              usagePayload?.homes?.[0]?.pull?.message ||
+              'Usage refresh failed.',
           );
         }
 
-        const normalizationWarning =
-          usagePayload?.normalization?.result?.warning ?? null;
+        const homeSummary = usagePayload.homes?.find((home) => home.homeId === homeId);
+        const summaryMessages: string[] = [];
+
+        if (homeSummary) {
+          if (homeSummary.authorizationRefreshed) {
+            summaryMessages.push('SMT authorization refreshed.');
+          } else if (homeSummary.authorizationMessage) {
+            summaryMessages.push(homeSummary.authorizationMessage);
+          }
+
+          if (homeSummary.pull.attempted) {
+            summaryMessages.push(
+              homeSummary.pull.ok
+                ? homeSummary.pull.message ?? 'SMT usage pull triggered.'
+                : homeSummary.pull.message ?? 'SMT usage pull failed.',
+            );
+          }
+        }
+
+        if (usagePayload.normalization?.attempted) {
+          summaryMessages.push(
+            usagePayload.normalization.ok
+              ? usagePayload.normalization.message ?? 'Usage normalization triggered.'
+              : usagePayload.normalization.message ?? 'Usage normalization failed.',
+          );
+        }
 
         setStatus('success');
-        setMessage(
-          normalizationWarning
-            ? `SMT status refreshed. ${normalizationWarning}`
-            : 'SMT data refreshed and usage reloaded.',
-        );
+        setMessage(summaryMessages.filter(Boolean).join(' '));
         router.refresh();
       } catch (error) {
         setStatus('error');

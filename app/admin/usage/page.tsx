@@ -232,7 +232,11 @@ export default function AdminUsageConsole() {
           json?.error ||
           json?.message ||
           (raw && raw.length > 0 ? raw : debugRes.statusText || 'Failed to load usage debug data');
-        setError(`Usage debug fetch failed (${debugRes.status}): ${detail}`);
+        const hint =
+          debugRes.status === 401
+            ? ' (add the admin token above to authenticate)'
+            : '';
+        setError(`Usage debug fetch failed (${debugRes.status}): ${detail}${hint}`);
       }
 
       if (greenButtonRes.ok) {

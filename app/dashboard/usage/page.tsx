@@ -295,41 +295,28 @@ export default function UsagePage() {
           targetHouses.map(async (house) => {
             if (!house.houseId) return;
             try {
-              const statusRes = await fetch('/api/smt/authorization/status', {
+              const res = await fetch('/api/user/usage/refresh', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ homeId: house.houseId }),
               });
-              if (!statusRes.ok) {
-                const detail = await statusRes.text().catch(() => '');
-                console.warn(
-                  'SMT status refresh failed',
-                  house.houseId,
-                  statusRes.status,
-                  detail,
-                );
+              let payload: any = null;
+              try {
+                payload = await res.json();
+              } catch {
+                payload = null;
               }
-            } catch (error) {
-              console.error('SMT status refresh encountered an error', house.houseId, error);
-            }
 
-            try {
-              const usageRes = await fetch('/api/user/usage/refresh', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ homeId: house.houseId }),
-              });
-              if (!usageRes.ok) {
-                const detail = await usageRes.text().catch(() => '');
-                console.warn(
-                  'Usage normalization refresh failed',
-                  house.houseId,
-                  usageRes.status,
-                  detail,
-                );
+              if (!res.ok || payload?.ok === false) {
+                const message =
+                  payload?.normalization?.message ||
+                  payload?.homes?.[0]?.pull?.message ||
+                  payload?.error ||
+                  `Usage refresh failed (${res.status})`;
+                console.warn('Usage refresh warning', house.houseId, message);
               }
             } catch (error) {
-              console.error('Usage normalization refresh encountered an error', house.houseId, error);
+              console.error('Usage refresh encountered an error', house.houseId, error);
             }
           }),
         );

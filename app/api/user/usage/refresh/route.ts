@@ -26,6 +26,18 @@ function resolveBaseUrl(): URL {
   return new URL("https://intelliwatt.com");
 }
 
+interface HomeRefreshResult {
+  homeId: string;
+  authorizationRefreshed: boolean;
+  authorizationMessage?: string;
+  pull: {
+    attempted: boolean;
+    ok: boolean;
+    status?: number;
+    message?: string;
+  };
+}
+
 export async function POST(req: NextRequest) {
   const cookieStore = cookies();
   const sessionEmail = cookieStore.get("intelliwatt_user")?.value ?? null;
@@ -78,57 +90,98 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const refreshed: Array<{
-    homeId: string;
-    authorizationRefreshed: boolean;
-    message?: string;
-  }> = [];
+  const adminToken = process.env.ADMIN_TOKEN ?? "";
+  const baseUrl = resolveBaseUrl();
+  const pullUrl = new URL("/api/admin/smt/pull", baseUrl);
+  const normalizeUrl = new URL("/api/admin/smt/normalize", baseUrl);
+  normalizeUrl.searchParams.set("limit", "10");
+
+  const refreshed: HomeRefreshResult[] = [];
 
   for (const house of targetHouses) {
+    const result: HomeRefreshResult = {
+      homeId: house.id,
+      authorizationRefreshed: false,
+      pull: {
+        attempted: Boolean(adminToken),
+        ok: false,
+      },
+    };
+
     const auth = await prisma.smtAuthorization.findFirst({
       where: { houseAddressId: house.id, archivedAt: null },
       orderBy: { createdAt: "desc" },
       select: { id: true },
     });
 
-    if (!auth) {
-      refreshed.push({
-        homeId: house.id,
-        authorizationRefreshed: false,
-        message: "No SMT authorization found for this home.",
-      });
-      continue;
-    }
-
-    try {
-      await refreshSmtAuthorizationStatus(auth.id);
-      refreshed.push({
-        homeId: house.id,
-        authorizationRefreshed: true,
-      });
-    } catch (error) {
-      refreshed.push({
-        homeId: house.id,
-        authorizationRefreshed: false,
-        message:
+    if (auth) {
+      try {
+        await refreshSmtAuthorizationStatus(auth.id);
+        result.authorizationRefreshed = true;
+      } catch (error) {
+        result.authorizationMessage =
           error instanceof Error
             ? error.message
-            : "Failed to refresh SMT authorization status.",
-      });
+            : "Failed to refresh SMT authorization status.";
+      }
+    } else {
+      result.authorizationMessage = "No SMT authorization found for this home.";
     }
+
+    if (adminToken && house.esiid) {
+      try {
+        const pullResponse = await fetch(pullUrl, {
+          method: "POST",
+          headers: {
+            "x-admin-token": adminToken,
+            "content-type": "application/json",
+          },
+          cache: "no-store",
+          body: JSON.stringify({ esiid: house.esiid, houseId: house.id }),
+        });
+
+        result.pull.status = pullResponse.status;
+        let pullPayload: any = null;
+        try {
+          pullPayload = await pullResponse.json();
+        } catch {
+          pullPayload = null;
+        }
+
+        if (pullResponse.ok && pullPayload?.ok !== false) {
+          result.pull.ok = true;
+          result.pull.message = pullPayload?.message ?? "SMT pull triggered.";
+        } else {
+          result.pull.ok = false;
+          result.pull.message =
+            pullPayload?.error ?? pullPayload?.details ?? "SMT pull request failed.";
+        }
+      } catch (error) {
+        result.pull.ok = false;
+        result.pull.message =
+          error instanceof Error
+            ? error.message
+            : "Failed to invoke SMT pull webhook.";
+      }
+    } else if (!adminToken) {
+      result.pull.message = "ADMIN_TOKEN not configured; SMT pull not attempted.";
+    } else {
+      result.pull.message = "House is missing an ESIID; SMT pull not attempted.";
+    }
+
+    refreshed.push(result);
   }
 
-  const adminToken = process.env.ADMIN_TOKEN;
-  let normalizationResult: any = null;
-  let normalizationOk = false;
+  let normalization = {
+    attempted: Boolean(adminToken),
+    ok: false,
+    status: undefined as number | undefined,
+    message: undefined as string | undefined,
+  };
 
   if (adminToken) {
-    const baseUrl = resolveBaseUrl();
-    const normalizeUrl = new URL("/api/admin/smt/normalize", baseUrl);
-    normalizeUrl.searchParams.set("limit", "10");
-
     try {
-      const res = await fetch(normalizeUrl, {
+      const normalizeRes = await fetch(normalizeUrl, {
         method: "POST",
         headers: {
           "x-admin-token": adminToken,
@@ -136,30 +189,37 @@ export async function POST(req: NextRequest) {
         },
         cache: "no-store",
       });
-      normalizationOk = res.ok;
+      normalization.status = normalizeRes.status;
+      let normalizePayload: any = null;
       try {
-        normalizationResult = await res.json();
+        normalizePayload = await normalizeRes.json();
       } catch {
-        normalizationResult = await res.text();
+        normalizePayload = null;
+      }
+
+      if (normalizeRes.ok && normalizePayload?.ok !== false) {
+        normalization.ok = true;
+        normalization.message = normalizePayload?.filesProcessed
+          ? `Normalized ${normalizePayload.filesProcessed} file(s).`
+          : normalizePayload?.message ?? "Normalization triggered.";
+      } else {
+        normalization.ok = false;
+        normalization.message =
+          normalizePayload?.error ?? normalizePayload?.detail ?? "Normalization failed.";
       }
     } catch (error) {
-      normalizationResult =
-        error instanceof Error ? error.message : String(error);
+      normalization.ok = false;
+      normalization.message =
+        error instanceof Error ? error.message : "Failed to invoke SMT normalization.";
     }
   } else {
-    normalizationResult = {
-      warning: "ADMIN_TOKEN not configured; normalized SMT intervals were not refreshed.",
-    };
+    normalization.message = "ADMIN_TOKEN not configured; normalization not attempted.";
   }
 
   return NextResponse.json({
     ok: true,
-    refreshedHomes: refreshed,
-    normalization: {
-      attempted: Boolean(adminToken),
-      ok: normalizationOk,
-      result: normalizationResult,
-    },
+    homes: refreshed,
+    normalization,
   });
 }
 
