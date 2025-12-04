@@ -1,8 +1,10 @@
 import express, { Request, Response, NextFunction } from "express";
 import multer from "multer";
 import { createHash, createHmac } from "node:crypto";
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import { PrismaClient as UsagePrismaClient } from "../../.prisma/usage-client";
+import { parseGreenButtonBuffer } from "@/lib/usage/greenButtonParser";
+import { normalizeGreenButtonReadingsTo15Min } from "@/lib/usage/greenButtonNormalize";
 
 const PORT = Number(process.env.GREEN_BUTTON_UPLOAD_PORT || "8091");
 const MAX_BYTES = Number(process.env.GREEN_BUTTON_UPLOAD_MAX_BYTES || 10 * 1024 * 1024);
@@ -92,6 +94,8 @@ function decodePayload(encoded: string): UploadPayload {
 }
 
 app.post("/upload", upload.single("file"), async (req: Request, res: Response) => {
+  let uploadRecordId: string | null = null;
+  let rawRecordId: string | null = null;
   try {
     if (!SECRET) {
       res.status(500).json({
@@ -203,7 +207,6 @@ app.post("/upload", upload.single("file"), async (req: Request, res: Response) =
       file.originalname?.slice(0, 255) || file.fieldname || "green-button-upload.xml";
     const mimeType = file.mimetype?.slice(0, 128) || "application/xml";
 
-    let rawRecordId: string | null = null;
     try {
       const created = await usagePrisma.rawGreenButton.create({
         data: {
@@ -240,26 +243,162 @@ app.post("/upload", upload.single("file"), async (req: Request, res: Response) =
       throw new Error("Failed to persist raw Green Button record");
     }
 
-    await (prisma as any).greenButtonUpload.create({
-      data: {
-        houseId: house.id,
-        utilityName,
-        accountNumber,
-        fileName: filename,
-        fileType: mimeType,
-        fileSizeBytes: buffer.length,
-        storageKey: `usage:raw_green_button:${rawRecordId}`,
-        parseStatus: "pending",
-        parseMessage: null,
-      },
+    const storageKey = `usage:raw_green_button:${rawRecordId}`;
+    const existingUpload = await (prisma as any).greenButtonUpload.findFirst({
+      where: { storageKey },
+      select: { id: true },
     });
+
+    const baseUploadData = {
+      houseId: house.id,
+      utilityName,
+      accountNumber,
+      fileName: filename,
+      fileType: mimeType,
+      fileSizeBytes: buffer.length,
+      storageKey,
+      parseStatus: "processing",
+      parseMessage: null,
+      dateRangeStart: null,
+      dateRangeEnd: null,
+      intervalMinutes: null,
+    };
+
+    if (existingUpload) {
+      uploadRecordId = existingUpload.id;
+      await (prisma as any).greenButtonUpload.update({
+        where: { id: existingUpload.id },
+        data: baseUploadData,
+      });
+    } else {
+      const createdUpload = await (prisma as any).greenButtonUpload.create({
+        data: baseUploadData,
+      });
+      uploadRecordId = createdUpload.id;
+    }
+
+    const parsed = parseGreenButtonBuffer(buffer, filename);
+    if (parsed.errors.length > 0) {
+      if (uploadRecordId) {
+        await (prisma as any).greenButtonUpload.update({
+          where: { id: uploadRecordId },
+          data: {
+            parseStatus: "error",
+            parseMessage: parsed.errors.join("; "),
+          },
+        });
+      }
+      res.status(422).json({
+        ok: false,
+        error: parsed.errors.join("; "),
+        warnings: parsed.warnings,
+      });
+      return;
+    }
+
+    if (parsed.readings.length === 0) {
+      if (uploadRecordId) {
+        await (prisma as any).greenButtonUpload.update({
+          where: { id: uploadRecordId },
+          data: {
+            parseStatus: "empty",
+            parseMessage: "File parsed but no interval data was found.",
+          },
+        });
+      }
+      res.status(422).json({
+        ok: false,
+        error: "no_readings",
+        warnings: parsed.warnings,
+      });
+      return;
+    }
+
+    const normalized = normalizeGreenButtonReadingsTo15Min(parsed.readings);
+    if (normalized.length === 0) {
+      if (uploadRecordId) {
+        await (prisma as any).greenButtonUpload.update({
+          where: { id: uploadRecordId },
+          data: {
+            parseStatus: "empty",
+            parseMessage: "Readings were parsed but could not be normalized to 15-minute intervals.",
+          },
+        });
+      }
+      res.status(422).json({
+        ok: false,
+        error: "normalization_empty",
+        warnings: parsed.warnings,
+      });
+      return;
+    }
+
+    const intervalData = normalized.map((interval) => ({
+      rawId: rawRecordId!,
+      homeId: house.id,
+      userId: house.userId,
+      timestamp: interval.timestamp,
+      consumptionKwh: new Prisma.Decimal(interval.consumptionKwh),
+      intervalMinutes: interval.intervalMinutes,
+    }));
+
+    await usagePrisma.$transaction(async (tx) => {
+      await (tx as any).greenButtonInterval.deleteMany({ where: { rawId: rawRecordId! } });
+      if (intervalData.length > 0) {
+        await (tx as any).greenButtonInterval.createMany({
+          data: intervalData,
+        });
+      }
+    });
+
+    const totalKwh = normalized.reduce((sum, row) => sum + row.consumptionKwh, 0);
+    const earliest = normalized[0]?.timestamp ?? null;
+    const latest = normalized[normalized.length - 1]?.timestamp ?? null;
+
+    if (uploadRecordId) {
+      const summary = {
+        format: parsed.format,
+        totalRawReadings: parsed.metadata.totalReadings,
+        normalizedIntervals: normalized.length,
+        totalKwh: Number(totalKwh.toFixed(6)),
+        warnings: parsed.warnings,
+      };
+      await (prisma as any).greenButtonUpload.update({
+        where: { id: uploadRecordId },
+        data: {
+          parseStatus: parsed.warnings.length > 0 ? "complete_with_warnings" : "complete",
+          parseMessage: JSON.stringify(summary),
+          dateRangeStart: earliest,
+          dateRangeEnd: latest,
+          intervalMinutes: 15,
+        },
+      });
+    }
 
     res.status(201).json({
       ok: true,
       rawId: rawRecordId,
+      intervalsCreated: normalized.length,
+      totalKwh,
+      warnings: parsed.warnings,
+      dateRangeStart: earliest ? earliest.toISOString() : null,
+      dateRangeEnd: latest ? latest.toISOString() : null,
     });
   } catch (error) {
     console.error("[green-button-upload] failed to handle upload", error);
+    if (uploadRecordId) {
+      try {
+        await (prisma as any).greenButtonUpload.update({
+          where: { id: uploadRecordId },
+          data: {
+            parseStatus: "error",
+            parseMessage: String((error as Error)?.message || error),
+          },
+        });
+      } catch (updateErr) {
+        console.error("[green-button-upload] failed to mark upload error", updateErr);
+      }
+    }
     res.status(500).json({
       ok: false,
       error: "internal_error",

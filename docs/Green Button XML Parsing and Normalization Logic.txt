@@ -1,0 +1,1196 @@
+# Green Button XML Parsing and Normalization Logic
+## Complete Implementation Guide for Energy Data Extraction
+
+---
+
+## EXECUTIVE SUMMARY
+
+Green Button is a standardized format for sharing electricity consumption data from utilities.
+It comes in two formats:
+    1. XML (ESPI - Energy Services Profile Interface) - Most common
+    2. CSV (simplified spreadsheet) - Easier to work with
+
+This document explains how to:
+    1. Parse Green Button XML files
+    2. Extract consumption intervals (typically 15 minutes, 30 minutes, or hourly)
+    3. Validate data quality and detect anomalies
+    4. Normalize to standard 15-minute intervals
+    5. Handle missing data, meter changes, and rate changes
+    6. Store in database for analysis
+
+---
+
+## SECTION 1: GREEN BUTTON FILE FORMATS
+
+### 1.1 Green Button XML Structure (ESPI Format)
+
+Green Button XML files have nested structure:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Green Button Usage Data</title>
+  <entry>
+    <id>urn:uuid:data-feed</id>
+    <title>Usage</title>
+    <content>
+      <IntervalBlock>
+        <interval>
+          <start>1234567890</start>
+          <duration>900</duration>
+          <value>1234</value>
+        </interval>
+        <interval>
+          <start>1234568790</start>
+          <duration>900</duration>
+          <value>1456</value>
+        </interval>
+        <!-- More intervals -->
+      </IntervalBlock>
+    </content>
+  </entry>
+  <entry>
+    <id>urn:uuid:meter-reading-container</id>
+    <title>Meter Reading Container</title>
+    <content>
+      <MeterReading>
+        <meterReading>
+          <timePeriod>
+            <start>1234500000</start>
+            <duration>86400</duration>
+          </timePeriod>
+          <Reading>
+            <timePeriod>
+              <start>1234567890</start>
+              <duration>900</duration>
+            </timePeriod>
+            <value>1234</value>
+            <quality>12</quality>
+          </Reading>
+        </meterReading>
+      </MeterReading>
+    </content>
+  </entry>
+  <entry>
+    <id>urn:uuid:local-time-parameters</id>
+    <title>Local Time Parameters</title>
+    <content>
+      <LocalTimeParameters>
+        <dstStartRule>0,5,0,2,0,7200</dstStartRule>
+        <dstEndRule>0,10,0,2,0,7200</dstEndRule>
+        <tzOffset>-14400</tzOffset>
+      </LocalTimeParameters>
+    </content>
+  </entry>
+</feed>
+```
+
+KEY ELEMENTS:
+
+    <start> = Unix timestamp (seconds since Jan 1, 1970 UTC)
+    <duration> = Duration of interval in seconds
+    <value> = Energy consumed during interval (in Wh - watt-hours)
+    <quality> = Data quality code (optional, 0=good, 1-7=issues)
+    <timePeriod> = Container for multiple readings
+
+CRITICAL NOTES:
+    - All times are in UTC (epoch format)
+    - Must convert to local timezone using tzOffset or DST rules
+    - Values are in Wh (watt-hours), not kWh
+    - Need to convert: Wh ÷ 1000 = kWh
+
+### 1.2 Green Button CSV Format
+
+Simplified CSV version of Green Button (easier to parse):
+
+```
+Date,Time,Start Time (UTC),End Time (UTC),Usage (kWh),Quality Code
+2024-01-01,00:00,1704067200,1704067900,0.234,0
+2024-01-01,00:15,1704067900,1704068800,0.267,0
+2024-01-01,00:30,1704068800,1704069500,0.312,0
+2024-01-01,00:45,1704069500,1704070200,0.245,0
+2024-01-01,01:00,1704070200,1704070900,0.289,0
+```
+
+ADVANTAGES OVER XML:
+    - Human-readable
+    - Easier to parse with pandas or csv module
+    - Column headers clearly defined
+    - Timezone already converted to local time (usually)
+
+DISADVANTAGES:
+    - Less complete metadata
+    - May not include quality codes or meter info
+    - Some utilities only provide XML
+
+---
+
+## SECTION 2: PARSING LOGIC
+
+### 2.1 XML Parsing with Python (xml.etree.ElementTree)
+
+```python
+import xml.etree.ElementTree as ET
+from datetime import datetime, timezone, timedelta
+import json
+
+def parse_green_button_xml(xml_file_path):
+    """
+    Parse Green Button XML file and extract intervals.
+    
+    Args:
+        xml_file_path: Path to Green Button XML file
+    
+    Returns:
+        Dictionary with:
+        - intervals: List of interval data (start_time, duration, consumption_kwh)
+        - metadata: Timezone info, meter data, data quality
+        - errors: Any parsing issues encountered
+    """
+    
+    result = {
+        'intervals': [],
+        'metadata': {},
+        'errors': []
+    }
+    
+    try:
+        # Parse XML file
+        tree = ET.parse(xml_file_path)
+        root = tree.getroot()
+        
+        # Define XML namespace (Green Button uses this)
+        ns = {'atom': 'http://www.w3.org/2005/Atom'}
+        
+        # Extract timezone information
+        local_time_params = root.find('.//LocalTimeParameters')
+        tz_offset_seconds = 0
+        if local_time_params is not None:
+            tz_offset_str = local_time_params.findtext('tzOffset')
+            if tz_offset_str:
+                tz_offset_seconds = int(tz_offset_str)
+        
+        result['metadata']['timezone_offset_seconds'] = tz_offset_seconds
+        result['metadata']['timezone_offset_hours'] = tz_offset_seconds / 3600
+        
+        # Extract all intervals
+        for interval in root.findall('.//interval'):
+            start_str = interval.findtext('start')
+            duration_str = interval.findtext('duration')
+            value_str = interval.findtext('value')
+            
+            if not all([start_str, duration_str, value_str]):
+                result['errors'].append(f'Incomplete interval: {interval}')
+                continue
+            
+            try:
+                start_epoch = int(start_str)
+                duration_seconds = int(duration_str)
+                value_wh = int(value_str)
+                
+                # Convert epoch to datetime (UTC)
+                start_utc = datetime.fromtimestamp(start_epoch, tz=timezone.utc)
+                
+                # Apply timezone offset to get local time
+                local_tz = timezone(timedelta(seconds=tz_offset_seconds))
+                start_local = start_utc.astimezone(local_tz)
+                
+                # Convert Wh to kWh
+                consumption_kwh = value_wh / 1000.0
+                
+                # Calculate interval minutes
+                interval_minutes = duration_seconds // 60
+                
+                result['intervals'].append({
+                    'start_time_epoch': start_epoch,
+                    'start_time_local': start_local.isoformat(),
+                    'duration_seconds': duration_seconds,
+                    'interval_minutes': interval_minutes,
+                    'consumption_kwh': consumption_kwh,
+                    'consumption_wh': value_wh,
+                    'unit': 'kWh'
+                })
+            
+            except (ValueError, TypeError) as e:
+                result['errors'].append(f'Error parsing interval: {str(e)}')
+        
+        # Extract meter information if available
+        meter_reading = root.find('.//MeterReading')
+        if meter_reading is not None:
+            meter_sn = meter_reading.findtext('meterSerialNumber')
+            if meter_sn:
+                result['metadata']['meter_serial'] = meter_sn
+        
+        result['metadata']['total_intervals'] = len(result['intervals'])
+        result['metadata']['date_range_start'] = result['intervals'][0]['start_time_local'] if result['intervals'] else None
+        result['metadata']['date_range_end'] = result['intervals'][-1]['start_time_local'] if result['intervals'] else None
+        
+    except ET.ParseError as e:
+        result['errors'].append(f'XML Parse Error: {str(e)}')
+    except Exception as e:
+        result['errors'].append(f'Unexpected error: {str(e)}')
+    
+    return result
+```
+
+### 2.2 CSV Parsing with Python (csv or pandas)
+
+```python
+import pandas as pd
+from datetime import datetime
+
+def parse_green_button_csv(csv_file_path):
+    """
+    Parse Green Button CSV file (simplified format).
+    
+    Args:
+        csv_file_path: Path to Green Button CSV file
+    
+    Returns:
+        Dictionary with intervals and metadata
+    """
+    
+    result = {
+        'intervals': [],
+        'metadata': {},
+        'errors': []
+    }
+    
+    try:
+        # Read CSV file
+        df = pd.read_csv(csv_file_path)
+        
+        # Check for expected columns
+        expected_cols = ['Date', 'Time', 'Usage (kWh)']
+        for col in expected_cols:
+            if col not in df.columns:
+                result['errors'].append(f'Missing column: {col}')
+        
+        if result['errors']:
+            return result
+        
+        # Process each row
+        for idx, row in df.iterrows():
+            try:
+                # Combine date and time
+                date_str = str(row['Date']).strip()
+                time_str = str(row['Time']).strip()
+                datetime_str = f"{date_str} {time_str}"
+                
+                # Parse datetime (adjust format as needed)
+                start_time = datetime.strptime(datetime_str, "%Y-%m-%d %H:%M")
+                
+                # Extract consumption
+                consumption_kwh = float(row['Usage (kWh)'])
+                
+                # Determine interval minutes (typically 15)
+                # If not provided, calculate from consecutive timestamps
+                interval_minutes = 15  # Default assumption
+                
+                # Extract quality code if present
+                quality = 0
+                if 'Quality Code' in df.columns:
+                    quality = int(row.get('Quality Code', 0))
+                
+                result['intervals'].append({
+                    'start_time_local': start_time.isoformat(),
+                    'duration_seconds': interval_minutes * 60,
+                    'interval_minutes': interval_minutes,
+                    'consumption_kwh': consumption_kwh,
+                    'unit': 'kWh',
+                    'quality_code': quality
+                })
+            
+            except (ValueError, TypeError) as e:
+                result['errors'].append(f'Row {idx}: {str(e)}')
+        
+        result['metadata']['total_intervals'] = len(result['intervals'])
+        if result['intervals']:
+            result['metadata']['date_range_start'] = result['intervals'][0]['start_time_local']
+            result['metadata']['date_range_end'] = result['intervals'][-1]['start_time_local']
+        
+    except pd.errors.ParserError as e:
+        result['errors'].append(f'CSV Parse Error: {str(e)}')
+    except FileNotFoundError:
+        result['errors'].append(f'File not found: {csv_file_path}')
+    except Exception as e:
+        result['errors'].append(f'Unexpected error: {str(e)}')
+    
+    return result
+```
+
+---
+
+## SECTION 3: INTERVAL NORMALIZATION
+
+### 3.1 Handling Variable Interval Sizes
+
+Green Button files may contain intervals of different durations:
+    - 15 minutes (most common)
+    - 30 minutes (some utilities)
+    - 1 hour (older meters)
+    - Irregular gaps (DST changes, meter resets)
+
+GOAL: Normalize all to standard 15-minute intervals
+
+#### CASE 1: Data Already in 15-Minute Intervals
+No conversion needed. Validation steps:
+    1. Verify each interval is exactly 900 seconds (15 min)
+    2. Verify no gaps in timestamps
+    3. Verify no overlaps
+
+#### CASE 2: Data in 30-Minute or 1-Hour Intervals
+Split larger intervals proportionally:
+
+```python
+def normalize_to_15_min(intervals):
+    """
+    Convert variable interval data to 15-minute intervals.
+    
+    Args:
+        intervals: List of interval dicts with consumption_kwh and duration_seconds
+    
+    Returns:
+        List of normalized 15-minute intervals
+    """
+    
+    normalized = []
+    
+    for interval in intervals:
+        duration_min = interval['duration_seconds'] / 60
+        consumption_kwh = interval['consumption_kwh']
+        
+        if duration_min == 15:
+            # Already 15 minutes, use as-is
+            normalized.append(interval)
+        
+        elif duration_min == 30:
+            # Split 30-min interval into two 15-min intervals
+            # Assume consumption is evenly distributed
+            half_consumption = consumption_kwh / 2
+            
+            start_time = datetime.fromisoformat(interval['start_time_local'])
+            
+            normalized.append({
+                'start_time_local': start_time.isoformat(),
+                'duration_seconds': 900,
+                'interval_minutes': 15,
+                'consumption_kwh': half_consumption,
+                'unit': 'kWh',
+                'split_from': '30-min interval'
+            })
+            
+            start_time_2 = start_time + timedelta(minutes=15)
+            normalized.append({
+                'start_time_local': start_time_2.isoformat(),
+                'duration_seconds': 900,
+                'interval_minutes': 15,
+                'consumption_kwh': half_consumption,
+                'unit': 'kWh',
+                'split_from': '30-min interval'
+            })
+        
+        elif duration_min == 60:
+            # Split 60-min interval into four 15-min intervals
+            quarter_consumption = consumption_kwh / 4
+            
+            start_time = datetime.fromisoformat(interval['start_time_local'])
+            
+            for quarter in range(4):
+                quarter_start = start_time + timedelta(minutes=15*quarter)
+                normalized.append({
+                    'start_time_local': quarter_start.isoformat(),
+                    'duration_seconds': 900,
+                    'interval_minutes': 15,
+                    'consumption_kwh': quarter_consumption,
+                    'unit': 'kWh',
+                    'split_from': '60-min interval'
+                })
+        
+        else:
+            # Unusual interval size, flag for review
+            # Default: assume same as provided
+            normalized.append({
+                **interval,
+                'warning': f'Non-standard interval size: {duration_min} minutes'
+            })
+    
+    return normalized
+```
+
+### 3.2 Handling Gaps and Missing Data
+
+Green Button files may have gaps due to:
+    - Meter malfunction (data not recorded)
+    - Meter replacement (gap between old and new meter)
+    - Utility data processing (data not yet available)
+    - DST transitions (hour is skipped or repeated)
+
+DETECTION LOGIC:
+
+```python
+def detect_gaps(intervals):
+    """
+    Find gaps in interval data (missing timestamps).
+    
+    Args:
+        intervals: List of normalized intervals
+    
+    Returns:
+        List of gap records with start, end, duration
+    """
+    
+    gaps = []
+    
+    if len(intervals) < 2:
+        return gaps
+    
+    for i in range(len(intervals) - 1):
+        current = intervals[i]
+        next_interval = intervals[i + 1]
+        
+        current_time = datetime.fromisoformat(current['start_time_local'])
+        next_time = datetime.fromisoformat(next_interval['start_time_local'])
+        
+        # Expected gap: 15 minutes
+        expected_gap = timedelta(minutes=15)
+        actual_gap = next_time - current_time
+        
+        if actual_gap > expected_gap:
+            # Gap detected
+            gap_minutes = (actual_gap - expected_gap).total_seconds() / 60
+            gaps.append({
+                'gap_start': current_time.isoformat(),
+                'gap_end': next_time.isoformat(),
+                'gap_minutes': gap_minutes,
+                'gap_intervals_missing': int(gap_minutes / 15)
+            })
+    
+    return gaps
+```
+
+HANDLING MISSING DATA:
+
+```python
+def fill_gaps(intervals, method='linear'):
+    """
+    Fill gaps in data with estimated values.
+    
+    Args:
+        intervals: List of intervals with gaps
+        method: 'linear' (average), 'zero', 'forward_fill', 'backward_fill'
+    
+    Returns:
+        List of intervals with gaps filled
+    """
+    
+    filled = intervals.copy()
+    gaps = detect_gaps(intervals)
+    
+    for gap in gaps:
+        gap_start_time = datetime.fromisoformat(gap['gap_start'])
+        gap_end_time = datetime.fromisoformat(gap['gap_end'])
+        
+        # Get values before and after gap
+        before_value = None
+        after_value = None
+        
+        for interval in filled:
+            t = datetime.fromisoformat(interval['start_time_local'])
+            if t <= gap_start_time:
+                before_value = interval['consumption_kwh']
+            if t >= gap_end_time:
+                after_value = interval['consumption_kwh']
+                break
+        
+        # Create missing intervals
+        missing_count = gap['gap_intervals_missing']
+        current_time = gap_start_time + timedelta(minutes=15)
+        
+        for i in range(missing_count):
+            if method == 'linear':
+                # Average of before and after
+                estimated_value = (before_value + after_value) / 2 if before_value and after_value else 0
+            elif method == 'forward_fill':
+                estimated_value = before_value or 0
+            elif method == 'backward_fill':
+                estimated_value = after_value or 0
+            else:  # zero
+                estimated_value = 0
+            
+            filled.append({
+                'start_time_local': current_time.isoformat(),
+                'duration_seconds': 900,
+                'interval_minutes': 15,
+                'consumption_kwh': estimated_value,
+                'unit': 'kWh',
+                'imputed': True,
+                'imputation_method': method
+            })
+            
+            current_time += timedelta(minutes=15)
+    
+    # Sort by timestamp
+    filled.sort(key=lambda x: datetime.fromisoformat(x['start_time_local']))
+    
+    return filled
+```
+
+### 3.3 Handling DST (Daylight Saving Time) Transitions
+
+DST causes special cases:
+
+SPRING FORWARD (2 AM → 3 AM):
+    - One hour is skipped
+    - 1:45 AM is followed by 3:00 AM
+    - Result: One less interval that day (23 hours)
+
+FALL BACK (2 AM → 1 AM):
+    - One hour repeats
+    - 1:45 AM happens twice
+    - Result: One extra interval that day (25 hours)
+
+HANDLING:
+
+```python
+def handle_dst_transition(intervals):
+    """
+    Detect and handle DST transitions in interval data.
+    
+    Approach:
+    1. Identify days with 23 hours (spring forward) or 25 hours (fall back)
+    2. Flag for review (gaps may be legitimate due to DST)
+    3. Do NOT automatically fill spring-forward gaps
+    4. Remove duplicate fall-back intervals (keep first occurrence)
+    
+    Returns:
+        Modified intervals with DST flags
+    """
+    
+    result = []
+    last_hour = None
+    
+    for interval in intervals:
+        time = datetime.fromisoformat(interval['start_time_local'])
+        hour = time.hour
+        
+        # Detect fall-back (1 AM hour appearing twice)
+        if last_hour == 1 and hour == 1:
+            # This is the repeated hour due to fall-back
+            interval['dst_transition'] = 'fall_back_duplicate'
+            interval['skip'] = True  # Skip this interval
+            continue
+        
+        # Detect spring-forward (gap from 1:45 to 3:00)
+        # This will be caught by gap detection, flag it differently
+        
+        interval['dst_transition'] = None
+        result.append(interval)
+        last_hour = hour
+    
+    return result
+```
+
+---
+
+## SECTION 4: DATA QUALITY VALIDATION
+
+### 4.1 Quality Checks
+
+Green Button files include quality codes:
+
+```
+Quality Code Meanings:
+    0 = Good data (valid meter reading)
+    1 = Data altered (manually corrected)
+    2 = Time sync issues (meter clock off)
+    3 = Meter malfunction detected
+    4 = Reasonable estimate (meter down, estimated)
+    5 = Questionable data (unusual pattern)
+    6 = No data (gap, should not appear)
+    7 = Partially estimated (part of interval estimated)
+```
+
+```python
+def validate_data_quality(intervals):
+    """
+    Validate and flag data quality issues.
+    
+    Returns:
+        Dictionary with quality metrics and flags
+    """
+    
+    validation = {
+        'total_intervals': len(intervals),
+        'quality_breakdown': {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0},
+        'flags': [],
+        'quality_score': 100
+    }
+    
+    for interval in intervals:
+        quality_code = interval.get('quality_code', 0)
+        validation['quality_breakdown'][quality_code] += 1
+        
+        # Flag issues
+        if quality_code in [3, 4, 5]:  # Meter issues, estimates, questionable
+            validation['flags'].append({
+                'timestamp': interval['start_time_local'],
+                'quality_code': quality_code,
+                'consumption_kwh': interval['consumption_kwh'],
+                'issue': f'Data quality issue (code {quality_code})'
+            })
+        
+        # Check for negative consumption (should never happen)
+        if interval['consumption_kwh'] < 0:
+            validation['flags'].append({
+                'timestamp': interval['start_time_local'],
+                'consumption_kwh': interval['consumption_kwh'],
+                'issue': 'Negative consumption (data error)'
+            })
+        
+        # Check for unusually high consumption (sanity check)
+        # Residential typical: 0.5-2 kWh per 15 min
+        # Commercial may be much higher, but flag outliers
+        if interval['consumption_kwh'] > 5.0:
+            validation['flags'].append({
+                'timestamp': interval['start_time_local'],
+                'consumption_kwh': interval['consumption_kwh'],
+                'issue': f'Unusually high consumption: {interval["consumption_kwh"]:.2f} kWh'
+            })
+    
+    # Calculate quality score
+    # Deduct points for issues
+    issue_count = len(validation['flags'])
+    quality_score = 100 - (issue_count * 0.1)  # 0.1 point per issue
+    
+    # Deduct more for quality codes 3+ (serious issues)
+    serious_issues = sum(validation['quality_breakdown'][code] for code in [3, 4, 5])
+    quality_score -= (serious_issues * 0.5)
+    
+    validation['quality_score'] = max(0, quality_score)
+    
+    if validation['quality_score'] < 70:
+        validation['overall_recommendation'] = 'Use with caution - significant data quality issues'
+    elif validation['quality_score'] < 90:
+        validation['overall_recommendation'] = 'Acceptable - minor data quality issues'
+    else:
+        validation['overall_recommendation'] = 'Good data quality'
+    
+    return validation
+```
+
+### 4.2 Sanity Checks
+
+```python
+def sanity_checks(intervals):
+    """
+    Perform sanity checks on consumption data.
+    
+    Returns:
+        List of warnings and recommendations
+    """
+    
+    warnings = []
+    
+    if not intervals:
+        warnings.append('No intervals found')
+        return warnings
+    
+    # Check 1: Calculate total annual consumption
+    total_kwh = sum(i['consumption_kwh'] for i in intervals)
+    
+    if total_kwh == 0:
+        warnings.append('Total consumption is zero - possible data error')
+    elif total_kwh < 1000:
+        warnings.append(f'Very low annual consumption: {total_kwh:.0f} kWh (typical home: 8000-12000)')
+    elif total_kwh > 30000:
+        warnings.append(f'Very high annual consumption: {total_kwh:.0f} kWh (possible multi-unit or commercial)')
+    
+    # Check 2: Peak consumption
+    max_interval = max(intervals, key=lambda x: x['consumption_kwh'])
+    peak_consumption = max_interval['consumption_kwh']
+    
+    if peak_consumption > 5:
+        warnings.append(f'Peak 15-min consumption unusually high: {peak_consumption:.2f} kWh')
+    
+    # Check 3: Data continuity
+    gaps = detect_gaps(intervals)
+    if gaps:
+        total_missing_hours = sum(g['gap_minutes'] for g in gaps) / 60
+        warnings.append(f'Data gaps detected: {total_missing_hours:.1f} hours of missing data')
+    
+    # Check 4: Negative consumption (should never occur)
+    negative = [i for i in intervals if i['consumption_kwh'] < 0]
+    if negative:
+        warnings.append(f'Found {len(negative)} intervals with negative consumption (data corruption)')
+    
+    # Check 5: Excessive zeros
+    zeros = [i for i in intervals if i['consumption_kwh'] == 0]
+    zero_percent = len(zeros) / len(intervals) * 100 if intervals else 0
+    if zero_percent > 5:
+        warnings.append(f'Excessive zero values: {zero_percent:.1f}% of intervals (possible meter malfunction)')
+    
+    return warnings
+```
+
+---
+
+## SECTION 5: DATABASE STORAGE
+
+### 5.1 Database Schema
+
+```python
+from datetime import datetime
+from sqlalchemy import Column, String, Float, Integer, DateTime, Boolean
+from sqlalchemy.ext.declarative import declarative_base
+
+Base = declarative_base()
+
+class GreenButtonConsumptionData(Base):
+    """
+    Store normalized Green Button consumption data.
+    """
+    __tablename__ = 'green_button_consumption'
+    
+    id = Column(Integer, primary_key=True)
+    home_id = Column(String(36), index=True)  # Foreign key to homes table
+    
+    # Timestamp fields
+    interval_start_time = Column(DateTime, index=True)
+    interval_end_time = Column(DateTime)
+    
+    # Consumption data
+    consumption_kwh = Column(Float)
+    interval_minutes = Column(Integer)  # Always 15 after normalization
+    unit = Column(String(10))  # 'kWh'
+    
+    # Source and quality
+    source = Column(String(50))  # 'green_button_xml', 'green_button_csv', etc.
+    quality_code = Column(Integer)  # 0-7
+    
+    # Data handling flags
+    is_imputed = Column(Boolean, default=False)  # Filled missing data
+    imputation_method = Column(String(50))  # 'linear', 'forward_fill', etc.
+    
+    is_from_dst_transition = Column(Boolean, default=False)
+    
+    # Metadata
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Indexes for fast queries
+    __table_args__ = (
+        ('home_id', 'interval_start_time'),  # Composite index
+    )
+```
+
+### 5.2 Batch Insert Function
+
+```python
+import asyncio
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import insert
+
+async def save_intervals_to_database(home_id, normalized_intervals, session: AsyncSession):
+    """
+    Save normalized intervals to database.
+    
+    Args:
+        home_id: UUID of home
+        normalized_intervals: List of interval dicts
+        session: Async SQLAlchemy session
+    """
+    
+    records = []
+    
+    for interval in normalized_intervals:
+        # Skip imputed DST transition records
+        if interval.get('skip', False):
+            continue
+        
+        start_time = datetime.fromisoformat(interval['start_time_local'])
+        end_time = start_time + timedelta(minutes=interval['interval_minutes'])
+        
+        record = {
+            'home_id': home_id,
+            'interval_start_time': start_time,
+            'interval_end_time': end_time,
+            'consumption_kwh': interval['consumption_kwh'],
+            'interval_minutes': interval['interval_minutes'],
+            'unit': 'kWh',
+            'source': interval.get('source', 'green_button_unknown'),
+            'quality_code': interval.get('quality_code', 0),
+            'is_imputed': interval.get('imputed', False),
+            'imputation_method': interval.get('imputation_method', None),
+            'is_from_dst_transition': interval.get('dst_transition') is not None
+        }
+        
+        records.append(record)
+    
+    # Batch insert for efficiency
+    if records:
+        stmt = insert(GreenButtonConsumptionData).values(records)
+        await session.execute(stmt)
+        await session.commit()
+    
+    return len(records)
+```
+
+---
+
+## SECTION 6: COMPLETE WORKFLOW EXAMPLE
+
+### 6.1 End-to-End Processing
+
+```python
+async def process_green_button_file(home_id, file_path, session: AsyncSession):
+    """
+    Complete workflow: Parse → Normalize → Validate → Store
+    
+    Args:
+        home_id: Home UUID
+        file_path: Path to Green Button XML or CSV file
+        session: Database session
+    
+    Returns:
+        Processing report with statistics
+    """
+    
+    report = {
+        'home_id': home_id,
+        'file_path': file_path,
+        'status': 'starting',
+        'errors': [],
+        'warnings': [],
+        'statistics': {}
+    }
+    
+    try:
+        # Step 1: Detect file format
+        if file_path.endswith('.xml'):
+            report['format'] = 'Green Button XML'
+            parsed = parse_green_button_xml(file_path)
+        elif file_path.endswith('.csv'):
+            report['format'] = 'Green Button CSV'
+            parsed = parse_green_button_csv(file_path)
+        else:
+            report['status'] = 'error'
+            report['errors'].append(f'Unknown file format: {file_path}')
+            return report
+        
+        if parsed['errors']:
+            report['errors'].extend(parsed['errors'])
+        
+        intervals = parsed['intervals']
+        report['statistics']['raw_intervals'] = len(intervals)
+        report['statistics']['timezone'] = parsed['metadata'].get('timezone_offset_hours', 0)
+        
+        # Step 2: Normalize to 15-minute intervals
+        normalized = normalize_to_15_min(intervals)
+        report['statistics']['normalized_intervals'] = len(normalized)
+        
+        # Step 3: Handle DST transitions
+        normalized = handle_dst_transition(normalized)
+        report['statistics']['after_dst_handling'] = len(normalized)
+        
+        # Step 4: Validate data quality
+        validation = validate_data_quality(normalized)
+        report['statistics']['quality_score'] = validation['quality_score']
+        report['statistics']['quality_breakdown'] = validation['quality_breakdown']
+        
+        if validation['flags']:
+            report['warnings'].append(f"Data quality issues found: {len(validation['flags'])} intervals flagged")
+        
+        # Step 5: Perform sanity checks
+        sanity_warnings = sanity_checks(normalized)
+        report['warnings'].extend(sanity_warnings)
+        
+        # Step 6: Handle gaps (if any)
+        gaps = detect_gaps(normalized)
+        if gaps:
+            report['warnings'].append(f"Found {len(gaps)} gaps in data")
+            # Fill gaps with linear interpolation
+            normalized = fill_gaps(normalized, method='linear')
+            report['statistics']['intervals_after_gap_fill'] = len(normalized)
+        
+        # Step 7: Calculate consumption statistics
+        total_kwh = sum(i['consumption_kwh'] for i in normalized)
+        avg_kwh = total_kwh / len(normalized) if normalized else 0
+        max_kwh = max((i['consumption_kwh'] for i in normalized), default=0)
+        min_kwh = min((i['consumption_kwh'] for i in normalized), default=0)
+        
+        report['statistics']['total_consumption_kwh'] = total_kwh
+        report['statistics']['average_interval_kwh'] = avg_kwh
+        report['statistics']['peak_interval_kwh'] = max_kwh
+        report['statistics']['min_interval_kwh'] = min_kwh
+        report['statistics']['annual_estimated_kwh'] = total_kwh * (365 * 24 / (len(normalized) / 96))
+        
+        # Step 8: Save to database
+        saved_count = await save_intervals_to_database(home_id, normalized, session)
+        report['statistics']['intervals_saved'] = saved_count
+        
+        report['status'] = 'success'
+        
+    except Exception as e:
+        report['status'] = 'error'
+        report['errors'].append(f'Processing error: {str(e)}')
+    
+    return report
+```
+
+### 6.2 Integration with API Endpoint
+
+```python
+from fastapi import FastAPI, UploadFile, File, Depends
+import tempfile
+import os
+
+app = FastAPI()
+
+@app.post("/api/upload_green_button")
+async def upload_green_button(
+    home_id: str,
+    file: UploadFile = File(...),
+    session: AsyncSession = Depends(get_db_session)
+):
+    """
+    API endpoint to upload Green Button file.
+    
+    Accepts:
+        - Green Button XML file
+        - Green Button CSV file
+    
+    Returns:
+        Processing report with statistics
+    """
+    
+    try:
+        # Save uploaded file temporarily
+        with tempfile.NamedTemporaryFile(delete=False, suffix=file.filename) as tmp:
+            content = await file.read()
+            tmp.write(content)
+            tmp_path = tmp.name
+        
+        # Process the file
+        report = await process_green_button_file(home_id, tmp_path, session)
+        
+        # Clean up temp file
+        os.unlink(tmp_path)
+        
+        return {
+            'status': report['status'],
+            'file_format': report.get('format'),
+            'errors': report['errors'],
+            'warnings': report['warnings'],
+            'statistics': report['statistics']
+        }
+    
+    except Exception as e:
+        return {
+            'status': 'error',
+            'errors': [str(e)]
+        }
+```
+
+---
+
+## SECTION 7: ERROR HANDLING & EDGE CASES
+
+### 7.1 Common Issues & Solutions
+
+ISSUE 1: File is Not Valid XML/CSV
+    SYMPTOM: Parse error on line 1
+    SOLUTION:
+        - Check file encoding (should be UTF-8)
+        - Check for BOM (byte order mark) in XML files
+        - Some utilities use custom XML dialects - may need custom parser
+    CODE:
+        ```python
+        def safe_parse_xml(file_path):
+            # Try UTF-8
+            try:
+                tree = ET.parse(file_path)
+                return tree
+            except:
+                # Try with BOM stripping
+                with open(file_path, 'r', encoding='utf-8-sig') as f:
+                    tree = ET.parse(f)
+                    return tree
+        ```
+
+ISSUE 2: Timezone Information Missing from XML
+    SYMPTOM: All times in UTC, but utility in different timezone
+    SOLUTION:
+        - User specifies their timezone on upload
+        - Use zip code to look up timezone
+        - Default to Eastern Time if unknown
+    CODE:
+        ```python
+        def apply_timezone_override(intervals, timezone_offset_hours):
+            for interval in intervals:
+                # Adjust times by offset
+                pass
+        ```
+
+ISSUE 3: Meter Replacement (Different Meter Histories)
+    SYMPTOM: Consumption readings reset to zero, then restart with new meter
+    SOLUTION:
+        - Detect meter resets
+        - Store meter serial number with intervals
+        - Keep old and new meter data separate (can combine if needed)
+
+ISSUE 4: Rate Adjustment Notice (Different pricing periods in same file)
+    SYMPTOM: XML has multiple meter readings with different date ranges
+    SOLUTION:
+        - Extract all IntervalBlocks
+        - Store which rate period each interval belongs to
+        - Use for cost calculation later
+
+ISSUE 5: Duplicate Intervals (File uploaded twice)
+    SYMPTOM: Intervals have same timestamp and consumption
+    SOLUTION:
+        ```python
+        def remove_duplicates(intervals):
+            seen = set()
+            unique = []
+            for interval in intervals:
+                key = (interval['start_time_local'], interval['consumption_kwh'])
+                if key not in seen:
+                    unique.append(interval)
+                    seen.add(key)
+            return unique
+        ```
+
+---
+
+## SECTION 8: PERFORMANCE OPTIMIZATION
+
+### 8.1 Large File Handling
+
+Green Button files can be large (100,000+ intervals = 1-2 years of 15-min data).
+
+STRATEGY 1: Chunked Processing
+```python
+def process_large_xml_chunked(file_path, chunk_size=10000):
+    """
+    Process large XML file in chunks to avoid memory overflow.
+    """
+    
+    tree = ET.iterparse(file_path, events=('end',))
+    chunk = []
+    
+    for event, elem in tree:
+        if elem.tag == 'interval':
+            chunk.append(elem)
+            
+            if len(chunk) >= chunk_size:
+                # Process chunk
+                yield process_chunk(chunk)
+                chunk = []
+            
+            # Clean up memory
+            elem.clear()
+    
+    # Process final chunk
+    if chunk:
+        yield process_chunk(chunk)
+```
+
+STRATEGY 2: Batch Database Inserts
+```python
+# Instead of inserting one at a time, insert in batches
+BATCH_SIZE = 5000
+
+async def save_large_dataset(home_id, intervals, session):
+    for i in range(0, len(intervals), BATCH_SIZE):
+        batch = intervals[i:i+BATCH_SIZE]
+        await save_intervals_to_database(home_id, batch, session)
+```
+
+STRATEGY 3: Index Optimization
+```python
+# Create indexes after bulk insert
+async def optimize_indices(home_id, session):
+    # Index for quick date range queries
+    await session.execute("CREATE INDEX idx_consumption_home_time ON green_button_consumption(home_id, interval_start_time)")
+```
+
+### 8.2 Query Optimization
+
+Once data is stored, common queries:
+
+```sql
+-- Get daily total consumption
+SELECT DATE(interval_start_time) as date, SUM(consumption_kwh) as daily_kwh
+FROM green_button_consumption
+WHERE home_id = ? AND interval_start_time >= ? AND interval_start_time < ?
+GROUP BY DATE(interval_start_time)
+ORDER BY date;
+
+-- Get peak hours (top 10)
+SELECT interval_start_time, consumption_kwh
+FROM green_button_consumption
+WHERE home_id = ?
+ORDER BY consumption_kwh DESC
+LIMIT 10;
+
+-- Get consumption by hour of day (aggregated across all days)
+SELECT HOUR(interval_start_time) as hour, AVG(consumption_kwh) as avg_kwh
+FROM green_button_consumption
+WHERE home_id = ?
+GROUP BY HOUR(interval_start_time)
+ORDER BY hour;
+```
+
+---
+
+## SECTION 9: COMPARISON WITH MANUAL ENTRY
+
+### Green Button vs. Manual Monthly Entry
+
+GREEN BUTTON XML ADVANTAGES:
+    ✓ Granular 15-minute data (not estimated)
+    ✓ Actual meter readings from utility
+    ✓ Includes all 365 days (or months covered)
+    ✓ Can analyze usage patterns (peak hours, day-of-week)
+    ✓ Better for solar ROI analysis (hourly solar vs. hourly consumption)
+    ✓ Better for demand charge calculation
+    ✓ Better for time-of-use rate modeling
+
+MANUAL ENTRY ADVANTAGES:
+    ✓ No utility login required
+    ✓ User can start analysis immediately
+    ✓ Works if utility doesn't offer Green Button
+    ✓ Simpler data entry
+
+RECOMMENDATION:
+    1. Strongly prefer Green Button if available
+    2. Fall back to manual monthly if Green Button not available
+    3. Use manual annual only as last resort (least accurate)
+
+---
+
+## SECTION 10: DEPLOYMENT CHECKLIST
+
+BEFORE LAUNCH:
+    ☐ Tested with Green Button XML from 5+ different utilities
+    ☐ Tested with Green Button CSV format
+    ☐ Tested with 2+ years of data (large file)
+    ☐ DST transitions handled correctly
+    ☐ Meter replacements handled correctly
+    ☐ Missing data handled gracefully
+    ☐ Data quality validation working
+    ☐ Database storage working efficiently
+    ☐ Error messages clear and helpful
+    ☐ Performance acceptable (<30 seconds for 2 years of data)
+
+MONITORING IN PRODUCTION:
+    ☐ Log all parsing errors for utility-specific debugging
+    ☐ Alert on unusually high error rate
+    ☐ Track data quality scores by utility
+    ☐ Periodically review gaps and imputed intervals
+    ☐ Test new Green Button format variations as discovered
+
+---
+
+End of Green Button XML Parsing Documentation

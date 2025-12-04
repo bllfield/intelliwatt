@@ -669,6 +669,9 @@ export default function AdminDashboard() {
             result.totalKwh ?? 0,
           ).toFixed(3)} kWh, rawId ${result.rawId}`,
         );
+        if (Array.isArray(result.warnings) && result.warnings.length > 0) {
+          appendGreenButtonLog(`Warnings: ${result.warnings.join("; ")}`);
+        }
 
         setGreenButtonFile(null);
         if (greenButtonFileInputRef.current) {

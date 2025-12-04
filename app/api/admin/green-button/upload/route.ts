@@ -1,143 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
-import { normalizeGreenButtonReadingsTo15Min, GreenButtonRawReading } from "@/lib/usage/greenButtonNormalize";
+import { parseGreenButtonBuffer } from "@/lib/usage/greenButtonParser";
+import { normalizeGreenButtonReadingsTo15Min } from "@/lib/usage/greenButtonNormalize";
 import { usagePrisma } from "@/lib/db/usageClient";
-
-function toUtf8String(buffer: ArrayBuffer): string {
-  return new TextDecoder("utf-8").decode(buffer);
-}
-
-function parseGreenButtonContent(content: string, filename: string): GreenButtonRawReading[] {
-  const trimmed = content.trim();
-  if (!trimmed) {
-    return [];
-  }
-
-  if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
-    try {
-      const json = JSON.parse(trimmed);
-      if (Array.isArray(json)) {
-        return json.flatMap((item) => mapJsonToReading(item));
-      }
-      return mapJsonToReading(json);
-    } catch (error) {
-      console.warn("[green-button/upload] JSON parse failed", error);
-      // fall through to CSV/newline parsing
-    }
-  }
-
-  return parseCsvContent(trimmed, filename);
-}
-
-function mapJsonToReading(value: any): GreenButtonRawReading[] {
-  if (!value || typeof value !== "object") return [];
-  const candidate: GreenButtonRawReading = {
-    timestamp: value.timestamp ?? value.start ?? value.time ?? value.intervalStart ?? "",
-    durationSeconds: value.durationSeconds ?? value.duration ?? value.intervalSeconds ?? null,
-    value: value.value ?? value.usage ?? value.kwh ?? value.wh ?? 0,
-    unit: value.unit ?? value.units ?? value.measure ?? null,
-  };
-  if (!candidate.timestamp || candidate.value === undefined || candidate.value === null) {
-    return [];
-  }
-  return [candidate];
-}
-
-function parseCsvContent(content: string, filename: string): GreenButtonRawReading[] {
-  const lines = content
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0 && !line.startsWith("#"));
-
-  if (lines.length === 0) return [];
-
-  const delimiter = detectDelimiter(lines[0]);
-  const [headerLine, ...dataLines] = lines;
-  const headers = headerLine
-    .split(delimiter)
-    .map((h) => h.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_"));
-
-  const readings: GreenButtonRawReading[] = [];
-  for (const dataLine of dataLines) {
-    const columns = dataLine.split(delimiter).map((value) => value.trim());
-    if (columns.length === 0) continue;
-
-    if (columns.length === 1 && !headers.includes("timestamp")) {
-      // Single column CSV with values only – ignore.
-      continue;
-    }
-
-    const row: Record<string, string> = {};
-    for (let i = 0; i < headers.length; i++) {
-      row[headers[i]] = columns[i] ?? "";
-    }
-
-    const timestamp =
-      row.timestamp ||
-      row.start ||
-      row.interval_start ||
-      row.start_time ||
-      row.begin_datetime ||
-      row.begin_date ||
-      row.time ||
-      "";
-    const endTimestamp =
-      row.end || row.interval_end || row.end_time || row.stop || row.end_datetime || row.end_date || "";
-    const value = row.value || row.consumption || row.kwh || row.usage || row.reading || columns[1] || "";
-    const unit = row.unit || row.units || row.measure || null;
-    const durationSeconds =
-      parseNumber(row.duration_seconds) ||
-      parseNumber(row.duration) ||
-      parseNumber(row.interval_seconds) ||
-      parseNumber(row.seconds) ||
-      inferDuration(timestamp, endTimestamp);
-
-    if (!timestamp || !value) {
-      continue;
-    }
-
-    readings.push({
-      timestamp,
-      value,
-      unit,
-      durationSeconds: durationSeconds ?? undefined,
-    });
-  }
-
-  if (readings.length === 0) {
-    console.warn("[green-button/upload] no readings parsed from CSV", { filename });
-  }
-
-  return readings;
-}
-
-function detectDelimiter(line: string): string {
-  if (line.includes(",")) return ",";
-  if (line.includes("\t")) return "\t";
-  if (line.includes(";")) return ";";
-  return ",";
-}
-
-function parseNumber(value?: string): number | null {
-  if (!value) return null;
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) {
-    return null;
-  }
-  return numeric;
-}
-
-function inferDuration(start: string, end: string): number | null {
-  if (!start || !end) return null;
-  const startDate = new Date(start);
-  const endDate = new Date(end);
-  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
-    return null;
-  }
-  const diff = Math.floor((endDate.getTime() - startDate.getTime()) / 1000);
-  return diff > 0 ? diff : null;
-}
 
 export const dynamic = "force-dynamic";
 
@@ -161,18 +27,24 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: "file_too_large" }, { status: 413 });
     }
 
-    const textContent = toUtf8String(arrayBuffer);
-    const readings = parseGreenButtonContent(textContent, file.name);
-    if (readings.length === 0) {
+    const buffer = Buffer.from(arrayBuffer);
+    const parsed = parseGreenButtonBuffer(buffer, file.name);
+    if (parsed.errors.length > 0) {
+      return NextResponse.json(
+        { ok: false, error: parsed.errors.join("; ") },
+        { status: 400 },
+      );
+    }
+
+    if (parsed.readings.length === 0) {
       return NextResponse.json({ ok: false, error: "no_readings" }, { status: 400 });
     }
 
-    const normalized = normalizeGreenButtonReadingsTo15Min(readings);
+    const normalized = normalizeGreenButtonReadingsTo15Min(parsed.readings);
     if (normalized.length === 0) {
       return NextResponse.json({ ok: false, error: "normalization_empty" }, { status: 400 });
     }
 
-    const buffer = Buffer.from(arrayBuffer);
     const digest = createHash("sha256").update(buffer).digest("hex");
 
     let rawRecordId: string | null = null;
@@ -207,6 +79,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: "raw_persist_failed" }, { status: 500 });
     }
 
+    await (usagePrisma as any).greenButtonInterval.deleteMany({ where: { rawId: rawRecordId } });
+
     const intervalData = normalized.map((interval) => ({
       rawId: rawRecordId,
       timestamp: interval.timestamp,
@@ -225,6 +99,7 @@ export async function POST(request: NextRequest) {
       rawId: rawRecordId,
       intervalsCreated: normalized.length,
       totalKwh,
+      warnings: parsed.warnings,
     });
   } catch (error) {
     console.error("[admin/green-button/upload] failed", error);
