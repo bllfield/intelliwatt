@@ -5,6 +5,7 @@ import { prisma } from '@/lib/db';
 import { getCurrentPlanPrisma, CurrentPlanPrisma } from '@/lib/prismaCurrentPlan';
 import { ensureCurrentPlanEntry } from '@/lib/current-plan/ensureEntry';
 import { normalizeCurrentPlanForUserOrHome } from '@/lib/normalization/currentPlan';
+import { refreshUserEntryStatuses } from '@/lib/hitthejackwatt/entryLifecycle';
 
 const VALID_RATE_TYPES = new Set(['FIXED', 'VARIABLE', 'TIME_OF_USE', 'OTHER']);
 const VALID_VARIABLE_INDEX_TYPES = new Set(['ERCOT', 'FUEL', 'OTHER']);
@@ -143,6 +144,8 @@ export async function GET() {
     if (!user) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
+
+    await refreshUserEntryStatuses(user.id);
 
     const currentPlanPrisma = getCurrentPlanPrisma();
     const manualEntryDelegate = currentPlanPrisma.currentPlanManualEntry as any;
