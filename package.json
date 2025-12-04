@@ -69,8 +69,9 @@
     "eslint-config-next": "^14.0.0",
     "postcss": "^8.4.0",
     "tailwindcss": "^3.3.0",
+    "ts-node": "^10.9.2",
     "tsx": "^4.19.2",
-    "typescript": "^5.0.0"
+    "typescript": "^5.9.3"
   },
   "keywords": [
     "energy",
