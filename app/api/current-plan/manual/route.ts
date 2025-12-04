@@ -189,14 +189,21 @@ export async function GET() {
       },
     });
 
-    const usageEntry =
-      (latestPlan?.houseId
-        ? usageEntries.find((entry) => entry.houseId === latestPlan.houseId)
-        : null) ?? usageEntries[0] ?? null;
+    const isLiveStatus = (status: string | null | undefined) =>
+      status === 'ACTIVE' || status === 'EXPIRING_SOON';
 
-    const hasActiveUsage = usageEntries.some(
-      (entry) => entry.status === 'ACTIVE' || entry.status === 'EXPIRING_SOON',
-    );
+    const matchingHouseEntries = latestPlan?.houseId
+      ? usageEntries.filter((entry) => entry.houseId === latestPlan.houseId)
+      : usageEntries;
+
+    const usageEntry =
+      matchingHouseEntries.find((entry) => isLiveStatus(entry.status)) ??
+      matchingHouseEntries[0] ??
+      usageEntries.find((entry) => isLiveStatus(entry.status)) ??
+      usageEntries[0] ??
+      null;
+
+    const hasActiveUsage = usageEntries.some((entry) => isLiveStatus(entry.status));
 
     const serializedPlan = latestPlan
       ? {
