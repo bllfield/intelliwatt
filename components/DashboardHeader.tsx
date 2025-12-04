@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 
 const dashboardLinks = [
-  { href: '/dashboard/api', label: 'Connected Devices' },
+  { href: '/dashboard/api', label: 'Usage Entry' },
   { href: '/dashboard/usage', label: 'Usage' },
   { href: '/dashboard/current-rate', label: 'Current Rate' },
   { href: '/dashboard/plans', label: 'Plans' },

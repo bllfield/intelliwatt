@@ -1,0 +1,146 @@
+import { UsageEntryContext } from "./context";
+
+export type StatusTone = "success" | "warning" | "error" | "info";
+
+export type EntryStatus = {
+  label: string;
+  tone: StatusTone;
+  message?: string | null;
+  detail?: string | null;
+  lastUpdated?: Date | null;
+  expiresAt?: Date | null;
+};
+
+export const statusBadgeStyles: Record<StatusTone, string> = {
+  success:
+    "inline-flex items-center rounded-full bg-emerald-400/15 px-2.5 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-emerald-200",
+  warning:
+    "inline-flex items-center rounded-full bg-amber-400/15 px-2.5 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-amber-200",
+  error:
+    "inline-flex items-center rounded-full bg-rose-500/15 px-2.5 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-rose-200",
+  info:
+    "inline-flex items-center rounded-full bg-brand-cyan/15 px-2.5 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-brand-cyan",
+};
+
+export function deriveSmtStatus(
+  auth: UsageEntryContext["existingAuthorization"],
+): EntryStatus {
+  if (!auth) {
+    return {
+      label: "Not connected",
+      tone: "info",
+      message: "Link Smart Meter Texas for automatic daily usage updates.",
+    };
+  }
+
+  const rawStatus = (auth.smtStatus ?? "").toLowerCase();
+  const alreadyActive =
+    auth.subscriptionAlreadyActive === true ||
+    rawStatus === "already_active" ||
+    (auth.smtStatusMessage ?? "").toLowerCase().includes("already active");
+
+  if (alreadyActive || rawStatus === "active") {
+    return {
+      label: alreadyActive ? "Already active" : "Connected",
+      tone: "success",
+      message:
+        auth.smtStatusMessage && auth.smtStatusMessage.trim().length > 0
+          ? auth.smtStatusMessage
+          : "SMT usage will refresh automatically.",
+      lastUpdated: auth.createdAt,
+      expiresAt: auth.authorizationEndDate ?? null,
+    };
+  }
+
+  if (rawStatus === "pending") {
+    return {
+      label: "Awaiting confirmation",
+      tone: "warning",
+      message:
+        auth.smtStatusMessage && auth.smtStatusMessage.trim().length > 0
+          ? auth.smtStatusMessage
+          : "We’re finalizing your SMT agreement. This usually resolves within a minute.",
+      lastUpdated: auth.createdAt,
+    };
+  }
+
+  if (rawStatus === "error") {
+    return {
+      label: "Needs attention",
+      tone: "error",
+      message:
+        auth.smtStatusMessage && auth.smtStatusMessage.trim().length > 0
+          ? auth.smtStatusMessage
+          : "We couldn’t complete your SMT authorization. Try again or contact support.",
+      lastUpdated: auth.createdAt,
+    };
+  }
+
+  return {
+    label: auth.smtStatus ? auth.smtStatus : "Status unknown",
+    tone: "info",
+    message: auth.smtStatusMessage,
+    lastUpdated: auth.createdAt,
+  };
+}
+
+export function deriveGreenButtonStatus(
+  upload: UsageEntryContext["greenButtonUpload"],
+): EntryStatus {
+  if (!upload) {
+    return {
+      label: "No uploads yet",
+      tone: "info",
+      message: "Upload a Green Button XML/CSV file if your utility supports it.",
+    };
+  }
+
+  const normalizedMessage =
+    upload.parseStatus &&
+    upload.parseStatus.toLowerCase() !== "success" &&
+    upload.parseStatus.toLowerCase() !== "complete"
+      ? upload.parseMessage
+      : null;
+
+  return {
+    label: upload.parseStatus
+      ? upload.parseStatus.replace(/_/g, " ").toUpperCase()
+      : "Upload received",
+    tone:
+      upload.parseStatus &&
+      upload.parseStatus.toLowerCase().includes("error")
+        ? "error"
+        : "success",
+    message:
+      normalizedMessage ??
+      "Usage file processed. We’ll keep your dashboard in sync with the latest upload.",
+    lastUpdated: upload.createdAt,
+    detail:
+      upload.dateRangeStart && upload.dateRangeEnd
+        ? `Coverage: ${upload.dateRangeStart.toLocaleDateString()} – ${upload.dateRangeEnd.toLocaleDateString()}`
+        : undefined,
+  };
+}
+
+export function deriveManualStatus(
+  manual: UsageEntryContext["manualUsageUpload"],
+): EntryStatus {
+  if (!manual) {
+    return {
+      label: "Not recorded",
+      tone: "info",
+      message:
+        "Log a manual placeholder if SMT access isn’t ready so your rewards stay active.",
+    };
+  }
+
+  return {
+    label: "Placeholder active",
+    tone: "success",
+    message:
+      "We’ll keep your entries active with this manual reading until live data arrives.",
+    lastUpdated: manual.uploadedAt,
+    detail: `Expires ${manual.expiresAt.toLocaleDateString()}`,
+  };
+}
+
