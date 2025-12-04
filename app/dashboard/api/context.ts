@@ -61,6 +61,8 @@ export async function loadUsageEntryContext(): Promise<UsageEntryContext> {
   const cookieStore = cookies();
   const sessionEmail = cookieStore.get("intelliwatt_user")?.value ?? null;
 
+  const prismaAny = prisma as any;
+
   let user: UserSummary | null = null;
   if (sessionEmail) {
     const normalizedEmail = normalizeEmail(sessionEmail);
@@ -88,12 +90,12 @@ export async function loadUsageEntryContext(): Promise<UsageEntryContext> {
     } satisfies Record<string, boolean>;
 
     houseAddress =
-      (await prisma.houseAddress.findFirst({
+      (await prismaAny.houseAddress.findFirst({
         where: { userId: user.id, archivedAt: null, isPrimary: true },
         orderBy: { createdAt: "desc" },
         select,
       })) ??
-      (await prisma.houseAddress.findFirst({
+      (await prismaAny.houseAddress.findFirst({
         where: { userId: user.id, archivedAt: null },
         orderBy: { createdAt: "desc" },
         select,
@@ -102,7 +104,7 @@ export async function loadUsageEntryContext(): Promise<UsageEntryContext> {
 
   let existingAuthorization: UsageEntryContext["existingAuthorization"] = null;
   if (user && houseAddress) {
-    existingAuthorization = await prisma.smtAuthorization.findFirst({
+    existingAuthorization = await prismaAny.smtAuthorization.findFirst({
       where: {
         userId: user.id,
         houseAddressId: houseAddress.id,
@@ -126,7 +128,7 @@ export async function loadUsageEntryContext(): Promise<UsageEntryContext> {
 
   let userProfile = null;
   if (user) {
-    userProfile = await prisma.userProfile.findUnique({
+    userProfile = await prismaAny.userProfile.findUnique({
       where: { userId: user.id },
       select: {
         esiidAttentionRequired: true,
@@ -141,7 +143,7 @@ export async function loadUsageEntryContext(): Promise<UsageEntryContext> {
 
   const greenButtonUpload =
     houseAddress &&
-    (await prisma.greenButtonUpload.findFirst({
+    (await prismaAny.greenButtonUpload.findFirst({
       where: { houseId: houseAddress.id },
       orderBy: { createdAt: "desc" },
       select: {
@@ -160,7 +162,7 @@ export async function loadUsageEntryContext(): Promise<UsageEntryContext> {
 
   const manualUsageUpload =
     houseAddress &&
-    (await prisma.manualUsageUpload.findFirst({
+    (await prismaAny.manualUsageUpload.findFirst({
       where: { houseId: houseAddress.id },
       orderBy: { uploadedAt: "desc" },
       select: {
