@@ -28,6 +28,9 @@ function bigIntToNumber(value: unknown): number {
   return Number(value);
 }
 
+const RECENT_USAGE_WINDOW_DAYS = 30;
+const RECENT_USAGE_WINDOW_MS = RECENT_USAGE_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+
 export async function GET(request: NextRequest) {
   const gate = requireAdmin(request);
   if (!gate.ok) {
@@ -36,6 +39,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const usageClient = usagePrisma as any;
+    const recentCutoff = new Date(Date.now() - RECENT_USAGE_WINDOW_MS);
 
     const [
       smtAggregate,
@@ -94,14 +98,24 @@ export async function GET(request: NextRequest) {
         FROM "SmtInterval"
       `,
       usageClient.usageIntervalModule.aggregate({
+        where: {
+          ts: {
+            gte: recentCutoff,
+          },
+        },
         _count: { _all: true },
         _min: { ts: true },
         _max: { ts: true },
         _sum: { kwh: true },
       }),
       usageClient.usageIntervalModule.findMany({
+        where: {
+          ts: {
+            gte: recentCutoff,
+          },
+        },
         orderBy: { ts: 'desc' },
-        take: 25,
+        take: 50,
         select: {
           esiid: true,
           meter: true,
@@ -176,6 +190,7 @@ export async function GET(request: NextRequest) {
       usageModule: {
         totals: usageTotals,
         latestRows: usageLatestRows,
+        windowDays: RECENT_USAGE_WINDOW_DAYS,
       },
     });
   } catch (error) {

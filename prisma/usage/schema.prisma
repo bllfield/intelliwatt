@@ -33,6 +33,7 @@ model UsageIntervalModule {
   updatedAt DateTime @updatedAt
 
   @@unique([esiid, meter, ts])
+  @@index([ts])
   @@index([esiid, meter, ts])
 }
 
@@ -71,5 +72,6 @@ model GreenButtonInterval {
   intervalMinutes Int      @default(15)
 
   @@index([rawId])
+  @@index([timestamp])
   @@index([homeId, timestamp])
 }

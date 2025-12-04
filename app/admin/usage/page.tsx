@@ -65,6 +65,7 @@ interface UsageDebugModuleInterval {
 interface UsageDebugModule {
   totals: UsageDebugTotals;
   latestRows: UsageDebugModuleInterval[];
+  windowDays?: number;
 }
 
 interface UsageDebugResponse {
@@ -107,7 +108,7 @@ interface GreenButtonIntervalSample {
   intervalMinutes: number;
 }
 
-const AUTO_REFRESH_MS = 30_000;
+const AUTO_REFRESH_MS = 180_000;
 
 const numberFormatter = new Intl.NumberFormat(undefined, {
   minimumFractionDigits: 0,
@@ -677,6 +678,11 @@ export default function AdminUsageConsole() {
                     {formatDateTime(usageTotals?.latestTs ?? null)}
                   </span>
                 </p>
+                {debugData.usageModule.windowDays ? (
+                  <p className="text-xs text-brand-cyan/60">
+                    Window: last {debugData.usageModule.windowDays} days
+                  </p>
+                ) : null}
               </div>
               <div className="rounded-2xl border border-brand-cyan/20 bg-brand-navy/80 p-4 text-brand-cyan shadow">
                 <p className="text-xs uppercase tracking-[0.3em] text-brand-cyan/60">Usage module total</p>
@@ -814,6 +820,12 @@ export default function AdminUsageConsole() {
                 These rows mirror the usage database (`UsageIntervalModule`) after SMT or Green Button records have been
                 normalized. The dashboard promotes whichever data source updated most recently.
               </p>
+              {debugData.usageModule.windowDays ? (
+                <p className="text-xs text-brand-navy/60 mb-4">
+                  Showing up to {debugData.usageModule.latestRows.length} rows from the last{' '}
+                  {debugData.usageModule.windowDays} days.
+                </p>
+              ) : null}
               <div className="overflow-auto rounded-2xl border border-brand-navy/10">
                 <table className="min-w-full divide-y divide-brand-navy/10 text-sm text-brand-navy">
                   <thead className="bg-brand-navy/5 text-xs font-semibold uppercase tracking-wide text-brand-navy/70">
