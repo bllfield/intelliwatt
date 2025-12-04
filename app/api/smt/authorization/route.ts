@@ -6,6 +6,7 @@ import { cleanEsiid } from "@/lib/smt/esiid";
 import { createAgreementAndSubscription } from "@/lib/smt/agreements";
 import { waitForMeterInfo } from "@/lib/smt/meterInfo";
 import { archiveConflictingAuthorizations, setPrimaryHouse } from "@/lib/house/promote";
+import { syncHouseIdentifiersFromAuthorization } from "@/lib/house/syncIdentifiers";
 import { Entry } from "@prisma/client";
 import { refreshUserEntryStatuses } from "@/lib/hitthejackwatt/entryLifecycle";
 
@@ -302,6 +303,12 @@ export async function POST(req: NextRequest) {
       },
     });
 
+    await syncHouseIdentifiersFromAuthorization({
+      houseAddressId: house.id,
+      esiid: created.esiid,
+      meterNumber,
+    });
+
     let smtUpdateData: Record<string, any> = {};
 
     let smtResult: Awaited<ReturnType<typeof createAgreementAndSubscription>> | null = null;
@@ -365,6 +372,12 @@ export async function POST(req: NextRequest) {
             data: smtUpdateData,
           })
         : created;
+
+    await syncHouseIdentifiersFromAuthorization({
+      houseAddressId: house.id,
+      esiid: (updatedAuthorization as any).esiid ?? created.esiid,
+      meterNumber: (updatedAuthorization as any).meterNumber ?? meterNumber,
+    });
 
     const attentionTimestamp = new Date();
 

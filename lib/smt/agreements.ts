@@ -1,5 +1,6 @@
 import { randomBytes } from "crypto";
 import { prisma } from "@/lib/db";
+import { syncHouseIdentifiersFromAuthorization } from "@/lib/house/syncIdentifiers";
 
 export type SmtAgreementRequest = {
   esiid: string;
@@ -401,6 +402,7 @@ export async function refreshSmtAuthorizationStatus(authId: string) {
       smtAgreementId: true,
       esiid: true,
       houseAddressId: true,
+      meterNumber: true,
     },
   });
 
@@ -494,6 +496,20 @@ export async function refreshSmtAuthorizationStatus(authId: string) {
   const updated = await prisma.smtAuthorization.update({
     where: { id: auth.id },
     data: updateData,
+    select: {
+      id: true,
+      esiid: true,
+      meterNumber: true,
+      houseAddressId: true,
+      smtStatus: true,
+      smtStatusMessage: true,
+    },
+  });
+
+  await syncHouseIdentifiersFromAuthorization({
+    houseAddressId: updated.houseAddressId,
+    esiid: updated.esiid ?? auth.esiid,
+    meterNumber: updated.meterNumber ?? auth.meterNumber ?? null,
   });
 
   return {

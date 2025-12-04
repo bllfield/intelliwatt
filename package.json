@@ -18,6 +18,7 @@
     "esiid:save": "tsx ./scripts/admin/esiid-save.ts save",
     "test:connections": "tsx ./scripts/admin/test-connections.ts",
     "test:prod": "node scripts/admin/api_test_prod.mjs",
+    "house:backfill-esiids": "tsx ./scripts/admin/backfill-house-esiids.ts",
     "ercot:migrate:dev": "prisma migrate dev --name ercot_models",
     "ercot:migrate:deploy": "prisma migrate deploy",
     "ercot:fetch:latest": "node scripts/admin/ercot_fetch_latest.mjs",
