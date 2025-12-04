@@ -9,6 +9,7 @@ import SmtManualFallbackCard from "@/components/smt/SmtManualFallbackCard";
 import DashboardHero from "@/components/dashboard/DashboardHero";
 import LocalTime from "@/components/LocalTime";
 import GreenButtonHelpSection from "@/components/dashboard/GreenButtonUtilitiesCard";
+import RefreshSmtButton from "@/components/smt/RefreshSmtButton";
 
 type ExistingSmtAuthorization = {
   id: string;
@@ -382,8 +383,13 @@ export default async function ApiConnectPage() {
                     </div>
                   </div>
                   {existingAuth && (
-                  <div className="mt-4 rounded-lg border border-brand-cyan/45 bg-brand-navy p-3 text-xs leading-relaxed text-brand-cyan/80">
-                      We already have a valid Smart Meter Texas authorization for this address. Submit the form again if you need to refresh your consent (for example after changing providers or revoking access in SMT).
+                    <div className="mt-4 space-y-3 rounded-lg border border-brand-cyan/45 bg-brand-navy p-3 text-xs leading-relaxed text-brand-cyan/80">
+                      <p>
+                        We already have a valid Smart Meter Texas authorization for this address. Submit the form again if you need to refresh your consent (for example after changing providers or revoking access in SMT).
+                      </p>
+                      {houseAddress?.id ? (
+                        <RefreshSmtButton homeId={houseAddress.id} />
+                      ) : null}
                     </div>
                   )}
                 </div>

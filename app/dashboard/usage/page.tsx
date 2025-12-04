@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import DashboardHero from '@/components/dashboard/DashboardHero';
 import LocalTime from '@/components/LocalTime';
@@ -234,41 +234,117 @@ export default function UsagePage() {
   const [houses, setHouses] = useState<HouseUsage[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+
+  const loadUsage = useCallback(async (): Promise<HouseUsage[]> => {
+    const res = await fetch('/api/user/usage', { cache: 'no-store' });
+    let body: UsageApiResponse;
+    try {
+      body = (await res.json()) as UsageApiResponse;
+    } catch {
+      throw new Error('Failed to parse usage response');
+    }
+
+    if (!res.ok) {
+      throw new Error(body && body.ok === false ? body.error : `Failed to load usage data (status ${res.status})`);
+    }
+
+    if (!body.ok) {
+      throw new Error(body.error ?? 'Failed to load usage data');
+    }
+
+    return body.houses;
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
-    async function load() {
-      try {
-        const res = await fetch('/api/user/usage', { cache: 'no-store' });
-        if (!res.ok) {
-          const body = (await res.json()) as UsageApiResponse;
-          if (!cancelled) {
-            setError(body.ok ? 'Unexpected response' : body.error);
-            setLoading(false);
-          }
-          return;
-        }
-        const body = (await res.json()) as UsageApiResponse;
-        if (!cancelled && body.ok) {
-          setHouses(body.houses);
-          setLoading(false);
-        } else if (!cancelled && !body.ok) {
-          setError(body.error ?? 'Failed to load usage data');
-          setLoading(false);
-        }
-      } catch (err) {
+    setLoading(true);
+
+    loadUsage()
+      .then((data: HouseUsage[]) => {
+        if (cancelled) return;
+        setHouses(data);
+        setError(null);
+        setLastUpdated(new Date().toISOString());
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : 'Failed to load usage data');
+        setHouses([]);
+      })
+      .finally(() => {
         if (!cancelled) {
-          setError((err as Error)?.message ?? 'Failed to load usage data');
           setLoading(false);
         }
-      }
-    }
-    load();
+      });
 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [loadUsage]);
+
+  const handleRefresh = useCallback(async () => {
+    if (refreshing) return;
+    try {
+      setRefreshing(true);
+      const targetHouses = houses.length > 0 ? houses : undefined;
+
+      if (targetHouses) {
+        await Promise.all(
+          targetHouses.map(async (house) => {
+            if (!house.houseId) return;
+            try {
+              const statusRes = await fetch('/api/smt/authorization/status', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ homeId: house.houseId }),
+              });
+              if (!statusRes.ok) {
+                const detail = await statusRes.text().catch(() => '');
+                console.warn(
+                  'SMT status refresh failed',
+                  house.houseId,
+                  statusRes.status,
+                  detail,
+                );
+              }
+            } catch (error) {
+              console.error('SMT status refresh encountered an error', house.houseId, error);
+            }
+
+            try {
+              const usageRes = await fetch('/api/user/usage/refresh', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ homeId: house.houseId }),
+              });
+              if (!usageRes.ok) {
+                const detail = await usageRes.text().catch(() => '');
+                console.warn(
+                  'Usage normalization refresh failed',
+                  house.houseId,
+                  usageRes.status,
+                  detail,
+                );
+              }
+            } catch (error) {
+              console.error('Usage normalization refresh encountered an error', house.houseId, error);
+            }
+          }),
+        );
+      }
+
+      const data = await loadUsage();
+      setHouses(data);
+      setError(null);
+      setLastUpdated(new Date().toISOString());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to refresh usage data');
+    } finally {
+      setRefreshing(false);
+    }
+  }, [houses, loadUsage, refreshing]);
 
   return (
     <div className="min-h-screen bg-brand-white">
@@ -280,6 +356,34 @@ export default function UsagePage() {
 
       <section className="bg-brand-white pt-4 pb-12 px-4">
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
+          <div className="flex flex-col gap-2 rounded-3xl border border-brand-cyan/20 bg-brand-navy/60 px-4 py-3 text-sm text-brand-cyan shadow-[0_18px_40px_rgba(16,60,110,0.25)] sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-1">
+              <p className="font-semibold uppercase tracking-[0.3em] text-brand-cyan/70">
+                Usage data
+              </p>
+              <p className="text-xs text-brand-cyan/60">
+                {lastUpdated
+                  ? `Last updated ${new Date(lastUpdated).toLocaleString()}`
+                  : 'No usage data available yet.'}
+              </p>
+              {error && !loading ? (
+                <p className="text-xs text-rose-300">
+                  {error}
+                </p>
+              ) : null}
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+              <button
+                type="button"
+                onClick={handleRefresh}
+                disabled={refreshing || loading}
+                className="inline-flex items-center justify-center rounded-full border border-brand-cyan/40 bg-brand-cyan/10 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-brand-cyan transition hover:border-brand-cyan hover:bg-brand-cyan/20 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {refreshing ? 'Updating…' : 'Update usage data'}
+              </button>
+            </div>
+          </div>
+
           {loading ? (
             <div className="rounded-3xl border border-brand-cyan/20 bg-brand-navy/60 p-6 text-center text-brand-cyan">
               <p className="text-sm text-brand-cyan/80">Pulling usage history…</p>

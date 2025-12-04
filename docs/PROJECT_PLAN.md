@@ -55,7 +55,7 @@ Notes:
 - Added an admin cron endpoint `POST /api/admin/smt/cron/status` (x-admin-token) sized for hourly Vercel Cron jobs that re-check pending SMT authorizations in small batches.
 - Introduced the dedicated confirmation route `/dashboard/smt-confirmation` that:
   - Displays the pending/declined SMT status and the service address context.
-  - Provides explicit “Approved” / “Declined” actions that call the existing confirmation API and refresh /api/smt/authorization/status.
+  - Provides explicit "Approved" / "Declined" actions that call the existing confirmation API and refresh /api/smt/authorization/status.
   - Is the only accessible dashboard page while an authorization is pending or declined (layout-level redirect).
 - Removed the legacy `SmtStatusGate` overlay in favor of the dedicated confirmation page.
 - Customer-facing agreement flow now posts only to SMT `/v2/NewAgreement/`; the legacy `/v2/NewSubscription/` call is skipped to avoid redundant CSP enrollments.
@@ -117,26 +117,26 @@ Notes:
   - ✅ Referral dashboard page now includes a **Referral Sharing Tools** section with:
     - A HitTheJackWatt-focused share block (jackpot/drawing message + referral URL).
     - An IntelliWatt-focused share block (plan-savings / smart-meter automation message + referral URL).
-    - Each block has a pre-written social media message, a “Copy message” button, and multi-network share links using the latest ad creatives.
+    - Each block has a pre-written social media message, a "Copy message" button, and multi-network share links using the latest ad creatives.
   - ✅ IntelliWatt universal social-media referral ad creative (neon IntelliWatt branding, no platform icons) defined for future export/use.
 - [x] Create initial HitTheJackWatt™ Facebook ad copy library (marketing/hitthejackwatt_facebook_ads.md) for referral and jackpot promotion.
   - ⬜ OPTIONAL: Generate multiple ad sizes (square, story, landscape) and wire in per-user referral URLs for downloadable creatives.
 
 - **Remaining To-Dos from the current checklist**
-  - ⬜ **Current Rate Page (MVP)** with image upload or manual entry and “we’re working hard to unlock these features” messaging across:
+  - ⬜ **Current Rate Page (MVP)** with image upload or manual entry and "we're working hard to unlock these features" messaging across:
     - Usage, Plans, Home Info, Appliances, Upgrades, Analysis, Optimal Energy.
   - ⬜ **Pop-Up Flow** to guide entries in order: SMT → Current Rate → Referrals, with an option to skip directly to Referrals at each step.
   - ⬜ **Additional SMT Endpoints + Daily Poll** for agreement statuses:
     - acknowledged / approved / revoked / declined / cancel.
   - ⬜ **Real-Time SMT Approval Check**:
-    - When the user clicks “I approved it,” call SMT API and show status; if not approved, show a clear “not approved yet” message.
+    - When the user clicks "I approved it," call SMT API and show status; if not approved, show a clear "not approved yet" message.
   - ⬜ **API Dataset Normalization**:
-    - Separate per-API raw datasets (WattBuy, EnergyBot, etc.) and a master normalized dataset with null-safe handling so empty fields don’t break the UI.
+    - Separate per-API raw datasets (WattBuy, EnergyBot, etc.) and a master normalized dataset with null-safe handling so empty fields don't break the UI.
   - The `RateStructure` contract in `docs/API_CONTRACTS.md` is the shared shape for user-entered current plans and normalized vendor offers so the rate engine can cost fixed, variable, and TOU plans uniformly.
-  - Store `billCredits` alongside each plan’s `RateStructure` so the comparison engine can apply credits automatically when monthly usage falls inside the configured ranges.
+  - Store `billCredits` alongside each plan's `RateStructure` so the comparison engine can apply credits automatically when monthly usage falls inside the configured ranges.
   - ⬜ **Usage-dependent entry reconfirm flows (Added 2025-12-02)**:
     - Preserve previously submitted Current Plan data when SMT usage lapses so the card shows the saved snapshot even while the entry is expired.
-    - Add “Reconfirm plan” CTA on `/dashboard/current-rate` that re-validates the stored plan (or accepts new details) before re-awarding the entry once active usage returns.
+    - Add "Reconfirm plan" CTA on `/dashboard/current-rate` that re-validates the stored plan (or accepts new details) before re-awarding the entry once active usage returns.
     - Ensure `refreshUserEntryStatuses` unlocks the Current Plan entry automatically once usage data is active **and** the user reconfirms; surface the same pattern for Home Details + Appliances when those modules go live.
     - ✅ Update usage-dependent entry copy/site messaging (entries page, checklist) to explain that referrals remain the only entry path without active usage data.
     - ✅ Add usage-aware banner on `/dashboard/current-rate` to direct customers to `/dashboard/api` when no SMT/manual usage is present.
@@ -171,7 +171,7 @@ Notes:
 - [x] Run Prisma generate + migrate for the Current Plan module schema and master schema (dev + prod) so the pipeline is live end-to-end.
 - [ ] Normalize vendor offer ingestion to populate the shared `RateStructure`, then adapt the comparison engine to cost fixed, variable, and TOU offers with the same code path as user-entered plans.
 - [ ] Use `NormalizedCurrentPlan` in the Rate Plan Analyzer UI (future step once normalization + master data is live).
-- ✅ Add reconfirmation UX + mutations so expired Current Plan entries can be re-awarded once usage data is back in sync (see “Usage-dependent entry reconfirm flows” checklist).
+- ✅ Add reconfirmation UX + mutations so expired Current Plan entries can be re-awarded once usage data is back in sync (see "Usage-dependent entry reconfirm flows" checklist).
 
 <!-- Dev + Prod Prisma migrations completed for Current Plan module + master schema on 2025-11-28 -->
 
@@ -183,7 +183,7 @@ Notes:
 
 ### Normalized Current Plan Dataset
 
-- Master schema now includes the `NormalizedCurrentPlan` model storing normalized snapshots of each user’s current rate structure (tiers, TOU bands, bill credits) sourced from the module DB.
+- Master schema now includes the `NormalizedCurrentPlan` model storing normalized snapshots of each user's current rate structure (tiers, TOU bands, bill credits) sourced from the module DB.
 - Dev migration applied: `20251130225951_add_normalized_current_plan` (`npx prisma migrate dev --schema=prisma/schema.prisma --name add_normalized_current_plan` against `intelliwatt_main_dev`).
 - Normalization pipeline: `/api/current-plan/manual` writes to module DB → `lib/normalization/currentPlan.ts` hydrates master data → `NormalizedCurrentPlan` persists in the main schema.
 
@@ -214,6 +214,7 @@ Notes:
 - `/dashboard/usage` is now live; the page fetches the endpoint above, surfaces coverage/total summaries, renders a 14-day daily table, and highlights recent peak intervals. Locked homes guide customers back to SMT reconnect or Green Button upload workflows while keeping referrals unlocked.
 - Manual usage normalization remains queued; once implemented it will plug into the same endpoint so the promotion logic (latest source wins) continues to hold.
 - Added `/admin/usage` Usage Test Console so Ops can run SMT + Green Button upload tests, monitor latest intervals/raw files, and review consolidated debugging output (leverages `/api/admin/usage/debug` + existing Green Button records endpoint).
+- Added customer-facing refresh actions: `/dashboard/api` now exposes a `Refresh SMT Data` control (POST `/api/smt/authorization/status` + `/api/user/usage/refresh`) and `/dashboard/usage` includes `Update usage data`, wiring both pages into the on-demand normalization pipeline so stale SMT intervals can be rehydrated instantly.
 
 ### Usage Module Database (`intelliwatt_usage`)
 
@@ -246,26 +247,26 @@ Notes:
 - Usage module migrations are totally isolated from the master schema; do not place master migrations in `prisma/usage/migrations`.
 - Always manage Usage tables through migrations—no manual DDL against `intelliwatt_usage`.
 
-#### Usage module status — December 2025
+#### Usage module status — December 2025
 
 - Schema now includes `UsageIntervalModule` (mirrors `SmtInterval` fields/casing) and `UsageModuleBootstrap`.
 - `lib/usage/dualWriteUsageIntervals.ts` writes SMT-normalized rows to both `SmtInterval` (master) and `UsageIntervalModule` (module DB); `/api/admin/smt/pull` is already calling the helper.
 - Dev database `intelliwatt_usage` is in sync after `npx prisma migrate dev --schema=prisma/usage/schema.prisma --name add_usage_interval_module`.
 - Next actions:
-  - Record a `add_usage_interval_module` migration in `prisma/usage/migrations` (if the command above reports “Already in sync”, create the migration with `--create-only` and re-run) and commit it once verified.
+  - Record a `add_usage_interval_module` migration in `prisma/usage/migrations` (if the command above reports "Already in sync", create the migration with `--create-only` and re-run) and commit it once verified.
   - Extend dual-write coverage to Green Button + manual usage paths before we build the `NormalizedUsage` pipeline.
-- Admin QA harness lives on `app/admin/page.tsx` (“SMT Inline Ingest Tester”). Any future ingest smoke tests must expose copy/paste-ready payloads/commands in the admin dashboard so operators can exercise secured endpoints without digging through docs.
+- Admin QA harness lives on `app/admin/page.tsx` ("SMT Inline Ingest Tester"). Any future ingest smoke tests must expose copy/paste-ready payloads/commands in the admin dashboard so operators can exercise secured endpoints without digging through docs.
 
 #### Green Button raw upload pipeline (Added 2025-12-03)
 
-- Added a droplet-hosted uploader (`scripts/droplet/green-button-upload-server.ts`) modeled after the SMT “Big-file Upload” path. It verifies signed tickets, enforces the 10 MB limit, writes raw bytes into `usage.RawGreenButton`, and records metadata in `GreenButtonUpload`.
+- Added a droplet-hosted uploader (`scripts/droplet/green-button-upload-server.ts`) modeled after the SMT "Big-file Upload" path. It verifies signed tickets, enforces the 10 MB limit, writes raw bytes into `usage.RawGreenButton`, and records metadata in `GreenButtonUpload`.
 - Introduced `POST /api/green-button/upload-ticket` on Vercel to authenticate the user, confirm ownership of the target `houseId`, and issue a short-lived HMAC-signed payload for the droplet uploader.
-- Updated the dashboard Green Button uploader to request a ticket, stream files to the droplet endpoint, and fall back to `/api/green-button/upload` only if the droplet flow is unavailable. The client blocks files larger than 10 MB and surfaces clear success/error states.
+- Updated the dashboard Green Button uploader to request a ticket, stream files to the droplet endpoint, and fall back to `/api/green-button/upload` only if the droplet flow is unavailable. The client blocks files larger than 10 MB and surfaces clear success/error states.
 - New environment variables:
   - **Vercel / app router**
     - `GREEN_BUTTON_UPLOAD_SECRET` (shared HMAC key).
     - `GREEN_BUTTON_UPLOAD_URL` or `NEXT_PUBLIC_GREEN_BUTTON_UPLOAD_URL` (public droplet `/upload` endpoint).
-    - Optional `GREEN_BUTTON_UPLOAD_MAX_BYTES` (defaults to 10 MB).
+    - Optional `GREEN_BUTTON_UPLOAD_MAX_BYTES` (defaults to 10 MB).
   - **Droplet service**
     - `GREEN_BUTTON_UPLOAD_SECRET` (must match Vercel).
     - `DATABASE_URL` (master DB) and `USAGE_DATABASE_URL` (usage module DB).
@@ -274,11 +275,11 @@ Notes:
   1. Configure the env vars above in both Vercel and the droplet process manager (systemd/pm2).
   2. Deploy the web app so `/api/green-button/upload-ticket` is live.
   3. Build/run the droplet service (TypeScript or compiled JS) and confirm `/health` exposes the expected configuration.
-  4. Verify a 10 MB XML/CSV upload succeeds through the droplet path and that the fallback `/api/green-button/upload` still works for smaller files or preview environments.
+  4. Verify a 10 MB XML/CSV upload succeeds through the droplet path and that the fallback `/api/green-button/upload` still works for smaller files or preview environments.
 
 #### PowerShell runbook — Module Prisma CLI (all modules)
 
-Use this pattern for every module database (current-plan, usage, home-details, appliances, upgrades, wattbuy-offers, referrals) to avoid the common Windows errors we’ve hit:
+Use this pattern for every module database (current-plan, usage, home-details, appliances, upgrades, wattbuy-offers, referrals) to avoid the common Windows errors we've hit:
 
 1. **Open a fresh PowerShell session** in the repo root. Kill any stuck Prisma/Node processes first if Studio or CLI was left running:
    ```powershell
@@ -288,7 +289,7 @@ Use this pattern for every module database (current-plan, usage, home-details, a
    ```powershell
    Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
    ```
-3. **Set the module’s datasource URL** (substitute the correct env var):
+3. **Set the module's datasource URL** (substitute the correct env var):
    ```powershell
    $env:USAGE_DATABASE_URL = "postgresql://…:25060/intelliwatt_usage?sslmode=require"
    ```
@@ -297,7 +298,7 @@ Use this pattern for every module database (current-plan, usage, home-details, a
    npx prisma generate --schema=prisma/usage/schema.prisma
    npx prisma migrate dev --schema=prisma/usage/schema.prisma --name <migration_name>
    ```
-   - If Prisma reports “Already in sync, no schema change,” but you expect a new table/view, re-run with `--create-only` to capture the migration diff before applying it.
+   - If Prisma reports "Already in sync, no schema change," but you expect a new table/view, re-run with `--create-only` to capture the migration diff before applying it.
 5. **Deploy** with `npx prisma migrate deploy --schema=…` once the migration file is committed and ready for staging/production.
 
 Helpful reminders:
@@ -313,7 +314,7 @@ When updating module Prisma schemas, always include Linux engine binaries for Ve
 binaryTargets = ["native", "rhel-openssl-3.0.x"]
 ```
 
-This applies to every custom generator (Current Plan, Usage, etc.) and prevents the “Prisma Client could not locate the Query Engine for runtime rhel-openssl-3.0.x” error during serverless execution.
+This applies to every custom generator (Current Plan, Usage, etc.) and prevents the "Prisma Client could not locate the Query Engine for runtime rhel-openssl-3.0.x" error during serverless execution.
 
 ### PC-2025-11-25-K — Keeper Cleanup Runbook (Chat-Driven)
 
@@ -357,7 +358,7 @@ DATABASE_URL="postgresql://doadmin:AVNS_lUXcN2ftFFu6XUIc5G0@db-postgresql-nyc3-3
 DIRECT_URL="postgresql://doadmin:AVNS_lUXcN2ftFFu6XUIc5G0@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25060/defaultdb?sslmode=require"
 ```
 - **Vercel env vars:** Set both `DATABASE_URL` and `DIRECT_URL` exactly as above.
-- **Local `.env` / `.env.production.local`:** Include the same two lines so Prisma CLI and Studio use the pool.
+- **Local `.env` / `.env.production.local**:** Include the same two lines so Prisma CLI and Studio use the pool.
 - **Droplet (`intelliwatt-smt-proxy`):**
   ```bash
   sudo nano /etc/environment
@@ -519,7 +520,7 @@ This Plan Change supersedes any prior instructions that defaulted to the direct 
 ### PC-2025-11-27-FAQ — Public FAQ refresh (intelliwatt.com)
 
 - Updated the public-facing FAQ to focus on IntelliWatt as the primary experience while clearly explaining HitTheJackWatt as the gamified entry point and IntelliPath Solutions LLC as the parent company.
-- Consolidated brand relationship copy (“How HitTheJackWatt, IntelliWatt, and IntelliPath Solutions Work Together”) and synced terminology across sections.
+- Consolidated brand relationship copy ("How HitTheJackWatt, IntelliWatt, and IntelliPath Solutions Work Together") and synced terminology across sections.
 - Clarified that plan comparisons and modeling use Smart Meter Texas 15-minute interval usage (not generic hourly averages), keeping data expectations consistent across marketing and product.
 
 ---
@@ -1200,7 +1201,7 @@ You should see: latest `postedAt`, and `results` for each TDSP with `key`, `byte
 
 - `/api/admin/smt/pull` inline uploads persist to storage + `raw_smt_files` with `sha256` idempotency.
 - `SmtInterval` enforces uniqueness on `(esiid, meter, ts)` to prevent duplicate ingest.
-- Next.js does not allow custom App Router body-parser sizing; keep inline payloads within default limits (~4 MB) and fall back to the droplet webhook for larger files while keeping function limits at 60s/1 GB.
+- Next.js does not allow custom App Router body-parser sizing; keep inline payloads within default limits (~4 MB) and fall back to the droplet webhook for larger files while keeping function limits at 60s/1 GB.
 - `/admin/smt` UI uses a server action proxy; admin secrets never touch the browser.
 - `/api/admin/smt/normalize` supports `dryRun=1` for DST + record-count verification before writes.
 
@@ -1753,7 +1754,7 @@ Scope:
   - Provide and maintain admin automation (e.g., `scripts/admin/Upload-SmtCsvToDroplet.ps1`) that copies local CSVs to the droplet inbox and triggers `smt-ingest.service`, ensuring full-size files enter `RawSmtFile`/`SmtInterval` via the standard pipeline.
   - The existing `/admin/smt/raw` → "Load Raw Files" inline upload:
     - Is a small-file/debug convenience only.
-    - Remains subject to App Router limits (~4 MB).
+    - Remains subject to App Router limits (~4 MB).
     - Is NOT the primary path for production-sized SMT interval CSVs.
 - Customer manual uploads:
   - Any future customer-facing manual interval upload feature MUST:
@@ -1946,7 +1947,7 @@ During testing, the SMT upload server (`smt-upload-server.js`) was starting, log
 
 ## PC-2025-11-15-B: SMT Inline Upload Compression (base64+gzip Override)
 
-- Droplet inline uploads now gzip large SMT CSV files before base64 encoding to satisfy Vercel's ~4.5 MB function body limit.
+- Droplet inline uploads now gzip large SMT CSV files before base64 encoding to satisfy Vercel's ~4.5 MB function body limit.
 - Endpoint remains `POST https://intelliwatt.com/api/admin/smt/pull` with `mode: "inline"` and `x-admin-token`.
 - Payload shape:
   - `encoding: "base64+gzip"` (new default); `sizeBytes` is the uncompressed CSV byte size; optional `compressedBytes` notes the gzipped size.
