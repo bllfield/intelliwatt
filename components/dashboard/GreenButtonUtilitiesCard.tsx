@@ -131,8 +131,25 @@ export default function GreenButtonHelpSection({
         }
       };
 
+      const triggerUsageRefresh = async () => {
+        try {
+          const refreshRes = await fetch('/api/user/usage/refresh', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ homeId: houseAddressId }),
+          });
+          if (!refreshRes.ok) {
+            const detail = await refreshRes.text().catch(() => '');
+            console.warn('Usage refresh after Green Button upload failed', refreshRes.status, detail);
+          }
+        } catch (refreshError) {
+          console.error('Usage refresh post-upload encountered an error', refreshError);
+        }
+      };
+
       const dropletSuccess = await attemptDropletUpload();
       if (dropletSuccess) {
+        await triggerUsageRefresh();
         setStatusTone("success");
         setStatusMessage("Upload received! We’ll start parsing your usage data shortly.");
         setSelectedFile(null);
@@ -166,6 +183,7 @@ export default function GreenButtonHelpSection({
           return;
         }
 
+        await triggerUsageRefresh();
         setStatusTone("success");
         setStatusMessage("Upload received! We’ll start parsing your usage data shortly.");
         setSelectedFile(null);
