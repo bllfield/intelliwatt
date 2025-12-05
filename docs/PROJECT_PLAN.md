@@ -210,6 +210,17 @@ Notes:
 
 ## PC-2025-12-04 · Usage Dashboard Activation (SMT-first)
 
+## PC-2025-12-05 · SMT Large-File Ingest Hardening & Admin Visibility
+
+- Large-file path only: production inline/small SMT upload is guarded off; all ingest flows must enter via the droplet uploader.
+- Raw upload stores bytes: `/api/admin/smt/raw-upload` now accepts `contentBase64`, decodes into `RawSmtFile.content` (bytes) with sha256 idempotency intact.
+- Droplet uploader updated: `scripts/droplet/smt-upload-server.ts` reads the saved file, base64-encodes, posts to raw-upload, triggers normalize (`limit=1`, no dryRun), and deletes the inbox file after success.
+- Normalize overwrite: `/api/admin/smt/normalize` prefers `RawSmtFile.content`, falls back to S3, and delete+inserts per (esiid, meter) across the file’s `[tsMin, tsMax]` window (skipDuplicates=false for ranged runs).
+- Admin SMT visibility: `/admin/smt` now has a "Normalize Status (dry run)" panel showing per-file records/inserted/skipped/kWh and coverage, plus totals, using a dry-run call to normalize.
+- Backfill hooks: SMT approval and "Refresh SMT Data" trigger a rolling 12-month backfill via the SMT proxy (request helper in `lib/smt/agreements.ts`).
+- Cleanup: added `scripts/droplet/cleanup_smt_inbox.sh` to prune stale inbox temp dirs/files; wire to cron/systemd on the droplet.
+- Ops/debug requirement (new): any new ingest/processing module must expose its debug/status view from the admin dashboard, with per-run metrics (processed/inserted/skipped, coverage, timestamps, and relevant logs) so QA can validate in one place.
+
 - Added `/api/user/usage` (GET) which aggregates 15-minute, hourly, daily, monthly, and annual buckets for each house. The handler inspects master `SmtInterval` rows and usage-db `GreenButtonInterval` rows, automatically selecting the source with the freshest timestamp so the dashboard always reflects the most recent upload.
 - `/dashboard/usage` is now live; the page fetches the endpoint above, surfaces coverage/total summaries, renders a 14-day daily table, and highlights recent peak intervals. Locked homes guide customers back to SMT reconnect or Green Button upload workflows while keeping referrals unlocked.
 - Manual usage normalization remains queued; once implemented it will plug into the same endpoint so the promotion logic (latest source wins) continues to hold.
@@ -256,6 +267,7 @@ Notes:
   - Record a `add_usage_interval_module` migration in `prisma/usage/migrations` (if the command above reports "Already in sync", create the migration with `--create-only` and re-run) and commit it once verified.
   - Extend dual-write coverage to Green Button + manual usage paths before we build the `NormalizedUsage` pipeline.
 - Admin QA harness lives on `app/admin/page.tsx` ("SMT Inline Ingest Tester"). Any future ingest smoke tests must expose copy/paste-ready payloads/commands in the admin dashboard so operators can exercise secured endpoints without digging through docs.
+- Admin QA harness lives on `app/admin/page.tsx` ("SMT Inline Ingest Tester"). Any future ingest smoke tests must expose copy/paste-ready payloads/commands in the admin dashboard so operators can exercise secured endpoints without digging through docs. New rule: every new process/module that needs QA must also surface a linked admin debug/status view with per-run metrics (processed/inserted/skipped, coverage, timestamps, relevant logs) so all debugging stays in one place.
 
 #### Green Button raw upload pipeline (Added 2025-12-03)
 
