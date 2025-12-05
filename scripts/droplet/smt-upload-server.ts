@@ -173,17 +173,29 @@ async function computeFileSha256(filepath: string): Promise<string> {
   });
 }
 
+type NormalizeResult = {
+  ok: boolean;
+  message: string;
+  filesProcessed?: number;
+  intervalsInserted?: number;
+};
+
 async function registerAndNormalizeFile(
   filepath: string,
   filename: string,
   size_bytes: number,
-): Promise<void> {
+): Promise<NormalizeResult> {
   if (!ADMIN_TOKEN || !INTELLIWATT_BASE_URL) {
     console.warn(
       "[smt-upload] Cannot register file: ADMIN_TOKEN or INTELLIWATT_BASE_URL not configured",
     );
-    return;
+    return {
+      ok: false,
+      message: "ADMIN_TOKEN or INTELLIWATT_BASE_URL not configured",
+    };
   }
+
+  let deleted = false;
 
   try {
     // STEP 3: Large-file SMT ingestion - read file, send content, normalize, then delete
@@ -230,7 +242,10 @@ async function registerAndNormalizeFile(
       console.error(
         `[smt-upload] raw-upload failed: ${rawResponse.status} ${errBody}`,
       );
-      return;
+      return {
+        ok: false,
+        message: `raw-upload failed: ${rawResponse.status}`,
+      };
     }
 
     const rawResult = await rawResponse.json();
@@ -257,7 +272,10 @@ async function registerAndNormalizeFile(
       console.error(
         `[smt-upload] normalize failed: ${normResponse.status} ${errBody}`,
       );
-      return;
+      return {
+        ok: false,
+        message: `normalize failed: ${normResponse.status}`,
+      };
     }
 
     const normResult = await normResponse.json();
@@ -268,25 +286,35 @@ async function registerAndNormalizeFile(
       `[smt-upload] normalization complete: filesProcessed=${filesProcessed} intervalsInserted=${intervalsInserted}`,
     );
 
-    // STEP 3: Delete file after successful normalization to prevent disk from filling
-    if (filesProcessed > 0 || intervalsInserted >= 0) {
-      try {
-        await fs.promises.unlink(filepath);
-        // eslint-disable-next-line no-console
-        console.log(`[smt-upload] deleted local file after normalization: ${filepath}`);
-      } catch (unlinkErr) {
+    return {
+      ok: true,
+      message: "normalize complete",
+      filesProcessed,
+      intervalsInserted,
+    };
+  } catch (err) {
+    console.error("[smt-upload] error during registration/normalization:", err);
+    return {
+      ok: false,
+      message: `normalize error: ${(err as Error)?.message || err}`,
+    };
+  } finally {
+    try {
+      await fs.promises.unlink(filepath);
+      deleted = true;
+      // eslint-disable-next-line no-console
+      console.log(`[smt-upload] deleted local file (cleanup): ${filepath}`);
+    } catch (unlinkErr) {
+      if (!deleted) {
         // eslint-disable-next-line no-console
         console.warn(`[smt-upload] warning: failed to delete local file ${filepath}:`, unlinkErr);
       }
-    } else {
-      // eslint-disable-next-line no-console
-      console.log(`[smt-upload] keeping file (no intervals inserted): ${filepath}`);
     }
-  } catch (err) {
-    console.error("[smt-upload] error during registration/normalization:", err);
-    // Keep file on error for manual inspection
-    console.log(`[smt-upload] keeping file due to error: ${filepath}`);
   }
+}
+
+function isIntervalFile(name: string) {
+  return /interval/i.test(name);
 }
 
 app.use((req: Request, res: Response, next: NextFunction) => {
@@ -386,25 +414,44 @@ app.post(
           : undefined) ||
         0;
 
+      const originalName = file.originalname || file.filename || "upload.csv";
+      const intervalFile = isIntervalFile(originalName);
+
       // eslint-disable-next-line no-console
       console.log(
-        `[smt-upload] saved file=${destPath} bytes=${sizeGuess ?? "n/a"} role=${role} accountKey=${accountKey}`,
+        `[smt-upload] saved file=${destPath} bytes=${sizeGuess ?? "n/a"} role=${role} accountKey=${accountKey} interval=${intervalFile}`,
       );
 
-      // NEW: Register and normalize the file with the main app in the background
-      // Don't wait for this to complete before responding (fire-and-forget)
-      registerAndNormalizeFile(destPath, file.originalname || file.filename || "upload.csv", sizeGuess)
-        .catch(err => {
-          console.error("[smt-upload] background registration/normalization failed:", err);
-        });
+      let responseMessage = "Upload accepted and ingest triggered";
+      let responseOk = true;
 
-      res.status(202).json({
-        ok: true,
-        message: "Upload accepted and ingest triggered",
+      if (!intervalFile) {
+        // Drop non-interval files immediately so the droplet doesn't fill up
+        try {
+          await fs.promises.unlink(destPath);
+          // eslint-disable-next-line no-console
+          console.log(`[smt-upload] deleted non-interval file: ${originalName}`);
+        } catch (unlinkErr) {
+          // eslint-disable-next-line no-console
+          console.warn(`[smt-upload] warning: failed to delete non-interval file ${destPath}:`, unlinkErr);
+        }
+
+        responseMessage = "Upload ignored (non-interval file removed)";
+      } else {
+        // Register and normalize the file with the main app and surface result to caller
+        const normResult = await registerAndNormalizeFile(destPath, originalName, sizeGuess);
+        responseMessage = normResult.message;
+        responseOk = normResult.ok;
+      }
+
+      res.status(responseOk ? 202 : 500).json({
+        ok: responseOk,
+        message: responseMessage,
         file: {
-          name: file.originalname || file.filename,
+          name: originalName,
           size: sizeGuess ?? null,
           path: destPath,
+          interval: intervalFile,
         },
         meta: {
           role,
