@@ -186,6 +186,7 @@ async function registerAndNormalizeFile(
   }
 
   try {
+    // STEP 3: Large-file SMT ingestion - read file, send content, normalize, then delete
     const sha256 = await computeFileSha256(filepath);
     // eslint-disable-next-line no-console
     console.log(
@@ -204,11 +205,11 @@ async function registerAndNormalizeFile(
     const rawUploadUrl = `${INTELLIWATT_BASE_URL}/api/admin/smt/raw-upload`;
     const rawUploadPayload = {
       filename,
-      size_bytes,
+      sizeBytes: size_bytes,
       sha256,
-      content: contentBase64,
+      contentBase64,
       source: "droplet-upload",
-      received_at: new Date().toISOString(),
+      receivedAt: new Date().toISOString(),
     };
 
     // eslint-disable-next-line no-console
@@ -260,12 +261,31 @@ async function registerAndNormalizeFile(
     }
 
     const normResult = await normResponse.json();
+    const filesProcessed = normResult.filesProcessed || 0;
+    const intervalsInserted = normResult.intervalsInserted || 0;
     // eslint-disable-next-line no-console
     console.log(
-      `[smt-upload] normalization complete: filesProcessed=${normResult.filesProcessed} intervalsInserted=${normResult.intervalsInserted}`,
+      `[smt-upload] normalization complete: filesProcessed=${filesProcessed} intervalsInserted=${intervalsInserted}`,
     );
+
+    // STEP 3: Delete file after successful normalization to prevent disk from filling
+    if (filesProcessed > 0 || intervalsInserted >= 0) {
+      try {
+        await fs.promises.unlink(filepath);
+        // eslint-disable-next-line no-console
+        console.log(`[smt-upload] deleted local file after normalization: ${filepath}`);
+      } catch (unlinkErr) {
+        // eslint-disable-next-line no-console
+        console.warn(`[smt-upload] warning: failed to delete local file ${filepath}:`, unlinkErr);
+      }
+    } else {
+      // eslint-disable-next-line no-console
+      console.log(`[smt-upload] keeping file (no intervals inserted): ${filepath}`);
+    }
   } catch (err) {
     console.error("[smt-upload] error during registration/normalization:", err);
+    // Keep file on error for manual inspection
+    console.log(`[smt-upload] keeping file due to error: ${filepath}`);
   }
 }
 

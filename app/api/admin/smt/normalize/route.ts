@@ -98,14 +98,21 @@ export async function POST(req: NextRequest) {
   };
 
   for (const file of rows) {
+    // STEP 2: Prefer RawSmtFile.content (large-file SMT path), fallback to S3 for legacy records
     let payloadBuffer: Buffer | null = null;
+    
     if (file.content) {
+      // Large-file SMT ingestion path: content stored directly in RawSmtFile.content as Bytes
       payloadBuffer = Buffer.isBuffer(file.content) ? file.content : Buffer.from(file.content as Uint8Array);
+      console.log(`[smt/normalize] using RawSmtFile.content for file ${file.id}, size=${payloadBuffer.length}`);
     } else {
+      // FALLBACK: legacy path for old records that used S3 storage
+      console.log(`[smt/normalize] no content, attempting S3 fetch for file ${file.id}, path=${file.storage_path}`);
       payloadBuffer = await getObjectFromStorage(file.storage_path);
     }
 
     if (!payloadBuffer) {
+      console.warn(`[smt/normalize] no CSV content available for file ${file.id}, skipping`);
       summary.files.push({
         id: String(file.id),
         filename: file.filename,

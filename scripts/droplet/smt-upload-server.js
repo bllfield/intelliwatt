@@ -171,7 +171,7 @@ function computeFileSha256(filepath) {
 }
 function registerAndNormalizeFile(filepath, filename, size_bytes) {
     return __awaiter(this, void 0, void 0, function () {
-        var sha256, fileContent, contentBase64, rawUploadUrl, rawUploadPayload, rawResponse, errBody, rawResult, normalizeUrl, normResponse, errBody, normResult, err_1;
+        var sha256, fileContent, contentBase64, rawUploadUrl, rawUploadPayload, rawResponse, errBody, rawResult, normalizeUrl, normResponse, errBody, normResult, filesProcessed, intervalsInserted, unlinkErr_1, err_1;
         return __generator(this, function (_a) {
             switch (_a.label) {
                 case 0:
@@ -181,7 +181,7 @@ function registerAndNormalizeFile(filepath, filename, size_bytes) {
                     }
                     _a.label = 1;
                 case 1:
-                    _a.trys.push([1, 12, , 13]);
+                    _a.trys.push([1, 18, , 19]);
                     return [4 /*yield*/, computeFileSha256(filepath)];
                 case 2:
                     sha256 = _a.sent();
@@ -196,11 +196,11 @@ function registerAndNormalizeFile(filepath, filename, size_bytes) {
                     rawUploadUrl = "".concat(INTELLIWATT_BASE_URL, "/api/admin/smt/raw-upload");
                     rawUploadPayload = {
                         filename: filename,
-                        size_bytes: size_bytes,
+                        sizeBytes: size_bytes,
                         sha256: sha256,
-                        content: contentBase64,
+                        contentBase64: contentBase64,
                         source: "droplet-upload",
-                        received_at: new Date().toISOString(),
+                        receivedAt: new Date().toISOString(),
                     };
                     // eslint-disable-next-line no-console
                     console.log("[smt-upload] registering raw file at ".concat(rawUploadUrl));
@@ -249,14 +249,38 @@ function registerAndNormalizeFile(filepath, filename, size_bytes) {
                 case 10: return [4 /*yield*/, normResponse.json()];
                 case 11:
                     normResult = _a.sent();
+                    filesProcessed = normResult.filesProcessed || 0;
+                    intervalsInserted = normResult.intervalsInserted || 0;
                     // eslint-disable-next-line no-console
-                    console.log("[smt-upload] normalization complete: filesProcessed=".concat(normResult.filesProcessed, " intervalsInserted=").concat(normResult.intervalsInserted));
-                    return [3 /*break*/, 13];
+                    console.log("[smt-upload] normalization complete: filesProcessed=".concat(filesProcessed, " intervalsInserted=").concat(intervalsInserted));
+                    if (!(filesProcessed > 0 || intervalsInserted >= 0)) return [3 /*break*/, 16];
+                    _a.label = 12;
                 case 12:
+                    _a.trys.push([12, 14, , 15]);
+                    return [4 /*yield*/, fs_1.default.promises.unlink(filepath)];
+                case 13:
+                    _a.sent();
+                    // eslint-disable-next-line no-console
+                    console.log("[smt-upload] deleted local file after normalization: ".concat(filepath));
+                    return [3 /*break*/, 15];
+                case 14:
+                    unlinkErr_1 = _a.sent();
+                    // eslint-disable-next-line no-console
+                    console.warn("[smt-upload] warning: failed to delete local file ".concat(filepath, ":"), unlinkErr_1);
+                    return [3 /*break*/, 15];
+                case 15: return [3 /*break*/, 17];
+                case 16:
+                    // eslint-disable-next-line no-console
+                    console.log("[smt-upload] keeping file (no intervals inserted): ".concat(filepath));
+                    _a.label = 17;
+                case 17: return [3 /*break*/, 19];
+                case 18:
                     err_1 = _a.sent();
                     console.error("[smt-upload] error during registration/normalization:", err_1);
-                    return [3 /*break*/, 13];
-                case 13: return [2 /*return*/];
+                    // Keep file on error for manual inspection
+                    console.log("[smt-upload] keeping file due to error: ".concat(filepath));
+                    return [3 /*break*/, 19];
+                case 19: return [2 /*return*/];
             }
         });
     });

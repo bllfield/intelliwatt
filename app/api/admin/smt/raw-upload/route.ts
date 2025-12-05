@@ -23,7 +23,8 @@ export async function POST(req: NextRequest) {
     (body.storagePath as string | undefined) ??
     (body.storage_path as string | undefined) ??
     `/adhocusage/${filename ?? ''}`;
-  const contentBase64 = body.content as string | undefined; // Base64 encoded file content
+  // STEP 1: Accept optional contentBase64 for large-file SMT ingestion path
+  const contentBase64 = body.contentBase64 as string | undefined;
 
   const missing: string[] = [];
 
@@ -32,12 +33,11 @@ export async function POST(req: NextRequest) {
     missing.push('size_bytes|sizeBytes (number)');
   }
   if (!sha256) missing.push('sha256 (string)');
-  if (!contentBase64) missing.push('content (base64 string)');
+  // NOTE: contentBase64 is optional for backward compatibility with old callers
 
   if (missing.length > 0) {
     const receivedKeys = Object.keys(body ?? {});
-    // helpful server log (keeps corrId flow you already have)
-    console.error('[raw-upload] validation failed', { missing, receivedKeys, body });
+    console.error('[raw-upload] validation failed', { missing, receivedKeys });
     return NextResponse.json(
       {
         ok: false,
@@ -48,6 +48,13 @@ export async function POST(req: NextRequest) {
       },
       { status: 400 },
     );
+  }
+
+  // Log whether contentBase64 was provided (for SMT large-file ingestion debugging)
+  if (contentBase64) {
+    console.log('[raw-upload] contentBase64 provided, length:', contentBase64.length);
+  } else {
+    console.log('[raw-upload] no contentBase64 (legacy path or S3 storage)');
   }
 
   try {
@@ -70,8 +77,8 @@ export async function POST(req: NextRequest) {
     }
 
     // Create new record
-    // TypeScript: filename, sizeBytes, sha256, contentBase64 are guaranteed to be defined after validation
-    const contentBuffer = contentBase64 ? Buffer.from(contentBase64, 'base64') : null;
+    // STEP 1: Store contentBase64 as Buffer if provided (RawSmtFile.content is Bytes type)
+    const contentBuffer = contentBase64 ? Buffer.from(contentBase64, 'base64') : undefined;
     
     const row = await prisma.rawSmtFile.create({
       data: {
