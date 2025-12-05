@@ -4,7 +4,9 @@ import { useCallback, useEffect, useState, useTransition } from 'react';
 import {
   fetchSmtPullStatuses,
   normalizeLatestServerAction,
+  fetchNormalizeStatuses,
   type SmtPullStatusesPayload,
+  type NormalizeRunSummary,
 } from './actions';
 
 type MonitorPayload = SmtPullStatusesPayload;
@@ -18,6 +20,10 @@ export default function AdminSmtToolsPage() {
   const [monitorLimit, setMonitorLimit] = useState(10);
   const [monitor, setMonitor] = useState<MonitorPayload | null>(null);
   const [monitorError, setMonitorError] = useState<string | null>(null);
+  const [normStatusLimit, setNormStatusLimit] = useState(5);
+  const [normStatus, setNormStatus] = useState<NormalizeRunSummary | null>(null);
+  const [normStatusError, setNormStatusError] = useState<string | null>(null);
+  const [isNormStatusPending, startNormStatusTransition] = useTransition();
 
   const handleNormalize = () => {
     setError(null);
@@ -56,6 +62,27 @@ export default function AdminSmtToolsPage() {
     }, 15000);
     return () => clearInterval(interval);
   }, [handleRefreshMonitor, monitorLimit]);
+
+  const handleRefreshNormalizeStatus = useCallback(
+    (nextLimit?: number) => {
+      const effectiveLimit = Math.max(1, Math.min(50, nextLimit ?? normStatusLimit));
+      setNormStatusLimit(effectiveLimit);
+      setNormStatusError(null);
+      startNormStatusTransition(async () => {
+        try {
+          const payload = await fetchNormalizeStatuses(effectiveLimit);
+          setNormStatus(payload);
+        } catch (err: any) {
+          setNormStatusError(err?.message ?? String(err));
+        }
+      });
+    },
+    [normStatusLimit],
+  );
+
+  useEffect(() => {
+    handleRefreshNormalizeStatus();
+  }, [handleRefreshNormalizeStatus]);
 
   const renderMonitorTable = () => {
     if (!monitor) {
@@ -249,6 +276,96 @@ export default function AdminSmtToolsPage() {
 {JSON.stringify(result, null, 2)}
         </pre>
       )}
+
+      <div className="space-y-3 rounded border border-neutral-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-neutral-900">Normalize Status (dry run)</h2>
+            <p className="text-sm text-neutral-600">Shows the last raw SMT files and what normalization would do (no writes).</p>
+            {normStatus?.tsMax ? (
+              <p className="text-xs text-neutral-500">Coverage {normStatus.tsMin ?? '—'} → {normStatus.tsMax ?? '—'}</p>
+            ) : null}
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-2 text-sm">
+              <span>Rows</span>
+              <input
+                type="number"
+                min={1}
+                max={50}
+                className="w-20 rounded border px-2 py-1"
+                value={normStatusLimit}
+                onChange={(event) => handleRefreshNormalizeStatus(Number(event.target.value) || 5)}
+              />
+            </label>
+            <button
+              type="button"
+              onClick={() => handleRefreshNormalizeStatus(normStatusLimit)}
+              disabled={isNormStatusPending}
+              className="rounded border border-neutral-300 bg-neutral-50 px-3 py-1.5 text-sm font-medium text-neutral-700 transition hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isNormStatusPending ? 'Refreshing…' : 'Refresh'}
+            </button>
+          </div>
+        </div>
+
+        {normStatusError && (
+          <div className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-700">
+            {normStatusError}
+          </div>
+        )}
+
+        {normStatus ? (
+          <div className="overflow-hidden rounded border border-neutral-200 bg-white">
+            <table className="min-w-full divide-y divide-neutral-200 text-xs md:text-sm">
+              <thead className="bg-neutral-100 text-neutral-700">
+                <tr>
+                  <th className="px-3 py-2 text-left font-medium">File</th>
+                  <th className="px-3 py-2 text-left font-medium">Records</th>
+                  <th className="px-3 py-2 text-left font-medium">Inserted</th>
+                  <th className="px-3 py-2 text-left font-medium">Skipped</th>
+                  <th className="px-3 py-2 text-left font-medium">kWh</th>
+                  <th className="px-3 py-2 text-left font-medium">tsMin → tsMax</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-neutral-200">
+                {normStatus.files.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-3 py-4 text-center text-neutral-500">
+                      No raw SMT files found.
+                    </td>
+                  </tr>
+                ) : (
+                  normStatus.files.map((file) => (
+                    <tr key={file.id} className="odd:bg-white even:bg-neutral-50">
+                      <td className="px-3 py-2 text-[11px] font-mono uppercase md:text-xs">{file.filename}</td>
+                      <td className="px-3 py-2 text-xs md:text-sm">{file.records}</td>
+                      <td className="px-3 py-2 text-xs md:text-sm">{file.inserted}</td>
+                      <td className="px-3 py-2 text-xs md:text-sm">{file.skipped}</td>
+                      <td className="px-3 py-2 text-xs md:text-sm">{file.kwh.toFixed(3)}</td>
+                      <td className="px-3 py-2 text-[11px] text-neutral-600 md:text-xs">
+                        {file.tsMin ?? '—'} → {file.tsMax ?? '—'}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+              <tfoot className="bg-neutral-50 text-neutral-800">
+                <tr>
+                  <td className="px-3 py-2 font-semibold">Totals</td>
+                  <td className="px-3 py-2 text-xs md:text-sm">{normStatus.filesProcessed}</td>
+                  <td className="px-3 py-2 text-xs md:text-sm">{normStatus.intervalsInserted}</td>
+                  <td className="px-3 py-2 text-xs md:text-sm">{normStatus.duplicatesSkipped}</td>
+                  <td className="px-3 py-2 text-xs md:text-sm">{normStatus.totalKwh.toFixed(3)}</td>
+                  <td className="px-3 py-2 text-[11px] text-neutral-600 md:text-xs">
+                    {normStatus.tsMin ?? '—'} → {normStatus.tsMax ?? '—'}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        ) : null}
+      </div>
 
       <div className="space-y-3 rounded border border-neutral-200 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">

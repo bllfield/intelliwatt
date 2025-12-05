@@ -55,6 +55,53 @@ export async function normalizeLatestServerAction(limit = 5) {
   return res.json();
 }
 
+export type NormalizeRunSummary = {
+  ok: boolean;
+  dryRun: boolean;
+  filesProcessed: number;
+  intervalsInserted: number;
+  duplicatesSkipped: number;
+  totalKwh: number;
+  tsMin: string | null;
+  tsMax: string | null;
+  files: Array<{
+    id: string;
+    filename: string;
+    records: number;
+    inserted: number;
+    skipped: number;
+    kwh: number;
+    tsMin?: string;
+    tsMax?: string;
+  }>;
+};
+
+export async function fetchNormalizeStatuses(limit = 5): Promise<NormalizeRunSummary> {
+  const adminToken = process.env.ADMIN_TOKEN;
+  if (!adminToken) {
+    throw new Error('ADMIN_TOKEN is not configured on the server');
+  }
+
+  const baseUrl = resolveBaseUrl();
+  const url = new URL(`/api/admin/smt/normalize?limit=${encodeURIComponent(Math.max(1, limit))}&dryRun=1`, baseUrl);
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'x-admin-token': adminToken,
+      'content-type': 'application/json',
+    },
+    cache: 'no-store',
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`Normalize status fetch failed: ${res.status} ${text}`.trim());
+  }
+
+  return res.json();
+}
+
 type MonitorAddress = {
   addressLine1: string | null;
   addressCity: string | null;
