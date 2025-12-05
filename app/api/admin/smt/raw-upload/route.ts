@@ -23,6 +23,7 @@ export async function POST(req: NextRequest) {
     (body.storagePath as string | undefined) ??
     (body.storage_path as string | undefined) ??
     `/adhocusage/${filename ?? ''}`;
+  const contentBase64 = body.content as string | undefined; // Base64 encoded file content
 
   const missing: string[] = [];
 
@@ -31,6 +32,7 @@ export async function POST(req: NextRequest) {
     missing.push('size_bytes|sizeBytes (number)');
   }
   if (!sha256) missing.push('sha256 (string)');
+  if (!contentBase64) missing.push('content (base64 string)');
 
   if (missing.length > 0) {
     const receivedKeys = Object.keys(body ?? {});
@@ -68,7 +70,9 @@ export async function POST(req: NextRequest) {
     }
 
     // Create new record
-    // TypeScript: filename, sizeBytes, sha256 are guaranteed to be defined after validation
+    // TypeScript: filename, sizeBytes, sha256, contentBase64 are guaranteed to be defined after validation
+    const contentBuffer = contentBase64 ? Buffer.from(contentBase64, 'base64') : null;
+    
     const row = await prisma.rawSmtFile.create({
       data: {
         filename: filename!,
@@ -77,6 +81,7 @@ export async function POST(req: NextRequest) {
         source,
         content_type: contentType,
         storage_path: storagePath,
+        content: contentBuffer,
         received_at: receivedAt ? new Date(receivedAt) : new Date(),
       },
       select: { id: true, filename: true, size_bytes: true, sha256: true, created_at: true },

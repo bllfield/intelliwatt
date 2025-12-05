@@ -192,12 +192,21 @@ async function registerAndNormalizeFile(
       `[smt-upload] computed sha256=${sha256} for file=${filepath}`,
     );
 
-    // Step 1: Register the raw file with the main app
+    // Read file content and encode as base64
+    const fileContent = await fs.promises.readFile(filepath);
+    const contentBase64 = fileContent.toString('base64');
+    // eslint-disable-next-line no-console
+    console.log(
+      `[smt-upload] read file content: ${fileContent.length} bytes, base64 length: ${contentBase64.length}`,
+    );
+
+    // Step 1: Register the raw file with the main app (including content)
     const rawUploadUrl = `${INTELLIWATT_BASE_URL}/api/admin/smt/raw-upload`;
     const rawUploadPayload = {
       filename,
       size_bytes,
       sha256,
+      content: contentBase64,
       source: "droplet-upload",
       received_at: new Date().toISOString(),
     };

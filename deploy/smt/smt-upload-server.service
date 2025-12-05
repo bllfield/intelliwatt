@@ -1,0 +1,27 @@
+[Unit]
+Description=IntelliWatt SMT Upload Server (webhook receiver on port 8081)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=deploy
+Group=deploy
+WorkingDirectory=/home/deploy/apps/intelliwatt
+EnvironmentFile=/etc/default/intelliwatt-smt
+
+# SMT upload server specific env vars
+Environment=SMT_UPLOAD_DIR=/home/deploy/smt_inbox
+Environment=SMT_UPLOAD_PORT=8081
+Environment=SMT_UPLOAD_MAX_BYTES=10485760
+Environment=SMT_INGEST_SERVICE_NAME=smt-ingest.service
+
+# Run the webhook receiver (always running)
+ExecStart=/usr/bin/node scripts/droplet/smt-upload-server.js
+
+# Always restart this server - it's a long-running webhook receiver
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
