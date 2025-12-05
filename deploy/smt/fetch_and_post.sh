@@ -195,6 +195,8 @@ for file_path in "${FILES[@]}"; do
     # The droplet upload server saves the file to its inbox and triggers smt-ingest.service
     http_code="$(
       curl -sS -o "$RESP_FILE" -w "%{http_code}" \
+        --connect-timeout 30 \
+        --max-time 300 \
         -X POST "$SMT_UPLOAD_URL" \
         -F "file=@$effective_path" \
         -F "esiid=$esiid" \

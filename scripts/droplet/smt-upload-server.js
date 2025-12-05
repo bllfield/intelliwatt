@@ -156,6 +156,7 @@ async function registerAndNormalizeFile(filepath, filename, size_bytes) {
                 "x-admin-token": ADMIN_TOKEN,
             },
             body: JSON.stringify(rawUploadPayload),
+            signal: AbortSignal.timeout(30000), // 30 second timeout for registration
         });
         if (!rawResponse.ok) {
             const errBody = await rawResponse.text();
@@ -176,6 +177,7 @@ async function registerAndNormalizeFile(filepath, filename, size_bytes) {
                 "x-admin-token": ADMIN_TOKEN,
             },
             body: JSON.stringify({}),
+            signal: AbortSignal.timeout(300000), // 5 minute timeout for normalization (large files)
         });
         if (!normResponse.ok) {
             const errBody = await normResponse.text();
