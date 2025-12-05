@@ -3,9 +3,11 @@
 This procedure installs a systemd timer on the IntelliWatt droplet that:
 
 1. Mirrors new SMT SFTP CSV files into a local inbox.
-2. Posts each unseen file **inline** to `https://<your-domain>/api/admin/smt/pull` with the admin token.
+2. Posts each unseen file to the **droplet upload server** (recommended for large files) or via **inline POST** (legacy fallback for small files).
 
 The script records posted SHA256 hashes so replays are skipped automatically.
+
+**Important:** For production, files must be uploaded via the droplet upload server (`SMT_UPLOAD_URL`), not inline POSTs to `/api/admin/smt/pull`. Inline POSTs are limited by Vercel's 100MB payload limit and will fail for full-year SMT CSV files.
 
 ---
 
@@ -23,20 +25,30 @@ The script records posted SHA256 hashes so replays are skipped automatically.
 Create `/etc/default/intelliwatt-smt` with the following contents (no quotes):
 
 ```bash
+# Core credentials (required)
 ADMIN_TOKEN=REDACTED_64_CHAR
 INTELLIWATT_BASE_URL=https://intelliwatt.com
 
+# SMT SFTP credentials (required)
 SMT_HOST=ftp.smartmetertexas.biz
 SMT_USER=intellipathsolutionsftp
 SMT_KEY=/home/deploy/.ssh/intelliwatt_smt_rsa4096
 SMT_REMOTE_DIR=/
 SMT_LOCAL_DIR=/home/deploy/smt_inbox
 
+# Droplet upload server (RECOMMENDED for production big files)
+# This should point to the droplet's upload server, e.g. the smt-upload-server running on port 8081
+SMT_UPLOAD_URL=http://localhost:8081/upload
+
 # Optional overrides used by fetch_and_post.sh
 SOURCE_TAG=adhocusage
 METER_DEFAULT=M1
 ESIID_DEFAULT=10443720000000001
 ```
+
+**Important:** 
+- `SMT_UPLOAD_URL` should be set for production. The droplet upload server (smt-upload-server) listens at this URL and handles multipart file uploads without Vercel payload limits.
+- If `SMT_UPLOAD_URL` is not set, the script will fall back to inline POSTs (legacy mode), which fails for large files.
 
 Ensure the file is readable by `deploy` (root-owned with mode `640` is recommended).
 
@@ -88,17 +100,31 @@ sudo -u deploy INTELLIWATT_BASE_URL="https://intelliwatt.com" \
 
 | Path | Purpose |
 | ---- | ------- |
-| `deploy/smt/fetch_and_post.sh` | SFTP sync + inline POST script |
+| `deploy/smt/fetch_and_post.sh` | SFTP sync + droplet upload POST script |
 | `deploy/smt/smt-ingest.service` | systemd unit that runs the script |
 | `deploy/smt/smt-ingest.timer` | systemd timer (every 30 minutes) |
 | `/etc/default/intelliwatt-smt` | environment variables consumed by the unit |
-| `/home/deploy/smt_ingest/web/webhook_server.py` | Python webhook bridge (droplet → Vercel trigger) |
 
 Make the script executable:
 
 ```bash
 chmod +x /home/deploy/apps/intelliwatt/deploy/smt/fetch_and_post.sh
 ```
+
+---
+
+## How it works
+
+1. **fetch_and_post.sh** runs on schedule (via smt-ingest.timer, every 30 minutes).
+2. It SFTP-fetches new CSV files from SMT into `/home/deploy/smt_inbox`.
+3. For each unseen file, it POSTs to **SMT_UPLOAD_URL** (the droplet upload server) using multipart/form-data.
+4. The droplet upload server receives the file, saves it to its local inbox, and triggers `smt-ingest.service` to normalize and write to the database.
+5. Deduplication: SHA256 hashes of posted files are recorded in `.posted_sha256` to prevent replays.
+
+**Why droplet upload server instead of inline POSTs?**
+- Inline POSTs encode the file as base64+gzip and POST JSON to Vercel, but Vercel's App Router has a ~100MB payload limit.
+- Full-year SMT interval CSVs (12 months of 15-minute reads) exceed this limit.
+- The droplet upload server speaks multipart/form-data directly, bypassing the Vercel limit.
 
 ---
 
@@ -110,8 +136,8 @@ Each successful POST writes the SHA256 of the file into `SMT_LOCAL_DIR/.posted_s
 
 ## Notes
 
-- Admin token is injected **server-side** on the droplet; it never touches the browser/UI.
-- App Router body size is not overridden, so large SMT files should be ingested here and posted inline one file at a time.
+- The droplet upload server (`smt-upload-server.ts`) must be running and accessible at `SMT_UPLOAD_URL`.
+- If `SMT_UPLOAD_URL` is not set, the script will warn and fall back to legacy inline POSTs (not recommended).
 - If SFTP fails, confirm key permissions (`chmod 600`), host reachability, and username.
 - Check recent runs with `journalctl -u smt-ingest.service -n 200`.
 - Packages `jq`, `curl`, `openssh-client`, and coreutils tools (`sha256sum`, `base64`) must be installed.
@@ -122,7 +148,8 @@ Each successful POST writes the SHA256 of the file into `SMT_LOCAL_DIR/.posted_s
 
 - Real SMT interval CSVs (12 months of 15-minute reads) can be large.
 - The **primary ingestion path for big SMT CSVs** is:
-  - SMT SFTP → droplet → `smt-ingest` script → `/api/admin/smt/pull` (inline JSON payload) → `RawSmtFile` → `SmtInterval`.
+  - SMT SFTP → droplet → `fetch_and_post.sh` → **droplet upload server** (multipart/form-data) → `RawSmtFile` → `SmtInterval`.
+  - **This avoids Vercel's 100MB payload limit** by not posting inline to `/api/admin/smt/pull`.
 - The `/admin/smt/raw` → “Load Raw Files” inline upload:
   - Is limited by Vercel App Router’s request body size (~4 MB).
   - Is intended for **small test files and debugging**, not for production 12-month SMT exports.

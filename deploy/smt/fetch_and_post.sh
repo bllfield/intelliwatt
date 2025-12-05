@@ -15,6 +15,13 @@ log() {
 # Will hold a tmp dir path when we decrypt a PGP payload
 MATERIALIZED_TMP_DIR=""
 
+# Track whether we're posting to droplet upload server vs inline
+SMT_UPLOAD_URL="${SMT_UPLOAD_URL:-}"
+USE_DROPLET_UPLOAD="true"
+if [[ -z "$SMT_UPLOAD_URL" ]]; then
+  USE_DROPLET_UPLOAD="false"
+fi
+
 # -----------------------------------------------------------------------------
 # materialize_csv_from_pgp_zip
 # -----------------------------------------------------------------------------
@@ -110,6 +117,14 @@ require_cmd python3
 mkdir -p "$SMT_LOCAL_DIR"
 cd "$SMT_LOCAL_DIR"
 
+# Validate droplet upload configuration
+if [[ "$USE_DROPLET_UPLOAD" == "false" ]]; then
+  log "WARN: SMT_UPLOAD_URL not configured; will attempt legacy inline POST (not recommended for large files)"
+  log "HINT: Set SMT_UPLOAD_URL to the droplet upload server URL for big-file support"
+else
+  log "INFO: Using droplet upload server at $SMT_UPLOAD_URL"
+fi
+
 SEEN_FILE=".posted_sha256"
 if [[ ! -f "$SEEN_FILE" ]]; then
   touch "$SEEN_FILE"
@@ -166,14 +181,38 @@ for file_path in "${FILES[@]}"; do
   mtime_epoch="$(stat -c '%Y' "$effective_path")"
   captured_at="$(date -u -d "@$mtime_epoch" +%Y-%m-%dT%H:%M:%SZ)"
 
-  json="$(
-    SMT_FILE_PATH="$effective_path" \
-    SMT_ESIID="$esiid" \
-    SMT_METER="$meter" \
-    SMT_SOURCE="$SOURCE_TAG" \
-    SMT_CAPTURED_AT="$captured_at" \
-    SMT_SIZE_BYTES="$size_bytes" \
-    python3 - << 'PY'
+  if [[ "$USE_DROPLET_UPLOAD" == "true" ]]; then
+    # NEW: POST multipart/form-data to droplet upload server (avoids Vercel payload limit)
+    # The droplet upload server saves the file to its inbox and triggers smt-ingest.service
+    http_code="$(
+      curl -sS -o "$RESP_FILE" -w "%{http_code}" \
+        -X POST "$SMT_UPLOAD_URL" \
+        -F "file=@$effective_path" \
+        -F "esiid=$esiid" \
+        -F "meter=$meter" \
+        -F "accountKey=intelliwatt-smt-ingest" \
+        -F "role=smt-ingest" \
+        -F "capturedAt=$captured_at" \
+        2>/dev/null || printf '000'
+    )"
+
+    if [[ "$http_code" == "200" || "$http_code" == "201" ]]; then
+      log "Droplet upload success ($http_code): $(jq -c '.message // .' "$RESP_FILE" 2>/dev/null || cat "$RESP_FILE")"
+      printf '%s\n' "$sha256" >>"$SEEN_FILE"
+    else
+      log "Droplet upload failed ($http_code): $(cat "$RESP_FILE")"
+    fi
+  else
+    # LEGACY: POST inline JSON to /api/admin/smt/pull (only for small test files)
+    # This path is deprecated for production; use SMT_UPLOAD_URL instead.
+    json="$(
+      SMT_FILE_PATH="$effective_path" \
+      SMT_ESIID="$esiid" \
+      SMT_METER="$meter" \
+      SMT_SOURCE="$SOURCE_TAG" \
+      SMT_CAPTURED_AT="$captured_at" \
+      SMT_SIZE_BYTES="$size_bytes" \
+      python3 - << 'PY'
 import base64
 import gzip
 import json
@@ -207,23 +246,24 @@ payload = {
 
 sys.stdout.write(json.dumps(payload, separators=(",", ":")))
 PY
-  )"
+    )"
 
-  url="${INTELLIWATT_BASE_URL%/}/api/admin/smt/pull"
+    url="${INTELLIWATT_BASE_URL%/}/api/admin/smt/pull"
 
-  http_code="$(
-    printf '%s' "$json" | curl -sS -o "$RESP_FILE" -w "%{http_code}" \
-      -X POST "$url" \
-      -H "x-admin-token: $ADMIN_TOKEN" \
-      -H "content-type: application/json" \
-      --data-binary @- 2>/dev/null || printf '000'
-  )"
+    http_code="$(
+      printf '%s' "$json" | curl -sS -o "$RESP_FILE" -w "%{http_code}" \
+        -X POST "$url" \
+        -H "x-admin-token: $ADMIN_TOKEN" \
+        -H "content-type: application/json" \
+        --data-binary @- 2>/dev/null || printf '000'
+    )"
 
-  if [[ "$http_code" == "200" || "$http_code" == "201" ]]; then
-    log "POST success ($http_code): $(jq -c '.' "$RESP_FILE" 2>/dev/null || cat "$RESP_FILE")"
-    printf '%s\n' "$sha256" >>"$SEEN_FILE"
-  else
-    log "POST failed ($http_code): $(cat "$RESP_FILE")"
+    if [[ "$http_code" == "200" || "$http_code" == "201" ]]; then
+      log "Inline POST success ($http_code): $(jq -c '.' "$RESP_FILE" 2>/dev/null || cat "$RESP_FILE")"
+      printf '%s\n' "$sha256" >>"$SEEN_FILE"
+    else
+      log "Inline POST failed ($http_code): $(cat "$RESP_FILE")"
+    fi
   fi
 
   if [[ -n "$MATERIALIZED_TMP_DIR" && -d "$MATERIALIZED_TMP_DIR" ]]; then

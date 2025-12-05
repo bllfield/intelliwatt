@@ -6,6 +6,8 @@ import { prisma } from '@/lib/db';
 import { usagePrisma } from '@/lib/db/usageClient';
 import { normalizeEmail } from '@/lib/utils/email';
 
+export const dynamic = 'force-dynamic';
+
 type UsageSeriesPoint = {
   timestamp: string;
   kwh: number;
