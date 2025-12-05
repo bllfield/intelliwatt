@@ -22,11 +22,27 @@ async function normalizeInlineSmtCsv(opts: {
   const { csvBytes, esiid, meter, source } = opts;
   if (!csvBytes?.length) return;
 
-  const { intervals } = normalizeSmtIntervals(csvBytes.toString('utf8'), {
+  const { intervals, stats } = normalizeSmtIntervals(csvBytes.toString('utf8'), {
     esiid,
     meter,
     source: source ?? 'smt-inline',
   });
+
+  // Non-breaking debug log: emit normalization stats so operators can quickly
+  // verify whether the CSV produced any 15-min intervals. This helps diagnose
+  // cases where inline uploads persist a RawSmtFile but normalization yields
+  // zero intervals (common causes: timestamp parsing, missing ESIID, or kWh parse failures).
+  try {
+    console.log('[smt/pull:inline] normalizeSmtIntervals result', {
+      intervals: intervals.length,
+      stats,
+      esiid,
+      meter,
+      source,
+    });
+  } catch (err) {
+    // Never let logging interfere with ingest flow.
+  }
 
   if (intervals.length === 0) return;
 

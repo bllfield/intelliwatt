@@ -3473,3 +3473,64 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
 **Status**
 
 - COMPLETE — Palette guidance documented; apply on new UI work to maintain consistency.
+
+---
+## SMT Usage Pipeline – Debug Notes (2025-12-04)
+
+**Purpose**
+
+- Capture recent diagnostic findings about Smart Meter Texas (SMT) interval ingestion and the observed `dataset: null` symptom for ESIID `10443720004895510`.
+
+**Summary of Findings**
+
+- The canonical inline ingestion path (`POST /api/admin/smt/pull` with `encoding: "base64+gzip"`) decodes the payload, persists a `RawSmtFile`, runs CSV parsing (`parseSmtCsvFlexible`), normalizes intervals (`normalizeSmtIntervals`) and writes to the master `SmtInterval` table.
+- A best-effort dual-write attempts to also persist intervals to the separate Usage module table `UsageIntervalModule`. That write is wrapped in a `try/catch` and failures are logged only; it does not cause the master write to fail.
+- The admin normalization endpoint (`POST /api/admin/usage/normalize` → `lib/usage/normalize.ts`) reads raw rows from the **usage module** (`UsageIntervalModule`) and upserts them into the master `SmtInterval`. This means `rawCount: 0` from that admin route can legitimately occur even when master `SmtInterval` contains data.
+
+**Likely Causes for `dataset: null`**
+
+- Inline normalization produced zero intervals (CSV parse issues: invalid timestamps, missing/invalid kWh) — master `SmtInterval` would be empty and UI dataset null.
+- Inline normalization wrote to master `SmtInterval` but the dual-write to `UsageIntervalModule` failed (or usage DB not configured). The admin normalize route reads from usage module and will show `rawCount: 0`.
+- The UI (`/api/user/usage`) chooses the freshest dataset across master `SmtInterval` and usage-module Green Button data. If both are empty or stale, UI returns `dataset: null`.
+
+**Short-term Mitigation (already applied)**
+
+- Added a non-breaking console log in `app/api/admin/smt/pull/route.ts` to emit normalization results: `{ intervals: intervals.length, stats, esiid, meter, source }` with tag `[smt/pull:inline] normalizeSmtIntervals result`. This helps quickly verify whether an inline CSV produced intervals.
+
+**Recommended Ops Verification Steps**
+
+- Inspect raw SMT capture rows for the suspect ESIID:
+  - `SELECT id, filename, sha256, received_at FROM "RawSmtFile" WHERE filename ILIKE '%10443720004895510%' OR filename ILIKE '%<partial-filename>%';`
+- Search server logs for the new normalize result tag and inspect `intervals` and `stats` values:
+  - Look for `[smt/pull:inline] normalizeSmtIntervals result` entries in the app logs.
+- Check master `SmtInterval` for the ESIID:
+  - `SELECT COUNT(*) FROM "SmtInterval" WHERE esiid = '10443720004895510';`
+- Check usage-module table (requires USAGE DB access):
+  - `SELECT COUNT(*) FROM "UsageIntervalModule" WHERE esiid = '10443720004895510';`
+
+**If master has rows but usage module is empty**
+
+- Confirm environment/Prisma usage client is configured for `USAGE_DATABASE_URL` in the deployed environment. If the usage DB is misconfigured or unavailable, dual-write will fail silently.
+- Re-run the admin normalize flow only if usage-module contains raw rows; otherwise, re-run a controlled inline `POST /api/admin/smt/pull` for the specific CSV and watch the new normalization log.
+
+**If normalization produced zero intervals**
+
+- Inspect the raw CSV in `RawSmtFile` storage (or re-download from droplet) for:
+  - Timestamp formats not parsed by `parseSmtCsvFlexible`.
+  - Missing or non-numeric kWh values.
+  - Header row differences that cause column mapping failure.
+- Create a reproducible minimal CSV and run the local `normalizeSmtIntervals` helper (or craft a dedicated admin endpoint in a safe testing environment) to iterate until parsing succeeds.
+
+**Longer-term Recommendations**
+
+- Make the dual-write to the usage module observable: emit success/failure metrics and include `usageWriteOk` in the inline response JSON when possible.
+- Expose a small admin debug view under `/admin/smt/raw` to preview `RawSmtFile` contents, normalization `stats`, and whether dual-write succeeded for each raw file.
+- Add health checks/alerts for the usage-module Prisma client so dual-write failures surface in monitoring (Sentry/Datadog) rather than only in permissive logs.
+
+**Next Actions I can take**
+
+- (A) Produce exact SQL + PowerShell commands to run the above checks in your environment.
+- (B) Add an admin-only debug view that shows recent `RawSmtFile` rows, normalize stats, and dual-write status (requires a follow-up change).
+- (C) Retry committing these notes elsewhere or expand them into an ops playbook entry.
+
+---
