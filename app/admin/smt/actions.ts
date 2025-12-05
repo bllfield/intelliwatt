@@ -102,6 +102,66 @@ export async function fetchNormalizeStatuses(limit = 5): Promise<NormalizeRunSum
   return res.json();
 }
 
+export type IntervalPreviewRow = {
+  ts: string;
+  esiid: string;
+  meter: string;
+  kwh: number;
+  source: string | null;
+};
+
+export type IntervalPreview = {
+  rows: IntervalPreviewRow[];
+  tsMin: string | null;
+  tsMax: string | null;
+};
+
+export async function fetchRecentIntervals(days = 2, limit = 500): Promise<IntervalPreview> {
+  const windowMs = Math.max(1, days) * 24 * 60 * 60 * 1000;
+  const cutoff = new Date(Date.now() - windowMs);
+  const take = Math.min(Math.max(1, limit), 2000);
+
+  const rows = await prisma.smtInterval.findMany({
+    where: {
+      ts: {
+        gte: cutoff,
+      },
+    },
+    orderBy: { ts: 'desc' },
+    take,
+    select: {
+      ts: true,
+      esiid: true,
+      meter: true,
+      kwh: true,
+      source: true,
+    },
+  });
+
+  let tsMin: string | null = null;
+  let tsMax: string | null = null;
+
+  const mapped = rows.map((row) => {
+    const iso = row.ts.toISOString();
+    if (!tsMin || iso < tsMin) tsMin = iso;
+    if (!tsMax || iso > tsMax) tsMax = iso;
+
+    return {
+      ts: iso,
+      esiid: row.esiid,
+      meter: row.meter,
+      kwh: Number(row.kwh),
+      source: row.source ?? null,
+    } satisfies IntervalPreviewRow;
+  });
+
+  return {
+    rows: mapped,
+    tsMin,
+    tsMax,
+  };
+}
+
 type MonitorAddress = {
   addressLine1: string | null;
   addressCity: string | null;

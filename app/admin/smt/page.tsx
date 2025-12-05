@@ -5,8 +5,10 @@ import {
   fetchSmtPullStatuses,
   normalizeLatestServerAction,
   fetchNormalizeStatuses,
+  fetchRecentIntervals,
   type SmtPullStatusesPayload,
   type NormalizeRunSummary,
+  type IntervalPreview,
 } from './actions';
 
 type MonitorPayload = SmtPullStatusesPayload;
@@ -24,6 +26,9 @@ export default function AdminSmtToolsPage() {
   const [normStatus, setNormStatus] = useState<NormalizeRunSummary | null>(null);
   const [normStatusError, setNormStatusError] = useState<string | null>(null);
   const [isNormStatusPending, startNormStatusTransition] = useTransition();
+  const [intervalPreview, setIntervalPreview] = useState<IntervalPreview | null>(null);
+  const [intervalPreviewError, setIntervalPreviewError] = useState<string | null>(null);
+  const [isIntervalPreviewPending, startIntervalPreviewTransition] = useTransition();
 
   const handleNormalize = () => {
     setError(null);
@@ -83,6 +88,22 @@ export default function AdminSmtToolsPage() {
   useEffect(() => {
     handleRefreshNormalizeStatus();
   }, [handleRefreshNormalizeStatus]);
+
+  const handleRefreshIntervalPreview = useCallback(() => {
+    setIntervalPreviewError(null);
+    startIntervalPreviewTransition(async () => {
+      try {
+        const payload = await fetchRecentIntervals(2, 400);
+        setIntervalPreview(payload);
+      } catch (err: any) {
+        setIntervalPreviewError(err?.message ?? String(err));
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    handleRefreshIntervalPreview();
+  }, [handleRefreshIntervalPreview]);
 
   const renderMonitorTable = () => {
     if (!monitor) {
@@ -365,6 +386,48 @@ export default function AdminSmtToolsPage() {
             </table>
           </div>
         ) : null}
+      </div>
+
+      <div className="space-y-3 rounded border border-neutral-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-neutral-900">Normalized Interval Preview</h2>
+            <p className="text-sm text-neutral-600">Last 2 days of 15-minute intervals (post-normalization).</p>
+            {intervalPreview?.tsMin ? (
+              <p className="text-xs text-neutral-500">Coverage {intervalPreview.tsMin} → {intervalPreview.tsMax}</p>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            onClick={handleRefreshIntervalPreview}
+            disabled={isIntervalPreviewPending}
+            className="rounded border border-neutral-300 bg-neutral-50 px-3 py-1.5 text-sm font-medium text-neutral-700 transition hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isIntervalPreviewPending ? 'Refreshing…' : 'Refresh'}
+          </button>
+        </div>
+
+        {intervalPreviewError && (
+          <div className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-700">
+            {intervalPreviewError}
+          </div>
+        )}
+
+        <div className="max-h-80 overflow-auto rounded border border-neutral-200 bg-neutral-900 p-3 text-xs text-neutral-100">
+          {intervalPreview?.rows?.length ? (
+            intervalPreview.rows.map((row) => (
+              <div key={`${row.esiid}-${row.meter}-${row.ts}`} className="flex gap-3 border-b border-neutral-800 py-1 last:border-none">
+                <span className="min-w-[170px] font-mono text-[11px] text-neutral-300">{row.ts}</span>
+                <span className="w-24 font-mono text-[11px] uppercase text-neutral-200">{row.esiid}</span>
+                <span className="w-24 font-mono text-[11px] uppercase text-neutral-300">{row.meter}</span>
+                <span className="w-16 text-right font-mono text-[11px] text-neutral-100">{row.kwh.toFixed(3)}</span>
+                <span className="flex-1 text-[11px] text-neutral-400">{row.source ?? 'smt'}</span>
+              </div>
+            ))
+          ) : (
+            <div className="text-neutral-400">No interval data found in the last 2 days.</div>
+          )}
+        </div>
       </div>
 
       <div className="space-y-3 rounded border border-neutral-200 bg-white p-4 shadow-sm">
