@@ -374,6 +374,13 @@ export async function POST(req: NextRequest) {
   }
 
   if (body?.mode === 'inline') {
+    // Guard: disable direct inline SMT uploads in production; require droplet large-file path instead.
+    if (process.env.NODE_ENV === 'production') {
+      return NextResponse.json(
+        { ok: false, error: 'INLINE_DISABLED', message: 'Direct SMT upload is disabled in production. Use droplet large-file path.' },
+        { status: 400 },
+      );
+    }
     const {
       source: rawSource = 'adhocusage',
       filename: rawFilename = 'adhoc.csv',
