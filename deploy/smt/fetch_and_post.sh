@@ -174,7 +174,7 @@ for file_path in "${FILES[@]}"; do
   # If no ESIID in filename, try to extract from CSV content (after decryption)
   # SMT CSVs may have ESIID with leading single quote: '10443720004529147
   if [[ -z "$esiid_guess" && -f "$effective_path" ]]; then
-    esiid_guess="$(head -n 100 "$effective_path" | grep -oE "'?10[0-9]{16}" | sed "s/^'//" | head -n 1 || true)"
+    esiid_guess="$(head -n 100 "$effective_path" | grep -oE "'10[0-9]{16}|10[0-9]{16}" | sed "s/^'//" | head -n 1 || true)"
     log "Extracted ESIID from CSV content: $esiid_guess"
   fi
 
