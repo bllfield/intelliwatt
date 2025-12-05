@@ -147,26 +147,85 @@ export async function POST(req: NextRequest) {
     let skipped = 0;
 
     if (!dryRun) {
-      // Use createMany with skipDuplicates to avoid P2002 errors on unique constraint violations
       if (intervals.length > 0) {
-        try {
-          const result = await prisma.smtInterval.createMany({
-            data: intervals.map((interval) => ({
-              esiid: interval.esiid,
-              meter: interval.meter,
-              ts: interval.ts,
-              kwh: new Prisma.Decimal(interval.kwh),
-              source: interval.source ?? file.source ?? 'smt',
-            })),
-            skipDuplicates: true,
-          });
-          inserted = result.count;
-          skipped = intervals.length - result.count;
-        } catch (err) {
-          if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-            skipped = intervals.length;
-          } else {
+        const hasRange = !!stats.tsMin && !!stats.tsMax;
+
+        if (hasRange) {
+          // Overwrite behavior: delete existing intervals for the same (esiid, meter)
+          // within this file's [tsMin, tsMax] window, then insert fresh records.
+          const tsMinDate = new Date(stats.tsMin!);
+          const tsMaxDate = new Date(stats.tsMax!);
+
+          try {
+            await prisma.$transaction(async (tx) => {
+              // Find distinct (esiid, meter) pairs present in this file
+              const distinctPairs = Array.from(
+                new Set(intervals.map((i) => `${i.esiid}|${i.meter}`)),
+              ).map((key) => {
+                const [esiid, meter] = key.split('|');
+                return { esiid, meter };
+              });
+
+              if (distinctPairs.length > 0) {
+                await tx.smtInterval.deleteMany({
+                  where: {
+                    OR: distinctPairs.map((pair) => ({
+                      esiid: pair.esiid,
+                      meter: pair.meter,
+                      ts: {
+                        gte: tsMinDate,
+                        lte: tsMaxDate,
+                      },
+                    })),
+                  },
+                });
+              }
+
+              const result = await tx.smtInterval.createMany({
+                data: intervals.map((interval) => ({
+                  esiid: interval.esiid,
+                  meter: interval.meter,
+                  ts: interval.ts,
+                  kwh: new Prisma.Decimal(interval.kwh),
+                  source: interval.source ?? file.source ?? 'smt',
+                })),
+                skipDuplicates: false,
+              });
+
+              inserted = result.count;
+              skipped = intervals.length - result.count;
+            });
+          } catch (err) {
+            console.error('[smt/normalize] failed overwrite transaction', {
+              fileId: file.id,
+              filename: file.filename,
+              tsMin: stats.tsMin,
+              tsMax: stats.tsMax,
+              err,
+            });
             throw err;
+          }
+        } else {
+          // Fallback: if we somehow lack a range, retain old idempotent behavior
+          try {
+            const result = await prisma.smtInterval.createMany({
+              data: intervals.map((interval) => ({
+                esiid: interval.esiid,
+                meter: interval.meter,
+                ts: interval.ts,
+                kwh: new Prisma.Decimal(interval.kwh),
+                source: interval.source ?? file.source ?? 'smt',
+              })),
+              skipDuplicates: true,
+            });
+            inserted = result.count;
+            skipped = intervals.length - result.count;
+          } catch (err) {
+            if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+              skipped = intervals.length;
+            } else {
+              throw err;
+            }
           }
         }
       }

@@ -27,6 +27,26 @@ export type SmtAgreementResult = {
   subscriptionAlreadyActive?: boolean;
 };
 
+export interface SmtBackfillRequest {
+  authorizationId: string;
+  esiid: string;
+  meterNumber?: string | null;
+  startDate: Date;
+  endDate: Date;
+}
+
+export function getRollingBackfillRange(monthsBack: number = 12): {
+  startDate: Date;
+  endDate: Date;
+} {
+  const endDate = new Date();
+  const startDate = new Date(endDate);
+  startDate.setMonth(startDate.getMonth() - monthsBack);
+  startDate.setUTCHours(0, 0, 0, 0);
+  endDate.setUTCHours(23, 59, 59, 999);
+  return { startDate, endDate };
+}
+
 // Feature flag to hard-disable SMT agreements from env.
 const SMT_AGREEMENTS_ENABLED =
   process.env.SMT_AGREEMENTS_ENABLED === "true" ||
@@ -61,6 +81,62 @@ function buildProxyUrl(path: string): string {
   const base = resolveProxyBaseUrl().replace(/\/+$/, "");
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
   return `${base}${normalizedPath}`;
+}
+
+export async function requestSmtBackfillForAuthorization(
+  req: SmtBackfillRequest,
+): Promise<{ ok: boolean; message?: string }> {
+  if (!SMT_PROXY_AGREEMENTS_URL && !SMT_PROXY_TOKEN && !SMT_PROXY_URL) {
+    console.warn("[SMT_BACKFILL] Proxy not configured; skipping backfill request.", {
+      authorizationId: req.authorizationId,
+    });
+    return { ok: false, message: "SMT proxy not configured" };
+  }
+
+  const payload = {
+    action: "request_interval_backfill",
+    authorizationId: req.authorizationId,
+    esiid: normalizeEsiid(req.esiid),
+    meterNumber: req.meterNumber ?? null,
+    startDate: req.startDate.toISOString(),
+    endDate: req.endDate.toISOString(),
+  };
+
+  try {
+    const url = SMT_PROXY_AGREEMENTS_URL || SMT_PROXY_URL || buildProxyUrl("/smt/backfill");
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(SMT_PROXY_TOKEN
+          ? { Authorization: `Bearer ${SMT_PROXY_TOKEN}` }
+          : {}),
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      console.error("[SMT_BACKFILL] HTTP error", res.status, text.slice(0, 500));
+      return {
+        ok: false,
+        message: `HTTP ${res.status}: ${text.slice(0, 200)}`,
+      };
+    }
+
+    const json: any = await res.json().catch(() => ({}));
+    const ok = Boolean(json?.ok ?? true);
+    return {
+      ok,
+      message: json?.message,
+    };
+  } catch (error: any) {
+    console.error("[SMT_BACKFILL] network error", error);
+    return {
+      ok: false,
+      message: error?.message ?? String(error),
+    };
+  }
 }
 
 const LEGACY_ACTION_MAP: Record<string, string> = {
@@ -385,6 +461,11 @@ export interface AgreementLookupResult {
   raw: any;
   agreements: SmtAgreementSummary[];
   match: SmtAgreementSummary | null;
+}
+
+export interface SmtBackfillRange {
+  start: Date;
+  end: Date;
 }
 
 /**
@@ -760,6 +841,13 @@ function parseRepPuctNumber(value: string | number | null | undefined): number |
   }
   const parsed = Number.parseInt(digits, 10);
   return Number.isNaN(parsed) ? undefined : parsed;
+}
+
+export function getBackfillRangeForAuth(now: Date = new Date()): SmtBackfillRange {
+  const end = new Date(now);
+  const start = new Date(end);
+  start.setMonth(start.getMonth() - 12);
+  return { start, end };
 }
 
 if (!SMT_USERNAME) {

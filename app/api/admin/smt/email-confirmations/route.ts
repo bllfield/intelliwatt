@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { getRollingBackfillRange, requestSmtBackfillForAuthorization } from '@/lib/smt/agreements';
 
 export const dynamic = 'force-dynamic';
 
@@ -91,5 +92,85 @@ export async function GET() {
   } catch (error) {
     console.error('[admin/smt/email-confirmations] Failed to load email confirmations', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
+export async function POST(req: Request) {
+  try {
+    const prismaAny = prisma as any;
+    const body = (await req.json().catch(() => null)) as
+      | { authorizationId?: string; action?: string }
+      | null;
+
+    if (!body || typeof body !== 'object' || !body.authorizationId) {
+      return NextResponse.json(
+        { ok: false, error: 'authorizationId is required' },
+        { status: 400 },
+      );
+    }
+
+    const auth = await prismaAny.smtAuthorization.findUnique({
+      where: { id: body.authorizationId },
+      select: {
+        id: true,
+        esiid: true,
+        meterNumber: true,
+        emailConfirmationStatus: true,
+        emailConfirmationAt: true,
+        smtBackfillRequestedAt: true,
+      },
+    });
+
+    if (!auth) {
+      return NextResponse.json(
+        { ok: false, error: 'Authorization not found' },
+        { status: 404 },
+      );
+    }
+
+    // Only trigger backfill once the email is approved/confirmed.
+    if (auth.emailConfirmationStatus !== 'APPROVED') {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'Authorization is not approved for backfill',
+          status: auth.emailConfirmationStatus,
+        },
+        { status: 409 },
+      );
+    }
+
+    // Avoid spamming SMT with duplicate backfill requests if we've already sent one.
+    if (auth.smtBackfillRequestedAt) {
+      return NextResponse.json({
+        ok: true,
+        skipped: true,
+        message: 'Backfill already requested for this authorization',
+      });
+    }
+
+    const { startDate, endDate } = getRollingBackfillRange(12);
+
+    const res = await requestSmtBackfillForAuthorization({
+      authorizationId: auth.id,
+      esiid: auth.esiid,
+      meterNumber: auth.meterNumber,
+      startDate,
+      endDate,
+    });
+
+    if (res.ok) {
+      await prismaAny.smtAuthorization.update({
+        where: { id: auth.id },
+        data: {
+          smtBackfillRequestedAt: new Date(),
+        },
+      });
+    }
+
+    return NextResponse.json({ ok: res.ok, message: res.message });
+  } catch (error) {
+    console.error('[admin/smt/email-confirmations] Failed to request SMT backfill', error);
+    return NextResponse.json({ ok: false, error: 'Internal server error' }, { status: 500 });
   }
 }
