@@ -2,6 +2,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import { normalizeSmtTo15Min } from '@/lib/analysis/normalizeSmt';
 import { requireSharedSecret } from '@/lib/auth/shared';

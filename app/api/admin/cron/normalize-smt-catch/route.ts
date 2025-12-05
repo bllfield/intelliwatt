@@ -4,6 +4,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
+import { Prisma } from '@prisma/client';
 import { requireVercelCron } from '@/lib/auth/cron';
 import { computeDailySummaries } from '@/lib/analysis/dailySummary';
 import { DateTime } from 'luxon';
