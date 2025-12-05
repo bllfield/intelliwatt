@@ -138,6 +138,42 @@ function DailyTable({ series }: { series: UsageSeriesPoint[] }) {
   );
 }
 
+function IntervalPreview({ series }: { series: UsageSeriesPoint[] }) {
+  const rows = useMemo(() => series.slice(-192), [series]); // ~2 days of 15-minute intervals
+
+  return (
+    <div className="rounded-2xl border border-brand-cyan/15 bg-brand-navy/40 p-3 text-xs text-brand-cyan/80">
+      <div className="mb-2 flex items-center justify-between text-[11px] uppercase tracking-[0.25em] text-brand-cyan/60">
+        <span>Last 2 days · 15-min intervals</span>
+        <span>{rows.length} rows</span>
+      </div>
+      <div className="max-h-64 overflow-auto rounded-xl border border-brand-cyan/15 bg-brand-navy/60">
+        {rows.length === 0 ? (
+          <div className="p-3 text-brand-cyan/60">No interval data yet. Upload SMT data to populate.</div>
+        ) : (
+          rows
+            .slice()
+            .reverse()
+            .map((row) => (
+              <div
+                key={row.timestamp}
+                className="flex items-center gap-3 border-b border-brand-cyan/10 px-3 py-2 last:border-none"
+              >
+                <span className="min-w-[120px] font-mono text-[11px] text-brand-cyan/70">
+                  <LocalTime
+                    value={row.timestamp}
+                    options={{ month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }}
+                  />
+                </span>
+                <span className="flex-1 text-right font-mono text-[11px] text-brand-white">{row.kwh.toFixed(3)} kWh</span>
+              </div>
+            ))
+        )}
+      </div>
+    </div>
+  );
+}
+
 function UsageDatasetSection({ house }: { house: HouseUsage }) {
   const dataset = house.dataset;
 
@@ -219,6 +255,10 @@ function UsageDatasetSection({ house }: { house: HouseUsage }) {
           </h3>
           <PeakTable series={series.hourly} />
         </div>
+      </div>
+
+      <div className="mt-6">
+        <IntervalPreview series={series.intervals15} />
       </div>
 
       <div className="mt-6 rounded-2xl border border-brand-cyan/15 bg-brand-navy/50 px-4 py-3 text-xs text-brand-cyan/70">

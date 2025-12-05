@@ -71,7 +71,7 @@ async function fetchSmtDataset(esiid: string | null): Promise<UsageDatasetResult
   const recentIntervals = await prisma.smtInterval.findMany({
     where: { esiid },
     orderBy: { ts: 'desc' },
-    take: 96,
+    take: 192, // ~2 days of 15-minute intervals
   });
 
   const intervals15 = recentIntervals
@@ -158,7 +158,7 @@ async function fetchGreenButtonDataset(houseId: string): Promise<UsageDatasetRes
   const recentIntervals = (await usageClient.greenButtonInterval.findMany({
     where: { homeId: houseId },
     orderBy: { timestamp: 'desc' },
-    take: 96,
+    take: 192, // ~2 days of 15-minute intervals
   })) as Array<{ timestamp: Date; consumptionKwh: Prisma.Decimal | number }>;
 
   const intervals15 = recentIntervals
