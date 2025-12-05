@@ -86,7 +86,7 @@ function buildProxyUrl(path: string): string {
 export async function requestSmtBackfillForAuthorization(
   req: SmtBackfillRequest,
 ): Promise<{ ok: boolean; message?: string }> {
-  if (!SMT_PROXY_AGREEMENTS_URL && !SMT_PROXY_TOKEN && !SMT_PROXY_URL) {
+  if (!SMT_PROXY_AGREEMENTS_URL && !SMT_PROXY_TOKEN) {
     console.warn("[SMT_BACKFILL] Proxy not configured; skipping backfill request.", {
       authorizationId: req.authorizationId,
     });
@@ -103,7 +103,7 @@ export async function requestSmtBackfillForAuthorization(
   };
 
   try {
-    const url = SMT_PROXY_AGREEMENTS_URL || SMT_PROXY_URL || buildProxyUrl("/smt/backfill");
+    const url = SMT_PROXY_AGREEMENTS_URL || buildProxyUrl("/smt/backfill");
     const res = await fetch(url, {
       method: "POST",
       headers: {
