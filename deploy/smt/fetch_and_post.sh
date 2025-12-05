@@ -175,7 +175,7 @@ for file_path in "${FILES[@]}"; do
   # SMT CSVs may have ESIID with leading single quote: '10443720004529147
   # Use awk to extract first column, then grep for ESIID pattern
   if [[ -z "$esiid_guess" && -f "$effective_path" ]]; then
-    esiid_guess="$(head -n 100 "$effective_path" | awk -F, '{gsub(/^'\''/, "", $1); print $1}' | grep -E '^10[0-9]{16}$' | head -n 1 || true)"
+    esiid_guess="$(head -n 100 "$effective_path" | awk -F, '{gsub(/^'\''/, "", $1); print $1}' | grep '^10[0-9]\{16\}$' | head -n 1 || true)"
     log "Extracted ESIID from CSV content: $esiid_guess"
   fi
 
