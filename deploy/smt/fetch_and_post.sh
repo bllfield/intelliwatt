@@ -163,19 +163,27 @@ for file_path in "${FILES[@]}"; do
     continue
   fi
 
+  # Decrypt first if needed
+  effective_path="$(materialize_csv_from_pgp_zip "$file_path" || printf '%s\n' "$file_path")"
+
+  # Try to extract ESIID from filename first
   base="$(basename "$file_path")"
   esiid_guess="$(printf '%s\n' "$base" | grep -oE '10[0-9]{16}' || true)"
   meter_guess="$(printf '%s\n' "$base" | grep -oE 'M[0-9]+' || true)"
+
+  # If no ESIID in filename, try to extract from CSV content (after decryption)
+  if [[ -z "$esiid_guess" && -f "$effective_path" ]]; then
+    esiid_guess="$(head -n 100 "$effective_path" | grep -oE '10[0-9]{16}' | head -n 1 || true)"
+    log "Extracted ESIID from CSV content: $esiid_guess"
+  fi
 
   esiid="${esiid_guess:-$(printf '%s' "${ESIID_DEFAULT:-}" | tr -d $'\r\n')}"
   meter="${meter_guess:-$METER_DEFAULT}"
 
   if [[ -z "$esiid" ]]; then
-    log "WARN: No ESIID found or ESIID_DEFAULT set for $file_path; skipping"
+    log "WARN: No ESIID found in filename or CSV content for $file_path; skipping"
     continue
   fi
-
-  effective_path="$(materialize_csv_from_pgp_zip "$file_path" || printf '%s\n' "$file_path")"
 
   size_bytes="$(stat -c '%s' "$effective_path")"
   mtime_epoch="$(stat -c '%Y' "$effective_path")"
