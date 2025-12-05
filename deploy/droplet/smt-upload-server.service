@@ -1,0 +1,27 @@
+[Unit]
+Description=IntelliWatt SMT Upload Server (Node on 8081)
+After=network.target
+
+[Service]
+Type=simple
+User=deploy
+WorkingDirectory=/home/deploy/apps/intelliwatt
+
+# Load environment variables from shared SMT config
+EnvironmentFile=/etc/default/intelliwatt-smt
+
+# SMT upload server specific environment variables
+Environment=SMT_UPLOAD_DIR=/home/deploy/smt_inbox
+Environment=SMT_UPLOAD_PORT=8081
+Environment=SMT_UPLOAD_MAX_BYTES=10485760
+Environment=SMT_INGEST_SERVICE_NAME=smt-ingest.service
+
+# Start the Node upload server
+ExecStart=/usr/bin/node scripts/droplet/smt-upload-server.js
+
+# Always restart this service - it's a critical long-running daemon
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

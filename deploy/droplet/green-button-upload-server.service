@@ -1,0 +1,25 @@
+[Unit]
+Description=IntelliWatt Green Button Upload Server (Node on 8091)
+After=network.target
+
+[Service]
+Type=simple
+User=deploy
+WorkingDirectory=/home/deploy/apps/intelliwatt
+
+# Load environment variables from shared SMT config
+EnvironmentFile=/etc/default/intelliwatt-smt
+
+# Green Button specific environment variables
+Environment=GREEN_BUTTON_UPLOAD_PORT=8091
+Environment=GREEN_BUTTON_UPLOAD_MAX_BYTES=10485760
+
+# Start the Node upload server
+ExecStart=/usr/bin/node scripts/droplet/green-button-upload-server.js
+
+# Always restart this service - it's a critical long-running daemon
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
