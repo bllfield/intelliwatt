@@ -140,21 +140,24 @@ export async function POST(req: NextRequest) {
     let skipped = 0;
 
     if (!dryRun) {
-      for (const interval of intervals) {
+      // Use createMany with skipDuplicates to avoid P2002 errors on unique constraint violations
+      if (intervals.length > 0) {
         try {
-          await prisma.smtInterval.create({
-            data: {
+          const result = await prisma.smtInterval.createMany({
+            data: intervals.map((interval) => ({
               esiid: interval.esiid,
               meter: interval.meter,
               ts: interval.ts,
               kwh: new Prisma.Decimal(interval.kwh),
               source: interval.source ?? file.source ?? 'smt',
-            },
+            })),
+            skipDuplicates: true,
           });
-          inserted += 1;
+          inserted = result.count;
+          skipped = intervals.length - result.count;
         } catch (err) {
           if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-            skipped += 1;
+            skipped = intervals.length;
           } else {
             throw err;
           }

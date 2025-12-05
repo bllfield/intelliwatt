@@ -126,17 +126,25 @@ export async function POST(req: NextRequest) {
         const existing = await prisma.smtInterval.findUnique({ where: key });
 
         if (!existing) {
-          await prisma.smtInterval.create({
-            data: {
-              esiid: p.esiid,
-              meter: p.meter,
-              ts: new Date(p.ts),
-              kwh: p.kwh,
-              filled: !!p.filled,
-              source: p.source,
-            },
-          });
-          persisted++;
+          try {
+            await prisma.smtInterval.create({
+              data: {
+                esiid: p.esiid,
+                meter: p.meter,
+                ts: new Date(p.ts),
+                kwh: p.kwh,
+                filled: !!p.filled,
+                source: p.source,
+              },
+            });
+            persisted++;
+          } catch (err) {
+            if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+              // duplicate key constraint; skip silently
+            } else {
+              throw err;
+            }
+          }
           continue;
         }
 
