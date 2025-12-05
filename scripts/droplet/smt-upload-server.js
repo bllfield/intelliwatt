@@ -12,7 +12,8 @@ const UPLOAD_DIR = process.env.SMT_UPLOAD_DIR || "/home/deploy/smt_inbox";
 const PORT = Number(process.env.SMT_UPLOAD_PORT || "8081");
 const MAX_BYTES = Number(process.env.SMT_UPLOAD_MAX_BYTES || 10 * 1024 * 1024);
 const UPLOAD_TOKEN = process.env.SMT_UPLOAD_TOKEN || "";
-const ADMIN_LIMIT = Number(process.env.SMT_ADMIN_UPLOAD_DAILY_LIMIT || "50");
+// Admin limit: 40,000 allows ~365 days of 15-min interval files (96 intervals/day × 365 days = 35,040)
+const ADMIN_LIMIT = Number(process.env.SMT_ADMIN_UPLOAD_DAILY_LIMIT || "40000");
 const ADMIN_WINDOW_MS = Number(process.env.SMT_ADMIN_UPLOAD_WINDOW_MS || 24 * 60 * 60 * 1000);
 const CUSTOMER_LIMIT = Number(process.env.SMT_CUSTOMER_UPLOAD_MONTHLY_LIMIT || "5");
 const CUSTOMER_WINDOW_MS = Number(process.env.SMT_CUSTOMER_UPLOAD_WINDOW_MS || 30 * 24 * 60 * 60 * 1000);
@@ -152,7 +153,7 @@ async function registerAndNormalizeFile(filepath, filename, size_bytes) {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
-                "Authorization": `Bearer ${ADMIN_TOKEN}`,
+                "x-admin-token": ADMIN_TOKEN,
             },
             body: JSON.stringify(rawUploadPayload),
         });
@@ -172,7 +173,7 @@ async function registerAndNormalizeFile(filepath, filename, size_bytes) {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
-                "Authorization": `Bearer ${ADMIN_TOKEN}`,
+                "x-admin-token": ADMIN_TOKEN,
             },
             body: JSON.stringify({}),
         });
