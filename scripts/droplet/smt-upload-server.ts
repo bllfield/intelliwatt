@@ -3,6 +3,7 @@ import multer from "multer";
 import fs from "fs";
 import path from "path";
 import { spawn } from "child_process";
+import crypto from "crypto";
 
 const UPLOAD_DIR = process.env.SMT_UPLOAD_DIR || "/home/deploy/smt_inbox";
 const PORT = Number(process.env.SMT_UPLOAD_PORT || "8081");
@@ -18,6 +19,10 @@ const CUSTOMER_LIMIT = Number(
 const CUSTOMER_WINDOW_MS = Number(
   process.env.SMT_CUSTOMER_UPLOAD_WINDOW_MS || 30 * 24 * 60 * 60 * 1000,
 );
+
+// Main app webhook for registering and normalizing uploaded files
+const INTELLIWATT_BASE_URL = process.env.INTELLIWATT_BASE_URL || "https://intelliwatt.com";
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "";
 
 type Counter = {
   count: number;
@@ -157,6 +162,101 @@ function verifyUploadToken(
   });
 }
 
+async function computeFileSha256(filepath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash('sha256');
+    const stream = fs.createReadStream(filepath);
+    stream.on('data', (data) => hash.update(data));
+    stream.on('end', () => resolve(hash.digest('hex')));
+    stream.on('error', reject);
+  });
+}
+
+async function registerAndNormalizeFile(
+  filepath: string,
+  filename: string,
+  size_bytes: number,
+): Promise<void> {
+  if (!ADMIN_TOKEN || !INTELLIWATT_BASE_URL) {
+    console.warn(
+      "[smt-upload] Cannot register file: ADMIN_TOKEN or INTELLIWATT_BASE_URL not configured",
+    );
+    return;
+  }
+
+  try {
+    const sha256 = await computeFileSha256(filepath);
+    // eslint-disable-next-line no-console
+    console.log(
+      `[smt-upload] computed sha256=${sha256} for file=${filepath}`,
+    );
+
+    // Step 1: Register the raw file with the main app
+    const rawUploadUrl = `${INTELLIWATT_BASE_URL}/api/admin/smt/raw-upload`;
+    const rawUploadPayload = {
+      filename,
+      size_bytes,
+      sha256,
+      source: "droplet-upload",
+      received_at: new Date().toISOString(),
+    };
+
+    // eslint-disable-next-line no-console
+    console.log(`[smt-upload] registering raw file at ${rawUploadUrl}`);
+
+    const rawResponse = await fetch(rawUploadUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${ADMIN_TOKEN}`,
+      },
+      body: JSON.stringify(rawUploadPayload),
+    });
+
+    if (!rawResponse.ok) {
+      const errBody = await rawResponse.text();
+      console.error(
+        `[smt-upload] raw-upload failed: ${rawResponse.status} ${errBody}`,
+      );
+      return;
+    }
+
+    const rawResult = await rawResponse.json();
+    // eslint-disable-next-line no-console
+    console.log(`[smt-upload] raw file registered: ${JSON.stringify(rawResult)}`);
+
+    // Step 2: Trigger normalization of the raw file
+    const normalizeUrl = `${INTELLIWATT_BASE_URL}/api/admin/smt/normalize?limit=1`;
+    // eslint-disable-next-line no-console
+    console.log(`[smt-upload] triggering normalization at ${normalizeUrl}`);
+
+    const normResponse = await fetch(normalizeUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${ADMIN_TOKEN}`,
+      },
+      body: JSON.stringify({}),
+    });
+
+    if (!normResponse.ok) {
+      const errBody = await normResponse.text();
+      console.error(
+        `[smt-upload] normalize failed: ${normResponse.status} ${errBody}`,
+      );
+      return;
+    }
+
+    const normResult = await normResponse.json();
+    // eslint-disable-next-line no-console
+    console.log(
+      `[smt-upload] normalization complete: filesProcessed=${normResult.filesProcessed} intervalsInserted=${normResult.intervalsInserted}`,
+    );
+  } catch (err) {
+    console.error("[smt-upload] error during registration/normalization:", err);
+  }
+}
+
 app.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
@@ -251,33 +351,20 @@ app.post(
         (typeof file.size === "number" ? file.size : undefined) ||
         (typeof req.headers["content-length"] === "string"
           ? Number(req.headers["content-length"])
-          : undefined);
+          : undefined) ||
+        0;
 
       // eslint-disable-next-line no-console
       console.log(
         `[smt-upload] saved file=${destPath} bytes=${sizeGuess ?? "n/a"} role=${role} accountKey=${accountKey}`,
       );
 
-      const ingestService =
-        process.env.SMT_INGEST_SERVICE_NAME || "smt-ingest.service";
-
-      try {
-        const child = spawn("systemctl", ["start", ingestService], {
-          detached: true,
-          stdio: "ignore",
+      // NEW: Register and normalize the file with the main app in the background
+      // Don't wait for this to complete before responding (fire-and-forget)
+      registerAndNormalizeFile(destPath, file.originalname || file.filename || "upload.csv", sizeGuess)
+        .catch(err => {
+          console.error("[smt-upload] background registration/normalization failed:", err);
         });
-        child.unref();
-        // eslint-disable-next-line no-console
-        console.log(
-          `[smt-upload] triggered systemctl start ${ingestService}`,
-        );
-      } catch (serviceErr) {
-        // eslint-disable-next-line no-console
-        console.error(
-          "[smt-upload] failed to trigger smt-ingest.service:",
-          serviceErr,
-        );
-      }
 
       res.status(202).json({
         ok: true,
