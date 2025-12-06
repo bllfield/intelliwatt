@@ -19,6 +19,27 @@ export default function UsagePage() {
       </section>
     </div>
   );
+}"use client";
+
+import DashboardHero from "@/components/dashboard/DashboardHero";
+import UsageDashboard from "@/components/usage/UsageDashboard";
+
+export default function UsagePage() {
+  return (
+    <div className="min-h-screen bg-brand-white">
+      <DashboardHero
+        title="Energy"
+        highlight="Usage"
+        description="Visualize your household consumption with monthly, daily, and typical 15-minute load insights."
+      />
+
+      <section className="bg-brand-white px-4 pb-12 pt-4">
+        <div className="mx-auto w-full max-w-6xl">
+          <UsageDashboard />
+        </div>
+      </section>
+    </div>
+  );
 }'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
