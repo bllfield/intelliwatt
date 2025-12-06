@@ -57,12 +57,6 @@ const SMT_TOOLS: Tool[] = [
     title: 'Subscriptions (New/List/Unsubscribe)',
     desc: 'SMT subscription utilities: list active/closed subscriptions and check report status.',
   },
-  {
-    href: '/admin/smt/enrollments',
-    title: 'Enrollment (Backfill: 12mo res / 24mo com)',
-    desc: 'One-time historical backfill via SFTP (per SMT limits).',
-    paused: true,
-  },
 ];
 
 export default function SMTInspector() {
