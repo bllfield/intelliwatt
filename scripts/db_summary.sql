@@ -1,0 +1,13 @@
+SELECT 'User' AS table, count(*) AS cnt FROM "User"
+UNION ALL SELECT 'HouseAddress', count(*) FROM "HouseAddress"
+UNION ALL SELECT 'SmtAuthorization', count(*) FROM "SmtAuthorization"
+UNION ALL SELECT 'SmtInterval', count(*) FROM "SmtInterval"
+UNION ALL SELECT 'SmtBillingRead', count(*) FROM "SmtBillingRead"
+UNION ALL SELECT 'ManualUsageUpload', count(*) FROM "ManualUsageUpload"
+UNION ALL SELECT 'Entry', count(*) FROM "Entry"
+UNION ALL SELECT 'Referral', count(*) FROM "Referral"
+UNION ALL SELECT 'TestimonialSubmission', count(*) FROM "TestimonialSubmission"
+UNION ALL SELECT 'Appliance', count(*) FROM "Appliance"
+UNION ALL SELECT 'SmtMeterInfo', count(*) FROM "SmtMeterInfo"
+UNION ALL SELECT 'Session', count(*) FROM "Session"
+UNION ALL SELECT 'GreenButtonUpload', count(*) FROM "GreenButtonUpload";

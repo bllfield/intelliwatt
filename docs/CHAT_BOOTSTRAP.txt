@@ -225,7 +225,8 @@ sudo cp scripts/droplet/green-button-upload-server.ts /home/deploy/green-button-
 
 # Bounce the uploader
 sudo systemctl restart green-button-upload.service
-
+sudo journalctl -u smt-webhook.service -n 200 -f
+sudo journalctl -u green-button-upload.service -n 200 -f
 # (Optional) confirm it came back clean
 sudo journalctl -u green-button-upload.service --since "5 minutes ago" --no-pager
 

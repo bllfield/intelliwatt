@@ -10,6 +10,8 @@ import { NormalizedUsageRow } from '@/lib/usage/normalize';
 
 export const dynamic = 'force-dynamic';
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 type UsageSeriesPoint = {
   timestamp: string;
   kwh: number;
@@ -74,6 +76,19 @@ function fillDailyGaps(points: UsageSeriesPoint[], startIso?: string | null, end
   return out;
 }
 
+async function getSmtWindow(esiid: string) {
+  const latest = await prisma.smtInterval.findFirst({
+    where: { esiid },
+    orderBy: { ts: 'desc' },
+    select: { ts: true },
+  });
+
+  if (!latest?.ts) return null;
+
+  const cutoff = new Date(latest.ts.getTime() - 400 * DAY_MS); // show roughly last 13 months
+  return { latest: latest.ts, cutoff };
+}
+
 async function fetchNormalizedIntervals(
   source: 'SMT' | 'GREEN_BUTTON',
   houseId: string,
@@ -81,8 +96,15 @@ async function fetchNormalizedIntervals(
 ): Promise<NormalizedUsageRow[]> {
   if (source === 'SMT') {
     if (!esiid) return [];
+
+    const window = await getSmtWindow(esiid);
+    if (!window) return [];
+
     const rows = await prisma.smtInterval.findMany({
-      where: { esiid },
+      where: {
+        esiid,
+        ts: { gte: window.cutoff },
+      },
       orderBy: { ts: 'asc' },
       select: {
         id: true,
@@ -150,8 +172,14 @@ async function fetchNormalizedIntervals(
 async function fetchSmtDataset(esiid: string | null): Promise<UsageDatasetResult | null> {
   if (!esiid) return null;
 
+  const window = await getSmtWindow(esiid);
+  if (!window) return null;
+
   const aggregates = await prisma.smtInterval.aggregate({
-    where: { esiid },
+    where: {
+      esiid,
+      ts: { gte: window.cutoff },
+    },
     _count: { _all: true },
     _sum: { kwh: true },
     _min: { ts: true },
@@ -168,7 +196,7 @@ async function fetchSmtDataset(esiid: string | null): Promise<UsageDatasetResult
   const end = aggregates._max?.ts ?? null;
 
   const recentIntervals = await prisma.smtInterval.findMany({
-    where: { esiid },
+    where: { esiid, ts: { gte: window.cutoff } },
     orderBy: { ts: 'desc' },
     take: 192, // ~2 days of 15-minute intervals
   });
@@ -184,6 +212,7 @@ async function fetchSmtDataset(esiid: string | null): Promise<UsageDatasetResult
     SELECT date_trunc('hour', "ts") AS bucket, SUM("kwh")::float AS kwh
     FROM "SmtInterval"
     WHERE "esiid" = ${esiid}
+      AND "ts" >= ${window.cutoff}
       AND "ts" >= NOW() - INTERVAL '14 days'
     GROUP BY bucket
     ORDER BY bucket ASC
@@ -193,6 +222,7 @@ async function fetchSmtDataset(esiid: string | null): Promise<UsageDatasetResult
     SELECT date_trunc('day', "ts") AS bucket, SUM("kwh")::float AS kwh
     FROM "SmtInterval"
     WHERE "esiid" = ${esiid}
+      AND "ts" >= ${window.cutoff}
     GROUP BY bucket
     ORDER BY bucket DESC
     LIMIT 400
@@ -202,6 +232,7 @@ async function fetchSmtDataset(esiid: string | null): Promise<UsageDatasetResult
     SELECT date_trunc('month', "ts") AS bucket, SUM("kwh")::float AS kwh
     FROM "SmtInterval"
     WHERE "esiid" = ${esiid}
+      AND "ts" >= ${window.cutoff}
     GROUP BY bucket
     ORDER BY bucket DESC
     LIMIT 120
@@ -211,6 +242,7 @@ async function fetchSmtDataset(esiid: string | null): Promise<UsageDatasetResult
     SELECT date_trunc('year', "ts") AS bucket, SUM("kwh")::float AS kwh
     FROM "SmtInterval"
     WHERE "esiid" = ${esiid}
+      AND "ts" >= ${window.cutoff}
     GROUP BY bucket
     ORDER BY bucket ASC
   `);

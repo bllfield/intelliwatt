@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
 import { cleanEsiid } from "@/lib/smt/esiid";
-import { createAgreementAndSubscription } from "@/lib/smt/agreements";
+import { createAgreementAndSubscription, getRollingBackfillRange, requestSmtBackfillForAuthorization } from "@/lib/smt/agreements";
 import { waitForMeterInfo } from "@/lib/smt/meterInfo";
 import { archiveConflictingAuthorizations, setPrimaryHouse } from "@/lib/house/promote";
 import { syncHouseIdentifiersFromAuthorization } from "@/lib/house/syncIdentifiers";
@@ -308,6 +308,27 @@ export async function POST(req: NextRequest) {
       esiid: created.esiid,
       meterNumber,
     });
+
+    // Immediately request a 12-month backfill so we do not start with a short window.
+    try {
+      const range = getRollingBackfillRange(12);
+      const backfillRes = await requestSmtBackfillForAuthorization({
+        authorizationId: created.id,
+        esiid: created.esiid,
+        meterNumber,
+        startDate: range.startDate,
+        endDate: range.endDate,
+      });
+
+      if (backfillRes.ok) {
+        await (prisma as any).smtAuthorization.update({
+          where: { id: created.id },
+          data: { smtBackfillRequestedAt: new Date() },
+        });
+      }
+    } catch (backfillErr) {
+      console.error("[smt/authorization] backfill request failed", backfillErr);
+    }
 
     let smtUpdateData: Record<string, any> = {};
 
