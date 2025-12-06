@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: "raw_persist_failed" }, { status: 500 });
     }
 
-    await (usagePrisma as any).greenButtonInterval.deleteMany({ where: { rawId: rawRecordId } });
+    await (usagePrisma as any).greenButtonInterval.deleteMany({ where: { homeId: houseId } });
 
     const intervalData = normalized.map((interval) => ({
       rawId: rawRecordId,

@@ -768,7 +768,7 @@ app.post("/upload", upload.single("file"), async (req, res) => {
       intervalMinutes: interval.intervalMinutes,
     }));
 
-    await usagePrisma.greenButtonInterval.deleteMany({ where: { rawId: rawRecordId } });
+    await usagePrisma.greenButtonInterval.deleteMany({ where: { homeId: house.id } });
     if (intervalData.length > 0) {
       const BATCH_SIZE = 1000;
       for (let i = 0; i < intervalData.length; i += BATCH_SIZE) {

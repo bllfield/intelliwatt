@@ -174,7 +174,7 @@ export async function POST(request: Request) {
       // Postgres parameter limit (~65k) can be exceeded on year-long files; insert in batches to avoid failure.
       const BATCH_SIZE = 4000;
 
-      await (usagePrisma as any).greenButtonInterval.deleteMany({ where: { rawId: rawRecord.id } });
+      await (usagePrisma as any).greenButtonInterval.deleteMany({ where: { homeId: house.id } });
 
       for (let i = 0; i < intervalData.length; i += BATCH_SIZE) {
         const slice = intervalData.slice(i, i + BATCH_SIZE);
