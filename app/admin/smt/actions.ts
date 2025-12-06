@@ -32,29 +32,34 @@ function resolveBaseUrl() {
 type ActionError = { ok: false; error: string };
 
 export async function normalizeLatestServerAction(limit = 5): Promise<NormalizeRunSummary | ActionError> {
-  const adminToken = process.env.ADMIN_TOKEN;
-  if (!adminToken) {
-    return { ok: false, error: 'ADMIN_TOKEN is not configured on the server' };
+  try {
+    const adminToken = process.env.ADMIN_TOKEN;
+    if (!adminToken) {
+      return { ok: false, error: 'ADMIN_TOKEN is not configured on the server' };
+    }
+
+    const baseUrl = resolveBaseUrl();
+    const url = new URL(`/api/admin/smt/normalize?limit=${encodeURIComponent(Math.max(1, limit))}`, baseUrl);
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'x-admin-token': adminToken,
+        'content-type': 'application/json',
+      },
+      cache: 'no-store',
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      return { ok: false, error: `Normalize failed: ${res.status} ${text}`.trim() };
+    }
+
+    return res.json();
+  } catch (err: any) {
+    console.error('[normalizeLatestServerAction] unexpected error', err);
+    return { ok: false, error: err?.message ?? 'Normalize failed unexpectedly' };
   }
-
-  const baseUrl = resolveBaseUrl();
-  const url = new URL(`/api/admin/smt/normalize?limit=${encodeURIComponent(Math.max(1, limit))}`, baseUrl);
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'x-admin-token': adminToken,
-      'content-type': 'application/json',
-    },
-    cache: 'no-store',
-  });
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    return { ok: false, error: `Normalize failed: ${res.status} ${text}`.trim() };
-  }
-
-  return res.json();
 }
 
 export type NormalizeRunSummary = {
@@ -79,29 +84,34 @@ export type NormalizeRunSummary = {
 };
 
 export async function fetchNormalizeStatuses(limit = 5): Promise<NormalizeRunSummary | ActionError> {
-  const adminToken = process.env.ADMIN_TOKEN;
-  if (!adminToken) {
-    return { ok: false, error: 'ADMIN_TOKEN is not configured on the server' };
+  try {
+    const adminToken = process.env.ADMIN_TOKEN;
+    if (!adminToken) {
+      return { ok: false, error: 'ADMIN_TOKEN is not configured on the server' };
+    }
+
+    const baseUrl = resolveBaseUrl();
+    const url = new URL(`/api/admin/smt/normalize?limit=${encodeURIComponent(Math.max(1, limit))}&dryRun=1`, baseUrl);
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'x-admin-token': adminToken,
+        'content-type': 'application/json',
+      },
+      cache: 'no-store',
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      return { ok: false, error: `Normalize status fetch failed: ${res.status} ${text}`.trim() };
+    }
+
+    return res.json();
+  } catch (err: any) {
+    console.error('[fetchNormalizeStatuses] unexpected error', err);
+    return { ok: false, error: err?.message ?? 'Normalize status fetch failed unexpectedly' };
   }
-
-  const baseUrl = resolveBaseUrl();
-  const url = new URL(`/api/admin/smt/normalize?limit=${encodeURIComponent(Math.max(1, limit))}&dryRun=1`, baseUrl);
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'x-admin-token': adminToken,
-      'content-type': 'application/json',
-    },
-    cache: 'no-store',
-  });
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    return { ok: false, error: `Normalize status fetch failed: ${res.status} ${text}`.trim() };
-  }
-
-  return res.json();
 }
 
 export type IntervalPreviewRow = {
