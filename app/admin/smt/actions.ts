@@ -204,11 +204,22 @@ export async function fetchRecentIntervals(days = 2, limit = 500): Promise<Inter
 }
 
 export async function fetchPipelineDebug(intervalsLimit = 25, rawLimit = 15): Promise<PipelineDebug> {
-  const url = `/api/admin/ui/smt/pipeline-debug?intervalsLimit=${encodeURIComponent(intervalsLimit)}&rawLimit=${encodeURIComponent(rawLimit)}`;
+  const adminToken = process.env.ADMIN_TOKEN;
+  if (!adminToken) {
+    throw new Error('ADMIN_TOKEN is not configured on the server');
+  }
+
+  const baseUrl = resolveBaseUrl();
+  const url = new URL(
+    `/api/admin/ui/smt/pipeline-debug?intervalsLimit=${encodeURIComponent(intervalsLimit)}&rawLimit=${encodeURIComponent(rawLimit)}`,
+    baseUrl,
+  );
+
   const res = await fetch(url, {
     method: 'GET',
     headers: {
       'content-type': 'application/json',
+      'x-admin-token': adminToken,
     },
     cache: 'no-store',
   });
