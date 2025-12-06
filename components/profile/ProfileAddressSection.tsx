@@ -134,13 +134,6 @@ export function ProfileAddressSection({
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
           <button
-            onClick={startUpdate}
-            className="inline-flex items-center rounded-full border border-brand-cyan/60 bg-brand-cyan/10 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-brand-cyan transition hover:border-brand-blue hover:text-brand-blue disabled:opacity-50 disabled:cursor-not-allowed"
-            disabled={!activeHouse}
-          >
-            {isEditing && editorMode === "update" ? "Cancel" : "Update address"}
-          </button>
-          <button
             onClick={startAdd}
             className="inline-flex items-center rounded-full border border-brand-blue bg-brand-blue/20 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-brand-blue transition hover:bg-brand-blue/30 disabled:opacity-60 disabled:cursor-not-allowed"
             disabled={!allowAdd}
