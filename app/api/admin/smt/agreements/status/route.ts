@@ -35,9 +35,11 @@ export async function POST(req: NextRequest) {
   }
 
   let esiidValue: unknown = null;
+  let agreementNumberValue: unknown = null;
   if (payload && typeof payload === 'object') {
     const data = payload as Record<string, unknown>;
     esiidValue = data.esiid ?? data.ESIID;
+    agreementNumberValue = data.agreementNumber ?? data.AgreementNumber ?? data.agreement_id ?? data.agreementId;
   }
 
   if (typeof esiidValue !== 'string' || !esiidValue.trim()) {
@@ -54,7 +56,9 @@ export async function POST(req: NextRequest) {
   const esiid = esiidValue.trim();
 
   try {
-    const status = await getSmtAgreementStatus(esiid);
+    const status = await getSmtAgreementStatus(esiid, {
+      agreementNumber: agreementNumberValue as any,
+    });
     return NextResponse.json(
       {
         ok: true,

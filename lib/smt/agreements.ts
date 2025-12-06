@@ -320,11 +320,34 @@ async function postToSmtProxy(
   }
 }
 
-export async function getSmtAgreementStatus(esiid: string) {
+export async function getSmtAgreementStatus(
+  esiid: string,
+  opts: { agreementNumber?: number | string | null; retailCustomerEmail?: string | null; statusReason?: string | null } = {},
+) {
   const sanitizedEsiid = normalizeEsiid(esiid);
-  return postToSmtProxy("/smt/agreements/myagreements", {
+
+  const payload: Record<string, unknown> = {
     esiid: sanitizedEsiid,
-  });
+  };
+
+  if (opts?.agreementNumber !== undefined && opts?.agreementNumber !== null) {
+    const num = Number.parseInt(String(opts.agreementNumber).trim(), 10);
+    if (Number.isFinite(num)) {
+      payload.agreementNumber = num;
+    }
+  }
+
+  if (opts?.retailCustomerEmail && typeof opts.retailCustomerEmail === "string") {
+    const email = opts.retailCustomerEmail.trim();
+    if (email) payload.retailCustomerEmail = email;
+  }
+
+  if (opts?.statusReason && typeof opts.statusReason === "string") {
+    const reason = opts.statusReason.trim();
+    if (reason) payload.statusReason = reason;
+  }
+
+  return postToSmtProxy("/smt/agreements/myagreements", payload);
 }
 
 /**
@@ -484,6 +507,7 @@ export async function refreshSmtAuthorizationStatus(authId: string) {
       esiid: true,
       houseAddressId: true,
       meterNumber: true,
+      contactEmail: true,
     },
   });
 
@@ -522,7 +546,10 @@ export async function refreshSmtAuthorizationStatus(authId: string) {
 
   let lookup: AgreementLookupResult;
   try {
-    lookup = await findAgreementForEsiid(targetEsiid);
+    lookup = await findAgreementForEsiid(targetEsiid, {
+      agreementNumber: auth.smtAgreementId ?? undefined,
+      retailCustomerEmail: auth.contactEmail ?? undefined,
+    });
   } catch (error) {
     console.error(
       "[SMT] refreshSmtAuthorizationStatus: SMT proxy request failed",
@@ -781,13 +808,14 @@ function extractAgreementSummaries(raw: any): SmtAgreementSummary[] {
 
 export async function findAgreementForEsiid(
   esiid: string,
+  opts: { agreementNumber?: number | string | null; retailCustomerEmail?: string | null; statusReason?: string | null } = {},
 ): Promise<AgreementLookupResult> {
   const sanitized = normalizeEsiid(esiid);
   if (!sanitized || sanitized.trim().length === 0) {
     throw new Error("findAgreementForEsiid: esiid is required");
   }
 
-  const response = await getSmtAgreementStatus(sanitized);
+  const response = await getSmtAgreementStatus(sanitized, opts);
   const agreements = extractAgreementSummaries(response);
   const normalizedTarget = normalizeEsiid(sanitized);
 
