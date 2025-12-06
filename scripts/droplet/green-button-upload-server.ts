@@ -794,7 +794,7 @@ app.post("/upload", upload.single("file"), async (req: Request, res: Response) =
     }
 
     const normalized = normalizeGreenButtonReadingsTo15Min(parsed.readings, {
-      maxKwhPerInterval: 200,
+      maxKwhPerInterval: 10,
     });
     if (normalized.length === 0) {
       if (uploadRecordId) {

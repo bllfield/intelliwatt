@@ -150,7 +150,7 @@ export async function POST(request: Request) {
       }
 
       const normalized = normalizeGreenButtonReadingsTo15Min(parsed.readings, {
-        maxKwhPerInterval: 200, // drop extreme outliers that inflate totals
+        maxKwhPerInterval: 10, // tighten clamp to filter unrealistic spikes
       });
       if (normalized.length === 0) {
         await (prisma as any).greenButtonUpload.update({

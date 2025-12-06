@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
     }
 
     const normalized = normalizeGreenButtonReadingsTo15Min(parsed.readings, {
-      maxKwhPerInterval: 200,
+      maxKwhPerInterval: 10,
     });
     if (normalized.length === 0) {
       return NextResponse.json({ ok: false, error: "normalization_empty" }, { status: 400 });
