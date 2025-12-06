@@ -584,12 +584,6 @@ app.post("/upload", upload.single("file"), async (req: Request, res: Response) =
       return;
     }
 
-    logEvent("request.accepted", {
-      payloadEncodedLength: payloadEncoded.length,
-      hasSignature: Boolean(signature),
-      contentLength: req.headers["content-length"],
-    });
-
     const payloadEncoded =
       (req.body?.payload as string | undefined) ||
       (typeof req.headers["x-green-button-payload"] === "string"
@@ -610,6 +604,12 @@ app.post("/upload", upload.single("file"), async (req: Request, res: Response) =
       res.status(401).json({ ok: false, error: "invalid_signature" });
       return;
     }
+
+    logEvent("request.accepted", {
+      payloadEncodedLength: payloadEncoded.length,
+      hasSignature: Boolean(signature),
+      contentLength: req.headers["content-length"],
+    });
 
     let payload: UploadPayload;
     try {
