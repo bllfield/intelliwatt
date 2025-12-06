@@ -94,7 +94,7 @@ export async function POST(req: NextRequest) {
   const baseUrl = resolveBaseUrl();
   const pullUrl = new URL("/api/admin/smt/pull", baseUrl);
   const normalizeUrl = new URL("/api/admin/smt/normalize", baseUrl);
-  normalizeUrl.searchParams.set("limit", "50");
+  normalizeUrl.searchParams.set("limit", "100");
 
   const refreshed: HomeRefreshResult[] = [];
 

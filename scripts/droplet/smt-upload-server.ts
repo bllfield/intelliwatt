@@ -22,7 +22,7 @@ const CUSTOMER_WINDOW_MS = Number(
   process.env.SMT_CUSTOMER_UPLOAD_WINDOW_MS || 30 * 24 * 60 * 60 * 1000,
 );
 const NORMALIZE_LIMIT = Math.min(
-  Math.max(Number(process.env.SMT_NORMALIZE_LIMIT || "50"), 1),
+  Math.max(Number(process.env.SMT_NORMALIZE_LIMIT || "100"), 1),
   100,
 );
 
