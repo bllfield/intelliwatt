@@ -793,7 +793,9 @@ app.post("/upload", upload.single("file"), async (req: Request, res: Response) =
       return;
     }
 
-    const normalized = normalizeGreenButtonReadingsTo15Min(parsed.readings);
+    const normalized = normalizeGreenButtonReadingsTo15Min(parsed.readings, {
+      maxKwhPerInterval: 200,
+    });
     if (normalized.length === 0) {
       if (uploadRecordId) {
         await (prisma as any).greenButtonUpload.update({

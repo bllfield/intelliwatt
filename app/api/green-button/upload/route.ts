@@ -149,7 +149,9 @@ export async function POST(request: Request) {
         return NextResponse.json({ ok: false, error: "no_readings" }, { status: 422 });
       }
 
-      const normalized = normalizeGreenButtonReadingsTo15Min(parsed.readings);
+      const normalized = normalizeGreenButtonReadingsTo15Min(parsed.readings, {
+        maxKwhPerInterval: 200, // drop extreme outliers that inflate totals
+      });
       if (normalized.length === 0) {
         await (prisma as any).greenButtonUpload.update({
           where: { id: uploadRecord.id },
