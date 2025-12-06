@@ -12,6 +12,7 @@ import { normalizeGreenButtonReadingsTo15Min } from "@/lib/usage/greenButtonNorm
 
 // No explicit upload cap; rely on platform limits. Large files are allowed to ensure full 12-month coverage.
 const MANUAL_USAGE_LIFETIME_DAYS = 365;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
