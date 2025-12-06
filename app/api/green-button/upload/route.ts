@@ -16,8 +16,6 @@ const MANUAL_USAGE_LIFETIME_DAYS = 365;
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 export const maxDuration = 300; // permit long-running parses for large files
-// Allow larger fallback uploads through the Vercel API route (primary flow uses droplet uploader).
-export const maxRequestBodySize = "100mb";
 
 export async function POST(request: Request) {
   try {
