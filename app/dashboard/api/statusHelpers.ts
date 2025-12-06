@@ -13,7 +13,7 @@ export type EntryStatus = {
 
 export const statusBadgeStyles: Record<StatusTone, string> = {
   success:
-    "inline-flex items-center rounded-full bg-emerald-400/15 px-2.5 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-emerald-200",
+    "inline-flex items-center rounded-full bg-lime-300/20 px-2.5 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-lime-100 shadow-[0_0_12px_rgba(190,242,100,0.55)]",
   warning:
     "inline-flex items-center rounded-full bg-amber-400/15 px-2.5 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-amber-200",
   error:
