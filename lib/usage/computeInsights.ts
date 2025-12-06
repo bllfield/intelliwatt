@@ -66,7 +66,7 @@ export function computeInsights(intervals: NormalizedUsageRow[]): UsageInsights 
     const month = `${ts.getFullYear()}-${String(ts.getMonth() + 1).padStart(2, '0')}`;
     monthlyMap.set(month, (monthlyMap.get(month) ?? 0) + row.kwh);
   }
-  const monthlyTotals = [...monthlyMap.entries()].map(([month, kwh]) => ({ month, kwh: round2(kwh) }));
+  const monthlyTotals = Array.from(monthlyMap.entries()).map(([month, kwh]) => ({ month, kwh: round2(kwh) }));
 
   // ----- 15-MINUTE AVERAGE LOAD CURVE -----
   const slotMap = new Map<string, { sum: number; count: number }>();
@@ -79,7 +79,7 @@ export function computeInsights(intervals: NormalizedUsageRow[]): UsageInsights 
     slot.sum += row.kwh * 4; // Convert 15m kWh into kW
     slot.count += 1;
   }
-  const fifteenMinuteAverages = [...slotMap.entries()].map(([hhmm, value]) => ({
+  const fifteenMinuteAverages = Array.from(slotMap.entries()).map(([hhmm, value]) => ({
     hhmm,
     avgKw: round2(value.sum / value.count),
   }));
@@ -97,7 +97,7 @@ export function computeInsights(intervals: NormalizedUsageRow[]): UsageInsights 
   }
   const peakHour = hourMap.size > 0
     ? (() => {
-        const top = [...hourMap.entries()].reduce((a, b) => (b[1] > a[1] ? b : a));
+        const top = Array.from(hourMap.entries()).reduce((a, b) => (b[1] > a[1] ? b : a));
         return { hour: top[0], kw: round2(top[1] * 4) };
       })()
     : null;
