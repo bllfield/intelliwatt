@@ -76,6 +76,19 @@ function fillDailyGaps(points: UsageSeriesPoint[], startIso?: string | null, end
   return out;
 }
 
+async function getGreenButtonWindow(usageClient: any, houseId: string, rawId: string) {
+  const latest = await usageClient.greenButtonInterval.findFirst({
+    where: { homeId: houseId, rawId },
+    orderBy: { timestamp: 'desc' },
+    select: { timestamp: true },
+  });
+
+  if (!latest?.timestamp) return null;
+
+  const cutoff = new Date(latest.timestamp.getTime() - 400 * DAY_MS); // ~13 months
+  return { latest: latest.timestamp, cutoff };
+}
+
 async function getSmtWindow(esiid: string) {
   const latest = await prisma.smtInterval.findFirst({
     where: { esiid },
@@ -138,8 +151,11 @@ async function fetchNormalizedIntervals(
     return [];
   }
 
+  const window = await getGreenButtonWindow(usageClient, houseId, latestRaw.id);
+  if (!window) return [];
+
   const rows = (await usageClient.greenButtonInterval.findMany({
-    where: { homeId: houseId, rawId: latestRaw.id },
+    where: { homeId: houseId, rawId: latestRaw.id, timestamp: { gte: window.cutoff } },
     orderBy: { timestamp: 'asc' },
     select: {
       id: true,
@@ -279,8 +295,11 @@ async function fetchGreenButtonDataset(houseId: string): Promise<UsageDatasetRes
     return null;
   }
 
+  const window = await getGreenButtonWindow(usageClient, houseId, latestRaw.id);
+  if (!window) return null;
+
   const aggregates = await usageClient.greenButtonInterval.aggregate({
-    where: { homeId: houseId, rawId: latestRaw.id },
+    where: { homeId: houseId, rawId: latestRaw.id, timestamp: { gte: window.cutoff } },
     _count: { _all: true },
     _sum: { consumptionKwh: true },
     _min: { timestamp: true },
@@ -297,7 +316,7 @@ async function fetchGreenButtonDataset(houseId: string): Promise<UsageDatasetRes
   const end = aggregates._max?.timestamp ?? null;
 
   const recentIntervals = (await usageClient.greenButtonInterval.findMany({
-    where: { homeId: houseId, rawId: latestRaw.id },
+    where: { homeId: houseId, rawId: latestRaw.id, timestamp: { gte: window.cutoff } },
     orderBy: { timestamp: 'desc' },
     take: 192, // ~2 days of 15-minute intervals
   })) as Array<{ timestamp: Date; consumptionKwh: Prisma.Decimal | number }>;
@@ -314,6 +333,7 @@ async function fetchGreenButtonDataset(houseId: string): Promise<UsageDatasetRes
     FROM "GreenButtonInterval"
     WHERE "homeId" = ${houseId}
       AND "rawId" = ${latestRaw.id}
+      AND "timestamp" >= ${window.cutoff}
       AND "timestamp" >= NOW() - INTERVAL '14 days'
     GROUP BY bucket
     ORDER BY bucket ASC
@@ -325,6 +345,7 @@ async function fetchGreenButtonDataset(houseId: string): Promise<UsageDatasetRes
     FROM "GreenButtonInterval"
     WHERE "homeId" = ${houseId}
       AND "rawId" = ${latestRaw.id}
+      AND "timestamp" >= ${window.cutoff}
     GROUP BY bucket
     ORDER BY bucket DESC
     LIMIT 400
@@ -336,6 +357,7 @@ async function fetchGreenButtonDataset(houseId: string): Promise<UsageDatasetRes
     FROM "GreenButtonInterval"
     WHERE "homeId" = ${houseId}
       AND "rawId" = ${latestRaw.id}
+      AND "timestamp" >= ${window.cutoff}
     GROUP BY bucket
     ORDER BY bucket DESC
     LIMIT 120
@@ -347,6 +369,7 @@ async function fetchGreenButtonDataset(houseId: string): Promise<UsageDatasetRes
     FROM "GreenButtonInterval"
     WHERE "homeId" = ${houseId}
       AND "rawId" = ${latestRaw.id}
+      AND "timestamp" >= ${window.cutoff}
     GROUP BY bucket
     ORDER BY bucket ASC
   `);
