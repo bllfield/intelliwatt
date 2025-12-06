@@ -46,12 +46,12 @@ var path_1 = __importDefault(require("path"));
 var crypto_1 = __importDefault(require("crypto"));
 var UPLOAD_DIR = process.env.SMT_UPLOAD_DIR || "/home/deploy/smt_inbox";
 var PORT = Number(process.env.SMT_UPLOAD_PORT || "8081");
-var MAX_BYTES = Number(process.env.SMT_UPLOAD_MAX_BYTES || 10 * 1024 * 1024);
+var MAX_BYTES = Number(process.env.SMT_UPLOAD_MAX_BYTES || 500 * 1024 * 1024);
 var UPLOAD_TOKEN = process.env.SMT_UPLOAD_TOKEN || "";
-// Admin limit: 40,000 allows ~365 days of 15-min interval files (96 intervals/day × 365 days = 35,040)
-var ADMIN_LIMIT = Number(process.env.SMT_ADMIN_UPLOAD_DAILY_LIMIT || "40000");
+// Allow effectively unlimited uploads by default; override with env vars to re-enable throttling
+var ADMIN_LIMIT = Number(process.env.SMT_ADMIN_UPLOAD_DAILY_LIMIT || Number.MAX_SAFE_INTEGER);
 var ADMIN_WINDOW_MS = Number(process.env.SMT_ADMIN_UPLOAD_WINDOW_MS || 24 * 60 * 60 * 1000);
-var CUSTOMER_LIMIT = Number(process.env.SMT_CUSTOMER_UPLOAD_MONTHLY_LIMIT || "5");
+var CUSTOMER_LIMIT = Number(process.env.SMT_CUSTOMER_UPLOAD_MONTHLY_LIMIT || Number.MAX_SAFE_INTEGER);
 var CUSTOMER_WINDOW_MS = Number(process.env.SMT_CUSTOMER_UPLOAD_WINDOW_MS || 30 * 24 * 60 * 60 * 1000);
 // Main app webhook for registering and normalizing uploaded files
 var INTELLIWATT_BASE_URL = process.env.INTELLIWATT_BASE_URL || "https://intelliwatt.com";
@@ -211,7 +211,7 @@ function registerAndNormalizeFile(filepath, filename, size_bytes) {
                                 "x-admin-token": ADMIN_TOKEN,
                             },
                             body: JSON.stringify(rawUploadPayload),
-                            signal: AbortSignal.timeout(30000), // 30 second timeout for registration
+                            signal: AbortSignal.timeout(300000), // allow large-file registration
                         })];
                 case 4:
                     rawResponse = _a.sent();

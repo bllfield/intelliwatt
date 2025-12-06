@@ -35,6 +35,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { parseSmtCsvToIntervals, parseGreenButtonToIntervals, type Interval15 } from '@/lib/smt/adapter';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 type JsonBody = {
   type?: 'csv' | 'greenbutton' | 'auto';
@@ -51,7 +52,7 @@ type JsonBody = {
   includeRaw?: boolean;
 };
 
-export const maxDuration = 60; // allow larger uploads
+export const maxDuration = 300; // allow large SMT uploads
 
 export async function POST(req: NextRequest) {
   try {

@@ -3,6 +3,9 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import { requireAdmin } from '@/lib/auth/admin';
 
+export const runtime = 'nodejs';
+export const maxDuration = 300; // allow large SMT raw uploads
+
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {

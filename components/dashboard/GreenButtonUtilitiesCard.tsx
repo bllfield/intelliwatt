@@ -291,7 +291,7 @@ export default function GreenButtonHelpSection({
           <form className="space-y-4" onSubmit={handleSubmit}>
             <div className="flex flex-col gap-2">
               <label htmlFor="green-button-file" className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-navy">
-                File (XML or CSV · up to {MAX_UPLOAD_MB} MB)
+                File (XML or CSV · large uploads supported)
               </label>
               <input
                 id="green-button-file"

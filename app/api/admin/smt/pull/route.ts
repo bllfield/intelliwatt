@@ -11,6 +11,7 @@ import { cleanEsiid, resolveSmtEsiid } from '@/lib/smt/esiid';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const maxDuration = 300; // allow long-running SMT pulls and inline normalization
 const WEBHOOK_HEADERS = ['x-intelliwatt-secret', 'x-smt-secret', 'x-webhook-secret'] as const;
 
 async function normalizeInlineSmtCsv(opts: {
