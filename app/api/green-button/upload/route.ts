@@ -1,11 +1,15 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { createHash } from "node:crypto";
+import { EntryStatus } from "@prisma/client";
+
 import { prisma } from "@/lib/db";
 import { usagePrisma } from "@/lib/db/usageClient";
+import { refreshUserEntryStatuses } from "@/lib/hitthejackwatt/entryLifecycle";
 import { normalizeEmail } from "@/lib/utils/email";
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB safety limit
+const MANUAL_USAGE_LIFETIME_DAYS = 365;
 
 export const dynamic = "force-dynamic";
 
@@ -119,11 +123,65 @@ export async function POST(request: Request) {
       },
     });
 
+    // Award / refresh the usage entry using a ManualUsageUpload placeholder so it expires after 12 months
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + MANUAL_USAGE_LIFETIME_DAYS * 24 * 60 * 60 * 1000);
+
+    const manualUsage = await (prisma as any).manualUsageUpload.create({
+      data: {
+        userId: user.id,
+        houseId: house.id,
+        source: "green_button",
+        expiresAt,
+        metadata: {
+          rawGreenButtonId: rawRecord.id,
+          uploadId: uploadRecord.id,
+          utilityName,
+          accountNumber,
+        },
+      },
+      select: { id: true },
+    });
+
+    const existingEntry = await prisma.entry.findFirst({
+      where: { userId: user.id, houseId: house.id, type: "smart_meter_connect" },
+      select: { id: true, amount: true },
+    });
+
+    if (existingEntry) {
+      await prisma.entry.update({
+        where: { id: existingEntry.id },
+        data: {
+          amount: Math.max(existingEntry.amount, 1),
+          manualUsageId: manualUsage.id,
+          status: EntryStatus.ACTIVE,
+          expiresAt: null,
+          expirationReason: null,
+          lastValidated: now,
+        },
+      });
+    } else {
+      await prisma.entry.create({
+        data: {
+          userId: user.id,
+          houseId: house.id,
+          type: "smart_meter_connect",
+          amount: 1,
+          manualUsageId: manualUsage.id,
+          status: EntryStatus.ACTIVE,
+          lastValidated: now,
+        },
+      });
+    }
+
+    await refreshUserEntryStatuses(user.id);
+
     return NextResponse.json(
       {
         ok: true,
         rawId: rawRecord.id,
         uploadId: uploadRecord.id,
+        entryAwarded: true,
       },
       { status: 201 },
     );

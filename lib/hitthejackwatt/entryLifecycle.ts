@@ -132,31 +132,30 @@ function computeEntryStatus(entry: EntryRecord, ctx: UsageContext) {
 
   const isUsageDependent = USAGE_DEPENDENT_TYPES.has(entry.type);
   const manualId = entry.manualUsageId ?? undefined;
-  const isManual = Boolean(manualId);
 
   if (!isUsageDependent) {
     return { status: 'ACTIVE', expiresAt: null, reason: null, lastValidated };
   }
 
+  const manual = manualId ? ctx.manualUploadsById.get(manualId) : ctx.freshestManual;
+
+  // Consider all available usage sources and pick the freshest expiry (SMT or manual/Green Button).
   let candidateExpiry: Date | null = null;
 
-  if (isManual && manualId) {
-    const manual = ctx.manualUploadsById.get(manualId);
-    if (manual) {
-      candidateExpiry = manual.expiresAt;
-    } else {
-      candidateExpiry = ctx.now;
-      status = 'EXPIRED';
-      reason = 'Manual usage data removed';
-    }
-  } else {
-    if (ctx.hasActiveSmt) {
-      candidateExpiry = ctx.activeSmtExpiry;
-    } else {
-      candidateExpiry = ctx.now;
-      status = 'EXPIRED';
-      reason = 'No active usage data connection';
-    }
+  if (ctx.hasActiveSmt) {
+    candidateExpiry = ctx.activeSmtExpiry ?? null;
+  }
+
+  if (manual) {
+    candidateExpiry = candidateExpiry
+      ? new Date(Math.max(candidateExpiry.getTime(), manual.expiresAt.getTime()))
+      : manual.expiresAt;
+  }
+
+  if (!candidateExpiry) {
+    status = 'EXPIRED';
+    reason = 'No active usage data connection';
+    candidateExpiry = ctx.now;
   }
 
   if (status !== 'EXPIRED') {
