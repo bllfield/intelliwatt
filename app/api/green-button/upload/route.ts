@@ -52,7 +52,7 @@ export async function POST(request: Request) {
     const homeId = homeIdRaw.trim();
     const house = await prisma.houseAddress.findFirst({
       where: { id: homeId, userId: user.id, archivedAt: null },
-      select: { id: true, utilityName: true },
+      select: { id: true, utilityName: true, esiid: true },
     });
 
     if (!house) {
@@ -164,7 +164,54 @@ export async function POST(request: Request) {
         return NextResponse.json({ ok: false, error: "normalization_empty" }, { status: 422 });
       }
 
-      const intervalData = normalized.map((interval) => ({
+      const sorted = [...normalized].sort(
+        (a, b) => a.timestamp.getTime() - b.timestamp.getTime(),
+      );
+      const latestTimestamp = sorted[sorted.length - 1]?.timestamp ?? null;
+      if (!latestTimestamp) {
+        await (prisma as any).greenButtonUpload.update({
+          where: { id: uploadRecord.id },
+          data: {
+            parseStatus: "error",
+            parseMessage: "Unable to determine timestamp window for intervals.",
+          },
+        });
+
+        return NextResponse.json({ ok: false, error: "no_recent_readings" }, { status: 422 });
+      }
+
+      const cutoff = new Date(latestTimestamp.getTime() - MANUAL_USAGE_LIFETIME_DAYS * DAY_MS);
+      const trimmed = sorted.filter((interval) => interval.timestamp >= cutoff);
+
+      if (trimmed.length === 0) {
+        await (prisma as any).greenButtonUpload.update({
+          where: { id: uploadRecord.id },
+          data: {
+            parseStatus: "empty",
+            parseMessage: "No intervals found within the last 365 days.",
+          },
+        });
+
+        return NextResponse.json({ ok: false, error: "no_recent_readings" }, { status: 422 });
+      }
+
+      const cleanupTasks: Array<Promise<unknown>> = [
+        (usagePrisma as any).greenButtonInterval.deleteMany({
+          where: { homeId: house.id, rawId: { not: rawRecord.id } },
+        }),
+        (usagePrisma as any).rawGreenButton.deleteMany({
+          where: { homeId: house.id, NOT: { id: rawRecord.id } },
+        }),
+        (prisma as any).greenButtonUpload.deleteMany({
+          where: { houseId: house.id, NOT: { id: uploadRecord.id } },
+        }),
+      ];
+      if (house.esiid) {
+        cleanupTasks.push(prisma.smtInterval.deleteMany({ where: { esiid: house.esiid } }));
+      }
+      await Promise.all(cleanupTasks);
+
+      const intervalData = trimmed.map((interval) => ({
         rawId: rawRecord.id,
         homeId: house.id,
         userId: user.id,
@@ -176,23 +223,22 @@ export async function POST(request: Request) {
       // Postgres parameter limit (~65k) can be exceeded on year-long files; insert in batches to avoid failure.
       const BATCH_SIZE = 4000;
 
-      await (usagePrisma as any).greenButtonInterval.deleteMany({ where: { homeId: house.id } });
-
       for (let i = 0; i < intervalData.length; i += BATCH_SIZE) {
         const slice = intervalData.slice(i, i + BATCH_SIZE);
         if (slice.length === 0) continue;
         await (usagePrisma as any).greenButtonInterval.createMany({ data: slice });
       }
 
-      const totalKwh = normalized.reduce((sum, row) => sum + row.consumptionKwh, 0);
-      const earliest = normalized[0]?.timestamp ?? null;
-      const latest = normalized[normalized.length - 1]?.timestamp ?? null;
+      const totalKwh = trimmed.reduce((sum, row) => sum + row.consumptionKwh, 0);
+      const earliest = trimmed[0]?.timestamp ?? null;
+      const latest = trimmed[trimmed.length - 1]?.timestamp ?? null;
 
       parsedSummary = {
         format: parsed.format,
         totalRawReadings: parsed.metadata.totalReadings,
-        normalizedIntervals: normalized.length,
+        normalizedIntervals: trimmed.length,
         totalKwh: Number(totalKwh.toFixed(6)),
+        appliedWindowDays: MANUAL_USAGE_LIFETIME_DAYS,
         warnings: parsed.warnings,
       };
 

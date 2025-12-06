@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
+import { prisma } from "@/lib/db";
 import { parseGreenButtonBuffer } from "@/lib/usage/greenButtonParser";
 import { normalizeGreenButtonReadingsTo15Min } from "@/lib/usage/greenButtonNormalize";
 import { usagePrisma } from "@/lib/db/usageClient";
 
 export const dynamic = "force-dynamic";
+
+const MANUAL_USAGE_LIFETIME_DAYS = 365;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 export async function POST(request: NextRequest) {
   try {
@@ -51,6 +55,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: "normalization_empty" }, { status: 400 });
     }
 
+    const sorted = [...normalized].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+    const latestTimestamp = sorted[sorted.length - 1]?.timestamp ?? null;
+    if (!latestTimestamp) {
+      return NextResponse.json({ ok: false, error: "no_recent_readings" }, { status: 400 });
+    }
+
+    const cutoff = new Date(latestTimestamp.getTime() - MANUAL_USAGE_LIFETIME_DAYS * DAY_MS);
+    const trimmed = sorted.filter((interval) => interval.timestamp >= cutoff);
+
+    if (trimmed.length === 0) {
+      return NextResponse.json({ ok: false, error: "no_recent_readings" }, { status: 400 });
+    }
+
     const digest = createHash("sha256").update(buffer).digest("hex");
 
     let rawRecordId: string | null = null;
@@ -87,9 +104,25 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: "raw_persist_failed" }, { status: 500 });
     }
 
-    await (usagePrisma as any).greenButtonInterval.deleteMany({ where: { homeId: houseId } });
+    const houseMeta = houseId
+      ? await prisma.houseAddress.findUnique({ where: { id: houseId }, select: { esiid: true } })
+      : null;
 
-    const intervalData = normalized.map((interval) => ({
+    const cleanupTasks: Array<Promise<unknown>> = [];
+    if (houseId) {
+      cleanupTasks.push(
+        (usagePrisma as any).greenButtonInterval.deleteMany({ where: { homeId: houseId, rawId: { not: rawRecordId } } }),
+      );
+      cleanupTasks.push(
+        (usagePrisma as any).rawGreenButton.deleteMany({ where: { homeId: houseId, NOT: { id: rawRecordId } } }),
+      );
+      if (houseMeta?.esiid) {
+        cleanupTasks.push(prisma.smtInterval.deleteMany({ where: { esiid: houseMeta.esiid } }));
+      }
+    }
+    await Promise.all(cleanupTasks);
+
+    const intervalData = trimmed.map((interval) => ({
       rawId: rawRecordId,
       homeId: houseId,
       userId,
@@ -105,12 +138,12 @@ export async function POST(request: NextRequest) {
       await (usagePrisma as any).greenButtonInterval.createMany({ data: slice });
     }
 
-    const totalKwh = normalized.reduce((sum, row) => sum + row.consumptionKwh, 0);
+    const totalKwh = trimmed.reduce((sum, row) => sum + row.consumptionKwh, 0);
 
     return NextResponse.json({
       ok: true,
       rawId: rawRecordId,
-      intervalsCreated: normalized.length,
+      intervalsCreated: trimmed.length,
       totalKwh,
       warnings: parsed.warnings,
     });

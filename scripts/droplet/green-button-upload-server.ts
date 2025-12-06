@@ -9,6 +9,8 @@ const PORT = Number(process.env.GREEN_BUTTON_UPLOAD_PORT || "8091");
 const MAX_BYTES = Number(process.env.GREEN_BUTTON_UPLOAD_MAX_BYTES || 500 * 1024 * 1024);
 const SECRET = process.env.GREEN_BUTTON_UPLOAD_SECRET || "";
 const ALLOW_ORIGIN = process.env.GREEN_BUTTON_UPLOAD_ALLOW_ORIGIN || "https://intelliwatt.com";
+const MANUAL_USAGE_LIFETIME_DAYS = 365;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 const prisma = new PrismaClient({
   log: process.env.NODE_ENV === "development" ? ["query", "error", "warn"] : ["error"],
@@ -663,7 +665,7 @@ app.post("/upload", upload.single("file"), async (req: Request, res: Response) =
 
     const house = await prisma.houseAddress.findFirst({
       where: { id: payload.houseId, userId: payload.userId, archivedAt: null },
-      select: { id: true, userId: true, utilityName: true },
+      select: { id: true, userId: true, utilityName: true, esiid: true },
     });
 
     if (!house) {
@@ -814,7 +816,50 @@ app.post("/upload", upload.single("file"), async (req: Request, res: Response) =
       return;
     }
 
-    const intervalData = normalized.map((interval) => ({
+    const sorted = [...normalized].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+    const latestTimestamp = sorted[sorted.length - 1]?.timestamp ?? null;
+    if (!latestTimestamp) {
+      if (uploadRecordId) {
+        await (prisma as any).greenButtonUpload.update({
+          where: { id: uploadRecordId },
+          data: {
+            parseStatus: "error",
+            parseMessage: "Unable to determine timestamp window for intervals.",
+          },
+        });
+      }
+      res.status(422).json({ ok: false, error: "no_recent_readings" });
+      return;
+    }
+
+    const cutoff = new Date(latestTimestamp.getTime() - MANUAL_USAGE_LIFETIME_DAYS * DAY_MS);
+    const trimmed = sorted.filter((interval) => interval.timestamp >= cutoff);
+
+    if (trimmed.length === 0) {
+      if (uploadRecordId) {
+        await (prisma as any).greenButtonUpload.update({
+          where: { id: uploadRecordId },
+          data: {
+            parseStatus: "empty",
+            parseMessage: "No intervals found within the last 365 days.",
+          },
+        });
+      }
+      res.status(422).json({ ok: false, error: "no_recent_readings" });
+      return;
+    }
+
+    const cleanupTasks: Array<Promise<unknown>> = [
+      usagePrisma.greenButtonInterval.deleteMany({ where: { homeId: house.id, rawId: { not: rawRecordId } } }),
+      usagePrisma.rawGreenButton.deleteMany({ where: { homeId: house.id, NOT: { id: rawRecordId } } }),
+      (prisma as any).greenButtonUpload.deleteMany({ where: { houseId: house.id, NOT: { id: uploadRecordId } } }),
+    ];
+    if (house.esiid) {
+      cleanupTasks.push(prisma.smtInterval.deleteMany({ where: { esiid: house.esiid } }));
+    }
+    await Promise.all(cleanupTasks);
+
+    const intervalData = trimmed.map((interval) => ({
       rawId: rawRecordId!,
       homeId: house.id,
       userId: house.userId,
@@ -833,16 +878,17 @@ app.post("/upload", upload.single("file"), async (req: Request, res: Response) =
       }
     }
 
-    const totalKwh = normalized.reduce((sum, row) => sum + row.consumptionKwh, 0);
-    const earliest = normalized[0]?.timestamp ?? null;
-    const latest = normalized[normalized.length - 1]?.timestamp ?? null;
+    const totalKwh = trimmed.reduce((sum, row) => sum + row.consumptionKwh, 0);
+    const earliest = trimmed[0]?.timestamp ?? null;
+    const latest = trimmed[trimmed.length - 1]?.timestamp ?? null;
 
     if (uploadRecordId) {
       const summary = {
         format: parsed.format,
         totalRawReadings: parsed.metadata.totalReadings,
-        normalizedIntervals: normalized.length,
+        normalizedIntervals: trimmed.length,
         totalKwh: Number(totalKwh.toFixed(6)),
+        appliedWindowDays: MANUAL_USAGE_LIFETIME_DAYS,
         warnings: parsed.warnings,
       };
       await (prisma as any).greenButtonUpload.update({
@@ -860,7 +906,7 @@ app.post("/upload", upload.single("file"), async (req: Request, res: Response) =
     res.status(201).json({
       ok: true,
       rawId: rawRecordId,
-      intervalsCreated: normalized.length,
+      intervalsCreated: trimmed.length,
       totalKwh,
       warnings: parsed.warnings,
       dateRangeStart: earliest ? earliest.toISOString() : null,
