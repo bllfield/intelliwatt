@@ -352,16 +352,29 @@ export default function AdminSmtToolsPage() {
             <h3 className="text-sm font-semibold text-neutral-800">Raw files (latest)</h3>
             <div className="max-h-80 overflow-auto rounded border border-neutral-200 bg-neutral-900 p-3 text-xs text-neutral-100">
               {pipelineDebug?.rawFiles?.length ? (
-                pipelineDebug.rawFiles.map((file) => (
-                  <div key={file.id} className="border-b border-neutral-800 py-1 last:border-none">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-mono text-[11px] text-neutral-200">{file.filename}</span>
-                      <span className="text-[11px] text-neutral-400">{(file.sizeBytes ?? 0).toLocaleString()} bytes</span>
+                pipelineDebug.rawFiles.map((file) => {
+                  const isError = (file.source ?? '').toLowerCase().includes('error')
+                    || file.filename.toLowerCase().includes('error');
+                  const statusMatch = file.filename.match(/-(\d{3})\.json$/);
+                  const statusLabel = statusMatch?.[1];
+                  return (
+                    <div key={file.id} className={`border-b border-neutral-800 py-1 last:border-none ${isError ? 'bg-red-900/20' : ''}`}>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className={`font-mono text-[11px] ${isError ? 'text-red-200' : 'text-neutral-200'}`}>
+                          {file.filename}
+                        </span>
+                        <span className={`text-[11px] ${isError ? 'text-red-200' : 'text-neutral-400'}`}>
+                          {(file.sizeBytes ?? 0).toLocaleString()} bytes
+                        </span>
+                      </div>
+                      <div className={`text-[11px] ${isError ? 'text-red-200' : 'text-neutral-400'}`}>
+                        {file.source ?? 'smt'} · {file.createdAt}
+                        {statusLabel ? ` · HTTP ${statusLabel}` : ''}
+                      </div>
+                      <div className="text-[10px] text-neutral-500">sha256 {file.sha256}</div>
                     </div>
-                    <div className="text-[11px] text-neutral-400">{file.source ?? 'smt'} · {file.createdAt}</div>
-                    <div className="text-[10px] text-neutral-500">sha256 {file.sha256}</div>
-                  </div>
-                ))
+                  );
+                })
               ) : (
                 <div className="text-neutral-400">No raw files found.</div>
               )}

@@ -174,6 +174,57 @@ async function computeFileSha256(filepath: string): Promise<string> {
   });
 }
 
+async function recordPipelineError(status: number, step: string, details: string) {
+  if (!ADMIN_TOKEN || !INTELLIWATT_BASE_URL) {
+    console.warn('[smt-upload] Cannot record pipeline error: ADMIN_TOKEN or INTELLIWATT_BASE_URL missing');
+    return;
+  }
+
+  try {
+    const trimmedDetails = (details || '').slice(0, 4000);
+    const payload = {
+      ok: false,
+      step,
+      status,
+      details: trimmedDetails,
+      recordedAt: new Date().toISOString(),
+    };
+    const content = JSON.stringify(payload, null, 2);
+    const buffer = Buffer.from(content, 'utf8');
+    const sha256 = crypto.createHash('sha256').update(buffer).digest('hex');
+    const contentBase64 = buffer.toString('base64');
+
+    const body = {
+      filename: `smt-upload-error-${step}-${status}.json`,
+      sizeBytes: buffer.length,
+      sha256,
+      contentBase64,
+      source: 'droplet-error',
+      receivedAt: new Date().toISOString(),
+    };
+
+    const rawUploadUrl = `${INTELLIWATT_BASE_URL}/api/admin/smt/raw-upload`;
+    console.warn(`[smt-upload] recording pipeline error at ${rawUploadUrl} status=${status} step=${step}`);
+
+    const resp = await fetch(rawUploadUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-admin-token': ADMIN_TOKEN,
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(15000),
+    });
+
+    if (!resp.ok) {
+      const text = await resp.text();
+      console.warn(`[smt-upload] failed to record pipeline error: ${resp.status} ${text}`);
+    }
+  } catch (err) {
+    console.warn('[smt-upload] exception while recording pipeline error:', err);
+  }
+}
+
 type NormalizeResult = {
   ok: boolean;
   message: string;
@@ -243,6 +294,7 @@ async function registerAndNormalizeFile(
       console.error(
         `[smt-upload] raw-upload failed: ${rawResponse.status} ${errBody}`,
       );
+      await recordPipelineError(rawResponse.status, 'raw-upload', errBody);
       return {
         ok: false,
         message: `raw-upload failed: ${rawResponse.status}`,
@@ -273,6 +325,7 @@ async function registerAndNormalizeFile(
       console.error(
         `[smt-upload] normalize failed: ${normResponse.status} ${errBody}`,
       );
+      await recordPipelineError(normResponse.status, 'normalize', errBody);
       return {
         ok: false,
         message: `normalize failed: ${normResponse.status}`,
@@ -295,6 +348,7 @@ async function registerAndNormalizeFile(
     };
   } catch (err) {
     console.error("[smt-upload] error during registration/normalization:", err);
+    await recordPipelineError(0, 'pipeline-error', String((err as Error)?.message || err));
     return {
       ok: false,
       message: `normalize error: ${(err as Error)?.message || err}`,
