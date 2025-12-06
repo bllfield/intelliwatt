@@ -106,8 +106,18 @@ async function fetchNormalizedIntervals(
   }
 
   const usageClient = usagePrisma as any;
-  const rows = (await usageClient.greenButtonInterval.findMany({
+  const latestRaw = await usageClient.rawGreenButton.findFirst({
     where: { homeId: houseId },
+    orderBy: { createdAt: 'desc' },
+    select: { id: true },
+  });
+
+  if (!latestRaw) {
+    return [];
+  }
+
+  const rows = (await usageClient.greenButtonInterval.findMany({
+    where: { homeId: houseId, rawId: latestRaw.id },
     orderBy: { timestamp: 'asc' },
     select: {
       id: true,
@@ -227,8 +237,18 @@ async function fetchSmtDataset(esiid: string | null): Promise<UsageDatasetResult
 async function fetchGreenButtonDataset(houseId: string): Promise<UsageDatasetResult | null> {
   const usageClient = usagePrisma as any;
 
-  const aggregates = await usageClient.greenButtonInterval.aggregate({
+  const latestRaw = await usageClient.rawGreenButton.findFirst({
     where: { homeId: houseId },
+    orderBy: { createdAt: 'desc' },
+    select: { id: true },
+  });
+
+  if (!latestRaw) {
+    return null;
+  }
+
+  const aggregates = await usageClient.greenButtonInterval.aggregate({
+    where: { homeId: houseId, rawId: latestRaw.id },
     _count: { _all: true },
     _sum: { consumptionKwh: true },
     _min: { timestamp: true },
@@ -245,7 +265,7 @@ async function fetchGreenButtonDataset(houseId: string): Promise<UsageDatasetRes
   const end = aggregates._max?.timestamp ?? null;
 
   const recentIntervals = (await usageClient.greenButtonInterval.findMany({
-    where: { homeId: houseId },
+    where: { homeId: houseId, rawId: latestRaw.id },
     orderBy: { timestamp: 'desc' },
     take: 192, // ~2 days of 15-minute intervals
   })) as Array<{ timestamp: Date; consumptionKwh: Prisma.Decimal | number }>;
@@ -261,6 +281,7 @@ async function fetchGreenButtonDataset(houseId: string): Promise<UsageDatasetRes
     SELECT date_trunc('hour', "timestamp") AS bucket, SUM("consumptionKwh")::float AS kwh
     FROM "GreenButtonInterval"
     WHERE "homeId" = ${houseId}
+      AND "rawId" = ${latestRaw.id}
       AND "timestamp" >= NOW() - INTERVAL '14 days'
     GROUP BY bucket
     ORDER BY bucket ASC
@@ -271,6 +292,7 @@ async function fetchGreenButtonDataset(houseId: string): Promise<UsageDatasetRes
     SELECT date_trunc('day', "timestamp") AS bucket, SUM("consumptionKwh")::float AS kwh
     FROM "GreenButtonInterval"
     WHERE "homeId" = ${houseId}
+      AND "rawId" = ${latestRaw.id}
     GROUP BY bucket
     ORDER BY bucket DESC
     LIMIT 400
@@ -281,6 +303,7 @@ async function fetchGreenButtonDataset(houseId: string): Promise<UsageDatasetRes
     SELECT date_trunc('month', "timestamp") AS bucket, SUM("consumptionKwh")::float AS kwh
     FROM "GreenButtonInterval"
     WHERE "homeId" = ${houseId}
+      AND "rawId" = ${latestRaw.id}
     GROUP BY bucket
     ORDER BY bucket DESC
     LIMIT 120
@@ -291,6 +314,7 @@ async function fetchGreenButtonDataset(houseId: string): Promise<UsageDatasetRes
     SELECT date_trunc('year', "timestamp") AS bucket, SUM("consumptionKwh")::float AS kwh
     FROM "GreenButtonInterval"
     WHERE "homeId" = ${houseId}
+      AND "rawId" = ${latestRaw.id}
     GROUP BY bucket
     ORDER BY bucket ASC
   `);
