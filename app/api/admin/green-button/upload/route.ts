@@ -18,6 +18,10 @@ export async function POST(request: NextRequest) {
       typeof formData.get("utilityName") === "string" ? String(formData.get("utilityName")).trim() : null;
     const accountNumber =
       typeof formData.get("accountNumber") === "string" ? String(formData.get("accountNumber")).trim() : null;
+    const houseId =
+      typeof formData.get("houseId") === "string" ? String(formData.get("houseId")).trim() : null;
+    const userId =
+      typeof formData.get("userId") === "string" ? String(formData.get("userId")).trim() : null;
 
     const arrayBuffer = await file.arrayBuffer();
     if (arrayBuffer.byteLength === 0) {
@@ -51,6 +55,8 @@ export async function POST(request: NextRequest) {
     try {
       const created = await usagePrisma.rawGreenButton.create({
         data: {
+          homeId: houseId,
+          userId,
           content: buffer,
           filename: file.name,
           mimeType: file.type || "text/plain",
@@ -83,6 +89,8 @@ export async function POST(request: NextRequest) {
 
     const intervalData = normalized.map((interval) => ({
       rawId: rawRecordId,
+      homeId: houseId,
+      userId,
       timestamp: interval.timestamp,
       consumptionKwh: new Prisma.Decimal(interval.consumptionKwh),
       intervalMinutes: interval.intervalMinutes,
