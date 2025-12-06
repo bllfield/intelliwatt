@@ -80,29 +80,12 @@ function base64UrlToBuffer(input: string) {
 }
 
 type UploadPayload = {
-    // Idempotent insert: if the sha256 already exists, reuse that record instead of failing
-    const upserted = await usagePrisma.rawGreenButton.upsert({
-      where: { sha256 },
-      update: {},
-      create: {
-        homeId: house.id,
-        userId: house.userId,
-        utilityName,
-        accountNumber,
-        filename,
-        mimeType,
-        sizeBytes: buffer.length,
-        content: buffer,
-        sha256,
-        capturedAt: new Date(),
-      },
-      select: { id: true },
-    });
-    rawRecordId = upserted.id;
-      (req.body?.signature as string | undefined) ||
-      (typeof req.headers["x-green-button-signature"] === "string"
-        ? (req.headers["x-green-button-signature"] as string)
-        : undefined);
+  v: number;
+  userId: string;
+  houseId: string;
+  issuedAt?: string;
+  expiresAt?: string;
+};
 
     if (!payloadEncoded || !signature) {
       res.status(401).json({
@@ -195,37 +178,25 @@ type UploadPayload = {
       file.originalname?.slice(0, 255) || file.fieldname || "green-button-upload.xml";
     const mimeType = file.mimetype?.slice(0, 128) || "application/xml";
 
-    try {
-      const created = await usagePrisma.rawGreenButton.create({
-        data: {
-          homeId: house.id,
-          userId: house.userId,
-          utilityName,
-          accountNumber,
-          filename,
-          mimeType,
-          sizeBytes: buffer.length,
-          content: buffer,
-          sha256,
-          capturedAt: new Date(),
-        },
-        select: { id: true },
-      });
-      rawRecordId = created.id;
-    } catch (error: any) {
-      if (error && typeof error === "object" && "code" in error && error.code === "P2002") {
-        const existing = await usagePrisma.rawGreenButton.findUnique({
-          where: { sha256 },
-          select: { id: true },
-        });
-        if (!existing) {
-          throw error;
-        }
-        rawRecordId = existing.id;
-      } else {
-        throw error;
-      }
-    }
+    // Idempotent insert: if the sha256 already exists, reuse that record instead of failing
+    const upserted = await usagePrisma.rawGreenButton.upsert({
+      where: { sha256 },
+      update: {},
+      create: {
+        homeId: house.id,
+        userId: house.userId,
+        utilityName,
+        accountNumber,
+        filename,
+        mimeType,
+        sizeBytes: buffer.length,
+        content: buffer,
+        sha256,
+        capturedAt: new Date(),
+      },
+      select: { id: true },
+    });
+    rawRecordId = upserted.id;
 
     if (!rawRecordId) {
       throw new Error("Failed to persist raw Green Button record");
