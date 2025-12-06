@@ -41,6 +41,10 @@ export default function AdminSmtToolsPage() {
     startTransition(async () => {
       try {
         const payload = await normalizeLatestServerAction(limit);
+        if (payload && typeof payload === 'object' && 'ok' in payload && payload.ok === false && 'error' in payload) {
+          setError(String(payload.error ?? 'Normalize failed'));
+          return;
+        }
         setResult(payload);
       } catch (err: any) {
         setError(err?.message ?? String(err));
@@ -81,6 +85,11 @@ export default function AdminSmtToolsPage() {
       startNormStatusTransition(async () => {
         try {
           const payload = await fetchNormalizeStatuses(effectiveLimit);
+          if (payload && typeof payload === 'object' && 'ok' in payload && payload.ok === false && 'error' in payload) {
+            setNormStatus(null);
+            setNormStatusError(String(payload.error ?? 'Normalize status fetch failed'));
+            return;
+          }
           setNormStatus(payload);
         } catch (err: any) {
           setNormStatusError(err?.message ?? String(err));

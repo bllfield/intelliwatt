@@ -29,10 +29,12 @@ function resolveBaseUrl() {
   return new URL(`${protocol}://${host}`);
 }
 
-export async function normalizeLatestServerAction(limit = 5) {
+type ActionError = { ok: false; error: string };
+
+export async function normalizeLatestServerAction(limit = 5): Promise<NormalizeRunSummary | ActionError> {
   const adminToken = process.env.ADMIN_TOKEN;
   if (!adminToken) {
-    throw new Error('ADMIN_TOKEN is not configured on the server');
+    return { ok: false, error: 'ADMIN_TOKEN is not configured on the server' };
   }
 
   const baseUrl = resolveBaseUrl();
@@ -49,7 +51,7 @@ export async function normalizeLatestServerAction(limit = 5) {
 
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    throw new Error(`Normalize failed: ${res.status} ${text}`.trim());
+    return { ok: false, error: `Normalize failed: ${res.status} ${text}`.trim() };
   }
 
   return res.json();
@@ -76,10 +78,10 @@ export type NormalizeRunSummary = {
   }>;
 };
 
-export async function fetchNormalizeStatuses(limit = 5): Promise<NormalizeRunSummary> {
+export async function fetchNormalizeStatuses(limit = 5): Promise<NormalizeRunSummary | ActionError> {
   const adminToken = process.env.ADMIN_TOKEN;
   if (!adminToken) {
-    throw new Error('ADMIN_TOKEN is not configured on the server');
+    return { ok: false, error: 'ADMIN_TOKEN is not configured on the server' };
   }
 
   const baseUrl = resolveBaseUrl();
@@ -96,7 +98,7 @@ export async function fetchNormalizeStatuses(limit = 5): Promise<NormalizeRunSum
 
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    throw new Error(`Normalize status fetch failed: ${res.status} ${text}`.trim());
+    return { ok: false, error: `Normalize status fetch failed: ${res.status} ${text}`.trim() };
   }
 
   return res.json();
