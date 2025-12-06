@@ -118,6 +118,7 @@ export function parseSmtCsvFlexible(csv: string): ParsedInterval[] {
 
     const esiid = findValue('esiid', 'esi');
     const meter = findValue('meter', 'meterid');
+    const usageDate = findValue('usagedate', 'readdate', 'readdt');
     const start = findValue('intervalstart', 'startdatetime', 'startdate', 'starttime');
     const end = findValue('intervalend', 'enddatetime', 'enddate', 'endtime');
     const single = findValue('datetime', 'datetimecst', 'datetimecdt', 'date/time', 'datetimect');
@@ -126,12 +127,17 @@ export function parseSmtCsvFlexible(csv: string): ParsedInterval[] {
 
     if (kwh === null) continue;
 
+    // Some SMT extracts split date and time. If we have a usage date, fuse it with start/end.
+    const startWithDate = start && usageDate ? `${usageDate} ${start}` : start;
+    const endWithDate = end && usageDate ? `${usageDate} ${end}` : end;
+    const singleWithDate = single || (usageDate && (start || end) ? `${usageDate} ${start || end}` : undefined);
+
     results.push({
       esiid: esiid ?? null,
       meter: meter ?? null,
-      startLocal: start ?? null,
-      endLocal: end ?? null,
-      dateTimeLocal: single ?? null,
+      startLocal: startWithDate ?? null,
+      endLocal: endWithDate ?? null,
+      dateTimeLocal: singleWithDate ?? null,
       kwh,
     });
   }
