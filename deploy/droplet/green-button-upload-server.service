@@ -12,7 +12,8 @@ EnvironmentFile=/etc/default/intelliwatt-smt
 
 # Green Button specific environment variables
 Environment=GREEN_BUTTON_UPLOAD_PORT=8091
-Environment=GREEN_BUTTON_UPLOAD_MAX_BYTES=10485760
+# Allow up to 500MB uploads to match server defaults
+Environment=GREEN_BUTTON_UPLOAD_MAX_BYTES=524288000
 
 # Start the Node upload server
 ExecStart=/usr/bin/node scripts/droplet/green-button-upload-server.js
