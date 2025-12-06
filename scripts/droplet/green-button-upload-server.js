@@ -768,14 +768,14 @@ app.post("/upload", upload.single("file"), async (req, res) => {
       intervalMinutes: interval.intervalMinutes,
     }));
 
-    await usagePrisma.$transaction(async (tx) => {
-      await tx.greenButtonInterval.deleteMany({ where: { rawId: rawRecordId } });
-      if (intervalData.length > 0) {
-        await tx.greenButtonInterval.createMany({
-          data: intervalData,
-        });
+    await usagePrisma.greenButtonInterval.deleteMany({ where: { rawId: rawRecordId } });
+    if (intervalData.length > 0) {
+      const BATCH_SIZE = 1000;
+      for (let i = 0; i < intervalData.length; i += BATCH_SIZE) {
+        const slice = intervalData.slice(i, i + BATCH_SIZE);
+        await usagePrisma.greenButtonInterval.createMany({ data: slice });
       }
-    });
+    }
 
     const totalKwh = normalized.reduce((sum, row) => sum + row.consumptionKwh, 0);
     const earliest = normalized[0] ? normalized[0].timestamp : null;
