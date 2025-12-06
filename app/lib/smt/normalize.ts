@@ -41,22 +41,87 @@ function normalizeMeter(raw?: string | null, fallback?: string | null): string {
   return candidate || 'unknown';
 }
 
+function parseCentralIso(raw?: string | null): string | null {
+  if (!raw) return null;
+  const value = raw.trim();
+  if (!value) return null;
+
+  // Extract basic components (MM/DD/YYYY HH:mm[:ss][AM|PM]) and treat them as America/Chicago local time.
+  const normalized = value.replace(/\s+(CST|CDT|CT)$/i, '').replace(/[T]/g, ' ').trim();
+  const match = normalized.match(
+    /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?/i,
+  );
+
+  if (match) {
+    const [, mStr, dStr, yStr, hStr, minStr, sStr, ampm] = match;
+    const year = Number(yStr.length === 2 ? `20${yStr}` : yStr);
+    const month = Number(mStr) - 1;
+    const day = Number(dStr);
+    let hour = Number(hStr);
+    const minute = Number(minStr);
+    const second = Number(sStr ?? '0');
+
+    if (ampm) {
+      const upper = ampm.toUpperCase();
+      if (upper === 'PM' && hour < 12) hour += 12;
+      if (upper === 'AM' && hour === 12) hour = 0;
+    }
+
+    const initialUtcMs = Date.UTC(year, month, day, hour, minute, second);
+
+    const getOffsetMinutes = (utcMs: number, timeZone: string): number => {
+      const dtf = new Intl.DateTimeFormat('en-US', {
+        timeZone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      });
+      const parts = dtf.formatToParts(new Date(utcMs));
+      const map: Record<string, string> = {};
+      for (const p of parts) {
+        if (p.type !== 'literal') map[p.type] = p.value;
+      }
+      const asUtc = Date.UTC(
+        Number(map.year),
+        Number(map.month) - 1,
+        Number(map.day),
+        Number(map.hour),
+        Number(map.minute),
+        Number(map.second),
+      );
+      return (asUtc - utcMs) / 60000;
+    };
+
+    const offsetMinutes = getOffsetMinutes(initialUtcMs, 'America/Chicago');
+    const finalMs = initialUtcMs - offsetMinutes * 60000;
+    return new Date(finalMs).toISOString();
+  }
+
+  // Fallback: trust the Date parser and assume the string already carries timezone info
+  const fallbackDate = new Date(value);
+  if (!Number.isNaN(fallbackDate.getTime())) {
+    return fallbackDate.toISOString();
+  }
+
+  return null;
+}
+
 function deriveTimestamp(entry: {
   endLocal?: string | null;
   dateTimeLocal?: string | null;
   startLocal?: string | null;
 }): string | null {
-  let timestamp = entry.endLocal ?? entry.dateTimeLocal ?? null;
-  if (!timestamp && entry.startLocal) {
-    const startDate = new Date(entry.startLocal);
-    if (!Number.isNaN(startDate.getTime())) {
-      const endDate = new Date(startDate.getTime() + 15 * 60 * 1000);
-      timestamp = endDate.toISOString();
-    } else {
-      timestamp = entry.startLocal;
-    }
+  const candidates = [entry.endLocal, entry.dateTimeLocal, entry.startLocal];
+  for (const candidate of candidates) {
+    const iso = parseCentralIso(candidate);
+    if (iso) return iso;
   }
-  return timestamp ?? null;
+
+  return null;
 }
 
 function parseKwh(value: unknown): number | null {
