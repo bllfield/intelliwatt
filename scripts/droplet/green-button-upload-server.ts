@@ -181,24 +181,33 @@ app.post("/upload", upload.single("file"), async (req: Request, res: Response) =
     const mimeType = file.mimetype?.slice(0, 128) || "application/xml";
 
     // Idempotent insert: if the sha256 already exists, reuse that record instead of failing
-    const upserted = await usagePrisma.rawGreenButton.upsert({
-      where: { sha256 },
-      update: {},
-      create: {
-        homeId: house.id,
-        userId: house.userId,
-        utilityName,
-        accountNumber,
-        filename,
-        mimeType,
-        sizeBytes: buffer.length,
-        content: buffer,
-        sha256,
-        capturedAt: new Date(),
-      },
-      select: { id: true },
-    });
-    rawRecordId = upserted.id;
+    try {
+      const upserted = await usagePrisma.rawGreenButton.upsert({
+        where: { sha256 },
+        update: {},
+        create: {
+          homeId: house.id,
+          userId: house.userId,
+          utilityName,
+          accountNumber,
+          filename,
+          mimeType,
+          sizeBytes: buffer.length,
+          content: buffer,
+          sha256,
+          capturedAt: new Date(),
+        },
+        select: { id: true },
+      });
+      rawRecordId = upserted.id;
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+        const existing = await usagePrisma.rawGreenButton.findUnique({ where: { sha256 }, select: { id: true } });
+        rawRecordId = existing?.id ?? null;
+      } else {
+        throw err;
+      }
+    }
 
     if (!rawRecordId) {
       throw new Error("Failed to persist raw Green Button record");
