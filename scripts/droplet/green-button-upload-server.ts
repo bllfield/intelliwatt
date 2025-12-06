@@ -86,20 +86,34 @@ type UploadPayload = {
   issuedAt?: string;
   expiresAt?: string;
 };
+ 
+app.post("/upload", upload.single("file"), async (req: Request, res: Response) => {
+  let uploadRecordId: string | null = null;
+  let rawRecordId: string | null = null;
+  try {
+    if (!SECRET) {
+      res.status(500).json({ ok: false, error: "server_not_configured" });
+      return;
+    }
+
+    const payloadEncoded =
+      (req.body?.payload as string | undefined) ||
+      (typeof req.headers["x-green-button-payload"] === "string"
+        ? (req.headers["x-green-button-payload"] as string)
+        : undefined);
+    const signature =
+      (req.body?.signature as string | undefined) ||
+      (typeof req.headers["x-green-button-signature"] === "string"
+        ? (req.headers["x-green-button-signature"] as string)
+        : undefined);
 
     if (!payloadEncoded || !signature) {
-      res.status(401).json({
-        ok: false,
-        error: "missing_signature",
-      });
+      res.status(401).json({ ok: false, error: "missing_signature" });
       return;
     }
 
     if (!verifySignature(payloadEncoded, signature)) {
-      res.status(401).json({
-        ok: false,
-        error: "invalid_signature",
-      });
+      res.status(401).json({ ok: false, error: "invalid_signature" });
       return;
     }
 
@@ -107,47 +121,33 @@ type UploadPayload = {
     try {
       payload = decodePayload(payloadEncoded);
     } catch (parseErr) {
-      res.status(400).json({
-        ok: false,
-        error: "invalid_payload",
-        detail: String((parseErr as Error)?.message || parseErr),
-      });
+      res
+        .status(400)
+        .json({ ok: false, error: "invalid_payload", detail: String((parseErr as Error)?.message || parseErr) });
       return;
     }
 
     if (!payload?.userId || !payload?.houseId) {
-      res.status(400).json({
-        ok: false,
-        error: "payload_missing_fields",
-      });
+      res.status(400).json({ ok: false, error: "payload_missing_fields" });
       return;
     }
 
     if (payload.expiresAt) {
       const expiresMs = Date.parse(payload.expiresAt);
       if (Number.isFinite(expiresMs) && expiresMs < Date.now()) {
-        res.status(401).json({
-          ok: false,
-          error: "upload_ticket_expired",
-        });
+        res.status(401).json({ ok: false, error: "upload_ticket_expired" });
         return;
       }
     }
 
     const file = req.file;
     if (!file || !file.buffer || file.buffer.length === 0) {
-      res.status(400).json({
-        ok: false,
-        error: "missing_file",
-      });
+      res.status(400).json({ ok: false, error: "missing_file" });
       return;
     }
 
     if (file.buffer.length > MAX_BYTES) {
-      res.status(413).json({
-        ok: false,
-        error: "file_too_large",
-      });
+      res.status(413).json({ ok: false, error: "file_too_large" });
       return;
     }
 
@@ -157,10 +157,7 @@ type UploadPayload = {
     });
 
     if (!house) {
-      res.status(404).json({
-        ok: false,
-        error: "home_not_found",
-      });
+      res.status(404).json({ ok: false, error: "home_not_found" });
       return;
     }
 
@@ -174,8 +171,7 @@ type UploadPayload = {
       typeof req.body?.accountNumber === "string" && req.body.accountNumber.trim().length > 0
         ? req.body.accountNumber.trim()
         : null;
-    const filename =
-      file.originalname?.slice(0, 255) || file.fieldname || "green-button-upload.xml";
+    const filename = file.originalname?.slice(0, 255) || file.fieldname || "green-button-upload.xml";
     const mimeType = file.mimetype?.slice(0, 128) || "application/xml";
 
     // Idempotent insert: if the sha256 already exists, reuse that record instead of failing
