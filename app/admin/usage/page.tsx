@@ -88,6 +88,8 @@ export default function AdminUsageProduction() {
   const [data, setData] = useState<UsageDebugResponse | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [lastResponse, setLastResponse] = useState<{ status: number; body: unknown; rawText: string } | null>(null);
+  const [normalizing, setNormalizing] = useState(false);
+  const [lastNormalize, setLastNormalize] = useState<{ status: number; body: unknown; rawText: string } | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -151,6 +153,40 @@ export default function AdminUsageProduction() {
     }
   }, [adminToken]);
 
+  const runNormalize = useCallback(async () => {
+    const token = adminToken.trim();
+    if (!token) {
+      setError("Set x-admin-token to run normalization.");
+      return;
+    }
+    setNormalizing(true);
+    try {
+      const res = await fetch("/api/admin/usage/normalize", {
+        method: "POST",
+        headers: {
+          "x-admin-token": token,
+          accept: "application/json",
+        },
+      });
+      const text = await res.text().catch(() => "");
+      let parsed: unknown = null;
+      try {
+        parsed = text ? JSON.parse(text) : null;
+      } catch {
+        parsed = null;
+      }
+      setLastNormalize({ status: res.status, body: parsed ?? text, rawText: text });
+      if (!res.ok) {
+        throw new Error(`Usage normalize failed: ${res.status} ${text}`.trim());
+      }
+      await fetchDebug();
+    } catch (err: any) {
+      setError(err?.message ?? "Failed to run normalization");
+    } finally {
+      setNormalizing(false);
+    }
+  }, [adminToken, fetchDebug]);
+
   useEffect(() => {
     fetchDebug();
   }, [fetchDebug]);
@@ -166,6 +202,7 @@ export default function AdminUsageProduction() {
   const usage = data?.usageModule;
   const topEsiids = useMemo(() => smt?.topEsiids ?? [], [smt]);
   const usageMissingButSmtPresent = (usage?.totals.intervalCount ?? 0) === 0 && (smt?.totals.intervalCount ?? 0) > 0;
+  const deltaIntervals = (smt?.totals.intervalCount ?? 0) - (usage?.totals.intervalCount ?? 0);
 
   return (
     <div className="space-y-6 p-6">
@@ -193,6 +230,14 @@ export default function AdminUsageProduction() {
           >
             {refreshing ? "Refreshing" : "Refresh"}
           </button>
+          <button
+            type="button"
+            onClick={runNormalize}
+            disabled={normalizing}
+            className="rounded bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {normalizing ? "Normalizing…" : "Run normalize"}
+          </button>
           <a
             href="/admin/smt/inspector"
             className="rounded border border-neutral-300 px-3 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-100"
@@ -214,6 +259,18 @@ export default function AdminUsageProduction() {
           </div>
           <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-white/80 p-2 text-[11px] text-amber-900">
             {JSON.stringify(lastResponse.body ?? lastResponse.rawText ?? "", null, 2)}
+          </pre>
+        </div>
+      ) : null}
+
+      {!loading && lastNormalize ? (
+        <div className="rounded border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900">
+          <div className="flex items-center justify-between">
+            <span className="font-semibold">Last /api/admin/usage/normalize response</span>
+            <span className="font-mono text-[11px] text-blue-800">status {lastNormalize.status}</span>
+          </div>
+          <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-white/80 p-2 text-[11px] text-blue-900">
+            {JSON.stringify(lastNormalize.body ?? lastNormalize.rawText ?? "", null, 2)}
           </pre>
         </div>
       ) : null}
@@ -318,7 +375,7 @@ export default function AdminUsageProduction() {
                   <p className="text-xs font-medium text-amber-700">Warning: SMT has intervals but usage module returned zero rows. Check normalization jobs and ingestion logs.</p>
                 ) : null}
               </div>
-              <div className="text-sm text-neutral-600">Rows: {fmtNum(usage?.totals.intervalCount ?? 0)} · kWh {fmtKwh(usage?.totals.totalKwh ?? 0)} · Window {fmtDate(usage?.totals.earliestTs ?? null)} → {fmtDate(usage?.totals.latestTs ?? null)}</div>
+              <div className="text-sm text-neutral-600">Rows: {fmtNum(usage?.totals.intervalCount ?? 0)} · kWh {fmtKwh(usage?.totals.totalKwh ?? 0)} · Window {fmtDate(usage?.totals.earliestTs ?? null)} → {fmtDate(usage?.totals.latestTs ?? null)} · Delta vs SMT: {fmtNum(deltaIntervals)}</div>
             </div>
 
             <div className="max-h-96 overflow-auto rounded border border-neutral-200 bg-neutral-900 p-3 text-xs text-neutral-100">
