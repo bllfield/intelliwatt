@@ -10,10 +10,12 @@ import { normalizeEmail } from "@/lib/utils/email";
 import { parseGreenButtonBuffer } from "@/lib/usage/greenButtonParser";
 import { normalizeGreenButtonReadingsTo15Min } from "@/lib/usage/greenButtonNormalize";
 
-const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB safety limit
+// No explicit upload cap; rely on platform limits. Large files are allowed to ensure full 12-month coverage.
 const MANUAL_USAGE_LIFETIME_DAYS = 365;
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+export const maxDuration = 300; // permit long-running parses for large files
 
 export async function POST(request: Request) {
   try {
@@ -55,16 +57,6 @@ export async function POST(request: Request) {
 
     if (!house) {
       return NextResponse.json({ ok: false, error: "Home not found" }, { status: 404 });
-    }
-
-    if (file.size > MAX_UPLOAD_BYTES) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "File exceeds the 10 MB upload limit. Please trim the export and try again.",
-        },
-        { status: 413 },
-      );
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());

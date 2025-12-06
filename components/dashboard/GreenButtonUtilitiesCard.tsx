@@ -19,8 +19,6 @@ export default function GreenButtonHelpSection({
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [statusTone, setStatusTone] = useState<"success" | "error" | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
-  const MAX_UPLOAD_MB = MAX_UPLOAD_BYTES / (1024 * 1024);
 
   useEffect(() => {
     setUtilityName(defaultUtilityName ?? "");
@@ -41,14 +39,6 @@ export default function GreenButtonHelpSection({
       setSelectedFile(null);
       return;
     }
-
-     if (file.size > MAX_UPLOAD_BYTES) {
-       setStatusTone("error");
-       setStatusMessage(`File exceeds the ${MAX_UPLOAD_MB} MB limit. Please export a smaller window.`);
-       event.target.value = "";
-       setSelectedFile(null);
-       return;
-     }
 
     setStatusTone(null);
     setStatusMessage(null);

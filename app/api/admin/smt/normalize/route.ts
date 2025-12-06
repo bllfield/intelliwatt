@@ -7,6 +7,7 @@ import { normalizeSmtIntervals, type NormalizeStats } from '@/app/lib/smt/normal
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const maxDuration = 300; // allow long ingestion runs
 
 const INSERT_BATCH_SIZE = 4000; // avoid Postgres parameter limits on large files
 
@@ -57,8 +58,8 @@ export async function POST(req: NextRequest) {
 
   const url = new URL(req.url);
   // Remove practical caps so we can ingest everything; caller can still pass limit explicitly.
-  const limitParam = Number(url.searchParams.get('limit') ?? 100000);
-  const limit = Number.isFinite(limitParam) ? Math.floor(limitParam) : 100000;
+  const limitParam = Number(url.searchParams.get('limit') ?? 10000000);
+  const limit = Number.isFinite(limitParam) ? Math.floor(limitParam) : 10000000;
   const source = url.searchParams.get('source') ?? 'adhocusage';
   const dryRun = url.searchParams.get('dryRun') === '1';
 

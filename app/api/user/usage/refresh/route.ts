@@ -95,7 +95,7 @@ export async function POST(req: NextRequest) {
   const pullUrl = new URL("/api/admin/smt/pull", baseUrl);
   const normalizeUrl = new URL("/api/admin/smt/normalize", baseUrl);
   // No cap: request normalization without meaningful limit so full history ingests.
-  normalizeUrl.searchParams.set("limit", "100000");
+  normalizeUrl.searchParams.set("limit", "10000000");
 
   const refreshed: HomeRefreshResult[] = [];
 

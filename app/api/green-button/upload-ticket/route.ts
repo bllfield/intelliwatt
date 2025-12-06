@@ -132,7 +132,8 @@ export async function POST(request: Request) {
       uploadUrl,
       payload: payloadEncoded,
       signature,
-      maxBytes: Number(process.env.GREEN_BUTTON_UPLOAD_MAX_BYTES || 10 * 1024 * 1024),
+      // Allow large files; platform/network limits will apply.
+      maxBytes: Number(process.env.GREEN_BUTTON_UPLOAD_MAX_BYTES || 500 * 1024 * 1024),
       expiresAt: payload.expiresAt,
       houseId: house.id,
       utilityName: house.utilityName ?? null,
