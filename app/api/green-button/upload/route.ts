@@ -174,15 +174,13 @@ export async function POST(request: Request) {
       // Postgres parameter limit (~65k) can be exceeded on year-long files; insert in batches to avoid failure.
       const BATCH_SIZE = 4000;
 
-      await usagePrisma.$transaction(async (tx) => {
-        await (tx as any).greenButtonInterval.deleteMany({ where: { rawId: rawRecord.id } });
+      await (usagePrisma as any).greenButtonInterval.deleteMany({ where: { rawId: rawRecord.id } });
 
-        for (let i = 0; i < intervalData.length; i += BATCH_SIZE) {
-          const slice = intervalData.slice(i, i + BATCH_SIZE);
-          if (slice.length === 0) continue;
-          await (tx as any).greenButtonInterval.createMany({ data: slice });
-        }
-      });
+      for (let i = 0; i < intervalData.length; i += BATCH_SIZE) {
+        const slice = intervalData.slice(i, i + BATCH_SIZE);
+        if (slice.length === 0) continue;
+        await (usagePrisma as any).greenButtonInterval.createMany({ data: slice });
+      }
 
       const totalKwh = normalized.reduce((sum, row) => sum + row.consumptionKwh, 0);
       const earliest = normalized[0]?.timestamp ?? null;

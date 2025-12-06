@@ -96,9 +96,12 @@ export async function POST(request: NextRequest) {
       intervalMinutes: interval.intervalMinutes,
     }));
 
-    await (usagePrisma as any).greenButtonInterval.createMany({
-      data: intervalData,
-    });
+    const BATCH_SIZE = 1000;
+    for (let i = 0; i < intervalData.length; i += BATCH_SIZE) {
+      const slice = intervalData.slice(i, i + BATCH_SIZE);
+      if (slice.length === 0) continue;
+      await (usagePrisma as any).greenButtonInterval.createMany({ data: slice });
+    }
 
     const totalKwh = normalized.reduce((sum, row) => sum + row.consumptionKwh, 0);
 
