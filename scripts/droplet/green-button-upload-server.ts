@@ -93,17 +93,6 @@ type UploadPayload = {
         error: "missing_signature",
       });
       return;
-    let payload: UploadPayload;
-    try {
-      payload = decodePayload(payloadEncoded);
-    } catch (parseErr) {
-      res.status(400).json({
-        ok: false,
-        error: "invalid_payload",
-        detail: String((parseErr as Error)?.message || parseErr),
-      });
-      return;
-    }
     }
 
     if (!verifySignature(payloadEncoded, signature)) {
