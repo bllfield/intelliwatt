@@ -7,7 +7,8 @@ import crypto from "crypto";
 
 const UPLOAD_DIR = process.env.SMT_UPLOAD_DIR || "/home/deploy/smt_inbox";
 const PORT = Number(process.env.SMT_UPLOAD_PORT || "8081");
-const MAX_BYTES = Number(process.env.SMT_UPLOAD_MAX_BYTES || 10 * 1024 * 1024);
+// Allow up to ~25MB by default so a full 12-month interval CSV (≈35k rows) clears the limit.
+const MAX_BYTES = Number(process.env.SMT_UPLOAD_MAX_BYTES || 25 * 1024 * 1024);
 const UPLOAD_TOKEN = process.env.SMT_UPLOAD_TOKEN || "";
 // Admin limit: 40,000 allows ~365 days of 15-min interval files (96 intervals/day × 365 days = 35,040)
 const ADMIN_LIMIT = Number(process.env.SMT_ADMIN_UPLOAD_DAILY_LIMIT || "40000");
