@@ -183,8 +183,7 @@ export const UsageDashboard: React.FC = () => {
 
     const recentDaily = fallbackDaily
       .slice()
-      .sort((a, b) => (a.date < b.date ? -1 : 1))
-      .slice(-30);
+      .sort((a, b) => (a.date < b.date ? -1 : 1));
 
     const monthlySorted = monthly.slice().sort((a, b) => (a.month < b.month ? -1 : 1));
 
@@ -353,7 +352,7 @@ export const UsageDashboard: React.FC = () => {
           <div className="grid gap-4 lg:grid-cols-2">
             <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
               <div className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">
-                Recent daily usage (last {derived.daily.length} days)
+                Daily usage (all {derived.daily.length} days)
               </div>
               {derived.daily.length ? (
                 <div className="h-64">
