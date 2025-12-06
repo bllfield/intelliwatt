@@ -101,22 +101,36 @@ export function deriveGreenButtonStatus(
       ? upload.parseMessage
       : null;
 
-  return {
-    label: upload.parseStatus
+  const hasCoverage = Boolean(upload.dateRangeStart && upload.dateRangeEnd);
+  const isParseSuccess =
+    upload.parseStatus &&
+    ["success", "complete"].includes(upload.parseStatus.toLowerCase());
+
+  // If coverage exists (we already normalized data), surface as active even if parseStatus wasn't updated.
+  const label = hasCoverage || isParseSuccess
+    ? "ACTIVE"
+    : upload.parseStatus
       ? upload.parseStatus.replace(/_/g, " ").toUpperCase()
-      : "Upload received",
-    tone:
-      upload.parseStatus &&
-      upload.parseStatus.toLowerCase().includes("error")
-        ? "error"
-        : "success",
+      : "Upload received";
+
+  const tone: StatusTone = hasCoverage || isParseSuccess
+    ? "success"
+    : upload.parseStatus && upload.parseStatus.toLowerCase().includes("error")
+      ? "error"
+      : "warning";
+
+  return {
+    label,
+    tone,
     message:
       normalizedMessage ??
-      "Usage file processed. We’ll keep your dashboard in sync with the latest upload.",
-    lastUpdated: upload.createdAt,
+      (hasCoverage
+        ? "Usage file processed and active. We’ll keep your dashboard in sync with the latest upload."
+        : "Usage file received. Processing shortly."),
+    lastUpdated: upload.updatedAt ?? upload.createdAt,
     detail:
-      upload.dateRangeStart && upload.dateRangeEnd
-        ? `Coverage: ${upload.dateRangeStart.toLocaleDateString()} – ${upload.dateRangeEnd.toLocaleDateString()}`
+      hasCoverage
+        ? `Coverage: ${upload.dateRangeStart!.toLocaleDateString()} – ${upload.dateRangeEnd!.toLocaleDateString()}`
         : undefined,
   };
 }
