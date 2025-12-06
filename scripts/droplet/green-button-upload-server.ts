@@ -7,7 +7,7 @@ import { parseGreenButtonBuffer } from "@/lib/usage/greenButtonParser";
 import { normalizeGreenButtonReadingsTo15Min } from "@/lib/usage/greenButtonNormalize";
 
 const PORT = Number(process.env.GREEN_BUTTON_UPLOAD_PORT || "8091");
-const MAX_BYTES = Number(process.env.GREEN_BUTTON_UPLOAD_MAX_BYTES || 10 * 1024 * 1024);
+const MAX_BYTES = Number(process.env.GREEN_BUTTON_UPLOAD_MAX_BYTES || 500 * 1024 * 1024);
 const SECRET = process.env.GREEN_BUTTON_UPLOAD_SECRET || "";
 const ALLOW_ORIGIN = process.env.GREEN_BUTTON_UPLOAD_ALLOW_ORIGIN || "https://intelliwatt.com";
 
@@ -80,37 +80,25 @@ function base64UrlToBuffer(input: string) {
 }
 
 type UploadPayload = {
-  v: number;
-  userId: string;
-  houseId: string;
-  issuedAt?: string;
-  expiresAt?: string;
-};
-
-function decodePayload(encoded: string): UploadPayload {
-  const buffer = base64UrlToBuffer(encoded);
-  const json = buffer.toString("utf8");
-  return JSON.parse(json) as UploadPayload;
-}
-
-app.post("/upload", upload.single("file"), async (req: Request, res: Response) => {
-  let uploadRecordId: string | null = null;
-  let rawRecordId: string | null = null;
-  try {
-    if (!SECRET) {
-      res.status(500).json({
-        ok: false,
-        error: "server_not_configured",
-      });
-      return;
-    }
-
-    const payloadEncoded =
-      (req.body?.payload as string | undefined) ||
-      (typeof req.headers["x-green-button-payload"] === "string"
-        ? (req.headers["x-green-button-payload"] as string)
-        : undefined);
-    const signature =
+    // Idempotent insert: if the sha256 already exists, reuse that record instead of failing
+    const upserted = await usagePrisma.rawGreenButton.upsert({
+      where: { sha256 },
+      update: {},
+      create: {
+        homeId: house.id,
+        userId: house.userId,
+        utilityName,
+        accountNumber,
+        filename,
+        mimeType,
+        sizeBytes: buffer.length,
+        content: buffer,
+        sha256,
+        capturedAt: new Date(),
+      },
+      select: { id: true },
+    });
+    rawRecordId = upserted.id;
       (req.body?.signature as string | undefined) ||
       (typeof req.headers["x-green-button-signature"] === "string"
         ? (req.headers["x-green-button-signature"] as string)
