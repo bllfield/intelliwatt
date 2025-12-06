@@ -87,6 +87,7 @@ export default function AdminUsageProduction() {
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<UsageDebugResponse | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const [lastResponse, setLastResponse] = useState<{ status: number; body: unknown; rawText: string } | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -124,12 +125,21 @@ export default function AdminUsageProduction() {
         cache: "no-store",
       });
 
+      const text = await res.text().catch(() => "");
+      let parsed: unknown = null;
+      try {
+        parsed = text ? JSON.parse(text) : null;
+      } catch {
+        parsed = null;
+      }
+
+      setLastResponse({ status: res.status, body: parsed ?? text, rawText: text });
+
       if (!res.ok) {
-        const text = await res.text().catch(() => "");
         throw new Error(`Usage debug failed: ${res.status} ${text}`.trim());
       }
 
-      const payload = (await res.json()) as UsageDebugResponse;
+      const payload = (parsed as UsageDebugResponse) ?? ((await res.json()) as UsageDebugResponse);
       setData(payload);
       setLastUpdated(new Date().toISOString());
     } catch (err: any) {
@@ -155,6 +165,7 @@ export default function AdminUsageProduction() {
   const smt = data?.smt;
   const usage = data?.usageModule;
   const topEsiids = useMemo(() => smt?.topEsiids ?? [], [smt]);
+  const usageMissingButSmtPresent = (usage?.totals.intervalCount ?? 0) === 0 && (smt?.totals.intervalCount ?? 0) > 0;
 
   return (
     <div className="space-y-6 p-6">
@@ -193,6 +204,18 @@ export default function AdminUsageProduction() {
 
       {error ? (
         <div className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-700">{error}</div>
+      ) : null}
+
+      {!loading && lastResponse ? (
+        <div className="rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+          <div className="flex items-center justify-between">
+            <span className="font-semibold">Last /api/admin/usage/debug response</span>
+            <span className="font-mono text-[11px] text-amber-800">status {lastResponse.status}</span>
+          </div>
+          <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-white/80 p-2 text-[11px] text-amber-900">
+            {JSON.stringify(lastResponse.body ?? lastResponse.rawText ?? "", null, 2)}
+          </pre>
+        </div>
       ) : null}
 
       {loading ? (
@@ -291,6 +314,9 @@ export default function AdminUsageProduction() {
               <div>
                 <h2 className="text-lg font-semibold text-neutral-900">Usage Module (production)</h2>
                 <p className="text-sm text-neutral-600">Latest normalized usage rows in prod DB.</p>
+                {usageMissingButSmtPresent ? (
+                  <p className="text-xs font-medium text-amber-700">Warning: SMT has intervals but usage module returned zero rows. Check normalization jobs and ingestion logs.</p>
+                ) : null}
               </div>
               <div className="text-sm text-neutral-600">Rows: {fmtNum(usage?.totals.intervalCount ?? 0)} · kWh {fmtKwh(usage?.totals.totalKwh ?? 0)} · Window {fmtDate(usage?.totals.earliestTs ?? null)} → {fmtDate(usage?.totals.latestTs ?? null)}</div>
             </div>
