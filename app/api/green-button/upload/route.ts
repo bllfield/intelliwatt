@@ -1,12 +1,14 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { createHash } from "node:crypto";
-import { EntryStatus } from "@prisma/client";
+import { EntryStatus, Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/db";
 import { usagePrisma } from "@/lib/db/usageClient";
 import { refreshUserEntryStatuses } from "@/lib/hitthejackwatt/entryLifecycle";
 import { normalizeEmail } from "@/lib/utils/email";
+import { parseGreenButtonBuffer } from "@/lib/usage/greenButtonParser";
+import { normalizeGreenButtonReadingsTo15Min } from "@/lib/usage/greenButtonNormalize";
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB safety limit
 const MANUAL_USAGE_LIFETIME_DAYS = 365;
@@ -118,10 +120,103 @@ export async function POST(request: Request) {
         fileType: mimeType,
         fileSizeBytes: buffer.length,
         storageKey: `usage:raw_green_button:${rawRecord.id}`,
-        parseStatus: "pending",
+        parseStatus: "processing",
         parseMessage: null,
+        dateRangeStart: null,
+        dateRangeEnd: null,
+        intervalMinutes: null,
       },
     });
+
+    let parsedSummary: Record<string, unknown> | null = null;
+
+    try {
+      const parsed = parseGreenButtonBuffer(buffer, file.name);
+
+      if (parsed.errors.length > 0) {
+        await (prisma as any).greenButtonUpload.update({
+          where: { id: uploadRecord.id },
+          data: {
+            parseStatus: "error",
+            parseMessage: parsed.errors.join("; "),
+          },
+        });
+
+        return NextResponse.json({ ok: false, error: parsed.errors.join("; ") }, { status: 422 });
+      }
+
+      if (parsed.readings.length === 0) {
+        await (prisma as any).greenButtonUpload.update({
+          where: { id: uploadRecord.id },
+          data: {
+            parseStatus: "empty",
+            parseMessage: "File parsed but no interval data was found.",
+          },
+        });
+
+        return NextResponse.json({ ok: false, error: "no_readings" }, { status: 422 });
+      }
+
+      const normalized = normalizeGreenButtonReadingsTo15Min(parsed.readings);
+      if (normalized.length === 0) {
+        await (prisma as any).greenButtonUpload.update({
+          where: { id: uploadRecord.id },
+          data: {
+            parseStatus: "empty",
+            parseMessage: "Readings were parsed but could not be normalized to 15-minute intervals.",
+          },
+        });
+
+        return NextResponse.json({ ok: false, error: "normalization_empty" }, { status: 422 });
+      }
+
+      const intervalData = normalized.map((interval) => ({
+        rawId: rawRecord.id,
+        homeId: house.id,
+        userId: user.id,
+        timestamp: interval.timestamp,
+        consumptionKwh: new Prisma.Decimal(interval.consumptionKwh),
+        intervalMinutes: interval.intervalMinutes,
+      }));
+
+      await usagePrisma.$transaction(async (tx) => {
+        await (tx as any).greenButtonInterval.deleteMany({ where: { rawId: rawRecord.id } });
+        await (tx as any).greenButtonInterval.createMany({ data: intervalData });
+      });
+
+      const totalKwh = normalized.reduce((sum, row) => sum + row.consumptionKwh, 0);
+      const earliest = normalized[0]?.timestamp ?? null;
+      const latest = normalized[normalized.length - 1]?.timestamp ?? null;
+
+      parsedSummary = {
+        format: parsed.format,
+        totalRawReadings: parsed.metadata.totalReadings,
+        normalizedIntervals: normalized.length,
+        totalKwh: Number(totalKwh.toFixed(6)),
+        warnings: parsed.warnings,
+      };
+
+      await (prisma as any).greenButtonUpload.update({
+        where: { id: uploadRecord.id },
+        data: {
+          parseStatus: parsed.warnings.length > 0 ? "complete_with_warnings" : "complete",
+          parseMessage: JSON.stringify(parsedSummary),
+          dateRangeStart: earliest,
+          dateRangeEnd: latest,
+          intervalMinutes: 15,
+        },
+      });
+    } catch (parseErr) {
+      await (prisma as any).greenButtonUpload.update({
+        where: { id: uploadRecord.id },
+        data: {
+          parseStatus: "error",
+          parseMessage: String((parseErr as Error)?.message || parseErr),
+        },
+      });
+
+      throw parseErr;
+    }
 
     // Award / refresh the usage entry using a ManualUsageUpload placeholder so it expires after 12 months
     const now = new Date();
@@ -138,6 +233,7 @@ export async function POST(request: Request) {
           uploadId: uploadRecord.id,
           utilityName,
           accountNumber,
+          summary: parsedSummary,
         },
       },
       select: { id: true },
@@ -182,6 +278,7 @@ export async function POST(request: Request) {
         rawId: rawRecord.id,
         uploadId: uploadRecord.id,
         entryAwarded: true,
+        parseSummary: parsedSummary,
       },
       { status: 201 },
     );

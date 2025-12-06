@@ -319,14 +319,42 @@ function chooseDataset(
   smt: UsageDatasetResult | null,
   greenButton: UsageDatasetResult | null,
 ): UsageDatasetResult | null {
+  const MS_PER_DAY = 24 * 60 * 60 * 1000;
+  const coverageDays = (dataset: UsageDatasetResult | null): number => {
+    if (!dataset?.summary?.start || !dataset?.summary?.end) return 0;
+    const startMs = new Date(dataset.summary.start).getTime();
+    const endMs = new Date(dataset.summary.end).getTime();
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return 0;
+    return (endMs - startMs) / MS_PER_DAY;
+  };
+
+  const latestMs = (dataset: UsageDatasetResult | null): number => {
+    if (!dataset?.summary?.latest) return 0;
+    const ts = new Date(dataset.summary.latest).getTime();
+    return Number.isFinite(ts) ? ts : 0;
+  };
+
+  const smtCoverage = coverageDays(smt);
+  const gbCoverage = coverageDays(greenButton);
+  const smtHasYear = smtCoverage >= 330;
+  const gbHasYear = gbCoverage >= 330;
+
   if (smt && !greenButton) return smt;
   if (!smt && greenButton) return greenButton;
   if (!smt && !greenButton) return null;
 
-  const smtLatest = smt?.summary.latest ? new Date(smt.summary.latest).getTime() : 0;
-  const greenLatest = greenButton?.summary.latest ? new Date(greenButton.summary.latest).getTime() : 0;
+  if (smtHasYear && !gbHasYear) return smt!;
+  if (gbHasYear && !smtHasYear) return greenButton!;
 
-  return greenLatest >= smtLatest ? greenButton! : smt!;
+  if (smtHasYear && gbHasYear) {
+    return latestMs(greenButton) >= latestMs(smt) ? greenButton! : smt!;
+  }
+
+  if (smtCoverage !== gbCoverage) {
+    return smtCoverage > gbCoverage ? smt! : greenButton!;
+  }
+
+  return latestMs(greenButton) >= latestMs(smt) ? greenButton! : smt!;
 }
 
 export async function GET(_request: NextRequest) {

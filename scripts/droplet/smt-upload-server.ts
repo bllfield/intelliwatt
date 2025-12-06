@@ -21,6 +21,10 @@ const CUSTOMER_LIMIT = Number(
 const CUSTOMER_WINDOW_MS = Number(
   process.env.SMT_CUSTOMER_UPLOAD_WINDOW_MS || 30 * 24 * 60 * 60 * 1000,
 );
+const NORMALIZE_LIMIT = Math.min(
+  Math.max(Number(process.env.SMT_NORMALIZE_LIMIT || "50"), 1),
+  100,
+);
 
 // Main app webhook for registering and normalizing uploaded files
 const INTELLIWATT_BASE_URL = process.env.INTELLIWATT_BASE_URL || "https://intelliwatt.com";
@@ -306,7 +310,7 @@ async function registerAndNormalizeFile(
     console.log(`[smt-upload] raw file registered: ${JSON.stringify(rawResult)}`);
 
     // Step 2: Trigger normalization of the raw file
-    const normalizeUrl = `${INTELLIWATT_BASE_URL}/api/admin/smt/normalize?limit=1`;
+    const normalizeUrl = `${INTELLIWATT_BASE_URL}/api/admin/smt/normalize?limit=${NORMALIZE_LIMIT}`;
     // eslint-disable-next-line no-console
     console.log(`[smt-upload] triggering normalization at ${normalizeUrl}`);
 

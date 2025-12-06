@@ -54,8 +54,8 @@ export async function POST(req: NextRequest) {
   if (!gate.ok) return NextResponse.json(gate.body, { status: gate.status });
 
   const url = new URL(req.url);
-  const limitParam = Number(url.searchParams.get('limit') ?? 5);
-  const limit = Number.isFinite(limitParam) ? Math.min(Math.max(Math.floor(limitParam), 1), 100) : 5;
+  const limitParam = Number(url.searchParams.get('limit') ?? 50);
+  const limit = Number.isFinite(limitParam) ? Math.min(Math.max(Math.floor(limitParam), 1), 100) : 50;
   const source = url.searchParams.get('source') ?? 'adhocusage';
   const dryRun = url.searchParams.get('dryRun') === '1';
 
