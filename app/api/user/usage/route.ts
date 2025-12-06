@@ -48,6 +48,30 @@ function toSeriesPoint(rows: Array<{ bucket: Date; kwh: number }>): UsageSeriesP
     .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 }
 
+function fillDailyGaps(points: UsageSeriesPoint[], startIso?: string | null, endIso?: string | null) {
+  if (points.length === 0 && !startIso && !endIso) return points;
+
+  const startMs = startIso ? new Date(startIso).getTime() : new Date(points[0].timestamp).getTime();
+  const endMs = endIso ? new Date(endIso).getTime() : new Date(points[points.length - 1].timestamp).getTime();
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs > endMs) return points;
+
+  const map = new Map<number, number>();
+  for (const p of points) {
+    const dayMs = new Date(new Date(p.timestamp).toISOString().slice(0, 10)).getTime();
+    if (Number.isFinite(dayMs)) map.set(dayMs, p.kwh);
+  }
+
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const out: UsageSeriesPoint[] = [];
+  for (let ms = startMs; ms <= endMs; ms += DAY_MS) {
+    const key = ms;
+    const kwh = map.get(key) ?? 0;
+    out.push({ timestamp: new Date(ms).toISOString(), kwh });
+  }
+
+  return out;
+}
+
 async function fetchSmtDataset(esiid: string | null): Promise<UsageDatasetResult | null> {
   if (!esiid) return null;
 
@@ -128,7 +152,7 @@ async function fetchSmtDataset(esiid: string | null): Promise<UsageDatasetResult
     series: {
       intervals15,
       hourly: toSeriesPoint(hourlyRows),
-      daily: toSeriesPoint(dailyRows),
+      daily: fillDailyGaps(toSeriesPoint(dailyRows), start?.toISOString() ?? null, end?.toISOString() ?? null),
       monthly: toSeriesPoint(monthlyRows),
       annual: toSeriesPoint(annualRows),
     },
@@ -219,7 +243,7 @@ async function fetchGreenButtonDataset(houseId: string): Promise<UsageDatasetRes
     series: {
       intervals15,
       hourly: toSeriesPoint(hourlyRows),
-      daily: toSeriesPoint(dailyRows),
+      daily: fillDailyGaps(toSeriesPoint(dailyRows), start?.toISOString() ?? null, end?.toISOString() ?? null),
       monthly: toSeriesPoint(monthlyRows),
       annual: toSeriesPoint(annualRows),
     },
