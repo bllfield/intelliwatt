@@ -17,6 +17,12 @@ const usagePrisma = new UsagePrismaClient({
   log: process.env.NODE_ENV === "development" ? ["query", "error", "warn"] : ["error"],
 });
 
+function logEvent(event: string, details?: Record<string, unknown>) {
+  const payload = details ? ` ${JSON.stringify(details)}` : "";
+  // eslint-disable-next-line no-console
+  console.log(`[green-button-upload] ${event}${payload}`);
+}
+
 const storage = multer.memoryStorage();
 const upload = multer({
   storage,
@@ -578,6 +584,12 @@ app.post("/upload", upload.single("file"), async (req: Request, res: Response) =
       return;
     }
 
+    logEvent("request.accepted", {
+      payloadEncodedLength: payloadEncoded.length,
+      hasSignature: Boolean(signature),
+      contentLength: req.headers["content-length"],
+    });
+
     const payloadEncoded =
       (req.body?.payload as string | undefined) ||
       (typeof req.headers["x-green-button-payload"] === "string"
@@ -676,11 +688,14 @@ app.post("/upload", upload.single("file"), async (req: Request, res: Response) =
         select: { id: true },
       });
       rawRecordId = upserted.id;
+      logEvent("raw.upsert", { sha256, rawRecordId, reused: false, sizeBytes: buffer.length });
     } catch (err) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
         const existing = await usagePrisma.rawGreenButton.findUnique({ where: { sha256 }, select: { id: true } });
         rawRecordId = existing?.id ?? null;
+        logEvent("raw.upsert.duplicate", { sha256, rawRecordId });
       } else {
+        logEvent("raw.upsert.error", { sha256, error: String(err) });
         throw err;
       }
     }
@@ -722,6 +737,8 @@ app.post("/upload", upload.single("file"), async (req: Request, res: Response) =
       });
       uploadRecordId = createdUpload.id;
     }
+
+    logEvent("upload.record", { uploadRecordId, rawRecordId, houseId: house.id, fileSize: buffer.length });
 
     const parsed = parseGreenButtonBuffer(buffer, filename);
     if (parsed.errors.length > 0) {
@@ -829,6 +846,13 @@ app.post("/upload", upload.single("file"), async (req: Request, res: Response) =
       warnings: parsed.warnings,
       dateRangeStart: earliest ? earliest.toISOString() : null,
       dateRangeEnd: latest ? latest.toISOString() : null,
+    });
+    logEvent("upload.success", {
+      rawRecordId,
+      uploadRecordId,
+      intervals: normalized.length,
+      totalKwh,
+      warnings: parsed.warnings,
     });
   } catch (error) {
     console.error("[green-button-upload] failed to handle upload", error);
