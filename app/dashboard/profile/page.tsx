@@ -8,6 +8,7 @@ import { ProfileTestimonialCard } from "@/components/profile/ProfileTestimonialC
 import { SmtTerminateButton } from "@/components/smt/SmtTerminateButton";
 import DashboardHero from "@/components/dashboard/DashboardHero";
 import { SmtStatusBanner } from "@/components/account/SmtStatusBanner";
+import { ProfileInlineAddressChange } from "@/components/profile/ProfileInlineAddressChange";
 const COMMISSION_STATUS_ALLOWLIST = ["pending", "submitted", "approved", "completed", "paid"];
 
 function isTestimonialTableMissing(error: unknown) {
@@ -319,6 +320,9 @@ export default async function ProfilePage() {
                 initialEmail={user.email}
                 initialPhone={user.profile?.phone ?? ""}
                 initialName={user.profile?.fullName ?? ""}
+              />
+              <ProfileInlineAddressChange
+                activeHouse={activeHouseDetails ? { id: activeHouseDetails.id, formattedAddress: activeHouseDetails.formattedAddress } : null}
               />
               <dl className="rounded-2xl border border-brand-cyan/30 bg-brand-navy p-4 text-sm text-brand-cyan">
                 <div className="flex justify-between gap-4">
