@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 
 import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
-import { refreshSmtAuthorizationStatus } from "@/lib/smt/agreements";
+import { refreshSmtAuthorizationStatus, getRollingBackfillRange, requestSmtBackfillForAuthorization } from "@/lib/smt/agreements";
 
 export const dynamic = "force-dynamic";
 
@@ -98,6 +98,9 @@ export async function POST(req: NextRequest) {
 
   const refreshed: HomeRefreshResult[] = [];
 
+  const backfillRange = getRollingBackfillRange(12);
+  const backfillResults: Array<{ homeId: string; ok: boolean; message?: string }> = [];
+
   for (const house of targetHouses) {
     const result: HomeRefreshResult = {
       homeId: house.id,
@@ -170,6 +173,39 @@ export async function POST(req: NextRequest) {
     }
 
     refreshed.push(result);
+
+    // Proactively request a 12-month SMT backfill so we don't get stuck with short coverage.
+    try {
+      const auth = await prisma.smtAuthorization.findFirst({
+        where: { houseAddressId: house.id, archivedAt: null },
+        select: { id: true, esiid: true, meterNumber: true },
+      });
+
+      if (auth?.id && auth.esiid) {
+        const res = await requestSmtBackfillForAuthorization({
+          authorizationId: auth.id,
+          esiid: auth.esiid,
+          meterNumber: auth.meterNumber,
+          startDate: backfillRange.startDate,
+          endDate: backfillRange.endDate,
+        });
+
+        if (res.ok) {
+          await prisma.smtAuthorization.update({
+            where: { id: auth.id },
+            data: { smtBackfillRequestedAt: new Date() },
+          });
+        }
+
+        backfillResults.push({ homeId: house.id, ok: res.ok, message: res.message });
+      }
+    } catch (backfillError) {
+      backfillResults.push({
+        homeId: house.id,
+        ok: false,
+        message: backfillError instanceof Error ? backfillError.message : String(backfillError),
+      });
+    }
   }
 
   let normalization = {
@@ -220,6 +256,7 @@ export async function POST(req: NextRequest) {
     ok: true,
     homes: refreshed,
     normalization,
+    backfill: backfillResults,
   });
 }
 
