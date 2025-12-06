@@ -5,6 +5,8 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import { usagePrisma } from '@/lib/db/usageClient';
 import { normalizeEmail } from '@/lib/utils/email';
+import { computeInsights } from '@/lib/usage/computeInsights';
+import { NormalizedUsageRow } from '@/lib/usage/normalize';
 
 export const dynamic = 'force-dynamic';
 
@@ -70,6 +72,69 @@ function fillDailyGaps(points: UsageSeriesPoint[], startIso?: string | null, end
   }
 
   return out;
+}
+
+async function fetchNormalizedIntervals(
+  source: 'SMT' | 'GREEN_BUTTON',
+  houseId: string,
+  esiid: string | null,
+): Promise<NormalizedUsageRow[]> {
+  if (source === 'SMT') {
+    if (!esiid) return [];
+    const rows = await prisma.smtInterval.findMany({
+      where: { esiid },
+      orderBy: { ts: 'asc' },
+      select: {
+        id: true,
+        esiid: true,
+        meter: true,
+        ts: true,
+        kwh: true,
+        source: true,
+      },
+    });
+
+    return rows.map((row) => ({
+      houseId,
+      esiid: row.esiid,
+      meter: row.meter,
+      timestamp: row.ts,
+      kwh: decimalToNumber(row.kwh),
+      source: row.source ?? 'smt',
+      rawSourceId: row.id,
+    }));
+  }
+
+  const usageClient = usagePrisma as any;
+  const rows = (await usageClient.greenButtonInterval.findMany({
+    where: { homeId: houseId },
+    orderBy: { timestamp: 'asc' },
+    select: {
+      id: true,
+      rawId: true,
+      homeId: true,
+      timestamp: true,
+      consumptionKwh: true,
+      userId: true,
+    },
+  })) as Array<{
+    id: string;
+    rawId: string | null;
+    homeId: string | null;
+    timestamp: Date;
+    consumptionKwh: Prisma.Decimal | number;
+    userId: string | null;
+  }>;
+
+  return rows.map((row) => ({
+    houseId: row.homeId ?? houseId,
+    esiid: null,
+    meter: 'green_button',
+    timestamp: row.timestamp,
+    kwh: decimalToNumber(row.consumptionKwh),
+    source: 'green_button',
+    rawSourceId: row.rawId ?? row.id,
+  }));
 }
 
 async function fetchSmtDataset(esiid: string | null): Promise<UsageDatasetResult | null> {
@@ -300,6 +365,41 @@ export async function GET(_request: NextRequest) {
       const greenDataset = await fetchGreenButtonDataset(house.id);
       const selected = chooseDataset(smtDataset, greenDataset);
 
+      let intervals: NormalizedUsageRow[] = [];
+      if (selected?.summary?.source) {
+        intervals = await fetchNormalizedIntervals(selected.summary.source, house.id, house.esiid ?? null);
+      }
+
+      const insights = intervals.length > 0 ? computeInsights(intervals) : null;
+      const intervalsPayload = (insights?.intervals ?? intervals).map((row) => ({
+        houseId: row.houseId,
+        esiid: row.esiid,
+        meter: row.meter,
+        timestamp: row.timestamp.toISOString(),
+        kwh: row.kwh,
+        source: row.source,
+        rawSourceId: row.rawSourceId,
+      }));
+
+      const dataset = selected
+        ? {
+            summary: selected.summary,
+            series: selected.series,
+            intervals: intervalsPayload,
+            daily: insights?.dailyTotals ?? [],
+            monthly: insights?.monthlyTotals ?? [],
+            insights: insights
+              ? {
+                  fifteenMinuteAverages: insights.fifteenMinuteAverages,
+                  peakDay: insights.peakDay,
+                  peakHour: insights.peakHour,
+                  baseload: insights.baseload,
+                  weekdayVsWeekend: insights.weekdayVsWeekend,
+                }
+              : null,
+          }
+        : null;
+
       results.push({
         houseId: house.id,
         label: house.label || house.addressLine1,
@@ -309,7 +409,7 @@ export async function GET(_request: NextRequest) {
           state: house.addressState,
         },
         esiid: house.esiid,
-        dataset: selected,
+        dataset,
         alternatives: {
           smt: smtDataset?.summary ?? null,
           greenButton: greenDataset?.summary ?? null,
