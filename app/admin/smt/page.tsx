@@ -414,8 +414,8 @@ export default function AdminSmtToolsPage() {
       <div className="space-y-3 rounded border border-neutral-200 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold text-neutral-900">Normalize Status (dry run)</h2>
-            <p className="text-sm text-neutral-600">Shows the last raw SMT files and what normalization would do (no writes).</p>
+            <h2 className="text-lg font-semibold text-neutral-900">Normalize Status (live)</h2>
+            <p className="text-sm text-neutral-600">Runs normalization against the latest raw SMT files and shows actual writes (overwrite window).</p>
             {normStatus?.tsMax ? (
               <p className="text-xs text-neutral-500">Coverage {normStatus.tsMin ?? '—'} → {normStatus.tsMax ?? '—'}</p>
             ) : null}

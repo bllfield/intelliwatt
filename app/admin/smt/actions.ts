@@ -91,7 +91,7 @@ export async function fetchNormalizeStatuses(limit = 5): Promise<NormalizeRunSum
     }
 
     const baseUrl = resolveBaseUrl();
-    const url = new URL(`/api/admin/smt/normalize?limit=${encodeURIComponent(Math.max(1, limit))}&dryRun=1`, baseUrl);
+    const url = new URL(`/api/admin/smt/normalize?limit=${encodeURIComponent(Math.max(1, limit))}&dryRun=0`, baseUrl);
 
     const res = await fetch(url, {
       method: 'POST',
