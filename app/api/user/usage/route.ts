@@ -85,7 +85,7 @@ async function getGreenButtonWindow(usageClient: any, houseId: string, rawId: st
 
   if (!latest?.timestamp) return null;
 
-  const cutoff = new Date(latest.timestamp.getTime() - 400 * DAY_MS); // ~13 months
+  const cutoff = new Date(latest.timestamp.getTime() - 365 * DAY_MS); // strict last 12 months
   return { latest: latest.timestamp, cutoff };
 }
 
