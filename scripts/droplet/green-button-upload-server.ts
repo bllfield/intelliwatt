@@ -579,7 +579,13 @@ app.post("/upload", upload.single("file"), async (req: Request, res: Response) =
   let uploadRecordId: string | null = null;
   let rawRecordId: string | null = null;
   try {
+    logEvent("request.received", {
+      contentLength: req.headers["content-length"],
+      secretConfigured: Boolean(SECRET),
+    });
+
     if (!SECRET) {
+      logEvent("request.rejected", { reason: "missing_secret" });
       res.status(500).json({ ok: false, error: "server_not_configured" });
       return;
     }
@@ -596,11 +602,21 @@ app.post("/upload", upload.single("file"), async (req: Request, res: Response) =
         : undefined);
 
     if (!payloadEncoded || !signature) {
+      logEvent("request.rejected", {
+        reason: "missing_payload_or_signature",
+        hasPayload: Boolean(payloadEncoded),
+        hasSignature: Boolean(signature),
+      });
       res.status(401).json({ ok: false, error: "missing_signature" });
       return;
     }
 
     if (!verifySignature(payloadEncoded, signature)) {
+      logEvent("request.rejected", {
+        reason: "invalid_signature",
+        payloadEncodedLength: payloadEncoded.length,
+        hasSignature: Boolean(signature),
+      });
       res.status(401).json({ ok: false, error: "invalid_signature" });
       return;
     }
