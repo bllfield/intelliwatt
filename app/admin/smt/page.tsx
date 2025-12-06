@@ -6,9 +6,11 @@ import {
   normalizeLatestServerAction,
   fetchNormalizeStatuses,
   fetchRecentIntervals,
+  fetchPipelineDebug,
   type SmtPullStatusesPayload,
   type NormalizeRunSummary,
   type IntervalPreview,
+  type PipelineDebug,
 } from './actions';
 
 type MonitorPayload = SmtPullStatusesPayload;
@@ -29,6 +31,9 @@ export default function AdminSmtToolsPage() {
   const [intervalPreview, setIntervalPreview] = useState<IntervalPreview | null>(null);
   const [intervalPreviewError, setIntervalPreviewError] = useState<string | null>(null);
   const [isIntervalPreviewPending, startIntervalPreviewTransition] = useTransition();
+  const [pipelineDebug, setPipelineDebug] = useState<PipelineDebug | null>(null);
+  const [pipelineDebugError, setPipelineDebugError] = useState<string | null>(null);
+  const [isPipelineDebugPending, startPipelineDebugTransition] = useTransition();
 
   const handleNormalize = () => {
     setError(null);
@@ -104,6 +109,22 @@ export default function AdminSmtToolsPage() {
   useEffect(() => {
     handleRefreshIntervalPreview();
   }, [handleRefreshIntervalPreview]);
+
+  const handleRefreshPipelineDebug = useCallback(() => {
+    setPipelineDebugError(null);
+    startPipelineDebugTransition(async () => {
+      try {
+        const payload = await fetchPipelineDebug(50, 25);
+        setPipelineDebug(payload);
+      } catch (err: any) {
+        setPipelineDebugError(err?.message ?? String(err));
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    handleRefreshPipelineDebug();
+  }, [handleRefreshPipelineDebug]);
 
   const renderMonitorTable = () => {
     if (!monitor) {
@@ -297,6 +318,76 @@ export default function AdminSmtToolsPage() {
 {JSON.stringify(result, null, 2)}
         </pre>
       )}
+
+      <div className="space-y-3 rounded border border-neutral-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-neutral-900">Pipeline Debug</h2>
+            <p className="text-sm text-neutral-600">End-to-end ingest visibility: raw files, interval counts, latest rows.</p>
+            {pipelineDebug?.stats ? (
+              <p className="text-xs text-neutral-500">
+                Intervals: {pipelineDebug.stats.totalIntervals} · ESIIDs: {pipelineDebug.stats.uniqueEsiids} ·
+                Window: {pipelineDebug.stats.tsMin ?? '—'} → {pipelineDebug.stats.tsMax ?? '—'}
+              </p>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            onClick={handleRefreshPipelineDebug}
+            disabled={isPipelineDebugPending}
+            className="rounded border border-neutral-300 bg-neutral-50 px-3 py-1.5 text-sm font-medium text-neutral-700 transition hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isPipelineDebugPending ? 'Refreshing…' : 'Refresh'}
+          </button>
+        </div>
+
+        {pipelineDebugError && (
+          <div className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-700">
+            {pipelineDebugError}
+          </div>
+        )}
+
+        <div className="grid gap-4 lg:grid-cols-2">
+          <div className="space-y-2">
+            <h3 className="text-sm font-semibold text-neutral-800">Raw files (latest)</h3>
+            <div className="max-h-80 overflow-auto rounded border border-neutral-200 bg-neutral-900 p-3 text-xs text-neutral-100">
+              {pipelineDebug?.rawFiles?.length ? (
+                pipelineDebug.rawFiles.map((file) => (
+                  <div key={file.id} className="border-b border-neutral-800 py-1 last:border-none">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-mono text-[11px] text-neutral-200">{file.filename}</span>
+                      <span className="text-[11px] text-neutral-400">{(file.sizeBytes ?? 0).toLocaleString()} bytes</span>
+                    </div>
+                    <div className="text-[11px] text-neutral-400">{file.source ?? 'smt'} · {file.createdAt}</div>
+                    <div className="text-[10px] text-neutral-500">sha256 {file.sha256}</div>
+                  </div>
+                ))
+              ) : (
+                <div className="text-neutral-400">No raw files found.</div>
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <h3 className="text-sm font-semibold text-neutral-800">Latest intervals</h3>
+            <div className="max-h-80 overflow-auto rounded border border-neutral-200 bg-neutral-900 p-3 text-xs text-neutral-100">
+              {pipelineDebug?.intervals?.length ? (
+                pipelineDebug.intervals.map((row) => (
+                  <div key={`${row.esiid}-${row.meter}-${row.ts}`} className="flex items-center gap-3 border-b border-neutral-800 py-1 last:border-none">
+                    <span className="min-w-[150px] font-mono text-[11px] text-neutral-300">{row.ts}</span>
+                    <span className="w-28 font-mono text-[11px] uppercase text-neutral-200">{row.esiid}</span>
+                    <span className="w-16 font-mono text-[11px] uppercase text-neutral-300">{row.meter}</span>
+                    <span className="w-16 text-right font-mono text-[11px] text-neutral-100">{row.kwh.toFixed(3)}</span>
+                    <span className="flex-1 text-[11px] text-neutral-400">{row.source ?? 'smt'} · {row.createdAt}</span>
+                  </div>
+                ))
+              ) : (
+                <div className="text-neutral-400">No intervals found.</div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
 
       <div className="space-y-3 rounded border border-neutral-200 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">

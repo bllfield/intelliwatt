@@ -116,6 +116,35 @@ export type IntervalPreview = {
   tsMax: string | null;
 };
 
+export type PipelineDebug = {
+  stats: {
+    totalIntervals: number;
+    uniqueEsiids: number;
+    tsMin: string | null;
+    tsMax: string | null;
+  };
+  rawFiles: Array<{
+    id: string;
+    filename: string;
+    sizeBytes: number | null;
+    sha256: string | null;
+    createdAt: string;
+    receivedAt: string | null;
+    source: string | null;
+    storagePath: string | null;
+    contentType: string | null;
+  }>;
+  intervals: Array<{
+    id: string;
+    esiid: string;
+    meter: string;
+    ts: string;
+    kwh: number;
+    source: string | null;
+    createdAt: string;
+  }>;
+};
+
 export async function fetchRecentIntervals(days = 2, limit = 500): Promise<IntervalPreview> {
   const windowMs = Math.max(1, days) * 24 * 60 * 60 * 1000;
   const cutoff = new Date(Date.now() - windowMs);
@@ -160,6 +189,24 @@ export async function fetchRecentIntervals(days = 2, limit = 500): Promise<Inter
     tsMin,
     tsMax,
   };
+}
+
+export async function fetchPipelineDebug(intervalsLimit = 25, rawLimit = 15): Promise<PipelineDebug> {
+  const url = `/api/admin/ui/smt/pipeline-debug?intervalsLimit=${encodeURIComponent(intervalsLimit)}&rawLimit=${encodeURIComponent(rawLimit)}`;
+  const res = await fetch(url, {
+    method: 'GET',
+    headers: {
+      'content-type': 'application/json',
+    },
+    cache: 'no-store',
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`Pipeline debug fetch failed: ${res.status} ${text}`.trim());
+  }
+
+  return res.json();
 }
 
 type MonitorAddress = {
