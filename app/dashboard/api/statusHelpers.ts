@@ -94,6 +94,20 @@ export function deriveGreenButtonStatus(
     };
   }
 
+  const rawStatus = upload.parseStatus?.toLowerCase() ?? "";
+  const isError = rawStatus.includes("error") || rawStatus === "failed";
+  if (isError) {
+    return {
+      label: "ERROR",
+      tone: "error",
+      message:
+        upload.parseMessage && upload.parseMessage.trim().length > 0
+          ? upload.parseMessage
+          : "We couldn’t parse this upload. Please re-export the file and try again.",
+      lastUpdated: upload.updatedAt ?? upload.createdAt,
+    };
+  }
+
   const normalizedMessage =
     upload.parseStatus &&
     upload.parseStatus.toLowerCase() !== "success" &&
@@ -104,7 +118,7 @@ export function deriveGreenButtonStatus(
   const hasCoverage = Boolean(upload.dateRangeStart && upload.dateRangeEnd);
   const isParseSuccess =
     upload.parseStatus &&
-    ["success", "complete"].includes(upload.parseStatus.toLowerCase());
+    ["success", "complete", "complete_with_warnings"].includes(upload.parseStatus.toLowerCase());
 
   // If coverage exists (we already normalized data), surface as active even if parseStatus wasn't updated.
   const label = hasCoverage || isParseSuccess
@@ -115,9 +129,7 @@ export function deriveGreenButtonStatus(
 
   const tone: StatusTone = hasCoverage || isParseSuccess
     ? "success"
-    : upload.parseStatus && upload.parseStatus.toLowerCase().includes("error")
-      ? "error"
-      : "warning";
+    : "warning";
 
   return {
     label,
