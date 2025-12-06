@@ -156,6 +156,9 @@ if (( ${#FILES[@]} == 0 )); then
   exit 0
 fi
 
+rate_limited="false"
+rate_limit_reset=""
+
 for file_path in "${FILES[@]}"; do
   sha256="$(sha256sum "$file_path" | awk '{print $1}')"
   if grep -qx "$sha256" "$SEEN_FILE"; then
@@ -211,6 +214,11 @@ for file_path in "${FILES[@]}"; do
     if [[ "$http_code" == "200" || "$http_code" == "201" ]]; then
       log "Droplet upload success ($http_code): $(jq -c '.message // .' "$RESP_FILE" 2>/dev/null || cat "$RESP_FILE")"
       printf '%s\n' "$sha256" >>"$SEEN_FILE"
+    elif [[ "$http_code" == "429" ]]; then
+      rate_limit_reset="$(jq -r '.resetAt // empty' "$RESP_FILE" 2>/dev/null || true)"
+      log "Droplet upload failed (rate limited 429); stopping this run. resetAt=${rate_limit_reset:-unknown}"
+      rate_limited="true"
+      break
     else
       log "Droplet upload failed ($http_code): $(cat "$RESP_FILE")"
     fi
@@ -283,6 +291,14 @@ PY
     MATERIALIZED_TMP_DIR=""
   fi
 
+  if [[ "$rate_limited" == "true" ]]; then
+    break
+  fi
+
 done
+
+if [[ "$rate_limited" == "true" ]]; then
+  log "Run halted early due to upload rate limit. Will retry on next scheduled run after reset=${rate_limit_reset:-unknown}"
+fi
 
 log "Ingest run complete"
