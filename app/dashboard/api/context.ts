@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/db";
+import { usagePrisma } from "@/lib/db/usageClient";
 import { normalizeEmail } from "@/lib/utils/email";
 
 type UserSummary = { id: string; email: string };
@@ -160,6 +161,47 @@ export async function loadUsageEntryContext(): Promise<UsageEntryContext> {
       },
     }));
 
+  // Fallback: if a Green Button upload never updated its coverage but intervals exist,
+  // surface coverage so the dashboard can show ACTIVE instead of stuck PENDING.
+  let gbCoverage: { start: Date | null; end: Date | null; count: number } | null = null;
+  if (houseAddress) {
+    const coverage = await (prismaAny.usagePrisma ?? usagePrisma)?.greenButtonInterval.aggregate({
+      where: { homeId: houseAddress.id },
+      _count: { _all: true },
+      _min: { timestamp: true },
+      _max: { timestamp: true },
+    }).catch(() => null);
+
+    if (coverage && (coverage._count?._all ?? 0) > 0) {
+      gbCoverage = {
+        start: coverage._min?.timestamp ?? null,
+        end: coverage._max?.timestamp ?? null,
+        count: coverage._count?._all ?? 0,
+      };
+    }
+  }
+
+  const resolvedGreenButtonUpload = greenButtonUpload
+    ? {
+        ...greenButtonUpload,
+        dateRangeStart: greenButtonUpload.dateRangeStart ?? gbCoverage?.start ?? null,
+        dateRangeEnd: greenButtonUpload.dateRangeEnd ?? gbCoverage?.end ?? null,
+      }
+    : gbCoverage
+      ? {
+          id: "derived-coverage",
+          createdAt: gbCoverage.start ?? new Date(),
+          updatedAt: gbCoverage.end ?? new Date(),
+          parseStatus: "complete",
+          parseMessage: null,
+          dateRangeStart: gbCoverage.start,
+          dateRangeEnd: gbCoverage.end,
+          intervalMinutes: 15,
+          fileName: "derived",
+          fileSizeBytes: null,
+        }
+      : null;
+
   const manualUsageUpload =
     houseAddress &&
     (await prismaAny.manualUsageUpload.findFirst({
@@ -180,7 +222,7 @@ export async function loadUsageEntryContext(): Promise<UsageEntryContext> {
     houseAddress,
     existingAuthorization,
     displacedAttention,
-    greenButtonUpload,
+    greenButtonUpload: resolvedGreenButtonUpload,
     manualUsageUpload,
   };
 }
