@@ -8,6 +8,8 @@ import { normalizeSmtIntervals, type NormalizeStats } from '@/app/lib/smt/normal
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+const INSERT_BATCH_SIZE = 4000; // avoid Postgres parameter limits on large files
+
 const s3Config = (() => {
   const bucket = process.env.S3_BUCKET;
   const endpoint = process.env.S3_ENDPOINT || process.env.DO_SPACES_ENDPOINT;
@@ -182,19 +184,28 @@ export async function POST(req: NextRequest) {
                 });
               }
 
-              const result = await tx.smtInterval.createMany({
-                data: intervals.map((interval) => ({
+              let insertedTotal = 0;
+              for (let i = 0; i < intervals.length; i += INSERT_BATCH_SIZE) {
+                const slice = intervals.slice(i, i + INSERT_BATCH_SIZE).map((interval) => ({
                   esiid: interval.esiid,
                   meter: interval.meter,
                   ts: interval.ts,
                   kwh: new Prisma.Decimal(interval.kwh),
                   source: interval.source ?? file.source ?? 'smt',
-                })),
-                skipDuplicates: false,
-              });
+                }));
 
-              inserted = result.count;
-              skipped = intervals.length - result.count;
+                if (slice.length === 0) continue;
+
+                const result = await tx.smtInterval.createMany({
+                  data: slice,
+                  skipDuplicates: false,
+                });
+
+                insertedTotal += result.count;
+              }
+
+              inserted = insertedTotal;
+              skipped = intervals.length - insertedTotal;
             });
           } catch (err) {
             console.error('[smt/normalize] failed overwrite transaction', {
@@ -209,18 +220,27 @@ export async function POST(req: NextRequest) {
         } else {
           // Fallback: if we somehow lack a range, retain old idempotent behavior
           try {
-            const result = await prisma.smtInterval.createMany({
-              data: intervals.map((interval) => ({
+            let insertedTotal = 0;
+            for (let i = 0; i < intervals.length; i += INSERT_BATCH_SIZE) {
+              const slice = intervals.slice(i, i + INSERT_BATCH_SIZE).map((interval) => ({
                 esiid: interval.esiid,
                 meter: interval.meter,
                 ts: interval.ts,
                 kwh: new Prisma.Decimal(interval.kwh),
                 source: interval.source ?? file.source ?? 'smt',
-              })),
-              skipDuplicates: true,
-            });
-            inserted = result.count;
-            skipped = intervals.length - result.count;
+              }));
+
+              if (slice.length === 0) continue;
+
+              const result = await prisma.smtInterval.createMany({
+                data: slice,
+                skipDuplicates: true,
+              });
+              insertedTotal += result.count;
+            }
+
+            inserted = insertedTotal;
+            skipped = intervals.length - insertedTotal;
           } catch (err) {
             if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
               skipped = intervals.length;
