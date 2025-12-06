@@ -40,6 +40,7 @@ export default function QuickAddressEntry({
   const [unitNumber, setUnitNumber] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(!userAddress);
   const [placeDetails, setPlaceDetails] = useState<any>(null); // Store full Google Place object
   const containerRef = useRef<HTMLDivElement | null>(null);
   const autocompleteElementRef = useRef<any>(null);
@@ -247,6 +248,7 @@ export default function QuickAddressEntry({
 
     addressValueRef.current = userAddress;
     setAddress(userAddress);
+    setEditing(false);
     parsedAddressRef.current = null;
     placeDetailsRef.current = null;
     setPlaceDetails(null);
@@ -390,6 +392,7 @@ export default function QuickAddressEntry({
       placeDetailsRef.current = null;
       setPlaceDetails(null);
       parsedAddressRef.current = null;
+      setEditing(false);
       
       const savedEsiid = data?.address?.esiid ?? null;
       await wait(savedEsiid ? 800 : 2500);
@@ -398,12 +401,6 @@ export default function QuickAddressEntry({
       }
       if (onSaveResult) {
         onSaveResult(data);
-      }
-      if (redirectOnSuccess) {
-        router.push('/dashboard/api#smt');
-      }
-      if (onSaveResult) {
-        onSaveResult(null);
       }
     } catch (error) {
       console.error('Error saving address:', error);
@@ -428,6 +425,8 @@ export default function QuickAddressEntry({
     'rounded-2xl border border-[#00F0FF]/30 bg-brand-navy/95 p-6 text-brand-cyan shadow-[0_24px_70px_rgba(0,240,255,0.12)] sm:p-8';
   const containerClass = className ? `${baseClass} ${className}` : baseClass;
   const hasSavedAddress = Boolean(userAddress);
+  const showForm = editing || !hasSavedAddress;
+  const showSaved = hasSavedAddress && !editing;
 
   const resetAddress = () => {
     const widget = autocompleteElementRef.current;
@@ -458,9 +457,12 @@ export default function QuickAddressEntry({
             <p className="text-[11px] leading-relaxed text-[#9DFBFF]/55">{helperText}</p>
           ) : null}
         </div>
-        {hasSavedAddress ? (
+        {showSaved ? (
           <button
-            onClick={resetAddress}
+            onClick={() => {
+              resetAddress();
+              setEditing(true);
+            }}
             className="inline-flex items-center rounded-full border border-[#00F0FF]/30 px-4 py-1 text-[11px] font-semibold uppercase tracking-wide text-[#00F0FF] transition hover:border-[#00F0FF] hover:text-white"
           >
             Change address
@@ -469,7 +471,7 @@ export default function QuickAddressEntry({
       </div>
 
       <div className="mt-6 space-y-5">
-        {hasSavedAddress ? (
+        {showSaved ? (
           <div className="rounded-xl border border-[#39FF14]/30 bg-[#39FF14]/10 px-4 py-4 text-sm text-[#39FF14] shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
             <div className="flex items-start gap-3">
               <div className="mt-1 flex h-7 w-7 items-center justify-center rounded-full border border-[#39FF14]/40 bg-[#39FF14]/15 text-xs font-bold text-[#39FF14]">
@@ -485,7 +487,7 @@ export default function QuickAddressEntry({
           </div>
         ) : null}
 
-        {!hasSavedAddress ? (
+        {showForm ? (
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)] lg:grid-cols-[minmax(0,2fr),minmax(0,1fr)]">
               <div className="space-y-2">
