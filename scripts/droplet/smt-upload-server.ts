@@ -21,10 +21,8 @@ const CUSTOMER_LIMIT = Number(
 const CUSTOMER_WINDOW_MS = Number(
   process.env.SMT_CUSTOMER_UPLOAD_WINDOW_MS || 30 * 24 * 60 * 60 * 1000,
 );
-const NORMALIZE_LIMIT = Math.min(
-  Math.max(Number(process.env.SMT_NORMALIZE_LIMIT || "100"), 1),
-  100,
-);
+// No cap here; allow operator to pass huge limits to normalize everything in one run.
+const NORMALIZE_LIMIT = Math.max(Number(process.env.SMT_NORMALIZE_LIMIT || "100000"), 1);
 
 // Main app webhook for registering and normalizing uploaded files
 const INTELLIWATT_BASE_URL = process.env.INTELLIWATT_BASE_URL || "https://intelliwatt.com";
