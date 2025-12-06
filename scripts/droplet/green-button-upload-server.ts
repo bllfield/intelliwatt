@@ -86,6 +86,12 @@ type UploadPayload = {
   issuedAt?: string;
   expiresAt?: string;
 };
+
+function decodePayload(encoded: string): UploadPayload {
+  const buffer = base64UrlToBuffer(encoded);
+  const json = buffer.toString("utf8");
+  return JSON.parse(json) as UploadPayload;
+}
  
 app.post("/upload", upload.single("file"), async (req: Request, res: Response) => {
   let uploadRecordId: string | null = null;
