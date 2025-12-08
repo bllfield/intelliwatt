@@ -1341,6 +1341,7 @@ class H(BaseHTTPRequestHandler):
         response_steps: List[Dict[str, Any]] = []
 
         for step in validated_steps:
+            # Execute each SMT step in order, capturing responses for the client.
             try:
                 smt_response = smt_post(step["path"], step["body"])
             except Exception as exc:
