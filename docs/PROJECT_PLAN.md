@@ -227,6 +227,18 @@ Notes:
 - Added `/admin/usage` Usage Test Console so Ops can run SMT + Green Button upload tests, monitor latest intervals/raw files, and review consolidated debugging output (leverages `/api/admin/usage/debug` + existing Green Button records endpoint).
 - Added customer-facing refresh actions: `/dashboard/api` now exposes a `Refresh SMT Data` control (POST `/api/smt/authorization/status` + `/api/user/usage/refresh`) and `/dashboard/usage` includes `Update usage data`, wiring both pages into the on-demand normalization pipeline so stale SMT intervals can be rehydrated instantly.
 
+## PC-2025-12-08 · Green Button Upload Hardening & Droplet Stability
+
+- Frontend: Green Button uploads now go **droplet-only** (no Vercel fallback) via `/api/green-button/upload-ticket` → `uploads.intelliwatt.com/upload`. Errors surface from the droplet response so users see real failures.
+- Droplet uploader (`scripts/droplet/green-button-upload-server.js`):
+  - Enforces per-home in-memory lock; pre-cleans existing GB/SMT data for the home; trims to last 365 days; clamps interval kWh to 10; caps total intervals (~60k) via batching (4k slices).
+  - Awards HitTheJackWatt entry on GB upload, matching SMT behavior; uses literal status string to avoid Prisma enum runtime mismatch; tracks homeId for safe lock release to prevent crashes.
+  - Env dependencies: `GREEN_BUTTON_UPLOAD_SECRET`, `GREEN_BUTTON_UPLOAD_URL=https://uploads.intelliwatt.com/upload`, `USAGE_DATABASE_URL` (usage module DB), plus existing port/max-bytes/origin settings.
+- Systemd/service hygiene on droplet:
+  - Drop-in `ExecStartPre=/usr/local/bin/gb-kill-8091.sh` that force-kills any PID on 8091 before start; `Restart=always`, `RestartSec=2s`, `LimitNOFILE=65535`.
+  - Helper script retried kills and final `-9` to avoid `EADDRINUSE` during restarts; logs attempts in journal.
+- Ops steps applied (prod droplet): secret + usage DB URL added to `/etc/default/intelliwatt-smt`; service reloaded/restarted; uploads now bind cleanly to 8091 with a single node PID.
+
 ### Usage Module Database (`intelliwatt_usage`)
 
 - Connection: `USAGE_DATABASE_URL`
