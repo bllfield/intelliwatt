@@ -7,9 +7,9 @@ import SmtAddressCaptureCard from "@/components/smt/SmtAddressCaptureCard";
 import { SmtAuthorizationForm } from "@/components/smt/SmtAuthorizationForm";
 import RefreshSmtButton from "@/components/smt/RefreshSmtButton";
 import LocalTime from "@/components/LocalTime";
-import dynamic from "next/dynamic";
+import nextDynamic from "next/dynamic";
 
-const SmtBillUploadCard = dynamic(() => import("@/components/smt/SmtBillUploadCard"), {
+const SmtBillUploadCard = nextDynamic(() => import("@/components/smt/SmtBillUploadCard"), {
   ssr: false,
 });
 
