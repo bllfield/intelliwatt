@@ -1347,6 +1347,13 @@ class H(BaseHTTPRequestHandler):
         response_steps: List[Dict[str, Any]] = []
 
         for step in validated_steps:
+                        esiid,
+                        fetched_meter,
+                    )
+                    return fetched_meter
+
+                return meter_number
+
             try:
                 smt_response = smt_post(step["path"], step["body"])
             except Exception as exc:
@@ -1867,7 +1874,7 @@ class H(BaseHTTPRequestHandler):
             resp_body = run_default_command()
             if isinstance(payload, dict):
                 reason = payload.get("reason")
-                if reason == "smt_authorized":
+                if reason in ("smt_authorized", "admin_triggered"):
                     resp_body = handle_smt_authorized(payload)
                 elif reason == "smt_meter_info":
                     resp_body = handle_smt_meter_info(payload)
@@ -1879,8 +1886,9 @@ class H(BaseHTTPRequestHandler):
             msg = f"webhook error: {e!r}"
             print("[ERROR]", msg, flush=True)
             self.send_response(500)
+            self.send_header("Content-Type", "application/json")
             self.end_headers()
-            self.wfile.write(msg.encode())
+            self.wfile.write(json.dumps({"ok": False, "error": msg}).encode("utf-8"))
 
 
 if __name__ == "__main__":
