@@ -86,7 +86,19 @@ export default function SmtBillUploadCard({ className }: Props) {
             className="hidden"
             onChange={(e) => {
               const selected = Array.from(e.target.files ?? []);
-              setFiles(selected);
+              if (selected.length === 0) return;
+
+              setFiles((prev) => {
+                const merged = [...prev, ...selected];
+                // Remove duplicates by name+size to avoid double uploads of the same file
+                const seen = new Set<string>();
+                return merged.filter((file) => {
+                  const key = `${file.name}-${file.size}`;
+                  if (seen.has(key)) return false;
+                  seen.add(key);
+                  return true;
+                });
+              });
               setUploaded(false);
               setStatus(null);
             }}
