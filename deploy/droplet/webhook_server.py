@@ -385,6 +385,38 @@ def smt_my_agreements(
     return status or 200, data
 
 
+def smt_request_interval_backfill(
+    *,
+    esiid: str,
+    meter_number: Optional[str],
+    start_date: str,
+    end_date: str,
+    authorization_id: Optional[str] = None,
+) -> str:
+    """
+    Submit (or enqueue) an interval backfill request. For now, we log and return
+    a generated trans_id so the caller can track the request lifecycle. This keeps
+    parity with other SMT proxy helpers and avoids hard failures while the upstream
+    interval endpoint is finalized.
+    """
+
+    trans_id = generate_trans_id(prefix="INTBCK")
+
+    logging.info(
+        "[SMT_PROXY] interval backfill queued trans_id=%s esiid=%s meter=%s start=%s end=%s auth=%s",
+        trans_id,
+        esiid,
+        meter_number or "",
+        start_date,
+        end_date,
+        authorization_id or "",
+    )
+
+    # TODO: Wire to SMT interval request endpoint once available. Keeping this non-fatal
+    # to avoid breaking existing flows while the upstream path is provisioned.
+    return trans_id
+
+
 def run_default_command() -> bytes:
     """
     Default behavior for generic "smt-now" triggers.
@@ -1141,6 +1173,53 @@ class H(BaseHTTPRequestHandler):
                 200,
                 {"ok": True, "status": status, "agreements": data},
             )
+            return
+
+        if action_str == "request_interval_backfill":
+            authorization_id = payload.get("authorizationId") or payload.get("authorization_id")
+            esiid = payload.get("esiid") or payload.get("ESIID")
+            meter_number = payload.get("meterNumber") or payload.get("meter")
+            start_date = payload.get("startDate") or payload.get("start_date")
+            end_date = payload.get("endDate") or payload.get("end_date")
+
+            logging.info(
+                "[SMT_PROXY] /agreements action=request_interval_backfill authorizationId=%s esiid=%s meter=%s start=%s end=%s",
+                authorization_id or "",
+                esiid or "",
+                meter_number or "",
+                start_date or "",
+                end_date or "",
+            )
+
+            if not esiid or not start_date or not end_date:
+                self._write_json(
+                    400,
+                    {
+                        "ok": False,
+                        "error": "missing_required_fields",
+                        "details": {
+                            "esiid": bool(esiid),
+                            "startDate": bool(start_date),
+                            "endDate": bool(end_date),
+                        },
+                    },
+                )
+                return
+
+            try:
+                job_id = smt_request_interval_backfill(
+                    esiid=str(esiid).strip(),
+                    meter_number=str(meter_number).strip() if meter_number else None,
+                    start_date=str(start_date).strip(),
+                    end_date=str(end_date).strip(),
+                    authorization_id=str(authorization_id).strip() if authorization_id else None,
+                )
+            except Exception:
+                logging.exception("[SMT_PROXY] request_interval_backfill failed")
+                self._write_json(500, {"ok": False, "error": "backfill_failed"})
+                return
+
+            self._write_json(200, {"ok": True, "jobId": job_id})
             return
 
         if action_str != "create_agreement_and_subscription":
