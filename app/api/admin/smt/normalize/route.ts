@@ -150,109 +150,72 @@ export async function POST(req: NextRequest) {
     let inserted = 0;
     let skipped = 0;
 
-    if (!dryRun) {
-      if (intervals.length > 0) {
-        const hasRange = !!stats.tsMin && !!stats.tsMax;
+    // Derive tsMin/tsMax directly from parsed intervals to ensure full-file coverage
+    const timestamps = intervals.map((i) => i.ts.getTime()).filter((ms) => Number.isFinite(ms));
+    const tsMinDate = timestamps.length ? new Date(Math.min(...timestamps)) : undefined;
+    const tsMaxDate = timestamps.length ? new Date(Math.max(...timestamps)) : undefined;
 
-        if (hasRange) {
-          // Overwrite behavior: delete existing intervals for the same (esiid, meter)
-          // within this file's [tsMin, tsMax] window, then insert fresh records.
-          const tsMinDate = new Date(stats.tsMin!);
-          const tsMaxDate = new Date(stats.tsMax!);
+    if (!dryRun && tsMinDate && tsMaxDate) {
+      const tsMinIso = tsMinDate.toISOString();
+      const tsMaxIso = tsMaxDate.toISOString();
+      const distinctPairs = Array.from(new Set(intervals.map((i) => `${i.esiid}|${i.meter}`))).map((key) => {
+        const [esiid, meter] = key.split('|');
+        return { esiid, meter };
+      });
 
-          try {
-            await prisma.$transaction(async (tx) => {
-              // Find distinct (esiid, meter) pairs present in this file
-              const distinctPairs = Array.from(
-                new Set(intervals.map((i) => `${i.esiid}|${i.meter}`)),
-              ).map((key) => {
-                const [esiid, meter] = key.split('|');
-                return { esiid, meter };
-              });
-
-              if (distinctPairs.length > 0) {
-                await tx.smtInterval.deleteMany({
-                  where: {
-                    OR: distinctPairs.map((pair) => ({
-                      esiid: pair.esiid,
-                      meter: pair.meter,
-                      ts: {
-                        gte: tsMinDate,
-                        lte: tsMaxDate,
-                      },
-                    })),
+      try {
+        await prisma.$transaction(async (tx) => {
+          if (distinctPairs.length > 0) {
+            await tx.smtInterval.deleteMany({
+              where: {
+                OR: distinctPairs.map((pair) => ({
+                  esiid: pair.esiid,
+                  meter: pair.meter,
+                  ts: {
+                    gte: tsMinDate,
+                    lte: tsMaxDate,
                   },
-                });
-              }
-
-              let insertedTotal = 0;
-              for (let i = 0; i < intervals.length; i += INSERT_BATCH_SIZE) {
-                const slice = intervals.slice(i, i + INSERT_BATCH_SIZE).map((interval) => ({
-                  esiid: interval.esiid,
-                  meter: interval.meter,
-                  ts: interval.ts,
-                  kwh: new Prisma.Decimal(interval.kwh),
-                  source: interval.source ?? file.source ?? 'smt',
-                }));
-
-                if (slice.length === 0) continue;
-
-                const result = await tx.smtInterval.createMany({
-                  data: slice,
-                  skipDuplicates: false,
-                });
-
-                insertedTotal += result.count;
-              }
-
-              inserted = insertedTotal;
-              skipped = intervals.length - insertedTotal;
+                })),
+              },
             });
-          } catch (err) {
-            console.error('[smt/normalize] failed overwrite transaction', {
-              fileId: file.id,
-              filename: file.filename,
-              tsMin: stats.tsMin,
-              tsMax: stats.tsMax,
-              err,
+          }
+
+          let insertedTotal = 0;
+          for (let i = 0; i < intervals.length; i += INSERT_BATCH_SIZE) {
+            const slice = intervals.slice(i, i + INSERT_BATCH_SIZE).map((interval) => ({
+              esiid: interval.esiid,
+              meter: interval.meter,
+              ts: interval.ts,
+              kwh: new Prisma.Decimal(interval.kwh),
+              source: interval.source ?? file.source ?? 'smt',
+            }));
+
+            if (slice.length === 0) continue;
+
+            const result = await tx.smtInterval.createMany({
+              data: slice,
+              skipDuplicates: false,
             });
-            throw err;
+
+            insertedTotal += result.count;
           }
-        } else {
-          // Fallback: if we somehow lack a range, retain old idempotent behavior
-          try {
-            let insertedTotal = 0;
-            for (let i = 0; i < intervals.length; i += INSERT_BATCH_SIZE) {
-              const slice = intervals.slice(i, i + INSERT_BATCH_SIZE).map((interval) => ({
-                esiid: interval.esiid,
-                meter: interval.meter,
-                ts: interval.ts,
-                kwh: new Prisma.Decimal(interval.kwh),
-                source: interval.source ?? file.source ?? 'smt',
-              }));
 
-              if (slice.length === 0) continue;
-
-              const result = await prisma.smtInterval.createMany({
-                data: slice,
-                skipDuplicates: true,
-              });
-              insertedTotal += result.count;
-            }
-
-            inserted = insertedTotal;
-            skipped = intervals.length - insertedTotal;
-          } catch (err) {
-            if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-              skipped = intervals.length;
-            } else {
-              throw err;
-            }
-          }
-        }
+          inserted = insertedTotal;
+          skipped = intervals.length - insertedTotal;
+        });
+      } catch (err) {
+        console.error('[smt/normalize] failed overwrite transaction', {
+          fileId: file.id,
+          filename: file.filename,
+          tsMin: tsMinIso,
+          tsMax: tsMaxIso,
+          err,
+        });
+        throw err;
       }
-    } else {
+    } else if (dryRun) {
       inserted = intervals.length;
+      skipped = 0;
     }
 
     summary.filesProcessed += 1;

@@ -20,7 +20,8 @@
 - `GREEN_BUTTON_UPLOAD_ALLOW_ORIGIN` — Optional CORS allowlist for the droplet uploader (defaults to `https://intelliwatt.com` when unset).
 
 ## Databases
-- `DATABASE_URL` — Primary IntelliWatt application database (master normalized dataset; used by `prisma/schema.prisma`).
+- `DATABASE_URL` — Primary IntelliWatt application database (master normalized dataset; used by `prisma/schema.prisma`). **Web app (Vercel) stays on this pooled URL (PgBouncer).**
+- `DIRECT_URL` — Direct Postgres connection for Prisma migrations and backend jobs that should avoid PgBouncer (e.g., SMT ingest/normalize on the droplet). **Do not repoint to the pool.**
 - `CURRENT_PLAN_DATABASE_URL` — **Separate PostgreSQL database dedicated to the Current Plan / Current Rate module.** Must not reuse the primary `DATABASE_URL`. Point this to a distinct database instance (e.g., `intelliwatt_current_plan`) created just for manual plan entries and bill uploads.
 - `USAGE_DATABASE_URL` — Module DB for raw and processed usage data (SMT intervals, Green Button uploads, manual entries) before normalization into master usage tables.
 - `HOME_DETAILS_DATABASE_URL` — Module DB for home characteristics and energy-impact factors (square footage, insulation, windows, thermostat habits, HVAC type, etc.).
