@@ -52,6 +52,11 @@ const SMT_AGREEMENTS_ENABLED =
   process.env.SMT_AGREEMENTS_ENABLED === "true" ||
   process.env.SMT_AGREEMENTS_ENABLED === "1";
 
+// Backfill (interval) support is not implemented on the SMT proxy yet. Guard it with a flag.
+const SMT_INTERVAL_BACKFILL_ENABLED =
+  process.env.SMT_INTERVAL_BACKFILL_ENABLED === "true" ||
+  process.env.SMT_INTERVAL_BACKFILL_ENABLED === "1";
+
 // Droplet proxy wiring (already configured in Vercel).
 const SMT_PROXY_AGREEMENTS_URL =
   process.env.SMT_PROXY_AGREEMENTS_URL ||
@@ -86,6 +91,14 @@ function buildProxyUrl(path: string): string {
 export async function requestSmtBackfillForAuthorization(
   req: SmtBackfillRequest,
 ): Promise<{ ok: boolean; message?: string }> {
+  if (!SMT_INTERVAL_BACKFILL_ENABLED) {
+    console.info("[SMT_BACKFILL] interval backfill disabled (proxy does not support it yet)", {
+      authorizationId: req.authorizationId,
+      esiid: req.esiid,
+    });
+    return { ok: false, message: "interval backfill disabled" };
+  }
+
   if (!SMT_PROXY_AGREEMENTS_URL && !SMT_PROXY_TOKEN) {
     console.warn("[SMT_BACKFILL] Proxy not configured; skipping backfill request.", {
       authorizationId: req.authorizationId,
@@ -117,7 +130,11 @@ export async function requestSmtBackfillForAuthorization(
 
     if (!res.ok) {
       const text = await res.text();
-      console.error("[SMT_BACKFILL] HTTP error", res.status, text.slice(0, 500));
+      console.warn("[SMT_BACKFILL] HTTP error", {
+        action: payload.action,
+        status: res.status,
+        body: text.slice(0, 300),
+      });
       return {
         ok: false,
         message: `HTTP ${res.status}: ${text.slice(0, 200)}`,
