@@ -374,6 +374,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: 'BAD_JSON' }, { status: 400 });
   }
 
+  // For user/admin-triggered pulls (non-webhook), require a homeId so we always scope to a single home.
+  if (!hasWebhookAuth) {
+    const homeId = typeof body?.homeId === 'string' && body.homeId.trim().length > 0 ? body.homeId.trim() : null;
+    if (!homeId) {
+      return NextResponse.json(
+        { ok: false, error: 'HOME_ID_REQUIRED', message: 'homeId is required for SMT pull.' },
+        { status: 400 },
+      );
+    }
+  }
+
   if (body?.mode === 'inline') {
     // Guard: disable direct inline SMT uploads in production; require droplet large-file path instead.
     if (process.env.NODE_ENV === 'production') {
@@ -619,6 +630,7 @@ export async function POST(req: NextRequest) {
           reason: 'admin_triggered',
           esiid: resolvedEsiid,
           meter: meter || undefined,
+          houseId: typeof houseId === 'string' ? houseId : undefined,
           ts: Date.now(),
         }),
         cache: 'no-store',
