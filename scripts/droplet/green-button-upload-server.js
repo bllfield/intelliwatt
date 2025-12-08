@@ -542,6 +542,7 @@ app.post("/upload", upload.single("file"), async (req, res) => {
   let uploadRecordId = null;
   let rawRecordId = null;
   let homeLockAcquired = false;
+  let homeIdForLock = null;
   try {
     logEvent("request.received", {
       contentLength: req.headers["content-length"],
@@ -607,6 +608,8 @@ app.post("/upload", upload.single("file"), async (req, res) => {
       res.status(400).json({ ok: false, error: "payload_missing_fields" });
       return;
     }
+
+    homeIdForLock = payload.houseId;
 
     if (payload.expiresAt) {
       const expiresMs = Date.parse(payload.expiresAt);
@@ -922,7 +925,7 @@ app.post("/upload", upload.single("file"), async (req, res) => {
           data: {
             amount: Math.max(existingEntry.amount, 1),
             manualUsageId: manualUsage.id,
-            status: Prisma.EntryStatus.ACTIVE,
+            status: "ACTIVE",
             expiresAt: null,
             expirationReason: null,
             lastValidated: now,
@@ -936,7 +939,7 @@ app.post("/upload", upload.single("file"), async (req, res) => {
             type: "smart_meter_connect",
             amount: 1,
             manualUsageId: manualUsage.id,
-            status: Prisma.EntryStatus.ACTIVE,
+            status: "ACTIVE",
             lastValidated: now,
           },
         });
@@ -981,7 +984,7 @@ app.post("/upload", upload.single("file"), async (req, res) => {
     });
   } finally {
     if (homeLockAcquired) {
-      releaseHomeLock(payload?.houseId);
+      releaseHomeLock(homeIdForLock);
     }
   }
 });
