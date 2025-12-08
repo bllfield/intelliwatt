@@ -152,18 +152,16 @@ export function deriveManualStatus(
 ): EntryStatus {
   if (!manual) {
     return {
-      label: "Not recorded",
+      label: "Not Active",
       tone: "info",
       message:
-        "Log a manual placeholder if SMT access isn’t ready so your rewards stay active.",
+        "Log a manual reading for a jackpot entry if SMT or Green Button access isn’t available. It’s less accurate and a bit more work, so prefer SMT or Green Button when possible.",
     };
   }
 
   return {
-    label: "Placeholder active",
-    tone: "success",
-    message:
-      "We’ll keep your entries active with this manual reading until live data arrives.",
+    label: "Not Active",
+    tone: "info",
     lastUpdated: manual.uploadedAt,
     detail: `Expires ${manual.expiresAt.toLocaleDateString()}`,
   };

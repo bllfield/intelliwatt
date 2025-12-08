@@ -78,10 +78,10 @@ export default function SmtManualFallbackCard({ houseAddressId = null }: Props) 
 
   return (
     <div className="rounded-3xl border-2 border-brand-blue bg-brand-navy px-5 py-5 text-sm text-brand-cyan shadow-[0_16px_45px_rgba(16,46,90,0.22)] sm:px-6 sm:py-6">
-      <p className="font-semibold uppercase tracking-wide text-brand-cyan">Need to log usage manually?</p>
+      <p className="font-semibold uppercase tracking-wide text-brand-cyan">Manual Usage - Coming Soon</p>
       <p className="mt-2 text-brand-cyan/80">
-        If your utility account isn’t ready yet, record a manual placeholder so your rewards stay active. You can replace it
-        with live SMT data anytime.
+        Log a manual reading for a jackpot entry if you do not have SMT or Green Button data. It is less accurate and takes a
+        bit more work to enter. If available, please use SMT or Green Button for the best results.
       </p>
       <button
         type="button"
@@ -89,7 +89,7 @@ export default function SmtManualFallbackCard({ houseAddressId = null }: Props) 
         disabled={manualState === 'submitting'}
         className="mt-4 inline-flex items-center rounded-full border border-brand-blue px-5 py-2 text-xs font-semibold uppercase tracking-wide text-brand-blue transition hover:border-brand-blue/70 hover:bg-brand-blue/10 disabled:cursor-not-allowed disabled:opacity-60"
       >
-        {manualState === 'submitting' ? 'Recording manual usage…' : 'Record manual usage for now'}
+        {manualState === 'submitting' ? 'Recording manual usage…' : 'Update entry'}
       </button>
       {manualMessage ? (
         <p

@@ -258,7 +258,7 @@ export default async function UsageEntryHub() {
             </div>
           ) : null}
 
-          <div className="mt-1 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+          <div className="mt-1 grid gap-5 md:grid-cols-3">
             <OptionCard
               title="Smart Meter Texas"
               subtitle="Preferred"
@@ -279,7 +279,9 @@ export default async function UsageEntryHub() {
               subtitle="Utility exports"
               description={
                 <span className="text-brand-cyan/85">
-                  Download your usage as a Green Button XML/CSV file and upload it here. Ideal if SMT isn’t available yet.
+                  Download your usage as a Green Button XML/CSV file and upload it here. Ideal if SMT or an automatic data
+                  pull isn’t available yet. This provides better accuracy but takes more work than an automatic feed through
+                  SMT.
                 </span>
               }
               href="/dashboard/api/green-button"
@@ -288,13 +290,12 @@ export default async function UsageEntryHub() {
               disabledMessage={!user ? "Sign in to continue" : "Save your service address first"}
             />
             <OptionCard
-              title="Manual Usage Placeholder"
+              title="Manual Usage-Coming Soon"
               subtitle="Quick fallback"
               description={
                 <span className="text-brand-cyan/85">
-                  Log a manual placeholder reading so{" "}
-                  <span className="font-semibold text-[#39FF14]">jackpot entries</span> stay active while you wait for live
-                  data.
+                  Log a manual reading for a jackpot entry if you do not have SMT or Green Button access. It is less accurate
+                  and a bit more work, so please use SMT or Green Button when available for best results.
                 </span>
               }
               href="/dashboard/api/manual"
