@@ -7,6 +7,11 @@ import SmtAddressCaptureCard from "@/components/smt/SmtAddressCaptureCard";
 import { SmtAuthorizationForm } from "@/components/smt/SmtAuthorizationForm";
 import RefreshSmtButton from "@/components/smt/RefreshSmtButton";
 import LocalTime from "@/components/LocalTime";
+import dynamic from "next/dynamic";
+
+const SmtBillUploadCard = dynamic(() => import("@/components/smt/SmtBillUploadCard"), {
+  ssr: false,
+});
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0; 
@@ -98,6 +103,8 @@ export default async function UsageEntrySmartMeterPage() {
 
       <section className="bg-brand-white px-4 pb-12 pt-4">
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
+          <SmtBillUploadCard />
+
           <Link
             href="/dashboard/api"
             className="inline-flex items-center text-sm font-semibold text-brand-blue underline-offset-4 hover:underline"
