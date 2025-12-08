@@ -34,6 +34,21 @@ const upload = multer({
 
 const app = express();
 
+// Per-home lock to prevent concurrent uploads for the same home (avoids double work / conflicts)
+const inFlightHomes = new Set();
+
+function acquireHomeLock(homeId) {
+  if (!homeId) return true;
+  if (inFlightHomes.has(homeId)) return false;
+  inFlightHomes.add(homeId);
+  return true;
+}
+
+function releaseHomeLock(homeId) {
+  if (!homeId) return;
+  inFlightHomes.delete(homeId);
+}
+
 // Local Green Button parser + normalizer (JS port of lib/usage to avoid TS imports)
 function stripBom(input) {
   if (input.charCodeAt(0) === 0xfeff) {
@@ -526,6 +541,7 @@ function decodePayload(encoded) {
 app.post("/upload", upload.single("file"), async (req, res) => {
   let uploadRecordId = null;
   let rawRecordId = null;
+  let homeLockAcquired = false;
   try {
     logEvent("request.received", {
       contentLength: req.headers["content-length"],
@@ -628,6 +644,12 @@ app.post("/upload", upload.single("file"), async (req, res) => {
       prisma.greenButtonUpload.deleteMany({ where: { houseId: house.id } }),
       house.esiid ? prisma.smtInterval.deleteMany({ where: { esiid: house.esiid } }) : Promise.resolve(),
     ]);
+
+    if (!acquireHomeLock(payload.houseId)) {
+      res.status(429).json({ ok: false, error: "home_upload_in_progress" });
+      return;
+    }
+    homeLockAcquired = true;
 
     const buffer = file.buffer;
     const sha256 = createHash("sha256").update(buffer).digest("hex");
@@ -751,6 +773,19 @@ app.post("/upload", upload.single("file"), async (req, res) => {
     }
 
     const normalized = normalizeGreenButtonReadingsTo15Min(parsed.readings, { maxKwhPerInterval: 10 });
+    if (normalized.length > 60000) {
+      if (uploadRecordId) {
+        await prisma.greenButtonUpload.update({
+          where: { id: uploadRecordId },
+          data: {
+            parseStatus: "error",
+            parseMessage: "Normalized interval count exceeds limit (60k).",
+          },
+        });
+      }
+      res.status(422).json({ ok: false, error: "too_many_intervals" });
+      return;
+    }
     if (normalized.length === 0) {
       if (uploadRecordId) {
         await prisma.greenButtonUpload.update({
@@ -944,6 +979,10 @@ app.post("/upload", upload.single("file"), async (req, res) => {
       error: "internal_error",
       detail: String((error && error.message) || error),
     });
+  } finally {
+    if (homeLockAcquired) {
+      releaseHomeLock(payload?.houseId);
+    }
   }
 });
 
