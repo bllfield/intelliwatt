@@ -98,7 +98,8 @@ async function getSmtWindow(esiid: string) {
 
   if (!latest?.ts) return null;
 
-  const cutoff = new Date(latest.ts.getTime() - 400 * DAY_MS); // show roughly last 13 months
+  // Align SMT display window to the last 12 months (match Green Button behavior)
+  const cutoff = new Date(latest.ts.getTime() - 365 * DAY_MS);
   return { latest: latest.ts, cutoff };
 }
 
@@ -418,22 +419,13 @@ function chooseDataset(
   const smtHasYear = smtCoverage >= 330;
   const gbHasYear = gbCoverage >= 330;
 
-  if (smt && !greenButton) return smt;
-  if (!smt && greenButton) return greenButton;
-  if (!smt && !greenButton) return null;
-
-  if (smtHasYear && !gbHasYear) return smt!;
-  if (gbHasYear && !smtHasYear) return greenButton!;
-
-  if (smtHasYear && gbHasYear) {
-    return latestMs(greenButton) >= latestMs(smt) ? greenButton! : smt!;
+  // Prefer SMT whenever it is available; fall back to Green Button only if SMT is absent
+  // or completely lacks coverage. This ensures SMT supersedes prior uploads.
+  if (smt) {
+    return smt;
   }
 
-  if (smtCoverage !== gbCoverage) {
-    return smtCoverage > gbCoverage ? smt! : greenButton!;
-  }
-
-  return latestMs(greenButton) >= latestMs(smt) ? greenButton! : smt!;
+  return greenButton;
 }
 
 export async function GET(_request: NextRequest) {
