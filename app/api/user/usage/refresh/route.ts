@@ -91,6 +91,17 @@ export async function POST(req: NextRequest) {
   }
 
   const adminToken = process.env.ADMIN_TOKEN ?? "";
+  if (!adminToken) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "admin_token_missing",
+        message: "ADMIN_TOKEN must be configured to trigger SMT pull/normalize.",
+      },
+      { status: 500 },
+    );
+  }
+
   const baseUrl = resolveBaseUrl();
   const pullUrl = new URL("/api/admin/smt/pull", baseUrl);
   const normalizeUrl = new URL("/api/admin/smt/normalize", baseUrl);
