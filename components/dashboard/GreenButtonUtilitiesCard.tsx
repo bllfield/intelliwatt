@@ -66,8 +66,6 @@ export default function GreenButtonHelpSection({
 
       const trimmedUtility = utilityName.trim();
       const trimmedAccount = accountNumber.trim();
-      let uploadCompleted = false;
-
       const attemptDropletUpload = async () => {
         try {
           const ticketRes = await fetch("/api/green-button/upload-ticket", {
@@ -77,12 +75,13 @@ export default function GreenButtonHelpSection({
           });
 
           if (!ticketRes.ok) {
-            return false;
+            const detail = await ticketRes.text().catch(() => "Unable to obtain upload ticket.");
+            throw new Error(detail || "Unable to obtain upload ticket.");
           }
 
           const ticket = await ticketRes.json();
           if (!ticket?.ok || !ticket?.uploadUrl || !ticket?.payload || !ticket?.signature) {
-            return false;
+            throw new Error("Upload ticket missing required fields.");
           }
 
           const dropletForm = new FormData();
@@ -104,20 +103,14 @@ export default function GreenButtonHelpSection({
 
           if (!dropletResponse.ok) {
             const data = await dropletResponse.json().catch(() => ({}));
-            const detail =
-              typeof data?.error === "string"
-                ? data.error
-                : "Upload failed on the secure uploader. Falling back to direct upload.";
-            setStatusTone("error");
-            setStatusMessage(detail);
-            return false;
+            const detail = typeof data?.error === "string" ? data.error : "Upload failed on the secure uploader.";
+            throw new Error(detail);
           }
 
-          uploadCompleted = true;
           return true;
         } catch (err) {
           console.error("[GreenButtonHelpSection] droplet upload failed", err);
-          return false;
+          throw err;
         }
       };
 
@@ -137,8 +130,8 @@ export default function GreenButtonHelpSection({
         }
       };
 
-      const dropletSuccess = await attemptDropletUpload();
-      if (dropletSuccess) {
+      try {
+        await attemptDropletUpload();
         await triggerUsageRefresh();
         setStatusTone("success");
         setStatusMessage("Upload received! We’ll start parsing your usage data shortly.");
@@ -146,40 +139,13 @@ export default function GreenButtonHelpSection({
         if (fileInputRef.current) {
           fileInputRef.current.value = "";
         }
-        uploadCompleted = true;
-      }
-
-      if (!uploadCompleted) {
-        const fallbackForm = new FormData();
-        fallbackForm.append("file", selectedFile);
-        fallbackForm.append("homeId", houseAddressId);
-        if (trimmedUtility.length > 0) {
-          fallbackForm.append("utilityName", trimmedUtility);
-        }
-        if (trimmedAccount.length > 0) {
-          fallbackForm.append("accountNumber", trimmedAccount);
-        }
-
-        const response = await fetch("/api/green-button/upload", {
-          method: "POST",
-          body: fallbackForm,
-        });
-
-        if (!response.ok) {
-          const data = await response.json().catch(() => ({}));
-          const detail = typeof data?.error === "string" ? data.error : "Upload failed. Please try again.";
-          setStatusTone("error");
-          setStatusMessage(detail);
-          return;
-        }
-
-        await triggerUsageRefresh();
-        setStatusTone("success");
-        setStatusMessage("Upload received! We’ll start parsing your usage data shortly.");
-        setSelectedFile(null);
-        if (fileInputRef.current) {
-          fileInputRef.current.value = "";
-        }
+      } catch (uploadErr: any) {
+        setStatusTone("error");
+        setStatusMessage(
+          typeof uploadErr?.message === "string"
+            ? uploadErr.message
+            : "Upload failed on the secure uploader. Please try again."
+        );
       }
     } catch (error) {
       console.error("[GreenButtonHelpSection] upload failed", error);
