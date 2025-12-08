@@ -189,26 +189,20 @@ def maybe_hydrate_meter_number(step: Dict[str, Any]) -> Optional[str]:
         entry["meterNumber"] = fetched_meter
         logging.info(
             "Updated NewAgreement meter number via meterInfo API: esiid=%s meter=%s",
-            try:
-                resp_body = run_default_command()
-                if isinstance(payload, dict):
-                    reason = payload.get("reason")
-                    # Treat admin-triggered pulls the same as customer auth events so they run ingest.
-                    if reason in ("smt_authorized", "admin_triggered"):
-                        resp_body = handle_smt_authorized(payload)
-                    elif reason == "smt_meter_info":
-                        resp_body = handle_smt_meter_info(payload)
+            esiid,
+            fetched_meter,
+        )
+        return fetched_meter
 
-                self.send_response(200)
-                self.end_headers()
-                self.wfile.write(resp_body or b"ok")
-            except Exception as e:
-                msg = f"webhook error: {e!r}"
-                print("[ERROR]", msg, flush=True)
-                self.send_response(500)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(json.dumps({"ok": False, "error": msg}).encode("utf-8"))
+    return meter_number
+
+
+def _strip_meter_numbers_from_body(body: Dict[str, Any]) -> None:
+    if not isinstance(body, dict):
+        return
+
+    customer_meter_list = body.get("customerMeterList")
+    if isinstance(customer_meter_list, list):
         for entry in customer_meter_list:
             if isinstance(entry, dict):
                 entry.pop("meterNumber", None)
