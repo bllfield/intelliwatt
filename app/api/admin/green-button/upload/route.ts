@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createHash } from "node:crypto";
 import { EntryStatus, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { refreshUserEntryStatuses } from "@/lib/hitthejackwatt/entryLifecycle";
 import { parseGreenButtonBuffer } from "@/lib/usage/greenButtonParser";
 import { normalizeGreenButtonReadingsTo15Min } from "@/lib/usage/greenButtonNormalize";
 import { usagePrisma } from "@/lib/db/usageClient";
@@ -189,6 +190,8 @@ export async function POST(request: NextRequest) {
           },
         });
       }
+
+      await refreshUserEntryStatuses(userId);
     }
 
     return NextResponse.json({
