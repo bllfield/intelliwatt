@@ -27,8 +27,8 @@ type CategoryConfig = {
 const CATEGORY_CARDS: CategoryConfig[] = [
   {
     id: "smart_meter_connect",
-    title: "Smart Meter Authorization",
-    description: "Connect Smart Meter Texas to unlock automated usage and earn 1 entry.",
+    title: "Usage Details",
+    description: "Share your usage details to earn 1 entry.",
     ctaLabel: "Go to API Connect",
     ctaHref: "/dashboard/api#smt",
   },
