@@ -232,6 +232,7 @@ type NormalizeResult = {
   message: string;
   filesProcessed?: number;
   intervalsInserted?: number;
+  normalized?: boolean;
 };
 
 async function registerAndNormalizeFile(
@@ -307,6 +308,18 @@ async function registerAndNormalizeFile(
     // eslint-disable-next-line no-console
     console.log(`[smt-upload] raw file registered: ${JSON.stringify(rawResult)}`);
 
+    const isDuplicate = rawResult?.duplicate === true || rawResult?.status === "duplicate";
+    if (isDuplicate) {
+      // Skip normalization to avoid hammering the API when nothing new will ingest.
+      return {
+        ok: true,
+        message: "duplicate raw file; normalization skipped",
+        filesProcessed: 0,
+        intervalsInserted: 0,
+        normalized: false,
+      };
+    }
+
     // Step 2: Trigger normalization of the raw file
     const normalizeUrl = `${INTELLIWATT_BASE_URL}/api/admin/smt/normalize?limit=${NORMALIZE_LIMIT}`;
     // eslint-disable-next-line no-console
@@ -347,6 +360,7 @@ async function registerAndNormalizeFile(
       message: "normalize complete",
       filesProcessed,
       intervalsInserted,
+      normalized: true,
     };
   } catch (err) {
     console.error("[smt-upload] error during registration/normalization:", err);
