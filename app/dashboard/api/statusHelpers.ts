@@ -120,6 +120,14 @@ export function deriveGreenButtonStatus(
     upload.parseStatus &&
     ["success", "complete", "complete_with_warnings"].includes(upload.parseStatus.toLowerCase());
 
+  const expiresAt = upload.dateRangeEnd
+    ? (() => {
+        const expiry = new Date(upload.dateRangeEnd);
+        expiry.setFullYear(expiry.getFullYear() + 1);
+        return expiry;
+      })()
+    : null;
+
   // If coverage exists (we already normalized data), surface as active even if parseStatus wasn't updated.
   const label = hasCoverage || isParseSuccess
     ? "ACTIVE"
@@ -142,7 +150,7 @@ export function deriveGreenButtonStatus(
     lastUpdated: upload.updatedAt ?? upload.createdAt,
     detail:
       hasCoverage
-        ? `Coverage: ${upload.dateRangeStart!.toLocaleDateString()} – ${upload.dateRangeEnd!.toLocaleDateString()}`
+        ? `Coverage: ${upload.dateRangeStart!.toLocaleDateString()} – ${upload.dateRangeEnd!.toLocaleDateString()}${expiresAt ? ` Expires ${expiresAt.toLocaleDateString()}` : ""}`
         : undefined,
   };
 }

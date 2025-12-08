@@ -122,6 +122,7 @@ export async function POST(request: Request) {
     });
 
     let parsedSummary: Record<string, unknown> | null = null;
+    let coverageEnd: Date | null = null;
 
     try {
       const parsed = parseGreenButtonBuffer(buffer, file.name);
@@ -233,6 +234,7 @@ export async function POST(request: Request) {
       const totalKwh = trimmed.reduce((sum, row) => sum + row.consumptionKwh, 0);
       const earliest = trimmed[0]?.timestamp ?? null;
       const latest = trimmed[trimmed.length - 1]?.timestamp ?? null;
+      coverageEnd = latest;
 
       parsedSummary = {
         format: parsed.format,
@@ -267,7 +269,9 @@ export async function POST(request: Request) {
 
     // Award / refresh the usage entry using a ManualUsageUpload placeholder so it expires after 12 months
     const now = new Date();
-    const expiresAt = new Date(now.getTime() + MANUAL_USAGE_LIFETIME_DAYS * 24 * 60 * 60 * 1000);
+    const expiryAnchor = coverageEnd ?? now;
+    const expiresAt = new Date(expiryAnchor.getTime());
+    expiresAt.setFullYear(expiresAt.getFullYear() + 1);
 
     const manualUsage = await (prisma as any).manualUsageUpload.create({
       data: {

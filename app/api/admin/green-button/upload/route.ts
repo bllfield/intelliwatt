@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { EntryStatus, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { refreshUserEntryStatuses } from "@/lib/hitthejackwatt/entryLifecycle";
+import { qualifyReferralsForUser } from "@/lib/referral/qualify";
 import { parseGreenButtonBuffer } from "@/lib/usage/greenButtonParser";
 import { normalizeGreenButtonReadingsTo15Min } from "@/lib/usage/greenButtonNormalize";
 import { usagePrisma } from "@/lib/db/usageClient";
@@ -143,7 +144,9 @@ export async function POST(request: NextRequest) {
 
     if (houseId && userId) {
       const now = new Date();
-      const expiresAt = new Date(now.getTime() + MANUAL_USAGE_LIFETIME_DAYS * DAY_MS);
+      const coverageEnd = trimmed[trimmed.length - 1]?.timestamp ?? latestTimestamp ?? now;
+      const expiresAt = new Date(coverageEnd.getTime());
+      expiresAt.setFullYear(expiresAt.getFullYear() + 1);
 
       const manualUsage = await (prisma as any).manualUsageUpload.create({
         data: {
@@ -192,6 +195,7 @@ export async function POST(request: NextRequest) {
       }
 
       await refreshUserEntryStatuses(userId);
+      await qualifyReferralsForUser(userId);
     }
 
     return NextResponse.json({
