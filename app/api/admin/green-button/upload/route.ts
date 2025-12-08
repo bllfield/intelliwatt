@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createHash } from "node:crypto";
-import { Prisma } from "@prisma/client";
+import { EntryStatus, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { parseGreenButtonBuffer } from "@/lib/usage/greenButtonParser";
 import { normalizeGreenButtonReadingsTo15Min } from "@/lib/usage/greenButtonNormalize";
@@ -139,6 +139,57 @@ export async function POST(request: NextRequest) {
     }
 
     const totalKwh = trimmed.reduce((sum, row) => sum + row.consumptionKwh, 0);
+
+    if (houseId && userId) {
+      const now = new Date();
+      const expiresAt = new Date(now.getTime() + MANUAL_USAGE_LIFETIME_DAYS * DAY_MS);
+
+      const manualUsage = await (prisma as any).manualUsageUpload.create({
+        data: {
+          userId,
+          houseId,
+          source: "green_button",
+          expiresAt,
+          metadata: {
+            rawGreenButtonId: rawRecordId,
+            utilityName,
+            accountNumber,
+          },
+        },
+        select: { id: true },
+      });
+
+      const existingEntry = await prisma.entry.findFirst({
+        where: { userId, houseId, type: "smart_meter_connect" },
+        select: { id: true, amount: true },
+      });
+
+      if (existingEntry) {
+        await prisma.entry.update({
+          where: { id: existingEntry.id },
+          data: {
+            amount: Math.max(existingEntry.amount, 1),
+            manualUsageId: manualUsage.id,
+            status: EntryStatus.ACTIVE,
+            expiresAt: null,
+            expirationReason: null,
+            lastValidated: now,
+          },
+        });
+      } else {
+        await prisma.entry.create({
+          data: {
+            userId,
+            houseId,
+            type: "smart_meter_connect",
+            amount: 1,
+            manualUsageId: manualUsage.id,
+            status: EntryStatus.ACTIVE,
+            lastValidated: now,
+          },
+        });
+      }
+    }
 
     return NextResponse.json({
       ok: true,

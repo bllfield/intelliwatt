@@ -847,6 +847,59 @@ app.post("/upload", upload.single("file"), async (req, res) => {
       });
     }
 
+    // Award / refresh the usage entry so Green Button counts like SMT
+    if (house.userId) {
+      const now = new Date();
+      const expiresAt = new Date(now.getTime() + MANUAL_USAGE_LIFETIME_DAYS * DAY_MS);
+
+      const manualUsage = await prisma.manualUsageUpload.create({
+        data: {
+          userId: house.userId,
+          houseId: house.id,
+          source: "green_button",
+          expiresAt,
+          metadata: {
+            rawGreenButtonId: rawRecordId,
+            uploadId: uploadRecordId,
+            utilityName,
+            accountNumber,
+          },
+        },
+        select: { id: true },
+      });
+
+      const existingEntry = await prisma.entry.findFirst({
+        where: { userId: house.userId, houseId: house.id, type: "smart_meter_connect" },
+        select: { id: true, amount: true },
+      });
+
+      if (existingEntry) {
+        await prisma.entry.update({
+          where: { id: existingEntry.id },
+          data: {
+            amount: Math.max(existingEntry.amount, 1),
+            manualUsageId: manualUsage.id,
+            status: Prisma.EntryStatus.ACTIVE,
+            expiresAt: null,
+            expirationReason: null,
+            lastValidated: now,
+          },
+        });
+      } else {
+        await prisma.entry.create({
+          data: {
+            userId: house.userId,
+            houseId: house.id,
+            type: "smart_meter_connect",
+            amount: 1,
+            manualUsageId: manualUsage.id,
+            status: Prisma.EntryStatus.ACTIVE,
+            lastValidated: now,
+          },
+        });
+      }
+    }
+
     res.status(201).json({
       ok: true,
       rawId: rawRecordId,
