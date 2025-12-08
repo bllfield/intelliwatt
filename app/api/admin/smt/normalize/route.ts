@@ -152,13 +152,40 @@ export async function POST(req: NextRequest) {
 
     // Derive tsMin/tsMax directly from parsed intervals to ensure full-file coverage
     const timestamps = intervals.map((i) => i.ts.getTime()).filter((ms) => Number.isFinite(ms));
-    const tsMinDate = timestamps.length ? new Date(Math.min(...timestamps)) : undefined;
+    const tsMinDateAll = timestamps.length ? new Date(Math.min(...timestamps)) : undefined;
     const tsMaxDate = timestamps.length ? new Date(Math.max(...timestamps)) : undefined;
 
+    // New behavior: always replace the last 365 days using the newest data
+    const windowStart = tsMaxDate ? new Date(tsMaxDate.getTime() - 365 * 24 * 60 * 60 * 1000) : undefined;
+    const boundedIntervals = windowStart
+      ? intervals.filter((i) => i.ts >= windowStart && i.ts <= tsMaxDate!)
+      : intervals;
+
+    if (boundedIntervals.length === 0) {
+      summary.files.push({
+        id: String(file.id),
+        filename: file.filename,
+        records: 0,
+        inserted: 0,
+        skipped: 0,
+        kwh: 0,
+        tsMin: tsMinDateAll ? tsMinDateAll.toISOString() : stats.tsMin ?? undefined,
+        tsMax: tsMaxDate ? tsMaxDate.toISOString() : stats.tsMax ?? undefined,
+        diagnostics: stats,
+      });
+      continue;
+    }
+
+    const boundedTotalKwh = boundedIntervals.reduce((sum, i) => sum + i.kwh, 0);
+
+    // Recompute bounds for the bounded set to drive delete + summary
+    const boundedTimestamps = boundedIntervals.map((i) => i.ts.getTime()).filter((ms) => Number.isFinite(ms));
+    const tsMinDate = boundedTimestamps.length ? new Date(Math.min(...boundedTimestamps)) : tsMinDateAll;
+
     if (!dryRun && tsMinDate && tsMaxDate) {
-      const tsMinIso = tsMinDate.toISOString();
-      const tsMaxIso = tsMaxDate.toISOString();
-      const distinctPairs = Array.from(new Set(intervals.map((i) => `${i.esiid}|${i.meter}`))).map((key) => {
+          const tsMinIso = tsMinDate.toISOString();
+          const tsMaxIso = tsMaxDate.toISOString();
+          const distinctPairs = Array.from(new Set(boundedIntervals.map((i) => `${i.esiid}|${i.meter}`))).map((key) => {
         const [esiid, meter] = key.split('|');
         return { esiid, meter };
       });
@@ -181,8 +208,8 @@ export async function POST(req: NextRequest) {
           }
 
           let insertedTotal = 0;
-          for (let i = 0; i < intervals.length; i += INSERT_BATCH_SIZE) {
-            const slice = intervals.slice(i, i + INSERT_BATCH_SIZE).map((interval) => ({
+          for (let i = 0; i < boundedIntervals.length; i += INSERT_BATCH_SIZE) {
+            const slice = boundedIntervals.slice(i, i + INSERT_BATCH_SIZE).map((interval) => ({
               esiid: interval.esiid,
               meter: interval.meter,
               ts: interval.ts,
@@ -201,7 +228,7 @@ export async function POST(req: NextRequest) {
           }
 
           inserted = insertedTotal;
-          skipped = intervals.length - insertedTotal;
+          skipped = boundedIntervals.length - insertedTotal;
         });
       } catch (err) {
         console.error('[smt/normalize] failed overwrite transaction', {
@@ -214,14 +241,14 @@ export async function POST(req: NextRequest) {
         throw err;
       }
     } else if (dryRun) {
-      inserted = intervals.length;
+      inserted = boundedIntervals.length;
       skipped = 0;
     }
 
     summary.filesProcessed += 1;
     summary.intervalsInserted += inserted;
     summary.duplicatesSkipped += skipped;
-    summary.totalKwh += stats.totalKwh;
+    summary.totalKwh += boundedTotalKwh;
 
     if (stats.tsMin && (!summary.tsMin || stats.tsMin < summary.tsMin)) summary.tsMin = stats.tsMin;
     if (stats.tsMax && (!summary.tsMax || stats.tsMax > summary.tsMax)) summary.tsMax = stats.tsMax;
@@ -229,12 +256,12 @@ export async function POST(req: NextRequest) {
     summary.files.push({
       id: String(file.id),
       filename: file.filename,
-      records: intervals.length,
+      records: boundedIntervals.length,
       inserted,
       skipped,
-      kwh: Number(stats.totalKwh.toFixed(6)),
-      tsMin: stats.tsMin ?? undefined,
-      tsMax: stats.tsMax ?? undefined,
+      kwh: Number(boundedTotalKwh.toFixed(6)),
+      tsMin: tsMinDate ? tsMinDate.toISOString() : stats.tsMin ?? undefined,
+      tsMax: tsMaxDate ? tsMaxDate.toISOString() : stats.tsMax ?? undefined,
       diagnostics: stats,
     });
   }
