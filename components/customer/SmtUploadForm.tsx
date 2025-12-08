@@ -9,6 +9,8 @@ type SmtUploadFormProps = {
 type UploadStatus = {
   message: string;
   tone: "info" | "success" | "error";
+  queuePosition?: number;
+  etaSeconds?: number;
 };
 
 export default function SmtUploadForm({ uploadUrl }: SmtUploadFormProps) {
@@ -87,12 +89,22 @@ export default function SmtUploadForm({ uploadUrl }: SmtUploadFormProps) {
 
       if (json?.ok) {
         const remaining =
-          typeof json.remaining === "number"
-            ? ` Remaining uploads this window: ${json.remaining}.`
+          typeof json.meta?.remaining === "number"
+            ? ` Remaining uploads this window: ${json.meta.remaining}.`
             : "";
+        const queuePosition = json.queue?.position ?? null;
+        const etaSeconds = json.queue?.etaSeconds ?? null;
+        const etaText = etaSeconds ? ` Estimated time: ~${Math.ceil(etaSeconds)}s.` : "";
+        const positionText =
+          queuePosition && queuePosition > 1
+            ? ` You are #${queuePosition} in line.`
+            : " Your file is now processing.";
+
         setStatus({
-          message: `Upload complete. Your file has been queued for processing.${remaining}`,
+          message: `Upload accepted and queued.${positionText}${etaText}${remaining} You can close this page; we'll notify you when processing completes if notifications are enabled on your account.`,
           tone: "success",
+          queuePosition: queuePosition ?? undefined,
+          etaSeconds: etaSeconds ?? undefined,
         });
         form.reset();
       } else {
@@ -166,7 +178,15 @@ export default function SmtUploadForm({ uploadUrl }: SmtUploadFormProps) {
               : "border-amber-300 bg-amber-50 text-amber-700"
           }`}
         >
-          {status.message}
+          <div>{status.message}</div>
+          {typeof status.queuePosition === "number" || typeof status.etaSeconds === "number" ? (
+            <div className="mt-1 text-xs text-gray-700">
+              {typeof status.queuePosition === "number" ? `Queue position: ${status.queuePosition}. ` : null}
+              {typeof status.etaSeconds === "number"
+                ? `Estimated time remaining: ~${Math.ceil(status.etaSeconds)} seconds.`
+                : null}
+            </div>
+          ) : null}
         </div>
       ) : null}
 
