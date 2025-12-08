@@ -238,6 +238,8 @@ Notes:
   - Drop-in `ExecStartPre=/usr/local/bin/gb-kill-8091.sh` that force-kills any PID on 8091 before start; `Restart=always`, `RestartSec=2s`, `LimitNOFILE=65535`.
   - Helper script retried kills and final `-9` to avoid `EADDRINUSE` during restarts; logs attempts in journal.
 - Ops steps applied (prod droplet): secret + usage DB URL added to `/etc/default/intelliwatt-smt`; service reloaded/restarted; uploads now bind cleanly to 8091 with a single node PID.
+- Ops habit: after any `journalctl` check, run a follow command to confirm listener state:
+  - `sudo ss -ltnp | grep 8091`
 
 ### Usage Module Database (`intelliwatt_usage`)
 
