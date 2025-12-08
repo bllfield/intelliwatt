@@ -37,10 +37,11 @@ export default function SmtQueuePage() {
     }
 
     let cancelled = false;
+    const url = summaryUrl; // capture after null-check so fetch sees a string
     async function load() {
       setLoading(true);
       try {
-        const resp = await fetch(summaryUrl, { cache: "no-store" });
+        const resp = await fetch(url, { cache: "no-store" });
         const json = await resp.json();
         if (!cancelled) {
           setSummary(json as QueueSummary);
