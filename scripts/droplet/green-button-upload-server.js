@@ -621,6 +621,14 @@ app.post("/upload", upload.single("file"), async (req, res) => {
       return;
     }
 
+    // Pre-clean existing usage for this home to avoid ballooning data during parse/insert
+    await Promise.all([
+      usagePrisma.greenButtonInterval.deleteMany({ where: { homeId: house.id } }),
+      usagePrisma.rawGreenButton.deleteMany({ where: { homeId: house.id } }),
+      prisma.greenButtonUpload.deleteMany({ where: { houseId: house.id } }),
+      house.esiid ? prisma.smtInterval.deleteMany({ where: { esiid: house.esiid } }) : Promise.resolve(),
+    ]);
+
     const buffer = file.buffer;
     const sha256 = createHash("sha256").update(buffer).digest("hex");
     const utilityName =
