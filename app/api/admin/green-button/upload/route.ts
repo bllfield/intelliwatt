@@ -14,6 +14,7 @@ const MANUAL_USAGE_LIFETIME_DAYS = 365;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export async function POST(request: NextRequest) {
+  let uploadRecordId: string | null = null;
   try {
     const formData = await request.formData();
     const file = formData.get("file");
@@ -28,6 +29,22 @@ export async function POST(request: NextRequest) {
       typeof formData.get("houseId") === "string" ? String(formData.get("houseId")).trim() : null;
     const userId =
       typeof formData.get("userId") === "string" ? String(formData.get("userId")).trim() : null;
+
+    if (!houseId || !userId) {
+      return NextResponse.json(
+        { ok: false, error: "missing_house_or_user" },
+        { status: 400 },
+      );
+    }
+
+    const house = await prisma.houseAddress.findFirst({
+      where: { id: houseId, userId, archivedAt: null },
+      select: { id: true, esiid: true },
+    });
+
+    if (!house) {
+      return NextResponse.json({ ok: false, error: "invalid_house" }, { status: 404 });
+    }
 
     const arrayBuffer = await file.arrayBuffer();
     if (arrayBuffer.byteLength === 0) {
@@ -102,6 +119,25 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    const uploadRecord = await (prisma as any).greenButtonUpload.create({
+      data: {
+        houseId,
+        utilityName,
+        accountNumber,
+        fileName: file.name,
+        fileType: file.type || "text/plain",
+        fileSizeBytes: buffer.length,
+        storageKey: rawRecordId ? `usage:raw_green_button:${rawRecordId}` : null,
+        parseStatus: "processing",
+        parseMessage: null,
+        dateRangeStart: null,
+        dateRangeEnd: null,
+        intervalMinutes: null,
+      },
+      select: { id: true },
+    });
+    uploadRecordId = uploadRecord.id;
+
     if (!rawRecordId) {
       return NextResponse.json({ ok: false, error: "raw_persist_failed" }, { status: 500 });
     }
@@ -118,9 +154,9 @@ export async function POST(request: NextRequest) {
       cleanupTasks.push(
         (usagePrisma as any).rawGreenButton.deleteMany({ where: { homeId: houseId, NOT: { id: rawRecordId } } }),
       );
-      if (houseMeta?.esiid) {
-        cleanupTasks.push(prisma.smtInterval.deleteMany({ where: { esiid: houseMeta.esiid } }));
-      }
+      cleanupTasks.push(
+        (prisma as any).greenButtonUpload.deleteMany({ where: { houseId, NOT: { id: uploadRecordId } } }),
+      );
     }
     await Promise.all(cleanupTasks);
 
@@ -141,72 +177,113 @@ export async function POST(request: NextRequest) {
     }
 
     const totalKwh = trimmed.reduce((sum, row) => sum + row.consumptionKwh, 0);
+    const earliest = trimmed[0]?.timestamp ?? null;
+    const latest = trimmed[trimmed.length - 1]?.timestamp ?? null;
 
-    if (houseId && userId) {
-      const now = new Date();
-      const coverageEnd = trimmed[trimmed.length - 1]?.timestamp ?? latestTimestamp ?? now;
-      const expiresAt = new Date(coverageEnd.getTime());
-      expiresAt.setFullYear(expiresAt.getFullYear() + 1);
+    if (uploadRecordId) {
+      const summary = {
+        format: parsed.format,
+        totalRawReadings: parsed.metadata.totalReadings,
+        normalizedIntervals: trimmed.length,
+        totalKwh: Number(totalKwh.toFixed(6)),
+        appliedWindowDays: MANUAL_USAGE_LIFETIME_DAYS,
+        warnings: parsed.warnings,
+      };
 
-      const manualUsage = await (prisma as any).manualUsageUpload.create({
+      await (prisma as any).greenButtonUpload.update({
+        where: { id: uploadRecordId },
+        data: {
+          parseStatus: parsed.warnings.length > 0 ? "complete_with_warnings" : "complete",
+          parseMessage: JSON.stringify(summary),
+          dateRangeStart: earliest,
+          dateRangeEnd: latest,
+          intervalMinutes: 15,
+        },
+      });
+    }
+
+    const now = new Date();
+    const coverageEnd = latest ?? latestTimestamp ?? now;
+    const expiresAt = new Date(coverageEnd.getTime());
+    expiresAt.setFullYear(expiresAt.getFullYear() + 1);
+
+    const manualUsage = await (prisma as any).manualUsageUpload.create({
+      data: {
+        userId,
+        houseId,
+        source: "green_button",
+        expiresAt,
+        metadata: {
+          rawGreenButtonId: rawRecordId,
+          uploadId: uploadRecordId,
+          utilityName,
+          accountNumber,
+        },
+      },
+      select: { id: true },
+    });
+
+    const existingEntry = await prisma.entry.findFirst({
+      where: { userId, houseId, type: "smart_meter_connect" },
+      select: { id: true, amount: true },
+    });
+
+    if (existingEntry) {
+      await prisma.entry.update({
+        where: { id: existingEntry.id },
+        data: {
+          amount: Math.max(existingEntry.amount, 1),
+          manualUsageId: manualUsage.id,
+          status: EntryStatus.ACTIVE,
+          expiresAt: null,
+          expirationReason: null,
+          lastValidated: now,
+        },
+      });
+    } else {
+      await prisma.entry.create({
         data: {
           userId,
           houseId,
-          source: "green_button",
-          expiresAt,
-          metadata: {
-            rawGreenButtonId: rawRecordId,
-            utilityName,
-            accountNumber,
-          },
+          type: "smart_meter_connect",
+          amount: 1,
+          manualUsageId: manualUsage.id,
+          status: EntryStatus.ACTIVE,
+          lastValidated: now,
         },
-        select: { id: true },
       });
-
-      const existingEntry = await prisma.entry.findFirst({
-        where: { userId, houseId, type: "smart_meter_connect" },
-        select: { id: true, amount: true },
-      });
-
-      if (existingEntry) {
-        await prisma.entry.update({
-          where: { id: existingEntry.id },
-          data: {
-            amount: Math.max(existingEntry.amount, 1),
-            manualUsageId: manualUsage.id,
-            status: EntryStatus.ACTIVE,
-            expiresAt: null,
-            expirationReason: null,
-            lastValidated: now,
-          },
-        });
-      } else {
-        await prisma.entry.create({
-          data: {
-            userId,
-            houseId,
-            type: "smart_meter_connect",
-            amount: 1,
-            manualUsageId: manualUsage.id,
-            status: EntryStatus.ACTIVE,
-            lastValidated: now,
-          },
-        });
-      }
-
-      await refreshUserEntryStatuses(userId);
-      await qualifyReferralsForUser(userId);
     }
+
+    await refreshUserEntryStatuses(userId);
+    await qualifyReferralsForUser(userId);
 
     return NextResponse.json({
       ok: true,
       rawId: rawRecordId,
+      uploadId: uploadRecordId,
       intervalsCreated: trimmed.length,
       totalKwh,
       warnings: parsed.warnings,
+      dateRangeStart: earliest,
+      dateRangeEnd: latest,
     });
   } catch (error) {
     console.error("[admin/green-button/upload] failed", error);
+
+    if (uploadRecordId) {
+      try {
+        await (prisma as any).greenButtonUpload.update({
+          where: { id: uploadRecordId },
+          data: {
+            parseStatus: "error",
+            parseMessage: String((error as Error)?.message || error),
+          },
+        });
+      } catch (err) {
+        console.error("[admin/green-button/upload] failed to persist error state", err);
+      }
+    }
+
     return NextResponse.json({ ok: false, error: "upload_failed" }, { status: 500 });
   }
 }

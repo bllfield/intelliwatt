@@ -399,33 +399,19 @@ function chooseDataset(
   smt: UsageDatasetResult | null,
   greenButton: UsageDatasetResult | null,
 ): UsageDatasetResult | null {
-  const MS_PER_DAY = 24 * 60 * 60 * 1000;
-  const coverageDays = (dataset: UsageDatasetResult | null): number => {
-    if (!dataset?.summary?.start || !dataset?.summary?.end) return 0;
-    const startMs = new Date(dataset.summary.start).getTime();
-    const endMs = new Date(dataset.summary.end).getTime();
-    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return 0;
-    return (endMs - startMs) / MS_PER_DAY;
-  };
-
   const latestMs = (dataset: UsageDatasetResult | null): number => {
     if (!dataset?.summary?.latest) return 0;
     const ts = new Date(dataset.summary.latest).getTime();
     return Number.isFinite(ts) ? ts : 0;
   };
 
-  const smtCoverage = coverageDays(smt);
-  const gbCoverage = coverageDays(greenButton);
-  const smtHasYear = smtCoverage >= 330;
-  const gbHasYear = gbCoverage >= 330;
+  const smtLatest = latestMs(smt);
+  const gbLatest = latestMs(greenButton);
 
-  // Prefer SMT whenever it is available; fall back to Green Button only if SMT is absent
-  // or completely lacks coverage. This ensures SMT supersedes prior uploads.
-  if (smt) {
-    return smt;
-  }
+  if (smtLatest === 0 && gbLatest === 0) return null;
+  if (smtLatest === gbLatest) return smt ?? greenButton;
 
-  return greenButton;
+  return smtLatest > gbLatest ? smt : greenButton;
 }
 
 export async function GET(_request: NextRequest) {

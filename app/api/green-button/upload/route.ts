@@ -208,9 +208,6 @@ export async function POST(request: Request) {
           where: { houseId: house.id, NOT: { id: uploadRecord.id } },
         }),
       ];
-      if (house.esiid) {
-        cleanupTasks.push(prisma.smtInterval.deleteMany({ where: { esiid: house.esiid } }));
-      }
       await Promise.all(cleanupTasks);
 
       const intervalData = trimmed.map((interval) => ({
