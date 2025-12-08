@@ -44,6 +44,7 @@ SMT_UPLOAD_URL=http://localhost:8081/upload
 SOURCE_TAG=adhocusage
 METER_DEFAULT=M1
 ESIID_DEFAULT=10443720000000001
+SMT_UPLOAD_DELAY=2                 # seconds to sleep between uploads (throttle)
 ```
 
 **Important:** 
@@ -117,7 +118,7 @@ chmod +x /home/deploy/apps/intelliwatt/deploy/smt/fetch_and_post.sh
 
 1. **fetch_and_post.sh** runs on schedule (via smt-ingest.timer, every 30 minutes).
 2. It SFTP-fetches new CSV files from SMT into `/home/deploy/smt_inbox`.
-3. For each unseen file, it POSTs to **SMT_UPLOAD_URL** (the droplet upload server) using multipart/form-data.
+3. For each unseen file, it POSTs to **SMT_UPLOAD_URL** (the droplet upload server) using multipart/form-data, sleeping `SMT_UPLOAD_DELAY` seconds between uploads to keep load modest. Queue endpoints have been removed; processing is purely sequential.
 4. The droplet upload server receives the file, saves it to its local inbox, and triggers `smt-ingest.service` to normalize and write to the database.
 5. Deduplication: SHA256 hashes of posted files are recorded in `.posted_sha256` to prevent replays.
 

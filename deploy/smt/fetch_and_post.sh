@@ -295,6 +295,9 @@ PY
     break
   fi
 
+  # Throttle between uploads to reduce load on the droplet/API
+  sleep "${SMT_UPLOAD_DELAY:-2}"
+
 done
 
 if [[ "$rate_limited" == "true" ]]; then

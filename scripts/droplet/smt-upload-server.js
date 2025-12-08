@@ -24,10 +24,6 @@ const NORMALIZE_LIMIT = Math.max(Number(process.env.SMT_NORMALIZE_LIMIT || "1000
 const INTELLIWATT_BASE_URL = process.env.INTELLIWATT_BASE_URL || "https://intelliwatt.com";
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "";
 const counters = new Map();
-const pendingJobs = [];
-let activeJob = null;
-const durationHistory = [];
-const DEFAULT_ESTIMATE_SECONDS = 45;
 function computeKey(role, accountKey) {
     return `${role}:${accountKey || "unknown"}`;
 }
@@ -82,7 +78,7 @@ const storage = multer_1.default.diskStorage({
     },
     filename: (_req, file, cb) => {
         const ts = new Date().toISOString().replace(/[-:]/g, "").split(".")[0];
-        const safeOriginal = (file.originalname || "upload.csv").replace(/[\s\\/:*?"<>|]+/g, "_");
+        const safeOriginal = (file.originalname || "upload.csv").replace(/[\s\/:*?"<>|]+/g, "_");
         cb(null, `${ts}_${safeOriginal}`);
     },
 });
@@ -127,139 +123,12 @@ function verifyUploadToken(req, res, next) {
         message: "Invalid or missing SMT upload token",
     });
 }
-async function computeFileSha256(filepath) {
-    return new Promise((resolve, reject) => {
-        const hash = crypto_1.default.createHash('sha256');
-        const stream = fs_1.default.createReadStream(filepath);
-        stream.on('data', (data) => hash.update(data));
-        stream.on('end', () => resolve(hash.digest('hex')));
-        stream.on('error', reject);
-    });
-}
-async function recordPipelineError(status, step, details) {
-    if (!ADMIN_TOKEN || !INTELLIWATT_BASE_URL) {
-        console.warn('[smt-upload] Cannot record pipeline error: ADMIN_TOKEN or INTELLIWATT_BASE_URL missing');
-        return;
-    }
-    try {
-        const trimmedDetails = (details || '').slice(0, 4000);
-        const payload = {
-            ok: false,
-            step,
-            status,
-            details: trimmedDetails,
-            recordedAt: new Date().toISOString(),
-        };
-        const content = JSON.stringify(payload, null, 2);
-        const buffer = Buffer.from(content, 'utf8');
-        const sha256 = crypto_1.default.createHash('sha256').update(buffer).digest('hex');
-        const contentBase64 = buffer.toString('base64');
-        const body = {
-            filename: `smt-upload-error-${step}-${status}.json`,
-            sizeBytes: buffer.length,
-            sha256,
-            contentBase64,
-            source: 'droplet-error',
-            receivedAt: new Date().toISOString(),
-        };
-        const rawUploadUrl = `${INTELLIWATT_BASE_URL}/api/admin/smt/raw-upload`;
-        console.warn(`[smt-upload] recording pipeline error at ${rawUploadUrl} status=${status} step=${step}`);
-        const resp = await fetch(rawUploadUrl, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'x-admin-token': ADMIN_TOKEN,
-            },
-            body: JSON.stringify(body),
-            signal: AbortSignal.timeout(15000),
-        });
-        if (!resp.ok) {
-            const text = await resp.text();
             console.warn(`[smt-upload] failed to record pipeline error: ${resp.status} ${text}`);
         }
     }
     catch (err) {
         console.warn('[smt-upload] exception while recording pipeline error:', err);
     }
-}
-function pruneDurations(now) {
-    const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000;
-    while (durationHistory.length && durationHistory[0].finishedAt < sevenDaysAgo) {
-        durationHistory.shift();
-    }
-}
-function longestDurationMs(windowMs) {
-    const now = Date.now();
-    const cutoff = now - windowMs;
-    let max = 0;
-    for (const sample of durationHistory) {
-        if (sample.finishedAt >= cutoff && sample.durationMs > max) {
-            max = sample.durationMs;
-        }
-    }
-    return max;
-}
-function averageDurationSeconds() {
-    if (durationHistory.length === 0)
-        return DEFAULT_ESTIMATE_SECONDS;
-    const total = durationHistory.reduce((sum, s) => sum + s.durationMs, 0);
-    return Math.max(Math.round(total / durationHistory.length / 1000), 1);
-}
-function queuePosition(jobId) {
-    const idx = pendingJobs.findIndex((j) => j.id === jobId);
-    if (idx === -1)
-        return (activeJob === null || activeJob === void 0 ? void 0 : activeJob.id) === jobId ? 0 : -1;
-    return idx + 1 + (activeJob ? 1 : 0);
-}
-async function processQueue() {
-    var _a, _b;
-    if (activeJob || pendingJobs.length === 0) {
-        return;
-    }
-    const job = pendingJobs.shift();
-    if (!job)
-        return;
-    activeJob = { ...job, status: "active", startedAt: Date.now() };
-    // eslint-disable-next-line no-console
-    console.log(`[smt-upload] processing job ${activeJob.id} file=${activeJob.filename} bytes=${activeJob.sizeBytes}`);
-    try {
-        const result = await registerAndNormalizeFile(job.filepath, job.filename, job.sizeBytes);
-        const finishedAt = Date.now();
-        const durationMs = activeJob.startedAt ? finishedAt - activeJob.startedAt : 0;
-        durationHistory.push({ durationMs, finishedAt });
-        pruneDurations(finishedAt);
-        activeJob = {
-            ...activeJob,
-            finishedAt,
-            status: result.ok ? "done" : "error",
-            result,
-            error: result.ok ? undefined : result.message,
-        };
-        // eslint-disable-next-line no-console
-        console.log(`[smt-upload] job ${activeJob.id} complete status=${activeJob.status} durationMs=${durationMs} filesProcessed=${(_a = result.filesProcessed) !== null && _a !== void 0 ? _a : 0} intervalsInserted=${(_b = result.intervalsInserted) !== null && _b !== void 0 ? _b : 0}`);
-    }
-    catch (err) {
-        const finishedAt = Date.now();
-        activeJob = {
-            ...activeJob,
-            finishedAt,
-            status: "error",
-            error: String((err === null || err === void 0 ? void 0 : err.message) || err),
-        };
-        // eslint-disable-next-line no-console
-        console.error(`[smt-upload] job ${activeJob.id} failed:`, err);
-    }
-    finally {
-        activeJob = null;
-        // Kick the next job.
-        void processQueue();
-    }
-}
-function enqueueJob(job) {
-    pendingJobs.push(job);
-    // eslint-disable-next-line no-console
-    console.log(`[smt-upload] queued job id=${job.id} file=${job.filename} size=${job.sizeBytes} pending=${pendingJobs.length} active=${activeJob ? 1 : 0}`);
-    void processQueue();
 }
 async function registerAndNormalizeFile(filepath, filename, size_bytes) {
     if (!ADMIN_TOKEN || !INTELLIWATT_BASE_URL) {
@@ -396,38 +265,8 @@ app.get("/health", (_req, res) => {
         maxBytes: MAX_BYTES,
     });
 });
-app.get("/queue/summary", (_req, res) => {
-    const avgSeconds = averageDurationSeconds();
-    const longestDay = Math.round(longestDurationMs(24 * 60 * 60 * 1000) / 1000);
-    const longestWeek = Math.round(longestDurationMs(7 * 24 * 60 * 60 * 1000) / 1000);
-    res.json({
-        ok: true,
-        pending: pendingJobs.length,
-        active: activeJob ? 1 : 0,
-        averageSecondsPerFile: avgSeconds,
-        longestSecondsLastDay: longestDay,
-        longestSecondsLastWeek: longestWeek,
-        activeJob: activeJob
-            ? {
-                id: activeJob.id,
-                filename: activeJob.filename,
-                sizeBytes: activeJob.sizeBytes,
-                startedAt: activeJob.startedAt,
-            }
-            : null,
-        nextJob: pendingJobs[0]
-            ? {
-                id: pendingJobs[0].id,
-                filename: pendingJobs[0].filename,
-                sizeBytes: pendingJobs[0].sizeBytes,
-                queuedAt: pendingJobs[0].createdAt,
-            }
-            : null,
-        samplesRecorded: durationHistory.length,
-    });
-});
 app.post("/upload", verifyUploadToken, upload.single("file"), async (req, res) => {
-    var _a, _b;
+    var _a, _b, _c, _d, _e;
     const roleHeader = req.headers["x-smt-upload-role"];
     const accountHeader = req.headers["x-smt-upload-account-key"];
     const roleRaw = ((_a = req.body) === null || _a === void 0 ? void 0 : _a.role) ||
@@ -454,38 +293,6 @@ app.post("/upload", verifyUploadToken, upload.single("file"), async (req, res) =
             role,
             accountKey,
             limit: rate.limit,
-            remaining: 0,
-            resetAt: resetAtIso,
-            message: role === "admin"
-                ? "Admin upload limit reached for the current 24-hour window"
-                : "Customer upload limit reached for the current 30-day window",
-        });
-        return;
-    }
-    try {
-        const file = req.file;
-        if (!file) {
-            console.warn("[smt-upload] No file in request (field \"file\" missing)");
-            res.status(400).json({
-                ok: false,
-                error: 'Missing file field "file"',
-            });
-            return;
-        }
-        const destPath = path_1.default.join(UPLOAD_DIR, file.filename || file.originalname || "upload.csv");
-        try {
-            if (file.path && file.path !== destPath) {
-                await fs_1.default.promises.rename(file.path, destPath);
-            }
-            else if (!file.path && file.buffer) {
-                await fs_1.default.promises.writeFile(destPath, file.buffer);
-            }
-        }
-        catch (writeErr) {
-            // eslint-disable-next-line no-console
-            console.error("[smt-upload] Failed to persist file:", writeErr);
-            throw writeErr;
-        }
         const sizeGuess = (typeof file.size === "number" ? file.size : undefined) ||
             (typeof req.headers["content-length"] === "string"
                 ? Number(req.headers["content-length"])
@@ -495,8 +302,6 @@ app.post("/upload", verifyUploadToken, upload.single("file"), async (req, res) =
         const intervalFile = isIntervalFile(originalName);
         // eslint-disable-next-line no-console
         console.log(`[smt-upload] saved file=${destPath} bytes=${sizeGuess !== null && sizeGuess !== void 0 ? sizeGuess : "n/a"} role=${role} accountKey=${accountKey} interval=${intervalFile}`);
-        let responseMessage = "Upload accepted and ingest triggered";
-        let responseOk = true;
         if (!intervalFile) {
             // Drop non-interval files immediately so the droplet doesn't fill up
             try {
@@ -508,28 +313,9 @@ app.post("/upload", verifyUploadToken, upload.single("file"), async (req, res) =
                 // eslint-disable-next-line no-console
                 console.warn(`[smt-upload] warning: failed to delete non-interval file ${destPath}:`, unlinkErr);
             }
-            responseMessage = "Upload ignored (non-interval file removed)";
-        }
-        else {
-            const job = {
-                id: crypto_1.default.randomUUID(),
-                filepath: destPath,
-                filename: originalName,
-                sizeBytes: sizeGuess,
-                role,
-                accountKey,
-                createdAt: Date.now(),
-                status: "pending",
-            };
-            enqueueJob(job);
-            const position = queuePosition(job.id);
-            const avgSeconds = averageDurationSeconds();
-            const etaSeconds = Math.max((position <= 0 ? 1 : position) * avgSeconds, avgSeconds);
-            responseMessage = "Upload accepted and queued";
-            responseOk = true;
             res.status(202).json({
                 ok: true,
-                message: responseMessage,
+                message: "Upload ignored (non-interval file removed)",
                 file: {
                     name: originalName,
                     size: sizeGuess !== null && sizeGuess !== void 0 ? sizeGuess : null,
@@ -543,20 +329,13 @@ app.post("/upload", verifyUploadToken, upload.single("file"), async (req, res) =
                     remaining: rate.remaining,
                     resetAt: resetAtIso,
                 },
-                queue: {
-                    jobId: job.id,
-                    position,
-                    etaSeconds,
-                    averageSecondsPerFile: avgSeconds,
-                    pending: pendingJobs.length,
-                    active: activeJob ? 1 : 0,
-                },
             });
             return;
         }
-        res.status(responseOk ? 202 : 500).json({
-            ok: responseOk,
-            message: responseMessage,
+        const result = await registerAndNormalizeFile(destPath, originalName, sizeGuess);
+        res.status(result.ok ? 200 : 500).json({
+            ok: result.ok,
+            message: result.message,
             file: {
                 name: originalName,
                 size: sizeGuess !== null && sizeGuess !== void 0 ? sizeGuess : null,
@@ -569,6 +348,11 @@ app.post("/upload", verifyUploadToken, upload.single("file"), async (req, res) =
                 limit: rate.limit,
                 remaining: rate.remaining,
                 resetAt: resetAtIso,
+            },
+            ingest: {
+                filesProcessed: (_c = result.filesProcessed) !== null && _c !== void 0 ? _c : 0,
+                intervalsInserted: (_d = result.intervalsInserted) !== null && _d !== void 0 ? _d : 0,
+                normalized: (_e = result.normalized) !== null && _e !== void 0 ? _e : false,
             },
         });
     }
