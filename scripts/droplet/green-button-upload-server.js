@@ -850,6 +850,22 @@ app.post("/upload", upload.single("file"), async (req, res) => {
     }
     await Promise.all(cleanupTasks);
 
+    // Protect DB/CPU: cap interval inserts to ~60k (15-min for ~2.5 years); reject larger files.
+    const MAX_INTERVALS = 60000;
+    if (trimmed.length > MAX_INTERVALS) {
+      if (uploadRecordId) {
+        await prisma.greenButtonUpload.update({
+          where: { id: uploadRecordId },
+          data: {
+            parseStatus: "error",
+            parseMessage: `Too many intervals after trim (${trimmed.length} > ${MAX_INTERVALS})`,
+          },
+        });
+      }
+      res.status(422).json({ ok: false, error: "too_many_intervals" });
+      return;
+    }
+
     const intervalData = trimmed.map((interval) => ({
       rawId: rawRecordId,
       homeId: house.id,
