@@ -76,16 +76,19 @@ export async function POST(req: NextRequest) {
       ? body.homeId.trim()
       : null;
 
-  const houses = await prisma.houseAddress.findMany({
-    where: { userId: user.id, archivedAt: null },
+  if (!requestedHomeId) {
+    return NextResponse.json(
+      { ok: false, error: "home_id_required", message: "homeId is required to refresh usage." },
+      { status: 400 },
+    );
+  }
+
+  const targetHouse = await prisma.houseAddress.findFirst({
+    where: { id: requestedHomeId, userId: user.id, archivedAt: null },
     select: { id: true, esiid: true },
   });
 
-  const targetHouses = requestedHomeId
-    ? houses.filter((house) => house.id === requestedHomeId)
-    : houses;
-
-  if (targetHouses.length === 0) {
+  if (!targetHouse) {
     return NextResponse.json(
       { ok: false, error: "home_not_found" },
       { status: 404 },
@@ -113,7 +116,7 @@ export async function POST(req: NextRequest) {
   const refreshed: HomeRefreshResult[] = [];
   const backfillRange = getRollingBackfillRange(12);
 
-  const houseTasks = targetHouses.map(async (house) => {
+  const houseTasks = [targetHouse].map(async (house) => {
     const result: HomeRefreshResult = {
       homeId: house.id,
       authorizationRefreshed: false,
