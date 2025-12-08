@@ -604,8 +604,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const WEBHOOK_TIMEOUT_MS = Number(process.env.DROPLET_WEBHOOK_TIMEOUT_MS ?? 15000);
     let webhookResponse: Response;
     try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), WEBHOOK_TIMEOUT_MS);
       webhookResponse = await fetch(DROPLET_WEBHOOK_URL, {
         method: 'POST',
         headers: {
@@ -619,8 +622,23 @@ export async function POST(req: NextRequest) {
           ts: Date.now(),
         }),
         cache: 'no-store',
+        signal: controller.signal,
       });
+      clearTimeout(timer);
     } catch (err: any) {
+      // Treat webhook timeouts as accepted/queued to avoid blocking the caller for 5m+.
+      if (err?.name === 'AbortError') {
+        return NextResponse.json(
+          {
+            ok: true,
+            queued: true,
+            esiid: resolvedEsiid,
+            meter: meter || null,
+            message: `Webhook dispatch timed out after ${WEBHOOK_TIMEOUT_MS}ms; processing may still continue downstream.`,
+          },
+          { status: 202 },
+        );
+      }
       return NextResponse.json(
         {
           ok: false,
