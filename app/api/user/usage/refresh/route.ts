@@ -6,6 +6,8 @@ import { normalizeEmail } from "@/lib/utils/email";
 import { refreshSmtAuthorizationStatus, getRollingBackfillRange, requestSmtBackfillForAuthorization } from "@/lib/smt/agreements";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs"; // ensure Node runtime for longer executions
+export const maxDuration = 300; // allow ample time for pull + normalize + backfill
 
 function resolveBaseUrl(): URL {
   const explicit =
