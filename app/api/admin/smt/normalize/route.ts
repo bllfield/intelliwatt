@@ -57,9 +57,9 @@ export async function POST(req: NextRequest) {
   if (!gate.ok) return NextResponse.json(gate.body, { status: gate.status });
 
   const url = new URL(req.url);
-  // Remove practical caps so we can ingest everything; caller can still pass limit explicitly.
-  const limitParam = Number(url.searchParams.get('limit') ?? 10000000);
-  const limit = Number.isFinite(limitParam) ? Math.floor(limitParam) : 10000000;
+  // Default to only the most recent file unless caller explicitly increases.
+  const limitParam = Number(url.searchParams.get('limit') ?? 1);
+  const limit = Number.isFinite(limitParam) ? Math.floor(limitParam) : 1;
   const source = url.searchParams.get('source') ?? 'adhocusage';
   const dryRun = url.searchParams.get('dryRun') === '1';
 

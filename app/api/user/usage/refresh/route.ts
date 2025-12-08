@@ -110,8 +110,8 @@ export async function POST(req: NextRequest) {
   const baseUrl = resolveBaseUrl();
   const pullUrl = new URL("/api/admin/smt/pull", baseUrl);
   const normalizeUrl = new URL("/api/admin/smt/normalize", baseUrl);
-  // No cap: request normalization without meaningful limit so full history ingests.
-  normalizeUrl.searchParams.set("limit", "10000000");
+  // Only normalize the most recent file per request to avoid reprocessing old uploads by default.
+  normalizeUrl.searchParams.set("limit", "1");
 
   const refreshed: HomeRefreshResult[] = [];
   const backfillRange = getRollingBackfillRange(12);
