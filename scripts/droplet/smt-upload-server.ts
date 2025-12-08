@@ -35,7 +35,30 @@ type Counter = {
   windowMs: number;
 };
 
+type QueueStatus = "pending" | "active" | "done" | "error";
+
+type QueueJob = {
+  id: string;
+  filepath: string;
+  filename: string;
+  sizeBytes: number;
+  role: "admin" | "customer";
+  accountKey: string;
+  createdAt: number;
+  startedAt?: number;
+  finishedAt?: number;
+  status: QueueStatus;
+  result?: NormalizeResult;
+  error?: string;
+};
+
+type DurationSample = { durationMs: number; finishedAt: number };
+
 const counters = new Map<string, Counter>();
+const pendingJobs: QueueJob[] = [];
+let activeJob: QueueJob | null = null;
+const durationHistory: DurationSample[] = [];
+const DEFAULT_ESTIMATE_SECONDS = 45;
 
 function computeKey(role: "admin" | "customer", accountKey: string) {
   return `${role}:${accountKey || "unknown"}`;
@@ -235,6 +258,94 @@ type NormalizeResult = {
   normalized?: boolean;
 };
 
+function pruneDurations(now: number) {
+  const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000;
+  while (durationHistory.length && durationHistory[0].finishedAt < sevenDaysAgo) {
+    durationHistory.shift();
+  }
+}
+
+function longestDurationMs(windowMs: number) {
+  const now = Date.now();
+  const cutoff = now - windowMs;
+  let max = 0;
+  for (const sample of durationHistory) {
+    if (sample.finishedAt >= cutoff && sample.durationMs > max) {
+      max = sample.durationMs;
+    }
+  }
+  return max;
+}
+
+function averageDurationSeconds() {
+  if (durationHistory.length === 0) return DEFAULT_ESTIMATE_SECONDS;
+  const total = durationHistory.reduce((sum, s) => sum + s.durationMs, 0);
+  return Math.max(Math.round(total / durationHistory.length / 1000), 1);
+}
+
+function queuePosition(jobId: string) {
+  const idx = pendingJobs.findIndex((j) => j.id === jobId);
+  if (idx === -1) return activeJob?.id === jobId ? 0 : -1;
+  return idx + 1 + (activeJob ? 1 : 0);
+}
+
+async function processQueue() {
+  if (activeJob || pendingJobs.length === 0) {
+    return;
+  }
+
+  const job = pendingJobs.shift();
+  if (!job) return;
+  activeJob = { ...job, status: "active", startedAt: Date.now() };
+
+  // eslint-disable-next-line no-console
+  console.log(`[smt-upload] processing job ${activeJob.id} file=${activeJob.filename} bytes=${activeJob.sizeBytes}`);
+
+  try {
+    const result = await registerAndNormalizeFile(job.filepath, job.filename, job.sizeBytes);
+    const finishedAt = Date.now();
+    const durationMs = activeJob.startedAt ? finishedAt - activeJob.startedAt : 0;
+    durationHistory.push({ durationMs, finishedAt });
+    pruneDurations(finishedAt);
+
+    activeJob = {
+      ...activeJob,
+      finishedAt,
+      status: result.ok ? "done" : "error",
+      result,
+      error: result.ok ? undefined : result.message,
+    };
+
+    // eslint-disable-next-line no-console
+    console.log(
+      `[smt-upload] job ${activeJob.id} complete status=${activeJob.status} durationMs=${durationMs} filesProcessed=${result.filesProcessed ?? 0} intervalsInserted=${result.intervalsInserted ?? 0}`,
+    );
+  } catch (err) {
+    const finishedAt = Date.now();
+    activeJob = {
+      ...activeJob,
+      finishedAt,
+      status: "error",
+      error: String((err as Error)?.message || err),
+    };
+    // eslint-disable-next-line no-console
+    console.error(`[smt-upload] job ${activeJob.id} failed:`, err);
+  } finally {
+    activeJob = null;
+    // Kick the next job.
+    void processQueue();
+  }
+}
+
+function enqueueJob(job: QueueJob) {
+  pendingJobs.push(job);
+  // eslint-disable-next-line no-console
+  console.log(
+    `[smt-upload] queued job id=${job.id} file=${job.filename} size=${job.sizeBytes} pending=${pendingJobs.length} active=${activeJob ? 1 : 0}`,
+  );
+  void processQueue();
+}
+
 async function registerAndNormalizeFile(
   filepath: string,
   filename: string,
@@ -401,6 +512,38 @@ app.get("/health", (_req: Request, res: Response) => {
   });
 });
 
+app.get("/queue/summary", (_req: Request, res: Response) => {
+  const avgSeconds = averageDurationSeconds();
+  const longestDay = Math.round(longestDurationMs(24 * 60 * 60 * 1000) / 1000);
+  const longestWeek = Math.round(longestDurationMs(7 * 24 * 60 * 60 * 1000) / 1000);
+
+  res.json({
+    ok: true,
+    pending: pendingJobs.length,
+    active: activeJob ? 1 : 0,
+    averageSecondsPerFile: avgSeconds,
+    longestSecondsLastDay: longestDay,
+    longestSecondsLastWeek: longestWeek,
+    activeJob: activeJob
+      ? {
+          id: activeJob.id,
+          filename: activeJob.filename,
+          sizeBytes: activeJob.sizeBytes,
+          startedAt: activeJob.startedAt,
+        }
+      : null,
+    nextJob: pendingJobs[0]
+      ? {
+          id: pendingJobs[0].id,
+          filename: pendingJobs[0].filename,
+          sizeBytes: pendingJobs[0].sizeBytes,
+          queuedAt: pendingJobs[0].createdAt,
+        }
+      : null,
+    samplesRecorded: durationHistory.length,
+  });
+});
+
 app.post(
   "/upload",
   verifyUploadToken,
@@ -509,10 +652,52 @@ app.post(
 
         responseMessage = "Upload ignored (non-interval file removed)";
       } else {
-        // Register and normalize the file with the main app and surface result to caller
-        const normResult = await registerAndNormalizeFile(destPath, originalName, sizeGuess);
-        responseMessage = normResult.message;
-        responseOk = normResult.ok;
+        const job: QueueJob = {
+          id: crypto.randomUUID(),
+          filepath: destPath,
+          filename: originalName,
+          sizeBytes: sizeGuess,
+          role,
+          accountKey,
+          createdAt: Date.now(),
+          status: "pending",
+        };
+
+        enqueueJob(job);
+
+        const position = queuePosition(job.id);
+        const avgSeconds = averageDurationSeconds();
+        const etaSeconds = Math.max((position <= 0 ? 1 : position) * avgSeconds, avgSeconds);
+
+        responseMessage = "Upload accepted and queued";
+        responseOk = true;
+
+        res.status(202).json({
+          ok: true,
+          message: responseMessage,
+          file: {
+            name: originalName,
+            size: sizeGuess ?? null,
+            path: destPath,
+            interval: intervalFile,
+          },
+          meta: {
+            role,
+            accountKey,
+            limit: rate.limit,
+            remaining: rate.remaining,
+            resetAt: resetAtIso,
+          },
+          queue: {
+            jobId: job.id,
+            position,
+            etaSeconds,
+            averageSecondsPerFile: avgSeconds,
+            pending: pendingJobs.length,
+            active: activeJob ? 1 : 0,
+          },
+        });
+        return;
       }
 
       res.status(responseOk ? 202 : 500).json({
