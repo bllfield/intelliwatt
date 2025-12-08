@@ -9,6 +9,8 @@ import { normalizeGreenButtonReadingsTo15Min } from "@/lib/usage/greenButtonNorm
 import { usagePrisma } from "@/lib/db/usageClient";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs"; // ensure Node runtime so Buffer/crypto and larger payloads work
+export const maxDuration = 300; // allow long-running parses for large files
 
 const MANUAL_USAGE_LIFETIME_DAYS = 365;
 const DAY_MS = 24 * 60 * 60 * 1000;
