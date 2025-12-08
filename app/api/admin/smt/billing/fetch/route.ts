@@ -3,19 +3,17 @@ import { requireAdmin } from '@/lib/auth/admin';
 import { prisma } from '@/lib/db';
 import { getSmtAccessToken } from '@/lib/smt/token';
 import { resolveSmtEsiid } from '@/lib/smt/esiid';
+import crypto from 'crypto';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 function defaultDateRange(): { start: string; end: string } {
   const today = new Date();
-  const year = today.getFullYear();
-  const month = today.getMonth();
-  const prevMonth = month === 0 ? 11 : month - 1;
-  const prevYear = month === 0 ? year - 1 : year;
-
-  const start = new Date(prevYear, prevMonth, 1);
-  const end = new Date(prevYear, prevMonth + 1, 0);
+  const end = today;
+  const start = new Date(today);
+  // Pull a full 365-day window ending today to ensure 12 months of intervals.
+  start.setDate(start.getDate() - 365);
 
   const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
 
@@ -51,7 +49,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ok: false, error: "Field 'esiid' is required and must be resolvable." }, { status: 400 });
   }
 
-  const includeInterval = Boolean(raw.includeInterval);
+  const includeInterval = raw.includeInterval === undefined ? true : Boolean(raw.includeInterval);
   const includeDaily = Boolean(raw.includeDaily);
   const includeMonthly = raw.includeMonthly === undefined ? true : Boolean(raw.includeMonthly);
 
@@ -69,7 +67,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (includeInterval) dataTypes.push('INTERVAL');
   if (includeDaily) dataTypes.push('DAILY');
   if (includeMonthly) dataTypes.push('MONTHLY');
-  if (dataTypes.length === 0) dataTypes.push('MONTHLY');
+  if (dataTypes.length === 0) dataTypes.push('INTERVAL');
 
   const requestorId =
     process.env.SMT_REQUESTOR_ID?.trim() ??
@@ -94,10 +92,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const smtBaseUrl = process.env.SMT_API_BASE_URL ?? 'https://services.smartmetertexas.net';
   const smtUrl = `${smtBaseUrl.replace(/\/+$/, '')}/v2/energydata/`;
 
+  const transId = `TX${Date.now().toString(36)}${crypto.randomBytes(3).toString('hex')}`.slice(0, 32);
+
   const payload = {
+    trans_id: transId,
     requestorID: requestorId,
     requestorType,
     requesterAuthenticationID: requestorAuthId,
+    // Guide-aligned fields
+    startDate: startIso,
+    endDate: endIso,
+    deliveryMode: 'API',
+    reportFormat: 'JSON',
+    version: 'L',
+    readingType: includeInterval ? 'A' : 'C', // A = consumption+gen, C = consumption
+    ESIIDList: [esiid],
+    SMTTermsandConditions: 'Y',
+    // Keep existing options for compatibility with prior schema
     filter: {
       esiidList: [esiid],
       startDate: startIso,
@@ -106,7 +117,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     options: {
       dataTypes,
     },
-    SMTTermsandConditions: 'Y',
   };
 
   try {

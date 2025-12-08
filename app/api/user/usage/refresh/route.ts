@@ -111,11 +111,9 @@ export async function POST(req: NextRequest) {
   normalizeUrl.searchParams.set("limit", "10000000");
 
   const refreshed: HomeRefreshResult[] = [];
-
   const backfillRange = getRollingBackfillRange(12);
-  const backfillResults: Array<{ homeId: string; ok: boolean; message?: string }> = [];
 
-  for (const house of targetHouses) {
+  const houseTasks = targetHouses.map(async (house) => {
     const result: HomeRefreshResult = {
       homeId: house.id,
       authorizationRefreshed: false,
@@ -125,15 +123,16 @@ export async function POST(req: NextRequest) {
       },
     };
 
-    const auth = await prisma.smtAuthorization.findFirst({
+    // Refresh authorization status (if exists)
+    const latestAuth = await prisma.smtAuthorization.findFirst({
       where: { houseAddressId: house.id, archivedAt: null },
       orderBy: { createdAt: "desc" },
       select: { id: true },
     });
 
-    if (auth) {
+    if (latestAuth) {
       try {
-        await refreshSmtAuthorizationStatus(auth.id);
+        await refreshSmtAuthorizationStatus(latestAuth.id);
         result.authorizationRefreshed = true;
       } catch (error) {
         result.authorizationMessage =
@@ -145,6 +144,7 @@ export async function POST(req: NextRequest) {
       result.authorizationMessage = "No SMT authorization found for this home.";
     }
 
+    // Trigger SMT pull (admin) if possible
     if (adminToken && house.esiid) {
       try {
         const pullResponse = await fetch(pullUrl, {
@@ -186,9 +186,8 @@ export async function POST(req: NextRequest) {
       result.pull.message = "House is missing an ESIID; SMT pull not attempted.";
     }
 
-    refreshed.push(result);
-
-    // Proactively request a 12-month SMT backfill so we don't get stuck with short coverage.
+    // Request 12-month backfill to ensure full coverage
+    let backfillOutcome: { homeId: string; ok: boolean; message?: string } | null = null;
     try {
       const auth = await prisma.smtAuthorization.findFirst({
         where: { houseAddressId: house.id, archivedAt: null },
@@ -211,16 +210,24 @@ export async function POST(req: NextRequest) {
           });
         }
 
-        backfillResults.push({ homeId: house.id, ok: res.ok, message: res.message });
+        backfillOutcome = { homeId: house.id, ok: res.ok, message: res.message };
       }
     } catch (backfillError) {
-      backfillResults.push({
+      backfillOutcome = {
         homeId: house.id,
         ok: false,
         message: backfillError instanceof Error ? backfillError.message : String(backfillError),
-      });
+      };
     }
-  }
+
+    return { result, backfillOutcome };
+  });
+
+  const houseResults = await Promise.all(houseTasks);
+  const backfillResults = houseResults
+    .map((hr) => hr.backfillOutcome)
+    .filter((x): x is { homeId: string; ok: boolean; message?: string } => Boolean(x));
+  refreshed.push(...houseResults.map((hr) => hr.result));
 
   let normalization = {
     attempted: Boolean(adminToken),
