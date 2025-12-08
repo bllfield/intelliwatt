@@ -320,7 +320,7 @@ async function registerAndNormalizeFile(
     }
 
     // Step 2: Trigger normalization of the raw file
-    const normalizeUrl = `${INTELLIWATT_BASE_URL}/api/admin/smt/normalize?limit=${NORMALIZE_LIMIT}`;
+    const normalizeUrl = `${INTELLIWATT_BASE_URL}/api/admin/smt/normalize?source=droplet-upload&limit=${NORMALIZE_LIMIT}`;
     // eslint-disable-next-line no-console
     console.log(`[smt-upload] triggering normalization at ${normalizeUrl}`);
 
