@@ -319,8 +319,14 @@ PY
 
   # Throttle between uploads to reduce load on the droplet/API
   sleep "${SMT_UPLOAD_DELAY:-2}"
-  # Trigger normalize (scoped to this ESIID) so only the newest file is processed and DB is clean
-  if [[ "$upload_ok" == "true" && -n "$esiid" ]]; then
+
+  # Legacy inline path ONLY:
+  # When posting directly to /api/admin/smt/pull (USE_DROPLET_UPLOAD=false),
+  # we still invoke /api/admin/smt/normalize as a follow-up.
+  # When using the droplet upload server, raw-upload already normalizes the
+  # entire file inline, so calling /api/admin/smt/normalize here would
+  # re-process unrelated RawSmtFile rows (including error artifacts).
+  if [[ "$upload_ok" == "true" && -n "$esiid" && "$USE_DROPLET_UPLOAD" == "false" ]]; then
     norm_url="${INTELLIWATT_BASE_URL%/}/api/admin/smt/normalize?esiid=${esiid}&limit=1&purge=1&cleanup=1"
     norm_code="$(
       curl -sS -o "$RESP_FILE" -w "%{http_code}" \
@@ -329,7 +335,7 @@ PY
         -H "content-type: application/json" \
         --data '{}' 2>/dev/null || printf '000'
     )"
-    log "Normalize (${esiid}) -> http $norm_code: $(cat "$RESP_FILE")"
+    log "Normalize (${esiid}) [legacy inline] -> http $norm_code: $(cat "$RESP_FILE")"
   fi
 
   if [[ "$upload_ok" == "true" && "$PROCESS_ONE_FILE" == "true" ]]; then
