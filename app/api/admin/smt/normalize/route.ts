@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { GetObjectCommand, DeleteObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { requireAdmin } from '@/lib/auth/admin';
 import { prisma } from '@/lib/db';
+import { usagePrisma } from '@/lib/db/usageClient';
 import { normalizeSmtIntervals, type NormalizeStats } from '@/app/lib/smt/normalize';
 
 export const runtime = 'nodejs';
@@ -227,33 +228,23 @@ export async function POST(req: NextRequest) {
 
     const boundedTotalKwh = boundedIntervals.reduce((sum, i) => sum + i.kwh, 0);
 
+    const distinctPairs = Array.from(new Set(boundedIntervals.map((i) => `${i.esiid}|${i.meter}`))).map((key) => {
+      const [esiid, meter] = key.split('|');
+      return { esiid, meter };
+    });
+    const distinctEsiids = Array.from(new Set(boundedIntervals.map((i) => i.esiid))).filter(Boolean);
+
     // Recompute bounds for the bounded set to drive delete + summary
     const boundedTimestamps = boundedIntervals.map((i) => i.ts.getTime()).filter((ms) => Number.isFinite(ms));
     const tsMinDate = boundedTimestamps.length ? new Date(Math.min(...boundedTimestamps)) : tsMinDateAll;
 
     if (!dryRun && tsMinDate && tsMaxDate) {
-          const tsMinIso = tsMinDate.toISOString();
-          const tsMaxIso = tsMaxDate.toISOString();
-          const distinctPairs = Array.from(new Set(boundedIntervals.map((i) => `${i.esiid}|${i.meter}`))).map((key) => {
-        const [esiid, meter] = key.split('|');
-        return { esiid, meter };
-      });
-
       try {
         await prisma.$transaction(async (tx) => {
-          if (distinctPairs.length > 0) {
-            await tx.smtInterval.deleteMany({
-              where: {
-                OR: distinctPairs.map((pair) => ({
-                  esiid: pair.esiid,
-                  meter: pair.meter,
-                  ts: {
-                    gte: tsMinDate,
-                    lte: tsMaxDate,
-                  },
-                })),
-              },
-            });
+          // Wipe existing interval + billing data for the ESIIDs in this file before inserting fresh data
+          if (distinctEsiids.length > 0) {
+            await tx.smtBillingRead.deleteMany({ where: { esiid: { in: distinctEsiids } } });
+            await tx.smtInterval.deleteMany({ where: { esiid: { in: distinctEsiids } } });
           }
 
           let insertedTotal = 0;
@@ -283,8 +274,8 @@ export async function POST(req: NextRequest) {
         console.error('[smt/normalize] failed overwrite transaction', {
           fileId: file.id,
           filename: file.filename,
-          tsMin: tsMinIso,
-          tsMax: tsMaxIso,
+          tsMin: tsMinDate?.toISOString(),
+          tsMax: tsMaxDate?.toISOString(),
           err,
         });
         throw err;
@@ -316,6 +307,32 @@ export async function POST(req: NextRequest) {
 
     if (!dryRun) {
       processedIds.push(file.id);
+    }
+
+    // Also remove any existing manual/green-button data for matching homes so new SMT data is the sole source.
+    if (!dryRun && distinctEsiids.length > 0) {
+      try {
+        const houses = await prisma.houseAddress.findMany({
+          where: { esiid: { in: distinctEsiids }, archivedAt: null },
+          select: { id: true },
+        });
+        const houseIds = houses.map((h) => h.id);
+
+        if (houseIds.length > 0) {
+          // Null out manualUsageId on entries tied to these houses (to avoid FK issues), then delete manual usage uploads
+          const manualIds = await prisma.manualUsageUpload.findMany({ where: { houseId: { in: houseIds } }, select: { id: true } });
+          if (manualIds.length > 0) {
+            await prisma.entry.updateMany({ where: { manualUsageId: { in: manualIds.map((m) => m.id) } }, data: { manualUsageId: null } });
+          }
+          await prisma.manualUsageUpload.deleteMany({ where: { houseId: { in: houseIds } } });
+          await prisma.greenButtonUpload.deleteMany({ where: { houseId: { in: houseIds } } });
+
+          await usagePrisma.greenButtonInterval.deleteMany({ where: { homeId: { in: houseIds } } });
+          await usagePrisma.rawGreenButton.deleteMany({ where: { homeId: { in: houseIds } } });
+        }
+      } catch (err) {
+        console.error('[smt/normalize] failed to cleanup green-button/manual data for ESIID(s)', { distinctEsiids, err });
+      }
     }
 
     // Cleanup raw file after successful normalization (mimic green-button behavior)
