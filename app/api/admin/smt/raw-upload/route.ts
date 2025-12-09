@@ -33,6 +33,8 @@ export async function POST(req: NextRequest) {
     `/adhocusage/${filename ?? ''}`;
   // STEP 1: Accept optional contentBase64 for large-file SMT ingestion path
   const contentBase64 = body.contentBase64 as string | undefined;
+  const purgeExisting: boolean =
+    body.purgeExisting === false ? false : true; // default: true for legacy callers
 
   const missing: string[] = [];
 
@@ -102,8 +104,10 @@ export async function POST(req: NextRequest) {
       select: { id: true, filename: true, size_bytes: true, sha256: true, created_at: true },
     });
 
-    // Early purge of prior data for this ESIID so normalization has a clean slate
-    if (esiid) {
+    // Early purge of prior data for this ESIID so normalization has a clean slate.
+    // For large files that are chunked into multiple raw-upload calls, callers can pass
+    // purgeExisting=false on subsequent chunks so we only wipe once.
+    if (esiid && purgeExisting) {
       try {
         const houses = await prisma.houseAddress.findMany({
           where: { esiid, archivedAt: null },

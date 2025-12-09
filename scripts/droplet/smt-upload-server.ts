@@ -254,120 +254,122 @@ async function registerAndNormalizeFile(
   let deleted = false;
 
   try {
-    // STEP 3: Large-file SMT ingestion - read file, send content, normalize, then delete
-    const sha256 = await computeFileSha256(filepath);
-    // eslint-disable-next-line no-console
-    console.log(
-      `[smt-upload] computed sha256=${sha256} for file=${filepath}`,
-    );
-
-    // Read file content and encode as base64
+    // STEP 3: Large-file SMT ingestion - read file, optionally split into chunks,
+    // send content to the app, normalize, then delete.
     const fileContent = await fs.promises.readFile(filepath);
-    const contentBase64 = fileContent.toString('base64');
     // eslint-disable-next-line no-console
     console.log(
-      `[smt-upload] read file content: ${fileContent.length} bytes, base64 length: ${contentBase64.length}`,
+      `[smt-upload] read file content: ${fileContent.length} bytes from ${filepath}`,
     );
 
-    // Step 1: Register the raw file with the main app (including content)
+    const text = fileContent.toString("utf8");
+    const lines = text.split(/\r?\n/);
+    const header = lines[0] || "";
+    const dataLines = lines.slice(1).filter((l) => l.trim().length > 0);
+
+    const LINES_PER_CHUNK = Number(process.env.SMT_RAW_LINES_PER_CHUNK || "5000");
+    const totalParts =
+      dataLines.length > 0 ? Math.ceil(dataLines.length / LINES_PER_CHUNK) : 1;
+
     const rawUploadUrl = `${INTELLIWATT_BASE_URL}/api/admin/smt/raw-upload`;
-    const rawUploadPayload: Record<string, unknown> = {
-      filename,
-      sizeBytes: size_bytes,
-      sha256,
-      contentBase64,
-      source: "droplet-upload",
-      receivedAt: new Date().toISOString(),
-    };
 
-    if (esiid && esiid.trim().length > 0) {
-      rawUploadPayload.esiid = esiid.trim();
-    }
-    if (meter && meter.trim().length > 0) {
-      rawUploadPayload.meter = meter.trim();
-    }
+    let totalFilesProcessed = 0;
+    let totalIntervalsInserted = 0;
 
-    // eslint-disable-next-line no-console
-    console.log(`[smt-upload] registering raw file at ${rawUploadUrl}`);
+    for (let partIndex = 0; partIndex < totalParts; partIndex += 1) {
+      const start = partIndex * LINES_PER_CHUNK;
+      const end = Math.min(start + LINES_PER_CHUNK, dataLines.length);
+      const partDataLines =
+        dataLines.length > 0 ? dataLines.slice(start, end) : dataLines;
 
-    const rawResponse = await fetch(rawUploadUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-admin-token": ADMIN_TOKEN,
-      },
-      body: JSON.stringify(rawUploadPayload),
-      signal: AbortSignal.timeout(30000), // 30 second timeout for registration
-    });
+      if (partDataLines.length === 0 && dataLines.length > 0) {
+        continue;
+      }
 
-    if (!rawResponse.ok) {
-      const errBody = await rawResponse.text();
-      console.error(
-        `[smt-upload] raw-upload failed: ${rawResponse.status} ${errBody}`,
+      const partContent =
+        dataLines.length > 0
+          ? [header, ...partDataLines].join("\n")
+          : text;
+      const partBuffer = Buffer.from(partContent, "utf8");
+      const partSha256 = crypto.createHash("sha256").update(partBuffer).digest("hex");
+      const contentBase64 = partBuffer.toString("base64");
+
+      const partFilename =
+        totalParts > 1
+          ? `${filename}.part${partIndex + 1}-of-${totalParts}`
+          : filename;
+
+      const rawUploadPayload: Record<string, unknown> = {
+        filename: partFilename,
+        sizeBytes: partBuffer.length,
+        sha256: partSha256,
+        contentBase64,
+        source: "droplet-upload",
+        receivedAt: new Date().toISOString(),
+        purgeExisting: partIndex === 0, // only the first chunk clears existing intervals
+      };
+
+      if (esiid && esiid.trim().length > 0) {
+        rawUploadPayload.esiid = esiid.trim();
+      }
+      if (meter && meter.trim().length > 0) {
+        rawUploadPayload.meter = meter.trim();
+      }
+
+      // eslint-disable-next-line no-console
+      console.log(
+        `[smt-upload] registering raw file part ${partIndex + 1}/${totalParts} at ${rawUploadUrl} (bytes=${partBuffer.length})`,
       );
-      await recordPipelineError(rawResponse.status, 'raw-upload', errBody);
-      return {
-        ok: false,
-        message: `raw-upload failed: ${rawResponse.status}`,
-      };
-    }
 
-    const rawResult = await rawResponse.json();
-    // eslint-disable-next-line no-console
-    console.log(`[smt-upload] raw file registered: ${JSON.stringify(rawResult)}`);
+      const rawResponse = await fetch(rawUploadUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-admin-token": ADMIN_TOKEN,
+        },
+        body: JSON.stringify(rawUploadPayload),
+        signal: AbortSignal.timeout(30000), // 30 second timeout for registration
+      });
 
-    const isDuplicate = rawResult?.duplicate === true || rawResult?.status === "duplicate";
-    if (isDuplicate) {
-      // Skip normalization to avoid hammering the API when nothing new will ingest.
-      return {
-        ok: true,
-        message: "duplicate raw file; normalization skipped",
-        filesProcessed: 0,
-        intervalsInserted: 0,
-        normalized: false,
-      };
-    }
+      if (!rawResponse.ok) {
+        const errBody = await rawResponse.text();
+        console.error(
+          `[smt-upload] raw-upload failed for part ${partIndex + 1}/${totalParts}: ${rawResponse.status} ${errBody}`,
+        );
+        await recordPipelineError(rawResponse.status, "raw-upload", errBody);
+        return {
+          ok: false,
+          message: `raw-upload failed: ${rawResponse.status}`,
+        };
+      }
 
-    // Step 2: Trigger normalization of the raw file
-    const normalizeUrl = `${INTELLIWATT_BASE_URL}/api/admin/smt/normalize?source=droplet-upload&limit=${NORMALIZE_LIMIT}`;
-    // eslint-disable-next-line no-console
-    console.log(`[smt-upload] triggering normalization at ${normalizeUrl}`);
-
-    const normResponse = await fetch(normalizeUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-admin-token": ADMIN_TOKEN,
-      },
-      body: JSON.stringify({}),
-      signal: AbortSignal.timeout(300000), // 5 minute timeout for normalization (large files)
-    });
-
-    if (!normResponse.ok) {
-      const errBody = await normResponse.text();
-      console.error(
-        `[smt-upload] normalize failed: ${normResponse.status} ${errBody}`,
+      const rawResult = await rawResponse.json();
+      // eslint-disable-next-line no-console
+      console.log(
+        `[smt-upload] raw file part registered: ${JSON.stringify(rawResult)}`,
       );
-      await recordPipelineError(normResponse.status, 'normalize', errBody);
-      return {
-        ok: false,
-        message: `normalize failed: ${normResponse.status}`,
-      };
-    }
 
-    const normResult = await normResponse.json();
-    const filesProcessed = normResult.filesProcessed || 0;
-    const intervalsInserted = normResult.intervalsInserted || 0;
-    // eslint-disable-next-line no-console
-    console.log(
-      `[smt-upload] normalization complete: filesProcessed=${filesProcessed} intervalsInserted=${intervalsInserted}`,
-    );
+      const isDuplicate =
+        rawResult?.duplicate === true || rawResult?.status === "duplicate";
+      if (isDuplicate) {
+        // Skip normalization to avoid hammering the API when nothing new will ingest.
+        continue;
+      }
+
+      // Track normalization summary if the inline raw-upload returned it.
+      if (rawResult?.normalizedInline) {
+        totalFilesProcessed += 1;
+        if (typeof rawResult.normalizedInline.intervalsInserted === "number") {
+          totalIntervalsInserted += rawResult.normalizedInline.intervalsInserted;
+        }
+      }
+    }
 
     return {
       ok: true,
-      message: "normalize complete",
-      filesProcessed,
-      intervalsInserted,
+      message: "normalize complete (inline via raw-upload)",
+      filesProcessed: totalFilesProcessed,
+      intervalsInserted: totalIntervalsInserted,
       normalized: true,
     };
   } catch (err) {
