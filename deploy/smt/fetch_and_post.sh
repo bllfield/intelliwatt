@@ -112,7 +112,8 @@ require_cmd stat
 require_cmd gpg
 require_cmd unzip
 
-PROCESS_ONE_FILE="${SMT_PROCESS_ONE:-true}" # default: stop after first successful upload/normalize
+# Default: process all files; set SMT_PROCESS_ONE=true to stop after the first successful upload/normalize
+PROCESS_ONE_FILE="${SMT_PROCESS_ONE:-false}"
 require_cmd python3
 
 mkdir -p "$SMT_LOCAL_DIR"
