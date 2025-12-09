@@ -77,12 +77,15 @@ export async function POST(req: NextRequest) {
   const limitParam = Number(url.searchParams.get('limit') ?? 1);
   const limit = Number.isFinite(limitParam) ? Math.floor(limitParam) : 1;
   const cleanupOthers = url.searchParams.get('cleanup') !== '0';
-  const source = url.searchParams.get('source') ?? 'adhocusage';
+  const sourceParam = url.searchParams.get('source');
+  const source = sourceParam && sourceParam !== 'all' ? sourceParam : undefined;
   const dryRun = url.searchParams.get('dryRun') === '1';
 
-  const whereFilter: any = {
-    source: source || undefined,
-  };
+  const whereFilter: any = {};
+
+  if (source) {
+    whereFilter.source = source;
+  }
 
   if (esiidFilter) {
     whereFilter.AND = [
