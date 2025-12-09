@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import { usagePrisma } from '@/lib/db/usageClient';
+import { normalizeSmtIntervals } from '@/app/lib/smt/normalize';
 import { requireAdmin } from '@/lib/auth/admin';
 
 export const runtime = 'nodejs';
@@ -131,6 +132,110 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // If the payload was provided inline, normalize immediately (mirrors green-button flow)
+    let normalizedSummary: any = null;
+    if (contentBuffer && contentBuffer.length > 0) {
+      const { intervals, stats } = normalizeSmtIntervals(contentBuffer.toString('utf8'), {
+        source: source ?? 'smt',
+      });
+
+      if (intervals.length > 0) {
+        const timestamps = intervals.map((i) => i.ts.getTime()).filter((ms) => Number.isFinite(ms));
+        const tsMax = timestamps.length ? new Date(Math.max(...timestamps)) : null;
+        const tsMinAll = timestamps.length ? new Date(Math.min(...timestamps)) : null;
+
+        const windowStart = tsMax ? new Date(tsMax.getTime() - 365 * 24 * 60 * 60 * 1000) : null;
+        const bounded = windowStart ? intervals.filter((i) => i.ts >= windowStart && i.ts <= tsMax) : intervals;
+
+        const distinctEsiids = Array.from(new Set(bounded.map((i) => i.esiid))).filter(Boolean);
+
+        let inserted = 0;
+        let skipped = 0;
+
+        if (bounded.length > 0 && tsMax) {
+          try {
+            await prisma.$transaction(async (tx) => {
+              if (distinctEsiids.length > 0) {
+                await tx.smtBillingRead.deleteMany({ where: { esiid: { in: distinctEsiids } } });
+                await tx.smtInterval.deleteMany({ where: { esiid: { in: distinctEsiids } } });
+              }
+
+              const INSERT_BATCH_SIZE = 4000;
+              let insertedTotal = 0;
+              for (let i = 0; i < bounded.length; i += INSERT_BATCH_SIZE) {
+                const slice = bounded.slice(i, i + INSERT_BATCH_SIZE).map((interval) => ({
+                  esiid: interval.esiid,
+                  meter: interval.meter,
+                  ts: interval.ts,
+                  kwh: new Prisma.Decimal(interval.kwh),
+                  source: interval.source ?? source ?? 'smt',
+                }));
+
+                if (slice.length === 0) continue;
+
+                const result = await tx.smtInterval.createMany({ data: slice, skipDuplicates: false });
+                insertedTotal += result.count;
+              }
+
+              inserted = insertedTotal;
+              skipped = bounded.length - insertedTotal;
+            });
+          } catch (err) {
+            console.error('[raw-upload:inline] failed overwrite transaction', { err });
+            throw err;
+          }
+
+          if (distinctEsiids.length > 0) {
+            try {
+              const houses = await prisma.houseAddress.findMany({
+                where: { esiid: { in: distinctEsiids }, archivedAt: null },
+                select: { id: true },
+              });
+              const houseIds = houses.map((h) => h.id);
+
+              if (houseIds.length > 0) {
+                const manualIds = await prisma.manualUsageUpload.findMany({
+                  where: { houseId: { in: houseIds } },
+                  select: { id: true },
+                });
+                if (manualIds.length > 0) {
+                  await prisma.entry.updateMany({
+                    where: { manualUsageId: { in: manualIds.map((m) => m.id) } },
+                    data: { manualUsageId: null },
+                  });
+                }
+                await prisma.manualUsageUpload.deleteMany({ where: { houseId: { in: houseIds } } });
+                await prisma.greenButtonUpload.deleteMany({ where: { houseId: { in: houseIds } } });
+
+                await usagePrisma.greenButtonInterval.deleteMany({ where: { homeId: { in: houseIds } } });
+                await usagePrisma.rawGreenButton.deleteMany({ where: { homeId: { in: houseIds } } });
+              }
+            } catch (err) {
+              console.error('[raw-upload:inline] failed to cleanup green-button/manual data for ESIID(s)', {
+                distinctEsiids,
+                err,
+              });
+            }
+          }
+
+          try {
+            await prisma.rawSmtFile.delete({ where: { id: row.id } });
+          } catch (err) {
+            console.error('[raw-upload:inline] failed to delete raw record after inline normalize', { err });
+          }
+
+          normalizedSummary = {
+            inserted,
+            skipped,
+            records: bounded.length,
+            tsMin: tsMinAll ? tsMinAll.toISOString() : stats.tsMin ?? null,
+            tsMax: tsMax.toISOString(),
+            diagnostics: stats,
+          };
+        }
+      }
+    }
+
     return NextResponse.json({
       ok: true,
       id: String(row.id), // BigInt -> string
@@ -138,6 +243,7 @@ export async function POST(req: NextRequest) {
       sizeBytes: row.size_bytes,
       sha256: row.sha256,
       createdAt: row.created_at,
+      normalizedInline: normalizedSummary,
     });
   } catch (e: any) {
     // Safety net: if we still hit a P2002 (unique constraint), treat as idempotent

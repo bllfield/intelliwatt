@@ -631,52 +631,38 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const WEBHOOK_TIMEOUT_MS = Number(process.env.DROPLET_WEBHOOK_TIMEOUT_MS ?? 15000);
-    const webhookPromise = fetch(DROPLET_WEBHOOK_URL, {
-      method: 'POST',
-      headers: {
-        [WEBHOOK_HEADERS[0]]: WEBHOOK_SECRET,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        reason: 'admin_triggered',
-        esiid: resolvedEsiid,
-        meter: meter || undefined,
-        houseId: typeof houseId === 'string' ? houseId : undefined,
-        ts: Date.now(),
-      }),
-      cache: 'no-store',
-    });
-
-    let webhookResponse: Response | 'timeout';
+    // Block until the droplet webhook responds (up to ~4.5 minutes) so the caller sees completion instead of a timeout.
+    const WEBHOOK_TIMEOUT_MS = Number(process.env.DROPLET_WEBHOOK_TIMEOUT_MS ?? 280_000);
+    let webhookResponse: Response;
     try {
-      webhookResponse = await Promise.race([
-        webhookPromise,
-        new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), WEBHOOK_TIMEOUT_MS)),
-      ]);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), WEBHOOK_TIMEOUT_MS);
+      webhookResponse = await fetch(DROPLET_WEBHOOK_URL, {
+        method: 'POST',
+        headers: {
+          [WEBHOOK_HEADERS[0]]: WEBHOOK_SECRET,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          reason: 'admin_triggered',
+          esiid: resolvedEsiid,
+          meter: meter || undefined,
+          houseId: typeof houseId === 'string' ? houseId : undefined,
+          ts: Date.now(),
+        }),
+        cache: 'no-store',
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
     } catch (err: any) {
+      const isTimeout = err?.name === 'AbortError';
       return NextResponse.json(
         {
           ok: false,
-          error: 'WEBHOOK_CONNECTION_FAILED',
+          error: isTimeout ? 'WEBHOOK_TIMEOUT' : 'WEBHOOK_CONNECTION_FAILED',
           details: err?.message || 'Failed to connect to webhook',
         },
-        { status: 502 },
-      );
-    }
-
-    if (webhookResponse === 'timeout') {
-      // Allow the webhook to continue in the background; surface a quick 202 to the caller.
-      webhookPromise.catch((err) => console.error('SMT webhook later failed after timeout window', err));
-      return NextResponse.json(
-        {
-          ok: true,
-          queued: true,
-          esiid: resolvedEsiid,
-          meter: meter || null,
-          message: `Webhook dispatch still running after ${WEBHOOK_TIMEOUT_MS}ms; continuing in background.`,
-        },
-        { status: 202 },
+        { status: isTimeout ? 504 : 502 },
       );
     }
 
