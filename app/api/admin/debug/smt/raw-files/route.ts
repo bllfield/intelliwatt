@@ -10,18 +10,38 @@ export async function GET(req: NextRequest) {
   if (!gate.ok) return NextResponse.json(gate.body, { status: gate.status });
 
   const { searchParams } = new URL(req.url);
-  const limit = Math.min(Math.max(Number(searchParams.get('limit') ?? 5), 1), 50);
+  const limit = Math.min(Math.max(Number(searchParams.get('limit') ?? 5), 1), 100);
+  const esiid = searchParams.get('esiid')?.trim();
+  const sourceParam = searchParams.get('source');
+  const source = sourceParam && sourceParam !== 'all' ? sourceParam : undefined;
+
+  const where: any = {};
+  if (source) {
+    where.source = source;
+  }
+  if (esiid) {
+    where.AND = [
+      {
+        OR: [
+          { billingReads: { some: { esiid } } },
+          { filename: { contains: esiid } },
+          { storage_path: { contains: esiid } },
+        ],
+      },
+    ];
+  }
 
   const rows = await prisma.rawSmtFile.findMany({
+    where,
     orderBy: { created_at: 'desc' },
     take: limit,
     select: {
-      id: true,            // BigInt
+      id: true, // BigInt
       filename: true,
       size_bytes: true,
       sha256: true,
-      created_at: true,    // Date
-      received_at: true,   // Date | null
+      created_at: true, // Date
+      received_at: true, // Date | null
       source: true,
       storage_path: true,
       content_type: true,
@@ -40,7 +60,7 @@ export async function GET(req: NextRequest) {
     contentType: r.content_type ?? null,
   }));
 
-  return NextResponse.json({ rows: dto });
+  return NextResponse.json({ ok: true, count: dto.length, rows: dto });
 }
 
 
