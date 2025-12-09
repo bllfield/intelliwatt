@@ -39,11 +39,20 @@ export function getRollingBackfillRange(monthsBack: number = 12): {
   startDate: Date;
   endDate: Date;
 } {
-  const endDate = new Date();
-  const startDate = new Date(endDate);
-  startDate.setMonth(startDate.getMonth() - monthsBack);
-  startDate.setUTCHours(0, 0, 0, 0);
+  // SMT guidance: request 365 days of interval data ending "yesterday".
+  // We ignore monthsBack here and always take a 365-day window for now
+  // to avoid surprises around month length / DST.
+  const today = new Date();
+  const endDate = new Date(today);
+  // End = yesterday, 23:59:59.999 UTC
+  endDate.setUTCDate(endDate.getUTCDate() - 1);
   endDate.setUTCHours(23, 59, 59, 999);
+
+  const startDate = new Date(endDate);
+  // Inclusive 365-day window: subtract 364 days so [start, end] has 365 days.
+  startDate.setUTCDate(startDate.getUTCDate() - 364);
+  startDate.setUTCHours(0, 0, 0, 0);
+
   return { startDate, endDate };
 }
 
@@ -88,6 +97,14 @@ function buildProxyUrl(path: string): string {
   return `${base}${normalizedPath}`;
 }
 
+function formatDateMDY(date: Date): string {
+  // SMT XML schema examples use MM/DD/YYYY as a string. Keep leading zeros.
+  const m = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(date.getUTCDate()).padStart(2, "0");
+  const y = String(date.getUTCFullYear());
+  return `${m}/${d}/${y}`;
+}
+
 export async function requestSmtBackfillForAuthorization(
   req: SmtBackfillRequest,
 ): Promise<{ ok: boolean; message?: string }> {
@@ -111,8 +128,10 @@ export async function requestSmtBackfillForAuthorization(
     authorizationId: req.authorizationId,
     esiid: normalizeEsiid(req.esiid),
     meterNumber: req.meterNumber ?? null,
-    startDate: req.startDate.toISOString(),
-    endDate: req.endDate.toISOString(),
+    // SMT Interface schema: startDate/endDate are xsd:string with maxLength 10.
+    // Use MM/DD/YYYY as in the official examples.
+    startDate: formatDateMDY(req.startDate),
+    endDate: formatDateMDY(req.endDate),
   };
 
   try {
