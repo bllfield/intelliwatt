@@ -43,7 +43,6 @@ materialize_csv_from_pgp_zip() {
   tmp_dir="$(mktemp -d "${SMT_LOCAL_DIR%/}/pgp_tmp.XXXXXX")"
   if [[ -z "$tmp_dir" || ! -d "$tmp_dir" ]]; then
     log "WARN: materialize_csv_from_pgp_zip: mktemp failed for $asc_path"
-    printf '%s\n' "$asc_path"
     return 1
   fi
 
@@ -51,7 +50,6 @@ materialize_csv_from_pgp_zip() {
   if ! gpg --batch --yes -o "$dec_zip" -d "$asc_path" >/dev/null 2>&1; then
     log "WARN: materialize_csv_from_pgp_zip: gpg decrypt failed for $asc_path"
     rm -rf "$tmp_dir"
-    printf '%s\n' "$asc_path"
     return 1
   fi
 
@@ -59,14 +57,12 @@ materialize_csv_from_pgp_zip() {
   if [[ -z "$inner_name" ]]; then
     log "WARN: materialize_csv_from_pgp_zip: empty archive for $asc_path"
     rm -rf "$tmp_dir"
-    printf '%s\n' "$asc_path"
     return 1
   fi
 
   if ! unzip -p "$dec_zip" "$inner_name" >"$tmp_dir/$inner_name" 2>/dev/null; then
     log "WARN: materialize_csv_from_pgp_zip: unzip failed for $asc_path"
     rm -rf "$tmp_dir"
-    printf '%s\n' "$asc_path"
     return 1
   fi
 
@@ -139,6 +135,9 @@ BATCH_FILE="$(mktemp)"
 RESP_FILE="$(mktemp)"
 trap 'rm -f "$BATCH_FILE" "$RESP_FILE"' EXIT
 
+# Clean up stale temp dirs from previous decrypts (run best-effort, ignore errors)
+find "$SMT_LOCAL_DIR" -maxdepth 1 -type d -name 'pgp_tmp.*' -mmin +60 -prune -exec rm -rf {} + >/dev/null 2>&1 || true
+
 log "Starting SFTP sync from ${SMT_USER}@${SMT_HOST}:${SMT_REMOTE_DIR}"
 cat >"$BATCH_FILE" <<BATCH
 cd ${SMT_REMOTE_DIR}
@@ -178,8 +177,11 @@ for file_path in "${FILES[@]}"; do
     continue
   fi
 
-  # Decrypt first if needed
-  effective_path="$(materialize_csv_from_pgp_zip "$file_path" || printf '%s\n' "$file_path")"
+  # Decrypt first if needed; ensure we don't concatenate duplicate paths on failure
+  effective_path="$(materialize_csv_from_pgp_zip "$file_path" || true)"
+  if [[ -z "$effective_path" || ! -f "$effective_path" ]]; then
+    effective_path="$file_path"
+  fi
 
   # Try to extract ESIID from filename first
   base="$(basename "$file_path")"
@@ -190,7 +192,12 @@ for file_path in "${FILES[@]}"; do
   # SMT CSVs may have ESIID with leading single quote: '10443720004529147
   # Use awk to extract and validate ESIID pattern in one step
   if [[ -z "$esiid_guess" && -f "$effective_path" ]]; then
-    esiid_guess="$(awk -F, 'NR>1 {gsub(/^'\''/, "", $1); if ($1 ~ /^10[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]$/) {print $1; exit}}' "$effective_path" || true)"
+    # Fast path: allow leading quote/equals then strip non-digits
+    esiid_guess="$(head -n 200 "$effective_path" | tr -d '\r' | grep -oE "'?=?10[0-9]{15}" | tr -cd '0-9\n' | head -n1 || true)"
+    if [[ -z "$esiid_guess" ]]; then
+      # Structured path: scan first ~50 rows and all columns, stripping quotes/equals
+      esiid_guess="$(awk 'BEGIN{FS="[,;]"} NR>1 && NR<=50 {for(i=1;i<=NF;i++){gsub(/^[[:space:]"'\''=]+/,"",$i); if(match($i,/10[0-9]{15}/)){print substr($i,RSTART,17); exit}}}' "$effective_path" || true)"
+    fi
     log "Extracted ESIID from CSV content: $esiid_guess"
   fi
 
@@ -223,7 +230,7 @@ for file_path in "${FILES[@]}"; do
         2>/dev/null || printf '000'
     )"
 
-    if [[ "$http_code" == "200" || "$http_code" == "201" ]]; then
+    if [[ "$http_code" == "200" || "$http_code" == "201" || "$http_code" == "202" ]]; then
       log "Droplet upload success ($http_code): $(jq -c '.message // .' "$RESP_FILE" 2>/dev/null || cat "$RESP_FILE")"
       printf '%s\n' "$sha256" >>"$SEEN_FILE"
       upload_ok="true"
