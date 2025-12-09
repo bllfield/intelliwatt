@@ -73,6 +73,7 @@ export async function POST(req: NextRequest) {
   // Default to only the most recent file unless caller explicitly increases.
   const limitParam = Number(url.searchParams.get('limit') ?? 1);
   const limit = Number.isFinite(limitParam) ? Math.floor(limitParam) : 1;
+  const cleanupOthers = url.searchParams.get('cleanup') !== '0';
   const source = url.searchParams.get('source') ?? 'adhocusage';
   const dryRun = url.searchParams.get('dryRun') === '1';
 
@@ -113,6 +114,8 @@ export async function POST(req: NextRequest) {
       diagnostics?: NormalizeStats;
     }>,
   };
+
+  const processedIds: bigint[] = [];
 
   for (const file of rows) {
     // STEP 2: Prefer RawSmtFile.content (large-file SMT path), fallback to S3 for legacy records
@@ -278,6 +281,10 @@ export async function POST(req: NextRequest) {
       diagnostics: stats,
     });
 
+    if (!dryRun) {
+      processedIds.push(file.id);
+    }
+
     // Cleanup raw file after successful normalization (mimic green-button behavior)
     if (!dryRun) {
       try {
@@ -289,6 +296,15 @@ export async function POST(req: NextRequest) {
       if (file.storage_path) {
         await deleteFromStorage(file.storage_path);
       }
+    }
+  }
+
+  // Optional: delete all other raw files to prevent backlog from reprocessing
+  if (!dryRun && cleanupOthers && processedIds.length > 0) {
+    try {
+      await prisma.rawSmtFile.deleteMany({ where: { id: { notIn: processedIds } } });
+    } catch (err) {
+      console.error('[smt/normalize] failed to cleanup older raw files', err);
     }
   }
 
