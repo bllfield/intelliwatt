@@ -109,12 +109,17 @@ export async function GET(request: NextRequest) {
           received_at: true,
         },
       }),
-      prisma.$queryRaw<{ count: bigint }[]>`
-        SELECT COUNT(DISTINCT "esiid")::bigint AS count
-        FROM "SmtInterval"
-        WHERE "ts" >= ${recentCutoff}
-        ${esiidFilter ? prisma.$raw`AND "esiid" = ${esiidFilter}` : prisma.$raw``}
-      `,
+      (esiidFilter
+        ? prisma.$queryRaw<{ count: bigint }[]>`
+            SELECT COUNT(DISTINCT "esiid")::bigint AS count
+            FROM "SmtInterval"
+            WHERE "ts" >= ${recentCutoff} AND "esiid" = ${esiidFilter}
+          `
+        : prisma.$queryRaw<{ count: bigint }[]>`
+            SELECT COUNT(DISTINCT "esiid")::bigint AS count
+            FROM "SmtInterval"
+            WHERE "ts" >= ${recentCutoff}
+          `),
       usageClient.usageIntervalModule.aggregate({
         where: {
           ts: { gte: recentCutoff },
