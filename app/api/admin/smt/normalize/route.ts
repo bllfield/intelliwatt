@@ -71,6 +71,7 @@ export async function POST(req: NextRequest) {
 
   const url = new URL(req.url);
   const purgeAll = url.searchParams.get('purge') === '1';
+  const esiidFilter = url.searchParams.get('esiid')?.trim() || null;
   // Default to only the most recent file unless caller explicitly increases.
   const limitParam = Number(url.searchParams.get('limit') ?? 1);
   const limit = Number.isFinite(limitParam) ? Math.floor(limitParam) : 1;
@@ -78,9 +79,25 @@ export async function POST(req: NextRequest) {
   const source = url.searchParams.get('source') ?? 'adhocusage';
   const dryRun = url.searchParams.get('dryRun') === '1';
 
+  const whereFilter: any = {
+    source: source || undefined,
+  };
+
+  if (esiidFilter) {
+    whereFilter.AND = [
+      {
+        OR: [
+          { billingReads: { some: { esiid: esiidFilter } } },
+          { filename: { contains: esiidFilter } },
+          { storage_path: { contains: esiidFilter } },
+        ],
+      },
+    ];
+  }
+
   if (purgeAll) {
     const purgeList = await prisma.rawSmtFile.findMany({
-      where: { source: source || undefined },
+      where: whereFilter,
       select: { id: true, storage_path: true },
     });
 
@@ -94,7 +111,7 @@ export async function POST(req: NextRequest) {
   }
 
   const rows = await prisma.rawSmtFile.findMany({
-    where: { source: source || undefined },
+    where: whereFilter,
     orderBy: { created_at: 'desc' },
     take: limit,
     select: {
@@ -318,7 +335,7 @@ export async function POST(req: NextRequest) {
   // Optional: delete all other raw files to prevent backlog from reprocessing
   if (!dryRun && cleanupOthers && processedIds.length > 0) {
     try {
-      await prisma.rawSmtFile.deleteMany({ where: { id: { notIn: processedIds } } });
+      await prisma.rawSmtFile.deleteMany({ where: { ...whereFilter, id: { notIn: processedIds } } });
     } catch (err) {
       console.error('[smt/normalize] failed to cleanup older raw files', err);
     }
