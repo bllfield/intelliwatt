@@ -11,6 +11,45 @@ The script records posted SHA256 hashes so replays are skipped automatically.
 
 ---
 
+## Fast restore (post-purge) to make usage pages show SMT data
+
+Use this when intervals and raw files were cleared and you need data visible again quickly:
+
+1. **Upload the SMT CSV to the droplet upload server (port 8081):**
+   ```bash
+   curl -X POST http://<droplet-host>:8081/upload \
+     -F "file=@/path/to/smt.csv" \
+     -F "source=smt-inline" \
+     -F "esiid=YOUR_ESIID" \
+     -F "meter=OPTIONAL_METER"
+   ```
+2. **Normalize into `SmtInterval` (app):**
+   ```bash
+   curl -X POST "$INTELLIWATT_BASE_URL/api/admin/smt/normalize" \
+     -H "x-admin-token: $ADMIN_TOKEN" \
+     -H "content-type: application/json" \
+     -d '{"latest": true}'
+   ```
+   - If you captured `rawId` from step 1, use `{ "rawId": <id> }` instead of `latest`.
+3. **Verify intervals landed:**
+   ```bash
+   curl -X POST "$INTELLIWATT_BASE_URL/api/admin/smt/backfill-usage" \
+     -H "x-admin-token: $ADMIN_TOKEN" \
+     -H "content-type: application/json" \
+     -d '{"esiid":"YOUR_ESIID","days":400,"limit":100000}'
+   ```
+   - Expect non-empty `data` and `summary.totalKwh`.
+4. **Force usage refresh (optional, if UI caches):**
+   ```bash
+   curl -X POST "$INTELLIWATT_BASE_URL/api/user/usage/refresh" \
+     -H "content-type: application/json" \
+     -d '{"houseId":"<HOUSE_ID>","esiid":"YOUR_ESIID"}'
+   ```
+
+This flow bypasses Vercel payload limits and repopulates `SmtInterval` so the usage page renders data again.
+
+---
+
 ## Prerequisites
 
 - Droplet user: `deploy`, project checkout at `/home/deploy/apps/intelliwatt`
