@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db';
+import { usagePrisma } from '@/lib/db/usageClient';
 import { requireAdmin } from '@/lib/auth/admin';
 
 export const runtime = 'nodejs';
@@ -18,6 +19,7 @@ export async function POST(req: NextRequest) {
   const sha256 = body.sha256 as string | undefined;
   const receivedAt = (body.receivedAt ?? body.received_at) as string | undefined;
   const source = (body.source as string | undefined) ?? 'adhocusage';
+  const esiid = typeof body.esiid === 'string' && body.esiid.trim() ? body.esiid.trim() : null;
   const contentType =
     (body.contentType as string | undefined) ??
     (body.content_type as string | undefined) ??
@@ -96,6 +98,38 @@ export async function POST(req: NextRequest) {
       },
       select: { id: true, filename: true, size_bytes: true, sha256: true, created_at: true },
     });
+
+    // Early purge of prior data for this ESIID so normalization has a clean slate
+    if (esiid) {
+      try {
+        const houses = await prisma.houseAddress.findMany({
+          where: { esiid, archivedAt: null },
+          select: { id: true },
+        });
+        const houseIds = houses.map((h) => h.id);
+
+        await prisma.$transaction(async (tx) => {
+          await tx.smtBillingRead.deleteMany({ where: { esiid } });
+          await tx.smtInterval.deleteMany({ where: { esiid } });
+
+          if (houseIds.length > 0) {
+            const manualIds = await tx.manualUsageUpload.findMany({ where: { houseId: { in: houseIds } }, select: { id: true } });
+            if (manualIds.length > 0) {
+              await tx.entry.updateMany({ where: { manualUsageId: { in: manualIds.map((m) => m.id) } }, data: { manualUsageId: null } });
+            }
+            await tx.manualUsageUpload.deleteMany({ where: { houseId: { in: houseIds } } });
+            await tx.greenButtonUpload.deleteMany({ where: { houseId: { in: houseIds } } });
+          }
+        });
+
+        if (houseIds.length > 0) {
+          await usagePrisma.greenButtonInterval.deleteMany({ where: { homeId: { in: houseIds } } });
+          await usagePrisma.rawGreenButton.deleteMany({ where: { homeId: { in: houseIds } } });
+        }
+      } catch (err) {
+        console.error('[raw-upload] failed to purge existing data for esiid', { esiid, err });
+      }
+    }
 
     return NextResponse.json({
       ok: true,
