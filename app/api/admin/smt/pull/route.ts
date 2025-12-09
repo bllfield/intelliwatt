@@ -11,6 +11,7 @@ import { cleanEsiid, resolveSmtEsiid } from '@/lib/smt/esiid';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const maxDuration = 300; // allow long webhook waits if droplet is slow
 export const maxDuration = 300; // allow long-running SMT pulls and inline normalization
 const WEBHOOK_HEADERS = ['x-intelliwatt-secret', 'x-smt-secret', 'x-webhook-secret'] as const;
 
@@ -631,7 +632,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const WEBHOOK_TIMEOUT_MS = Number(process.env.DROPLET_WEBHOOK_TIMEOUT_MS ?? 15000);
+    const WEBHOOK_TIMEOUT_MS = Number(process.env.DROPLET_WEBHOOK_TIMEOUT_MS ?? 120000);
     let webhookResponse: Response;
     try {
       const controller = new AbortController();
