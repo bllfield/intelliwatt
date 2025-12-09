@@ -227,6 +227,12 @@ Notes:
 - Added `/admin/usage` Usage Test Console so Ops can run SMT + Green Button upload tests, monitor latest intervals/raw files, and review consolidated debugging output (leverages `/api/admin/usage/debug` + existing Green Button records endpoint).
 - Added customer-facing refresh actions: `/dashboard/api` now exposes a `Refresh SMT Data` control (POST `/api/smt/authorization/status` + `/api/user/usage/refresh`) and `/dashboard/usage` includes `Update usage data`, wiring both pages into the on-demand normalization pipeline so stale SMT intervals can be rehydrated instantly.
 
+## PC-2025-12-09 · SMT Ingest Defaults & ESIID Extraction
+
+- **SMT ingest now processes all files by default.** `deploy/smt/fetch_and_post.sh` defaults `SMT_PROCESS_ONE=false`, so a single run uploads and normalizes every CSV in the inbox. Set `SMT_PROCESS_ONE=true` only when you intentionally want to stop after the first success.
+- **ESIID extraction hardened** (already deployed): handles leading quotes/equals/whitespace and pulls the 17-digit ESIID from CSV content when not present in filenames; treats HTTP 202 from the droplet uploader as success; cleans PGP decrypt temp paths.
+- **Ops note:** pull `main` on the droplet and run the script (no env toggle needed) to populate the dashboard with the full 12-month window.
+
 ## PC-2025-12-08 · Green Button Upload Hardening & Droplet Stability
 
 - Frontend: Green Button uploads now go **droplet-only** (no Vercel fallback) via `/api/green-button/upload-ticket` → `uploads.intelliwatt.com/upload`. Errors surface from the droplet response so users see real failures.
