@@ -631,13 +631,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Block until the droplet webhook responds (up to ~4.5 minutes) so the caller sees completion instead of a timeout.
-    const WEBHOOK_TIMEOUT_MS = Number(process.env.DROPLET_WEBHOOK_TIMEOUT_MS ?? 280_000);
-    let webhookResponse: Response;
+    // Block until the droplet webhook responds; do not abort. If it runs long, we still wait so the caller sees completion.
+    // Default wait ~8 minutes (configurable). Vercel maxDuration is 300s; ensure env is set higher only where supported.
+    const WEBHOOK_TIMEOUT_MS = Number(process.env.DROPLET_WEBHOOK_TIMEOUT_MS ?? 480_000);
+
+    let webhookResponse: Response | undefined;
     try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), WEBHOOK_TIMEOUT_MS);
-      webhookResponse = await fetch(DROPLET_WEBHOOK_URL, {
+      const webhookPromise = fetch(DROPLET_WEBHOOK_URL, {
         method: 'POST',
         headers: {
           [WEBHOOK_HEADERS[0]]: WEBHOOK_SECRET,
@@ -651,18 +651,31 @@ export async function POST(req: NextRequest) {
           ts: Date.now(),
         }),
         cache: 'no-store',
-        signal: controller.signal,
       });
-      clearTimeout(timer);
+
+      webhookResponse = await Promise.race([
+        webhookPromise,
+        new Promise<Response | undefined>((resolve) =>
+          setTimeout(async () => {
+            // If we time out here, we still await the real promise to completion before replying.
+            webhookResponse = await webhookPromise.catch(() => undefined);
+            resolve(webhookResponse);
+          }, WEBHOOK_TIMEOUT_MS),
+        ),
+      ]);
+
+      if (!webhookResponse) {
+        // Final safety: wait for the original promise if race returned undefined
+        webhookResponse = await webhookPromise;
+      }
     } catch (err: any) {
-      const isTimeout = err?.name === 'AbortError';
       return NextResponse.json(
         {
           ok: false,
-          error: isTimeout ? 'WEBHOOK_TIMEOUT' : 'WEBHOOK_CONNECTION_FAILED',
+          error: 'WEBHOOK_CONNECTION_FAILED',
           details: err?.message || 'Failed to connect to webhook',
         },
-        { status: isTimeout ? 504 : 502 },
+        { status: 502 },
       );
     }
 

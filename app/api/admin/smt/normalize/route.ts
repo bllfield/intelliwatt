@@ -241,34 +241,35 @@ export async function POST(req: NextRequest) {
     if (!dryRun && tsMinDate && tsMaxDate) {
       try {
         await prisma.$transaction(async (tx) => {
-          // Wipe existing interval + billing data for the ESIIDs in this file before inserting fresh data
-          if (distinctEsiids.length > 0) {
-            await tx.smtBillingRead.deleteMany({ where: { esiid: { in: distinctEsiids } } });
-            await tx.smtInterval.deleteMany({ where: { esiid: { in: distinctEsiids } } });
+          // Delete existing intervals in the precise range for each (esiid, meter) pair
+          for (const pair of distinctPairs) {
+            await tx.smtInterval.deleteMany({
+              where: {
+                esiid: pair.esiid,
+                meter: pair.meter,
+                ts: { gte: tsMinDate, lte: tsMaxDate },
+              },
+            });
           }
 
-          let insertedTotal = 0;
-          for (let i = 0; i < boundedIntervals.length; i += INSERT_BATCH_SIZE) {
-            const slice = boundedIntervals.slice(i, i + INSERT_BATCH_SIZE).map((interval) => ({
+          // Insert all bounded intervals in one shot
+          const result = await tx.smtInterval.createMany({
+            data: boundedIntervals.map((interval) => ({
               esiid: interval.esiid,
               meter: interval.meter,
               ts: interval.ts,
               kwh: new Prisma.Decimal(interval.kwh),
               source: interval.source ?? file.source ?? 'smt',
-            }));
+            })),
+            skipDuplicates: false,
+          });
 
-            if (slice.length === 0) continue;
+          inserted = result.count;
+          skipped = boundedIntervals.length - result.count;
 
-            const result = await tx.smtInterval.createMany({
-              data: slice,
-              skipDuplicates: false,
-            });
-
-            insertedTotal += result.count;
+          if (distinctEsiids.length > 0) {
+            await tx.smtBillingRead.deleteMany({ where: { esiid: { in: distinctEsiids } } });
           }
-
-          inserted = insertedTotal;
-          skipped = boundedIntervals.length - insertedTotal;
         });
       } catch (err) {
         console.error('[smt/normalize] failed overwrite transaction', {

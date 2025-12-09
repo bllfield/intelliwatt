@@ -175,30 +175,38 @@ export async function POST(req: NextRequest) {
         if (bounded.length > 0 && tsMax) {
           try {
             await prisma.$transaction(async (tx) => {
-              if (distinctEsiids.length > 0) {
-                await tx.smtBillingRead.deleteMany({ where: { esiid: { in: distinctEsiids } } });
-                await tx.smtInterval.deleteMany({ where: { esiid: { in: distinctEsiids } } });
+              const boundedTs = bounded.map((i) => i.ts.getTime()).filter((ms) => Number.isFinite(ms));
+              const tsMinBound = boundedTs.length ? new Date(Math.min(...boundedTs)) : tsMinAll;
+
+              const pairs = Array.from(new Set(bounded.map((i) => `${i.esiid}|${i.meter}`)))
+                .map((k) => {
+                  const [e, m] = k.split('|');
+                  return { esiid: e, meter: m };
+                });
+
+              for (const pair of pairs) {
+                await tx.smtInterval.deleteMany({
+                  where: {
+                    esiid: pair.esiid,
+                    meter: pair.meter,
+                    ts: { gte: tsMinBound ?? tsMinAll ?? tsMax, lte: tsMax },
+                  },
+                });
               }
 
-              const INSERT_BATCH_SIZE = 4000;
-              let insertedTotal = 0;
-              for (let i = 0; i < bounded.length; i += INSERT_BATCH_SIZE) {
-                const slice = bounded.slice(i, i + INSERT_BATCH_SIZE).map((interval) => ({
+              const result = await tx.smtInterval.createMany({
+                data: bounded.map((interval) => ({
                   esiid: interval.esiid,
                   meter: interval.meter,
                   ts: interval.ts,
                   kwh: new Prisma.Decimal(interval.kwh),
                   source: interval.source ?? source ?? 'smt',
-                }));
+                })),
+                skipDuplicates: false,
+              });
 
-                if (slice.length === 0) continue;
-
-                const result = await tx.smtInterval.createMany({ data: slice, skipDuplicates: false });
-                insertedTotal += result.count;
-              }
-
-              inserted = insertedTotal;
-              skipped = bounded.length - insertedTotal;
+              inserted = result.count;
+              skipped = bounded.length - result.count;
             });
           } catch (err) {
             console.error('[raw-upload:inline] failed overwrite transaction', { err });
