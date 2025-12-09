@@ -107,12 +107,6 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const baseUrl = resolveBaseUrl();
-  const pullUrl = new URL("/api/admin/smt/pull", baseUrl);
-  const normalizeUrl = new URL("/api/admin/smt/normalize", baseUrl);
-  // Only normalize the most recent file per request to avoid reprocessing old uploads by default.
-  normalizeUrl.searchParams.set("limit", "1");
-
   const refreshed: HomeRefreshResult[] = [];
   const backfillRange = getRollingBackfillRange(12);
 
@@ -150,6 +144,8 @@ export async function POST(req: NextRequest) {
     // Trigger SMT pull (admin) if possible
     if (adminToken && house.esiid) {
       try {
+        const baseUrl = resolveBaseUrl();
+        const pullUrl = new URL("/api/admin/smt/pull", baseUrl);
         const pullResponse = await fetch(pullUrl, {
           method: "POST",
           headers: {
@@ -231,7 +227,6 @@ export async function POST(req: NextRequest) {
     .map((hr) => hr.backfillOutcome)
     .filter((x): x is { homeId: string; ok: boolean; message?: string } => Boolean(x));
   refreshed.push(...houseResults.map((hr) => hr.result));
-
   let normalization = {
     attempted: Boolean(adminToken),
     ok: false,
@@ -241,6 +236,14 @@ export async function POST(req: NextRequest) {
 
   if (adminToken) {
     try {
+      const baseUrl = resolveBaseUrl();
+      const normalizeUrl = new URL("/api/admin/smt/normalize", baseUrl);
+      // For usage refresh we want the full 12‑month window for the target home,
+      // so normalize all raw files for its ESIID rather than only the latest one.
+      if (targetHouse.esiid) {
+        normalizeUrl.searchParams.set("esiid", targetHouse.esiid);
+      }
+      normalizeUrl.searchParams.set("limit", "100000");
       const normalizeRes = await fetch(normalizeUrl, {
         method: "POST",
         headers: {
