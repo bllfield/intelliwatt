@@ -267,7 +267,9 @@ async function registerAndNormalizeFile(
     const header = lines[0] || "";
     const dataLines = lines.slice(1).filter((l) => l.trim().length > 0);
 
-    const LINES_PER_CHUNK = Number(process.env.SMT_RAW_LINES_PER_CHUNK || "5000");
+    // Keep chunks very small to ensure each POST body is comfortably under Vercel limits.
+    // You can raise SMT_RAW_LINES_PER_CHUNK later once everything is stable.
+    const LINES_PER_CHUNK = Number(process.env.SMT_RAW_LINES_PER_CHUNK || "500");
     const totalParts =
       dataLines.length > 0 ? Math.ceil(dataLines.length / LINES_PER_CHUNK) : 1;
 

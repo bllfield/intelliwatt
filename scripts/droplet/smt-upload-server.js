@@ -254,7 +254,7 @@ async function registerAndNormalizeFile(filepath, filename, size_bytes) {
         const lines = text.split(/\r?\n/);
         const header = lines[0] || "";
         const dataLines = lines.slice(1).filter((l) => l.trim().length > 0);
-        const LINES_PER_CHUNK = Number(process.env.SMT_RAW_LINES_PER_CHUNK || "5000");
+        const LINES_PER_CHUNK = Number(process.env.SMT_RAW_LINES_PER_CHUNK || "500");
         const totalParts = dataLines.length > 0 ? Math.ceil(dataLines.length / LINES_PER_CHUNK) : 1;
         const rawUploadUrl = `${INTELLIWATT_BASE_URL}/api/admin/smt/raw-upload`;
         let totalFilesProcessed = 0;
