@@ -185,11 +185,18 @@ export async function POST(req: NextRequest) {
                 });
 
               for (const pair of pairs) {
+                const pairIntervals = bounded.filter((i) => i.esiid === pair.esiid && i.meter === pair.meter);
+                if (pairIntervals.length === 0) continue;
+
+                const pairTimestamps = pairIntervals.map((i) => i.ts.getTime()).filter((ms) => Number.isFinite(ms));
+                const pairMin = pairTimestamps.length ? new Date(Math.min(...pairTimestamps)) : tsMinBound;
+                const pairMax = pairTimestamps.length ? new Date(Math.max(...pairTimestamps)) : tsMax;
+
                 await tx.smtInterval.deleteMany({
                   where: {
                     esiid: pair.esiid,
                     meter: pair.meter,
-                    ts: { gte: tsMinBound ?? tsMinAll ?? tsMax, lte: tsMax },
+                    ts: { gte: pairMin ?? tsMinBound ?? tsMax, lte: pairMax ?? tsMax },
                   },
                 });
               }
@@ -211,6 +218,49 @@ export async function POST(req: NextRequest) {
           } catch (err) {
             console.error('[raw-upload:inline] failed overwrite transaction', { err });
             throw err;
+          }
+
+          // Dual-write to usage DB so dashboards see SMT data from inline uploads
+          try {
+            const usageClient: any = usagePrisma;
+            if (usageClient?.usageIntervalModule) {
+              const pairs = Array.from(new Set(bounded.map((i) => `${i.esiid}|${i.meter}`)))
+                .map((k) => {
+                  const [e, m] = k.split('|');
+                  return { esiid: e, meter: m };
+                });
+
+              for (const pair of pairs) {
+                const pairIntervals = bounded.filter((i) => i.esiid === pair.esiid && i.meter === pair.meter);
+                if (pairIntervals.length === 0) continue;
+
+                const pairTimestamps = pairIntervals.map((i) => i.ts.getTime()).filter((ms) => Number.isFinite(ms));
+                const pairMin = pairTimestamps.length ? new Date(Math.min(...pairTimestamps)) : tsMinAll;
+                const pairMax = pairTimestamps.length ? new Date(Math.max(...pairTimestamps)) : tsMax;
+
+                await usageClient.usageIntervalModule.deleteMany({
+                  where: {
+                    esiid: pair.esiid,
+                    meter: pair.meter,
+                    ts: { gte: pairMin ?? tsMinAll ?? tsMax, lte: pairMax ?? tsMax },
+                  },
+                });
+
+                await usageClient.usageIntervalModule.createMany({
+                  data: pairIntervals.map((interval) => ({
+                    esiid: interval.esiid,
+                    meter: interval.meter,
+                    ts: interval.ts,
+                    kwh: new Prisma.Decimal(interval.kwh),
+                    filled: false,
+                    source: interval.source ?? source ?? 'smt',
+                  })),
+                  skipDuplicates: false,
+                });
+              }
+            }
+          } catch (usageErr) {
+            console.error('[raw-upload:inline] usage dual-write failed', usageErr);
           }
 
           if (distinctEsiids.length > 0) {

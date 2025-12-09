@@ -241,18 +241,28 @@ export async function POST(req: NextRequest) {
     if (!dryRun && tsMinDate && tsMaxDate) {
       try {
         await prisma.$transaction(async (tx) => {
-          // Delete existing intervals in the precise range for each (esiid, meter) pair
+          // For each (esiid, meter), delete the exact range then bulk insert all rows
           for (const pair of distinctPairs) {
+            const pairIntervals = boundedIntervals.filter(
+              (i) => i.esiid === pair.esiid && i.meter === pair.meter,
+            );
+            if (pairIntervals.length === 0) continue;
+
+            const pairTimestamps = pairIntervals
+              .map((i) => i.ts.getTime())
+              .filter((ms) => Number.isFinite(ms));
+            const pairMin = pairTimestamps.length ? new Date(Math.min(...pairTimestamps)) : tsMinDate;
+            const pairMax = pairTimestamps.length ? new Date(Math.max(...pairTimestamps)) : tsMaxDate;
+
             await tx.smtInterval.deleteMany({
               where: {
                 esiid: pair.esiid,
                 meter: pair.meter,
-                ts: { gte: tsMinDate, lte: tsMaxDate },
+                ts: { gte: pairMin ?? tsMinDate, lte: pairMax ?? tsMaxDate },
               },
             });
           }
 
-          // Insert all bounded intervals in one shot
           const result = await tx.smtInterval.createMany({
             data: boundedIntervals.map((interval) => ({
               esiid: interval.esiid,
@@ -271,6 +281,47 @@ export async function POST(req: NextRequest) {
             await tx.smtBillingRead.deleteMany({ where: { esiid: { in: distinctEsiids } } });
           }
         });
+
+        // Dual-write to usage DB so dashboards see SMT data
+        try {
+          const usageClient: any = usagePrisma;
+          if (usageClient?.usageIntervalModule) {
+            for (const pair of distinctPairs) {
+              const pairIntervals = boundedIntervals.filter(
+                (i) => i.esiid === pair.esiid && i.meter === pair.meter,
+              );
+              if (pairIntervals.length === 0) continue;
+
+              const pairTimestamps = pairIntervals
+                .map((i) => i.ts.getTime())
+                .filter((ms) => Number.isFinite(ms));
+              const pairMin = pairTimestamps.length ? new Date(Math.min(...pairTimestamps)) : tsMinDate;
+              const pairMax = pairTimestamps.length ? new Date(Math.max(...pairTimestamps)) : tsMaxDate;
+
+              await usageClient.usageIntervalModule.deleteMany({
+                where: {
+                  esiid: pair.esiid,
+                  meter: pair.meter,
+                  ts: { gte: pairMin ?? tsMinDate, lte: pairMax ?? tsMaxDate },
+                },
+              });
+
+              await usageClient.usageIntervalModule.createMany({
+                data: pairIntervals.map((interval) => ({
+                  esiid: interval.esiid,
+                  meter: interval.meter,
+                  ts: interval.ts,
+                  kwh: new Prisma.Decimal(interval.kwh),
+                  filled: false,
+                  source: interval.source ?? file.source ?? 'smt',
+                })),
+                skipDuplicates: false,
+              });
+            }
+          }
+        } catch (usageErr) {
+          console.error('[smt/normalize] usage dual-write failed', usageErr);
+        }
       } catch (err) {
         console.error('[smt/normalize] failed overwrite transaction', {
           fileId: file.id,
