@@ -144,6 +144,26 @@ export async function POST(req: NextRequest) {
         const tsMax = timestamps.length ? new Date(Math.max(...timestamps)) : null;
         const tsMinAll = timestamps.length ? new Date(Math.min(...timestamps)) : null;
 
+        if (!tsMax) {
+          normalizedSummary = {
+            inserted: 0,
+            skipped: intervals.length,
+            records: intervals.length,
+            tsMin: tsMinAll ? tsMinAll.toISOString() : stats.tsMin ?? null,
+            tsMax: stats.tsMax ?? null,
+            diagnostics: stats,
+          };
+          return NextResponse.json({
+            ok: true,
+            id: String(row.id),
+            filename: row.filename,
+            sizeBytes: row.size_bytes,
+            sha256: row.sha256,
+            createdAt: row.created_at,
+            normalizedInline: normalizedSummary,
+          });
+        }
+
         const windowStart = tsMax ? new Date(tsMax.getTime() - 365 * 24 * 60 * 60 * 1000) : null;
         const bounded = windowStart ? intervals.filter((i) => i.ts >= windowStart && i.ts <= tsMax) : intervals;
 
