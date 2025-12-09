@@ -70,12 +70,28 @@ export async function POST(req: NextRequest) {
   if (!gate.ok) return NextResponse.json(gate.body, { status: gate.status });
 
   const url = new URL(req.url);
+  const purgeAll = url.searchParams.get('purge') === '1';
   // Default to only the most recent file unless caller explicitly increases.
   const limitParam = Number(url.searchParams.get('limit') ?? 1);
   const limit = Number.isFinite(limitParam) ? Math.floor(limitParam) : 1;
   const cleanupOthers = url.searchParams.get('cleanup') !== '0';
   const source = url.searchParams.get('source') ?? 'adhocusage';
   const dryRun = url.searchParams.get('dryRun') === '1';
+
+  if (purgeAll) {
+    const purgeList = await prisma.rawSmtFile.findMany({
+      where: { source: source || undefined },
+      select: { id: true, storage_path: true },
+    });
+
+    for (const file of purgeList) {
+      if (file.storage_path) {
+        await deleteFromStorage(file.storage_path);
+      }
+    }
+
+    await prisma.rawSmtFile.deleteMany({ where: { id: { in: purgeList.map((f) => f.id) } } });
+  }
 
   const rows = await prisma.rawSmtFile.findMany({
     where: { source: source || undefined },
