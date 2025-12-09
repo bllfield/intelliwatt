@@ -112,6 +112,8 @@ require_cmd find
 require_cmd stat
 require_cmd gpg
 require_cmd unzip
+
+PROCESS_ONE_FILE="${SMT_PROCESS_ONE:-true}" # default: stop after first successful upload/normalize
 require_cmd python3
 
 mkdir -p "$SMT_LOCAL_DIR"
@@ -161,6 +163,7 @@ rate_limit_reset=""
 
 for file_path in "${FILES[@]}"; do
   sha256="$(sha256sum "$file_path" | awk '{print $1}')"
+  upload_ok="false"
   if grep -qx "$sha256" "$SEEN_FILE"; then
     log "Skipping already-posted file: $file_path"
     continue
@@ -214,6 +217,7 @@ for file_path in "${FILES[@]}"; do
     if [[ "$http_code" == "200" || "$http_code" == "201" ]]; then
       log "Droplet upload success ($http_code): $(jq -c '.message // .' "$RESP_FILE" 2>/dev/null || cat "$RESP_FILE")"
       printf '%s\n' "$sha256" >>"$SEEN_FILE"
+      upload_ok="true"
     elif [[ "$http_code" == "429" ]]; then
       rate_limit_reset="$(jq -r '.resetAt // empty' "$RESP_FILE" 2>/dev/null || true)"
       log "Droplet upload failed (rate limited 429); stopping this run. resetAt=${rate_limit_reset:-unknown}"
@@ -281,6 +285,7 @@ PY
     if [[ "$http_code" == "200" || "$http_code" == "201" ]]; then
       log "Inline POST success ($http_code): $(jq -c '.' "$RESP_FILE" 2>/dev/null || cat "$RESP_FILE")"
       printf '%s\n' "$sha256" >>"$SEEN_FILE"
+      upload_ok="true"
     else
       log "Inline POST failed ($http_code): $(cat "$RESP_FILE")"
     fi
@@ -297,6 +302,23 @@ PY
 
   # Throttle between uploads to reduce load on the droplet/API
   sleep "${SMT_UPLOAD_DELAY:-2}"
+  # Trigger normalize (scoped to this ESIID) so only the newest file is processed and DB is clean
+  if [[ "$upload_ok" == "true" && -n "$esiid" ]]; then
+    norm_url="${INTELLIWATT_BASE_URL%/}/api/admin/smt/normalize?esiid=${esiid}&limit=1&purge=1&cleanup=1"
+    norm_code="$(
+      curl -sS -o "$RESP_FILE" -w "%{http_code}" \
+        -X POST "$norm_url" \
+        -H "x-admin-token: $ADMIN_TOKEN" \
+        -H "content-type: application/json" \
+        --data '{}' 2>/dev/null || printf '000'
+    )"
+    log "Normalize (${esiid}) -> http $norm_code: $(cat "$RESP_FILE")"
+  fi
+
+  if [[ "$upload_ok" == "true" && "$PROCESS_ONE_FILE" == "true" ]]; then
+    log "PROCESS_ONE_FILE=true; stopping after first successful upload/normalize"
+    break
+  fi
 
 done
 
