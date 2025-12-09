@@ -238,6 +238,8 @@ async function registerAndNormalizeFile(
   filepath: string,
   filename: string,
   size_bytes: number,
+  esiid?: string,
+  meter?: string,
 ): Promise<NormalizeResult> {
   if (!ADMIN_TOKEN || !INTELLIWATT_BASE_URL) {
     console.warn(
@@ -269,7 +271,7 @@ async function registerAndNormalizeFile(
 
     // Step 1: Register the raw file with the main app (including content)
     const rawUploadUrl = `${INTELLIWATT_BASE_URL}/api/admin/smt/raw-upload`;
-    const rawUploadPayload = {
+    const rawUploadPayload: Record<string, unknown> = {
       filename,
       sizeBytes: size_bytes,
       sha256,
@@ -277,6 +279,13 @@ async function registerAndNormalizeFile(
       source: "droplet-upload",
       receivedAt: new Date().toISOString(),
     };
+
+    if (esiid && esiid.trim().length > 0) {
+      rawUploadPayload.esiid = esiid.trim();
+    }
+    if (meter && meter.trim().length > 0) {
+      rawUploadPayload.meter = meter.trim();
+    }
 
     // eslint-disable-next-line no-console
     console.log(`[smt-upload] registering raw file at ${rawUploadUrl}`);
@@ -523,8 +532,17 @@ app.post(
         return;
       }
 
+      const esiid =
+        typeof req.body?.esiid === "string" && req.body.esiid.trim().length > 0
+          ? req.body.esiid.trim()
+          : undefined;
+      const meter =
+        typeof req.body?.meter === "string" && req.body.meter.trim().length > 0
+          ? req.body.meter.trim()
+          : undefined;
+
       // Process sequentially: register and normalize immediately after saving.
-      const result = await registerAndNormalizeFile(destPath, originalName, sizeGuess);
+      const result = await registerAndNormalizeFile(destPath, originalName, sizeGuess, esiid, meter);
 
       res.status(result.ok ? 200 : 500).json({
         ok: result.ok,

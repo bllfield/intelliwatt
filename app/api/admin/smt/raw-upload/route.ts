@@ -21,6 +21,8 @@ export async function POST(req: NextRequest) {
   const receivedAt = (body.receivedAt ?? body.received_at) as string | undefined;
   const source = (body.source as string | undefined) ?? 'adhocusage';
   const esiid = typeof body.esiid === 'string' && body.esiid.trim() ? body.esiid.trim() : null;
+  const meter =
+    typeof body.meter === 'string' && body.meter.trim() ? (body.meter as string).trim() : null;
   const contentType =
     (body.contentType as string | undefined) ??
     (body.content_type as string | undefined) ??
@@ -136,6 +138,8 @@ export async function POST(req: NextRequest) {
     let normalizedSummary: any = null;
     if (contentBuffer && contentBuffer.length > 0) {
       const { intervals, stats } = normalizeSmtIntervals(contentBuffer.toString('utf8'), {
+        esiid,
+        meter: meter ?? undefined,
         source: source ?? 'smt',
       });
 
