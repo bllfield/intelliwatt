@@ -53,7 +53,26 @@ materialize_csv_from_pgp_zip() {
     return 1
   fi
 
-  inner_name="$(unzip -Z1 "$dec_zip" 2>/dev/null | head -n 1)"
+  # Prefer IntervalMeterUsage CSVs when multiple files are present in the ZIP.
+  # SMT often bundles interval + billing files together; we only want the
+  # interval CSV here.
+  local inner_name=""
+  local first_name=""
+  while IFS= read -r entry; do
+    if [[ -z "$first_name" ]]; then
+      first_name="$entry"
+    fi
+    # Match common interval naming patterns; case-insensitive.
+    if [[ "$entry" =~ [Ii]nterval && "$entry" =~ \.csv$ ]]; then
+      inner_name="$entry"
+      break
+    fi
+  done < <(unzip -Z1 "$dec_zip" 2>/dev/null || true)
+
+  if [[ -z "$inner_name" ]]; then
+    inner_name="$first_name"
+  fi
+
   if [[ -z "$inner_name" ]]; then
     log "WARN: materialize_csv_from_pgp_zip: empty archive for $asc_path"
     rm -rf "$tmp_dir"
@@ -61,7 +80,7 @@ materialize_csv_from_pgp_zip() {
   fi
 
   if ! unzip -p "$dec_zip" "$inner_name" >"$tmp_dir/$inner_name" 2>/dev/null; then
-    log "WARN: materialize_csv_from_pgp_zip: unzip failed for $asc_path"
+    log "WARN: materialize_csv_from_pgp_zip: unzip failed for $asc_path (entry=$inner_name)"
     rm -rf "$tmp_dir"
     return 1
   fi
