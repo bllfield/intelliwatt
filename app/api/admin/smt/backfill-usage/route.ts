@@ -88,7 +88,7 @@ export async function POST(req: NextRequest) {
 
     let inserted = 0;
 
-    for (const [, rows] of groups.entries()) {
+    for (const rows of Array.from(groups.values())) {
       const pairMin = rows[0].ts;
       const pairMax = rows[rows.length - 1].ts;
       const { esiid: pairEsiid, meter: pairMeter } = rows[0];
