@@ -28,8 +28,8 @@ function bigIntToNumber(value: unknown): number {
   return Number(value);
 }
 
-const RECENT_USAGE_WINDOW_DAYS = 30;
-const RECENT_USAGE_WINDOW_MS = RECENT_USAGE_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+const DEFAULT_RECENT_USAGE_WINDOW_DAYS = 30;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 export async function GET(request: NextRequest) {
   const gate = requireAdmin(request);
@@ -39,7 +39,11 @@ export async function GET(request: NextRequest) {
 
   try {
     const usageClient = usagePrisma as any;
-    const recentCutoff = new Date(Date.now() - RECENT_USAGE_WINDOW_MS);
+    const url = new URL(request.url);
+    const esiidFilter = url.searchParams.get('esiid') || undefined;
+    const daysParam = Number(url.searchParams.get('days') || DEFAULT_RECENT_USAGE_WINDOW_DAYS);
+    const windowDays = Number.isFinite(daysParam) && daysParam > 0 ? daysParam : DEFAULT_RECENT_USAGE_WINDOW_DAYS;
+    const recentCutoff = new Date(Date.now() - windowDays * DAY_MS);
 
     const [
       smtAggregate,
@@ -52,9 +56,8 @@ export async function GET(request: NextRequest) {
     ] = await Promise.all([
       prisma.smtInterval.aggregate({
         where: {
-          ts: {
-            gte: recentCutoff,
-          },
+          ts: { gte: recentCutoff },
+          ...(esiidFilter ? { esiid: esiidFilter } : {}),
         },
         _count: { _all: true },
         _min: { ts: true },
@@ -63,9 +66,8 @@ export async function GET(request: NextRequest) {
       }),
       prisma.smtInterval.groupBy({
         where: {
-          ts: {
-            gte: recentCutoff,
-          },
+          ts: { gte: recentCutoff },
+          ...(esiidFilter ? { esiid: esiidFilter } : {}),
         },
         by: ['esiid'],
         _count: { _all: true },
@@ -80,9 +82,8 @@ export async function GET(request: NextRequest) {
       }),
       prisma.smtInterval.findMany({
         where: {
-          ts: {
-            gte: recentCutoff,
-          },
+          ts: { gte: recentCutoff },
+          ...(esiidFilter ? { esiid: esiidFilter } : {}),
         },
         orderBy: { ts: 'desc' },
         take: 25,
@@ -112,12 +113,12 @@ export async function GET(request: NextRequest) {
         SELECT COUNT(DISTINCT "esiid")::bigint AS count
         FROM "SmtInterval"
         WHERE "ts" >= ${recentCutoff}
+        ${esiidFilter ? prisma.$raw`AND "esiid" = ${esiidFilter}` : prisma.$raw``}
       `,
       usageClient.usageIntervalModule.aggregate({
         where: {
-          ts: {
-            gte: recentCutoff,
-          },
+          ts: { gte: recentCutoff },
+          ...(esiidFilter ? { esiid: esiidFilter } : {}),
         },
         _count: { _all: true },
         _min: { ts: true },
@@ -126,9 +127,8 @@ export async function GET(request: NextRequest) {
       }),
       usageClient.usageIntervalModule.findMany({
         where: {
-          ts: {
-            gte: recentCutoff,
-          },
+          ts: { gte: recentCutoff },
+          ...(esiidFilter ? { esiid: esiidFilter } : {}),
         },
         orderBy: { ts: 'desc' },
         take: 50,
