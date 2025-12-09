@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
-import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { GetObjectCommand, DeleteObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { requireAdmin } from '@/lib/auth/admin';
 import { prisma } from '@/lib/db';
 import { normalizeSmtIntervals, type NormalizeStats } from '@/app/lib/smt/normalize';
@@ -49,6 +49,19 @@ async function getObjectFromStorage(storagePath?: string | null) {
   } catch (err) {
     console.error('[smt/normalize] failed to fetch object from storage', { key, err });
     return null;
+  }
+}
+
+async function deleteFromStorage(storagePath?: string | null) {
+  if (!storagePath || !s3Config) return false;
+  const key = storagePath.replace(/^\//, '');
+
+  try {
+    await s3Config.client.send(new DeleteObjectCommand({ Bucket: s3Config.bucket, Key: key }));
+    return true;
+  } catch (err) {
+    console.error('[smt/normalize] failed to delete object from storage', { key, err });
+    return false;
   }
 }
 
@@ -264,6 +277,19 @@ export async function POST(req: NextRequest) {
       tsMax: tsMaxDate ? tsMaxDate.toISOString() : stats.tsMax ?? undefined,
       diagnostics: stats,
     });
+
+    // Cleanup raw file after successful normalization (mimic green-button behavior)
+    if (!dryRun) {
+      try {
+        await prisma.rawSmtFile.delete({ where: { id: file.id } });
+      } catch (err) {
+        console.error('[smt/normalize] failed to delete raw record', { fileId: file.id, err });
+      }
+
+      if (file.storage_path) {
+        await deleteFromStorage(file.storage_path);
+      }
+    }
   }
 
   return NextResponse.json(summary);
