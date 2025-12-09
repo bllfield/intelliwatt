@@ -118,17 +118,15 @@ export default function SmtSftpFlowTestPage() {
         data: pipelineJson,
       });
 
-      // 3) Raw files listing (same as SMT inspector "List Raw Files"), filtered to this ESIID where possible
-      const rawFilesRes = await fetch(
-        `/api/admin/debug/smt/raw-files?limit=20&esiid=${encodeURIComponent(TEST_ESIID)}`,
-        {
-          method: 'GET',
-          headers: {
-            'x-admin-token': token,
-            accept: 'application/json',
-          },
+      // 3) Raw files listing (same as SMT inspector "List Raw Files").
+      // We do not filter by ESIID here so you can see every payload SMT has delivered recently.
+      const rawFilesRes = await fetch('/api/admin/debug/smt/raw-files?limit=20', {
+        method: 'GET',
+        headers: {
+          'x-admin-token': token,
+          accept: 'application/json',
         },
-      );
+      });
       const rawFilesJson = (await rawFilesRes
         .json()
         .catch(() => ({ error: 'Failed to parse JSON', status: rawFilesRes.status }))) as Json;
