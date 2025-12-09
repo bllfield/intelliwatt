@@ -99,7 +99,10 @@ require ADMIN_TOKEN
 require INTELLIWATT_BASE_URL
 require SMT_HOST
 require SMT_USER
-require SMT_KEY
+# SMT_KEY is optional when using password auth; if empty, we'll prompt
+if [[ -z "${SMT_KEY:-}" ]]; then
+  log "INFO: SMT_KEY not set; will use password auth for sftp"
+fi
 require SMT_REMOTE_DIR
 require SMT_LOCAL_DIR
 
@@ -143,7 +146,13 @@ lcd ${SMT_LOCAL_DIR}
 mget -p -r *
 BATCH
 
-if ! sftp -i "$SMT_KEY" -oStrictHostKeyChecking=accept-new "${SMT_USER}@${SMT_HOST}" <"$BATCH_FILE"; then
+if [[ -n "${SMT_KEY:-}" ]]; then
+  sftp_cmd=(sftp -i "$SMT_KEY" -oStrictHostKeyChecking=accept-new "${SMT_USER}@${SMT_HOST}")
+else
+  sftp_cmd=(sftp -oPreferredAuthentications=password -oStrictHostKeyChecking=accept-new "${SMT_USER}@${SMT_HOST}")
+fi
+
+if ! "${sftp_cmd[@]}" <"$BATCH_FILE"; then
   log "WARN: sftp returned non-zero; continuing with any downloaded files"
 fi
 
