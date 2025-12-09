@@ -300,11 +300,11 @@ export async function POST(req: NextRequest) {
             }
           }
 
-          try {
-            await prisma.rawSmtFile.delete({ where: { id: row.id } });
-          } catch (err) {
-            console.error('[raw-upload:inline] failed to delete raw record after inline normalize', { err });
-          }
+          // IMPORTANT for debugging: keep the RawSmtFile row so we can inspect
+          // the original SMT payloads (full 12‑month package) after ingest.
+          // Previously we deleted the raw record after inline normalize; now we
+          // retain it so admin tools (/api/admin/debug/smt/raw-files and the
+          // download route) can see every uploaded file.
 
           normalizedSummary = {
             inserted,
