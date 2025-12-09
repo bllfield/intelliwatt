@@ -57,6 +57,11 @@ const SMT_TOOLS: Tool[] = [
     title: 'Subscriptions (New/List/Unsubscribe)',
     desc: 'SMT subscription utilities: list active/closed subscriptions and check report status.',
   },
+  {
+    href: '/admin/smt/interval-api-test',
+    title: 'Interval API JSON Test',
+    desc: 'Admin harness: call /api/admin/smt/billing/fetch for a hard-coded ESIID and show SMT + usage debug + customer usage view.',
+  },
 ];
 
 export default function SMTInspector() {
