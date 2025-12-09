@@ -50,6 +50,9 @@ export default function SmtSftpFlowTestPage() {
   const [rawFilesRaw, setRawFilesRaw] = useState<Json | null>(null);
   const [usageRaw, setUsageRaw] = useState<Json | null>(null);
   const [intervalsRaw, setIntervalsRaw] = useState<Json | null>(null);
+  const [rawPayloadPreviews, setRawPayloadPreviews] = useState<
+    Array<{ id: string; filename: string; createdAt: string; sizeBytes: number | null; textPreview: string | null }>
+  >([]);
 
   async function runTest() {
     if (!token) {
@@ -67,6 +70,7 @@ export default function SmtSftpFlowTestPage() {
     setRawFilesRaw(null);
     setUsageRaw(null);
     setIntervalsRaw(null);
+    setRawPayloadPreviews([]);
 
     try {
       // 1) Trigger SMT pull via admin webhook (SFTP ingest path)
@@ -114,14 +118,17 @@ export default function SmtSftpFlowTestPage() {
         data: pipelineJson,
       });
 
-      // 3) Raw files listing (same as SMT inspector "List Raw Files")
-      const rawFilesRes = await fetch('/api/admin/debug/smt/raw-files?limit=20', {
-        method: 'GET',
-        headers: {
-          'x-admin-token': token,
-          accept: 'application/json',
+      // 3) Raw files listing (same as SMT inspector "List Raw Files"), filtered to this ESIID where possible
+      const rawFilesRes = await fetch(
+        `/api/admin/debug/smt/raw-files?limit=20&esiid=${encodeURIComponent(TEST_ESIID)}`,
+        {
+          method: 'GET',
+          headers: {
+            'x-admin-token': token,
+            accept: 'application/json',
+          },
         },
-      });
+      );
       const rawFilesJson = (await rawFilesRes
         .json()
         .catch(() => ({ error: 'Failed to parse JSON', status: rawFilesRes.status }))) as Json;
@@ -133,6 +140,45 @@ export default function SmtSftpFlowTestPage() {
         message: rawFilesJson?.message,
         data: rawFilesJson,
       });
+
+      // 3b) For each raw file, fetch a text preview so we can see the actual payload content.
+      if (rawFilesJson?.rows && Array.isArray(rawFilesJson.rows)) {
+        const previews: Array<{
+          id: string;
+          filename: string;
+          createdAt: string;
+          sizeBytes: number | null;
+          textPreview: string | null;
+        }> = [];
+        for (const row of rawFilesJson.rows as any[]) {
+          const id = row.id;
+          if (!id) continue;
+          try {
+            const detailRes = await fetch(`/api/admin/debug/smt/raw-files/${encodeURIComponent(id)}`, {
+              method: 'GET',
+              headers: {
+                'x-admin-token': token,
+                accept: 'application/json',
+              },
+            });
+            const detailJson = (await detailRes
+              .json()
+              .catch(() => ({ error: 'Failed to parse JSON', status: detailRes.status }))) as any;
+            if (detailJson?.ok) {
+              previews.push({
+                id: String(detailJson.id ?? id),
+                filename: detailJson.filename ?? row.filename ?? '',
+                createdAt: detailJson.createdAt ?? row.createdAt ?? '',
+                sizeBytes: detailJson.sizeBytes ?? row.sizeBytes ?? null,
+                textPreview: typeof detailJson.textPreview === 'string' ? detailJson.textPreview : null,
+              });
+            }
+          } catch {
+            // ignore individual preview errors; we'll still show listing JSON
+          }
+        }
+        setRawPayloadPreviews(previews);
+      }
 
       // 4) Usage debug for this ESIID over 365 days
       const usageRes = await fetch(
@@ -318,6 +364,34 @@ export default function SmtSftpFlowTestPage() {
           </pre>
         </div>
       </section>
+
+      {rawPayloadPreviews.length > 0 && (
+        <section className="p-4 rounded-2xl border">
+          <h3 className="font-medium mb-2">Raw SMT Payloads for this ESIID (text previews)</h3>
+          <p className="text-sm text-gray-700 mb-3">
+            Each block below is a distinct <code>RawSmtFile</code> row (one payload SMT delivered). This is the actual CSV
+            content we ingested from SFTP/upload, truncated for display.
+          </p>
+          <div className="space-y-4">
+            {rawPayloadPreviews.map((p) => (
+              <div key={p.id} className="border rounded-lg p-3 bg-white">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                  <div className="text-sm">
+                    <div className="font-semibold">{p.filename}</div>
+                    <div className="text-xs text-gray-600">
+                      id=<span className="font-mono">{p.id}</span> · createdAt={p.createdAt} · size=
+                      {p.sizeBytes != null ? p.sizeBytes.toLocaleString() : '—'} bytes
+                    </div>
+                  </div>
+                </div>
+                <pre className="text-xs bg-gray-50 rounded-md p-2 overflow-auto max-h-64">
+{p.textPreview ?? '(binary or no text preview available)'}
+                </pre>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="grid md:grid-cols-2 gap-4">
         <div className="p-4 rounded-2xl border">
