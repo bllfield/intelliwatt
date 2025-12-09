@@ -207,12 +207,12 @@ export async function GET(request: NextRequest) {
         topEsiids: smtTopEsiids,
         latestIntervals: smtLatestIntervals,
         rawFiles: smtRawFilesPayload,
-        windowDays: RECENT_USAGE_WINDOW_DAYS,
+        windowDays,
       },
       usageModule: {
         totals: usageTotals,
         latestRows: usageLatestRows,
-        windowDays: RECENT_USAGE_WINDOW_DAYS,
+        windowDays,
       },
     });
   } catch (error) {
