@@ -90,7 +90,7 @@ export default function SmtIntervalApiTestPage() {
 
       // 2) Call /api/admin/usage/debug for the same ESIID to see what landed in SmtInterval/usage module
       const usageRes = await fetch(
-        `/api/admin/usage/debug?esiid=${encodeURIComponent(TEST_ESIID)}&days=400`,
+        `/api/admin/usage/debug?esiid=${encodeURIComponent(TEST_ESIID)}&days=365`,
         {
           method: 'GET',
           headers: {
@@ -146,7 +146,7 @@ export default function SmtIntervalApiTestPage() {
       <h1 className="text-2xl font-semibold">SMT Interval API Test (JSON)</h1>
       <p className="text-sm text-gray-700">
         This admin-only harness calls <code>/api/admin/smt/billing/fetch</code> for a hard-coded ESIID (
-        <code>{TEST_ESIID}</code>), then shows:
+        <code>{TEST_ESIID}</code>) over a 365-day window, then shows:
         <br />
         1) The SMT API response; 2) Usage/interval debug for that ESIID; 3) The same usage dashboard output the customer
         would see.
@@ -169,7 +169,7 @@ export default function SmtIntervalApiTestPage() {
         <div className="p-4 rounded-2xl border flex flex-col gap-3">
           <h2 className="font-medium">Test Controls</h2>
           <p className="text-sm text-gray-700">
-            ESIID is hard-coded to <code>{TEST_ESIID}</code>. Date window is 365 days ending today (per SMT guide).
+            ESIID is hard-coded to <code>{TEST_ESIID}</code>. Date window is 365 days (same as live backfill logic).
           </p>
           <button
             onClick={runTest}
