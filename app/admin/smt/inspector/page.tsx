@@ -62,6 +62,11 @@ const SMT_TOOLS: Tool[] = [
     title: 'Interval API JSON Test',
     desc: 'Admin harness: call /api/admin/smt/billing/fetch for a hard-coded ESIID and show SMT + usage debug + customer usage view.',
   },
+  {
+    href: '/admin/smt/sftp-flow-test',
+    title: 'SFTP Flow Test (Raw Files + Usage)',
+    desc: 'Admin harness: trigger /api/admin/smt/pull for a hard-coded ESIID and show SFTP raw files, intervals, and the customer usage view.',
+  },
 ];
 
 export default function SMTInspector() {
