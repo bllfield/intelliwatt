@@ -55,8 +55,14 @@ function toSeriesPoint(rows: Array<{ bucket: Date; kwh: number }>): UsageSeriesP
 function fillDailyGaps(points: UsageSeriesPoint[], startIso?: string | null, endIso?: string | null) {
   if (points.length === 0 && !startIso && !endIso) return points;
 
-  const startMs = startIso ? new Date(startIso).getTime() : new Date(points[0].timestamp).getTime();
-  const endMs = endIso ? new Date(endIso).getTime() : new Date(points[points.length - 1].timestamp).getTime();
+  const startDate = startIso ? new Date(startIso) : new Date(points[0].timestamp);
+  const endDate = endIso ? new Date(endIso) : new Date(points[points.length - 1].timestamp);
+  const startMs = Number.isFinite(startDate.getTime())
+    ? new Date(startDate.toISOString().slice(0, 10)).getTime()
+    : Number.NaN;
+  const endMs = Number.isFinite(endDate.getTime())
+    ? new Date(endDate.toISOString().slice(0, 10)).getTime()
+    : Number.NaN;
   if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs > endMs) return points;
 
   const map = new Map<number, number>();
