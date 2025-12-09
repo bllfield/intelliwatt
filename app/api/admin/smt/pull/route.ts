@@ -374,12 +374,27 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: 'BAD_JSON' }, { status: 400 });
   }
 
-  // For user/admin-triggered pulls (non-webhook), require a homeId so we always scope to a single home.
-  if (!hasWebhookAuth) {
-    const homeId = typeof body?.homeId === 'string' && body.homeId.trim().length > 0 ? body.homeId.trim() : null;
-    if (!homeId) {
+  // For user/admin-triggered pulls (non-webhook), ensure we scope to a single home.
+  // If homeId is not provided, try to resolve it from the ESIID on the user's houses.
+  let requestedHomeId: string | null =
+    typeof body?.homeId === 'string' && body.homeId.trim().length > 0 ? body.homeId.trim() : null;
+
+  if (!hasWebhookAuth && !requestedHomeId) {
+    const esiidForLookup = typeof body?.esiid === 'string' ? body.esiid.trim() : null;
+    if (esiidForLookup) {
+      const houseMatch = await prisma.houseAddress.findFirst({
+        where: { esiid: esiidForLookup, archivedAt: null },
+        select: { id: true },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (houseMatch) {
+        requestedHomeId = houseMatch.id;
+      }
+    }
+
+    if (!requestedHomeId) {
       return NextResponse.json(
-        { ok: false, error: 'HOME_ID_REQUIRED', message: 'homeId is required for SMT pull.' },
+        { ok: false, error: 'HOME_ID_REQUIRED', message: 'homeId (or resolvable esiid) is required for SMT pull.' },
         { status: 400 },
       );
     }
@@ -582,7 +597,8 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const { esiid, meter, houseId } = body || {};
+    const { esiid, meter } = body || {};
+    const houseId = requestedHomeId ?? (typeof body?.houseId === 'string' ? body.houseId : null);
 
     const resolvedEsiid = await resolveSmtEsiid({
       prismaClient: prisma,
