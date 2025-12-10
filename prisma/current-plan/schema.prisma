@@ -66,27 +66,78 @@ model CurrentPlanBillUpload {
 model ParsedCurrentPlan {
   id                  String               @id @default(cuid())
   userId              String
-  houseId             String
-  sourceUploadId      String?              // optional FK-ish pointer to CurrentPlanBillUpload.id
+  houseId             String?
+
+  /// Legacy pointer used by initial v1 implementation (kept for compatibility).
+  sourceUploadId      String?
+
+  /// New FK field to the uploaded bill that was parsed.
+  uploadId            String?
+
+  // Raw bill text snippet for debugging / re-parsing (not used directly by calculators)
+  rawText             String?              @currentPlanDb.Text
+  rawTextSnippet      String?              @currentPlanDb.Text
+
+  // Identification / account
+  esiid               String?
+  meterNumber         String?
   providerName        String?
-  planName            String?
-  rateType            CurrentPlanRateType?
-  energyRateCents     Decimal?             @currentPlanDb.Decimal(8, 4)
-  baseMonthlyFee      Decimal?             @currentPlanDb.Decimal(8, 2)
-  billCreditDollars   Decimal?             @currentPlanDb.Decimal(8, 2)
-  termLengthMonths    Int?
-  contractEndDate     DateTime?
-  earlyTerminationFee Decimal?             @currentPlanDb.Decimal(8, 2)
+  tdspName            String?
+  accountNumber       String?
   esiId               String?
   accountNumberLast4  String?
-  notes               String?              @currentPlanDb.Text
-  rateStructure       Json?
+
+  // Customer + address
+  customerName           String?
+  serviceAddressLine1    String?
+  serviceAddressLine2    String?
+  serviceAddressCity     String?
+  serviceAddressState    String?
+  serviceAddressZip      String?
+
+  // Plan type + contract
+  rateType               CurrentPlanRateType?
+  variableIndexType      String?
+  planName               String?
+  termMonths             Int?
+  termLengthMonths       Int?
+  contractStartDate      DateTime?
+  contractEndDate        DateTime?
+  earlyTerminationFeeCents Int?
+  earlyTerminationFee    Decimal?             @currentPlanDb.Decimal(8, 2)
+
+  // Prices (non-TOU)
+  baseChargeCentsPerMonth Int?
+  energyRateCents         Decimal?            @currentPlanDb.Decimal(8, 4)
+  baseMonthlyFee          Decimal?            @currentPlanDb.Decimal(8, 2)
+  billCreditDollars       Decimal?            @currentPlanDb.Decimal(8, 2)
+
+  // Serialized JSON blobs for tiered rates, TOU windows, bill credits.
+  // These are parsed into typed structures in application code, NOT used
+  // directly by the DB for logic.
+  energyRateTiersJson    Json?
+  timeOfUseConfigJson    Json?
+  billCreditsJson        Json?
+  rateStructure          Json?
+
+  // Optional billing-cycle meta
+  billingPeriodStart     DateTime?
+  billingPeriodEnd       DateTime?
+  billIssueDate          DateTime?
+  billDueDate            DateTime?
+  totalAmountDueCents    Int?
+
+  // Parser metadata
   parserVersion       String?
   confidenceScore     Float?
-  rawTextSnippet      String?              @currentPlanDb.Text
+
+  // Relations
+  billUpload          CurrentPlanBillUpload? @relation(fields: [uploadId], references: [id])
+
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
 
+  @@index([userId])
   @@index([userId, houseId])
 }
 
