@@ -3567,3 +3567,109 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
 - (C) Retry committing these notes elsewhere or expand them into an ops playbook entry.
 
 ---
+
+### PC-2025-12-10-SMT-INTERVAL-INGEST-HARDENING-AND-UX
+
+**Rationale**
+
+- SMT interval ingest for real customers (e.g., ESIID `10443720004766435`) was intermittently failing to deliver a full 12‑month window due to a mix of payload limits (Vercel 413), partial normalization, and unclear UI states.
+- This change set hardens the end‑to‑end SMT 15‑minute interval pipeline (droplet → app → DB → dashboard) and makes the customer authorization/refresh UX accurately reflect long‑running SMT operations.
+
+**Scope – Backend ingest + droplet**
+
+- `scripts/droplet/smt-upload-server.ts` / `.js`:
+  - `registerAndNormalizeFile` is now the **canonical big‑file path** from the droplet into the app:
+    - Reads each uploaded SMT CSV, splits it into chunks of `SMT_RAW_LINES_PER_CHUNK` data lines (default `500`), and POSTs each chunk to `POST /api/admin/smt/raw-upload`.
+    - Supplies `esiid` and `meter` into every chunk payload so normalization does not rely on per‑file parsing.
+    - Uses `purgeExisting: true` on the first chunk and `false` on subsequent chunks so the ESIID is purged once, then fully replaced by the new 365‑day dataset without re‑deleting on each chunk.
+  - This chunked POST approach keeps individual request bodies well under Vercel’s App Router limits while still treating the original SMT payload as a **single, authoritative dataset** for that ESIID.
+- `deploy/smt/fetch_and_post.sh`:
+  - `materialize_csv_from_pgp_zip` now **prefers `IntervalMeterUsage*.csv`** inside decrypted PGP ZIPs, falling back to the first file only when no interval CSV is found. This matches SMT’s “bundle” behavior (interval + billing files together) while ensuring the interval data is what we ingest.
+  - **ESIID parsing from filenames/CSVs has been removed for this path**. For auth‑triggered ingest, the script now requires a trusted `ESIID_DEFAULT` from the app/webhook:
+    - When `ESIID_DEFAULT` is set, its trimmed value is applied to every file in the batch.
+    - When `ESIID_DEFAULT` is missing or empty, the script logs a WARN and skips the file rather than guessing.
+  - When using the droplet upload server (`SMT_UPLOAD_URL`), the script no longer makes an extra call to `/api/admin/smt/normalize` after upload; normalization is driven solely by `raw-upload` to avoid reprocessing unrelated raw files.
+- `app/api/admin/smt/raw-upload/route.ts`:
+  - Becomes the **primary app entry point** for droplet‑originated SMT CSV content:
+    - Accepts `filename`, `sizeBytes`, `sha256`, `contentBase64`, `esiid`, `meter`, `source`, and a `purgeExisting` flag.
+    - When `esiid` is present and `purgeExisting` is `true` (default on first chunk), performs an early **full purge** for that ESIID:
+      - Deletes SMT intervals and billing rows for the ESIID and clears related manual and Green Button usage for that home set, then deletes associated usage‑module intervals and raw Green Button rows.
+      - All purge work runs inside a Prisma transaction with an increased timeout (30 s) to tolerate large 365‑day datasets.
+    - Normalizes the CSV text directly with `normalizeSmtIntervals`, explicitly passing `esiid` and `meter` as defaults to ensure all rows land under the correct identifiers.
+    - Inserts intervals using `createMany` with `skipDuplicates: false` after a purge so every interval from the incoming SMT file set is treated as canonical.
+  - Raw files are **no longer deleted** after inline normalization; `RawSmtFile` rows (including content) are preserved for debugging and admin inspection.
+
+**Scope – SMT 15‑minute FTP backfill + JSON API payload correctness**
+
+- `lib/smt/agreements.ts`:
+  - `getRollingBackfillRange` now computes a **365‑day window ending “yesterday”** at 23:59:59.999Z, matching SMT guidance for backfill requests.
+  - `requestSmtBackfillForAuthorization` uses a new `formatDateMDY` helper so `startDate` and `endDate` are sent to the droplet as `MM/DD/YYYY` strings (`maxLength=10`), aligning with SMT’s XSD.
+- `deploy/droplet/webhook_server.py`:
+  - `smt_request_interval_backfill` is now fully wired to SMT’s `/v2/15minintervalreads/` endpoint instead of returning a fake job ID. The payload uses:
+    - `deliveryMode: "FTP"`, `reportFormat: "CSV"`, `version: "A"` (all versions), `readingType: "C"` (consumption).
+    - `esiid: [ "<ESIID>" ]` (array of strings) per SMT’s schema and example payloads.
+    - `SMTTermsandConditions: "Y"`.
+  - This endpoint is invoked from the app when `SMT_INTERVAL_BACKFILL_ENABLED=true` so that new SMT authorizations kick off an automated 365‑day 15‑minute interval backfill to SFTP.
+- `app/api/admin/smt/billing/fetch/route.ts`:
+  - Interval‑capable billing fetches via `/v2/energydata/` now use `version: "A"` (all) instead of `"L"` (latest) to prevent silent data truncation by SMT.
+- New admin harness for FTP backfill:
+  - `app/api/admin/smt/interval-ftp-test/route.ts` and `app/admin/smt/interval-ftp-test/page.tsx` surface the **exact JSON payload** the droplet sends to `/v2/15minintervalreads/` and a copy‑pasta `curl` example for running it directly on the droplet with a known‑good SMT JWT.
+
+**Scope – SMT admin inspectors & raw payload visibility**
+
+- `app/admin/smt/interval-api-test/page.tsx`:
+  - Admin‑only harness that:
+    - Calls `/api/admin/smt/billing/fetch` for a hard‑coded ESIID over a 365‑day window.
+    - Immediately calls `/api/admin/usage/debug` and `/api/admin/debug/smt/intervals` for that ESIID to show what landed in `SmtInterval` and the usage module.
+    - Renders a live `UsageDashboard` so operators can see exactly what a customer would see on `/dashboard/usage` for the same ESIID and dates.
+    - Includes an “SMT Request & Error Inspector” panel showing the full SMT request body and parsed error fields (`statusCode`, `errorCode`, `errorMessage`, `detail`).
+- `app/admin/smt/sftp-flow-test/page.tsx`:
+  - Admin harness for the SFTP/droplet ingest path that:
+    - Triggers the existing `/api/admin/smt/pull` or webhook‑based ingest.
+    - Calls `/api/admin/ui/smt/pipeline-debug`, `/api/admin/debug/smt/raw-files`, `/api/admin/usage/debug`, and `/api/admin/debug/smt/intervals` to show end‑to‑end state.
+    - Shows **Raw SMT Payloads** by listing `RawSmtFile` rows (initially unfiltered by ESIID) and rendering a `head`/`tail` text preview of each CSV body so operators can confirm what SMT actually delivered, not just what was normalized.
+- `app/admin/smt/inspector/page.tsx`:
+  - Updated to link to the new `Interval API JSON Test` and `Interval FTP 15‑Min Test` pages to make these harnesses discoverable from the admin SMT module home.
+- `app/api/admin/debug/smt/raw-files/route.ts` and `app/api/admin/debug/smt/raw-files/[id]/route.ts`:
+  - `raw-files` now supports optional ESIID filtering (query param) and returns counts and metadata for recent `RawSmtFile` rows.
+  - The `[id]` route returns `textPreview` (first 20k characters) and `contentBase64` for a specific raw file, enabling deeper diff/debug flows from the admin UI.
+
+**Scope – Customer & operator SMT usage refresh UX**
+
+- `app/api/user/usage/refresh/route.ts`:
+  - When a customer clicks **“Refresh SMT Data”**, the backend now:
+    - Triggers the normal usage refresh for the home.
+    - Immediately calls `POST /api/admin/smt/normalize` with `esiid=<home ESIID>` and `limit=100000`, instructing the admin route to **process all raw files for that ESIID**, not just the latest.
+  - This ensures the refresh covers the full 365‑day SMT payload once it has been ingested as raw files.
+- `app/api/user/usage/status/route.ts` (new):
+  - Provides a lightweight status probe for a given home/ESIID:
+    - `status: "pending"` when no SMT raw files or intervals exist.
+    - `status: "processing"` when raw files exist but intervals have not yet landed.
+    - `status: "ready"` when `SmtInterval` contains data for the ESIID.
+  - Returns counts for `intervals` and `rawFiles` so UI and admins can see progress over time.
+- `components/smt/RefreshSmtButton.tsx`:
+  - After hitting `/api/user/usage/refresh`, the button now enters a **long‑running polling state** (up to ~8 minutes):
+    - Polls `/api/user/usage/status` every 5 seconds.
+    - Shows contextual status text:
+      - “Waiting on SMT…” when status is `"pending"` (waiting on SMT to deliver the ZIP).
+      - “Processing SMT Data…” when status is `"processing"` (raw files present, normalization running).
+      - “Your SMT usage data is ready.” when status is `"ready"` (then refreshes the router to update charts).
+  - Disables itself during the polling window to prevent double submits and makes it clear that SMT work is happening out‑of‑band.
+- `components/smt/SmtConfirmationActions.tsx`:
+  - The **“I approved the SMT email”** action now drives the **same refresh + polling flow** as `RefreshSmtButton`:
+    - Calls `/api/smt/authorization/status` to confirm SMT email approval.
+    - Triggers `/api/user/usage/refresh` for the home.
+    - Polls `/api/user/usage/status` every 5 seconds until SMT data is ready, then redirects to `/dashboard/api`.
+  - While polling, the buttons show “Waiting on SMT…” / “Processing SMT data…” and are disabled to prevent conflicting interactions; a small status banner surfaces the current state.
+- `app/dashboard/layout.tsx`:
+  - Continues to act as a **global SMT confirmation gate**:
+    - When `isSmtConfirmationRequired()` is true, all dashboard routes redirect to `/dashboard/smt-confirmation` until the SMT email is explicitly approved or declined.
+    - Once confirmed, attempts to return to the confirmation route will redirect back to `/dashboard`.
+  - In combination with the polling behavior above, this ensures customers cannot “skip past” a pending SMT confirmation and always see an up‑to‑date SMT status on the dashboard.
+
+**Guardrails / Non‑Goals**
+
+- Vercel continues to treat SMT as **droplet‑only**: all SMT REST (`/v2/token/`, `/v2/15minintervalreads/`, `/v2/energydata/`) is called from the droplet; app‑side routes invoke the droplet via existing proxies and feature flags.
+- The new big‑file path (`smt-upload-server` → `raw-upload`) is required for 12‑month SMT CSVs; inline uploads (`/api/admin/smt/pull`) remain supported for small test/debug files only.
+- No new Prisma models were introduced; changes are confined to SMT ingest behavior, admin inspectors, and customer UI flows.
+- All SMT admin/test routes remain gated by `x-admin-token`; no customer‑facing route exposes raw SMT payloads or SMT credentials. 

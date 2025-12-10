@@ -2,8 +2,8 @@
 
 This procedure installs a systemd timer on the IntelliWatt droplet that:
 
-1. Mirrors new SMT SFTP CSV files into a local inbox.
-2. Posts each unseen file to the **droplet upload server** (recommended for large files) or via **inline POST** (legacy fallback for small files).
+1. Mirrors new SMT SFTP CSV/PGP files into a local inbox.
+2. Posts each unseen interval CSV to the **droplet upload server** (canonical path for large files). The upload server then chunks and forwards the content to the Vercel app via `POST /api/admin/smt/raw-upload` for storage and inline normalization.
 
 The script records posted SHA256 hashes so replays are skipped automatically.
 
@@ -156,9 +156,9 @@ chmod +x /home/deploy/apps/intelliwatt/deploy/smt/fetch_and_post.sh
 ## How it works
 
 1. **fetch_and_post.sh** runs on schedule (via smt-ingest.timer, every 30 minutes).
-2. It SFTP-fetches new CSV files from SMT into `/home/deploy/smt_inbox`.
-3. For each unseen file, it POSTs to **SMT_UPLOAD_URL** (the droplet upload server) using multipart/form-data, sleeping `SMT_UPLOAD_DELAY` seconds between uploads to keep load modest. Queue endpoints have been removed; processing is purely sequential.
-4. The droplet upload server receives the file, saves it to its local inbox, and triggers `smt-ingest.service` to normalize and write to the database.
+2. It SFTP-fetches new CSV and PGP `.asc` bundles from SMT into `/home/deploy/smt_inbox`.
+3. For each unseen interval CSV, it POSTs to **SMT_UPLOAD_URL** (the droplet upload server) using multipart/form-data, sleeping `SMT_UPLOAD_DELAY` seconds between uploads to keep load modest. Queue endpoints have been removed; processing is purely sequential.
+4. The droplet upload server receives the file, materializes the relevant `IntervalMeterUsage*.csv` when necessary, splits large CSVs into small chunks, and forwards them to `POST /api/admin/smt/raw-upload` in the Vercel app. That route persists `RawSmtFile` rows and normalizes intervals into `SmtInterval` inline for the supplied `esiid`/`meter`.
 5. Deduplication: SHA256 hashes of posted files are recorded in `.posted_sha256` to prevent replays.
 
 **Why droplet upload server instead of inline POSTs?**
@@ -223,8 +223,9 @@ For full-size SMT interval CSVs (e.g., 12 months of 15-minute data), the canonic
 - Local file (admin machine)
 - → Droplet SMT inbox (`/home/deploy/smt_inbox`)
 - → `smt-ingest.service` (runs the ingest script)
-- → `/api/admin/smt/pull` (inline JSON payload)
-- → `RawSmtFile` + `SmtInterval`
+- → droplet HTTP upload server (`SMT_UPLOAD_URL`, multipart `/upload`)
+- → `POST /api/admin/smt/raw-upload` (chunked CSV parts)
+- → `RawSmtFile` + `SmtInterval` (inline normalization per chunk)
 
 To make this repeatable, we provide an admin PowerShell helper script in the repo:
 
@@ -305,12 +306,12 @@ Ensure the port is open (e.g., `sudo ufw allow 8081/tcp`) and set `NEXT_PUBLIC_S
 - `deploy/smt/fetch_and_post.sh` now:
   - Decrypts `.asc` files with `gpg` using the IntelliWatt SMT keypair.
   - Unzips the decrypted payload to a temporary CSV under `$SMT_LOCAL_DIR`.
-  - Posts that CSV as an inline payload to `POST /api/admin/smt/pull` (mode `inline`).
-- The API detects DailyMeterUsage CSVs and persists both `RawSmtFile` and `SmtBillingRead` rows automatically.
+  - Either posts that CSV inline to `POST /api/admin/smt/pull` (mode `inline`) or hands it to the droplet upload server, depending on configuration.
+- The admin APIs detect DailyMeterUsage CSVs and persist both `RawSmtFile` and `SmtBillingRead` rows automatically.
 - Requirements:
   - `gpg` and `unzip` installed on the droplet.
   - IntelliWatt SMT GPG keypair available for the `deploy` user (`/home/deploy/.gnupg`).
-- Interval files (`IntervalMeterUsage*.csv`) continue through the existing pipeline unchanged.
+- Interval files (`IntervalMeterUsage*.csv`) are preferred when decrypting multi-file bundles and continue through the interval ingest pipeline described above.
 
 ### SMT Upload HTTPS Proxy (`smt-upload.intelliwatt.com`)
 
@@ -942,15 +943,14 @@ The droplet now supports an auth-triggered ingest path that complements the time
 
 ### `fetch_and_post.sh` recap
 
-- Requires: `SMT_HOST`, `SMT_USER`, `SMT_KEY`, `SMT_REMOTE_DIR`, `SMT_LOCAL_DIR`, `INTELLIWATT_BASE_URL`, `ADMIN_TOKEN`.
+- Requires: `SMT_HOST`, `SMT_USER`, `SMT_KEY`, `SMT_REMOTE_DIR`, `SMT_LOCAL_DIR`, `INTELLIWATT_BASE_URL`, `ADMIN_TOKEN` (plus `SMT_UPLOAD_URL` for the droplet upload server path).
 - Runs `lftp mget -p -r *` from `SMT_REMOTE_DIR` into `SMT_LOCAL_DIR`.
-- Scans for `*.csv` (depth ≤ 2).
+- Scans for `*.csv` (depth ≤ 2) and decrypted `IntervalMeterUsage*.csv` from PGP bundles.
 - For each CSV:
   - Computes SHA-256 and skips files already recorded in `.posted_sha256`.
-  - Derives ESIID/meter from filename, or uses `ESIID_DEFAULT` / `METER_DEFAULT`.
-  - Builds gzipped+base64 JSON payload.
-  - POSTs to `${INTELLIWATT_BASE_URL}/api/admin/smt/pull` with `x-admin-token`.
-  - Interval CSVs are automatically normalized by the admin endpoint into `SmtInterval`.
+  - Uses `ESIID_DEFAULT` (from the webhook payload or env) as the trusted ESIID for every file in the ingest batch instead of attempting to parse ESIID from filenames or CSV content. If `ESIID_DEFAULT` is missing, the script logs a warning and skips the file.
+  - Applies `METER_DEFAULT` or a simple meter guess where needed.
+  - POSTs the file to `${SMT_UPLOAD_URL}` (droplet upload server) as multipart form data. The upload server then chunks and forwards the CSV to `POST /api/admin/smt/raw-upload`, which both stores `RawSmtFile` and normalizes into `SmtInterval` for that ESIID.
 
 ### Ops: How to test the flow
 
