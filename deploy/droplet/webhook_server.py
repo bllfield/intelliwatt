@@ -422,8 +422,9 @@ def smt_request_interval_backfill(
         # A = All, L = Latest. Use A so SMT does not silently collapse data.
         "version": "A",
         "readingType": "C",
-        # 15-minute spec uses a single esiid element, not a list.
-        "esiid": str(esiid).strip(),
+        # 15-minute JSON examples from SMT show esiid as an array of strings:
+        # "esiid": ["1008901012126195372100"]
+        "esiid": [str(esiid).strip()],
         "SMTTermsandConditions": "Y",
     }
 

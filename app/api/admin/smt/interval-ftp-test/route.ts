@@ -60,7 +60,8 @@ export async function POST(req: NextRequest) {
     // A = All, L = Latest. Use A so SMT does not drop older versions.
     version: 'A',
     readingType: 'C',
-    esiid,
+    // SMT JSON examples for 15-min endpoint show: "esiid": ["..."].
+    esiid: [esiid],
     SMTTermsandConditions: 'Y',
   };
 
