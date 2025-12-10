@@ -137,7 +137,7 @@ export function SmtConfirmationActions({ homeId }: Props) {
         (summaryMessages.filter(Boolean).join(" ") || "SMT usage refresh triggered.") +
           " We requested your SMT data and are waiting for it to be delivered. This can take a few minutes.",
       );
-      await pollUsageReady(homeId);
+      void pollUsageReady(homeId);
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to refresh Smart Meter Texas data.";
@@ -241,21 +241,30 @@ export function SmtConfirmationActions({ homeId }: Props) {
           {error}
         </div>
       ) : null}
+      {statusMessage ? (
+        <div className="rounded-md border border-emerald-400/40 bg-emerald-500/5 px-4 py-3 text-xs text-emerald-100">
+          {statusMessage}
+        </div>
+      ) : null}
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <button
           type="button"
           onClick={() => postConfirmation("approved")}
-          disabled={state !== "idle"}
+          disabled={state !== "idle" || isWaitingOnSmt || isProcessing}
           className="inline-flex items-center justify-center rounded-md border border-emerald-500 px-4 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {state === "approved" ? "Saving approval…" : "I approved the SMT email"}
+          {state === "approved" || isWaitingOnSmt || isProcessing
+            ? isProcessing
+              ? "Processing SMT data…"
+              : "Waiting on SMT…"
+            : "I approved the SMT email"}
         </button>
 
         <button
           type="button"
           onClick={() => postConfirmation("declined")}
-          disabled={state !== "idle"}
+          disabled={state !== "idle" || isWaitingOnSmt || isProcessing}
           className="inline-flex items-center justify-center rounded-md border border-rose-500 px-4 py-2 text-sm font-semibold text-rose-600 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {state === "declined" ? "Recording decline…" : "I declined the SMT email"}
@@ -264,7 +273,7 @@ export function SmtConfirmationActions({ homeId }: Props) {
         <button
           type="button"
           onClick={refreshAuthorizationStatus}
-          disabled={state !== "idle"}
+          disabled={state !== "idle" || isWaitingOnSmt || isProcessing}
           className="inline-flex items-center justify-center rounded-md border border-blue-500 px-4 py-2 text-sm font-semibold text-blue-600 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {state === "refresh" ? "Refreshing…" : "Refresh status"}
