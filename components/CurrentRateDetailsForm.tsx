@@ -360,51 +360,91 @@ export function CurrentRateDetailsForm({
     };
   }, [refreshPlan]);
 
-  // Auto-fill the manual entry form from parsedCurrentPlan (preferred) or savedCurrentPlan.
+  // Auto-fill the manual entry form from savedCurrentPlan (preferred) or parsedCurrentPlan.
   useEffect(() => {
     if (!isMountedRef.current) return;
     if (hasInitializedFromPlanRef.current) return;
 
-    const source = parsedPlan ?? savedPlan;
-    if (!source) return;
+    if (!savedPlan && !parsedPlan) return;
 
     hasInitializedFromPlanRef.current = true;
 
-    if (source.providerName && !electricCompany) {
-      setElectricCompany(source.providerName);
-    }
-    if (source.planName && !planName) {
-      setPlanName(source.planName);
-    }
-    if (source.rateType && !rateType) {
-      if (source.rateType === "FIXED" || source.rateType === "VARIABLE" || source.rateType === "TIME_OF_USE") {
-        setRateType(source.rateType);
-      }
-    }
-    if (source.baseMonthlyFee != null && baseFeeDollars === "") {
-      setBaseFeeDollars(String(source.baseMonthlyFee));
-    }
-    if (source.termLengthMonths != null && termLengthMonths === "") {
-      setTermLengthMonths(String(source.termLengthMonths));
-    }
-    if (source.contractEndDate && contractExpiration === "") {
-      // contractEndDate is ISO date; keep only the date portion
-      setContractExpiration(source.contractEndDate.slice(0, 10));
-    }
-    if (source.earlyTerminationFee != null && earlyTerminationFee === "") {
-      setEarlyTerminationFee(String(source.earlyTerminationFee));
-    }
-    if (source.esiId && !esiId) {
-      setEsiId(source.esiId);
-    }
-    if (source.accountNumberLast4 && !accountNumberLast4) {
-      setAccountNumberLast4(source.accountNumberLast4);
-    }
-    if (source.notes && !notes) {
-      setNotes(source.notes);
+    const saved = savedPlan;
+    const parsed = parsedPlan;
+
+    const pickString = (savedVal?: string | null, parsedVal?: string | null) => {
+      if (savedVal && savedVal.trim().length > 0) return savedVal.trim();
+      if (parsedVal && parsedVal.trim().length > 0) return parsedVal.trim();
+      return null;
+    };
+
+    const pickNumber = (savedVal?: number | null, parsedVal?: number | null) => {
+      if (savedVal !== null && savedVal !== undefined) return savedVal;
+      if (parsedVal !== null && parsedVal !== undefined) return parsedVal;
+      return null;
+    };
+
+    const pickedProvider = pickString(saved?.providerName, parsed?.providerName);
+    if (!electricCompany && pickedProvider) {
+      setElectricCompany(pickedProvider);
     }
 
-    const structure = source.rateStructure;
+    const pickedPlanName = pickString(saved?.planName, parsed?.planName);
+    if (!planName && pickedPlanName) {
+      setPlanName(pickedPlanName);
+    }
+
+    const pickedRateType = pickString(saved?.rateType, parsed?.rateType);
+    if (pickedRateType === "FIXED" || pickedRateType === "VARIABLE" || pickedRateType === "TIME_OF_USE") {
+      setRateType(pickedRateType);
+    }
+
+    const pickedBaseFee = pickNumber(saved?.baseMonthlyFee, parsed?.baseMonthlyFee);
+    if (baseFeeDollars === "" && pickedBaseFee !== null) {
+      setBaseFeeDollars(String(pickedBaseFee));
+    }
+
+    const pickedTermMonths = pickNumber(saved?.termLengthMonths, parsed?.termLengthMonths);
+    if (termLengthMonths === "" && pickedTermMonths !== null) {
+      setTermLengthMonths(String(pickedTermMonths));
+    }
+
+    const pickedContractEnd =
+      saved?.contractEndDate ?? parsed?.contractEndDate ?? null;
+    if (contractExpiration === "" && pickedContractEnd) {
+      setContractExpiration(pickedContractEnd.slice(0, 10));
+    }
+
+    const pickedEarlyTermination = pickNumber(
+      saved?.earlyTerminationFee,
+      parsed?.earlyTerminationFee,
+    );
+    if (earlyTerminationFee === "" && pickedEarlyTermination !== null) {
+      setEarlyTerminationFee(String(pickedEarlyTermination));
+    }
+
+    const pickedEsiId = pickString(saved?.esiId, parsed?.esiId);
+    if (!esiId && pickedEsiId) {
+      setEsiId(pickedEsiId);
+    }
+
+    const pickedAccountLast = pickString(
+      saved?.accountNumberLast4,
+      parsed?.accountNumberLast4,
+    );
+    if (!accountNumberLast4 && pickedAccountLast) {
+      setAccountNumberLast4(pickedAccountLast);
+    }
+
+    const pickedNotes = pickString(saved?.notes, parsed?.notes);
+    if (!notes && pickedNotes) {
+      setNotes(pickedNotes);
+    }
+
+    const structure =
+      (saved && saved.rateStructure) ||
+      (parsed && parsed.rateStructure) ||
+      null;
     if (structure && typeof structure === "object") {
       if (structure.type === "FIXED" && structure.energyRateCents != null && primaryRateCentsPerKwh === "") {
         setPrimaryRateCentsPerKwh(String(structure.energyRateCents));
