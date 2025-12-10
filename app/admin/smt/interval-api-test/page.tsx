@@ -40,6 +40,7 @@ export default function SmtIntervalApiTestPage() {
   const [loading, setLoading] = useState(false);
 
   const [billingResult, setBillingResult] = useState<ApiResult | null>(null);
+  // Full response we got back from our /api/admin/smt/billing/fetch wrapper.
   const [usageDebugResult, setUsageDebugResult] = useState<ApiResult | null>(null);
   const [intervalsDebugResult, setIntervalsDebugResult] = useState<ApiResult | null>(null);
 
@@ -141,6 +142,37 @@ export default function SmtIntervalApiTestPage() {
     }
   }
 
+  // Pull out SMT-specific diagnostics from whatever billingRawshape we got back.
+  const smtDiagnostics = useMemo(() => {
+    const raw = billingRaw as any;
+    if (!raw) return null;
+    const smtJson = raw.smtJson ?? null;
+    const smtText = raw.smtText ?? null;
+    const payloadUsed = raw.payloadUsed ?? null;
+
+    // SMT error metadata often shows up on the top-level JSON:
+    // statusCode, errorCode, errorMessage, message, detail, etc.
+    const j: any = smtJson || {};
+
+    return {
+      smtUrl: raw.smtUrl ?? null,
+      httpStatusFromWrapper: billingResult?.status ?? null,
+      smtStatusCode: j.statusCode ?? j.StatusCode ?? null,
+      smtErrorCode: j.errorCode ?? j.ErrorCode ?? j.code ?? null,
+      smtErrorMessage:
+        j.errorMessage ??
+        j.ErrorMessage ??
+        j.message ??
+        j.Message ??
+        j.detail ??
+        j.Detail ??
+        null,
+      payloadUsed,
+      smtJson,
+      smtText,
+    };
+  }, [billingRaw, billingResult]);
+
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
       <h1 className="text-2xl font-semibold">SMT Interval API Test (JSON)</h1>
@@ -219,6 +251,70 @@ export default function SmtIntervalApiTestPage() {
             <dd>{intervalsDebugResult?.error ?? ''}</dd>
           </dl>
         </div>
+      </section>
+
+      <section className="p-4 rounded-2xl border">
+        <h2 className="font-medium mb-3">SMT Request & Error Inspector</h2>
+        <p className="text-sm text-gray-700 mb-3">
+          This section surfaces exactly what we sent to SMT and what SMT told us back, including any{' '}
+          <code>statusCode</code>, <code>errorCode</code>, or &quot;already delivered&quot;-style messages from their
+          JSON. Use this when SMT says it has already delivered data or is refusing a backfill.
+        </p>
+        {!billingRaw && (
+          <p className="text-sm text-gray-500">Run the test above to see SMT request/response details.</p>
+        )}
+        {billingRaw && smtDiagnostics && (
+          <div className="space-y-4">
+            <div className="grid md:grid-cols-3 gap-4">
+              <div>
+                <h3 className="font-medium mb-2 text-sm">HTTP / Wrapper Status</h3>
+                <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                  <dt className="text-gray-500">wrapper.ok</dt>
+                  <dd>{String(billingResult?.ok ?? '')}</dd>
+                  <dt className="text-gray-500">wrapper.status</dt>
+                  <dd>{billingResult?.status ?? ''}</dd>
+                </dl>
+              </div>
+              <div>
+                <h3 className="font-medium mb-2 text-sm">SMT Error Fields (parsed)</h3>
+                <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                  <dt className="text-gray-500">smt.statusCode</dt>
+                  <dd>{smtDiagnostics.smtStatusCode ?? ''}</dd>
+                  <dt className="text-gray-500">smt.errorCode</dt>
+                  <dd>{smtDiagnostics.smtErrorCode ?? ''}</dd>
+                  <dt className="text-gray-500">smt.errorMessage</dt>
+                  <dd className="break-words">{smtDiagnostics.smtErrorMessage ?? ''}</dd>
+                </dl>
+              </div>
+              <div>
+                <h3 className="font-medium mb-2 text-sm">Request Meta</h3>
+                <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                  <dt className="text-gray-500">smtUrl</dt>
+                  <dd className="break-all">{smtDiagnostics.smtUrl ?? ''}</dd>
+                  <dt className="text-gray-500">date window</dt>
+                  <dd>
+                    {String((billingRaw as any)?.startDate ?? '')} → {String((billingRaw as any)?.endDate ?? '')}
+                  </dd>
+                </dl>
+              </div>
+            </div>
+
+            <div className="grid md:grid-cols-2 gap-4">
+              <div>
+                <h3 className="font-medium mb-2 text-sm">Payload Sent to SMT</h3>
+                <pre className="text-xs bg-gray-50 rounded-lg p-3 overflow-auto max-h-[24rem]">
+{pretty(smtDiagnostics.payloadUsed ?? {})}
+                </pre>
+              </div>
+              <div>
+                <h3 className="font-medium mb-2 text-sm">Raw SMT Body (JSON or text)</h3>
+                <pre className="text-xs bg-gray-50 rounded-lg p-3 overflow-auto max-h-[24rem]">
+{pretty(smtDiagnostics.smtJson ?? smtDiagnostics.smtText ?? {})}
+                </pre>
+              </div>
+            </div>
+          </div>
+        )}
       </section>
 
       <section className="grid md:grid-cols-3 gap-4">

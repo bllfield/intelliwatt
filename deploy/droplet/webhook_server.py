@@ -389,27 +389,88 @@ def smt_request_interval_backfill(
     authorization_id: Optional[str] = None,
 ) -> str:
     """
-    Submit (or enqueue) an interval backfill request. For now, we log and return
-    a generated trans_id so the caller can track the request lifecycle. This keeps
-    parity with other SMT proxy helpers and avoids hard failures while the upstream
-    interval endpoint is finalized.
+    Submit a 15-minute interval backfill request to SMT's /v2/15minintervalreads/
+    endpoint, asking SMT to deliver a CSV report over FTP.
+
+    The caller is responsible for providing start_date/end_date as MM/DD/YYYY
+    strings (365 days before "now" for start, and today/yesterday for end).
+
+    Returns a job identifier (correlationId if provided by SMT, otherwise the
+    locally generated trans_id) that the caller can use to correlate ReportStatus.
     """
 
-    trans_id = generate_trans_id(prefix="INTBCK")
+    # Build SMT identity fields (requestorID + DUNS).
+    requestor_id, requester_auth_id = _smt_base_ids()
+
+    # SMT requires a unique transaction id per request.
+    trans_id = generate_trans_id(prefix="INT15")
+
+    # Payload is modeled on the SMT "15-Minute Interval Data" spec:
+    # - deliveryMode: FTP (so results land in our SFTP inbox)
+    # - reportFormat: CSV
+    # - version: L (latest)
+    # - readingType: C (consumption only) – adjust to "A" if we ever want gen+consumption.
+    payload: Dict[str, Any] = {
+        "trans_id": trans_id,
+        "requestorID": requestor_id,
+        "requesterType": "CSP",
+        "requesterAuthenticationID": requester_auth_id,
+        "startDate": start_date,
+        "endDate": end_date,
+        "deliveryMode": "FTP",
+        "reportFormat": "CSV",
+        "version": "L",
+        "readingType": "C",
+        "esiid": str(esiid).strip(),
+        "SMTTermsandConditions": "Y",
+    }
 
     logging.info(
-        "[SMT_PROXY] interval backfill queued trans_id=%s esiid=%s meter=%s start=%s end=%s auth=%s",
-        trans_id,
+        "[SMT_PROXY] interval backfill request esiid=%s meter=%s start=%s end=%s auth=%s payload=%s",
         esiid,
         meter_number or "",
         start_date,
         end_date,
         authorization_id or "",
+        json.dumps(payload, separators=(",", ":"), ensure_ascii=False),
     )
 
-    # TODO: Wire to SMT interval request endpoint once available. Keeping this non-fatal
-    # to avoid breaking existing flows while the upstream path is provisioned.
-    return trans_id
+    # Call SMT /v2/15minintervalreads/ using the shared helper that injects the JWT token.
+    response = smt_post("/v2/15minintervalreads/", payload)
+    status = response.get("status")
+    data = response.get("data") or {}
+
+    # Log a concise summary for journalctl debugging.
+    try:
+        data_snip = json.dumps(data, separators=(",", ":"))[:800] if isinstance(data, (dict, list)) else repr(data)[:800]
+    except Exception:
+        data_snip = repr(data)[:800]
+
+    logging.info(
+        "[SMT_PROXY] interval backfill SMT reply status=%s body=%s",
+        status,
+        data_snip,
+    )
+
+    if not _smt_success(status):
+        # Surface the SMT error up to the caller; the HTTP handler will convert this into a 5xx.
+        raise SmtProxyRequestError(status or 0, data, response.get("url"))
+
+    # The async acknowledgement should include a correlationId; prefer that if present.
+    correlation_id = None
+    if isinstance(data, dict):
+        correlation_id = data.get("correlationId") or data.get("correlationID") or data.get("CorrelationId")
+
+    job_id = str(correlation_id or trans_id)
+
+    logging.info(
+        "[SMT_PROXY] interval backfill accepted esiid=%s jobId=%s status=%s",
+        esiid,
+        job_id,
+        status,
+    )
+
+    return job_id
 
 
 def run_default_command() -> bytes:
