@@ -203,34 +203,20 @@ for file_path in "${FILES[@]}"; do
     effective_path="$file_path"
   fi
 
-  # Try to extract ESIID from filename/content unless ESIID_DEFAULT is already provided.
+  # Resolve ESIID strictly from app/webhook. Do NOT parse from filename or CSV.
   base="$(basename "$file_path")"
-  esiid_guess="$(printf '%s\n' "$base" | grep -oE '10[0-9]{16}' || true)"
   meter_guess="$(printf '%s\n' "$base" | grep -oE 'M[0-9]+' || true)"
 
   trimmed_default_esiid="$(printf '%s' "${ESIID_DEFAULT:-}" | tr -d $'\r\n')"
 
   if [[ -n "$trimmed_default_esiid" ]]; then
-    # For authorization-triggered runs, the webhook passed a trusted ESIID.
-    # Use it for every file in this ingest batch instead of requiring per-file ESIID.
+    # For authorization/admin-triggered runs, the webhook passed a trusted ESIID.
+    # Use it for every file in this ingest batch. We no longer attempt to infer
+    # ESIID from filenames or CSV content in any path (including cron).
     esiid="$trimmed_default_esiid"
   else
-    # Cron/bulk runs: we may have multiple ESIIDs in the inbox; resolve per file.
-    # If no ESIID in filename, try to extract from CSV content (after decryption).
-    # SMT CSVs may have ESIID with leading single quote: '10443720004529147
-    # Use awk to extract and validate ESIID pattern in one step.
-    if [[ -z "$esiid_guess" && -f "$effective_path" ]]; then
-      # Fast path: allow leading quote/equals then strip non-digits
-      esiid_guess="$(head -n 200 "$effective_path" | tr -d '\r' | grep -oE "'?=?10[0-9]{15}" | tr -cd '0-9\n' | head -n1 || true)"
-      if [[ -z "$esiid_guess" ]]; then
-        # Structured path: scan first ~50 rows and all columns, stripping quotes/equals
-        esiid_guess="$(awk 'BEGIN{FS="[,;]"} NR>1 && NR<=50 {for(i=1;i<=NF;i++){gsub(/^[[:space:]"'\''=]+/,"",$i); if(match($i,/10[0-9]{15}/)){print substr($i,RSTART,17); exit}}}' "$effective_path" || true)"
-      fi
-      if [[ -n "$esiid_guess" ]]; then
-        log "Extracted ESIID from CSV content: $esiid_guess"
-      fi
-    fi
-    esiid="$esiid_guess"
+    log "WARN: ESIID_DEFAULT not set for $file_path; skipping (ESIID must come from app, not filename/CSV)"
+    continue
   fi
   meter="${meter_guess:-$METER_DEFAULT}"
 
