@@ -35,11 +35,48 @@ export default function RefreshSmtButton({ homeId }: RefreshSmtButtonProps) {
   const [status, setStatus] = useState<RefreshState>('idle');
   const [message, setMessage] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [isWaitingOnSmt, setIsWaitingOnSmt] = useState(false);
+
+  async function pollUsageReady(homeIdToPoll: string, attempts: number = 0): Promise<void> {
+    // Cap polling to avoid hammering the API forever.
+    if (attempts > 120) {
+      setIsWaitingOnSmt(false);
+      setStatus('error');
+      setMessage('Still waiting on SMT data after several minutes. Try again later.');
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/user/usage/status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ homeId: homeIdToPoll }),
+        cache: 'no-store',
+      });
+
+      const payload: any = await res.json().catch(() => null);
+      if (res.ok && payload?.ok && payload?.ready) {
+        setIsWaitingOnSmt(false);
+        setStatus('success');
+        setMessage('Your SMT usage data has arrived and usage has been refreshed.');
+        router.refresh();
+        return;
+      }
+    } catch {
+      // swallow transient polling errors; we will try again
+    }
+
+    // Try again in 5 seconds.
+    setTimeout(() => {
+      void pollUsageReady(homeIdToPoll, attempts + 1);
+    }, 5000);
+  }
 
   const handleClick = () => {
     if (!homeId || isPending) return;
     setStatus('idle');
     setMessage(null);
+    setIsWaitingOnSmt(false);
 
     startTransition(async () => {
       try {
@@ -116,9 +153,16 @@ export default function RefreshSmtButton({ homeId }: RefreshSmtButtonProps) {
           );
         }
 
+        // If SMT pull/backfill/normalize succeeded, start polling to see when
+        // the data actually lands. This is primarily for the SMT path, which
+        // may take some time between backfill request and SFTP delivery.
+        setIsWaitingOnSmt(true);
         setStatus('success');
-        setMessage(summaryMessages.filter(Boolean).join(' '));
-        router.refresh();
+        setMessage(
+          (summaryMessages.filter(Boolean).join(' ') || 'SMT usage refresh triggered.') +
+            ' We requested your SMT data and are waiting for it to be delivered. This can take a few minutes.',
+        );
+        void pollUsageReady(homeId);
       } catch (error) {
         setStatus('error');
         setMessage(
@@ -138,7 +182,7 @@ export default function RefreshSmtButton({ homeId }: RefreshSmtButtonProps) {
         disabled={isPending}
         className="inline-flex items-center rounded-full border border-brand-cyan/40 bg-brand-cyan/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-brand-cyan transition hover:border-brand-cyan hover:bg-brand-cyan/20 disabled:cursor-not-allowed disabled:opacity-60"
       >
-        {isPending ? 'Refreshing…' : 'Refresh SMT Data'}
+        {isPending || isWaitingOnSmt ? 'Refreshing…' : 'Refresh SMT Data'}
       </button>
       {status === 'success' && message ? (
         <span className="text-xs text-emerald-300">{message}</span>
