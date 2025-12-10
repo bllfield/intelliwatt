@@ -127,7 +127,7 @@ export async function POST(req: NextRequest) {
             await tx.manualUsageUpload.deleteMany({ where: { houseId: { in: houseIds } } });
             await tx.greenButtonUpload.deleteMany({ where: { houseId: { in: houseIds } } });
           }
-        });
+        }, { timeout: 30000 });
 
         if (houseIds.length > 0) {
           await usagePrisma.greenButtonInterval.deleteMany({ where: { homeId: { in: houseIds } } });
@@ -182,6 +182,9 @@ export async function POST(req: NextRequest) {
 
         if (bounded.length > 0 && tsMax) {
           try {
+            // Give this overwrite transaction more time; large FTP files can
+            // generate many intervals and the default 5s interactive timeout
+            // is too aggressive.
             await prisma.$transaction(async (tx) => {
               const boundedTs = bounded.map((i) => i.ts.getTime()).filter((ms) => Number.isFinite(ms));
               const tsMinBound = boundedTs.length ? new Date(Math.min(...boundedTs)) : tsMinAll;
@@ -222,7 +225,7 @@ export async function POST(req: NextRequest) {
 
               inserted = result.count;
               skipped = bounded.length - result.count;
-            });
+            }, { timeout: 30000 });
           } catch (err) {
             console.error('[raw-upload:inline] failed overwrite transaction', { err });
             throw err;
