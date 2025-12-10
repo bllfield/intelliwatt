@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { normalizeEmail } from '@/lib/utils/email';
 import { prisma } from '@/lib/db';
 import { getCurrentPlanPrisma, CurrentPlanPrisma } from '@/lib/prismaCurrentPlan';
-import { parseBillText } from '@/lib/billing/parseBillText';
+import { extractCurrentPlanFromBillText } from '@/lib/billing/parseBillText';
 
 export const dynamic = 'force-dynamic';
 
@@ -111,14 +111,9 @@ export async function POST(request: NextRequest) {
     }
 
     const text =
-      textOverride ??
-      uploadRecord!.billData.toString('utf8').slice(0, 20000); // PDF bytes will not be perfect, but v1 parser is JSON-focused.
+      textOverride ?? uploadRecord!.billData.toString('utf8').slice(0, 20000);
 
-    const parsed = parseBillText({
-      text,
-      fileName: uploadRecord?.filename ?? null,
-      contentType: uploadRecord?.mimeType ?? null,
-    });
+    const parsed = extractCurrentPlanFromBillText(text, {});
 
     const decimalOrNull = (value: number | null | undefined, scale: number) => {
       if (value === null || value === undefined) return null;
@@ -129,28 +124,45 @@ export async function POST(request: NextRequest) {
       userId: user.id,
       houseId,
       sourceUploadId: uploadRecord?.id ?? null,
-      providerName: parsed.providerName ?? null,
-      planName: parsed.planName ?? null,
-      rateType: parsed.rateType ?? null,
-      energyRateCents:
-        parsed.energyRateCents != null
-          ? decimalFromNumber(parsed.energyRateCents, 8, 4)
-          : null,
-      baseMonthlyFee:
-        parsed.baseMonthlyFeeDollars != null
-          ? decimalFromNumber(parsed.baseMonthlyFeeDollars, 8, 2)
-          : null,
-      billCreditDollars: decimalOrNull(parsed.billCreditDollars ?? null, 2),
-      termLengthMonths: parsed.termLengthMonths ?? null,
+      uploadId: uploadRecord?.id ?? null,
+      rawText: parsed.rawText,
+      rawTextSnippet: parsed.rawText.slice(0, 4000),
+      esiid: parsed.esiid,
+      meterNumber: parsed.meterNumber,
+      providerName: parsed.providerName,
+      tdspName: parsed.tdspName,
+      accountNumber: parsed.accountNumber,
+      customerName: parsed.customerName,
+      serviceAddressLine1: parsed.serviceAddressLine1,
+      serviceAddressLine2: parsed.serviceAddressLine2,
+      serviceAddressCity: parsed.serviceAddressCity,
+      serviceAddressState: parsed.serviceAddressState,
+      serviceAddressZip: parsed.serviceAddressZip,
+      rateType: parsed.rateType,
+      variableIndexType: parsed.variableIndexType,
+      planName: parsed.planName,
+      termMonths: parsed.termMonths,
+      termLengthMonths: parsed.termMonths,
+      contractStartDate: parsed.contractStartDate
+        ? new Date(parsed.contractStartDate)
+        : null,
       contractEndDate: parsed.contractEndDate ? new Date(parsed.contractEndDate) : null,
-      earlyTerminationFee: decimalOrNull(parsed.earlyTerminationFeeDollars ?? null, 2),
-      esiId: parsed.esiId ?? null,
-      accountNumberLast4: parsed.accountNumberLast4 ?? null,
-      notes: parsed.notes ?? null,
-      rateStructure: parsed.rateStructure ?? null,
-      parserVersion: parsed.parserVersion,
-      confidenceScore: parsed.confidenceScore,
-      rawTextSnippet: text.slice(0, 4000),
+      earlyTerminationFeeCents: parsed.earlyTerminationFeeCents,
+      baseChargeCentsPerMonth: parsed.baseChargeCentsPerMonth,
+      energyRateTiersJson: parsed.energyRateTiers,
+      timeOfUseConfigJson: parsed.timeOfUse,
+      billCreditsJson: parsed.billCredits,
+      billingPeriodStart: parsed.billingPeriodStart
+        ? new Date(parsed.billingPeriodStart)
+        : null,
+      billingPeriodEnd: parsed.billingPeriodEnd
+        ? new Date(parsed.billingPeriodEnd)
+        : null,
+      billIssueDate: parsed.billIssueDate ? new Date(parsed.billIssueDate) : null,
+      billDueDate: parsed.billDueDate ? new Date(parsed.billDueDate) : null,
+      totalAmountDueCents: parsed.totalAmountDueCents,
+      parserVersion: 'bill-text-v1-regex',
+      confidenceScore: null,
     };
 
     const parsedDelegate = (currentPlanPrisma as any).parsedCurrentPlan as any;
@@ -223,7 +235,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       ok: true,
       parsedPlan: serializedParsedPlan,
-      warnings: parsed.warnings,
+      warnings: [],
     });
   } catch (error) {
     console.error('[current-plan/bill-parse] Failed to parse bill', error);

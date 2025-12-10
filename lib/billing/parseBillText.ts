@@ -1,161 +1,167 @@
-export type ParsedCurrentPlanFields = {
-  providerName?: string | null;
-  planName?: string | null;
-  rateType?: 'FIXED' | 'VARIABLE' | 'TIME_OF_USE' | 'OTHER' | null;
-  energyRateCents?: number | null;
-  baseMonthlyFeeDollars?: number | null;
-  billCreditDollars?: number | null;
-  termLengthMonths?: number | null;
-  contractEndDate?: string | null;
-  earlyTerminationFeeDollars?: number | null;
-  esiId?: string | null;
-  accountNumberLast4?: string | null;
-  notes?: string | null;
-  rateStructure?: unknown | null;
+export type EnergyRateTier = {
+  minKWh: number;
+  maxKWh: number | null;
+  rateCentsPerKWh: number;
 };
 
-export type ParseBillTextInput = {
-  text: string;
-  fileName?: string | null;
-  contentType?: string | null;
+export type TimeOfUsePeriod = {
+  days: Array<'MON' | 'TUE' | 'WED' | 'THU' | 'FRI' | 'SAT' | 'SUN'>;
+  startMinutes: number; // 0–1439
+  endMinutes: number; // 0–1439 (can wrap midnight)
+  rateCentsPerKWh: number;
 };
 
-export type ParseBillTextResult = ParsedCurrentPlanFields & {
-  parserVersion: string;
-  confidenceScore: number | null;
-  warnings: string[];
+export type TimeOfUseConfig = {
+  periods: TimeOfUsePeriod[];
 };
 
-/**
- * Very minimal v1 parser.
- *
- * For now we support two modes:
- *  - If the "text" is JSON, we try to parse structured fields directly.
- *  - Otherwise, we return an empty structured result plus a warning.
- *
- * This keeps all logic additive and allows future parsers (PDF/OCR) to evolve
- * without changing the contract consumed by the API and UI.
- */
-export function parseBillText(input: ParseBillTextInput): ParseBillTextResult {
-  const { text } = input;
-  const warnings: string[] = [];
+export type BillCreditRule = {
+  kind: 'AUTOPAY' | 'PAPERLESS' | 'USAGE_THRESHOLD' | 'FLAT_OTHER';
+  amountCents: number;
+  minKWh: number | null;
+  maxKWh: number | null;
+};
 
-  const base: ParsedCurrentPlanFields = {
-    providerName: null,
-    planName: null,
+export type BillCredits = {
+  enabled: boolean;
+  rules: BillCreditRule[];
+};
+
+export type ParsedCurrentPlanPayload = {
+  // Identification / account
+  esiid: string | null;
+  meterNumber: string | null;
+  providerName: string | null;
+  tdspName: string | null;
+  accountNumber: string | null;
+
+  // Customer + address
+  customerName: string | null;
+  serviceAddressLine1: string | null;
+  serviceAddressLine2: string | null;
+  serviceAddressCity: string | null;
+  serviceAddressState: string | null;
+  serviceAddressZip: string | null;
+
+  // Plan type + contract
+  rateType: 'FIXED' | 'VARIABLE' | 'TIME_OF_USE' | 'OTHER' | null;
+  variableIndexType: 'ERCOT' | 'FUEL' | 'OTHER' | null;
+  planName: string | null;
+  termMonths: number | null;
+  contractStartDate: string | null; // ISO date or null
+  contractEndDate: string | null;
+  earlyTerminationFeeCents: number | null;
+
+  // Prices (non-TOU)
+  baseChargeCentsPerMonth: number | null;
+  energyRateTiers: EnergyRateTier[];
+
+  // TOU + credits
+  timeOfUse: TimeOfUseConfig | null;
+  billCredits: BillCredits;
+
+  // Billing-cycle meta
+  billingPeriodStart: string | null;
+  billingPeriodEnd: string | null;
+  billIssueDate: string | null;
+  billDueDate: string | null;
+  totalAmountDueCents: number | null;
+
+  // For debugging / re-parsing
+  rawText: string;
+};
+
+export type BillParseHints = {
+  esiidHint?: string | null;
+  addressLine1Hint?: string | null;
+  cityHint?: string | null;
+  stateHint?: string | null;
+};
+
+const ESIID_REGEX = /\b(ESI[\s-]*ID[:\s]*)(\d{17,22})\b/i;
+const METER_REGEX = /\b(Meter(?:\s*Number)?[:\s#]*)([A-Za-z0-9\-]+)\b/i;
+const PROVIDER_REGEX = /\b(?:Provider|Retail Electric Provider|REP)[:\s]+(.+?)\b/;
+const ACCOUNT_REGEX = /\b(Account(?:\s*Number)?[:\s#]*)([A-Za-z0-9\-]+)\b/;
+
+export function extractCurrentPlanFromBillText(
+  rawText: string,
+  hints: BillParseHints = {},
+): ParsedCurrentPlanPayload {
+  const text = rawText || '';
+
+  // Basic ESIID
+  let esiid: string | null = null;
+  const esiidMatch = text.match(ESIID_REGEX);
+  if (esiidMatch && esiidMatch[2]) {
+    esiid = esiidMatch[2].trim();
+  } else if (hints.esiidHint) {
+    esiid = hints.esiidHint;
+  }
+
+  // Basic meter number
+  let meterNumber: string | null = null;
+  const meterMatch = text.match(METER_REGEX);
+  if (meterMatch && meterMatch[2]) {
+    meterNumber = meterMatch[2].trim();
+  }
+
+  // Basic provider name (best-effort; can improve later)
+  let providerName: string | null = null;
+  const providerMatch = text.match(PROVIDER_REGEX);
+  if (providerMatch && providerMatch[1]) {
+    providerName = providerMatch[1].trim();
+  }
+
+  // Account number
+  let accountNumber: string | null = null;
+  const accountMatch = text.match(ACCOUNT_REGEX);
+  if (accountMatch && accountMatch[2]) {
+    accountNumber = accountMatch[2].trim();
+  }
+
+  // TODO: add smarter parsing for tdspName, planName, TOU windows, bill credits, etc.
+  // For now, we return nulls/placeholders so the form can still autofill what we do know.
+
+  const payload: ParsedCurrentPlanPayload = {
+    esiid,
+    meterNumber,
+    providerName,
+    tdspName: null,
+    accountNumber,
+
+    customerName: null,
+    serviceAddressLine1: hints.addressLine1Hint ?? null,
+    serviceAddressLine2: null,
+    serviceAddressCity: hints.cityHint ?? null,
+    serviceAddressState: hints.stateHint ?? null,
+    serviceAddressZip: null,
+
     rateType: null,
-    energyRateCents: null,
-    baseMonthlyFeeDollars: null,
-    billCreditDollars: null,
-    termLengthMonths: null,
+    variableIndexType: null,
+    planName: null,
+    termMonths: null,
+    contractStartDate: null,
     contractEndDate: null,
-    earlyTerminationFeeDollars: null,
-    esiId: null,
-    accountNumberLast4: null,
-    notes: null,
-    rateStructure: null,
+    earlyTerminationFeeCents: null,
+
+    baseChargeCentsPerMonth: null,
+    energyRateTiers: [],
+
+    timeOfUse: null,
+    billCredits: {
+      enabled: false,
+      rules: [],
+    },
+
+    billingPeriodStart: null,
+    billingPeriodEnd: null,
+    billIssueDate: null,
+    billDueDate: null,
+    totalAmountDueCents: null,
+
+    rawText,
   };
 
-  const toNumber = (value: unknown): number | null => {
-    if (value === null || value === undefined) return null;
-    if (typeof value === 'number') return Number.isFinite(value) ? value : null;
-    if (typeof value === 'string') {
-      const parsed = Number(value);
-      return Number.isFinite(parsed) ? parsed : null;
-    }
-    return null;
-  };
-
-  const trimOrNull = (value: unknown): string | null => {
-    if (typeof value !== 'string') return null;
-    const trimmed = value.trim();
-    return trimmed.length > 0 ? trimmed : null;
-  };
-
-  let parsedJson: any = null;
-  try {
-    const maybe = text.trim();
-    if (maybe.startsWith('{') && maybe.endsWith('}')) {
-      parsedJson = JSON.parse(maybe);
-    }
-  } catch {
-    warnings.push('Bill text looked like JSON but could not be parsed; ignoring JSON mode.');
-  }
-
-  if (!parsedJson || typeof parsedJson !== 'object') {
-    // Non-JSON mode: just store a snippet in notes for later manual review.
-    return {
-      ...base,
-      notes: null,
-      parserVersion: 'bill-text-v1-json-or-empty',
-      confidenceScore: null,
-      warnings: [
-        ...warnings,
-        'Bill parser v1 did not detect a structured JSON payload. No fields were auto-filled.',
-      ],
-    };
-  }
-
-  const rateTypeRaw = trimOrNull(parsedJson.rateType) ?? trimOrNull(parsedJson.rate_type);
-  const normalizedRateType =
-    rateTypeRaw && ['FIXED', 'VARIABLE', 'TIME_OF_USE', 'OTHER'].includes(rateTypeRaw.toUpperCase())
-      ? (rateTypeRaw.toUpperCase() as ParsedCurrentPlanFields['rateType'])
-      : null;
-
-  const result: ParsedCurrentPlanFields = {
-    providerName: trimOrNull(parsedJson.providerName ?? parsedJson.provider_name),
-    planName: trimOrNull(parsedJson.planName ?? parsedJson.plan_name),
-    rateType: normalizedRateType,
-    energyRateCents: toNumber(parsedJson.energyRateCents ?? parsedJson.energy_rate_cents),
-    baseMonthlyFeeDollars: toNumber(
-      parsedJson.baseMonthlyFeeDollars ??
-        parsedJson.base_monthly_fee_dollars ??
-        parsedJson.baseMonthlyFee ??
-        parsedJson.base_monthly_fee,
-    ),
-    billCreditDollars: toNumber(
-      parsedJson.billCreditDollars ??
-        parsedJson.bill_credit_dollars ??
-        parsedJson.billCredit ??
-        parsedJson.bill_credit,
-    ),
-    termLengthMonths: (() => {
-      const raw = toNumber(
-        parsedJson.termLengthMonths ??
-          parsedJson.term_length_months ??
-          parsedJson.termLength ??
-          parsedJson.term_length,
-      );
-      if (raw === null) return null;
-      const rounded = Math.trunc(raw);
-      return rounded > 0 ? rounded : null;
-    })(),
-    contractEndDate:
-      trimOrNull(parsedJson.contractEndDate ?? parsedJson.contract_end_date) ?? null,
-    earlyTerminationFeeDollars: toNumber(
-      parsedJson.earlyTerminationFeeDollars ??
-        parsedJson.early_termination_fee_dollars ??
-        parsedJson.earlyTerminationFee ??
-        parsedJson.early_termination_fee,
-    ),
-    esiId: trimOrNull(parsedJson.esiId ?? parsedJson.esiid ?? parsedJson.ESIID),
-    accountNumberLast4: trimOrNull(
-      parsedJson.accountNumberLast4 ??
-        parsedJson.account_number_last4 ??
-        parsedJson.accountNumber ??
-        parsedJson.account_number,
-    ),
-    notes: trimOrNull(parsedJson.notes),
-    rateStructure: parsedJson.rateStructure ?? parsedJson.rate_structure ?? null,
-  };
-
-  return {
-    ...base,
-    ...result,
-    parserVersion: 'bill-text-v1-json-or-empty',
-    confidenceScore: 0.8,
-    warnings,
-  };
+  return payload;
 }
-
 
