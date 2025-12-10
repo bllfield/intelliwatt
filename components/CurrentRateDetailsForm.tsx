@@ -112,6 +112,29 @@ type SavedPlanDetails = {
   updatedAt: string;
 };
 
+type ParsedPlanDetails = {
+  id: string;
+  userId: string;
+  houseId: string;
+  providerName: string | null;
+  planName: string | null;
+  rateType: string | null;
+  energyRateCents: number | null;
+  baseMonthlyFee: number | null;
+  billCreditDollars: number | null;
+  termLengthMonths: number | null;
+  contractEndDate: string | null;
+  earlyTerminationFee: number | null;
+  esiId: string | null;
+  accountNumberLast4: string | null;
+  notes: string | null;
+  rateStructure: any;
+  parserVersion?: string | null;
+  confidenceScore?: number | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 type CurrentRateDetailsFormProps = {
   onContinue?: (data: ManualEntryPayload) => void;
   onSkip?: () => void;
@@ -201,6 +224,7 @@ export function CurrentRateDetailsForm({
   onSkip,
 }: CurrentRateDetailsFormProps) {
   const [savedPlan, setSavedPlan] = useState<SavedPlanDetails | null>(null);
+  const [parsedPlan, setParsedPlan] = useState<ParsedPlanDetails | null>(null);
   const [planEntrySnapshot, setPlanEntrySnapshot] = useState<EntrySnapshot | null>(null);
   const [usageSnapshot, setUsageSnapshot] = useState<EntrySnapshot | null>(null);
   const [hasActiveUsage, setHasActiveUsage] = useState(false);
@@ -233,6 +257,7 @@ export function CurrentRateDetailsForm({
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
   const formRef = useRef<HTMLFormElement | null>(null);
   const isMountedRef = useRef(true);
+  const hasInitializedFromPlanRef = useRef(false);
 
   useEffect(() => {
     return () => {
@@ -248,7 +273,7 @@ export function CurrentRateDetailsForm({
     setSavedPlanError(null);
 
     try {
-      const response = await fetch("/api/current-plan/manual", {
+      const response = await fetch("/api/current-plan/init", {
         method: "GET",
         cache: "no-store",
       });
@@ -259,6 +284,7 @@ export function CurrentRateDetailsForm({
 
       if (response.status === 404) {
         setSavedPlan(null);
+        setParsedPlan(null);
         setPlanEntrySnapshot(null);
         setUsageSnapshot(null);
         setHasActiveUsage(false);
@@ -281,7 +307,8 @@ export function CurrentRateDetailsForm({
       }
 
       const nextPlanEntrySnapshot = payload?.entry ?? null;
-      setSavedPlan(payload?.plan ?? null);
+      setSavedPlan(payload?.savedCurrentPlan ?? null);
+      setParsedPlan(payload?.parsedCurrentPlan ?? null);
       setPlanEntrySnapshot(nextPlanEntrySnapshot);
       setUsageSnapshot(payload?.usage ?? null);
 
@@ -302,6 +329,7 @@ export function CurrentRateDetailsForm({
           : "Unable to load your saved current plan.";
       setSavedPlanError(message);
       setSavedPlan(null);
+      setParsedPlan(null);
       setPlanEntrySnapshot(null);
       setUsageSnapshot(null);
       setHasActiveUsage(false);
@@ -331,6 +359,126 @@ export function CurrentRateDetailsForm({
       window.removeEventListener("entriesUpdated", handleEntriesUpdated);
     };
   }, [refreshPlan]);
+
+  // Auto-fill the manual entry form from parsedCurrentPlan (preferred) or savedCurrentPlan.
+  useEffect(() => {
+    if (!isMountedRef.current) return;
+    if (hasInitializedFromPlanRef.current) return;
+
+    const source = parsedPlan ?? savedPlan;
+    if (!source) return;
+
+    hasInitializedFromPlanRef.current = true;
+
+    if (source.providerName && !electricCompany) {
+      setElectricCompany(source.providerName);
+    }
+    if (source.planName && !planName) {
+      setPlanName(source.planName);
+    }
+    if (source.rateType && !rateType) {
+      if (source.rateType === "FIXED" || source.rateType === "VARIABLE" || source.rateType === "TIME_OF_USE") {
+        setRateType(source.rateType);
+      }
+    }
+    if (source.baseMonthlyFee != null && baseFeeDollars === "") {
+      setBaseFeeDollars(String(source.baseMonthlyFee));
+    }
+    if (source.termLengthMonths != null && termLengthMonths === "") {
+      setTermLengthMonths(String(source.termLengthMonths));
+    }
+    if (source.contractEndDate && contractExpiration === "") {
+      // contractEndDate is ISO date; keep only the date portion
+      setContractExpiration(source.contractEndDate.slice(0, 10));
+    }
+    if (source.earlyTerminationFee != null && earlyTerminationFee === "") {
+      setEarlyTerminationFee(String(source.earlyTerminationFee));
+    }
+    if (source.esiId && !esiId) {
+      setEsiId(source.esiId);
+    }
+    if (source.accountNumberLast4 && !accountNumberLast4) {
+      setAccountNumberLast4(source.accountNumberLast4);
+    }
+    if (source.notes && !notes) {
+      setNotes(source.notes);
+    }
+
+    const structure = source.rateStructure;
+    if (structure && typeof structure === "object") {
+      if (structure.type === "FIXED" && structure.energyRateCents != null && primaryRateCentsPerKwh === "") {
+        setPrimaryRateCentsPerKwh(String(structure.energyRateCents));
+      }
+      if (structure.type === "VARIABLE") {
+        if (structure.currentBillEnergyRateCents != null && primaryRateCentsPerKwh === "") {
+          setPrimaryRateCentsPerKwh(String(structure.currentBillEnergyRateCents));
+        }
+        if (structure.indexType && !variableIndexType) {
+          if (structure.indexType === "ERCOT" || structure.indexType === "FUEL" || structure.indexType === "OTHER") {
+            setVariableIndexType(structure.indexType);
+          }
+        }
+        if (structure.variableNotes && !variableNotes) {
+          setVariableNotes(structure.variableNotes);
+        }
+      }
+      if (structure.billCredits && typeof structure.billCredits === "object") {
+        const bc = structure.billCredits as BillCreditStructure;
+        if (bc.hasBillCredit && bc.rules && bc.rules.length > 0) {
+          setIncludeBillCredits(true);
+          const rules: BillCreditRuleForm[] = bc.rules.map((rule, idx) => ({
+            id:
+              typeof crypto !== "undefined" && "randomUUID" in crypto
+                ? crypto.randomUUID()
+                : `${idx}-${Math.random().toString(36).slice(2)}`,
+            label: rule.label,
+            creditAmount: rule.creditAmountCents != null ? String(rule.creditAmountCents / 100) : "",
+            minUsage: rule.minUsageKWh != null ? String(rule.minUsageKWh) : "",
+            maxUsage: rule.maxUsageKWh != null ? String(rule.maxUsageKWh) : "",
+            applyAllMonths: !rule.monthsOfYear || rule.monthsOfYear.length === 0,
+            selectedMonths: rule.monthsOfYear ?? [],
+          }));
+          setBillCreditRules(rules.length > 0 ? rules : [createEmptyBillCreditRule()]);
+        }
+      }
+      if (structure.type === "TIME_OF_USE" && Array.isArray((structure as any).tiers)) {
+        const tiersSource = (structure as any).tiers as TimeOfUseTier[];
+        const mapped: TimeOfUseTierForm[] = tiersSource.map((tier, idx) => ({
+          id:
+            typeof crypto !== "undefined" && "randomUUID" in crypto
+              ? crypto.randomUUID()
+              : `${idx}-${Math.random().toString(36).slice(2)}`,
+          label: tier.label,
+          priceCents: tier.priceCents != null ? String(tier.priceCents) : "",
+          startTime: tier.startTime ?? "",
+          endTime: tier.endTime ?? "",
+          useAllDays: tier.daysOfWeek === "ALL",
+          selectedDays: Array.isArray(tier.daysOfWeek) ? tier.daysOfWeek : [],
+          selectedMonths: tier.monthsOfYear ?? [],
+        }));
+        if (mapped.length > 0) {
+          setTouTiers(mapped);
+          setRateType("TIME_OF_USE");
+        }
+      }
+    }
+  }, [
+    parsedPlan,
+    savedPlan,
+    electricCompany,
+    planName,
+    rateType,
+    baseFeeDollars,
+    termLengthMonths,
+    contractExpiration,
+    earlyTerminationFee,
+    esiId,
+    accountNumberLast4,
+    notes,
+    primaryRateCentsPerKwh,
+    variableIndexType,
+    variableNotes,
+  ]);
 
   useEffect(() => {
     if (rateType !== "VARIABLE") {

@@ -61,3 +61,32 @@ model CurrentPlanBillUpload {
   @@index([userId, houseId])
 }
 
+/// ParsedCurrentPlan stores structured fields extracted from an uploaded bill.
+/// This is kept separate from manual entries so we can compare and merge later.
+model ParsedCurrentPlan {
+  id                  String               @id @default(cuid())
+  userId              String
+  houseId             String
+  sourceUploadId      String?              // optional FK-ish pointer to CurrentPlanBillUpload.id
+  providerName        String?
+  planName            String?
+  rateType            CurrentPlanRateType?
+  energyRateCents     Decimal?             @currentPlanDb.Decimal(8, 4)
+  baseMonthlyFee      Decimal?             @currentPlanDb.Decimal(8, 2)
+  billCreditDollars   Decimal?             @currentPlanDb.Decimal(8, 2)
+  termLengthMonths    Int?
+  contractEndDate     DateTime?
+  earlyTerminationFee Decimal?             @currentPlanDb.Decimal(8, 2)
+  esiId               String?
+  accountNumberLast4  String?
+  notes               String?              @currentPlanDb.Text
+  rateStructure       Json?
+  parserVersion       String?
+  confidenceScore     Float?
+  rawTextSnippet      String?              @currentPlanDb.Text
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  @@index([userId, houseId])
+}
+
