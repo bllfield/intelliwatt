@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useTransition, FormEvent } from "react";
+import React, { useEffect, useState, useTransition, FormEvent, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { RepSelector } from "@/components/smt/RepSelector";
 
@@ -29,6 +29,7 @@ type ApiError = {
 export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
   const {
     houseAddressId,
+    houseId,
     esiid,
     tdspCode,
     tdspName,
@@ -63,6 +64,15 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
   const reminderStorageKey = `smt-email-reminder:${houseAddressId}`;
   const hasActiveAuth = Boolean(existingAuth);
 
+  const [autoEsiid, setAutoEsiid] = useState(esiid ?? "");
+  const [autoServiceAddressLine1, setAutoServiceAddressLine1] = useState(serviceAddressLine1 ?? "");
+  const [autoServiceAddressLine2, setAutoServiceAddressLine2] = useState(serviceAddressLine2 ?? null);
+  const [autoServiceCity, setAutoServiceCity] = useState(serviceCity ?? "");
+  const [autoServiceState, setAutoServiceState] = useState(serviceState ?? "");
+  const [autoServiceZip, setAutoServiceZip] = useState(serviceZip ?? "");
+
+  const hasHydratedFromSmtInitRef = useRef(false);
+
   useEffect(() => {
     if (typeof window === "undefined") {
       return;
@@ -73,6 +83,68 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
       setShowEmailReminder(true);
     }
   }, [reminderStorageKey]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    if (hasHydratedFromSmtInitRef.current) {
+      return;
+    }
+
+    hasHydratedFromSmtInitRef.current = true;
+
+    const targetHouseId = houseId ?? houseAddressId;
+    if (!targetHouseId) {
+      return;
+    }
+
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/api/smt/init?houseId=${encodeURIComponent(targetHouseId)}`,
+          { method: "GET", cache: "no-store" },
+        );
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data?.ok) {
+          return;
+        }
+
+        if (!autoEsiid && typeof data.esiid === "string" && data.esiid.trim().length > 0) {
+          setAutoEsiid(data.esiid.trim());
+        }
+
+        if (!meterNumber && typeof data.meterNumber === "string" && data.meterNumber.trim().length > 0) {
+          setMeterNumber(data.meterNumber.trim());
+        }
+
+        const addr = data.serviceAddress ?? {};
+        if (!autoServiceAddressLine1 && typeof addr.line1 === "string" && addr.line1.trim().length > 0) {
+          setAutoServiceAddressLine1(addr.line1.trim());
+        }
+        if (!autoServiceCity && typeof addr.city === "string" && addr.city.trim().length > 0) {
+          setAutoServiceCity(addr.city.trim());
+        }
+        if (!autoServiceState && typeof addr.state === "string" && addr.state.trim().length > 0) {
+          setAutoServiceState(addr.state.trim());
+        }
+        if (!autoServiceZip && typeof addr.zip === "string" && addr.zip.trim().length > 0) {
+          setAutoServiceZip(addr.zip.trim());
+        }
+      } catch {
+        // best-effort; ignore errors
+      }
+    })();
+  }, [
+    houseAddressId,
+    houseId,
+    autoEsiid,
+    autoServiceAddressLine1,
+    autoServiceCity,
+    autoServiceState,
+    autoServiceZip,
+    meterNumber,
+  ]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -230,12 +302,12 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
                 Service Address on File
               </div>
               <div className="space-y-0.5">
-                <div>{serviceAddressLine1}</div>
-                {serviceAddressLine2 ? <div>{serviceAddressLine2}</div> : null}
-                <div>{[serviceCity, serviceState, serviceZip].filter(Boolean).join(", ")}</div>
+                <div>{autoServiceAddressLine1}</div>
+                {autoServiceAddressLine2 ? <div>{autoServiceAddressLine2}</div> : null}
+                <div>{[autoServiceCity, autoServiceState, autoServiceZip].filter(Boolean).join(", ")}</div>
                 <div>
                   <span className="font-semibold">ESIID · </span>
-                  {esiid || <span className="italic text-brand-cyan/70">Not available</span>}
+                  {autoEsiid || <span className="italic text-brand-cyan/70">Not available</span>}
                 </div>
                 <div>
                   <span className="font-semibold">Utility · </span>
