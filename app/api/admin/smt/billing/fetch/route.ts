@@ -104,7 +104,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     endDate: endIso,
     deliveryMode: 'API',
     reportFormat: 'JSON',
-    version: 'L',
+    // A = All, L = Latest. Use A so SMT does not silently reduce the dataset.
+    version: 'A',
     readingType: includeInterval ? 'A' : 'C', // A = consumption+gen, C = consumption
     ESIIDList: [esiid],
     SMTTermsandConditions: 'Y',

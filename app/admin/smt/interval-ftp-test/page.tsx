@@ -189,7 +189,7 @@ curl -sS -X POST "$SMT_API_BASE_URL/v2/15minintervalreads/" \\
     "endDate": "MM/DD/YYYY",
     "deliveryMode": "FTP",
     "reportFormat": "CSV",
-    "version": "L",
+    "version": "A",
     "readingType": "C",
     "esiid": "${TEST_ESIID}",
     "SMTTermsandConditions": "Y"

@@ -419,7 +419,9 @@ def smt_request_interval_backfill(
         "endDate": end_date,
         "deliveryMode": "FTP",
         "reportFormat": "CSV",
-        "version": "L",
+        # Per SMT spec: version A = All, L = Latest. Use A so SMT does not
+        # silently collapse data to only the latest version.
+        "version": "A",
         "readingType": "C",
         "esiid": str(esiid).strip(),
         "SMTTermsandConditions": "Y",

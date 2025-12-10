@@ -57,7 +57,8 @@ export async function POST(req: NextRequest) {
     endDate: endMDY,
     deliveryMode: 'FTP',
     reportFormat: 'CSV',
-    version: 'L',
+    // A = All, L = Latest. Use A so SMT does not drop older versions.
+    version: 'A',
     readingType: 'C',
     esiid,
     SMTTermsandConditions: 'Y',
