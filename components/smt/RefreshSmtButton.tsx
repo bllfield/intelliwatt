@@ -36,11 +36,13 @@ export default function RefreshSmtButton({ homeId }: RefreshSmtButtonProps) {
   const [message, setMessage] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const [isWaitingOnSmt, setIsWaitingOnSmt] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
 
   async function pollUsageReady(homeIdToPoll: string, attempts: number = 0): Promise<void> {
-    // Cap polling to avoid hammering the API forever.
-    if (attempts > 120) {
+    // Cap polling to about 8 minutes at 5s intervals (~96 attempts).
+    if (attempts > 96) {
       setIsWaitingOnSmt(false);
+      setIsProcessing(false);
       setStatus('error');
       setMessage('Still waiting on SMT data after several minutes. Try again later.');
       return;
@@ -55,12 +57,24 @@ export default function RefreshSmtButton({ homeId }: RefreshSmtButtonProps) {
       });
 
       const payload: any = await res.json().catch(() => null);
-      if (res.ok && payload?.ok && payload?.ready) {
-        setIsWaitingOnSmt(false);
-        setStatus('success');
-        setMessage('Your SMT usage data has arrived and usage has been refreshed.');
-        router.refresh();
-        return;
+      if (res.ok && payload?.ok) {
+        if (payload.status === 'ready' || payload.ready) {
+          setIsWaitingOnSmt(false);
+          setIsProcessing(false);
+          setStatus('success');
+          setMessage('Your SMT usage data has arrived and usage has been refreshed.');
+          router.refresh();
+          return;
+        }
+        if (payload.status === 'processing' || (payload.rawFiles > 0 && !payload.ready)) {
+          // We have raw files but intervals are not fully ready; show "processing".
+          setIsWaitingOnSmt(false);
+          setIsProcessing(true);
+          setStatus('success');
+          setMessage(
+            'We received your SMT data package and are processing your usage. This can take a few minutes.',
+          );
+        }
       }
     } catch {
       // swallow transient polling errors; we will try again
@@ -77,6 +91,7 @@ export default function RefreshSmtButton({ homeId }: RefreshSmtButtonProps) {
     setStatus('idle');
     setMessage(null);
     setIsWaitingOnSmt(false);
+    setIsProcessing(false);
 
     startTransition(async () => {
       try {
@@ -179,10 +194,14 @@ export default function RefreshSmtButton({ homeId }: RefreshSmtButtonProps) {
       <button
         type="button"
         onClick={handleClick}
-        disabled={isPending}
+        disabled={isPending || isWaitingOnSmt || isProcessing}
         className="inline-flex items-center rounded-full border border-brand-cyan/40 bg-brand-cyan/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-brand-cyan transition hover:border-brand-cyan hover:bg-brand-cyan/20 disabled:cursor-not-allowed disabled:opacity-60"
       >
-        {isPending || isWaitingOnSmt ? 'Refreshing…' : 'Refresh SMT Data'}
+        {isPending || isWaitingOnSmt
+          ? 'Waiting on SMT…'
+          : isProcessing
+          ? 'Processing SMT Data…'
+          : 'Refresh SMT Data'}
       </button>
       {status === 'success' && message ? (
         <span className="text-xs text-emerald-300">{message}</span>

@@ -83,10 +83,12 @@ export async function POST(req: NextRequest) {
   });
 
   const ready = intervalCount > 0;
+  const phase =
+    ready ? "ready" : rawCount > 0 ? "processing" : "pending";
 
   return NextResponse.json({
     ok: true,
-    status: ready ? "ready" : "pending",
+    status: phase,
     ready,
     intervals: intervalCount,
     rawFiles: rawCount,
