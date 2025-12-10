@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { normalizeEmail } from '@/lib/utils/email';
 import { prisma } from '@/lib/db';
 import { getCurrentPlanPrisma, CurrentPlanPrisma } from '@/lib/prismaCurrentPlan';
-import { extractCurrentPlanFromBillText } from '@/lib/billing/parseBillText';
+import { extractCurrentPlanFromBillTextWithOpenAI } from '@/lib/billing/parseBillText';
 
 export const dynamic = 'force-dynamic';
 
@@ -113,7 +113,7 @@ export async function POST(request: NextRequest) {
     const text =
       textOverride ?? uploadRecord!.billData.toString('utf8').slice(0, 20000);
 
-    const parsed = extractCurrentPlanFromBillText(text, {});
+    const parsed = await extractCurrentPlanFromBillTextWithOpenAI(text, {});
 
     const decimalOrNull = (value: number | null | undefined, scale: number) => {
       if (value === null || value === undefined) return null;
