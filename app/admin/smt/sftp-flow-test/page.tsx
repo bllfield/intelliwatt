@@ -365,28 +365,46 @@ export default function SmtSftpFlowTestPage() {
 
       {rawPayloadPreviews.length > 0 && (
         <section className="p-4 rounded-2xl border">
-          <h3 className="font-medium mb-2">Raw SMT Payloads for this ESIID (text previews)</h3>
+          <h3 className="font-medium mb-2">Raw SMT Payloads for this ESIID (head/tail view)</h3>
           <p className="text-sm text-gray-700 mb-3">
-            Each block below is a distinct <code>RawSmtFile</code> row (one payload SMT delivered). This is the actual CSV
-            content we ingested from SFTP/upload, truncated for display.
+            Each block below is a distinct <code>RawSmtFile</code> row (one payload SMT delivered). For quick inspection,
+            we show the first 40 lines and last 40 lines of the CSV text we ingested from SFTP/upload.
           </p>
           <div className="space-y-4">
-            {rawPayloadPreviews.map((p) => (
-              <div key={p.id} className="border rounded-lg p-3 bg-white">
-                <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                  <div className="text-sm">
-                    <div className="font-semibold">{p.filename}</div>
-                    <div className="text-xs text-gray-600">
-                      id=<span className="font-mono">{p.id}</span> · createdAt={p.createdAt} · size=
-                      {p.sizeBytes != null ? p.sizeBytes.toLocaleString() : '—'} bytes
+            {rawPayloadPreviews.map((p) => {
+              const text = p.textPreview ?? '';
+              const lines = text ? text.split(/\r?\n/) : [];
+              const headLines = lines.slice(0, 40).join('\n');
+              const tailLines = lines.length > 40 ? lines.slice(-40).join('\n') : '';
+
+              return (
+                <div key={p.id} className="border rounded-lg p-3 bg-white">
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                    <div className="text-sm">
+                      <div className="font-semibold">{p.filename}</div>
+                      <div className="text-xs text-gray-600">
+                        id=<span className="font-mono">{p.id}</span> · createdAt={p.createdAt} · size=
+                        {p.sizeBytes != null ? p.sizeBytes.toLocaleString() : '—'} bytes
+                      </div>
+                    </div>
+                  </div>
+                  <div className="grid md:grid-cols-2 gap-3">
+                    <div>
+                      <div className="text-xs text-gray-500 mb-1">First 40 lines</div>
+                      <pre className="text-xs bg-gray-50 rounded-md p-2 overflow-auto max-h-64">
+{headLines || '(no text preview available)'}
+                      </pre>
+                    </div>
+                    <div>
+                      <div className="text-xs text-gray-500 mb-1">Last 40 lines</div>
+                      <pre className="text-xs bg-gray-50 rounded-md p-2 overflow-auto max-h-64">
+{tailLines || '(no additional lines beyond head preview)'}
+                      </pre>
                     </div>
                   </div>
                 </div>
-                <pre className="text-xs bg-gray-50 rounded-md p-2 overflow-auto max-h-64">
-{p.textPreview ?? '(binary or no text preview available)'}
-                </pre>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </section>
       )}
