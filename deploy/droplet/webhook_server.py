@@ -419,10 +419,10 @@ def smt_request_interval_backfill(
         "endDate": end_date,
         "deliveryMode": "FTP",
         "reportFormat": "CSV",
-        # Per SMT spec: version A = All, L = Latest. Use A so SMT does not
-        # silently collapse data to only the latest version.
+        # A = All, L = Latest. Use A so SMT does not silently collapse data.
         "version": "A",
         "readingType": "C",
+        # 15-minute spec uses a single esiid element, not a list.
         "esiid": str(esiid).strip(),
         "SMTTermsandConditions": "Y",
     }
