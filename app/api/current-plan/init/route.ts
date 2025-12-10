@@ -255,13 +255,20 @@ export async function GET(request: NextRequest) {
           }
         : null;
 
+    const savedCurrentPlan = serializeManualPlan(latestManual);
+    const parsedCurrentPlan = serializeParsedPlan(latestParsed);
+
     return NextResponse.json({
       ok: true,
-      savedCurrentPlan: serializeManualPlan(latestManual),
-      parsedCurrentPlan: serializeParsedPlan(latestParsed),
+      // Backwards-compatible fields used by existing UI:
+      savedCurrentPlan,
+      parsedCurrentPlan,
       entry: serializeEntrySnapshot(entry),
       usage: serializeEntrySnapshot(usageEntry),
       hasActiveUsage,
+      // Aliases matching the bill parsing system overview contract:
+      saved: savedCurrentPlan,
+      parsed: parsedCurrentPlan,
     });
   } catch (error) {
     console.error('[current-plan/init] Failed to fetch current plan init payload', error);
