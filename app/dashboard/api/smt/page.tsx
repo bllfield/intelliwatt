@@ -103,7 +103,7 @@ export default async function UsageEntrySmartMeterPage() {
 
       <section className="bg-brand-white px-4 pb-12 pt-4">
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-          <SmtBillUploadCard />
+          <SmtBillUploadCard className={undefined} houseId={houseAddress.houseId ?? houseAddress.id} />
 
           <Link
             href="/dashboard/api"

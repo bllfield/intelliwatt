@@ -71,8 +71,6 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
   const [autoServiceState, setAutoServiceState] = useState(serviceState ?? "");
   const [autoServiceZip, setAutoServiceZip] = useState(serviceZip ?? "");
 
-  const hasHydratedFromSmtInitRef = useRef(false);
-
   useEffect(() => {
     if (typeof window === "undefined") {
       return;
@@ -88,18 +86,13 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
     if (typeof window === "undefined") {
       return;
     }
-    if (hasHydratedFromSmtInitRef.current) {
-      return;
-    }
-
-    hasHydratedFromSmtInitRef.current = true;
 
     const targetHouseId = houseId ?? houseAddressId;
     if (!targetHouseId) {
       return;
     }
 
-    void (async () => {
+    const hydrateFromSmtInit = async () => {
       try {
         const res = await fetch(
           `/api/smt/init?houseId=${encodeURIComponent(targetHouseId)}`,
@@ -134,7 +127,18 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
       } catch {
         // best-effort; ignore errors
       }
-    })();
+    };
+
+    void hydrateFromSmtInit();
+
+    const handleUpdated = () => {
+      void hydrateFromSmtInit();
+    };
+
+    window.addEventListener("smt-init-updated", handleUpdated);
+    return () => {
+      window.removeEventListener("smt-init-updated", handleUpdated);
+    };
   }, [
     houseAddressId,
     houseId,

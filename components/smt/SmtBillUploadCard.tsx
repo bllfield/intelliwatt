@@ -4,9 +4,10 @@ import { useState } from "react";
 
 interface Props {
   className?: string;
+  houseId?: string | null;
 }
 
-export default function SmtBillUploadCard({ className }: Props) {
+export default function SmtBillUploadCard({ className, houseId }: Props) {
   const [files, setFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -24,6 +25,9 @@ export default function SmtBillUploadCard({ className }: Props) {
 
       const formData = new FormData();
       files.forEach((file) => formData.append("billFile", file));
+      if (houseId && houseId.trim().length > 0) {
+        formData.append("houseId", houseId.trim());
+      }
 
       const res = await fetch("/api/current-plan/upload", {
         method: "POST",
@@ -41,10 +45,34 @@ export default function SmtBillUploadCard({ className }: Props) {
         window.dispatchEvent(new CustomEvent("entriesUpdated"));
       }
 
+      let parseSucceeded = false;
+      if (houseId && houseId.trim().length > 0) {
+        try {
+          const parseRes = await fetch("/api/current-plan/bill-parse", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ houseId: houseId.trim() }),
+          });
+          const parseJson = await parseRes.json().catch(() => null);
+          if (parseRes.ok && parseJson?.ok) {
+            parseSucceeded = true;
+            if (typeof window !== "undefined") {
+              window.dispatchEvent(new CustomEvent("smt-init-updated"));
+            }
+          }
+        } catch {
+          // best-effort; ignore parse errors for now
+        }
+      }
+
       setUploaded(true);
       setStatus(
         entryAwarded
-          ? "Bill uploaded and entry recorded."
+          ? parseSucceeded
+            ? "Bill uploaded, entry recorded, and SMT details updated."
+            : "Bill uploaded and entry recorded."
+          : parseSucceeded
+          ? "Bill uploaded and SMT details updated."
           : "Bill uploaded. We will parse and pre-fill your SMT details."
       );
       setFiles([]);
