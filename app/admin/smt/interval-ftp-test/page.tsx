@@ -166,6 +166,39 @@ export default function SmtIntervalFtpTestPage() {
       </section>
 
       <section className="p-4 rounded-2xl border">
+        <h3 className="font-medium mb-2">Droplet curl example (manual SMT 15-min FTP call)</h3>
+        <p className="text-sm text-gray-700 mb-3">
+          This is a sample command you could run on the SMT droplet (as <code>deploy</code>) to call{' '}
+          <code>/v2/15minintervalreads/</code> directly, using the same body shape as our proxy. Replace the token and
+          dates as needed.
+        </p>
+        <pre className="text-xs bg-gray-50 rounded-lg p-3 overflow-auto max-h-[32rem]">
+{`# On droplet (as deploy), after obtaining an SMT JWT token:
+export SMT_API_BASE_URL="https://services.smartmetertexas.net"
+export SMT_JWT="<paste_access_token_here>"
+
+curl -sS -X POST "$SMT_API_BASE_URL/v2/15minintervalreads/" \\
+  -H "Authorization: Bearer $SMT_JWT" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "trans_id": "INT15XXXXXXXXXXXX",
+    "requestorID": "INTELLIPATH",
+    "requesterType": "CSP",
+    "requesterAuthenticationID": "134642921",
+    "startDate": "MM/DD/YYYY",
+    "endDate": "MM/DD/YYYY",
+    "deliveryMode": "FTP",
+    "reportFormat": "CSV",
+    "version": "L",
+    "readingType": "C",
+    "esiid": "${TEST_ESIID}",
+    "SMTTermsandConditions": "Y"
+  }'
+`}
+        </pre>
+      </section>
+
+      <section className="p-4 rounded-2xl border">
         <h3 className="font-medium mb-2">Raw Response from App Proxy</h3>
         <pre className="text-xs bg-gray-50 rounded-lg p-3 overflow-auto max-h-[32rem]">
 {pretty(raw)}
