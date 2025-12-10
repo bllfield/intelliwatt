@@ -57,6 +57,8 @@ model CurrentPlanBillUpload {
   billData   Bytes
   uploadedAt DateTime @default(now())
 
+  parsedPlans ParsedCurrentPlan[] @relation("BillUploadToParsedPlans")
+
   @@index([userId])
   @@index([userId, houseId])
 }
@@ -132,7 +134,7 @@ model ParsedCurrentPlan {
   confidenceScore     Float?
 
   // Relations
-  billUpload          CurrentPlanBillUpload? @relation(fields: [uploadId], references: [id])
+  billUpload          CurrentPlanBillUpload? @relation("BillUploadToParsedPlans", fields: [uploadId], references: [id])
 
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
