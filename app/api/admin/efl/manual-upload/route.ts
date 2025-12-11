@@ -63,11 +63,14 @@ export async function POST(req: NextRequest) {
     });
   } catch (error) {
     console.error("[EFL_MANUAL_UPLOAD] Failed to process fact card:", error);
+    const message =
+      error instanceof Error
+        ? error.message
+        : "We couldn't process that PDF. Please confirm it is a valid EFL and try again.";
     return NextResponse.json(
       {
         ok: false,
-        error:
-          "We couldn't process that PDF. Please confirm it is a valid EFL and try again.",
+        error: message,
       },
       { status: 500 },
     );
