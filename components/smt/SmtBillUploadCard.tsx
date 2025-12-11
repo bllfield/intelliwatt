@@ -12,6 +12,10 @@ export default function SmtBillUploadCard({ className, houseId }: Props) {
   const [isUploading, setIsUploading] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [uploaded, setUploaded] = useState(false);
+  const [showPasteModal, setShowPasteModal] = useState(false);
+  const [pastedText, setPastedText] = useState("");
+  const [pasteError, setPasteError] = useState<string | null>(null);
+  const [isParsingPaste, setIsParsingPaste] = useState(false);
 
   async function uploadBill() {
     if (files.length === 0) {
@@ -80,6 +84,56 @@ export default function SmtBillUploadCard({ className, houseId }: Props) {
       setStatus("Upload failed. Try again.");
     } finally {
       setIsUploading(false);
+    }
+  }
+
+  async function parsePastedBillText() {
+    if (!houseId || houseId.trim().length === 0) {
+      setPasteError("We couldn't find your service address. Try refreshing the page and try again.");
+      return;
+    }
+    if (!pastedText.trim()) {
+      setPasteError("Paste the visible text from your bill before running the parser.");
+      return;
+    }
+
+    try {
+      setIsParsingPaste(true);
+      setPasteError(null);
+
+      const res = await fetch("/api/current-plan/bill-parse", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          houseId: houseId.trim(),
+          textOverride: pastedText.trim(),
+        }),
+      });
+
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.ok) {
+        setPasteError(
+          json?.error ||
+            "We couldn't parse that text. Make sure you copied all of the visible bill details and try again.",
+        );
+        return;
+      }
+
+      setShowPasteModal(false);
+      setPastedText("");
+
+      setUploaded(true);
+      setStatus("Bill text parsed. Your SMT details above will refresh shortly.");
+
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("smt-init-updated"));
+      }
+    } catch (err: any) {
+      setPasteError(
+        err?.message ?? "Something went wrong while parsing that text. Please try again.",
+      );
+    } finally {
+      setIsParsingPaste(false);
     }
   }
 
@@ -162,6 +216,16 @@ export default function SmtBillUploadCard({ className, houseId }: Props) {
           >
             {isUploading ? "Uploading…" : uploaded ? "Bill Uploaded ✓" : "Upload bill now"}
           </button>
+          <button
+            type="button"
+            onClick={() => {
+              setShowPasteModal(true);
+              setPasteError(null);
+            }}
+            className="text-xs font-semibold text-brand-blue underline underline-offset-4 hover:text-brand-blue/80"
+          >
+            Or paste copied bill text instead
+          </button>
           {status ? (
             <p className={`text-sm ${uploaded ? "text-emerald-700" : "text-rose-700"}`}>
               {status}
@@ -169,6 +233,64 @@ export default function SmtBillUploadCard({ className, houseId }: Props) {
           ) : null}
         </div>
       </div>
+
+      {showPasteModal && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 px-4">
+          <div className="w-full max-w-xl rounded-2xl bg-white p-5 shadow-xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold text-brand-navy">
+                  Paste bill text from an image or PDF
+                </h3>
+                <p className="mt-1 text-xs text-brand-slate">
+                  If you have a screenshot or scanned bill, open it and copy the visible text
+                  (provider, plan, address, ESIID, meter, pricing details) into the box below.{" "}
+                  We&apos;ll run the same parser used for PDF uploads and refresh your SMT details.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPasteModal(false)}
+                className="text-xs font-semibold uppercase tracking-wide text-brand-slate hover:text-brand-navy"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="mt-3 space-y-2">
+              <textarea
+                className="h-40 w-full resize-none rounded-lg border border-brand-blue/30 px-3 py-2 text-xs font-mono text-brand-navy focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/40"
+                placeholder="Paste the text from your bill here..."
+                value={pastedText}
+                onChange={(e) => setPastedText(e.target.value)}
+              />
+              {pasteError && (
+                <p className="text-xs text-rose-600">
+                  {pasteError}
+                </p>
+              )}
+            </div>
+
+            <div className="mt-3 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setShowPasteModal(false)}
+                className="rounded-full border border-brand-slate/40 px-4 py-1.5 text-xs font-semibold text-brand-slate hover:bg-brand-slate/5"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={parsePastedBillText}
+                disabled={isParsingPaste}
+                className="rounded-full bg-brand-navy px-4 py-1.5 text-xs font-semibold uppercase tracking-wide text-brand-cyan shadow-[0_6px_18px_rgba(16,46,90,0.35)] hover:bg-brand-navy/90 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isParsingPaste ? "Parsing…" : "Parse pasted text"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
