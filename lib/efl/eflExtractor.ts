@@ -280,12 +280,20 @@ export async function deterministicEflExtract(
     warnings.push("Missing EFL Ver. # version code.");
   }
 
-  return {
+  const result: EflDeterministicExtract = {
     eflPdfSha256,
     rawText,
     repPuctCertificate,
     eflVersionCode,
     warnings,
-    extractorMethod,
   };
+
+  // Only include extractorMethod when we actually know which extractor was used;
+  // in the legacy path where a custom extractPdfText is provided, this remains
+  // undefined and is therefore omitted from the returned object.
+  if (extractorMethod) {
+    (result as any).extractorMethod = extractorMethod;
+  }
+
+  return result;
 }
