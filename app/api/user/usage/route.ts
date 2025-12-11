@@ -242,7 +242,8 @@ async function fetchSmtDataset(esiid: string | null): Promise<UsageDatasetResult
   `);
 
   const dailyRows = await prisma.$queryRaw<Array<{ bucket: Date; kwh: number }>>(Prisma.sql`
-    SELECT date_trunc('day', "ts") AS bucket, SUM("kwh")::float AS kwh
+    SELECT date_trunc('day', "ts" AT TIME ZONE 'America/Chicago') AT TIME ZONE 'UTC' AS bucket,
+           SUM("kwh")::float AS kwh
     FROM "SmtInterval"
     WHERE "esiid" = ${esiid}
       AND "ts" >= ${window.cutoff}
@@ -348,7 +349,8 @@ async function fetchGreenButtonDataset(houseId: string): Promise<UsageDatasetRes
   const hourlyRows = hourlyRowsRaw as Array<{ bucket: Date; kwh: number }>;
 
   const dailyRowsRaw = await usageClient.$queryRaw(Prisma.sql`
-    SELECT date_trunc('day', "timestamp") AS bucket, SUM("consumptionKwh")::float AS kwh
+    SELECT date_trunc('day', "timestamp" AT TIME ZONE 'America/Chicago') AT TIME ZONE 'UTC' AS bucket,
+           SUM("consumptionKwh")::float AS kwh
     FROM "GreenButtonInterval"
     WHERE "homeId" = ${houseId}
       AND "rawId" = ${latestRaw.id}

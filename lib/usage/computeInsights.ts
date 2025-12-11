@@ -1,3 +1,4 @@
+import { DateTime } from 'luxon';
 import { NormalizedUsageRow } from './normalize';
 
 export interface UsageInsights {
@@ -15,12 +16,17 @@ function round2(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
+// Use America/Chicago so daily buckets align with Texas local time and SMT UI.
+const US_CENTRAL_TZ = 'America/Chicago';
+
 function dateKey(date: Date): string {
-  return date.toISOString().slice(0, 10);
+  const dt = DateTime.fromJSDate(date, { zone: US_CENTRAL_TZ });
+  return dt.toISODate() ?? date.toISOString().slice(0, 10);
 }
 
 function startOfDayMs(date: Date): number {
-  return new Date(dateKey(date)).getTime();
+  const dt = DateTime.fromJSDate(date, { zone: US_CENTRAL_TZ }).startOf('day').toUTC();
+  return dt.toJSDate().getTime();
 }
 
 export function computeInsights(intervals: NormalizedUsageRow[]): UsageInsights {
