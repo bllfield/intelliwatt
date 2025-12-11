@@ -389,29 +389,59 @@ export default function CurrentPlanBillParserAdmin() {
     setFileLoading(true);
 
     try {
-      const mime = file.type || '';
-      const lowerName = (file.name || '').toLowerCase();
-      const isPlainText =
-        mime.startsWith('text/') ||
-        lowerName.endsWith('.txt') ||
-        lowerName.endsWith('.csv');
+      if (!token.trim()) {
+        setFileError('Admin token is required before uploading a bill.');
+        return;
+      }
 
-      if (!isPlainText) {
+      const lowerName = (file.name || '').toLowerCase();
+      const mime = (file.type || '').toLowerCase();
+      const isPdf =
+        mime === 'application/pdf' ||
+        lowerName.endsWith('.pdf');
+
+      if (!isPdf) {
         setFileError(
-          'The upload helper only auto-loads plain text files (e.g., .txt, .csv). For PDFs or images, open the bill and copy/paste the visible text into the textarea below.',
+          'Only PDF bill uploads are allowed. If your bill is an image or screenshot, open it and copy/paste the visible text into the textarea instead.',
         );
         return;
       }
 
-      // Best-effort: read file as UTF-8 text for .txt/.csv exports.
-      const text = await file.text();
-      setRawText(text);
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const res = await fetch('/api/admin/current-plan/extract-text', {
+        method: 'POST',
+        headers: {
+          'x-admin-token': token.trim(),
+        },
+        body: formData,
+      });
+
+      const body = (await res.json().catch(() => null)) as
+        | { ok: boolean; text?: string; error?: string }
+        | null;
+
+      if (!body) {
+        setFileError('Empty response from admin extract-text endpoint.');
+        return;
+      }
+
+      if (!res.ok || !body.ok || !body.text) {
+        setFileError(
+          body.error ||
+            `Failed to extract text from PDF (status ${res.status}). Try opening the bill and copy/pasting the visible text instead.`,
+        );
+        return;
+      }
+
+      setRawText(body.text);
     } catch (err: any) {
       // eslint-disable-next-line no-console
-      console.error('[admin/bill-parser] failed to read file as text', err);
+      console.error('[admin/bill-parser] failed to extract text from PDF', err);
       setFileError(
         err?.message ??
-          'Failed to read file as text. For PDFs or images, copy/paste the bill text into the textarea.',
+          'Failed to extract text from PDF. Try opening the bill and copy/pasting the visible text instead.',
       );
     } finally {
       setFileLoading(false);
@@ -609,7 +639,7 @@ export default function CurrentPlanBillParserAdmin() {
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <input
               type="file"
-              accept="text/plain,application/pdf,image/*"
+              accept=".pdf,application/pdf"
               onChange={handleFileChange}
               className="text-sm"
             />
@@ -621,8 +651,10 @@ export default function CurrentPlanBillParserAdmin() {
             )}
           </div>
           <p className="text-xs text-gray-500">
-            This helper reads the file as plain text. For scanned PDFs or photos, it’s usually more
-            reliable to copy/paste the bill text into the textarea below.
+            This helper mirrors the production flow: it accepts <span className="font-semibold">PDF bills only</span>,
+            uses the same server-side PDF text extractor, and then runs the OpenAI-assisted parser on the
+            extracted text. For images or screenshots, open the bill and copy/paste the visible text into
+            the textarea instead.
           </p>
           {fileError && (
             <div className="mt-1 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
