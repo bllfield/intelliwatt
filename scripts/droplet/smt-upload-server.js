@@ -235,20 +235,20 @@ function recordPipelineError(status, step, details) {
     });
 }
 async function registerAndNormalizeFile(filepath, filename, size_bytes) {
-    if (!ADMIN_TOKEN || !INTELLIWATT_BASE_URL) {
-        console.warn("[smt-upload] Cannot register file: ADMIN_TOKEN or INTELLIWATT_BASE_URL not configured");
+                    if (!ADMIN_TOKEN || !INTELLIWATT_BASE_URL) {
+                        console.warn("[smt-upload] Cannot register file: ADMIN_TOKEN or INTELLIWATT_BASE_URL not configured");
         return {
-            ok: false,
-            message: "ADMIN_TOKEN or INTELLIWATT_BASE_URL not configured",
+                                ok: false,
+                                message: "ADMIN_TOKEN or INTELLIWATT_BASE_URL not configured",
         };
-    }
+                    }
     let deleted = false;
     try {
         // STEP 3: Large-file SMT ingestion - read file, optionally split into chunks,
         // send content to the app, normalize inline via /api/admin/smt/raw-upload,
         // then delete the local file.
         const fileContent = await fs_1.default.promises.readFile(filepath);
-        // eslint-disable-next-line no-console
+                    // eslint-disable-next-line no-console
         console.log(`[smt-upload] read file content: ${fileContent.length} bytes from ${filepath}`);
         const text = fileContent.toString("utf8");
         const lines = text.split(/\r?\n/);
@@ -276,19 +276,19 @@ async function registerAndNormalizeFile(filepath, filename, size_bytes) {
                 sizeBytes: partBuffer.length,
                 sha256: partSha256,
                 contentBase64,
-                source: "droplet-upload",
-                receivedAt: new Date().toISOString(),
+                        source: "droplet-upload",
+                        receivedAt: new Date().toISOString(),
                 purgeExisting: partIndex === 0,
-            };
-            // eslint-disable-next-line no-console
+                    };
+                    // eslint-disable-next-line no-console
             console.log(`[smt-upload] registering raw file part ${partIndex + 1}/${totalParts} at ${rawUploadUrl} (bytes=${partBuffer.length})`);
             const rawResponse = await fetch(rawUploadUrl, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "x-admin-token": ADMIN_TOKEN,
-                },
-                body: JSON.stringify(rawUploadPayload),
+                            method: "POST",
+                            headers: {
+                                "Content-Type": "application/json",
+                                "x-admin-token": ADMIN_TOKEN,
+                            },
+                            body: JSON.stringify(rawUploadPayload),
                 signal: AbortSignal.timeout(30000),
             });
             if (!rawResponse.ok) {
@@ -296,15 +296,15 @@ async function registerAndNormalizeFile(filepath, filename, size_bytes) {
                 console.error(`[smt-upload] raw-upload failed for part ${partIndex + 1}/${totalParts}: ${rawResponse.status} ${errBody}`);
                 await recordPipelineError(rawResponse.status, "raw-upload", errBody);
                 return {
-                    ok: false,
+                            ok: false,
                     message: `raw-upload failed: ${rawResponse.status}`,
                 };
             }
             const rawResult = await rawResponse.json();
-            // eslint-disable-next-line no-console
+                    // eslint-disable-next-line no-console
             console.log(`[smt-upload] raw file part registered: ${JSON.stringify(rawResult)}`);
             const isDuplicate = (rawResult === null || rawResult === void 0 ? void 0 : rawResult.duplicate) === true || (rawResult === null || rawResult === void 0 ? void 0 : rawResult.status) === "duplicate";
-            if (isDuplicate) {
+                    if (isDuplicate) {
                 continue;
             }
             if (rawResult === null || rawResult === void 0 ? void 0 : rawResult.normalizedInline) {
@@ -315,34 +315,34 @@ async function registerAndNormalizeFile(filepath, filename, size_bytes) {
             }
         }
         return {
-            ok: true,
+                            ok: true,
             message: "normalize complete (inline via raw-upload)",
             filesProcessed: totalFilesProcessed,
             intervalsInserted: totalIntervalsInserted,
-            normalized: true,
+                            normalized: true,
         };
     }
     catch (err) {
         console.error("[smt-upload] error during registration/normalization:", err);
         await recordPipelineError(0, 'pipeline-error', String((err === null || err === void 0 ? void 0 : err.message) || err));
         return {
-            ok: false,
+                            ok: false,
             message: `normalize error: ${(err === null || err === void 0 ? void 0 : err.message) || err}`,
         };
     }
     finally {
         try {
             await fs_1.default.promises.unlink(filepath);
-            deleted = true;
-            // eslint-disable-next-line no-console
+                    deleted = true;
+                    // eslint-disable-next-line no-console
             console.log(`[smt-upload] deleted local file (cleanup): ${filepath}`);
         }
         catch (unlinkErr) {
-            if (!deleted) {
-                // eslint-disable-next-line no-console
+                    if (!deleted) {
+                        // eslint-disable-next-line no-console
                 console.warn(`[smt-upload] warning: failed to delete local file ${filepath}:`, unlinkErr);
+                    }
             }
-        }
     }
 }
 function isIntervalFile(name) {

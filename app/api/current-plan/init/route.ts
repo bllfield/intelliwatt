@@ -177,7 +177,7 @@ export async function GET(request: NextRequest) {
     const manualDelegate = currentPlanPrisma.currentPlanManualEntry as any;
     const parsedDelegate = (currentPlanPrisma as any).parsedCurrentPlan as any;
 
-    const latestManual: ManualEntry | null = await manualDelegate.findFirst({
+  const latestManual: ManualEntry | null = await manualDelegate.findFirst({
       where: {
         userId: user.id,
         ...(houseId ? { houseId } : {}),
@@ -185,18 +185,30 @@ export async function GET(request: NextRequest) {
       orderBy: { updatedAt: 'desc' },
     });
 
-    const effectiveHouseId = houseId ?? latestManual?.houseId ?? null;
+  let effectiveHouseId: string | null = houseId ?? latestManual?.houseId ?? null;
 
-    let latestParsed: ParsedEntry | null = null;
-    if (effectiveHouseId) {
-      latestParsed = await parsedDelegate.findFirst({
-        where: {
-          userId: user.id,
-          houseId: effectiveHouseId,
-        },
-        orderBy: { createdAt: 'desc' },
-      });
+  let latestParsed: ParsedEntry | null = null;
+  if (effectiveHouseId) {
+    latestParsed = await parsedDelegate.findFirst({
+      where: {
+        userId: user.id,
+        houseId: effectiveHouseId,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  } else {
+    // If there is no manual entry and no explicit houseId, fall back to the most recent
+    // parsed bill for this user so parsed data can still pre-fill the form.
+    latestParsed = await parsedDelegate.findFirst({
+      where: {
+        userId: user.id,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (latestParsed && !effectiveHouseId) {
+      effectiveHouseId = latestParsed.houseId ?? null;
     }
+  }
 
     const entry = await prisma.entry.findFirst({
       where: {

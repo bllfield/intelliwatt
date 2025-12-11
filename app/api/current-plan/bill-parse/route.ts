@@ -132,6 +132,12 @@ export async function POST(request: NextRequest) {
       providerName: parsed.providerName,
       tdspName: parsed.tdspName,
       accountNumber: parsed.accountNumber,
+      // Normalize into helper fields used by downstream UIs.
+      esiId: parsed.esiid,
+      accountNumberLast4:
+        parsed.accountNumber && parsed.accountNumber.length > 0
+          ? parsed.accountNumber.slice(-4)
+          : null,
       customerName: parsed.customerName,
       serviceAddressLine1: parsed.serviceAddressLine1,
       serviceAddressLine2: parsed.serviceAddressLine2,
