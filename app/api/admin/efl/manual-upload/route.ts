@@ -161,6 +161,7 @@ export async function POST(req: NextRequest) {
       parseConfidence,
       parseWarnings,
       validation,
+      extractorMethod: extract.extractorMethod ?? "pdf-parse",
     });
   } catch (error) {
     console.error("[EFL_MANUAL_UPLOAD] Failed to process fact card:", error);

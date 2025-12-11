@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { Buffer } from "node:buffer";
 
 import { computePdfSha256, deterministicEflExtract } from "@/lib/efl/eflExtractor";
-import { extractPlanRulesAndRateStructureFromEflText } from "@/lib/efl/planAiExtractor";
+import {
+  extractPlanRulesAndRateStructureFromEflText,
+  extractPlanRulesAndRateStructureFromEflUrlVision,
+} from "@/lib/efl/planAiExtractor";
 import { upsertRatePlanFromEfl } from "@/lib/efl/planPersistence";
 
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
@@ -28,6 +31,7 @@ type RunLinkSuccess = {
   parseConfidence?: number;
   parseWarnings?: string[];
   eflVersionCode?: string | null;
+  extractorMethod?: "pdf-parse" | "pdfjs" | "vision";
 };
 
 type RunLinkError = {
@@ -130,38 +134,64 @@ export async function POST(req: NextRequest) {
     let parseWarnings: string[] | undefined;
     let validation: unknown;
     let eflVersionCode: string | null = null;
+    let extractorMethod: "pdf-parse" | "pdfjs" | "vision" = "pdf-parse";
 
     try {
-      // Deterministic extract: PDF bytes → cleaned text + identity metadata
-      const extract = await deterministicEflExtract(pdfBytes, async (bytes) => {
-        const pdfParseModule = await import("pdf-parse");
-        const pdfParseFn: any =
-          (pdfParseModule as any).default || (pdfParseModule as any);
-        const result = await pdfParseFn(Buffer.from(bytes));
-        return result?.text || "";
-      });
+      // Deterministic extract: PDF bytes → cleaned text + identity metadata,
+      // now with internal pdf-parse → pdfjs-dist fallback.
+      const extract = await deterministicEflExtract(pdfBytes);
 
       cleanedText = extract.rawText;
       eflVersionCode = extract.eflVersionCode ?? null;
+      if (extract.warnings && extract.warnings.length > 0) {
+        warnings.push(...extract.warnings);
+      }
+      if (extract.extractorMethod) {
+        extractorMethod = extract.extractorMethod;
+      }
 
-      // AI extraction: EFL text → PlanRules + RateStructure
-      const aiResult = await extractPlanRulesAndRateStructureFromEflText({
-        input: {
-          rawText: extract.rawText,
-          repPuctCertificate: extract.repPuctCertificate,
-          eflVersionCode: extract.eflVersionCode,
-          eflPdfSha256: extract.eflPdfSha256,
-          warnings: extract.warnings,
-        },
-      });
+      if (cleanedText && cleanedText.trim().length > 0) {
+        // Text-based AI extraction path
+        const aiResult = await extractPlanRulesAndRateStructureFromEflText({
+          input: {
+            rawText: extract.rawText,
+            repPuctCertificate: extract.repPuctCertificate,
+            eflVersionCode: extract.eflVersionCode,
+            eflPdfSha256: extract.eflPdfSha256,
+            warnings: extract.warnings,
+          },
+        });
 
-      planRules = aiResult.planRules ?? null;
-      rateStructure = aiResult.rateStructure ?? null;
-      parseConfidence = aiResult.meta.parseConfidence;
-      parseWarnings = aiResult.meta.parseWarnings;
-      validation = aiResult.meta.validation ?? null;
+        planRules = aiResult.planRules ?? null;
+        rateStructure = aiResult.rateStructure ?? null;
+        parseConfidence = aiResult.meta.parseConfidence;
+        parseWarnings = aiResult.meta.parseWarnings;
+        validation = aiResult.meta.validation ?? null;
 
-      steps.push("deterministic_extract", "ai_planrules_extract");
+        steps.push("deterministic_extract", "ai_planrules_extract");
+      } else {
+        // Vision-based AI fallback: no usable text from pdf-parse/pdfjs
+        const visionResult =
+          await extractPlanRulesAndRateStructureFromEflUrlVision({
+            eflUrl: normalizedUrl,
+            inputMeta: {
+              rawText: "",
+              repPuctCertificate: extract.repPuctCertificate,
+              eflVersionCode: extract.eflVersionCode,
+              eflPdfSha256: extract.eflPdfSha256,
+              warnings: extract.warnings,
+            },
+          });
+
+        planRules = visionResult.planRules ?? null;
+        rateStructure = visionResult.rateStructure ?? null;
+        parseConfidence = visionResult.meta.parseConfidence;
+        parseWarnings = visionResult.meta.parseWarnings;
+        validation = visionResult.meta.validation ?? null;
+
+        steps.push("deterministic_extract", "ai_planrules_vision_fallback");
+        extractorMethod = "vision";
+      }
     } catch (error) {
       warnings.push(
         `AI extraction failed: ${
@@ -220,6 +250,7 @@ export async function POST(req: NextRequest) {
       parseConfidence,
       parseWarnings,
       eflVersionCode,
+      extractorMethod,
     };
 
     return NextResponse.json(payload, { status: 200 });

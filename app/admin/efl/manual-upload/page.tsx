@@ -16,6 +16,7 @@ type UploadResponse = {
   rawTextPreview: string;
   rawTextLength: number;
   rawTextTruncated: boolean;
+  extractorMethod?: "pdf-parse" | "pdfjs" | "vision";
   // Best-effort AI outputs so admins can see which endpoint fields the parser fills.
   planRules?: unknown;
   rateStructure?: unknown;
@@ -399,6 +400,14 @@ export default function ManualFactCardLoaderPage() {
               </dt>
               <dd className="mt-1 rounded-md bg-brand-blue/5 px-2 py-1 text-sm text-brand-navy">
                 {result.eflVersionCode ?? "—"}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs font-medium uppercase tracking-wide text-brand-navy/70">
+                Extraction Method
+              </dt>
+              <dd className="mt-1 rounded-md bg-brand-blue/5 px-2 py-1 text-sm text-brand-navy">
+                {result.extractorMethod ?? "—"}
               </dd>
             </div>
             <div>
