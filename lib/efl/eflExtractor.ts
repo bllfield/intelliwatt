@@ -163,24 +163,39 @@ async function extractPdfTextWithFallback(
     // @ts-ignore - pdfjs-dist legacy build has no bundled types for this entry
     const pdfjsLib: any = await import("pdfjs-dist/legacy/build/pdf");
 
+    // Point workerSrc at the actual worker file in node_modules so pdf.js
+    // can use its normal worker path in Node instead of the fake
+    // .next/server/chunks/pdf.worker.mjs route.
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const workerPath = require.resolve(
+        "pdfjs-dist/legacy/build/pdf.worker.js",
+      );
+      if (workerPath && pdfjsLib.GlobalWorkerOptions) {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = workerPath;
+      }
+    } catch (err) {
+      warnings.push(
+        `pdfjs workerSrc resolve failed: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+
     // Ensure pdf.js always receives a plain Uint8Array, never a Node Buffer subclass.
     const uint8: Uint8Array =
       Buffer.isBuffer(pdfBytes)
         ? new Uint8Array(pdfBytes) // Buffer -> Uint8Array
         : pdfBytes instanceof Uint8Array
           ? pdfBytes
-          : new Uint8Array(pdfBytes as ArrayLike<number>);
-
-    // Hard-disable workers in serverless/Node so we don't need a pdf.worker.mjs chunk.
-    if (pdfjsLib.GlobalWorkerOptions) {
-      pdfjsLib.GlobalWorkerOptions.workerSrc = "";
-      (pdfjsLib.GlobalWorkerOptions as any).workerPort = null;
-    }
-    (pdfjsLib as any).disableWorker = true;
+          : new Uint8Array(
+              Buffer.isBuffer(pdfBytes)
+                ? pdfBytes
+                : Buffer.from(pdfBytes as ArrayLike<number>),
+            );
 
     const loadingTask = pdfjsLib.getDocument({
       data: uint8,
-      disableWorker: true,
     });
 
     const doc = await loadingTask.promise;
