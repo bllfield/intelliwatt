@@ -384,14 +384,26 @@ export default function CurrentPlanBillParserAdmin() {
     if (!file) {
       return;
     }
-
     setFileError(null);
     setFileName(file.name);
     setFileLoading(true);
 
     try {
-      // Best-effort: read file as UTF-8 text. This works well for .txt exports;
-      // for PDFs/images, admins should still prefer copying bill text into the textarea.
+      const mime = file.type || '';
+      const lowerName = (file.name || '').toLowerCase();
+      const isPlainText =
+        mime.startsWith('text/') ||
+        lowerName.endsWith('.txt') ||
+        lowerName.endsWith('.csv');
+
+      if (!isPlainText) {
+        setFileError(
+          'The upload helper only auto-loads plain text files (e.g., .txt, .csv). For PDFs or images, open the bill and copy/paste the visible text into the textarea below.',
+        );
+        return;
+      }
+
+      // Best-effort: read file as UTF-8 text for .txt/.csv exports.
       const text = await file.text();
       setRawText(text);
     } catch (err: any) {

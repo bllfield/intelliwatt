@@ -3,7 +3,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { normalizeEmail } from '@/lib/utils/email';
 import { prisma } from '@/lib/db';
 import { getCurrentPlanPrisma, CurrentPlanPrisma } from '@/lib/prismaCurrentPlan';
-import { extractCurrentPlanFromBillTextWithOpenAI } from '@/lib/billing/parseBillText';
+import {
+  extractCurrentPlanFromBillText,
+  extractCurrentPlanFromBillTextWithOpenAI,
+  type ParsedCurrentPlanPayload,
+} from '@/lib/billing/parseBillText';
+import { extractBillTextFromUpload } from '@/lib/billing/extractBillText';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,6 +21,40 @@ const decimalFromNumber = (
   const rounded = Math.round(value * multiplier) / multiplier;
   return new CurrentPlanPrisma.Decimal(rounded.toFixed(scale));
 };
+
+function normalizeKey(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return trimmed.toUpperCase();
+}
+
+function applyTemplateToParsed(
+  parsed: ParsedCurrentPlanPayload,
+  template: any,
+): ParsedCurrentPlanPayload {
+  return {
+    ...parsed,
+    providerName: template.providerName ?? parsed.providerName ?? null,
+    planName: template.planName ?? parsed.planName ?? null,
+    rateType: (template.rateType as any) ?? parsed.rateType ?? null,
+    variableIndexType: template.variableIndexType ?? parsed.variableIndexType ?? null,
+    termMonths: template.termMonths ?? parsed.termMonths ?? null,
+    contractEndDate: template.contractEndDate
+      ? (template.contractEndDate as Date).toISOString().slice(0, 10)
+      : parsed.contractEndDate ?? null,
+    earlyTerminationFeeCents:
+      template.earlyTerminationFeeCents ?? parsed.earlyTerminationFeeCents ?? null,
+    baseChargeCentsPerMonth:
+      template.baseChargeCentsPerMonth ?? parsed.baseChargeCentsPerMonth ?? null,
+    energyRateTiers:
+      (template.energyRateTiersJson as any) ?? parsed.energyRateTiers ?? parsed.energyRateTiers,
+    timeOfUse:
+      (template.timeOfUseConfigJson as any) ?? parsed.timeOfUse ?? parsed.timeOfUse,
+    billCredits:
+      (template.billCreditsJson as any) ?? parsed.billCredits ?? parsed.billCredits,
+  };
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -81,8 +120,9 @@ export async function POST(request: NextRequest) {
 
     const currentPlanPrisma = getCurrentPlanPrisma();
 
-    let uploadRecord: { id: string; filename: string; mimeType: string; billData: Buffer } | null =
-      null;
+    let uploadRecord:
+      | { id: string; filename: string; mimeType: string; billData: Buffer }
+      | null = null;
 
     if (!textOverride) {
       const billDelegate = currentPlanPrisma.currentPlanBillUpload as any;
@@ -110,10 +150,115 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const text =
-      textOverride ?? uploadRecord!.billData.toString('utf8').slice(0, 20000);
+    let text = textOverride;
 
-    const parsed = await extractCurrentPlanFromBillTextWithOpenAI(text, {});
+    if (!text) {
+      const billDelegate = currentPlanPrisma.currentPlanBillUpload as any;
+      const fullUpload = await billDelegate.findFirst({
+        where: { id: uploadRecord!.id },
+      });
+      text = await extractBillTextFromUpload(fullUpload);
+    }
+
+    if (!text || !text.trim()) {
+      return NextResponse.json(
+        { ok: false, error: 'Could not extract text from uploaded bill file.' },
+        { status: 422 },
+      );
+    }
+
+    // 1) Baseline parse (regex-only)
+    const baseline = extractCurrentPlanFromBillText(text, {});
+
+    // 2) Try to find a template based on providerName + planName from baseline
+    let providerNameKey = normalizeKey(baseline.providerName);
+    let planNameKey = normalizeKey(baseline.planName);
+
+    const templateDelegate = (currentPlanPrisma as any).billPlanTemplate as any;
+
+    let parsed: ParsedCurrentPlanPayload;
+    let existingTemplate: any = null;
+
+    if (templateDelegate && providerNameKey && planNameKey) {
+      existingTemplate = await templateDelegate.findUnique({
+        where: {
+          providerNameKey_planNameKey: {
+            providerNameKey,
+            planNameKey,
+          },
+        },
+      });
+    }
+
+    if (existingTemplate) {
+      parsed = applyTemplateToParsed(baseline, existingTemplate);
+    } else {
+      const aiParsed = await extractCurrentPlanFromBillTextWithOpenAI(text, {});
+      parsed = aiParsed;
+
+      providerNameKey = normalizeKey(parsed.providerName ?? baseline.providerName);
+      planNameKey = normalizeKey(parsed.planName ?? baseline.planName);
+
+      if (templateDelegate && providerNameKey && planNameKey) {
+        try {
+          await templateDelegate.upsert({
+            where: {
+              providerNameKey_planNameKey: {
+                providerNameKey,
+                planNameKey,
+              },
+            },
+            update: {
+              providerName: parsed.providerName ?? baseline.providerName ?? null,
+              planName: parsed.planName ?? baseline.planName ?? null,
+              rateType: parsed.rateType ?? baseline.rateType ?? null,
+              variableIndexType:
+                parsed.variableIndexType ?? baseline.variableIndexType ?? null,
+              termMonths: parsed.termMonths ?? baseline.termMonths ?? null,
+              contractEndDate: parsed.contractEndDate
+                ? new Date(parsed.contractEndDate)
+                : null,
+              earlyTerminationFeeCents:
+                parsed.earlyTerminationFeeCents ?? baseline.earlyTerminationFeeCents ?? null,
+              baseChargeCentsPerMonth:
+                parsed.baseChargeCentsPerMonth ?? baseline.baseChargeCentsPerMonth ?? null,
+              energyRateTiersJson:
+                parsed.energyRateTiers ?? baseline.energyRateTiers ?? [],
+              timeOfUseConfigJson: parsed.timeOfUse ?? baseline.timeOfUse ?? null,
+              billCreditsJson:
+                parsed.billCredits ??
+                baseline.billCredits ?? { enabled: false, rules: [] },
+            },
+            create: {
+              providerNameKey,
+              planNameKey,
+              providerName: parsed.providerName ?? baseline.providerName ?? null,
+              planName: parsed.planName ?? baseline.planName ?? null,
+              rateType: parsed.rateType ?? baseline.rateType ?? null,
+              variableIndexType:
+                parsed.variableIndexType ?? baseline.variableIndexType ?? null,
+              termMonths: parsed.termMonths ?? baseline.termMonths ?? null,
+              contractEndDate: parsed.contractEndDate
+                ? new Date(parsed.contractEndDate)
+                : null,
+              earlyTerminationFeeCents:
+                parsed.earlyTerminationFeeCents ?? baseline.earlyTerminationFeeCents ?? null,
+              baseChargeCentsPerMonth:
+                parsed.baseChargeCentsPerMonth ?? baseline.baseChargeCentsPerMonth ?? null,
+              energyRateTiersJson:
+                parsed.energyRateTiers ?? baseline.energyRateTiers ?? [],
+              timeOfUseConfigJson: parsed.timeOfUse ?? baseline.timeOfUse ?? null,
+              billCreditsJson:
+                parsed.billCredits ??
+                baseline.billCredits ?? { enabled: false, rules: [] },
+            },
+          });
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.error('[current-plan/bill-parse] Failed to upsert BillPlanTemplate', e);
+        }
+      }
+    }
 
     const decimalOrNull = (value: number | null | undefined, scale: number) => {
       if (value === null || value === undefined) return null;
@@ -167,7 +312,7 @@ export async function POST(request: NextRequest) {
       billIssueDate: parsed.billIssueDate ? new Date(parsed.billIssueDate) : null,
       billDueDate: parsed.billDueDate ? new Date(parsed.billDueDate) : null,
       totalAmountDueCents: parsed.totalAmountDueCents,
-      parserVersion: 'bill-text-v1-regex',
+      parserVersion: process.env.OPENAI_API_KEY ? 'bill-text-v3-json' : 'bill-text-v1-regex',
       confidenceScore: null,
     };
 

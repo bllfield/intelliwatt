@@ -1464,11 +1464,11 @@ export function CurrentRateDetailsForm({
           <label className="flex w-full cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-brand-blue/30 bg-brand-blue/5 p-6 text-center text-sm text-brand-navy transition hover:border-brand-blue/60 hover:bg-brand-blue/10">
             <span className="font-semibold">Drag your file here or click to browse</span>
             <span className="mt-1 text-xs text-brand-slate">
-              Accepted formats: PDF, JPG, PNG — attach multiple pages if needed
+              Accepted formats: PDF, JPG, PNG, TXT, CSV — attach multiple pages if needed
             </span>
             <input
               type="file"
-              accept="image/*,application/pdf"
+              accept=".pdf,.jpg,.jpeg,.png,.txt,.csv,text/plain,application/pdf"
               multiple
               onChange={(e) => {
                 const selected = Array.from(e.target.files ?? []);

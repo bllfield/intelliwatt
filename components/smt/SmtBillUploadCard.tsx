@@ -106,10 +106,10 @@ export default function SmtBillUploadCard({ className, houseId }: Props) {
       <div className="mt-5 space-y-3">
         <label className="flex w-full cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-brand-blue/30 bg-brand-blue/5 p-5 text-center text-sm text-brand-navy transition hover:border-brand-blue/60 hover:bg-brand-blue/10">
           <span className="font-semibold">Drag a PDF/photo here or click to browse</span>
-          <span className="mt-1 text-xs text-brand-slate">PDF, JPG, or PNG</span>
+          <span className="mt-1 text-xs text-brand-slate">PDF, JPG, PNG, TXT, or CSV</span>
           <input
             type="file"
-            accept="image/*,application/pdf"
+            accept=".pdf,.jpg,.jpeg,.png,.txt,.csv,text/plain,application/pdf"
             multiple
             className="hidden"
             onChange={(e) => {

@@ -195,13 +195,27 @@ export async function extractCurrentPlanFromBillTextWithOpenAI(
   let aiResult: OpenAIBillParseResult | null = null;
 
   try {
-    // Dynamic import to avoid bundling OpenAI client in environments
-    // where it is not needed (e.g., client bundles).
     const { openai } = await import('@/lib/ai/openai');
 
     const systemPrompt = `
 You are an expert at reading Texas residential electricity bills and extracting structured plan data.
-You MUST return ONLY valid JSON that matches the given TypeScript type:
+
+Your job:
+- Interpret the bill as precisely as possible.
+- Recover the FULL contract-level structure for the plan:
+  • rateType
+  • base charges
+  • energy rate tiers
+  • time-of-use windows
+  • bill credits (autopay, paperless, usage-based)
+- Fill in as MANY details as the bill explicitly or implicitly provides.
+- When the bill clearly defines a TOU or tiered structure, you MUST translate it into the structured fields below.
+- When the bill includes phrases like "On-peak", "Off-peak", "Shoulder", "Solar days", "Free nights", etc.,
+  map those to TimeOfUsePeriod entries with correct days + minutes + rates.
+- When usage-based bill credits are present (e.g. "Credit of $20 when usage between 1000-1200 kWh"),
+  encode them as BillCreditRule entries.
+
+You MUST return ONLY valid JSON that matches this TypeScript type:
 
 type EnergyRateTier = {
   minKWh: number;
@@ -269,10 +283,24 @@ type ParsedCurrentPlanPayload = {
   rawText: string;
 };
 
-If a field is not clearly present on the bill, set it to null (for scalars) or [] (for arrays).
-Do NOT guess or hallucinate missing values.
-All money fields must be in CENTS (integer).
-All dates must be in ISO format (yyyy-mm-dd) if you can infer them, otherwise null.
+Rules:
+- If a field is clearly present, you MUST fill it.
+- If TOU logic is present (e.g. different prices at different times of day or days of week),
+  you MUST express it in timeOfUse.periods.
+- If bill credits are present (autopay, paperless, usage thresholds), set billCredits.enabled = true
+  and include appropriate rules.
+- If a value truly does not appear anywhere, set it to null (for scalars) or [] (for arrays).
+- Do NOT invent imaginary products or charges not supported by the text.
+- All money fields must be in CENTS (integer).
+- All dates must be in ISO format (yyyy-mm-dd) if you can infer them, otherwise null.
+`;
+
+    const hintSummary = `
+Hints (may be null):
+- esiidHint: ${hints.esiidHint ?? 'null'}
+- addressLine1Hint: ${hints.addressLine1Hint ?? 'null'}
+- cityHint: ${hints.cityHint ?? 'null'}
+- stateHint: ${hints.stateHint ?? 'null'}
 `;
 
     const userPrompt = `
@@ -282,11 +310,7 @@ Here is the full text of a residential electricity bill:
 ${rawText}
 ----- BILL TEXT END -----
 
-Hints (may be null):
-- esiidHint: ${hints.esiidHint ?? 'null'}
-- addressLine1Hint: ${hints.addressLine1Hint ?? 'null'}
-- cityHint: ${hints.cityHint ?? 'null'}
-- stateHint: ${hints.stateHint ?? 'null'}
+${hintSummary}
 
 Return ONLY a JSON object matching ParsedCurrentPlanPayload (no extra keys, no comments).
 `;
@@ -298,30 +322,22 @@ Return ONLY a JSON object matching ParsedCurrentPlanPayload (no extra keys, no c
         { role: 'user', content: userPrompt },
       ],
       temperature: 0,
+      response_format: { type: 'json_object' },
     });
 
-    // Best-effort usage logging
     const usage = (completion as any).usage;
     if (usage) {
-      const inputTokens =
-        usage.prompt_tokens ?? usage.input_tokens ?? 0;
-      const outputTokens =
-        usage.completion_tokens ?? usage.output_tokens ?? 0;
-      const totalTokens =
-        usage.total_tokens ?? inputTokens + outputTokens;
+      const inputTokens = usage.prompt_tokens ?? usage.input_tokens ?? 0;
+      const outputTokens = usage.completion_tokens ?? usage.output_tokens ?? 0;
+      const totalTokens = usage.total_tokens ?? inputTokens + outputTokens;
 
-      // Approximate cost in USD (update if pricing changes)
-      // gpt-4.1-mini example pricing assumptions:
-      // - input: $0.00025 per 1K tokens
-      // - output: $0.00075 per 1K tokens
       const inputCost = (inputTokens / 1000) * 0.00025;
       const outputCost = (outputTokens / 1000) * 0.00075;
       const costUsd = inputCost + outputCost;
 
-      // Fire-and-forget; internal helper swallows errors.
       void logOpenAIUsage({
         module: 'current-plan',
-        operation: 'bill-parse-v2',
+        operation: 'bill-parse-v3-json',
         model: (completion as any).model ?? 'gpt-4.1-mini',
         inputTokens,
         outputTokens,
@@ -337,13 +353,11 @@ Return ONLY a JSON object matching ParsedCurrentPlanPayload (no extra keys, no c
     }
 
     const content = completion.choices[0]?.message?.content ?? '';
-    const jsonStart = content.indexOf('{');
-    const jsonEnd = content.lastIndexOf('}');
-
-    if (jsonStart !== -1 && jsonEnd !== -1 && jsonEnd > jsonStart) {
-      const jsonText = content.slice(jsonStart, jsonEnd + 1);
-      aiResult = JSON.parse(jsonText) as OpenAIBillParseResult;
+    if (!content) {
+      return baseline;
     }
+
+    aiResult = JSON.parse(content) as OpenAIBillParseResult;
   } catch (err) {
     // Swallow OpenAI errors and fall back to regex-only.
     console.error('OpenAI bill parse failed; using baseline only', err);
@@ -352,6 +366,35 @@ Return ONLY a JSON object matching ParsedCurrentPlanPayload (no extra keys, no c
 
   if (!aiResult) {
     return baseline;
+  }
+
+  // Basic numeric sanity guards
+  const clampMoney = (value: number | null | undefined, maxCents: number): number | null => {
+    if (value == null) return null;
+    if (!Number.isFinite(value)) return null;
+    if (value < 0) return null;
+    if (value > maxCents) return null;
+    return Math.round(value);
+  };
+
+  aiResult.baseChargeCentsPerMonth = clampMoney(aiResult.baseChargeCentsPerMonth, 500_00); // ≤ $500
+  aiResult.earlyTerminationFeeCents = clampMoney(aiResult.earlyTerminationFeeCents, 1_000_00); // ≤ $1000
+  aiResult.totalAmountDueCents = clampMoney(aiResult.totalAmountDueCents, 5_000_00); // ≤ $5000
+
+  if (aiResult.timeOfUse && Array.isArray(aiResult.timeOfUse.periods)) {
+    aiResult.timeOfUse.periods = aiResult.timeOfUse.periods
+      .map((p) => {
+        const start = Math.max(0, Math.min(1439, (p as any).startMinutes ?? 0));
+        const end = Math.max(0, Math.min(1439, (p as any).endMinutes ?? 0));
+        return { ...p, startMinutes: start, endMinutes: end };
+      })
+      .filter((p) => Number.isFinite((p as any).rateCentsPerKWh) && (p as any).rateCentsPerKWh >= 0);
+  }
+
+  if (!aiResult.billCredits) {
+    aiResult.billCredits = { enabled: false, rules: [] };
+  } else if (!Array.isArray(aiResult.billCredits.rules)) {
+    aiResult.billCredits.rules = [];
   }
 
   // Merge baseline (regex) + AI (OpenAI) — AI wins when it provides something.

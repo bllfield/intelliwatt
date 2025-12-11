@@ -143,3 +143,28 @@ model ParsedCurrentPlan {
   @@index([userId, houseId])
 }
 
+model BillPlanTemplate {
+  id                      String   @id @default(cuid())
+  providerNameKey         String   // normalized key, e.g. uppercased providerName
+  planNameKey             String   // normalized key, e.g. uppercased planName
+
+  // Core contract-level fields we want to reuse across bills for the same plan
+  providerName            String?
+  planName                String?
+  rateType                String?  // 'FIXED' | 'VARIABLE' | 'TIME_OF_USE' | 'OTHER'
+  variableIndexType       String?
+  termMonths              Int?
+  contractEndDate         DateTime?
+  earlyTerminationFeeCents Int?
+  baseChargeCentsPerMonth Int?
+
+  energyRateTiersJson     Json?    // mirrors ParsedCurrentPlan.energyRateTiersJson
+  timeOfUseConfigJson     Json?    // mirrors ParsedCurrentPlan.timeOfUseConfigJson
+  billCreditsJson         Json?    // mirrors ParsedCurrentPlan.billCreditsJson
+
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  @@unique([providerNameKey, planNameKey])
+}
+
