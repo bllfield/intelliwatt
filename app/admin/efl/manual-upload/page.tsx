@@ -477,7 +477,7 @@ export default function ManualFactCardLoaderPage() {
                 {/* PlanRules field values */}
                 <div className="space-y-2">
                   <h4 className="font-semibold text-brand-navy">PlanRules (EFL side)</h4>
-                  <dl className="grid grid-cols-[minmax(0,150px),minmax(0,1fr)] gap-x-3 gap-y-1">
+                  <dl className="grid grid-cols-[minmax(0,170px),minmax(0,1fr)] gap-x-3 gap-y-1">
                     <dt className="font-mono text-[11px] text-brand-navy/80">planType</dt>
                     <dd className="truncate">
                       {(result.planRules as any)?.planType ?? "—"}
@@ -486,6 +486,11 @@ export default function ManualFactCardLoaderPage() {
                     <dt className="font-mono text-[11px] text-brand-navy/80">rateType</dt>
                     <dd className="truncate">
                       {(result.planRules as any)?.rateType ?? "—"}
+                    </dd>
+
+                    <dt className="font-mono text-[11px] text-brand-navy/80">variableIndexType</dt>
+                    <dd className="truncate">
+                      {(result.planRules as any)?.variableIndexType ?? "—"}
                     </dd>
 
                     <dt className="font-mono text-[11px] text-brand-navy/80">
