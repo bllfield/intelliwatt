@@ -78,6 +78,8 @@ export type BillParseHints = {
   stateHint?: string | null;
 };
 
+import { logOpenAIUsage } from '@/lib/admin/openaiUsage';
+
 const ESIID_REGEX = /\b(ESI[\s-]*ID[:\s]*)(\d{17,22})\b/i;
 const METER_REGEX = /\b(Meter(?:\s*Number)?[:\s#]*)([A-Za-z0-9\-]+)\b/i;
 const PROVIDER_REGEX = /\b(?:Provider|Retail Electric Provider|REP)[:\s]+(.+?)\b/;
@@ -297,6 +299,42 @@ Return ONLY a JSON object matching ParsedCurrentPlanPayload (no extra keys, no c
       ],
       temperature: 0,
     });
+
+    // Best-effort usage logging
+    const usage = (completion as any).usage;
+    if (usage) {
+      const inputTokens =
+        usage.prompt_tokens ?? usage.input_tokens ?? 0;
+      const outputTokens =
+        usage.completion_tokens ?? usage.output_tokens ?? 0;
+      const totalTokens =
+        usage.total_tokens ?? inputTokens + outputTokens;
+
+      // Approximate cost in USD (update if pricing changes)
+      // gpt-4.1-mini example pricing assumptions:
+      // - input: $0.00025 per 1K tokens
+      // - output: $0.00075 per 1K tokens
+      const inputCost = (inputTokens / 1000) * 0.00025;
+      const outputCost = (outputTokens / 1000) * 0.00075;
+      const costUsd = inputCost + outputCost;
+
+      // Fire-and-forget; internal helper swallows errors.
+      void logOpenAIUsage({
+        module: 'current-plan',
+        operation: 'bill-parse-v2',
+        model: (completion as any).model ?? 'gpt-4.1-mini',
+        inputTokens,
+        outputTokens,
+        totalTokens,
+        costUsd,
+        requestId: (completion as any).id ?? null,
+        userId: null,
+        houseId: null,
+        metadata: {
+          source: 'bill-parse-text',
+        },
+      });
+    }
 
     const content = completion.choices[0]?.message?.content ?? '';
     const jsonStart = content.indexOf('{');

@@ -208,6 +208,48 @@ Notes:
   - Main production DB: master migrations up to date; `20251130225951_add_normalized_current_plan` deployed with `npx prisma migrate deploy --schema=prisma/schema.prisma`.
 - Any prior drift (ERCOT index, SMT column type, etc.) was resolved by rebuilding dev and re-running migrate deploy in prod. No further migration repair is required for this slice.
 
+### PC-2025-12-10-OPENAI-USAGE-MODULE — OpenAI Usage Tracking Module
+
+**Rationale**
+
+- We now use OpenAI for bill parsing and will add more AI-powered tools.
+- Brian needs a simple way to see how many calls we’re making, which models, and roughly how much they cost per day/module.
+- This must be admin-only, live at `/admin` with the other internal tools.
+
+**Scope**
+
+- **Main Prisma schema (`prisma/schema.prisma`)**
+  - Add a new `OpenAIUsageEvent` model in the primary app DB, not in module DBs. This table holds one row per OpenAI API call.
+  - Fields: `id`, `createdAt`, `module`, `operation`, `model`, `inputTokens`, `outputTokens`, `totalTokens`, `costUsd`, `requestId`, `userId`, `houseId`, `metadataJson`.
+- **Server-side logging**
+  - Add a small helper `logOpenAIUsage` that writes to `OpenAIUsageEvent` using the existing shared Prisma client (`@/lib/db`).
+  - Integrate this helper into the bill parser’s OpenAI call so every `/api/current-plan/bill-parse` AI call logs one usage row tagged as `module="current-plan"` and `operation="bill-parse-v2"`.
+  - Logging failures must never break customer flows; they are best-effort only.
+- **Admin API**
+  - New route: `GET /api/admin/openai/usage` (App Router).
+  - Enforce `x-admin-token` header using the same `ADMIN_TOKEN` check pattern used in `ADMIN_API.md` and existing admin routes.
+  - Return JSON summarizing:
+    - Totals for the last 30 days (per day).
+    - Totals by module (all time and last 30 days).
+    - The 50 most recent events (for quick inspection).
+- **Admin UI**
+  - Add a new module card on `/admin` and `/admin/modules`:
+    - Title: **OpenAI Usage**
+    - Description: “Track OpenAI calls, tokens, and estimated cost.”
+    - Link: `/admin/openai/usage`.
+  - New page at `/admin/openai/usage`:
+    - Admin-only, built as a server page with a client subcomponent.
+    - Uses `fetch` to call `/api/admin/openai/usage` with `x-admin-token` from the same local-storage pattern as other admin tools.
+    - Shows:
+      - Summary cards (last 30 days: total calls, total cost, top module).
+      - A simple table of the 50 most recent events (timestamp, module, operation, model, tokens, cost).
+
+**Env / Ops**
+
+- Uses existing `ADMIN_TOKEN` admin guard; no new secrets required.
+- Uses the existing main DB connection (`DATABASE_URL` / `DIRECT_URL`).
+- After merging, run Prisma migrations against the dev DB, then deploy to prod per the existing migration/deploy process for the master schema.
+
 ## PC-2025-12-04 · Usage Dashboard Activation (SMT-first)
 
 ## PC-2025-12-05 · SMT Large-File Ingest Hardening & Admin Visibility

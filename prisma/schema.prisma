@@ -514,6 +514,39 @@ model SupplierControl {
   @@index([supplierName])
 }
 
+/// OpenAI usage tracking for admin-visible cost and volume monitoring.
+model OpenAIUsageEvent {
+  id          String   @id @default(cuid())
+  createdAt   DateTime @default(now())
+
+  /// Logical module / subsystem (e.g. "current-plan", "rate-engine", "admin-tool")
+  module      String   @db.VarChar(64)
+  /// Specific operation name (e.g. "bill-parse-v2", "efl-link-runner")
+  operation   String   @db.VarChar(128)
+  /// OpenAI model id (e.g. "gpt-4.1-mini")
+  model       String   @db.VarChar(64)
+
+  inputTokens  Int
+  outputTokens Int
+  totalTokens  Int
+
+  /// Approximate cost in USD for this call, stored as decimal
+  costUsd Decimal @db.Decimal(10, 4)
+
+  /// Optional OpenAI request id for correlation
+  requestId String? @db.VarChar(128)
+  /// Optional IntelliWatt userId when known
+  userId   String? @db.VarChar(64)
+  /// Optional houseId when call is tied to a home
+  houseId  String? @db.VarChar(64)
+
+  /// Arbitrary JSON metadata (e.g. { billParse: { houseId, esiid, fileId } })
+  metadataJson Json?
+
+  @@index([createdAt])
+  @@index([module])
+}
+
 model HouseAddress {
   id                    String           @id @default(uuid())
   userId                String
