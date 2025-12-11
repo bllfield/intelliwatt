@@ -171,11 +171,15 @@ async function extractPdfTextWithFallback(
           ? pdfBytes
           : new Uint8Array(pdfBytes as ArrayLike<number>);
 
+    // Hard-disable workers in serverless/Node so we don't need a pdf.worker.mjs chunk.
+    if (pdfjsLib.GlobalWorkerOptions) {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = "";
+      (pdfjsLib.GlobalWorkerOptions as any).workerPort = null;
+    }
+    (pdfjsLib as any).disableWorker = true;
+
     const loadingTask = pdfjsLib.getDocument({
       data: uint8,
-      // In a bundled Next.js/Vercel serverless runtime, there is no separate
-      // pdf.worker.mjs chunk to load. Disable the worker so pdf.js runs
-      // in-process instead of trying (and failing) to spin up a fake worker.
       disableWorker: true,
     });
 
