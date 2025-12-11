@@ -83,6 +83,16 @@ export async function deterministicEflExtract(
 ): Promise<EflDeterministicExtract> {
   const warnings: string[] = [];
 
+  // Some pdf.js builds expect a DOMMatrix global, which is not available in the
+  // Node.js runtime used by our API routes. Provide a minimal no-op polyfill
+  // so text extraction can proceed without crashing.
+  if (typeof (globalThis as any).DOMMatrix === "undefined") {
+    (globalThis as any).DOMMatrix = class DOMMatrixPolyfill {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      constructor(..._args: any[]) {}
+    } as any;
+  }
+
   const eflPdfSha256 = computePdfSha256(pdfBytes);
 
   const rawExtracted = await extractPdfText(pdfBytes);
