@@ -163,10 +163,13 @@ async function extractPdfTextWithFallback(
     // @ts-ignore - pdfjs-dist legacy build has no bundled types for this entry
     const pdfjsLib: any = await import("pdfjs-dist/legacy/build/pdf");
 
-    const uint8 =
-      pdfBytes instanceof Uint8Array
-        ? pdfBytes
-        : new Uint8Array(Buffer.isBuffer(pdfBytes) ? pdfBytes : Buffer.from(pdfBytes));
+    // Ensure pdf.js always receives a plain Uint8Array, never a Node Buffer subclass.
+    const uint8: Uint8Array =
+      Buffer.isBuffer(pdfBytes)
+        ? new Uint8Array(pdfBytes) // Buffer -> Uint8Array
+        : pdfBytes instanceof Uint8Array
+          ? pdfBytes
+          : new Uint8Array(pdfBytes as ArrayLike<number>);
 
     const loadingTask = pdfjsLib.getDocument({
       data: uint8,
