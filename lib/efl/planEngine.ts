@@ -107,6 +107,20 @@ export interface PlanRules {
   billCredits: BillCreditRule[];
 }
 
+export type PlanRulesValidationSeverity = "ERROR" | "WARNING";
+
+export interface PlanRulesValidationIssue {
+  code: string;
+  message: string;
+  severity: PlanRulesValidationSeverity;
+}
+
+export interface PlanRulesValidationResult {
+  isValid: boolean;
+  requiresManualReview: boolean;
+  issues: PlanRulesValidationIssue[];
+}
+
 // ---------------- RateStructure alignment helpers ----------------
 
 // Local copy of the shared RateStructure contract used for current-plan and
@@ -169,6 +183,15 @@ export type RateStructure =
   | VariableRateStructure
   | TimeOfUseRateStructure;
 
+/**
+ * Helper to convert a numeric "hour" into an "HH:MM" string.
+ *
+ * NOTE:
+ * - We currently assume TOU boundaries are whole hours.
+ * - We round down to the nearest integer hour (e.g. 21.7 → "21:00").
+ * - This matches most Texas EFLs and keeps the RateStructure contract simple.
+ * - If we need half-hour precision later, we can extend this helper.
+ */
 function toTwoDigitTime(hour: number): string {
   const h = Math.min(23, Math.max(0, Math.floor(hour)));
   return `${String(h).padStart(2, "0")}:00`;
@@ -237,6 +260,82 @@ function mapBillCreditsToRateStructure(
 }
 
 /**
+ * Validate PlanRules for structural completeness based on the presence of
+ * time-of-use periods and default rates. This helper is intentionally strict:
+ * anything not clearly defined is treated as requiring manual review. We do
+ * not invent fallback values.
+ */
+export function validatePlanRules(plan: PlanRules): PlanRulesValidationResult {
+  const issues: PlanRulesValidationIssue[] = [];
+
+  const addIssue = (
+    code: string,
+    message: string,
+    severity: PlanRulesValidationSeverity = "ERROR",
+  ) => {
+    issues.push({ code, message, severity });
+  };
+
+  const hasTou =
+    Array.isArray(plan.timeOfUsePeriods) && plan.timeOfUsePeriods.length > 0;
+
+  // TOU plans: every period must either have an explicit rate or be explicitly free.
+  if (hasTou) {
+    const badPeriod = plan.timeOfUsePeriods.find((p) => {
+      const hasExplicitRate = typeof p.rateCentsPerKwh === "number";
+      const isExplicitlyFree = p.isFree === true;
+      return !hasExplicitRate && !isExplicitlyFree;
+    });
+
+    if (badPeriod) {
+      addIssue(
+        "MISSING_TOU_RATE",
+        "One or more TOU periods are missing rateCentsPerKwh and are not explicitly marked as free (isFree=true).",
+        "ERROR",
+      );
+    }
+  }
+
+  // Non-TOU plans: require a well-formed defaultRateCentsPerKwh.
+  if (!hasTou) {
+    const v = plan.defaultRateCentsPerKwh;
+    if (typeof v !== "number" || !Number.isFinite(v)) {
+      addIssue(
+        "MISSING_DEFAULT_RATE",
+        "Plan has no TOU periods and defaultRateCentsPerKwh is not a finite number.",
+        "ERROR",
+      );
+    } else if (v < 0) {
+      addIssue(
+        "NEGATIVE_DEFAULT_RATE",
+        "defaultRateCentsPerKwh must be non-negative.",
+        "ERROR",
+      );
+    }
+  }
+
+  // Base charge sanity (non-blocking warning).
+  if (plan.baseChargePerMonthCents != null) {
+    const v = plan.baseChargePerMonthCents;
+    if (!Number.isFinite(v) || v < 0) {
+      addIssue(
+        "INVALID_BASE_CHARGE",
+        "baseChargePerMonthCents should be a non-negative finite number when present.",
+        "WARNING",
+      );
+    }
+  }
+
+  const hasError = issues.some((i) => i.severity === "ERROR");
+
+  return {
+    isValid: !hasError,
+    requiresManualReview: hasError,
+    issues,
+  };
+}
+
+/**
  * Convert EFL-derived PlanRules into the shared RateStructure contract used
  * by current-plan normalization and the rate engine.
  */
@@ -244,17 +343,23 @@ export function planRulesToRateStructure(plan: PlanRules): RateStructure {
   const baseMonthlyFeeCents = plan.baseChargePerMonthCents ?? undefined;
   const billCredits = mapBillCreditsToRateStructure(plan.billCredits);
 
-  // Heuristic: any explicit TOU periods → TIME_OF_USE, otherwise FIXED.
   const hasTou = Array.isArray(plan.timeOfUsePeriods) && plan.timeOfUsePeriods.length > 0;
 
+  // NOTE: This function assumes validatePlanRules(plan) has already been called
+  // and that it returned isValid=true. Any missing required fields should have
+  // been caught and flagged for manual review BEFORE we get here.
+
+  // 1) TIME-OF-USE: explicit TOU periods win.
   if (hasTou) {
     const tiers: RateStructureTimeOfUseTier[] = plan.timeOfUsePeriods.map((p) => {
+      if (typeof p.rateCentsPerKwh !== "number" && !p.isFree) {
+        throw new Error(
+          "planRulesToRateStructure: TOU period missing rateCentsPerKwh and not marked isFree=true. Validation should have caught this earlier.",
+        );
+      }
+
       const price =
-        p.isFree && p.rateCentsPerKwh == null
-          ? 0
-          : p.rateCentsPerKwh != null
-          ? p.rateCentsPerKwh
-          : plan.defaultRateCentsPerKwh ?? 0;
+        p.isFree && p.rateCentsPerKwh == null ? 0 : (p.rateCentsPerKwh as number);
 
       return {
         label: p.label,
@@ -274,15 +379,23 @@ export function planRulesToRateStructure(plan: PlanRules): RateStructure {
     };
   }
 
-  // Default: treat as FIXED plan using the defaultRateCentsPerKwh.
-  const energyRateCents = plan.defaultRateCentsPerKwh ?? 0;
+  // 2) Default: treat as FIXED plan using the defaultRateCentsPerKwh.
+  if (typeof plan.defaultRateCentsPerKwh !== "number") {
+    throw new Error(
+      "planRulesToRateStructure: defaultRateCentsPerKwh is not defined for non-TOU plan. Validation should have caught this.",
+    );
+  }
 
-  return {
+  const energyRateCents = plan.defaultRateCentsPerKwh;
+
+  const fixedStructure: FixedRateStructure = {
     type: "FIXED",
     energyRateCents,
     baseMonthlyFeeCents,
     billCredits,
   };
+
+  return fixedStructure;
 }
 
 /**

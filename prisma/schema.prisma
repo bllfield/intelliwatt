@@ -838,9 +838,23 @@ model RatePlan {
   rate2000   Float?
   cancelFee  String?
 
+  // Source documents for this plan (EFL, TOS, YRAC)
   eflUrl  String?
   tosUrl  String?
   yracUrl String?
+
+  // EFL Fact Card identity + validation (AI-backed PlanRules extractor)
+  repPuctCertificate      String?
+  eflVersionCode          String?
+  eflPdfSha256            String? @unique
+  // Canonical source URL for the EFL used for this plan version
+  eflSourceUrl            String?
+  // Whether the AI-derived PlanRules for this EFL require manual review
+  eflRequiresManualReview Boolean  @default(false)
+  // Structured validation issues from PlanRulesValidationResult
+  eflValidationIssues     Json?
+  // Normalized pricing structure derived from PlanRules (see lib/efl/planEngine.ts)
+  rateStructure           Json?
 
   isUtilityTariff Boolean   @default(false)
   tariffStructure Json?

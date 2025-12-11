@@ -6,14 +6,18 @@
  * OPENAI_IntelliWatt_Fact_Card_Parser.
  */
 
-import type { PlanRules, RateStructure } from "@/lib/efl/planEngine";
+import type {
+  PlanRules,
+  RateStructure,
+  PlanRulesValidationResult,
+} from "@/lib/efl/planEngine";
 import {
   type EflDeterministicExtractInput,
   type ExtractPlanRulesResult,
   extractPlanRulesFromEflText as coreExtractPlanRulesFromEflText,
 } from "@/lib/efl/aiExtraction";
 import { openaiFactCardParser } from "@/lib/ai/openaiFactCardParser";
-import { planRulesToRateStructure } from "@/lib/efl/planEngine";
+import { planRulesToRateStructure, validatePlanRules } from "@/lib/efl/planEngine";
 import { logOpenAIUsage } from "@/lib/admin/openaiUsage";
 
 export type EflTextExtractionInput = EflDeterministicExtractInput;
@@ -27,6 +31,8 @@ export interface PlanRulesExtractionMeta {
   parseConfidence: number;
   parseWarnings: string[];
   source: "efl_pdf" | string;
+  // Optional validation summary indicating whether the plan is safe to auto-use.
+  validation?: PlanRulesValidationResult;
 }
 
 export interface PlanRulesExtractionResult {
@@ -111,6 +117,8 @@ export async function extractPlanRulesFromEflText(
       callOpenAiPlanRulesModel,
     );
 
+    const validation = validatePlanRules(coreResult.planRules);
+
     return {
       ok: true,
       input,
@@ -119,6 +127,7 @@ export async function extractPlanRulesFromEflText(
         parseConfidence: coreResult.parseConfidence,
         parseWarnings: coreResult.parseWarnings,
         source: coreResult.source,
+        validation,
       },
     };
   } catch (error) {
@@ -152,6 +161,18 @@ export async function extractPlanRulesAndRateStructureFromEflText(args: {
   if (!result.ok || !result.planRules) {
     return {
       planRules: null,
+      rateStructure: null,
+      meta: result.meta,
+    };
+  }
+
+  const validation = result.meta.validation;
+  const requiresManualReview = validation?.requiresManualReview === true;
+
+  // If the plan is structurally incomplete or ambiguous, do NOT produce a RateStructure.
+  if (requiresManualReview) {
+    return {
+      planRules: result.planRules,
       rateStructure: null,
       meta: result.meta,
     };

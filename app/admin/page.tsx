@@ -869,6 +869,15 @@ npx prisma studio --browser none --port 5562`}
               </div>
             </a>
             <a
+              href="/admin/efl/manual-review"
+              className="block p-4 border-2 border-brand-blue/20 rounded-lg hover:border-brand-blue hover:bg-brand-blue/5 transition-colors"
+            >
+              <div className="font-semibold text-brand-navy mb-1">📝 Fact Card Manual Review Queue</div>
+              <div className="text-sm text-brand-navy/60">
+                Review EFL Fact Cards that the AI extractor flags as requiring manual review.
+              </div>
+            </a>
+            <a
               href="/admin/efl/links"
               className="block p-4 border-2 border-brand-blue/20 rounded-lg hover:border-brand-blue hover:bg-brand-blue/5 transition-colors"
             >

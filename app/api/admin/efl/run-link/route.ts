@@ -3,6 +3,7 @@ import { Buffer } from "node:buffer";
 
 import { computePdfSha256, deterministicEflExtract } from "@/lib/efl/eflExtractor";
 import { extractPlanRulesAndRateStructureFromEflText } from "@/lib/efl/planAiExtractor";
+import { upsertRatePlanFromEfl } from "@/lib/efl/planPersistence";
 
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 
@@ -126,6 +127,7 @@ export async function POST(req: NextRequest) {
     let rateStructure: unknown;
     let parseConfidence: number | undefined;
     let parseWarnings: string[] | undefined;
+    let validation: unknown;
 
     try {
       // Deterministic extract: PDF bytes → cleaned text + identity metadata
@@ -154,6 +156,7 @@ export async function POST(req: NextRequest) {
       rateStructure = aiResult.rateStructure ?? null;
       parseConfidence = aiResult.meta.parseConfidence;
       parseWarnings = aiResult.meta.parseWarnings;
+      validation = aiResult.meta.validation ?? null;
 
       steps.push("deterministic_extract", "ai_planrules_extract");
     } catch (error) {
@@ -164,10 +167,39 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Human-readable mode notes for the admin response.
     const notes =
       mode === "test"
         ? "Test mode: downloads/fingerprints the EFL PDF and (best-effort) runs AI extraction; no persistence."
-        : "Live mode: persistence into offers DB is not wired yet; this endpoint currently behaves like test mode plus AI extraction.";
+        : "Live mode: best-effort persistence into RatePlan with EFL guardrails; incomplete plans are marked for manual review.";
+
+    // Live-mode persistence with guardrails. Test mode remains read-only.
+    if (mode === "live" && planRules && pdfSha256) {
+      try {
+        await upsertRatePlanFromEfl({
+          mode,
+          eflUrl: normalizedUrl,
+          repPuctCertificate:
+            (validation as any)?.repPuctCertificate ?? null,
+          eflVersionCode: (validation as any)?.eflVersionCode ?? null,
+          eflPdfSha256: pdfSha256,
+          providerName: (planRules as any)?.repName ?? null,
+          planName: (planRules as any)?.planMarketingName ?? null,
+          planRules: planRules as any,
+          rateStructure: rateStructure as any,
+          validation: validation as any,
+        });
+        steps.push("rateplan_persisted");
+      } catch (persistError) {
+        warnings.push(
+          `EFL live persistence failed: ${
+            persistError instanceof Error
+              ? persistError.message
+              : String(persistError)
+          }`,
+        );
+      }
+    }
 
     const payload: RunLinkSuccess = {
       ok: true,
