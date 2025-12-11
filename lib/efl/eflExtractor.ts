@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { Buffer } from "node:buffer";
-import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.js";
+// @ts-expect-error pdfjs-dist legacy build has no bundled types for this entry
+import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf";
 
 /**
  * Result of deterministic EFL parsing before AI extraction.
