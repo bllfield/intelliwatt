@@ -28,6 +28,8 @@ export default function ManualFactCardLoaderPage() {
   const [result, setResult] = useState<UploadResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fileLabel, setFileLabel] = useState<string>("No file selected");
+  const [pastedText, setPastedText] = useState("");
+  const [isProcessingText, setIsProcessingText] = useState(false);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -75,6 +77,49 @@ export default function ManualFactCardLoaderPage() {
     }
   }
 
+  async function handleProcessText(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    setResult(null);
+
+    const trimmed = pastedText.trim();
+    if (!trimmed) {
+      setError("Paste the visible EFL text before processing.");
+      return;
+    }
+
+    setIsProcessingText(true);
+
+    try {
+      const response = await fetch("/api/admin/efl/manual-text", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ rawText: trimmed }),
+      });
+
+      const data = (await response.json()) as UploadResponse | UploadError;
+
+      if (!response.ok || !data.ok) {
+        throw new Error(
+          "error" in data ? data.error : "Unexpected error while processing pasted text.",
+        );
+      }
+
+      setResult(data);
+    } catch (err) {
+      console.error("[ManualFactCardLoader] manual text processing failed:", err);
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Processing pasted text failed. Please try again with valid EFL content.",
+      );
+    } finally {
+      setIsProcessingText(false);
+    }
+  }
+
   async function handleCopy(text: string, label: string) {
     try {
       await navigator.clipboard.writeText(text);
@@ -92,43 +137,75 @@ export default function ManualFactCardLoaderPage() {
       <header>
         <h1 className="text-2xl font-semibold text-brand-navy">Manual Fact Card Loader</h1>
         <p className="mt-2 text-sm text-brand-navy/70">
-          Upload an official EFL PDF, review the deterministic extract, and copy the AI prompt
-          required to generate a <code className="rounded bg-brand-navy/5 px-1 py-0.5">PlanRules</code>{" "}
-          JSON. No data is persisted — results are shown only in this browser session.
+          Upload an official EFL PDF{" "}
+          <span className="font-semibold">or paste the EFL text</span>, review the deterministic
+          extract, and copy the AI prompt required to generate a{" "}
+          <code className="rounded bg-brand-navy/5 px-1 py-0.5">PlanRules</code> JSON. No data is
+          persisted — results are shown only in this browser session.
         </p>
       </header>
 
-      <form
-        onSubmit={handleSubmit}
-        className="space-y-4 rounded-lg border border-brand-blue/20 bg-brand-white p-6 shadow-lg"
-        encType="multipart/form-data"
-      >
-        <div>
-          <label className="block text-sm font-medium text-brand-navy mb-2">
-            EFL PDF
-          </label>
-          <input
-            type="file"
-            name="file"
-            accept="application/pdf,.pdf"
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              setFileLabel(file ? file.name : "No file selected");
-            }}
-            className="block w-full text-sm text-brand-navy file:mr-4 file:rounded-md file:border-0 file:bg-brand-blue/10 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-brand-navy hover:file:bg-brand-blue/20"
-            required
-          />
-          <p className="mt-1 text-xs text-brand-navy/60">{fileLabel}</p>
-        </div>
-
-        <button
-          type="submit"
-          disabled={isSubmitting}
-          className="inline-flex items-center rounded-md border border-brand-blue bg-brand-blue/10 px-3 py-1.5 text-sm font-medium text-brand-navy transition hover:bg-brand-blue/20 disabled:cursor-not-allowed disabled:opacity-60"
+      <div className="grid gap-6 md:grid-cols-2">
+        <form
+          onSubmit={handleSubmit}
+          className="space-y-4 rounded-lg border border-brand-blue/20 bg-brand-white p-6 shadow-lg"
+          encType="multipart/form-data"
         >
-          {isSubmitting ? "Processing…" : "Process Fact Card"}
-        </button>
-      </form>
+          <div>
+            <label className="block text-sm font-medium text-brand-navy mb-2">
+              EFL PDF
+            </label>
+            <input
+              type="file"
+              name="file"
+              accept="application/pdf,.pdf"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                setFileLabel(file ? file.name : "No file selected");
+              }}
+              className="block w-full text-sm text-brand-navy file:mr-4 file:rounded-md file:border-0 file:bg-brand-blue/10 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-brand-navy hover:file:bg-brand-blue/20"
+            />
+            <p className="mt-1 text-xs text-brand-navy/60">{fileLabel}</p>
+          </div>
+
+          <button
+            type="submit"
+            disabled={isSubmitting}
+            className="inline-flex items-center rounded-md border border-brand-blue bg-brand-blue/10 px-3 py-1.5 text-sm font-medium text-brand-navy transition hover:bg-brand-blue/20 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isSubmitting ? "Processing…" : "Process Fact Card"}
+          </button>
+        </form>
+
+        <form
+          onSubmit={handleProcessText}
+          className="space-y-3 rounded-lg border border-dashed border-brand-blue/25 bg-brand-blue/5 p-6 shadow-sm"
+        >
+          <div>
+            <label className="block text-sm font-medium text-brand-navy mb-1">
+              Or paste EFL text
+            </label>
+            <p className="mb-2 text-xs text-brand-navy/70">
+              If pdf-parse fails or you only have a screenshot, open the EFL, select all visible
+              text, copy, and paste it here. We&apos;ll run the same deterministic extractor over
+              this text.
+            </p>
+            <textarea
+              className="h-40 w-full resize-none rounded-md border border-brand-blue/30 bg-white px-3 py-2 text-xs font-mono text-brand-navy focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/40"
+              placeholder="Paste the full EFL text here…"
+              value={pastedText}
+              onChange={(event) => setPastedText(event.target.value)}
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={isProcessingText}
+            className="inline-flex items-center rounded-md border border-brand-blue bg-brand-blue/10 px-3 py-1.5 text-sm font-medium text-brand-navy transition hover:bg-brand-blue/20 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isProcessingText ? "Processing text…" : "Process Pasted Text"}
+          </button>
+        </form>
+      </div>
 
       {error ? (
         <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700">
