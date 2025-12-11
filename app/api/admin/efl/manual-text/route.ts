@@ -3,6 +3,7 @@ import { Buffer } from "node:buffer";
 
 import { deterministicEflExtract } from "@/lib/efl/eflExtractor";
 import { buildPlanRulesExtractionPrompt } from "@/lib/efl/aiExtraction";
+import { extractPlanRulesAndRateStructureFromEflText } from "@/lib/efl/planAiExtractor";
 
 const MAX_PREVIEW_CHARS = 20000;
 
@@ -56,6 +57,45 @@ export async function POST(req: NextRequest) {
       ? fullText.slice(0, MAX_PREVIEW_CHARS)
       : fullText;
 
+    // Best-effort AI extraction so the admin can see which endpoint fields
+    // would be populated from this EFL text without having to read code.
+    let planRules: unknown = null;
+    let rateStructure: unknown = null;
+    let parseConfidence: number | undefined;
+    let parseWarnings: string[] | undefined;
+    let validation: unknown;
+
+    try {
+      const aiResult = await extractPlanRulesAndRateStructureFromEflText({
+        input: {
+          rawText: extract.rawText,
+          repPuctCertificate: extract.repPuctCertificate,
+          eflVersionCode: extract.eflVersionCode,
+          eflPdfSha256: extract.eflPdfSha256,
+          warnings: extract.warnings,
+        },
+      });
+
+      planRules = aiResult.planRules ?? null;
+      rateStructure = aiResult.rateStructure ?? null;
+      parseConfidence = aiResult.meta.parseConfidence;
+      parseWarnings = aiResult.meta.parseWarnings;
+      validation = aiResult.meta.validation ?? null;
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(
+        "[EFL_MANUAL_TEXT] AI PlanRules extraction failed; continuing with deterministic preview only",
+        err,
+      );
+      if (Array.isArray(extract.warnings)) {
+        extract.warnings.push(
+          err instanceof Error
+            ? `AI PlanRules extract failed: ${err.message}`
+            : "AI PlanRules extract failed.",
+        );
+      }
+    }
+
     return NextResponse.json({
       ok: true,
       eflPdfSha256: extract.eflPdfSha256,
@@ -66,6 +106,11 @@ export async function POST(req: NextRequest) {
       rawTextPreview,
       rawTextLength: fullText.length,
       rawTextTruncated,
+      planRules,
+      rateStructure,
+      parseConfidence,
+      parseWarnings,
+      validation,
     });
   } catch (error) {
     console.error("[EFL_MANUAL_TEXT] Failed to process pasted EFL text:", error);

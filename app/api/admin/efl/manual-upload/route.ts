@@ -3,6 +3,7 @@ import { Buffer } from "node:buffer";
 
 import { deterministicEflExtract } from "@/lib/efl/eflExtractor";
 import { buildPlanRulesExtractionPrompt } from "@/lib/efl/aiExtraction";
+import { extractPlanRulesAndRateStructureFromEflText } from "@/lib/efl/planAiExtractor";
 
 const MAX_PREVIEW_CHARS = 20000;
 
@@ -56,6 +57,48 @@ export async function POST(req: NextRequest) {
       warnings: extract.warnings,
     });
 
+    // Best-effort AI extraction: mirror /api/admin/efl/run-link so this tool
+    // can show how the parser would populate PlanRules + RateStructure and
+    // which fields require manual review. Failures are reported as warnings
+    // but do not break the deterministic preview.
+    let planRules: unknown = null;
+    let rateStructure: unknown = null;
+    let parseConfidence: number | undefined;
+    let parseWarnings: string[] | undefined;
+    let validation: unknown;
+
+    try {
+      const aiResult = await extractPlanRulesAndRateStructureFromEflText({
+        input: {
+          rawText: extract.rawText,
+          repPuctCertificate: extract.repPuctCertificate,
+          eflVersionCode: extract.eflVersionCode,
+          eflPdfSha256: extract.eflPdfSha256,
+          warnings: extract.warnings,
+        },
+      });
+
+      planRules = aiResult.planRules ?? null;
+      rateStructure = aiResult.rateStructure ?? null;
+      parseConfidence = aiResult.meta.parseConfidence;
+      parseWarnings = aiResult.meta.parseWarnings;
+      validation = aiResult.meta.validation ?? null;
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(
+        "[EFL_MANUAL_UPLOAD] AI PlanRules extraction failed; continuing with deterministic preview only",
+        err,
+      );
+      // Surface a user-visible warning without failing the request.
+      if (Array.isArray(extract.warnings)) {
+        extract.warnings.push(
+          err instanceof Error
+            ? `AI PlanRules extract failed: ${err.message}`
+            : "AI PlanRules extract failed.",
+        );
+      }
+    }
+
     const rawText = extract.rawText ?? "";
     const rawTextTruncated = rawText.length > MAX_PREVIEW_CHARS;
     const rawTextPreview = rawTextTruncated
@@ -72,6 +115,11 @@ export async function POST(req: NextRequest) {
       rawTextPreview,
       rawTextLength: rawText.length,
       rawTextTruncated,
+      planRules,
+      rateStructure,
+      parseConfidence,
+      parseWarnings,
+      validation,
     });
   } catch (error) {
     console.error("[EFL_MANUAL_UPLOAD] Failed to process fact card:", error);

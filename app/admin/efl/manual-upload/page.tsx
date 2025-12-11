@@ -16,6 +16,16 @@ type UploadResponse = {
   rawTextPreview: string;
   rawTextLength: number;
   rawTextTruncated: boolean;
+  // Best-effort AI outputs so admins can see which endpoint fields the parser fills.
+  planRules?: unknown;
+  rateStructure?: unknown;
+  parseConfidence?: number;
+  parseWarnings?: string[];
+  validation?: {
+    isValid: boolean;
+    requiresManualReview: boolean;
+    issues: { code: string; message: string; severity: "ERROR" | "WARNING" }[];
+  } | null;
 };
 
 type UploadError = {
@@ -420,6 +430,205 @@ export default function ManualFactCardLoaderPage() {
               rows={12}
               className="w-full rounded-md border border-brand-blue/30 bg-brand-blue/5 p-3 text-xs text-brand-navy focus:outline-none focus:ring-2 focus:ring-brand-blue/40"
             />
+          </section>
+
+          {/* Parsed Plan snapshot (PlanRules + RateStructure) */}
+          <section className="space-y-3 rounded-md border border-brand-blue/20 bg-brand-blue/5 p-4">
+            <header className="flex items-center justify-between gap-4">
+              <div>
+                <h3 className="text-sm font-semibold text-brand-navy">
+                  Parsed Plan Snapshot (AI EFL Parser)
+                </h3>
+                <p className="text-xs text-brand-navy/70">
+                  These fields show how the EFL parser would populate the shared{" "}
+                  <span className="font-mono text-[11px]">PlanRules</span> and{" "}
+                  <span className="font-mono text-[11px]">RateStructure</span> contracts used by the
+                  database endpoints.
+                </p>
+              </div>
+              {typeof result.parseConfidence === "number" ? (
+                <div className="text-right text-xs text-brand-navy/70">
+                  <div>
+                    <span className="font-semibold text-brand-navy">Confidence:</span>{" "}
+                    {(result.parseConfidence * 100).toFixed(0)}%
+                  </div>
+                  {result.validation ? (
+                    <div>
+                      <span className="font-semibold text-brand-navy">Requires manual review:</span>{" "}
+                      {result.validation.requiresManualReview ? "Yes" : "No"}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </header>
+
+            {!result.planRules && !result.rateStructure ? (
+              <p className="text-xs text-brand-navy/70">
+                The AI EFL parser did not return a{" "}
+                <span className="font-mono text-[11px]">PlanRules</span> object. Check warnings above
+                (for example, missing{" "}
+                <span className="font-mono text-[11px]">
+                  OPENAI_IntelliWatt_Fact_Card_Parser
+                </span>
+                ) or try again later.
+              </p>
+            ) : (
+              <div className="grid gap-4 md:grid-cols-2 text-xs text-brand-navy/80">
+                {/* PlanRules field values */}
+                <div className="space-y-2">
+                  <h4 className="font-semibold text-brand-navy">PlanRules (EFL side)</h4>
+                  <dl className="grid grid-cols-[minmax(0,150px),minmax(0,1fr)] gap-x-3 gap-y-1">
+                    <dt className="font-mono text-[11px] text-brand-navy/80">planType</dt>
+                    <dd className="truncate">
+                      {(result.planRules as any)?.planType ?? "—"}
+                    </dd>
+
+                    <dt className="font-mono text-[11px] text-brand-navy/80">rateType</dt>
+                    <dd className="truncate">
+                      {(result.planRules as any)?.rateType ?? "—"}
+                    </dd>
+
+                    <dt className="font-mono text-[11px] text-brand-navy/80">
+                      defaultRateCentsPerKwh
+                    </dt>
+                    <dd className="truncate">
+                      {(result.planRules as any)?.defaultRateCentsPerKwh ?? "—"}
+                    </dd>
+
+                    <dt className="font-mono text-[11px] text-brand-navy/80">
+                      baseChargePerMonthCents
+                    </dt>
+                    <dd className="truncate">
+                      {(result.planRules as any)?.baseChargePerMonthCents ?? "—"}
+                    </dd>
+
+                    <dt className="font-mono text-[11px] text-brand-navy/80">
+                      currentBillEnergyRateCents
+                    </dt>
+                    <dd className="truncate">
+                      {(result.planRules as any)?.currentBillEnergyRateCents ?? "—"}
+                    </dd>
+
+                    <dt className="font-mono text-[11px] text-brand-navy/80">
+                      timeOfUsePeriods count
+                    </dt>
+                    <dd className="truncate">
+                      {Array.isArray((result.planRules as any)?.timeOfUsePeriods)
+                        ? (result.planRules as any).timeOfUsePeriods.length
+                        : 0}
+                    </dd>
+
+                    <dt className="font-mono text-[11px] text-brand-navy/80">
+                      usageTiers count
+                    </dt>
+                    <dd className="truncate">
+                      {Array.isArray((result.planRules as any)?.usageTiers)
+                        ? (result.planRules as any).usageTiers.length
+                        : 0}
+                    </dd>
+
+                    <dt className="font-mono text-[11px] text-brand-navy/80">
+                      billCredits count
+                    </dt>
+                    <dd className="truncate">
+                      {Array.isArray((result.planRules as any)?.billCredits)
+                        ? (result.planRules as any).billCredits.length
+                        : 0}
+                    </dd>
+
+                    <dt className="font-mono text-[11px] text-brand-navy/80">
+                      solarBuyback.hasBuyback
+                    </dt>
+                    <dd className="truncate">
+                      {(result.planRules as any)?.solarBuyback?.hasBuyback ?? "—"}
+                    </dd>
+                  </dl>
+                </div>
+
+                {/* RateStructure field values */}
+                <div className="space-y-2">
+                  <h4 className="font-semibold text-brand-navy">RateStructure (engine side)</h4>
+                  <dl className="grid grid-cols-[minmax(0,170px),minmax(0,1fr)] gap-x-3 gap-y-1">
+                    <dt className="font-mono text-[11px] text-brand-navy/80">type</dt>
+                    <dd className="truncate">
+                      {(result.rateStructure as any)?.type ?? "—"}
+                    </dd>
+
+                    <dt className="font-mono text-[11px] text-brand-navy/80">
+                      baseMonthlyFeeCents
+                    </dt>
+                    <dd className="truncate">
+                      {(result.rateStructure as any)?.baseMonthlyFeeCents ?? "—"}
+                    </dd>
+
+                    <dt className="font-mono text-[11px] text-brand-navy/80">
+                      billCredits.hasBillCredit
+                    </dt>
+                    <dd className="truncate">
+                      {(result.rateStructure as any)?.billCredits?.hasBillCredit ?? "—"}
+                    </dd>
+
+                    <dt className="font-mono text-[11px] text-brand-navy/80">
+                      billCredits.rules count
+                    </dt>
+                    <dd className="truncate">
+                      {Array.isArray((result.rateStructure as any)?.billCredits?.rules)
+                        ? (result.rateStructure as any).billCredits.rules.length
+                        : 0}
+                    </dd>
+
+                    {/* FIXED-specific */}
+                    <dt className="font-mono text-[11px] text-brand-navy/80">
+                      energyRateCents (FIXED)
+                    </dt>
+                    <dd className="truncate">
+                      {(result.rateStructure as any)?.energyRateCents ?? "—"}
+                    </dd>
+
+                    {/* VARIABLE-specific */}
+                    <dt className="font-mono text-[11px] text-brand-navy/80">
+                      currentBillEnergyRateCents (VARIABLE)
+                    </dt>
+                    <dd className="truncate">
+                      {(result.rateStructure as any)?.currentBillEnergyRateCents ?? "—"}
+                    </dd>
+
+                    <dt className="font-mono text-[11px] text-brand-navy/80">
+                      indexType (VARIABLE)
+                    </dt>
+                    <dd className="truncate">
+                      {(result.rateStructure as any)?.indexType ?? "—"}
+                    </dd>
+
+                    {/* TIME_OF_USE-specific */}
+                    <dt className="font-mono text-[11px] text-brand-navy/80">
+                      TIME_OF_USE tiers count
+                    </dt>
+                    <dd className="truncate">
+                      {Array.isArray((result.rateStructure as any)?.tiers)
+                        ? (result.rateStructure as any).tiers.length
+                        : 0}
+                    </dd>
+                  </dl>
+                </div>
+              </div>
+            )}
+
+            {/* Validation issues, if any */}
+            {result.validation && result.validation.issues.length > 0 ? (
+              <div className="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                <div className="mb-1 font-semibold">Validation issues</div>
+                <ul className="space-y-0.5">
+                  {result.validation.issues.map((issue, idx) => (
+                    <li key={`${issue.code}-${idx}`}>
+                      <span className="font-mono text-[11px]">{issue.severity}</span>{" "}
+                      <span className="font-mono text-[11px]">{issue.code}</span> —{" "}
+                      {issue.message}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
           </section>
 
           <section className="space-y-2">
