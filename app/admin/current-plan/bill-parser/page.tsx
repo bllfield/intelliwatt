@@ -107,6 +107,281 @@ function prettyJson(value: unknown): string {
   }
 }
 
+type SmtPreviewProps = {
+  parsed: ParsedCurrentPlanPayload;
+};
+
+function SmtAuthorizationPreview({ parsed }: SmtPreviewProps) {
+  const addressLines = [
+    parsed.serviceAddressLine1 ?? '',
+    parsed.serviceAddressLine2 ?? '',
+  ]
+    .filter((line) => line && line.trim().length > 0)
+    .join('\n');
+
+  const cityStateZip = [parsed.serviceAddressCity, parsed.serviceAddressState, parsed.serviceAddressZip]
+    .filter((part) => part && part.trim().length > 0)
+    .join(', ');
+
+  return (
+    <section className="p-4 rounded-2xl border space-y-3">
+      <h2 className="font-medium">SMT Authorization Form Preview</h2>
+      <p className="text-xs text-gray-600">
+        Read-only snapshot of the customer SMT form, prefilled from the parsed bill data. This does
+        not submit or call SMT – it is only for visual verification.
+      </p>
+
+      <div className="grid gap-3 rounded-lg border-2 border-brand-blue bg-brand-navy p-3 text-xs text-brand-cyan md:grid-cols-2">
+        <div className="space-y-1">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-brand-cyan">
+            Service Address on File
+          </div>
+          <div className="space-y-0.5 whitespace-pre-line">
+            <div>{addressLines || <span className="italic text-brand-cyan/70">Not available</span>}</div>
+            <div>{cityStateZip || <span className="italic text-brand-cyan/70">Not available</span>}</div>
+            <div>
+              <span className="font-semibold">ESIID · </span>
+              {parsed.esiid || <span className="italic text-brand-cyan/70">Not available</span>}
+            </div>
+            <div>
+              <span className="font-semibold">Utility · </span>
+              {parsed.tdspName || <span className="italic text-brand-cyan/70">Not available</span>}
+            </div>
+          </div>
+        </div>
+        <div className="space-y-1">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-brand-cyan">
+            Retail Electric Provider
+          </div>
+          <div className="space-y-0.5">
+            <div>
+              <span className="font-semibold">Provider · </span>
+              {parsed.providerName || <span className="italic text-brand-cyan/70">Not available</span>}
+            </div>
+            <div>
+              <span className="font-semibold">Customer name · </span>
+              {parsed.customerName || <span className="italic text-brand-cyan/70">Not available</span>}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="space-y-1 text-xs">
+          <label className="block font-semibold uppercase tracking-wide text-slate-800">
+            Name on electric bill
+          </label>
+          <input
+            type="text"
+            readOnly
+            value={parsed.customerName ?? ''}
+            className="w-full rounded-md border border-slate-300 bg-slate-100 px-2 py-1.5 text-xs text-slate-900"
+            placeholder="First and last name"
+          />
+        </div>
+        <div className="space-y-1 text-xs">
+          <label className="block font-semibold uppercase tracking-wide text-slate-800">
+            Meter number
+          </label>
+          <input
+            type="text"
+            readOnly
+            value={parsed.meterNumber ?? ''}
+            className="w-full rounded-md border border-slate-300 bg-slate-100 px-2 py-1.5 text-xs text-slate-900"
+            placeholder="Meter number from bill"
+          />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+type CurrentPlanPreviewProps = {
+  parsed: ParsedCurrentPlanPayload;
+};
+
+function CurrentPlanFormPreview({ parsed }: CurrentPlanPreviewProps) {
+  const normalizedRateType =
+    parsed.rateType === 'FIXED' ||
+    parsed.rateType === 'VARIABLE' ||
+    parsed.rateType === 'TIME_OF_USE'
+      ? parsed.rateType
+      : 'FIXED';
+
+  const baseFeeDollars =
+    typeof parsed.baseChargeCentsPerMonth === 'number'
+      ? (parsed.baseChargeCentsPerMonth / 100).toFixed(2)
+      : '';
+
+  const earlyTerminationDollars =
+    typeof parsed.earlyTerminationFeeCents === 'number'
+      ? (parsed.earlyTerminationFeeCents / 100).toFixed(2)
+      : '';
+
+  const termMonths = parsed.termMonths != null ? String(parsed.termMonths) : '';
+  const contractEndDate = parsed.contractEndDate
+    ? parsed.contractEndDate.slice(0, 10)
+    : '';
+
+  const esiid = parsed.esiid ?? '';
+  const accountLast4 =
+    parsed.accountNumber && parsed.accountNumber.length >= 4
+      ? parsed.accountNumber.slice(-4)
+      : '';
+
+  return (
+    <section className="p-4 rounded-2xl border space-y-3">
+      <h2 className="font-medium">Current Plan Form Preview</h2>
+      <p className="text-xs text-gray-600">
+        Read-only approximation of the customer Current Rate Details form, populated from the parsed
+        bill. This is a mirror of what the customer UI would use for auto-fill.
+      </p>
+
+      <div className="space-y-3">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="block space-y-1 text-xs text-brand-navy">
+            <span className="font-semibold uppercase tracking-wide text-brand-navy/80">
+              Electric company name
+            </span>
+            <input
+              type="text"
+              readOnly
+              value={parsed.providerName ?? ''}
+              className="w-full rounded-xl border border-slate-300 bg-slate-100 px-3 py-1.5 text-xs text-brand-navy"
+              placeholder="e.g., Sample Energy Co."
+            />
+          </label>
+          <label className="block space-y-1 text-xs text-brand-navy">
+            <span className="font-semibold uppercase tracking-wide text-brand-navy/80">
+              Plan name
+            </span>
+            <input
+              type="text"
+              readOnly
+              value={parsed.planName ?? ''}
+              className="w-full rounded-xl border border-slate-300 bg-slate-100 px-3 py-1.5 text-xs text-brand-navy"
+              placeholder="e.g., Free Nights &amp; Weekends 12"
+            />
+          </label>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-3">
+          <label className="block space-y-1 text-xs text-brand-navy">
+            <span className="font-semibold uppercase tracking-wide text-brand-navy/80">
+              Rate type
+            </span>
+            <select
+              value={normalizedRateType}
+              disabled
+              className="w-full rounded-xl border border-slate-300 bg-slate-100 px-3 py-1.5 text-xs text-brand-navy"
+            >
+              <option value="FIXED">Fixed rate</option>
+              <option value="VARIABLE">Variable / indexed rate</option>
+              <option value="TIME_OF_USE">Time-of-use</option>
+            </select>
+          </label>
+          <label className="block space-y-1 text-xs text-brand-navy">
+            <span className="font-semibold uppercase tracking-wide text-brand-navy/80">
+              Base monthly fee ($/month)
+            </span>
+            <input
+              type="text"
+              readOnly
+              value={baseFeeDollars}
+              className="w-full rounded-xl border border-slate-300 bg-slate-100 px-3 py-1.5 text-xs text-brand-navy"
+              placeholder="e.g., 4.95"
+            />
+          </label>
+          <label className="block space-y-1 text-xs text-brand-navy">
+            <span className="font-semibold uppercase tracking-wide text-brand-navy/80">
+              Term length (months)
+            </span>
+            <input
+              type="text"
+              readOnly
+              value={termMonths}
+              className="w-full rounded-xl border border-slate-300 bg-slate-100 px-3 py-1.5 text-xs text-brand-navy"
+              placeholder="e.g., 12"
+            />
+          </label>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-3">
+          <label className="block space-y-1 text-xs text-brand-navy">
+            <span className="font-semibold uppercase tracking-wide text-brand-navy/80">
+              Contract expiration date
+            </span>
+            <input
+              type="date"
+              readOnly
+              value={contractEndDate}
+              className="w-full rounded-xl border border-slate-300 bg-slate-100 px-3 py-1.5 text-xs text-brand-navy"
+            />
+          </label>
+          <label className="block space-y-1 text-xs text-brand-navy">
+            <span className="font-semibold uppercase tracking-wide text-brand-navy/80">
+              Early termination fee ($)
+            </span>
+            <input
+              type="text"
+              readOnly
+              value={earlyTerminationDollars}
+              className="w-full rounded-xl border border-slate-300 bg-slate-100 px-3 py-1.5 text-xs text-brand-navy"
+              placeholder="e.g., 150"
+            />
+          </label>
+          <label className="block space-y-1 text-xs text-brand-navy">
+            <span className="font-semibold uppercase tracking-wide text-brand-navy/80">
+              ESIID
+            </span>
+            <input
+              type="text"
+              readOnly
+              value={esiid}
+              className="w-full rounded-xl border border-slate-300 bg-slate-100 px-3 py-1.5 text-xs text-brand-navy"
+              placeholder="17- or 22-digit ID"
+            />
+          </label>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="block space-y-1 text-xs text-brand-navy">
+            <span className="font-semibold uppercase tracking-wide text-brand-navy/80">
+              Account number (last digits)
+            </span>
+            <input
+              type="text"
+              readOnly
+              value={accountLast4}
+              className="w-full rounded-xl border border-slate-300 bg-slate-100 px-3 py-1.5 text-xs text-brand-navy"
+              placeholder="Last 4 digits"
+            />
+          </label>
+          <label className="block space-y-1 text-xs text-brand-navy">
+            <span className="font-semibold uppercase tracking-wide text-brand-navy/80">
+              Time-of-use / credits flags
+            </span>
+            <div className="flex flex-wrap gap-2 text-xs">
+              <span className="inline-flex items-center rounded-full border border-slate-300 bg-slate-100 px-3 py-1">
+                TOU config: {parsed.timeOfUse ? 'present' : '—'}
+              </span>
+              <span className="inline-flex items-center rounded-full border border-slate-300 bg-slate-100 px-3 py-1">
+                Bill credits: {parsed.billCredits ? 'present' : '—'}
+              </span>
+              <span className="inline-flex items-center rounded-full border border-slate-300 bg-slate-100 px-3 py-1">
+                Energy tiers:{' '}
+                {Array.isArray(parsed.energyRateTiers)
+                  ? `${(parsed.energyRateTiers as unknown[]).length} tier(s)`
+                  : '—'}
+              </span>
+            </div>
+          </label>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export default function CurrentPlanBillParserAdmin() {
   const { token, setToken } = useAdminToken();
   const [rawText, setRawText] = useState('');
@@ -362,6 +637,13 @@ export default function CurrentPlanBillParserAdmin() {
           </pre>
         </div>
       </section>
+
+      {parsedPayload && (
+        <section className="grid md:grid-cols-2 gap-4">
+          <SmtAuthorizationPreview parsed={parsedPayload} />
+          <CurrentPlanFormPreview parsed={parsedPayload} />
+        </section>
+      )}
 
       <section className="p-4 rounded-2xl border space-y-3">
         <div className="flex items-center justify-between gap-3">
