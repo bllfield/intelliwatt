@@ -312,7 +312,7 @@ export async function POST(request: NextRequest) {
       billIssueDate: parsed.billIssueDate ? new Date(parsed.billIssueDate) : null,
       billDueDate: parsed.billDueDate ? new Date(parsed.billDueDate) : null,
       totalAmountDueCents: parsed.totalAmountDueCents,
-      parserVersion: process.env.OPENAI_API_KEY ? 'bill-text-v3-json' : 'bill-text-v1-regex',
+      parserVersion: process.env.OPENAI_IntelliWatt_Bill_Parcer ? 'bill-text-v3-json' : 'bill-text-v1-regex',
       confidenceScore: null,
     };
 
@@ -393,5 +393,4 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Failed to parse bill' }, { status: 500 });
   }
 }
-
 

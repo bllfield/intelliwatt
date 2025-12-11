@@ -58,14 +58,14 @@ export async function extractBillTextFromUpload(
   }
 
   if (fileType === 'image') {
-    if (!process.env.OPENAI_API_KEY) {
+    if (!process.env.OPENAI_IntelliWatt_Bill_Parcer) {
       // eslint-disable-next-line no-console
-      console.error('[bill-text] Missing OPENAI_API_KEY; cannot OCR image bill');
+      console.error('[bill-text] Missing OPENAI_IntelliWatt_Bill_Parcer; cannot OCR image bill');
       return '';
     }
 
     try {
-      const { openai } = await import('@/lib/ai/openai');
+      const { openaiBillParser } = await import('@/lib/ai/openaiBillParser');
       const base64 = billBuffer.toString('base64');
       const contentType =
         (anyUpload.mimeType as string | undefined) ??
@@ -74,7 +74,7 @@ export async function extractBillTextFromUpload(
 
       const dataUrl = `data:${contentType};base64,${base64}`;
 
-      const completion = await openai.chat.completions.create({
+      const completion = await openaiBillParser.chat.completions.create({
         model: 'gpt-4.1-mini',
         messages: [
           {

@@ -187,6 +187,15 @@ Notes:
 - Wired `/api/current-plan/init` to return both the latest manual plan (`savedCurrentPlan`) and the most recent parsed bill (`parsedCurrentPlan`) per house so the Current Rate form and SMT agreement flow can auto-fill ESIID, meter number, and service address.
 - Extended the manual entry API to accept a unified `RateStructure` object (fixed, variable/indexed, or time-of-use with tiers + bill credits) that normalizes into `NormalizedCurrentPlan.rateStructure` for side-by-side comparison against vendor offers.
 - Introduced an OpenAI-assisted bill parser (`extractCurrentPlanFromBillTextWithOpenAI` behind `/api/current-plan/bill-parse`) which augments the regex baseline with richer fields (rateType, contract dates, base charges, TOU periods, and bill credits) while falling back to regex-only behavior if the model or API is unavailable.
+- Upgraded the bill parser to **v3/v4**:
+  - Hardened the OpenAI call to use JSON mode (`response_format: "json_object"`) with numeric sanity guards and stronger prompts to fully populate time-of-use tiers, bill credits, and contract metadata.
+  - Added a `BillPlanTemplate` model in the Current Plan module DB so we only pay OpenAI once per unique provider+planName; subsequent bills for the same plan reuse stored contract fields and only keep bill-specific dates/totals from the regex baseline.
+  - Implemented `extractBillTextFromUpload` to convert uploaded bill bytes into plain text on the server:
+    - PDFs → parsed via `pdf-parse` with UTF-8 fallback.
+    - Images (JPG/PNG) → OCR via OpenAI vision with UTF-8 fallback.
+    - Text exports (`.txt`, `.csv`, `text/*`) → direct UTF-8 decode.
+  - Updated SMT and Current Plan bill-upload components to clearly accept PDF/JPG/PNG/TXT/CSV while keeping the admin dev harness conservative (it still only auto-loads `.txt` / `.csv` into its textarea).
+  - Isolated the bill parser onto its own OpenAI key env var: `OPENAI_IntelliWatt_Bill_Parcer`, wired through a dedicated `openaiBillParser` client used only by bill parsing and image OCR.
 
 ### Normalized Current Plan Dataset
 

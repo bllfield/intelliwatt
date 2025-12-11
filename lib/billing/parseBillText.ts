@@ -188,14 +188,14 @@ export async function extractCurrentPlanFromBillTextWithOpenAI(
   const baseline = extractCurrentPlanFromBillText(rawText, hints);
 
   // If there is no OpenAI key, just return baseline
-  if (!process.env.OPENAI_API_KEY) {
+  if (!process.env.OPENAI_IntelliWatt_Bill_Parcer) {
     return baseline;
   }
 
   let aiResult: OpenAIBillParseResult | null = null;
 
   try {
-    const { openai } = await import('@/lib/ai/openai');
+    const { openaiBillParser } = await import('@/lib/ai/openaiBillParser');
 
     const systemPrompt = `
 You are an expert at reading Texas residential electricity bills and extracting structured plan data.
@@ -315,7 +315,7 @@ ${hintSummary}
 Return ONLY a JSON object matching ParsedCurrentPlanPayload (no extra keys, no comments).
 `;
 
-    const completion = await openai.chat.completions.create({
+    const completion = await openaiBillParser.chat.completions.create({
       model: 'gpt-4.1-mini',
       messages: [
         { role: 'system', content: systemPrompt },
