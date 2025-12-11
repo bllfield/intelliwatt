@@ -1,11 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Buffer } from "node:buffer";
-import pdfParse from "pdf-parse";
 
 import { computePdfSha256, deterministicEflExtract } from "@/lib/efl/eflExtractor";
-import {
-  extractPlanRulesAndRateStructureFromEflText,
-} from "@/lib/efl/planAiExtractor";
+import { extractPlanRulesAndRateStructureFromEflText } from "@/lib/efl/planAiExtractor";
 
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 
@@ -133,8 +130,11 @@ export async function POST(req: NextRequest) {
     try {
       // Deterministic extract: PDF bytes → cleaned text + identity metadata
       const extract = await deterministicEflExtract(pdfBytes, async (bytes) => {
-        const result = await pdfParse(Buffer.from(bytes));
-        return result.text || "";
+        const pdfParseModule = await import("pdf-parse");
+        const pdfParseFn: any =
+          (pdfParseModule as any).default || (pdfParseModule as any);
+        const result = await pdfParseFn(Buffer.from(bytes));
+        return result?.text || "";
       });
 
       cleanedText = extract.rawText;
