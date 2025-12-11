@@ -181,6 +181,13 @@ Notes:
 - Module DB: `intelliwatt_current_plan` (via `CURRENT_PLAN_DATABASE_URL`) managed exclusively through `prisma/current-plan/schema.prisma` and the `prisma/current-plan/migrations` folder.
 - Module migrations: Baseline (`20251128232427_init_current_plan_module`) created and applied to dev; production deploy uses `npx prisma migrate deploy --schema=prisma/current-plan/schema.prisma`.
 
+#### 2025-12 Current Plan Enhancements
+
+- Added `ParsedCurrentPlan` module-model plus `/api/current-plan/bill-parse` so uploaded bills can be parsed into structured plan metadata (ESIID, meter number, address, basic pricing fields) and stored alongside manual entries.
+- Wired `/api/current-plan/init` to return both the latest manual plan (`savedCurrentPlan`) and the most recent parsed bill (`parsedCurrentPlan`) per house so the Current Rate form and SMT agreement flow can auto-fill ESIID, meter number, and service address.
+- Extended the manual entry API to accept a unified `RateStructure` object (fixed, variable/indexed, or time-of-use with tiers + bill credits) that normalizes into `NormalizedCurrentPlan.rateStructure` for side-by-side comparison against vendor offers.
+- Introduced an OpenAI-assisted bill parser (`extractCurrentPlanFromBillTextWithOpenAI` behind `/api/current-plan/bill-parse`) which augments the regex baseline with richer fields (rateType, contract dates, base charges, TOU periods, and bill credits) while falling back to regex-only behavior if the model or API is unavailable.
+
 ### Normalized Current Plan Dataset
 
 - Master schema now includes the `NormalizedCurrentPlan` model storing normalized snapshots of each user's current rate structure (tiers, TOU bands, bill credits) sourced from the module DB.
@@ -268,6 +275,7 @@ Notes:
 - Manual usage normalization remains queued; once implemented it will plug into the same endpoint so the promotion logic (latest source wins) continues to hold.
 - Added `/admin/usage` Usage Test Console so Ops can run SMT + Green Button upload tests, monitor latest intervals/raw files, and review consolidated debugging output (leverages `/api/admin/usage/debug` + existing Green Button records endpoint).
 - Added customer-facing refresh actions: `/dashboard/api` now exposes a `Refresh SMT Data` control (POST `/api/smt/authorization/status` + `/api/user/usage/refresh`) and `/dashboard/usage` includes `Update usage data`, wiring both pages into the on-demand normalization pipeline so stale SMT intervals can be rehydrated instantly.
+- Daily usage bucketing in `/api/user/usage` now aligns to America/Chicago (Texas local time) so 365-day charts use 12:00am–11:59pm Central days and match SMT’s own dashboard more closely.
 
 ## PC-2025-12-09 · SMT Ingest Defaults & ESIID Extraction
 
