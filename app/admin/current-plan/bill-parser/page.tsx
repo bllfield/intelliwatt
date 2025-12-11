@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, ChangeEvent } from 'react';
 import type { ParsedCurrentPlanPayload as ParsedCurrentPlanPayloadBase } from '@/lib/billing/parseBillText';
 
 type ParsedCurrentPlanPayload = ParsedCurrentPlanPayloadBase;
@@ -360,6 +360,9 @@ function CurrentPlanFormPreview({ parsed }: CurrentPlanPreviewProps) {
 export default function CurrentPlanBillParserAdmin() {
   const { token, setToken } = useAdminToken();
   const [rawText, setRawText] = useState('');
+  const [fileName, setFileName] = useState<string | null>(null);
+  const [fileLoading, setFileLoading] = useState(false);
+  const [fileError, setFileError] = useState<string | null>(null);
   const [esiidHint, setEsiidHint] = useState('');
   const [addressHint, setAddressHint] = useState('');
   const [cityHint, setCityHint] = useState('');
@@ -375,6 +378,33 @@ export default function CurrentPlanBillParserAdmin() {
   const [templates, setTemplates] = useState<TemplateRow[]>([]);
 
   const ready = useMemo(() => Boolean(token.trim()), [token]);
+
+  async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    setFileError(null);
+    setFileName(file.name);
+    setFileLoading(true);
+
+    try {
+      // Best-effort: read file as UTF-8 text. This works well for .txt exports;
+      // for PDFs/images, admins should still prefer copying bill text into the textarea.
+      const text = await file.text();
+      setRawText(text);
+    } catch (err: any) {
+      // eslint-disable-next-line no-console
+      console.error('[admin/bill-parser] failed to read file as text', err);
+      setFileError(
+        err?.message ??
+          'Failed to read file as text. For PDFs or images, copy/paste the bill text into the textarea.',
+      );
+    } finally {
+      setFileLoading(false);
+    }
+  }
 
   async function runParse() {
     if (!token.trim()) {
@@ -559,6 +589,34 @@ export default function CurrentPlanBillParserAdmin() {
           >
             {parseLoading ? 'Parsing…' : 'Run bill parser'}
           </button>
+        </div>
+        <div className="space-y-2">
+          <label className="block text-sm font-medium text-gray-800">
+            Upload bill file (optional)
+          </label>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <input
+              type="file"
+              accept="text/plain,application/pdf,image/*"
+              onChange={handleFileChange}
+              className="text-sm"
+            />
+            {fileName && (
+              <span className="text-xs text-gray-600">
+                Selected: {fileName}
+                {fileLoading ? ' (reading…) ' : ''}
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-gray-500">
+            This helper reads the file as plain text. For scanned PDFs or photos, it’s usually more
+            reliable to copy/paste the bill text into the textarea below.
+          </p>
+          {fileError && (
+            <div className="mt-1 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              {fileError}
+            </div>
+          )}
         </div>
         <p className="text-sm text-gray-600">
           Paste the raw text of a residential bill below. The admin endpoint will run the same
