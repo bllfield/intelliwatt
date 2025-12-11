@@ -397,6 +397,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       ok: true,
       parsedPlan: serializedParsedPlan,
+      eflVersionCode: parsed.eflVersionCode ?? null,
       warnings: [],
     });
   } catch (error) {

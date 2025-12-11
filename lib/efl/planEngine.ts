@@ -189,6 +189,15 @@ export interface RateStructureBillCredits {
   rules: RateStructureBillCreditRule[];
 }
 
+export interface RateStructureUsageTier {
+  /** Inclusive lower bound for this tier, in kWh (e.g. 0, 1000). */
+  minKWh: number;
+  /** Exclusive upper bound for this tier in kWh, or null/undefined for "no upper limit". */
+  maxKWh?: number | null;
+  /** Energy rate for this band, in integer cents/kWh. */
+  centsPerKWh: number;
+}
+
 export interface RateStructureTimeOfUseTier {
   label: string;
   priceCents: number;
@@ -204,6 +213,13 @@ export interface BaseRateStructure {
   type: RateType;
   baseMonthlyFeeCents?: number;
   billCredits?: RateStructureBillCredits | null;
+  /**
+   * Optional supplier-side kWh-based pricing tiers. When present, engines that
+   * understand tiered pricing should use these bands instead of flattening to a
+   * single blended rate. Callers that do not support tiers yet may continue to
+   * rely on the legacy headline fields (e.g. energyRateCents) for display only.
+   */
+  usageTiers?: RateStructureUsageTier[] | null;
 }
 
 export interface FixedRateStructure extends BaseRateStructure {
@@ -385,13 +401,14 @@ export function validatePlanRules(plan: PlanRules): PlanRulesValidationResult {
   }
 
   // kWh tiered pricing: captured for completeness, but the rate engine does not
-  // yet support kWh-based usage tiers. Any presence of usageTiers requires
-  // manual review so we do not flatten tiers into fake defaults.
+  // yet fully support kWh-based usage tiers. We allow them as a first-class
+  // structure and emit a WARNING so they show up in diagnostics without
+  // forcing manual review.
   if (Array.isArray(plan.usageTiers) && plan.usageTiers.length > 0) {
     addIssue(
       "USAGE_TIERS_REQUIRE_MANUAL_REVIEW",
-      "Plan has kWh-based usage tiers; engine support is not implemented yet. Manual inspection required.",
-      "ERROR",
+      "Plan has kWh-based usage tiers; engines that do not understand tiers should avoid flattening them into a single fake rate.",
+      "WARNING",
     );
   }
 
@@ -411,6 +428,37 @@ export function validatePlanRules(plan: PlanRules): PlanRulesValidationResult {
 export function planRulesToRateStructure(plan: PlanRules): RateStructure {
   const baseMonthlyFeeCents = plan.baseChargePerMonthCents ?? undefined;
   const billCredits = mapBillCreditsToRateStructure(plan.billCredits);
+
+  const usageTiers: RateStructureUsageTier[] | null =
+    Array.isArray(plan.usageTiers) && plan.usageTiers.length > 0
+      ? plan.usageTiers
+          .map((tier) => {
+            if (
+              tier == null ||
+              typeof tier.minKwh !== "number" ||
+              typeof tier.rateCentsPerKwh !== "number"
+            ) {
+              return null;
+            }
+            if (!Number.isFinite(tier.minKwh) || !Number.isFinite(tier.rateCentsPerKwh)) {
+              return null;
+            }
+            const max =
+              tier.maxKwh == null || !Number.isFinite(tier.maxKwh)
+                ? null
+                : tier.maxKwh;
+
+            return {
+              minKWh: tier.minKwh,
+              maxKWh: max,
+              centsPerKWh: Math.round(tier.rateCentsPerKwh),
+            } as RateStructureUsageTier;
+          })
+          .filter(
+            (t): t is RateStructureUsageTier =>
+              t !== null,
+          )
+      : null;
 
   const hasTou = Array.isArray(plan.timeOfUsePeriods) && plan.timeOfUsePeriods.length > 0;
 
@@ -444,6 +492,7 @@ export function planRulesToRateStructure(plan: PlanRules): RateStructure {
       type: "TIME_OF_USE",
       baseMonthlyFeeCents,
       billCredits,
+      usageTiers,
       tiers,
     };
   }
@@ -462,6 +511,7 @@ export function planRulesToRateStructure(plan: PlanRules): RateStructure {
     energyRateCents,
     baseMonthlyFeeCents,
     billCredits,
+    usageTiers,
   };
 
   return fixedStructure;

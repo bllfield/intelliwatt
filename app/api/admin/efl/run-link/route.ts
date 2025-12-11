@@ -27,6 +27,7 @@ type RunLinkSuccess = {
   rateStructure?: unknown;
   parseConfidence?: number;
   parseWarnings?: string[];
+  eflVersionCode?: string | null;
 };
 
 type RunLinkError = {
@@ -128,6 +129,7 @@ export async function POST(req: NextRequest) {
     let parseConfidence: number | undefined;
     let parseWarnings: string[] | undefined;
     let validation: unknown;
+    let eflVersionCode: string | null = null;
 
     try {
       // Deterministic extract: PDF bytes → cleaned text + identity metadata
@@ -140,6 +142,7 @@ export async function POST(req: NextRequest) {
       });
 
       cleanedText = extract.rawText;
+      eflVersionCode = extract.eflVersionCode ?? null;
 
       // AI extraction: EFL text → PlanRules + RateStructure
       const aiResult = await extractPlanRulesAndRateStructureFromEflText({
@@ -216,6 +219,7 @@ export async function POST(req: NextRequest) {
       rateStructure,
       parseConfidence,
       parseWarnings,
+      eflVersionCode,
     };
 
     return NextResponse.json(payload, { status: 200 });

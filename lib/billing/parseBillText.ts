@@ -27,6 +27,8 @@ export type BillCredits = {
   rules: BillCreditRule[];
 };
 
+const EFL_VERSION_REGEX = /\bVer\.?\s*#?\s*([A-Za-z0-9][A-Za-z0-9.\-_/]*)\b/i;
+
 export type ParsedCurrentPlanPayload = {
   // Identification / account
   esiid: string | null;
@@ -66,6 +68,9 @@ export type ParsedCurrentPlanPayload = {
   billIssueDate: string | null;
   billDueDate: string | null;
   totalAmountDueCents: number | null;
+
+  // Optional EFL version code (e.g., "Ver. #12345") when the bill text clearly includes it.
+  eflVersionCode: string | null;
 
   // For debugging / re-parsing
   rawText: string;
@@ -124,6 +129,13 @@ export function extractCurrentPlanFromBillText(
   // TODO: add smarter parsing for tdspName, planName, TOU windows, bill credits, etc.
   // For now, we return nulls/placeholders so the form can still autofill what we do know.
 
+  // Best-effort extraction of an EFL version code when the bill includes a "Ver." identifier.
+  let eflVersionCode: string | null = null;
+  const verMatch = text.match(EFL_VERSION_REGEX);
+  if (verMatch && verMatch[1]) {
+    eflVersionCode = verMatch[1].trim();
+  }
+
   const payload: ParsedCurrentPlanPayload = {
     esiid,
     meterNumber,
@@ -162,6 +174,7 @@ export function extractCurrentPlanFromBillText(
     totalAmountDueCents: null,
 
     rawText,
+    eflVersionCode,
   };
 
   return payload;
@@ -246,42 +259,45 @@ type BillCredits = {
   rules: BillCreditRule[];
 };
 
-type ParsedCurrentPlanPayload = {
-  esiid: string | null;
-  meterNumber: string | null;
-  providerName: string | null;
-  tdspName: string | null;
-  accountNumber: string | null;
+                type ParsedCurrentPlanPayload = {
+                esiid: string | null;
+                meterNumber: string | null;
+                providerName: string | null;
+                tdspName: string | null;
+                accountNumber: string | null;
 
-  customerName: string | null;
-  serviceAddressLine1: string | null;
-  serviceAddressLine2: string | null;
-  serviceAddressCity: string | null;
-  serviceAddressState: string | null;
-  serviceAddressZip: string | null;
+                customerName: string | null;
+                serviceAddressLine1: string | null;
+                serviceAddressLine2: string | null;
+                serviceAddressCity: string | null;
+                serviceAddressState: string | null;
+                serviceAddressZip: string | null;
 
-  rateType: 'FIXED' | 'VARIABLE' | 'TIME_OF_USE' | 'OTHER' | null;
-  variableIndexType: 'ERCOT' | 'FUEL' | 'OTHER' | null;
-  planName: string | null;
-  termMonths: number | null;
-  contractStartDate: string | null;  // ISO date
-  contractEndDate: string | null;
-  earlyTerminationFeeCents: number | null;
+                rateType: 'FIXED' | 'VARIABLE' | 'TIME_OF_USE' | 'OTHER' | null;
+                variableIndexType: 'ERCOT' | 'FUEL' | 'OTHER' | null;
+                planName: string | null;
+                termMonths: number | null;
+                contractStartDate: string | null;  // ISO date
+                contractEndDate: string | null;
+                earlyTerminationFeeCents: number | null;
 
-  baseChargeCentsPerMonth: number | null;
-  energyRateTiers: EnergyRateTier[];
+                baseChargeCentsPerMonth: number | null;
+                energyRateTiers: EnergyRateTier[];
 
-  timeOfUse: TimeOfUseConfig | null;
-  billCredits: BillCredits;
+                timeOfUse: TimeOfUseConfig | null;
+                billCredits: BillCredits;
 
-  billingPeriodStart: string | null;
-  billingPeriodEnd: string | null;
-  billIssueDate: string | null;
-  billDueDate: string | null;
-  totalAmountDueCents: number | null;
+                billingPeriodStart: string | null;
+                billingPeriodEnd: string | null;
+                billIssueDate: string | null;
+                billDueDate: string | null;
+                totalAmountDueCents: number | null;
 
-  rawText: string;
-};
+                // Optional EFL version code when the bill text clearly includes a "Ver." identifier.
+                eflVersionCode: string | null;
+
+                rawText: string;
+                };
 
 Rules:
 - If a field is clearly present, you MUST fill it.
@@ -458,6 +474,10 @@ Return ONLY a JSON object matching ParsedCurrentPlanPayload (no extra keys, no c
     billDueDate: prefer(baseline.billDueDate, aiResult.billDueDate) ?? null,
     totalAmountDueCents:
       prefer(baseline.totalAmountDueCents, aiResult.totalAmountDueCents) ?? null,
+
+    // EFL version code (if any) is carried forward from either baseline or AI.
+    eflVersionCode:
+      prefer(baseline.eflVersionCode, aiResult.eflVersionCode) ?? null,
 
     // always keep rawText from baseline
     rawText: baseline.rawText,
