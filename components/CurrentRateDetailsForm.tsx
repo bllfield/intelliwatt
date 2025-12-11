@@ -800,6 +800,21 @@ export function CurrentRateDetailsForm({
           : "✓ Bill pages uploaded and saved securely.";
         setUploadStatus(message);
       }
+
+      // After a successful upload, run the bill parser so parsedCurrentPlan is
+      // populated for this user/house, then refresh the form from the result.
+      try {
+        await fetch("/api/current-plan/bill-parse", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          // houseId is optional here; the API will fall back to the latest
+          // uploaded bill for this user when none is provided.
+          body: JSON.stringify({}),
+        });
+      } catch {
+        // Best-effort; upload success is still valuable even if parsing fails.
+      }
+
       await refreshPlan();
       return true;
     } catch (error) {

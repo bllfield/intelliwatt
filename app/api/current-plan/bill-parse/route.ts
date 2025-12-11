@@ -102,20 +102,21 @@ export async function POST(request: NextRequest) {
         ? houseIdRaw.trim()
         : null;
 
-    if (!houseId) {
-      return NextResponse.json({ error: 'houseId is required' }, { status: 400 });
-    }
+    // If a houseId is provided, verify ownership. For flows that do not yet have
+    // a resolved house (e.g., initial current-plan dashboard uploads), we allow
+    // houseId to be null and rely solely on the authenticated user.
+    if (houseId) {
+      const ownsHouse = await prisma.houseAddress.findFirst({
+        where: { id: houseId, userId: user.id },
+        select: { id: true },
+      });
 
-    const ownsHouse = await prisma.houseAddress.findFirst({
-      where: { id: houseId, userId: user.id },
-      select: { id: true },
-    });
-
-    if (!ownsHouse) {
-      return NextResponse.json(
-        { error: 'houseId does not belong to the current user' },
-        { status: 403 },
-      );
+      if (!ownsHouse) {
+        return NextResponse.json(
+          { error: 'houseId does not belong to the current user' },
+          { status: 403 },
+        );
+      }
     }
 
     const currentPlanPrisma = getCurrentPlanPrisma();
@@ -129,14 +130,21 @@ export async function POST(request: NextRequest) {
 
       if (uploadIdRaw && typeof uploadIdRaw === 'string' && uploadIdRaw.trim().length > 0) {
         uploadRecord = await billDelegate.findFirst({
-          where: { id: uploadIdRaw.trim(), userId: user.id, houseId },
+          where: {
+            id: uploadIdRaw.trim(),
+            userId: user.id,
+            ...(houseId ? { houseId } : {}),
+          },
           select: { id: true, filename: true, mimeType: true, billData: true },
         });
       }
 
       if (!uploadRecord) {
         uploadRecord = await billDelegate.findFirst({
-          where: { userId: user.id, houseId },
+          where: {
+            userId: user.id,
+            ...(houseId ? { houseId } : {}),
+          },
           orderBy: { uploadedAt: 'desc' },
           select: { id: true, filename: true, mimeType: true, billData: true },
         });
@@ -144,7 +152,10 @@ export async function POST(request: NextRequest) {
 
       if (!uploadRecord) {
         return NextResponse.json(
-          { error: 'No uploaded bill found for this house. Upload a bill first.' },
+          {
+            error:
+              'No uploaded bill found for this account. Upload a PDF on the dashboard first or paste the bill text.',
+          },
           { status: 404 },
         );
       }
