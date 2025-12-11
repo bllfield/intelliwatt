@@ -114,6 +114,15 @@ async function extractPdfTextWithFallback(
     return ratio < 0.6;
   }
 
+  // Ensure DOMMatrix polyfill is available before any pdf.js-based work,
+  // including the internal pdf.js that pdf-parse relies on.
+  if (typeof (globalThis as any).DOMMatrix === "undefined") {
+    (globalThis as any).DOMMatrix = class DOMMatrixPolyfill {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      constructor(..._args: any[]) {}
+    } as any;
+  }
+
   // --- Primary: pdf-parse ---
   let primaryText = "";
   try {
@@ -147,16 +156,6 @@ async function extractPdfTextWithFallback(
 
   // --- Fallback: pdfjs-dist text extraction ---
   try {
-    // Some pdf.js builds expect a DOMMatrix global, which is not available in the
-    // Node.js runtime used by our API routes. Provide a minimal no-op polyfill
-    // so text extraction can proceed without crashing.
-    if (typeof (globalThis as any).DOMMatrix === "undefined") {
-      (globalThis as any).DOMMatrix = class DOMMatrixPolyfill {
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        constructor(..._args: any[]) {}
-      } as any;
-    }
-
     // Dynamically import the legacy pdf.js build only when needed so that
     // routes that never hit this fallback do not pay the cost or risk
     // module initialization issues at load time.
@@ -164,8 +163,13 @@ async function extractPdfTextWithFallback(
     // @ts-ignore - pdfjs-dist legacy build has no bundled types for this entry
     const pdfjsLib: any = await import("pdfjs-dist/legacy/build/pdf");
 
+    const uint8 =
+      pdfBytes instanceof Uint8Array
+        ? pdfBytes
+        : new Uint8Array(Buffer.isBuffer(pdfBytes) ? pdfBytes : Buffer.from(pdfBytes));
+
     const loadingTask = pdfjsLib.getDocument({
-      data: Buffer.isBuffer(pdfBytes) ? pdfBytes : Buffer.from(pdfBytes),
+      data: uint8,
     });
 
     const doc = await loadingTask.promise;
