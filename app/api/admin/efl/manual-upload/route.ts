@@ -49,8 +49,41 @@ export async function POST(req: NextRequest) {
       return Buffer.from(bytes).toString("utf8");
     });
 
+    const rawText = extract.rawText ?? "";
+
+    // Heuristic: if the "text" we got back still looks like raw PDF bytes
+    // (e.g. starts with %PDF- and/or has a very low ratio of printable
+    // characters), treat this as a hard text-extraction failure instead of
+    // feeding binary junk into the AI parser.
+    const looksLikePdfHeader = rawText.startsWith("%PDF-");
+    let printableRatio = 1;
+    if (rawText.length > 0) {
+      let printableCount = 0;
+      for (let i = 0; i < rawText.length; i++) {
+        const code = rawText.charCodeAt(i);
+        // Treat ASCII whitespace + visible ASCII as "printable".
+        const isPrintable =
+          code === 9 || code === 10 || code === 13 || (code >= 32 && code <= 126);
+        if (isPrintable) {
+          printableCount++;
+        }
+      }
+      printableRatio = printableCount / rawText.length;
+    }
+
+    const looksBinaryOrCorrupt = looksLikePdfHeader || printableRatio < 0.4;
+
+    if (looksBinaryOrCorrupt) {
+      extract.warnings.push(
+        "PDF text extraction appears to have failed (content looks binary or non-text). " +
+          "This EFL cannot be parsed automatically; please paste the EFL text using the Manual Text tab.",
+      );
+    }
+
     const prompt = buildPlanRulesExtractionPrompt({
-      rawText: extract.rawText,
+      rawText: looksBinaryOrCorrupt
+        ? "[[PDF text extraction failed; content appears to be binary or unsupported. No readable EFL text is available.]]"
+        : rawText,
       repPuctCertificate: extract.repPuctCertificate,
       eflVersionCode: extract.eflVersionCode,
       eflPdfSha256: extract.eflPdfSha256,
@@ -67,39 +100,47 @@ export async function POST(req: NextRequest) {
     let parseWarnings: string[] | undefined;
     let validation: unknown;
 
-    try {
-      const aiResult = await extractPlanRulesAndRateStructureFromEflText({
-        input: {
-          rawText: extract.rawText,
-          repPuctCertificate: extract.repPuctCertificate,
-          eflVersionCode: extract.eflVersionCode,
-          eflPdfSha256: extract.eflPdfSha256,
-          warnings: extract.warnings,
-        },
-      });
+    if (!looksBinaryOrCorrupt) {
+      try {
+        const aiResult = await extractPlanRulesAndRateStructureFromEflText({
+          input: {
+            rawText,
+            repPuctCertificate: extract.repPuctCertificate,
+            eflVersionCode: extract.eflVersionCode,
+            eflPdfSha256: extract.eflPdfSha256,
+            warnings: extract.warnings,
+          },
+        });
 
-      planRules = aiResult.planRules ?? null;
-      rateStructure = aiResult.rateStructure ?? null;
-      parseConfidence = aiResult.meta.parseConfidence;
-      parseWarnings = aiResult.meta.parseWarnings;
-      validation = aiResult.meta.validation ?? null;
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error(
-        "[EFL_MANUAL_UPLOAD] AI PlanRules extraction failed; continuing with deterministic preview only",
-        err,
-      );
-      // Surface a user-visible warning without failing the request.
-      if (Array.isArray(extract.warnings)) {
-        extract.warnings.push(
-          err instanceof Error
-            ? `AI PlanRules extract failed: ${err.message}`
-            : "AI PlanRules extract failed.",
+        planRules = aiResult.planRules ?? null;
+        rateStructure = aiResult.rateStructure ?? null;
+        parseConfidence = aiResult.meta.parseConfidence;
+        parseWarnings = aiResult.meta.parseWarnings;
+        validation = aiResult.meta.validation ?? null;
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error(
+          "[EFL_MANUAL_UPLOAD] AI PlanRules extraction failed; continuing with deterministic preview only",
+          err,
         );
+        // Surface a user-visible warning
+        if (Array.isArray(extract.warnings)) {
+          extract.warnings.push(
+            err instanceof Error
+              ? `AI PlanRules extract failed: ${err.message}`
+              : "AI PlanRules extract failed.",
+          );
+        }
       }
+    } else {
+      // Binary/corrupt text: don't even call the AI, just surface a clear failure.
+      parseConfidence = 0;
+      parseWarnings = [
+        "Skipped AI PlanRules extract because PDF text extraction failed and produced non-text/binary content.",
+      ];
+      validation = null;
     }
 
-    const rawText = extract.rawText ?? "";
     const rawTextTruncated = rawText.length > MAX_PREVIEW_CHARS;
     const rawTextPreview = rawTextTruncated
       ? rawText.slice(0, MAX_PREVIEW_CHARS)
