@@ -72,10 +72,28 @@ export interface SolarBuybackConfig {
  * represented by multiple rules.
  */
 export interface BillCreditRule {
-  /** Usage threshold in kWh over a billing cycle. */
-  thresholdKwh: number;
-  /** Fixed credit (positive number) applied once when the threshold is met. */
+  /**
+   * Human-friendly label from the EFL, e.g. "Usage Credit ≥1000 kWh",
+   * "AutoPay + Paperless", etc.
+   */
+  label: string;
+  /** Fixed credit (positive number) applied once when the rule is satisfied. */
   creditDollars: number;
+  /**
+   * Optional usage threshold in kWh over a billing cycle. For purely
+   * behavioral credits (e.g. AutoPay + Paperless) this may be null.
+   */
+  thresholdKwh?: number | null;
+  /**
+   * Optional list of months (1–12) where this credit applies. Omit/empty =
+   * all months.
+   */
+  monthsOfYear?: number[];
+  /**
+   * High-level classification of the credit rule. This is descriptive only;
+   * pricing engines and RateStructure mapping can choose how to interpret it.
+   */
+  type?: "USAGE_THRESHOLD" | "BEHAVIOR" | "OTHER";
 }
 
 /**
@@ -105,6 +123,33 @@ export interface PlanRules {
   solarBuyback: SolarBuybackConfig | null;
   /** EFL-defined bill credits / minimum-usage rules. */
   billCredits: BillCreditRule[];
+  /**
+   * Optional rate type classification aligned with the shared RateStructure
+   * contract. This is descriptive only on the EFL side for now.
+   */
+  rateType?: RateType;
+  /**
+   * For VARIABLE plans, describes the explicit index type when stated on the
+   * EFL (e.g. ERCOT hub, fuel, other).
+   */
+  variableIndexType?: "ERCOT" | "FUEL" | "OTHER";
+  /**
+   * If the EFL lists the current bill's energy rate for a VARIABLE plan,
+   * capture it here in cents/kWh.
+   */
+  currentBillEnergyRateCents?: number | null;
+  /**
+   * Optional kWh-based pricing tiers (e.g., 0–1000 kWh at X¢, >1000 at Y¢).
+   * These describe supplier-side energy charge tiers only (not TDSP tiers).
+   */
+  usageTiers?: Array<{
+    /** Inclusive lower bound for this tier, e.g. 0, 1000. */
+    minKwh: number;
+    /** Exclusive upper bound for this tier, or null for "no upper limit". */
+    maxKwh: number | null;
+    /** Energy rate in integer cents/kWh for this band. */
+    rateCentsPerKwh: number;
+  }>;
 }
 
 export type PlanRulesValidationSeverity = "ERROR" | "WARNING";
@@ -230,18 +275,31 @@ function mapBillCreditsToRateStructure(
     .map((rule, idx) => {
       if (
         !rule ||
-        typeof rule.thresholdKwh !== "number" ||
-        rule.thresholdKwh < 0 ||
         typeof rule.creditDollars !== "number" ||
         rule.creditDollars <= 0
       ) {
         return null;
       }
 
+      const threshold =
+        rule.thresholdKwh == null ? 0 : rule.thresholdKwh;
+      if (!Number.isFinite(threshold) || threshold < 0) {
+        return null;
+      }
+
+      const label =
+        rule.label && rule.label.trim().length > 0
+          ? rule.label.trim()
+          : `Bill credit ${idx + 1}`;
+
       return {
-        label: `Bill credit ${idx + 1}`,
+        label,
         creditAmountCents: Math.round(rule.creditDollars * 100),
-        minUsageKWh: rule.thresholdKwh,
+        minUsageKWh: threshold,
+        ...(Array.isArray(rule.monthsOfYear) &&
+        rule.monthsOfYear.length > 0
+          ? { monthsOfYear: rule.monthsOfYear }
+          : {}),
       };
     })
     .filter(
@@ -324,6 +382,17 @@ export function validatePlanRules(plan: PlanRules): PlanRulesValidationResult {
         "WARNING",
       );
     }
+  }
+
+  // kWh tiered pricing: captured for completeness, but the rate engine does not
+  // yet support kWh-based usage tiers. Any presence of usageTiers requires
+  // manual review so we do not flatten tiers into fake defaults.
+  if (Array.isArray(plan.usageTiers) && plan.usageTiers.length > 0) {
+    addIssue(
+      "USAGE_TIERS_REQUIRE_MANUAL_REVIEW",
+      "Plan has kWh-based usage tiers; engine support is not implemented yet. Manual inspection required.",
+      "ERROR",
+    );
   }
 
   const hasError = issues.some((i) => i.severity === "ERROR");

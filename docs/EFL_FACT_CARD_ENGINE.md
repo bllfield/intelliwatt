@@ -172,27 +172,42 @@ This section defines the **logical** shape of `PlanRules`. Actual TypeScript typ
   - Energy charge in cents/kWh when no specific TOU band applies.  
 - `baseChargePerMonthCents` (number | null)  
   - Recurring base charge from the EFL (REP portion only).  
+- `rateType` (`"FIXED"` | `"VARIABLE"` | `"TIME_OF_USE"` | null)  
+  - High-level rate classification aligned with the shared `RateStructure` contract.  
+- `variableIndexType` (`"ERCOT"` | `"FUEL"` | `"OTHER"` | null)  
+  - For VARIABLE plans, captures the explicit index type when the EFL names it.  
+- `currentBillEnergyRateCents` (number | null)  
+  - For VARIABLE plans, the current bill’s energy rate in cents/kWh when clearly stated.  
 - `timeOfUsePeriods` (array)  
   - Each entry describes a labeled window (e.g., `Free Nights`) with:  
-    - `label` (string)  
-    - `startHour` (number, 0–23, local)  
-    - `endHour` (number, 0–23, local, can cross midnight)  
-    - `daysOfWeek` (array of 0–6, Sunday–Saturday)  
-    - `months` (optional array of 1–12)  
-    - `rateCentsPerKwh` (number | null)  
-    - `isFree` (boolean)  
+  - `label` (string)  
+  - `startHour` (number, 0–23, local)  
+  - `endHour` (number, 0–23, local, can cross midnight)  
+  - `daysOfWeek` (array of 0–6, Sunday–Saturday)  
+  - `months` (optional array of 1–12)  
+  - `rateCentsPerKwh` (number | null)  
+  - `isFree` (boolean)  
+- `usageTiers` (array, optional)  
+  - Captures supplier-side kWh-based energy charge tiers (not TDSP tiers):  
+  - `minKwh` (number) — inclusive lower kWh bound for the tier.  
+  - `maxKwh` (number | null) — exclusive upper bound, or `null` for “no upper limit”.  
+  - `rateCentsPerKwh` (number) — energy rate in integer cents/kWh for the band.  
+  - **Note:** Presence of `usageTiers` currently forces manual review; the engine does not yet flatten kWh tiers into a single rate.  
 - `solarBuyback` (object | null)  
   - Fields (if EFL / DG rider defines DG rules):  
-    - `hasBuyback` (boolean)  
-    - `creditCentsPerKwh` (number | null)  
-    - `matchesImportRate` (boolean | null)  
-    - `maxMonthlyExportKwh` (number | null)  
-    - `notes` (string | null).  
+  - `hasBuyback` (boolean)  
+  - `creditCentsPerKwh` (number | null)  
+  - `matchesImportRate` (boolean | null)  
+  - `maxMonthlyExportKwh` (number | null)  
+  - `notes` (string | null).  
 - `billCredits` (array)  
   - Captures bill credit/minimum usage structures that the EFL explicitly states.  
   - Each rule will include:  
-    - `thresholdKwh` (number)  
-    - `creditDollars` (number).  
+  - `label` (string) — human-readable description, e.g. `"Usage Credit ≥1000 kWh"` or `"AutoPay + Paperless"`.  
+  - `creditDollars` (number) — positive credit amount in dollars.  
+  - `thresholdKwh` (number | null) — minimum usage in kWh to qualify (0 or `null` for non-usage credits).  
+  - `monthsOfYear` (array of 1–12, optional) — seasonality when explicitly stated.  
+  - `type` (`"USAGE_THRESHOLD"` | `"BEHAVIOR"` | `"OTHER"` | null) — high-level classification for downstream tools.  
 
 These field names are intended to be used directly in:
 

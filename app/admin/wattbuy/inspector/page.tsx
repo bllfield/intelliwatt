@@ -36,6 +36,8 @@ export default function WattBuyInspector() {
   const [state, setState] = useState('tx'); // lowercase per spec
   const [zip, setZip] = useState('76116');
   const [utilityID, setUtilityID] = useState('44372'); // Oncor
+  const [wattkey, setWattkey] = useState('');
+  const [probeMode, setProbeMode] = useState<'test' | 'live'>('test');
   const [result, setResult] = useState<InspectResult | null>(null);
   const [raw, setRaw] = useState<Json | null>(null);
   const [loading, setLoading] = useState(false);
@@ -54,6 +56,58 @@ export default function WattBuyInspector() {
       const res = await fetch(path, {
         headers: { 'x-admin-token': token },
       });
+      const data = await res.json();
+      setResult(data);
+      setRaw(data);
+    } catch (err: any) {
+      console.error(err);
+      setResult({ ok: false, error: err?.message || 'Unknown error' });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function hitEflProbe() {
+    if (!token) {
+      alert('Need admin token');
+      return;
+    }
+
+    const trimmedWattkey = wattkey.trim();
+    const trimmedAddress = address.trim();
+    const trimmedCity = city.trim();
+    const trimmedState = state.trim();
+    const trimmedZip = zip.trim();
+
+    if (!trimmedWattkey && (!trimmedAddress || !trimmedCity || !trimmedState || !trimmedZip)) {
+      alert('Provide either wattkey or a full address (address, city, state, zip).');
+      return;
+    }
+
+    setLoading(true);
+    setResult(null);
+    setRaw(null);
+
+    try {
+      const body: any = { mode: probeMode };
+      if (trimmedWattkey) {
+        body.wattkey = trimmedWattkey;
+      } else {
+        body.address = trimmedAddress;
+        body.city = trimmedCity;
+        body.state = trimmedState;
+        body.zip = trimmedZip;
+      }
+
+      const res = await fetch('/api/admin/wattbuy/efl-probe', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-token': token,
+        },
+        body: JSON.stringify(body),
+      });
+
       const data = await res.json();
       setResult(data);
       setRaw(data);
@@ -178,6 +232,57 @@ export default function WattBuyInspector() {
           >
             {loading ? 'Loading…' : 'Property Bundle (WattBuy → SMT usage → offers)'}
           </button>
+        </div>
+
+        <div className="mt-4 rounded-2xl border border-dashed border-blue-200 bg-blue-50/40 p-4 space-y-3">
+          <h3 className="font-medium text-sm text-blue-900">EFL PlanRules Probe (WattBuy → EFL Engine)</h3>
+          <p className="text-xs text-blue-900/80">
+            This calls <code className="rounded bg-white/60 px-1 py-0.5 text-[10px]">POST /api/admin/wattbuy/efl-probe</code>,
+            fetches WattBuy offers, follows each plan&apos;s EFL URL, and runs the EFL Fact Card
+            engine. Use it to verify which plans already have cached <code className="rounded bg-white/60 px-1 py-0.5 text-[10px]">RatePlan.rateStructure</code>
+            and which require manual review.
+          </p>
+          <div className="grid gap-3 md:grid-cols-3">
+            <div>
+              <label className="block text-xs font-medium mb-1 text-blue-900">
+                wattkey (optional)
+              </label>
+              <input
+                className="w-full rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-xs"
+                placeholder="wattkey from electricity API"
+                value={wattkey}
+                onChange={(e) => setWattkey(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium mb-1 text-blue-900">
+                Mode
+              </label>
+              <select
+                className="w-full rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-xs"
+                value={probeMode}
+                onChange={(e) => setProbeMode(e.target.value as 'test' | 'live')}
+              >
+                <option value="test">test (no DB writes)</option>
+                <option value="live">live (upsert RatePlan)</option>
+              </select>
+            </div>
+            <div className="flex items-end">
+              <button
+                type="button"
+                onClick={hitEflProbe}
+                disabled={loading || !ready}
+                className="inline-flex items-center rounded-lg border border-blue-400 bg-blue-600/90 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {loading ? 'Probing…' : 'Run EFL Probe'}
+              </button>
+            </div>
+          </div>
+          <p className="text-[11px] text-blue-900/70">
+            If <code className="rounded bg-white/60 px-1 py-0.5 text-[10px]">wattkey</code> is blank, the probe will
+            use the address, city, state, and ZIP from above. Results appear in the Inspector
+            Summary and Raw Response panes.
+          </p>
         </div>
       </section>
 

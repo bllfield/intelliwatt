@@ -207,6 +207,148 @@ export default function ManualFactCardLoaderPage() {
         </form>
       </div>
 
+      <section className="space-y-3 rounded-lg border border-dashed border-brand-blue/30 bg-brand-blue/5 p-6">
+        <h2 className="text-base font-semibold text-brand-navy">
+          PlanRules &amp; RateStructure Field Checklist
+        </h2>
+        <p className="text-xs text-brand-navy/70">
+          This is the complete contract the EFL parser can populate. Use it to compare different
+          Fact Cards (Just Energy Free Nights, Reliant tiers, Rhythm/Gexa bill credits, etc.) and
+          confirm we&apos;re capturing all the structures you care about.
+        </p>
+        <div className="grid gap-4 md:grid-cols-2 text-xs text-brand-navy/80">
+          <div>
+            <h3 className="mb-1 font-semibold text-brand-navy">PlanRules fields (EFL side)</h3>
+            <ul className="space-y-1">
+              <li>
+                <span className="font-mono text-[11px]">planType</span> — flat / tou / free-nights /
+                free-weekends / solar-buyback / other
+              </li>
+              <li>
+                <span className="font-mono text-[11px]">defaultRateCentsPerKwh</span> — fallback
+                energy charge when no TOU band applies
+              </li>
+              <li>
+                <span className="font-mono text-[11px]">baseChargePerMonthCents</span> — REP base
+                charge cents/month
+              </li>
+              <li>
+                <span className="font-mono text-[11px]">rateType</span> — FIXED / VARIABLE /
+                TIME_OF_USE (aligned with RateStructure)
+              </li>
+              <li>
+                <span className="font-mono text-[11px]">variableIndexType</span> — ERCOT / FUEL /
+                OTHER for indexed plans
+              </li>
+              <li>
+                <span className="font-mono text-[11px]">currentBillEnergyRateCents</span> — current
+                VARIABLE bill&apos;s rate when listed
+              </li>
+              <li className="mt-1 font-semibold text-brand-navy">timeOfUsePeriods[]</li>
+              <li className="ml-3">
+                <span className="font-mono text-[11px]">label</span> — e.g. &quot;Free Nights&quot;,
+                &quot;On-Peak&quot;
+              </li>
+              <li className="ml-3">
+                <span className="font-mono text-[11px]">startHour / endHour</span> — 0–23, supports
+                cross‑midnight windows
+              </li>
+              <li className="ml-3">
+                <span className="font-mono text-[11px]">daysOfWeek</span> — 0–6 (Sun–Sat)
+              </li>
+              <li className="ml-3">
+                <span className="font-mono text-[11px]">months</span> — optional 1–12 list for
+                seasonal windows
+              </li>
+              <li className="ml-3">
+                <span className="font-mono text-[11px]">rateCentsPerKwh</span> — band‑specific
+                import rate, or null when isFree
+              </li>
+              <li className="ml-3">
+                <span className="font-mono text-[11px]">isFree</span> — true for free nights /
+                weekends
+              </li>
+              <li className="mt-1 font-semibold text-brand-navy">usageTiers[]</li>
+              <li className="ml-3">
+                <span className="font-mono text-[11px]">minKwh / maxKwh</span> — kWh tier bounds
+                (e.g., 0–1000, &gt;1000)
+              </li>
+              <li className="ml-3">
+                <span className="font-mono text-[11px]">rateCentsPerKwh</span> — tier energy charge
+              </li>
+              <li className="mt-1 font-semibold text-brand-navy">solarBuyback</li>
+              <li className="ml-3">
+                <span className="font-mono text-[11px]">hasBuyback</span>,{" "}
+                <span className="font-mono text-[11px]">creditCentsPerKwh</span>,{" "}
+                <span className="font-mono text-[11px]">matchesImportRate</span>,{" "}
+                <span className="font-mono text-[11px]">maxMonthlyExportKwh</span>,{" "}
+                <span className="font-mono text-[11px]">notes</span>
+              </li>
+              <li className="mt-1 font-semibold text-brand-navy">billCredits[]</li>
+              <li className="ml-3">
+                <span className="font-mono text-[11px]">label</span> — usage vs behavioral credit
+                description
+              </li>
+              <li className="ml-3">
+                <span className="font-mono text-[11px]">creditDollars</span> — dollar credit amount
+              </li>
+              <li className="ml-3">
+                <span className="font-mono text-[11px]">thresholdKwh</span> — kWh trigger for usage
+                credits (Rhythm, Gexa, etc.)
+              </li>
+              <li className="ml-3">
+                <span className="font-mono text-[11px]">monthsOfYear</span> — seasonal credit
+                windows when present
+              </li>
+              <li className="ml-3">
+                <span className="font-mono text-[11px]">type</span> — USAGE_THRESHOLD / BEHAVIOR /
+                OTHER
+              </li>
+            </ul>
+          </div>
+          <div>
+            <h3 className="mb-1 font-semibold text-brand-navy">RateStructure fields (engine side)</h3>
+            <ul className="space-y-1">
+              <li>
+                <span className="font-mono text-[11px]">type</span> — FIXED / VARIABLE / TIME_OF_USE
+              </li>
+              <li>
+                <span className="font-mono text-[11px]">baseMonthlyFeeCents</span> — carried through
+                from EFL
+              </li>
+              <li className="mt-1 font-semibold text-brand-navy">FIXED</li>
+              <li className="ml-3">
+                <span className="font-mono text-[11px]">energyRateCents</span> — single blended
+                energy rate
+              </li>
+              <li className="mt-1 font-semibold text-brand-navy">VARIABLE</li>
+              <li className="ml-3">
+                <span className="font-mono text-[11px]">currentBillEnergyRateCents</span>,{" "}
+                <span className="font-mono text-[11px]">indexType</span>,{" "}
+                <span className="font-mono text-[11px]">variableNotes</span>
+              </li>
+              <li className="mt-1 font-semibold text-brand-navy">TIME_OF_USE tiers[]</li>
+              <li className="ml-3">
+                <span className="font-mono text-[11px]">label</span>,{" "}
+                <span className="font-mono text-[11px]">priceCents</span>,{" "}
+                <span className="font-mono text-[11px]">startTime</span>,{" "}
+                <span className="font-mono text-[11px]">endTime</span>,{" "}
+                <span className="font-mono text-[11px]">daysOfWeek</span>,{" "}
+                <span className="font-mono text-[11px]">monthsOfYear</span>
+              </li>
+              <li className="mt-1 font-semibold text-brand-navy">billCredits.rules[]</li>
+              <li className="ml-3">
+                <span className="font-mono text-[11px]">label</span>,{" "}
+                <span className="font-mono text-[11px]">creditAmountCents</span>,{" "}
+                <span className="font-mono text-[11px]">minUsageKWh</span>,{" "}
+                <span className="font-mono text-[11px]">maxUsageKWh</span>,{" "}
+                <span className="font-mono text-[11px]">monthsOfYear</span>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
       {error ? (
         <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700">
           {error}
