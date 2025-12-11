@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Buffer } from "node:buffer";
+
 import { deterministicEflExtract } from "@/lib/efl/eflExtractor";
 import { buildPlanRulesExtractionPrompt } from "@/lib/efl/aiExtraction";
 
@@ -21,14 +23,17 @@ export async function POST(req: NextRequest) {
     const arrayBuffer = await file.arrayBuffer();
     const pdfBuffer = Buffer.from(arrayBuffer);
 
-    const pdfModule = await import("pdf-parse");
-    const pdfParse = (pdfModule as any).default ?? pdfModule;
-    const parsedPdf = (await pdfParse(pdfBuffer)) as { text?: string };
-    const normalizedText = (parsedPdf.text ?? "").trim();
-
+    // Reuse the same deterministic extractor + pdf-parse wiring as the /api/admin/efl/run-link
+    // endpoint so behavior is consistent between manual uploads and URL-based runs.
     const extract = await deterministicEflExtract(
       pdfBuffer,
-      async () => normalizedText,
+      async (bytes) => {
+        const pdfParseModule = await import("pdf-parse");
+        const pdfParseFn: any =
+          (pdfParseModule as any).default || (pdfParseModule as any);
+        const result = await pdfParseFn(Buffer.from(bytes));
+        return (result?.text ?? "").toString();
+      },
     );
 
     const prompt = buildPlanRulesExtractionPrompt({
