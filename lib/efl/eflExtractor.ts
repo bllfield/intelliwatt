@@ -173,6 +173,10 @@ async function extractPdfTextWithFallback(
 
     const loadingTask = pdfjsLib.getDocument({
       data: uint8,
+      // In a bundled Next.js/Vercel serverless runtime, there is no separate
+      // pdf.worker.mjs chunk to load. Disable the worker so pdf.js runs
+      // in-process instead of trying (and failing) to spin up a fake worker.
+      disableWorker: true,
     });
 
     const doc = await loadingTask.promise;
@@ -227,7 +231,9 @@ async function extractPdfTextWithFallback(
 
   return {
     rawText: "",
-    extractorMethod: "pdf-parse",
+    // We attempted pdfjs fallback and still couldn't get usable text, so
+    // report pdfjs here to reflect the last extractor tried.
+    extractorMethod: "pdfjs",
     warnings,
   };
 }
