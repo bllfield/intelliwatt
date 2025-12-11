@@ -1,37 +1,9 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import type { ParsedCurrentPlanPayload as ParsedCurrentPlanPayloadBase } from '@/lib/billing/parseBillText';
 
-type ParsedCurrentPlanPayload = {
-  esiid: string | null;
-  meterNumber: string | null;
-  providerName: string | null;
-  tdspName: string | null;
-  accountNumber: string | null;
-  customerName: string | null;
-  serviceAddressLine1: string | null;
-  serviceAddressLine2: string | null;
-  serviceAddressCity: string | null;
-  serviceAddressState: string | null;
-  serviceAddressZip: string | null;
-  rateType: string | null;
-  variableIndexType: string | null;
-  planName: string | null;
-  termMonths: number | null;
-  contractStartDate: string | null;
-  contractEndDate: string | null;
-  earlyTerminationFeeCents: number | null;
-  baseChargeCentsPerMonth: number | null;
-  energyRateTiers: unknown;
-  timeOfUse: unknown;
-  billCredits: unknown;
-  billingPeriodStart: string | null;
-  billingPeriodEnd: string | null;
-  billIssueDate: string | null;
-  billDueDate: string | null;
-  totalAmountDueCents: number | null;
-  rawText: string;
-};
+type ParsedCurrentPlanPayload = ParsedCurrentPlanPayloadBase;
 
 type BillParseResponse =
   | {
@@ -201,12 +173,13 @@ type CurrentPlanPreviewProps = {
 };
 
 function CurrentPlanFormPreview({ parsed }: CurrentPlanPreviewProps) {
-  const normalizedRateType =
+  const normalizedRateType: ParsedCurrentPlanPayload['rateType'] =
     parsed.rateType === 'FIXED' ||
     parsed.rateType === 'VARIABLE' ||
-    parsed.rateType === 'TIME_OF_USE'
+    parsed.rateType === 'TIME_OF_USE' ||
+    parsed.rateType === 'OTHER'
       ? parsed.rateType
-      : 'FIXED';
+      : null;
 
   const baseFeeDollars =
     typeof parsed.baseChargeCentsPerMonth === 'number'
@@ -271,13 +244,15 @@ function CurrentPlanFormPreview({ parsed }: CurrentPlanPreviewProps) {
               Rate type
             </span>
             <select
-              value={normalizedRateType}
+              value={normalizedRateType ?? ''}
               disabled
               className="w-full rounded-xl border border-slate-300 bg-slate-100 px-3 py-1.5 text-xs text-brand-navy"
             >
+              <option value="">(not set)</option>
               <option value="FIXED">Fixed rate</option>
               <option value="VARIABLE">Variable / indexed rate</option>
               <option value="TIME_OF_USE">Time-of-use</option>
+              <option value="OTHER">Other / custom</option>
             </select>
           </label>
           <label className="block space-y-1 text-xs text-brand-navy">
