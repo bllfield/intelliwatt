@@ -36,7 +36,9 @@ export async function logOpenAIUsage(
         requestId: params.requestId ? params.requestId.slice(0, 128) : null,
         userId: params.userId ? params.userId.slice(0, 64) : null,
         houseId: params.houseId ? params.houseId.slice(0, 64) : null,
-        metadataJson: params.metadata ?? undefined,
+        // Cast to any so we can pass arbitrary JSON-like metadata without
+        // fighting the Prisma helper types. Runtime will enforce JSON-serializable values.
+        metadataJson: params.metadata as any,
       },
     });
   } catch (error) {
