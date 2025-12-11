@@ -634,6 +634,329 @@ export default function ManualFactCardLoaderPage() {
                 </ul>
               </div>
             ) : null}
+
+            {/* Full PlanRules + RateStructure endpoint fields (arrays and nested objects) */}
+            <section className="mt-4 space-y-4 text-xs text-brand-navy/80">
+              {/* PlanRules.timeOfUsePeriods[] */}
+              <div className="space-y-1">
+                <h4 className="font-semibold text-brand-navy">
+                  PlanRules.timeOfUsePeriods[] (label, hours, days, months, rate, isFree)
+                </h4>
+                <div className="overflow-auto rounded-md border border-brand-blue/20 bg-brand-blue/5">
+                  <table className="min-w-full border-separate border-spacing-x-0 border-spacing-y-0.5 text-[11px]">
+                    <thead className="bg-brand-blue/10 text-brand-navy/80">
+                      <tr>
+                        <th className="px-2 py-1 text-left font-mono font-normal">#</th>
+                        <th className="px-2 py-1 text-left font-mono font-normal">label</th>
+                        <th className="px-2 py-1 text-left font-mono font-normal">startHour</th>
+                        <th className="px-2 py-1 text-left font-mono font-normal">endHour</th>
+                        <th className="px-2 py-1 text-left font-mono font-normal">daysOfWeek</th>
+                        <th className="px-2 py-1 text-left font-mono font-normal">months</th>
+                        <th className="px-2 py-1 text-left font-mono font-normal">rateCentsPerKwh</th>
+                        <th className="px-2 py-1 text-left font-mono font-normal">isFree</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Array.isArray((result.planRules as any)?.timeOfUsePeriods) &&
+                      (result.planRules as any).timeOfUsePeriods.length > 0 ? (
+                        (result.planRules as any).timeOfUsePeriods.map(
+                          (p: any, idx: number) => (
+                            <tr key={`tou-${idx}`} className="odd:bg-brand-blue/0 even:bg-brand-blue/5">
+                              <td className="px-2 py-1 align-top">{idx + 1}</td>
+                              <td className="px-2 py-1 align-top break-words">{p?.label ?? "—"}</td>
+                              <td className="px-2 py-1 align-top">{p?.startHour ?? "—"}</td>
+                              <td className="px-2 py-1 align-top">{p?.endHour ?? "—"}</td>
+                              <td className="px-2 py-1 align-top">
+                                {Array.isArray(p?.daysOfWeek) && p.daysOfWeek.length > 0
+                                  ? p.daysOfWeek.join(",")
+                                  : "—"}
+                              </td>
+                              <td className="px-2 py-1 align-top">
+                                {Array.isArray(p?.months) && p.months.length > 0
+                                  ? p.months.join(",")
+                                  : "—"}
+                              </td>
+                              <td className="px-2 py-1 align-top">
+                                {p?.rateCentsPerKwh ?? "—"}
+                              </td>
+                              <td className="px-2 py-1 align-top">
+                                {typeof p?.isFree === "boolean" ? String(p.isFree) : "—"}
+                              </td>
+                            </tr>
+                          ),
+                        )
+                      ) : (
+                        <tr>
+                          <td
+                            className="px-2 py-2 text-center text-brand-navy/50"
+                            colSpan={8}
+                          >
+                            No time-of-use periods on this EFL.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* PlanRules.usageTiers[] */}
+              <div className="space-y-1">
+                <h4 className="font-semibold text-brand-navy">
+                  PlanRules.usageTiers[] (minKwh, maxKwh, rateCentsPerKwh)
+                </h4>
+                <div className="overflow-auto rounded-md border border-brand-blue/20 bg-brand-blue/5">
+                  <table className="min-w-full border-separate border-spacing-x-0 border-spacing-y-0.5 text-[11px]">
+                    <thead className="bg-brand-blue/10 text-brand-navy/80">
+                      <tr>
+                        <th className="px-2 py-1 text-left font-mono font-normal">#</th>
+                        <th className="px-2 py-1 text-left font-mono font-normal">minKwh</th>
+                        <th className="px-2 py-1 text-left font-mono font-normal">maxKwh</th>
+                        <th className="px-2 py-1 text-left font-mono font-normal">rateCentsPerKwh</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Array.isArray((result.planRules as any)?.usageTiers) &&
+                      (result.planRules as any).usageTiers.length > 0 ? (
+                        (result.planRules as any).usageTiers.map((t: any, idx: number) => (
+                          <tr key={`tier-${idx}`} className="odd:bg-brand-blue/0 even:bg-brand-blue/5">
+                            <td className="px-2 py-1 align-top">{idx + 1}</td>
+                            <td className="px-2 py-1 align-top">{t?.minKwh ?? "—"}</td>
+                            <td className="px-2 py-1 align-top">
+                              {t?.maxKwh === null || typeof t?.maxKwh === "undefined"
+                                ? "—"
+                                : t.maxKwh}
+                            </td>
+                            <td className="px-2 py-1 align-top">
+                              {t?.rateCentsPerKwh ?? "—"}
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td
+                            className="px-2 py-2 text-center text-brand-navy/50"
+                            colSpan={4}
+                          >
+                            No kWh usage tiers on this EFL.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* PlanRules.billCredits[] */}
+              <div className="space-y-1">
+                <h4 className="font-semibold text-brand-navy">
+                  PlanRules.billCredits[] (label, creditDollars, thresholdKwh, monthsOfYear, type)
+                </h4>
+                <div className="overflow-auto rounded-md border border-brand-blue/20 bg-brand-blue/5">
+                  <table className="min-w-full border-separate border-spacing-x-0 border-spacing-y-0.5 text-[11px]">
+                    <thead className="bg-brand-blue/10 text-brand-navy/80">
+                      <tr>
+                        <th className="px-2 py-1 text-left font-mono font-normal">#</th>
+                        <th className="px-2 py-1 text-left font-mono font-normal">label</th>
+                        <th className="px-2 py-1 text-left font-mono font-normal">creditDollars</th>
+                        <th className="px-2 py-1 text-left font-mono font-normal">thresholdKwh</th>
+                        <th className="px-2 py-1 text-left font-mono font-normal">monthsOfYear</th>
+                        <th className="px-2 py-1 text-left font-mono font-normal">type</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Array.isArray((result.planRules as any)?.billCredits) &&
+                      (result.planRules as any).billCredits.length > 0 ? (
+                        (result.planRules as any).billCredits.map((c: any, idx: number) => (
+                          <tr key={`credit-${idx}`} className="odd:bg-brand-blue/0 even:bg-brand-blue/5">
+                            <td className="px-2 py-1 align-top">{idx + 1}</td>
+                            <td className="px-2 py-1 align-top break-words">{c?.label ?? "—"}</td>
+                            <td className="px-2 py-1 align-top">{c?.creditDollars ?? "—"}</td>
+                            <td className="px-2 py-1 align-top">
+                              {c?.thresholdKwh === null || typeof c?.thresholdKwh === "undefined"
+                                ? "—"
+                                : c.thresholdKwh}
+                            </td>
+                            <td className="px-2 py-1 align-top">
+                              {Array.isArray(c?.monthsOfYear) && c.monthsOfYear.length > 0
+                                ? c.monthsOfYear.join(",")
+                                : "—"}
+                            </td>
+                            <td className="px-2 py-1 align-top">{c?.type ?? "—"}</td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td
+                            className="px-2 py-2 text-center text-brand-navy/50"
+                            colSpan={6}
+                          >
+                            No bill credit rules on this EFL.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* PlanRules.solarBuyback */}
+              <div className="space-y-1">
+                <h4 className="font-semibold text-brand-navy">PlanRules.solarBuyback</h4>
+                <dl className="grid grid-cols-[minmax(0,170px),minmax(0,1fr)] gap-x-3 gap-y-1">
+                  <dt className="font-mono text-[11px] text-brand-navy/80">hasBuyback</dt>
+                  <dd className="truncate">
+                    {(result.planRules as any)?.solarBuyback?.hasBuyback ?? "—"}
+                  </dd>
+
+                  <dt className="font-mono text-[11px] text-brand-navy/80">
+                    creditCentsPerKwh
+                  </dt>
+                  <dd className="truncate">
+                    {(result.planRules as any)?.solarBuyback?.creditCentsPerKwh ?? "—"}
+                  </dd>
+
+                  <dt className="font-mono text-[11px] text-brand-navy/80">matchesImportRate</dt>
+                  <dd className="truncate">
+                    {(result.planRules as any)?.solarBuyback?.matchesImportRate ?? "—"}
+                  </dd>
+
+                  <dt className="font-mono text-[11px] text-brand-navy/80">
+                    maxMonthlyExportKwh
+                  </dt>
+                  <dd className="truncate">
+                    {(result.planRules as any)?.solarBuyback?.maxMonthlyExportKwh ?? "—"}
+                  </dd>
+
+                  <dt className="font-mono text-[11px] text-brand-navy/80">notes</dt>
+                  <dd className="truncate">
+                    {(result.planRules as any)?.solarBuyback?.notes ?? "—"}
+                  </dd>
+                </dl>
+              </div>
+
+              {/* RateStructure.TIME_OF_USE tiers[] */}
+              <div className="space-y-1">
+                <h4 className="font-semibold text-brand-navy">
+                  RateStructure.tiers[] (TIME_OF_USE tiers: label, priceCents, startTime, endTime,
+                  daysOfWeek, monthsOfYear)
+                </h4>
+                <div className="overflow-auto rounded-md border border-brand-blue/20 bg-brand-blue/5">
+                  <table className="min-w-full border-separate border-spacing-x-0 border-spacing-y-0.5 text-[11px]">
+                    <thead className="bg-brand-blue/10 text-brand-navy/80">
+                      <tr>
+                        <th className="px-2 py-1 text-left font-mono font-normal">#</th>
+                        <th className="px-2 py-1 text-left font-mono font-normal">label</th>
+                        <th className="px-2 py-1 text-left font-mono font-normal">priceCents</th>
+                        <th className="px-2 py-1 text-left font-mono font-normal">startTime</th>
+                        <th className="px-2 py-1 text-left font-mono font-normal">endTime</th>
+                        <th className="px-2 py-1 text-left font-mono font-normal">daysOfWeek</th>
+                        <th className="px-2 py-1 text-left font-mono font-normal">monthsOfYear</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Array.isArray((result.rateStructure as any)?.tiers) &&
+                      (result.rateStructure as any).tiers.length > 0 ? (
+                        (result.rateStructure as any).tiers.map((t: any, idx: number) => (
+                          <tr key={`rs-tier-${idx}`} className="odd:bg-brand-blue/0 even:bg-brand-blue/5">
+                            <td className="px-2 py-1 align-top">{idx + 1}</td>
+                            <td className="px-2 py-1 align-top break-words">{t?.label ?? "—"}</td>
+                            <td className="px-2 py-1 align-top">{t?.priceCents ?? "—"}</td>
+                            <td className="px-2 py-1 align-top">{t?.startTime ?? "—"}</td>
+                            <td className="px-2 py-1 align-top">{t?.endTime ?? "—"}</td>
+                            <td className="px-2 py-1 align-top">
+                              {Array.isArray(t?.daysOfWeek) && t.daysOfWeek.length > 0
+                                ? t.daysOfWeek.join(",")
+                                : "—"}
+                            </td>
+                            <td className="px-2 py-1 align-top">
+                              {Array.isArray(t?.monthsOfYear) && t.monthsOfYear.length > 0
+                                ? t.monthsOfYear.join(",")
+                                : "—"}
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td
+                            className="px-2 py-2 text-center text-brand-navy/50"
+                            colSpan={7}
+                          >
+                            No TIME_OF_USE tiers on this RateStructure.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* RateStructure.billCredits.rules[] */}
+              <div className="space-y-1">
+                <h4 className="font-semibold text-brand-navy">
+                  RateStructure.billCredits.rules[] (label, creditAmountCents, minUsageKWh,
+                  maxUsageKWh, monthsOfYear)
+                </h4>
+                <div className="overflow-auto rounded-md border border-brand-blue/20 bg-brand-blue/5">
+                  <table className="min-w-full border-separate border-spacing-x-0 border-spacing-y-0.5 text-[11px]">
+                    <thead className="bg-brand-blue/10 text-brand-navy/80">
+                      <tr>
+                        <th className="px-2 py-1 text-left font-mono font-normal">#</th>
+                        <th className="px-2 py-1 text-left font-mono font-normal">label</th>
+                        <th className="px-2 py-1 text-left font-mono font-normal">
+                          creditAmountCents
+                        </th>
+                        <th className="px-2 py-1 text-left font-mono font-normal">minUsageKWh</th>
+                        <th className="px-2 py-1 text-left font-mono font-normal">maxUsageKWh</th>
+                        <th className="px-2 py-1 text-left font-mono font-normal">monthsOfYear</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Array.isArray((result.rateStructure as any)?.billCredits?.rules) &&
+                      (result.rateStructure as any).billCredits.rules.length > 0 ? (
+                        (result.rateStructure as any).billCredits.rules.map(
+                          (r: any, idx: number) => (
+                            <tr
+                              key={`rs-credit-${idx}`}
+                              className="odd:bg-brand-blue/0 even:bg-brand-blue/5"
+                            >
+                              <td className="px-2 py-1 align-top">{idx + 1}</td>
+                              <td className="px-2 py-1 align-top break-words">
+                                {r?.label ?? "—"}
+                              </td>
+                              <td className="px-2 py-1 align-top">
+                                {r?.creditAmountCents ?? "—"}
+                              </td>
+                              <td className="px-2 py-1 align-top">{r?.minUsageKWh ?? "—"}</td>
+                              <td className="px-2 py-1 align-top">
+                                {r?.maxUsageKWh === null ||
+                                typeof r?.maxUsageKWh === "undefined"
+                                  ? "—"
+                                  : r.maxUsageKWh}
+                              </td>
+                              <td className="px-2 py-1 align-top">
+                                {Array.isArray(r?.monthsOfYear) && r.monthsOfYear.length > 0
+                                  ? r.monthsOfYear.join(",")
+                                  : "—"}
+                              </td>
+                            </tr>
+                          ),
+                        )
+                      ) : (
+                        <tr>
+                          <td
+                            className="px-2 py-2 text-center text-brand-navy/50"
+                            colSpan={6}
+                          >
+                            No RateStructure bill credit rules.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
           </section>
 
           <section className="space-y-2">
