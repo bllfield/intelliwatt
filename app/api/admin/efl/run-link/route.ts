@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Buffer } from "node:buffer";
+import pdfParse from "pdf-parse";
 
-import { computePdfSha256 } from "@/lib/efl/eflExtractor";
+import { computePdfSha256, deterministicEflExtract } from "@/lib/efl/eflExtractor";
+import {
+  extractPlanRulesAndRateStructureFromEflText,
+} from "@/lib/efl/planAiExtractor";
 
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 
@@ -20,6 +24,11 @@ type RunLinkSuccess = {
   contentLength: number | null;
   warnings: string[];
   notes: string;
+  cleanedText?: string;
+  planRules?: unknown;
+  rateStructure?: unknown;
+  parseConfidence?: number;
+  parseWarnings?: string[];
 };
 
 type RunLinkError = {
@@ -114,10 +123,51 @@ export async function POST(req: NextRequest) {
     const pdfSha256 = computePdfSha256(pdfBytes);
 
     const steps: string[] = ["downloaded_pdf", "computed_sha256"];
+
+    let cleanedText: string | undefined;
+    let planRules: unknown;
+    let rateStructure: unknown;
+    let parseConfidence: number | undefined;
+    let parseWarnings: string[] | undefined;
+
+    try {
+      // Deterministic extract: PDF bytes → cleaned text + identity metadata
+      const extract = await deterministicEflExtract(pdfBytes, async (bytes) => {
+        const result = await pdfParse(Buffer.from(bytes));
+        return result.text || "";
+      });
+
+      cleanedText = extract.rawText;
+
+      // AI extraction: EFL text → PlanRules + RateStructure
+      const aiResult = await extractPlanRulesAndRateStructureFromEflText({
+        input: {
+          rawText: extract.rawText,
+          repPuctCertificate: extract.repPuctCertificate,
+          eflVersionCode: extract.eflVersionCode,
+          eflPdfSha256: extract.eflPdfSha256,
+          warnings: extract.warnings,
+        },
+      });
+
+      planRules = aiResult.planRules ?? null;
+      rateStructure = aiResult.rateStructure ?? null;
+      parseConfidence = aiResult.meta.parseConfidence;
+      parseWarnings = aiResult.meta.parseWarnings;
+
+      steps.push("deterministic_extract", "ai_planrules_extract");
+    } catch (error) {
+      warnings.push(
+        `AI extraction failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+
     const notes =
       mode === "test"
-        ? "Test mode: no persistence; this endpoint only downloads and fingerprints the EFL PDF."
-        : "Live mode: persistence and AI extraction are not wired yet; this endpoint currently behaves like test mode.";
+        ? "Test mode: downloads/fingerprints the EFL PDF and (best-effort) runs AI extraction; no persistence."
+        : "Live mode: persistence into offers DB is not wired yet; this endpoint currently behaves like test mode plus AI extraction.";
 
     const payload: RunLinkSuccess = {
       ok: true,
@@ -129,6 +179,11 @@ export async function POST(req: NextRequest) {
       contentLength,
       warnings,
       notes,
+      cleanedText,
+      planRules,
+      rateStructure,
+      parseConfidence,
+      parseWarnings,
     };
 
     return NextResponse.json(payload, { status: 200 });

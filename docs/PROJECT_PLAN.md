@@ -3548,7 +3548,35 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
 
 **Status**
 
-- COMPLETE (contract stub delivered; AI integration remains a future task).
+- SUPERSEDED — Contract stub delivered; full AI integration shipped in PC-2025-12-xx-EFL-AI-EXTRACTION (see below).
+
+---
+
+### PC-2025-12-XX-EFL-AI-EXTRACTION — EFL Fact Card AI + RateStructure Alignment (Step 3b)
+
+**Scope**
+
+- Implemented the OpenAI-backed PlanRules extractor for EFL Fact Cards (`lib/efl/planAiExtractor.ts`) using the dedicated env var `OPENAI_IntelliWatt_Fact_Card_Parser`:
+  - Wraps the generic contract in `lib/efl/aiExtraction.ts` with a concrete JSON-mode OpenAI call.
+  - Logs usage to `OpenAIUsageEvent` via `logOpenAIUsage` with `module="efl-fact-card"` and `operation="plan-rules-extract-v1"`.
+- Aligned EFL-derived pricing with the shared `RateStructure` contract:
+  - Extended `lib/efl/planEngine.ts` with a `RateStructure`-compatible type set and a `planRulesToRateStructure(plan: PlanRules)` helper.
+  - Maps `PlanRules` into the same `RateStructure` variants used by `NormalizedCurrentPlan` (FIXED vs TIME_OF_USE) including `baseMonthlyFeeCents` and bill credits.
+  - Converts simple EFL `billCredits` (threshold kWh + credit dollars) into `BillCreditStructure`-compatible rules (label, `creditAmountCents`, `minUsageKWh`, optional seasonality).
+- Wired the admin EFL run-link route (`/api/admin/efl/run-link`) to run the full pipeline in **test** and **live** modes:
+  - Downloads the EFL PDF, fingerprints it with `computePdfSha256`, and runs `deterministicEflExtract` to get cleaned text / identity metadata.
+  - Calls `extractPlanRulesAndRateStructureFromEflText` to produce `planRules` + `rateStructure` along with parse confidence/warnings.
+  - Returns a JSON payload including `cleanedText`, `planRules`, `rateStructure`, `parseConfidence`, and `parseWarnings` for admin inspection (no persistence yet).
+
+**Guardrails**
+
+- Fact Card AI uses `OPENAI_IntelliWatt_Fact_Card_Parser` exclusively; other OpenAI flows (bill parser, generic tools) remain on their own env keys.
+- EFL → `RateStructure` mapping is one-way and non-breaking; the canonical `RateStructure` contract for current-plan normalization is unchanged.
+- Admin run-link remains an internal tool; it performs no writes to the offers DB until the “Normalize vendor offer ingestion to populate the shared RateStructure” checklist item is explicitly implemented.
+
+**Status**
+
+- COMPLETE — EFL Fact Card AI extraction is live for admin tools and aligned with the shared `RateStructure` contract.
 
 ---
 

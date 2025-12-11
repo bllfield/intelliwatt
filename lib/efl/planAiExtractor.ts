@@ -1,47 +1,34 @@
 /**
- * EFL AI Extraction Layer (Contract Stub)
+ * EFL AI Extraction Layer backed by OpenAI (production implementation).
  *
- * Defines the contract for the AI-powered PlanRules extraction described in
- * docs/EFL_FACT_CARD_ENGINE.md (Step 3). This implementation is intentionally
- * a stub: it does NOT call any AI model yet.
- *
- * Upstream callers must treat this helper as experimental until the real AI
- * integration ships.
+ * Wraps the generic extraction contract in `lib/efl/aiExtraction.ts` with a
+ * concrete OpenAI caller that uses the dedicated fact-card env var
+ * OPENAI_IntelliWatt_Fact_Card_Parser.
  */
 
-import type { PlanRules } from "@/lib/efl/planEngine";
+import type { PlanRules, RateStructure } from "@/lib/efl/planEngine";
+import {
+  type EflDeterministicExtractInput,
+  type ExtractPlanRulesResult,
+  extractPlanRulesFromEflText as coreExtractPlanRulesFromEflText,
+} from "@/lib/efl/aiExtraction";
+import { openaiFactCardParser } from "@/lib/ai/openaiFactCardParser";
+import { planRulesToRateStructure } from "@/lib/efl/planEngine";
+import { logOpenAIUsage } from "@/lib/admin/openaiUsage";
 
-/**
- * Deterministic EFL extract input collected from earlier pipeline stages.
- */
-export interface EflTextExtractionInput {
-  rawText: string;
-  repPuctCertificate: string | null;
-  eflVersionCode: string | null;
-  eflPdfSha256: string;
-}
+export type EflTextExtractionInput = EflDeterministicExtractInput;
 
-/**
- * Options for the future AI extractor. These hints are placeholders and may
- * evolve once the real model contract is finalized.
- */
 export interface PlanRulesExtractionOptions {
   planTypeHint?: string | null;
   conservative?: boolean;
 }
 
-/**
- * Metadata returned with every extraction attempt.
- */
 export interface PlanRulesExtractionMeta {
   parseConfidence: number;
   parseWarnings: string[];
   source: "efl_pdf" | string;
 }
 
-/**
- * Structured response for an EFL -> PlanRules extraction.
- */
 export interface PlanRulesExtractionResult {
   ok: boolean;
   input: EflTextExtractionInput;
@@ -50,39 +37,131 @@ export interface PlanRulesExtractionResult {
   error?: string;
 }
 
-/**
- * Contract for AI-based PlanRules extraction. Stub only.
- *
- * Future implementation will:
- *  - Call the configured AI model with a strict prompt.
- *  - Validate the returned PlanRules JSON.
- *  - Populate confidence + warnings.
- */
-export async function extractPlanRulesFromEflText(
-  input: EflTextExtractionInput,
-  opts: PlanRulesExtractionOptions = {},
-): Promise<PlanRulesExtractionResult> {
-  void opts;
+async function callOpenAiPlanRulesModel(args: {
+  prompt: string;
+  extract: EflDeterministicExtractInput;
+}): Promise<unknown> {
+  if (!process.env.OPENAI_IntelliWatt_Fact_Card_Parser) {
+    throw new Error(
+      "OPENAI_IntelliWatt_Fact_Card_Parser is not configured; cannot run EFL Fact Card AI extraction.",
+    );
+  }
 
-  const meta: PlanRulesExtractionMeta = {
-    parseConfidence: 0,
-    parseWarnings: [
-      "extractPlanRulesFromEflText is not implemented yet; this is a contract stub only.",
+  const completion = await openaiFactCardParser.chat.completions.create({
+    model: "gpt-4.1-mini",
+    messages: [
+      {
+        role: "system",
+        content:
+          "You are an expert Texas Electricity Facts Label (EFL) parser. " +
+          "You MUST return ONLY strict JSON matching the requested schema. " +
+          "Do not include explanations or commentary.",
+      },
+      {
+        role: "user",
+        content: args.prompt,
+      },
     ],
-    source: "efl_pdf",
-  };
+    temperature: 0,
+    response_format: { type: "json_object" },
+  });
 
-  const errorMessage =
-    "extractPlanRulesFromEflText is not implemented yet. " +
-    "This is the Step 3a contract stub from docs/EFL_FACT_CARD_ENGINE.md. " +
-    "Do not wire this to production until the AI implementation is completed.";
+  const usage = (completion as any).usage;
+  if (usage) {
+    const inputTokens = usage.prompt_tokens ?? usage.input_tokens ?? 0;
+    const outputTokens = usage.completion_tokens ?? usage.output_tokens ?? 0;
+    const totalTokens = usage.total_tokens ?? inputTokens + outputTokens;
 
-  return {
-    ok: false,
-    input,
-    planRules: null,
-    meta,
-    error: errorMessage,
-  };
+    const inputCost = (inputTokens / 1000) * 0.00025;
+    const outputCost = (outputTokens / 1000) * 0.00075;
+    const costUsd = inputCost + outputCost;
+
+    void logOpenAIUsage({
+      module: "efl-fact-card",
+      operation: "plan-rules-extract-v1",
+      model: (completion as any).model ?? "gpt-4.1-mini",
+      inputTokens,
+      outputTokens,
+      totalTokens,
+      costUsd,
+      requestId: (completion as any).id ?? null,
+      userId: null,
+      houseId: null,
+      metadata: {
+        source: "efl-fact-card",
+      },
+    });
+  }
+
+  const content = completion.choices[0]?.message?.content ?? "";
+  if (!content) {
+    throw new Error("Empty response from OpenAI fact card model.");
+  }
+
+  return JSON.parse(content);
 }
 
+export async function extractPlanRulesFromEflText(
+  input: EflTextExtractionInput,
+  _opts: PlanRulesExtractionOptions = {},
+): Promise<PlanRulesExtractionResult> {
+  try {
+    const coreResult: ExtractPlanRulesResult = await coreExtractPlanRulesFromEflText(
+      input,
+      callOpenAiPlanRulesModel,
+    );
+
+    return {
+      ok: true,
+      input,
+      planRules: coreResult.planRules,
+      meta: {
+        parseConfidence: coreResult.parseConfidence,
+        parseWarnings: coreResult.parseWarnings,
+        source: coreResult.source,
+      },
+    };
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Failed to extract PlanRules from EFL text.";
+
+    return {
+      ok: false,
+      input,
+      planRules: null,
+      meta: {
+        parseConfidence: 0,
+        parseWarnings: [message],
+        source: "efl_pdf",
+      },
+      error: message,
+    };
+  }
+}
+
+export async function extractPlanRulesAndRateStructureFromEflText(args: {
+  input: EflTextExtractionInput;
+  options?: PlanRulesExtractionOptions;
+}): Promise<{
+  planRules: PlanRules | null;
+  rateStructure: RateStructure | null;
+  meta: PlanRulesExtractionMeta;
+}> {
+  const result = await extractPlanRulesFromEflText(args.input, args.options);
+
+  if (!result.ok || !result.planRules) {
+    return {
+      planRules: null,
+      rateStructure: null,
+      meta: result.meta,
+    };
+  }
+
+  const rateStructure = planRulesToRateStructure(result.planRules);
+
+  return {
+    planRules: result.planRules,
+    rateStructure,
+    meta: result.meta,
+  };
+}

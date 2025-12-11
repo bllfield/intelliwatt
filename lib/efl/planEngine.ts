@@ -107,6 +107,184 @@ export interface PlanRules {
   billCredits: BillCreditRule[];
 }
 
+// ---------------- RateStructure alignment helpers ----------------
+
+// Local copy of the shared RateStructure contract used for current-plan and
+// offer normalization, kept in sync with docs/API_CONTRACTS.md and
+// app/api/current-plan/manual/route.ts. This type is exported so other
+// modules (e.g. admin EFL tools) can reuse it without importing from an
+// app route.
+
+export type RateType = "FIXED" | "VARIABLE" | "TIME_OF_USE";
+
+export interface RateStructureBillCreditRule {
+  label: string;
+  creditAmountCents: number;
+  minUsageKWh: number;
+  maxUsageKWh?: number;
+  monthsOfYear?: number[];
+}
+
+export interface RateStructureBillCredits {
+  hasBillCredit: boolean;
+  rules: RateStructureBillCreditRule[];
+}
+
+export interface RateStructureTimeOfUseTier {
+  label: string;
+  priceCents: number;
+  startTime: string; // "HH:MM"
+  endTime: string; // "HH:MM"
+  daysOfWeek:
+    | ("MON" | "TUE" | "WED" | "THU" | "FRI" | "SAT" | "SUN")[]
+    | "ALL";
+  monthsOfYear?: number[];
+}
+
+export interface BaseRateStructure {
+  type: RateType;
+  baseMonthlyFeeCents?: number;
+  billCredits?: RateStructureBillCredits | null;
+}
+
+export interface FixedRateStructure extends BaseRateStructure {
+  type: "FIXED";
+  energyRateCents: number;
+}
+
+export interface VariableRateStructure extends BaseRateStructure {
+  type: "VARIABLE";
+  currentBillEnergyRateCents: number;
+  indexType?: "ERCOT" | "FUEL" | "OTHER";
+  variableNotes?: string;
+}
+
+export interface TimeOfUseRateStructure extends BaseRateStructure {
+  type: "TIME_OF_USE";
+  tiers: RateStructureTimeOfUseTier[];
+}
+
+export type RateStructure =
+  | FixedRateStructure
+  | VariableRateStructure
+  | TimeOfUseRateStructure;
+
+function toTwoDigitTime(hour: number): string {
+  const h = Math.min(23, Math.max(0, Math.floor(hour)));
+  return `${String(h).padStart(2, "0")}:00`;
+}
+
+function mapDaysOfWeek(days: number[]): RateStructureTimeOfUseTier["daysOfWeek"] {
+  const unique = Array.from(new Set(days)).sort();
+  const allDays = [0, 1, 2, 3, 4, 5, 6];
+  if (unique.length === allDays.length && unique.every((d, i) => d === allDays[i])) {
+    return "ALL";
+  }
+
+  const mapping: Record<number, "SUN" | "MON" | "TUE" | "WED" | "THU" | "FRI" | "SAT"> = {
+    0: "SUN",
+    1: "MON",
+    2: "TUE",
+    3: "WED",
+    4: "THU",
+    5: "FRI",
+    6: "SAT",
+  };
+
+  return unique
+    .map((d) => mapping[d])
+    .filter((d): d is NonNullable<typeof d> => Boolean(d));
+}
+
+function mapBillCreditsToRateStructure(
+  rules: BillCreditRule[],
+): RateStructureBillCredits | null {
+  if (!rules || rules.length === 0) {
+    return { hasBillCredit: false, rules: [] };
+  }
+
+  const mapped: RateStructureBillCreditRule[] = rules
+    .map((rule, idx) => {
+      if (
+        !rule ||
+        typeof rule.thresholdKwh !== "number" ||
+        rule.thresholdKwh < 0 ||
+        typeof rule.creditDollars !== "number" ||
+        rule.creditDollars <= 0
+      ) {
+        return null;
+      }
+
+      return {
+        label: `Bill credit ${idx + 1}`,
+        creditAmountCents: Math.round(rule.creditDollars * 100),
+        minUsageKWh: rule.thresholdKwh,
+      };
+    })
+    .filter(
+      (r): r is RateStructureBillCreditRule =>
+        Boolean(r),
+    );
+
+  if (mapped.length === 0) {
+    return { hasBillCredit: false, rules: [] };
+  }
+
+  return {
+    hasBillCredit: true,
+    rules: mapped,
+  };
+}
+
+/**
+ * Convert EFL-derived PlanRules into the shared RateStructure contract used
+ * by current-plan normalization and the rate engine.
+ */
+export function planRulesToRateStructure(plan: PlanRules): RateStructure {
+  const baseMonthlyFeeCents = plan.baseChargePerMonthCents ?? undefined;
+  const billCredits = mapBillCreditsToRateStructure(plan.billCredits);
+
+  // Heuristic: any explicit TOU periods → TIME_OF_USE, otherwise FIXED.
+  const hasTou = Array.isArray(plan.timeOfUsePeriods) && plan.timeOfUsePeriods.length > 0;
+
+  if (hasTou) {
+    const tiers: RateStructureTimeOfUseTier[] = plan.timeOfUsePeriods.map((p) => {
+      const price =
+        p.isFree && p.rateCentsPerKwh == null
+          ? 0
+          : p.rateCentsPerKwh != null
+          ? p.rateCentsPerKwh
+          : plan.defaultRateCentsPerKwh ?? 0;
+
+      return {
+        label: p.label,
+        priceCents: price,
+        startTime: toTwoDigitTime(p.startHour),
+        endTime: toTwoDigitTime(p.endHour),
+        daysOfWeek: mapDaysOfWeek(p.daysOfWeek),
+        monthsOfYear: p.months && p.months.length > 0 ? p.months : undefined,
+      };
+    });
+
+    return {
+      type: "TIME_OF_USE",
+      baseMonthlyFeeCents,
+      billCredits,
+      tiers,
+    };
+  }
+
+  // Default: treat as FIXED plan using the defaultRateCentsPerKwh.
+  const energyRateCents = plan.defaultRateCentsPerKwh ?? 0;
+
+  return {
+    type: "FIXED",
+    energyRateCents,
+    baseMonthlyFeeCents,
+    billCredits,
+  };
+}
+
 /**
  * Pricing snapshot for a single interval (time-of-day only; no billing-cycle logic).
  */
