@@ -162,6 +162,11 @@ const ROUTE_METADATA: Record<string, Metadata> = {
     status: 'Internal / Test',
     description: 'Legacy SMT trigger panel (kept for regression testing).',
   },
+  '/admin/current-plan/bill-parser': {
+    label: 'Current Plan Bill Parser',
+    status: 'Admin Only',
+    description: 'Admin harness for bill text parsing and ParsedCurrentPlan template review.',
+  },
   '/admin/tools/smt': {
     label: 'SMT Tools (Legacy)',
     status: 'Internal / Test',
