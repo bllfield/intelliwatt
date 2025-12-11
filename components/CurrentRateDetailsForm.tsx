@@ -1462,14 +1462,15 @@ export function CurrentRateDetailsForm({
             On mobile, snap a clear photo. On desktop, upload the PDF. We&apos;ll parse it soon to auto-fill your plan data.
           </p>
           <label className="flex w-full cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-brand-blue/30 bg-brand-blue/5 p-6 text-center text-sm text-brand-navy transition hover:border-brand-blue/60 hover:bg-brand-blue/10">
-            <span className="font-semibold">Drag your file here or click to browse</span>
+            <span className="font-semibold">Drag your PDF here or click to browse</span>
             <span className="mt-1 text-xs text-brand-slate">
-              Accepted formats: PDF, JPG, PNG, TXT, CSV — attach multiple pages if needed
+              Accepted file: <span className="font-semibold">PDF only</span>. If your bill is an image or screenshot,
+              open it and copy/paste the visible text into the text box instead.
             </span>
             <input
               type="file"
-              accept=".pdf,.jpg,.jpeg,.png,.txt,.csv,text/plain,application/pdf"
-              multiple
+              accept=".pdf,application/pdf"
+              multiple={false}
               onChange={(e) => {
                 const selected = Array.from(e.target.files ?? []);
                 if (selected.length > 0) {

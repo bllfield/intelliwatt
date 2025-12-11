@@ -58,58 +58,14 @@ export async function extractBillTextFromUpload(
   }
 
   if (fileType === 'image') {
-    if (!process.env.OPENAI_IntelliWatt_Bill_Parcer) {
-      // eslint-disable-next-line no-console
-      console.error('[bill-text] Missing OPENAI_IntelliWatt_Bill_Parcer; cannot OCR image bill');
-      return '';
-    }
-
-    try {
-      const { openaiBillParser } = await import('@/lib/ai/openaiBillParser');
-      const base64 = billBuffer.toString('base64');
-      const contentType =
-        (anyUpload.mimeType as string | undefined) ??
-        (anyUpload.contentType as string | undefined) ??
-        'image/png';
-
-      const dataUrl = `data:${contentType};base64,${base64}`;
-
-      const completion = await openaiBillParser.chat.completions.create({
-        model: 'gpt-4.1-mini',
-        messages: [
-          {
-            role: 'system',
-            content:
-              'You are an OCR engine. Extract ALL visible text from this electricity bill image and return it as plain text only.',
-          },
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'text',
-                text: 'Extract the full readable text from this bill image.',
-              } as any,
-              {
-                type: 'image_url',
-                image_url: { url: dataUrl },
-              } as any,
-            ],
-          },
-        ],
-        temperature: 0,
-      });
-
-      const text = completion.choices[0]?.message?.content ?? '';
-      if (text && text.trim().length > 0) {
-        return text;
-      }
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error('[bill-text] OpenAI OCR for image bill failed', err);
-    }
-
-    // Fallback: at least attempt UTF-8 decode
-    return billBuffer.toString('utf8');
+    // Safety net: image uploads should be rejected by /api/current-plan/upload.
+    // If we ever reach this branch, do NOT call OpenAI Vision; just log and
+    // return empty text so the caller can surface a clear error.
+    // eslint-disable-next-line no-console
+    console.error(
+      '[bill-text] Image upload reached extractBillTextFromUpload; images are not supported for automatic text extraction.',
+    );
+    return '';
   }
 
   if (fileType === 'text') {

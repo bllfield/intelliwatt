@@ -61,6 +61,24 @@ export async function POST(request: NextRequest) {
     const currentPlanPrisma = getCurrentPlanPrisma();
 
     for (const billFile of billFiles) {
+      const fileName = billFile.name?.toLowerCase?.() ?? '';
+      const fileType = billFile.type?.toLowerCase?.() ?? '';
+
+      const isPdf =
+        fileType === 'application/pdf' ||
+        fileName.endsWith('.pdf');
+
+      if (!isPdf) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error:
+              'Only PDF bill uploads are allowed. If your bill is an image or screenshot, please open it and copy/paste the text instead of uploading the image.',
+          },
+          { status: 400 },
+        );
+      }
+
       const arrayBuffer = await billFile.arrayBuffer();
       if (arrayBuffer.byteLength === 0) {
         return NextResponse.json({ error: 'Uploaded file is empty' }, { status: 400 });
