@@ -93,6 +93,27 @@ async function extractPdfTextWithFallback(
 }> {
   const warnings: string[] = [];
 
+  // --- Strict binary / glyph detection helper ---
+  function looksBinary(rawText: string): boolean {
+    if (!rawText) return true;
+
+    // 1) PDF header → definitely not extracted text
+    if (rawText.startsWith("%PDF-")) return true;
+
+    // 2) Printable character ratio (ASCII 0x20-0x7E)
+    let printableCount = 0;
+    for (let i = 0; i < rawText.length; i++) {
+      const ch = rawText[i];
+      if (ch >= " " && ch <= "~") {
+        printableCount++;
+      }
+    }
+    const ratio = printableCount / rawText.length;
+
+    // If less than 60% printable, treat as binary/glyph noise
+    return ratio < 0.6;
+  }
+
   // --- Primary: pdf-parse ---
   let primaryText = "";
   try {
@@ -113,12 +134,10 @@ async function extractPdfTextWithFallback(
     primaryText = "";
   }
 
-  const trimmedPrimary = primaryText.trim();
-  const looksBinaryOrEmpty =
-    trimmedPrimary.startsWith("%PDF-") ||
-    trimmedPrimary.replace(/\s+/g, "").length < 32;
+  primaryText = primaryText.trim();
 
-  if (!looksBinaryOrEmpty && trimmedPrimary.length > 0) {
+  // If pdf-parse output is clearly readable, use it.
+  if (!looksBinary(primaryText)) {
     return {
       rawText: primaryText,
       extractorMethod: "pdf-parse",
@@ -173,10 +192,9 @@ async function extractPdfTextWithFallback(
     }
 
     const combined = textChunks.join("\n").trim();
-    if (combined.length > 0) {
-      warnings.push(
-        "pdf-parse output looked binary or empty; pdfjs-dist was used as a fallback.",
-      );
+
+    if (combined && !looksBinary(combined)) {
+      warnings.push("pdfjs fallback succeeded after binary-looking pdf-parse output.");
       return {
         rawText: combined,
         extractorMethod: "pdfjs",
@@ -184,7 +202,9 @@ async function extractPdfTextWithFallback(
       };
     }
 
-    warnings.push("pdfjs-dist fallback produced no text.");
+    warnings.push(
+      "pdfjs fallback attempted but still produced unreadable/binary-looking text.",
+    );
   } catch (err) {
     warnings.push(
       `pdfjs-dist text extraction failed: ${
@@ -193,9 +213,13 @@ async function extractPdfTextWithFallback(
     );
   }
 
-  // If we reach here, no better text was extracted; return whatever we have from pdf-parse.
+  // If we reach here, no meaningful text was extracted.
+  warnings.push(
+    "PDF content appears binary/unreadable even after pdfjs fallback; no usable text available.",
+  );
+
   return {
-    rawText: primaryText || "",
+    rawText: "",
     extractorMethod: "pdf-parse",
     warnings,
   };

@@ -24,30 +24,11 @@ export async function POST(req: NextRequest) {
     const arrayBuffer = await file.arrayBuffer();
     const pdfBuffer = Buffer.from(arrayBuffer);
 
-    // Reuse the same deterministic extractor wiring as the /api/admin/efl/run-link
-    // endpoint so behavior is consistent between manual uploads and URL-based runs.
-    // If pdf-parse fails for any reason, we fall back to a simple UTF-8 decode
-    // instead of throwing, so the admin can still see a raw-text preview.
-    const extract = await deterministicEflExtract(pdfBuffer, async (bytes) => {
-      try {
-        const pdfParseModule = await import("pdf-parse");
-        const pdfParseFn: any =
-          (pdfParseModule as any).default || (pdfParseModule as any);
-        const result = await pdfParseFn(Buffer.from(bytes));
-        const text = (result?.text ?? "").toString();
-        if (typeof text === "string" && text.trim().length > 0) {
-          return text;
-        }
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.error(
-          "[EFL_MANUAL_UPLOAD] pdf-parse failed, falling back to UTF-8 decode",
-          err,
-        );
-      }
-
-      return Buffer.from(bytes).toString("utf8");
-    });
+    // Reuse the same deterministic extractor wiring and centralized PDF
+    // text fallback (pdf-parse → pdfjs) as the /api/admin/efl/run-link
+    // endpoint so behavior is consistent between manual uploads and
+    // URL-based runs.
+    const extract = await deterministicEflExtract(pdfBuffer);
 
     const rawText = extract.rawText ?? "";
 
