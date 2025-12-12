@@ -261,6 +261,138 @@ Next step: Step 5 — Admin list/view/approve templates + collision detection
 ✅ Step 6 complete: backfill + cache + metrics  
 Next step: Step 7 — Documentation + runbooks + failure modes
 
+## EFL / Fact Card Engine — Final Working Order (Rock Solid)
+
+### Pipeline (end-to-end)
+
+1. **PDF → Text Extraction**
+   - **Primary**: droplet `pdftotext` helper behind HTTPS (`EFL_PDFTEXT_URL` → `https://efl-pdftotext.intelliwatt.com/efl/pdftotext`).
+   - **Binding**: droplet Python service binds to `127.0.0.1` and is fronted by nginx TLS (no direct `:8095` from Vercel).
+   - **Result**: `rawText`, `eflPdfSha256`, and `extractorMethod` (`"pdftotext"`).
+2. **Deterministic metadata extraction (from rawText)**
+   - `repPuctCertificate`: REP PUCT Certificate # via regex in `lib/efl/eflExtractor.ts`.
+   - `eflVersionCode`: EFL `Ver. #` via regex in `lib/efl/eflExtractor.ts`.
+3. **Identity + Dedupe (templateKey precedence)**
+   - `PUCT_CERT_PLUS_EFL_VERSION` → `puct:${repPuctCertificate}|ver:${normalizedEflVersionCode}`.
+   - `EFL_PDF_SHA256` → `sha256:${eflPdfSha256}`.
+   - `WATTBUY_FALLBACK` → `wb:${norm(provider)}|plan:${norm(plan)}|term:${term||"na"}|tdsp:${norm(tdsp)||"na"}|offer:${offerId||"na"}`.
+   - Implemented by `lib/efl/templateIdentity.ts#getTemplateKey`.
+4. **Template lookup**
+   - In-process caches in `lib/efl/getOrCreateEflTemplate.ts`:
+     - TTL cache (`TEMPLATE_CACHE`, 5-minute TTL) keyed by `identity.primaryKey`.
+     - Longer-lived map keyed by all `lookupKeys`.
+   - On miss, callers may persist templates into `RatePlan` via `upsertRatePlanFromEfl` (separate persistence step).
+5. **If missing: AI parse (TEXT-ONLY)**
+   - `parseEflTextWithAi` consumes **normalized `rawText` only**; PDFs are **never** uploaded to OpenAI (413 eliminated).
+   - Input passes through the soft slicer (`normalizeEflTextForAi`) with **fail-open** back to original text if too aggressive.
+6. **Deterministic fallback fill**
+   - If AI leaves fields empty but the text clearly states them:
+     - Base charge per month (dollars → cents).
+     - Usage tiers (`minKwh`, `maxKwh`, `rateCentsPerKwh`).
+     - Threshold-based bill credits (e.g., `$50 if usage >= 800 kWh`).
+7. **Validation + computed confidence**
+   - `parseConfidence` computed deterministically from completeness:
+     - presence of base charge, tiers/fixed rate, bill credits, rate type, and term months.
+   - Model self-reported confidence is ignored in favor of this score.
+8. **Persist template + metadata**
+   - In-memory template record from `getOrCreateEflTemplate` includes:
+     - `eflPdfSha256`, `repPuctCertificate`, `eflVersionCode`, `rawText`, `extractorMethod`.
+     - `planRules`, `rateStructure`, `parseConfidence`, `parseWarnings`.
+   - Long-term persistence uses `RatePlan` in the master schema via `lib/efl/planPersistence.ts#upsertRatePlanFromEfl` (EFL identity + `rateStructure` with manual-review gating).
+
+### What we intentionally ignore
+
+- **TDU/TDSP delivery charges** (volumetric and fixed) — handled by the separate Utility/TDSP cost module.
+- **Average price tables** (`Average Monthly Use / Average Price per kWh`) — these are examples, not billable rates.
+- **Taxes, municipal fees, and generic disclosures** — ignored unless they directly change recurring REP charges that cannot be modeled elsewhere.
+
+### API wiring
+
+- **Manual upload**: `POST /api/admin/efl/manual-upload`
+  - Accepts an EFL PDF file, runs `deterministicEflExtract`, then calls `getOrCreateEflTemplate({ source: "manual_upload", pdfBytes })`.
+  - Returns the **fact card snapshot**: `planRules`, `rateStructure`, `parseConfidence`, `parseWarnings`, plus `rawTextPreview`, identity fields, and deterministic warnings.
+- **WattBuy offer detail**: `POST /api/efl/template/from-offer`
+  - Accepts WattBuy offer identity (offerId, providerName, planName, termMonths, tdspName) plus optional EFL metadata and `rawText`.
+  - If `rawText` present → calls `getOrCreateEflTemplate({ source: "wattbuy", ... })` to parse and/or cache a template.
+  - If `rawText` empty → performs identity-only lookup via `findCachedEflTemplateByIdentity` and returns either the template or a soft warning that admin manual upload is required.
+
+### Admin workflow (current + future stubs)
+
+- **Manual fact card loader**: `/admin/efl/manual-upload`
+  - Upload an EFL PDF and inspect deterministic + AI parse results and warnings.
+- **WattBuy offers console**: `/admin/offers`
+  - For each offer row, **Fact card** action calls `/api/efl/template/from-offer` (non-blocking) and shows confidence + identity + warnings.
+- **Backfill**: `POST /api/admin/efl/backfill`
+  - Given an `offers[]` array (and optional `providerName`/`tdspName` filters), backfills templates via `getOrCreateEflTemplate({ source: "wattbuy", ... })` and returns `{ processed, created, hits, misses, warnings }`.
+- **Future (not fully wired yet, design placeholders)**:
+  - `/api/admin/efl/templates` — list stored EFL templates (e.g., `RatePlan` rows with EFL metadata).
+  - `/api/admin/efl/templates/[id]` — detail view for a single template.
+  - `/api/admin/efl/templates/collisions` — surface identity collisions (same PUCT+Ver or sha256 with divergent content) for manual review.
+  - `/api/admin/efl/templates/[id]/reparse` — re-run AI on stored `rawText` with updated prompts/logic.
+
+### Observability
+
+- **Metrics**:
+  - `getOrCreateEflTemplate` tracks:
+    - `templateHit`, `templateMiss`, `templateCreated`, `aiParseCount`.
+  - Each call logs a structured line:
+    - `console.info("[EFL_TEMPLATE_METRICS]", { templateHit, templateMiss, templateCreated, aiParseCount })`.
+- **Logs**:
+  - Droplet `efl_pdftotext` service logs structured JSON per request (method, path, status, content-length, token status) for inspection via:
+    - `sudo journalctl -u efl-pdftotext.service -n 200 -f`.
+  - Health checks:
+    - `curl -i https://efl-pdftotext.intelliwatt.com/health` (from the internet).
+    - `curl -i http://127.0.0.1:8095/health` (from the droplet, if needed).
+
+### Failure modes + recovery
+
+- **rawText empty**
+  - `deterministicEflExtract` returns empty text → `getOrCreateEflTemplate` throws `"EFL rawText empty; cannot create template."` for manual uploads; the route surfaces this as warnings to the admin UI.
+  - For WattBuy paths, `from-offer` returns `ok: true` with warnings and `planRules: null`, signaling that admin manual upload is required.
+- **Missing PUCT/Ver**
+  - `repPuctCertificate` or `eflVersionCode` missing → identity falls back to `sha256` or WattBuy fallback key; parser adds warnings so we know identity strength is weaker.
+- **AI returns empty or partial**
+  - Deterministic fallbacks fill base charge, usage tiers, and bill credits when clearly present in text but missing from the model output.
+  - `parseConfidence` reflects completeness; low confidence signals the need for manual QA or future prompt tuning.
+- **WattBuy has no EFL source**
+  - If WattBuy offers do not include an EFL URL or raw text, `/api/efl/template/from-offer` returns:
+    - `ok: true`, `planRules: null`, `rateStructure: null`, plus warnings like:
+      - `"No EFL text source provided by WattBuy; template not found. Admin upload required to learn this plan."`
+  - Admin can then use `/admin/efl/manual-upload` to teach the template.
+- **Droplet or `pdftotext` down**
+  - Errors from the droplet helper bubble up as explicit warnings in the admin UI; bill parsing and other modules remain unaffected.
+  - Recovery: fix droplet (nginx/TLS/env) per `docs/runbooks/EFL_PDFTEXT_PROXY_NGINX.md`, then retry manual upload or offer-based template learning.
+
+### Operational notes
+
+- **Droplet vs Vercel boundaries**
+  - Droplet:
+    - Hosts `efl_pdftotext_server.py` bound to `127.0.0.1:8095` behind nginx TLS.
+    - Managed via `systemd` with a dedicated env file (`/home/deploy/.efl-pdftotext.env`).
+    - Updated by `deploy/droplet/apply_efl_pdftotext.sh` and `deploy/droplet/post_pull.sh`.
+  - Vercel:
+    - Calls the droplet helper **only** via HTTPS (`EFL_PDFTEXT_URL`), never direct `:8095`.
+    - Runs all EFL AI parsing (`parseEflTextWithAi`) and template orchestration (`getOrCreateEflTemplate`).
+- **When droplet sync is required**
+  - Only when files under `deploy/droplet/**` change; then run:
+    - `git pull origin main`
+    - `sudo bash deploy/droplet/post_pull.sh`
+  - Pure app/lib/docs changes deploy via Vercel only; no droplet action required.
+- **SMT isolation**
+  - Smart Meter Texas ingestion, normalization, and agreements remain on separate droplet/server paths and are **not** coupled to the EFL Fact Card Engine.
+
+### How to continue (bootstrap pointers)
+
+- **Template service location**:
+  - `lib/efl/getOrCreateEflTemplate.ts` — the single entry point for deterministic extract + AI parse + identity + caching.
+- **Identity helper**:
+  - `lib/efl/templateIdentity.ts` — where to add new identity variants or adjust precedence.
+- **Fallback + mappings**:
+  - `lib/efl/eflAiParser.ts` — where to extend deterministic fallbacks for new bill credit patterns, minimum-usage fees, or edge-case pricing components.
+
+✅ EFL Fact Card Engine complete for launch phase.  
+Next module: Utility Delivery Fee module (separate thread).
+
 <!-- Dev + Prod Prisma migrations completed for Current Plan module + master schema on 2025-11-28 -->
 
 ### Current Plan / Current Rate Page — Status
