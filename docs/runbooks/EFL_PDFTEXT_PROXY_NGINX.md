@@ -15,6 +15,14 @@ The app expects:
 - `EFL_PDFTEXT_URL` (Vercel) → `https://<droplet-domain>/efl/pdftotext`
 - `EFL_PDFTEXT_TOKEN` (Vercel + droplet) → shared secret; quotes do not matter (code strips wrapping quotes).
 
+After any **git pull on the droplet repo**, keep nginx + systemd in sync by running:
+
+```bash
+sudo bash deploy/droplet/post_pull.sh
+```
+
+This script re-applies the nginx vhost and systemd override from the repo, ensures `/home/deploy/.efl-pdftotext.env` exists (without overwriting secrets), restarts the relevant services, and runs a quick health check against `https://efl-pdftotext.intelliwatt.com/health`.
+
 ---
 
 ## 0. DNS for `efl-pdftotext.intelliwatt.com`
@@ -380,3 +388,41 @@ If you get a non-200 status, check:
 - [ ] Vercel + droplet `EFL_PDFTEXT_TOKEN` match (quotes are fine; code strips them).
 - [ ] Windows `curl.exe` test to `https://<droplet-domain>/efl/pdftotext` returns `{ "ok": true, "text": "..." }`.
 - [ ] EFL manual-upload route shows `pdftotext` fallback as attempted and, when successful, reports `extractorMethod: "pdftotext"`.
+
+---
+
+## 12. Sync nginx + systemd config from repo to droplet
+
+Once the repo contains the canonical nginx vhost, systemd override, and env example files, you can sync them to the droplet and restart the helper with a single command block.
+
+**Where:** Droplet, as `deploy` (or `root` with `sudo`), in `/home/deploy/apps/intelliwatt`:
+
+```bash
+cd /home/deploy/apps/intelliwatt
+
+# 1) NGINX site (from repo -> live)
+sudo cp -f deploy/droplet/nginx/efl-pdftotext.intelliwatt.com /etc/nginx/sites-available/efl-pdftotext.intelliwatt.com
+sudo ln -sf /etc/nginx/sites-available/efl-pdftotext.intelliwatt.com /etc/nginx/sites-enabled/efl-pdftotext.intelliwatt.com
+
+# 2) SYSTEMD override (from repo -> live)
+sudo mkdir -p /etc/systemd/system/efl-pdftotext.service.d
+sudo cp -f deploy/droplet/systemd/efl-pdftotext.override.conf /etc/systemd/system/efl-pdftotext.service.d/override.conf
+
+# 3) Ensure the EFL env file exists (do NOT overwrite if already present)
+if [ ! -f /home/deploy/.efl-pdftotext.env ]; then
+  sudo cp deploy/droplet/env/.efl-pdftotext.env.example /home/deploy/.efl-pdftotext.env
+  sudo chown deploy:deploy /home/deploy/.efl-pdftotext.env
+  sudo chmod 600 /home/deploy/.efl-pdftotext.env
+fi
+
+# 4) Reload + restart
+sudo nginx -t
+sudo systemctl daemon-reload
+sudo systemctl reload nginx
+sudo systemctl restart efl-pdftotext.service
+
+# 5) Quick verification
+sudo systemctl --no-pager status efl-pdftotext.service
+curl -sS https://efl-pdftotext.intelliwatt.com/health
+echo
+```

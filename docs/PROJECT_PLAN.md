@@ -181,6 +181,9 @@ Notes:
 - ✅ Nginx + TLS deployment steps for the helper are documented in `docs/runbooks/EFL_PDFTEXT_PROXY_NGINX.md` (including vhost, Certbot, and firewall notes).
 - ✅ Helper now exposes `/health` (plain-text `ok`) behind nginx HTTPS, and logs each request (method, path, content-length, token status) for `journalctl` inspection.
 - ✅ EFL `pdftotext` helper env is isolated via `/home/deploy/.efl-pdftotext.env` + systemd `EnvironmentFile` override (no changes to shared `/home/deploy/.intelliwatt.env`).
+- ✅ Droplet re-apply script: `deploy/droplet/apply_efl_pdftotext.sh` (idempotently reapplies nginx + systemd config from repo files).
+- ✅ Droplet after-pull script: `deploy/droplet/post_pull.sh` (runs `apply_efl_pdftotext.sh`, safely restarts known services, and prints the EFL health check).
+- Note: after any `git pull` on the droplet repo, run `sudo bash deploy/droplet/post_pull.sh` to keep nginx/systemd and the EFL helper in sync with the repo.
 - ⬜ Keep DNS + droplet nginx/certbot changes in sync with these docs whenever the helper hostname or topology changes.
 
 <!-- Dev + Prod Prisma migrations completed for Current Plan module + master schema on 2025-11-28 -->

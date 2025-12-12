@@ -202,12 +202,11 @@ When pulling changes directly on the droplet:
   cd /home/deploy/apps/intelliwatt
   git status -sb
   git pull origin main
+  sudo bash deploy/droplet/post_pull.sh
 
-Then restart the services so the new code is live:
+After `post_pull.sh` completes, the droplet nginx/site + systemd config for EFL pdftotext is reapplied from the repo, core services are restarted if present, and the EFL helper health is checked at:
 
-  sudo systemctl restart smt-webhook.service
-  sudo systemctl restart smt-ingest.service
-  sudo journalctl -u smt-webhook.service -n 200 -f
+  curl -i https://efl-pdftotext.intelliwatt.com/health
 Optional: run `git fetch origin` followed by `git status -sb`; it should show `## main...origin/main`.
 
 DROPLET LOG TAILING (LAST 5 MINUTES)
