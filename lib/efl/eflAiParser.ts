@@ -177,6 +177,7 @@ export async function parseEflTextWithAi(opts: {
   const deterministicSingleEnergy = extractSingleEnergyCharge(rawText);
   const hasDeterministicEnergy =
     deterministicTiers.length > 0 || deterministicSingleEnergy != null;
+  const deterministicTdspIncluded = detectTdspIncluded(rawText);
   const {
     text: normalizedText,
     notes: normalizationNotes,
@@ -318,6 +319,9 @@ OUTPUT CONTRACT:
 
   if (!planRules || typeof planRules !== "object") {
     planRules = {};
+  }
+  if (!rateStructure || typeof rateStructure !== "object") {
+    rateStructure = {};
   }
 
   // === Deterministic fallbacks for the "big 3" when the model leaves them empty. ===
@@ -547,6 +551,22 @@ OUTPUT CONTRACT:
         rules: bcRules,
       };
     }
+  }
+
+  // TDSP delivery-included flag: prefer deterministic value when present.
+  if (deterministicTdspIncluded !== null) {
+    (planRules as any).tdspDeliveryIncludedInEnergyCharge =
+      deterministicTdspIncluded;
+    (rs as any).tdspDeliveryIncludedInEnergyCharge = deterministicTdspIncluded;
+  } else if (
+    (planRules as any).tdspDeliveryIncludedInEnergyCharge != null &&
+    (rs as any).tdspDeliveryIncludedInEnergyCharge == null
+  ) {
+    // Mirror any AI/populated flag from PlanRules into RateStructure if we
+    // don't have a deterministic value but the model provided one.
+    (rs as any).tdspDeliveryIncludedInEnergyCharge = (
+      planRules as any
+    ).tdspDeliveryIncludedInEnergyCharge;
   }
 
   // Night Hours → time-of-use period (e.g., Free Nights credit window).
@@ -979,6 +999,23 @@ function extractEnergyChargeTiers(text: string): UsageTier[] {
 
 function extractSingleEnergyCharge(text: string): number | null {
   return fallbackExtractSingleEnergyChargeCents(text);
+}
+
+// ----------------------------------------------------------------------
+// TDSP / TDU "delivery included in energy charge" detector
+// ----------------------------------------------------------------------
+function detectTdspIncluded(text: string): boolean | null {
+  const patterns = [
+    /includes\s+all\s+supply\s+and\s+(tdsp|tdu)\s+delivery\s+charges/i,
+    /includes\s+all\s+supply\s+and\s+(tdsp|tdu)\s+charges/i,
+    /includes\s+all\s+supply\s+and\s+delivery\s+charges/i,
+    /includes\s+all\s+(delivery|tdsp|tdu)\s+charges/i,
+    /includes[^.\n]{0,80}tdsp[^.\n]{0,80}delivery/i,
+  ];
+  for (const re of patterns) {
+    if (re.test(text)) return true;
+  }
+  return null;
 }
 
 // ----------------------------------------------------------------------

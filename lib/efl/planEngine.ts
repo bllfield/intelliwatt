@@ -150,6 +150,13 @@ export interface PlanRules {
     /** Energy rate in integer cents/kWh for this band. */
     rateCentsPerKwh: number;
   }>;
+  /**
+   * When true, the EFL explicitly states that the REP's energy charge already
+   * includes TDSP/TDU delivery charges. When this is true, downstream engines
+   * MUST NOT stack separate TDSP delivery charges on top of the REP rate.
+   * Null means unknown; false is reserved for future explicit negatives.
+   */
+  tdspDeliveryIncludedInEnergyCharge?: boolean | null;
 }
 
 export type PlanRulesValidationSeverity = "ERROR" | "WARNING";
@@ -213,6 +220,12 @@ export interface BaseRateStructure {
   type: RateType;
   baseMonthlyFeeCents?: number;
   billCredits?: RateStructureBillCredits | null;
+  /**
+   * Mirrors PlanRules.tdspDeliveryIncludedInEnergyCharge so pricing engines
+   * can avoid stacking TDSP delivery charges when the REP's rate is already
+   * "delivery included". Null = unknown; true = explicitly included.
+   */
+  tdspDeliveryIncludedInEnergyCharge?: boolean | null;
   /**
    * Optional supplier-side kWh-based pricing tiers. When present, engines that
    * understand tiered pricing should use these bands instead of flattening to a
