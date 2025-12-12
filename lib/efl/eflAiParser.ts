@@ -44,8 +44,27 @@ function normalizeEflTextForAi(rawText: string): {
 
   let skippingAverages = false;
   let skippedAverages = false;
-  let skippingTdu = false;
-  let skippedTdu = false;
+  let removedTdu = false;
+
+  const isRepPricingLine = (s: string): boolean =>
+    /energy\s*charge/i.test(s) ||
+    /usage\s*credit/i.test(s) ||
+    /base\s*charge/i.test(s);
+
+  const isTduOnlyLine = (s: string): boolean => {
+    const t = s.trim();
+    if (!t) return false;
+    if (isRepPricingLine(t)) return false;
+    return (
+      /^tdu\s*delivery\s*charges/i.test(t) ||
+      /passed\s*through\s*to\s*customers/i.test(t) ||
+      /without\s*markup/i.test(t) ||
+      /for\s*updated\s*tdu/i.test(t) ||
+      /tdu-charges/i.test(t) ||
+      /service\s*tariff/i.test(t) ||
+      /underground\s*facilities/i.test(t)
+    );
+  };
 
   for (const line of lines) {
     const trimmed = line.trim();
@@ -83,32 +102,6 @@ function normalizeEflTextForAi(rawText: string): {
       }
     }
 
-    // Start skipping TDU Delivery Charges block.
-    if (!skippingTdu && /tdu delivery charges/i.test(trimmed)) {
-      skippingTdu = true;
-      skippedTdu = true;
-      notes.push("Removed TDU Delivery Charges passthrough block.");
-      continue;
-    }
-
-    if (skippingTdu) {
-      // End TDU block at blank or new section headers.
-      if (
-        trimmed === "" ||
-        /^other key/i.test(lower) ||
-        /^terms and questions/i.test(lower) ||
-        /^type of product/i.test(lower)
-      ) {
-        skippingTdu = false;
-        // Skip the current header line as well if it's just a section transition.
-        if (trimmed === "") {
-          continue;
-        }
-      } else {
-        continue;
-      }
-    }
-
     // Drop known noisy lines even outside explicit blocks.
     if (/average prices per kwh listed above do not include/i.test(trimmed)) {
       const hint = "Removed average price disclaimer line.";
@@ -116,19 +109,13 @@ function normalizeEflTextForAi(rawText: string): {
       droppedHints.push(hint);
       continue;
     }
-    if (/for updated tdu delivery charges/i.test(lower)) {
-      const hint = "Removed TDU delivery charges URL line.";
-      notes.push(hint);
-      droppedHints.push(hint);
-      continue;
-    }
-    if (
-      /passed through to customer as billed/i.test(lower) &&
-      /tdu/i.test(lower)
-    ) {
-      const hint = "Removed generic TDU passthrough language.";
-      notes.push(hint);
-      droppedHints.push(hint);
+    if (isTduOnlyLine(trimmed)) {
+      if (!removedTdu) {
+        removedTdu = true;
+        const hint = "Removed TDU Delivery Charges passthrough block.";
+        notes.push(hint);
+        droppedHints.push(hint);
+      }
       continue;
     }
     if (/sales tax|municipalfees|municipal fees/i.test(lower)) {
@@ -157,7 +144,7 @@ function normalizeEflTextForAi(rawText: string): {
     if (skippedAverages) {
       keptSections.push("Pricing components without Average Monthly Use table.");
     }
-    if (skippedTdu) {
+    if (removedTdu) {
       keptSections.push("REP pricing sections without TDU passthrough blocks.");
     }
   }
@@ -321,9 +308,9 @@ OUTPUT CONTRACT:
   }
 
   // === Deterministic fallbacks for the "big 3" when the model leaves them empty. ===
-  // Use the same normalizedText we gave to the model so we are operating on the
-  // exact input it saw (or the raw text, if the slicer fail-opened).
-  const fallbackSourceText = normalizedText;
+  // Always run fallbacks against the original rawText so they can recover values
+  // even if the slicer removed or normalized away certain hints.
+  const fallbackSourceText = rawText;
 
   // Base Charge ($/month)
   if (planRules.baseChargePerMonthCents == null) {
@@ -499,10 +486,15 @@ OUTPUT CONTRACT:
 
   const dedupedWarnings = Array.from(new Set(warnings));
 
+  const normalizedConfidence = Math.max(
+    0,
+    Math.min(1, computedConfidence / 100),
+  );
+
   return {
     planRules: planRules ?? null,
     rateStructure: rateStructure ?? null,
-    parseConfidence: computedConfidence,
+    parseConfidence: normalizedConfidence,
     // Domain-level warnings from model are filtered; infra/config errors were
     // returned earlier; deterministic fallback notes are appended verbatim.
     parseWarnings: dedupedWarnings,

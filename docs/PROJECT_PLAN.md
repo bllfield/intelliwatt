@@ -193,10 +193,12 @@ EFL parser model + extraction status:
 - ✅ Parser prompt and optional deterministic fallback focus on REP Base Charge, Energy Charge tiers, Bill Credits, Product Type, Contract Term, and Early Termination Fee; if the model misses obvious values present in normalized text, a guarded fallback fills them and adds a parse warning.
 - ✅ Fixed slicer bug where the “Average Monthly Use” block could accidentally remove real pricing lines (Energy Charge / Usage Credit) that follow immediately after the table; the slicer now stops skipping as soon as it encounters pricing-component markers and preserves those lines.
 - ✅ `parseWarnings` are now de-duplicated at the AI parser boundary for cleaner diagnostics without losing any signal.
+ - ✅ TDU removal is now line-level and conservative: only obvious TDU/TDSP passthrough boilerplate lines are dropped, and lines containing REP pricing components (Energy Charge / Usage Credit / Base Charge) are always preserved.
 
 Reliability guardrails:
 - ✅ Deterministic fallback now fills Base Charge per month, Energy Charge usage tiers, and threshold-based Bill Credits directly from EFL text when the AI leaves them empty.
-- ✅ `parseConfidence` is computed deterministically from completeness (presence of base charge, tiers/fixed rate, bill credits, rate type, and term months) instead of relying on the model’s self-score.
+- ✅ Deterministic fallbacks now run against the original `rawText` (source of truth) instead of the normalized slicer text, so they can recover values even if the slicer removes or normalizes away certain hints.
+- ✅ `parseConfidence` is computed deterministically from completeness (presence of base charge, tiers/fixed rate, bill credits, rate type, and term months), then clamped to the 0–1 range before returning to avoid any UI percent inflation.
 - ✅ System no longer returns 0% parseConfidence when obvious pricing lines exist; instead it surfaces the best-effort structured parse plus explicit fallback warnings.
 
 ## EFL Templates — Stable Identity + Dedupe (Step 2)
