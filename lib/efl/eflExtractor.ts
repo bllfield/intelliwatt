@@ -193,26 +193,65 @@ async function runPdftotext(pdfBytes: Uint8Array | Buffer): Promise<string> {
 
 /**
  * Parse REP PUCT Certificate # from EFL text.
- * Looks for patterns like:
- *  - "PUCT Certificate # 10260"
- *  - "PUCT Certificate No. 10260"
+ * Handles common forms like:
+ *  - "PUCT Certificate No. 10004"
+ *  - "PUCT Cert. #10027"
+ * Returns the numeric certificate string (digits only) when found.
  */
-function extractRepPuctCertificate(rawText: string): string | null {
-  const match = rawText.match(/PUCT\s+Certificate\s*(#|No\.?)\s*([A-Za-z0-9]+)/i);
-  return match ? match[2].trim() : null;
+function extractRepPuctCertificate(text: string): string | null {
+  const re =
+    /PUCT\s*(?:Certificate\s*(?:No\.?|Number)?|Cert\.?)\s*[#:.\s]*([0-9]{4,6})\b/i;
+  const m = text.match(re);
+  return m?.[1] ?? null;
 }
 
 /**
- * Parse the EFL "Ver. #:" line.
- * Example:
- *  Ver. #: Free Nights 36_ONC_U_1205_995_15_09052025
+ * Parse the EFL "Ver. #:" or "EFL Version" line.
+ * Examples:
+ *  - "EFL Ver. #: Free Nights 36_ONC_U_1205_995_15_09052025"
+ *  - "Ver. #: 120725_UNB"
+ *  - "EFL Version:" on one line, version code on the next non-empty line.
  */
-function extractEflVersionCode(rawText: string): string | null {
-  const match = rawText.match(/Ver\.\s*#:\s*(.+)/i);
-  if (!match) return null;
+function extractEflVersionCode(text: string): string | null {
+  const lines = text.split(/\r?\n/).map((l) => l.trim());
 
-  const value = match[1].split("\n")[0].trim();
-  return value.length > 0 ? value : null;
+  // A) Common inline "Ver. #:" patterns, with or without leading "EFL".
+  for (const line of lines) {
+    const m = line.match(/\b(?:EFL\s*)?Ver\.\s*#\s*:\s*(.+)\b/i);
+    if (m?.[1]) {
+      const val = m[1].trim();
+      if (val && val.length >= 3) return val;
+    }
+  }
+
+  // B) "EFL Version:" header with value either on the same line or the next
+  // non-empty line.
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^EFL\s*Version\s*:?\s*$/i.test(line) || /^EFL\s*Version\s*:/i.test(line)) {
+      // Same line value after colon
+      const same = line.match(/^EFL\s*Version\s*:\s*(.+)$/i);
+      if (same?.[1]) {
+        const val = same[1].trim();
+        if (val && val.length >= 3) return val;
+      }
+      // Next non-empty line within a small window
+      for (let j = i + 1; j < Math.min(i + 6, lines.length); j++) {
+        const candidate = lines[j]?.trim();
+        if (!candidate) continue;
+        if (/[A-Z0-9_]{6,}/i.test(candidate)) return candidate;
+        if (/[0-9]/.test(candidate) && candidate.length >= 3) return candidate;
+      }
+    }
+  }
+
+  // C) Fallback: standalone codes like "EFL_<...>" on any line.
+  for (const line of lines) {
+    const m = line.match(/\b(EFL_[A-Z0-9_]+)\b/i);
+    if (m?.[1]) return m[1];
+  }
+
+  return null;
 }
 
 /**
@@ -287,12 +326,16 @@ export async function deterministicEflExtract(
 
   const repPuctCertificate = extractRepPuctCertificate(rawText);
   if (!repPuctCertificate) {
-    warnings.push("Missing REP PUCT Certificate number.");
+    if (!warnings.includes("Missing REP PUCT Certificate number.")) {
+      warnings.push("Missing REP PUCT Certificate number.");
+    }
   }
 
   const eflVersionCode = extractEflVersionCode(rawText);
   if (!eflVersionCode) {
-    warnings.push("Missing EFL Ver. # version code.");
+    if (!warnings.includes("Missing EFL Ver. # version code.")) {
+      warnings.push("Missing EFL Ver. # version code.");
+    }
   }
 
   const result: EflDeterministicExtract = {

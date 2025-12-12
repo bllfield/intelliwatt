@@ -381,6 +381,70 @@ OUTPUT CONTRACT:
     }
   }
 
+  // Additional deterministic fallbacks for common single-rate EFLs and
+  // metadata fields (Type of Product, Contract Term).
+  const { rateType: fallbackRateType, termMonths: fallbackTerm } =
+    fallbackExtractRateTypeAndTerm(fallbackSourceText);
+
+  if (!planRules.rateType && fallbackRateType) {
+    planRules.rateType = fallbackRateType;
+    warnings.push(
+      "Fallback filled rateType from 'Type of Product' line.",
+    );
+  }
+
+  // Plan type mapping for UI classification when missing.
+  if (!planRules.planType && fallbackRateType) {
+    let inferredPlanType: string | null = null;
+    if (fallbackRateType === "FIXED") inferredPlanType = "flat";
+    else if (fallbackRateType === "TIME_OF_USE") inferredPlanType = "tou";
+    else if (fallbackRateType === "VARIABLE") inferredPlanType = "other";
+
+    if (inferredPlanType) {
+      (planRules as any).planType = inferredPlanType;
+      warnings.push(
+        "Fallback filled planType based on Type of Product classification.",
+      );
+    }
+  }
+
+  if (
+    fallbackTerm != null &&
+    typeof (planRules as any).termMonths !== "number"
+  ) {
+    (planRules as any).termMonths = fallbackTerm;
+    warnings.push(
+      "Fallback filled contract term (months) from 'Contract Term' line.",
+    );
+  }
+
+  const singleEnergy = fallbackExtractSingleEnergyChargeCents(
+    fallbackSourceText,
+  );
+
+  if (
+    singleEnergy != null &&
+    (planRules.currentBillEnergyRateCents == null ||
+      typeof planRules.currentBillEnergyRateCents !== "number")
+  ) {
+    planRules.currentBillEnergyRateCents = singleEnergy;
+    warnings.push(
+      "Fallback filled currentBillEnergyRateCents from single Energy Charge line.",
+    );
+  }
+
+  if (
+    singleEnergy != null &&
+    planRules.rateType === "FIXED" &&
+    (planRules.defaultRateCentsPerKwh == null ||
+      typeof planRules.defaultRateCentsPerKwh !== "number")
+  ) {
+    planRules.defaultRateCentsPerKwh = singleEnergy;
+    warnings.push(
+      "Fallback set defaultRateCentsPerKwh from single Energy Charge line for FIXED plan.",
+    );
+  }
+
   // Deterministic parse confidence scoring based on completeness of the key
   // pricing components, rather than trusting the model to self-score.
   const baseChargePerMonthCents =
@@ -485,6 +549,17 @@ function centsStringToNumber(cents: string): number | null {
 }
 
 // ----------------------------------------------------------------------
+// Fallback: Single, non-tiered energy charge (e.g. "Energy Charge 16.3500 ¢ per kWh")
+// ----------------------------------------------------------------------
+function fallbackExtractSingleEnergyChargeCents(text: string): number | null {
+  const re =
+    /Energy\s*Charge[\s:]*([0-9]+(?:\.[0-9]+)?)\s*¢?\s*per\s*kwh/i;
+  const m = text.match(re);
+  if (!m?.[1]) return null;
+  return centsStringToNumber(`${m[1]}¢`);
+}
+
+// ----------------------------------------------------------------------
 // Fallback: Base Charge per month ($)
 // Matches: "Base Charge: Per Month ($) $9.95" or similar
 // ----------------------------------------------------------------------
@@ -571,24 +646,81 @@ type BillCredit = {
 
 function fallbackExtractBillCredits(text: string): BillCredit[] {
   const credits: BillCredit[] = [];
-  const re =
+
+  // Pattern 1: "A bill credit of $50 ... usage is 800 kWh or more."
+  const re1 =
     /bill\s+credit\s+of\s+\$?\s*([0-9]+(?:\.[0-9]{1,2})?)\b[\s\S]{0,140}?\busage\s+is\s+(\d{1,6})\s*kwh\s+or\s+more\b/i;
-  const m = text.match(re);
-  if (!m?.[1] || !m?.[2]) return credits;
+  const m1 = text.match(re1);
+  if (m1?.[1] && m1?.[2]) {
+    const dollars = Number(m1[1]);
+    const threshold = Number(m1[2]);
+    if (Number.isFinite(dollars) && Number.isFinite(threshold)) {
+      credits.push({
+        label: `Bill credit $${dollars} if usage >= ${threshold} kWh`,
+        creditDollars: dollars,
+        thresholdKwh: threshold,
+        monthsOfYear: null,
+        type: "THRESHOLD_MIN",
+      });
+    }
+  }
 
-  const dollars = Number(m[1]);
-  const threshold = Number(m[2]);
-  if (!Number.isFinite(dollars) || !Number.isFinite(threshold)) return credits;
-
-  credits.push({
-    label: `Bill credit $${dollars} if usage >= ${threshold} kWh`,
-    creditDollars: dollars,
-    thresholdKwh: threshold,
-    monthsOfYear: null,
-    type: "THRESHOLD_MIN",
-  });
+  // Pattern 2: "Usage Credit $125.00 per billing cycle for usage (>=1000) kWh"
+  const re2 =
+    /Usage\s*Credit[\s:]*\$?\s*([0-9]+(?:\.[0-9]{1,2})?)\b[\s\S]{0,160}?\(\s*>=\s*(\d{1,6})\s*\)\s*kwh/i;
+  const m2 = text.match(re2);
+  if (m2?.[1] && m2?.[2]) {
+    const dollars = Number(m2[1]);
+    const threshold = Number(m2[2]);
+    if (Number.isFinite(dollars) && Number.isFinite(threshold)) {
+      credits.push({
+        label: `Usage Credit $${dollars} if usage >= ${threshold} kWh`,
+        creditDollars: dollars,
+        thresholdKwh: threshold,
+        monthsOfYear: null,
+        type: "THRESHOLD_MIN",
+      });
+    }
+  }
 
   return credits;
+}
+
+// ----------------------------------------------------------------------
+// Fallback: Type of Product + Contract Term
+// ----------------------------------------------------------------------
+function fallbackExtractRateTypeAndTerm(text: string): {
+  rateType: "FIXED" | "VARIABLE" | "TIME_OF_USE" | null;
+  termMonths: number | null;
+} {
+  let rateType: "FIXED" | "VARIABLE" | "TIME_OF_USE" | null = null;
+  let termMonths: number | null = null;
+
+  const typeMatch = text.match(/Type\s*of\s*Product\s*:\s*(.+)$/im);
+  const typeLine = typeMatch?.[1]?.trim() ?? null;
+  if (typeLine) {
+    if (/fixed/i.test(typeLine)) {
+      rateType = "FIXED";
+    } else if (/variable/i.test(typeLine)) {
+      rateType = "VARIABLE";
+    } else if (
+      /time\s*of\s*use|tou|free\s*nights|free\s*weekends/i.test(typeLine)
+    ) {
+      rateType = "TIME_OF_USE";
+    }
+  }
+
+  const termMatch = text.match(
+    /Contract\s*Term\s*:\s*(\d{1,3})\s*Months?/i,
+  );
+  if (termMatch?.[1]) {
+    const n = Number(termMatch[1]);
+    if (Number.isFinite(n)) {
+      termMonths = n;
+    }
+  }
+
+  return { rateType, termMonths };
 }
 
 // ----------------------------------------------------------------------
