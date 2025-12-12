@@ -26,19 +26,30 @@ export async function parseEflPdfWithAi(opts: {
     };
   }
 
+  // 1) Upload the PDF bytes as a file to OpenAI, never embed bytes in JSON.
+  let file: any;
   try {
-    // Wrap pdfBytes into something acceptable by the OpenAI Node SDK.
-    // If you already have a helper for file uploads, reuse it here instead of this direct call.
-    const file = await (openaiFactCardParser as any).files.create({
+    file = await (openaiFactCardParser as any).files.create({
       file: {
-        // Adjust if your SDK expects a different shape; this is a common pattern.
         name: `${eflPdfSha256}.pdf`,
         content: Buffer.isBuffer(pdfBytes) ? pdfBytes : Buffer.from(pdfBytes),
       } as any,
       purpose: "vision",
     });
+  } catch (err: any) {
+    const msg =
+      err?.message ??
+      (typeof err === "object" ? JSON.stringify(err) : String(err));
 
-    const systemPrompt = `
+    return {
+      planRules: null,
+      rateStructure: null,
+      parseConfidence: 0,
+      parseWarnings: [`EFL AI file upload failed: ${msg}`],
+    };
+  }
+
+  const systemPrompt = `
 You are an expert Texas Electricity Facts Label (EFL) parser.
 
 You will be given an EFL PDF file as input. Using ONLY the content of that PDF as the source of truth, extract detailed pricing rules into a JSON object with this structure.
@@ -153,6 +164,9 @@ RULES:
 - Always return STRICT JSON with double-quoted keys/strings and no comments or trailing commas.
   `;
 
+  // 2) Call the Responses API, referencing only the file_id.
+  let rawJson = "{}";
+  try {
     const response = await (openaiFactCardParser as any).responses.create({
       model: "gpt-5.1-mini",
       response_format: { type: "json_object" },
@@ -166,7 +180,8 @@ RULES:
           content: [
             {
               type: "input_text",
-              text: "Here is the EFL PDF file. Use ONLY this PDF as the source of truth.",
+              text: `Here is the EFL PDF file. Use ONLY this PDF as the source of truth.
+EFL PDF SHA-256: ${eflPdfSha256}`,
             },
             {
               type: "input_file",
@@ -177,42 +192,44 @@ RULES:
       ],
     });
 
-    const output = (response as any).output?.[0]?.content?.[0]?.text ?? "{}";
-    let parsed: any;
-    try {
-      parsed = JSON.parse(output);
-    } catch (err) {
-      return {
-        planRules: null,
-        rateStructure: null,
-        parseConfidence: 0,
-        parseWarnings: [
-          `Failed to parse EFL AI response JSON: ${
-            err instanceof Error ? err.message : String(err)
-          }`,
-        ],
-      };
-    }
+    rawJson = (response as any).output?.[0]?.content?.[0]?.text ?? "{}";
+  } catch (err: any) {
+    const msg =
+      err?.message ??
+      (typeof err === "object" ? JSON.stringify(err) : String(err));
 
     return {
-      planRules: parsed.planRules ?? null,
-      rateStructure: parsed.rateStructure ?? null,
-      parseConfidence:
-        typeof parsed.parseConfidence === "number" ? parsed.parseConfidence : 0,
-      parseWarnings: Array.isArray(parsed.parseWarnings)
-        ? parsed.parseWarnings
-        : [],
+      planRules: null,
+      rateStructure: null,
+      parseConfidence: 0,
+      parseWarnings: [`EFL AI call failed: ${msg}`],
     };
+  }
+
+  // 3) Parse the JSON emitted by the model into our result shape.
+  let parsed: any;
+  try {
+    parsed = JSON.parse(rawJson);
   } catch (err) {
     return {
       planRules: null,
       rateStructure: null,
       parseConfidence: 0,
       parseWarnings: [
-        `EFL AI PDF parser failed: ${
+        `Failed to parse EFL AI response JSON: ${
           err instanceof Error ? err.message : String(err)
         }`,
       ],
     };
   }
+
+  return {
+    planRules: parsed.planRules ?? null,
+    rateStructure: parsed.rateStructure ?? null,
+    parseConfidence:
+      typeof parsed.parseConfidence === "number" ? parsed.parseConfidence : 0,
+    parseWarnings: Array.isArray(parsed.parseWarnings)
+      ? parsed.parseWarnings
+      : [],
+  };
 }
