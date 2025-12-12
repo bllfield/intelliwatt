@@ -1,5 +1,9 @@
 import crypto from "crypto";
 import { Buffer } from "node:buffer";
+import { execFile } from "node:child_process";
+import os from "node:os";
+import fs from "node:fs/promises";
+import path from "node:path";
 
 /**
  * Result of deterministic EFL parsing before AI extraction.
@@ -22,7 +26,7 @@ export interface EflDeterministicExtract {
   warnings: string[];
 
   /** Which PDF text extraction method was used, if known. */
-  extractorMethod?: "pdf-parse" | "pdfjs";
+  extractorMethod?: "pdf-parse" | "pdfjs" | "pdftotext";
 }
 
 /**
@@ -51,6 +55,31 @@ function cleanExtractedText(text: string): string {
  */
 export interface PdfTextExtractor {
   (pdfBytes: Uint8Array | Buffer): Promise<string>;
+}
+
+async function runPdftotext(pdfBytes: Uint8Array | Buffer): Promise<string> {
+  const tmpDir = os.tmpdir();
+  const tmpPath = path.join(
+    tmpDir,
+    `efl-${Date.now()}-${Math.random().toString(16).slice(2)}.pdf`,
+  );
+
+  await fs.writeFile(
+    tmpPath,
+    Buffer.isBuffer(pdfBytes) ? pdfBytes : Buffer.from(pdfBytes),
+  );
+
+  return new Promise<string>((resolve, reject) => {
+    execFile(
+      "pdftotext",
+      ["-layout", "-enc", "UTF-8", tmpPath, "-"],
+      (err, stdout) => {
+        void fs.unlink(tmpPath).catch(() => {});
+        if (err) return reject(err);
+        resolve(stdout.toString());
+      },
+    );
+  });
 }
 
 /**
@@ -88,7 +117,7 @@ async function extractPdfTextWithFallback(
   pdfBytes: Uint8Array | Buffer,
 ): Promise<{
   rawText: string;
-  extractorMethod: "pdf-parse" | "pdfjs";
+  extractorMethod: "pdf-parse" | "pdfjs" | "pdftotext";
   warnings: string[];
 }> {
   const warnings: string[] = [];
@@ -226,6 +255,30 @@ async function extractPdfTextWithFallback(
     );
   }
 
+  // --- Fallback: pdftotext CLI ---
+  try {
+    const pdftotextOutput = (await runPdftotext(pdfBytes)).trim();
+
+    if (pdftotextOutput && !looksBinary(pdftotextOutput)) {
+      warnings.push("pdftotext fallback succeeded after pdf-parse/pdfjs failed.");
+      return {
+        rawText: pdftotextOutput,
+        extractorMethod: "pdftotext",
+        warnings,
+      };
+    }
+
+    warnings.push(
+      "pdftotext fallback attempted but still produced unreadable/binary-looking text.",
+    );
+  } catch (err) {
+    warnings.push(
+      `pdftotext fallback failed: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+
   // If we reach here, no meaningful text was extracted.
   warnings.push(
     "PDF content appears binary/unreadable even after pdfjs fallback; no usable text available.",
@@ -249,7 +302,7 @@ export async function deterministicEflExtract(
   extractPdfText?: PdfTextExtractor,
 ): Promise<EflDeterministicExtract> {
   const warnings: string[] = [];
-  let extractorMethod: "pdf-parse" | "pdfjs" | undefined;
+  let extractorMethod: "pdf-parse" | "pdfjs" | "pdftotext" | undefined;
 
   const eflPdfSha256 = computePdfSha256(pdfBytes);
 
