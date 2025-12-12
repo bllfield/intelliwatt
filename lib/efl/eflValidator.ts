@@ -114,7 +114,7 @@ export function extractEflAvgPricePoints(
     ) ?? "";
 
   const uses = Array.from(
-    useLine.matchAll(/(\d{1,2}(?:,\d{3})?)\s*kwh/gi),
+    useLine.matchAll(/(\d{1,4}(?:,\d{3})?)\s*kwh/gi),
   ).map((m) => Number(m[1].replace(/,/g, "")));
   const hasRequiredUses =
     uses.includes(500) && uses.includes(1000) && uses.includes(2000);
@@ -137,7 +137,7 @@ export function extractEflAvgPricePoints(
     const priceText = priceMatch?.[0] ?? priceLine;
 
     const uses2 = Array.from(
-      useText.matchAll(/(\d{1,2}(?:,\d{3})?)\s*kwh/gi),
+      useText.matchAll(/(\d{1,4}(?:,\d{3})?)\s*kwh/gi),
     ).map((m) => Number(m[1].replace(/,/g, "")));
     const cents2 = Array.from(priceText.matchAll(centsPattern)).map((m) =>
       Number(m[1]),
