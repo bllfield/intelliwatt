@@ -244,6 +244,23 @@ Next step: Step 4 — Wire into WattBuy offer detail (non-blocking UI)
 ✅ Step 4 complete: WattBuy offer details now attempt to load/learn EFL templates  
 Next step: Step 5 — Admin list/view/approve templates + collision detection
 
+## EFL Templates — Backfill, Cache, Metrics (Step 6)
+
+- In-memory cache:
+  - `lib/efl/getOrCreateEflTemplate.ts` now maintains a short-lived TTL cache (`TEMPLATE_CACHE`, 5 minutes) keyed by the primary EFL identity key (`identity.primaryKey`), plus a longer-lived in-process map keyed by all `lookupKeys`.
+  - `getOrCreateEflTemplate()` checks the TTL cache first for hits before consulting the in-process map or calling the AI parser, and refreshes the TTL entry after each successful lookup or creation.
+- Metrics counters (log-based):
+  - Module-scope counters track `templateHit`, `templateMiss`, `templateCreated`, and `aiParseCount` inside `getOrCreateEflTemplate()`.
+  - Each call emits a structured `console.info("[EFL_TEMPLATE_METRICS]", { ... })` payload so we can observe cache effectiveness and AI usage from logs without adding new infra.
+- Admin backfill endpoint:
+  - New route: `POST /api/admin/efl/backfill` (requires `x-admin-token` matching `ADMIN_TOKEN`), which accepts `{ limit?: number, providerName?: string, tdspName?: string, offers?: any[] }`.
+  - When `offers[]` are provided, it filters by `providerName`/`tdspName`, skips entries without `rawText` / `eflRawText`, and calls `getOrCreateEflTemplate({ source: "wattbuy", ... })` for the rest.
+  - Returns a summary: `{ ok: true, processed, created, hits, misses, warnings }`, where warnings include skips (no text) and any parser/template warnings per offer.
+- No Redis/KV or schema changes were introduced; correctness remains anchored in the deterministic extract + AI parser behavior, with caching and metrics strictly additive for performance and observability.
+
+✅ Step 6 complete: backfill + cache + metrics  
+Next step: Step 7 — Documentation + runbooks + failure modes
+
 <!-- Dev + Prod Prisma migrations completed for Current Plan module + master schema on 2025-11-28 -->
 
 ### Current Plan / Current Rate Page — Status

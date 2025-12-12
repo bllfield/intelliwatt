@@ -52,9 +52,44 @@ export interface GetOrCreateEflTemplateResult {
   warnings: string[];
 }
 
-// Simple in-memory cache so that repeated parses of the exact same
+// Simple in-memory caches so that repeated parses of the exact same
 // EFL within a single process do not re-run the AI unnecessarily.
+// - TEMPLATE_CACHE: short-lived TTL cache keyed by identity.primaryKey
+// - templateCache: longer-lived map keyed by all identity.lookupKeys
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const TEMPLATE_CACHE = new Map<string, { template: EflTemplateRecord; cachedAt: number }>();
 const templateCache = new Map<string, EflTemplateRecord>();
+
+let templateHit = 0;
+let templateMiss = 0;
+let templateCreated = 0;
+let aiParseCount = 0;
+
+function getFromTtlCache(key: string): EflTemplateRecord | null {
+  const entry = TEMPLATE_CACHE.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.cachedAt > CACHE_TTL_MS) {
+    TEMPLATE_CACHE.delete(key);
+    return null;
+  }
+  return entry.template;
+}
+
+function putInTtlCache(key: string, template: EflTemplateRecord): void {
+  TEMPLATE_CACHE.set(key, { template, cachedAt: Date.now() });
+}
+
+function logTemplateMetrics() {
+  // Lightweight, log-based metrics for observability. This is intentionally
+  // low-cardinality and can be aggregated externally if needed.
+  // eslint-disable-next-line no-console
+  console.info("[EFL_TEMPLATE_METRICS]", {
+    templateHit,
+    templateMiss,
+    templateCreated,
+    aiParseCount,
+  });
+}
 
 export function findCachedEflTemplateByIdentity(input: {
   repPuctCertificate: string | null;
@@ -121,16 +156,38 @@ async function handleManualUpload(
     wattbuy: null,
   });
 
+  // Fast path: TTL cache keyed by primary identity key.
+  const ttlHit = getFromTtlCache(identity.primaryKey);
+  if (ttlHit) {
+    templateHit++;
+    const warnings = [
+      ...extract.warnings,
+      ...identity.warnings,
+      ...(ttlHit.parseWarnings ?? []),
+    ];
+    logTemplateMetrics();
+    return {
+      template: ttlHit,
+      wasCreated: false,
+      identity,
+      warnings,
+    };
+  }
+
   // Try cache by any of the lookup keys (strongest first).
   for (const key of identity.lookupKeys) {
     const hit = templateCache.get(key);
     if (hit) {
+      templateHit++;
       const warnings = [
         ...extract.warnings,
         ...identity.warnings,
         // keep the cached template's own parseWarnings visible at top level
         ...(hit.parseWarnings ?? []),
       ];
+      // Also refresh TTL under the primary key.
+      putInTtlCache(identity.primaryKey, hit);
+      logTemplateMetrics();
       return {
         template: hit,
         wasCreated: false,
@@ -140,7 +197,10 @@ async function handleManualUpload(
     }
   }
 
+  templateMiss++;
+
   // Miss → run AI parse from TEXT ONLY.
+  aiParseCount++;
   const aiResult = await parseEflTextWithAi({
     rawText,
     eflPdfSha256: extract.eflPdfSha256,
@@ -167,9 +227,13 @@ async function handleManualUpload(
 
   // Cache under all lookup keys so future calls within this process
   // (manual uploads of the same EFL) are fast and consistent.
+  templateCreated++;
+  putInTtlCache(identity.primaryKey, template);
   for (const key of identity.lookupKeys) {
     templateCache.set(key, template);
   }
+
+  logTemplateMetrics();
 
   return {
     template,
@@ -196,13 +260,32 @@ async function handleWattbuy(
     wattbuy: input.wattbuy ?? null,
   });
 
+  const ttlHit = getFromTtlCache(identity.primaryKey);
+  if (ttlHit) {
+    templateHit++;
+    const warnings = [
+      ...identity.warnings,
+      ...(ttlHit.parseWarnings ?? []),
+    ];
+    logTemplateMetrics();
+    return {
+      template: ttlHit,
+      wasCreated: false,
+      identity,
+      warnings,
+    };
+  }
+
   for (const key of identity.lookupKeys) {
     const hit = templateCache.get(key);
     if (hit) {
+      templateHit++;
       const warnings = [
         ...identity.warnings,
         ...(hit.parseWarnings ?? []),
       ];
+      putInTtlCache(identity.primaryKey, hit);
+      logTemplateMetrics();
       return {
         template: hit,
         wasCreated: false,
@@ -212,11 +295,15 @@ async function handleWattbuy(
     }
   }
 
+  templateMiss++;
+
   const aiResult: EflAiParseResult = await parseEflTextWithAi({
+    // Track each AI call for simple metrics.
     rawText,
     eflPdfSha256: eflPdfSha256 || identity.primaryKey,
     extraWarnings: [],
   });
+  aiParseCount++;
 
   const template: EflTemplateRecord = {
     eflPdfSha256: eflPdfSha256 || identity.primaryKey,
@@ -235,9 +322,13 @@ async function handleWattbuy(
     ...(aiResult.parseWarnings ?? []),
   ];
 
+  templateCreated++;
+  putInTtlCache(identity.primaryKey, template);
   for (const key of identity.lookupKeys) {
     templateCache.set(key, template);
   }
+
+  logTemplateMetrics();
 
   return {
     template,
