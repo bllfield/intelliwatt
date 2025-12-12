@@ -210,6 +210,39 @@ Notes:
   - Updated SMT and Current Plan bill-upload components to clearly accept PDF/JPG/PNG/TXT/CSV while keeping the admin dev harness conservative (it still only auto-loads `.txt` / `.csv` into its textarea).
   - Isolated the bill parser onto its own OpenAI key env var: `OPENAI_IntelliWatt_Bill_Parcer`, wired through a dedicated `openaiBillParser` client used only by bill parsing and image OCR.
 
+## Model Lock: Bill Parser & EFL pdftotext Execution
+
+For all **bill-parser**, **Current Plan bill parsing**, and **EFL pdftotext**
+implementation work, the **execution model is locked to GPT-4.1**.
+
+### Rationale
+- Bill parsing and PDF → text extraction are **infra-critical**
+- Changes must be **surgical**, deterministic, and follow strict constraints
+- GPT-4.1 reliably handles:
+  - Next.js route handlers
+  - TypeScript helpers
+  - Env var fallbacks
+  - Droplet vs serverless boundaries
+  - Project plan hygiene (final working order only)
+
+### Explicit Rules
+- ✅ Use **GPT-4.1** for:
+  - Implementing bill-parse logic
+  - Wiring droplet pdftotext
+  - Updating PROJECT_PLAN.md after changes
+- ❌ Do NOT use GPT-4.1-mini for bill parsing or infra steps
+- ⚠️ Use GPT-5 Codex **only** for architecture design or large refactors
+
+### Enforcement
+If a future chat suggests:
+- pdf.js / pdf-parse fallback for bills
+- OpenAI-based bill OCR
+- New droplet routes without necessity
+- Model downgrades to 4.1-mini
+
+That guidance is considered **out of date and invalid**.
+Follow this section instead.
+
 ### Normalized Current Plan Dataset
 
 - Master schema now includes the `NormalizedCurrentPlan` model storing normalized snapshots of each user's current rate structure (tiers, TOU bands, bill credits) sourced from the module DB.
@@ -2961,6 +2994,15 @@ Ops and support need a stable email field on `HouseAddress` for lookups, while t
 - Droplet ingest currently defaults to a 12-month look-back and posts both interval and billing files.
 
 **Guardrail:** Treat this flow as canonical. Future work must extend it (e.g., new ingest modes) rather than replacing or bypassing the droplet-trigger mechanism.
+
+### How to Continue This Work Safely
+
+After every successful code change related to bill parsing, Current Plan, or EFL pdftotext:
+1. Update `docs/PROJECT_PLAN.md` to reflect the final working order.
+2. Keep **only** the final, working approach in this plan (remove or overwrite failed/experimental paths).
+3. Ensure future chats can continue safely without regressions by:
+   - Respecting the **Model Lock** section above (GPT-4.1 for execution).
+   - Following droplet sync rules (`git pull origin main` + `sudo bash deploy/droplet/post_pull.sh` when droplet files change).
 
 ### PC-2025-11-19-BILLING: SMT Billing Reads Table (Schema Only)
 

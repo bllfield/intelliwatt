@@ -167,6 +167,16 @@ WHAT THE NEXT GPT SHOULD DO
   - Run /home/deploy/smt_token_test.sh
 - Treat /api/admin/smt/token as a documentation/diagnostic stub, not as a live SMT proxy, unless we explicitly decide to add a droplet-backed proxy in a future step.
 
+Droplet sync enforcement (EFL / SMT / helpers):
+- Whenever you create or modify any file under `deploy/droplet/**` or any droplet-only helper script/config:
+  - After committing and pushing to `main`, you MUST tell me explicitly that the droplet needs a pull + post-pull sync.
+  - Include a concrete command block for the droplet:
+    - From `deploy`: 
+      - `cd /home/deploy/apps/intelliwatt`
+      - `git pull origin main`
+      - `sudo bash deploy/droplet/post_pull.sh`
+  - If a change does **not** require a droplet pull (Vercel-only or docs-only), say that clearly: “No droplet update needed for this push.”
+
 ========================================
 CURSOR WORKFLOW: “DONE” MEANS EXECUTED
 ========================================
@@ -218,7 +228,7 @@ On the droplet, run as `root` or prefix with `sudo`:
 FROM ROOT
 cd /home/deploy/apps/intelliwatt
 git pull origin main
-
+sudo bash deploy/droplet/post_pull.sh
 sudo cp deploy/droplet/webhook_server.py /home/deploy/webhook_server.py
 sudo systemctl restart smt-webhook.service
 sudo systemctl restart smt-ingest.service
