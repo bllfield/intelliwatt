@@ -765,6 +765,7 @@ OUTPUT CONTRACT:
       assumptionsUsed: {},
       fail: false,
       notes: [`Avg price validator error: ${msg}`],
+      avgTableFound: false,
     };
   }
 

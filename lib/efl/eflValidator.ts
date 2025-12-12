@@ -1,8 +1,5 @@
 import type { PlanRules, RateStructure } from "./planEngine";
-import {
-  computePlanCost,
-  type PlanCostEngineInput,
-} from "@/lib/planAnalyzer/planCostEngine";
+import { computePlanCost } from "@/lib/planAnalyzer/planCostEngine";
 import type {
   IntervalUsagePoint,
   RatePlanRef,
@@ -34,6 +31,9 @@ export interface EflAvgPriceValidation {
   fail: boolean;
   queueReason?: string;
   notes?: string[];
+  avgTableFound: boolean;
+  avgTableRows?: Array<{ kwh: number; avgPriceCentsPerKwh: number }>;
+  avgTableSnippet?: string;
 }
 
 const DEFAULT_TOLERANCE_CENTS_PER_KWH = 0.25;
@@ -314,14 +314,12 @@ async function computeModeledAvgCentsPerKwhOrNull(args: {
     tdspCode: null,
   };
 
-  const input: PlanCostEngineInput = {
-    plan: { plan, rules: planRules },
-    usage,
-    tz: VALIDATION_TZ,
-  };
-
   try {
-    const result = computePlanCost(input);
+    const result = computePlanCost({
+      plan: { plan, rules: planRules },
+      usage,
+      tz: VALIDATION_TZ,
+    });
     const totalDollars = result.totalCostDollars;
     const avgCents = (totalDollars * 100) / kwh;
     if (!Number.isFinite(avgCents)) return null;
@@ -345,6 +343,24 @@ export async function validateEflAvgPriceTable(args: {
   const tolerance = args.toleranceCentsPerKwh ?? DEFAULT_TOLERANCE_CENTS_PER_KWH;
 
   const points = extractEflAvgPricePoints(rawText);
+
+  const avgTableFound = Array.isArray(points) && points.length > 0;
+
+  // Build a small snippet around the Average Monthly Use / Average price lines
+  // so the admin UI can show exactly what was parsed.
+  let avgTableSnippet: string | undefined;
+  if (avgTableFound) {
+    const lines = rawText.split(/\r?\n/);
+    const startIdx = lines.findIndex((l) =>
+      /Average\s+(Monthly\s+Use|monthly\s+use)/i.test(l),
+    );
+    if (startIdx >= 0) {
+      const endIdx = Math.min(lines.length, startIdx + 6);
+      const block = lines.slice(startIdx, endIdx).join("\n");
+      avgTableSnippet = block.slice(0, 800);
+    }
+  }
+
   if (!points || points.length === 0) {
     return {
       status: "SKIP",
@@ -353,6 +369,7 @@ export async function validateEflAvgPriceTable(args: {
       assumptionsUsed: {},
       fail: false,
       notes: ["EFL Average Price table (500/1000/2000) not found in text."],
+      avgTableFound: false,
     };
   }
 
@@ -365,6 +382,12 @@ export async function validateEflAvgPriceTable(args: {
       assumptionsUsed: {},
       fail: false,
       notes: [assumption.reason ?? "Assumption-based avg price table."],
+      avgTableFound,
+      avgTableRows: points.map((p) => ({
+        kwh: p.kwh,
+        avgPriceCentsPerKwh: p.eflAvgCentsPerKwh,
+      })),
+      avgTableSnippet,
     };
   }
 
@@ -426,6 +449,12 @@ export async function validateEflAvgPriceTable(args: {
       notes: [
         "Canonical plan-cost calculator could not be applied for any avg-price point; skipping validation.",
       ],
+      avgTableFound,
+      avgTableRows: points.map((p) => ({
+        kwh: p.kwh,
+        avgPriceCentsPerKwh: p.eflAvgCentsPerKwh,
+      })),
+      avgTableSnippet,
     };
   }
 
@@ -454,6 +483,12 @@ export async function validateEflAvgPriceTable(args: {
       },
       fail: false,
       notes: [],
+      avgTableFound,
+      avgTableRows: points.map((p) => ({
+        kwh: p.kwh,
+        avgPriceCentsPerKwh: p.eflAvgCentsPerKwh,
+      })),
+      avgTableSnippet,
     };
   }
 
@@ -475,6 +510,12 @@ export async function validateEflAvgPriceTable(args: {
         4,
       )} ¢/kWh (tolerance ${tolerance} ¢/kWh).`,
     ],
+    avgTableFound,
+    avgTableRows: points.map((p) => ({
+      kwh: p.kwh,
+      avgPriceCentsPerKwh: p.eflAvgCentsPerKwh,
+    })),
+    avgTableSnippet,
   };
 }
 
