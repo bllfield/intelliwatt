@@ -100,6 +100,11 @@ function extractLineAfterLabel(
 export function extractEflAvgPricePoints(
   rawText: string,
 ): EflAvgPricePoint[] | null {
+  // Support common encodings like "18.5¢", "18.5 ¢", and "18.5Â¢"
+  // by allowing arbitrary non-digit, non-¢ chars between the number
+  // and the literal cent sign.
+  const centsPattern = /(\d+(?:\.\d+)?)[^\d¢]*¢/g;
+
   const useLine =
     extractLineAfterLabel(rawText, /Average\s+(monthly\s+)?use/i) ?? "";
   const priceLine =
@@ -114,9 +119,9 @@ export function extractEflAvgPricePoints(
   const hasRequiredUses =
     uses.includes(500) && uses.includes(1000) && uses.includes(2000);
 
-  const centsTokens = Array.from(
-    priceLine.matchAll(/(\d+(?:\.\d+)?)\s*¢/g),
-  ).map((m) => Number(m[1]));
+  const centsTokens = Array.from(priceLine.matchAll(centsPattern)).map((m) =>
+    Number(m[1]),
+  );
   const has3 = centsTokens.length >= 3;
 
   if (!hasRequiredUses || !has3) {
@@ -134,9 +139,9 @@ export function extractEflAvgPricePoints(
     const uses2 = Array.from(
       useText.matchAll(/(\d{1,2}(?:,\d{3})?)\s*kwh/gi),
     ).map((m) => Number(m[1].replace(/,/g, "")));
-    const cents2 = Array.from(
-      priceText.matchAll(/(\d+(?:\.\d+)?)\s*¢/g),
-    ).map((m) => Number(m[1]));
+    const cents2 = Array.from(priceText.matchAll(centsPattern)).map((m) =>
+      Number(m[1]),
+    );
 
     if (
       !(
@@ -373,24 +378,11 @@ export async function validateEflAvgPriceTable(args: {
     };
   }
 
+  // We still detect assumption-based language (e.g., free nights examples)
+  // but we do NOT skip validation outright anymore. Instead we pass any
+  // parsed night-hours assumptions into the cost engine so the modeled
+  // averages line up with the EFL's own methodology.
   const assumption = isAssumptionBasedAvgPriceTable(rawText);
-  if (assumption.isAssumptionBased) {
-    return {
-      status: "SKIP",
-      toleranceCentsPerKwh: tolerance,
-      points: [],
-      assumptionsUsed: {},
-      fail: false,
-      notes: [assumption.reason ?? "Assumption-based avg price table."],
-      avgTableFound,
-      avgTableRows: points.map((p) => ({
-        kwh: p.kwh,
-        avgPriceCentsPerKwh: p.eflAvgCentsPerKwh,
-      })),
-      avgTableSnippet,
-    };
-  }
-
   const nightAssumption = parseEflNightHoursAssumption(rawText) ?? undefined;
 
   const tdspIncludedFlag =
