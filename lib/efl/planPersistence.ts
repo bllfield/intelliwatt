@@ -4,6 +4,7 @@ import type {
   RateStructure,
   PlanRulesValidationResult,
 } from "@/lib/efl/planEngine";
+import { getTemplateKey } from "@/lib/efl/templateIdentity";
 
 export interface UpsertEflRatePlanArgs {
   eflUrl: string;
@@ -90,12 +91,38 @@ export async function upsertRatePlanFromEfl(
     planName: planName ?? undefined,
   } as const;
 
-  // Prefer an existing RatePlan with this PDF fingerprint if present.
-  // Note: we use a raw where cast here because the generated types may not yet
-  // include eflPdfSha256 until after Prisma client regeneration.
-  const existing = await prisma.ratePlan.findFirst({
-    where: { eflPdfSha256: eflPdfSha256 } as any,
+  // Compute a stable template identity for this EFL so we can dedupe RatePlan
+  // rows even when the same EFL arrives via multiple URLs or ingest paths.
+  const identity = getTemplateKey({
+    repPuctCertificate,
+    eflVersionCode,
+    eflPdfSha256,
+    wattbuy: null,
   });
+
+  let existing = null as Awaited<
+    ReturnType<(typeof prisma)["ratePlan"]["findFirst"]>
+  >;
+
+  // 1) Prefer an existing RatePlan with the same REP PUCT Certificate + EFL
+  // Version Code, when available.
+  if (repPuctCertificate && eflVersionCode) {
+    existing = await prisma.ratePlan.findFirst({
+      where: {
+        repPuctCertificate: repPuctCertificate,
+        eflVersionCode: eflVersionCode,
+      },
+    });
+  }
+
+  // 2) If not found, fall back to the EFL PDF SHA-256 fingerprint.
+  if (!existing && eflPdfSha256) {
+    // Note: we use a raw where cast here because the generated types may not yet
+    // include eflPdfSha256 until after Prisma client regeneration.
+    existing = await prisma.ratePlan.findFirst({
+      where: { eflPdfSha256: eflPdfSha256 } as any,
+    });
+  }
 
   if (!existing) {
     return prisma.ratePlan.create({

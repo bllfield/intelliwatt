@@ -197,6 +197,22 @@ Reliability guardrails:
 - ✅ `parseConfidence` is computed deterministically from completeness (presence of base charge, tiers/fixed rate, bill credits, rate type, and term months) instead of relying on the model’s self-score.
 - ✅ System no longer returns 0% parseConfidence when obvious pricing lines exist; instead it surfaces the best-effort structured parse plus explicit fallback warnings.
 
+## EFL Templates — Stable Identity + Dedupe (Step 2)
+
+- key precedence order (strongest to weakest):
+  - `PUCT_CERT_PLUS_EFL_VERSION`: `puct:${repPuctCertificate}|ver:${normalizedEflVersionCode}`
+  - `EFL_PDF_SHA256`: `sha256:${eflPdfSha256}`
+  - `WATTBUY_FALLBACK`: `wb:${norm(provider)}|plan:${norm(plan)}|term:${term||"na"}|tdsp:${norm(tdsp)||"na"}|offer:${offerId||"na"}`
+- exact templateKey formats are implemented via `lib/efl/templateIdentity.ts#getTemplateKey`, which normalizes strings (lowercase, collapse whitespace, strip non-alphanum except spaces) and returns:
+  - `primaryKey`, `keyType`, `confidence` (0–100), `lookupKeys` (primary first, then weaker keys), and `warnings`.
+- RatePlan template storage now dedupes on:
+  - REP PUCT Certificate + EFL Ver. # when present, otherwise
+  - EFL PDF SHA-256 fingerprint; this prevents duplicate templates when the same EFL is seen through multiple URLs or ingest paths.
+- UI/API responses remain unchanged; identity + dedupe affect only internal RatePlan persistence.
+
+✅ Step 2 complete: stable identity + dedupe in template storage  
+Next step: Step 3 — Get-or-create template service (single entry point) + validation gating
+
 <!-- Dev + Prod Prisma migrations completed for Current Plan module + master schema on 2025-11-28 -->
 
 ### Current Plan / Current Rate Page — Status
