@@ -189,7 +189,7 @@ Notes:
 EFL parser model + extraction status:
 - ✅ OpenAI PDF file upload path removed for the EFL parser (413 capacity issues avoided); AI now runs **only** on the `pdftotext` output text.
 - ✅ REP PUCT Certificate number and EFL Ver. # are extracted deterministically from the normalized text via regex helpers in `lib/efl/eflExtractor.ts`.
-- ✅ EFL AI normalizer now strips **Average Price** rows and **TDU passthrough** blocks from the AI input text only, dropping only the “Average Monthly Use / Average Price per kWh” lines and never the subsequent price components table; the EFL parser output shape (`planRules`, `rateStructure`, `parseConfidence`, `parseWarnings`) and the “Parsed Plan Snapshot” rendering remain unchanged.
+- ✅ EFL AI normalizer now strips **Average Price** rows and **TDU passthrough** blocks from the AI input text only, dropping only the “Average Monthly Use / Average Price per kWh” lines and never the subsequent price components table; key component tables (e.g., “This price disclosure is based on the following components: …”) are explicitly pinned so their rows are never removed. The EFL parser output shape (`planRules`, `rateStructure`, `parseConfidence`, `parseWarnings`) and the “Parsed Plan Snapshot” rendering remain unchanged.
 - ✅ Parser prompt and optional deterministic fallback focus on REP Base Charge, Energy Charge tiers, Bill Credits, Product Type, Contract Term, and Early Termination Fee; if the model misses obvious values present in normalized text, a guarded fallback fills them and adds a parse warning.
 - ✅ Fixed slicer bug where the “Average Monthly Use” block could accidentally remove real pricing lines (Energy Charge / Usage Credit) that follow immediately after the table; the slicer now stops skipping as soon as it encounters pricing-component markers and preserves those lines.
 - ✅ `parseWarnings` are now de-duplicated at the AI parser boundary for cleaner diagnostics without losing any signal.
@@ -205,6 +205,8 @@ Reliability guardrails:
  - ✅ N/A is now treated as explicitly present for core pricing components: if the EFL lists “Base Monthly Charge N/A”, “Minimum Usage Charge N/A”, or “Residential Usage Credit N/A”, the parser leaves the numeric fields null but records clear N/A warnings instead of implying the fields are missing.
  - ✅ When the EFL answers “Do I have a termination fee” with a formula like “$15.00 multiplied by the number of months remaining”, the parser captures this ETF formula text as a parse warning/note without introducing new schema fields.
  - ✅ For EFLs that clearly state `Type of Product: Fixed Rate` and a single “Energy Charge X¢/kWh”, deterministic fallbacks now fully populate FIXED metadata: `planRules.rateType = "FIXED"`, `planRules.defaultRateCentsPerKwh`, `planRules.currentBillEnergyRateCents`, and the aligned `rateStructure` fields (`type: "FIXED"`, `energyRateCents`, `baseMonthlyFeeCents` when present).
+ - ✅ Version extraction is robust to footer-style “Version X.Y” strings (e.g., `Version 10.0`) in addition to the existing `Ver. #` and underscore-token patterns.
+ - ✅ Deterministic bill-credit fallbacks now cover AutoPay/Paperless credits and usage credits with thresholds (e.g., “Usage Credit for 1,000 kWh or more: $100.00 per month”), mapping them into both `planRules.billCredits[]` and the aligned `rateStructure.billCredits.rules[]` so engines can apply them directly. Base charge values of `$0` are treated as explicitly present, not “missing”.
 
 ## EFL Templates — Stable Identity + Dedupe (Step 2)
 

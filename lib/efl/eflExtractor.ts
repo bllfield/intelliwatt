@@ -215,6 +215,14 @@ function extractRepPuctCertificate(text: string): string | null {
 function extractEflVersionCode(text: string): string | null {
   const lines = text.split(/\r?\n/).map((l) => l.trim());
 
+  // 0) Simple footer-style "Version 10.0" pattern.
+  const footerVersion = text.match(
+    /\bVersion\s+([0-9]+(?:\.[0-9]+)?)\b/i,
+  );
+  if (footerVersion?.[1]) {
+    return `Version ${footerVersion[1]}`;
+  }
+
   // A) Common inline "Ver. #:" patterns, with or without leading "EFL".
   for (const line of lines) {
     const m = line.match(/\b(?:EFL\s*)?Ver\.\s*#\s*:\s*(.+)\b/i);

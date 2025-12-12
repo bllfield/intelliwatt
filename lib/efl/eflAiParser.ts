@@ -44,6 +44,7 @@ function normalizeEflTextForAi(rawText: string): {
 
   let removedAverages = false;
   let removedTdu = false;
+  let pinCount = 0; // Protect critical pricing component tables.
 
   const isRepPricingLine = (s: string): boolean =>
     /energy\s*charge/i.test(s) ||
@@ -83,6 +84,15 @@ function normalizeEflTextForAi(rawText: string): {
     const trimmed = line.trim();
     const lower = trimmed.toLowerCase();
 
+    // Pin region: once we see the "following components" header, keep the next
+    // ~20 lines intact (except for exact average rows), even if they contain
+    // TDU or other boilerplate, so we never drop the component pricing table.
+    if (/following components/i.test(trimmed)) {
+      pinCount = 20;
+    } else if (pinCount > 0) {
+      pinCount -= 1;
+    }
+
     // Drop only the "Average Monthly Use / Average Price per kWh" rows
     // themselves, never the subsequent price components table.
     if (isAverageRow(trimmed)) {
@@ -103,7 +113,7 @@ function normalizeEflTextForAi(rawText: string): {
       droppedHints.push(hint);
       continue;
     }
-    if (isTduOnlyLine(trimmed)) {
+    if (pinCount === 0 && isTduOnlyLine(trimmed)) {
       if (!removedTdu) {
         removedTdu = true;
         const hint = "Removed TDU Delivery Charges passthrough block.";
@@ -112,7 +122,7 @@ function normalizeEflTextForAi(rawText: string): {
       }
       continue;
     }
-    if (/sales tax|municipalfees|municipal fees/i.test(lower)) {
+    if (pinCount === 0 && /sales tax|municipalfees|municipal fees/i.test(lower)) {
       const hint = "Removed generic tax/municipal fee language.";
       notes.push(hint);
       droppedHints.push(hint);
@@ -480,6 +490,33 @@ OUTPUT CONTRACT:
     }
   }
 
+  // Mirror PlanRules.billCredits into RateStructure.billCredits rules so
+  // downstream engines see the same credit/fee structures.
+  if (Array.isArray(planRules.billCredits) && planRules.billCredits.length > 0) {
+    const bcRules: any[] = [];
+    for (const bc of planRules.billCredits as any[]) {
+      if (!bc || typeof bc.creditDollars !== "number") continue;
+      const cents = Math.round(bc.creditDollars * 100);
+      const minUsage =
+        typeof bc.thresholdKwh === "number" && Number.isFinite(bc.thresholdKwh)
+          ? bc.thresholdKwh
+          : 0;
+      bcRules.push({
+        label: typeof bc.label === "string" ? bc.label : "Bill credit",
+        creditAmountCents: cents,
+        minUsageKWh: minUsage,
+        maxUsageKWh: undefined,
+        monthsOfYear: bc.monthsOfYear ?? undefined,
+      });
+    }
+    if (bcRules.length > 0) {
+      rs.billCredits = {
+        hasBillCredit: true,
+        rules: bcRules,
+      };
+    }
+  }
+
   // Night Hours → time-of-use period (e.g., Free Nights credit window).
   const night = fallbackExtractNightHours(fallbackSourceText);
   if (night) {
@@ -540,7 +577,7 @@ OUTPUT CONTRACT:
   if (/Do I have a termination fee/i.test(fallbackSourceText)) {
     const etfMatch =
       fallbackSourceText.match(
-        /\$([0-9]+(?:\.[0-9]{1,2})?).{0,120}multiplied\s+by.{0,120}months?\s+remaining/i,
+        /\$([0-9]+(?:\.[0-9]{1,2})?).{0,160}?(multiplied\s+by|each\s+whole\s+month).{0,120}?months?\s+remaining/i,
       ) ?? null;
     if (etfMatch?.[1]) {
       const amt = etfMatch[1];
@@ -823,6 +860,41 @@ function fallbackExtractBillCredits(text: string): BillCredit[] {
         thresholdKwh: threshold,
         monthsOfYear: null,
         type: "THRESHOLD_MIN",
+      });
+    }
+  }
+
+  // Pattern 3: "Auto Pay & Paperless Credit: $5.00 per month"
+  const re3 =
+    /Auto\s*Pay\s*&\s*Paperless\s*Credit\s*:\s*\$?\s*([0-9]+(?:\.[0-9]{1,2})?)\b/i;
+  const m3 = text.match(re3);
+  if (m3?.[1]) {
+    const dollars = Number(m3[1]);
+    if (Number.isFinite(dollars)) {
+      credits.push({
+        label: "Auto Pay & Paperless Credit",
+        creditDollars: dollars,
+        thresholdKwh: 0,
+        monthsOfYear: undefined,
+        type: "BEHAVIOR",
+      });
+    }
+  }
+
+  // Pattern 4: "Usage Credit for 1,000 kWh or more: $100.00 per month"
+  const re4 =
+    /Usage\s*Credit\s*for\s*([0-9,]+)\s*kwh\s*or\s*more\s*:\s*\$?\s*([0-9]+(?:\.[0-9]{1,2})?)\b/i;
+  const m4 = text.match(re4);
+  if (m4?.[1] && m4?.[2]) {
+    const threshold = Number(m4[1].replace(/,/g, ""));
+    const dollars = Number(m4[2]);
+    if (Number.isFinite(threshold) && Number.isFinite(dollars)) {
+      credits.push({
+        label: `Usage Credit (>= ${threshold} kWh)`,
+        creditDollars: dollars,
+        thresholdKwh: threshold,
+        monthsOfYear: null,
+        type: "USAGE_THRESHOLD",
       });
     }
   }
