@@ -186,6 +186,10 @@ Notes:
 - Note: after any `git pull` on the droplet repo, run `sudo bash deploy/droplet/post_pull.sh` to keep nginx/systemd and the EFL helper in sync with the repo.
 - ⬜ Keep DNS + droplet nginx/certbot changes in sync with these docs whenever the helper hostname or topology changes.
 
+EFL parser model + extraction status:
+- ✅ OpenAI PDF file upload path removed for the EFL parser (413 capacity issues avoided); AI now runs **only** on the `pdftotext` output text.
+- ✅ REP PUCT Certificate number and EFL Ver. # are extracted deterministically from the normalized text via regex helpers in `lib/efl/eflExtractor.ts`.
+
 <!-- Dev + Prod Prisma migrations completed for Current Plan module + master schema on 2025-11-28 -->
 
 ### Current Plan / Current Rate Page — Status

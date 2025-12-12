@@ -26,7 +26,7 @@ function filterParseWarnings(warnings: string[]): string[] {
   );
 }
 
-async function parseEflTextWithAi(opts: {
+export async function parseEflTextWithAi(opts: {
   rawText: string;
   eflPdfSha256: string;
   extraWarnings?: string[];
@@ -151,242 +151,22 @@ export async function parseEflPdfWithAi(opts: {
   eflPdfSha256: string;
   rawText?: string;
 }): Promise<EflAiParseResult> {
-  const { pdfBytes, eflPdfSha256, rawText } = opts;
+  const { rawText, eflPdfSha256 } = opts;
+  const text = (rawText ?? "").trim();
 
-  if (!process.env.OPENAI_IntelliWatt_Fact_Card_Parser) {
+  if (!text) {
     return {
       planRules: null,
       rateStructure: null,
       parseConfidence: 0,
-      // Infra/config error → do not filter; keep full message.
       parseWarnings: [
-        "OPENAI_IntelliWatt_Fact_Card_Parser is not configured; cannot run EFL AI PDF parser.",
+        "EFL rawText is empty; AI parse skipped.",
       ],
     };
   }
 
-  // 1) Upload the PDF bytes as a file to OpenAI, never embed bytes in JSON.
-  let file: any;
-  try {
-    file = await (openaiFactCardParser as any).files.create({
-      file: {
-        name: `${eflPdfSha256}.pdf`,
-        content: Buffer.isBuffer(pdfBytes) ? pdfBytes : Buffer.from(pdfBytes),
-      } as any,
-      purpose: "vision",
-    });
-  } catch (err: any) {
-    const msg =
-      err?.message ??
-      (typeof err === "object" ? JSON.stringify(err) : String(err));
-
-    const baseWarning = `EFL AI file upload failed: ${msg}`;
-
-    // If the upload fails (e.g., 413 capacity error) but we have clean text,
-    // fall back to a text-only parse so we can still extract structure.
-    if (rawText && rawText.length > 0) {
-      return parseEflTextWithAi({
-        rawText,
-        eflPdfSha256,
-        extraWarnings: [baseWarning],
-      });
-    }
-
-    return {
-      planRules: null,
-      rateStructure: null,
-      parseConfidence: 0,
-      // Upload error warning is domain-level but not from the model; keep verbatim.
-      parseWarnings: [baseWarning],
-    };
-  }
-
-  const systemPrompt = `
-You are an expert Texas Electricity Facts Label (EFL) parser.
-
-You will be given an EFL PDF file as input. Using ONLY the content of that PDF as the source of truth, extract detailed pricing rules into a JSON object with this structure.
-
-CRITICAL GUARDRAILS:
-- You MUST NOT guess, approximate, or invent any numeric value (rates, fees, credits, thresholds).
-- If the EFL does not clearly provide a value, you MUST leave that field null or omit it,
-  and you may include a parse warning instead.
-- Do not fill in 'typical' values or make assumptions beyond what the EFL explicitly states.
-
-IDENTITY CONTEXT:
-EFL PDF SHA-256: ${eflPdfSha256}
-
-OUTPUT CONTRACT:
-Return a single JSON object with the following top-level fields:
-
-{
-  "planRules": {
-    "planType": string,
-    "defaultRateCentsPerKwh": number | null,
-    "baseChargePerMonthCents": number | null,
-    "rateType": "FIXED" | "VARIABLE" | "TIME_OF_USE" | null,
-    "variableIndexType": "ERCOT" | "FUEL" | "OTHER" | null,
-    "currentBillEnergyRateCents": number | null,
-    "timeOfUsePeriods": [
-      {
-        "label": string,
-        "startHour": number,
-        "endHour": number,
-        "daysOfWeek": number[],
-        "months": number[] | null,
-        "rateCentsPerKwh": number | null,
-        "isFree": boolean
-      }
-    ],
-    "solarBuyback": {
-      "hasBuyback": boolean,
-      "creditCentsPerKwh": number | null,
-      "matchesImportRate": boolean | null,
-      "maxMonthlyExportKwh": number | null,
-      "notes": string | null
-    } | null,
-    "usageTiers": [
-      {
-        "minKwh": number,
-        "maxKwh": number | null,
-        "rateCentsPerKwh": number
-      }
-    ] | null,
-    "billCredits": [
-      {
-        "label": string,
-        "creditDollars": number,
-        "thresholdKwh": number | null,
-        "monthsOfYear": number[] | null,
-        "type": "USAGE_THRESHOLD" | "BEHAVIOR" | "OTHER" | null
-      }
-    ]
-  },
-  "rateStructure": {
-    "type": "FIXED" | "VARIABLE" | "TIME_OF_USE" | null,
-    "baseMonthlyFeeCents": number | null,
-    "fixed": {
-      "energyRateCents": number | null
-    } | null,
-    "variable": {
-      "currentBillEnergyRateCents": number | null,
-      "indexType": "ERCOT" | "FUEL" | "OTHER" | null,
-      "variableNotes": string | null
-    } | null,
-    "timeOfUse": {
-      "tiers": [
-        {
-          "label": string,
-          "priceCents": number | null,
-          "startTime": string | null,
-          "endTime": string | null,
-          "daysOfWeek": number[] | null,
-          "monthsOfYear": number[] | null
-        }
-      ] | null
-    } | null,
-    "billCredits": {
-      "rules": [
-        {
-          "label": string,
-          "creditAmountCents": number | null,
-          "minUsageKWh": number | null,
-          "maxUsageKWh": number | null,
-          "monthsOfYear": number[] | null
-        }
-      ] | null
-    } | null
-  } | null,
-  "parseConfidence": number,
-  "parseWarnings": string[],
-  "source": "efl_pdf"
-}
-
-RULES:
-- Use ONLY the EFL PDF/text to determine REP (retail provider) energy charges, base fees,
-  bill credits, and plan metadata (plan name, Ver. #, PUCT certificate number if present).
-- Ignore TDSP/delivery charges, relocation fees, and municipal fees for now; they will be modeled
-  in a separate utility cost module. Do not attempt to infer or normalize those into this structure.
-- If a field is not explicitly stated, set it to null or an empty array.
-- Do NOT guess, approximate, or invent any numeric value (rates, fees, credits, thresholds).
-- For free nights/weekends, represent the free window as a timeOfUsePeriod
-  with isFree = true and rateCentsPerKwh = null (or 0 only if the EFL explicitly says 0),
-  and set planRules.rateType = "TIME_OF_USE".
-- For kWh tiered plans, express each band in usageTiers with correct minKwh, maxKwh, and rateCentsPerKwh.
-- For usage-based bill credits and behavioral credits, fill billCredits appropriately as described.
-- Always return STRICT JSON with double-quoted keys/strings and no comments or trailing commas.
-  `;
-
-  // 2) Call the Responses API, referencing only the file_id.
-  let rawJson = "{}";
-  try {
-    const response = await (openaiFactCardParser as any).responses.create({
-      model: process.env.OPENAI_EFL_MODEL || "gpt-4.1",
-      text: { format: { type: "json_object" } },
-      input: [
-        {
-          role: "system",
-          content: systemPrompt,
-        },
-        {
-          role: "user",
-          content: [
-            {
-              type: "input_text",
-              text: `Here is the EFL PDF file. Use ONLY this PDF as the source of truth.
-EFL PDF SHA-256: ${eflPdfSha256}`,
-            },
-            {
-              type: "input_file",
-              file_id: file.id,
-            },
-          ],
-        },
-      ],
-    });
-
-    rawJson = (response as any).output?.[0]?.content?.[0]?.text ?? "{}";
-  } catch (err: any) {
-    const msg =
-      err?.message ??
-      (typeof err === "object" ? JSON.stringify(err) : String(err));
-
-    return {
-      planRules: null,
-      rateStructure: null,
-      parseConfidence: 0,
-      // Infra/API error → do not filter; keep full message.
-      parseWarnings: [`EFL AI call failed: ${msg}`],
-    };
-  }
-
-  // 3) Parse the JSON emitted by the model into our result shape.
-  let parsed: any;
-  try {
-    parsed = JSON.parse(rawJson);
-  } catch (err) {
-    return {
-      planRules: null,
-      rateStructure: null,
-      parseConfidence: 0,
-      // JSON parse error → do not filter; keep full message.
-      parseWarnings: [
-        `Failed to parse EFL AI response JSON: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      ],
-    };
-  }
-
-  const modelWarnings = Array.isArray(parsed.parseWarnings)
-    ? parsed.parseWarnings
-    : [];
-
-  return {
-    planRules: parsed.planRules ?? null,
-    rateStructure: parsed.rateStructure ?? null,
-    parseConfidence:
-      typeof parsed.parseConfidence === "number" ? parsed.parseConfidence : 0,
-    // Only model-emitted warnings are filtered; infra errors are handled above.
-    parseWarnings: filterParseWarnings(modelWarnings),
-  };
+  return parseEflTextWithAi({
+    rawText: text,
+    eflPdfSha256,
+  });
 }
