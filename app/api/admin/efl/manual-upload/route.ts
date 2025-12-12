@@ -46,6 +46,7 @@ export async function POST(req: NextRequest) {
     const aiResult = await parseEflPdfWithAi({
       pdfBytes: pdfBuffer,
       eflPdfSha256,
+      rawText,
     });
 
     const allWarnings = [

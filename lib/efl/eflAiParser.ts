@@ -9,11 +9,114 @@ export interface EflAiParseResult {
   parseWarnings: string[];
 }
 
+async function parseEflTextWithAi(opts: {
+  rawText: string;
+  eflPdfSha256: string;
+  extraWarnings?: string[];
+}): Promise<EflAiParseResult> {
+  const { rawText, eflPdfSha256, extraWarnings = [] } = opts;
+
+  if (!process.env.OPENAI_IntelliWatt_Fact_Card_Parser) {
+    return {
+      planRules: null,
+      rateStructure: null,
+      parseConfidence: 0,
+      parseWarnings: [
+        ...extraWarnings,
+        "OPENAI_IntelliWatt_Fact_Card_Parser is not configured; cannot run EFL AI text parser.",
+      ],
+    };
+  }
+
+  const systemPrompt = `
+You are an expert Texas Electricity Facts Label (EFL) parser.
+
+You will be given the full plain-text contents of an EFL PDF. Using ONLY this text as the source of truth, extract detailed pricing rules into a JSON object with this structure.
+
+CRITICAL GUARDRAILS:
+- You MUST NOT guess, approximate, or invent any numeric value (rates, fees, credits, thresholds).
+- If the EFL does not clearly provide a value, you MUST leave that field null or omit it,
+  and you may include a parse warning instead.
+- Do not fill in 'typical' values or make assumptions beyond what the EFL explicitly states.
+
+IDENTITY CONTEXT:
+EFL PDF SHA-256: ${eflPdfSha256}
+
+OUTPUT CONTRACT:
+(same as the PDF-based contract; see planRules/rateStructure fields below)
+`;
+
+  let rawJson = "{}";
+  try {
+    const response = await (openaiFactCardParser as any).responses.create({
+      model: "gpt-5.1-mini",
+      response_format: { type: "json_object" },
+      input: [
+        {
+          role: "system",
+          content: systemPrompt,
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: `Here is the full EFL text. Use ONLY this text as the source of truth.\n\n${rawText}`,
+            },
+          ],
+        },
+      ],
+    });
+
+    rawJson = (response as any).output?.[0]?.content?.[0]?.text ?? "{}";
+  } catch (err: any) {
+    const msg =
+      err?.message ??
+      (typeof err === "object" ? JSON.stringify(err) : String(err));
+
+    return {
+      planRules: null,
+      rateStructure: null,
+      parseConfidence: 0,
+      parseWarnings: [...extraWarnings, `EFL AI text call failed: ${msg}`],
+    };
+  }
+
+  let parsed: any;
+  try {
+    parsed = JSON.parse(rawJson);
+  } catch (err) {
+    return {
+      planRules: null,
+      rateStructure: null,
+      parseConfidence: 0,
+      parseWarnings: [
+        ...extraWarnings,
+        `Failed to parse EFL AI text response JSON: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      ],
+    };
+  }
+
+  return {
+    planRules: parsed.planRules ?? null,
+    rateStructure: parsed.rateStructure ?? null,
+    parseConfidence:
+      typeof parsed.parseConfidence === "number" ? parsed.parseConfidence : 0,
+    parseWarnings: [
+      ...extraWarnings,
+      ...(Array.isArray(parsed.parseWarnings) ? parsed.parseWarnings : []),
+    ],
+  };
+}
+
 export async function parseEflPdfWithAi(opts: {
   pdfBytes: Uint8Array | Buffer;
   eflPdfSha256: string;
+  rawText?: string;
 }): Promise<EflAiParseResult> {
-  const { pdfBytes, eflPdfSha256 } = opts;
+  const { pdfBytes, eflPdfSha256, rawText } = opts;
 
   if (!process.env.OPENAI_IntelliWatt_Fact_Card_Parser) {
     return {
@@ -41,11 +144,23 @@ export async function parseEflPdfWithAi(opts: {
       err?.message ??
       (typeof err === "object" ? JSON.stringify(err) : String(err));
 
+    const baseWarning = `EFL AI file upload failed: ${msg}`;
+
+    // If the upload fails (e.g., 413 capacity error) but we have clean text,
+    // fall back to a text-only parse so we can still extract structure.
+    if (rawText && rawText.length > 0) {
+      return parseEflTextWithAi({
+        rawText,
+        eflPdfSha256,
+        extraWarnings: [baseWarning],
+      });
+    }
+
     return {
       planRules: null,
       rateStructure: null,
       parseConfidence: 0,
-      parseWarnings: [`EFL AI file upload failed: ${msg}`],
+      parseWarnings: [baseWarning],
     };
   }
 
