@@ -58,6 +58,53 @@ export interface PdfTextExtractor {
 }
 
 async function runPdftotext(pdfBytes: Uint8Array | Buffer): Promise<string> {
+  const serviceUrl = process.env.EFL_PDFTEXT_URL;
+  const serviceToken = process.env.EFL_PDFTEXT_TOKEN;
+
+  const buffer = Buffer.isBuffer(pdfBytes) ? pdfBytes : Buffer.from(pdfBytes);
+
+  // Preferred path: call remote pdftotext microservice (e.g., droplet helper)
+  // so production does not depend on a local binary being present in Vercel.
+  if (serviceUrl) {
+    const pdfBase64 = buffer.toString("base64");
+
+    const resp = await fetch(serviceUrl, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(serviceToken ? { Authorization: `Bearer ${serviceToken}` } : {}),
+      },
+      body: JSON.stringify({
+        pdfBase64,
+      }),
+    });
+
+    if (!resp.ok) {
+      throw new Error(`pdftotext service HTTP ${resp.status}`);
+    }
+
+    let data: any;
+    try {
+      data = await resp.json();
+    } catch (err) {
+      throw new Error(
+        `pdftotext service returned non-JSON response: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+
+    if (!data || data.ok !== true || typeof data.text !== "string") {
+      const msg =
+        (data && typeof data.error === "string" && data.error) ||
+        "unexpected pdftotext service payload";
+      throw new Error(msg);
+    }
+
+    return data.text;
+  }
+
+  // Fallback: try local pdftotext binary if available (useful for local dev).
   const tmpDir = os.tmpdir();
   const tmpPath = path.join(
     tmpDir,

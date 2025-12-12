@@ -1,0 +1,23 @@
+[Unit]
+Description=IntelliWatt EFL pdftotext Helper (Python on 8095)
+After=network.target
+
+[Service]
+Type=simple
+User=deploy
+WorkingDirectory=/home/deploy/apps/intelliwatt
+
+# Load shared IntelliWatt env (including DATABASE_URL, etc.) if present
+EnvironmentFile=-/home/deploy/.intelliwatt.env
+
+# EFL pdftotext specific environment
+Environment=EFL_PDFTEXT_PORT=8095
+
+# Start the helper
+ExecStart=/usr/bin/env python3 /home/deploy/apps/intelliwatt/deploy/droplet/efl_pdftotext_server.py
+
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
