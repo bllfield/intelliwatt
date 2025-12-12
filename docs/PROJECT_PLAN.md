@@ -191,6 +191,8 @@ EFL parser model + extraction status:
 - ✅ REP PUCT Certificate number and EFL Ver. # are extracted deterministically from the normalized text via regex helpers in `lib/efl/eflExtractor.ts`.
 - ✅ EFL AI normalizer now strips **Average Price** tables and **TDU passthrough** blocks from the AI input text only; the EFL parser output shape (`planRules`, `rateStructure`, `parseConfidence`, `parseWarnings`) and the “Parsed Plan Snapshot” rendering remain unchanged.
 - ✅ Parser prompt and optional deterministic fallback focus on REP Base Charge, Energy Charge tiers, Bill Credits, Product Type, Contract Term, and Early Termination Fee; if the model misses obvious values present in normalized text, a guarded fallback fills them and adds a parse warning.
+- ✅ Fixed slicer bug where the “Average Monthly Use” block could accidentally remove real pricing lines (Energy Charge / Usage Credit) that follow immediately after the table; the slicer now stops skipping as soon as it encounters pricing-component markers and preserves those lines.
+- ✅ `parseWarnings` are now de-duplicated at the AI parser boundary for cleaner diagnostics without losing any signal.
 
 Reliability guardrails:
 - ✅ Deterministic fallback now fills Base Charge per month, Energy Charge usage tiers, and threshold-based Bill Credits directly from EFL text when the AI leaves them empty.

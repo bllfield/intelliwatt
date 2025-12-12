@@ -62,16 +62,22 @@ function normalizeEflTextForAi(rawText: string): {
     }
 
     if (skippingAverages) {
-      // End of averages block: when we hit Base Charge, Type of Product, or Other Key terms.
-      if (
-        /base charge/i.test(trimmed) ||
-        /your average price per kwh/i.test(trimmed) ||
+      const endOfAverages =
+        /the price you pay/i.test(trimmed) ||
+        /energy\s*charge/i.test(trimmed) ||
+        /usage\s*credit/i.test(trimmed) ||
+        /electricity\s*price/i.test(trimmed) ||
+        /tdu\s*delivery\s*charges/i.test(trimmed) ||
+        /base\s*charge/i.test(trimmed) ||
         /^type of product/i.test(lower) ||
+        /^contract term/i.test(lower) ||
         /^other key/i.test(lower) ||
-        /^terms and questions/i.test(lower)
-      ) {
+        /^terms and questions/i.test(lower);
+
+      if (endOfAverages) {
         skippingAverages = false;
-        // Fall through to normal processing for this line.
+        // Fall through to normal processing for this line so the pricing
+        // component itself is preserved.
       } else {
         continue;
       }
@@ -491,13 +497,15 @@ OUTPUT CONTRACT:
     termMonths,
   });
 
+  const dedupedWarnings = Array.from(new Set(warnings));
+
   return {
     planRules: planRules ?? null,
     rateStructure: rateStructure ?? null,
     parseConfidence: computedConfidence,
     // Domain-level warnings from model are filtered; infra/config errors were
     // returned earlier; deterministic fallback notes are appended verbatim.
-    parseWarnings: warnings,
+    parseWarnings: dedupedWarnings,
   };
 }
 
