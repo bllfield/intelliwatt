@@ -56,32 +56,39 @@ class Handler(BaseHTTPRequestHandler):
             self._write_json(400, {"ok": False, "error": "missing_body"})
             return
 
-        try:
-            payload = json.loads(body_bytes.decode("utf-8"))
-        except Exception:
-            self._write_json(400, {"ok": False, "error": "invalid_json"})
-            return
+        # Support two modes:
+        # - application/pdf: body is raw PDF bytes
+        # - application/json: legacy mode with { pdfBase64 }
+        ctype = (self.headers.get("Content-Type") or "").lower()
+        if "application/json" in ctype:
+            try:
+                payload = json.loads(body_bytes.decode("utf-8"))
+            except Exception:
+                self._write_json(400, {"ok": False, "error": "invalid_json"})
+                return
 
-        if not isinstance(payload, dict):
-            self._write_json(400, {"ok": False, "error": "invalid_json"})
-            return
+            if not isinstance(payload, dict):
+                self._write_json(400, {"ok": False, "error": "invalid_json"})
+                return
 
-        pdf_b64 = payload.get("pdfBase64")
-        if not isinstance(pdf_b64, str) or not pdf_b64:
-            self._write_json(400, {"ok": False, "error": "missing_pdfBase64"})
-            return
+            pdf_b64 = payload.get("pdfBase64")
+            if not isinstance(pdf_b64, str) or not pdf_b64:
+                self._write_json(400, {"ok": False, "error": "missing_pdfBase64"})
+                return
 
-        try:
-            pdf_bytes = base64.b64decode(pdf_b64, validate=True)
-        except Exception as exc:
-            self._write_json(
-                400,
-                {
-                    "ok": False,
-                    "error": f"invalid_base64: {exc}",
-                },
-            )
-            return
+            try:
+                pdf_bytes = base64.b64decode(pdf_b64, validate=True)
+            except Exception as exc:
+                self._write_json(
+                    400,
+                    {
+                        "ok": False,
+                        "error": f"invalid_base64: {exc}",
+                    },
+                )
+                return
+        else:
+            pdf_bytes = body_bytes
 
         # Materialize to a temp file and run pdftotext -layout -enc UTF-8
         try:

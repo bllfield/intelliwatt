@@ -66,17 +66,14 @@ async function runPdftotext(pdfBytes: Uint8Array | Buffer): Promise<string> {
   // Preferred path: call remote pdftotext microservice (e.g., droplet helper)
   // so production does not depend on a local binary being present in Vercel.
   if (serviceUrl) {
-    const pdfBase64 = buffer.toString("base64");
-
     const resp = await fetch(serviceUrl, {
       method: "POST",
       headers: {
-        "content-type": "application/json",
+        // Send raw PDF bytes; the droplet helper reads the body as-is.
+        "content-type": "application/pdf",
         ...(serviceToken ? { Authorization: `Bearer ${serviceToken}` } : {}),
       },
-      body: JSON.stringify({
-        pdfBase64,
-      }),
+      body: buffer as unknown as BodyInit,
     });
 
     if (!resp.ok) {
