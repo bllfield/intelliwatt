@@ -175,6 +175,10 @@ async function runPdftotext(pdfBytes: Uint8Array | Buffer): Promise<string> {
 
       return cliText;
     } catch (cliErr) {
+      // Best-effort cleanup if we failed before the execFile callback
+      // had a chance to remove the temp file.
+      void fs.unlink(tmpPath).catch(() => {});
+
       const cliMsg =
         cliErr instanceof Error ? cliErr.message : String(cliErr);
       throw new Error(
