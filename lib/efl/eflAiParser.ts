@@ -168,6 +168,15 @@ export async function parseEflTextWithAi(opts: {
   extraWarnings?: string[];
 }): Promise<EflAiParseResult> {
   const { rawText, eflPdfSha256, extraWarnings = [] } = opts;
+
+  // Deterministic extraction against the **raw** EFL text. These values are
+  // computed before any AI call and later used to fill or override missing
+  // pricing components from the model.
+  const deterministicBaseCents = extractBaseChargeCents(rawText);
+  const deterministicTiers = extractEnergyChargeTiers(rawText);
+  const deterministicSingleEnergy = extractSingleEnergyCharge(rawText);
+  const hasDeterministicEnergy =
+    deterministicTiers.length > 0 || deterministicSingleEnergy != null;
   const {
     text: normalizedText,
     notes: normalizationNotes,
@@ -298,7 +307,7 @@ OUTPUT CONTRACT:
   // Start with model-emitted warnings (domain-level only), then append any
   // deterministic fallback notes we add below. Infrastructure errors were
   // already returned earlier without filtering.
-  const warnings: string[] = [
+  let warnings: string[] = [
     ...baseWarnings,
     ...filterParseWarnings(modelWarnings),
   ];
@@ -322,21 +331,13 @@ OUTPUT CONTRACT:
       .split(/\r?\n/)
       .some((l) => labelRe.test(l) && naRe.test(l));
 
-  // Base Charge ($/month)
+  // Base Charge ($/month) from deterministic extractor
   if (planRules.baseChargePerMonthCents == null) {
-    const base = fallbackExtractBaseChargePerMonthCents(fallbackSourceText);
-    if (base != null) {
-      planRules.baseChargePerMonthCents = base;
+    if (deterministicBaseCents != null) {
+      planRules.baseChargePerMonthCents = deterministicBaseCents;
       warnings.push(
-        "Fallback filled baseChargePerMonthCents from EFL text (Base Charge line).",
+        "Deterministic extract filled baseChargePerMonthCents from EFL text (Base Charge line).",
       );
-    } else if (
-      /Base\s*Charge\s*:\s*\$0\b[\s\S]{0,40}?per\s*month/i.test(
-        fallbackSourceText,
-      )
-    ) {
-      // Explicit "$0 per month" base charge is treated as present (0), not missing.
-      planRules.baseChargePerMonthCents = 0;
     } else if (
       hasExplicitNaOnLine(/Base\s+Monthly\s+Charge/i) ||
       hasExplicitNaOnLine(/Base\s+Charge/i)
@@ -350,14 +351,17 @@ OUTPUT CONTRACT:
     ? planRules.usageTiers
     : [];
 
-  if (existingTiers.length === 0) {
-    const tiers = fallbackExtractEnergyChargeTiers(fallbackSourceText);
-    if (tiers.length > 0) {
-      planRules.usageTiers = tiers;
-      warnings.push(
-        "Fallback filled usageTiers from EFL Energy Charge tier lines.",
-      );
+  if (existingTiers.length === 0 && deterministicTiers.length > 0) {
+    planRules.usageTiers = deterministicTiers;
+    if (!planRules.rateType) {
+      planRules.rateType = "FIXED";
     }
+    if (!(planRules as any).planType) {
+      (planRules as any).planType = "flat";
+    }
+    warnings.push(
+      "Deterministic extract filled usageTiers from EFL Energy Charge tier lines.",
+    );
   }
 
   // Bill credits (threshold-based)
@@ -457,9 +461,9 @@ OUTPUT CONTRACT:
     );
   }
 
-  const singleEnergy = fallbackExtractSingleEnergyChargeCents(
-    fallbackSourceText,
-  );
+  const singleEnergy =
+    deterministicSingleEnergy ??
+    fallbackExtractSingleEnergyChargeCents(fallbackSourceText);
 
   if (
     singleEnergy != null &&
@@ -485,16 +489,19 @@ OUTPUT CONTRACT:
   }
 
   // Align RateStructure with FIXED + single-rate information when available.
-  if (planRules.rateType === "FIXED") {
-    if (
-      typeof rs.baseMonthlyFeeCents !== "number" &&
-      typeof planRules.baseChargePerMonthCents === "number"
-    ) {
-      rs.baseMonthlyFeeCents = planRules.baseChargePerMonthCents;
-    }
-    if (singleEnergy != null && typeof rs.energyRateCents !== "number") {
-      rs.energyRateCents = singleEnergy;
-    }
+  if (
+    typeof rs.baseMonthlyFeeCents !== "number" &&
+    typeof planRules.baseChargePerMonthCents === "number"
+  ) {
+    rs.baseMonthlyFeeCents = planRules.baseChargePerMonthCents;
+  }
+  if (
+    singleEnergy != null &&
+    typeof rs.energyRateCents !== "number" &&
+    (!Array.isArray(planRules.usageTiers) ||
+      planRules.usageTiers.length === 0)
+  ) {
+    rs.energyRateCents = singleEnergy;
   }
 
   // Normalize bill credits: fix autopay thresholdKwh and mirror into RateStructure.
@@ -647,7 +654,12 @@ OUTPUT CONTRACT:
       fixedEnergyFromPlan != null &&
       (typeof rs.energyRateCents !== "number" || rs.energyRateCents <= 0)
     ) {
-      rs.energyRateCents = fixedEnergyFromPlan;
+      if (
+        !Array.isArray(planRules.usageTiers) ||
+        planRules.usageTiers.length === 0
+      ) {
+        rs.energyRateCents = fixedEnergyFromPlan;
+      }
     }
   }
 
@@ -706,6 +718,17 @@ OUTPUT CONTRACT:
       (fixedEnergyRateCents != null && fixedEnergyRateCents > 0))
   ) {
     if (computedConfidence < 60) computedConfidence = 60;
+  }
+
+  // If deterministic extract already found clear REP energy charges (tiers or
+  // a single rate), drop any model warnings that incorrectly claim energy
+  // charges are missing.
+  if (hasDeterministicEnergy) {
+    warnings = warnings.filter(
+      (w) =>
+        !/no\s+rep[^.]*energy\s+charge/i.test(w) &&
+        !/could\s+not\s+find\s+energy\s+charge/i.test(w),
+    );
   }
 
   const dedupedWarnings = Array.from(new Set(warnings));
@@ -885,6 +908,77 @@ function fallbackExtractEnergyChargeTiers(text: string): UsageTier[] {
     if (!uniq.has(key)) uniq.set(key, t);
   }
   return Array.from(uniq.values()).sort((a, b) => a.minKwh - b.minKwh);
+}
+
+// ----------------------------------------------------------------------
+// Deterministic extractors (rawText-first) for core pricing components
+// ----------------------------------------------------------------------
+function extractBaseChargeCents(text: string): number | null {
+  // Treat explicit N/A as "not present", not zero.
+  if (/Base\s*Charge[^.\n]*\bN\/A\b|\bNA\b/i.test(text)) {
+    return null;
+  }
+
+  // Explicit $0 per billing cycle/month.
+  if (
+    /Base\s*Charge\s*:\s*\$0\b[\s\S]{0,40}?per\s*(?:billing\s*cycle|month)/i.test(
+      text,
+    )
+  ) {
+    return 0;
+  }
+
+  // Existing "Per Month ($)" pattern.
+  const fromPerMonth = fallbackExtractBaseChargePerMonthCents(text);
+  if (fromPerMonth != null) return fromPerMonth;
+
+  // Generic "Base Charge: $X per billing cycle/month".
+  const generic =
+    /Base\s*Charge(?:\s*of)?\s*\$?\s*([0-9]+(?:\.[0-9]{1,2})?)\b[\s\S]{0,80}?(?:per\s+(?:billing\s*cycle|month))/i;
+  const m = text.match(generic);
+  if (m?.[1]) {
+    return dollarsToCents(m[1]);
+  }
+
+  return null;
+}
+
+function extractEnergyChargeTiers(text: string): UsageTier[] {
+  // Start with the existing line-based tier extractor.
+  const baseTiers = fallbackExtractEnergyChargeTiers(text);
+  const extra: UsageTier[] = [];
+
+  // Also handle bracketed Rhythm-style tiers:
+  // "Energy Charge: (0 to 1000 kWh) 10.9852¢ per kWh"
+  // "Energy Charge: (> 1000 kWh) 12.9852¢ per kWh"
+  const re =
+    /Energy\s*Charge\s*:\s*\(\s*(>?)\s*([0-9,]+)(?:\s*to\s*([0-9,]+))?\s*kwh\s*\)\s*([0-9]+(?:\.[0-9]+)?)\s*¢\s*(?:per|\/)\s*kwh/gi;
+
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const isGt = !!m[1];
+    const a = Number(m[2].replace(/,/g, ""));
+    const b = m[3] ? Number(m[3].replace(/,/g, "")) : null;
+    const rate = centsStringToNumber(`${m[4]}¢`);
+    if (!Number.isFinite(a) || (b != null && !Number.isFinite(b)) || rate == null) {
+      continue;
+    }
+    const minKwh = a; // For "(> 1000 kWh)" we treat minKwh = 1000 (documented assumption).
+    const maxKwh = isGt ? null : b;
+    extra.push({ minKwh, maxKwh, rateCentsPerKwh: rate });
+  }
+
+  const all = [...baseTiers, ...extra];
+  const uniq = new Map<string, UsageTier>();
+  for (const t of all) {
+    const key = `${t.minKwh}|${t.maxKwh ?? "null"}|${t.rateCentsPerKwh}`;
+    if (!uniq.has(key)) uniq.set(key, t);
+  }
+  return Array.from(uniq.values()).sort((a, b) => a.minKwh - b.minKwh);
+}
+
+function extractSingleEnergyCharge(text: string): number | null {
+  return fallbackExtractSingleEnergyChargeCents(text);
 }
 
 // ----------------------------------------------------------------------
