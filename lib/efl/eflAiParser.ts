@@ -331,6 +331,13 @@ OUTPUT CONTRACT:
         "Fallback filled baseChargePerMonthCents from EFL text (Base Charge line).",
       );
     } else if (
+      /Base\s*Charge\s*:\s*\$0\b[\s\S]{0,40}?per\s*month/i.test(
+        fallbackSourceText,
+      )
+    ) {
+      // Explicit "$0 per month" base charge is treated as present (0), not missing.
+      planRules.baseChargePerMonthCents = 0;
+    } else if (
       hasExplicitNaOnLine(/Base\s+Monthly\s+Charge/i) ||
       hasExplicitNaOnLine(/Base\s+Charge/i)
     ) {
@@ -490,23 +497,41 @@ OUTPUT CONTRACT:
     }
   }
 
-  // Mirror PlanRules.billCredits into RateStructure.billCredits rules so
-  // downstream engines see the same credit/fee structures.
+  // Normalize bill credits: fix autopay thresholdKwh and mirror into RateStructure.
   if (Array.isArray(planRules.billCredits) && planRules.billCredits.length > 0) {
-    const bcRules: any[] = [];
+    const normalizedCredits: any[] = [];
     for (const bc of planRules.billCredits as any[]) {
       if (!bc || typeof bc.creditDollars !== "number") continue;
+      const cloned: any = { ...bc };
+      const labelStr =
+        typeof cloned.label === "string" ? cloned.label : "Bill credit";
+      cloned.label = labelStr;
+      // For Auto Pay / Paperless behavior credits, thresholdKwh should be null.
+      if (
+        /auto\s*pay/i.test(labelStr) ||
+        /paperless/i.test(labelStr) ||
+        (typeof cloned.type === "string" &&
+          /BEHAVIOR/i.test(String(cloned.type)))
+      ) {
+        cloned.thresholdKwh = null;
+      }
+      normalizedCredits.push(cloned);
+    }
+    planRules.billCredits = normalizedCredits;
+
+    const bcRules: any[] = [];
+    for (const bc of normalizedCredits) {
       const cents = Math.round(bc.creditDollars * 100);
       const minUsage =
         typeof bc.thresholdKwh === "number" && Number.isFinite(bc.thresholdKwh)
           ? bc.thresholdKwh
-          : 0;
+          : null;
       bcRules.push({
-        label: typeof bc.label === "string" ? bc.label : "Bill credit",
+        label: bc.label,
         creditAmountCents: cents,
         minUsageKWh: minUsage,
-        maxUsageKWh: undefined,
-        monthsOfYear: bc.monthsOfYear ?? undefined,
+        maxUsageKWh: null,
+        monthsOfYear: bc.monthsOfYear ?? null,
       });
     }
     if (bcRules.length > 0) {
@@ -587,6 +612,45 @@ OUTPUT CONTRACT:
     }
   }
 
+  // --------------------------------------------------------------------
+  // Final deterministic completion for common FIXED plans (Rhythm-style)
+  // --------------------------------------------------------------------
+  const isFixedFromText =
+    /Type\s*of\s*Product\s+Fixed\b/i.test(fallbackSourceText) ||
+    /\bType\s*of\s*Product\b.*\bFixed\b/i.test(fallbackSourceText);
+
+  if (isFixedFromText) {
+    if (!planRules.rateType) {
+      planRules.rateType = "FIXED";
+    }
+    if (!(planRules as any).planType) {
+      (planRules as any).planType = "flat";
+    }
+    if (!rs.type) {
+      rs.type = "FIXED";
+    }
+
+    const fixedEnergyFromPlan =
+      typeof planRules.currentBillEnergyRateCents === "number" &&
+      planRules.currentBillEnergyRateCents > 0
+        ? planRules.currentBillEnergyRateCents
+        : null;
+
+    if (
+      fixedEnergyFromPlan != null &&
+      (planRules.defaultRateCentsPerKwh == null ||
+        typeof planRules.defaultRateCentsPerKwh !== "number")
+    ) {
+      planRules.defaultRateCentsPerKwh = fixedEnergyFromPlan;
+    }
+    if (
+      fixedEnergyFromPlan != null &&
+      (typeof rs.energyRateCents !== "number" || rs.energyRateCents <= 0)
+    ) {
+      rs.energyRateCents = fixedEnergyFromPlan;
+    }
+  }
+
   // Deterministic parse confidence scoring based on completeness of the key
   // pricing components, rather than trusting the model to self-score.
   const baseChargePerMonthCents =
@@ -624,7 +688,7 @@ OUTPUT CONTRACT:
         ? (planRules as any).termMonths
         : null;
 
-  const computedConfidence = scoreParseConfidence({
+  let computedConfidence = scoreParseConfidence({
     baseChargePerMonthCents,
     usageTiersCount,
     fixedEnergyRateCents,
@@ -632,6 +696,17 @@ OUTPUT CONTRACT:
     rateType,
     termMonths,
   });
+
+  // Confidence floor: if we have a clear FIXED classification plus an energy
+  // rate, ensure the score is at least 60 so UI reflects a reasonably
+  // confident parse for simple fixed-rate plans.
+  if (
+    planRules.rateType === "FIXED" &&
+    (typeof planRules.defaultRateCentsPerKwh === "number" ||
+      (fixedEnergyRateCents != null && fixedEnergyRateCents > 0))
+  ) {
+    if (computedConfidence < 60) computedConfidence = 60;
+  }
 
   const dedupedWarnings = Array.from(new Set(warnings));
 
@@ -820,7 +895,7 @@ function fallbackExtractEnergyChargeTiers(text: string): UsageTier[] {
 type BillCredit = {
   label: string;
   creditDollars: number;
-  thresholdKwh: number;
+  thresholdKwh: number | null;
   monthsOfYear?: number[] | null;
   type?: string | null;
 };
