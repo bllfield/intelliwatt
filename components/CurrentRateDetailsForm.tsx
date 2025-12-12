@@ -42,6 +42,7 @@ type BaseRateStructure = {
   type: RateType;
   baseMonthlyFeeCents?: number;
   billCredits?: BillCreditStructure | null;
+  tdspDeliveryIncludedInEnergyCharge?: boolean | null;
 };
 
 type FixedRateStructure = BaseRateStructure & {
@@ -258,6 +259,7 @@ export function CurrentRateDetailsForm({
   const [showPasteModal, setShowPasteModal] = useState(false);
   const [pastedBillText, setPastedBillText] = useState("");
   const [pasteError, setPasteError] = useState<string | null>(null);
+  const [deliveryIncluded, setDeliveryIncluded] = useState<boolean | null>(null);
   const [isParsingPaste, setIsParsingPaste] = useState(false);
   const formRef = useRef<HTMLFormElement | null>(null);
   const isMountedRef = useRef(true);
@@ -465,6 +467,12 @@ export function CurrentRateDetailsForm({
         if (structure.variableNotes && !variableNotes) {
           setVariableNotes(structure.variableNotes);
         }
+      }
+      if (
+        structure.tdspDeliveryIncludedInEnergyCharge === true &&
+        deliveryIncluded === null
+      ) {
+        setDeliveryIncluded(true);
       }
       if (structure.billCredits && typeof structure.billCredits === "object") {
         const bc = structure.billCredits as BillCreditStructure;
@@ -1747,6 +1755,49 @@ export function CurrentRateDetailsForm({
               placeholder="e.g., 4.95"
             />
           </label>
+
+          <div className="space-y-2 rounded-2xl border border-brand-blue/30 bg-brand-blue/5 p-4 text-sm text-brand-navy">
+            <div className="font-semibold uppercase tracking-wide text-brand-navy/80">
+              Delivery included in energy charge?
+            </div>
+            <p className="text-xs text-brand-navy/70">
+              Turn this on if the REP&apos;s EFL or bill clearly states that the energy charge
+              already includes TDSP/TDU delivery charges. When enabled, IntelliWatt can treat the
+              rate as &quot;delivery included&quot; when comparing against other plans.
+            </p>
+            <div className="flex flex-col gap-2 pt-1">
+              <label className="inline-flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="deliveryIncluded"
+                  checked={deliveryIncluded === true}
+                  onChange={() => setDeliveryIncluded(true)}
+                  className="h-4 w-4 rounded border-brand-blue text-brand-blue focus:ring-brand-blue"
+                />
+                <span>Yes, my energy rate includes TDSP/TDU delivery</span>
+              </label>
+              <label className="inline-flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="deliveryIncluded"
+                  checked={deliveryIncluded === false}
+                  onChange={() => setDeliveryIncluded(false)}
+                  className="h-4 w-4 rounded border-brand-blue text-brand-blue focus:ring-brand-blue"
+                />
+                <span>No, TDSP delivery is billed separately</span>
+              </label>
+              <label className="inline-flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="deliveryIncluded"
+                  checked={deliveryIncluded === null}
+                  onChange={() => setDeliveryIncluded(null)}
+                  className="h-4 w-4 rounded border-slate-300 text-slate-500 focus:ring-brand-blue"
+                />
+                <span>Not sure / not stated</span>
+              </label>
+            </div>
+          </div>
 
           <div className="space-y-3 rounded-2xl border border-brand-blue/30 bg-brand-blue/5 p-4">
             <label className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-brand-navy/80">

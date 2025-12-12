@@ -556,6 +556,13 @@ export default function ManualFactCardLoaderPage() {
                     <dd className="truncate">
                       {(result.planRules as any)?.solarBuyback?.hasBuyback ?? "—"}
                     </dd>
+
+                    <dt className="font-mono text-[11px] text-brand-navy/80">
+                      tdspDeliveryIncludedInEnergyCharge
+                    </dt>
+                    <dd className="truncate">
+                      {(result.planRules as any)?.tdspDeliveryIncludedInEnergyCharge ?? "—"}
+                    </dd>
                   </dl>
                 </div>
 
@@ -622,6 +629,13 @@ export default function ManualFactCardLoaderPage() {
                       {Array.isArray((result.rateStructure as any)?.tiers)
                         ? (result.rateStructure as any).tiers.length
                         : 0}
+                    </dd>
+
+                    <dt className="font-mono text-[11px] text-brand-navy/80">
+                      tdspDeliveryIncludedInEnergyCharge
+                    </dt>
+                    <dd className="truncate">
+                      {(result.rateStructure as any)?.tdspDeliveryIncludedInEnergyCharge ?? "—"}
                     </dd>
                   </dl>
                 </div>
