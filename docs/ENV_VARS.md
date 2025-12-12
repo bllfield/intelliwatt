@@ -32,7 +32,7 @@
   - **Purpose**: Shared secret between Vercel and the droplet `pdftotext` helper.
   - Sent as header `X-EFL-PDFTEXT-TOKEN` from Vercel; the Python helper validates it against its own `EFL_PDFTEXT_TOKEN`.
   - Must match exactly on both Vercel and the droplet.
-  - **Droplet env note**: In `/home/deploy/.intelliwatt.env` or similar, set as `EFL_PDFTEXT_TOKEN=your-token` **without quotes**.
+  - **Droplet env note**: Use a dedicated env file (e.g. `/home/deploy/.efl-pdftotext.env`) loaded via `EnvironmentFile=` in the `efl-pdftotext.service` systemd unit, and set `EFL_PDFTEXT_TOKEN=your-token` (and optional `EFL_PDFTEXT_PORT=8095`) **without quotes**.
   - **Normalization**: If some tools wrap the value in single or double quotes (e.g., `"token"` or `'token'`), the Node helper automatically trims whitespace and strips one pair of wrapping quotes before sending it upstream.
 
 ## Databases

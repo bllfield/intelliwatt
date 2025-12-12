@@ -17,7 +17,30 @@ The app expects:
 
 ---
 
-## 1. Verify the Python helper is listening on 8095
+## 0. DNS for `efl-pdftotext.intelliwatt.com`
+
+To expose the helper via a stable HTTPS hostname, create this DNS record with your DNS provider:
+
+- **Type**: `A`
+- **Name**: `efl-pdftotext.intelliwatt.com`
+- **Value**: `64.225.25.54`  (DigitalOcean droplet IP)
+
+Wait for DNS propagation (`nslookup efl-pdftotext.intelliwatt.com`) before running Certbot.
+
+---
+
+## 1. Install nginx and Certbot (droplet)
+
+On the droplet (as `root` or `deploy` with `sudo`), ensure nginx and Certbot are installed:
+
+```bash
+sudo apt-get update
+sudo apt-get install nginx certbot python3-certbot-nginx
+```
+
+---
+
+## 2. Verify the Python helper is listening on 8095
 
 **Where:** Droplet, as `root` (or `deploy` + `sudo`).
 
@@ -28,7 +51,7 @@ sudo ss -ltnp | grep 8095 || true
 Expected output (example):
 
 ```text
-tcp   LISTEN 0      5    0.0.0.0:8095      0.0.0.0:*    users:("python3",pid=...,fd=3)
+tcp   LISTEN 0      5    127.0.0.1:8095      0.0.0.0:*    users:("python3",pid=...,fd=3)
 ```
 
 If you do **not** see a Python process on 8095, restart the helper:
@@ -40,7 +63,7 @@ sudo systemctl status efl-pdftotext.service
 
 ---
 
-## 2. Verify nginx is installed and running
+## 3. Verify nginx is installed and running
 
 ```bash
 sudo systemctl status nginx --no-pager
@@ -138,8 +161,8 @@ server {
     include /etc/letsencrypt/options-ssl-nginx.conf;
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 
-    # EFL PDFs are small, but give a safe headroom
-    client_max_body_size 10m;
+    # EFL PDFs are small, but give a safe headroom (25 MB or higher if needed)
+    client_max_body_size 25m;
 
     location /efl/pdftotext {
         proxy_pass http://127.0.0.1:8095/efl/pdftotext;
@@ -152,6 +175,20 @@ server {
         proxy_read_timeout  60s;
         proxy_connect_timeout 30s;
         proxy_send_timeout 60s;
+    }
+
+    # Health check proxy used by curl and external monitors
+    location /health {
+        proxy_pass http://127.0.0.1:8095/health;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_read_timeout  10s;
+        proxy_connect_timeout 5s;
+        proxy_send_timeout 10s;
     }
 }
 ```
@@ -209,23 +246,85 @@ When the proxy is wired correctly and `EFL_PDFTEXT_URL` points at `https://<drop
 
 ---
 
-## 7. Vercel environment variables
+## 7. Health check tests
+
+### From the droplet (direct to helper)
+
+```bash
+curl -i http://127.0.0.1:8095/health
+```
+
+Expected:
+
+- `HTTP/1.0 200 OK`
+- Body: `ok`
+
+### From anywhere (through nginx + TLS)
+
+```bash
+curl -i https://efl-pdftotext.intelliwatt.com/health
+```
+
+Expected:
+
+- `HTTP/2 200` (or `HTTP/1.1 200` depending on curl/OpenSSL)
+- Body: `ok`
+
+If either command fails, check:
+
+- `sudo journalctl -u efl-pdftotext.service -n 200 -f`
+- `sudo journalctl -u nginx -n 200 -f`
+
+---
+
+## 8. Vercel environment variables
 
 In your Vercel project settings (Production + Preview), set:
 
 ```text
-EFL_PDFTEXT_URL   = https://<droplet-domain>/efl/pdftotext
+EFL_PDFTEXT_URL   = https://efl-pdftotext.intelliwatt.com/efl/pdftotext
 EFL_PDFTEXT_TOKEN = <your-shared-token>
 ```
 
 Notes:
 
-- The token value must **match exactly** whatever you set on the droplet (e.g. in `/home/deploy/.intelliwatt.env`), but **quotes do not matter**:
+- The token value must **match exactly** whatever you set on the droplet, but **quotes do not matter**:
   - `EFL_PDFTEXT_TOKEN="abc123"` → normalized to `abc123`.
   - `EFL_PDFTEXT_TOKEN='abc123'`  → normalized to `abc123`.
 - The app sends the token in header: `X-EFL-PDFTEXT-TOKEN: <normalized-token>`.
 
-On the droplet, ensure `EFL_PDFTEXT_TOKEN` is set in the environment used by `efl-pdftotext.service` (e.g. `/home/deploy/.intelliwatt.env`).
+On the droplet, **do not** reuse the shared `/home/deploy/.intelliwatt.env` file for this helper. Instead, create a dedicated env file:
+
+```bash
+sudo nano /home/deploy/.efl-pdftotext.env
+```
+
+Example contents:
+
+```dotenv
+EFL_PDFTEXT_TOKEN=your-shared-token
+EFL_PDFTEXT_PORT=8095
+```
+
+Then wire it into the systemd unit via an override so only this service reads it:
+
+```bash
+sudo systemctl edit efl-pdftotext.service
+```
+
+Paste:
+
+```ini
+[Service]
+EnvironmentFile=/home/deploy/.efl-pdftotext.env
+```
+
+Reload and restart:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart efl-pdftotext.service
+```
 
 ---
 
@@ -266,7 +365,7 @@ If you get a non-200 status, check:
 
 ## 10. Do **not** open port 8095 publicly
 
-- Keep the Python helper bound to `127.0.0.1:8095` or `0.0.0.0:8095` **behind** nginx.
+- Keep the Python helper bound to `127.0.0.1:8095` **behind** nginx.
 - Do **not** add a firewall rule exposing 8095 to the internet.
 - All external traffic should go through HTTPS/443 → nginx → `http://127.0.0.1:8095/efl/pdftotext`.
 

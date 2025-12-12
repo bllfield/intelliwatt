@@ -157,3 +157,12 @@ For long-running helpers on the DigitalOcean droplet, use `journalctl` to inspec
   - Follow live during EFL uploads:
     - `sudo journalctl -u efl-pdftotext.service -n 200 -f`
   - Use correlation IDs or request metadata (where logged) to tie helper activity back to `/api/admin/efl/manual-upload` calls.
+
+### How to verify the EFL pdftotext helper
+
+- **Health check over HTTPS (nginx → helper):**
+  - `curl -i https://efl-pdftotext.intelliwatt.com/health`
+- **Watch helper logs while testing:**
+  - `sudo journalctl -u efl-pdftotext.service -n 200 -f`
+
+When things are wired correctly, the health check returns `200 OK` with body `ok`, and each request produces a structured log line (method, path, content length, token status) visible in `journalctl`.

@@ -13,10 +13,53 @@ EFL_PDFTEXT_PORT = int(os.environ.get("EFL_PDFTEXT_PORT", "8095"))
 
 
 class Handler(BaseHTTPRequestHandler):
+    def _log_request(self, status: int) -> None:
+        length = self.headers.get("Content-Length") or ""
+
+        # Accept either the newer X-EFL-PDFTEXT-TOKEN header or legacy Authorization: Bearer.
+        token_header = self.headers.get("X-EFL-PDFTEXT-TOKEN") or self.headers.get(
+            "Authorization"
+        )
+        token_present = bool(token_header)
+
+        incoming = ""
+        if token_header:
+            incoming = token_header.strip()
+            bearer_prefix = "Bearer "
+            if incoming.startswith(bearer_prefix):
+                incoming = incoming[len(bearer_prefix) :].strip()
+
+        token_valid = bool(EFL_PDFTEXT_TOKEN) and incoming == EFL_PDFTEXT_TOKEN
+
+        log_payload = {
+            "service": "efl-pdftotext",
+            "method": self.command,
+            "path": self.path,
+            "status": status,
+            "content_length": length,
+            "token_present": token_present,
+            "token_valid": token_valid,
+        }
+        try:
+            print(json.dumps(log_payload), flush=True)
+        except Exception:
+            # Never let logging failures break the handler.
+            pass
+
     def _write_json(self, status: int, payload: Dict[str, Any]) -> None:
         body = json.dumps(payload).encode("utf-8")
+        self._log_request(status)
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _write_plain(self, status: int, text: str) -> None:
+        body = text.encode("utf-8")
+        self._log_request(status)
+        self.send_response(status)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -33,23 +76,50 @@ class Handler(BaseHTTPRequestHandler):
             return b""
         return self.rfile.read(length)
 
+    def _is_token_valid(self) -> bool:
+        """
+        Return True if the incoming request includes a token that matches
+        EFL_PDFTEXT_TOKEN. When the env var is empty, treat the request
+        as authorized (no auth configured).
+        """
+        if not EFL_PDFTEXT_TOKEN:
+            return True
+
+        token_header = self.headers.get("X-EFL-PDFTEXT-TOKEN") or self.headers.get(
+            "Authorization"
+        )
+        if not token_header:
+            return False
+
+        token_value = token_header.strip()
+        bearer_prefix = "Bearer "
+        if token_value.startswith(bearer_prefix):
+            token_value = token_value[len(bearer_prefix) :].strip()
+
+        return token_value == EFL_PDFTEXT_TOKEN
+
+    def do_GET(self) -> None:  # type: ignore[override]
+        if self.path == "/health":
+            # Simple plain text health check for nginx/Vercel.
+            self._write_plain(200, "ok")
+            return
+
+        self._log_request(404)
+        self.send_response(404)
+        self.end_headers()
+
     def do_POST(self) -> None:  # type: ignore[override]
         if self.path != "/efl/pdftotext":
+            self._log_request(404)
             self.send_response(404)
             self.end_headers()
             return
 
-        # Simple Bearer token auth so only the app can call this.
-        auth_header = self.headers.get("Authorization") or ""
-        if EFL_PDFTEXT_TOKEN:
-            prefix = "Bearer "
-            if not auth_header.startswith(prefix):
-                self._write_json(401, {"ok": False, "error": "unauthorized"})
-                return
-            incoming = auth_header[len(prefix) :].strip()
-            if incoming != EFL_PDFTEXT_TOKEN:
-                self._write_json(401, {"ok": False, "error": "unauthorized"})
-                return
+        # Simple shared-secret auth: prefer X-EFL-PDFTEXT-TOKEN but also accept
+        # Authorization: Bearer for backward compatibility.
+        if not self._is_token_valid():
+            self._write_json(401, {"ok": False, "error": "unauthorized"})
+            return
 
         body_bytes = self._read_body()
         if not body_bytes:
@@ -156,9 +226,10 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    srv = HTTPServer(("0.0.0.0", EFL_PDFTEXT_PORT), Handler)
+    # Bind only to localhost; nginx terminates TLS and proxies to this helper.
+    srv = HTTPServer(("127.0.0.1", EFL_PDFTEXT_PORT), Handler)
     print(
-        f"[EFL_PDFTEXT] listening on :{EFL_PDFTEXT_PORT} (token_set={bool(EFL_PDFTEXT_TOKEN)})",
+        f"[EFL_PDFTEXT] listening on 127.0.0.1:{EFL_PDFTEXT_PORT} (token_set={bool(EFL_PDFTEXT_TOKEN)})",
         flush=True,
     )
     srv.serve_forever()

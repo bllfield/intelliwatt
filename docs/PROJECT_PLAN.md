@@ -179,7 +179,9 @@ Notes:
   - Canonical env: `EFL_PDFTEXT_URL=https://efl-pdftotext.intelliwatt.com/efl/pdftotext`
   - Shared secret: `EFL_PDFTEXT_TOKEN` documented in `docs/ENV_VARS.md` and wired to the droplet helper + Vercel.
 - ✅ Nginx + TLS deployment steps for the helper are documented in `docs/runbooks/EFL_PDFTEXT_PROXY_NGINX.md` (including vhost, Certbot, and firewall notes).
-- ⬜ DNS + droplet nginx/certbot changes must be kept in sync with these docs whenever the helper hostname or topology changes.
+- ✅ Helper now exposes `/health` (plain-text `ok`) behind nginx HTTPS, and logs each request (method, path, content-length, token status) for `journalctl` inspection.
+- ✅ EFL `pdftotext` helper env is isolated via `/home/deploy/.efl-pdftotext.env` + systemd `EnvironmentFile` override (no changes to shared `/home/deploy/.intelliwatt.env`).
+- ⬜ Keep DNS + droplet nginx/certbot changes in sync with these docs whenever the helper hostname or topology changes.
 
 <!-- Dev + Prod Prisma migrations completed for Current Plan module + master schema on 2025-11-28 -->
 
