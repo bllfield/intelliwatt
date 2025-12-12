@@ -189,6 +189,8 @@ Notes:
 EFL parser model + extraction status:
 - ✅ OpenAI PDF file upload path removed for the EFL parser (413 capacity issues avoided); AI now runs **only** on the `pdftotext` output text.
 - ✅ REP PUCT Certificate number and EFL Ver. # are extracted deterministically from the normalized text via regex helpers in `lib/efl/eflExtractor.ts`.
+- ✅ EFL AI normalizer now strips **Average Price** tables and **TDU passthrough** blocks from the AI input text only; the EFL parser output shape (`planRules`, `rateStructure`, `parseConfidence`, `parseWarnings`) and the “Parsed Plan Snapshot” rendering remain unchanged.
+- ✅ Parser prompt and optional deterministic fallback focus on REP Base Charge, Energy Charge tiers, Bill Credits, Product Type, Contract Term, and Early Termination Fee; if the model misses obvious values present in normalized text, a guarded fallback fills them and adds a parse warning.
 
 <!-- Dev + Prod Prisma migrations completed for Current Plan module + master schema on 2025-11-28 -->
 

@@ -26,13 +26,21 @@ function filterParseWarnings(warnings: string[]): string[] {
   );
 }
 
+// Guardrail: the slicer below may ONLY change the AI INPUT text. It must never
+// remove or alter any fields from the EflAiParseResult output. If normalization
+// produces text that is too small, we fail-open back to the original text.
 function normalizeEflTextForAi(rawText: string): {
   text: string;
   notes: string[];
+  droppedHints: string[];
+  keptSections: string[];
+  usedFallback: boolean;
 } {
   const lines = rawText.split(/\r?\n/);
   const out: string[] = [];
   const notes: string[] = [];
+  const droppedHints: string[] = [];
+  const keptSections: string[] = [];
 
   let skippingAverages = false;
   let skippedAverages = false;
@@ -47,7 +55,9 @@ function normalizeEflTextForAi(rawText: string): {
     if (!skippingAverages && /average monthly use/i.test(trimmed)) {
       skippingAverages = true;
       skippedAverages = true;
-      notes.push("Removed Average Monthly Use / Average Price per kWh table.");
+      const hint = "Removed Average Monthly Use / Average Price per kWh table.";
+      notes.push(hint);
+      droppedHints.push(hint);
       continue;
     }
 
@@ -95,31 +105,63 @@ function normalizeEflTextForAi(rawText: string): {
 
     // Drop known noisy lines even outside explicit blocks.
     if (/average prices per kwh listed above do not include/i.test(trimmed)) {
-      notes.push("Removed average price disclaimer line.");
+      const hint = "Removed average price disclaimer line.";
+      notes.push(hint);
+      droppedHints.push(hint);
       continue;
     }
     if (/for updated tdu delivery charges/i.test(lower)) {
-      notes.push("Removed TDU delivery charges URL line.");
+      const hint = "Removed TDU delivery charges URL line.";
+      notes.push(hint);
+      droppedHints.push(hint);
       continue;
     }
     if (
       /passed through to customer as billed/i.test(lower) &&
       /tdu/i.test(lower)
     ) {
-      notes.push("Removed generic TDU passthrough language.");
+      const hint = "Removed generic TDU passthrough language.";
+      notes.push(hint);
+      droppedHints.push(hint);
       continue;
     }
     if (/sales tax|municipalfees|municipal fees/i.test(lower)) {
-      notes.push("Removed generic tax/municipal fee language.");
+      const hint = "Removed generic tax/municipal fee language.";
+      notes.push(hint);
+      droppedHints.push(hint);
       continue;
     }
 
     out.push(line);
   }
 
+  let normalized = out.join("\n");
+  let usedFallback = false;
+
+  // Fail-open safeguard: if the normalized text is too short, fall back
+  // to the original raw text so downstream consumers still see a full EFL.
+  const rawTrimmed = rawText.trim();
+  if (normalized.trim().length < 200 && rawTrimmed.length > 0) {
+    normalized = rawTrimmed;
+    usedFallback = true;
+    notes.push(
+      "Slicer fallback: normalized EFL text was too short; using original text for AI input.",
+    );
+  } else {
+    if (skippedAverages) {
+      keptSections.push("Pricing components without Average Monthly Use table.");
+    }
+    if (skippedTdu) {
+      keptSections.push("REP pricing sections without TDU passthrough blocks.");
+    }
+  }
+
   return {
-    text: out.join("\n"),
+    text: normalized,
     notes: Array.from(new Set(notes)),
+    droppedHints: Array.from(new Set(droppedHints)),
+    keptSections: Array.from(new Set(keptSections)),
+    usedFallback,
   };
 }
 
@@ -129,9 +171,18 @@ export async function parseEflTextWithAi(opts: {
   extraWarnings?: string[];
 }): Promise<EflAiParseResult> {
   const { rawText, eflPdfSha256, extraWarnings = [] } = opts;
-  const { text: normalizedText, notes: normalizationNotes } =
-    normalizeEflTextForAi(rawText);
+  const {
+    text: normalizedText,
+    notes: normalizationNotes,
+    usedFallback,
+  } = normalizeEflTextForAi(rawText);
+
   const baseWarnings = [...extraWarnings, ...normalizationNotes];
+  if (usedFallback) {
+    baseWarnings.push(
+      "Slicer fail-open: AI input uses original EFL text because normalized text was too short.",
+    );
+  }
 
   if (!process.env.OPENAI_IntelliWatt_Fact_Card_Parser) {
     return {
