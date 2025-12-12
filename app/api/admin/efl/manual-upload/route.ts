@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Buffer } from "node:buffer";
 
-import { deterministicEflExtract } from "@/lib/efl/eflExtractor";
-import { parseEflPdfWithAi } from "@/lib/efl/eflAiParser";
+import { getOrCreateEflTemplate } from "@/lib/efl/getOrCreateEflTemplate";
 
 const MAX_PREVIEW_CHARS = 20000;
 
@@ -23,55 +22,36 @@ export async function POST(req: NextRequest) {
     const arrayBuffer = await file.arrayBuffer();
     const pdfBuffer = Buffer.from(arrayBuffer);
 
-    // Deterministic extract: PDF bytes → cleaned text + identity metadata
-    // (SHA-256, PUCT certificate, EFL Ver. #, extractor warnings).
-    const extract = await deterministicEflExtract(pdfBuffer);
+    const { template, warnings: topWarnings } = await getOrCreateEflTemplate({
+      source: "manual_upload",
+      pdfBytes: pdfBuffer,
+      filename: (file as File).name ?? null,
+    });
 
-    const rawText = extract.rawText ?? "";
+    const rawText = template.rawText ?? "";
     const rawTextTruncated = rawText.length > MAX_PREVIEW_CHARS;
     const rawTextPreview = rawTextTruncated
       ? rawText.slice(0, MAX_PREVIEW_CHARS)
       : rawText;
 
-    const {
-      eflPdfSha256,
-      repPuctCertificate,
-      eflVersionCode,
-      warnings: deterministicWarnings,
-      extractorMethod,
-    } = extract;
-
-    // Always call the AI PDF parser on the original PDF bytes, regardless of
-    // rawText content. Text extraction is now diagnostic only.
-    const aiResult = await parseEflPdfWithAi({
-      pdfBytes: pdfBuffer,
-      eflPdfSha256,
-      rawText,
-    });
-
-    const allWarnings = [
-      ...(deterministicWarnings ?? []),
-      ...(aiResult.parseWarnings ?? []),
-    ];
-
     return NextResponse.json({
       ok: true,
-      eflPdfSha256,
-      repPuctCertificate,
-      eflVersionCode,
-      warnings: allWarnings,
-      // Prompt is now a simple descriptor since the AI runs directly on the PDF.
+      eflPdfSha256: template.eflPdfSha256,
+      repPuctCertificate: template.repPuctCertificate,
+      eflVersionCode: template.eflVersionCode,
+      warnings: topWarnings,
+      // Prompt is now a simple descriptor since the AI runs directly on the EFL text.
       prompt:
         "EFL PDF parsed by OpenAI using the standard planRules/rateStructure contract.",
       rawTextPreview,
       rawTextLength: rawText.length,
       rawTextTruncated,
-      planRules: aiResult.planRules,
-      rateStructure: aiResult.rateStructure,
-      parseConfidence: aiResult.parseConfidence,
-      parseWarnings: aiResult.parseWarnings,
+      planRules: template.planRules,
+      rateStructure: template.rateStructure,
+      parseConfidence: template.parseConfidence,
+      parseWarnings: template.parseWarnings,
       validation: null,
-      extractorMethod: extractorMethod ?? "pdf-parse",
+      extractorMethod: template.extractorMethod ?? "pdftotext",
     });
   } catch (error) {
     console.error("[EFL_MANUAL_UPLOAD] Failed to process fact card:", error);

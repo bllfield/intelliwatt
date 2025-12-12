@@ -213,6 +213,23 @@ Reliability guardrails:
 ✅ Step 2 complete: stable identity + dedupe in template storage  
 Next step: Step 3 — Get-or-create template service (single entry point) + validation gating
 
+## EFL Templates — Get-or-Create Service (Step 3)
+
+- Single entry point: `lib/efl/getOrCreateEflTemplate.ts` owns the deterministic extract + AI parse + identity wiring for EFL templates.
+- Identity lookup order is the same as Step 2:
+  - `PUCT_CERT_PLUS_EFL_VERSION` → `puct:${repPuctCertificate}|ver:${normalizedEflVersionCode}`
+  - `EFL_PDF_SHA256` → `sha256:${eflPdfSha256}`
+  - `WATTBUY_FALLBACK` → `wb:${norm(provider)}|plan:${norm(plan)}|term:${term||"na"}|tdsp:${norm(tdsp)||"na"}|offer:${offerId||"na"}`
+- `getOrCreateEflTemplate()`:
+  - Accepts either `{ source: "manual_upload", pdfBytes }` or `{ source: "wattbuy", rawText, ... }`.
+  - Runs deterministic extract (`deterministicEflExtract`) for PDF inputs to produce `rawText`, `eflPdfSha256`, `repPuctCertificate`, `eflVersionCode`, and extractor warnings.
+  - Computes a stable identity via `getTemplateKey` and uses an in-process cache so repeated parses of the same EFL do not re-run the AI unnecessarily.
+  - Invokes the **text-only** AI parser (`parseEflTextWithAi`) with slicer + deterministic fallbacks + confidence scoring, then returns a unified template record: `planRules`, `rateStructure`, `parseConfidence`, `parseWarnings`, identity, and aggregated warnings.
+- The admin manual-upload route (`/api/admin/efl/manual-upload`) now calls `getOrCreateEflTemplate` and returns the same JSON shape as before (including `planRules`, `rateStructure`, `parseConfidence`, `parseWarnings`, and `rawTextPreview`), but all EFL parsing logic flows through the shared service.
+
+✅ Step 3 complete: single get-or-create template service wired to manual upload  
+Next step: Step 4 — Wire into WattBuy offer detail (non-blocking UI)
+
 <!-- Dev + Prod Prisma migrations completed for Current Plan module + master schema on 2025-11-28 -->
 
 ### Current Plan / Current Rate Page — Status
