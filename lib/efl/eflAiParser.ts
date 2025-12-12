@@ -9,6 +9,23 @@ export interface EflAiParseResult {
   parseWarnings: string[];
 }
 
+function filterParseWarnings(warnings: string[]): string[] {
+  const ignorePatterns = [
+    /TDU\b/i,
+    /\bTDSP\b/i,
+    /transmission and distribution/i,
+    /underground facilities and cost recovery/i,
+    /sales taxes? (are )?not included/i,
+    /non-recurring fees?/i,
+    /deposit requirements?/i,
+    /terms of service/i,
+  ];
+
+  return warnings.filter(
+    (w) => !ignorePatterns.some((rx) => rx.test(w)),
+  );
+}
+
 async function parseEflTextWithAi(opts: {
   rawText: string;
   eflPdfSha256: string;
@@ -21,10 +38,10 @@ async function parseEflTextWithAi(opts: {
       planRules: null,
       rateStructure: null,
       parseConfidence: 0,
-      parseWarnings: [
+      parseWarnings: filterParseWarnings([
         ...extraWarnings,
         "OPENAI_IntelliWatt_Fact_Card_Parser is not configured; cannot run EFL AI text parser.",
-      ],
+      ]),
     };
   }
 
@@ -38,6 +55,13 @@ CRITICAL GUARDRAILS:
 - If the EFL does not clearly provide a value, you MUST leave that field null or omit it,
   and you may include a parse warning instead.
 - Do not fill in 'typical' values or make assumptions beyond what the EFL explicitly states.
+
+SCOPE:
+- Focus ONLY on REP (retail provider) energy charges, base monthly fees, usage tiers,
+  bill credits, and core plan metadata (plan name, Ver. #, PUCT certificate number if present).
+- Ignore TDU/TDSP delivery charges, underground facility charges, municipal fees, generic
+  non-recurring fee disclaimers, and "see Terms of Service" notes unless they change the
+  customer's recurring REP charges in a way that cannot be represented in the contract.
 
 IDENTITY CONTEXT:
 EFL PDF SHA-256: ${eflPdfSha256}
@@ -78,7 +102,10 @@ OUTPUT CONTRACT:
       planRules: null,
       rateStructure: null,
       parseConfidence: 0,
-      parseWarnings: [...extraWarnings, `EFL AI text call failed: ${msg}`],
+      parseWarnings: filterParseWarnings([
+        ...extraWarnings,
+        `EFL AI text call failed: ${msg}`,
+      ]),
     };
   }
 
@@ -90,12 +117,12 @@ OUTPUT CONTRACT:
       planRules: null,
       rateStructure: null,
       parseConfidence: 0,
-      parseWarnings: [
+      parseWarnings: filterParseWarnings([
         ...extraWarnings,
         `Failed to parse EFL AI text response JSON: ${
           err instanceof Error ? err.message : String(err)
         }`,
-      ],
+      ]),
     };
   }
 
@@ -104,10 +131,10 @@ OUTPUT CONTRACT:
     rateStructure: parsed.rateStructure ?? null,
     parseConfidence:
       typeof parsed.parseConfidence === "number" ? parsed.parseConfidence : 0,
-    parseWarnings: [
+    parseWarnings: filterParseWarnings([
       ...extraWarnings,
       ...(Array.isArray(parsed.parseWarnings) ? parsed.parseWarnings : []),
-    ],
+    ]),
   };
 }
 
