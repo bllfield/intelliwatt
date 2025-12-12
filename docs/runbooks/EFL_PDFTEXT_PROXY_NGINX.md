@@ -50,7 +50,7 @@ You should see `active (running)`. If nginx is not installed or running, follow 
 
 ---
 
-## 3. Find the active nginx site config
+## 3. Option A: Attach to an existing HTTPS server block
 
 Most droplets use `/etc/nginx/sites-enabled`.
 
@@ -100,6 +100,82 @@ location /efl/pdftotext {
 ```
 
 Save and exit (`Ctrl+O`, `Enter`, `Ctrl+X`).
+
+---
+
+## 3b. Option B: Dedicated vhost for `efl-pdftotext.intelliwatt.com`
+
+If you prefer a dedicated hostname for the helper, you can create a separate vhost that terminates TLS for
+`efl-pdftotext.intelliwatt.com` and proxies to the local helper on `127.0.0.1:8095`.
+
+**Where:** Droplet, as `root`.
+
+1. Create a new site file:
+
+```bash
+sudo nano /etc/nginx/sites-available/efl-pdftotext.intelliwatt.com
+```
+
+2. Paste this minimal vhost config (adjust paths only if your Certbot layout differs):
+
+```nginx
+server {
+    listen 80;
+    listen [::]:80;
+    server_name efl-pdftotext.intelliwatt.com;
+
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name efl-pdftotext.intelliwatt.com;
+
+    # Certbot will fill these paths; you can leave placeholders until certs are issued
+    ssl_certificate     /etc/letsencrypt/live/efl-pdftotext.intelliwatt.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/efl-pdftotext.intelliwatt.com/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    # EFL PDFs are small, but give a safe headroom
+    client_max_body_size 10m;
+
+    location /efl/pdftotext {
+        proxy_pass http://127.0.0.1:8095/efl/pdftotext;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_read_timeout  60s;
+        proxy_connect_timeout 30s;
+        proxy_send_timeout 60s;
+    }
+}
+```
+
+3. Enable the site and test nginx:
+
+```bash
+sudo ln -s /etc/nginx/sites-available/efl-pdftotext.intelliwatt.com /etc/nginx/sites-enabled/efl-pdftotext.intelliwatt.com
+sudo nginx -t
+```
+
+4. Reload nginx:
+
+```bash
+sudo systemctl reload nginx
+```
+
+5. Request/renew certificates with Certbot (if not already in place):
+
+```bash
+sudo certbot --nginx -d efl-pdftotext.intelliwatt.com
+```
+
+Certbot will update the `ssl_certificate`/`ssl_certificate_key` paths automatically in the vhost config.
 
 ---
 
@@ -180,7 +256,15 @@ If you get a non-200 status, check:
 
 ---
 
-## 9. Do **not** open port 8095 publicly
+## 9. Firewall / network notes
+
+- Publicly expose **only** ports 80 and 443 on the droplet.
+- Port `8095` should remain reachable **only** from localhost (nginx → helper).
+- Do **not** add firewall rules to expose `8095` directly to the internet; all traffic must go through HTTPS/443.
+
+---
+
+## 10. Do **not** open port 8095 publicly
 
 - Keep the Python helper bound to `127.0.0.1:8095` or `0.0.0.0:8095` **behind** nginx.
 - Do **not** add a firewall rule exposing 8095 to the internet.
@@ -188,7 +272,7 @@ If you get a non-200 status, check:
 
 ---
 
-## 10. Checklist
+## 11. Checklist
 
 - [ ] Python helper (`efl-pdftotext.service`) is running and listening on 8095.
 - [ ] nginx site config includes a `location /efl/pdftotext { ... }` block proxying to `http://127.0.0.1:8095/efl/pdftotext`.

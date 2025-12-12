@@ -173,6 +173,14 @@ Notes:
 - [ ] Use `NormalizedCurrentPlan` in the Rate Plan Analyzer UI (future step once normalization + master data is live).
 - ✅ Add reconfirmation UX + mutations so expired Current Plan entries can be re-awarded once usage data is back in sync (see "Usage-dependent entry reconfirm flows" checklist).
 
+### EFL Fact Card Engine / pdftotext Helper
+
+- ✅ EFL `pdftotext` droplet helper is reachable from Vercel via dedicated HTTPS subdomain:
+  - Canonical env: `EFL_PDFTEXT_URL=https://efl-pdftotext.intelliwatt.com/efl/pdftotext`
+  - Shared secret: `EFL_PDFTEXT_TOKEN` documented in `docs/ENV_VARS.md` and wired to the droplet helper + Vercel.
+- ✅ Nginx + TLS deployment steps for the helper are documented in `docs/runbooks/EFL_PDFTEXT_PROXY_NGINX.md` (including vhost, Certbot, and firewall notes).
+- ⬜ DNS + droplet nginx/certbot changes must be kept in sync with these docs whenever the helper hostname or topology changes.
+
 <!-- Dev + Prod Prisma migrations completed for Current Plan module + master schema on 2025-11-28 -->
 
 ### Current Plan / Current Rate Page — Status

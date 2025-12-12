@@ -146,3 +146,14 @@ export async function GET(request: Request) {
 - **Error rates** by error class
 - **Response times** (p50, p95, p99)
 - **Database performance** metrics
+
+## Droplet Services & Logs
+
+For long-running helpers on the DigitalOcean droplet, use `journalctl` to inspect structured logs and correlate with Vercel requests:
+
+- **`efl-pdftotext.service`** — EFL `pdftotext` helper (PDF → text fallback)
+  - View recent logs:
+    - `sudo journalctl -u efl-pdftotext.service -n 200 --no-pager`
+  - Follow live during EFL uploads:
+    - `sudo journalctl -u efl-pdftotext.service -n 200 -f`
+  - Use correlation IDs or request metadata (where logged) to tie helper activity back to `/api/admin/efl/manual-upload` calls.

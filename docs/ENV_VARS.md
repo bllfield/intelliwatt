@@ -18,8 +18,22 @@
 - `NEXT_PUBLIC_GREEN_BUTTON_UPLOAD_URL` — Public URL exposed to the browser for the droplet `/upload` endpoint. Omit in preview/dev if the droplet isn’t reachable.
 - `GREEN_BUTTON_UPLOAD_MAX_BYTES` — Optional override for the 10 MB default upload limit (applies to both Vercel fallback route and droplet service).
 - `GREEN_BUTTON_UPLOAD_ALLOW_ORIGIN` — Optional CORS allowlist for the droplet uploader (defaults to `https://intelliwatt.com` when unset).
-- `EFL_PDFTEXT_URL` — HTTPS endpoint for the droplet EFL `pdftotext` proxy (e.g., `https://<droplet-domain>/efl/pdftotext`). Vercel calls this when pdf-parse/pdfjs extraction fails.
-- `EFL_PDFTEXT_TOKEN` — Shared secret between Vercel and the droplet `pdftotext` helper. Sent as header `X-EFL-PDFTEXT-TOKEN`. **Note:** Some shells or env files may wrap this value in quotes (e.g., `"token"` or `'token'`); the code automatically trims whitespace and strips one pair of wrapping quotes before sending.
+
+## EFL pdftotext Helper (Droplet HTTPS Proxy)
+
+- `EFL_PDFTEXT_URL`
+  - **Purpose**: HTTPS endpoint Vercel calls when `pdf-parse`/`pdfjs` extraction fails for EFL PDFs.
+  - **Production canonical value**: `https://efl-pdftotext.intelliwatt.com/efl/pdftotext`
+  - **Requirements**:
+    - Must be **HTTPS** (port 443), not `http://` or a direct `:8095` URL.
+    - Hostname must be publicly reachable from Vercel (fronted by nginx + TLS on the droplet).
+    - nginx on the droplet should proxy this path to the local helper on `http://127.0.0.1:8095/efl/pdftotext`.
+- `EFL_PDFTEXT_TOKEN`
+  - **Purpose**: Shared secret between Vercel and the droplet `pdftotext` helper.
+  - Sent as header `X-EFL-PDFTEXT-TOKEN` from Vercel; the Python helper validates it against its own `EFL_PDFTEXT_TOKEN`.
+  - Must match exactly on both Vercel and the droplet.
+  - **Droplet env note**: In `/home/deploy/.intelliwatt.env` or similar, set as `EFL_PDFTEXT_TOKEN=your-token` **without quotes**.
+  - **Normalization**: If some tools wrap the value in single or double quotes (e.g., `"token"` or `'token'`), the Node helper automatically trims whitespace and strips one pair of wrapping quotes before sending it upstream.
 
 ## Databases
 - `DATABASE_URL` — Primary IntelliWatt application database (master normalized dataset; used by `prisma/schema.prisma`). **Web app (Vercel) stays on this pooled URL (PgBouncer).**

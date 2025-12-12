@@ -73,20 +73,25 @@ async function runPdftotext(pdfBytes: Uint8Array | Buffer): Promise<string> {
   if (!rawUrl) {
     throw new Error(
       "EFL_PDFTEXT_URL is not configured; pdftotext fallback is disabled. " +
-        "Set EFL_PDFTEXT_URL to the droplet HTTPS proxy (see docs/runbooks/EFL_PDFTEXT_PROXY_NGINX.md).",
+        "This value must be an HTTPS URL on a publicly reachable hostname (no direct :8095). " +
+        "In production, set EFL_PDFTEXT_URL to https://efl-pdftotext.intelliwatt.com/efl/pdftotext " +
+        "(see docs/runbooks/EFL_PDFTEXT_PROXY_NGINX.md).",
     );
   }
 
   const serviceUrl = rawUrl.trim();
 
   // Warn loudly (via error text) if still pointed directly at :8095 over http,
-  // which is not reachable from Vercel in production. We surface this through
-  // the normal pdftotext fallback warning path.
+  // which is not reachable from Vercel in production and should never be used
+  // from browsers or serverless functions. We surface this through the normal
+  // pdftotext fallback warning path.
   if (serviceUrl.startsWith("http://") && serviceUrl.includes(":8095")) {
     throw new Error(
-      `EFL_PDFTEXT_URL appears to point at ${serviceUrl}, which uses plain http and port 8095. ` +
-        "This port is not reachable from Vercel. Configure an nginx HTTPS proxy on the droplet and " +
-        "update EFL_PDFTEXT_URL to use https://<droplet-domain>/efl/pdftotext instead.",
+      `EFL_PDFTEXT_URL appears to point at ${serviceUrl}, which uses plain http and a non-standard port (8095). ` +
+        "Vercel cannot reach this directly, and plain http should not be used for PDF uploads. " +
+        "Configure an nginx HTTPS proxy on the droplet that terminates TLS for efl-pdftotext.intelliwatt.com " +
+        "and proxy_passes to http://127.0.0.1:8095/efl/pdftotext, then set " +
+        "EFL_PDFTEXT_URL=https://efl-pdftotext.intelliwatt.com/efl/pdftotext.",
     );
   }
 
