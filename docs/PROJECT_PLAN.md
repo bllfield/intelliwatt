@@ -230,6 +230,20 @@ Next step: Step 3 — Get-or-create template service (single entry point) + vali
 ✅ Step 3 complete: single get-or-create template service wired to manual upload  
 Next step: Step 4 — Wire into WattBuy offer detail (non-blocking UI)
 
+## EFL Templates — WattBuy Wiring (Step 4)
+
+- New endpoint: `POST /api/efl/template/from-offer` accepts a WattBuy offer identity payload:
+  - `offerId`, `providerName`, `planName`, `termMonths`, `tdspName`, plus optional `rawText`, `eflPdfSha256`, `repPuctCertificate`, and `eflVersionCode`.
+- Behavior:
+  - When `rawText` is present, the endpoint calls `getOrCreateEflTemplate({ source: "wattbuy", ... })` to run the **text-only** AI parser with deterministic fallbacks and returns `planRules`, `rateStructure`, `parseConfidence`, `parseWarnings`, and identity metadata.
+  - When `rawText` is missing/empty, the endpoint performs an identity-only lookup using `findCachedEflTemplateByIdentity` (no OpenAI call, no PDF fetch); if no template is found, it returns `ok: true` with warnings indicating that admin manual upload is required to learn the plan.
+- UI wiring (non-blocking):
+  - Admin Offers Explorer (`/admin/offers`) now includes a **Fact card** action per row that calls `/api/efl/template/from-offer` on demand.
+  - The offers table still renders immediately; fact card loading is asynchronous with a "Parsing…" state, and results are rendered as a lightweight snapshot (confidence, PUCT Cert, Ver. #, and warnings) without blocking the rest of the UI.
+
+✅ Step 4 complete: WattBuy offer details now attempt to load/learn EFL templates  
+Next step: Step 5 — Admin list/view/approve templates + collision detection
+
 <!-- Dev + Prod Prisma migrations completed for Current Plan module + master schema on 2025-11-28 -->
 
 ### Current Plan / Current Rate Page — Status

@@ -327,6 +327,15 @@ function RowActions({ offerId, raw }: { offerId: string; raw: any }) {
     return null;
   }, [offerId, raw]);
 
+  const [eflLoading, setEflLoading] = useState(false);
+  const [eflError, setEflError] = useState<string | null>(null);
+  const [eflSnapshot, setEflSnapshot] = useState<{
+    parseConfidence: number | null;
+    repPuctCertificate: string | null;
+    eflVersionCode: string | null;
+    warnings: string[];
+  } | null>(null);
+
   const copyOffer = useCallback(async () => {
     if (!offer) return;
     const text = JSON.stringify(offer, null, 2);
@@ -341,24 +350,95 @@ function RowActions({ offerId, raw }: { offerId: string; raw: any }) {
     window.open(url, '_blank', 'noopener,noreferrer');
   }, [offer]);
 
+  const loadFactCard = useCallback(async () => {
+    if (!offer) return;
+    setEflLoading(true);
+    setEflError(null);
+    setEflSnapshot(null);
+
+    try {
+      const body = {
+        offerId: offer.offer_id ?? null,
+        providerName: offer.offer_data?.supplier_name ?? offer.offer_data?.supplier ?? null,
+        planName: offer.offer_name ?? null,
+        termMonths: typeof offer.offer_data?.term === 'number' ? offer.offer_data.term : null,
+        tdspName: offer.offer_data?.utility ?? null,
+        rawText: null,
+        eflPdfSha256: null,
+        repPuctCertificate: null,
+        eflVersionCode: null,
+      };
+
+      const res = await fetch('/api/efl/template/from-offer', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json();
+
+      if (!res.ok || json.ok === false) {
+        throw new Error(json.error || res.statusText || 'Template lookup failed');
+      }
+
+      setEflSnapshot({
+        parseConfidence: typeof json.parseConfidence === 'number' ? json.parseConfidence : null,
+        repPuctCertificate: json.repPuctCertificate ?? null,
+        eflVersionCode: json.eflVersionCode ?? null,
+        warnings: Array.isArray(json.warnings) ? json.warnings : [],
+      });
+    } catch (e: any) {
+      setEflError(e?.message || 'Failed to load EFL template.');
+    } finally {
+      setEflLoading(false);
+    }
+  }, [offer]);
+
   return (
-    <div className="flex items-center gap-2 text-xs">
-      <button
-        className="rounded border px-2 py-1 bg-white hover:bg-gray-50"
-        onClick={showOffer}
-        disabled={!offer}
-        title="View JSON"
-      >
-        View
-      </button>
-      <button
-        className="rounded border px-2 py-1 bg-white hover:bg-gray-50"
-        onClick={copyOffer}
-        disabled={!offer}
-        title="Copy JSON to clipboard"
-      >
-        Copy
-      </button>
+    <div className="flex flex-col gap-1 text-xs">
+      <div className="flex items-center gap-2">
+        <button
+          className="rounded border px-2 py-1 bg-white hover:bg-gray-50"
+          onClick={showOffer}
+          disabled={!offer}
+          title="View JSON"
+        >
+          View
+        </button>
+        <button
+          className="rounded border px-2 py-1 bg-white hover:bg-gray-50"
+          onClick={copyOffer}
+          disabled={!offer}
+          title="Copy JSON to clipboard"
+        >
+          Copy
+        </button>
+        <button
+          className="rounded border px-2 py-1 bg-white hover:bg-gray-50"
+          onClick={loadFactCard}
+          disabled={!offer || eflLoading}
+          title="Load EFL fact card template (non-blocking)"
+        >
+          {eflLoading ? 'Parsing…' : 'Fact card'}
+        </button>
+      </div>
+      {eflError && <div className="text-red-600">{eflError}</div>}
+      {eflSnapshot && (
+        <div className="text-gray-600">
+          <div>
+            Confidence:{' '}
+            {eflSnapshot.parseConfidence != null ? `${eflSnapshot.parseConfidence}%` : 'n/a'}
+          </div>
+          {eflSnapshot.repPuctCertificate && (
+            <div>PUCT Cert: {eflSnapshot.repPuctCertificate}</div>
+          )}
+          {eflSnapshot.eflVersionCode && <div>Ver #: {eflSnapshot.eflVersionCode}</div>}
+          {eflSnapshot.warnings.length > 0 && (
+            <div className="mt-1 text-[11px] text-gray-500">
+              Warnings: {eflSnapshot.warnings.join(' • ')}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

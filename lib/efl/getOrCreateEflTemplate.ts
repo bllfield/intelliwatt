@@ -56,6 +56,45 @@ export interface GetOrCreateEflTemplateResult {
 // EFL within a single process do not re-run the AI unnecessarily.
 const templateCache = new Map<string, EflTemplateRecord>();
 
+export function findCachedEflTemplateByIdentity(input: {
+  repPuctCertificate: string | null;
+  eflVersionCode: string | null;
+  eflPdfSha256: string | null;
+  wattbuy?:
+    | {
+        providerName?: string | null;
+        planName?: string | null;
+        termMonths?: number | null;
+        tdspName?: string | null;
+        offerId?: string | null;
+      }
+    | null;
+}): {
+  template: EflTemplateRecord | null;
+  identity: EflTemplateKeyResult;
+  warnings: string[];
+} {
+  const identity = getTemplateKey({
+    repPuctCertificate: input.repPuctCertificate,
+    eflVersionCode: input.eflVersionCode,
+    eflPdfSha256: input.eflPdfSha256,
+    wattbuy: input.wattbuy ?? null,
+  });
+
+  for (const key of identity.lookupKeys) {
+    const hit = templateCache.get(key);
+    if (hit) {
+      const warnings = [
+        ...identity.warnings,
+        ...(hit.parseWarnings ?? []),
+      ];
+      return { template: hit, identity, warnings };
+    }
+  }
+
+  return { template: null, identity, warnings: identity.warnings.slice() };
+}
+
 export async function getOrCreateEflTemplate(
   input: GetOrCreateEflTemplateInput,
 ): Promise<GetOrCreateEflTemplateResult> {
