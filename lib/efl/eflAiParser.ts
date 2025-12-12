@@ -42,8 +42,7 @@ function normalizeEflTextForAi(rawText: string): {
   const droppedHints: string[] = [];
   const keptSections: string[] = [];
 
-  let skippingAverages = false;
-  let skippedAverages = false;
+  let removedAverages = false;
   let removedTdu = false;
 
   const isRepPricingLine = (s: string): boolean =>
@@ -52,6 +51,18 @@ function normalizeEflTextForAi(rawText: string): {
     /base\s*charge/i.test(s) ||
     /night\s*hours/i.test(s) ||
     /minimum\s*usage\s*fee/i.test(s);
+
+  const isAverageRow = (s: string): boolean => {
+    const t = s.trim().toLowerCase();
+    return (
+      t.startsWith("average monthly use") ||
+      t.startsWith("average monthly use:") ||
+      t.startsWith("average price per kwh") ||
+      t.startsWith("average price per kilowatt-hour") ||
+      t.startsWith("average price per kwh:") ||
+      t.startsWith("average price per kilowatt-hour:")
+    );
+  };
 
   const isTduOnlyLine = (s: string): boolean => {
     const t = s.trim();
@@ -72,36 +83,17 @@ function normalizeEflTextForAi(rawText: string): {
     const trimmed = line.trim();
     const lower = trimmed.toLowerCase();
 
-    // Start skipping "Average Monthly Use / Average Price per kWh" block.
-    if (!skippingAverages && /average monthly use/i.test(trimmed)) {
-      skippingAverages = true;
-      skippedAverages = true;
-      const hint = "Removed Average Monthly Use / Average Price per kWh table.";
-      notes.push(hint);
-      droppedHints.push(hint);
-      continue;
-    }
-
-    if (skippingAverages) {
-      const endOfAverages =
-        /the price you pay/i.test(trimmed) ||
-        /energy\s*charge/i.test(trimmed) ||
-        /usage\s*credit/i.test(trimmed) ||
-        /electricity\s*price/i.test(trimmed) ||
-        /tdu\s*delivery\s*charges/i.test(trimmed) ||
-        /base\s*charge/i.test(trimmed) ||
-        /^type of product/i.test(lower) ||
-        /^contract term/i.test(lower) ||
-        /^other key/i.test(lower) ||
-        /^terms and questions/i.test(lower);
-
-      if (endOfAverages) {
-        skippingAverages = false;
-        // Fall through to normal processing for this line so the pricing
-        // component itself is preserved.
-      } else {
-        continue;
+    // Drop only the "Average Monthly Use / Average Price per kWh" rows
+    // themselves, never the subsequent price components table.
+    if (isAverageRow(trimmed)) {
+      if (!removedAverages) {
+        removedAverages = true;
+        const hint =
+          "Removed Average Monthly Use / Average Price per kWh table.";
+        notes.push(hint);
+        droppedHints.push(hint);
       }
+      continue;
     }
 
     // Drop known noisy lines even outside explicit blocks.
@@ -143,7 +135,7 @@ function normalizeEflTextForAi(rawText: string): {
       "Slicer fallback: normalized EFL text was too short; using original text for AI input.",
     );
   } else {
-    if (skippedAverages) {
+    if (removedAverages) {
       keptSections.push("Pricing components without Average Monthly Use table.");
     }
     if (removedTdu) {
@@ -314,6 +306,12 @@ OUTPUT CONTRACT:
   // even if the slicer removed or normalized away certain hints.
   const fallbackSourceText = rawText;
 
+  const naRe = /\bN\/A\b|\bNA\b/i;
+  const hasExplicitNaOnLine = (labelRe: RegExp): boolean =>
+    fallbackSourceText
+      .split(/\r?\n/)
+      .some((l) => labelRe.test(l) && naRe.test(l));
+
   // Base Charge ($/month)
   if (planRules.baseChargePerMonthCents == null) {
     const base = fallbackExtractBaseChargePerMonthCents(fallbackSourceText);
@@ -322,6 +320,11 @@ OUTPUT CONTRACT:
       warnings.push(
         "Fallback filled baseChargePerMonthCents from EFL text (Base Charge line).",
       );
+    } else if (
+      hasExplicitNaOnLine(/Base\s+Monthly\s+Charge/i) ||
+      hasExplicitNaOnLine(/Base\s+Charge/i)
+    ) {
+      warnings.push("Base monthly charge listed as N/A on EFL.");
     }
   }
 
@@ -352,6 +355,18 @@ OUTPUT CONTRACT:
       warnings.push(
         "Fallback filled billCredits from 'bill credit if usage >= threshold' line.",
       );
+    }
+  } else if (
+    hasExplicitNaOnLine(/Minimum\s+Usage\s+(Charge|Fee)/i) ||
+    hasExplicitNaOnLine(/Residential\s+Usage\s+Credit/i)
+  ) {
+    // If the EFL explicitly calls these out as N/A, surface that fact instead
+    // of implying they are simply missing.
+    if (hasExplicitNaOnLine(/Minimum\s+Usage\s+(Charge|Fee)/i)) {
+      warnings.push("Minimum usage charge listed as N/A on EFL.");
+    }
+    if (hasExplicitNaOnLine(/Residential\s+Usage\s+Credit/i)) {
+      warnings.push("Residential usage credit listed as N/A on EFL.");
     }
   }
 
@@ -386,6 +401,18 @@ OUTPUT CONTRACT:
     warnings.push(
       "Fallback filled rateType from 'Type of Product' line.",
     );
+  }
+
+  // Ensure RateStructure.type tracks a clear FIXED classification when present.
+  if (!rateStructure || typeof rateStructure !== "object") {
+    rateStructure = {};
+  }
+  const rs: any = rateStructure;
+
+  if (planRules.rateType === "FIXED") {
+    if (!rs.type) {
+      rs.type = "FIXED";
+    }
   }
 
   // Plan type mapping for UI classification when missing.
@@ -440,6 +467,19 @@ OUTPUT CONTRACT:
     );
   }
 
+  // Align RateStructure with FIXED + single-rate information when available.
+  if (planRules.rateType === "FIXED") {
+    if (
+      typeof rs.baseMonthlyFeeCents !== "number" &&
+      typeof planRules.baseChargePerMonthCents === "number"
+    ) {
+      rs.baseMonthlyFeeCents = planRules.baseChargePerMonthCents;
+    }
+    if (singleEnergy != null && typeof rs.energyRateCents !== "number") {
+      rs.energyRateCents = singleEnergy;
+    }
+  }
+
   // Night Hours → time-of-use period (e.g., Free Nights credit window).
   const night = fallbackExtractNightHours(fallbackSourceText);
   if (night) {
@@ -490,6 +530,22 @@ OUTPUT CONTRACT:
       });
       warnings.push(
         "Fallback added minimum usage fee as a negative bill credit from EFL text.",
+      );
+    }
+  }
+
+  // ETF formula: capture text like "$15.00 multiplied by the number of months remaining"
+  // when the EFL explicitly answers "Do I have a termination fee". This is surfaced as
+  // a warning/note only, without introducing new structured fields.
+  if (/Do I have a termination fee/i.test(fallbackSourceText)) {
+    const etfMatch =
+      fallbackSourceText.match(
+        /\$([0-9]+(?:\.[0-9]{1,2})?).{0,120}multiplied\s+by.{0,120}months?\s+remaining/i,
+      ) ?? null;
+    if (etfMatch?.[1]) {
+      const amt = etfMatch[1];
+      warnings.push(
+        `Early termination fee: $${amt} × months remaining (per EFL).`,
       );
     }
   }
