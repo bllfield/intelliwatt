@@ -38,10 +38,11 @@ async function parseEflTextWithAi(opts: {
       planRules: null,
       rateStructure: null,
       parseConfidence: 0,
-      parseWarnings: filterParseWarnings([
+      // Infra/config error → do not filter; keep full message.
+      parseWarnings: [
         ...extraWarnings,
         "OPENAI_IntelliWatt_Fact_Card_Parser is not configured; cannot run EFL AI text parser.",
-      ]),
+      ],
     };
   }
 
@@ -102,10 +103,11 @@ OUTPUT CONTRACT:
       planRules: null,
       rateStructure: null,
       parseConfidence: 0,
-      parseWarnings: filterParseWarnings([
+      // Infra/API error → do not filter; keep full message.
+      parseWarnings: [
         ...extraWarnings,
         `EFL AI text call failed: ${msg}`,
-      ]),
+      ],
     };
   }
 
@@ -117,24 +119,30 @@ OUTPUT CONTRACT:
       planRules: null,
       rateStructure: null,
       parseConfidence: 0,
-      parseWarnings: filterParseWarnings([
+      // JSON parse error → do not filter; keep full message.
+      parseWarnings: [
         ...extraWarnings,
         `Failed to parse EFL AI text response JSON: ${
           err instanceof Error ? err.message : String(err)
         }`,
-      ]),
+      ],
     };
   }
+
+  const modelWarnings = Array.isArray(parsed.parseWarnings)
+    ? parsed.parseWarnings
+    : [];
 
   return {
     planRules: parsed.planRules ?? null,
     rateStructure: parsed.rateStructure ?? null,
     parseConfidence:
       typeof parsed.parseConfidence === "number" ? parsed.parseConfidence : 0,
-    parseWarnings: filterParseWarnings([
+    // Domain-level warnings from model are filtered; extraWarnings are kept verbatim.
+    parseWarnings: [
       ...extraWarnings,
-      ...(Array.isArray(parsed.parseWarnings) ? parsed.parseWarnings : []),
-    ]),
+      ...filterParseWarnings(modelWarnings),
+    ],
   };
 }
 
@@ -150,9 +158,10 @@ export async function parseEflPdfWithAi(opts: {
       planRules: null,
       rateStructure: null,
       parseConfidence: 0,
-      parseWarnings: filterParseWarnings([
+      // Infra/config error → do not filter; keep full message.
+      parseWarnings: [
         "OPENAI_IntelliWatt_Fact_Card_Parser is not configured; cannot run EFL AI PDF parser.",
-      ]),
+      ],
     };
   }
 
@@ -187,7 +196,8 @@ export async function parseEflPdfWithAi(opts: {
       planRules: null,
       rateStructure: null,
       parseConfidence: 0,
-      parseWarnings: filterParseWarnings([baseWarning]),
+      // Upload error warning is domain-level but not from the model; keep verbatim.
+      parseWarnings: [baseWarning],
     };
   }
 
@@ -344,7 +354,8 @@ EFL PDF SHA-256: ${eflPdfSha256}`,
       planRules: null,
       rateStructure: null,
       parseConfidence: 0,
-      parseWarnings: filterParseWarnings([`EFL AI call failed: ${msg}`]),
+      // Infra/API error → do not filter; keep full message.
+      parseWarnings: [`EFL AI call failed: ${msg}`],
     };
   }
 
@@ -357,21 +368,25 @@ EFL PDF SHA-256: ${eflPdfSha256}`,
       planRules: null,
       rateStructure: null,
       parseConfidence: 0,
-      parseWarnings: filterParseWarnings([
+      // JSON parse error → do not filter; keep full message.
+      parseWarnings: [
         `Failed to parse EFL AI response JSON: ${
           err instanceof Error ? err.message : String(err)
         }`,
-      ]),
+      ],
     };
   }
+
+  const modelWarnings = Array.isArray(parsed.parseWarnings)
+    ? parsed.parseWarnings
+    : [];
 
   return {
     planRules: parsed.planRules ?? null,
     rateStructure: parsed.rateStructure ?? null,
     parseConfidence:
       typeof parsed.parseConfidence === "number" ? parsed.parseConfidence : 0,
-    parseWarnings: filterParseWarnings(
-      Array.isArray(parsed.parseWarnings) ? parsed.parseWarnings : [],
-    ),
+    // Only model-emitted warnings are filtered; infra errors are handled above.
+    parseWarnings: filterParseWarnings(modelWarnings),
   };
 }
