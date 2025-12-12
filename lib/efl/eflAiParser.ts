@@ -50,7 +50,7 @@ OUTPUT CONTRACT:
   try {
     const response = await (openaiFactCardParser as any).responses.create({
       model: "gpt-5.1-mini",
-      text: { format: "json_object" },
+      text: { format: { type: "json_object" } },
       input: [
         {
           role: "system",
@@ -284,7 +284,7 @@ RULES:
   try {
     const response = await (openaiFactCardParser as any).responses.create({
       model: "gpt-5.1-mini",
-      text: { format: "json_object" },
+      text: { format: { type: "json_object" } },
       input: [
         {
           role: "system",
