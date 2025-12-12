@@ -194,11 +194,13 @@ EFL parser model + extraction status:
 - ✅ Fixed slicer bug where the “Average Monthly Use” block could accidentally remove real pricing lines (Energy Charge / Usage Credit) that follow immediately after the table; the slicer now stops skipping as soon as it encounters pricing-component markers and preserves those lines.
 - ✅ `parseWarnings` are now de-duplicated at the AI parser boundary for cleaner diagnostics without losing any signal.
  - ✅ TDU removal is now line-level and conservative: only obvious TDU/TDSP passthrough boilerplate lines are dropped, and lines containing REP pricing components (Energy Charge / Usage Credit / Base Charge) are always preserved.
+ - ✅ REP certificate extraction now supports additional real-world label variants, including “PUCT License # #####” and “REP No. #####”, and EFL version codes are also inferred from bottom-of-document underscore tokens (e.g., `TX_JE_NF_EFL_ENG_V1.5_SEP_01_25`) when explicit `Ver. #` labels are missing.
 
 Reliability guardrails:
 - ✅ Deterministic fallback now fills Base Charge per month, Energy Charge usage tiers, and threshold-based Bill Credits directly from EFL text when the AI leaves them empty.
 - ✅ Deterministic fallbacks now run against the original `rawText` (source of truth) instead of the normalized slicer text, so they can recover values even if the slicer removes or normalizes away certain hints.
 - ✅ `parseConfidence` is computed deterministically from completeness (presence of base charge, tiers/fixed rate, bill credits, rate type, and term months), then clamped to the 0–1 range before returning to avoid any UI percent inflation.
+ - ✅ New rawText-based fallbacks handle common EFL patterns for fixed-rate Free Nights products: single-line “Energy Charge: X¢/kWh”, “Base Charge of $X per billing cycle / per ESI-ID”, “Night Hours = 9:00 PM – 7:00 AM” (mapped into `timeOfUsePeriods` as a free/credit window), and “Minimum Usage Fee of $X … less than N kWh” (encoded as a negative billCredit rule for downstream engines.
 - ✅ System no longer returns 0% parseConfidence when obvious pricing lines exist; instead it surfaces the best-effort structured parse plus explicit fallback warnings.
 
 ## EFL Templates — Stable Identity + Dedupe (Step 2)

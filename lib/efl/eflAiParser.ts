@@ -49,7 +49,9 @@ function normalizeEflTextForAi(rawText: string): {
   const isRepPricingLine = (s: string): boolean =>
     /energy\s*charge/i.test(s) ||
     /usage\s*credit/i.test(s) ||
-    /base\s*charge/i.test(s);
+    /base\s*charge/i.test(s) ||
+    /night\s*hours/i.test(s) ||
+    /minimum\s*usage\s*fee/i.test(s);
 
   const isTduOnlyLine = (s: string): boolean => {
     const t = s.trim();
@@ -438,6 +440,60 @@ OUTPUT CONTRACT:
     );
   }
 
+  // Night Hours → time-of-use period (e.g., Free Nights credit window).
+  const night = fallbackExtractNightHours(fallbackSourceText);
+  if (night) {
+    const existingTou = Array.isArray(planRules.timeOfUsePeriods)
+      ? planRules.timeOfUsePeriods
+      : [];
+    if (!existingTou.length) {
+      planRules.timeOfUsePeriods = [
+        {
+          label: "Night Hours Credit",
+          startHour: night.startHour,
+          endHour: night.endHour,
+          daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
+          months: undefined,
+          rateCentsPerKwh: null,
+          isFree: true,
+        },
+      ];
+      warnings.push(
+        "Fallback added Night Hours time-of-use period from EFL text.",
+      );
+    }
+  }
+
+  // Minimum Usage Fee → negative bill credit rule.
+  const minFee = fallbackExtractMinimumUsageFee(fallbackSourceText);
+  if (minFee) {
+    if (!Array.isArray(planRules.billCredits)) {
+      planRules.billCredits = [];
+    }
+    const alreadyHasMinUsage = (planRules.billCredits as any[]).some(
+      (bc) =>
+        bc &&
+        typeof bc.label === "string" &&
+        /Minimum\s*Usage\s*Fee/i.test(bc.label),
+    );
+    if (!alreadyHasMinUsage) {
+      const feeDollars = minFee.feeCents / 100;
+      const label = `Minimum Usage Fee $${feeDollars.toFixed(
+        2,
+      )} if usage < ${minFee.maxKwh} kWh`;
+      (planRules.billCredits as any[]).push({
+        label,
+        creditDollars: -feeDollars,
+        thresholdKwh: minFee.maxKwh,
+        monthsOfYear: null,
+        type: "OTHER",
+      });
+      warnings.push(
+        "Fallback added minimum usage fee as a negative bill credit from EFL text.",
+      );
+    }
+  }
+
   // Deterministic parse confidence scoring based on completeness of the key
   // pricing components, rather than trusting the model to self-score.
   const baseChargePerMonthCents =
@@ -553,10 +609,42 @@ function centsStringToNumber(cents: string): number | null {
 // ----------------------------------------------------------------------
 function fallbackExtractSingleEnergyChargeCents(text: string): number | null {
   const re =
-    /Energy\s*Charge[\s:]*([0-9]+(?:\.[0-9]+)?)\s*¢?\s*per\s*kwh/i;
+    /Energy\s*Charge[\s:]*([0-9]+(?:\.[0-9]+)?)\s*¢?\s*(?:\/|per)\s*kwh/i;
   const m = text.match(re);
   if (!m?.[1]) return null;
   return centsStringToNumber(`${m[1]}¢`);
+}
+
+// ----------------------------------------------------------------------
+// Fallback: Night Hours window (e.g. "Night Hours = 9:00 PM – 7:00 AM")
+// ----------------------------------------------------------------------
+function fallbackExtractNightHours(text: string): {
+  startHour: number;
+  endHour: number;
+} | null {
+  const m =
+    text.match(
+      /Night\s*Hours\s*=\s*([0-9]{1,2})\s*:\s*([0-9]{2})\s*(AM|PM)\s*[–-]\s*([0-9]{1,2})\s*:\s*([0-9]{2})\s*(AM|PM)/i,
+    ) ?? null;
+  if (!m) return null;
+
+  const to24 = (hh: string, mm: string, ap: string): number | null => {
+    let h = Number(hh);
+    const minute = Number(mm);
+    if (!Number.isFinite(h) || !Number.isFinite(minute)) return null;
+    const isPm = ap.toUpperCase() === "PM";
+    if (h === 12) {
+      h = isPm ? 12 : 0;
+    } else {
+      h = isPm ? h + 12 : h;
+    }
+    return h;
+  };
+
+  const start = to24(m[1], m[2], m[3]);
+  const end = to24(m[4], m[5], m[6]);
+  if (start == null || end == null) return null;
+  return { startHour: start, endHour: end };
 }
 
 // ----------------------------------------------------------------------
@@ -684,6 +772,23 @@ function fallbackExtractBillCredits(text: string): BillCredit[] {
   }
 
   return credits;
+}
+
+// ----------------------------------------------------------------------
+// Fallback: Minimum Usage Fee
+// ----------------------------------------------------------------------
+function fallbackExtractMinimumUsageFee(text: string): {
+  feeCents: number;
+  maxKwh: number;
+} | null {
+  const re =
+    /Minimum\s*Usage\s*Fee\s*of\s*\$?\s*([0-9]+(?:\.[0-9]{1,2})?)\s*will\s*apply[\s\S]{0,80}?(?:less\s*than|below)\s*(\d{1,6})\s*kwh/i;
+  const m = text.match(re);
+  if (!m?.[1] || !m?.[2]) return null;
+  const dollars = Number(m[1]);
+  const kwh = Number(m[2]);
+  if (!Number.isFinite(dollars) || !Number.isFinite(kwh)) return null;
+  return { feeCents: Math.round(dollars * 100), maxKwh: kwh };
 }
 
 // ----------------------------------------------------------------------

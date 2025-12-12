@@ -200,7 +200,7 @@ async function runPdftotext(pdfBytes: Uint8Array | Buffer): Promise<string> {
  */
 function extractRepPuctCertificate(text: string): string | null {
   const re =
-    /PUCT\s*(?:Certificate\s*(?:No\.?|Number)?|Cert\.?)\s*[#:.\s]*([0-9]{4,6})\b/i;
+    /\b(?:PUCT\s*(?:Certificate\s*(?:No\.?|Number)?|Cert\.?|License)|REP\s*No\.)\s*[#:.\s]*([0-9]{4,6})\b/i;
   const m = text.match(re);
   return m?.[1] ?? null;
 }
@@ -249,6 +249,19 @@ function extractEflVersionCode(text: string): string | null {
   for (const line of lines) {
     const m = line.match(/\b(EFL_[A-Z0-9_]+)\b/i);
     if (m?.[1]) return m[1];
+  }
+
+  // D) Bottom-of-doc version token (e.g., TX_JE_NF_EFL_ENG_V1.5_SEP_01_25).
+  const tail = lines.filter(Boolean).slice(-20);
+  for (const l of tail) {
+    if (
+      l.includes("_") &&
+      /[0-9]/.test(l) &&
+      /^[A-Z0-9_.-]+$/i.test(l) &&
+      l.length >= 8
+    ) {
+      return l;
+    }
   }
 
   return null;
