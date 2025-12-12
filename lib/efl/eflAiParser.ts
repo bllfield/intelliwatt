@@ -998,6 +998,21 @@ function extractBaseChargeCents(text: string): number | null {
     return 0;
   }
 
+  // Variant: "Base Charge of $4.95 per ESI-ID will apply each billing cycle."
+  // Also supports: "Base Charge of $X will apply each billing cycle.",
+  // and "Base Charge of $X per ESI-ID ... per billing cycle / per month".
+  {
+    const ofRe =
+      /Base\s+Charge\s+of\s*(?!.*\bN\/A\b)\$?\s*([0-9]+(?:\.[0-9]{1,2})?)\s*(?:per\s+ESI-?ID)?[\s\S]{0,60}?(?:will\s+apply)?\s*(?:each\s+billing\s+cycle|per\s+billing\s+cycle|per\s+month|\/\s*month|monthly)/i;
+    const m = text.match(ofRe);
+    if (m?.[1]) {
+      const dollars = Number(m[1]);
+      if (Number.isFinite(dollars)) {
+        return dollarsToCents(String(dollars));
+      }
+    }
+  }
+
   // Existing "Per Month ($)" pattern.
   const fromPerMonth = fallbackExtractBaseChargePerMonthCents(text);
   if (fromPerMonth != null) return fromPerMonth;
