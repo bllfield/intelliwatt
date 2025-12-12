@@ -49,7 +49,7 @@ OUTPUT CONTRACT:
   let rawJson = "{}";
   try {
     const response = await (openaiFactCardParser as any).responses.create({
-      model: process.env.OPENAI_EFL_MODEL || "gpt-4.1-mini",
+      model: process.env.OPENAI_EFL_MODEL || "gpt-4.1",
       text: { format: { type: "json_object" } },
       input: [
         {
@@ -283,7 +283,7 @@ RULES:
   let rawJson = "{}";
   try {
     const response = await (openaiFactCardParser as any).responses.create({
-      model: process.env.OPENAI_EFL_MODEL || "gpt-4.1-mini",
+      model: process.env.OPENAI_EFL_MODEL || "gpt-4.1",
       text: { format: { type: "json_object" } },
       input: [
         {
