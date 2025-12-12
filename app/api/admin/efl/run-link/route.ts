@@ -31,7 +31,7 @@ type RunLinkSuccess = {
   parseConfidence?: number;
   parseWarnings?: string[];
   eflVersionCode?: string | null;
-  extractorMethod?: "pdf-parse" | "pdfjs" | "vision";
+  extractorMethod?: "pdf-parse" | "pdfjs" | "pdftotext" | "vision";
 };
 
 type RunLinkError = {
@@ -134,7 +134,8 @@ export async function POST(req: NextRequest) {
     let parseWarnings: string[] | undefined;
     let validation: unknown;
     let eflVersionCode: string | null = null;
-    let extractorMethod: "pdf-parse" | "pdfjs" | "vision" = "pdf-parse";
+    let extractorMethod: "pdf-parse" | "pdfjs" | "pdftotext" | "vision" =
+      "pdf-parse";
 
     try {
       // Deterministic extract: PDF bytes → cleaned text + identity metadata,
