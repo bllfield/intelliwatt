@@ -99,7 +99,8 @@ async function runPdftotext(pdfBytes: Uint8Array | Buffer): Promise<string> {
 
   // Preferred path: call remote pdftotext microservice (e.g., droplet helper)
   // via HTTPS proxy, so production does not depend on a local binary being
-  // present in Vercel.
+  // present in Vercel. If that fails (e.g., droplet unreachable in local dev),
+  // fall back to a local `pdftotext` CLI if available.
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 25_000);
 
@@ -148,38 +149,42 @@ async function runPdftotext(pdfBytes: Uint8Array | Buffer): Promise<string> {
 
     return data.text;
   } catch (err) {
-    const msg =
-      err instanceof Error ? err.message : String(err);
-    throw new Error(
-      `pdftotext service fetch to ${serviceUrl} failed: ${msg}`,
+    const remoteMsg = err instanceof Error ? err.message : String(err);
+
+    // Fallback: try local pdftotext binary if available (useful for local dev).
+    const tmpDir = os.tmpdir();
+    const tmpPath = path.join(
+      tmpDir,
+      `efl-${Date.now()}-${Math.random().toString(16).slice(2)}.pdf`,
     );
+
+    try {
+      await fs.writeFile(tmpPath, buffer);
+
+      const cliText = await new Promise<string>((resolve, reject) => {
+        execFile(
+          "pdftotext",
+          ["-layout", "-enc", "UTF-8", tmpPath, "-"],
+          (cliErr, stdout) => {
+            void fs.unlink(tmpPath).catch(() => {});
+            if (cliErr) return reject(cliErr);
+            resolve(stdout.toString());
+          },
+        );
+      });
+
+      return cliText;
+    } catch (cliErr) {
+      const cliMsg =
+        cliErr instanceof Error ? cliErr.message : String(cliErr);
+      throw new Error(
+        `pdftotext service fetch to ${serviceUrl} failed: ${remoteMsg}; ` +
+          `local pdftotext fallback failed: ${cliMsg}`,
+      );
+    }
   } finally {
     clearTimeout(timeout);
   }
-
-  // Fallback: try local pdftotext binary if available (useful for local dev).
-  const tmpDir = os.tmpdir();
-  const tmpPath = path.join(
-    tmpDir,
-    `efl-${Date.now()}-${Math.random().toString(16).slice(2)}.pdf`,
-  );
-
-  await fs.writeFile(
-    tmpPath,
-    Buffer.isBuffer(pdfBytes) ? pdfBytes : Buffer.from(pdfBytes),
-  );
-
-  return new Promise<string>((resolve, reject) => {
-    execFile(
-      "pdftotext",
-      ["-layout", "-enc", "UTF-8", tmpPath, "-"],
-      (err, stdout) => {
-        void fs.unlink(tmpPath).catch(() => {});
-        if (err) return reject(err);
-        resolve(stdout.toString());
-      },
-    );
-  });
 }
 
 /**
