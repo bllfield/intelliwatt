@@ -58,26 +58,69 @@ export interface PdfTextExtractor {
 }
 
 async function runPdftotext(pdfBytes: Uint8Array | Buffer): Promise<string> {
-  const serviceUrl = process.env.EFL_PDFTEXT_URL;
-  const serviceToken = process.env.EFL_PDFTEXT_TOKEN;
+  const rawUrl = process.env.EFL_PDFTEXT_URL;
+  const rawToken = process.env.EFL_PDFTEXT_TOKEN ?? "";
+
+  // Normalize token: trim whitespace and strip wrapping quotes, if any.
+  let token = rawToken.trim();
+  if (
+    (token.startsWith('"') && token.endsWith('"')) ||
+    (token.startsWith("'") && token.endsWith("'"))
+  ) {
+    token = token.slice(1, -1);
+  }
+
+  if (!rawUrl) {
+    throw new Error(
+      "EFL_PDFTEXT_URL is not configured; pdftotext fallback is disabled. " +
+        "Set EFL_PDFTEXT_URL to the droplet HTTPS proxy (see docs/runbooks/EFL_PDFTEXT_PROXY_NGINX.md).",
+    );
+  }
+
+  const serviceUrl = rawUrl.trim();
+
+  // Warn loudly (via error text) if still pointed directly at :8095 over http,
+  // which is not reachable from Vercel in production. We surface this through
+  // the normal pdftotext fallback warning path.
+  if (serviceUrl.startsWith("http://") && serviceUrl.includes(":8095")) {
+    throw new Error(
+      `EFL_PDFTEXT_URL appears to point at ${serviceUrl}, which uses plain http and port 8095. ` +
+        "This port is not reachable from Vercel. Configure an nginx HTTPS proxy on the droplet and " +
+        "update EFL_PDFTEXT_URL to use https://<droplet-domain>/efl/pdftotext instead.",
+    );
+  }
 
   const buffer = Buffer.isBuffer(pdfBytes) ? pdfBytes : Buffer.from(pdfBytes);
 
   // Preferred path: call remote pdftotext microservice (e.g., droplet helper)
-  // so production does not depend on a local binary being present in Vercel.
-  if (serviceUrl) {
+  // via HTTPS proxy, so production does not depend on a local binary being
+  // present in Vercel.
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 25_000);
+
+  try {
     const resp = await fetch(serviceUrl, {
       method: "POST",
       headers: {
         // Send raw PDF bytes; the droplet helper reads the body as-is.
         "content-type": "application/pdf",
-        ...(serviceToken ? { Authorization: `Bearer ${serviceToken}` } : {}),
+        ...(token ? { "X-EFL-PDFTEXT-TOKEN": token } : {}),
       },
       body: buffer as unknown as BodyInit,
+      signal: controller.signal,
     });
 
     if (!resp.ok) {
-      throw new Error(`pdftotext service HTTP ${resp.status}`);
+      let bodyText = "";
+      try {
+        bodyText = await resp.text();
+      } catch {
+        bodyText = "";
+      }
+      const snippet = bodyText.slice(0, 500);
+      throw new Error(
+        `pdftotext service HTTP ${resp.status} ${resp.statusText || ""} body=${snippet}`.trim(),
+      );
     }
 
     let data: any;
@@ -99,6 +142,14 @@ async function runPdftotext(pdfBytes: Uint8Array | Buffer): Promise<string> {
     }
 
     return data.text;
+  } catch (err) {
+    const msg =
+      err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `pdftotext service fetch to ${serviceUrl} failed: ${msg}`,
+    );
+  } finally {
+    clearTimeout(timeout);
   }
 
   // Fallback: try local pdftotext binary if available (useful for local dev).

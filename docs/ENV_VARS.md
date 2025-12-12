@@ -18,6 +18,8 @@
 - `NEXT_PUBLIC_GREEN_BUTTON_UPLOAD_URL` — Public URL exposed to the browser for the droplet `/upload` endpoint. Omit in preview/dev if the droplet isn’t reachable.
 - `GREEN_BUTTON_UPLOAD_MAX_BYTES` — Optional override for the 10 MB default upload limit (applies to both Vercel fallback route and droplet service).
 - `GREEN_BUTTON_UPLOAD_ALLOW_ORIGIN` — Optional CORS allowlist for the droplet uploader (defaults to `https://intelliwatt.com` when unset).
+- `EFL_PDFTEXT_URL` — HTTPS endpoint for the droplet EFL `pdftotext` proxy (e.g., `https://<droplet-domain>/efl/pdftotext`). Vercel calls this when pdf-parse/pdfjs extraction fails.
+- `EFL_PDFTEXT_TOKEN` — Shared secret between Vercel and the droplet `pdftotext` helper. Sent as header `X-EFL-PDFTEXT-TOKEN`. **Note:** Some shells or env files may wrap this value in quotes (e.g., `"token"` or `'token'`); the code automatically trims whitespace and strips one pair of wrapping quotes before sending.
 
 ## Databases
 - `DATABASE_URL` — Primary IntelliWatt application database (master normalized dataset; used by `prisma/schema.prisma`). **Web app (Vercel) stays on this pooled URL (PgBouncer).**
