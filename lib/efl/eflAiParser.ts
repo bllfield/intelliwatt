@@ -1,12 +1,19 @@
 import { Buffer } from "node:buffer";
 
 import { openaiFactCardParser } from "@/lib/ai/openaiFactCardParser";
+import {
+  validateEflAvgPriceTable,
+  type EflAvgPriceValidation,
+} from "@/lib/efl/eflValidator";
 
 export interface EflAiParseResult {
   planRules: any | null;
   rateStructure: any | null;
   parseConfidence: number;
   parseWarnings: string[];
+  validation?: {
+    eflAvgPriceValidation?: EflAvgPriceValidation | null;
+  } | null;
 }
 
 function filterParseWarnings(warnings: string[]): string[] {
@@ -740,6 +747,45 @@ OUTPUT CONTRACT:
     if (computedConfidence < 60) computedConfidence = 60;
   }
 
+  // Run EFL avg-price validator (best-effort; never crash parser).
+  let eflAvgPriceValidation: EflAvgPriceValidation | null = null;
+  try {
+    eflAvgPriceValidation = await validateEflAvgPriceTable({
+      rawText,
+      planRules,
+      rateStructure: rs,
+    });
+  } catch (err) {
+    const msg =
+      err instanceof Error ? err.message : String(err ?? "unknown error");
+    eflAvgPriceValidation = {
+      status: "SKIP",
+      toleranceCentsPerKwh: 0.25,
+      points: [],
+      assumptionsUsed: {},
+      fail: false,
+      notes: [`Avg price validator error: ${msg}`],
+    };
+  }
+
+  // If validator PASS, treat this as 100% confidence and prune "no pricing" style
+  // warnings that contradict a successful avg-price match.
+  if (eflAvgPriceValidation?.status === "PASS") {
+    computedConfidence = 100;
+    warnings = warnings.filter((w) => {
+      if (!w.startsWith("No ")) return true;
+      const lower = w.toLowerCase();
+      if (lower.includes("energy charge")) return false;
+      if (lower.includes("base monthly charge")) return false;
+      if (lower.includes("bill credit")) return false;
+      if (lower.includes("minimum") && lower.includes("kwh")) return false;
+      if (lower.includes("maximum") && lower.includes("kwh")) return false;
+      if (lower.includes("usage tiers")) return false;
+      if (lower.includes("tiered rates")) return false;
+      return true;
+    });
+  }
+
   // If deterministic extract already found clear REP energy charges (tiers or
   // a single rate), drop any model warnings that incorrectly claim energy
   // charges are missing.
@@ -765,6 +811,9 @@ OUTPUT CONTRACT:
     // Domain-level warnings from model are filtered; infra/config errors were
     // returned earlier; deterministic fallback notes are appended verbatim.
     parseWarnings: dedupedWarnings,
+    validation: eflAvgPriceValidation
+      ? { eflAvgPriceValidation }
+      : null,
   };
 }
 

@@ -43,6 +43,9 @@ type EflTemplateRecord = {
   rateStructure: any | null;
   parseConfidence: number;
   parseWarnings: string[];
+  validation?: {
+    eflAvgPriceValidation?: any;
+  } | null;
 };
 
 export interface GetOrCreateEflTemplateResult {
@@ -217,6 +220,7 @@ async function handleManualUpload(
     rateStructure: aiResult.rateStructure,
     parseConfidence: aiResult.parseConfidence,
     parseWarnings: aiResult.parseWarnings ?? [],
+    validation: aiResult.validation ?? null,
   };
 
   const warnings: string[] = [
@@ -315,6 +319,7 @@ async function handleWattbuy(
     rateStructure: aiResult.rateStructure,
     parseConfidence: aiResult.parseConfidence,
     parseWarnings: aiResult.parseWarnings ?? [],
+    validation: aiResult.validation ?? null,
   };
 
   const warnings: string[] = [

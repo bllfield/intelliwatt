@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
       rateStructure: template.rateStructure,
       parseConfidence: template.parseConfidence,
       parseWarnings: template.parseWarnings,
-      validation: null,
+      validation: template.validation ?? null,
       extractorMethod: template.extractorMethod ?? "pdftotext",
     });
   } catch (error) {
