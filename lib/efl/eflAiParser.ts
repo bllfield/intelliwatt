@@ -150,9 +150,9 @@ export async function parseEflPdfWithAi(opts: {
       planRules: null,
       rateStructure: null,
       parseConfidence: 0,
-      parseWarnings: [
+      parseWarnings: filterParseWarnings([
         "OPENAI_IntelliWatt_Fact_Card_Parser is not configured; cannot run EFL AI PDF parser.",
-      ],
+      ]),
     };
   }
 
@@ -187,7 +187,7 @@ export async function parseEflPdfWithAi(opts: {
       planRules: null,
       rateStructure: null,
       parseConfidence: 0,
-      parseWarnings: [baseWarning],
+      parseWarnings: filterParseWarnings([baseWarning]),
     };
   }
 
@@ -344,7 +344,7 @@ EFL PDF SHA-256: ${eflPdfSha256}`,
       planRules: null,
       rateStructure: null,
       parseConfidence: 0,
-      parseWarnings: [`EFL AI call failed: ${msg}`],
+      parseWarnings: filterParseWarnings([`EFL AI call failed: ${msg}`]),
     };
   }
 
@@ -357,11 +357,11 @@ EFL PDF SHA-256: ${eflPdfSha256}`,
       planRules: null,
       rateStructure: null,
       parseConfidence: 0,
-      parseWarnings: [
+      parseWarnings: filterParseWarnings([
         `Failed to parse EFL AI response JSON: ${
           err instanceof Error ? err.message : String(err)
         }`,
-      ],
+      ]),
     };
   }
 
@@ -370,8 +370,8 @@ EFL PDF SHA-256: ${eflPdfSha256}`,
     rateStructure: parsed.rateStructure ?? null,
     parseConfidence:
       typeof parsed.parseConfidence === "number" ? parsed.parseConfidence : 0,
-    parseWarnings: Array.isArray(parsed.parseWarnings)
-      ? parsed.parseWarnings
-      : [],
+    parseWarnings: filterParseWarnings(
+      Array.isArray(parsed.parseWarnings) ? parsed.parseWarnings : [],
+    ),
   };
 }
