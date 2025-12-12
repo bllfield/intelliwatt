@@ -642,12 +642,13 @@ export default function ManualFactCardLoaderPage() {
               </div>
             )}
 
-            {/* Validation issues, if any */}
-            {result.validation && result.validation.issues.length > 0 ? (
+            {/* Validation issues, if any (planRules structural validation) */}
+            {Array.isArray((result.validation as any)?.issues) &&
+            (result.validation as any).issues.length > 0 ? (
               <div className="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
                 <div className="mb-1 font-semibold">Validation issues</div>
                 <ul className="space-y-0.5">
-                  {result.validation.issues.map((issue, idx) => (
+                  {(result.validation as any).issues.map((issue: any, idx: number) => (
                     <li key={`${issue.code}-${idx}`}>
                       <span className="font-mono text-[11px]">{issue.severity}</span>{" "}
                       <span className="font-mono text-[11px]">{issue.code}</span> —{" "}
@@ -655,6 +656,103 @@ export default function ManualFactCardLoaderPage() {
                     </li>
                   ))}
                 </ul>
+              </div>
+            ) : null}
+
+            {/* EFL Avg Price Validator snapshot (if present) */}
+            {Boolean((result.validation as any)?.eflAvgPriceValidation) ? (
+              <div className="mt-3 rounded-md border border-brand-blue/30 bg-brand-blue/5 px-3 py-2 text-xs text-brand-navy">
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <div className="font-semibold">
+                    EFL Avg Price Validation (500 / 1000 / 2000 kWh)
+                  </div>
+                  <div className="text-right text-[11px] text-brand-navy/70">
+                    <div>
+                      <span className="font-mono">status:</span>{" "}
+                      <span className="font-mono font-semibold">
+                        {(result.validation as any).eflAvgPriceValidation.status}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="font-mono">tolerance:</span>{" "}
+                      <span className="font-mono">
+                        {(result.validation as any).eflAvgPriceValidation.toleranceCentsPerKwh}
+                        ¢/kWh
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {Array.isArray(
+                  (result.validation as any).eflAvgPriceValidation.points,
+                ) &&
+                (result.validation as any).eflAvgPriceValidation.points.length >
+                  0 ? (
+                  <div className="mb-2 overflow-auto rounded-md border border-brand-blue/30 bg-white">
+                    <table className="min-w-full border-separate border-spacing-x-0 border-spacing-y-0.5 text-[11px]">
+                      <thead className="bg-brand-blue/10 text-brand-navy/80">
+                        <tr>
+                          <th className="px-2 py-1 text-left font-mono font-normal">
+                            kWh
+                          </th>
+                          <th className="px-2 py-1 text-left font-mono font-normal">
+                            EFL avg (¢/kWh)
+                          </th>
+                          <th className="px-2 py-1 text-left font-mono font-normal">
+                            Modeled avg (¢/kWh)
+                          </th>
+                          <th className="px-2 py-1 text-left font-mono font-normal">
+                            Diff (¢/kWh)
+                          </th>
+                          <th className="px-2 py-1 text-left font-mono font-normal">
+                            OK?
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(result.validation as any).eflAvgPriceValidation.points.map(
+                          (p: any, idx: number) => (
+                            <tr
+                              key={`avgpt-${idx}`}
+                              className="odd:bg-brand-blue/0 even:bg-brand-blue/5"
+                            >
+                              <td className="px-2 py-1 align-top">
+                                {p.usageKwh}
+                              </td>
+                              <td className="px-2 py-1 align-top">
+                                {p.expectedAvgCentsPerKwh ?? "—"}
+                              </td>
+                              <td className="px-2 py-1 align-top">
+                                {p.modeledAvgCentsPerKwh ?? "—"}
+                              </td>
+                              <td className="px-2 py-1 align-top">
+                                {p.diffCentsPerKwh ?? "—"}
+                              </td>
+                              <td className="px-2 py-1 align-top">
+                                {typeof p.ok === "boolean"
+                                  ? String(p.ok)
+                                  : "—"}
+                              </td>
+                            </tr>
+                          ),
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : null}
+
+                {(result.validation as any).eflAvgPriceValidation
+                  .avgTableSnippet ? (
+                  <div className="mt-1">
+                    <div className="mb-0.5 font-semibold text-brand-navy/80">
+                      Extracted EFL avg-price table snippet
+                    </div>
+                    <pre className="max-h-48 overflow-auto rounded-md border border-brand-blue/20 bg-white px-2 py-1 text-[10px] leading-snug text-brand-navy">
+                      {(result.validation as any).eflAvgPriceValidation
+                        .avgTableSnippet}
+                    </pre>
+                  </div>
+                ) : null}
               </div>
             ) : null}
 

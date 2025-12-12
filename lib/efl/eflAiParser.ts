@@ -11,9 +11,9 @@ export interface EflAiParseResult {
   rateStructure: any | null;
   parseConfidence: number;
   parseWarnings: string[];
-  validation?: {
-    eflAvgPriceValidation?: EflAvgPriceValidation | null;
-  } | null;
+  // Validation bag: may include planRules validation issues and/or EFL avg-price validation.
+  // We keep this type loose to stay backward-compatible with older callers.
+  validation?: any | null;
 }
 
 function filterParseWarnings(warnings: string[]): string[] {
