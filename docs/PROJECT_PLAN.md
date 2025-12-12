@@ -192,6 +192,11 @@ EFL parser model + extraction status:
 - ✅ EFL AI normalizer now strips **Average Price** tables and **TDU passthrough** blocks from the AI input text only; the EFL parser output shape (`planRules`, `rateStructure`, `parseConfidence`, `parseWarnings`) and the “Parsed Plan Snapshot” rendering remain unchanged.
 - ✅ Parser prompt and optional deterministic fallback focus on REP Base Charge, Energy Charge tiers, Bill Credits, Product Type, Contract Term, and Early Termination Fee; if the model misses obvious values present in normalized text, a guarded fallback fills them and adds a parse warning.
 
+Reliability guardrails:
+- ✅ Deterministic fallback now fills Base Charge per month, Energy Charge usage tiers, and threshold-based Bill Credits directly from EFL text when the AI leaves them empty.
+- ✅ `parseConfidence` is computed deterministically from completeness (presence of base charge, tiers/fixed rate, bill credits, rate type, and term months) instead of relying on the model’s self-score.
+- ✅ System no longer returns 0% parseConfidence when obvious pricing lines exist; instead it surfaces the best-effort structured parse plus explicit fallback warnings.
+
 <!-- Dev + Prod Prisma migrations completed for Current Plan module + master schema on 2025-11-28 -->
 
 ### Current Plan / Current Rate Page — Status

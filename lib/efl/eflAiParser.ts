@@ -298,16 +298,142 @@ OUTPUT CONTRACT:
     ? parsed.parseWarnings
     : [];
 
+  // Start with model-emitted warnings (domain-level only), then append any
+  // deterministic fallback notes we add below. Infrastructure errors were
+  // already returned earlier without filtering.
+  const warnings: string[] = [
+    ...baseWarnings,
+    ...filterParseWarnings(modelWarnings),
+  ];
+
+  // Normalize planRules/rateStructure so we can safely mutate for fallbacks.
+  let planRules: any = parsed.planRules ?? null;
+  let rateStructure: any = parsed.rateStructure ?? null;
+
+  if (!planRules || typeof planRules !== "object") {
+    planRules = {};
+  }
+
+  // === Deterministic fallbacks for the "big 3" when the model leaves them empty. ===
+  // Use the same normalizedText we gave to the model so we are operating on the
+  // exact input it saw (or the raw text, if the slicer fail-opened).
+  const fallbackSourceText = normalizedText;
+
+  // Base Charge ($/month)
+  if (planRules.baseChargePerMonthCents == null) {
+    const base = fallbackExtractBaseChargePerMonthCents(fallbackSourceText);
+    if (base != null) {
+      planRules.baseChargePerMonthCents = base;
+      warnings.push(
+        "Fallback filled baseChargePerMonthCents from EFL text (Base Charge line).",
+      );
+    }
+  }
+
+  // Usage tiers (energy charge bands)
+  const existingTiers: any[] = Array.isArray(planRules.usageTiers)
+    ? planRules.usageTiers
+    : [];
+
+  if (existingTiers.length === 0) {
+    const tiers = fallbackExtractEnergyChargeTiers(fallbackSourceText);
+    if (tiers.length > 0) {
+      planRules.usageTiers = tiers;
+      warnings.push(
+        "Fallback filled usageTiers from EFL Energy Charge tier lines.",
+      );
+    }
+  }
+
+  // Bill credits (threshold-based)
+  const existingBillCredits: any[] = Array.isArray(planRules.billCredits)
+    ? planRules.billCredits
+    : [];
+
+  if (existingBillCredits.length === 0) {
+    const credits = fallbackExtractBillCredits(fallbackSourceText);
+    if (credits.length > 0) {
+      planRules.billCredits = credits;
+      warnings.push(
+        "Fallback filled billCredits from 'bill credit if usage >= threshold' line.",
+      );
+    }
+  }
+
+  // If FIXED rate and we now have usage tiers, ensure defaultRateCentsPerKwh
+  // is set so callers that only know about a single rate still have a value.
+  if (
+    planRules.rateType === "FIXED" &&
+    Array.isArray(planRules.usageTiers) &&
+    planRules.usageTiers.length > 0 &&
+    planRules.defaultRateCentsPerKwh == null
+  ) {
+    const firstTier = planRules.usageTiers[0];
+    if (
+      firstTier &&
+      typeof firstTier.rateCentsPerKwh === "number" &&
+      Number.isFinite(firstTier.rateCentsPerKwh)
+    ) {
+      planRules.defaultRateCentsPerKwh = firstTier.rateCentsPerKwh;
+      warnings.push(
+        "Fallback set defaultRateCentsPerKwh to first usage tier rate for FIXED plan.",
+      );
+    }
+  }
+
+  // Deterministic parse confidence scoring based on completeness of the key
+  // pricing components, rather than trusting the model to self-score.
+  const baseChargePerMonthCents =
+    typeof planRules.baseChargePerMonthCents === "number"
+      ? planRules.baseChargePerMonthCents
+      : null;
+  const usageTiersCount = Array.isArray(planRules.usageTiers)
+    ? planRules.usageTiers.length
+    : 0;
+
+  let fixedEnergyRateCents: number | null = null;
+  if (planRules.rateType === "FIXED") {
+    if (typeof planRules.defaultRateCentsPerKwh === "number") {
+      fixedEnergyRateCents = planRules.defaultRateCentsPerKwh;
+    } else if (
+      Array.isArray(planRules.usageTiers) &&
+      planRules.usageTiers.length > 0 &&
+      typeof planRules.usageTiers[0]?.rateCentsPerKwh === "number"
+    ) {
+      fixedEnergyRateCents = planRules.usageTiers[0].rateCentsPerKwh;
+    }
+  }
+
+  const billCreditsCount = Array.isArray(planRules.billCredits)
+    ? planRules.billCredits.length
+    : 0;
+
+  const rateType =
+    typeof planRules.rateType === "string" ? planRules.rateType : null;
+
+  const termMonths =
+    typeof (planRules as any).contractTermMonths === "number"
+      ? (planRules as any).contractTermMonths
+      : typeof (planRules as any).termMonths === "number"
+        ? (planRules as any).termMonths
+        : null;
+
+  const computedConfidence = scoreParseConfidence({
+    baseChargePerMonthCents,
+    usageTiersCount,
+    fixedEnergyRateCents,
+    billCreditsCount,
+    rateType,
+    termMonths,
+  });
+
   return {
-    planRules: parsed.planRules ?? null,
-    rateStructure: parsed.rateStructure ?? null,
-    parseConfidence:
-      typeof parsed.parseConfidence === "number" ? parsed.parseConfidence : 0,
-    // Domain-level warnings from model are filtered; extraWarnings are kept verbatim.
-    parseWarnings: [
-      ...baseWarnings,
-      ...filterParseWarnings(modelWarnings),
-    ],
+    planRules: planRules ?? null,
+    rateStructure: rateStructure ?? null,
+    parseConfidence: computedConfidence,
+    // Domain-level warnings from model are filtered; infra/config errors were
+    // returned earlier; deterministic fallback notes are appended verbatim.
+    parseWarnings: warnings,
   };
 }
 
@@ -335,3 +461,158 @@ export async function parseEflPdfWithAi(opts: {
     eflPdfSha256,
   });
 }
+
+// ----------------------------------------------------------------------
+// Helper: money string -> cents (e.g. "$9.95" => 995)
+// ----------------------------------------------------------------------
+function dollarsToCents(dollars: string): number | null {
+  const cleaned = dollars.replace(/[^0-9.]/g, "");
+  if (!cleaned) return null;
+  const n = Number(cleaned);
+  if (!Number.isFinite(n)) return null;
+  return Math.round(n * 100);
+}
+
+// ----------------------------------------------------------------------
+// Helper: cents string -> number cents (e.g. "12.5000¢" => 12.5)
+// ----------------------------------------------------------------------
+function centsStringToNumber(cents: string): number | null {
+  const cleaned = cents.replace(/[^0-9.]/g, "");
+  if (!cleaned) return null;
+  const n = Number(cleaned);
+  if (!Number.isFinite(n)) return null;
+  return n;
+}
+
+// ----------------------------------------------------------------------
+// Fallback: Base Charge per month ($)
+// Matches: "Base Charge: Per Month ($) $9.95" or similar
+// ----------------------------------------------------------------------
+function fallbackExtractBaseChargePerMonthCents(text: string): number | null {
+  const re =
+    /Base\s*Charge[\s\S]{0,80}?Per\s*Month\s*\(\$\)\s*\$?\s*([0-9]+(?:\.[0-9]{1,2})?)/i;
+  const m = text.match(re);
+  if (!m?.[1]) return null;
+  return dollarsToCents(m[1]);
+}
+
+// ----------------------------------------------------------------------
+// Fallback: Energy Charge tiers
+// Matches tier patterns like:
+// "0 - 1200 kWh 12.5000¢"
+// "> 1200 kWh 20.4000¢"
+// Also supports "0-1200" without spaces.
+// ----------------------------------------------------------------------
+type UsageTier = { minKwh: number; maxKwh: number | null; rateCentsPerKwh: number };
+
+function fallbackExtractEnergyChargeTiers(text: string): UsageTier[] {
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+
+  const tiers: UsageTier[] = [];
+
+  // Range tier: 0 - 1200 kWh 12.5000¢
+  const rangeRe =
+    /^(\d{1,6})\s*-\s*(\d{1,6})\s*kwh\b[\s:]*([0-9]+(?:\.[0-9]+)?)\s*¢/i;
+
+  // Greater-than tier: > 1200 kWh 20.4000¢
+  const gtRe = /^>\s*(\d{1,6})\s*kwh\b[\s:]*([0-9]+(?:\.[0-9]+)?)\s*¢/i;
+
+  // Only consider lines after "Energy Charge" anchor, but fail-open if not found.
+  const anchorIdx = lines.findIndex((l) => /Energy\s*Charge/i.test(l));
+  const search = anchorIdx >= 0 ? lines.slice(anchorIdx, anchorIdx + 80) : lines;
+
+  for (const l of search) {
+    let m = l.match(rangeRe);
+    if (m?.[1] && m?.[2] && m?.[3]) {
+      const minKwh = Number(m[1]);
+      const maxKwh = Number(m[2]);
+      const rate = centsStringToNumber(`${m[3]}¢`);
+      if (
+        Number.isFinite(minKwh) &&
+        Number.isFinite(maxKwh) &&
+        rate !== null
+      ) {
+        tiers.push({ minKwh, maxKwh, rateCentsPerKwh: rate });
+      }
+      continue;
+    }
+
+    m = l.match(gtRe);
+    if (m?.[1] && m?.[2]) {
+      const minKwh = Number(m[1]);
+      const rate = centsStringToNumber(`${m[2]}¢`);
+      if (Number.isFinite(minKwh) && rate !== null) {
+        tiers.push({ minKwh, maxKwh: null, rateCentsPerKwh: rate });
+      }
+    }
+  }
+
+  // De-dup and sort by minKwh
+  const uniq = new Map<string, UsageTier>();
+  for (const t of tiers) {
+    const key = `${t.minKwh}|${t.maxKwh ?? "null"}|${t.rateCentsPerKwh}`;
+    if (!uniq.has(key)) uniq.set(key, t);
+  }
+  return Array.from(uniq.values()).sort((a, b) => a.minKwh - b.minKwh);
+}
+
+// ----------------------------------------------------------------------
+// Fallback: Bill credit threshold
+// Matches: "A bill credit of $50 ... usage is 800 kWh or more."
+// Stores label + creditDollars + thresholdKwh
+// ----------------------------------------------------------------------
+type BillCredit = {
+  label: string;
+  creditDollars: number;
+  thresholdKwh: number;
+  monthsOfYear?: number[] | null;
+  type?: string | null;
+};
+
+function fallbackExtractBillCredits(text: string): BillCredit[] {
+  const credits: BillCredit[] = [];
+  const re =
+    /bill\s+credit\s+of\s+\$?\s*([0-9]+(?:\.[0-9]{1,2})?)\b[\s\S]{0,140}?\busage\s+is\s+(\d{1,6})\s*kwh\s+or\s+more\b/i;
+  const m = text.match(re);
+  if (!m?.[1] || !m?.[2]) return credits;
+
+  const dollars = Number(m[1]);
+  const threshold = Number(m[2]);
+  if (!Number.isFinite(dollars) || !Number.isFinite(threshold)) return credits;
+
+  credits.push({
+    label: `Bill credit $${dollars} if usage >= ${threshold} kWh`,
+    creditDollars: dollars,
+    thresholdKwh: threshold,
+    monthsOfYear: null,
+    type: "THRESHOLD_MIN",
+  });
+
+  return credits;
+}
+
+// ----------------------------------------------------------------------
+// Deterministic confidence scoring based on completeness
+// (0..100 integer)
+// ----------------------------------------------------------------------
+function scoreParseConfidence(args: {
+  baseChargePerMonthCents: number | null | undefined;
+  usageTiersCount: number;
+  fixedEnergyRateCents: number | null | undefined;
+  billCreditsCount: number;
+  rateType: string | null | undefined;
+  termMonths: number | null | undefined;
+}): number {
+  let score = 0;
+
+  if (args.baseChargePerMonthCents != null) score += 35;
+  if (args.usageTiersCount > 0 || args.fixedEnergyRateCents != null) score += 45;
+  if (args.billCreditsCount > 0) score += 10;
+  if (args.rateType) score += 5;
+  if (args.termMonths != null) score += 5;
+
+  if (score > 100) score = 100;
+  if (score < 0) score = 0;
+  return Math.round(score);
+}
+
