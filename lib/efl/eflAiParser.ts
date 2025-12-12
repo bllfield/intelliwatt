@@ -265,9 +265,10 @@ Return a single JSON object with the following top-level fields:
 }
 
 RULES:
-- Use ONLY the EFL PDF to determine prices, TOU windows, base charges,
-  bill credits, solar buyback rules, and any identifying fields such as the Ver. # code,
-  PUCT certificate number if present, and plan name/label.
+- Use ONLY the EFL PDF/text to determine REP (retail provider) energy charges, base fees,
+  bill credits, and plan metadata (plan name, Ver. #, PUCT certificate number if present).
+- Ignore TDSP/delivery charges, relocation fees, and municipal fees for now; they will be modeled
+  in a separate utility cost module. Do not attempt to infer or normalize those into this structure.
 - If a field is not explicitly stated, set it to null or an empty array.
 - Do NOT guess, approximate, or invent any numeric value (rates, fees, credits, thresholds).
 - For free nights/weekends, represent the free window as a timeOfUsePeriod
@@ -275,7 +276,6 @@ RULES:
   and set planRules.rateType = "TIME_OF_USE".
 - For kWh tiered plans, express each band in usageTiers with correct minKwh, maxKwh, and rateCentsPerKwh.
 - For usage-based bill credits and behavioral credits, fill billCredits appropriately as described.
-- Do NOT fold TDSP delivery charges into defaultRateCentsPerKwh unless the EFL clearly presents a combined rate.
 - Always return STRICT JSON with double-quoted keys/strings and no comments or trailing commas.
   `;
 
