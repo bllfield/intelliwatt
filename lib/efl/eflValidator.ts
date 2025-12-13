@@ -12,6 +12,22 @@ export type EflAvgPricePoint = {
   eflAvgCentsPerKwh: number;
 };
 
+export type EflTdspCharges = {
+  perKwhCents: number | null;
+  monthlyCents: number | null;
+  snippet: string | null;
+  confidence: "HIGH" | "MED" | "LOW";
+};
+
+export type ModeledComponents = {
+  repEnergyDollars: number;
+  repBaseDollars: number;
+  tdspDollars: number;
+  creditsDollars: number;
+  totalDollars: number;
+  avgCentsPerKwh: number;
+};
+
 export interface EflAvgPriceValidation {
   status: EflAvgPriceValidationStatus;
   toleranceCentsPerKwh: number;
@@ -21,12 +37,26 @@ export interface EflAvgPriceValidation {
     modeledAvgCentsPerKwh: number | null;
     diffCentsPerKwh: number | null;
     ok: boolean;
+    modeled?: {
+      repEnergyDollars: number;
+      repBaseDollars: number;
+      tdspDollars: number;
+      creditsDollars: number;
+      totalDollars: number;
+    } | null;
   }>;
   assumptionsUsed: {
     nightUsagePercent?: number;
     nightStartHour?: number;
     nightEndHour?: number;
     tdspIncludedInEnergyCharge?: boolean;
+    tdspFromEfl?: {
+      perKwhCents: number | null;
+      monthlyCents: number | null;
+      confidence: "HIGH" | "MED" | "LOW";
+      snippet: string | null;
+    };
+    usedEngineTdspFallback?: boolean;
   };
   fail: boolean;
   queueReason?: string;
@@ -78,6 +108,232 @@ export function isAssumptionBasedAvgPriceTable(rawText: string): {
   }
 
   return { isAssumptionBased: false };
+}
+
+// -------------------- TDSP helpers (validator-only) --------------------
+
+function cents(num: number): number {
+  return Math.round(num * 100) / 100;
+}
+
+function toCentsInt(dollars: number): number {
+  return Math.round(dollars * 100);
+}
+
+function parseMoneyDollars(s: string): number | null {
+  const cleaned = s.replace(/,/g, "");
+  const m = cleaned.match(/(\d+(?:\.\d+)?)/);
+  if (!m?.[1]) return null;
+  const n = Number(m[1]);
+  return Number.isFinite(n) ? n : null;
+}
+
+function parseCentsPerKwhToken(s: string): number | null {
+  const cleaned = s.replace(/,/g, "");
+  const m = cleaned.match(
+    /(\d+(?:\.\d+)?)\s*¢\s*(?:\/\s*kwh|per\s*kwh)/i,
+  );
+  if (!m?.[1]) return null;
+  const n = Number(m[1]);
+  return Number.isFinite(n) ? n : null;
+}
+
+export function extractEflTdspCharges(rawText: string): EflTdspCharges {
+  const text = rawText || "";
+
+  let perKwh: number | null = null;
+  let monthly: number | null = null;
+  let snippet: string | null = null;
+  let confidence: EflTdspCharges["confidence"] = "LOW";
+
+  // Pattern A: single-line combo
+  const combo = text.match(
+    /(Oncor|CenterPoint|AEP\s*Texas(?:\s*North|\s*Central)?|TNMP)?[^\n]{0,40}(?:TDSP|TDU|Delivery)\s*Charge(?:s)?:\s*([^\n]{0,200})/i,
+  );
+
+  if (combo) {
+    snippet = combo[0].trim();
+    const body = combo[2] ?? combo[0];
+
+    const pk = parseCentsPerKwhToken(body);
+    if (pk != null) perKwh = pk;
+
+    const m1 = body.match(
+      /\$\s*([0-9]+(?:\.[0-9]+)?)\s*per\s*(?:month|billing\s*cycle)/i,
+    );
+    if (m1?.[1]) {
+      const d = parseMoneyDollars(m1[1]);
+      if (d != null) monthly = toCentsInt(d);
+    }
+
+    if (perKwh != null && monthly != null) confidence = "HIGH";
+    else if (perKwh != null || monthly != null) confidence = "MED";
+  }
+
+  // Pattern B: separate per-kWh line near a TDU/TDSP header.
+  if (perKwh == null) {
+    const perLine = text.match(
+      /(Oncor|CenterPoint|AEP\s*Texas(?:\s*North|\s*Central)?|TNMP)?[^\n]{0,80}(?:TDSP|TDU|Delivery)\s*Charge(?:s)?[^\n]{0,120}(\d+(?:\.\d+)?)\s*¢\s*(?:\/\s*kwh|per\s*kwh)/i,
+    );
+    if (perLine?.[2]) {
+      const n = Number(perLine[2]);
+      if (Number.isFinite(n)) {
+        perKwh = n;
+        snippet = snippet ?? perLine[0].trim();
+        if (confidence === "LOW") confidence = "MED";
+      }
+    } else {
+      const near = text.match(
+        /(?:TDSP|TDU|Delivery)\s*Charge(?:s)?[^\n]{0,160}\n[^\n]{0,160}(\d+(?:\.\d+)?)\s*¢\s*(?:\/\s*kwh|per\s*kwh)/i,
+      );
+      if (near?.[1]) {
+        const n = Number(near[1]);
+        if (Number.isFinite(n)) {
+          perKwh = n;
+          snippet = snippet ?? near[0].trim();
+          if (confidence === "LOW") confidence = "MED";
+        }
+      }
+    }
+  }
+
+  // Pattern C: separate monthly line.
+  if (monthly == null) {
+    const monthLine = text.match(
+      /(Oncor|CenterPoint|AEP\s*Texas(?:\s*North|\s*Central)?|TNMP)?[^\n]{0,80}(?:TDSP|TDU|Delivery)\s*Charge(?:s)?[^\n]{0,160}\$\s*([0-9]+(?:\.[0-9]+)?)\s*per\s*(?:month|billing\s*cycle)/i,
+    );
+    if (monthLine?.[2]) {
+      const d = parseMoneyDollars(monthLine[2]);
+      if (d != null) {
+        monthly = toCentsInt(d);
+        snippet = snippet ?? monthLine[0].trim();
+        if (confidence === "LOW") confidence = "MED";
+      }
+    }
+  }
+
+  // If snippet includes explicit N/A, treat as no TDSP override.
+  if (snippet && /N\/A/i.test(snippet)) {
+    return {
+      perKwhCents: null,
+      monthlyCents: null,
+      snippet,
+      confidence: "LOW",
+    };
+  }
+
+  return { perKwhCents: perKwh, monthlyCents: monthly, snippet, confidence };
+}
+
+function safeNumber(n: unknown, fallback = 0): number {
+  return typeof n === "number" && Number.isFinite(n) ? n : fallback;
+}
+
+function buildModeledComponentsFromEngineResult(args: {
+  engineResult: any;
+  monthlyKwh: number;
+  eflTdsp: EflTdspCharges;
+  tdspIncludedInEnergyCharge: boolean | null | undefined;
+}): { components: ModeledComponents | null; usedEngineTdspFallback: boolean } {
+  const { engineResult, monthlyKwh, eflTdsp, tdspIncludedInEnergyCharge } =
+    args;
+
+  if (!engineResult || !Number.isFinite(monthlyKwh) || monthlyKwh <= 0) {
+    return { components: null, usedEngineTdspFallback: false };
+  }
+
+  const monthlySummaries: any[] = Array.isArray(
+    engineResult.monthlySummaries,
+  )
+    ? engineResult.monthlySummaries
+    : [];
+
+  const month = monthlySummaries[0];
+  const totalCostDollars = safeNumber(engineResult.totalCostDollars, NaN);
+
+  if (!month) {
+    if (!Number.isFinite(totalCostDollars)) {
+      return { components: null, usedEngineTdspFallback: false };
+    }
+
+    // No breakdown available; treat REP components as unknown, but still
+    // allow TDSP override for total + avg.
+    let tdspDollars = 0;
+    let usedEngineTdspFallback = false;
+
+    if (tdspIncludedInEnergyCharge) {
+      tdspDollars = 0;
+    } else if (
+      eflTdsp.perKwhCents != null ||
+      eflTdsp.monthlyCents != null
+    ) {
+      const per =
+        eflTdsp.perKwhCents != null ? eflTdsp.perKwhCents / 100 : 0;
+      const fixed =
+        eflTdsp.monthlyCents != null ? eflTdsp.monthlyCents / 100 : 0;
+      tdspDollars = fixed + per * monthlyKwh;
+    } else {
+      usedEngineTdspFallback = true;
+      tdspDollars = 0;
+    }
+
+    const total = totalCostDollars + tdspDollars;
+    const avgCentsPerKwh = (total / monthlyKwh) * 100;
+
+    return {
+      usedEngineTdspFallback,
+      components: {
+        repEnergyDollars: 0,
+        repBaseDollars: 0,
+        tdspDollars,
+        creditsDollars: 0,
+        totalDollars: total,
+        avgCentsPerKwh,
+      },
+    };
+  }
+
+  const energyDollars = safeNumber(month.energyChargesDollars, 0);
+  const baseDollars = safeNumber(month.baseChargeDollars, 0);
+  const billCreditsDollars = safeNumber(month.billCreditsDollars, 0);
+  const tdspFromEngine = safeNumber(month.tdspDeliveryDollars, 0);
+  const monthTotal = safeNumber(month.totalCostDollars, totalCostDollars);
+
+  const repOnlyTotal = monthTotal - tdspFromEngine;
+
+  let tdspDollars = 0;
+  let usedEngineTdspFallback = false;
+
+  if (tdspIncludedInEnergyCharge) {
+    tdspDollars = 0;
+  } else if (
+    eflTdsp.perKwhCents != null ||
+    eflTdsp.monthlyCents != null
+  ) {
+    const per =
+      eflTdsp.perKwhCents != null ? eflTdsp.perKwhCents / 100 : 0;
+    const fixed =
+      eflTdsp.monthlyCents != null ? eflTdsp.monthlyCents / 100 : 0;
+    tdspDollars = fixed + per * monthlyKwh;
+  } else {
+    usedEngineTdspFallback = true;
+    tdspDollars = tdspFromEngine;
+  }
+
+  const total = repOnlyTotal + tdspDollars;
+  const avgCentsPerKwh = (total / monthlyKwh) * 100;
+
+  return {
+    usedEngineTdspFallback,
+    components: {
+      repEnergyDollars: energyDollars,
+      repBaseDollars: baseDollars,
+      tdspDollars,
+      creditsDollars: billCreditsDollars,
+      totalDollars: total,
+      avgCentsPerKwh,
+    },
+  };
 }
 
 // -------------------- Avg price table extraction --------------------
@@ -225,18 +481,20 @@ export function parseEflNightHoursAssumption(rawText: string): {
 
 // -------------------- Canonical calculator adapter --------------------
 
-async function computeModeledAvgCentsPerKwhOrNull(args: {
+async function computeModeledComponentsOrNull(args: {
   planRules: PlanRules;
   rateStructure: RateStructure | null;
   kwh: number;
+  eflTdsp: EflTdspCharges;
+  tdspIncludedInEnergyCharge: boolean | null | undefined;
   nightUsagePercent?: number;
   nightStartHour?: number;
   nightEndHour?: number;
-}): Promise<number | null> {
+}): Promise<{ components: ModeledComponents | null; usedEngineTdspFallback: boolean }> {
   const { planRules, kwh } = args;
 
-  if (!planRules) return null;
-  if (kwh <= 0) return null;
+  if (!planRules) return { components: null, usedEngineTdspFallback: false };
+  if (kwh <= 0) return { components: null, usedEngineTdspFallback: false };
 
   const usage: IntervalUsagePoint[] = [];
 
@@ -325,12 +583,15 @@ async function computeModeledAvgCentsPerKwhOrNull(args: {
       usage,
       tz: VALIDATION_TZ,
     });
-    const totalDollars = result.totalCostDollars;
-    const avgCents = (totalDollars * 100) / kwh;
-    if (!Number.isFinite(avgCents)) return null;
-    return avgCents;
+
+    return buildModeledComponentsFromEngineResult({
+      engineResult: result,
+      monthlyKwh: kwh,
+      eflTdsp: args.eflTdsp,
+      tdspIncludedInEnergyCharge: args.tdspIncludedInEnergyCharge,
+    });
   } catch {
-    return null;
+    return { components: null, usedEngineTdspFallback: false };
   }
 }
 
@@ -385,6 +646,8 @@ export async function validateEflAvgPriceTable(args: {
   const assumption = isAssumptionBasedAvgPriceTable(rawText);
   const nightAssumption = parseEflNightHoursAssumption(rawText) ?? undefined;
 
+  const eflTdsp = extractEflTdspCharges(rawText);
+
   const tdspIncludedFlag =
     (planRules as any).tdspDeliveryIncludedInEnergyCharge === true ||
     (rateStructure as any)?.tdspDeliveryIncludedInEnergyCharge === true
@@ -394,34 +657,46 @@ export async function validateEflAvgPriceTable(args: {
   const modeledPoints: EflAvgPriceValidation["points"] = [];
 
   for (const p of points) {
-    const modeledAvg = await computeModeledAvgCentsPerKwhOrNull({
+    const { components, usedEngineTdspFallback } =
+      await computeModeledComponentsOrNull({
       planRules,
       rateStructure,
       kwh: p.kwh,
+        eflTdsp,
+        tdspIncludedInEnergyCharge: tdspIncludedFlag,
       nightUsagePercent: nightAssumption?.nightUsagePercent,
       nightStartHour: nightAssumption?.nightStartHour,
       nightEndHour: nightAssumption?.nightEndHour,
     });
 
-    if (modeledAvg == null || Number.isNaN(modeledAvg)) {
+    if (!components || Number.isNaN(components.avgCentsPerKwh)) {
       modeledPoints.push({
         usageKwh: p.kwh,
         expectedAvgCentsPerKwh: p.eflAvgCentsPerKwh,
         modeledAvgCentsPerKwh: null,
         diffCentsPerKwh: null,
         ok: false,
+        modeled: null,
       });
       continue;
     }
 
+    const modeledAvg = components.avgCentsPerKwh;
     const diff = modeledAvg - p.eflAvgCentsPerKwh;
     const absDiff = Math.abs(diff);
     modeledPoints.push({
       usageKwh: p.kwh,
       expectedAvgCentsPerKwh: p.eflAvgCentsPerKwh,
-      modeledAvgCentsPerKwh: Number(modeledAvg.toFixed(4)),
-      diffCentsPerKwh: Number(diff.toFixed(4)),
+      modeledAvgCentsPerKwh: Number(cents(modeledAvg).toFixed(4)),
+      diffCentsPerKwh: Number(cents(diff).toFixed(4)),
       ok: absDiff <= tolerance,
+      modeled: {
+        repEnergyDollars: cents(components.repEnergyDollars),
+        repBaseDollars: cents(components.repBaseDollars),
+        tdspDollars: cents(components.tdspDollars),
+        creditsDollars: cents(components.creditsDollars),
+        totalDollars: cents(components.totalDollars),
+      },
     });
   }
 
@@ -436,6 +711,14 @@ export async function validateEflAvgPriceTable(args: {
         nightStartHour: nightAssumption?.nightStartHour,
         nightEndHour: nightAssumption?.nightEndHour,
         tdspIncludedInEnergyCharge: tdspIncludedFlag,
+        tdspFromEfl: {
+          perKwhCents: eflTdsp.perKwhCents,
+          monthlyCents: eflTdsp.monthlyCents,
+          confidence: eflTdsp.confidence,
+          snippet: eflTdsp.snippet,
+        },
+        usedEngineTdspFallback:
+          eflTdsp.perKwhCents == null && eflTdsp.monthlyCents == null,
       },
       fail: false,
       notes: [
@@ -472,6 +755,14 @@ export async function validateEflAvgPriceTable(args: {
         nightStartHour: nightAssumption?.nightStartHour,
         nightEndHour: nightAssumption?.nightEndHour,
         tdspIncludedInEnergyCharge: tdspIncludedFlag,
+        tdspFromEfl: {
+          perKwhCents: eflTdsp.perKwhCents,
+          monthlyCents: eflTdsp.monthlyCents,
+          confidence: eflTdsp.confidence,
+          snippet: eflTdsp.snippet,
+        },
+        usedEngineTdspFallback:
+          eflTdsp.perKwhCents == null && eflTdsp.monthlyCents == null,
       },
       fail: false,
       notes: [],
@@ -493,6 +784,14 @@ export async function validateEflAvgPriceTable(args: {
       nightStartHour: nightAssumption?.nightStartHour,
       nightEndHour: nightAssumption?.nightEndHour,
       tdspIncludedInEnergyCharge: tdspIncludedFlag,
+      tdspFromEfl: {
+        perKwhCents: eflTdsp.perKwhCents,
+        monthlyCents: eflTdsp.monthlyCents,
+        confidence: eflTdsp.confidence,
+        snippet: eflTdsp.snippet,
+      },
+      usedEngineTdspFallback:
+        eflTdsp.perKwhCents == null && eflTdsp.monthlyCents == null,
     },
     fail: true,
     queueReason:
