@@ -200,15 +200,24 @@ export async function extractCurrentPlanFromBillTextWithOpenAI(
   // First pass: existing regex-based parser
   const baseline = extractCurrentPlanFromBillText(rawText, hints);
 
-  // If there is no OpenAI key, just return baseline
-  if (!process.env.OPENAI_IntelliWatt_Bill_Parcer) {
-    return baseline;
-  }
-
   let aiResult: OpenAIBillParseResult | null = null;
 
   try {
-    const { openaiBillParser } = await import('@/lib/ai/openaiBillParser');
+    const {
+      billParserAiEnabled,
+      getOpenAiBillClient,
+    } = await import("@/lib/ai/openaiBillParser");
+
+    // Feature flag: if Bill Parser AI is disabled, fall back to baseline-only.
+    if (!billParserAiEnabled()) {
+      return baseline;
+    }
+
+    const openaiBillParser = getOpenAiBillClient();
+    if (!openaiBillParser) {
+      // No usable API key configured; fall back to baseline-only behaviour.
+      return baseline;
+    }
 
     const systemPrompt = `
 You are an expert at reading Texas residential electricity bills and extracting structured plan data.
@@ -331,14 +340,14 @@ ${hintSummary}
 Return ONLY a JSON object matching ParsedCurrentPlanPayload (no extra keys, no comments).
 `;
 
-    const completion = await openaiBillParser.chat.completions.create({
-      model: 'gpt-4.1-mini',
+    const completion = await (openaiBillParser as any).chat.completions.create({
+      model: "gpt-4.1-mini",
       messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
       ],
       temperature: 0,
-      response_format: { type: 'json_object' },
+      response_format: { type: "json_object" },
     });
 
     const usage = (completion as any).usage;
@@ -368,7 +377,7 @@ Return ONLY a JSON object matching ParsedCurrentPlanPayload (no extra keys, no c
       });
     }
 
-    const content = completion.choices[0]?.message?.content ?? '';
+    const content = completion.choices[0]?.message?.content ?? "";
     if (!content) {
       return baseline;
     }
