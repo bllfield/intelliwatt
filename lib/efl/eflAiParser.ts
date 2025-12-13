@@ -1,6 +1,6 @@
 import { Buffer } from "node:buffer";
 
-import { openaiFactCardParser } from "@/lib/ai/openaiFactCardParser";
+import { getOpenAiClient } from "@/lib/ai/openaiFactCardParser";
 import {
   validateEflAvgPriceTable,
   type EflAvgPriceValidation,
@@ -198,16 +198,70 @@ export async function parseEflTextWithAi(opts: {
     );
   }
 
-  if (!process.env.OPENAI_IntelliWatt_Fact_Card_Parser) {
+  const aiEnabledFlag =
+    process.env.OPENAI_IntelliWatt_Fact_Card_Parser === "1";
+  const openaiClient = getOpenAiClient();
+
+  // When AI is disabled via flag or missing key, we still want deterministic
+  // extraction + validator to run, but we skip any OpenAI calls entirely.
+  if (!aiEnabledFlag || !openaiClient) {
+    const warnings: string[] = [
+      ...baseWarnings,
+      "AI_DISABLED_OR_MISSING_KEY: EFL AI text parser is disabled or missing OPENAI_API_KEY.",
+    ];
+
+    // Minimal deterministic-only PlanRules: base charge + usage tiers or a
+    // single fixed energy rate plus tdspDeliveryIncludedInEnergyCharge flag.
+    const planRules: any = {};
+
+    if (deterministicBaseCents != null) {
+      planRules.baseChargePerMonthCents = deterministicBaseCents;
+    }
+
+    if (deterministicTiers.length > 0) {
+      planRules.usageTiers = deterministicTiers;
+      planRules.rateType = planRules.rateType ?? "FIXED";
+      (planRules as any).planType = (planRules as any).planType ?? "flat";
+    } else if (deterministicSingleEnergy != null) {
+      planRules.rateType = planRules.rateType ?? "FIXED";
+      (planRules as any).planType = (planRules as any).planType ?? "flat";
+      planRules.defaultRateCentsPerKwh = deterministicSingleEnergy;
+      (planRules as any).currentBillEnergyRateCents = deterministicSingleEnergy;
+    }
+
+    if (deterministicTdspIncluded != null) {
+      planRules.tdspDeliveryIncludedInEnergyCharge = deterministicTdspIncluded;
+    }
+
+    let eflAvgPriceValidation: EflAvgPriceValidation | null = null;
+    try {
+      eflAvgPriceValidation = await validateEflAvgPriceTable({
+        rawText,
+        planRules,
+        rateStructure: null,
+      });
+    } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : String(err ?? "unknown error");
+      eflAvgPriceValidation = {
+        status: "SKIP",
+        toleranceCentsPerKwh: 0.25,
+        points: [],
+        assumptionsUsed: {},
+        fail: false,
+        notes: [`Avg price validator error: ${msg}`],
+        avgTableFound: false,
+      };
+    }
+
     return {
-      planRules: null,
+      planRules: Object.keys(planRules).length > 0 ? planRules : null,
       rateStructure: null,
       parseConfidence: 0,
-      // Infra/config error → do not filter; keep full message.
-      parseWarnings: [
-        ...baseWarnings,
-        "OPENAI_IntelliWatt_Fact_Card_Parser is not configured; cannot run EFL AI text parser.",
-      ],
+      parseWarnings: warnings,
+      validation: eflAvgPriceValidation
+        ? { eflAvgPriceValidation }
+        : null,
     };
   }
 
@@ -252,7 +306,8 @@ OUTPUT CONTRACT:
 
   let rawJson = "{}";
   try {
-    const response = await (openaiFactCardParser as any).responses.create({
+    const client = openaiClient;
+    const response = await (client as any).responses.create({
       model: process.env.OPENAI_EFL_MODEL || "gpt-4.1",
       text: { format: { type: "json_object" } },
       input: [

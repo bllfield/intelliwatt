@@ -212,6 +212,18 @@ Reliability guardrails:
 - ✅ Deterministic base-charge extractor now also supports phrasing such as “Base Charge of $4.95 per ESI-ID will apply each billing cycle.”, filling both `planRules.baseChargePerMonthCents` and the aligned `rateStructure.baseMonthlyFeeCents` so validator PASS/FAIL math includes the fixed monthly charge correctly.
 - ✅ Validator-level TDSP override: the EFL Avg Price Validator now parses explicit TDU/TDSP delivery charges from the EFL `rawText` (per‑kWh and per‑month, when present) and uses those amounts **only** for validation math and the admin UI breakdown, without changing the canonical plan cost engine or utility TDSP rate tables. When `tdspDeliveryIncludedInEnergyCharge = true`, the validator does not add any TDSP charges; otherwise it overlays the EFL-stated TDSP dollars on top of the REP energy/base/credit totals and returns a per-point component breakdown (`repEnergyDollars`, `repBaseDollars`, `tdspDollars`, `creditsDollars`, `totalDollars`, `avgCentsPerKwh`, `supplyOnlyTotalCents`, `tdspTotalCentsUsed`, `totalCentsUsed`) so admins can see exactly how modeled averages were constructed. TDSP/TDU extraction keeps full floating ¢/kWh precision (e.g., `6.0009`), and the snippet includes both the per‑month and per‑kWh delivery lines for inspection. If the canonical `computePlanCost` path cannot run (e.g., admin response sends a tier array rather than a full `RateStructure`), the validator falls back to a pure, deterministic calculator that uses `planRules` + EFL TDSP + threshold bill credits so we rarely SKIP; SKIP is now reserved for cases where the avg-price table is missing or **both** calculators fail for all three usage points. The validator also records a `tdspAppliedMode` flag (`INCLUDED_IN_RATE` | `ADDED_FROM_EFL` | `ENGINE_DEFAULT` | `NONE`) in `assumptionsUsed` so ops can see how TDSP was applied for each validation.
 
+### EFL Manual Upload — AI Toggle + Fallback Behaviour
+
+- **Env flags for AI EFL parser**:
+  - `OPENAI_API_KEY` must be set for any OpenAI-backed EFL parsing to run.
+  - `OPENAI_IntelliWatt_Fact_Card_Parser = "1"` acts as a feature flag; when it is not `"1"` or the API key is missing, the `/api/admin/efl/manual-upload` route skips AI extraction entirely.
+- **Manual upload still works without OpenAI**:
+  - When AI is disabled or misconfigured, the manual upload endpoint:
+    - Runs the deterministic `pdftotext` extract + metadata + validator path as usual.
+    - Returns a 200 JSON response that includes an `ai` bag: `{ enabled, hasKey, used: false, reason }`.
+    - Adds a stable warning code/message (`AI_DISABLED_OR_MISSING_KEY: EFL AI text parser is disabled or missing OPENAI_API_KEY.`) to `parseWarnings` instead of throwing at import-time.
+  - When AI is enabled **and** `OPENAI_API_KEY` is present, behaviour is unchanged: the OpenAI EFL parser runs via a lazy client getter, and the response includes `ai.used: true`.
+
 ## EFL Templates — Stable Identity + Dedupe (Step 2)
 
 - key precedence order (strongest to weakest):

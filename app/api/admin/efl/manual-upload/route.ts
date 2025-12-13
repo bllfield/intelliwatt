@@ -22,6 +22,11 @@ export async function POST(req: NextRequest) {
     const arrayBuffer = await file.arrayBuffer();
     const pdfBuffer = Buffer.from(arrayBuffer);
 
+    const aiEnabled = process.env.OPENAI_IntelliWatt_Fact_Card_Parser === "1";
+    const hasKey =
+      !!process.env.OPENAI_API_KEY &&
+      process.env.OPENAI_API_KEY.trim().length > 0;
+
     const { template, warnings: topWarnings } = await getOrCreateEflTemplate({
       source: "manual_upload",
       pdfBytes: pdfBuffer,
@@ -33,6 +38,35 @@ export async function POST(req: NextRequest) {
     const rawTextPreview = rawTextTruncated
       ? rawText.slice(0, MAX_PREVIEW_CHARS)
       : rawText;
+
+    const aiUsed =
+      aiEnabled &&
+      hasKey &&
+      !Array.isArray(template.parseWarnings) ? false :
+      !(
+        (template.parseWarnings ?? []).some((w: string) =>
+          w.includes("AI_DISABLED_OR_MISSING_KEY"),
+        )
+      );
+
+    const ai: {
+      enabled: boolean;
+      hasKey: boolean;
+      used: boolean;
+      reason?: string;
+    } = {
+      enabled: aiEnabled,
+      hasKey,
+      used: aiUsed,
+    };
+
+    if (!aiUsed) {
+      ai.reason = !aiEnabled
+        ? "AI disabled via OPENAI_IntelliWatt_Fact_Card_Parser flag."
+        : !hasKey
+          ? "OPENAI_API_KEY is missing or empty."
+          : "AI parser skipped; see parseWarnings for details.";
+    }
 
     return NextResponse.json({
       ok: true,
@@ -52,6 +86,7 @@ export async function POST(req: NextRequest) {
       parseWarnings: template.parseWarnings,
       validation: template.validation ?? null,
       extractorMethod: template.extractorMethod ?? "pdftotext",
+      ai,
     });
   } catch (error) {
     console.error("[EFL_MANUAL_UPLOAD] Failed to process fact card:", error);
@@ -62,7 +97,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         ok: false,
-        error: message,
+        error: {
+          message,
+          code: "EFL_MANUAL_UPLOAD_ERROR",
+        },
       },
       { status: 500 },
     );
