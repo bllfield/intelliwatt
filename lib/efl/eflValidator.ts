@@ -562,12 +562,53 @@ export function extractEflAvgPricePoints(
     const useMatch = tableScan.match(
       /Average\s+(Monthly\s+Use|monthly\s+use)[^\n]*\n?[^\n]*/i,
     );
-    const priceMatch = tableScan.match(
-      /Average\s+price[^\n]*\n?[^\n]*/i,
-    );
-
     const useText = useMatch?.[0] ?? useLine;
-    const priceText = priceMatch?.[0] ?? priceLine;
+
+    // Tolerant "Average price" scan:
+    //  - There might be a header line ("Average Price per kWh") with no cents
+    //    and a separate line with the actual numeric values.
+    //  - We scan all lines that contain "Average price" and prefer the first
+    //    window that yields ≥3 cent tokens.
+    const lines = tableScan.split(/\r?\n/);
+    let priceText = priceLine;
+    const priceLines: string[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      if (/Average\s+price/i.test(lines[i])) {
+        // Look at this line plus the next couple of lines to catch both
+        // header + numeric rows.
+        const window = lines.slice(i, i + 3).join(" ");
+        priceLines.push(window);
+      }
+    }
+    if (priceLines.length > 0) {
+      // Choose the first window that yields at least 3 cent tokens.
+      for (const window of priceLines) {
+        const tokens = Array.from(window.matchAll(centsPattern)).map((m) =>
+          Number(m[1]),
+        );
+        if (tokens.length >= 3) {
+          priceText = window;
+          break;
+        }
+      }
+      // If none of the windows produced 3 tokens, fall back to the first match
+      // text or the previously derived priceLine.
+      if (priceText === priceLine) {
+        const firstMatch = tableScan.match(
+          /Average\s+price[^\n]*\n?[^\n]*/i,
+        );
+        if (firstMatch?.[0]) {
+          priceText = firstMatch[0];
+        }
+      }
+    } else {
+      const priceMatch = tableScan.match(
+        /Average\s+price[^\n]*\n?[^\n]*/i,
+      );
+      if (priceMatch?.[0]) {
+        priceText = priceMatch[0];
+      }
+    }
 
     const uses2 = Array.from(
       useText.matchAll(/(\d{1,4}(?:,\d{3})?)\s*kwh/gi),
