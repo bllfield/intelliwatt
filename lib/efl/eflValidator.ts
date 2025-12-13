@@ -136,6 +136,25 @@ function parseMoneyDollars(s: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+// TDSP-specific parsers (line-based)
+function parseCentsPerKwhFromLine(line: string): number | null {
+  const m = line
+    .replace(/,/g, "")
+    .match(/(\d+(?:\.\d+)?)\s*¢\s*(?:\/\s*kWh|per\s*kWh)/i);
+  if (!m) return null;
+  const v = Number(m[1]);
+  return Number.isFinite(v) ? v : null;
+}
+
+function parseMonthlyDollarsFromLine(line: string): number | null {
+  const m = line
+    .replace(/,/g, "")
+    .match(/\$\s*([0-9]+(?:\.[0-9]+)?)\s*per\s*(?:month|billing\s*cycle)/i);
+  if (!m) return null;
+  const v = Number(m[1]);
+  return Number.isFinite(v) ? v : null;
+}
+
 function parseCentsPerKwhToken(s: string): number | null {
   const cleaned = s.replace(/,/g, "");
   const m = cleaned.match(
@@ -146,91 +165,90 @@ function parseCentsPerKwhToken(s: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function pickBestTdspPerKwhLine(
+  lines: string[],
+): { value: number | null; line: string | null } {
+  const best = lines.find(
+    (l) =>
+      /(TDU|TDSP)/i.test(l) &&
+      /Delivery/i.test(l) &&
+      /(¢\s*(?:\/\s*kWh|per\s*kWh))/i.test(l),
+  );
+  if (best) return { value: parseCentsPerKwhFromLine(best), line: best };
+
+  const next = lines.find(
+    (l) =>
+      /Delivery/i.test(l) && /(¢\s*(?:\/\s*kWh|per\s*kWh))/i.test(l),
+  );
+  if (next) return { value: parseCentsPerKwhFromLine(next), line: next };
+
+  const any = lines.find((l) =>
+    /(¢\s*(?:\/\s*kWh|per\s*kWh))/i.test(l),
+  );
+  if (any) return { value: parseCentsPerKwhFromLine(any), line: any };
+
+  return { value: null, line: null };
+}
+
+function pickBestTdspMonthlyLine(
+  lines: string[],
+): { dollars: number | null; line: string | null } {
+  const best = lines.find(
+    (l) =>
+      /(TDU|TDSP)/i.test(l) &&
+      /Delivery/i.test(l) &&
+      /\$\s*[0-9]+(?:\.[0-9]+)?\s*per\s*(?:month|billing\s*cycle)/i.test(l),
+  );
+  if (best)
+    return { dollars: parseMonthlyDollarsFromLine(best), line: best };
+
+  const next = lines.find(
+    (l) =>
+      /Delivery/i.test(l) &&
+      /\$\s*[0-9]+(?:\.[0-9]+)?\s*per\s*(?:month|billing\s*cycle)/i.test(l),
+  );
+  if (next)
+    return { dollars: parseMonthlyDollarsFromLine(next), line: next };
+
+  const any = lines.find((l) =>
+    /\$\s*[0-9]+(?:\.[0-9]+)?\s*per\s*(?:month|billing\s*cycle)/i.test(l),
+  );
+  if (any) return { dollars: parseMonthlyDollarsFromLine(any), line: any };
+
+  return { dollars: null, line: null };
+}
+
 export function extractEflTdspCharges(rawText: string): EflTdspCharges {
-  const text = rawText || "";
+  const lines = (rawText || "")
+    .split(/\r?\n/g)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
 
-  let perKwh: number | null = null;
-  let monthly: number | null = null;
-  let snippet: string | null = null;
-  let confidence: EflTdspCharges["confidence"] = "LOW";
-
-  // Pattern A: single-line combo
-  const combo = text.match(
-    /(Oncor|CenterPoint|AEP\s*Texas(?:\s*North|\s*Central)?|TNMP)?[^\n]{0,40}(?:TDSP|TDU|Delivery)\s*Charge(?:s)?:\s*([^\n]{0,200})/i,
+  const candidateLines = lines.filter((l) =>
+    /(TDU|TDSP|Delivery)/i.test(l),
   );
 
-  if (combo) {
-    snippet = combo[0].trim();
-    const body = combo[2] ?? combo[0];
+  const searchLines =
+    candidateLines.length > 0 ? candidateLines : lines;
 
-    const pk = parseCentsPerKwhToken(body);
-    if (pk != null) perKwh = pk;
+  const perPick = pickBestTdspPerKwhLine(searchLines);
+  const moPick = pickBestTdspMonthlyLine(searchLines);
 
-    const m1 = body.match(
-      /\$\s*([0-9]+(?:\.[0-9]+)?)\s*per\s*(?:month|billing\s*cycle)/i,
-    );
-    if (m1?.[1]) {
-      const d = parseMoneyDollars(m1[1]);
-      if (d != null) monthly = toCentsInt(d);
-    }
+  const perKwhCents = perPick.value;
+  const monthlyDollars = moPick.dollars;
+  const monthlyCents =
+    monthlyDollars == null ? null : Math.round(monthlyDollars * 100);
 
-    if (perKwh != null && monthly != null) confidence = "HIGH";
-    else if (perKwh != null || monthly != null) confidence = "MED";
-  }
+  const snippetLines = [moPick.line, perPick.line].filter(
+    (x): x is string => !!x,
+  );
+  const snippet = snippetLines.length ? snippetLines.join("\n") : null;
 
-  // Pattern B: separate per-kWh line near a TDU/TDSP header.
-  if (perKwh == null) {
-    const perLine = text.match(
-      /(Oncor|CenterPoint|AEP\s*Texas(?:\s*North|\s*Central)?|TNMP)?[^\n]{0,80}(?:TDSP|TDU|Delivery)\s*Charge(?:s)?[^\n]{0,160}/i,
-    );
-    if (perLine?.[0]) {
-      const v = parseCentsPerKwhToken(perLine[0]);
-      if (v != null) {
-        perKwh = v;
-        snippet = snippet ?? perLine[0].trim();
-        if (confidence === "LOW") confidence = "MED";
-      }
-    } else {
-      const near = text.match(
-        /(?:TDSP|TDU|Delivery)\s*Charge(?:s)?[^\n]{0,160}\n[^\n]{0,160}/i,
-      );
-      if (near?.[0]) {
-        const v = parseCentsPerKwhToken(near[0]);
-        if (v != null) {
-          perKwh = v;
-          snippet = snippet ?? near[0].trim();
-          if (confidence === "LOW") confidence = "MED";
-        }
-      }
-    }
-  }
+  let confidence: EflTdspCharges["confidence"] = "LOW";
+  if (perKwhCents != null && monthlyCents != null) confidence = "HIGH";
+  else if (perKwhCents != null || monthlyCents != null) confidence = "MED";
 
-  // Pattern C: separate monthly line.
-  if (monthly == null) {
-    const monthLine = text.match(
-      /(Oncor|CenterPoint|AEP\s*Texas(?:\s*North|\s*Central)?|TNMP)?[^\n]{0,80}(?:TDSP|TDU|Delivery)\s*Charge(?:s)?[^\n]{0,160}\$\s*([0-9]+(?:\.[0-9]+)?)\s*per\s*(?:month|billing\s*cycle)/i,
-    );
-    if (monthLine?.[2]) {
-      const d = parseMoneyDollars(monthLine[2]);
-      if (d != null) {
-        monthly = toCentsInt(d);
-        snippet = snippet ?? monthLine[0].trim();
-        if (confidence === "LOW") confidence = "MED";
-      }
-    }
-  }
-
-  // If snippet includes explicit N/A, treat as no TDSP override.
-  if (snippet && /N\/A/i.test(snippet)) {
-    return {
-      perKwhCents: null,
-      monthlyCents: null,
-      snippet,
-      confidence: "LOW",
-    };
-  }
-
-  return { perKwhCents: perKwh, monthlyCents: monthly, snippet, confidence };
+  return { perKwhCents, monthlyCents, snippet, confidence };
 }
 
 function safeNumber(n: unknown, fallback = 0): number {
