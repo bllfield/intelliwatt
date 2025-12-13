@@ -16,7 +16,7 @@ import {
   type ExtractPlanRulesResult,
   extractPlanRulesFromEflText as coreExtractPlanRulesFromEflText,
 } from "@/lib/efl/aiExtraction";
-import { openaiFactCardParser } from "@/lib/ai/openaiFactCardParser";
+import { getOpenAiClient } from "@/lib/ai/openaiFactCardParser";
 import { planRulesToRateStructure, validatePlanRules } from "@/lib/efl/planEngine";
 import { logOpenAIUsage } from "@/lib/admin/openaiUsage";
 
@@ -47,13 +47,20 @@ async function callOpenAiPlanRulesModel(args: {
   prompt: string;
   extract: EflDeterministicExtractInput;
 }): Promise<unknown> {
-  if (!process.env.OPENAI_IntelliWatt_Fact_Card_Parser) {
+  if (process.env.OPENAI_IntelliWatt_Fact_Card_Parser !== "1") {
     throw new Error(
-      "OPENAI_IntelliWatt_Fact_Card_Parser is not configured; cannot run EFL Fact Card AI extraction.",
+      "OPENAI_IntelliWatt_Fact_Card_Parser is not enabled; cannot run EFL Fact Card AI extraction.",
     );
   }
 
-  const completion = await openaiFactCardParser.chat.completions.create({
+  const client = getOpenAiClient();
+  if (!client) {
+    throw new Error(
+      "OPENAI_API_KEY is not configured; cannot run EFL Fact Card AI extraction.",
+    );
+  }
+
+  const completion = await (client as any).chat.completions.create({
     model: "gpt-4.1-mini",
     messages: [
       {
@@ -202,14 +209,29 @@ export async function extractPlanRulesAndRateStructureFromEflUrlVision(args: {
   rateStructure: RateStructure | null;
   meta: PlanRulesExtractionMeta;
 }> {
-  if (!process.env.OPENAI_IntelliWatt_Fact_Card_Parser) {
+  if (process.env.OPENAI_IntelliWatt_Fact_Card_Parser !== "1") {
     return {
       planRules: null,
       rateStructure: null,
       meta: {
         parseConfidence: 0,
         parseWarnings: [
-          "Vision fallback skipped: OPENAI_IntelliWatt_Fact_Card_Parser is not configured.",
+          "Vision fallback skipped: OPENAI_IntelliWatt_Fact_Card_Parser is not enabled.",
+        ],
+        source: "efl_pdf",
+      },
+    };
+  }
+
+  const client = getOpenAiClient();
+  if (!client) {
+    return {
+      planRules: null,
+      rateStructure: null,
+      meta: {
+        parseConfidence: 0,
+        parseWarnings: [
+          "Vision fallback skipped: OPENAI_API_KEY is not configured.",
         ],
         source: "efl_pdf",
       },
@@ -223,7 +245,7 @@ export async function extractPlanRulesAndRateStructureFromEflUrlVision(args: {
     "defined for the IntelliWatt EFL Fact Card engine. " +
     "Do NOT guess values; leave unknown fields null or omit them.";
 
-  const completion = await (openaiFactCardParser as any).chat.completions.create({
+  const completion = await (client as any).chat.completions.create({
     model: "gpt-4.1-mini",
     messages: [
       {
