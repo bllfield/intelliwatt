@@ -30,8 +30,8 @@
   - **Precedence**: Used first by the Bill Parser client; falls back to `OPENAI_API_KEY` when unset.
   - **Scope**: Server-only; never expose to the browser.
 - `OPENAI_API_KEY`
-  - **Purpose**: Shared default OpenAI key for generic tools and as a fallback when module-specific keys are not configured.
-  - **Note**: When using separate Projects per module, prefer the module keys above and reserve `OPENAI_API_KEY` for non-critical/shared usage.
+  - **Purpose**: Shared default OpenAI key for generic tools and as a **fallback** when module-specific keys are not configured.
+  - **Note**: When using separate Projects per module, prefer the module keys above. `OPENAI_API_KEY` is optional and only used when it looks like a real key (starts with `sk-`); values such as `"1"` or `"true"` are treated as flags only, never as API keys.
 - `OPENAI_IntelliWatt_Fact_Card_Parser`
   - **Purpose**: Feature flag for Fact Card / EFL AI parsing.
   - **Enabled when**: Set to a truthy value such as `"1"`, `"true"`, `"yes"`, `"on"`, or `"enabled"`.

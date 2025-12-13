@@ -23,17 +23,31 @@ function isTruthy(v: string | undefined): boolean {
   return s === "1" || s === "true" || s === "yes" || s === "on" || s === "enabled";
 }
 
+function looksLikeKey(v: string | undefined): boolean {
+  if (!v) return false;
+  const s = v.trim();
+  return s.startsWith("sk-") && s.length > 20;
+}
+
 export function factCardAiEnabled(): boolean {
-  return isTruthy(process.env.OPENAI_IntelliWatt_Fact_Card_Parser);
+  const flag = process.env.OPENAI_IntelliWatt_Fact_Card_Parser;
+  // Legacy configs may still store the API key directly in this var; treat a
+  // key-shaped value as "enabled" as well as explicit truthy flags.
+  return isTruthy(flag) || looksLikeKey(flag);
 }
 
 function getFactCardApiKey(): string | null {
-  const key =
-    process.env.OPENAI_FACT_CARD_API_KEY ||
-    process.env.OPENAI_API_KEY ||
-    "";
-  const trimmed = key.trim();
-  return trimmed.length > 0 ? trimmed : null;
+  const k1 = process.env.OPENAI_FACT_CARD_API_KEY;
+  if (looksLikeKey(k1)) return k1!.trim();
+
+  // Legacy: some deployments stored the key directly in OPENAI_IntelliWatt_Fact_Card_Parser.
+  const legacy = process.env.OPENAI_IntelliWatt_Fact_Card_Parser;
+  if (looksLikeKey(legacy)) return legacy!.trim();
+
+  const generic = process.env.OPENAI_API_KEY;
+  if (looksLikeKey(generic)) return generic!.trim();
+
+  return null;
 }
 
 export function getOpenAiClient(): OpenAI | null {
