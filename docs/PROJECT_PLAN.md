@@ -224,6 +224,18 @@ Reliability guardrails:
     - Adds a stable warning code/message (`AI_DISABLED_OR_MISSING_KEY: EFL AI text parser is disabled or missing OPENAI_API_KEY.`) to `parseWarnings` instead of throwing at import-time.
   - When AI is enabled **and** `OPENAI_API_KEY` is present, behaviour is unchanged: the OpenAI EFL parser runs via a lazy client getter, and the response includes `ai.used: true`.
 
+### OpenAI Projects — Per-Module Keys + Safety Notes
+
+- **Separate Projects per module**:
+  - Fact Card / EFL parser now prefers `OPENAI_FACT_CARD_API_KEY` (dedicated OpenAI Project) and only falls back to `OPENAI_API_KEY` when the module key is unset.
+  - Bill Parser / Current Plan module now prefers `OPENAI_BILL_PARSER_API_KEY` and only falls back to `OPENAI_API_KEY` when the module key is unset.
+  - Both modules are gated by feature flags (`OPENAI_IntelliWatt_Fact_Card_Parser`, `OPENAI_IntelliWatt_Bill_Parcer`); when flags are not truthy, AI calls are skipped and deterministic paths continue to run.
+- **Lazy-init OpenAI clients**:
+  - All OpenAI clients (Fact Card, Bill Parser, shared) are now lazily instantiated via getters so missing keys never crash imports; errors surface only when AI is actually invoked.
+  - API routes that depend on these clients always return JSON error payloads (never HTML), eliminating “Unexpected token '<'” parse errors in callers.
+- **Key hygiene**:
+  - Any keys pasted into chat or logs must be treated as compromised; operationally, rotate/revoke these keys in their respective OpenAI Projects before deploying changes that might rely on them.
+
 ## EFL Templates — Stable Identity + Dedupe (Step 2)
 
 - key precedence order (strongest to weakest):

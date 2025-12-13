@@ -19,6 +19,28 @@
 - `GREEN_BUTTON_UPLOAD_MAX_BYTES` — Optional override for the 10 MB default upload limit (applies to both Vercel fallback route and droplet service).
 - `GREEN_BUTTON_UPLOAD_ALLOW_ORIGIN` — Optional CORS allowlist for the droplet uploader (defaults to `https://intelliwatt.com` when unset).
 
+### OpenAI (per-module projects)
+
+- `OPENAI_FACT_CARD_API_KEY`
+  - **Purpose**: API key for the dedicated **Fact Card / EFL parser** OpenAI Project.
+  - **Precedence**: Used first by the Fact Card client; falls back to `OPENAI_API_KEY` when unset.
+  - **Scope**: Server-only; never expose to the browser.
+- `OPENAI_BILL_PARSER_API_KEY`
+  - **Purpose**: API key for the dedicated **Bill Parser / Current Plan** OpenAI Project.
+  - **Precedence**: Used first by the Bill Parser client; falls back to `OPENAI_API_KEY` when unset.
+  - **Scope**: Server-only; never expose to the browser.
+- `OPENAI_API_KEY`
+  - **Purpose**: Shared default OpenAI key for generic tools and as a fallback when module-specific keys are not configured.
+  - **Note**: When using separate Projects per module, prefer the module keys above and reserve `OPENAI_API_KEY` for non-critical/shared usage.
+- `OPENAI_IntelliWatt_Fact_Card_Parser`
+  - **Purpose**: Feature flag for Fact Card / EFL AI parsing.
+  - **Enabled when**: Set to a truthy value such as `"1"`, `"true"`, `"yes"`, `"on"`, or `"enabled"`.
+  - **Behavior**: When not truthy, Fact Card AI calls are skipped and deterministic parsing + validator still run, with clear JSON warnings.
+- `OPENAI_IntelliWatt_Bill_Parcer`
+  - **Purpose**: Feature flag for Bill Parser AI.
+  - **Enabled when**: Same truthy semantics as above.
+  - **Behavior**: When not truthy, bill parsing falls back to non-AI/regex paths where available.
+
 ## EFL pdftotext Helper (Droplet HTTPS Proxy)
 
 - `EFL_PDFTEXT_URL`
