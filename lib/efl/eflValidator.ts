@@ -13,7 +13,15 @@ export type EflAvgPricePoint = {
 };
 
 export type EflTdspCharges = {
+  /**
+   * TDSP delivery charge in ¢/kWh as printed in the EFL, kept as a float
+   * (e.g. 6.0009 for "6.0009 ¢ per kWh"). Never rounded to an int.
+   */
   perKwhCents: number | null;
+  /**
+   * Fixed TDSP delivery charge in integer cents per month / billing cycle
+   * (e.g. 490 for "$4.90 per billing cycle").
+   */
   monthlyCents: number | null;
   snippet: string | null;
   confidence: "HIGH" | "MED" | "LOW";
@@ -173,23 +181,23 @@ export function extractEflTdspCharges(rawText: string): EflTdspCharges {
   // Pattern B: separate per-kWh line near a TDU/TDSP header.
   if (perKwh == null) {
     const perLine = text.match(
-      /(Oncor|CenterPoint|AEP\s*Texas(?:\s*North|\s*Central)?|TNMP)?[^\n]{0,80}(?:TDSP|TDU|Delivery)\s*Charge(?:s)?[^\n]{0,120}(\d+(?:\.\d+)?)\s*¢\s*(?:\/\s*kwh|per\s*kwh)/i,
+      /(Oncor|CenterPoint|AEP\s*Texas(?:\s*North|\s*Central)?|TNMP)?[^\n]{0,80}(?:TDSP|TDU|Delivery)\s*Charge(?:s)?[^\n]{0,160}/i,
     );
-    if (perLine?.[2]) {
-      const n = Number(perLine[2]);
-      if (Number.isFinite(n)) {
-        perKwh = n;
+    if (perLine?.[0]) {
+      const v = parseCentsPerKwhToken(perLine[0]);
+      if (v != null) {
+        perKwh = v;
         snippet = snippet ?? perLine[0].trim();
         if (confidence === "LOW") confidence = "MED";
       }
     } else {
       const near = text.match(
-        /(?:TDSP|TDU|Delivery)\s*Charge(?:s)?[^\n]{0,160}\n[^\n]{0,160}(\d+(?:\.\d+)?)\s*¢\s*(?:\/\s*kwh|per\s*kwh)/i,
+        /(?:TDSP|TDU|Delivery)\s*Charge(?:s)?[^\n]{0,160}\n[^\n]{0,160}/i,
       );
-      if (near?.[1]) {
-        const n = Number(near[1]);
-        if (Number.isFinite(n)) {
-          perKwh = n;
+      if (near?.[0]) {
+        const v = parseCentsPerKwhToken(near[0]);
+        if (v != null) {
+          perKwh = v;
           snippet = snippet ?? near[0].trim();
           if (confidence === "LOW") confidence = "MED";
         }
@@ -333,6 +341,141 @@ function buildModeledComponentsFromEngineResult(args: {
       totalDollars: total,
       avgCentsPerKwh,
     },
+  };
+}
+
+// -------------------- Validator-only deterministic calculator --------------------
+
+type ValidatorModeledBreakdown = {
+  repEnergyDollars: number;
+  repBaseDollars: number;
+  tdspDollars: number;
+  creditsDollars: number;
+  totalDollars: number;
+  avgCentsPerKwh: number;
+};
+
+function round4(n: number): number {
+  return Math.round(n * 10000) / 10000;
+}
+
+function getEnergyRateCentsForUsage(
+  planRules: any,
+  rateStructure: any,
+  usageKwh: number,
+): number | null {
+  const tiersA = Array.isArray(planRules?.usageTiers)
+    ? planRules.usageTiers
+    : null;
+  if (tiersA && tiersA.length) {
+    const t = tiersA.find(
+      (x: any) =>
+        usageKwh >= x.minKwh && (x.maxKwh == null || usageKwh < x.maxKwh),
+    );
+    if (t?.rateCentsPerKwh != null) return Number(t.rateCentsPerKwh);
+  }
+
+  // Some admin responses send a tier array rather than the canonical
+  // RateStructure contract. Support that shape as a fallback.
+  const tiersB = Array.isArray(rateStructure) ? rateStructure : null;
+  if (tiersB && tiersB.length) {
+    const t = tiersB.find(
+      (x: any) =>
+        usageKwh >= (x.tierMinKWh ?? 0) &&
+        (x.tierMaxKWh == null || usageKwh < x.tierMaxKWh),
+    );
+    if (t?.energyRateCentsPerKWh != null) {
+      return Number(t.energyRateCentsPerKWh);
+    }
+  }
+
+  const single =
+    planRules?.currentBillEnergyRateCents ?? planRules?.defaultRateCentsPerKwh;
+  if (single != null) return Number(single);
+
+  return null;
+}
+
+function applyThresholdCredits(planRules: any, usageKwh: number): number {
+  const credits = Array.isArray(planRules?.billCredits)
+    ? planRules.billCredits
+    : [];
+  let totalCredit = 0;
+
+  for (const c of credits) {
+    const dollars = Number(c?.creditDollars);
+    if (!Number.isFinite(dollars)) continue;
+
+    const threshold =
+      c?.thresholdKwh != null ? Number(c.thresholdKwh) : null;
+    const type = String(c?.type ?? "").toUpperCase();
+
+    // Standard "usage >= threshold" bill credits.
+    if (type === "THRESHOLD_MIN" || type === "USAGE_THRESHOLD") {
+      if (threshold == null || usageKwh >= threshold) totalCredit += dollars;
+      continue;
+    }
+
+    // Minimum usage fee modeled as negative credit with threshold and
+    // "usage < threshold" semantics.
+    if (dollars < 0 && threshold != null) {
+      if (usageKwh < threshold) totalCredit += dollars;
+      continue;
+    }
+
+    // No threshold => assume always-on credit.
+    if (threshold == null) totalCredit += dollars;
+  }
+
+  return totalCredit;
+}
+
+function computeValidatorModeledBreakdown(
+  planRules: any,
+  rateStructure: any,
+  usageKwh: number,
+  eflTdsp: EflTdspCharges,
+  tdspDeliveryIncludedInEnergyCharge: boolean | null | undefined,
+): ValidatorModeledBreakdown | null {
+  const energyRateCents = getEnergyRateCentsForUsage(
+    planRules,
+    rateStructure,
+    usageKwh,
+  );
+  if (energyRateCents == null || !Number.isFinite(energyRateCents)) {
+    return null;
+  }
+
+  const repEnergyDollars = (usageKwh * energyRateCents) / 100;
+
+  const baseCents =
+    planRules?.baseChargePerMonthCents != null
+      ? Number(planRules.baseChargePerMonthCents)
+      : 0;
+  const repBaseDollars = Number.isFinite(baseCents) ? baseCents / 100 : 0;
+
+  const creditsDollars = applyThresholdCredits(planRules, usageKwh);
+
+  let tdspDollars = 0;
+  if (!tdspDeliveryIncludedInEnergyCharge) {
+    const per =
+      eflTdsp.perKwhCents != null ? eflTdsp.perKwhCents / 100 : 0;
+    const monthly =
+      eflTdsp.monthlyCents != null ? eflTdsp.monthlyCents / 100 : 0;
+    tdspDollars = monthly + per * usageKwh;
+  }
+
+  const totalDollars =
+    repEnergyDollars + repBaseDollars + tdspDollars - creditsDollars;
+  const avgCentsPerKwh = (totalDollars / usageKwh) * 100;
+
+  return {
+    repEnergyDollars: round4(repEnergyDollars),
+    repBaseDollars: round4(repBaseDollars),
+    tdspDollars: round4(tdspDollars),
+    creditsDollars: round4(creditsDollars),
+    totalDollars: round4(totalDollars),
+    avgCentsPerKwh: round4(avgCentsPerKwh),
   };
 }
 
@@ -657,17 +800,31 @@ export async function validateEflAvgPriceTable(args: {
   const modeledPoints: EflAvgPriceValidation["points"] = [];
 
   for (const p of points) {
-    const { components, usedEngineTdspFallback } =
-      await computeModeledComponentsOrNull({
+    // 1) Try canonical engine path.
+    const engineResult = await computeModeledComponentsOrNull({
       planRules,
       rateStructure,
       kwh: p.kwh,
-        eflTdsp,
-        tdspIncludedInEnergyCharge: tdspIncludedFlag,
+      eflTdsp,
+      tdspIncludedInEnergyCharge: tdspIncludedFlag,
       nightUsagePercent: nightAssumption?.nightUsagePercent,
       nightStartHour: nightAssumption?.nightStartHour,
       nightEndHour: nightAssumption?.nightEndHour,
     });
+
+    let components = engineResult.components;
+
+    // 2) If engine path failed, fall back to deterministic validator math
+    // from the EFL (energy rate, base charge, credits, TDSP from EFL).
+    if (!components || Number.isNaN(components.avgCentsPerKwh)) {
+      components = computeValidatorModeledBreakdown(
+        planRules,
+        rateStructure,
+        p.kwh,
+        eflTdsp,
+        tdspIncludedFlag,
+      );
+    }
 
     if (!components || Number.isNaN(components.avgCentsPerKwh)) {
       modeledPoints.push({
