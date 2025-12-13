@@ -34,6 +34,11 @@ export type ModeledComponents = {
   creditsDollars: number;
   totalDollars: number;
   avgCentsPerKwh: number;
+  /**
+   * REP-only total (energy + base - credits), excluding TDSP.
+   * Null when we cannot reliably separate supply from TDSP.
+   */
+  supplyOnlyDollars: number | null;
 };
 
 export interface EflAvgPriceValidation {
@@ -51,6 +56,14 @@ export interface EflAvgPriceValidation {
       tdspDollars: number;
       creditsDollars: number;
       totalDollars: number;
+      /** REP-only total (energy + base - credits) in cents, if available. */
+      supplyOnlyTotalCents?: number | null;
+      /** TDSP dollars used for this point, in cents. */
+      tdspTotalCentsUsed?: number | null;
+      /** Total dollars used for this point, in cents. */
+      totalCentsUsed?: number | null;
+      /** Average ¢/kWh used for this point (mirrors modeledAvgCentsPerKwh). */
+      avgCentsPerKwh?: number | null;
     } | null;
   }>;
   assumptionsUsed: {
@@ -65,6 +78,11 @@ export interface EflAvgPriceValidation {
       snippet: string | null;
     };
     usedEngineTdspFallback?: boolean;
+    tdspAppliedMode?:
+      | "INCLUDED_IN_RATE"
+      | "ADDED_FROM_EFL"
+      | "ENGINE_DEFAULT"
+      | "NONE";
   };
   fail: boolean;
   queueReason?: string;
@@ -315,6 +333,7 @@ function buildModeledComponentsFromEngineResult(args: {
         creditsDollars: 0,
         totalDollars: total,
         avgCentsPerKwh,
+        supplyOnlyDollars: null,
       },
     };
   }
@@ -358,20 +377,14 @@ function buildModeledComponentsFromEngineResult(args: {
       creditsDollars: billCreditsDollars,
       totalDollars: total,
       avgCentsPerKwh,
+      supplyOnlyDollars: repOnlyTotal,
     },
   };
 }
 
 // -------------------- Validator-only deterministic calculator --------------------
 
-type ValidatorModeledBreakdown = {
-  repEnergyDollars: number;
-  repBaseDollars: number;
-  tdspDollars: number;
-  creditsDollars: number;
-  totalDollars: number;
-  avgCentsPerKwh: number;
-};
+type ValidatorModeledBreakdown = ModeledComponents;
 
 function round4(n: number): number {
   return Math.round(n * 10000) / 10000;
@@ -494,6 +507,9 @@ function computeValidatorModeledBreakdown(
     creditsDollars: round4(creditsDollars),
     totalDollars: round4(totalDollars),
     avgCentsPerKwh: round4(avgCentsPerKwh),
+    supplyOnlyDollars: round4(
+      repEnergyDollars + repBaseDollars - creditsDollars,
+    ),
   };
 }
 
@@ -816,6 +832,8 @@ export async function validateEflAvgPriceTable(args: {
       : undefined;
 
   const modeledPoints: EflAvgPriceValidation["points"] = [];
+  let tdspAppliedMode: EflAvgPriceValidation["assumptionsUsed"]["tdspAppliedMode"] =
+    "NONE";
 
   for (const p of points) {
     // 1) Try canonical engine path.
@@ -871,6 +889,13 @@ export async function validateEflAvgPriceTable(args: {
         tdspDollars: cents(components.tdspDollars),
         creditsDollars: cents(components.creditsDollars),
         totalDollars: cents(components.totalDollars),
+        supplyOnlyTotalCents:
+          components.supplyOnlyDollars != null
+            ? Math.round(components.supplyOnlyDollars * 100)
+            : null,
+        tdspTotalCentsUsed: Math.round(components.tdspDollars * 100),
+        totalCentsUsed: Math.round(components.totalDollars * 100),
+        avgCentsPerKwh: Number(cents(modeledAvg).toFixed(4)),
       },
     });
   }
@@ -938,6 +963,12 @@ export async function validateEflAvgPriceTable(args: {
         },
         usedEngineTdspFallback:
           eflTdsp.perKwhCents == null && eflTdsp.monthlyCents == null,
+        tdspAppliedMode:
+          tdspIncludedFlag === true
+            ? "INCLUDED_IN_RATE"
+            : eflTdsp.perKwhCents != null || eflTdsp.monthlyCents != null
+              ? "ADDED_FROM_EFL"
+              : "NONE",
       },
       fail: false,
       notes: [],
@@ -967,6 +998,12 @@ export async function validateEflAvgPriceTable(args: {
       },
       usedEngineTdspFallback:
         eflTdsp.perKwhCents == null && eflTdsp.monthlyCents == null,
+      tdspAppliedMode:
+        tdspIncludedFlag === true
+          ? "INCLUDED_IN_RATE"
+          : eflTdsp.perKwhCents != null || eflTdsp.monthlyCents != null
+            ? "ADDED_FROM_EFL"
+            : "NONE",
     },
     fail: true,
     queueReason:
