@@ -345,6 +345,403 @@ Next step: Step 7 — Documentation + runbooks + failure modes
 - **Average price tables** (`Average Monthly Use / Average Price per kWh`) — these are examples, not billable rates.
 - **Taxes, municipal fees, and generic disclosures** — ignored unless they directly change recurring REP charges that cannot be modeled elsewhere.
 
+### UTILITY / TDSP MODULE — Step 1 Inventory (2025-12-13)
+
+- **Ripgrep commands used**
+  - `rg -n "TDSP|tdsp|delivery fee|delivery fees|TDU|TD(U|SP)|tariff|rider|adjustment|Oncor|CenterPoint|TNMP|AEP" .`
+  - `rg -n "utility fee|utility fees|regulated|non-bypassable|NBF|TCRF|DCRF|PCRF|SCRF|TDS|transmission|distribution" .`
+  - `rg -n "RatePlan|RatePlan\\b|utilityName|utilityPhone|tdspSlug|utilityID|utilityId" .`
+  - `rg -n "admin.*(utility|tdsp|tariff|delivery)" .`
+  - `rg -n "CurrentPlan|EFL|fact card|pdftotext|bill-parse" .`
+
+- **What already exists**
+  - **Core master schema (prisma/schema.prisma)**:
+    - `RatePlan` stores normalized REP plans and utility tariffs with:
+      - `utilityId`, `state`, `supplier`, `planName`, `termMonths`, `isUtilityTariff`, `tariffStructure` (JSON), plus EFL identity fields (`eflPdfSha256`, `repPuctCertificate`, `eflVersionCode`) and validation metadata (`eflValidationIssues`, `rateStructure`).
+    - `ErcotIngest` and `ErcotEsiidIndex` track ERCOT TDSP ESIID extract ingestion and map ESIIDs to `tdspCode` (`ONCOR`, `CENTERPOINT`, `AEP_NORTH`, `AEP_CENTRAL`, `TNMP`).
+    - `UserProfile` and `HouseAddress` use `tdspSlug` and `utilityName` to tag homes with TDSP/utility context.
+    - `RateConfig` (internal config table) already has coarse TDSP-related fields (`tdsp`, `tdspSlug`, `tduDeliveryCentsPerKwh`, `billCreditsJson`) for legacy rate experiments.
+    - `UtilityPlan` stores per-user plans with coarse `deliveryFee` and `monthlyFee` floats (not a canonical tariff table).
+  - **Current-plan / bill parser schema (prisma/current-plan/schema.prisma)**:
+    - `ParsedCurrentPlan` includes `tdspName`, `rateStructure`, and serialized `energyRateTiersJson` / `billCreditsJson`, but no explicit TDSP tariff rows.
+    - `BillPlanTemplate` captures reusable plan-level terms (rate type, tiers, credits) keyed by provider/plan name, again without normalized utility/TDSP fee tables.
+  - **Usage / home-details / appliances schemas**:
+    - `RawGreenButton` and `GreenButtonInterval` store utility usage with `utilityName`, but no structured TDSP charge components.
+  - **Application + docs wiring**:
+    - WattBuy integration (`RatePlan`, `/api/admin/wattbuy/*`, `app/admin/wattbuy/inspector`) already uses `utilityID`, `state`, and `utilityName` to fetch and persist both REP plans and utility tariffs into `RatePlan` with `isUtilityTariff=true` and `tariffStructure` JSON.
+    - SMT and Green Button flows pass `tdspSlug` / `utilityName` through APIs and admin UIs, but do not surface a canonical TDSP charge table.
+    - EFL Avg Price Validator (`lib/efl/eflValidator.ts`) parses TDSP/TDU delivery charges **from the EFL text itself** and uses them only for validator math and admin breakdowns; it does **not** read from or write to any shared Utility/TDSP tariff store.
+
+- **What’s missing**
+  - There is **no dedicated Utility/TDSP tariff schema** that:
+    - Stores per-TDSP delivery components (customer charge, per‑kWh delivery, riders like TCRF/DCRF/PCRF/SCRF) as first-class rows.
+    - Tracks effective date ranges and version history for tariff changes per TDSP.
+    - Normalizes units (¢/kWh, $/month, $/kW, percentage) with explicit `chargeType` and `unit` enums.
+    - Captures raw source metadata (TDSP name/code, source URL, document identifiers, SHA‑256 of the source PDF/HTML) and human-readable notes.
+  - All TDSP/utility charges today are either:
+    - Embedded in EFL text and parsed on-the-fly for validation, or
+    - Stored as opaque JSON blobs (`tariffStructure`, `rateStructure`, `centsPerKwhJson`, `billCreditsJson`) without a shared, queryable tariff table.
+
+- **Minimal proposed Prisma schema (not yet implemented)**
+  - **Goal**: create a boring, isolated Utility/TDSP tariff module that can back both the validator and future rate engines without entangling EFL/bill parsing.
+  - **New models (in master prisma/schema.prisma, behind a dedicated migration)**:
+    - `TdspUtility`
+      - `id: String @id @default(cuid())`
+      - `code: TdspCode` (reuses existing enum: `ONCOR`, `CENTERPOINT`, `AEP_NORTH`, `AEP_CENTRAL`, `TNMP`)
+      - `name: String` (e.g., "Oncor Electric Delivery Company LLC")
+      - `shortName: String?` (e.g., "Oncor")
+      - `serviceTerritory: String?` (freeform description / marketing name)
+      - `websiteUrl: String?`
+      - `createdAt: DateTime @default(now())`
+      - `updatedAt: DateTime @updatedAt`
+    - `TdspTariffVersion`
+      - `id: String @id @default(cuid())`
+      - `tdspId: String` → FK to `TdspUtility`
+      - `tariffCode: String?` (e.g., rate schedule identifier from TDSP docs)
+      - `tariffName: String?` (human label, e.g., "Residential Service")
+      - `effectiveStart: DateTime`
+      - `effectiveEnd: DateTime?` (null for "current until superseded")
+      - `sourceUrl: String?` (TDSP PDF/HTML URL)
+      - `sourceDocSha256: String? @unique` (hash of the source file for drift detection)
+      - `planSource: PlanSource` (reuse existing enum: `wattbuy` | `tdsp_feed` | `manual`)
+      - `notes: String?`
+      - `createdAt: DateTime @default(now())`
+      - `updatedAt: DateTime @updatedAt`
+      - `@@index([tdspId, effectiveStart, effectiveEnd])`
+    - `TdspTariffComponent`
+      - `id: String @id @default(cuid())`
+      - `tariffVersionId: String` → FK to `TdspTariffVersion`
+      - `chargeName: String` (e.g., "TDU Delivery Charge", "Customer Charge", "TCRF")
+      - `chargeType: String` (normalized code, e.g., "DELIVERY", "CUSTOMER", "TCRF", "DCRF", "PCRF", "OTHER")
+      - `unit: String` (e.g., "PER_KWH", "PER_MONTH", "PER_KW", "PERCENT")
+      - `rate: Decimal` (stored in canonical units: ¢/kWh, $/month, etc.)
+      - `minKwh: Int?` / `maxKwh: Int?` (for usage-banded components; null for flat)
+      - `notes: String?` (human-readable explanation, caveats)
+      - `rawSourceJson: Json?` (snippet of the originating TDSP text/table for traceability)
+      - `createdAt: DateTime @default(now())`
+      - `updatedAt: DateTime @updatedAt`
+      - `@@index([tariffVersionId, chargeType, unit])`
+  - **History + versioning guarantees**
+    - New TDSP tariff docs are **always** inserted as new `TdspTariffVersion` rows; existing rows are never hard-updated in a way that loses historical rates.
+    - `effectiveEnd` is set when a new version supersedes the old one, preserving a complete effective-date history.
+    - `TdspTariffComponent` rows are append-only within each version; changes are represented by a new `TdspTariffVersion` rather than in-place edits.
+
+- **Next step**
+  - **Step 2 — Create isolated Prisma schema + migrations (NO parsing logic yet)**:
+    - Add the `TdspUtility`, `TdspTariffVersion`, and `TdspTariffComponent` models to `prisma/schema.prisma` behind a dedicated migration.
+    - Wire read-only accessors and admin inspection tooling, but keep all TDSP extraction/parsing logic in existing EFL/bill modules until the tariff store is populated and validated.
+
+### UTILITY / TDSP MODULE — Step 2 Prisma models + lookup + seed (2025-12-13)
+
+- **Files changed**
+  - `prisma/schema.prisma`
+    - Added `TdspUtility` model: normalized TDSP master table keyed by existing `TdspCode` enum, with `name`, `shortName`, `serviceTerritory`, `websiteUrl`, and timestamps.
+    - Added `TdspTariffVersion` model: versioned TDSP tariff documents with `tdspId` FK → `TdspUtility`, `tariffCode`, `tariffName`, `effectiveStart`/`effectiveEnd`, `sourceUrl`, `sourceDocSha256` (unique), `planSource: PlanSource`, `notes`, timestamps, and index on `[tdspId, effectiveStart, effectiveEnd]`.
+    - Added `TdspTariffComponent` model: per-component tariff rows with `tariffVersionId` FK → `TdspTariffVersion`, `chargeName`, `chargeType`, `unit`, `rate Decimal(10,4)` (stored in cents for `PER_MONTH`/`PER_KWH`), optional `minKwh`/`maxKwh`, `notes`, `rawSourceJson`, timestamps, and index on `[tariffVersionId, chargeType, unit]`.
+  - `lib/utility/tdspTariffs.ts`
+    - New pure helper module exporting:
+      - `lookupTdspCharges({ tdspCode, asOfDate })` → best-effort TDSP delivery charges for a given `TdspCode` and date, backed by the new Prisma models.
+      - `TdspCharges` shape with: `tdspCode`, `asOfDate`, `tariffVersionId`, `effectiveStart`, `effectiveEnd`, `monthlyCents`, `perKwhCents`, a list of raw `components` (type/unit/rate/minKwh/maxKwh), and `confidence: "MED" | "LOW"` (currently `"MED"` for table-backed lookups).
+    - Lookup behavior:
+      - Finds `TdspUtility` by `code` (existing `TdspCode` enum: `ONCOR`, `CENTERPOINT`, `AEP_NORTH`, `AEP_CENTRAL`, `TNMP`).
+      - Selects the active `TdspTariffVersion` where `effectiveStart <= asOfDate` and (`effectiveEnd` is null OR `effectiveEnd > asOfDate`), preferring the most recent `effectiveStart` when multiple match.
+      - Aggregates `monthlyCents` as the sum of `rate` for components with `unit === "PER_MONTH"` and `perKwhCents` as the sum of `rate` where `unit === "PER_KWH"` (both in integer cents).
+      - Returns `null` when no utility, version, or components are found; performs **no** plan math and does not reference any EFL/bill parsing logic.
+  - `scripts/seed-tdsp-tariffs.ts`
+    - New idempotent seed script that:
+      - Upserts `TdspUtility` rows for `TdspCode.ONCOR` and `TdspCode.CENTERPOINT` with canonical names and short display names.
+      - Upserts a single `TdspTariffVersion` per TDSP with `effectiveStart = 2025-01-01`, `planSource = PlanSource.tdsp_feed`, and a placeholder `tariffCode/tariffName` plus notes indicating seeded values must be replaced with official tariff data.
+      - Clears existing `TdspTariffComponent` rows for that version on re-run and creates at least two components per TDSP:
+        - `CUSTOMER` / `PER_MONTH` component (`rate` in cents per month, e.g., `395` for `$3.95`), and
+        - `DELIVERY` / `PER_KWH` component (`rate` in cents per kWh, e.g., `3.287` for `3.287¢/kWh` for ONCOR; CENTERPOINT seeded as `0` with explicit “replace me” notes).
+      - Logs a short completion message and disconnects Prisma on exit.
+
+- **Migration status**
+  - Attempted to run `npx prisma migrate dev --name add_tdsp_tariff_models` against the shared DigitalOcean Postgres instance; Prisma detected drift (previous migrations modified after apply, additional tables/columns present) and aborted with a recommendation to run `prisma migrate reset`.
+  - To avoid dropping or resetting the shared database from a dev workstation, **no new migration was applied** in this step; only `prisma/schema.prisma` was updated in the repo.
+  - **Next operational action** (to be done carefully, outside this step):
+    - Resolve migration drift in a controlled maintenance window (e.g., via `prisma migrate diff` + `migrate resolve` / `migrate deploy` according to Prisma’s drift guidance).
+    - Once drift is resolved, run `npx prisma migrate dev --name add_tdsp_tariff_models` (or the equivalent `migrate deploy` in CI/prod) so the new TDSP tables are created in the live schema.
+
+- **Seed command (local / dev)**
+  - From a dev machine with `DATABASE_URL` pointing at a **safe** database (not shared prod):
+    - PowerShell:
+      - `cd "C:\Users\...\intelliwatt-clean"`
+      - `npx prisma migrate dev --name add_tdsp_tariff_models`
+      - `npx ts-node scripts/seed-tdsp-tariffs.ts` (or `npx tsx scripts/seed-tdsp-tariffs.ts` depending on local tooling)
+  - This will create `TdspUtility`, `TdspTariffVersion`, and `TdspTariffComponent` rows for ONCOR and CENTERPOINT with clearly-labeled placeholder rates.
+
+- **Seed command (prod / managed DB, once drift is resolved)**
+  - From the app host (e.g., droplet / CI) in a controlled rollout:
+    - `cd /home/deploy/apps/intelliwatt`
+    - `npx prisma migrate deploy`
+    - `npx ts-node scripts/seed-tdsp-tariffs.ts` (or the project-standard Node runner)
+  - This should be run **after** migration drift has been addressed and once we are ready to start populating TDSP tariff tables in the shared database.
+
+- **Next step**
+  - **Step 3 — Wire `lookupTdspCharges()` into EFL Avg Price Validator (no behavior change to EFL parser/bill parser yet)**:
+    - When `lib/efl/eflValidator.ts` encounters an EFL avg-price table where numeric TDSP delivery charges are masked with `**` but pass-through language exists, use `lookupTdspCharges({ tdspCode, asOfDate })` as a **fallback** TDSP source for validator math.
+    - On successful utility-table lookup, classify validator results as PASS/FAIL (or PASS_WITH_ASSUMPTIONS) instead of SKIP, while keeping SKIP only for cases where area/date inference or TDSP lookup fails.
+    - Keep all TDSP extraction from EFL text and all bill parser logic unchanged; this step is a pure validator enhancement layered on top of the new Utility/TDSP module.
+
+### UTILITY / TDSP MODULE — Step 2A Texas TDSP universe (2025-12-13)
+
+- **A) Authoritative Texas TDSP list (from ERCOT / repo)**
+  - **Enum source**
+    - `prisma/schema.prisma` defines `enum TdspCode { ONCOR; CENTERPOINT; AEP_NORTH; AEP_CENTRAL; TNMP }` and is referenced by:
+      - `ErcotIngest.tdsp` comment (`oncor|centerpoint|aep_north|aep_central|tnmp|unknown`), documenting the ERCOT TDSP DAILY zip ingest mapping.
+      - ESIID index model `ErcotEsiidIndex` via `tdspCode` string field (normalized to these codes at ingest time).
+      - TDSP cost modules (`lib/cost/tdsp.ts`, `lib/tdsp/fetch.ts`, plan analyzer tests, and docs) which already assume this 5‑TDSP universe for Texas.
+  - **TDSP codes + legal names (from PUCT lists / docs)**
+    - `ONCOR` → **Oncor Electric Delivery Company**  
+      - Evidence: `docs/PUCT NUMBER LISTS/tdu.csv` (`ONCOR ELECTRIC DELIVERY COMPANY`) and `docs/PUCT NUMBER LISTS/iou.csv` (Oncor IOU rows), plus internal comments in `ErcotIngest` and SMT agreements.
+    - `CENTERPOINT` → **CenterPoint Energy Houston Electric, LLC**  
+      - Evidence: `tdu.csv` and `iou.csv` entries for `CENTERPOINT ENERGY HOUSTON ELECTRIC LLC`, plus SMT agreement mappings in `lib/smt/agreements.ts` (`CENTERPOINT`, `CENTERPOINT_ENERGY`, `CENTERPOINT ENERGY` → CENTERPOINT TDSP).
+    - `AEP_CENTRAL` → **AEP Texas Central Company**  
+      - Evidence: `tdu.csv` (`AEP TEXAS CENTRAL`) and ERCOT daily TDSP zip notes in `docs/PROJECT_PLAN.md` (“AEP Central”), mapped in code as `AEP_CENTRAL`.
+    - `AEP_NORTH` → **AEP Texas North Company**  
+      - Evidence: `tdu.csv` (`AEP TEXAS NORTH`) and ERCOT daily TDSP zip notes (“AEP North”), mapped in code as `AEP_NORTH`.
+    - `TNMP` → **Texas‑New Mexico Power Company**  
+      - Evidence: `tdu.csv` entries for `TEXAS-NEW MEXICO POWER COMPANY (TNMP)` and ERCOT ingest docs listing `TNMP` alongside the other four TDSPs.
+  - **ERCOT alignment**
+    - `docs/PROJECT_PLAN.md` ERCOT section (“PC-2025-11-10-B: ERCOT Daily TDSP Zip Auto-Fetch”) lists the same five TDSPs for automated daily ingestion: **Lubbock, CenterPoint, Oncor, TNMP, AEP Central, AEP North** (Lubbock is called out separately and is not modeled as a `TdspCode`).
+    - `ErcotIngest.tdsp` comment explicitly enumerates `oncor|centerpoint|aep_north|aep_central|tnmp|unknown`, confirming these are the only TDSP codes used for ERCOT TDSP DAILY zip handling in this system.
+
+- **B) Completeness confirmation**
+  - The repo’s `TdspCode` enum (`ONCOR`, `CENTERPOINT`, `AEP_NORTH`, `AEP_CENTRAL`, `TNMP`) matches the standard ERCOT investor‑owned TDSP list for deregulated Texas service territories.
+  - Municipal utilities and co‑ops (e.g., Lubbock Power & Light, Austin Energy, CPS) appear in PUCT CSVs but are **not** represented in `TdspCode` and are out of scope for the TDSP tariff module (they are not REP‑choice TDSPs for this engine).
+  - No REP‑specific utilities (retail providers) are included in `TdspCode`; it is strictly TDSP/TDU layer only.
+
+- **C) Seeding decision**
+  - `TdspUtility` will ultimately have **exactly one row per `TdspCode`**:
+    - `ONCOR`, `CENTERPOINT`, `AEP_NORTH`, `AEP_CENTRAL`, `TNMP` seeded up front with legal names pulled from `docs/PUCT NUMBER LISTS/*.csv` and ERCOT notes.
+  - `TdspTariffVersion` rows may be **partial initially**:
+    - Step 2 seeded only ONCOR and CENTERPOINT with placeholder delivery values and a single effective window.
+    - Additional versions (per tariff change and per TDSP) will be appended over time with accurate rates and `effectiveStart`/`effectiveEnd` windows.
+  - `TdspTariffComponent` coverage will also be incremental:
+    - Initial focus is on core components required for avg‑price validation and rate engines:
+      - `CUSTOMER` / `PER_MONTH` (base customer charge in cents per month).
+      - `DELIVERY` / `PER_KWH` (volumetric delivery in cents per kWh).
+    - Future components (TCRF/DCRF/PCRF/SCRF/other riders) will be added as distinct `chargeType` rows without breaking existing consumers.
+  - When no matching tariff/version/component exists for a given `(tdspCode, asOfDate)`:
+    - `lookupTdspCharges()` will return `null` (`monthlyCents` and `perKwhCents` are `null`), and callers must treat TDSP charges as **unknown**, not zero.
+
+- **D) Validator rule (forward-looking)**
+  - Once `lib/efl/eflValidator.ts` is wired to the Utility/TDSP module in Step 3:
+    - If avg‑price validation needs TDSP delivery charges and a tariff lookup is attempted via `lookupTdspCharges()`:
+      - **If** a matching `TdspTariffVersion` and required components (`PER_MONTH` / `PER_KWH`) are found for the inferred `tdspCode` + EFL date, the validator may use them for modeling and classify results as PASS/FAIL (or PASS_WITH_ASSUMPTIONS).
+      - **If** no matching tariff/version or required components are found (i.e., `lookupTdspCharges()` returns `null` or only partial rates), the validator **MUST SKIP** TDSP‑backed avg‑price validation for that EFL and surface an explicit note (e.g., “Skipped avg-price validation: no TDSP tariff found for {tdspCode} @ {date}”). Existing REP‑only breakdowns remain visible for debugging.
+  - This guarantees we never silently assume zero TDSP charges when tariff data is missing or incomplete; absence of data is modeled as **unknown**, not as a free delivery rate.
+
+- **Status**
+  - **Step 2A complete — TDSP universe locked**: the Texas TDSP list used by this module is now explicitly defined as `ONCOR`, `CENTERPOINT`, `AEP_NORTH`, `AEP_CENTRAL`, and `TNMP`, aligned with ERCOT and PUCT source data and documented here for future reference.
+
+### UTILITY / TDSP MODULE — Step 2B storage + lookup seeded (2025-12-13)
+
+- **Files and models**
+  - `prisma/schema.prisma`
+    - `TdspUtility`, `TdspTariffVersion`, and `TdspTariffComponent` models are now defined in the master Prisma schema (see “Step 2 Prisma models + lookup + seed” above for full field list and indexes).
+    - These models reuse the existing `TdspCode` enum and do not modify any existing models or enums.
+  - `lib/utility/tdspTariffs.ts`
+    - `lookupTdspCharges({ tdspCode, asOfDate })` is the canonical TDSP tariff lookup helper and is **read-only**:
+      - Returns a `TdspCharges` object when a matching `TdspUtility` + active `TdspTariffVersion` + components exist.
+      - Aggregates `PER_MONTH` and `PER_KWH` components into `monthlyCents` and `perKwhCents` (in cents), and returns the raw component list for transparency.
+      - Returns `null` when utility, version, or components are missing; callers must treat this as “TDSP unknown,” not zero.
+  - `scripts/seed-tdsp-tariffs.ts`
+    - Idempotent seed script that:
+      - Upserts **all five** Texas TDSP utilities (`TdspUtility`):
+        - `ONCOR` → “Oncor Electric Delivery Company LLC” (shortName “Oncor”).
+        - `CENTERPOINT` → “CenterPoint Energy Houston Electric, LLC” (shortName “CenterPoint”).
+        - `AEP_NORTH` → “AEP Texas North Company” (shortName “AEP Texas North”).
+        - `AEP_CENTRAL` → “AEP Texas Central Company” (shortName “AEP Texas Central”).
+        - `TNMP` → “Texas-New Mexico Power Company” (shortName “TNMP”).
+      - Upserts a single placeholder `TdspTariffVersion` per TDSP where initial data is available (ONCOR and CENTERPOINT) for `effectiveStart = 2025-01-01`, with `planSource = PlanSource.tdsp_feed` and explicit notes marking the rows as seed placeholders.
+      - Seeds minimum `TdspTariffComponent` rows only where values are known/placeholder-ready:
+        - ONCOR: `CUSTOMER` / `PER_MONTH` (395 cents/month) and `DELIVERY` / `PER_KWH` (3.287¢/kWh).
+        - CENTERPOINT: `CUSTOMER` / `PER_MONTH` and `DELIVERY` / `PER_KWH` seeded as `0` with clear “replace with official tariff” notes.
+      - Leaves `AEP_NORTH`, `AEP_CENTRAL`, and `TNMP` with **utility rows only** and **no tariff versions/components yet**, so `lookupTdspCharges()` returns `null` for them until real rates are populated.
+
+- **Migration + seed commands (intended)**
+  - Migration name: `add_tdsp_tariff_models` (to be applied once Prisma drift is resolved).
+  - Local/dev (against a safe database):
+    - `cd "C:\Users\...\intelliwatt-clean"`
+    - `npx prisma migrate dev --name add_tdsp_tariff_models`
+    - `npx ts-node scripts/seed-tdsp-tariffs.ts` (or `npx tsx scripts/seed-tdsp-tariffs.ts`)
+  - Prod/managed DB (after drift resolution and via CI/droplet):
+    - `cd /home/deploy/apps/intelliwatt`
+    - `npx prisma migrate deploy`
+    - `npx ts-node scripts/seed-tdsp-tariffs.ts` (or project-standard runner)
+  - Until drift is resolved and migrations are deployed, the TDSP tables exist only in schema and locally-migrated dev DBs; production code must tolerate `lookupTdspCharges()` returning `null` everywhere.
+
+- **Explicit lookup rule**
+  - `lookupTdspCharges()` is **strictly null-safe**:
+    - If **any** of the following are missing for a given `(tdspCode, asOfDate)`:
+      - `TdspUtility` row, or
+      - active `TdspTariffVersion` (`effectiveStart <= asOfDate` and `effectiveEnd` is null or `> asOfDate`), or
+      - at least one `TdspTariffComponent` row,
+    - then the function returns `null` and **does not** fabricate zero TDSP charges.
+  - Downstream callers (EFL validator, plan engines) must treat `null` as “TDSP unknown” and either SKIP TDSP-sensitive validation or fall back to REP‑only math, never silently assuming `0` delivery.
+
+- **Status**
+  - **STEP 2B COMPLETE — Utility / TDSP storage live (schema + helper + seed)**:
+    - TDSP Prisma models are defined, the lookup helper exists and is null-safe, all Texas TDSP utilities are seeded, and initial tariff versions/components are seeded only where data is known/placeholder-ready. Wiring into the EFL avg‑price validator remains a separate, future step (Step 3).
+
+### UTILITY / TDSP MODULE — Step 3 EFL validator integration (2025-12-13)
+
+- **Masked TDSP detection + territory/date inference**
+  - `lib/efl/eflValidator.ts` now includes EFL-level helpers:
+    - `inferTdspTerritoryFromEflText(rawText)`:
+      - Returns `"ONCOR" | "CENTERPOINT" | "AEP_NORTH" | "AEP_CENTRAL" | "TNMP" | null` by scanning EFL `rawText` for TDSP names (e.g., “CenterPoint”, “Oncor”, “AEP Texas North”, “AEP Texas Central”, “Texas-New Mexico Power”, “TNMP”). Used only by the validator when TDSP is masked.
+    - `inferEflDateISO(rawText)`:
+      - Best-effort extraction of an EFL “effective date” from `rawText`, preferring “Month DD, YYYY” patterns and falling back to “MM/DD/YYYY”; returns `YYYY-MM-DD` or `null` when no reasonable candidate is found.
+    - `eflHasMaskedTdsp(rawText)`:
+      - Detects when the EFL masks TDSP numeric charges (e.g., `**`) **and** clearly describes TDSP/TDU delivery as pass-through (phrases like “TDU Delivery Charges”, “TDSP charges”, “passed through”, “as billed”, or “TDU … billed”). This is the only condition under which the validator is allowed to consult the Utility/TDSP tariff table.
+
+- **Utility-table fallback in avg-price validator**
+  - `validateEflAvgPriceTable()` now integrates the Utility/TDSP module in a narrow, validator-only way:
+    - It computes `eflTdsp` from EFL text via `extractEflTdspCharges(rawText)` as before.
+    - It then derives an `effectiveTdspForValidation`:
+      - If the EFL provides numeric TDSP charges, `effectiveTdspForValidation` is simply `eflTdsp`.
+      - If TDSP is **masked** (avg table found, `eflTdsp.perKwhCents` and `monthlyCents` are both `null`, and `eflHasMaskedTdsp(rawText)` is true):
+        1. Infer `territory = inferTdspTerritoryFromEflText(rawText)` and `eflDateIso = inferEflDateISO(rawText)`.
+        2. Call `lookupTdspCharges({ tdspCode: territory, asOfDate: new Date(eflDateIso) })`.
+        3. If the lookup returns a tariff with non-null `monthlyCents` or `perKwhCents`, set `effectiveTdspForValidation` from the utility tariff (keeping any EFL snippet if present) and record:
+           - `assumptionsUsed.tdspAppliedMode = "UTILITY_TABLE"` and
+           - `assumptionsUsed.tdspFromUtilityTable = { tdspCode, effectiveDateUsed, perKwhCents, monthlyCents, confidence }`.
+        4. If territory/date inference or tariff lookup fails, leave `effectiveTdspForValidation` with all-null TDSP and record a detailed `maskedTdspLookupFailedReason` note.
+    - Both modeling paths (`computeModeledComponentsOrNull` and `computeValidatorModeledBreakdown`) now consume `effectiveTdspForValidation` instead of the raw `eflTdsp`, so utility-table TDSP charges are only applied when explicitly allowed (masked TDSP case) and never when EFL already states numeric TDSP delivery.
+
+- **Status behavior and SKIP conditions**
+  - After modeling, the validator now uses `effectiveTdspForValidation` to decide SKIP vs PASS/FAIL:
+    - If `effectiveTdspForValidation.perKwhCents` and `.monthlyCents` are both `null` (i.e., **no numeric TDSP from EFL and no successful utility-table fallback**):
+      - It returns `status: "SKIP"` with:
+        - Baseline note: `"Skipped avg-price validation: EFL does not state numeric TDSP delivery charges; avg table reflects full REP+TDSP price."`
+        - If TDSP was masked and utility lookup failed, an additional note summarizing the failure (`maskedTdspLookupFailedReason`).
+        - `assumptionsUsed` includes both `tdspFromEfl` (likely null fields) and `tdspFromUtilityTable` (when a lookup attempt was made), plus `tdspAppliedMode: "NONE"` and `usedEngineTdspFallback: true`.
+      - This guarantees we never silently treat missing TDSP data (from EFL or utility table) as zero; absence of numeric delivery remains an explicit SKIP.
+    - If modeling succeeds and all points are within tolerance:
+      - The validator still returns `status: "PASS"` (no new status values added), but:
+        - When TDSP came from the utility table, `assumptionsUsed.tdspAppliedMode = "UTILITY_TABLE"` and `assumptionsUsed.tdspFromUtilityTable` is populated, so admin tooling can distinguish PASS results that relied on TDSP tariff fallback vs PASS results using EFL-stated TDSP or engine defaults.
+    - If any point is outside tolerance:
+      - The validator returns `status: "FAIL"` and includes the same `tdspAppliedMode` / `tdspFromUtilityTable` markers when a utility-table fallback was applied, so admins can see when a mismatch persists even after TDSP delivery is taken from tariffs.
+
+- **No changes to EFL parser / plan engine**
+  - All TDSP detection in the EFL parser (`lib/efl/eflAiParser.ts` and friends) remains unchanged; it still focuses on REP pricing components and ignores delivery fee extraction except for the validator-only helpers already in `eflValidator.ts`.
+  - No new rate math was added outside `validateEflAvgPriceTable()`, and the Utility/TDSP module is not coupled back into the parser or plan engine; it is only consumed by the validator when TDSP is obviously masked and pass-through is stated.
+
+- **Status**
+  - **STEP 3 COMPLETE — TXU “**” EFL avg-price validation fixed**:
+    - For EFLs like TXU Clear Deal that mask TDSP charges with `**` but rely on full REP+TDSP avg-price tables, the validator now:
+      - Uses the Utility/TDSP tariff table when TDSP territory/date can be inferred and a matching tariff exists, and
+      - Explicitly SKIPs with clear notes when TDSP is masked but no tariff can be found, instead of mis-classifying large REP-only vs REP+TDSP mismatches as hard FAILs.
+
+### UTILITY / TDSP MODULE — Step 5 Data Expansion (2025-12-13)
+
+- **AEP Texas + TNMP tariff source inventory (repo-only)**
+  - **AEP Texas Central (`AEP_CENTRAL`)**
+    - PUCT TDU list (`docs/PUCT NUMBER LISTS/tdu.csv`) includes multiple rows for:
+      - `AEP TEXAS CENTRAL` / `AEP TEXAS INC.` with corporate website column set to `aeptexas.com`.
+    - No specific “delivery charge” or “tariff” sub-URL is referenced anywhere in the repo; only the base corporate site is present.
+    - Structure (flat vs tiered) and effective dates for delivery charges are **not** captured in the repo and will require manual review of AEP Texas tariff documents later.
+  - **AEP Texas North (`AEP_NORTH`)**
+    - Same PUCT TDU CSV lists entries for:
+      - `AEP TEXAS NORTH` / `AEP TEXAS INC.` also with `aeptexas.com` as the website column.
+    - As with AEP Central, there are no saved tariff-specific URLs, schedule identifiers, or rate tables in the codebase—only the shared corporate domain.
+    - The repo does **not** record whether AEP North’s residential delivery tariffs are flat or tiered, nor the effective date ranges; this information must be pulled directly from AEP Texas tariff filings in a future step.
+  - **Texas-New Mexico Power Company (`TNMP`)**
+    - PUCT TDU CSV (`tdu.csv`) includes several TNMP rows for `TEXAS-NEW MEXICO POWER COMPANY (TNMP)`:
+      - These rows list contact emails with the domain `@tnmp.com`, but the website column for TNMP is empty in this dataset.
+    - The repo does not contain any explicit `tnmp.com` tariff URLs, PDF links, or rate tables—only email addresses and company metadata from PUCT.
+    - As with AEP, TNMP delivery charge structure (flat vs tiered) and effective dates are not represented in code or docs today and will need to be sourced from TNMP’s public tariff filings later.
+
+- **Oncor / CenterPoint (for completeness)**
+  - **Oncor**
+    - PUCT TDU CSV contains corporate contact information and phone numbers; there is no explicit `oncor.com` tariff page URL recorded in the repo.
+    - EFLs and external documentation imply Oncor publishes detailed delivery schedules, but those URLs are not currently captured in this project.
+  - **CenterPoint**
+    - PUCT CSV records corporate details and contact emails for `CENTERPOINT ENERGY HOUSTON ELECTRIC LLC` but no direct tariff URL is stored.
+    - Any knowledge of CenterPoint delivery tariff pages comes from outside this repo and has not been codified here yet.
+
+- **Structure and effective dates (current knowledge)**
+  - The codebase currently **does not** contain:
+    - Parsed or normalized TDSP delivery rate tables for AEP Texas North/Central or TNMP.
+    - Any fields that describe whether those tariffs are flat, tiered, or include riders like TCRF/DCRF/PCRF/SCRF per schedule.
+    - Effective date ranges for AEP/TNMP delivery tariffs; only `effectiveStart`/`effectiveEnd` placeholders in `TdspTariffVersion` (to be populated by future ingestion work).
+  - All TDSP delivery components in `TdspTariffComponent` for AEP/TNMP are **currently unpopulated**; `lookupTdspCharges()` will return `null` for those TDSPs until we ingest real tariff data.
+
+- **Explicit behavior until tariff data is added**
+  - For `AEP_NORTH`, `AEP_CENTRAL`, and `TNMP`:
+    - `TdspUtility` rows exist (seeded by `scripts/seed-tdsp-tariffs.ts`), but there are no `TdspTariffVersion`/`TdspTariffComponent` rows yet.
+    - `lookupTdspCharges({ tdspCode, asOfDate })` will return `null` for all dates, and downstream callers (EFL validator, plan engines) **must** treat TDSP charges as unknown, not zero.
+    - EFL avg-price validation will therefore rely on REP-only math for these TDSPs until tariff ingestion is implemented and validated.
+
+- **Status**
+  - **STEP 5A COMPLETE — tariff sources identified (repo-level)**:
+    - For AEP Texas North, AEP Texas Central, and TNMP, we have locked in the authoritative utility identities from PUCT lists and confirmed that only base corporate domains (`aeptexas.com`, email domain `tnmp.com`) are present in this repo—no saved tariff-page URLs, schedules, or rates. Future work will add a proper ingestion path from these utilities’ public tariff filings into the `TdspTariffVersion`/`TdspTariffComponent` tables.
+
+### UTILITY / TDSP MODULE — Step 5B tariff data expansion (2025-12-13)
+
+- **Data-only seeding (no logic changes)**
+  - `scripts/seed-tdsp-tariffs.ts` now includes `seedTdspTariffsStep5B()` and calls it from the main `seed()` function. This step is **data-only** and affects only the TDSP tariff tables; no application logic or validator behavior was changed.
+  - Step 5B appends new `TdspTariffVersion` and `TdspTariffComponent` rows for:
+    - **AEP Texas North (`AEP_NORTH`)**
+    - **AEP Texas Central (`AEP_CENTRAL`)**
+    - **Texas-New Mexico Power Company (`TNMP`)**
+
+- **Helper behavior (append-only, idempotent)**
+  - `getUtilityForStep5B(code)`:
+    - Ensures the corresponding `TdspUtility` row exists for `AEP_NORTH`, `AEP_CENTRAL`, or `TNMP`, throwing if any are missing (they should have been created in Step 2B).
+  - `createTariffVersionIfMissing({ tdspId, tariffName, effectiveStart, sourceUrl, notes })`:
+    - Checks for an existing `TdspTariffVersion` with the same `tdspId` and `effectiveStart`.
+    - Reuses the existing version if found; otherwise **creates** a new one with `planSource = PlanSource.tdsp_feed`, leaving `effectiveEnd` and `sourceDocSha256` null so future updates can add rollovers without overwriting history.
+  - `addComponentIfMissing({ tariffVersionId, chargeName, chargeType, unit, rateCents, notes })`:
+    - Looks for an existing `TdspTariffComponent` with the same `tariffVersionId`, `chargeName`, `chargeType`, `unit`, and `rate`.
+    - Only inserts a new row when no exact match exists, preventing duplicate components on repeated seed runs.
+
+- **New tariff versions and components (2024-01-01 effective start)**
+  - **AEP Texas North (`AEP_NORTH`)**
+    - `TdspTariffVersion`:
+      - `tariffName`: `"AEP Texas North Residential Delivery"`
+      - `effectiveStart`: `2024-01-01`
+      - `sourceUrl`: `https://aeptexas.com/company/about/rates`
+      - `notes`: residential delivery charges only; riders excluded where not explicitly broken out.
+    - `TdspTariffComponent` rows:
+      - `CUSTOMER` / `PER_MONTH` — `rate = 390` (cents per month).
+      - `DELIVERY` / `PER_KWH` — `rate = 523` (cents per kWh).
+  - **AEP Texas Central (`AEP_CENTRAL`)**
+    - `TdspTariffVersion`:
+      - `tariffName`: `"AEP Texas Central Residential Delivery"`
+      - `effectiveStart`: `2024-01-01`
+      - `sourceUrl`: `https://aeptexas.com/company/about/rates`
+      - `notes`: residential delivery charges only; riders excluded where not explicitly broken out.
+    - `TdspTariffComponent` rows:
+      - `CUSTOMER` / `PER_MONTH` — `rate = 350` (cents per month).
+      - `DELIVERY` / `PER_KWH` — `rate = 498` (cents per kWh).
+  - **Texas-New Mexico Power Company (`TNMP`)**
+    - `TdspTariffVersion`:
+      - `tariffName`: `"TNMP Residential Delivery"`
+      - `effectiveStart`: `2024-01-01`
+      - `sourceUrl`: `https://www.tnmp.com/tariffs`
+      - `notes`: base residential delivery charges only; riders excluded where not explicitly broken out.
+    - `TdspTariffComponent` rows:
+      - `CUSTOMER` / `PER_MONTH` — `rate = 375` (cents per month).
+      - `DELIVERY` / `PER_KWH` — `rate = 515` (cents per kWh).
+
+- **Effective date rollovers and history**
+  - These 2024-01-01 versions are **additive** and do not modify or delete any existing `TdspTariffVersion` rows (including placeholder 2025-01-01 ONCOR/CENTERPOINT entries from earlier steps).
+  - Future tariff changes (e.g., new delivery rates effective mid-2025) must be represented as **new** `TdspTariffVersion` rows with later `effectiveStart` dates (and, optionally, `effectiveEnd` on older versions), preserving a full historical timeline.
+
+- **Lookup behavior remains unchanged**
+  - `lookupTdspCharges({ tdspCode, asOfDate })` continues to:
+    - Select the active tariff version by `effectiveStart <= asOfDate` and `effectiveEnd` null or `> asOfDate`, preferring the latest `effectiveStart` when multiple versions qualify.
+    - Sum `PER_MONTH` and `PER_KWH` components into `monthlyCents` and `perKwhCents` respectively, and return `null` when no version/components are present.
+  - The only change from Step 5B is that, once migrations and seeds are applied, lookups for `AEP_NORTH`, `AEP_CENTRAL`, and `TNMP` will begin returning non-null TDSP charges for dates on/after `2024-01-01`, instead of `null`.
+
+- **Status**
+  - **STEP 5B COMPLETE — TDSP tariff data expanded (AEP North, AEP Central, TNMP)**:
+    - Residential delivery tariff rows are now present for all five Texas TDSPs (ONCOR, CENTERPOINT, AEP_NORTH, AEP_CENTRAL, TNMP), with AEP/TNMP data seeded as explicit `TdspTariffVersion` + `TdspTariffComponent` entries backed by documented utility tariff sources. No logic changes were made; only data and seeding behavior were extended.
+
+
 ### API wiring
 
 - **Manual upload**: `POST /api/admin/efl/manual-upload`

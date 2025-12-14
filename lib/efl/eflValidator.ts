@@ -4,6 +4,7 @@ import type {
   IntervalUsagePoint,
   RatePlanRef,
 } from "@/lib/planAnalyzer/planTypes";
+import { lookupTdspCharges } from "@/lib/utility/tdspTariffs";
 
 export type EflAvgPriceValidationStatus = "PASS" | "FAIL" | "SKIP";
 
@@ -77,11 +78,19 @@ export interface EflAvgPriceValidation {
       confidence: "HIGH" | "MED" | "LOW";
       snippet: string | null;
     };
+    tdspFromUtilityTable?: {
+      tdspCode: string;
+      effectiveDateUsed: string;
+      perKwhCents: number | null;
+      monthlyCents: number | null;
+      confidence: "MED" | "LOW";
+    };
     usedEngineTdspFallback?: boolean;
     tdspAppliedMode?:
       | "INCLUDED_IN_RATE"
       | "ADDED_FROM_EFL"
       | "ENGINE_DEFAULT"
+      | "UTILITY_TABLE"
       | "NONE";
   };
   fail: boolean;
@@ -267,6 +276,83 @@ export function extractEflTdspCharges(rawText: string): EflTdspCharges {
   else if (perKwhCents != null || monthlyCents != null) confidence = "MED";
 
   return { perKwhCents, monthlyCents, snippet, confidence };
+}
+
+/**
+ * Infer TDSP service territory from EFL raw text using simple name matching.
+ * Used only when the EFL masks TDSP numeric charges (e.g. "**") but clearly
+ * indicates that TDSP delivery charges are passed through.
+ */
+export function inferTdspTerritoryFromEflText(
+  rawText: string,
+):
+  | "ONCOR"
+  | "CENTERPOINT"
+  | "AEP_NORTH"
+  | "AEP_CENTRAL"
+  | "TNMP"
+  | null {
+  const t = rawText.toLowerCase();
+
+  if (t.includes("centerpoint")) return "CENTERPOINT";
+  if (t.includes("oncor")) return "ONCOR";
+  if (t.includes("aep texas north")) return "AEP_NORTH";
+  if (t.includes("aep texas central")) return "AEP_CENTRAL";
+  if (t.includes("texas-new mexico power") || t.includes("tnmp")) return "TNMP";
+
+  return null;
+}
+
+/**
+ * Best-effort inference of an EFL "effective date" from raw text.
+ * Returns an ISO date string (YYYY-MM-DD) or null when no reasonable
+ * candidate is found.
+ */
+export function inferEflDateISO(rawText: string): string | null {
+  const m1 = rawText.match(
+    /\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s+\d{4}\b/i,
+  );
+
+  if (m1) {
+    const d = new Date(m1[0]);
+    if (!Number.isNaN(d.getTime())) {
+      return d.toISOString().slice(0, 10);
+    }
+  }
+
+  const m2 = rawText.match(/\b\d{1,2}\/\d{1,2}\/\d{4}\b/);
+  if (m2) {
+    const d = new Date(m2[0]);
+    if (!Number.isNaN(d.getTime())) {
+      return d.toISOString().slice(0, 10);
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Detects when an EFL masks TDSP numeric charges (e.g. "**") but clearly
+ * describes TDSP/TDU delivery as pass-through from the utility. This is
+ * the only case where the validator is allowed to consult the Utility/TDSP
+ * tariff table as a fallback.
+ */
+function eflHasMaskedTdsp(rawText: string): boolean {
+  const t = rawText.toLowerCase();
+
+  const hasMask = t.includes("**");
+
+  const hasPassThrough =
+    t.includes("tdu delivery charges") ||
+    t.includes("tdu charges") ||
+    t.includes("tdu fees") ||
+    t.includes("tdsp charges") ||
+    t.includes("passed through") ||
+    t.includes("passed-through") ||
+    t.includes("as billed") ||
+    (t.includes("tdu") && t.includes("billed"));
+
+  return hasMask && hasPassThrough;
 }
 
 function safeNumber(n: unknown, fallback = 0): number {
@@ -941,6 +1027,73 @@ export async function validateEflAvgPriceTable(args: {
 
   const eflTdsp = extractEflTdspCharges(rawText);
 
+  // When the EFL clearly masks TDSP numeric charges (e.g. "**") but states
+  // that TDSP delivery charges are passed through from the utility, we are
+  // allowed to consult the Utility/TDSP tariff table as a fallback source
+  // for avg-price validation. This is the only place we ever call into the
+  // Utility/TDSP module from the EFL pipeline.
+  let effectiveTdspForValidation: EflTdspCharges = eflTdsp;
+  let tdspFromUtilityTable:
+    | {
+        tdspCode: string;
+        effectiveDateUsed: string;
+        perKwhCents: number | null;
+        monthlyCents: number | null;
+        confidence: "MED" | "LOW";
+      }
+    | null = null;
+  const tdspUnknownFromEfl =
+    eflTdsp.perKwhCents == null && eflTdsp.monthlyCents == null;
+  const maskedTdsp = avgTableFound && tdspUnknownFromEfl && eflHasMaskedTdsp(rawText);
+  let maskedTdspLookupFailedReason: string | null = null;
+
+  if (maskedTdsp) {
+    const territory = inferTdspTerritoryFromEflText(rawText);
+    const eflDateIso = inferEflDateISO(rawText);
+
+    if (!territory || !eflDateIso) {
+      maskedTdspLookupFailedReason =
+        "TDSP masked with ** but TDSP service territory or effective date could not be inferred from EFL text.";
+    } else {
+      try {
+        const tdsp = await lookupTdspCharges({
+          tdspCode: territory,
+          asOfDate: new Date(eflDateIso),
+        });
+
+        if (
+          tdsp &&
+          (tdsp.monthlyCents != null || tdsp.perKwhCents != null)
+        ) {
+          effectiveTdspForValidation = {
+            perKwhCents: tdsp.perKwhCents,
+            monthlyCents: tdsp.monthlyCents,
+            // Keep original snippet if we had one; otherwise note that values
+            // came from the utility tariff table.
+            snippet:
+              eflTdsp.snippet ??
+              `TDSP delivery inferred from utility tariff table for ${territory} as of ${eflDateIso}.`,
+            confidence: tdsp.confidence,
+          };
+          tdspFromUtilityTable = {
+            tdspCode: territory,
+            effectiveDateUsed: tdsp.effectiveStart.toISOString().slice(0, 10),
+            perKwhCents: tdsp.perKwhCents,
+            monthlyCents: tdsp.monthlyCents,
+            confidence: tdsp.confidence,
+          };
+        } else {
+          maskedTdspLookupFailedReason =
+            `TDSP masked with ** and no numeric TDSP tariff components found for ${territory} as of ${eflDateIso}.`;
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err ?? "unknown error");
+        maskedTdspLookupFailedReason =
+          `TDSP masked with ** but utility tariff lookup failed: ${msg}`;
+      }
+    }
+  }
+
   // For validator math, prefer a copy of planRules that includes a deterministic
   // base charge when the EFL clearly states one but the parser left it empty.
   const planRulesForValidation: any = planRules ? { ...(planRules as any) } : {};
@@ -969,7 +1122,7 @@ export async function validateEflAvgPriceTable(args: {
       planRules: planRulesForValidation,
       rateStructure,
       kwh: p.kwh,
-      eflTdsp,
+      eflTdsp: effectiveTdspForValidation,
       tdspIncludedInEnergyCharge: tdspIncludedFlag,
       nightUsagePercent: nightAssumption?.nightUsagePercent,
       nightStartHour: nightAssumption?.nightStartHour,
@@ -985,7 +1138,7 @@ export async function validateEflAvgPriceTable(args: {
         planRulesForValidation,
         rateStructure,
         p.kwh,
-        eflTdsp,
+        effectiveTdspForValidation,
         tdspIncludedFlag,
       );
     }
@@ -1068,14 +1221,22 @@ export async function validateEflAvgPriceTable(args: {
   }, 0);
 
   // If the EFL's average prices are clearly REP+TDSP totals but the document
-  // does not state numeric TDSP delivery charges (per-kWh or monthly), we
-  // cannot reliably validate the avg table; comparing REP-only math against a
-  // full REP+TDSP avg table will produce large, meaningless diffs. In this
-  // case, surface the modeled REP-only breakdown for debugging but SKIP the
-  // strict PASS/FAIL gate.
-  const tdspUnknown =
-    eflTdsp.perKwhCents == null && eflTdsp.monthlyCents == null;
-  if (tdspUnknown) {
+  // does not state numeric TDSP delivery charges (per-kWh or monthly) and we
+  // could not infer a matching TDSP tariff from the utility table, we cannot
+  // reliably validate the avg table. In this case, surface the modeled REP-only
+  // breakdown for debugging but SKIP the strict PASS/FAIL gate.
+  const tdspUnknownAfterFallback =
+    effectiveTdspForValidation.perKwhCents == null &&
+    effectiveTdspForValidation.monthlyCents == null;
+  if (tdspUnknownAfterFallback) {
+    const baseSkipNote =
+      "Skipped avg-price validation: EFL does not state numeric TDSP delivery charges; avg table reflects full REP+TDSP price.";
+    const maskedNote = maskedTdspLookupFailedReason
+      ? `TDSP masked with ** and utility-table fallback failed: ${maskedTdspLookupFailedReason}`
+      : null;
+
+    const notes: string[] = maskedNote ? [baseSkipNote, maskedNote] : [baseSkipNote];
+
     return {
       status: "SKIP",
       toleranceCentsPerKwh: tolerance,
@@ -1093,11 +1254,10 @@ export async function validateEflAvgPriceTable(args: {
         },
         usedEngineTdspFallback: true,
         tdspAppliedMode: "NONE",
+        tdspFromUtilityTable: tdspFromUtilityTable ?? undefined,
       },
       fail: false,
-      notes: [
-        "Skipped avg-price validation: EFL does not state numeric TDSP delivery charges; avg table reflects full REP+TDSP price.",
-      ],
+      notes,
       avgTableFound,
       avgTableRows: points.map((p) => ({
         kwh: p.kwh,
@@ -1132,11 +1292,14 @@ export async function validateEflAvgPriceTable(args: {
         usedEngineTdspFallback:
           eflTdsp.perKwhCents == null && eflTdsp.monthlyCents == null,
         tdspAppliedMode:
-          tdspIncludedFlag === true
-            ? "INCLUDED_IN_RATE"
-            : eflTdsp.perKwhCents != null || eflTdsp.monthlyCents != null
-              ? "ADDED_FROM_EFL"
-              : "NONE",
+          tdspFromUtilityTable != null
+            ? "UTILITY_TABLE"
+            : tdspIncludedFlag === true
+              ? "INCLUDED_IN_RATE"
+              : eflTdsp.perKwhCents != null || eflTdsp.monthlyCents != null
+                ? "ADDED_FROM_EFL"
+                : "NONE",
+        tdspFromUtilityTable: tdspFromUtilityTable ?? undefined,
       },
       fail: false,
       notes: [],
@@ -1167,11 +1330,14 @@ export async function validateEflAvgPriceTable(args: {
       usedEngineTdspFallback:
         eflTdsp.perKwhCents == null && eflTdsp.monthlyCents == null,
       tdspAppliedMode:
-        tdspIncludedFlag === true
-          ? "INCLUDED_IN_RATE"
-          : eflTdsp.perKwhCents != null || eflTdsp.monthlyCents != null
-            ? "ADDED_FROM_EFL"
-            : "NONE",
+        tdspFromUtilityTable != null
+          ? "UTILITY_TABLE"
+          : tdspIncludedFlag === true
+            ? "INCLUDED_IN_RATE"
+            : eflTdsp.perKwhCents != null || eflTdsp.monthlyCents != null
+              ? "ADDED_FROM_EFL"
+              : "NONE",
+      tdspFromUtilityTable: tdspFromUtilityTable ?? undefined,
     },
     fail: true,
     queueReason:

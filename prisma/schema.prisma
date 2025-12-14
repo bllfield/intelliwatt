@@ -933,3 +933,58 @@ enum ProductType {
   indexed
   tou
 }
+
+/// TDSP / utility master table (normalized by TdspCode).
+model TdspUtility {
+  id               String           @id @default(cuid())
+  code             TdspCode         @unique
+  name             String
+  shortName        String?
+  serviceTerritory String?
+  websiteUrl       String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  tariffs          TdspTariffVersion[]
+}
+
+/// Versioned TDSP tariff documents, with effective date ranges and source metadata.
+model TdspTariffVersion {
+  id               String          @id @default(cuid())
+  tdspId           String
+  tdsp             TdspUtility     @relation(fields: [tdspId], references: [id])
+  tariffCode       String?
+  tariffName       String?
+  effectiveStart   DateTime
+  effectiveEnd     DateTime?
+  sourceUrl        String?
+  sourceDocSha256  String?         @unique
+  planSource       PlanSource
+  notes            String?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  components       TdspTariffComponent[]
+
+  @@index([tdspId, effectiveStart, effectiveEnd])
+}
+
+/// Individual TDSP tariff components (customer charge, delivery ¢/kWh, riders, etc.).
+model TdspTariffComponent {
+  id               String           @id @default(cuid())
+  tariffVersionId  String
+  tariffVersion    TdspTariffVersion @relation(fields: [tariffVersionId], references: [id])
+  chargeName       String
+  chargeType       String
+  unit             String
+  /// Canonical rate stored in "cents" for PER_MONTH / PER_KWH, or raw units for other charge types.
+  rate             Decimal          @db.Decimal(10, 4)
+  minKwh           Int?
+  maxKwh           Int?
+  notes            String?
+  rawSourceJson    Json?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  @@index([tariffVersionId, chargeType, unit])
+}
