@@ -778,6 +778,15 @@ npx prisma studio --browser none --port 5562`}
               <div className="text-sm text-brand-navy/60">Test electricity, retail rates, and offers endpoints with real-time metadata</div>
             </a>
             <a
+              href="/admin/tdsp-tariffs"
+              className="block p-4 border-2 border-brand-blue/20 rounded-lg hover:border-brand-blue hover:bg-brand-blue/5 transition-colors"
+            >
+              <div className="font-semibold text-brand-navy mb-1">🏭 TDSP Tariff Viewer</div>
+              <div className="text-sm text-brand-navy/60">
+                Inspect Texas TDSP delivery tariffs, components, and lookupTdspCharges summaries by code and date
+              </div>
+            </a>
+            <a
               href="/admin/smt/inspector"
               className="block p-4 border-2 border-brand-blue/20 rounded-lg hover:border-brand-blue hover:bg-brand-blue/5 transition-colors"
             >
