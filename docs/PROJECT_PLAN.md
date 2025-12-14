@@ -468,14 +468,14 @@ Next step: Step 7 — Documentation + runbooks + failure modes
     - PowerShell:
       - `cd "C:\Users\...\intelliwatt-clean"`
       - `npx prisma migrate dev --name add_tdsp_tariff_models`
-      - `npx ts-node scripts/seed-tdsp-tariffs.ts` (or `npx tsx scripts/seed-tdsp-tariffs.ts` depending on local tooling)
+      - `npx tsx scripts/seed-tdsp-tariffs.ts`
   - This will create `TdspUtility`, `TdspTariffVersion`, and `TdspTariffComponent` rows for ONCOR and CENTERPOINT with clearly-labeled placeholder rates.
 
 - **Seed command (prod / managed DB, once drift is resolved)**
   - From the app host (e.g., droplet / CI) in a controlled rollout:
     - `cd /home/deploy/apps/intelliwatt`
     - `npx prisma migrate deploy`
-    - `npx ts-node scripts/seed-tdsp-tariffs.ts` (or the project-standard Node runner)
+    - `npx tsx scripts/seed-tdsp-tariffs.ts`
   - This should be run **after** migration drift has been addressed and once we are ready to start populating TDSP tariff tables in the shared database.
 
 - **Next step**
@@ -566,11 +566,11 @@ Next step: Step 7 — Documentation + runbooks + failure modes
   - Local/dev (against a safe database):
     - `cd "C:\Users\...\intelliwatt-clean"`
     - `npx prisma migrate dev --name add_tdsp_tariff_models`
-    - `npx ts-node scripts/seed-tdsp-tariffs.ts` (or `npx tsx scripts/seed-tdsp-tariffs.ts`)
+    - `npx tsx scripts/seed-tdsp-tariffs.ts`
   - Prod/managed DB (after drift resolution and via CI/droplet):
     - `cd /home/deploy/apps/intelliwatt`
     - `npx prisma migrate deploy`
-    - `npx ts-node scripts/seed-tdsp-tariffs.ts` (or project-standard runner)
+    - `npx tsx scripts/seed-tdsp-tariffs.ts`
   - Until drift is resolved and migrations are deployed, the TDSP tables exist only in schema and locally-migrated dev DBs; production code must tolerate `lookupTdspCharges()` returning `null` everywhere.
 
 - **Explicit lookup rule**
@@ -740,6 +740,60 @@ Next step: Step 7 — Documentation + runbooks + failure modes
 - **Status**
   - **STEP 5B COMPLETE — TDSP tariff data expanded (AEP North, AEP Central, TNMP)**:
     - Residential delivery tariff rows are now present for all five Texas TDSPs (ONCOR, CENTERPOINT, AEP_NORTH, AEP_CENTRAL, TNMP), with AEP/TNMP data seeded as explicit `TdspTariffVersion` + `TdspTariffComponent` entries backed by documented utility tariff sources. No logic changes were made; only data and seeding behavior were extended.
+
+#### UTILITY / TDSP MODULE — Step 5B tariff expansion (2025-12-13)
+
+- **Utilities added**
+  - AEP Texas North (`AEP_NORTH`)
+  - AEP Texas Central (`AEP_CENTRAL`)
+  - Texas-New Mexico Power Company (`TNMP`)
+
+- **Effective date strategy (append-only)**
+  - New tariff data is always introduced via **new** `TdspTariffVersion` rows with updated `effectiveStart` dates; existing versions are never hard-updated or deleted.
+  - Older versions may receive an `effectiveEnd` when superseded, but their components remain intact to preserve historical pricing for backfills, audits, and retroactive validations.
+  - This guarantees that `lookupTdspCharges()` can select the correct version for any `(tdspCode, asOfDate)` without losing prior rate history.
+
+- **Rider handling**
+  - Riders (e.g., TCRF/DCRF/PCRF/SCRF) are **excluded** from the initial TDSP tariff expansion unless they are explicitly published as clear, numeric delivery components in the underlying tariff schedules.
+  - When riders are later added, they will be represented as separate `TdspTariffComponent` rows with appropriate `chargeType` values, without altering existing base delivery components.
+
+### STEP 6A — Admin TDSP tariff viewer (2025-12-14)
+
+- **Page + API**
+  - New admin-only page: `app/admin/tdsp-tariffs/page.tsx` → `/admin/tdsp-tariffs`
+    - Client-side React page modeled after the existing ERCOT inspector, using the same `iw_admin_token` local-storage key and `x-admin-token` header pattern.
+    - Provides a simple TDSP dropdown and “as-of date” picker, calls the admin API, and renders all returned fields in a compact, copy-paste-friendly layout.
+  - New admin API route: `app/api/admin/tdsp-tariffs/route.ts` → `GET /api/admin/tdsp-tariffs?tdspCode=ONCOR&asOfDate=YYYY-MM-DD`
+    - Enforces `x-admin-token` against `ADMIN_TOKEN` using the same pattern as other admin routes; returns 401/500 via a structured `jsonError` helper when misconfigured.
+
+- **Inputs + behavior**
+  - `tdspCode`:
+    - Required query param; must be one of the `TdspCode` enum values from Prisma (`ONCOR`, `CENTERPOINT`, `AEP_NORTH`, `AEP_CENTRAL`, `TNMP`). Any other value returns a 400 with a list of valid codes.
+  - `asOfDate`:
+    - Required query param in `YYYY-MM-DD` format; parsed to a JS `Date` and validated. Invalid or missing dates return a 400 error with helpful debug text.
+  - For valid requests:
+    - Loads `TdspUtility` by `code`.
+    - Finds the active `TdspTariffVersion` for `asOfDate` with the same predicate as `lookupTdspCharges` (`effectiveStart <= asOfDate` and `effectiveEnd` null or `> asOfDate`, preferring the latest `effectiveStart`).
+    - Fetches all `TdspTariffComponent` rows for that version, ordered by `chargeType` and `unit`.
+    - Calls `lookupTdspCharges({ tdspCode, asOfDate })` to compute `monthlyCents`, `perKwhCents`, and `confidence` for a summary view.
+    - Returns a normalized `TdspTariffDebugResponse` with `utility`, `version`, `components`, `lookupSummary`, and a `debug[]` array explaining any missing pieces.
+
+- **What the admin page shows**
+  - **Utility card**:
+    - `code`, `name`, `shortName`, `websiteUrl` (with clickable link) from `TdspUtility`.
+  - **Active tariff version card**:
+    - `tariffName`, `effectiveStart`, `effectiveEnd`, `sourceUrl` (clickable), and `notes` from `TdspTariffVersion`.
+  - **Components table**:
+    - Tabular view of all `TdspTariffComponent` rows (columns: `chargeType`, `unit`, `rate`, `minKwh`, `maxKwh`, `notes`), suitable for quick copy/paste into notes or spreadsheets.
+  - **Summary**:
+    - Displays `monthlyCents`, `perKwhCents`, and `confidence` returned by `lookupTdspCharges` for the selected `(tdspCode, asOfDate)`.
+    - If `lookupTdspCharges` returns `null` or no numeric values, the page shows a short explanation instead.
+  - **Debug block**:
+    - Pretty-printed JSON of the full API response, including `debug[]` lines detailing why `utility`/`version`/`components`/`lookupSummary` may be missing (e.g., “No TdspUtility row found for this code”, “No TdspTariffVersion active at date”, `lookupTdspCharges()` returning null).
+
+- **Next step**
+  - **STEP 6B — Fact card warning + drill-down to this admin viewer**:
+    - When the EFL avg-price validator flags TDSP-related issues (e.g., masked TDSP with utility-table fallback, missing tariffs, SKIP conditions), surface a direct link from the Fact Card admin UI to `/admin/tdsp-tariffs` pre-populated with the inferred `tdspCode` and EFL date for deeper inspection.
 
 
 ### API wiring
