@@ -6,7 +6,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 import sourcesConfig from "@/lib/utility/tdspTariffSources.json";
-import { extractPdfTextWithPdftotextOnly } from "@/lib/efl/eflExtractor";
+import { deterministicEflExtract } from "@/lib/efl/eflExtractor";
 import { upsertTdspTariffFromIngest } from "@/lib/utility/tdspIngest";
 
 const execFileAsync = promisify(execFile);
@@ -235,10 +235,16 @@ async function ingestForSource(entry: SourceEntry) {
   log(tdspCode, "pdf sha256", sha);
 
   // Persist raw PDF into /tmp for debugging if needed.
-  const tmpPath = `/tmp/tdsp_${tdspCode}_Rate_Report.pdf`;
-  await fs.writeFile(tmpPath, pdfBytes);
+  const debugTmpPath = `/tmp/tdsp_${tdspCode}_Rate_Report.pdf`;
+  try {
+    await fs.writeFile(debugTmpPath, pdfBytes);
+  } catch {
+    // Best-effort debug write; ignore errors (e.g., non-Unix envs).
+  }
 
-  const text = await extractPdfTextWithPdftotextOnly(Buffer.from(pdfBytes));
+  const { rawText: text } = await deterministicEflExtract(
+    Buffer.from(pdfBytes),
+  );
 
   const effectiveStartISO = parseEffectiveDate(text);
   if (!effectiveStartISO) {
