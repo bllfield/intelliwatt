@@ -60,7 +60,12 @@ export async function lookupTdspCharges(args: {
       effectiveStart: { lte: asOfDate },
       OR: [{ effectiveEnd: null }, { effectiveEnd: { gt: asOfDate } }],
     },
-    orderBy: { effectiveStart: "desc" },
+    orderBy: [
+      { effectiveStart: "desc" },
+      // When multiple versions share the same effectiveStart (e.g., drift/new
+      // parse of the same PUCT report), prefer the most recently created one.
+      { createdAt: "desc" },
+    ],
   });
 
   if (!version) {

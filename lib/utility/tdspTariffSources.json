@@ -1,0 +1,36 @@
+{
+  "sources": [
+    {
+      "tdspCode": "ONCOR",
+      "kind": "PUCT_RATE_REPORT_PDF",
+      "sourceUrl": "https://ftp.puc.texas.gov/public/puct-info/industry/electric/rates/tdr/tdu/Oncor_Rate_Report.pdf",
+      "notes": "PUCT monthly rate report (Oncor)."
+    },
+    {
+      "tdspCode": "CENTERPOINT",
+      "kind": "PUCT_RATE_REPORT_PDF",
+      "sourceUrl": "https://ftp.puc.texas.gov/public/puct-info/industry/electric/rates/tdr/tdu/CenterPoint_Rate_Report.pdf",
+      "notes": "PUCT monthly rate report (CenterPoint)."
+    },
+    {
+      "tdspCode": "AEP_NORTH",
+      "kind": "PUCT_RATE_REPORT_PDF",
+      "sourceUrl": "https://ftp.puc.texas.gov/public/puct-info/industry/electric/rates/tdr/tdu/AEP_Rate_Report.pdf",
+      "notes": "AEP combined report (North/Central columns)."
+    },
+    {
+      "tdspCode": "AEP_CENTRAL",
+      "kind": "PUCT_RATE_REPORT_PDF",
+      "sourceUrl": "https://ftp.puc.texas.gov/public/puct-info/industry/electric/rates/tdr/tdu/AEP_Rate_Report.pdf",
+      "notes": "AEP combined report (North/Central columns)."
+    },
+    {
+      "tdspCode": "TNMP",
+      "kind": "PUCT_RATE_REPORT_PDF",
+      "sourceUrl": "https://ftp.puc.texas.gov/public/puct-info/industry/electric/rates/tdr/tdu/TNMP_Rate_Report.pdf",
+      "notes": "PUCT monthly rate report."
+    }
+  ]
+}
+
+

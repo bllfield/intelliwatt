@@ -795,6 +795,82 @@ Next step: Step 7 — Documentation + runbooks + failure modes
   - **STEP 6B — Fact card warning + drill-down to this admin viewer**:
     - When the EFL avg-price validator flags TDSP-related issues (e.g., masked TDSP with utility-table fallback, missing tariffs, SKIP conditions), surface a direct link from the Fact Card admin UI to `/admin/tdsp-tariffs` pre-populated with the inferred `tdspCode` and EFL date for deeper inspection.
 
+### UTILITY / TDSP MODULE — TDSP ingest skeleton (PUCT rate reports) (2025-12-14)
+
+- **Config**
+  - New config file: `lib/utility/tdspTariffSources.json`:
+    - Defines an array of `{ tdspCode, kind, sourceUrl, notes }` entries for the 5 Texas TDSPs:
+      - `ONCOR` → `kind: "PUCT_RATE_REPORT_PDF"`, `sourceUrl: null`, notes: TODO to fill the exact PUCT `Oncor_Rate_Report.pdf` URL.
+      - `CENTERPOINT` → `kind: "PUCT_RATE_REPORT_PDF"`, `sourceUrl: null`, notes: TODO to fill the exact PUCT `CenterPoint_Rate_Report.pdf` URL.
+      - `AEP_NORTH` → `kind: "PUCT_RATE_REPORT_PDF"`, `sourceUrl: "https://ftp.puc.texas.gov/public/puct-info/industry/electric/rates/tdr/tdu/AEP_Rate_Report.pdf"`.
+      - `AEP_CENTRAL` → same AEP combined report URL as `AEP_NORTH` (North/Central columns handled by the ingest parser).
+      - `TNMP` → `kind: "PUCT_RATE_REPORT_PDF"`, `sourceUrl: "https://ftp.puc.texas.gov/public/puct-info/industry/electric/rates/tdr/tdu/TNMP_Rate_Report.pdf"`.
+    - ONCOR and CENTERPOINT entries are placeholders until the exact PUCT `*_Rate_Report.pdf` URLs are identified; ingest skips any source whose `sourceUrl` is null with a clear log message.
+
+- **Upsert / versioning helper**
+  - New module: `lib/utility/tdspIngest.ts`:
+    - Exports `upsertTdspTariffFromIngest({ tdspCode, effectiveStartISO, sourceUrl, sourceDocSha256, components })` where:
+      - `components` is an array of:
+        - `{ chargeName, chargeType: "CUSTOMER" | "DELIVERY", unit: "PER_MONTH" | "PER_KWH", rateCents: string }`.
+    - Behavior:
+      - Resolves `TdspUtility` by `tdspCode` (enum-backed via `TdspCode`); throws if missing.
+      - Converts `effectiveStartISO` into a `Date` and validates it.
+      - Finds existing `TdspTariffVersion` rows for this `tdspId + effectiveStart`, ordered by `createdAt desc`.
+      - If the latest existing version has the same `sourceDocSha256` as the new ingest, treats this as a **no-op** (assumes components are identical, avoids duplicates).
+      - Otherwise, creates a **new** `TdspTariffVersion` row (append-only) with:
+        - `tariffName` like `"${tdspCode} Residential Delivery (PUCT ingest)"`,
+        - `effectiveStart`, `effectiveEnd: null`,
+        - `sourceUrl` and `sourceDocSha256` from the ingest,
+        - `planSource = PlanSource.tdsp_feed`,
+        - `notes` describing whether this is an initial ingest or drift/new parse.
+      - After inserting the new version, updates any prior open-ended versions (`effectiveEnd IS NULL AND effectiveStart < newEffectiveStart`) for this TDSP to set `effectiveEnd = newEffectiveStart`, cleanly closing the old window.
+      - Inserts all incoming components as fresh `TdspTariffComponent` rows for the new version; existing versions and their components are never mutated.
+
+- **Ingest script (PUCT Rate_Report PDFs)**
+  - New script: `scripts/tdsp/ingest-puct-rate-reports.ts`:
+    - Entry point: `npx tsx scripts/tdsp/ingest-puct-rate-reports.ts`.
+    - Behavior per source entry in `tdspTariffSources.json`:
+      - If `sourceUrl` is null, logs a skip (`"sourceUrl is null (TODO fill PUCT Rate_Report URL)."`).
+      - Otherwise:
+        - Fetches the PDF bytes via `fetch(sourceUrl)`.
+        - Computes `sourceDocSha256 = sha256(pdfBytes)` using Node’s `crypto.createHash('sha256')`.
+        - Writes a debug copy to `/tmp/tdsp_<TDSP>_Rate_Report.pdf` for inspection if needed.
+        - Converts the PDF to text using the existing EFL pdftotext helper (`extractPdfTextWithPdftotextOnly` from `lib/efl/eflExtractor.ts`), reusing the same droplet HTTPS endpoint and env wiring as the EFL parser.
+        - Parses an effective date of the form `"As of <Month> <D>, <YYYY>"` from the text; if not found, logs and skips.
+    - Rate extraction:
+      - For **AEP combined** (`AEP_Rate_Report.pdf`):
+        - Scans the text for three key rows: `"Customer Charge"`, `"Metering Charge"`, `"Volumetric Charge"`.
+        - For each row, extracts at least two numeric values (Central and North) by scanning for dollar amounts in order (simple split on numbers after the label).
+        - Builds separate records for `AEP_NORTH` and `AEP_CENTRAL` with:
+          - `customerDollars`, `meteringDollars`, and `volumetricDollarsPerKwh` taken from the respective column.
+        - If either column’s numbers are missing or malformed, logs and skips that TDSP (no partial writes).
+      - For **single-utility** reports (e.g., TNMP):
+        - Finds lines containing `"Customer Charge"`, `"Metering Charge"`, and `"Volumetric Charge"`.
+        - Extracts the numeric dollars/¢ per kWh from each using a simple dollar-amount regex; if any are missing, logs and skips.
+      - Computes:
+        - `monthlyCents = (customerDollars + meteringDollars) * 100` (rounded to integer cents, stored as string).
+        - `perKwhCents = volumetricDollarsPerKwh * 100` (kept as string, preserving fractional cents over 2 decimals).
+      - Calls `upsertTdspTariffFromIngest(...)` with exactly two components per TDSP:
+        - `CUSTOMER` / `PER_MONTH` → `"Customer + Metering Charge"` w/ `monthlyCents`.
+        - `DELIVERY` / `PER_KWH` → `"Volumetric Delivery Charge"` w/ `perKwhCents`.
+      - Logs per-TDSP ingest outcomes (`noop` vs `created`) and any parse/ingest errors.
+
+- **lookupTdspCharges determinism tweak**
+  - `lib/utility/tdspTariffs.ts`:
+    - The active `TdspTariffVersion` lookup now orders by:
+      - `effectiveStart DESC`, then
+      - `createdAt DESC`,
+    - So when multiple versions share the same `effectiveStart` (e.g., re-ingesting the same PUCT report after changes or drift), `lookupTdspCharges` deterministically prefers the most recently created version without requiring special-case logic elsewhere.
+
+- **Next step**
+  - Once the ingest skeleton is validated against live PUCT PDFs and exact Rate_Report URLs are confirmed for Oncor and CenterPoint, we can:
+    - Fill in `sourceUrl` for those TDSPs in `tdspTariffSources.json`.
+    - Wire a secured admin endpoint (e.g., `POST /api/admin/tdsp/ingest`) that calls `ingest-puct-rate-reports.ts` on demand and surfaces last-run logs/status via the admin UI.
+    - Tighten the PDF parsers as needed, including explicit rider handling, while keeping the core deterministic upsert/versioning contract intact.
+  - **Windows TLS note**:
+    - Direct `fetch()` calls from Node to `https://ftp.puc.texas.gov/...` can occasionally fail TLS chain validation on Windows due to differences between Node’s CA bundle and the OS trust store.
+    - The ingest script now falls back on Windows to `Invoke-WebRequest` via PowerShell (and on non-Windows to `curl -L` where available), so the OS-level trust store is used **without** disabling TLS verification globally.
+
 
 ### API wiring
 
