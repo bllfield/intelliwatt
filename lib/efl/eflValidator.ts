@@ -427,6 +427,65 @@ function getEnergyRateCentsForUsage(
   return null;
 }
 
+function computeEnergyDollarsFromPlanRules(
+  planRules: any,
+  rateStructure: any,
+  usageKwh: number,
+): number | null {
+  if (!Number.isFinite(usageKwh) || usageKwh <= 0) return null;
+
+  const tiersA = Array.isArray(planRules?.usageTiers)
+    ? planRules.usageTiers
+    : null;
+
+  // Prefer explicit usage tiers when available (e.g. 0–1000, >1000).
+  if (tiersA && tiersA.length) {
+    const tiers = [...tiersA].map((t) => ({
+      minKwh:
+        t?.minKwh != null && Number.isFinite(Number(t.minKwh))
+          ? Number(t.minKwh)
+          : 0,
+      maxKwh:
+        t?.maxKwh != null && Number.isFinite(Number(t.maxKwh))
+          ? Number(t.maxKwh)
+          : null,
+      rateCentsPerKwh:
+        t?.rateCentsPerKwh != null && Number.isFinite(Number(t.rateCentsPerKwh))
+          ? Number(t.rateCentsPerKwh)
+          : null,
+    }));
+
+    const validTiers = tiers.filter((t) => t.rateCentsPerKwh != null);
+    if (validTiers.length === 0) return null;
+
+    validTiers.sort((a, b) => a.minKwh - b.minKwh);
+
+    let totalDollars = 0;
+    for (const t of validTiers) {
+      const start = Math.max(0, t.minKwh);
+      const end = t.maxKwh == null ? usageKwh : Math.min(usageKwh, t.maxKwh);
+      if (end <= start) continue;
+      const segmentKwh = end - start;
+      const rateDollars = t.rateCentsPerKwh! / 100;
+      totalDollars += segmentKwh * rateDollars;
+      if (end >= usageKwh) break;
+    }
+
+    return totalDollars;
+  }
+
+  // Fallback: single effective rate for the whole usage bucket.
+  const energyRateCents = getEnergyRateCentsForUsage(
+    planRules,
+    rateStructure,
+    usageKwh,
+  );
+  if (energyRateCents == null || !Number.isFinite(energyRateCents)) {
+    return null;
+  }
+  return (usageKwh * energyRateCents) / 100;
+}
+
 function applyThresholdCredits(planRules: any, usageKwh: number): number {
   const credits = Array.isArray(planRules?.billCredits)
     ? planRules.billCredits
@@ -468,16 +527,14 @@ function computeValidatorModeledBreakdown(
   eflTdsp: EflTdspCharges,
   tdspDeliveryIncludedInEnergyCharge: boolean | null | undefined,
 ): ValidatorModeledBreakdown | null {
-  const energyRateCents = getEnergyRateCentsForUsage(
+  const repEnergyDollars = computeEnergyDollarsFromPlanRules(
     planRules,
     rateStructure,
     usageKwh,
   );
-  if (energyRateCents == null || !Number.isFinite(energyRateCents)) {
+  if (repEnergyDollars == null || !Number.isFinite(repEnergyDollars)) {
     return null;
   }
-
-  const repEnergyDollars = (usageKwh * energyRateCents) / 100;
 
   const baseCents =
     planRules?.baseChargePerMonthCents != null
