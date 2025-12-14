@@ -138,10 +138,16 @@ export async function GET(req: NextRequest) {
       } satisfies TdspTariffDebugResponse);
     }
 
-    const components = await (db as any).tdspTariffComponent.findMany({
+    const rawComponents = await (db as any).tdspTariffComponent.findMany({
       where: { tariffVersionId: version.id },
       orderBy: [{ chargeType: "asc" }, { unit: "asc" }],
     });
+
+    const components = rawComponents.map((c: any) => ({
+      ...c,
+      // Ensure Prisma Decimal is serialized safely for JSON responses.
+      rate: c.rate != null ? c.rate.toString() : null,
+    }));
 
     if (!components.length) {
       debug.push(
