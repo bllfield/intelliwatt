@@ -1067,6 +1067,46 @@ export async function validateEflAvgPriceTable(args: {
     return v > max ? v : max;
   }, 0);
 
+  // If the EFL's average prices are clearly REP+TDSP totals but the document
+  // does not state numeric TDSP delivery charges (per-kWh or monthly), we
+  // cannot reliably validate the avg table; comparing REP-only math against a
+  // full REP+TDSP avg table will produce large, meaningless diffs. In this
+  // case, surface the modeled REP-only breakdown for debugging but SKIP the
+  // strict PASS/FAIL gate.
+  const tdspUnknown =
+    eflTdsp.perKwhCents == null && eflTdsp.monthlyCents == null;
+  if (tdspUnknown) {
+    return {
+      status: "SKIP",
+      toleranceCentsPerKwh: tolerance,
+      points: modeledPoints,
+      assumptionsUsed: {
+        nightUsagePercent: nightAssumption?.nightUsagePercent,
+        nightStartHour: nightAssumption?.nightStartHour,
+        nightEndHour: nightAssumption?.nightEndHour,
+        tdspIncludedInEnergyCharge: tdspIncludedFlag,
+        tdspFromEfl: {
+          perKwhCents: eflTdsp.perKwhCents,
+          monthlyCents: eflTdsp.monthlyCents,
+          confidence: eflTdsp.confidence,
+          snippet: eflTdsp.snippet,
+        },
+        usedEngineTdspFallback: true,
+        tdspAppliedMode: "NONE",
+      },
+      fail: false,
+      notes: [
+        "Skipped avg-price validation: EFL does not state numeric TDSP delivery charges; avg table reflects full REP+TDSP price.",
+      ],
+      avgTableFound,
+      avgTableRows: points.map((p) => ({
+        kwh: p.kwh,
+        avgPriceCentsPerKwh: p.eflAvgCentsPerKwh,
+      })),
+      avgTableSnippet,
+    };
+  }
+
   const allOk =
     modeledPoints.length > 0 &&
     modeledPoints.every(
