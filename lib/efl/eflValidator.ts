@@ -515,6 +515,24 @@ function computeValidatorModeledBreakdown(
 
 // -------------------- Avg price table extraction --------------------
 
+function extractBaseChargePerMonthCentsFromRawText(
+  rawText: string,
+): number | null {
+  // Treat explicit N/A as "not present".
+  if (/Base\s*Charge[^.\n]*\bN\/A\b/i.test(rawText)) {
+    return null;
+  }
+
+  // Match patterns like "Base Charge: $5.00 per billing cycle" or "per month".
+  const m = rawText.match(
+    /Base\s*Charge\s*:\s*\$?\s*([0-9]+(?:\.[0-9]{1,2})?)\s*(?:per\s+(?:billing\s*cycle|month)|\/\s*month|monthly)/i,
+  );
+  if (!m?.[1]) return null;
+  const dollars = Number(m[1]);
+  if (!Number.isFinite(dollars)) return null;
+  return Math.round(dollars * 100);
+}
+
 function extractLineAfterLabel(
   rawText: string,
   labelRegex: RegExp,
@@ -866,6 +884,18 @@ export async function validateEflAvgPriceTable(args: {
 
   const eflTdsp = extractEflTdspCharges(rawText);
 
+  // For validator math, prefer a copy of planRules that includes a deterministic
+  // base charge when the EFL clearly states one but the parser left it empty.
+  const planRulesForValidation: any = planRules ? { ...(planRules as any) } : {};
+  const validatorBaseCents = extractBaseChargePerMonthCentsFromRawText(rawText);
+  if (
+    validatorBaseCents != null &&
+    (planRulesForValidation.baseChargePerMonthCents == null ||
+      typeof planRulesForValidation.baseChargePerMonthCents !== "number")
+  ) {
+    planRulesForValidation.baseChargePerMonthCents = validatorBaseCents;
+  }
+
   const tdspIncludedFlag =
     (planRules as any).tdspDeliveryIncludedInEnergyCharge === true ||
     (rateStructure as any)?.tdspDeliveryIncludedInEnergyCharge === true
@@ -879,7 +909,7 @@ export async function validateEflAvgPriceTable(args: {
   for (const p of points) {
     // 1) Try canonical engine path.
     const engineResult = await computeModeledComponentsOrNull({
-      planRules,
+      planRules: planRulesForValidation,
       rateStructure,
       kwh: p.kwh,
       eflTdsp,
@@ -895,7 +925,7 @@ export async function validateEflAvgPriceTable(args: {
     // from the EFL (energy rate, base charge, credits, TDSP from EFL).
     if (!components || Number.isNaN(components.avgCentsPerKwh)) {
       components = computeValidatorModeledBreakdown(
-        planRules,
+        planRulesForValidation,
         rateStructure,
         p.kwh,
         eflTdsp,
