@@ -16,7 +16,6 @@ type Row = {
   rate2000: number | null;
   cancelFee: string | null;
   eflUrl: string | null;
-  eflPdfSha256: string | null;
   updatedAt: string;
   lastSeenAt: string;
 };
@@ -154,7 +153,7 @@ export default function WattbuyTemplatedPlansPage() {
               className="w-full rounded-lg border px-3 py-2"
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="supplier, plan, cert, version, sha…"
+              placeholder="supplier, plan…"
             />
           </div>
           <div>

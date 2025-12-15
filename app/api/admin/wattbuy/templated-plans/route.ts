@@ -18,7 +18,6 @@ type Row = {
   rate2000: number | null;
   cancelFee: string | null;
   eflUrl: string | null;
-  eflPdfSha256: string | null;
   updatedAt: string;
   lastSeenAt: string;
   rateStructure: unknown;
@@ -61,7 +60,6 @@ export async function GET(req: NextRequest) {
             OR: [
               { supplier: { contains: q, mode: "insensitive" } },
               { planName: { contains: q, mode: "insensitive" } },
-              { eflPdfSha256: { contains: q, mode: "insensitive" } },
             ],
           }
         : {}),
@@ -85,7 +83,6 @@ export async function GET(req: NextRequest) {
         rate2000: true,
         cancelFee: true,
         eflUrl: true,
-        eflPdfSha256: true,
         updatedAt: true,
         lastSeenAt: true,
         rateStructure: true,
@@ -106,7 +103,6 @@ export async function GET(req: NextRequest) {
       rate2000: typeof p.rate2000 === "number" ? p.rate2000 : null,
       cancelFee: p.cancelFee ?? null,
       eflUrl: p.eflUrl ?? null,
-      eflPdfSha256: p.eflPdfSha256 ?? null,
       updatedAt: new Date(p.updatedAt).toISOString(),
       lastSeenAt: new Date(p.lastSeenAt).toISOString(),
       rateStructure: p.rateStructure ?? null,
