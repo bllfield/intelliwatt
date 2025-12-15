@@ -86,11 +86,31 @@ export async function solveEflValidationGaps(args: {
           // Ensure tiers are ordered by minKwh so downstream math behaves.
           .sort((a: any, b: any) => a.minKwh - b.minKwh);
 
-      if (mapped.length > 0) {
+        if (mapped.length > 0) {
           derivedPlanRules.usageTiers = mapped;
           solverApplied.push("TIER_SYNC_FROM_RATE_STRUCTURE");
         }
       }
+    }
+  }
+
+  // ---------------- Tier sync from EFL raw text (deterministic) ----------------
+  // If usageTiers are still missing or clearly incomplete (e.g. only first tier
+  // present when the EFL lists multiple tiers), re-derive from the raw text.
+  if (derivedPlanRules) {
+    const existingTiers: any[] = Array.isArray(derivedPlanRules.usageTiers)
+      ? derivedPlanRules.usageTiers
+      : [];
+
+    const tiersFromText = extractUsageTiersFromEflText(rawText);
+
+    const shouldApplyFromText =
+      tiersFromText.length > 0 &&
+      (existingTiers.length === 0 || existingTiers.length < tiersFromText.length);
+
+    if (shouldApplyFromText) {
+      derivedPlanRules.usageTiers = tiersFromText;
+      solverApplied.push("SYNC_USAGE_TIERS_FROM_EFL_TEXT");
     }
   }
 
@@ -160,6 +180,78 @@ function detectMaskedTdsp(rawText: string): boolean {
     /passed-through/i.test(t);
 
   return hasStars && hasPassThrough;
+}
+
+// Deterministic tier extractor mirroring the core Energy Charge parsing used
+// by the EFL extractor. This is intentionally duplicated at a high level so
+// the solver can recover from cases where only the first tier made it into
+// PlanRules but the raw text clearly lists multiple tiers.
+function extractUsageTiersFromEflText(rawText: string): Array<{
+  minKwh: number;
+  maxKwh: number | null;
+  rateCentsPerKwh: number;
+}> {
+  const lines = rawText
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  type Tier = { minKwh: number; maxKwh: number | null; rateCentsPerKwh: number };
+  const tiers: Tier[] = [];
+
+  // Line-based patterns:
+  //   "0 - 1200 kWh 12.5000¢"
+  //   "> 1200 kWh 20.4000¢"
+  const rangeRe =
+    /^(\d{1,6})\s*-\s*(\d{1,6})\s*kwh\b[\s:]*([0-9]+(?:\.[0-9]+)?)\s*¢/i;
+  const gtRe = />\s*(\d{1,6})\s*kwh\b[\s:]*([0-9]+(?:\.[0-9]+)?)\s*¢/i;
+
+  // Anchor search window near "Energy Charge" lines.
+  const anchorIdx = lines.findIndex((l) => /Energy\s*Charge/i.test(l));
+  const search = anchorIdx >= 0 ? lines.slice(anchorIdx, anchorIdx + 80) : lines;
+
+  const centsFrom = (raw: string): number | null => {
+    const cleaned = raw.replace(/,/g, "");
+    const m = cleaned.match(/([0-9]+(?:\.[0-9]+)?)/);
+    if (!m?.[1]) return null;
+    const n = Number(m[1]);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  for (const l of search) {
+    let m = l.match(rangeRe);
+    if (m?.[1] && m?.[2] && m?.[3]) {
+      const minKwh = Number(m[1]);
+      const maxKwh = Number(m[2]);
+      const rate = centsFrom(m[3]);
+      if (
+        Number.isFinite(minKwh) &&
+        Number.isFinite(maxKwh) &&
+        rate != null
+      ) {
+        tiers.push({ minKwh, maxKwh, rateCentsPerKwh: rate });
+      }
+      continue;
+    }
+
+    m = l.match(gtRe);
+    if (m?.[1] && m?.[2]) {
+      const minKwh = Number(m[1]);
+      const rate = centsFrom(m[2]);
+      if (Number.isFinite(minKwh) && rate != null) {
+        tiers.push({ minKwh, maxKwh: null, rateCentsPerKwh: rate });
+      }
+    }
+  }
+
+  // De-dup + sort by minKwh.
+  const uniq = new Map<string, Tier>();
+  for (const t of tiers) {
+    const key = `${t.minKwh}|${t.maxKwh ?? "null"}|${t.rateCentsPerKwh}`;
+    if (!uniq.has(key)) uniq.set(key, t);
+  }
+
+  return Array.from(uniq.values()).sort((a, b) => a.minKwh - b.minKwh);
 }
 
 

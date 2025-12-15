@@ -4980,6 +4980,10 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
     - It now tracks the covered kWh range as it walks sorted tiers.
     - If `usageKwh` exceeds the covered range and **no** tier has `maxKwh = null` (no explicit open‑ended tier), the remaining kWh are billed at the **last tier’s rate** instead of being silently ignored.
     - This keeps avg‑price modeling monotonic and prevents undercounted averages like `11.65 ¢/kWh` at 2000 kWh when only the first tier was previously applied.
+  - The validation gap solver (`lib/efl/validation/solveEflValidationGaps.ts`) now also:
+    - Syncs `PlanRules.usageTiers` from either `RateStructure.usageTiers` **or** directly from the raw EFL text when it detects more tiers in the text than are present in `PlanRules`.
+    - Records `solverApplied` entries such as `"TIER_SYNC_FROM_RATE_STRUCTURE"` and `"SYNC_USAGE_TIERS_FROM_EFL_TEXT"` so admins can see when tier fixes were applied before re-running `validateEflAvgPriceTable`.
+  - Avg-price table detection was relaxed to support both `"Average Monthly Use"` and `"Average Monthly Usage"` variants, and still expects 500/1000/2000 kWh rows plus three numeric avg ¢/kWh values.
 
 - **Next step**:
   - Step 4 (future work, not implemented here) would optionally reuse `lookupTdspCharges` in the bill parser/current‑plan engine so that customer‑facing rate modeling can present consistent TDSP assumptions when the REP’s EFL masks delivery charges with `**`. This will be gated behind explicit flags and never silently override EFL‑stated TDSP numerics.
