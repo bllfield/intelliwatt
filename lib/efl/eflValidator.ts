@@ -336,7 +336,40 @@ export function extractEflTdspCharges(rawText: string): EflTdspCharges {
   const moPick = pickBestTdspMonthlyLine(searchLines);
 
   const perKwhCents = perPick.value;
-  const monthlyDollars = moPick.dollars;
+  let monthlyDollars = moPick.dollars;
+
+  // Extra robustness: in many EFL tables, "per month" appears on a header line
+  // and the "$4.23" value is on the next line (or even a couple lines later),
+  // without repeating "per month". If our first pass missed the monthly value,
+  // do a small window scan anchored on a "per month" header near delivery/TDSP.
+  if (monthlyDollars == null) {
+    const perMonthIdx = lines.findIndex(
+      (l) =>
+        /per\s*month/i.test(l) &&
+        (/Delivery/i.test(l) || /TDSP/i.test(l) || /TDU/i.test(l) || /per\s*kwh/i.test(l)),
+    );
+
+    if (perMonthIdx >= 0) {
+      // Scan forward a few lines for a dollar amount; choose the last $ token
+      // on the first line that contains any $ amount (to avoid picking $0.00
+      // base charge when present earlier on the same row).
+      for (let j = 1; j <= 6; j++) {
+        const candidate = lines[perMonthIdx + j];
+        if (!candidate) continue;
+        if (!/\$/.test(candidate)) continue;
+
+        // If the candidate also contains a ¢/kWh token, it's very likely the
+        // delivery-charge row (good).
+        const parsed = parseMonthlyDollarsFromLine(
+          `per month ${candidate}`,
+        );
+        if (parsed != null) {
+          monthlyDollars = parsed;
+          break;
+        }
+      }
+    }
+  }
   const monthlyCents =
     monthlyDollars == null ? null : Math.round(monthlyDollars * 100);
 
