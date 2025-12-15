@@ -508,35 +508,50 @@ export default function WattBuyInspector() {
                     </tr>
                   </thead>
                   <tbody>
-                    {batchResults.map((r: any, idx: number) => (
-                      <tr key={r.offerId ?? idx} className="border-t">
-                        <td className="px-2 py-1 align-top">{r.supplier ?? '—'}</td>
-                        <td className="px-2 py-1 align-top">{r.planName ?? '—'}</td>
-                        <td className="px-2 py-1 align-top">{r.tdspName ?? '—'}</td>
-                        <td className="px-2 py-1 align-top">
-                          {typeof r.termMonths === 'number' ? `${r.termMonths} mo` : '—'}
-                        </td>
-                        <td className="px-2 py-1 align-top">
-                          <span className="font-mono">{r.validationStatus ?? '—'}</span>
-                        </td>
-                        <td className="px-2 py-1 align-top">
-                          <span className="font-mono">{r.templateAction}</span>
-                        </td>
-                        <td className="px-2 py-1 align-top">
-                          <span className="font-mono">{r.tdspAppliedMode ?? '—'}</span>
-                        </td>
-                        <td className="px-2 py-1 align-top text-right">
-                          {typeof r.parseConfidence === 'number'
-                            ? `${Math.round(r.parseConfidence * 100)}%`
-                            : '—'}
-                        </td>
-                        <td className="px-2 py-1 align-top">
-                          <div className="max-w-xs truncate" title={r.queueReason ?? undefined}>
-                            {r.queueReason ?? '—'}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                    {batchResults.map((r: any, idx: number) => {
+                      const finalStatus =
+                        r.finalValidationStatus ?? r.validationStatus ?? null;
+                      const originalStatus = r.originalValidationStatus ?? null;
+                      const statusTooltip =
+                        originalStatus && originalStatus !== finalStatus
+                          ? `original: ${originalStatus}`
+                          : undefined;
+
+                      return (
+                        <tr key={r.offerId ?? idx} className="border-t">
+                          <td className="px-2 py-1 align-top">{r.supplier ?? '—'}</td>
+                          <td className="px-2 py-1 align-top">{r.planName ?? '—'}</td>
+                          <td className="px-2 py-1 align-top">{r.tdspName ?? '—'}</td>
+                          <td className="px-2 py-1 align-top">
+                            {typeof r.termMonths === 'number' ? `${r.termMonths} mo` : '—'}
+                          </td>
+                          <td className="px-2 py-1 align-top">
+                            <span className="font-mono" title={statusTooltip}>
+                              {finalStatus ?? '—'}
+                            </span>
+                          </td>
+                          <td className="px-2 py-1 align-top">
+                            <span className="font-mono">{r.templateAction}</span>
+                          </td>
+                          <td className="px-2 py-1 align-top">
+                            <span className="font-mono">{r.tdspAppliedMode ?? '—'}</span>
+                          </td>
+                          <td className="px-2 py-1 align-top text-right">
+                            {typeof r.parseConfidence === 'number'
+                              ? `${Math.round(r.parseConfidence * 100)}%`
+                              : '—'}
+                          </td>
+                          <td className="px-2 py-1 align-top">
+                            <div
+                              className="max-w-xs truncate"
+                              title={r.finalQueueReason ?? r.queueReason ?? undefined}
+                            >
+                              {r.finalQueueReason ?? r.queueReason ?? '—'}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

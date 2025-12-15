@@ -3,8 +3,8 @@ import { Buffer } from "node:buffer";
 
 import { wbGetOffers } from "@/lib/wattbuy/client";
 import { normalizeOffers } from "@/lib/wattbuy/normalize";
-import { deterministicEflExtract } from "@/lib/efl/eflExtractor";
 import { getOrCreateEflTemplate } from "@/lib/efl/getOrCreateEflTemplate";
+import { runEflPipelineNoStore } from "@/lib/efl/runEflPipelineNoStore";
 
 export const dynamic = "force-dynamic";
 
@@ -34,10 +34,14 @@ type BatchResultRow = {
   repPuctCertificate: string | null;
   eflVersionCode: string | null;
   validationStatus: string | null;
+  originalValidationStatus?: string | null;
+  finalValidationStatus?: string | null;
   tdspAppliedMode: string | null;
   parseConfidence: number | null;
   templateAction: "HIT" | "CREATED" | "SKIPPED" | "NOT_ELIGIBLE";
   queueReason?: string | null;
+  finalQueueReason?: string | null;
+  solverApplied?: string[] | null;
   notes?: string | null;
   diffs?: Array<{
     kwh: number;
@@ -189,37 +193,12 @@ export async function POST(req: NextRequest) {
         const arrayBuffer = await res.arrayBuffer();
         const pdfBytes = Buffer.from(arrayBuffer);
 
-        const extract = await deterministicEflExtract(pdfBytes);
-        const rawText = extract.rawText ?? "";
-
-        if (!rawText.trim()) {
-          results.push({
-            offerId,
-            supplier,
-            planName,
-            termMonths,
-            tdspName,
-            eflUrl,
-            eflPdfSha256: extract.eflPdfSha256 ?? null,
-            repPuctCertificate: extract.repPuctCertificate ?? null,
-            eflVersionCode: extract.eflVersionCode ?? null,
-            validationStatus: null,
-            tdspAppliedMode: null,
-            parseConfidence: null,
-            templateAction: "SKIPPED",
-            notes: "deterministicEflExtract returned empty rawText; skipped.",
-          });
-          continue;
-        }
-
-        const { template, wasCreated } = await getOrCreateEflTemplate({
+        // 2) Run full EFL pipeline WITHOUT persisting templates.
+        const pipeline = await runEflPipelineNoStore({
+          pdfBytes,
           source: "wattbuy",
-          rawText,
-          eflPdfSha256: extract.eflPdfSha256 ?? null,
-          repPuctCertificate: extract.repPuctCertificate ?? null,
-          eflVersionCode: extract.eflVersionCode ?? null,
-          wattbuy: {
-            providerName: supplier,
+          offerMeta: {
+            supplier,
             planName,
             termMonths,
             tdspName,
@@ -227,13 +206,18 @@ export async function POST(req: NextRequest) {
           },
         });
 
-        const baseValidation = (template.validation as any)?.eflAvgPriceValidation ?? null;
-        const solved = template.derivedForValidation ?? null;
-        const effectiveValidation = solved?.validationAfter ?? baseValidation ?? null;
+        const det = pipeline.deterministic;
+        const baseValidation = (pipeline.validation as any)?.eflAvgPriceValidation ?? null;
+        const solved = pipeline.derivedForValidation ?? null;
+        const effectiveValidation = pipeline.finalValidation ?? baseValidation ?? null;
 
-        const status: string | null = effectiveValidation?.status ?? null;
+        const originalStatus: string | null = baseValidation?.status ?? null;
+        const finalStatus: string | null = effectiveValidation?.status ?? null;
         const tdspAppliedMode: string | null =
           effectiveValidation?.assumptionsUsed?.tdspAppliedMode ?? null;
+        const solverApplied: string[] | null = Array.isArray(solved?.solverApplied)
+          ? (solved.solverApplied as string[])
+          : null;
 
         const diffs =
           Array.isArray(effectiveValidation?.points) && effectiveValidation.points.length
@@ -246,16 +230,34 @@ export async function POST(req: NextRequest) {
               }))
             : undefined;
 
+        // 3) Conditionally persist template ONLY when explicitly requested and
+        // the final (derived) validation status is PASS.
         let templateAction: BatchResultRow["templateAction"] = "SKIPPED";
-        if (status === "PASS") {
-          templateAction = wasCreated ? "CREATED" : "HIT";
-        } else if (status == null) {
-          templateAction = "SKIPPED";
+        if (mode === "STORE_TEMPLATES_ON_PASS" && finalStatus === "PASS") {
+          try {
+            const { wasCreated } = await getOrCreateEflTemplate({
+              source: "wattbuy",
+              rawText: det.rawText,
+              eflPdfSha256: det.eflPdfSha256 ?? null,
+              repPuctCertificate: det.repPuctCertificate ?? null,
+              eflVersionCode: det.eflVersionCode ?? null,
+              wattbuy: {
+                providerName: supplier,
+                planName,
+                termMonths,
+                tdspName,
+                offerId,
+              },
+            });
+            templateAction = wasCreated ? "CREATED" : "HIT";
+          } catch {
+            // Best-effort: if persistence fails, we still return the pipeline
+            // result and mark this as SKIPPED for templateAction.
+            templateAction = "SKIPPED";
+          }
         }
 
-        // Mode is primarily for future extension; getOrCreateEflTemplate already
-        // handles creation vs cache, so we don't gate it here. The mode is still
-        // useful for the UI to decide whether to trust/store results.
+        const finalQueueReason: string | null = effectiveValidation?.queueReason ?? null;
 
         results.push({
           offerId,
@@ -264,17 +266,21 @@ export async function POST(req: NextRequest) {
           termMonths,
           tdspName,
           eflUrl,
-          eflPdfSha256: template.eflPdfSha256 ?? extract.eflPdfSha256 ?? null,
-          repPuctCertificate: template.repPuctCertificate ?? extract.repPuctCertificate ?? null,
-          eflVersionCode: template.eflVersionCode ?? extract.eflVersionCode ?? null,
-          validationStatus: status,
+          eflPdfSha256: det.eflPdfSha256 ?? null,
+          repPuctCertificate: det.repPuctCertificate ?? null,
+          eflVersionCode: det.eflVersionCode ?? null,
+          validationStatus: finalStatus,
+          originalValidationStatus: originalStatus,
+          finalValidationStatus: finalStatus,
           tdspAppliedMode,
-          parseConfidence: template.parseConfidence ?? null,
+          parseConfidence: pipeline.parseConfidence ?? null,
           templateAction,
-          queueReason: effectiveValidation?.queueReason ?? null,
+          queueReason: finalQueueReason,
+          finalQueueReason,
+          solverApplied,
           notes:
-            extract.warnings && extract.warnings.length
-              ? extract.warnings.join(" • ")
+            det.warnings && det.warnings.length
+              ? det.warnings.join(" • ")
               : undefined,
           diffs,
         });

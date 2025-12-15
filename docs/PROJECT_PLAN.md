@@ -4995,20 +4995,23 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
   - Request shape:
     - `address: { line1: string; city: string; state: string; zip: string }` (all required)
     - `offerLimit?: number` (defaults to 25, hard‑capped at 50)
-    - `mode?: "STORE_TEMPLATES_ON_PASS" | "DRY_RUN"` (currently informational; creation is governed by `getOrCreateEflTemplate`).
+    - `mode?: "STORE_TEMPLATES_ON_PASS" | "DRY_RUN"` (controls whether PASS results are persisted as templates).
   - Behavior:
     - Authenticates via `x-admin-token` against `ADMIN_TOKEN` (same guard as other admin WattBuy tools).
     - Calls `wbGetOffers` + `normalizeOffers` for the given address.
     - For each offer with an `docs.efl` URL (up to `offerLimit`):
-      - Downloads the EFL PDF and passes the bytes to `deterministicEflExtract` (shared pdftotext pipeline).
-      - Sends `rawText` + identity metadata into `getOrCreateEflTemplate({ source: "wattbuy", ... })`, reusing the same OpenAI / deterministic parser + `validateEflAvgPriceTable` + `solveEflValidationGaps` path as admin manual upload.
-      - Computes an effective validation object using `template.derivedForValidation?.validationAfter ?? template.validation?.eflAvgPriceValidation` and surfaces:
-        - `validationStatus` (`PASS` / `FAIL` / `SKIP` / `null`),
-        - `tdspAppliedMode` and avg‑price diff points (500/1000/2000 kWh) when present,
-        - `templateAction` — `"CREATED"` when `getOrCreateEflTemplate` reports a new template and status is `PASS`, `"HIT"` when status is `PASS` for an existing template, `"SKIPPED"` for all other statuses, and `"NOT_ELIGIBLE"` for offers without an EFL URL.
+      - Downloads the EFL PDF and passes the bytes to `runEflPipelineNoStore` (shared pdftotext + AI + validator + solver pipeline used by admin manual upload), which **does not persist any template**.
+      - Computes:
+        - `originalValidationStatus` from `validation.eflAvgPriceValidation?.status` (pre‑solver).
+        - `finalValidationStatus` from `derivedForValidation.validationAfter?.status` when present, falling back to the original validator status.
+        - `tdspAppliedMode` and avg‑price diff points (500/1000/2000 kWh) from the final validation object.
+      - Only when `mode === "STORE_TEMPLATES_ON_PASS"` **and** `finalValidationStatus === "PASS"`:
+        - Calls `getOrCreateEflTemplate({ source: "wattbuy", rawText, eflPdfSha256, repPuctCertificate, eflVersionCode, wattbuy })` to persist/lookup a template.
+        - Sets `templateAction` to `"CREATED"` when a new template is stored or `"HIT"` when an existing template matches.
+      - In all other cases (including DRY_RUN or non‑PASS validation), `templateAction` is `"SKIPPED"` (and `"NOT_ELIGIBLE"` for offers without an EFL URL).
     - Returns JSON:
       - `ok`, `mode`, `offerCount`, `processedCount`,
-      - `results[]` with: `offerId`, `supplier`, `planName`, `termMonths`, `tdspName`, `eflUrl`, `eflPdfSha256`, `repPuctCertificate`, `eflVersionCode`, `validationStatus`, `tdspAppliedMode`, `parseConfidence`, `templateAction`, `queueReason`, and a compact `diffs[]` view of the avg‑price validator points.
+      - `results[]` with: `offerId`, `supplier`, `planName`, `termMonths`, `tdspName`, `eflUrl`, `eflPdfSha256`, `repPuctCertificate`, `eflVersionCode`, `validationStatus` (final), `originalValidationStatus`, `finalValidationStatus`, `tdspAppliedMode`, `parseConfidence`, `templateAction`, `queueReason` / `finalQueueReason`, `solverApplied`, and a compact `diffs[]` view of the avg‑price validator points.
 
 - **Admin UI wiring (WattBuy Inspector)**:
   - Extended the WattBuy inspector page (`app/admin/wattbuy/inspector/page.tsx`) with a **“Batch EFL Parser Test (manual‑upload pipeline)”** panel under the existing _EFL PlanRules Probe_ section.
@@ -5022,8 +5025,12 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
       - Supplier, Plan, TDSP, Term, `validationStatus`, `templateAction` (HIT/CREATED/SKIPPED/NOT_ELIGIBLE), `tdspAppliedMode`, `parseConfidence` (as a 0–100% badge), and `queueReason` (truncated with full text as tooltip).
 
 - **Template creation policy (PASS‑only semantics)**:
-  - The batch harness never invents its own persistence layer; it strictly reuses `getOrCreateEflTemplate` for template creation/deduping and the existing avg‑price validator + gap solver.
-  - For operational clarity:
-    - We treat **`validationStatus === "PASS"`** as “eligible for auto‑learning” and surface these rows as `"HIT"` (existing template) or `"CREATED"` (new template) in `templateAction`.
+  - The batch harness never invents its own schema or persistence path; it runs the **non‑persisting** pipeline first via `runEflPipelineNoStore` and then, **only when explicitly requested**, delegates to `getOrCreateEflTemplate`.
+  - DRY_RUN behavior:
+    - When `mode === "DRY_RUN"`, the harness **never** calls `getOrCreateEflTemplate`, regardless of PASS/FAIL/SKIP.
+    - All rows are reported with `templateAction: "SKIPPED"` (or `"NOT_ELIGIBLE"` when there is no EFL URL), but still include full validation, TDSP, and diff details for QA.
+  - STORE_TEMPLATES_ON_PASS behavior:
+    - When `mode === "STORE_TEMPLATES_ON_PASS"`, the harness treats **`finalValidationStatus === "PASS"`** (derived validation after solver) as eligible for auto‑learning and calls `getOrCreateEflTemplate` **only** for those rows.
+    - These rows surface as `"HIT"` (existing template) or `"CREATED"` (new template) in `templateAction`.
     - Non‑PASS statuses (`FAIL`, `SKIP`, or `null`) are always marked `"SKIPPED"` and never reported as `"CREATED"`, so admins can quickly filter for plans that need manual review or deeper investigation.
-  - This keeps the batch tool aligned with the manual‑upload contract: only EFLs that clear avg‑price validation are considered “rock solid” candidates for template reuse.
+  - This keeps the batch tool aligned with the manual‑upload contract: only EFLs that clear **final** avg‑price validation are considered “rock solid” candidates for template reuse, and DRY_RUN mode is guaranteed side‑effect‑free with respect to template storage.
