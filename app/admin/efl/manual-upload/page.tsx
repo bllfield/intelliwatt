@@ -27,6 +27,11 @@ type UploadResponse = {
     requiresManualReview: boolean;
     issues: { code: string; message: string; severity: "ERROR" | "WARNING" }[];
   } | null;
+  // Optional derived validation snapshot from the gap solver (tier sync +
+  // TDSP utility-table fallback). This never alters the canonical
+  // planRules/rateStructure returned by the API; it is used only for
+  // avg-price validation and queueing.
+  derivedForValidation?: any | null;
 };
 
 type UploadError = {
@@ -667,12 +672,41 @@ export default function ManualFactCardLoaderPage() {
                     EFL Avg Price Validation (500 / 1000 / 2000 kWh)
                   </div>
                   <div className="text-right text-[11px] text-brand-navy/70">
-                    <div>
-                      <span className="font-mono">status:</span>{" "}
-                      <span className="font-mono font-semibold">
-                        {(result.validation as any).eflAvgPriceValidation.status}
-                      </span>
-                    </div>
+                    {(() => {
+                      const original =
+                        (result.validation as any).eflAvgPriceValidation;
+                      const derived =
+                        (result as any).derivedForValidation?.validationAfter ??
+                        null;
+                      return (
+                        <>
+                          <div>
+                            <span className="font-mono">status (original):</span>{" "}
+                            <span className="font-mono font-semibold">
+                              {original.status}
+                            </span>
+                          </div>
+                          {derived ? (
+                            <div>
+                              <span className="font-mono">
+                                status (derived):
+                              </span>{" "}
+                              <span className="font-mono font-semibold">
+                                {derived.status}
+                              </span>
+                            </div>
+                          ) : null}
+                          {derived?.assumptionsUsed?.tdspAppliedMode ? (
+                            <div>
+                              <span className="font-mono">tdspAppliedMode:</span>{" "}
+                              <span className="font-mono">
+                                {derived.assumptionsUsed.tdspAppliedMode}
+                              </span>
+                            </div>
+                          ) : null}
+                        </>
+                      );
+                    })()}
                     <div>
                       <span className="font-mono">tolerance:</span>{" "}
                       <span className="font-mono">
