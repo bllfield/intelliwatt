@@ -5156,13 +5156,17 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
         - `originalValidationStatus` from `validation.eflAvgPriceValidation?.status` (pre‑solver).
         - `finalValidationStatus` from `derivedForValidation.validationAfter?.status` when present, falling back to the original validator status.
         - `tdspAppliedMode` and avg‑price diff points (500/1000/2000 kWh) from the final validation object.
+      - **Template fast‑path (rateStructure cache)**:
+        - If a `RatePlan` already exists with the same `eflPdfSha256` **and** has a non‑null `rateStructure` (and `eflRequiresManualReview=false`), the batch harness skips re‑running the expensive EFL pipeline for that offer.
+        - These rows report `validationStatus: "PASS"` (so downstream PASS‑gates remain correct) and include `templateHit: true` to indicate the plan was already templated.
+        - In `mode === "DRY_RUN"`, these rows still report `templateAction: "SKIPPED"` (contract), but `templateHit: true` exposes that a template existed.
       - Only when `mode === "STORE_TEMPLATES_ON_PASS"` **and** `finalValidationStatus === "PASS"`:
         - Calls `getOrCreateEflTemplate({ source: "wattbuy", rawText, eflPdfSha256, repPuctCertificate, eflVersionCode, wattbuy })` to persist/lookup a template.
         - Sets `templateAction` to `"CREATED"` when a new template is stored or `"HIT"` when an existing template matches.
       - In all other cases (including DRY_RUN or non‑PASS validation), `templateAction` is `"SKIPPED"` (and `"NOT_ELIGIBLE"` for offers without an EFL URL).
     - Returns JSON:
       - `ok`, `mode`, `offerCount`, `processedCount`,
-      - `results[]` with: `offerId`, `supplier`, `planName`, `termMonths`, `tdspName`, `eflUrl`, `eflPdfSha256`, `repPuctCertificate`, `eflVersionCode`, `validationStatus` (final), `originalValidationStatus`, `finalValidationStatus`, `tdspAppliedMode`, `parseConfidence`, `templateAction`, `queueReason` / `finalQueueReason`, `solverApplied`, and a compact `diffs[]` view of the avg‑price validator points.
+      - `results[]` with: `offerId`, `supplier`, `planName`, `termMonths`, `tdspName`, `eflUrl`, `eflPdfSha256`, `repPuctCertificate`, `eflVersionCode`, `validationStatus` (final), `originalValidationStatus`, `finalValidationStatus`, `tdspAppliedMode`, `parseConfidence`, `templateHit`, `templateAction`, `queueReason` / `finalQueueReason`, `solverApplied`, and a compact `diffs[]` view of the avg‑price validator points.
 
 - **Admin UI wiring (WattBuy Inspector)**:
   - Extended the WattBuy inspector page (`app/admin/wattbuy/inspector/page.tsx`) with a **“Batch EFL Parser Test (manual‑upload pipeline)”** panel under the existing _EFL PlanRules Probe_ section.

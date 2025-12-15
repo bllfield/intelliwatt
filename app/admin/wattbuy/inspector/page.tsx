@@ -531,7 +531,9 @@ export default function WattBuyInspector() {
                             </span>
                           </td>
                           <td className="px-2 py-1 align-top">
-                            <span className="font-mono">{r.templateAction}</span>
+                            <span className="font-mono">
+                              {r.templateHit ? 'TEMPLATE' : r.templateAction}
+                            </span>
                           </td>
                           <td className="px-2 py-1 align-top">
                             <span className="font-mono">{r.tdspAppliedMode ?? '—'}</span>

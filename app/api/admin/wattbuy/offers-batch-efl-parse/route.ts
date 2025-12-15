@@ -42,6 +42,14 @@ type BatchResultRow = {
   parseConfidence: number | null;
   passStrength?: "STRONG" | "WEAK" | "INVALID" | null;
   passStrengthReasons?: string[] | null;
+  /**
+   * True when we detected a previously persisted RatePlan.rateStructure for this
+   * EFL fingerprint (i.e., a “template hit”), and skipped re-parsing.
+   *
+   * NOTE: In DRY_RUN, templateAction must remain "SKIPPED" per contract; use
+   * templateHit to still surface that a template existed.
+   */
+  templateHit?: boolean;
   templateAction: "TEMPLATE" | "HIT" | "CREATED" | "SKIPPED" | "NOT_ELIGIBLE";
   queueReason?: string | null;
   finalQueueReason?: string | null;
@@ -239,7 +247,10 @@ export async function POST(req: NextRequest) {
             parseConfidence: null,
             passStrength: null,
             passStrengthReasons: null,
-            templateAction: "TEMPLATE",
+            templateHit: true,
+            // DRY_RUN contract: templateAction is always SKIPPED (no template
+            // handling semantics). In STORE_TEMPLATES_ON_PASS, surface TEMPLATE.
+            templateAction: mode === "STORE_TEMPLATES_ON_PASS" ? "TEMPLATE" : "SKIPPED",
             queueReason: null,
             finalQueueReason: null,
             solverApplied: null,
