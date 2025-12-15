@@ -3,6 +3,7 @@ import { Buffer } from "node:buffer";
 
 import { wbGetOffers } from "@/lib/wattbuy/client";
 import { normalizeOffers } from "@/lib/wattbuy/normalize";
+import { computePdfSha256 } from "@/lib/efl/eflExtractor";
 import { getOrCreateEflTemplate } from "@/lib/efl/getOrCreateEflTemplate";
 import { runEflPipelineNoStore } from "@/lib/efl/runEflPipelineNoStore";
 import { prisma } from "@/lib/db";
@@ -41,7 +42,7 @@ type BatchResultRow = {
   parseConfidence: number | null;
   passStrength?: "STRONG" | "WEAK" | "INVALID" | null;
   passStrengthReasons?: string[] | null;
-  templateAction: "HIT" | "CREATED" | "SKIPPED" | "NOT_ELIGIBLE";
+  templateAction: "TEMPLATE" | "HIT" | "CREATED" | "SKIPPED" | "NOT_ELIGIBLE";
   queueReason?: string | null;
   finalQueueReason?: string | null;
   solverApplied?: string[] | null;
@@ -204,8 +205,47 @@ export async function POST(req: NextRequest) {
 
         const arrayBuffer = await res.arrayBuffer();
         const pdfBytes = Buffer.from(arrayBuffer);
+        const pdfSha256 = computePdfSha256(pdfBytes);
 
-        // 2) Run full EFL pipeline WITHOUT persisting templates.
+        // 2a) Fast path: if we already have a saved RatePlan.rateStructure for
+        // this exact EFL fingerprint (and it doesn't require manual review),
+        // skip running the expensive EFL pipeline entirely.
+        const existing = (await prisma.ratePlan.findFirst({
+          where: { eflPdfSha256: pdfSha256 } as any,
+        })) as any;
+
+        if (
+          existing &&
+          existing.rateStructure &&
+          (existing.eflRequiresManualReview ?? false) === false
+        ) {
+          results.push({
+            offerId,
+            supplier,
+            planName,
+            termMonths,
+            tdspName,
+            eflUrl,
+            eflPdfSha256: pdfSha256,
+            repPuctCertificate: existing.repPuctCertificate ?? null,
+            eflVersionCode: existing.eflVersionCode ?? null,
+            validationStatus: "TEMPLATE",
+            originalValidationStatus: null,
+            finalValidationStatus: "TEMPLATE",
+            tdspAppliedMode: null,
+            parseConfidence: null,
+            passStrength: null,
+            passStrengthReasons: null,
+            templateAction: "TEMPLATE",
+            queueReason: null,
+            finalQueueReason: null,
+            solverApplied: null,
+            notes: "Template hit: RatePlan already has rateStructure for this EFL fingerprint.",
+          });
+          continue;
+        }
+
+        // 2b) Run full EFL pipeline WITHOUT persisting templates.
         const pipeline = await runEflPipelineNoStore({
           pdfBytes,
           source: "wattbuy",

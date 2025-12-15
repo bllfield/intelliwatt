@@ -30,7 +30,7 @@ type PerPlanResult = {
   status:
     | "no_efl"
     | "fetched_pdf"
-    | "cached_rateplan"
+    | "template"
     | "parsed_ok"
     | "parsed_manual_review"
     | "fetch_error"
@@ -179,7 +179,7 @@ export async function POST(req: NextRequest) {
             supplierName,
             eflUrl,
             pdfSha256,
-            status: "cached_rateplan",
+            status: "template",
             requiresManualReview: existing.eflRequiresManualReview ?? false,
             notes: "RatePlan with this EFL fingerprint already has a RateStructure.",
           });
