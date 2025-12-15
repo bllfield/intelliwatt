@@ -32,6 +32,15 @@ function pretty(x: unknown) {
   }
 }
 
+async function copyToClipboard(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export default function EflReviewPage() {
   const { token, setToken } = useLocalToken();
   const [items, setItems] = useState<QueueItem[]>([]);
@@ -40,6 +49,8 @@ export default function EflReviewPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
+  const [linkRunnerUrl, setLinkRunnerUrl] = useState<string>('');
+  const [copiedUrlAt, setCopiedUrlAt] = useState<number | null>(null);
 
   const ready = useMemo(() => Boolean(token), [token]);
 
@@ -180,6 +191,77 @@ export default function EflReviewPage() {
           </div>
         </section>
 
+        <section className="rounded-2xl border bg-white p-4 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="font-medium">EFL Link Runner</h2>
+              <p className="text-xs text-gray-600 mt-1">
+                Paste an EFL URL here (or click “Use” on a row) to open the link runner and
+                quickly save the PDF locally.
+              </p>
+            </div>
+            <a
+              href="/admin/efl/links"
+              className="text-xs font-medium text-blue-700 underline"
+            >
+              Open full Link Runner
+            </a>
+          </div>
+
+          <div className="flex flex-col md:flex-row gap-2">
+            <input
+              className="flex-1 rounded-lg border px-3 py-2 text-sm"
+              placeholder="https://.../some-efl.pdf"
+              value={linkRunnerUrl}
+              onChange={(e) => setLinkRunnerUrl(e.target.value)}
+            />
+            <div className="flex flex-wrap items-center gap-2">
+              <a
+                href={
+                  linkRunnerUrl.trim()
+                    ? `/admin/efl/links?eflUrl=${encodeURIComponent(linkRunnerUrl.trim())}&sourceTag=efl_review_queue`
+                    : '/admin/efl/links'
+                }
+                className="rounded-lg border bg-blue-600 text-white px-3 py-2 text-sm font-medium disabled:opacity-60"
+                aria-disabled={!linkRunnerUrl.trim()}
+                onClick={(e) => {
+                  if (!linkRunnerUrl.trim()) e.preventDefault();
+                }}
+              >
+                Run fingerprint
+              </a>
+              <button
+                type="button"
+                className="rounded-lg border bg-white px-3 py-2 text-sm font-medium disabled:opacity-60"
+                disabled={!linkRunnerUrl.trim()}
+                onClick={() => {
+                  const u = linkRunnerUrl.trim();
+                  if (!u) return;
+                  window.open(u, '_blank', 'noopener,noreferrer');
+                }}
+              >
+                Open PDF
+              </button>
+              <button
+                type="button"
+                className="rounded-lg border bg-white px-3 py-2 text-sm font-medium disabled:opacity-60"
+                disabled={!linkRunnerUrl.trim()}
+                onClick={async () => {
+                  const u = linkRunnerUrl.trim();
+                  if (!u) return;
+                  const ok = await copyToClipboard(u);
+                  if (ok) {
+                    setCopiedUrlAt(Date.now());
+                    setTimeout(() => setCopiedUrlAt(null), 1200);
+                  }
+                }}
+              >
+                {copiedUrlAt ? 'Copied' : 'Copy URL'}
+              </button>
+            </div>
+          </div>
+        </section>
+
         <section className="rounded-2xl border bg-white p-4">
           <div className="flex items-center justify-between mb-3">
             <h2 className="font-medium">
@@ -199,6 +281,7 @@ export default function EflReviewPage() {
                     <th className="px-2 py-1 text-left">Supplier</th>
                     <th className="px-2 py-1 text-left">Plan</th>
                     <th className="px-2 py-1 text-left">OfferId</th>
+                    <th className="px-2 py-1 text-left">EFL URL</th>
                     <th className="px-2 py-1 text-left">EFL Ver</th>
                     <th className="px-2 py-1 text-left">Status</th>
                     <th className="px-2 py-1 text-left">Queue reason</th>
@@ -214,6 +297,7 @@ export default function EflReviewPage() {
                       : [];
                     const queueReason: string | undefined = item.queueReason ?? undefined;
                     const isResolved = Boolean(item.resolvedAt);
+                    const eflUrl: string = typeof item.eflUrl === 'string' ? item.eflUrl : '';
                     return (
                       <tr key={id} className="border-t align-top">
                         <td className="px-2 py-1">{item.supplier ?? '—'}</td>
@@ -226,6 +310,51 @@ export default function EflReviewPage() {
                           <div className="max-w-[120px] truncate" title={item.offerId ?? undefined}>
                             {item.offerId ?? '—'}
                           </div>
+                        </td>
+                        <td className="px-2 py-1">
+                          {eflUrl ? (
+                            <div className="flex items-center gap-1">
+                              <input
+                                className="w-[260px] max-w-[260px] rounded border bg-white px-2 py-1 font-mono text-[10px]"
+                                readOnly
+                                value={eflUrl}
+                                onFocus={(e) => e.currentTarget.select()}
+                                title={eflUrl}
+                              />
+                              <button
+                                type="button"
+                                className="rounded border bg-white px-2 py-1 text-[10px] font-medium hover:bg-gray-50"
+                                onClick={async () => {
+                                  const ok = await copyToClipboard(eflUrl);
+                                  if (ok) {
+                                    setCopiedUrlAt(Date.now());
+                                    setTimeout(() => setCopiedUrlAt(null), 1200);
+                                  }
+                                }}
+                              >
+                                Copy
+                              </button>
+                              <button
+                                type="button"
+                                className="rounded border bg-white px-2 py-1 text-[10px] font-medium hover:bg-gray-50"
+                                onClick={() => setLinkRunnerUrl(eflUrl)}
+                                title="Load into link runner above"
+                              >
+                                Use
+                              </button>
+                              <a
+                                href={eflUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="rounded border bg-white px-2 py-1 text-[10px] font-medium hover:bg-gray-50"
+                                title="Open EFL PDF"
+                              >
+                                Open
+                              </a>
+                            </div>
+                          ) : (
+                            '—'
+                          )}
                         </td>
                         <td className="px-2 py-1">
                           <div className="max-w-[140px] truncate" title={item.eflVersionCode ?? undefined}>
