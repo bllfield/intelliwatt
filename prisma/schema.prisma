@@ -478,6 +478,47 @@ model TdspRateSnapshot {
   @@index([effectiveAt])
 }
 
+model EflParseReviewQueue {
+  id                   String   @id @default(cuid())
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  /// Source of this record, e.g. "wattbuy_batch", "manual_upload".
+  source               String
+
+  /// Core EFL identity.
+  eflPdfSha256         String   @unique
+  repPuctCertificate   String?
+  eflVersionCode       String?
+
+  /// Offer / plan metadata (WattBuy or other upstream).
+  offerId              String?
+  supplier             String?
+  planName             String?
+  eflUrl               String?
+  tdspName             String?
+  termMonths           Int?
+
+  /// Parsed payloads used by the validator/solver.
+  rawText              String?  @db.Text
+  planRules            Json?
+  rateStructure        Json?
+  validation           Json?
+  derivedForValidation Json?
+
+  /// Final solver+validator outcome at time of queueing.
+  finalStatus          String   // e.g. "FAIL", "SKIP"
+  queueReason          String?  @db.Text
+  solverApplied        Json?
+
+  /// Admin resolution metadata (null => OPEN).
+  resolvedAt           DateTime?
+  resolvedBy           String?
+  resolutionNotes      String?  @db.Text
+
+  @@index([finalStatus, createdAt])
+}
+
 model OfferAudit {
   id           String   @id @default(uuid())
   event        String

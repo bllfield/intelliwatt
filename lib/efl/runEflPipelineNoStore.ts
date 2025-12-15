@@ -60,6 +60,14 @@ export type RunEflPipelineNoStoreResult = {
    * should be queued for manual admin review rather than auto-presented.
    */
   needsAdminReview?: boolean;
+  /**
+   * Explicit copies of the effective PlanRules/RateStructure used for
+   * decision-making. These mirror `planRules`/`rateStructure` but are
+   * provided for callers that want to differentiate between raw AI output
+   * and solver-adjusted shapes.
+   */
+  effectivePlanRules?: any | null;
+  effectiveRateStructure?: any | null;
 };
 
 /**
@@ -149,6 +157,8 @@ export async function runEflPipelineNoStore(
     derivedForValidation,
     finalValidation,
     needsAdminReview,
+    effectivePlanRules: finalPlanRules,
+    effectiveRateStructure: finalRateStructure,
   };
 }
 

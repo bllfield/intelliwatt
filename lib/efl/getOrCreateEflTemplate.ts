@@ -45,6 +45,10 @@ type EflTemplateRecord = {
     eflAvgPriceValidation?: any;
   } | null;
   derivedForValidation?: any | null;
+  /** When present, reflects the solver-adjusted shapes used for validation PASS. */
+  effectivePlanRules?: any | null;
+  effectiveRateStructure?: any | null;
+  finalValidation?: any | null;
 };
 
 export interface GetOrCreateEflTemplateResult {
@@ -258,6 +262,9 @@ async function handleManualUpload(
     parseWarnings: aiResult.parseWarnings ?? [],
     validation: validationForTemplate,
     derivedForValidation,
+    effectivePlanRules: planRulesForTemplate,
+    effectiveRateStructure: rateStructureForTemplate,
+    finalValidation: validationAfter ?? (aiResult.validation ?? null),
   };
 
   const warnings: string[] = [
@@ -392,6 +399,9 @@ async function handleWattbuy(
     parseWarnings: aiResult.parseWarnings ?? [],
     validation: validationForTemplate,
     derivedForValidation,
+    effectivePlanRules: planRulesForTemplate,
+    effectiveRateStructure: rateStructureForTemplate,
+    finalValidation: validationAfter ?? (aiResult.validation ?? null),
   };
 
   const warnings: string[] = [

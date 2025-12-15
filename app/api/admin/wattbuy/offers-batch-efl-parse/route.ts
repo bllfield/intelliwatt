@@ -5,6 +5,7 @@ import { wbGetOffers } from "@/lib/wattbuy/client";
 import { normalizeOffers } from "@/lib/wattbuy/normalize";
 import { getOrCreateEflTemplate } from "@/lib/efl/getOrCreateEflTemplate";
 import { runEflPipelineNoStore } from "@/lib/efl/runEflPipelineNoStore";
+import { prisma } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -73,6 +74,15 @@ function jsonError(status: number, error: string, details?: unknown) {
     ...(details ? { details } : {}),
   };
   return NextResponse.json(body, { status });
+}
+
+function normalizeQueueReason(reason: string | null | undefined): string | null {
+  if (!reason) return null;
+  // Fix common mojibake sequences such as "â€”" / "â€“" into proper dashes.
+  return reason
+    .replace(/â€”/g, "—")
+    .replace(/â€“/g, "–")
+    .replace(/â€™/g, "’");
 }
 
 export async function POST(req: NextRequest) {
@@ -257,7 +267,58 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        const finalQueueReason: string | null = effectiveValidation?.queueReason ?? null;
+        const finalQueueReasonRaw: string | null =
+          effectiveValidation?.queueReason ?? null;
+        const finalQueueReason = normalizeQueueReason(finalQueueReasonRaw);
+
+        // Queue FAILs for admin review (regardless of DRY_RUN vs STORE_TEMPLATES_ON_PASS).
+        if (finalStatus === "FAIL" && det.eflPdfSha256) {
+          try {
+            await (prisma as any).eflParseReviewQueue.upsert({
+              where: { eflPdfSha256: det.eflPdfSha256 },
+              create: {
+                source: "wattbuy_batch",
+                eflPdfSha256: det.eflPdfSha256,
+                repPuctCertificate: det.repPuctCertificate,
+                eflVersionCode: det.eflVersionCode,
+                offerId: offerId ?? null,
+                supplier: supplier ?? null,
+                planName: planName ?? null,
+                eflUrl,
+                tdspName,
+                termMonths,
+                rawText: det.rawText,
+                planRules: pipeline.planRules ?? null,
+                rateStructure: pipeline.rateStructure ?? null,
+                validation: pipeline.validation ?? null,
+                derivedForValidation: pipeline.derivedForValidation ?? null,
+                finalStatus: finalStatus,
+                queueReason: finalQueueReason,
+                solverApplied: solverApplied ?? [],
+              },
+              update: {
+                repPuctCertificate: det.repPuctCertificate,
+                eflVersionCode: det.eflVersionCode,
+                offerId: offerId ?? null,
+                supplier: supplier ?? null,
+                planName: planName ?? null,
+                eflUrl,
+                tdspName,
+                termMonths,
+                rawText: det.rawText,
+                planRules: pipeline.planRules ?? null,
+                rateStructure: pipeline.rateStructure ?? null,
+                validation: pipeline.validation ?? null,
+                derivedForValidation: pipeline.derivedForValidation ?? null,
+                finalStatus: finalStatus,
+                queueReason: finalQueueReason,
+                solverApplied: solverApplied ?? [],
+              },
+            });
+          } catch {
+            // Best-effort only; do not fail the batch because the review queue write failed.
+          }
+        }
 
         results.push({
           offerId,

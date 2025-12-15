@@ -5131,3 +5131,69 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
       - Otherwise, the template continues to store the raw AI `planRules` / `rateStructure` and original validator envelope, while still attaching `derivedForValidation` for debugging/audit.
     - This ensures that when the solver successfully closes gaps (tiers, TDSP fallbacks, base charge), the **derived** plan rules and rate structure become authoritative for all downstream uses (admin manual-upload UI, WattBuy templates, batch harness), without mutating DB-backed rate cards yet.
   - When the solver cannot rescue a FAIL (i.e., `validationAfter.status === "FAIL"` even after tier/TDSP/base-charge fills), the system now treats that as a “needs admin review” situation in the non-persisting pipeline (`needsAdminReview = true` in `runEflPipelineNoStore`), and the corresponding templates still reflect the raw AI output plus a blocking `queueReason` from the validator. Admin-queue wiring will be added in a subsequent step.
+
+## EFL SOLVER APPLY + ADMIN REVIEW QUEUE (2025‑12‑15)
+
+- **DB-backed review queue for failed EFL parses**:
+  - Added a new Prisma model `EflParseReviewQueue` in `prisma/schema.prisma` to capture EFLs whose avg-price validation **fails even after** solver passes:
+    - Identity: `eflPdfSha256` (unique), `repPuctCertificate`, `eflVersionCode`.
+    - Offer metadata: `offerId`, `supplier`, `planName`, `eflUrl`, `tdspName`, `termMonths`, and `source` (e.g., `"wattbuy_batch"`, `"manual_upload"`).
+    - Payloads: `rawText` (Text), `planRules` (Json), `rateStructure` (Json), `validation` (Json), and `derivedForValidation` (Json).
+    - Outcome: `finalStatus` (string, typically `"FAIL"`), `queueReason` (Text), and `solverApplied` (Json array of tags such as `"TIER_SYNC_FROM_RATE_STRUCTURE"`, `"SYNC_USAGE_TIERS_FROM_EFL_TEXT"`, `"SYNC_BASE_CHARGE_FROM_EFL_TEXT"`, etc.).
+    - Resolution: `resolvedAt`, `resolvedBy`, and `resolutionNotes` to track manual admin review; an index on `[finalStatus, createdAt]` supports OPEN/RESOLVED filtering.
+
+- **Effective rules logic in the non-persisting pipeline**:
+  - `lib/efl/runEflPipelineNoStore.ts` now returns **both** the raw AI shapes and solver-adjusted shapes in a single result:
+    - After `parseEflTextWithAi` + `solveEflValidationGaps`, it computes:
+      - `validationAfter = derivedForValidation?.validationAfter ?? null` and `finalValidation = validationAfter ?? baseValidation ?? null`.
+      - If `validationAfter.status === "PASS"` and `derivedPlanRules`/`derivedRateStructure` exist, the result’s `planRules`/`rateStructure` point at the solver-derived shapes; otherwise they mirror the raw AI output.
+    - New explicit mirrors:
+      - `effectivePlanRules` and `effectiveRateStructure` are always set to the same values returned via `planRules`/`rateStructure`, giving callers a stable “effective rules” handle regardless of internal wiring.
+    - A `needsAdminReview` flag is set when `finalValidation.status === "FAIL"`, signaling that this EFL should be queued rather than auto-presented.
+
+- **Templates store effective rules when solver PASS**:
+  - `lib/efl/getOrCreateEflTemplate.ts` now records solver-adjusted shapes alongside the original AI+validator outputs for both manual uploads and WattBuy templates:
+    - After `parseEflTextWithAi` + `solveEflValidationGaps`, each template incorporates:
+      - `effectivePlanRules` and `effectiveRateStructure`: `derivedPlanRules`/`derivedRateStructure` when `validationAfter.status === "PASS"`, otherwise the raw AI PlanRules/RateStructure.
+      - `finalValidation`: prefers `validationAfter` (the solver’s re-run) when truthy, falling back to the original `validation` envelope; `validation` on the template continues to carry the canonical `{ eflAvgPriceValidation }` used by callers.
+      - `derivedForValidation` is preserved as-is (with `solverApplied`, `solveMode`, and `queueReason`) for debug/audit use in admin UIs.
+    - This makes it explicit which shapes are “effective” (what we trust after solver) vs. the raw model output, while still keeping all template caching semantics unchanged.
+
+- **Queueing FAIL plans from the WattBuy batch harness**:
+  - `app/api/admin/wattbuy/offers-batch-efl-parse/route.ts` now **upserts** any EFL whose final (post-solver) validation status is `"FAIL"` into `EflParseReviewQueue`:
+    - For each offer with an EFL PDF:
+      - Runs `runEflPipelineNoStore` to obtain `deterministic`, `planRules`, `rateStructure`, `validation`, `derivedForValidation`, and `finalValidation`.
+      - When `finalStatus === "FAIL"` and `det.eflPdfSha256` is present:
+        - Performs `prisma.eflParseReviewQueue.upsert({ where: { eflPdfSha256 }, create: {...}, update: {...} })` with:
+          - Source `"wattbuy_batch"`, the EFL identity, offer metadata, and the effective `planRules`/`rateStructure` returned by the pipeline.
+          - `validation`, `derivedForValidation`, `finalStatus`, a normalized `queueReason` (fixing common mojibake like `"â€”"` → `"—"`), and `solverApplied` tags.
+      - This happens regardless of batch mode (`DRY_RUN` vs. `STORE_TEMPLATES_ON_PASS`) because the endpoint is admin-only and the queue is strictly for operator review.
+    - PASS plans remain unchanged:
+      - No queue insert when `finalStatus === "PASS"`.
+      - When `mode === "STORE_TEMPLATES_ON_PASS"`, the existing template-write behavior (via `getOrCreateEflTemplate`) is preserved.
+
+- **Admin APIs + review UI**:
+  - New admin API routes for inspecting and resolving queue items:
+    - `GET /api/admin/efl-review/list` (`app/api/admin/efl-review/list/route.ts`):
+      - Gated by `ADMIN_TOKEN` via `x-admin-token` header.
+      - Query params: `status=OPEN|RESOLVED` (OPEN = `resolvedAt IS NULL` by default), `limit` (default 50, max 200), and `q` (search supplier/plan/offerId/sha/version via case-insensitive `contains`).
+      - Returns `{ ok, status, count, items }` with newest items first.
+    - `POST /api/admin/efl-review/resolve` (`app/api/admin/efl-review/resolve/route.ts`):
+      - Gated by `ADMIN_TOKEN`.
+      - Body: `{ id, resolutionNotes?, resolvedBy? }`.
+      - Sets `resolvedAt = now`, `resolvedBy` (default `"admin"`), and optional `resolutionNotes`, and returns the updated row.
+  - New admin page `app/admin/efl-review/page.tsx`:
+    - Client-side React page using the same `x-admin-token` pattern as other admin tools.
+    - Shows filters for **Open / Resolved** and a free-text search (`supplier`, `planName`, `offerId`, `eflPdfSha256`, `eflVersionCode`).
+    - Main table lists, per item:
+      - Supplier, Plan, OfferId, EFL Version, `finalStatus`, `queueReason` (truncated with full tooltip), and `solverApplied` tags.
+    - Each row includes:
+      - A **“View details”** expander showing `planRules`, `rateStructure`, `validation`, `derivedForValidation`, and a truncated `rawText` excerpt for deep inspection.
+      - A **“Mark resolved”** button (for open items) that calls `/api/admin/efl-review/resolve` and refreshes the list.
+
+- **Behavioral summary**:
+  - Effective PlanRules/RateStructure are only treated as authoritative when the **final** avg-price validation status (after solver) is `"PASS"`; in that case, both the non-persisting pipeline and in-memory templates surface the **derived** shapes.
+  - When the final status remains `"FAIL"`, the plan is **never** auto-presented:
+    - The pipeline marks `needsAdminReview = true`.
+    - The batch harness enqueues the EFL into `EflParseReviewQueue` with full context for admins.
+    - Future steps will wire this queue into customer-facing plan gating so that only PASS templates (original or solver-assisted) can be surfaced by default.
