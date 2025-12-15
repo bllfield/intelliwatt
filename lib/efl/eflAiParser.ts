@@ -417,17 +417,24 @@ OUTPUT CONTRACT:
     ? planRules.usageTiers
     : [];
 
-  if (existingTiers.length === 0 && deterministicTiers.length > 0) {
-    planRules.usageTiers = deterministicTiers;
-    if (!planRules.rateType) {
-      planRules.rateType = "FIXED";
+  if (deterministicTiers.length > 0) {
+    const shouldOverrideTiers =
+      existingTiers.length === 0 || existingTiers.length < deterministicTiers.length;
+
+    if (shouldOverrideTiers) {
+      planRules.usageTiers = deterministicTiers;
+      if (!planRules.rateType) {
+        planRules.rateType = "FIXED";
+      }
+      if (!(planRules as any).planType) {
+        (planRules as any).planType = "flat";
+      }
+      warnings.push(
+        existingTiers.length === 0
+          ? "Deterministic extract filled usageTiers from EFL Energy Charge tier lines."
+          : "Deterministic override: populated planRules.usageTiers from EFL tier lines (more complete than AI tiers).",
+      );
     }
-    if (!(planRules as any).planType) {
-      (planRules as any).planType = "flat";
-    }
-    warnings.push(
-      "Deterministic extract filled usageTiers from EFL Energy Charge tier lines.",
-    );
   }
 
   // Bill credits (threshold-based)
@@ -1020,7 +1027,10 @@ function fallbackExtractEnergyChargeTiers(text: string): UsageTier[] {
 
     m = l.match(gtRe);
     if (m?.[1] && m?.[2]) {
-      const minKwh = Number(m[1]);
+      // For "> N kWh" we treat the tier as starting at N + 1 so that there is
+      // no double-counted kWh at the boundary with the previous tier.
+      const boundary = Number(m[1]);
+      const minKwh = Number.isFinite(boundary) ? boundary + 1 : boundary;
       const rate = centsStringToNumber(`${m[2]}¢`);
       if (Number.isFinite(minKwh) && rate !== null) {
         tiers.push({ minKwh, maxKwh: null, rateCentsPerKwh: rate });
@@ -1105,7 +1115,9 @@ function extractEnergyChargeTiers(text: string): UsageTier[] {
     if (!Number.isFinite(a) || (b != null && !Number.isFinite(b)) || rate == null) {
       continue;
     }
-    const minKwh = a; // For "(> 1000 kWh)" we treat minKwh = 1000 (documented assumption).
+    // For "(> 1000 kWh)" we treat the tier as starting at 1001 to avoid
+    // double-counting at the boundary.
+    const minKwh = isGt ? a + 1 : a;
     const maxKwh = isGt ? null : b;
     extra.push({ minKwh, maxKwh, rateCentsPerKwh: rate });
   }

@@ -51,6 +51,19 @@ async function main() {
   console.log(
     JSON.stringify(
       {
+        tiers: {
+          beforeCount:
+            Array.isArray((planRules as any).usageTiers) &&
+            (planRules as any).usageTiers.length > 0
+              ? (planRules as any).usageTiers.length
+              : 0,
+          afterCount:
+            Array.isArray((solved.derivedPlanRules as any)?.usageTiers) &&
+            (solved.derivedPlanRules as any).usageTiers.length > 0
+              ? (solved.derivedPlanRules as any).usageTiers.length
+              : 0,
+          afterTiers: (solved.derivedPlanRules as any)?.usageTiers ?? null,
+        },
         before: {
           status: baseValidation.status,
           tdspAppliedMode: baseValidation.assumptionsUsed?.tdspAppliedMode,

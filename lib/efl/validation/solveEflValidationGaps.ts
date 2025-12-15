@@ -236,12 +236,33 @@ function extractUsageTiersFromEflText(rawText: string): Array<{
 
     m = l.match(gtRe);
     if (m?.[1] && m?.[2]) {
-      const minKwh = Number(m[1]);
+      const boundary = Number(m[1]);
+      const minKwh = Number.isFinite(boundary) ? boundary + 1 : boundary;
       const rate = centsFrom(m[2]);
       if (Number.isFinite(minKwh) && rate != null) {
         tiers.push({ minKwh, maxKwh: null, rateCentsPerKwh: rate });
       }
     }
+  }
+
+  // Also handle bracketed tiers as seen in some Rhythm-style EFLs:
+  //   "Energy Charge: (0 to 1000 kWh) 10.9852¢ per kWh"
+  //   "Energy Charge: (> 1000 kWh) 12.9852¢ per kWh"
+  const bracketRe =
+    /Energy\s*Charge\s*:\s*\(\s*(>?)\s*([0-9,]+)(?:\s*to\s*([0-9,]+))?\s*kwh\s*\)\s*([0-9]+(?:\.[0-9]+)?)\s*¢\s*(?:per|\/)\s*kwh/gi;
+
+  let mBracket: RegExpExecArray | null;
+  while ((mBracket = bracketRe.exec(rawText)) !== null) {
+    const isGt = !!mBracket[1];
+    const a = Number(mBracket[2].replace(/,/g, ""));
+    const b = mBracket[3] ? Number(mBracket[3].replace(/,/g, "")) : null;
+    const rate = centsFrom(mBracket[4]);
+    if (!Number.isFinite(a) || (b != null && !Number.isFinite(b)) || rate == null) {
+      continue;
+    }
+    const minKwh = isGt ? a + 1 : a;
+    const maxKwh = isGt ? null : b;
+    tiers.push({ minKwh, maxKwh, rateCentsPerKwh: rate });
   }
 
   // De-dup + sort by minKwh.
