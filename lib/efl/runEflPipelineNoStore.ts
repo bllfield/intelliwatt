@@ -30,6 +30,12 @@ export type RunEflPipelineNoStoreResult = {
     rawTextLength: number;
     rawTextTruncated: boolean;
   };
+  /**
+   * PlanRules/RateStructure to present to callers. When the solver produces a
+   * PASS `validationAfter`, these will reflect the derivedPlanRules/
+   * derivedRateStructure from the solver; otherwise they mirror the raw AI
+   * output.
+   */
   planRules: any | null;
   rateStructure: any | null;
   parseConfidence: number | null;
@@ -49,6 +55,11 @@ export type RunEflPipelineNoStoreResult = {
    * derivedForValidation.validationAfter ?? validation.eflAvgPriceValidation ?? null
    */
   finalValidation: any | null;
+  /**
+   * When true, the solver's final validation status is FAIL and this EFL
+   * should be queued for manual admin review rather than auto-presented.
+   */
+  needsAdminReview?: boolean;
 };
 
 /**
@@ -91,8 +102,25 @@ export async function runEflPipelineNoStore(
   }
 
   const baseValidation = (aiResult.validation as any)?.eflAvgPriceValidation ?? null;
-  const finalValidation =
-    (derivedForValidation as any)?.validationAfter ?? baseValidation ?? null;
+  const validationAfter = (derivedForValidation as any)?.validationAfter ?? null;
+  const finalValidation = validationAfter ?? baseValidation ?? null;
+
+  const finalStatus: string | null = finalValidation?.status ?? null;
+
+  // Decide which shapes to surface. When the solver succeeds (PASS), prefer
+  // its derivedPlanRules/RateStructure; otherwise, keep the original AI
+  // output so admins can see exactly what the model produced.
+  const finalPlanRules =
+    finalStatus === "PASS" && derivedForValidation?.derivedPlanRules
+      ? derivedForValidation.derivedPlanRules
+      : aiResult.planRules ?? null;
+
+  const finalRateStructure =
+    finalStatus === "PASS" && derivedForValidation?.derivedRateStructure
+      ? derivedForValidation.derivedRateStructure
+      : aiResult.rateStructure ?? null;
+
+  const needsAdminReview = finalStatus === "FAIL";
 
   const rawTextLength = rawText.length;
   const rawTextTruncated = rawTextLength > MAX_PREVIEW_CHARS;
@@ -112,14 +140,15 @@ export async function runEflPipelineNoStore(
       rawTextLength,
       rawTextTruncated,
     },
-    planRules: aiResult.planRules ?? null,
-    rateStructure: aiResult.rateStructure ?? null,
+    planRules: finalPlanRules,
+    rateStructure: finalRateStructure,
     parseConfidence:
       typeof aiResult.parseConfidence === "number" ? aiResult.parseConfidence : null,
     parseWarnings: aiResult.parseWarnings ?? [],
     validation: aiResult.validation ?? null,
     derivedForValidation,
     finalValidation,
+    needsAdminReview,
   };
 }
 

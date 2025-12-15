@@ -5035,3 +5035,99 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
     - These rows surface as `"HIT"` (existing template) or `"CREATED"` (new template) in `templateAction`.
     - Non‑PASS statuses (`FAIL`, `SKIP`, or `null`) are always marked `"SKIPPED"` and never reported as `"CREATED"`, so admins can quickly filter for plans that need manual review or deeper investigation.
   - This keeps the batch tool aligned with the manual‑upload contract: only EFLs that clear **final** avg‑price validation are considered “rock solid” candidates for template reuse, and DRY_RUN mode is guaranteed side‑effect‑free with respect to template storage.
+
+## EFL SOLVER APPLY — Discovery inventory (2025‑12‑15)
+
+- **Batch runner (EFL pipeline entrypoint)**:
+  - Admin batch harness routes WattBuy offers into the EFL pipeline via `app/api/admin/wattbuy/offers-batch-efl-parse/route.ts`:
+    - Authenticates with `ADMIN_TOKEN` (`x-admin-token` header) and accepts `{ address, offerLimit, mode: "DRY_RUN" | "STORE_TEMPLATES_ON_PASS" }` in the request body.
+    - Uses `wbGetOffers` + `normalizeOffers` to fetch offers, filters to those with `docs.efl`, downloads each EFL PDF, and hands `pdfBytes` to `runEflPipelineNoStore` for deterministic+AI+validator+solver processing.
+    - Computes `originalStatus` from `validation.eflAvgPriceValidation?.status` and `finalStatus` from `pipeline.finalValidation?.status` and, when mode is `"STORE_TEMPLATES_ON_PASS"` and `finalStatus === "PASS"`, calls `getOrCreateEflTemplate` once per PASS to persist or reuse an EFL template (`templateAction: "CREATED" | "HIT"`). All other rows are reported as `"SKIPPED"` (or `"NOT_ELIGIBLE"` without EFL URL) but still include validation details and `solverApplied`.
+
+- **Pipeline wrapper (pdf→text→AI→validator→solver, no DB writes)**:
+  - `lib/efl/runEflPipelineNoStore.ts` is the canonical non‑persisting EFL pipeline entrypoint used by batch tools:
+    - Accepts `pdfBytes` and optional `source`/`offerMeta` (for logging only).
+    - Calls `deterministicEflExtract(pdfBytes)` from `lib/efl/eflExtractor.ts` to compute `eflPdfSha256`, `rawText`, `repPuctCertificate`, `eflVersionCode`, extractor method, and warnings.
+    - Runs `parseEflTextWithAi({ rawText, eflPdfSha256, extraWarnings })` from `lib/efl/eflAiParser.ts` to produce `planRules`, `rateStructure`, `parseConfidence`, `parseWarnings`, and `validation: { eflAvgPriceValidation }` (avg‑price validator envelope).
+    - Invokes `solveEflValidationGaps({ rawText, planRules, rateStructure, validation })` from `lib/efl/validation/solveEflValidationGaps.ts` to derive `derivedPlanRules`/`derivedRateStructure`, `solverApplied[]`, and `validationAfter` (re‑run avg‑price validator with tier sync + TDSP utility‑table fallback).
+    - Returns a structured result with:
+      - `deterministic` (full pdf→text identity + preview), `planRules`, `rateStructure`, `parseConfidence`, `parseWarnings`,
+      - `validation` (original `eflAvgPriceValidation`), `derivedForValidation` (solver result), and `finalValidation = derivedForValidation.validationAfter ?? validation.eflAvgPriceValidation ?? null`.
+
+- **Deterministic pdf→text + identity extractor**:
+  - `lib/efl/eflExtractor.ts` implements the pdftotext and ID extraction layer:
+    - `computePdfSha256(pdfBytes)` computes the PDF fingerprint used across templates and fact card storage.
+    - `runPdftotext(pdfBytes)` calls the droplet’s HTTPS helper via `EFL_PDFTEXT_URL` + `EFL_PDFTEXT_TOKEN` and falls back to a local `pdftotext` CLI if available; all text is normalized via `cleanExtractedText()`.
+    - `EflDeterministicExtract` shape carries `eflPdfSha256`, `rawText`, `repPuctCertificate`, `eflVersionCode`, `warnings`, and `extractorMethod` and is consumed by both manual upload (`getOrCreateEflTemplate` for `source: "manual_upload"`) and `runEflPipelineNoStore`.
+    - `extractRepPuctCertificate(text)` and `extractEflVersionCode(text)` parse PUCT REP certificate IDs and EFL version codes from the raw text for template identity and rate card linkage.
+
+- **PlanRules / RateStructure extractor (deterministic + AI)**:
+  - `lib/efl/eflAiParser.ts` is the primary text→PlanRules/RateStructure engine:
+    - `parseEflTextWithAi({ rawText, eflPdfSha256, extraWarnings })`:
+      - Runs deterministic extraction first on `rawText`:
+        - `extractBaseChargeCents`, `extractEnergyChargeTiers` (all Energy Charge tiers into `UsageTier[]`), `extractSingleEnergyCharge`, `detectTdspIncluded`, and deterministic bill‑credit fallbacks.
+      - Normalizes text for AI via `normalizeEflTextForAi(rawText)` (removing the “Average Monthly Use / Average Price per kWh” table, TDU‑only boilerplate, etc., while pinning actual pricing sections).
+      - Invokes GPT‑4.1 (or `OPENAI_EFL_MODEL`) to produce `parsed.planRules` and `parsed.rateStructure`, then merges deterministic fallbacks:
+        - Fills `baseChargePerMonthCents`, usage tiers (`planRules.usageTiers`), single‑rate fields, Type of Product, Contract Term, and TDSP delivery‑included flag where the model left gaps.
+        - Specifically, if deterministic tiers exist and AI tiers are missing or shorter, it **overrides** `planRules.usageTiers` with deterministic tiers and adds a warning (“Deterministic extract filled usageTiers…” or “Deterministic override…”).
+      - Calls `validateEflAvgPriceTable({ rawText, planRules, rateStructure })` from `lib/efl/eflValidator.ts` to attach `validation: { eflAvgPriceValidation }` and clamps `parseConfidence` based on validation status and filled fields.
+    - When AI is disabled or keys are missing, the same deterministic tier/base charge logic is used to build a minimal PlanRules, and the validator still runs against that shape.
+
+- **Avg‑price validator (modeled vs. EFL table)**:
+  - `lib/efl/eflValidator.ts` owns the EFL average‑price consistency check:
+    - `validateEflAvgPriceTable({ rawText, planRules, rateStructure, toleranceCentsPerKwh? })`:
+      - Extracts the “Average Monthly Use / Average price per kWh” table (500/1000/2000 kWh) from **rawText**, modeling expected REP+TDSP charges via:
+        - Either the canonical cost engine (`computePlanCost`) or a deterministic fallback that uses `planRules.usageTiers`, base charge, bill credits, and TDSP assumptions.
+      - Produces an `EflAvgPriceValidation` object with `status: "PASS" | "FAIL" | "SKIP"`, per‑usage diffs, `assumptionsUsed` (night‑hours, TDSP source, tdspAppliedMode, etc.), `fail` flag, `queueReason`, and `avgTableFound/Rows/Snippet` fields.
+      - Does not persist anything; it is called both from `parseEflTextWithAi` and from `solveEflValidationGaps` after tier/TDSP gaps are filled.
+
+- **Solver (tier/TDSP gap fill + revalidation)**:
+  - `lib/efl/validation/solveEflValidationGaps.ts` is the gap‑filler that can be “applied” while keeping the authoritative PlanRules untouched:
+    - `solveEflValidationGaps({ rawText, planRules, rateStructure, validation })`:
+      - Clones `planRules` and `rateStructure` into `derivedPlanRules`/`derivedRateStructure` to avoid mutating callers.
+      - Syncs tiers from `RateStructure.usageTiers` when richer than `planRules.usageTiers` (`"TIER_SYNC_FROM_RATE_STRUCTURE"`), then from raw EFL text when more tiers are detected (`"SYNC_USAGE_TIERS_FROM_EFL_TEXT"`), using a deterministic parser mirroring `extractEnergyChargeTiers` (including bracketed `Energy Charge: (0 to 1000 kWh)` / `Energy Charge: (> 1000 kWh)` patterns).
+      - Heuristically flags masked‑TDSP cases via `detectMaskedTdsp(rawText)` and records `"TDSP_UTILITY_TABLE_CANDIDATE"` but leaves TDSP math to the validator.
+      - If any solverApplied entries were added, it re‑runs `validateEflAvgPriceTable` with `derivedPlanRules`/`derivedRateStructure` and returns:
+        - `validationAfter`, `solverApplied[]`, `solveMode: "NONE" | "PASS_WITH_ASSUMPTIONS" | "FAIL"`, and updated `queueReason` from the re‑run validator.
+      - Today this is used in read‑only fashion by manual upload (`app/api/admin/efl/manual-upload/route.ts`), template creation (`lib/efl/getOrCreateEflTemplate.ts`), and the batch harness (`runEflPipelineNoStore`), which look at `validationAfter` and `solverApplied` but keep primary PlanRules unchanged.
+
+- **Persistence layer (rate cards / templates / fact cards)**:
+  - EFL template caching (in‑memory, no DB) lives in `lib/efl/getOrCreateEflTemplate.ts`:
+    - Defines `GetOrCreateEflTemplateInput` for `source: "manual_upload" | "wattbuy"` and in‑process `EflTemplateRecord` cache keyed by `getTemplateKey` (PUCT+Ver+SHA‑256+WattBuy identity).
+    - For `source: "manual_upload"`:
+      - Calls `deterministicEflExtract` → `parseEflTextWithAi` → `solveEflValidationGaps` and caches the resulting template (PlanRules/RateStructure/validation) under all identity keys, but does not write to a DB table.
+    - For `source: "wattbuy"`:
+      - Runs `parseEflTextWithAi` → `solveEflValidationGaps` on provided `rawText` and caches the result; used by WattBuy template backfill and the batch harness when in `"STORE_TEMPLATES_ON_PASS"` mode.
+  - Rate cards / fact card templates in the DB are modeled separately:
+    - `prisma/schema.prisma`: `RateConfig` and `MasterPlan` hold EFL URL, term, TDSP, and a normalized `rateModel` JSON (populated later in the roadmap from EFL templates).
+    - `prisma/current-plan/schema.prisma`: `BillPlanTemplate` captures reusable bill parser templates (provider/plan keys, term, tiers, TOU config, bill credits) for the current‑plan/bill‑parse module.
+  - At this stage, the EFL avg‑price solver (`solveEflValidationGaps`) is wired only into the **in‑memory** EFL template pipeline and batch harness; it does not yet auto‑mutate DB‑backed rate cards. Any future “apply” behavior will need to explicitly decide when to translate `derivedPlanRules` into `MasterPlan.rateModel` or other persistent fields, using `solveMode`, `solverApplied`, and `queueReason` as the gating signals.
+
+## EFL SOLVER APPLY — Base charge solve (2025‑12‑15)
+
+- **Deterministic base-charge extraction improvements**:
+  - Extended the core base-charge extractor in `lib/efl/eflAiParser.ts` (`extractBaseChargeCents`) to recognize additional label variants:
+    - `"Base Monthly Charge"` alongside `"Base Charge"` (with flexible whitespace and optional prefixes such as provider name),
+    - Explicit `$0` lines like `"Base Monthly Charge: $0 per billing cycle"`,
+    - Generic `"Base Charge $X per billing cycle"` / `"Monthly Base Charge $X per month"` patterns.
+  - The extractor now consistently normalizes all of these into integer cents and feeds them into deterministic fallbacks so `planRules.baseChargePerMonthCents` is set whenever the EFL clearly states a base monthly charge (still treating `N/A` as "not present").
+  - Existing wiring that mirrors `planRules.baseChargePerMonthCents` into `rateStructure.baseMonthlyFeeCents` when the latter is missing remains intact, so a single deterministic extraction now powers both PlanRules and RateStructure shapes.
+
+- **Solver: base-charge sync + revalidation**:
+  - Updated `lib/efl/validation/solveEflValidationGaps.ts` to add a base-charge sync step before the `"NONE"` early-return:
+    - If `derivedPlanRules` exists and `derivedPlanRules.baseChargePerMonthCents` is null/undefined, the solver calls a local deterministic helper `extractBaseChargeCentsFromEflText(rawText)` (mirroring the main extractor’s patterns, including `"Base Monthly Charge"`).
+    - When a base charge is found, the solver populates **both** `derivedPlanRules.baseChargePerMonthCents` and `derivedRateStructure.baseMonthlyFeeCents` (creating a minimal `derivedRateStructure` object if necessary) and pushes a new `solverApplied` tag: `"SYNC_BASE_CHARGE_FROM_EFL_TEXT"`.
+    - Because this adds a solverApplied entry, the solver always re-runs `validateEflAvgPriceTable` after base-charge sync so any FAIL arising solely from a missing base fee can be upgraded to PASS when the numeric base charge is known.
+
+- **Applying solver-derived shapes when PASS**:
+  - Adjusted `lib/efl/runEflPipelineNoStore.ts` so that solver results are reflected in the pipeline outputs:
+    - The wrapper still calls `parseEflTextWithAi` + `solveEflValidationGaps`, but now:
+      - When `validationAfter.status === "PASS"`, `planRules` and `rateStructure` in the returned `RunEflPipelineNoStoreResult` are taken from `derivedPlanRules` / `derivedRateStructure` (the solver output), not the raw AI output.
+      - When the solver leaves the status as FAIL or SKIP, `planRules` / `rateStructure` continue to reflect the original AI shapes so admins can see exactly what the model produced.
+    - A new flag `needsAdminReview` is set to `true` when the final (post-solver) validation status is `"FAIL"`, giving callers (e.g., future admin queues) a simple signal to hide or queue problematic EFLs rather than auto-present them.
+  - Updated `lib/efl/getOrCreateEflTemplate.ts` so that templates also honor solver-derived shapes:
+    - For both `source: "manual_upload"` and `source: "wattbuy"`, the template builder now inspects `derivedForValidation.validationAfter.status`:
+      - If the solver’s `validationAfter.status === "PASS"`, the template stores `planRules` and `rateStructure` from `derivedPlanRules` / `derivedRateStructure` and uses `validationAfter` as the canonical `eflAvgPriceValidation` for that template.
+      - Otherwise, the template continues to store the raw AI `planRules` / `rateStructure` and original validator envelope, while still attaching `derivedForValidation` for debugging/audit.
+    - This ensures that when the solver successfully closes gaps (tiers, TDSP fallbacks, base charge), the **derived** plan rules and rate structure become authoritative for all downstream uses (admin manual-upload UI, WattBuy templates, batch harness), without mutating DB-backed rate cards yet.
+  - When the solver cannot rescue a FAIL (i.e., `validationAfter.status === "FAIL"` even after tier/TDSP/base-charge fills), the system now treats that as a “needs admin review” situation in the non-persisting pipeline (`needsAdminReview = true` in `runEflPipelineNoStore`), and the corresponding templates still reflect the raw AI output plus a blocking `queueReason` from the validator. Admin-queue wiring will be added in a subsequent step.

@@ -1052,13 +1052,13 @@ function fallbackExtractEnergyChargeTiers(text: string): UsageTier[] {
 // ----------------------------------------------------------------------
 function extractBaseChargeCents(text: string): number | null {
   // Treat explicit N/A as "not present", not zero.
-  if (/Base\s*Charge[^.\n]*\bN\/A\b|\bNA\b/i.test(text)) {
+  if (/Base\s*(?:Monthly\s+)?Charge[^.\n]*\bN\/A\b|\bNA\b/i.test(text)) {
     return null;
   }
 
   // Explicit $0 per billing cycle/month.
   if (
-    /Base\s*Charge\s*:\s*\$0\b[\s\S]{0,40}?per\s*(?:billing\s*cycle|month)/i.test(
+    /Base\s*(?:Monthly\s+)?Charge\s*:\s*\$0\b[\s\S]{0,40}?per\s*(?:billing\s*cycle|month)/i.test(
       text,
     )
   ) {
@@ -1070,7 +1070,7 @@ function extractBaseChargeCents(text: string): number | null {
   // and "Base Charge of $X per ESI-ID ... per billing cycle / per month".
   {
     const ofRe =
-      /Base\s+Charge\s+of\s*(?!.*\bN\/A\b)\$?\s*([0-9]+(?:\.[0-9]{1,2})?)\s*(?:per\s+ESI-?ID)?[\s\S]{0,60}?(?:will\s+apply)?\s*(?:each\s+billing\s+cycle|per\s+billing\s+cycle|per\s+month|\/\s*month|monthly)/i;
+      /Base\s+(?:Monthly\s+)?Charge\s+of\s*(?!.*\bN\/A\b)\$?\s*([0-9]+(?:\.[0-9]{1,2})?)\s*(?:per\s+ESI-?ID)?[\s\S]{0,60}?(?:will\s+apply)?\s*(?:each\s+billing\s+cycle|per\s+billing\s+cycle|per\s+month|\/\s*month|monthly)/i;
     const m = text.match(ofRe);
     if (m?.[1]) {
       const dollars = Number(m[1]);
@@ -1086,7 +1086,7 @@ function extractBaseChargeCents(text: string): number | null {
 
   // Generic "Base Charge: $X per billing cycle/month".
   const generic =
-    /Base\s*Charge(?:\s*of)?\s*\$?\s*([0-9]+(?:\.[0-9]{1,2})?)\b[\s\S]{0,80}?(?:per\s+(?:billing\s*cycle|month))/i;
+    /Base\s*(?:Monthly\s+)?Charge(?:\s*of)?\s*\$?\s*([0-9]+(?:\.[0-9]{1,2})?)\b[\s\S]{0,80}?(?:per\s+(?:billing\s*cycle|month))/i;
   const m = text.match(generic);
   if (m?.[1]) {
     return dollarsToCents(m[1]);

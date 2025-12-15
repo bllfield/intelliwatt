@@ -210,8 +210,8 @@ async function handleManualUpload(
   });
 
   // Run deterministic validation gap solver (tier sync + TDSP utility-table
-  // fallback) so all callers — manual upload and WattBuy ingestion — see the
-  // same derived validation output.
+  // fallback + base-charge sync) so all callers — manual upload and WattBuy
+  // ingestion — see the same derived validation output.
   let derivedForValidation: any = null;
   try {
     const baseValidation = (aiResult.validation as any)?.eflAvgPriceValidation ?? null;
@@ -225,17 +225,38 @@ async function handleManualUpload(
     derivedForValidation = null;
   }
 
+  const validationAfter =
+    (derivedForValidation as any)?.validationAfter ??
+    (aiResult.validation as any)?.eflAvgPriceValidation ??
+    null;
+  const finalStatus: string | null = validationAfter?.status ?? null;
+
+  const planRulesForTemplate =
+    finalStatus === "PASS" && derivedForValidation?.derivedPlanRules
+      ? derivedForValidation.derivedPlanRules
+      : aiResult.planRules;
+
+  const rateStructureForTemplate =
+    finalStatus === "PASS" && derivedForValidation?.derivedRateStructure
+      ? derivedForValidation.derivedRateStructure
+      : aiResult.rateStructure;
+
+  const validationForTemplate =
+    finalStatus === "PASS" && validationAfter
+      ? { eflAvgPriceValidation: validationAfter }
+      : aiResult.validation ?? null;
+
   const template: EflTemplateRecord = {
     eflPdfSha256: extract.eflPdfSha256,
     repPuctCertificate: extract.repPuctCertificate,
     eflVersionCode: extract.eflVersionCode,
     rawText,
     extractorMethod: extract.extractorMethod ?? "pdftotext",
-    planRules: aiResult.planRules,
-    rateStructure: aiResult.rateStructure,
+    planRules: planRulesForTemplate,
+    rateStructure: rateStructureForTemplate,
     parseConfidence: aiResult.parseConfidence,
     parseWarnings: aiResult.parseWarnings ?? [],
-    validation: aiResult.validation ?? null,
+    validation: validationForTemplate,
     derivedForValidation,
   };
 
@@ -338,17 +359,38 @@ async function handleWattbuy(
     derivedForValidation = null;
   }
 
+  const validationAfter =
+    (derivedForValidation as any)?.validationAfter ??
+    (aiResult.validation as any)?.eflAvgPriceValidation ??
+    null;
+  const finalStatus: string | null = validationAfter?.status ?? null;
+
+  const planRulesForTemplate =
+    finalStatus === "PASS" && derivedForValidation?.derivedPlanRules
+      ? derivedForValidation.derivedPlanRules
+      : aiResult.planRules;
+
+  const rateStructureForTemplate =
+    finalStatus === "PASS" && derivedForValidation?.derivedRateStructure
+      ? derivedForValidation.derivedRateStructure
+      : aiResult.rateStructure;
+
+  const validationForTemplate =
+    finalStatus === "PASS" && validationAfter
+      ? { eflAvgPriceValidation: validationAfter }
+      : aiResult.validation ?? null;
+
   const template: EflTemplateRecord = {
     eflPdfSha256: eflPdfSha256 || identity.primaryKey,
     repPuctCertificate: input.repPuctCertificate ?? null,
     eflVersionCode: input.eflVersionCode ?? null,
     rawText,
     extractorMethod: "pdftotext",
-    planRules: aiResult.planRules,
-    rateStructure: aiResult.rateStructure,
+    planRules: planRulesForTemplate,
+    rateStructure: rateStructureForTemplate,
     parseConfidence: aiResult.parseConfidence,
     parseWarnings: aiResult.parseWarnings ?? [],
-    validation: aiResult.validation ?? null,
+    validation: validationForTemplate,
     derivedForValidation,
   };
 

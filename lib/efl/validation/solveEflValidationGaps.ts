@@ -24,7 +24,7 @@ export async function solveEflValidationGaps(args: {
 
   // Clone planRules shallowly so we can add usageTiers without mutating callers.
   const derivedPlanRules: any = planRules ? { ...(planRules as any) } : null;
-  const derivedRateStructure: any = rateStructure ?? null;
+  let derivedRateStructure: any = rateStructure ?? null;
 
   const solverApplied: string[] = [];
 
@@ -122,6 +122,28 @@ export async function solveEflValidationGaps(args: {
         validation.assumptionsUsed?.tdspAppliedMode === undefined));
   if (maskedTdsp) {
     solverApplied.push("TDSP_UTILITY_TABLE_CANDIDATE");
+  }
+
+  // ---------------- Base charge sync from EFL text ----------------
+  if (derivedPlanRules && derivedPlanRules.baseChargePerMonthCents == null) {
+    const baseCents = extractBaseChargeCentsFromEflText(rawText);
+    if (baseCents != null) {
+      derivedPlanRules.baseChargePerMonthCents = baseCents;
+
+      if (!derivedRateStructure) {
+        // Minimal shape; callers treat this as partial RateStructure.
+        derivedRateStructure = {};
+      }
+
+      if (
+        derivedRateStructure &&
+        typeof (derivedRateStructure as any).baseMonthlyFeeCents !== "number"
+      ) {
+        (derivedRateStructure as any).baseMonthlyFeeCents = baseCents;
+      }
+
+      solverApplied.push("SYNC_BASE_CHARGE_FROM_EFL_TEXT");
+    }
   }
 
   // If nothing was applied, return quickly with the original validation.
@@ -273,6 +295,55 @@ function extractUsageTiersFromEflText(rawText: string): Array<{
   }
 
   return Array.from(uniq.values()).sort((a, b) => a.minKwh - b.minKwh);
+}
+
+// Deterministic base charge extractor (solver-only) mirroring the patterns in
+// the main EFL extractor. This is intentionally local so the solver can fill
+// in missing baseChargePerMonthCents/baseMonthlyFeeCents before re-validating.
+function extractBaseChargeCentsFromEflText(rawText: string): number | null {
+  const text = rawText || "";
+
+  // Treat explicit N/A as "not present", not zero.
+  if (/Base\s*(?:Monthly\s+)?Charge[^.\n]*\bN\/A\b|\bNA\b/i.test(text)) {
+    return null;
+  }
+
+  // Explicit $0 per billing cycle/month.
+  if (
+    /Base\s*(?:Monthly\s+)?Charge\s*:\s*\$0\b[\s\S]{0,40}?per\s*(?:billing\s*cycle|month)/i.test(
+      text,
+    )
+  ) {
+    return 0;
+  }
+
+  // Variant: "Base Charge of $4.95 per ESI-ID will apply each billing cycle."
+  {
+    const ofRe =
+      /Base\s+(?:Monthly\s+)?Charge\s+of\s*(?!.*\bN\/A\b)\$?\s*([0-9]+(?:\.[0-9]{1,2})?)\s*(?:per\s+ESI-?ID)?[\s\S]{0,60}?(?:will\s+apply)?\s*(?:each\s+billing\s+cycle|per\s+billing\s+cycle|per\s+month|\/\s*month|monthly)/i;
+    const m = text.match(ofRe);
+    if (m?.[1]) {
+      const dollars = Number(m[1]);
+      if (Number.isFinite(dollars)) {
+        return Math.round(dollars * 100);
+      }
+    }
+  }
+
+  // Generic "Base Charge: $X per billing cycle/month" including "Base Monthly Charge".
+  {
+    const generic =
+      /Base\s*(?:Monthly\s+)?Charge(?:\s*of)?\s*\$?\s*([0-9]+(?:\.[0-9]{1,2})?)\b[\s\S]{0,80}?(?:per\s+(?:billing\s*cycle|month))/i;
+    const m = text.match(generic);
+    if (m?.[1]) {
+      const dollars = Number(m[1]);
+      if (Number.isFinite(dollars)) {
+        return Math.round(dollars * 100);
+      }
+    }
+  }
+
+  return null;
 }
 
 
