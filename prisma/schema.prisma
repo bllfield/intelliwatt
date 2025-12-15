@@ -927,6 +927,12 @@ enum TdspCode {
   TNMP
 }
 
+enum TdspTariffIngestRunStatus {
+  SUCCESS
+  PARTIAL
+  ERROR
+}
+
 enum ProductType {
   fixed
   variable
@@ -987,4 +993,26 @@ model TdspTariffComponent {
   updatedAt        DateTime         @updatedAt
 
   @@index([tariffVersionId, chargeType, unit])
+}
+
+model TdspTariffIngestRun {
+  id                  String                      @id @default(cuid())
+  createdAt           DateTime                    @default(now())
+  startedAt           DateTime
+  finishedAt          DateTime?
+  status              TdspTariffIngestRunStatus
+  trigger             String                      // "VERCEL_CRON" | "ADMIN_API" | "DROPLET_CRON" | etc.
+  sourceKind          String                      // e.g. "PUCT_RATE_REPORT_PDF"
+
+  processedTdspCount  Int                         @default(0)
+  createdVersionCount Int                         @default(0)
+  noopVersionCount    Int                         @default(0)
+  skippedTdspCount    Int                         @default(0)
+  errorTdspCount      Int                         @default(0)
+
+  changesJson         Json?                       // array of {tdspCode, action, effectiveStartISO, versionId, sha256}
+  errorsJson          Json?                       // array of {tdspCode, message, stack?, hint?}
+  logs                String?                     // optional compact logs (keep short)
+
+  @@index([createdAt])
 }

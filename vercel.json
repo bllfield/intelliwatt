@@ -15,6 +15,7 @@
     }
   },
   "crons": [
-    { "path": "/api/admin/ercot/cron", "schedule": "0 12 * * *" }
+    { "path": "/api/admin/ercot/cron", "schedule": "0 12 * * *" },
+    { "path": "/api/admin/tdsp/ingest", "schedule": "15 9 * * *" }
   ]
 }

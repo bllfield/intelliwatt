@@ -4831,3 +4831,77 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
 - The new big‑file path (`smt-upload-server` → `raw-upload`) is required for 12‑month SMT CSVs; inline uploads (`/api/admin/smt/pull`) remain supported for small test/debug files only.
 - No new Prisma models were introduced; changes are confined to SMT ingest behavior, admin inspectors, and customer UI flows.
 - All SMT admin/test routes remain gated by `x-admin-token`; no customer‑facing route exposes raw SMT payloads or SMT credentials. 
+
+
+**UTILITY / TDSP MODULE — Step X Daily ingest scheduling + run logging (2025‑12‑14)**
+
+- **TdspTariffIngestRun model (Prisma)**:
+  - Added `enum TdspTariffIngestRunStatus { SUCCESS | PARTIAL | ERROR }` and `TdspTariffIngestRun` model to `prisma/schema.prisma` to track each PUCT Rate_Report ingest run.
+  - Fields:
+    - `startedAt`, `finishedAt`, `status`, `trigger` (`"VERCEL_CRON" | "ADMIN_API" | "DROPLET_CRON" | ...`), `sourceKind` (`"PUCT_RATE_REPORT_PDF"`).
+    - Rollup counts: `processedTdspCount`, `createdVersionCount`, `noopVersionCount`, `skippedTdspCount`, `errorTdspCount`.
+    - Small JSON payloads: `changesJson` (per‑TDSP {tdspCode, action, effectiveStartISO, versionId, sha256}), `errorsJson` (per‑TDSP {tdspCode, message}), and optional short `logs` string.
+  - Migration: **local dev** uses `npx prisma migrate dev --name tdsp_tariff_ingest_run`; prod/droplet continue to use the existing `migrate deploy` + drift‑resolution flow documented earlier.
+
+- **Shared PUCT Rate_Report ingest runner**:
+  - `scripts/tdsp/ingest-puct-rate-reports.ts` was refactored to expose a reusable `runPuctRateReportIngest({ debugDate? })` helper that:
+    - Reuses the existing parsing and `upsertTdspTariffFromIngest` logic unchanged.
+    - Returns `results: Array<{tdspCode, action: "created"|"noop"|"skipped"|"error", effectiveStartISO?, versionId?, sourceDocSha256?, message?}>` plus a summary counts object.
+  - The CLI entry point now just parses `--debugDate=1` flags, calls `runPuctRateReportIngest`, and logs a one‑line summary.
+
+- **Admin endpoint – TDSP ingest runner (token + cron gated)**:
+  - New route `app/api/admin/tdsp/ingest/route.ts`:
+    - Accepts `POST` (manual admin) and `GET` (Vercel cron) requests.
+    - Auth:
+      - Manual/admin calls require `TDSP_TARIFF_INGEST_ADMIN_TOKEN` (or fallback `ADMIN_TOKEN`) and either `Authorization: Bearer <token>` or `x-admin-token: <token>`.
+      - Scheduled calls are allowed when the `x-vercel-cron` header is present, without sending the admin token in `vercel.json`.
+    - Behavior:
+      - Creates a `TdspTariffIngestRun` row with `status=PARTIAL`, `trigger` = `"ADMIN_API"` or `"VERCEL_CRON"`, and `sourceKind="PUCT_RATE_REPORT_PDF"`.
+      - Invokes `runPuctRateReportIngest({ debugDate: false })` and rolls up counts into the run row.
+      - Classifies final status:
+        - `SUCCESS` when `errorTdspCount===0` and `processedTdspCount>0`.
+        - `ERROR` when all processed TDSPs errored (or runner threw before processing).
+        - `PARTIAL` otherwise.
+      - Persists `changesJson`, `errorsJson`, and a short `logs` string; truncates unexpected error stacks to ~4k chars.
+      - Returns JSON: `{ ok, runId, status, summary, changes, errors }` (never HTML).
+
+- **Admin endpoint – ingest status for UI**:
+  - New route `app/api/admin/tdsp/ingest/status/route.ts` (token‑gated; **no** `x-vercel-cron` allowed):
+    - Auth: same `TDSP_TARIFF_INGEST_ADMIN_TOKEN` / `ADMIN_TOKEN` via `x-admin-token` as other admin tools.
+    - Returns a single JSON payload:
+      - `lastRun`: latest `TdspTariffIngestRun` by `createdAt`.
+      - `recentRuns`: last 20 ingest runs.
+      - `recentTariffVersions`: last 50 `TdspTariffVersion` rows (including `tdsp.code` + `tdsp.name`) so admins can see which versions were most recently touched.
+
+- **Vercel cron wiring (daily PUCT Rate_Report ingest)**:
+  - `vercel.json` now includes a daily cron for TDSP ingest:
+    - `"crons": [ { "path": "/api/admin/ercot/cron", "schedule": "0 12 * * *" }, { "path": "/api/admin/tdsp/ingest", "schedule": "15 9 * * *" } ]`.
+  - Notes:
+    - Vercel schedules are UTC; `15 9 * * *` runs at 09:15 UTC daily.
+    - Cron calls hit `GET /api/admin/tdsp/ingest` with `x-vercel-cron` set; the endpoint **does not** require or log an admin token for these calls.
+    - Manual runs remain available via `POST /api/admin/tdsp/ingest` with `x-admin-token` or `Authorization: Bearer`.
+
+- **Admin UI panel – TDSP ingest status + recent changes**:
+  - New page `app/admin/tdsp-ingest/page.tsx` (client component):
+    - Reuses the `intelliwattAdminToken` localStorage key for `x-admin-token` (same token as the main admin dashboard).
+    - Sections:
+      - **Admin token panel** – password input + “Load status” and “Run ingest now” buttons.
+      - **Last ingest run** – displays ID, status, trigger, sourceKind, start/finish timestamps, derived duration, counts, logs, and decoded `changesJson` / `errorsJson` from the most recent run.
+      - **Recent runs table** – last 20 runs with compact IDs, timestamps, durations, and counts for quick visual scan.
+      - **Recent TDSP tariff versions** – last 50 `TdspTariffVersion` rows (TDSP code + name, tariffName, effectiveStart/end, sourceUrl link).
+      - **Debug JSON** – raw, pretty‑printed JSON body from `/api/admin/tdsp/ingest/status` to aid troubleshooting.
+  - The main admin dashboard already links to TDSP tools; a future pass can surface `/admin/tdsp-ingest` alongside the TDSP Tariff Viewer as needed.
+
+- **Droplet cron alternative (non‑Vercel scheduling)**:
+  - If we ever disable Vercel cron, the ingest runner can be invoked from the droplet via a simple cron entry:
+    - Example (Linux cron, **not** committed to the repo):
+      - `*/30 * * * * curl -sS -X POST -H "Authorization: Bearer $TDSP_TARIFF_INGEST_ADMIN_TOKEN" https://intelliwatt.com/api/admin/tdsp/ingest >/tmp/tdsp_ingest.log 2>&1`
+    - The API route semantics are identical; only the trigger (`trigger="DROPLET_CRON"`) and scheduling surface differ.
+
+- **Operational note – steady‑state after backfill**:
+  - Once historical backfill and PUCT Rate_Report ingest bootstrapping are complete, operators should:
+    - Rely primarily on **daily ingest** (Vercel cron or droplet cron) to keep TDSP tariffs fresh.
+    - Use the **TDSP Ingest** admin panel for:
+      - Verifying that recent PUCT Rate_Report changes landed as new `TdspTariffVersion` rows (via `changesJson` + `recentTariffVersions`).
+      - Spot‑checking errors for individual TDSPs when feeds drift or PDFs change structure.
+  - No additional schema changes are planned for TDSP ingest; future work should build on the `TdspTariffIngestRun` + `TdspTariffVersion` primitives rather than introducing new ingest‑tracking tables.

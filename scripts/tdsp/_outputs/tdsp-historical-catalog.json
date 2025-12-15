@@ -1,0 +1,1054 @@
+{
+  "generatedAt": "2025-12-14T18:29:56.628Z",
+  "entries": [
+    {
+      "tdspCode": "CENTERPOINT",
+      "sourceKind": "HISTORICAL_ARCHIVE_INDEX",
+      "indexUrl": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx",
+      "candidates": [
+        {
+          "url": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx#",
+          "type": "html",
+          "labelHint": "Residential",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service-9-17-2025.pdf",
+          "type": "pdf",
+          "labelHint": "​Tariff for Retail Delivery Service - September​ 17​​, 2025​",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service-9-1-2025.pdf",
+          "type": "pdf",
+          "labelHint": "​Tariff for Retail Delivery Service - September​ 1, 2025​",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service-8-1-2025.pdf",
+          "type": "pdf",
+          "labelHint": "​Tariff for Retail Delivery Service - August 1, 2025​",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service-7-21-2025.pdf",
+          "type": "pdf",
+          "labelHint": "​Tariff for Retail Delivery Service - July 2​1, 2025​",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service-4-28-25.pdf",
+          "type": "pdf",
+          "labelHint": "​Tariff for Retail Delivery Service - April​​​ 28, 2025​",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service-3-01-25.pdf",
+          "type": "pdf",
+          "labelHint": "​Tariff for Retail Delivery Service - March 1, 2025​",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service-2-26-25.pdf",
+          "type": "pdf",
+          "labelHint": "​Tariff for Retail Delivery Service - February 26, 2025​",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service-9-8-24.pdf",
+          "type": "pdf",
+          "labelHint": "​Tariff for Retail Delivery Service - September 8, 2024​",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service-9-1-24.pdf",
+          "type": "pdf",
+          "labelHint": "​Tariff for Retail Delivery Service - September 1, 2024​",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service-8-11-24.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - August 11, 2024",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service-8-1-24.pdf",
+          "type": "pdf",
+          "labelHint": "​Tariff for Retail Delivery Service - August 1, 2024",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service-4-1-24.pdf",
+          "type": "pdf",
+          "labelHint": "​Tariff for Retail Delivery Service -&#160;​​April 1, 2024​",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff%20for%20Retail%20Delivery%20Service%203-1-24.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - March 1, 2024",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff%20for%20Retail%20Delivery%20Service%2012-15-23.pdf",
+          "type": "pdf",
+          "labelHint": "​Tariff for Retail Delivery Service - December 15, 2023​",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff%20for%20Retail%20Delivery%20Service%209-1-2023.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - September 1, 2023​",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff%20for%20Retail%20Delivery%20Service%204-15-2023.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - April 15, 2023​",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff%20for%20Retail%20Delivery%20Service%203-1-2023.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - March 1, 2023",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service-12-15-2022.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - December 15, 2022",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff%20for%20Retail%20Delivery%20Service%2009-01-2022.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - September 1, 2022",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service-06-06-2022.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - June 6, 2022",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/Tariff%20for%20Retail%20Delivery%20Service%2004-06-2022.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - April 6, 2022",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff%20for%20Retail%20Delivery%20Service%2003-17-2022.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - March 17, 2022",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff%20for%20Retail%20Delivery%20Service%2003-01-2022.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - March 1, 2022",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff%20for%20Retail%20Delivery%20Service%2012-15-2021.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - December 15, 2021",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff%20for%20Retail%20Delivery%20Service%2010-15-2021.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - October 15, 2021",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/Tariff-for-Retail-Delivery-Service-9-1-2021.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - September 1, 2021",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff%20for%20Retail%20Delivery%20Service%207-13-2021.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - July 13, 2021",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff%20for%20Retail%20Delivery%20Service%205-15-2021.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - May 15, 2021",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff%20for%20Retail%20Delivery%20Service%203-1-2021.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - March 1, 2021",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service-10-15-2020.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff-for-Retail-Delivery-Service-10-15-2020.pdf",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff%20for%20Retail%20Delivery%20Service%2012-15-2020.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - December 15, 2020",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service-9-1-2020.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - September 1, 2020",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service%204-23-20.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - April 23, 2020",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service-3-31-20.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - March 31, 2020",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service%203-1-20.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - March 1, 2020",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service-12-15-19.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - December 15, 2019",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff%20for%20Retail%20Delivery%20Service%2012-07-19.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - December 7, 2019",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service-10-15-19.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - October 15, 2019",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service-9-1-19.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - September 1, 2019",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service%207-11-19.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - July 11, 2019",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service-3-7-19.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - March 7, 2019",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service-3-1-19.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - March 1, 2019",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service-2-1-19.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - February 1, 2019",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service-12-15-18.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - December 15, 2018",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service-12-1-18.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - December 1, 2018",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service-10-15-18.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - October 15, 2018",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service-9-1-18.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - September 1, 2018",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service6-15-18.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - June 15, 2018",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service-3-1-18.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - March 1, 2018",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service-2-1-18.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - February 1, 2018",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service-12-15-17.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - December 15, 2017",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service-12-1-17.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - December 1, 2017",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service-10-15-17.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff-for-Retail-Delivery-Service-10-15-17.pdf",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service-9-1-17.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - September 1, 2017",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service-3-1-17.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - March 1, 2017",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service-2-2-17.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - February 2, 2017",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service-2-1-17.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - February 1, 2017",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service-12-15-16.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - December 15, 2016",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service-12-1-16.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - December 1, 2016",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service%20-10-15-16.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - October 15, 2016",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service-%209-1-16.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - September 1, 2016",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service-3-1-16.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - March 1, 2016",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service-2-1-16.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - February 1, 2016",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service-12-15-15.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - December 15, 2015",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service%20-12-1-15.pdf",
+          "type": "pdf",
+          "labelHint": "​ ​​Tariff for Retail Delivery Service - December 1, 2015",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Documents/RatesandTariffs/HoustonElectric/Tariff-for-Retail-Delivery-Service-11-18-15.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Retail Delivery Service - November 18, 2015​",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "javascript:window.location=&quot;/en-us/pages/faq.aspx?k=&#39;&quot;+document.title+&quot;&#39;&quot;;",
+          "type": "html",
+          "labelHint": "FAQs",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        },
+        {
+          "url": "https://www.centerpointenergy.com/en-us/Corp/Pages/COVID-19.aspx",
+          "type": "html",
+          "labelHint": "COVID-19 Update",
+          "foundOn": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx"
+        }
+      ]
+    },
+    {
+      "tdspCode": "TNMP",
+      "sourceKind": "HISTORICAL_ARCHIVE_INDEX",
+      "indexUrl": "https://www.tnmp.com/customers/rates-0",
+      "candidates": [
+        {
+          "url": "https://www.tnmp.com/sites/default/files/inline-images/TNMP%20Retail%20Tariff%20%2820251229%29_0.pdf",
+          "type": "pdf",
+          "labelHint": "Complete document effective December 29, 2025 (downloadable PDF)",
+          "foundOn": "https://www.tnmp.com/customers/rates-0"
+        },
+        {
+          "url": "https://www.tnmp.com/sites/default/files/inline-images/TNMP%20Wholesale%20Tariff%20%2820251229%29.pdf",
+          "type": "pdf",
+          "labelHint": "Complete document effective December 29, 2025 (downloadable PDF)",
+          "foundOn": "https://www.tnmp.com/customers/rates-0"
+        }
+      ]
+    },
+    {
+      "tdspCode": "AEP_NORTH",
+      "sourceKind": "TARIFF_HUB",
+      "indexUrl": "https://aeptexas.com/company/about/rates",
+      "candidates": [
+        {
+          "url": "https://aeptexas.com/lib/docs/ratesandtariffs/Texas/AEP_TEXAS_TARIFF_Eff_September-1-2025.pdf",
+          "type": "pdf",
+          "labelHint": "Retail Transmission and Delivery Service",
+          "foundOn": "https://aeptexas.com/company/about/rates"
+        },
+        {
+          "url": "https://aeptexas.com/lib/docs/global/CustomerHandbooks/Indiana_Michigan_Power_IN_Handbook.pdf",
+          "type": "pdf",
+          "labelHint": "Indiana Customer Handbook",
+          "foundOn": "https://aeptexas.com/company/about/rates"
+        },
+        {
+          "url": "https://aeptexas.com/lib/docs/global/CustomerHandbooks/Indiana_Michigan_Power_MI_Handbook.pdf",
+          "type": "pdf",
+          "labelHint": "Michigan Customer Handbook",
+          "foundOn": "https://aeptexas.com/company/about/rates"
+        },
+        {
+          "url": "https://aeptexas.com/lib/docs/global/CustomerHandbooks/SWEPCO_Texas_Handbook.pdf",
+          "type": "pdf",
+          "labelHint": "Texas Customer Handbook",
+          "foundOn": "https://aeptexas.com/company/about/rates"
+        },
+        {
+          "url": "https://aeptexas.com/lib/docs/global/CustomerHandbooks/2011ARSWEPCOHandbook.pdf",
+          "type": "pdf",
+          "labelHint": "Arkansas: Your Rights as a Customer",
+          "foundOn": "https://aeptexas.com/company/about/rates"
+        },
+        {
+          "url": "https://aeptexas.com/lib/docs/global/CustomerHandbooks/2011ARSWEPCOCommercialHandbook.pdf",
+          "type": "pdf",
+          "labelHint": "Arkansas: \"Arkansas Commercial/Industrial Price Options\"",
+          "foundOn": "https://aeptexas.com/company/about/rates"
+        }
+      ]
+    },
+    {
+      "tdspCode": "AEP_CENTRAL",
+      "sourceKind": "TARIFF_HUB",
+      "indexUrl": "https://aeptexas.com/company/about/rates",
+      "candidates": [
+        {
+          "url": "https://aeptexas.com/lib/docs/ratesandtariffs/Texas/AEP_TEXAS_TARIFF_Eff_September-1-2025.pdf",
+          "type": "pdf",
+          "labelHint": "Retail Transmission and Delivery Service",
+          "foundOn": "https://aeptexas.com/company/about/rates"
+        },
+        {
+          "url": "https://aeptexas.com/lib/docs/global/CustomerHandbooks/Indiana_Michigan_Power_IN_Handbook.pdf",
+          "type": "pdf",
+          "labelHint": "Indiana Customer Handbook",
+          "foundOn": "https://aeptexas.com/company/about/rates"
+        },
+        {
+          "url": "https://aeptexas.com/lib/docs/global/CustomerHandbooks/Indiana_Michigan_Power_MI_Handbook.pdf",
+          "type": "pdf",
+          "labelHint": "Michigan Customer Handbook",
+          "foundOn": "https://aeptexas.com/company/about/rates"
+        },
+        {
+          "url": "https://aeptexas.com/lib/docs/global/CustomerHandbooks/SWEPCO_Texas_Handbook.pdf",
+          "type": "pdf",
+          "labelHint": "Texas Customer Handbook",
+          "foundOn": "https://aeptexas.com/company/about/rates"
+        },
+        {
+          "url": "https://aeptexas.com/lib/docs/global/CustomerHandbooks/2011ARSWEPCOHandbook.pdf",
+          "type": "pdf",
+          "labelHint": "Arkansas: Your Rights as a Customer",
+          "foundOn": "https://aeptexas.com/company/about/rates"
+        },
+        {
+          "url": "https://aeptexas.com/lib/docs/global/CustomerHandbooks/2011ARSWEPCOCommercialHandbook.pdf",
+          "type": "pdf",
+          "labelHint": "Arkansas: \"Arkansas Commercial/Industrial Price Options\"",
+          "foundOn": "https://aeptexas.com/company/about/rates"
+        }
+      ]
+    },
+    {
+      "tdspCode": "ONCOR",
+      "sourceKind": "TARIFF_HUB",
+      "indexUrl": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html",
+      "candidates": [
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home.html",
+          "type": "html",
+          "labelHint": "home.html",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/residential.html",
+          "type": "html",
+          "labelHint": "Residential",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/residential.html#RequestNewService",
+          "type": "html",
+          "labelHint": "Service Assistance",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/constructionanddevelopment/new-construction.html",
+          "type": "html",
+          "labelHint": "Existing Project Status: Get An Update",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/residential.html#TempMeter",
+          "type": "html",
+          "labelHint": "Disconnect Or Reconnect A Meter Temporarily",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/esiid-lookup.html",
+          "type": "html",
+          "labelHint": "What Is My ESI ID",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/smart-energy/renewables-solar-and-more.html",
+          "type": "html",
+          "labelHint": "Energy Savings",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/safety.html",
+          "type": "html",
+          "labelHint": "Safety",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/faqs.html",
+          "type": "html",
+          "labelHint": "FAQs",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/business.html",
+          "type": "html",
+          "labelHint": "FOR BUSINESS",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/business.html#RequestNewService",
+          "type": "html",
+          "labelHint": "Service Assistance",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/economic-development.html#teaser-3de4036872",
+          "type": "html",
+          "labelHint": "Expand or Relocate a Business",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/business.html#UnderstandCommercialMetering",
+          "type": "html",
+          "labelHint": "Understand Commercial Metering",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/chronic-condition-critical-care-critical-load.html",
+          "type": "html",
+          "labelHint": "Apply for Critical Load / Care Status",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/business.html#TempMeter",
+          "type": "html",
+          "labelHint": "Disconnect Or Reconnect A Meter Temporarily",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/partners/retail-electric-providers.html",
+          "type": "html",
+          "labelHint": "Portals",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/constructionanddevelopment.html",
+          "type": "html",
+          "labelHint": "CONSTRUCTION &amp; DEVELOPMENT",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/constructionanddevelopment/new-construction.html#BuildDevResources",
+          "type": "html",
+          "labelHint": "Builder &amp; Developer Resources",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/constructionanddevelopment/new-construction.html#title-3e984137b1",
+          "type": "html",
+          "labelHint": "Builder and Developer Resources",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/constructionanddevelopment/new-construction.html#accordion-f277ea3d1a-item-5a0ddacab8",
+          "type": "html",
+          "labelHint": "Construction Guidelines",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/constructionanddevelopment/new-construction.html#accordion-f277ea3d1a-item-e0f8aaf287",
+          "type": "html",
+          "labelHint": "Customer Load Requirements",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/constructionanddevelopment/new-construction.html#accordion-f277ea3d1a-item-dc14aaa969",
+          "type": "html",
+          "labelHint": "Distribution Design Specifications",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/constructionanddevelopment/new-construction.html#accordion-f277ea3d1a-item-f7bb058d7d",
+          "type": "html",
+          "labelHint": "Petroleum Industry Guidelines",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/safety.html#CallBeforeDig",
+          "type": "html",
+          "labelHint": "Call Before You Dig",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/safety.html#TreePruningAdvisory",
+          "type": "html",
+          "labelHint": "Tree Pruning Advisory",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/safety.html#MeterTampering",
+          "type": "html",
+          "labelHint": "Meter Tampering",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/partners.html",
+          "type": "html",
+          "labelHint": "PARTNERS",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/partners/retail-electric-providers.html#BusinessOperations",
+          "type": "html",
+          "labelHint": "Business Operations",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/partners/retail-electric-providers.html#MeterReadingSchedules",
+          "type": "html",
+          "labelHint": "Meter Reading Schedules",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/partners/retail-electric-providers.html#CycleCalendar",
+          "type": "html",
+          "labelHint": "Cycle Calendar",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/partners/retail-electric-providers.html#RepTraining",
+          "type": "html",
+          "labelHint": "Retail Electric Provider (REP) Training",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/partners/retail-electric-providers.html#RepResources",
+          "type": "html",
+          "labelHint": "Retail Electric Provider (REP) Resources",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/partners/suppliers-general-info.html",
+          "type": "html",
+          "labelHint": "Supplier Diversity",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/partners/suppliers-general-info/supplier-registration.html",
+          "type": "html",
+          "labelHint": "Supplier Registration",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/partners/eepm-home.html",
+          "type": "html",
+          "labelHint": "Energy Efficiency Contractors (EEPM)",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/partners/eepm-home/sign-up.html",
+          "type": "html",
+          "labelHint": "Register or Login to Energy Efficiency Contractors (EEPM) Portal",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/safety.html#TreePruning",
+          "type": "html",
+          "labelHint": "Tree Pruning Contractors",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/smart-energy.html",
+          "type": "html",
+          "labelHint": "SMART ENERGY",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/smart-energy/electric-vehicles.html",
+          "type": "html",
+          "labelHint": "Electric Vehicles",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/investors.html",
+          "type": "html",
+          "labelHint": "INVESTOR RELATIONS",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/investors/corporate-governance.html#accordion-31f7ace653-item-a2b629c551",
+          "type": "html",
+          "labelHint": "Corporate Governance",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/investors/board-of-directors.html#board-committees",
+          "type": "html",
+          "labelHint": "Board of Directors Committee Charters",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/investors.html#SecFilings",
+          "type": "html",
+          "labelHint": "SEC Filings",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/investors.html#FinancialNewsPresentations",
+          "type": "html",
+          "labelHint": "Financial News, Earnings Releases and Financial Presentations",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/investors.html#EarningsReports",
+          "type": "html",
+          "labelHint": "Earnings Reports (PUCT)",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/investors.html#FederalEnergyRegulatoryCommission",
+          "type": "html",
+          "labelHint": "Federal Energy Regulatory Commission (FERC Form 1)",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/investors/corporate-governance.html",
+          "type": "html",
+          "labelHint": "Corporate Governance",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/investors/board-of-directors.html",
+          "type": "html",
+          "labelHint": "Board of Directors",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/investors/infrareit.html",
+          "type": "html",
+          "labelHint": "Tax and Infrareit information",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/investors/sustainability.html",
+          "type": "html",
+          "labelHint": "Sustainability",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/about-us.html",
+          "type": "html",
+          "labelHint": "ABOUT US",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/economic-development.html",
+          "type": "html",
+          "labelHint": "Economic Development",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/external-affairs.html",
+          "type": "html",
+          "labelHint": "External Affairs",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/transmission-systems.html",
+          "type": "html",
+          "labelHint": "Transmission System",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/electric-distribution-system.html",
+          "type": "html",
+          "labelHint": "Electric Distribution System",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/advanced-metering-service.html",
+          "type": "html",
+          "labelHint": "Advanced Metering Service",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/vegetation-management.html",
+          "type": "html",
+          "labelHint": "Vegetation Management",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory.html",
+          "type": "html",
+          "labelHint": "Regulatory",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/careers.html",
+          "type": "html",
+          "labelHint": "Join Us",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/wire/en/home.html",
+          "type": "html",
+          "labelHint": "Media Center",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/faqs/faqs-details.html#accordion-96f6b22563-item-373ad8467e",
+          "type": "html",
+          "labelHint": "Is the Outage Map in real-time?",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/faqs/faqs-details.html#accordion-96f6b22563-item-ff0659017c",
+          "type": "html",
+          "labelHint": "Does Oncor automatically know when my power is out?",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/faqs/faqs-details.html#accordion-96f6b22563-item-9313ba176b",
+          "type": "html",
+          "labelHint": "How do I report power outage?",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/powered-by-oncor/my-oncor-app.html",
+          "type": "html",
+          "labelHint": "Download MyOncor Mobile App",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/contact-us.html",
+          "type": "html",
+          "labelHint": "Contact Oncor",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html#",
+          "type": "html",
+          "labelHint": "tariffs-rate-schedules.html",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/outage-weather.html",
+          "type": "html",
+          "labelHint": "Contact Us - Outages",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home.html#RequestNewService",
+          "type": "html",
+          "labelHint": "New Construction Assistance",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/claims.html",
+          "type": "html",
+          "labelHint": "Claims",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://stormcenter.oncor.com/external/default.html",
+          "type": "html",
+          "labelHint": "View Outage Map",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/es/home.html",
+          "type": "html",
+          "labelHint": "ESPAÑOL",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html",
+          "type": "html",
+          "labelHint": "Tariffs and Rate Schedules",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/puct-code-of-conduct.html",
+          "type": "html",
+          "labelHint": "PUCT Code Of Conduct",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/required-regulatory-postings.html",
+          "type": "html",
+          "labelHint": "Required Regulatory Postings",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/delivery-charges-101.html",
+          "type": "html",
+          "labelHint": "Delivery Charges 101",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/safety.html#downedPowerlineE",
+          "type": "html",
+          "labelHint": "Report Downed Line",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/outage-weather/my-oncor-alerts.html",
+          "type": "html",
+          "labelHint": "MyOncor Alerts",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/dam/oncorwww/documents/about-us/regulatory/tariff-and-rate-schedules/Tariff%20for%20Retail%20Delivery%20Service.pdf.coredownload.pdf",
+          "type": "pdf",
+          "labelHint": "Tariff for Delivery Service",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/dam/oncorwww/documents/about-us/regulatory/tariff-and-rate-schedules/Rate%20Codes%20Info.pdf.coredownload.pdf",
+          "type": "pdf",
+          "labelHint": "Rate Codes",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/dam/oncorwww/documents/about-us/regulatory/tariff-and-rate-schedules/Transmission%20Tariff.pdf.coredownload.pdf",
+          "type": "pdf",
+          "labelHint": "Oncor Tariff for Transmission Service",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/dam/oncorwww/documents/about-us/regulatory/tariff-and-rate-schedules/Oncor%20NTU%20Tariff%20for%20Transmission%20Service.pdf.coredownload.pdf",
+          "type": "pdf",
+          "labelHint": "NTU Tariff for Transmission Service",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/dam/oncorwww/documents/about-us/regulatory/tariff-and-rate-schedules/FERC%20TFO%20TARIFF.pdf.coredownload.pdf",
+          "type": "pdf",
+          "labelHint": "FERC TFO Tariff",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/social-media-and-web-house-rules.html",
+          "type": "html",
+          "labelHint": "Social Media &amp; Web House Rules",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/privacy-policy.html",
+          "type": "html",
+          "labelHint": "Privacy",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/legal.html",
+          "type": "html",
+          "labelHint": "Terms &amp; Conditions",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        },
+        {
+          "url": "https://www.oncor.com/content/oncorwww/us/en/home/copyright-policy.html",
+          "type": "html",
+          "labelHint": "Copyright Policy",
+          "foundOn": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html"
+        }
+      ]
+    }
+  ]
+}
