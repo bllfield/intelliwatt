@@ -920,7 +920,7 @@ Next step: Step 7 — Documentation + runbooks + failure modes
     - `"skip: ambiguous effective dates found"` plus a candidate list when multiple plausible dates are present but cannot be safely disambiguated.
   - Debugging:
     - `--debugDate=1`:
-      - When no effective date can be chosen, logs a compact `headPreview` (first ~400 characters with collapsed whitespace) along with the first few candidate dates (ISO + approximate positions) considered during parsing, to aid in tuning patterns without dumping full PDF contents.
+      - When no effective date can be chosen, logs a compact `headPreview` (first ~400 characters with collapsed whitespace) along with the first few candidate dates (`{ iso, pos, source }`) and a `reason` string (`"NO_DATES"`, `"AMBIGUOUS_ANCHOR"`, `"HEADER_SINGLE_DATE"`, etc.) to aid in tuning patterns without dumping full PDF contents. The debug logger was hardened so `candidates` is always an array, preventing crashes like the earlier AEP `"Cannot read properties of undefined (reading 'slice')"` error.
     - Example debug run:
       - `npx tsx scripts/tdsp/ingest-puct-rate-reports.ts --debugDate=1`
   - **PDF→text strategy (Poppler first, droplet fallback)**

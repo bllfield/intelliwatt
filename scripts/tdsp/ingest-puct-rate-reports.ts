@@ -14,11 +14,24 @@ type SourceEntry = {
   notes?: string;
 };
 
-type ParsedPuctEffectiveDate = {
+type PuctDateCandidate = {
+  iso: string;
+  pos: number;
+  source: string;
+};
+
+type PuctDateParse = {
   effectiveStartISO: string | null;
-  candidates: string[];
+  candidates: PuctDateCandidate[];
   ambiguous: boolean;
-  hits: { iso: string; index: number }[];
+  reason?: string;
+};
+
+const EMPTY_PUCT_DATE_PARSE: PuctDateParse = {
+  effectiveStartISO: null,
+  candidates: [],
+  ambiguous: false,
+  reason: "NO_DATES",
 };
 
 type IngestArgs = {
@@ -34,7 +47,7 @@ function sha256Hex(buf: Uint8Array): string {
   return createHash("sha256").update(buf).digest("hex");
 }
 
-function parsePuctEffectiveDateISO(text: string): ParsedPuctEffectiveDate {
+function parsePuctEffectiveDateISO(text: string): PuctDateParse {
   // Normalize whitespace; keep a version with newlines and a flattened version.
   const norm = text.replace(/\r/g, "\n");
   const tight = norm.replace(/[ \t]+/g, " ");
@@ -55,18 +68,24 @@ function parsePuctEffectiveDateISO(text: string): ParsedPuctEffectiveDate {
     december: "12",
   };
 
-  type DateHit = { iso: string; index: number };
+  type DateHit = { iso: string; index: number; source: string };
   const hits: DateHit[] = [];
 
   const lowerFlat = flat.toLowerCase();
   const headWindow = flat.slice(0, 800);
 
-  function addNumeric(mm: string, dd: string, yyyy: string, index: number) {
+  function addNumeric(
+    mm: string,
+    dd: string,
+    yyyy: string,
+    index: number,
+    source: string,
+  ) {
     if (!/^\d{4}$/.test(yyyy)) return;
     const mmNum = String(parseInt(mm, 10)).padStart(2, "0");
     const ddNum = String(parseInt(dd, 10)).padStart(2, "0");
     const iso = `${yyyy}-${mmNum}-${ddNum}`;
-    hits.push({ iso, index });
+    hits.push({ iso, index, source });
   }
 
   // A) "Rates Effective 09/01/2025"
@@ -76,7 +95,7 @@ function parsePuctEffectiveDateISO(text: string): ParsedPuctEffectiveDate {
     let m: RegExpExecArray | null;
     // eslint-disable-next-line no-cond-assign
     while ((m = re.exec(flat)) !== null) {
-      addNumeric(m[1], m[2], m[3], m.index);
+      addNumeric(m[1], m[2], m[3], m.index, "RATES_EFFECTIVE");
     }
   }
 
@@ -87,7 +106,7 @@ function parsePuctEffectiveDateISO(text: string): ParsedPuctEffectiveDate {
     let m: RegExpExecArray | null;
     // eslint-disable-next-line no-cond-assign
     while ((m = re.exec(headWindow)) !== null) {
-      addNumeric(m[1], m[2], m[3], m.index);
+      addNumeric(m[1], m[2], m[3], m.index, "RATES_REPORT");
     }
   }
 
@@ -98,7 +117,7 @@ function parsePuctEffectiveDateISO(text: string): ParsedPuctEffectiveDate {
     let m: RegExpExecArray | null;
     // eslint-disable-next-line no-cond-assign
     while ((m = re.exec(flat)) !== null) {
-      addNumeric(m[1], m[2], m[3], m.index);
+      addNumeric(m[1], m[2], m[3], m.index, "GENERIC_NUMERIC");
       if (hits.length >= 200) break;
     }
   }
@@ -110,7 +129,7 @@ function parsePuctEffectiveDateISO(text: string): ParsedPuctEffectiveDate {
     let m: RegExpExecArray | null;
     // eslint-disable-next-line no-cond-assign
     while ((m = re.exec(flat)) !== null) {
-      addNumeric(m[1], m[2], m[3], m.index);
+      addNumeric(m[1], m[2], m[3], m.index, "EFFECTIVE");
     }
   }
 
@@ -121,7 +140,7 @@ function parsePuctEffectiveDateISO(text: string): ParsedPuctEffectiveDate {
     let m: RegExpExecArray | null;
     // eslint-disable-next-line no-cond-assign
     while ((m = re.exec(flat)) !== null) {
-      addNumeric(m[1], m[2], m[3], m.index);
+      addNumeric(m[1], m[2], m[3], m.index, "AS_OF");
     }
   }
 
@@ -137,12 +156,12 @@ function parsePuctEffectiveDateISO(text: string): ParsedPuctEffectiveDate {
       const yyyy = m[3];
       if (!mm) continue;
       const iso = `${yyyy}-${mm}-${dd}`;
-      hits.push({ iso, index: m.index });
+      hits.push({ iso, index: m.index, source: "MONTH_NAME" });
     }
   }
 
   if (hits.length === 0) {
-    return { effectiveStartISO: null, candidates: [], ambiguous: false };
+    return { ...EMPTY_PUCT_DATE_PARSE };
   }
 
   // Keyword-guided selection when multiple dates appear.
@@ -157,7 +176,7 @@ function parsePuctEffectiveDateISO(text: string): ParsedPuctEffectiveDate {
     }
   }
 
-  const uniqueCandidates = Array.from(new Set(hits.map((h) => h.iso)));
+  const uniqueIso = Array.from(new Set(hits.map((h) => h.iso)));
 
     if (keywordPositions.length > 0) {
     let bestHit: DateHit | null = null;
@@ -180,17 +199,25 @@ function parsePuctEffectiveDateISO(text: string): ParsedPuctEffectiveDate {
       if (bestHit && bestCount === 1) {
         return {
           effectiveStartISO: bestHit.iso,
-          candidates: uniqueCandidates,
+          candidates: hits.map((h) => ({
+            iso: h.iso,
+            pos: h.index,
+            source: h.source,
+          })),
           ambiguous: false,
-          hits,
+          reason: "ANCHOR_CHOSEN",
         };
       }
 
       return {
         effectiveStartISO: null,
-        candidates: uniqueCandidates,
+        candidates: hits.map((h) => ({
+          iso: h.iso,
+          pos: h.index,
+          source: h.source,
+        })),
         ambiguous: true,
-        hits,
+        reason: "AMBIGUOUS_ANCHOR",
       };
   }
 
@@ -201,27 +228,39 @@ function parsePuctEffectiveDateISO(text: string): ParsedPuctEffectiveDate {
   if (headHits.length === 1) {
     return {
       effectiveStartISO: headHits[0]!.iso,
-      candidates: uniqueCandidates,
+      candidates: hits.map((h) => ({
+        iso: h.iso,
+        pos: h.index,
+        source: h.source,
+      })),
       ambiguous: false,
-      hits,
+      reason: "HEADER_SINGLE_DATE",
     };
   }
 
   if (headHits.length > 1) {
     return {
       effectiveStartISO: null,
-      candidates: Array.from(new Set(headHits.map((h) => h.iso))),
+      candidates: headHits.map((h) => ({
+        iso: h.iso,
+        pos: h.index,
+        source: h.source,
+      })),
       ambiguous: true,
-      hits,
+      reason: "HEADER_MULTIPLE_DATES",
     };
   }
 
   // Dates exist but not in the head window and no keywords to anchor them.
   return {
     effectiveStartISO: null,
-    candidates: uniqueCandidates,
+    candidates: hits.map((h) => ({
+      iso: h.iso,
+      pos: h.index,
+      source: h.source,
+    })),
     ambiguous: true,
-    hits,
+    reason: "UNANCHORED_AMBIGUOUS",
   };
 }
 
@@ -368,7 +407,15 @@ async function ingestForSource(entry: SourceEntry, args: IngestArgs) {
     return;
   }
 
-  const parsedDate = parsePuctEffectiveDateISO(text);
+  const parsedRaw = parsePuctEffectiveDateISO(text);
+  const parsedDate: PuctDateParse =
+    (parsedRaw && typeof parsedRaw === "object"
+      ? parsedRaw
+      : EMPTY_PUCT_DATE_PARSE);
+  const candidatesSafe = Array.isArray(parsedDate.candidates)
+    ? parsedDate.candidates
+    : [];
+
   const effectiveStartISO = parsedDate.effectiveStartISO;
 
   if (!effectiveStartISO) {
@@ -376,14 +423,21 @@ async function ingestForSource(entry: SourceEntry, args: IngestArgs) {
       const headPreview = text.replace(/\s+/g, " ").slice(0, 400);
       log(tdspCode, "debugDate headPreview", {
         headPreview,
-        candidates: parsedDate.candidates.slice(0, 10),
-        hits: parsedDate.hits.slice(0, 10),
+        candidates: candidatesSafe.slice(0, 10),
+        reason: parsedDate.reason,
+        ambiguous: parsedDate.ambiguous,
+      });
+      log(tdspCode, "debugDate candidates", {
+        effectiveStartISO: parsedDate.effectiveStartISO,
+        ambiguous: parsedDate.ambiguous,
+        reason: parsedDate.reason,
+        candidates: candidatesSafe.slice(0, 10),
       });
     }
 
-    if (parsedDate.candidates.length > 1 || parsedDate.ambiguous) {
+    if (candidatesSafe.length > 1 || parsedDate.ambiguous) {
       log(tdspCode, "skip: ambiguous effective dates found", {
-        candidates: parsedDate.candidates,
+        candidates: candidatesSafe,
       });
     } else {
       log(tdspCode, "skip: no effective date found in text.");
