@@ -19,8 +19,6 @@ type Row = {
   cancelFee: string | null;
   eflUrl: string | null;
   eflPdfSha256: string | null;
-  repPuctCertificate: string | null;
-  eflVersionCode: string | null;
   eflRequiresManualReview: boolean;
   updatedAt: string;
   lastSeenAt: string;
@@ -76,6 +74,29 @@ export async function GET(req: NextRequest) {
 
     const plans = await (prisma as any).ratePlan.findMany({
       where,
+      // IMPORTANT:
+      // Some deployments may not yet have newer columns migrated (e.g. repPuctCertificate).
+      // Prisma's default "select all columns" will then throw at runtime. Always use an
+      // explicit select with known-stable columns for admin listing endpoints.
+      select: {
+        id: true,
+        utilityId: true,
+        state: true,
+        supplier: true,
+        planName: true,
+        termMonths: true,
+        rate500: true,
+        rate1000: true,
+        rate2000: true,
+        cancelFee: true,
+        eflUrl: true,
+        eflPdfSha256: true,
+        eflRequiresManualReview: true,
+        isUtilityTariff: true,
+        updatedAt: true,
+        lastSeenAt: true,
+        rateStructure: true,
+      },
       orderBy: [{ updatedAt: "desc" }],
       take: limit,
     });
@@ -93,8 +114,6 @@ export async function GET(req: NextRequest) {
       cancelFee: p.cancelFee ?? null,
       eflUrl: p.eflUrl ?? null,
       eflPdfSha256: p.eflPdfSha256 ?? null,
-      repPuctCertificate: p.repPuctCertificate ?? null,
-      eflVersionCode: p.eflVersionCode ?? null,
       eflRequiresManualReview: Boolean(p.eflRequiresManualReview),
       updatedAt: new Date(p.updatedAt).toISOString(),
       lastSeenAt: new Date(p.lastSeenAt).toISOString(),
