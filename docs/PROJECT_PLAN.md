@@ -741,6 +741,8 @@ Next step: Step 7 — Documentation + runbooks + failure modes
   - **STEP 5B COMPLETE — TDSP tariff data expanded (AEP North, AEP Central, TNMP)**:
     - Residential delivery tariff rows are now present for all five Texas TDSPs (ONCOR, CENTERPOINT, AEP_NORTH, AEP_CENTRAL, TNMP), with AEP/TNMP data seeded as explicit `TdspTariffVersion` + `TdspTariffComponent` entries backed by documented utility tariff sources. No logic changes were made; only data and seeding behavior were extended.
 
+> **2025‑12‑15 (policy clarify)** — Clarified that the solver may persist per‑card derived numbers (per‑template/per‑plan) into templates/rate models, but manual review must always drive generalized extractor/normalizer/solver improvements rather than label‑ or supplier‑specific code branches.
+
 #### UTILITY / TDSP MODULE — Step 5B tariff expansion (2025-12-13)
 
 - **Utilities added**
@@ -756,6 +758,69 @@ Next step: Step 7 — Documentation + runbooks + failure modes
 - **Rider handling**
   - Riders (e.g., TCRF/DCRF/PCRF/SCRF) are **excluded** from the initial TDSP tariff expansion unless they are explicitly published as clear, numeric delivery components in the underlying tariff schedules.
   - When riders are later added, they will be represented as separate `TdspTariffComponent` rows with appropriate `chargeType` values, without altering existing base delivery components.
+
+## EFL Parser / Fact Card Fix Policy — No Label Hardcoding (Required)
+
+### Non‑Negotiable Rules (Guardrails)
+
+- ✅ **Allowed**: Persisting solver‑derived values *for a specific EFL card* (per‑template/per‑plan identity) so that exact card can PASS and be usable.
+  - This is **data persistence**, not “label hardcoding”: the solver uses constraints (e.g., avg‑price table, known variables) to compute missing numbers and we store those numbers into the template/rate model for that card.
+- ❌ **Not allowed**: Adding code paths keyed to a specific supplier/plan/version/pdfSha/offerId or unique label text as a “fix” after manual review.
+  - No `if (supplier === "TXU" && version === "ClearDeal12")` branches, no label‑string switches for one‑off cards.
+
+### Persistence vs. Code Hardcoding (Key Distinction)
+
+- The solver **may** compute missing variables (e.g., base charge, tier rates, TDSP assumptions) from constraints (avg‑price table, known fees) and write the *resulting numbers* into the stored template or rate model for that specific card.
+- Manual review is for improving the **general parser and solver heuristics**, not for introducing one‑off code exceptions:
+  - Fix = “update extractor/normalizer/solver regex or heuristic that applies broadly,” not “add a branch for this label/supplier only.”
+- Every manual resolution must be recorded as:
+  - A failure category (taxonomy code), and
+  - A description of **what generalized rule** would have prevented this failure (so we can implement it later).
+
+### Admin Review Queue Policy (Quarantine workflow)
+
+- The EFL review queue is used to:
+  - **(a)** Approve/use solver‑derived stored values for that card (so users can see it once validated), and
+  - **(b)** Classify the failure and drive a **generalized** extraction/normalization/solver improvement so future similar cards PASS automatically.
+- The queue is **not** used to introduce supplier/plan/version‑specific code conditions:
+  - No per‑card branches, no special‑case label handling baked into the parser; all fixes must be concept‑level.
+
+### Manual Review Output (What we must capture every time)
+
+For each reviewed item, manual review must produce **one** of the following outcomes:
+
+- **A) “Generalized Parser Rule Needed”**
+  - Define the missing concept (e.g., bill credit threshold wording variant, base‑charge synonym, TOU time‑window format).
+  - Add/adjust extractor/normalizer logic (regex/heuristic) that applies broadly (not just to one supplier/plan).
+  - Add regression fixture(s) proving it works on more than that one card (or is clearly concept‑general).
+
+- **B) “Solver Heuristic Needed”**
+  - Define why constraints failed (unit mismatch, wrong assumption, missing variable class).
+  - Add a generalized solver step/reason code that derives the variable class without provider‑specific anchors.
+  - Re‑run avg‑price validation; only once the solver can reliably PASS within tolerance do we accept the change.
+
+- **C) “Unsolvable / Needs Human Data”**
+  - If neither generalized extraction nor solver inference can resolve it confidently, keep it quarantined:
+    - Mark the item as unsolvable and document why (e.g., EFL omits critical numerical information, contradictory math, etc.).
+    - Do **not** add special‑case code for this card; treat it as permanently “needs human data.”
+
+### Failure Taxonomy — Next‑Time Prevention
+
+- Every failure taxonomy category must **map to a concrete code‑improvement path** (extractor, normalizer, solver):
+  - The taxonomy is not just labeling; each category implies “this is the area of the codebase we will improve so the next similar card passes automatically.”
+  - The goal is that manual queue volume trends **down** over time as coverage improves.
+
+### Definition of Done for Manual Review
+
+- A manual review is **not** “done” until we either:
+  - **(1)** Land a generalized rule/heuristic + regression fixture that would prevent the same failure next time, **or**
+  - **(2)** Explicitly mark the case as unsolvable and document why a generalized rule is not safe/possible.
+
+### EFL / Fact Card Roadmap Checklist
+
+- **Manual queue reduces over time**:
+  - Every resolved item should result in a generalized improvement (extractor/normalizer/solver) unless explicitly marked unsolvable.
+  - New categories or heuristics must be documented in this plan so future maintainers understand the coverage and rationale.
 
 ### STEP 6A — Admin TDSP tariff viewer (2025-12-14)
 
