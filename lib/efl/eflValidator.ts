@@ -764,9 +764,6 @@ export function extractEflAvgPricePoints(
     const useMatch = tableScan.match(
       /Average\s+Monthly\s+Us(?:e|age)[^\n]*\n?[^\n]*/i,
     );
-    const useMatch = tableScan.match(
-      /Average\s+Monthly\s+Us(?:e|age)[^\n]*\n?[^\n]*/i,
-    );
     const useText = useMatch?.[0] ?? useLine;
 
     // Tolerant "Average price" scan:
