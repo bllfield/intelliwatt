@@ -19,7 +19,6 @@ type Row = {
   cancelFee: string | null;
   eflUrl: string | null;
   eflPdfSha256: string | null;
-  eflRequiresManualReview: boolean;
   updatedAt: string;
   lastSeenAt: string;
   rateStructure: unknown;
@@ -57,15 +56,11 @@ export async function GET(req: NextRequest) {
     const where: any = {
       // “Templated” means we already have a usable engine structure persisted.
       rateStructure: { not: null },
-      eflRequiresManualReview: false,
-      isUtilityTariff: false,
       ...(q
         ? {
             OR: [
               { supplier: { contains: q, mode: "insensitive" } },
               { planName: { contains: q, mode: "insensitive" } },
-              { eflVersionCode: { contains: q, mode: "insensitive" } },
-              { repPuctCertificate: { contains: q, mode: "insensitive" } },
               { eflPdfSha256: { contains: q, mode: "insensitive" } },
             ],
           }
@@ -91,8 +86,6 @@ export async function GET(req: NextRequest) {
         cancelFee: true,
         eflUrl: true,
         eflPdfSha256: true,
-        eflRequiresManualReview: true,
-        isUtilityTariff: true,
         updatedAt: true,
         lastSeenAt: true,
         rateStructure: true,
@@ -114,7 +107,6 @@ export async function GET(req: NextRequest) {
       cancelFee: p.cancelFee ?? null,
       eflUrl: p.eflUrl ?? null,
       eflPdfSha256: p.eflPdfSha256 ?? null,
-      eflRequiresManualReview: Boolean(p.eflRequiresManualReview),
       updatedAt: new Date(p.updatedAt).toISOString(),
       lastSeenAt: new Date(p.lastSeenAt).toISOString(),
       rateStructure: p.rateStructure ?? null,
