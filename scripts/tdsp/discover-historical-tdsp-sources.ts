@@ -98,7 +98,9 @@ async function discoverForSource(
   const baseUrl = new URL(sourceUrl);
 
   // Very simple anchor parser: href + inner text.
-  const hrefRegex = /<a[^>]+href=["']([^"']+)["'][^>]*>(.*?)<\/a>/gis;
+  // Use [\s\S]*? instead of the 's' (dotAll) flag to stay compatible with older JS targets.
+  const hrefRegex =
+    /<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
 
   const byUrl = new Map<string, HistoricalCandidate>();
 
