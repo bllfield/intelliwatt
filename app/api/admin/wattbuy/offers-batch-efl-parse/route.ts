@@ -39,6 +39,8 @@ type BatchResultRow = {
   finalValidationStatus?: string | null;
   tdspAppliedMode: string | null;
   parseConfidence: number | null;
+  passStrength?: "STRONG" | "WEAK" | "INVALID" | null;
+  passStrengthReasons?: string[] | null;
   templateAction: "HIT" | "CREATED" | "SKIPPED" | "NOT_ELIGIBLE";
   queueReason?: string | null;
   finalQueueReason?: string | null;
@@ -228,6 +230,13 @@ export async function POST(req: NextRequest) {
         const solverApplied: string[] | null = Array.isArray(solved?.solverApplied)
           ? (solved.solverApplied as string[])
           : null;
+        const passStrength: "STRONG" | "WEAK" | "INVALID" | null =
+          (pipeline as any).passStrength ?? null;
+        const passStrengthReasons: string[] | null = Array.isArray(
+          (pipeline as any).passStrengthReasons,
+        )
+          ? ((pipeline as any).passStrengthReasons as string[])
+          : null;
 
         const diffs =
           Array.isArray(effectiveValidation?.points) && effectiveValidation.points.length
@@ -269,10 +278,35 @@ export async function POST(req: NextRequest) {
 
         const finalQueueReasonRaw: string | null =
           effectiveValidation?.queueReason ?? null;
-        const finalQueueReason = normalizeQueueReason(finalQueueReasonRaw);
+        let finalQueueReason = normalizeQueueReason(finalQueueReasonRaw);
 
-        // Queue FAILs for admin review (regardless of DRY_RUN vs STORE_TEMPLATES_ON_PASS).
-        if (finalStatus === "FAIL" && det.eflPdfSha256) {
+        // Enrich queueReason with pass-strength information when applicable.
+        if (
+          finalStatus === "PASS" &&
+          passStrength &&
+          passStrength !== "STRONG"
+        ) {
+          const strengthMsg = `PASS strength=${passStrength}${
+            passStrengthReasons && passStrengthReasons.length
+              ? ` reasons=${passStrengthReasons.join(",")}`
+              : ""
+          }`;
+          finalQueueReason = finalQueueReason
+            ? `${finalQueueReason} | ${strengthMsg}`
+            : strengthMsg;
+        }
+
+        const shouldQueue =
+          !!det.eflPdfSha256 &&
+          (finalStatus === "FAIL" ||
+            (finalStatus === "PASS" &&
+              passStrength &&
+              passStrength !== "STRONG") ||
+            (finalStatus === "SKIP" && !!eflUrl));
+
+        // Queue FAILs, PASS-but-weak/invalid, and SKIPs-with-EFL for admin review
+        // (regardless of DRY_RUN vs STORE_TEMPLATES_ON_PASS).
+        if (shouldQueue) {
           try {
             await (prisma as any).eflParseReviewQueue.upsert({
               where: { eflPdfSha256: det.eflPdfSha256 },
@@ -335,6 +369,8 @@ export async function POST(req: NextRequest) {
           finalValidationStatus: finalStatus,
           tdspAppliedMode,
           parseConfidence: pipeline.parseConfidence ?? null,
+          passStrength,
+          passStrengthReasons,
           templateAction,
           queueReason: finalQueueReason,
           finalQueueReason,

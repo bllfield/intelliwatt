@@ -101,6 +101,8 @@ export interface EflAvgPriceValidation {
   avgTableSnippet?: string;
 }
 
+export type EflPassStrength = "STRONG" | "WEAK" | "INVALID";
+
 const DEFAULT_TOLERANCE_CENTS_PER_KWH = 0.25;
 const VALIDATION_TZ = "America/Chicago";
 
@@ -694,6 +696,130 @@ function computeValidatorModeledBreakdown(
     supplyOnlyDollars: round4(
       repEnergyDollars + repBaseDollars - creditsDollars,
     ),
+  };
+}
+
+export async function modelAvgCentsPerKwhAtUsage(args: {
+  usageKwh: number;
+  planRules: any | null;
+  rateStructure: any | null;
+  assumptionsUsed?: any;
+}): Promise<{
+  modeledAvgCentsPerKwh: number | null;
+  modeledTotalCents?: number | null;
+  notes?: string[];
+}> {
+  const notes: string[] = [];
+
+  const { usageKwh, planRules, rateStructure } = args;
+  if (!planRules || !Number.isFinite(usageKwh) || usageKwh <= 0) {
+    return {
+      modeledAvgCentsPerKwh: null,
+      notes: ["INVALID_INPUT"],
+    };
+  }
+
+  const assumptions = args.assumptionsUsed ?? {};
+
+  const tdspIncludedFlag =
+    assumptions.tdspIncludedInEnergyCharge === true ||
+    (planRules as any).tdspDeliveryIncludedInEnergyCharge === true ||
+    (rateStructure as any)?.tdspDeliveryIncludedInEnergyCharge === true
+      ? true
+      : undefined;
+
+  let effectiveTdsp: EflTdspCharges = {
+    perKwhCents: null,
+    monthlyCents: null,
+    snippet: null,
+    confidence: "LOW",
+  };
+
+  const fromUtility = assumptions.tdspFromUtilityTable ?? null;
+  const fromEfl = assumptions.tdspFromEfl ?? null;
+  const appliedMode = assumptions.tdspAppliedMode ?? null;
+
+  if (
+    appliedMode === "UTILITY_TABLE" &&
+    fromUtility &&
+    (fromUtility.perKwhCents != null || fromUtility.monthlyCents != null)
+  ) {
+    effectiveTdsp = {
+      perKwhCents:
+        typeof fromUtility.perKwhCents === "number"
+          ? fromUtility.perKwhCents
+          : null,
+      monthlyCents:
+        typeof fromUtility.monthlyCents === "number"
+          ? fromUtility.monthlyCents
+          : null,
+      snippet: null,
+      confidence: fromUtility.confidence ?? "MED",
+    };
+  } else if (fromEfl) {
+    effectiveTdsp = {
+      perKwhCents:
+        typeof fromEfl.perKwhCents === "number" ? fromEfl.perKwhCents : null,
+      monthlyCents:
+        typeof fromEfl.monthlyCents === "number" ? fromEfl.monthlyCents : null,
+      snippet: fromEfl.snippet ?? null,
+      confidence: fromEfl.confidence ?? "LOW",
+    };
+  }
+
+  const nightUsagePercent =
+    typeof assumptions.nightUsagePercent === "number"
+      ? assumptions.nightUsagePercent
+      : undefined;
+  const nightStartHour =
+    typeof assumptions.nightStartHour === "number"
+      ? assumptions.nightStartHour
+      : undefined;
+  const nightEndHour =
+    typeof assumptions.nightEndHour === "number"
+      ? assumptions.nightEndHour
+      : undefined;
+
+  const engineResult = await computeModeledComponentsOrNull({
+    planRules: planRules as PlanRules,
+    rateStructure: (rateStructure as RateStructure | null) ?? null,
+    kwh: usageKwh,
+    eflTdsp: effectiveTdsp,
+    tdspIncludedInEnergyCharge: tdspIncludedFlag,
+    nightUsagePercent,
+    nightStartHour,
+    nightEndHour,
+  });
+
+  let components = engineResult.components;
+
+  if (!components || Number.isNaN(components.avgCentsPerKwh)) {
+    components = computeValidatorModeledBreakdown(
+      planRules,
+      rateStructure,
+      usageKwh,
+      effectiveTdsp,
+      tdspIncludedFlag,
+    );
+    if (components) {
+      notes.push("FALLBACK_VALIDATOR_MATH");
+    }
+  }
+
+  if (!components || Number.isNaN(components.avgCentsPerKwh)) {
+    return {
+      modeledAvgCentsPerKwh: null,
+      notes: [...notes, "NO_MODELED_COMPONENTS"],
+    };
+  }
+
+  const modeledAvg = Number(cents(components.avgCentsPerKwh).toFixed(4));
+  const modeledTotalCents = Math.round(components.totalDollars * 100);
+
+  return {
+    modeledAvgCentsPerKwh: modeledAvg,
+    modeledTotalCents,
+    notes,
   };
 }
 
@@ -1411,6 +1537,198 @@ export async function validateEflAvgPriceTable(args: {
       avgPriceCentsPerKwh: p.eflAvgCentsPerKwh,
     })),
     avgTableSnippet,
+  };
+}
+
+export async function scoreEflPassStrength(args: {
+  rawText: string;
+  validation: any | null;
+  planRules: any | null;
+  rateStructure: any | null;
+}): Promise<{
+  strength: EflPassStrength;
+  reasons: string[];
+  offPointDiffs?: Array<{
+    usageKwh: number;
+    expectedInterp: number;
+    modeled: number | null;
+    diff: number | null;
+    ok: boolean;
+  }>;
+}> {
+  const { validation, planRules, rateStructure } = args;
+
+  if (!validation || validation.status !== "PASS") {
+    return { strength: "INVALID", reasons: ["NOT_PASS"] };
+  }
+
+  const reasons: string[] = [];
+
+  const points: any[] = Array.isArray(validation.points)
+    ? validation.points
+    : [];
+
+  for (const p of points) {
+    const v = p?.modeledAvgCentsPerKwh;
+    if (typeof v === "number" && Number.isFinite(v)) {
+      if (v <= 0 || v > 150) {
+        reasons.push("AVG_OUT_OF_RANGE");
+        return { strength: "INVALID", reasons: Array.from(new Set(reasons)) };
+      }
+    }
+  }
+
+  const baseCandidateRaw =
+    (planRules as any)?.baseChargePerMonthCents ??
+    (rateStructure as any)?.baseMonthlyFeeCents;
+  if (
+    typeof baseCandidateRaw === "number" &&
+    Number.isFinite(baseCandidateRaw)
+  ) {
+    if (baseCandidateRaw < 0 || baseCandidateRaw > 20000) {
+      reasons.push("BASE_OUT_OF_RANGE");
+      return { strength: "INVALID", reasons: Array.from(new Set(reasons)) };
+    }
+  }
+
+  const tiers: any[] = Array.isArray((planRules as any)?.usageTiers)
+    ? (planRules as any).usageTiers
+    : [];
+  for (const t of tiers) {
+    const rc = Number(t?.rateCentsPerKwh);
+    if (Number.isFinite(rc)) {
+      if (rc < 0 || rc > 200) {
+        reasons.push("ENERGY_RATE_OUT_OF_RANGE");
+        return { strength: "INVALID", reasons: Array.from(new Set(reasons)) };
+      }
+    }
+  }
+
+  const credits: any[] = Array.isArray((planRules as any)?.billCredits)
+    ? (planRules as any).billCredits
+    : [];
+  for (const c of credits) {
+    if (typeof c?.creditDollars === "number") {
+      const centsVal = Math.abs(c.creditDollars * 100);
+      if (centsVal > 30000) {
+        reasons.push("CREDIT_OUT_OF_RANGE");
+        return { strength: "INVALID", reasons: Array.from(new Set(reasons)) };
+      }
+    } else if (typeof c?.creditCents === "number") {
+      const centsVal = Math.abs(c.creditCents);
+      if (centsVal > 30000) {
+        reasons.push("CREDIT_OUT_OF_RANGE");
+        return { strength: "INVALID", reasons: Array.from(new Set(reasons)) };
+      }
+    }
+  }
+
+  const byUsage = new Map<number, any>();
+  for (const p of points) {
+    if (typeof p?.usageKwh === "number") {
+      byUsage.set(p.usageKwh, p);
+    }
+  }
+
+  const p500 = byUsage.get(500);
+  const p1000 = byUsage.get(1000);
+  const p2000 = byUsage.get(2000);
+
+  if (!p500 || !p1000 || !p2000) {
+    reasons.push("MISSING_ANCHOR_POINTS");
+    return { strength: "WEAK", reasons: Array.from(new Set(reasons)) };
+  }
+
+  const expected500 = Number(p500.expectedAvgCentsPerKwh);
+  const expected1000 = Number(p1000.expectedAvgCentsPerKwh);
+  const expected2000 = Number(p2000.expectedAvgCentsPerKwh);
+
+  if (
+    !Number.isFinite(expected500) ||
+    !Number.isFinite(expected1000) ||
+    !Number.isFinite(expected2000)
+  ) {
+    reasons.push("ANCHOR_EXPECTED_INVALID");
+    return { strength: "WEAK", reasons: Array.from(new Set(reasons)) };
+  }
+
+  const interp = (
+    x: number,
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+  ): number => {
+    if (!Number.isFinite(x) || x2 === x1) return y1;
+    const t = (x - x1) / (x2 - x1);
+    return y1 + t * (y2 - y1);
+  };
+
+  const offUsages = [750, 1250, 1500];
+  const offPointDiffs: Array<{
+    usageKwh: number;
+    expectedInterp: number;
+    modeled: number | null;
+    diff: number | null;
+    ok: boolean;
+  }> = [];
+
+  let hasOffPointIssue = false;
+
+  for (const usage of offUsages) {
+    const expectedInterp =
+      usage <= 1000
+        ? interp(usage, 500, expected500, 1000, expected1000)
+        : interp(usage, 1000, expected1000, 2000, expected2000);
+
+    const modeledRes = await modelAvgCentsPerKwhAtUsage({
+      usageKwh: usage,
+      planRules,
+      rateStructure,
+      assumptionsUsed: validation.assumptionsUsed ?? {},
+    });
+
+    const modeled = modeledRes.modeledAvgCentsPerKwh;
+    let ok = true;
+    let diff: number | null = null;
+
+    if (modeled == null || !Number.isFinite(modeled)) {
+      reasons.push("OFFPOINT_MODELED_NULL");
+      ok = false;
+      hasOffPointIssue = true;
+    } else {
+      diff = modeled - expectedInterp;
+      const absDiff = Math.abs(diff);
+      if (absDiff > 0.5) {
+        reasons.push("OFFPOINT_DEVIATION");
+        ok = false;
+        hasOffPointIssue = true;
+      }
+    }
+
+    offPointDiffs.push({
+      usageKwh: usage,
+      expectedInterp,
+      modeled: modeled ?? null,
+      diff,
+      ok,
+    });
+  }
+
+  const uniqueReasons = Array.from(new Set(reasons));
+
+  if (hasOffPointIssue) {
+    return {
+      strength: "WEAK",
+      reasons: uniqueReasons.length ? uniqueReasons : ["OFFPOINT_ISSUE"],
+      offPointDiffs,
+    };
+  }
+
+  return {
+    strength: "STRONG",
+    reasons: uniqueReasons.length ? uniqueReasons : [],
+    offPointDiffs,
   };
 }
 

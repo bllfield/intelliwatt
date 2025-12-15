@@ -777,6 +777,91 @@ Next step: Step 7 — Documentation + runbooks + failure modes
   - A failure category (taxonomy code), and
   - A description of **what generalized rule** would have prevented this failure (so we can implement it later).
 
+## EFL Quarantine Resolution SOP (Authoritative)
+
+- **Authoritative SOP doc**
+  - See `docs/EFL_QUARANTINE_SOP.md` for the full, operational **EFL Quarantine Resolution SOP**.
+  - That SOP defines how quarantined EFLs (items in the EFL review queue) must be triaged, diagnosed, and resolved using **generalized rules** and **regression fixtures/tests**.
+
+- **Non‑negotiable rule**
+  - **No supplier‑specific patches; every fix must generalize.**
+  - Parser/solver code must never branch on supplier name, plan name, PDF SHA, offer ID, or unique label string as a “fix.”
+  - All fixes must be expressed as pattern‑based extraction/normalization/solver rules that can apply across suppliers.
+
+- **Required workflow**
+  - **quarantine → diagnose → generalize → regression fixture/test → update plan**
+    - **Quarantine**: EFLs that FAIL/SKIP validation or emit concerning `queueReason` values are kept out of user‑facing flows and land in the EFL review queue.
+    - **Diagnose**: Admin reviews the EFL PDF + pipeline output to identify what is missing/misparsed (base charge, tiers, credits, TOU, TDSP inclusion, TDSP masking, etc.).
+    - **Generalize**: Decide which layer (extractor, AI normalization, deterministic fallback, validator, solver) should be updated with a **reusable rule**, not a one‑off patch.
+    - **Regression fixture/test**: Add a fixture and automated tests so the same class of failure cannot silently re‑appear.
+    - **Update plan**: Record the change in this plan file with the new/updated **Rule ID** and the fixtures/tests that were added.
+
+- **Bootstrap / ongoing reminder**
+  - After **every** quarantine resolution or parser/solver change related to EFLs:
+    - Update this plan file with:
+      - What changed (at a high level).
+      - Which **Rule ID(s)** were added or updated (`docs/EFL_PARSER_RULES.md` is the canonical catalog).
+      - Which fixture(s)/test(s) were added or updated.
+
+### EFL PASS Strength Scoring + User-Facing Guard Rails (2025-12-15)
+
+- **PASS strength scoring (validator-only)**
+  - `lib/efl/eflValidator.ts` now exposes two helpers:
+    - `modelAvgCentsPerKwhAtUsage({ usageKwh, planRules, rateStructure, assumptionsUsed })` — reuses the same modeling logic as the avg‑price validator (engine + deterministic fallback) to compute modeled avg ¢/kWh at an arbitrary usage point.
+    - `scoreEflPassStrength({ rawText, validation, planRules, rateStructure })` — evaluates a PASS result for:
+      - **Sanity bounds** (avg ¢/kWh ∈ (0,150], base charges ≤ \$200/mo, tier rates ≤ 200 ¢/kWh, bill credits ≤ \$300/mo).
+      - **Off‑point behavior** at 750/1250/1500 kWh using linear interpolation between the EFL’s 500/1000/2000 anchors and the same modeled math used by the validator.
+  - `scoreEflPassStrength` returns:
+    - `strength: "STRONG" | "WEAK" | "INVALID"`
+    - `reasons: string[]` (machine‑readable tags like `AVG_OUT_OF_RANGE`, `OFFPOINT_DEVIATION`, `OFFPOINT_MODELED_NULL`)
+    - `offPointDiffs` (optional per‑usage diffs for admin/debug views).
+
+- **Pipeline wiring (no schema changes)**
+  - `lib/efl/runEflPipelineNoStore.ts` now:
+    - Calls `scoreEflPassStrength` using the **final** PlanRules/RateStructure + final validation (post‑solver when available).
+    - Returns additive fields on the pipeline result:
+      - `passStrength?: "STRONG" | "WEAK" | "INVALID" | null`
+      - `passStrengthReasons?: string[]`
+      - `passStrengthOffPointDiffs?: { usageKwh; expectedInterp; modeled; diff; ok }[] | null`
+    - Marks `needsAdminReview = true` when:
+      - Final validation status is **FAIL**, **or**
+      - Final validation status is **PASS** but `passStrength !== "STRONG"` (weak/invalid PASS).
+    - When a PASS is scored as WEAK/INVALID, it **appends** (without overwriting) a queueReason note:
+      - `"EFL PASS flagged as WEAK/INVALID (possible cancellation pass or out-of-bounds values) — manual admin review required."`
+
+- **Review queue behavior (batch harness)**
+  - `app/api/admin/wattbuy/offers-batch-efl-parse/route.ts` now queues:
+    - All **FAIL** results (existing behavior).
+    - All **PASS** results where `pipeline.passStrength !== "STRONG"`.
+    - All **SKIP** results that still have an `eflUrl` (validator could not meaningfully model avg‑price table).
+  - Queue entries enrich `queueReason` with pass‑strength metadata, e.g.:
+    - `PASS strength=WEAK reasons=OFFPOINT_DEVIATION,OFFPOINT_MODELED_NULL`
+  - Batch response rows now surface:
+    - `passStrength?: "STRONG" | "WEAK" | "INVALID" | null`
+    - `passStrengthReasons?: string[] | null`
+  - **No schema changes** were made; pass‑strength is surfaced via strings and reasons only.
+
+- **User-facing cost guard rails (recommendations feed)**
+  - `app/api/recommendations/route.ts` (user‑facing plan recommendations endpoint) now applies an EFL guard helper:
+    - `isEflSafeForUserPricing({ finalValidationStatus, parseConfidence, passStrength })` with rules:
+      - If **no** EFL metadata is present for a plan (legacy behavior), allow it through unchanged (guard is a no‑op until rate models carry metadata).
+      - Require `finalValidationStatus === "PASS"` once metadata exists.
+      - Require `passStrength === "STRONG"` once metadata exists.
+      - Apply a configurable **parseConfidence** floor:
+        - Uses `EFL_MIN_PARSE_CONFIDENCE` when set, otherwise defaults to `0.80`.
+  - The recommendations API now:
+    - Filters the `recommendations` list using this guard (only “safe” plans are shown to users).
+    - Logs and returns only the guarded set; fallback copy is shown when all plans are filtered out (reusing existing no‑offers UX).
+  - Today, because MasterPlan/rateModel does **not yet** embed EFL validation metadata, this guard is functionally inert; it becomes active as soon as rate models start carrying:
+    - `finalValidationStatus`, `parseConfidence`, and `passStrength` (e.g., via future Step 64 wiring).
+
+- **Policy reminder**
+  - Guard rails **never** rely on supplier‑specific or label‑specific conditions:
+    - PASS strength is derived solely from modeled math vs avg‑price anchors and value ranges.
+    - Queue behavior is keyed only on status/strength (`PASS`/`FAIL`/`SKIP` + `STRONG`/`WEAK`/`INVALID`), not on plan IDs or labels.
+  - When resolving any review item:
+    - The goal is to **tighten extraction/normalization rules** so future cards with the same pattern parse cleanly and score `PASS + STRONG`, not to carve out exceptions.
+
 ### Admin Review Queue Policy (Quarantine workflow)
 
 - The EFL review queue is used to:

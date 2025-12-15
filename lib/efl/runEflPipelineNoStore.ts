@@ -2,6 +2,7 @@ import { Buffer } from "node:buffer";
 
 import { deterministicEflExtract } from "@/lib/efl/eflExtractor";
 import { parseEflTextWithAi } from "@/lib/efl/eflAiParser";
+import { scoreEflPassStrength } from "@/lib/efl/eflValidator";
 import { solveEflValidationGaps } from "@/lib/efl/validation/solveEflValidationGaps";
 
 const MAX_PREVIEW_CHARS = 20000;
@@ -68,6 +69,20 @@ export type RunEflPipelineNoStoreResult = {
    */
   effectivePlanRules?: any | null;
   effectiveRateStructure?: any | null;
+  /**
+   * Strength of a PASS result based on off-point checks and sanity bounds.
+   * STRONG => safe to drive user-facing pricing (subject to confidence gate).
+   * WEAK/INVALID => should be quarantined / admin-only, not user-facing.
+   */
+  passStrength?: "STRONG" | "WEAK" | "INVALID" | null;
+  passStrengthReasons?: string[];
+  passStrengthOffPointDiffs?: Array<{
+    usageKwh: number;
+    expectedInterp: number;
+    modeled: number | null;
+    diff: number | null;
+    ok: boolean;
+  }> | null;
 };
 
 /**
@@ -128,7 +143,57 @@ export async function runEflPipelineNoStore(
       ? derivedForValidation.derivedRateStructure
       : aiResult.rateStructure ?? null;
 
-  const needsAdminReview = finalStatus === "FAIL";
+  let passStrength: "STRONG" | "WEAK" | "INVALID" | null = null;
+  let passStrengthReasons: string[] = [];
+  let passStrengthOffPointDiffs:
+    | Array<{
+        usageKwh: number;
+        expectedInterp: number;
+        modeled: number | null;
+        diff: number | null;
+        ok: boolean;
+      }>
+    | null = null;
+
+  if (finalValidation && finalPlanRules && finalRateStructure) {
+    try {
+      const scored = await scoreEflPassStrength({
+        rawText,
+        validation: finalValidation,
+        planRules: finalPlanRules,
+        rateStructure: finalRateStructure,
+      });
+      passStrength = scored.strength;
+      passStrengthReasons = scored.reasons ?? [];
+      passStrengthOffPointDiffs = scored.offPointDiffs ?? null;
+
+      if (
+        finalValidation.status === "PASS" &&
+        scored.strength &&
+        scored.strength !== "STRONG"
+      ) {
+        const extra =
+          "EFL PASS flagged as WEAK/INVALID (possible cancellation pass or out-of-bounds values) — manual admin review required.";
+        const existing = (finalValidation as any).queueReason as
+          | string
+          | undefined;
+        (finalValidation as any).queueReason = existing
+          ? `${existing} | ${extra}`
+          : extra;
+      }
+    } catch {
+      // Best-effort only; if scoring fails, leave strength fields null.
+      passStrength = null;
+      passStrengthReasons = [];
+      passStrengthOffPointDiffs = null;
+    }
+  }
+
+  const needsAdminReview =
+    finalStatus === "FAIL" ||
+    (finalStatus === "PASS" &&
+      passStrength != null &&
+      passStrength !== "STRONG");
 
   const rawTextLength = rawText.length;
   const rawTextTruncated = rawTextLength > MAX_PREVIEW_CHARS;
@@ -159,6 +224,9 @@ export async function runEflPipelineNoStore(
     needsAdminReview,
     effectivePlanRules: finalPlanRules,
     effectiveRateStructure: finalRateStructure,
+    passStrength,
+    passStrengthReasons,
+    passStrengthOffPointDiffs,
   };
 }
 
