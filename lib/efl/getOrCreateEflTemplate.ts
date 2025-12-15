@@ -13,6 +13,11 @@ export type GetOrCreateEflTemplateInput =
       source: "manual_upload";
       pdfBytes: Buffer;
       filename?: string | null;
+      /**
+       * Bypass in-process template caches and re-run extraction/parsing.
+       * Useful when code has improved and you need to re-evaluate the same PDF.
+       */
+      forceReparse?: boolean;
     }
   | {
       source: "wattbuy";
@@ -20,6 +25,11 @@ export type GetOrCreateEflTemplateInput =
       eflPdfSha256?: string | null;
       repPuctCertificate?: string | null;
       eflVersionCode?: string | null;
+      /**
+       * Bypass in-process template caches and re-run parsing.
+       * Use sparingly; can increase AI calls.
+       */
+      forceReparse?: boolean;
       wattbuy?:
         | {
             providerName?: string | null;
@@ -162,44 +172,46 @@ async function handleManualUpload(
     wattbuy: null,
   });
 
-  // Fast path: TTL cache keyed by primary identity key.
-  const ttlHit = getFromTtlCache(identity.primaryKey);
-  if (ttlHit) {
-    templateHit++;
-    const warnings = [
-      ...extract.warnings,
-      ...identity.warnings,
-      ...(ttlHit.parseWarnings ?? []),
-    ];
-    logTemplateMetrics();
-    return {
-      template: ttlHit,
-      wasCreated: false,
-      identity,
-      warnings,
-    };
-  }
-
-  // Try cache by any of the lookup keys (strongest first).
-  for (const key of identity.lookupKeys) {
-    const hit = templateCache.get(key);
-    if (hit) {
+  if (!input.forceReparse) {
+    // Fast path: TTL cache keyed by primary identity key.
+    const ttlHit = getFromTtlCache(identity.primaryKey);
+    if (ttlHit) {
       templateHit++;
       const warnings = [
         ...extract.warnings,
         ...identity.warnings,
-        // keep the cached template's own parseWarnings visible at top level
-        ...(hit.parseWarnings ?? []),
+        ...(ttlHit.parseWarnings ?? []),
       ];
-      // Also refresh TTL under the primary key.
-      putInTtlCache(identity.primaryKey, hit);
       logTemplateMetrics();
       return {
-        template: hit,
+        template: ttlHit,
         wasCreated: false,
         identity,
         warnings,
       };
+    }
+
+    // Try cache by any of the lookup keys (strongest first).
+    for (const key of identity.lookupKeys) {
+      const hit = templateCache.get(key);
+      if (hit) {
+        templateHit++;
+        const warnings = [
+          ...extract.warnings,
+          ...identity.warnings,
+          // keep the cached template's own parseWarnings visible at top level
+          ...(hit.parseWarnings ?? []),
+        ];
+        // Also refresh TTL under the primary key.
+        putInTtlCache(identity.primaryKey, hit);
+        logTemplateMetrics();
+        return {
+          template: hit,
+          wasCreated: false,
+          identity,
+          warnings,
+        };
+      }
     }
   }
 
@@ -308,38 +320,40 @@ async function handleWattbuy(
     wattbuy: input.wattbuy ?? null,
   });
 
-  const ttlHit = getFromTtlCache(identity.primaryKey);
-  if (ttlHit) {
-    templateHit++;
-    const warnings = [
-      ...identity.warnings,
-      ...(ttlHit.parseWarnings ?? []),
-    ];
-    logTemplateMetrics();
-    return {
-      template: ttlHit,
-      wasCreated: false,
-      identity,
-      warnings,
-    };
-  }
-
-  for (const key of identity.lookupKeys) {
-    const hit = templateCache.get(key);
-    if (hit) {
+  if (!input.forceReparse) {
+    const ttlHit = getFromTtlCache(identity.primaryKey);
+    if (ttlHit) {
       templateHit++;
       const warnings = [
         ...identity.warnings,
-        ...(hit.parseWarnings ?? []),
+        ...(ttlHit.parseWarnings ?? []),
       ];
-      putInTtlCache(identity.primaryKey, hit);
       logTemplateMetrics();
       return {
-        template: hit,
+        template: ttlHit,
         wasCreated: false,
         identity,
         warnings,
       };
+    }
+
+    for (const key of identity.lookupKeys) {
+      const hit = templateCache.get(key);
+      if (hit) {
+        templateHit++;
+        const warnings = [
+          ...identity.warnings,
+          ...(hit.parseWarnings ?? []),
+        ];
+        putInTtlCache(identity.primaryKey, hit);
+        logTemplateMetrics();
+        return {
+          template: hit,
+          wasCreated: false,
+          identity,
+          warnings,
+        };
+      }
     }
   }
 

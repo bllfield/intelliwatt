@@ -10,6 +10,10 @@ export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   try {
+    const forceReparse =
+      req.nextUrl.searchParams.get("force") === "1" ||
+      req.nextUrl.searchParams.get("forceReparse") === "1";
+
     const formData = await req.formData();
     const file = formData.get("file");
 
@@ -32,6 +36,7 @@ export async function POST(req: NextRequest) {
       source: "manual_upload",
       pdfBytes: pdfBuffer,
       filename: (file as File).name ?? null,
+      forceReparse,
     });
 
     const rawText = template.rawText ?? "";
