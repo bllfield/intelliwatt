@@ -1245,14 +1245,26 @@ function extractWeekdayWeekendTou(text: string): null | {
   for (let i = 0; i < lines.length; i++) {
     const cur = lines[i] ?? "";
     const next = lines[i + 1] ?? "";
-    const window = `${cur} ${next}`.replace(/\s+/g, " ").trim();
-    if (!/\bWeekdays?\b/i.test(window)) continue;
-    if (!/\bWeekends?\b/i.test(window)) continue;
-    const tokens = Array.from(window.matchAll(tokenRe));
-    if (tokens.length >= 2) {
-      bestWindow = window;
-      break;
+    const next2 = lines[i + 2] ?? "";
+
+    // Consider a 2-line and 3-line window because many EFL tables place the
+    // Weekdays/Weekends headers on one line and the numeric ¢/kWh values on the
+    // following line(s).
+    const windows = [
+      `${cur} ${next}`.replace(/\s+/g, " ").trim(),
+      `${cur} ${next} ${next2}`.replace(/\s+/g, " ").trim(),
+    ];
+
+    for (const window of windows) {
+      if (!/\bWeekdays?\b/i.test(window)) continue;
+      if (!/\bWeekends?\b/i.test(window)) continue;
+      const tokens = Array.from(window.matchAll(tokenRe));
+      if (tokens.length >= 2) {
+        bestWindow = window;
+        break;
+      }
     }
+    if (bestWindow) break;
   }
 
   const line =

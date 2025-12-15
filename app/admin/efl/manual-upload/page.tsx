@@ -46,7 +46,10 @@ export default function ManualFactCardLoaderPage() {
   const [fileLabel, setFileLabel] = useState<string>("No file selected");
   const [pastedText, setPastedText] = useState("");
   const [isProcessingText, setIsProcessingText] = useState(false);
-  const [forceReparse, setForceReparse] = useState(false);
+  // Default ON: this admin tool should always show the most up-to-date parser
+  // output, even on warm server instances where the in-process cache may still
+  // hold an older result for the same PDF fingerprint.
+  const [forceReparse, setForceReparse] = useState(true);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -196,7 +199,7 @@ export default function ManualFactCardLoaderPage() {
               onChange={(e) => setForceReparse(e.target.checked)}
               className="h-4 w-4 rounded border-brand-blue text-brand-blue focus:ring-brand-blue"
             />
-            Force reparse (bypass in-process cache)
+            Force reparse (recommended)
           </label>
 
           <button
