@@ -33,10 +33,20 @@ export default function Header() {
   const [authChecked, setAuthChecked] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const pathname = usePathname() || '';
+  const isAdminPath = pathname.startsWith('/admin');
 
   useEffect(() => {
     let cancelled = false;
     const checkStatus = async () => {
+      // Admin pages are token-gated and do not require (or guarantee) a user session.
+      // Avoid spamming 401s from /api/user/status while browsing Admin Tools.
+      if (isAdminPath) {
+        if (!cancelled) {
+          setIsAuthenticated(false);
+          setAuthChecked(true);
+        }
+        return;
+      }
       try {
         const response = await fetch('/api/user/status', { cache: 'no-store' });
         if (!cancelled) {
@@ -58,7 +68,7 @@ export default function Header() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isAdminPath]);
 
   const handleToggle = () => setIsOpen((prev) => !prev);
   const handleClose = () => setIsOpen(false);
@@ -98,6 +108,7 @@ export default function Header() {
               </div>
             </Link>
 
+            {!isAdminPath && (
             <div className="hidden items-center gap-4 border-l border-brand-blue/20 pl-3 sm:flex">
               <a
                 href="https://www.hitthejackwatt.com"
@@ -122,6 +133,7 @@ export default function Header() {
                 </div>
               </div>
             </div>
+            )}
           </div>
 
           <nav className="hidden items-center space-x-6 text-sm md:flex">
