@@ -2,6 +2,7 @@
 import base64
 import json
 import os
+import secrets
 import subprocess
 import tempfile
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -29,7 +30,10 @@ class Handler(BaseHTTPRequestHandler):
             if incoming.startswith(bearer_prefix):
                 incoming = incoming[len(bearer_prefix) :].strip()
 
-        token_valid = bool(EFL_PDFTEXT_TOKEN) and incoming == EFL_PDFTEXT_TOKEN
+        # Constant-time token comparison to avoid timing attacks.
+        token_valid = bool(EFL_PDFTEXT_TOKEN) and secrets.compare_digest(
+            incoming, EFL_PDFTEXT_TOKEN
+        )
 
         log_payload = {
             "service": "efl-pdftotext",
@@ -96,7 +100,8 @@ class Handler(BaseHTTPRequestHandler):
         if token_value.startswith(bearer_prefix):
             token_value = token_value[len(bearer_prefix) :].strip()
 
-        return token_value == EFL_PDFTEXT_TOKEN
+        # Constant-time token comparison to avoid timing attacks.
+        return secrets.compare_digest(token_value, EFL_PDFTEXT_TOKEN)
 
     def do_GET(self) -> None:  # type: ignore[override]
         if self.path == "/health":
@@ -161,11 +166,18 @@ class Handler(BaseHTTPRequestHandler):
             pdf_bytes = body_bytes
 
         # Materialize to a temp file and run pdftotext -layout -enc UTF-8
+        tmp_path = None
         try:
             with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-                tmp.write(pdf_bytes)
+                # Assign tmp_path immediately so we can clean up on partial failures.
                 tmp_path = tmp.name
+                tmp.write(pdf_bytes)
         except Exception as exc:
+            if tmp_path:
+                try:
+                    os.unlink(tmp_path)
+                except Exception:
+                    pass
             self._write_json(
                 500,
                 {
@@ -200,7 +212,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         finally:
             try:
-                os.unlink(tmp_path)
+                if tmp_path:
+                    os.unlink(tmp_path)
             except Exception:
                 pass
 
