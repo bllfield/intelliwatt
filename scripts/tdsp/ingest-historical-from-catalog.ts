@@ -422,7 +422,7 @@ async function main() {
 
       try {
         const pdfBytes = await fetchPdfBytes(url);
-        const { text, method, textLen } = await pdfBytesToText({
+        const { text, method } = await pdfBytesToText({
           pdfBytes,
           hintName: `${tdsp}-historical-${processedProbe}`,
         });
