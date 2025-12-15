@@ -4,6 +4,7 @@ import { Buffer } from "node:buffer";
 import { wbGetOffers } from "@/lib/wattbuy/client";
 import { normalizeOffers } from "@/lib/wattbuy/normalize";
 import { computePdfSha256, deterministicEflExtract } from "@/lib/efl/eflExtractor";
+import { fetchEflPdfFromUrl } from "@/lib/efl/fetchEflPdf";
 import { extractPlanRulesAndRateStructureFromEflText } from "@/lib/efl/planAiExtractor";
 import { upsertRatePlanFromEfl } from "@/lib/efl/planPersistence";
 import { prisma } from "@/lib/db";
@@ -145,8 +146,8 @@ export async function POST(req: NextRequest) {
 
       try {
         // 2) Download the EFL PDF
-        const res = await fetch(eflUrl);
-        if (!res.ok) {
+        const fetched = await fetchEflPdfFromUrl(eflUrl);
+        if (!fetched.ok) {
           results.push({
             offerId,
             planName,
@@ -154,13 +155,12 @@ export async function POST(req: NextRequest) {
             eflUrl,
             pdfSha256: null,
             status: "fetch_error",
-            notes: `Failed to fetch EFL PDF: HTTP ${res.status} ${res.statusText}`,
+            notes: fetched.error,
           });
           continue;
         }
 
-        const arrayBuffer = await res.arrayBuffer();
-        const pdfBytes = Buffer.from(arrayBuffer);
+        const pdfBytes = fetched.pdfBytes;
         pdfSha256 = computePdfSha256(pdfBytes);
 
         // 3) Check for an existing RatePlan with this fingerprint

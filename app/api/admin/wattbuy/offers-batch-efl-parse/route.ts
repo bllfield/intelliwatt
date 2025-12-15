@@ -4,6 +4,7 @@ import { Buffer } from "node:buffer";
 import { wbGetOffers } from "@/lib/wattbuy/client";
 import { normalizeOffers } from "@/lib/wattbuy/normalize";
 import { computePdfSha256 } from "@/lib/efl/eflExtractor";
+import { fetchEflPdfFromUrl } from "@/lib/efl/fetchEflPdf";
 import { getOrCreateEflTemplate } from "@/lib/efl/getOrCreateEflTemplate";
 import { runEflPipelineNoStore } from "@/lib/efl/runEflPipelineNoStore";
 import { prisma } from "@/lib/db";
@@ -190,8 +191,8 @@ export async function POST(req: NextRequest) {
       processedCount++;
 
       try {
-        const res = await fetch(eflUrl);
-        if (!res.ok) {
+        const fetched = await fetchEflPdfFromUrl(eflUrl);
+        if (!fetched.ok) {
           results.push({
             offerId,
             supplier,
@@ -206,13 +207,12 @@ export async function POST(req: NextRequest) {
             tdspAppliedMode: null,
             parseConfidence: null,
             templateAction: "SKIPPED",
-            notes: `Failed to fetch EFL PDF: HTTP ${res.status} ${res.statusText}`,
+            notes: fetched.error,
           });
           continue;
         }
 
-        const arrayBuffer = await res.arrayBuffer();
-        const pdfBytes = Buffer.from(arrayBuffer);
+        const pdfBytes = fetched.pdfBytes;
         const pdfSha256 = computePdfSha256(pdfBytes);
 
         // 2a) Fast path: if we already have a saved RatePlan.rateStructure for

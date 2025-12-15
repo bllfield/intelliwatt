@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Buffer } from "node:buffer";
 
 import { computePdfSha256, deterministicEflExtract } from "@/lib/efl/eflExtractor";
+import { fetchEflPdfFromUrl } from "@/lib/efl/fetchEflPdf";
 import {
   extractPlanRulesAndRateStructureFromEflText,
   extractPlanRulesAndRateStructureFromEflUrlVision,
@@ -89,40 +90,25 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    let res: Response;
-    try {
-      res = await fetch(normalizedUrl);
-    } catch (error) {
+    const fetched = await fetchEflPdfFromUrl(normalizedUrl);
+    if (!fetched.ok) {
       return jsonError(502, "Failed to fetch EFL PDF", {
-        message: error instanceof Error ? error.message : String(error),
+        message: fetched.error,
+        notes: fetched.notes,
       });
     }
 
-    if (!res.ok) {
-      return jsonError(res.status, "EFL PDF fetch returned non-OK status", {
-        status: res.status,
-        statusText: res.statusText,
-      });
-    }
-
-    const contentType = res.headers.get("content-type");
-    const contentLengthHeader = res.headers.get("content-length");
-    const parsedContentLength = contentLengthHeader
-      ? Number(contentLengthHeader)
-      : null;
-    const contentLength = Number.isFinite(parsedContentLength)
-      ? parsedContentLength
-      : null;
+    const contentType = fetched.contentType;
+    const contentLength = fetched.pdfBytes.length;
 
     const warnings: string[] = [];
-    if (contentType && !contentType.toLowerCase().includes("pdf")) {
+    if (fetched.source === "HTML_RESOLVED") {
       warnings.push(
-        `Content-Type is ${contentType}, which does not look like a PDF.`,
+        "EFL URL resolved via landing page (HTML) → Electricity Facts Label PDF link.",
       );
     }
 
-    const arrayBuffer = await res.arrayBuffer();
-    const pdfBytes = Buffer.from(arrayBuffer);
+    const pdfBytes = Buffer.from(fetched.pdfBytes);
     const pdfSha256 = computePdfSha256(pdfBytes);
 
     const steps: string[] = ["downloaded_pdf", "computed_sha256"];
