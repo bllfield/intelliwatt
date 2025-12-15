@@ -569,6 +569,8 @@ function computeEnergyDollarsFromPlanRules(
     validTiers.sort((a, b) => a.minKwh - b.minKwh);
 
     let totalDollars = 0;
+    let coveredUpTo = 0;
+
     for (const t of validTiers) {
       const start = Math.max(0, t.minKwh);
       const end = t.maxKwh == null ? usageKwh : Math.min(usageKwh, t.maxKwh);
@@ -576,7 +578,24 @@ function computeEnergyDollarsFromPlanRules(
       const segmentKwh = end - start;
       const rateDollars = t.rateCentsPerKwh! / 100;
       totalDollars += segmentKwh * rateDollars;
+      if (end > coveredUpTo) coveredUpTo = end;
       if (end >= usageKwh) break;
+    }
+
+    // If usage exceeds the covered range and there is no explicit open-ended
+    // tier, treat the remaining kWh as billed at the last tier's rate instead
+    // of silently dropping it. This keeps the math monotonic and avoids
+    // undercounting for validator scenarios where extraction missed an open
+    // upper bound.
+    if (
+      coveredUpTo < usageKwh &&
+      validTiers.length > 0 &&
+      !validTiers.some((t) => t.maxKwh == null)
+    ) {
+      const last = validTiers[validTiers.length - 1]!;
+      const remaining = usageKwh - coveredUpTo;
+      const lastRateDollars = last.rateCentsPerKwh! / 100;
+      totalDollars += remaining * lastRateDollars;
     }
 
     return totalDollars;

@@ -994,7 +994,9 @@ function fallbackExtractEnergyChargeTiers(text: string): UsageTier[] {
     /^(\d{1,6})\s*-\s*(\d{1,6})\s*kwh\b[\s:]*([0-9]+(?:\.[0-9]+)?)\s*¢/i;
 
   // Greater-than tier: > 1200 kWh 20.4000¢
-  const gtRe = /^>\s*(\d{1,6})\s*kwh\b[\s:]*([0-9]+(?:\.[0-9]+)?)\s*¢/i;
+  // Some layouts put the ">" mid-line (e.g., "Price .... > 1200 kWh 20.4000¢"),
+  // so we match ">" anywhere in the line instead of only at the start.
+  const gtRe = />\s*(\d{1,6})\s*kwh\b[\s:]*([0-9]+(?:\.[0-9]+)?)\s*¢/i;
 
   // Only consider lines after "Energy Charge" anchor, but fail-open if not found.
   const anchorIdx = lines.findIndex((l) => /Energy\s*Charge/i.test(l));

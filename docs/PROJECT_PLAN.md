@@ -4970,5 +4970,16 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
   - **TDSP masked with `**` + pass‑through language + tariff missing/lookup fails** → SKIP with reason; `tdspAppliedMode: "NONE"` and `notes` explain the masked‑TDSP + missing tariff situation.
   - **TDSP missing on EFL with no pass‑through markers** → Behavior unchanged from prior rev: validator does not consult utility table and will SKIP or FAIL based on existing REP‑only modeling rules.
 
+- **Deterministic tier extraction + tier math hardening**:
+  - The deterministic EFL extractor (`lib/efl/eflAiParser.ts`) now captures **all** Energy Charge tiers from lines like:
+    - `"0 - 1200 kWh 12.5000¢"` and `"Price ... > 1200 kWh 20.4000¢"` — not just the first tier.
+  - Fixes in `fallbackExtractEnergyChargeTiers`:
+    - The greater‑than tier regex was loosened to match `"> 1200 kWh 20.4000¢"` **anywhere** in the line (e.g., when `>` appears after the word “Price”), instead of only at the start of the line.
+    - Extracted tiers are deduped and sorted by `minKwh`, and then surfaced through `extractEnergyChargeTiers` into both `planRules.usageTiers` and, via the validation gap solver, into the avg‑price validator.
+  - The validator’s REP energy tier math (`computeEnergyDollarsFromPlanRules` in `lib/efl/eflValidator.ts`) was hardened so it no longer drops kWh beyond the last finite tier:
+    - It now tracks the covered kWh range as it walks sorted tiers.
+    - If `usageKwh` exceeds the covered range and **no** tier has `maxKwh = null` (no explicit open‑ended tier), the remaining kWh are billed at the **last tier’s rate** instead of being silently ignored.
+    - This keeps avg‑price modeling monotonic and prevents undercounted averages like `11.65 ¢/kWh` at 2000 kWh when only the first tier was previously applied.
+
 - **Next step**:
   - Step 4 (future work, not implemented here) would optionally reuse `lookupTdspCharges` in the bill parser/current‑plan engine so that customer‑facing rate modeling can present consistent TDSP assumptions when the REP’s EFL masks delivery charges with `**`. This will be gated behind explicit flags and never silently override EFL‑stated TDSP numerics.
