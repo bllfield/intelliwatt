@@ -29,39 +29,68 @@ export async function solveEflValidationGaps(args: {
   const solverApplied: string[] = [];
 
   // ---------------- Tier sync from RateStructure -> PlanRules ----------------
-  if (
-    derivedPlanRules &&
-    (!Array.isArray(derivedPlanRules.usageTiers) ||
-      (Array.isArray(derivedPlanRules.usageTiers) &&
-        derivedPlanRules.usageTiers.length === 0)) &&
-    derivedRateStructure &&
-    Array.isArray((derivedRateStructure as any).usageTiers) &&
-    (derivedRateStructure as any).usageTiers.length > 0
-  ) {
-    const rsTiers: any[] = (derivedRateStructure as any).usageTiers;
-    derivedPlanRules.usageTiers = rsTiers
-      .map((t) => {
-        const min = Number(t?.minKWh ?? t?.minKwh ?? 0);
-        const maxRaw = t?.maxKWh ?? t?.maxKwh;
-        const max =
-          maxRaw == null || !Number.isFinite(Number(maxRaw))
-            ? null
-            : Number(maxRaw);
-        const rate = Number(t?.centsPerKWh ?? t?.rateCentsPerKwh);
-        if (!Number.isFinite(rate)) return null;
-        return {
-          minKwh: Number.isFinite(min) ? min : 0,
-          maxKwh: max,
-          rateCentsPerKwh: rate,
-        };
-      })
-      .filter(Boolean);
+  if (derivedPlanRules && derivedRateStructure) {
+    const existingTiers: any[] = Array.isArray(derivedPlanRules.usageTiers)
+      ? derivedPlanRules.usageTiers
+      : [];
 
-    if (
-      Array.isArray(derivedPlanRules.usageTiers) &&
-      derivedPlanRules.usageTiers.length > 0
-    ) {
-      solverApplied.push("TIER_SYNC_FROM_RATE_STRUCTURE");
+    // Support both RateStructure.usageTiers (CDM) and the older "array of tier
+    // rows" shape used by some admin tools.
+    const rsUsageTiers: any[] = Array.isArray(
+      (derivedRateStructure as any).usageTiers,
+    )
+      ? (derivedRateStructure as any).usageTiers
+      : Array.isArray(derivedRateStructure)
+        ? (derivedRateStructure as any[])
+        : [];
+
+    if (rsUsageTiers.length > 0) {
+      const shouldSync =
+        !Array.isArray(derivedPlanRules.usageTiers) ||
+        existingTiers.length === 0 ||
+        existingTiers.length < rsUsageTiers.length;
+
+      if (shouldSync) {
+        const mapped = rsUsageTiers
+          .map((t) => {
+            const minRaw =
+              t?.minKWh ?? t?.minKwh ?? t?.tierMinKwh ?? t?.tierMinKWh ?? 0;
+            const maxRaw =
+              t?.maxKWh ?? t?.maxKwh ?? t?.tierMaxKwh ?? t?.tierMaxKWh;
+
+            const min = Number(minRaw);
+            const max =
+              maxRaw == null || !Number.isFinite(Number(maxRaw))
+                ? null
+                : Number(maxRaw);
+
+            let rate = t?.centsPerKWh ?? t?.rateCentsPerKwh;
+            if (
+              rate == null &&
+              typeof t?.energyCharge === "number" &&
+              Number.isFinite(t.energyCharge)
+            ) {
+              // Convert USD/kWh -> cents/kWh for older tier rows.
+              rate = t.energyCharge * 100;
+            }
+            const rateNum = Number(rate);
+            if (!Number.isFinite(rateNum)) return null;
+
+            return {
+              minKwh: Number.isFinite(min) ? min : 0,
+              maxKwh: max,
+              rateCentsPerKwh: rateNum,
+            };
+          })
+          .filter(Boolean)
+          // Ensure tiers are ordered by minKwh so downstream math behaves.
+          .sort((a: any, b: any) => a.minKwh - b.minKwh);
+
+      if (mapped.length > 0) {
+          derivedPlanRules.usageTiers = mapped;
+          solverApplied.push("TIER_SYNC_FROM_RATE_STRUCTURE");
+        }
+      }
     }
   }
 
