@@ -4905,3 +4905,70 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
       - Verifying that recent PUCT Rate_Report changes landed as new `TdspTariffVersion` rows (via `changesJson` + `recentTariffVersions`).
       - Spot‑checking errors for individual TDSPs when feeds drift or PDFs change structure.
   - No additional schema changes are planned for TDSP ingest; future work should build on the `TdspTariffIngestRun` + `TdspTariffVersion` primitives rather than introducing new ingest‑tracking tables.
+
+
+**UTILITY / TDSP MODULE — Step 3 Wire TDSP tariffs into EFL avg‑price validator (2025‑12‑15)**
+
+- **Masked TDSP detection (EFL text)**:
+  - `lib/efl/eflValidator.ts` now contains a focused helper:
+    - `isTdspMasked(rawText, eflTdsp)` returns true **only** when:
+      - The EFL has no numeric TDSP charges (`eflTdsp.perKwhCents == null` and `eflTdsp.monthlyCents == null`), and
+      - The text includes explicit pass‑through language (“will be passed through”, “passed through to customer”, “passed through … without mark‑up”), and
+      - The document uses a `**` placeholder around TDU delivery, e.g. `**For updated TDU delivery charges` or `TDU Delivery Charges: ... **`.
+  - For safety, `isTdspMasked` also retains the prior, broader heuristic (any `**` near generic TDSP/TDU pass‑through language) so we do not silently weaken behavior on existing masked EFLs.
+
+- **TDSP territory + EFL date inference (no schema changes)**:
+  - Reuses existing helpers in `lib/efl/eflValidator.ts`:
+    - `inferTdspTerritoryFromEflText(rawText)` maps EFL text to one of the five `TdspCode` values using simple brand/territory strings:
+      - `"CenterPoint"` → `CENTERPOINT`, `"Oncor"` → `ONCOR`, `"AEP Texas North"` / `"AEP North"` → `AEP_NORTH`, `"AEP Texas Central"` / `"AEP Central"` → `AEP_CENTRAL`, `"Texas‑New Mexico Power"` / `"TNMP"` → `TNMP`.
+    - `inferEflDateISO(rawText)` scans for header‑style dates like `"December 11, 2025"` or `"09/01/2025"` and converts them to `YYYY‑MM‑DD` (used as `asOfDate` for TDSP lookup). If no date is found, the masked‑TDSP path records a failure reason and the validator falls back to SKIP.
+
+- **Utility/TDSP tariff fallback in avg‑price validation**:
+  - The EFL avg‑price validator (`validateEflAvgPriceTable`) previously only validated TDSP when the EFL provided numeric TDSP delivery charges.
+  - New wiring:
+    - When the avg‑price table is present **and** `isTdspMasked(rawText, eflTdsp)` is true:
+      - The validator calls `lookupTdspCharges({ tdspCode, asOfDate })` from `lib/utility/tdspTariffs.ts` using the inferred TDSP territory and EFL effective date.
+      - If a tariff version is found and has any PER_MONTH or PER_KWH components, the validator builds an `effectiveTdspForValidation` object:
+        - `perKwhCents` and `monthlyCents` from the tariff,
+        - `snippet` sourced from the original EFL snippet when present, otherwise a synthetic note like “TDSP delivery inferred from utility tariff table for CENTERPOINT as of 2025‑12‑01.”,
+        - `confidence` copied from the tariff lookup (“MED”).
+      - `assumptionsUsed.tdspFromUtilityTable` is populated with `{ tdspCode, effectiveDateUsed, perKwhCents, monthlyCents, confidence }` and `tdspAppliedMode` is ultimately set to `"UTILITY_TABLE"` for PASS/FAIL results.
+    - If the TDSP lookup fails (no territory, no date, or no numeric components), the validator:
+      - Leaves `effectiveTdspForValidation` empty (no TDSP numeric data),
+      - Records `maskedTdspLookupFailedReason` and returns `status: "SKIP"` with notes explaining that:
+        - TDSP charges were masked with `**`, and
+        - No matching tariff could be found for the inferred TDSP / date, so the avg table cannot be reliably checked.
+
+- **Modeled math now includes TDSP utility charges when masked on EFL**:
+  - The avg‑price validator now treats three TDSP cases consistently when modeling 500/1000/2000 kWh:
+    - **EFL has numeric TDSP delivery charges**:
+      - `effectiveTdspForValidation` is the parsed EFL TDSP (`extractEflTdspCharges`); `tdspAppliedMode: "ADDED_FROM_EFL"`.
+    - **EFL masks TDSP with `**` but has pass‑through language AND a matching TDSP tariff is found**:
+      - `effectiveTdspForValidation` is filled from `lookupTdspCharges`, and the modeled TDSP dollars are:
+        - `tdspDollars = (monthlyCents/100) + (usageKwh * perKwhCents / 100)`.
+      - `assumptionsUsed.tdspFromEfl` remains `{ perKwhCents: null, monthlyCents: null, confidence: "LOW" }` when EFL had no numeric TDSP.
+      - `assumptionsUsed.tdspFromUtilityTable` is populated with the tariff data and `confidence: "MED"`, `tdspAppliedMode: "UTILITY_TABLE"`.
+      - PASS/FAIL logic then operates on these REP+TDSP modeled totals, just as if the EFL had stated TDSP numerically.
+    - **EFL does not state numeric TDSP and no utility tariff can be applied**:
+      - The validator returns `status: "SKIP"` and keeps `tdspAppliedMode: "NONE"` with notes explaining that avg‑price validation was skipped because the EFL’s avg prices reflect REP+TDSP but no numeric TDSP charges are available.
+
+- **Explicit notes when utility‑table TDSP is used**:
+  - When the validator **passes** and TDSP came from the utility table (masked EFL + successful lookup), we now add a clear note:
+    - `TDSP charges not listed numerically on EFL (**); applied {TDSP} tariff from utility table effective {effectiveDateUsed} for avg-price validation.`
+  - When the validator **fails** and TDSP came from the utility table, the same note is prepended to the existing “modeled vs expected diff” message.
+  - This ensures we never “silently pass” on TDSP assumptions; admins can always see when `tdspAppliedMode: "UTILITY_TABLE"` was used and why.
+
+- **Tiered energy cost alignment (no schema changes)**:
+  - The validator uses `computeEnergyDollarsFromPlanRules(planRules, rateStructure, usageKwh)` to deterministically compute REP energy dollars for tiered plans:
+    - It reads **all** `planRules.usageTiers[]` entries, normalizes min/max kWh and rateCentsPerKwh, and blends costs across segments for 500/1000/2000 kWh.
+    - When no tiers are present, it falls back to single‑rate fields (`currentBillEnergyRateCents` / `defaultRateCentsPerKwh`).
+  - Combined with the earlier deterministic tier extraction fixes in the EFL parser, this ensures that the validator’s tiered math matches the `PlanRules` used elsewhere in the engine.
+
+- **Current behavior matrix for EFL avg‑price validation with TDSP**:
+  - **TDSP numeric on EFL** → Use EFL TDSP numbers only; status can be PASS/FAIL/SKIP based on modeled diff and engine applicability. `tdspAppliedMode: "ADDED_FROM_EFL"` when used.
+  - **TDSP masked with `**` + pass‑through language + tariff found** → Use TDSP utility table; modeled totals include TDSP from tariff; PASS/FAIL gate applies; `tdspAppliedMode: "UTILITY_TABLE"` and notes call this out.
+  - **TDSP masked with `**` + pass‑through language + tariff missing/lookup fails** → SKIP with reason; `tdspAppliedMode: "NONE"` and `notes` explain the masked‑TDSP + missing tariff situation.
+  - **TDSP missing on EFL with no pass‑through markers** → Behavior unchanged from prior rev: validator does not consult utility table and will SKIP or FAIL based on existing REP‑only modeling rules.
+
+- **Next step**:
+  - Step 4 (future work, not implemented here) would optionally reuse `lookupTdspCharges` in the bill parser/current‑plan engine so that customer‑facing rate modeling can present consistent TDSP assumptions when the REP’s EFL masks delivery charges with `**`. This will be gated behind explicit flags and never silently override EFL‑stated TDSP numerics.

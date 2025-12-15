@@ -336,13 +336,35 @@ export function inferEflDateISO(rawText: string): string | null {
  * describes TDSP/TDU delivery as pass-through from the utility. This is
  * the only case where the validator is allowed to consult the Utility/TDSP
  * tariff table as a fallback.
+ *
+ * We prefer explicit pass-through + "**For updated TDU delivery charges"
+ * style markers, and fall back to the broader heuristic to avoid regressions.
  */
-function eflHasMaskedTdsp(rawText: string): boolean {
+function isTdspMasked(rawText: string, eflTdsp: EflTdspCharges): boolean {
+  const tdspUnknown =
+    eflTdsp.perKwhCents == null && eflTdsp.monthlyCents == null;
+  if (!tdspUnknown) return false;
+
   const t = rawText.toLowerCase();
 
-  const hasMask = t.includes("**");
+  const hasStarPlaceholder =
+    /\*\*\s*for\s+updated\s+tdu\s+delivery\s+charges/i.test(t) ||
+    /tdu\s+delivery\s+charges[\s\S]{0,120}\*\*/i.test(rawText);
 
-  const hasPassThrough =
+  const hasPassThroughLanguage =
+    /will\s+be\s+passed\s+through/i.test(t) ||
+    /passed\s+through\s+to\s+customer/i.test(t) ||
+    /passed\s+through[\s\S]{0,40}without\s+mark-?up/i.test(t) ||
+    /passed[-\s]through/i.test(t);
+
+  if (hasStarPlaceholder && hasPassThroughLanguage) {
+    return true;
+  }
+
+  // Backwards-compatible fallback: any "**" near generic TDSP/TDU pass-through
+  // language still counts as "masked" so we don't silently weaken behavior.
+  const hasMask = t.includes("**");
+  const hasPassThroughBroad =
     t.includes("tdu delivery charges") ||
     t.includes("tdu charges") ||
     t.includes("tdu fees") ||
@@ -352,7 +374,7 @@ function eflHasMaskedTdsp(rawText: string): boolean {
     t.includes("as billed") ||
     (t.includes("tdu") && t.includes("billed"));
 
-  return hasMask && hasPassThrough;
+  return hasMask && hasPassThroughBroad;
 }
 
 function safeNumber(n: unknown, fallback = 0): number {
@@ -1044,7 +1066,7 @@ export async function validateEflAvgPriceTable(args: {
     | null = null;
   const tdspUnknownFromEfl =
     eflTdsp.perKwhCents == null && eflTdsp.monthlyCents == null;
-  const maskedTdsp = avgTableFound && tdspUnknownFromEfl && eflHasMaskedTdsp(rawText);
+  const maskedTdsp = avgTableFound && isTdspMasked(rawText, eflTdsp);
   let maskedTdspLookupFailedReason: string | null = null;
 
   if (maskedTdsp) {
@@ -1273,7 +1295,17 @@ export async function validateEflAvgPriceTable(args: {
       (p) => p.modeledAvgCentsPerKwh != null && p.ok === true,
     );
 
+  const usedUtilityTableTdsp =
+    tdspFromUtilityTable != null && tdspUnknownFromEfl;
+
   if (allOk) {
+    const notes: string[] = [];
+    if (usedUtilityTableTdsp && tdspFromUtilityTable) {
+      notes.push(
+        `TDSP charges not listed numerically on EFL (**); applied ${tdspFromUtilityTable.tdspCode} tariff from utility table effective ${tdspFromUtilityTable.effectiveDateUsed} for avg-price validation.`,
+      );
+    }
+
     return {
       status: "PASS",
       toleranceCentsPerKwh: tolerance,
@@ -1302,7 +1334,7 @@ export async function validateEflAvgPriceTable(args: {
         tdspFromUtilityTable: tdspFromUtilityTable ?? undefined,
       },
       fail: false,
-      notes: [],
+      notes,
       avgTableFound,
       avgTableRows: points.map((p) => ({
         kwh: p.kwh,
@@ -1310,6 +1342,17 @@ export async function validateEflAvgPriceTable(args: {
       })),
       avgTableSnippet,
     };
+  }
+
+  const failNotes: string[] = [
+    `Modeled avg ¢/kWh differs from EFL avg price table by up to ${maxAbsDiff.toFixed(
+      4,
+    )} ¢/kWh (tolerance ${tolerance} ¢/kWh).`,
+  ];
+  if (usedUtilityTableTdsp && tdspFromUtilityTable) {
+    failNotes.unshift(
+      `TDSP charges not listed numerically on EFL (**); applied ${tdspFromUtilityTable.tdspCode} tariff from utility table effective ${tdspFromUtilityTable.effectiveDateUsed} for avg-price validation.`,
+    );
   }
 
   return {
@@ -1342,11 +1385,7 @@ export async function validateEflAvgPriceTable(args: {
     fail: true,
     queueReason:
       "EFL average price table mismatch (modeled vs expected) — manual admin review required.",
-    notes: [
-      `Modeled avg ¢/kWh differs from EFL avg price table by up to ${maxAbsDiff.toFixed(
-        4,
-      )} ¢/kWh (tolerance ${tolerance} ¢/kWh).`,
-    ],
+    notes: failNotes,
     avgTableFound,
     avgTableRows: points.map((p) => ({
       kwh: p.kwh,
