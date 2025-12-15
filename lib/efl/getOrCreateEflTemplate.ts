@@ -1,14 +1,12 @@
 import { Buffer } from "node:buffer";
 
 import { deterministicEflExtract } from "@/lib/efl/eflExtractor";
-import {
-  EflAiParseResult,
-  parseEflTextWithAi,
-} from "@/lib/efl/eflAiParser";
+import { EflAiParseResult, parseEflTextWithAi } from "@/lib/efl/eflAiParser";
 import {
   getTemplateKey,
   type EflTemplateKeyResult,
 } from "@/lib/efl/templateIdentity";
+import { solveEflValidationGaps } from "@/lib/efl/validation/solveEflValidationGaps";
 
 export type GetOrCreateEflTemplateInput =
   | {
@@ -46,6 +44,7 @@ type EflTemplateRecord = {
   validation?: {
     eflAvgPriceValidation?: any;
   } | null;
+  derivedForValidation?: any | null;
 };
 
 export interface GetOrCreateEflTemplateResult {
@@ -210,6 +209,22 @@ async function handleManualUpload(
     extraWarnings: extract.warnings,
   });
 
+  // Run deterministic validation gap solver (tier sync + TDSP utility-table
+  // fallback) so all callers — manual upload and WattBuy ingestion — see the
+  // same derived validation output.
+  let derivedForValidation: any = null;
+  try {
+    const baseValidation = (aiResult.validation as any)?.eflAvgPriceValidation ?? null;
+    derivedForValidation = await solveEflValidationGaps({
+      rawText,
+      planRules: aiResult.planRules,
+      rateStructure: aiResult.rateStructure,
+      validation: baseValidation,
+    });
+  } catch {
+    derivedForValidation = null;
+  }
+
   const template: EflTemplateRecord = {
     eflPdfSha256: extract.eflPdfSha256,
     repPuctCertificate: extract.repPuctCertificate,
@@ -221,6 +236,7 @@ async function handleManualUpload(
     parseConfidence: aiResult.parseConfidence,
     parseWarnings: aiResult.parseWarnings ?? [],
     validation: aiResult.validation ?? null,
+    derivedForValidation,
   };
 
   const warnings: string[] = [
@@ -309,6 +325,19 @@ async function handleWattbuy(
   });
   aiParseCount++;
 
+  let derivedForValidation: any = null;
+  try {
+    const baseValidation = (aiResult.validation as any)?.eflAvgPriceValidation ?? null;
+    derivedForValidation = await solveEflValidationGaps({
+      rawText,
+      planRules: aiResult.planRules,
+      rateStructure: aiResult.rateStructure,
+      validation: baseValidation,
+    });
+  } catch {
+    derivedForValidation = null;
+  }
+
   const template: EflTemplateRecord = {
     eflPdfSha256: eflPdfSha256 || identity.primaryKey,
     repPuctCertificate: input.repPuctCertificate ?? null,
@@ -320,6 +349,7 @@ async function handleWattbuy(
     parseConfidence: aiResult.parseConfidence,
     parseWarnings: aiResult.parseWarnings ?? [],
     validation: aiResult.validation ?? null,
+    derivedForValidation,
   };
 
   const warnings: string[] = [
