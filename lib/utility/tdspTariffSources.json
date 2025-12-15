@@ -29,6 +29,36 @@
       "kind": "PUCT_RATE_REPORT_PDF",
       "sourceUrl": "https://ftp.puc.texas.gov/public/puct-info/industry/electric/rates/tdr/tdu/TNMP_Rate_Report.pdf",
       "notes": "PUCT monthly rate report."
+    },
+    {
+      "tdspCode": "CENTERPOINT",
+      "kind": "HISTORICAL_ARCHIVE_INDEX",
+      "sourceUrl": "https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx",
+      "notes": "CenterPoint historical tariffs index."
+    },
+    {
+      "tdspCode": "TNMP",
+      "kind": "HISTORICAL_ARCHIVE_INDEX",
+      "sourceUrl": "https://www.tnmp.com/customers/rates-0",
+      "notes": "TNMP rates page (includes expired tariffs links)."
+    },
+    {
+      "tdspCode": "AEP_NORTH",
+      "kind": "TARIFF_HUB",
+      "sourceUrl": "https://aeptexas.com/company/about/rates",
+      "notes": "AEP Texas rates hub (effective-dated PDFs); parse North/Central later."
+    },
+    {
+      "tdspCode": "AEP_CENTRAL",
+      "kind": "TARIFF_HUB",
+      "sourceUrl": "https://aeptexas.com/company/about/rates",
+      "notes": "AEP Texas rates hub (effective-dated PDFs); parse North/Central later."
+    },
+    {
+      "tdspCode": "ONCOR",
+      "kind": "TARIFF_HUB",
+      "sourceUrl": "https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html",
+      "notes": "Oncor Tariffs & Rate Schedules hub."
     }
   ]
 }

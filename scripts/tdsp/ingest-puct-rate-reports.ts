@@ -1,21 +1,28 @@
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 
 import sourcesConfig from "@/lib/utility/tdspTariffSources.json";
-import { deterministicEflExtract } from "@/lib/efl/eflExtractor";
 import { upsertTdspTariffFromIngest } from "@/lib/utility/tdspIngest";
-
-const execFileAsync = promisify(execFile);
+import { fetchPdfBytes } from "./_shared/fetchPdfBytes";
+import { pdfBytesToText } from "./_shared/pdfToText";
 
 type SourceEntry = {
   tdspCode: "ONCOR" | "CENTERPOINT" | "AEP_NORTH" | "AEP_CENTRAL" | "TNMP";
   kind: "PUCT_RATE_REPORT_PDF";
   sourceUrl: string | null;
   notes?: string;
+};
+
+type ParsedPuctEffectiveDate = {
+  effectiveStartISO: string | null;
+  candidates: string[];
+  ambiguous: boolean;
+  hits: { iso: string; index: number }[];
+};
+
+type IngestArgs = {
+  debugDate: boolean;
 };
 
 function log(...args: any[]) {
@@ -27,72 +34,12 @@ function sha256Hex(buf: Uint8Array): string {
   return createHash("sha256").update(buf).digest("hex");
 }
 
-async function fetchPdfBytes(url: string): Promise<Uint8Array> {
-  // Primary path: Node fetch (works well on Linux, often fine on macOS/Windows).
-  try {
-    const res = await fetch(url);
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status} ${res.statusText}`);
-    }
-    const arrayBuf = await res.arrayBuffer();
-    return new Uint8Array(arrayBuf);
-  } catch (err) {
-    const msg =
-      err instanceof Error ? err.message : String(err ?? "unknown error");
-    log("fetchPdfBytes: primary fetch failed, considering fallback:", msg);
-  }
+function parsePuctEffectiveDateISO(text: string): ParsedPuctEffectiveDate {
+  // Normalize whitespace; keep a version with newlines and a flattened version.
+  const norm = text.replace(/\r/g, "\n");
+  const tight = norm.replace(/[ \t]+/g, " ");
+  const flat = tight.replace(/\n+/g, "\n");
 
-  const isWindows = os.platform() === "win32";
-  const tmpDir = os.tmpdir();
-  const tmpPath = path.join(tmpDir, `tdsp_rate_report_${Date.now()}.pdf`);
-
-  if (isWindows) {
-    // Windows: fall back to PowerShell Invoke-WebRequest, which uses the OS trust store.
-    try {
-      log(
-        "fetchPdfBytes: using PowerShell Invoke-WebRequest fallback for",
-        url,
-      );
-      await execFileAsync("powershell", [
-        "-NoProfile",
-        "-Command",
-        `Invoke-WebRequest -Uri '${url}' -OutFile '${tmpPath}'`,
-      ]);
-      const buf = await fs.readFile(tmpPath);
-      await fs.unlink(tmpPath).catch(() => {});
-      return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
-    } catch (err) {
-      const msg =
-        err instanceof Error ? err.message : String(err ?? "unknown error");
-      log(
-        "fetchPdfBytes: PowerShell Invoke-WebRequest fallback failed:",
-        msg,
-      );
-      throw err;
-    }
-  }
-
-  // Non-Windows: try curl -L if available.
-  try {
-    log("fetchPdfBytes: using curl -L fallback for", url);
-    await execFileAsync("curl", ["-L", "-o", tmpPath, url]);
-    const buf = await fs.readFile(tmpPath);
-    await fs.unlink(tmpPath).catch(() => {});
-    return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
-  } catch (err) {
-    const msg =
-      err instanceof Error ? err.message : String(err ?? "unknown error");
-    log("fetchPdfBytes: curl fallback failed:", msg);
-    throw err;
-  }
-}
-
-function parseEffectiveDate(text: string): string | null {
-  // Expect a phrase like: "As of December 1, 2025"
-  const m = text.match(
-    /As of\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),\s+(\d{4})/i,
-  );
-  if (!m) return null;
   const monthMap: Record<string, string> = {
     january: "01",
     february: "02",
@@ -107,10 +54,175 @@ function parseEffectiveDate(text: string): string | null {
     november: "11",
     december: "12",
   };
-  const mm = monthMap[m[1].toLowerCase()];
-  const dd = String(parseInt(m[2], 10)).padStart(2, "0");
-  const yyyy = m[3];
-  return `${yyyy}-${mm}-${dd}`;
+
+  type DateHit = { iso: string; index: number };
+  const hits: DateHit[] = [];
+
+  const lowerFlat = flat.toLowerCase();
+  const headWindow = flat.slice(0, 800);
+
+  function addNumeric(mm: string, dd: string, yyyy: string, index: number) {
+    if (!/^\d{4}$/.test(yyyy)) return;
+    const mmNum = String(parseInt(mm, 10)).padStart(2, "0");
+    const ddNum = String(parseInt(dd, 10)).padStart(2, "0");
+    const iso = `${yyyy}-${mmNum}-${ddNum}`;
+    hits.push({ iso, index });
+  }
+
+  // A) "Rates Effective 09/01/2025"
+  {
+    const re =
+      /rates\s+effective\s*[:\-]?\s*(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/gi;
+    let m: RegExpExecArray | null;
+    // eslint-disable-next-line no-cond-assign
+    while ((m = re.exec(flat)) !== null) {
+      addNumeric(m[1], m[2], m[3], m.index);
+    }
+  }
+
+  // A2) "Rates Report 09/01/2025" (some PUCT/CenterPoint layouts)
+  {
+    const re =
+      /rates\s+report\s+(\d{1,2})[\/\-\.\s](\d{1,2})[\/\-\.\s](\d{4})/gi;
+    let m: RegExpExecArray | null;
+    // eslint-disable-next-line no-cond-assign
+    while ((m = re.exec(headWindow)) !== null) {
+      addNumeric(m[1], m[2], m[3], m.index);
+    }
+  }
+
+  // A3) Generic numeric dates M/D/YYYY (anywhere in the document, capped).
+  {
+    const re =
+      /(?:\b)(\d{1,2})[\/\-\.\s](\d{1,2})[\/\-\.\s](\d{4})(?:\b)/g;
+    let m: RegExpExecArray | null;
+    // eslint-disable-next-line no-cond-assign
+    while ((m = re.exec(flat)) !== null) {
+      addNumeric(m[1], m[2], m[3], m.index);
+      if (hits.length >= 200) break;
+    }
+  }
+
+  // B) "Effective Date 09/01/2025" or "Effective 09/01/2025"
+  {
+    const re =
+      /effective\s*(?:date)?\s*[:\-]?\s*(\d{1,2})[\/\-\.\s](\d{1,2})[\/\-\.\s](\d{4})/gi;
+    let m: RegExpExecArray | null;
+    // eslint-disable-next-line no-cond-assign
+    while ((m = re.exec(flat)) !== null) {
+      addNumeric(m[1], m[2], m[3], m.index);
+    }
+  }
+
+  // C) "As of 09/01/2025"
+  {
+    const re =
+      /as\s+of\s*(\d{1,2})[\/\-\.\s](\d{1,2})[\/\-\.\s](\d{4})/gi;
+    let m: RegExpExecArray | null;
+    // eslint-disable-next-line no-cond-assign
+    while ((m = re.exec(flat)) !== null) {
+      addNumeric(m[1], m[2], m[3], m.index);
+    }
+  }
+
+  // D) Month-name style: "September 1, 2024"
+  {
+    const re =
+      /\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),\s*(\d{4})\b/gi;
+    let m: RegExpExecArray | null;
+    // eslint-disable-next-line no-cond-assign
+    while ((m = re.exec(flat)) !== null) {
+      const mm = monthMap[m[1].toLowerCase()];
+      const dd = String(parseInt(m[2], 10)).padStart(2, "0");
+      const yyyy = m[3];
+      if (!mm) continue;
+      const iso = `${yyyy}-${mm}-${dd}`;
+      hits.push({ iso, index: m.index });
+    }
+  }
+
+  if (hits.length === 0) {
+    return { effectiveStartISO: null, candidates: [], ambiguous: false };
+  }
+
+  // Keyword-guided selection when multiple dates appear.
+  const keywordRe =
+    /(rates\s+effective|effective\s+date|effective|as\s+of|rates\s+report|puct\s+monthly\s+report)/gi;
+  const keywordPositions: number[] = [];
+  {
+    let m: RegExpExecArray | null;
+    // eslint-disable-next-line no-cond-assign
+    while ((m = keywordRe.exec(lowerFlat)) !== null) {
+      keywordPositions.push(m.index);
+    }
+  }
+
+  const uniqueCandidates = Array.from(new Set(hits.map((h) => h.iso)));
+
+    if (keywordPositions.length > 0) {
+    let bestHit: DateHit | null = null;
+    let bestDist = Number.POSITIVE_INFINITY;
+    let bestCount = 0;
+
+    for (const h of hits) {
+      for (const k of keywordPositions) {
+        const dist = Math.abs(h.index - k);
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestHit = h;
+          bestCount = 1;
+        } else if (dist === bestDist) {
+          bestCount += 1;
+        }
+      }
+    }
+
+      if (bestHit && bestCount === 1) {
+        return {
+          effectiveStartISO: bestHit.iso,
+          candidates: uniqueCandidates,
+          ambiguous: false,
+          hits,
+        };
+      }
+
+      return {
+        effectiveStartISO: null,
+        candidates: uniqueCandidates,
+        ambiguous: true,
+        hits,
+      };
+  }
+
+  // No keywords: fall back to "single date in head window" heuristic.
+  const headLimit = 1200;
+  const headHits = hits.filter((h) => h.index < headLimit);
+
+  if (headHits.length === 1) {
+    return {
+      effectiveStartISO: headHits[0]!.iso,
+      candidates: uniqueCandidates,
+      ambiguous: false,
+      hits,
+    };
+  }
+
+  if (headHits.length > 1) {
+    return {
+      effectiveStartISO: null,
+      candidates: Array.from(new Set(headHits.map((h) => h.iso))),
+      ambiguous: true,
+      hits,
+    };
+  }
+
+  // Dates exist but not in the head window and no keywords to anchor them.
+  return {
+    effectiveStartISO: null,
+    candidates: uniqueCandidates,
+    ambiguous: true,
+    hits,
+  };
 }
 
 function parseDollarsFromLine(line: string): number | null {
@@ -220,8 +332,9 @@ function parseSingleUtilityRates(text: string): {
   };
 }
 
-async function ingestForSource(entry: SourceEntry) {
+async function ingestForSource(entry: SourceEntry, args: IngestArgs) {
   const { tdspCode, sourceUrl } = entry;
+  const { debugDate } = args;
 
   if (!sourceUrl) {
     log(tdspCode, "skip: sourceUrl is null (TODO fill PUCT Rate_Report URL).");
@@ -242,13 +355,39 @@ async function ingestForSource(entry: SourceEntry) {
     // Best-effort debug write; ignore errors (e.g., non-Unix envs).
   }
 
-  const { rawText: text } = await deterministicEflExtract(
-    Buffer.from(pdfBytes),
-  );
+  const { text, method, textLen } = await pdfBytesToText({
+    pdfBytes,
+    hintName: `${tdspCode}-puct-rate-report`,
+  });
+  log(tdspCode, "pdfToText", { method, textLen });
+  if (textLen === 0) {
+    log(
+      tdspCode,
+      "ERROR: pdfToText returned empty text; skipping before parsing.",
+    );
+    return;
+  }
 
-  const effectiveStartISO = parseEffectiveDate(text);
+  const parsedDate = parsePuctEffectiveDateISO(text);
+  const effectiveStartISO = parsedDate.effectiveStartISO;
+
   if (!effectiveStartISO) {
-    log(tdspCode, "skip: could not parse effective date from text.");
+    if (debugDate) {
+      const headPreview = text.replace(/\s+/g, " ").slice(0, 400);
+      log(tdspCode, "debugDate headPreview", {
+        headPreview,
+        candidates: parsedDate.candidates.slice(0, 10),
+        hits: parsedDate.hits.slice(0, 10),
+      });
+    }
+
+    if (parsedDate.candidates.length > 1 || parsedDate.ambiguous) {
+      log(tdspCode, "skip: ambiguous effective dates found", {
+        candidates: parsedDate.candidates,
+      });
+    } else {
+      log(tdspCode, "skip: no effective date found in text.");
+    }
     return;
   }
 
@@ -327,11 +466,26 @@ async function ingestForSource(entry: SourceEntry) {
 }
 
 async function main() {
-  const entries = (sourcesConfig as any).sources as SourceEntry[];
+  const argv = process.argv.slice(2);
+  let debugDate = false;
+  for (const arg of argv) {
+    if (arg.startsWith("--debugDate=")) {
+      const v = arg.slice("--debugDate=".length);
+      debugDate = v === "1" || v.toLowerCase() === "true";
+    }
+  }
 
-  for (const entry of entries) {
+  const entries = (sourcesConfig as any).sources as Array<
+    SourceEntry & { kind?: string }
+  >;
+
+  const rateReportEntries = entries.filter(
+    (e) => e.kind === "PUCT_RATE_REPORT_PDF",
+  );
+
+  for (const entry of rateReportEntries) {
     try {
-      await ingestForSource(entry);
+      await ingestForSource(entry, { debugDate });
     } catch (err) {
       const msg =
         err instanceof Error ? err.message : String(err ?? "unknown error");

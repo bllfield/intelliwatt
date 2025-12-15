@@ -871,6 +871,249 @@ Next step: Step 7 — Documentation + runbooks + failure modes
     - Direct `fetch()` calls from Node to `https://ftp.puc.texas.gov/...` can occasionally fail TLS chain validation on Windows due to differences between Node’s CA bundle and the OS trust store.
     - The ingest script now falls back on Windows to `Invoke-WebRequest` via PowerShell (and on non-Windows to `curl -L` where available), so the OS-level trust store is used **without** disabling TLS verification globally.
 
+### UTILITY / TDSP MODULE — PUCT Rate Report sources wired (2025-12-14)
+
+- **Authoritative PUCT Rate_Report sources**
+  - The TDSP PUCT monthly rate-report URLs are now explicitly wired into `lib/utility/tdspTariffSources.json` under `kind: "PUCT_RATE_REPORT_PDF"`:
+    - `ONCOR`:
+      - `https://ftp.puc.texas.gov/public/puct-info/industry/electric/rates/tdr/tdu/Oncor_Rate_Report.pdf`
+    - `CENTERPOINT`:
+      - `https://ftp.puc.texas.gov/public/puct-info/industry/electric/rates/tdr/tdu/CenterPoint_Rate_Report.pdf`
+    - `TNMP`:
+      - `https://ftp.puc.texas.gov/public/puct-info/industry/electric/rates/tdr/tdu/TNMP_Rate_Report.pdf`
+    - `AEP_NORTH` and `AEP_CENTRAL` (combined AEP report, parsed into separate columns):
+      - `https://ftp.puc.texas.gov/public/puct-info/industry/electric/rates/tdr/tdu/AEP_Rate_Report.pdf`
+  - `scripts/tdsp/ingest-puct-rate-reports.ts` now filters `tdspTariffSources.json` to only process entries whose `kind === "PUCT_RATE_REPORT_PDF"`, so the PUCT ingest runner is scoped strictly to these authoritative Rate_Report PDFs and does not touch historical discovery sources.
+
+- **Shared TLS-safe PDF fetch helper**
+  - New shared helper: `scripts/tdsp/_shared/fetchPdfBytes.ts`:
+    - Behavior:
+      - Attempts `fetch(url)` first.
+      - On **any** error (including TLS chain failures like `UNABLE_TO_GET_ISSUER_CERT_LOCALLY`):
+        - On Windows: falls back to `Invoke-WebRequest` via PowerShell, writing to a temp file under `os.tmpdir()` and then reading it back into memory.
+        - On non-Windows: falls back to `curl -L -o <tmpPath> <url>` and reads the temp file into memory.
+      - Always cleans up the temp file on success/failure.
+    - `ingest-puct-rate-reports.ts` consumes this helper, so Windows environments no longer require manual CA-store tweaks for `ftp.puc.texas.gov` — we automatically use the OS trust store when Node’s bundled CA set fails.
+  - Command to run the full PUCT ingest:
+    - `npx tsx scripts/tdsp/ingest-puct-rate-reports.ts`
+    - This will ingest ONCOR, CENTERPOINT, TNMP, AEP North, and AEP Central Rate_Report PDFs via the shared TLS-safe fetch helper and the append-only TDSP tariff upsert rules described above.
+
+- **Effective date parsing for Rate_Report PDFs**
+  - Added a dedicated `parsePuctEffectiveDateISO(rawText)` helper inside `scripts/tdsp/ingest-puct-rate-reports.ts`:
+    - Normalizes whitespace and scans the text for multiple effective-date idioms used by PUCT Rate_Report PDFs:
+      - `"Rates Effective MM/DD/YYYY"`,
+      - `"Rates Report MM/DD/YYYY"` (CenterPoint-style headers),
+      - `"Effective Date MM/DD/YYYY"` and `"Effective MM/DD/YYYY"`,
+      - `"As of MM/DD/YYYY"`,
+      - Month-name forms like `"September 1, 2024"`,
+      - Generic numeric dates `M/D/YYYY` / `MM/DD/YYYY` / `M-DD-YYYY` etc. (with 4-digit years only), capped to a modest number of candidates.
+    - Collects all candidate dates along with their positions in the text and applies a deterministic heuristic:
+      - If one or more keyword anchors are present (`"rates effective"`, `"effective date"`, `"effective"`, `"as of"`, `"rates report"`, `"PUCT Monthly Report"`):
+        - Picks the single closest date match to those keyword positions by character distance.
+        - If there is a tie (multiple dates at the same best distance), treats the result as **ambiguous** and skips the document.
+      - If no keywords are present:
+        - Looks at the first ~1200 characters and, if exactly one date appears in that “head” window, uses it as `effectiveStartISO`.
+        - If zero or more than one head-window dates are found, marks the result as ambiguous and skips for safety.
+    - All dates are returned as `YYYY-MM-DD`, and no filename-based inference is ever used.
+  - The ingest runner now uses this helper and distinguishes skip reasons:
+    - `"skip: no effective date found in text."` when no explicit date string is detected.
+    - `"skip: ambiguous effective dates found"` plus a candidate list when multiple plausible dates are present but cannot be safely disambiguated.
+  - Debugging:
+    - `--debugDate=1`:
+      - When no effective date can be chosen, logs a compact `headPreview` (first ~400 characters with collapsed whitespace) along with the first few candidate dates (ISO + approximate positions) considered during parsing, to aid in tuning patterns without dumping full PDF contents.
+    - Example debug run:
+      - `npx tsx scripts/tdsp/ingest-puct-rate-reports.ts --debugDate=1`
+  - **PDF→text strategy (Poppler first, droplet fallback)**
+    - TDSP ingest scripts now share a common PDF→text helper: `scripts/tdsp/_shared/pdfToText.ts`:
+      - `pdfBytesToText({ pdfBytes, hintName })`:
+        - First tries local `pdftotext` (Poppler) via `pdftotext -layout "<tmp.pdf>" "<tmp.txt>"` in `os.tmpdir()`.
+        - On success, returns `{ text, method: "LOCAL_PDFTOTEXT", textLen }` and cleans up temp files.
+        - On failure (missing binary or non-zero exit), logs a fallback message and calls `deterministicEflExtract(pdfBytes)` to use the existing droplet helper, returning `{ text: rawText, method: "DROPLET_PDFTOTEXT", textLen }`.
+      - Used by:
+        - `scripts/tdsp/ingest-puct-rate-reports.ts` for Rate_Report PDFs.
+        - `scripts/tdsp/ingest-historical-from-catalog.ts` in probe mode to measure extractability of historical tariffs.
+    - For PUCT ingest, each TDSP log now includes the extraction method and output length, e.g.:
+      - `[tdsp-ingest] ONCOR pdfToText { method: "LOCAL_PDFTOTEXT", textLen: 12345 }`.
+      - If `textLen === 0`, ingest logs a single error line and skips parsing/upsert to avoid writing empty/invalid rows.
+    - Windows Poppler note:
+      - If `pdftotext` is not already installed, install Poppler and ensure `pdftotext` is on `PATH`, then verify with:
+        - `pdftotext -v`
+
+### UTILITY / TDSP MODULE — Historical sources discovery scaffold (2025-12-14)
+
+- **Config extensions**
+  - `lib/utility/tdspTariffSources.json` now supports multiple source records per TDSP, including non-PUCT discovery targets:
+    - Existing `PUCT_RATE_REPORT_PDF` entries for:
+      - `ONCOR`, `CENTERPOINT`, `AEP_NORTH`, `AEP_CENTRAL`, `TNMP` (`*_Rate_Report.pdf` on `ftp.puc.texas.gov`).
+    - New discovery-only kinds:
+      - `HISTORICAL_ARCHIVE_INDEX`:
+        - `CENTERPOINT` → `https://www.centerpointenergy.com/en-us/corp/pages/historical-retail-tariffs.aspx` (historical tariffs index).
+        - `TNMP` → `https://www.tnmp.com/customers/rates-0` (rates page including expired tariffs links).
+      - `TARIFF_HUB`:
+        - `AEP_NORTH` → `https://aeptexas.com/company/about/rates` (AEP Texas rates hub; North vs Central parsed later).
+        - `AEP_CENTRAL` → same AEP Texas hub URL as `AEP_NORTH`.
+        - `ONCOR` → `https://www.oncor.com/tariffs` (Oncor tariffs hub).
+  - These entries are **discovery-only** in this step: they are not yet connected to TDSP tariff DB upserts or numeric parsers.
+
+- **Discovery script (no DB writes)**
+  - New script: `scripts/tdsp/discover-historical-tdsp-sources.ts`:
+    - Run via:
+      - `npx tsx scripts/tdsp/discover-historical-tdsp-sources.ts`
+    - Behavior:
+      - Loads `lib/utility/tdspTariffSources.json` and filters for entries whose `kind` is `HISTORICAL_ARCHIVE_INDEX` or `TARIFF_HUB`.
+      - For each discovery source:
+        - Fetches the HTML index via `fetch(sourceUrl)`.
+        - Parses `<a href="...">...</a>` anchors with a simple regex, capturing `href` and inner HTML.
+        - Normalizes `href` to an absolute URL using `new URL(href, baseUrl)`.
+        - Filters to candidate URLs that look like tariff/rate documents:
+          - `pdf`, `doc`/`docx`/`rtf`, `xls`/`xlsx`/`csv`, `html`/`htm`/`aspx`.
+        - Derives a `type` field (`pdf|html|doc|xls`) from the extension.
+        - Computes a `labelHint` from the anchor text (stripped of tags), or falls back to the basename of the URL path.
+        - De-duplicates candidates per TDSP by absolute URL.
+      - Logs per-TDSP discovery counts like:
+        - `[tdsp-historical] CENTERPOINT discovered 42 historical candidates`.
+  - Output:
+    - Writes a normalized catalog JSON file to:
+      - `scripts/tdsp/_outputs/tdsp-historical-catalog.json`
+    - Output shape:
+      - `generatedAt`: ISO timestamp.
+      - `entries[]`: one per discovery source (`HISTORICAL_ARCHIVE_INDEX` or `TARIFF_HUB`), with:
+        - `tdspCode`, `sourceKind`, `indexUrl`.
+        - `candidates[]` of `{ url, type, labelHint, foundOn }` where `foundOn` is the index URL used for discovery.
+    - A `.gitkeep` file at `scripts/tdsp/_outputs/.gitkeep` keeps the outputs folder present in git.
+  - Guardrails:
+    - No attempt is made (yet) to parse numeric rates, effective dates, or detailed tariff metadata.
+    - The script does **not** write to Prisma models or touch `TdspUtility` / `TdspTariffVersion` / `TdspTariffComponent` — it is pure discovery and cataloging only.
+
+- **Next step**
+  - Use `tdsp-historical-catalog.json` as the authoritative inventory of TDSP historical tariff/rate documents and pages, then:
+    - Design per-TDSP historical ingest parsers that:
+      - Download each discovered document.
+      - Compute `sha256` per document.
+      - Extract effective date, customer + metering + volumetric delivery charges (or full rider structure where appropriate).
+    - Wire a **separate** ingest pipeline that upserts historical tariff versions into `TdspTariffVersion` / `TdspTariffComponent` using the same append-only + SHA drift rules as the PUCT Rate_Report ingest, but grounded on these historical documents.
+    - Add admin tooling to visualize coverage by date and identify any gaps in the historical archive.
+  - **ONCOR URL fix**:
+    - The original ONCOR discovery URL (`https://www.oncor.com/tariffs`) returned HTTP 404 during discovery runs.
+    - The config now points to the full Tariffs & Rate Schedules hub instead:
+      - `https://www.oncor.com/content/oncorwww/us/en/home/about-us/regulatory/tariffs-rate-schedules.html`.
+
+### UTILITY / TDSP MODULE — Historical ingest runner (catalog-based) (2025-12-14)
+
+- **Script**
+  - New script: `scripts/tdsp/ingest-historical-from-catalog.ts`
+    - CLI:
+      - `npx tsx scripts/tdsp/ingest-historical-from-catalog.ts --tdsp=CENTERPOINT --limit=20`
+    - Arguments:
+      - `--tdsp=ONCOR|CENTERPOINT|AEP_NORTH|AEP_CENTRAL|TNMP` (required).
+      - `--limit=N` (optional; default 20) to bound the number of candidate PDFs processed per run.
+
+- **Inputs**
+  - Reads the discovery catalog produced by the previous step:
+    - `scripts/tdsp/_outputs/tdsp-historical-catalog.json`
+  - For the selected `tdspCode`:
+    - Locates the matching catalog entry.
+    - Filters `candidates[]` to `type === "pdf"` and URLs containing `.pdf`.
+    - Processes up to `limit` of these PDF URLs in order.
+
+- **Behavior**
+  - For each candidate PDF:
+    - Downloads bytes using a shared `fetchPdfBytes(url)` helper that:
+      - Uses `fetch()` first.
+      - Falls back on Windows to PowerShell `Invoke-WebRequest` (OS trust store) and on non-Windows to `curl -L`, mirroring the PUCT Rate_Report ingest TLS strategy.
+    - Computes `sourceDocSha256 = sha256(pdfBytes)`.
+    - Converts PDF → text by calling `deterministicEflExtract(pdfBytes)` and using the returned `rawText`, so we always go through the canonical EFL `pdftotext` droplet helper.
+    - Attempts to parse an explicit effective date from the text via:
+      - `"As of <Month> <D>, <YYYY>"` or `"Effective <Month> <D>, <YYYY>"`.
+      - `"Effective Date: MM/DD/YYYY"` (and minor variants like `Effective Date MM/DD/YYYY`).
+    - Attempts to parse charges with conservative patterns:
+      - Monthly:
+        - `Customer Charge ... $X.XX`
+        - Optional `Metering Charge ... $Y.YY` (if missing, treated as 0 for this run).
+        - Computes `monthlyCents = (customer + metering) * 100` and rounds.
+      - Volumetric:
+        - `Volumetric Charge ... $0.0xxxxx` or `Delivery Charge ... $0.0xxxxx` or any line with `per kWh` that yields a plausible dollar value.
+        - Computes `perKwhCents = dollarsPerKwh * 100` as a string; sanity-checks that the underlying dollar rate is between 0 and 1 (i.e., 0–100 ¢/kWh) before accepting.
+    - Only when **all three** of the following are present:
+      - `effectiveStartISO`,
+      - `monthlyCents`,
+      - `perKwhCents`,
+      - …the script calls `upsertTdspTariffFromIngest({ tdspCode, effectiveStartISO, sourceUrl, sourceDocSha256, components })` with two components:
+        - `CUSTOMER` / `PER_MONTH` → `"Customer + Metering Charge"` w/ `monthlyCents`.
+        - `DELIVERY` / `PER_KWH` → `"Volumetric Delivery Charge"` w/ `perKwhCents`.
+    - If any of those three are missing, the script **skips** the candidate and logs a structured reason instead of guessing.
+  - Upsert behavior:
+    - Delegated entirely to `lib/utility/tdspIngest.ts`:
+      - Append-only `TdspTariffVersion` creation with SHA drift detection and prior-window closing on newer `effectiveStart` (same rules as the PUCT rate-report ingest).
+      - No in-place mutation of existing versions or components.
+
+- **Logging + safety rules**
+  - For each candidate, logs:
+    - `url`,
+    - `effectiveStartISO` (if found),
+    - `monthlyCents` / `perKwhCents` (if parsed),
+    - `action`: `"created"`, `"noop"` (existing matching SHA), or `"skip"` with a reason (`no effective date`, `could not parse charges`, or `error during ingest`).
+  - Safety constraints:
+    - **Never** writes partial rates:
+      - If either the effective date or either charge is missing/invalid, the script does not call the upsert helper for that document.
+    - **Never** infers effective dates solely from filenames or URLs:
+      - URL date hints are ignored unless the document text itself contains a matching effective date pattern.
+    - **No** schema or validator changes; this runner only uses the existing TDSP tariff models and `upsertTdspTariffFromIngest` contract.
+
+- **Expected workflow**
+  - 1) **Discovery**:
+    - Run `npx tsx scripts/tdsp/discover-historical-tdsp-sources.ts` to refresh `tdsp-historical-catalog.json` when TDSP sites change.
+  - 2) **Targeted ingest per TDSP**:
+    - Start with a small limit for safety, e.g.:
+      - `npx tsx scripts/tdsp/ingest-historical-from-catalog.ts --tdsp=CENTERPOINT --limit=20`
+    - Inspect console logs to confirm dates and charges look correct.
+  - 3) **Verification**:
+    - Use `/admin/tdsp-tariffs` to inspect the resulting versions for a representative `asOfDate` in the newly ingested windows (e.g., CenterPoint 2024-09-01, 2023-03-01, etc.).
+    - Confirm that `monthlyCents` and `perKwhCents` match the tariff documents and that older open-ended versions were correctly closed when newer effective dates were introduced.
+  - **CenterPoint effective-date parser + debug**
+    - Updated the effective-date extractor to be robust to CenterPoint’s formatting quirks:
+      - Handles `Effective` / `EFFECTIVE` in all caps, `Effective\nDate` with line breaks, and extra spaces/tabs between tokens.
+      - Accepts both:
+        - `"Effective Date: MM/DD/YYYY"` style (with `/`, `-`, `.`, or spaces as separators, normalized to `YYYY-MM-DD` with 4-digit years only), and
+        - `"Effective: Month DD, YYYY"` and `"As of Month DD, YYYY"` full-month forms.
+    - Added an opt-in debug flag to the ingest runner:
+      - `--debugEffective=1`:
+        - For candidates where no effective date is found, prints a compact text snippet (~400 chars before/after the first `"effective"` occurrence) to help tune patterns without dumping the full PDF text.
+      - Example debug run for CenterPoint:
+        - `npx tsx scripts/tdsp/ingest-historical-from-catalog.ts --tdsp=CENTERPOINT --limit=10 --debugEffective=1`
+    - Safety remains unchanged:
+      - Still refuses to infer dates from filenames alone; only accepts effective dates that are explicitly present in the PDF text.
+      - Continues to skip (no upsert) when an effective date or either charge is missing.
+    - Header-date-only fallback (text-only, low confidence but explicit):
+      - Many CenterPoint tariff PDFs do **not** include an "Effective" label, but do carry a single clear date in the header stamp (e.g., `Tariff for Retail Delivery Service - September 1, 2024`).
+      - The ingest runner now:
+        - When all explicit `Effective` / `As of` patterns fail, scans the first ~2500 characters of the normalized header text for **explicit** dates:
+          - Month-name: `September 1, 2024` (`Month DD, YYYY`).
+          - Numeric: `09/01/2024`, `9-1-2024`, `9.1.2024`, etc. (`MM/DD/YYYY`-style with 4-digit years only).
+        - If **exactly one** such date appears in that header window, treats it as `effectiveStartISO` with `effectiveDateSource="HEADER_DATE"` (still text-based, no filename inference).
+        - If zero or more than one candidate dates are found in the header, the ingest run continues to **skip** the document (no upsert) for safety.
+      - Added a header preview debug flag:
+        - `--debugHead=1`:
+          - For the first processed candidate only, logs a compact `headPreview` (first ~600 characters of extracted text with whitespace collapsed) so we can visually inspect the header stamp without dumping full document content.
+        - Example deep-dive run for CenterPoint:
+          - `npx tsx scripts/tdsp/ingest-historical-from-catalog.ts --tdsp=CENTERPOINT --limit=5 --debugHead=1`
+    - Extractability probe mode (no DB writes, no parsing):
+      - Added a `--probe=1` flag to the historical ingest runner to quickly assess which historical PDFs actually yield usable `pdftotext` output.
+      - When `--probe=1` is set:
+        - The script **does not** attempt effective-date parsing, **does not** parse charges, and **does not** call `upsertTdspTariffFromIngest`.
+        - For each processed candidate:
+          - Downloads the PDF and runs `deterministicEflExtract` to obtain `rawText`.
+          - Computes simple metrics:
+            - `textLen = rawText.trim().length`,
+            - `hasDigits` (any numeric characters),
+            - `hasKwh` (`/kwh/i`),
+            - `hasCustomer` (`/customer/i`),
+            - `hasVolumetric` (`/(volumetric|delivery)/i`).
+          - Logs a single `probe summary` line per URL with these fields.
+        - After all candidates are processed, prints a ranked **top 10** list sorted by `textLen` descending so we can quickly see which documents are most promising for future parsers.
+      - Example CenterPoint probe run:
+        - `npx tsx scripts/tdsp/ingest-historical-from-catalog.ts --tdsp=CENTERPOINT --limit=30 --probe=1`
+
 
 ### API wiring
 
