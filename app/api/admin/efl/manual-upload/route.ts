@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Buffer } from "node:buffer";
 
 import { getOrCreateEflTemplate } from "@/lib/efl/getOrCreateEflTemplate";
+import { solveEflValidationGaps } from "@/lib/efl/validation/solveEflValidationGaps";
 
 const MAX_PREVIEW_CHARS = 20000;
 
@@ -68,6 +69,26 @@ export async function POST(req: NextRequest) {
           : "AI parser skipped; see parseWarnings for details.";
     }
 
+    // Run a deterministic "gap solver" pass for avg-price validation. This does
+    // not change the authoritative extracted planRules/rateStructure; it only
+    // derives a copy for validation and re-runs the validator with any
+    // deterministic fills (e.g., usageTiers sync from RateStructure).
+    let derivedForValidation: any = null;
+    try {
+      const baseValidation =
+        (template.validation as any)?.eflAvgPriceValidation ?? null;
+      const solverResult = await solveEflValidationGaps({
+        rawText,
+        planRules: template.planRules ?? null,
+        rateStructure: template.rateStructure ?? null,
+        validation: baseValidation,
+      });
+      derivedForValidation = solverResult;
+    } catch (e) {
+      // Best-effort only; never fail the route because the solver had an issue.
+      derivedForValidation = null;
+    }
+
     return NextResponse.json({
       ok: true,
       eflPdfSha256: template.eflPdfSha256,
@@ -85,6 +106,7 @@ export async function POST(req: NextRequest) {
       parseConfidence: template.parseConfidence,
       parseWarnings: template.parseWarnings,
       validation: template.validation ?? null,
+      derivedForValidation,
       extractorMethod: template.extractorMethod ?? "pdftotext",
       ai,
     });
