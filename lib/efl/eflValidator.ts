@@ -71,6 +71,8 @@ export interface EflAvgPriceValidation {
     nightUsagePercent?: number;
     nightStartHour?: number;
     nightEndHour?: number;
+    weekendUsagePercent?: number;
+    weekdayUsagePercent?: number;
     tdspIncludedInEnergyCharge?: boolean;
     tdspFromEfl?: {
       perKwhCents: number | null;
@@ -167,21 +169,51 @@ function parseMoneyDollars(s: string): number | null {
 
 // TDSP-specific parsers (line-based)
 function parseCentsPerKwhFromLine(line: string): number | null {
-  const m = line
-    .replace(/,/g, "")
-    .match(/(\d+(?:\.\d+)?)\s*¢\s*(?:\/\s*kWh|per\s*kWh)/i);
-  if (!m) return null;
-  const v = Number(m[1]);
+  const cleaned = line.replace(/,/g, "");
+  const matches = Array.from(
+    cleaned.matchAll(/(\d+(?:\.\d+)?)\s*¢\s*(?:\/\s*kWh|per\s*kWh)/gi),
+  );
+  if (matches.length === 0) return null;
+
+  // When a line contains both REP energy charges and TDSP delivery charges
+  // (common in side-by-side tables), picking the *last* ¢/kWh token is a
+  // pragmatic heuristic that tends to select the delivery column.
+  const last = matches[matches.length - 1];
+  const v = Number(last?.[1]);
   return Number.isFinite(v) ? v : null;
 }
 
 function parseMonthlyDollarsFromLine(line: string): number | null {
-  const m = line
-    .replace(/,/g, "")
-    .match(/\$\s*([0-9]+(?:\.[0-9]+)?)\s*per\s*(?:month|billing\s*cycle)/i);
-  if (!m) return null;
-  const v = Number(m[1]);
-  return Number.isFinite(v) ? v : null;
+  const cleaned = line.replace(/,/g, "");
+
+  // Standard inline pattern: "$4.23 per month" / "$4.23 per billing cycle"
+  const m1All = Array.from(
+    cleaned.matchAll(
+      /\$\s*([0-9]+(?:\.[0-9]+)?)\s*per\s*(?:month|billing\s*cycle)/gi,
+    ),
+  );
+  if (m1All.length > 0) {
+    const last = m1All[m1All.length - 1];
+    const v = Number(last?.[1]);
+    return Number.isFinite(v) ? v : null;
+  }
+
+  // Table/header pattern: the "per month" header may be on the same logical
+  // row as the $ amount, but not necessarily immediately adjacent.
+  if (/per\s*(?:month|billing\s*cycle)/i.test(cleaned)) {
+    const m2All = Array.from(
+      cleaned.matchAll(/\$\s*([0-9]+(?:\.[0-9]+)?)/gi),
+    );
+    if (m2All.length > 0) {
+      // Prefer the last $ token on the line; in side-by-side tables the TDSP
+      // "per month" value tends to appear after base-charge columns.
+      const last = m2All[m2All.length - 1];
+      const v = Number(last?.[1]);
+      return Number.isFinite(v) ? v : null;
+    }
+  }
+
+  return null;
 }
 
 function parseCentsPerKwhToken(s: string): number | null {
@@ -244,6 +276,16 @@ function pickBestTdspMonthlyLine(
   );
   if (any) return { dollars: parseMonthlyDollarsFromLine(any), line: any };
 
+  // Table/header fallback: allow "$4.23" on a line that contains "per month"
+  // even if the word "Delivery" isn't repeated on that same line.
+  const headerLike = lines.find(
+    (l) =>
+      /per\s*(?:month|billing\s*cycle)/i.test(l) &&
+      /\$\s*[0-9]+(?:\.[0-9]+)?/i.test(l),
+  );
+  if (headerLike)
+    return { dollars: parseMonthlyDollarsFromLine(headerLike), line: headerLike };
+
   return { dollars: null, line: null };
 }
 
@@ -253,12 +295,42 @@ export function extractEflTdspCharges(rawText: string): EflTdspCharges {
     .map((l) => l.trim())
     .filter((l) => l.length > 0);
 
-  const candidateLines = lines.filter((l) =>
-    /(TDU|TDSP|Delivery)/i.test(l),
-  );
+  // Candidate lines often include only the table headers ("Delivery ... per month")
+  // while the numeric values may be on adjacent rows. Build a search window that
+  // includes keyword lines plus their neighbors.
+  const hitIdx: number[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (/(TDU|TDSP|Delivery)/i.test(lines[i] ?? "")) {
+      hitIdx.push(i);
+    }
+  }
 
-  const searchLines =
-    candidateLines.length > 0 ? candidateLines : lines;
+  let searchLines: string[] = lines;
+  if (hitIdx.length > 0) {
+    const set = new Set<string>();
+    for (const i of hitIdx) {
+      const prev2 = lines[i - 2];
+      const prev = lines[i - 1];
+      const cur = lines[i];
+      const next = lines[i + 1];
+      const next2 = lines[i + 2];
+
+      if (prev2) set.add(prev2);
+      if (prev) set.add(prev);
+      if (cur) set.add(cur);
+      if (next) set.add(next);
+      if (next2) set.add(next2);
+
+      // Include simple joined windows so header/context + numeric values can be
+      // parsed even when split across lines.
+      if (cur && next) set.add(`${cur} ${next}`.trim());
+      if (next && next2) set.add(`${next} ${next2}`.trim());
+      if (cur && next2) set.add(`${cur} ${next2}`.trim());
+      if (prev && cur) set.add(`${prev} ${cur}`.trim());
+      if (prev2 && cur) set.add(`${prev2} ${cur}`.trim());
+    }
+    searchLines = Array.from(set);
+  }
 
   const perPick = pickBestTdspPerKwhLine(searchLines);
   const moPick = pickBestTdspMonthlyLine(searchLines);
@@ -655,12 +727,57 @@ function computeValidatorModeledBreakdown(
   usageKwh: number,
   eflTdsp: EflTdspCharges,
   tdspDeliveryIncludedInEnergyCharge: boolean | null | undefined,
+  weekendUsagePercent?: number,
 ): ValidatorModeledBreakdown | null {
-  const repEnergyDollars = computeEnergyDollarsFromPlanRules(
-    planRules,
-    rateStructure,
-    usageKwh,
-  );
+  // Special-case: simple weekday/weekend TOU expressed as all-day weekday vs all-day weekend.
+  const touPeriods: any[] = Array.isArray(planRules?.timeOfUsePeriods)
+    ? planRules.timeOfUsePeriods
+    : [];
+  const isTou =
+    planRules?.rateType === "TIME_OF_USE" ||
+    planRules?.planType === "tou" ||
+    planRules?.planType === "free-weekends" ||
+    touPeriods.length > 0;
+
+  let repEnergyDollars: number | null = null;
+
+  if (isTou && weekendUsagePercent != null && Number.isFinite(weekendUsagePercent)) {
+    const weekdayPeriod = touPeriods.find((p: any) => {
+      const days = Array.isArray(p?.daysOfWeek) ? p.daysOfWeek : [];
+      const isAllDay = Number(p?.startHour) === 0 && Number(p?.endHour) >= 23;
+      return (
+        isAllDay &&
+        days.length === 5 &&
+        days.every((d: number) => [1, 2, 3, 4, 5].includes(d))
+      );
+    });
+    const weekendPeriod = touPeriods.find((p: any) => {
+      const days = Array.isArray(p?.daysOfWeek) ? p.daysOfWeek : [];
+      const isAllDay = Number(p?.startHour) === 0 && Number(p?.endHour) >= 23;
+      return (
+        isAllDay &&
+        days.length === 2 &&
+        days.every((d: number) => [0, 6].includes(d))
+      );
+    });
+
+    const weekdayRate = weekdayPeriod?.rateCentsPerKwh;
+    const weekendRate = weekendPeriod?.rateCentsPerKwh;
+    if (Number.isFinite(Number(weekdayRate)) && Number.isFinite(Number(weekendRate))) {
+      const wp = Math.max(0, Math.min(1, weekendUsagePercent));
+      const weekdayShare = 1 - wp;
+      const blendedCents = Number(weekdayRate) * weekdayShare + Number(weekendRate) * wp;
+      repEnergyDollars = (usageKwh * blendedCents) / 100;
+    }
+  }
+
+  if (repEnergyDollars == null) {
+    repEnergyDollars = computeEnergyDollarsFromPlanRules(
+      planRules,
+      rateStructure,
+      usageKwh,
+    );
+  }
   if (repEnergyDollars == null || !Number.isFinite(repEnergyDollars)) {
     return null;
   }
@@ -779,6 +896,10 @@ export async function modelAvgCentsPerKwhAtUsage(args: {
     typeof assumptions.nightEndHour === "number"
       ? assumptions.nightEndHour
       : undefined;
+  const weekendUsagePercent =
+    typeof assumptions.weekendUsagePercent === "number"
+      ? assumptions.weekendUsagePercent
+      : undefined;
 
   const engineResult = await computeModeledComponentsOrNull({
     planRules: planRules as PlanRules,
@@ -793,6 +914,18 @@ export async function modelAvgCentsPerKwhAtUsage(args: {
 
   let components = engineResult.components;
 
+  // For simple weekday/weekend TOU, the canonical engine path does not model
+  // the EFL's stated weekend/weekday usage split reliably. Prefer deterministic
+  // validator math when we have that assumption + TOU periods.
+  if (
+    planRules?.rateType === "TIME_OF_USE" &&
+    weekendUsagePercent != null &&
+    Array.isArray((planRules as any).timeOfUsePeriods) &&
+    (planRules as any).timeOfUsePeriods.length > 0
+  ) {
+    components = null;
+  }
+
   if (!components || Number.isNaN(components.avgCentsPerKwh)) {
     components = computeValidatorModeledBreakdown(
       planRules,
@@ -800,6 +933,7 @@ export async function modelAvgCentsPerKwhAtUsage(args: {
       usageKwh,
       effectiveTdsp,
       tdspIncludedFlag,
+      weekendUsagePercent,
     );
     if (components) {
       notes.push("FALLBACK_VALIDATOR_MATH");
@@ -831,6 +965,17 @@ function extractBaseChargePerMonthCentsFromRawText(
   // Treat explicit N/A as "not present".
   if (/Base\s*Charge[^.\n]*\bN\/A\b/i.test(rawText)) {
     return null;
+  }
+
+  // Table-style base charge (no "per billing cycle" phrase), e.g. "Base Charge $0.00".
+  const table = rawText.match(
+    /\bBase\s*Charge\b[\s:]*\$?\s*([0-9]+(?:\.[0-9]{1,2})?)\b/i,
+  );
+  if (table?.[1]) {
+    const dollars = Number(table[1]);
+    if (Number.isFinite(dollars)) {
+      return Math.round(dollars * 100);
+    }
   }
 
   // Match patterns like "Base Charge: $5.00 per billing cycle" or "per month".
@@ -1025,6 +1170,28 @@ export function parseEflNightHoursAssumption(rawText: string): {
   return { nightUsagePercent, nightStartHour, nightEndHour };
 }
 
+export function parseEflWeekendWeekdayUsageAssumption(rawText: string): {
+  weekendUsagePercent?: number;
+  weekdayUsagePercent?: number;
+} | null {
+  // Example:
+  // "calculations assume that 30.0% of usage occurs during Weekends and 70.0% of usage occurs during Weekdays."
+  const m =
+    rawText.match(
+      /assume\s+that\s+([0-9]+(?:\.[0-9]+)?)%\s+of\s+usage\s+occurs\s+during\s+Weekends?\s+and\s+([0-9]+(?:\.[0-9]+)?)%\s+of\s+usage\s+occurs\s+during\s+Weekdays?/i,
+    ) ?? null;
+  if (!m?.[1] || !m?.[2]) return null;
+
+  const weekend = Number(m[1]) / 100;
+  const weekday = Number(m[2]) / 100;
+  if (!Number.isFinite(weekend) || !Number.isFinite(weekday)) return null;
+
+  return {
+    weekendUsagePercent: weekend,
+    weekdayUsagePercent: weekday,
+  };
+}
+
 // -------------------- Canonical calculator adapter --------------------
 
 async function computeModeledComponentsOrNull(args: {
@@ -1191,6 +1358,8 @@ export async function validateEflAvgPriceTable(args: {
   // averages line up with the EFL's own methodology.
   const assumption = isAssumptionBasedAvgPriceTable(rawText);
   const nightAssumption = parseEflNightHoursAssumption(rawText) ?? undefined;
+  const weekendAssumption =
+    parseEflWeekendWeekdayUsageAssumption(rawText) ?? undefined;
 
   const eflTdsp = extractEflTdspCharges(rawText);
 
@@ -1298,6 +1467,18 @@ export async function validateEflAvgPriceTable(args: {
 
     let components = engineResult.components;
 
+    // For simple weekday/weekend TOU, the canonical engine path does not model
+    // the EFL's stated weekend/weekday usage split reliably. Prefer deterministic
+    // validator math when we have that assumption + TOU periods.
+    if (
+      planRulesForValidation?.rateType === "TIME_OF_USE" &&
+      weekendAssumption?.weekendUsagePercent != null &&
+      Array.isArray((planRulesForValidation as any).timeOfUsePeriods) &&
+      (planRulesForValidation as any).timeOfUsePeriods.length > 0
+    ) {
+      components = null;
+    }
+
     // 2) If engine path failed, fall back to deterministic validator math
     // from the EFL (energy rate, base charge, credits, TDSP from EFL).
     if (!components || Number.isNaN(components.avgCentsPerKwh)) {
@@ -1307,6 +1488,7 @@ export async function validateEflAvgPriceTable(args: {
         p.kwh,
         effectiveTdspForValidation,
         tdspIncludedFlag,
+        weekendAssumption?.weekendUsagePercent,
       );
     }
 
@@ -1358,6 +1540,8 @@ export async function validateEflAvgPriceTable(args: {
         nightUsagePercent: nightAssumption?.nightUsagePercent,
         nightStartHour: nightAssumption?.nightStartHour,
         nightEndHour: nightAssumption?.nightEndHour,
+        weekendUsagePercent: weekendAssumption?.weekendUsagePercent,
+        weekdayUsagePercent: weekendAssumption?.weekdayUsagePercent,
         tdspIncludedInEnergyCharge: tdspIncludedFlag,
         tdspFromEfl: {
           perKwhCents: eflTdsp.perKwhCents,
@@ -1412,6 +1596,8 @@ export async function validateEflAvgPriceTable(args: {
         nightUsagePercent: nightAssumption?.nightUsagePercent,
         nightStartHour: nightAssumption?.nightStartHour,
         nightEndHour: nightAssumption?.nightEndHour,
+        weekendUsagePercent: weekendAssumption?.weekendUsagePercent,
+        weekdayUsagePercent: weekendAssumption?.weekdayUsagePercent,
         tdspIncludedInEnergyCharge: tdspIncludedFlag,
         tdspFromEfl: {
           perKwhCents: eflTdsp.perKwhCents,
@@ -1459,6 +1645,8 @@ export async function validateEflAvgPriceTable(args: {
         nightUsagePercent: nightAssumption?.nightUsagePercent,
         nightStartHour: nightAssumption?.nightStartHour,
         nightEndHour: nightAssumption?.nightEndHour,
+        weekendUsagePercent: weekendAssumption?.weekendUsagePercent,
+        weekdayUsagePercent: weekendAssumption?.weekdayUsagePercent,
         tdspIncludedInEnergyCharge: tdspIncludedFlag,
         tdspFromEfl: {
           perKwhCents: eflTdsp.perKwhCents,
@@ -1508,6 +1696,8 @@ export async function validateEflAvgPriceTable(args: {
       nightUsagePercent: nightAssumption?.nightUsagePercent,
       nightStartHour: nightAssumption?.nightStartHour,
       nightEndHour: nightAssumption?.nightEndHour,
+      weekendUsagePercent: weekendAssumption?.weekendUsagePercent,
+      weekdayUsagePercent: weekendAssumption?.weekdayUsagePercent,
       tdspIncludedInEnergyCharge: tdspIncludedFlag,
       tdspFromEfl: {
         perKwhCents: eflTdsp.perKwhCents,

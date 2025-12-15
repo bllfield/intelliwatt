@@ -25,7 +25,9 @@
     "ercot:load:file": "node scripts/admin/ercot_load_file.mjs",
     "ercot:resolve:fetch": "node scripts/admin/ercot_resolve_fetch.mjs",
     "puct:fetch-reps": "node scripts/admin/fetch-puct-reps.mjs",
-    "db:apply-smt-billing": "tsx scripts/db/applySmtBillingReadMigration.ts"
+    "db:apply-smt-billing": "tsx scripts/db/applySmtBillingReadMigration.ts",
+    "test": "vitest",
+    "test:run": "vitest --run"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.673.0",
@@ -75,7 +77,8 @@
     "tailwindcss": "^3.3.0",
     "ts-node": "^10.9.2",
     "tsx": "^4.19.2",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.15"
   },
   "keywords": [
     "energy",

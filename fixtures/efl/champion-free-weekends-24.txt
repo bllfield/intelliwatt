@@ -1,0 +1,28 @@
+Electricity Facts Label
+Champion Energy Services, LLC PUC #10098
+Residential Service ⇒ Free Weekends-24
+Oncor Electric Delivery
+
+Average Monthly Use:                          500 kWh               1,000 kWh              2,000 kWh
+Average price per kilowatt-hour :
+Oncor Electric Delivery                        16.5¢                    16.1¢                 15.9¢
+
+The average price per kWh includes the TDU Delivery Charges and Champion Energy Services Charges listed below,
+as well as the PUC Assessment charges and recurring TDU fees. Prices do not include applicable taxes. All price
+calculations assume that 30.0% of usage occurs during Weekends and 70.0% of usage occurs during Weekdays. Your
+average price will vary based on usage as reported in interval data from your advanced meter.
+
+Weekend hours are all day Saturday and Sunday, from 12:01 am on Saturday morning to 11:59 pm Sunday night.
+
+Champion Energy Charges                                           Delivery Charges from Oncor Electric Delivery
+Weekdays                  Weekends                                per kWh            per month
+14.4¢/kWh                  0.0¢/kWh              Base Charge $0.00 5.6032¢/kWh         $4.23
+
+Type of Product                                            Fixed Rate
+Contract Term                                              24 Month(s)
+Yes, Early Termination Fee: $250.00
+
+PUCT Certificate Number #10098
+EFL Version: TOU-EFL-20230918
+
+

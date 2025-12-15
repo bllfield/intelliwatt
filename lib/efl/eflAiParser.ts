@@ -182,8 +182,11 @@ export async function parseEflTextWithAi(opts: {
   const deterministicBaseCents = extractBaseChargeCents(rawText);
   const deterministicTiers = extractEnergyChargeTiers(rawText);
   const deterministicSingleEnergy = extractSingleEnergyCharge(rawText);
+  const deterministicTou = extractWeekdayWeekendTou(rawText);
   const hasDeterministicEnergy =
-    deterministicTiers.length > 0 || deterministicSingleEnergy != null;
+    deterministicTiers.length > 0 ||
+    deterministicSingleEnergy != null ||
+    deterministicTou != null;
   const deterministicTdspIncluded = detectTdspIncluded(rawText);
   const {
     text: normalizedText,
@@ -218,7 +221,17 @@ export async function parseEflTextWithAi(opts: {
       planRules.baseChargePerMonthCents = deterministicBaseCents;
     }
 
-    if (deterministicTiers.length > 0) {
+    if (deterministicTou) {
+      planRules.rateType = "TIME_OF_USE";
+      (planRules as any).planType =
+        deterministicTou.weekendRateCentsPerKwh === 0 ? "free-weekends" : "tou";
+      planRules.defaultRateCentsPerKwh = deterministicTou.weekdayRateCentsPerKwh;
+      planRules.timeOfUsePeriods = deterministicTou.periods;
+
+      if (planRules.baseChargePerMonthCents == null) {
+        planRules.baseChargePerMonthCents = deterministicTou.baseChargePerMonthCents;
+      }
+    } else if (deterministicTiers.length > 0) {
       planRules.usageTiers = deterministicTiers;
       planRules.rateType = planRules.rateType ?? "FIXED";
       (planRules as any).planType = (planRules as any).planType ?? "flat";
@@ -662,6 +675,50 @@ OUTPUT CONTRACT:
     }
   }
 
+  // Weekday/Weekend TOU (common "Free Weekends" EFLs): if the model did not
+  // populate timeOfUsePeriods but rawText clearly defines weekday/weekend
+  // energy charges, fill it deterministically.
+  const tou = extractWeekdayWeekendTou(fallbackSourceText);
+  if (tou) {
+    const existingTou = Array.isArray(planRules.timeOfUsePeriods)
+      ? planRules.timeOfUsePeriods
+      : [];
+    if (!existingTou.length) {
+      planRules.timeOfUsePeriods = tou.periods;
+      planRules.defaultRateCentsPerKwh =
+        typeof planRules.defaultRateCentsPerKwh === "number"
+          ? planRules.defaultRateCentsPerKwh
+          : tou.weekdayRateCentsPerKwh;
+      // If we successfully extracted TOU periods from raw text, the plan is
+      // TIME_OF_USE even if the model mistakenly labeled it FIXED.
+      if (planRules.rateType && planRules.rateType !== "TIME_OF_USE") {
+        warnings.push(
+          `Deterministic override: rateType was '${planRules.rateType}' but rawText clearly defines weekday/weekend TOU; setting rateType=TIME_OF_USE.`,
+        );
+      }
+      planRules.rateType = "TIME_OF_USE";
+
+      const inferredTouPlanType =
+        tou.weekendRateCentsPerKwh === 0 ? "free-weekends" : "tou";
+      const existingPlanType = (planRules as any).planType;
+      if (
+        existingPlanType == null ||
+        existingPlanType === "flat" ||
+        existingPlanType === "other"
+      ) {
+        (planRules as any).planType = inferredTouPlanType;
+      }
+
+      if (planRules.baseChargePerMonthCents == null && tou.baseChargePerMonthCents != null) {
+        planRules.baseChargePerMonthCents = tou.baseChargePerMonthCents;
+      }
+
+      warnings.push(
+        "Fallback added weekday/weekend time-of-use periods from EFL text.",
+      );
+    }
+  }
+
   // Minimum Usage Fee → negative bill credit rule.
   const minFee = fallbackExtractMinimumUsageFee(fallbackSourceText);
   if (minFee) {
@@ -1056,6 +1113,19 @@ function extractBaseChargeCents(text: string): number | null {
     return null;
   }
 
+  // Table-style base charge (no "per billing cycle" phrase), e.g. "Base Charge $0.00".
+  {
+    const m = text.match(
+      /\bBase\s*(?:Monthly\s+)?Charge\b[\s:]*\$?\s*([0-9]+(?:\.[0-9]{1,2})?)\b/i,
+    );
+    if (m?.[1]) {
+      const dollars = Number(m[1]);
+      if (Number.isFinite(dollars)) {
+        return dollarsToCents(String(dollars));
+      }
+    }
+  }
+
   // Explicit $0 per billing cycle/month.
   if (
     /Base\s*(?:Monthly\s+)?Charge\s*:\s*\$0\b[\s\S]{0,40}?per\s*(?:billing\s*cycle|month)/i.test(
@@ -1133,6 +1203,140 @@ function extractEnergyChargeTiers(text: string): UsageTier[] {
 
 function extractSingleEnergyCharge(text: string): number | null {
   return fallbackExtractSingleEnergyChargeCents(text);
+}
+
+function extractLineAfterLabel(text: string, labelRegex: RegExp): string | null {
+  const lines = String(text ?? "").split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    if (labelRegex.test(lines[i] ?? "")) {
+      const cur = lines[i] ?? "";
+      const next = lines[i + 1] ?? "";
+      return (cur + " " + next).trim();
+    }
+  }
+  return null;
+}
+
+function extractWeekdayWeekendTou(text: string): null | {
+  weekdayRateCentsPerKwh: number;
+  weekendRateCentsPerKwh: number;
+  baseChargePerMonthCents: number | null;
+  periods: Array<{
+    label: string;
+    startHour: number;
+    endHour: number;
+    daysOfWeek: number[];
+    months?: number[] | undefined;
+    rateCentsPerKwh: number | null;
+    isFree: boolean;
+  }>;
+} {
+  // Match a common pricing table pattern, e.g.:
+  //   Weekdays 14.4¢/kWh  Weekends 0.0¢/kWh  Base Charge $0.00
+  //
+  // IMPORTANT: EFLs often mention "Weekdays" in narrative text (e.g., usage
+  // assumptions) before the pricing table. So we scan for the *best* window
+  // that actually contains weekday/weekend headers + ¢/kWh tokens.
+  const lines = String(text ?? "").split(/\r?\n/);
+  const tokenRe =
+    /([0-9]+(?:\.[0-9]+)?)\s*¢\s*(?:\/\s*kwh|per\s*kwh)/gi;
+
+  let bestWindow: string | null = null;
+  for (let i = 0; i < lines.length; i++) {
+    const cur = lines[i] ?? "";
+    const next = lines[i + 1] ?? "";
+    const window = `${cur} ${next}`.replace(/\s+/g, " ").trim();
+    if (!/\bWeekdays?\b/i.test(window)) continue;
+    if (!/\bWeekends?\b/i.test(window)) continue;
+    const tokens = Array.from(window.matchAll(tokenRe));
+    if (tokens.length >= 2) {
+      bestWindow = window;
+      break;
+    }
+  }
+
+  const line =
+    bestWindow ?? extractLineAfterLabel(text, /\bWeekdays?\b/i) ?? text;
+  const cleaned = String(line).replace(/\s+/g, " ");
+
+  let weekdayMatch = cleaned.match(
+    /\bWeekdays?\b[\s:]*([0-9]+(?:\.[0-9]+)?)\s*¢\s*(?:\/\s*kwh|per\s*kwh)/i,
+  );
+  let weekendMatch = cleaned.match(
+    /\bWeekends?\b[\s:]*([0-9]+(?:\.[0-9]+)?)\s*¢\s*(?:\/\s*kwh|per\s*kwh)/i,
+  );
+
+  // Table variant: some EFLs show "Weekdays / Weekends" as column headers on
+  // one line, and the numeric rates on the next line without repeating the
+  // labels. In that case, grab the first two ¢/kWh tokens after the header.
+  if (!weekdayMatch?.[1] || !weekendMatch?.[1]) {
+    const hasHeaders = /\bWeekdays?\b/i.test(cleaned) && /\bWeekends?\b/i.test(cleaned);
+    if (hasHeaders) {
+      const tokens = Array.from(cleaned.matchAll(tokenRe)).map((m) => m[1]).filter(Boolean);
+      if (tokens.length >= 2) {
+        weekdayMatch = ["", tokens[0]] as any;
+        weekendMatch = ["", tokens[1]] as any;
+      } else {
+        return null;
+      }
+    } else {
+      return null;
+    }
+  }
+
+  if (!weekdayMatch?.[1] || !weekendMatch?.[1]) {
+    return null;
+  }
+
+  const weekdayRate = Number(weekdayMatch[1]);
+  const weekendRate = Number(weekendMatch[1]);
+  if (!Number.isFinite(weekdayRate) || !Number.isFinite(weekendRate)) {
+    return null;
+  }
+
+  // Optional base charge in the same table row.
+  let baseChargePerMonthCents: number | null = null;
+  const baseMatch = cleaned.match(
+    /\bBase\s*(?:Monthly\s+)?Charge\b[\s:]*\$?\s*([0-9]+(?:\.[0-9]{1,2})?)/i,
+  );
+  if (baseMatch?.[1]) {
+    const dollars = Number(baseMatch[1]);
+    if (Number.isFinite(dollars)) {
+      baseChargePerMonthCents = Math.round(dollars * 100);
+    }
+  }
+
+  const isFreeWeekend = weekendRate === 0;
+
+  const periods = [
+    {
+      label: "Weekday Energy Charge",
+      startHour: 0,
+      // Use 24 to represent full-day coverage. This is a plain number field
+      // in our CDM; downstream consumers treat this as end-exclusive.
+      endHour: 24,
+      daysOfWeek: [1, 2, 3, 4, 5], // Mon-Fri
+      months: undefined,
+      rateCentsPerKwh: weekdayRate,
+      isFree: false,
+    },
+    {
+      label: isFreeWeekend ? "Free Weekends" : "Weekend Energy Charge",
+      startHour: 0,
+      endHour: 24,
+      daysOfWeek: [0, 6], // Sun, Sat
+      months: undefined,
+      rateCentsPerKwh: weekendRate,
+      isFree: isFreeWeekend,
+    },
+  ];
+
+  return {
+    weekdayRateCentsPerKwh: weekdayRate,
+    weekendRateCentsPerKwh: weekendRate,
+    baseChargePerMonthCents,
+    periods,
+  };
 }
 
 // ----------------------------------------------------------------------
