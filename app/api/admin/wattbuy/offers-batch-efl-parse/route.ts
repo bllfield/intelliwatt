@@ -229,9 +229,12 @@ export async function POST(req: NextRequest) {
             eflPdfSha256: pdfSha256,
             repPuctCertificate: existing.repPuctCertificate ?? null,
             eflVersionCode: existing.eflVersionCode ?? null,
-            validationStatus: "TEMPLATE",
-            originalValidationStatus: null,
-            finalValidationStatus: "TEMPLATE",
+            // IMPORTANT: validationStatus must remain a real validation outcome
+            // so downstream consumers that gate on PASS behave correctly.
+            // "Template-ness" is represented by templateAction below.
+            validationStatus: "PASS",
+            originalValidationStatus: "PASS",
+            finalValidationStatus: "PASS",
             tdspAppliedMode: null,
             parseConfidence: null,
             passStrength: null,
