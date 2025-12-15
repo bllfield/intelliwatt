@@ -46,6 +46,7 @@ export default function ManualFactCardLoaderPage() {
   const [fileLabel, setFileLabel] = useState<string>("No file selected");
   const [pastedText, setPastedText] = useState("");
   const [isProcessingText, setIsProcessingText] = useState(false);
+  const [forceReparse, setForceReparse] = useState(false);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -67,7 +68,11 @@ export default function ManualFactCardLoaderPage() {
       const formData = new FormData();
       formData.append("file", file);
 
-      const response = await fetch("/api/admin/efl/manual-upload", {
+      const url = forceReparse
+        ? "/api/admin/efl/manual-upload?force=1"
+        : "/api/admin/efl/manual-upload";
+
+      const response = await fetch(url, {
         method: "POST",
         body: formData,
       });
@@ -183,6 +188,16 @@ export default function ManualFactCardLoaderPage() {
             />
             <p className="mt-1 text-xs text-brand-navy/60">{fileLabel}</p>
           </div>
+
+          <label className="flex items-center gap-2 text-xs text-brand-navy/70">
+            <input
+              type="checkbox"
+              checked={forceReparse}
+              onChange={(e) => setForceReparse(e.target.checked)}
+              className="h-4 w-4 rounded border-brand-blue text-brand-blue focus:ring-brand-blue"
+            />
+            Force reparse (bypass in-process cache)
+          </label>
 
           <button
             type="submit"
