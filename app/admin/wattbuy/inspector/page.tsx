@@ -41,6 +41,9 @@ export default function WattBuyInspector() {
   const [result, setResult] = useState<InspectResult | null>(null);
   const [raw, setRaw] = useState<Json | null>(null);
   const [loading, setLoading] = useState(false);
+  const [batchMode, setBatchMode] = useState<'DRY_RUN' | 'STORE_TEMPLATES_ON_PASS'>('DRY_RUN');
+  const [batchLimit, setBatchLimit] = useState(25);
+  const [batchResults, setBatchResults] = useState<any[] | null>(null);
 
   const ready = useMemo(() => Boolean(token), [token]);
 
@@ -114,6 +117,68 @@ export default function WattBuyInspector() {
     } catch (err: any) {
       console.error(err);
       setResult({ ok: false, error: err?.message || 'Unknown error' });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function hitBatchEflParse() {
+    if (!token) {
+      alert('Need admin token');
+      return;
+    }
+
+    const trimmedAddress = address.trim();
+    const trimmedCity = city.trim();
+    const trimmedState = state.trim();
+    const trimmedZip = zip.trim();
+
+    if (!trimmedAddress || !trimmedCity || !trimmedState || !trimmedZip) {
+      alert('Provide full address (address, city, state, zip) for batch EFL parse.');
+      return;
+    }
+
+    setLoading(true);
+    setResult(null);
+    setRaw(null);
+    setBatchResults(null);
+
+    try {
+      const body = {
+        address: {
+          line1: trimmedAddress,
+          city: trimmedCity,
+          state: trimmedState,
+          zip: trimmedZip,
+        },
+        offerLimit: batchLimit,
+        mode: batchMode,
+      };
+
+      const res = await fetch('/api/admin/wattbuy/offers-batch-efl-parse', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-token': token,
+        },
+        body: JSON.stringify(body),
+      });
+
+      const data = await res.json();
+      setRaw(data);
+      if (!res.ok || !data.ok) {
+        setResult({ ok: false, error: (data as any)?.error || 'Batch EFL parse failed.' });
+        return;
+      }
+
+      setBatchResults(data.results ?? []);
+      setResult({
+        ok: true,
+        note: `Processed ${data.processedCount} offers (of ${data.offerCount}) in mode=${data.mode}.`,
+      });
+    } catch (err: any) {
+      console.error(err);
+      setResult({ ok: false, error: err?.message || 'Unknown batch error' });
     } finally {
       setLoading(false);
     }
@@ -283,6 +348,56 @@ export default function WattBuyInspector() {
             use the address, city, state, and ZIP from above. Results appear in the Inspector
             Summary and Raw Response panes.
           </p>
+
+          <div className="mt-4 border-t border-blue-100 pt-3">
+            <h4 className="font-medium text-xs text-blue-900 mb-2">
+              Batch EFL Parser Test (manual-upload pipeline)
+            </h4>
+            <p className="text-[11px] text-blue-900/80 mb-2">
+              Uses the same deterministic EFL pipeline as admin manual upload (PDF → text → AI
+              (if enabled) → avg-price validator + TDSP utility table fallback) across a batch
+              of WattBuy offers for this address.
+            </p>
+            <div className="flex flex-wrap items-center gap-3 text-[11px]">
+              <div>
+                <label className="block font-medium mb-1 text-blue-900">Offer limit</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={batchLimit}
+                  onChange={(e) => setBatchLimit(Number(e.target.value) || 1)}
+                  className="w-20 rounded border border-blue-200 bg-white px-2 py-1"
+                />
+              </div>
+              <div>
+                <label className="block font-medium mb-1 text-blue-900">Mode</label>
+                <select
+                  value={batchMode}
+                  onChange={(e) =>
+                    setBatchMode(
+                      e.target.value === 'STORE_TEMPLATES_ON_PASS'
+                        ? 'STORE_TEMPLATES_ON_PASS'
+                        : 'DRY_RUN',
+                    )
+                  }
+                  className="rounded border border-blue-200 bg-white px-2 py-1 text-[11px]"
+                >
+                  <option value="DRY_RUN">Dry run (no template write semantics)</option>
+                  <option value="STORE_TEMPLATES_ON_PASS">
+                    Store templates on PASS (via existing pipeline)
+                  </option>
+                </select>
+              </div>
+              <button
+                onClick={hitBatchEflParse}
+                disabled={loading || !ready}
+                className="inline-flex items-center rounded border border-blue-300 bg-white px-3 py-1.5 text-[11px] font-medium text-blue-900 hover:bg-blue-50 disabled:opacity-60"
+              >
+                {loading ? 'Running batch…' : 'Run Batch EFL Parser'}
+              </button>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -371,6 +486,60 @@ export default function WattBuyInspector() {
               <pre className="text-xs bg-gray-50 rounded-lg p-3 overflow-auto max-h-40">
 {String((raw as any).rawTextPreview)}
               </pre>
+            </div>
+          )}
+
+          {Array.isArray(batchResults) && batchResults.length > 0 && (
+            <div className="mt-6">
+              <h3 className="font-medium mb-2">Batch EFL Parser Results</h3>
+              <div className="overflow-x-auto rounded-2xl border bg-white">
+                <table className="min-w-full text-xs">
+                  <thead className="bg-gray-50 text-gray-700">
+                    <tr>
+                      <th className="px-2 py-1 text-left">Supplier</th>
+                      <th className="px-2 py-1 text-left">Plan</th>
+                      <th className="px-2 py-1 text-left">TDSP</th>
+                      <th className="px-2 py-1 text-left">Term</th>
+                      <th className="px-2 py-1 text-left">Status</th>
+                      <th className="px-2 py-1 text-left">Template</th>
+                      <th className="px-2 py-1 text-left">TDSP Mode</th>
+                      <th className="px-2 py-1 text-right">Conf.</th>
+                      <th className="px-2 py-1 text-left">Queue reason</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {batchResults.map((r: any, idx: number) => (
+                      <tr key={r.offerId ?? idx} className="border-t">
+                        <td className="px-2 py-1 align-top">{r.supplier ?? '—'}</td>
+                        <td className="px-2 py-1 align-top">{r.planName ?? '—'}</td>
+                        <td className="px-2 py-1 align-top">{r.tdspName ?? '—'}</td>
+                        <td className="px-2 py-1 align-top">
+                          {typeof r.termMonths === 'number' ? `${r.termMonths} mo` : '—'}
+                        </td>
+                        <td className="px-2 py-1 align-top">
+                          <span className="font-mono">{r.validationStatus ?? '—'}</span>
+                        </td>
+                        <td className="px-2 py-1 align-top">
+                          <span className="font-mono">{r.templateAction}</span>
+                        </td>
+                        <td className="px-2 py-1 align-top">
+                          <span className="font-mono">{r.tdspAppliedMode ?? '—'}</span>
+                        </td>
+                        <td className="px-2 py-1 align-top text-right">
+                          {typeof r.parseConfidence === 'number'
+                            ? `${Math.round(r.parseConfidence * 100)}%`
+                            : '—'}
+                        </td>
+                        <td className="px-2 py-1 align-top">
+                          <div className="max-w-xs truncate" title={r.queueReason ?? undefined}>
+                            {r.queueReason ?? '—'}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </div>

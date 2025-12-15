@@ -4987,3 +4987,43 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
 
 - **Next step**:
   - Step 4 (future work, not implemented here) would optionally reuse `lookupTdspCharges` in the bill parser/current‑plan engine so that customer‑facing rate modeling can present consistent TDSP assumptions when the REP’s EFL masks delivery charges with `**`. This will be gated behind explicit flags and never silently override EFL‑stated TDSP numerics.
+
+## WATTBUY MODULE — Batch EFL parser harness (2025‑12‑15)
+
+- **Admin batch harness for WattBuy → EFL pipeline (no schema changes)**:
+  - Added a new admin‑only API route `POST /api/admin/wattbuy/offers-batch-efl-parse` wired to `app/api/admin/wattbuy/offers-batch-efl-parse/route.ts`.
+  - Request shape:
+    - `address: { line1: string; city: string; state: string; zip: string }` (all required)
+    - `offerLimit?: number` (defaults to 25, hard‑capped at 50)
+    - `mode?: "STORE_TEMPLATES_ON_PASS" | "DRY_RUN"` (currently informational; creation is governed by `getOrCreateEflTemplate`).
+  - Behavior:
+    - Authenticates via `x-admin-token` against `ADMIN_TOKEN` (same guard as other admin WattBuy tools).
+    - Calls `wbGetOffers` + `normalizeOffers` for the given address.
+    - For each offer with an `docs.efl` URL (up to `offerLimit`):
+      - Downloads the EFL PDF and passes the bytes to `deterministicEflExtract` (shared pdftotext pipeline).
+      - Sends `rawText` + identity metadata into `getOrCreateEflTemplate({ source: "wattbuy", ... })`, reusing the same OpenAI / deterministic parser + `validateEflAvgPriceTable` + `solveEflValidationGaps` path as admin manual upload.
+      - Computes an effective validation object using `template.derivedForValidation?.validationAfter ?? template.validation?.eflAvgPriceValidation` and surfaces:
+        - `validationStatus` (`PASS` / `FAIL` / `SKIP` / `null`),
+        - `tdspAppliedMode` and avg‑price diff points (500/1000/2000 kWh) when present,
+        - `templateAction` — `"CREATED"` when `getOrCreateEflTemplate` reports a new template and status is `PASS`, `"HIT"` when status is `PASS` for an existing template, `"SKIPPED"` for all other statuses, and `"NOT_ELIGIBLE"` for offers without an EFL URL.
+    - Returns JSON:
+      - `ok`, `mode`, `offerCount`, `processedCount`,
+      - `results[]` with: `offerId`, `supplier`, `planName`, `termMonths`, `tdspName`, `eflUrl`, `eflPdfSha256`, `repPuctCertificate`, `eflVersionCode`, `validationStatus`, `tdspAppliedMode`, `parseConfidence`, `templateAction`, `queueReason`, and a compact `diffs[]` view of the avg‑price validator points.
+
+- **Admin UI wiring (WattBuy Inspector)**:
+  - Extended the WattBuy inspector page (`app/admin/wattbuy/inspector/page.tsx`) with a **“Batch EFL Parser Test (manual‑upload pipeline)”** panel under the existing _EFL PlanRules Probe_ section.
+  - New controls (reuses the existing address fields and admin token):
+    - `Offer limit` numeric input (1–50; defaults to 25).
+    - `Mode` select: `"DRY_RUN"` vs `"STORE_TEMPLATES_ON_PASS"` (passed through to the API for future policy, currently informational).
+    - `Run Batch EFL Parser` button that POSTs to `/api/admin/wattbuy/offers-batch-efl-parse` with `x-admin-token` and shows progress via the existing `loading` state.
+  - Results surface in two places:
+    - The existing **Inspector Summary / Raw Response** panes (raw JSON body and high‑level note like “Processed N offers (of M) in mode=…”).
+    - A new **“Batch EFL Parser Results”** table showing, per offer:
+      - Supplier, Plan, TDSP, Term, `validationStatus`, `templateAction` (HIT/CREATED/SKIPPED/NOT_ELIGIBLE), `tdspAppliedMode`, `parseConfidence` (as a 0–100% badge), and `queueReason` (truncated with full text as tooltip).
+
+- **Template creation policy (PASS‑only semantics)**:
+  - The batch harness never invents its own persistence layer; it strictly reuses `getOrCreateEflTemplate` for template creation/deduping and the existing avg‑price validator + gap solver.
+  - For operational clarity:
+    - We treat **`validationStatus === "PASS"`** as “eligible for auto‑learning” and surface these rows as `"HIT"` (existing template) or `"CREATED"` (new template) in `templateAction`.
+    - Non‑PASS statuses (`FAIL`, `SKIP`, or `null`) are always marked `"SKIPPED"` and never reported as `"CREATED"`, so admins can quickly filter for plans that need manual review or deeper investigation.
+  - This keeps the batch tool aligned with the manual‑upload contract: only EFLs that clear avg‑price validation are considered “rock solid” candidates for template reuse.
