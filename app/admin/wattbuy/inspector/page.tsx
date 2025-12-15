@@ -531,8 +531,16 @@ export default function WattBuyInspector() {
                             </span>
                           </td>
                           <td className="px-2 py-1 align-top">
-                            <span className="font-mono">
-                              {r.templateHit ? 'TEMPLATE' : r.templateAction}
+                            <span
+                              className="font-mono"
+                              title={
+                                r.templateHit
+                                  ? 'Template exists for this EFL fingerprint (fast-path hit)'
+                                  : undefined
+                              }
+                            >
+                              {r.templateAction}
+                              {r.templateHit ? ' (hit)' : ''}
                             </span>
                           </td>
                           <td className="px-2 py-1 align-top">
