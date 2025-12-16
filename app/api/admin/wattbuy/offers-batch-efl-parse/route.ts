@@ -471,6 +471,62 @@ export async function POST(req: NextRequest) {
       try {
         const fetched = await fetchEflPdfFromUrl(eflSeedUrl);
         if (!fetched.ok) {
+          // Ensure offers don't "disappear" from ops: if we can't even fetch the PDF,
+          // queue a stable synthetic item keyed by URL + offer metadata.
+          try {
+            const syntheticSha = sha256Hex(
+              [
+                "wattbuy-fetch-efl-failed",
+                eflSeedUrl ?? "",
+                offerId ?? "",
+                supplier ?? "",
+                planName ?? "",
+                tdspName ?? "",
+                String(termMonths ?? ""),
+              ].join("|"),
+            );
+
+            const existingOpen = await (prisma as any).eflParseReviewQueue.findFirst({
+              where: { resolvedAt: null, eflUrl: eflSeedUrl },
+              select: { id: true },
+            });
+
+            const payload = {
+              source: "wattbuy_batch",
+              eflPdfSha256: syntheticSha,
+              repPuctCertificate: null,
+              eflVersionCode: null,
+              offerId: offerId ?? null,
+              supplier: supplier ?? null,
+              planName: planName ?? null,
+              eflUrl: eflSeedUrl,
+              tdspName,
+              termMonths,
+              rawText: null,
+              planRules: null,
+              rateStructure: null,
+              validation: null,
+              derivedForValidation: null,
+              finalStatus: "SKIP",
+              queueReason: `EFL fetch failed: ${String(fetched.error ?? "unknown error")}`.slice(
+                0,
+                1000,
+              ),
+              solverApplied: [],
+            } as const;
+
+            if (existingOpen?.id) {
+              await (prisma as any).eflParseReviewQueue.update({
+                where: { id: existingOpen.id },
+                data: payload,
+              });
+            } else {
+              await (prisma as any).eflParseReviewQueue.create({ data: payload });
+            }
+          } catch {
+            // Best-effort only; do not fail the batch because queue write failed.
+          }
+
           results.push({
             offerId,
             supplier,
@@ -485,6 +541,7 @@ export async function POST(req: NextRequest) {
             tdspAppliedMode: null,
             parseConfidence: null,
             templateAction: "SKIPPED",
+            queueReason: "Queued: EFL fetch failed (see notes).",
             notes: fetched.error,
           });
           continue;
@@ -748,7 +805,12 @@ export async function POST(req: NextRequest) {
             (finalStatus === "PASS" &&
               passStrength &&
               passStrength !== "STRONG") ||
-            (finalStatus === "SKIP" && !!eflSeedUrl));
+            (finalStatus === "SKIP" && !!eflSeedUrl) ||
+            // In STORE mode, any PASS that still fails to persist a template must be surfaced,
+            // otherwise it can land in neither Templates nor Queue.
+            (mode === "STORE_TEMPLATES_ON_PASS" &&
+              finalStatus === "PASS" &&
+              templateAction === "SKIPPED"));
 
         // Queue FAILs, PASS-but-weak/invalid, and SKIPs-with-EFL for admin review
         // (regardless of DRY_RUN vs STORE_TEMPLATES_ON_PASS).
@@ -841,6 +903,61 @@ export async function POST(req: NextRequest) {
           diffs,
         });
       } catch (err: any) {
+        // Catch-all: if the pipeline throws unexpectedly, queue it so it doesn't disappear from ops.
+        try {
+          const syntheticSha = sha256Hex(
+            [
+              "wattbuy-pipeline-exception",
+              eflSeedUrl ?? "",
+              offerId ?? "",
+              supplier ?? "",
+              planName ?? "",
+              tdspName ?? "",
+              String(termMonths ?? ""),
+            ].join("|"),
+          );
+
+          const existingOpen = await (prisma as any).eflParseReviewQueue.findFirst({
+            where: { resolvedAt: null, eflUrl: eflSeedUrl },
+            select: { id: true },
+          });
+
+          const payload = {
+            source: "wattbuy_batch",
+            eflPdfSha256: syntheticSha,
+            repPuctCertificate: null,
+            eflVersionCode: null,
+            offerId: offerId ?? null,
+            supplier: supplier ?? null,
+            planName: planName ?? null,
+            eflUrl: eflSeedUrl,
+            tdspName,
+            termMonths,
+            rawText: null,
+            planRules: null,
+            rateStructure: null,
+            validation: null,
+            derivedForValidation: null,
+            finalStatus: "SKIP",
+            queueReason: `Pipeline exception: ${String(err?.message || err || "unknown")}`.slice(
+              0,
+              1000,
+            ),
+            solverApplied: [],
+          } as const;
+
+          if (existingOpen?.id) {
+            await (prisma as any).eflParseReviewQueue.update({
+              where: { id: existingOpen.id },
+              data: payload,
+            });
+          } else {
+            await (prisma as any).eflParseReviewQueue.create({ data: payload });
+          }
+        } catch {
+          // Best-effort only; do not fail the batch because queue write failed.
+        }
+
         results.push({
           offerId,
           supplier,
@@ -855,6 +972,7 @@ export async function POST(req: NextRequest) {
           tdspAppliedMode: null,
           parseConfidence: null,
           templateAction: "SKIPPED",
+          queueReason: "Queued: pipeline exception (see notes).",
           notes: err?.message || String(err),
         });
       }

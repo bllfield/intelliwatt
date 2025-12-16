@@ -5339,6 +5339,7 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
     - **Missing EFL URL on an electricity offer**:
       - Because the normalizer filters out non-electricity offers, any remaining offer without `docs.efl` is treated as an upstream data issue.
       - These offers are queued into `EflParseReviewQueue` with `finalStatus="SKIP"` and a stable **synthetic** `eflPdfSha256` (since there is no PDF to fingerprint yet).
+    - Guardrail: batch ops should never allow an electricity offer to “disappear” from ops dashboards — if the PDF fetch fails or the pipeline throws before a fingerprint can be computed, the offer is queued with a stable **synthetic** fingerprint keyed by URL + offer metadata.
     - PASS plans remain unchanged:
       - No queue insert when `finalStatus === "PASS"`.
       - When `mode === "STORE_TEMPLATES_ON_PASS"`, PASS plans are persisted as templates by writing `RatePlan.rateStructure` (via `upsertRatePlanFromEfl`) so future runs can skip parsing across serverless invocations.
