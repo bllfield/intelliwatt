@@ -36,6 +36,27 @@ describe("wattbuy normalizeOffer - deep doc URL discovery", () => {
     const n = normalizeOffer(raw);
     expect(n.docs.efl).toBe("https://bit.ly/3XL87ns");
   });
+
+  it("does not confuse non-EFL bit.ly shortlinks as EFL during deep-scan fallback", () => {
+    const raw = {
+      offer_id: "wbdb-abc",
+      offer_name: "Some Plan",
+      offer_data: {
+        supplier_name: "OhmConnect Energy",
+        utility: "oncor",
+        term: 12,
+        tos: "https://bit.ly/3ZNResC",
+        yrac: "https://bit.ly/3IT2R7Z",
+        // Intentionally no offer_data.efl here.
+      },
+      // And no nested smartgridcis link either.
+    };
+
+    const n = normalizeOffer(raw);
+    expect(n.docs.efl).toBe(null);
+    expect(n.docs.tos).toBe("https://bit.ly/3ZNResC");
+    expect(n.docs.yrac).toBe("https://bit.ly/3IT2R7Z");
+  });
 });
 
 

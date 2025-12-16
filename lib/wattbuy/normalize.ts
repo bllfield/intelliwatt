@@ -139,8 +139,27 @@ function deepFindBestDocUrl(
     if (node == null) return;
     if (typeof node === 'string') {
       const sanitized = sanitizeDocURL(node);
-      if (sanitized && looksLikeEflDocUrlLoose(sanitized)) {
-        candidates.push({ url: sanitized, score: scorePath(path, sanitized) });
+      if (sanitized) {
+        // Guardrail: shortlinks (bit.ly) are allowed for docs, but they must match the field
+        // path for the document kind (to avoid accidentally treating TOS/YRAC shortlinks as EFL).
+        let isBitly = false;
+        try {
+          isBitly = new URL(sanitized).hostname.toLowerCase().endsWith('bit.ly');
+        } catch {
+          isBitly = false;
+        }
+
+        const p = path.toLowerCase();
+        const shortlinkMatchesKind =
+          opts.kind === 'efl'
+            ? p.includes('efl')
+            : opts.kind === 'tos'
+              ? p.includes('tos') || p.includes('terms')
+              : p.includes('yrac') || p.includes('rights');
+
+        if ((isBitly && shortlinkMatchesKind) || (!isBitly && looksLikeEflDocUrlLoose(sanitized))) {
+          candidates.push({ url: sanitized, score: scorePath(path, sanitized) });
+        }
       }
       return;
     }
