@@ -72,6 +72,7 @@ export default function WattbuyTemplatedPlansPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [backfillNote, setBackfillNote] = useState<string | null>(null);
+  const [tdspNote, setTdspNote] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [limit, setLimit] = useState(1000);
 
@@ -145,6 +146,34 @@ export default function WattbuyTemplatedPlansPage() {
       await load();
     } catch (e: any) {
       setError(e?.message || "Backfill failed.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function refreshTdspSnapshots() {
+    if (!token) {
+      setError("Admin token required.");
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    setTdspNote(null);
+    try {
+      const res = await fetch("/api/admin/tdsp/rates/refresh", {
+        method: "POST",
+        headers: { "x-admin-token": token },
+      });
+      const data = (await res.json().catch(() => null)) as any;
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || `HTTP ${res.status}`);
+      }
+      setTdspNote(
+        `TDSP snapshot refresh: created=${data.createdCount ?? 0} keys=${Array.isArray(data.keys) ? data.keys.join(",") : "—"} source=${data.sourceUrl ?? "—"}`,
+      );
+      await load();
+    } catch (e: any) {
+      setError(e?.message || "TDSP snapshot refresh failed.");
     } finally {
       setLoading(false);
     }
@@ -291,10 +320,19 @@ export default function WattbuyTemplatedPlansPage() {
             >
               {loading ? "Working…" : "Backfill utility (enables model rates)"}
             </button>
+            <button
+              className="px-3 py-2 rounded-lg border hover:bg-gray-50"
+              onClick={() => void refreshTdspSnapshots()}
+              disabled={loading}
+              title="Fetch TDSP delivery charges from TDSP_RATE_JSON_URL and store a new tdspRateSnapshot, enabling modeled all-in sanity-check rates."
+            >
+              {loading ? "Working…" : "Refresh TDSP snapshots"}
+            </button>
           </div>
         </div>
 
         {error ? <div className="text-sm text-red-700">{error}</div> : null}
+        {tdspNote ? <div className="text-xs text-gray-600">{tdspNote}</div> : null}
         {backfillNote ? <div className="text-xs text-gray-600">{backfillNote}</div> : null}
         <div className="text-xs text-gray-500">
           Shows plans where <span className="font-mono">RatePlan.rateStructure</span> is already stored (fast for users).

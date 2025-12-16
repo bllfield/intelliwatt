@@ -449,6 +449,7 @@ export default function FactCardOpsPage() {
   const [tplErr, setTplErr] = useState<string | null>(null);
   const [tplRows, setTplRows] = useState<TemplateRow[]>([]);
   const [tplTotalCount, setTplTotalCount] = useState<number | null>(null);
+  const [tdspNote, setTdspNote] = useState<string | null>(null);
   const [tplSortKey, setTplSortKey] = useState<
     "utilityId" | "supplier" | "planName" | "termMonths" | "rate500" | "rate1000" | "rate2000" | "eflVersionCode"
   >("supplier");
@@ -478,6 +479,32 @@ export default function FactCardOpsPage() {
       );
     } catch (e: any) {
       setTplErr(e?.message || "Failed to load templates.");
+    } finally {
+      setTplLoading(false);
+    }
+  }
+
+  async function refreshTdspSnapshots() {
+    if (!token) {
+      setTplErr("Admin token required.");
+      return;
+    }
+    setTplLoading(true);
+    setTplErr(null);
+    setTdspNote(null);
+    try {
+      const res = await fetch("/api/admin/tdsp/rates/refresh", {
+        method: "POST",
+        headers: { "x-admin-token": token },
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      setTdspNote(
+        `TDSP snapshot refresh: created=${data.createdCount ?? 0} keys=${Array.isArray(data.keys) ? data.keys.join(",") : "—"} source=${data.sourceUrl ?? "—"}`,
+      );
+      await loadTemplates();
+    } catch (e: any) {
+      setTplErr(e?.message || "Failed to refresh TDSP snapshots.");
     } finally {
       setTplLoading(false);
     }
@@ -1076,6 +1103,9 @@ export default function FactCardOpsPage() {
             <button className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60" onClick={() => void loadTemplates()} disabled={!ready || tplLoading}>
               {tplLoading ? "Loading…" : "Refresh"}
             </button>
+            <button className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60" onClick={() => void refreshTdspSnapshots()} disabled={!ready || tplLoading}>
+              Refresh TDSP snapshots
+            </button>
             <button className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60" onClick={() => void cleanupInvalidTemplates()} disabled={!ready || tplLoading}>
               Cleanup missing fields
             </button>
@@ -1092,6 +1122,7 @@ export default function FactCardOpsPage() {
           </button>
         </div>
         {tplErr ? <div className="text-sm text-red-700">{tplErr}</div> : null}
+        {tdspNote ? <div className="text-xs text-gray-600">{tdspNote}</div> : null}
 
         {/* ~5 visible rows + sticky header */}
         <div className="overflow-x-auto overflow-y-auto max-h-[280px] rounded-xl border">
