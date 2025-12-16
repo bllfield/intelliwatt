@@ -65,6 +65,17 @@ function jsonError(status: number, error: string, details?: unknown) {
   return NextResponse.json(body, { status });
 }
 
+function isUsableTemplate(p: any): boolean {
+  if (!p) return false;
+  if (!p.rateStructure) return false;
+  if ((p.eflRequiresManualReview ?? false) === true) return false;
+  if (!(String(p?.supplier ?? "").trim())) return false;
+  if (!(String(p?.planName ?? "").trim())) return false;
+  if (typeof p?.termMonths !== "number") return false;
+  if (!(String(p?.eflVersionCode ?? "").trim())) return false;
+  return true;
+}
+
 export async function POST(req: NextRequest) {
   try {
     if (!ADMIN_TOKEN) {
@@ -171,11 +182,7 @@ export async function POST(req: NextRequest) {
           where: { eflPdfSha256: pdfSha256 } as any,
         })) as any;
 
-        if (
-          existing &&
-          existing.rateStructure &&
-          (existing.eflRequiresManualReview ?? false) === false
-        ) {
+        if (isUsableTemplate(existing)) {
           results.push({
             offerId,
             planName,
@@ -230,6 +237,10 @@ export async function POST(req: NextRequest) {
               eflPdfSha256: extract.eflPdfSha256,
               providerName: (aiResult.planRules as any)?.repName ?? null,
               planName: (aiResult.planRules as any)?.planMarketingName ?? null,
+              termMonths:
+                typeof (aiResult.planRules as any)?.termMonths === "number"
+                  ? (aiResult.planRules as any).termMonths
+                  : null,
               planRules: aiResult.planRules,
               rateStructure: aiResult.rateStructure,
               validation: aiResult.meta.validation ?? null,

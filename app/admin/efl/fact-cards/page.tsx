@@ -417,6 +417,52 @@ export default function FactCardOpsPage() {
     }
   }
 
+  async function invalidateTemplate(id: string) {
+    if (!token) {
+      setTplErr("Admin token required.");
+      return;
+    }
+    const ok = window.confirm(
+      "Invalidate this template?\n\nThis will remove RatePlan.rateStructure (so it disappears from Templates) and mark it as requires manual review.",
+    );
+    if (!ok) return;
+    try {
+      const res = await fetch("/api/admin/efl/templates/invalidate", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-admin-token": token },
+        body: JSON.stringify({ id }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      await loadTemplates();
+    } catch (e: any) {
+      setTplErr(e?.message || "Failed to invalidate template.");
+    }
+  }
+
+  async function cleanupInvalidTemplates() {
+    if (!token) {
+      setTplErr("Admin token required.");
+      return;
+    }
+    const ok = window.confirm(
+      "Invalidate ALL templates that are missing supplier/planName/termMonths/eflVersionCode?\n\nRecommended: run this on Preview, not Production.",
+    );
+    if (!ok) return;
+    try {
+      const res = await fetch("/api/admin/efl/templates/cleanup-invalid", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-admin-token": token },
+        body: JSON.stringify({ dryRun: false }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      await loadTemplates();
+    } catch (e: any) {
+      setTplErr(e?.message || "Failed to cleanup invalid templates.");
+    }
+  }
+
   useEffect(() => {
     if (ready) void loadTemplates();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -927,9 +973,14 @@ export default function FactCardOpsPage() {
               ({tplTotalCount ?? tplRows.length})
             </span>
           </h2>
-          <button className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60" onClick={() => void loadTemplates()} disabled={!ready || tplLoading}>
-            {tplLoading ? "Loading…" : "Refresh"}
-          </button>
+          <div className="flex items-center gap-2">
+            <button className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60" onClick={() => void loadTemplates()} disabled={!ready || tplLoading}>
+              {tplLoading ? "Loading…" : "Refresh"}
+            </button>
+            <button className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60" onClick={() => void cleanupInvalidTemplates()} disabled={!ready || tplLoading}>
+              Cleanup missing fields
+            </button>
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <input className="flex-1 min-w-[220px] rounded-lg border px-3 py-2 text-sm" placeholder="Search supplier / plan / cert / version / sha…" value={tplQ} onChange={(e) => setTplQ(e.target.value)} />
@@ -985,6 +1036,9 @@ export default function FactCardOpsPage() {
                       <div className="flex flex-wrap gap-2">
                         <button className="px-2 py-1 rounded border hover:bg-gray-50 disabled:opacity-60" disabled={!eflUrl} onClick={() => loadIntoManual({ eflUrl, offerId: (r as any)?.offerId ?? null })}>
                           Load
+                        </button>
+                        <button className="px-2 py-1 rounded border hover:bg-red-50 text-red-700 border-red-200" onClick={() => void invalidateTemplate(String(r.id))}>
+                          Invalidate
                         </button>
                       </div>
                     </td>

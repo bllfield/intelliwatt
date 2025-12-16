@@ -137,6 +137,17 @@ function sha256Hex(s: string): string {
   return crypto.createHash("sha256").update(s).digest("hex");
 }
 
+function isUsableTemplate(p: any): boolean {
+  if (!p) return false;
+  if (!p.rateStructure) return false;
+  if ((p.eflRequiresManualReview ?? false) === true) return false;
+  if (!(String(p?.supplier ?? "").trim())) return false;
+  if (!(String(p?.planName ?? "").trim())) return false;
+  if (typeof p?.termMonths !== "number") return false;
+  if (!(String(p?.eflVersionCode ?? "").trim())) return false;
+  return true;
+}
+
 export async function POST(req: NextRequest) {
   try {
     if (!ADMIN_TOKEN) {
@@ -248,6 +259,9 @@ export async function POST(req: NextRequest) {
         },
         select: {
           id: true,
+          supplier: true,
+          planName: true,
+          termMonths: true,
           eflSourceUrl: true,
           eflUrl: true,
           eflPdfSha256: true,
@@ -390,11 +404,7 @@ export async function POST(req: NextRequest) {
       // skip fetching PDFs and re-running the EFL pipeline.
       if (!forceReparseTemplates) {
         const existingUrlPlan = urlToRatePlan.get(eflSeedUrl);
-        if (
-          existingUrlPlan &&
-          existingUrlPlan.rateStructure &&
-          (existingUrlPlan.eflRequiresManualReview ?? false) === false
-        ) {
+        if (isUsableTemplate(existingUrlPlan)) {
           // If we're in STORE mode, this "template hit" is evidence the queue item no longer
           // needs attention. Auto-resolve any matching OPEN queue rows.
           //
@@ -559,11 +569,7 @@ export async function POST(req: NextRequest) {
             where: { eflPdfSha256: pdfSha256 } as any,
           })) as any;
 
-          if (
-            existing &&
-            existing.rateStructure &&
-            (existing.eflRequiresManualReview ?? false) === false
-          ) {
+          if (isUsableTemplate(existing)) {
             // Same logic as URL fast-path: in STORE mode, a template hit means any OPEN queue
             // rows for this EFL should be cleared.
             if (mode === "STORE_TEMPLATES_ON_PASS") {
@@ -694,6 +700,7 @@ export async function POST(req: NextRequest) {
         // 3) Conditionally persist template ONLY when explicitly requested and
         // the final (derived) validation status is PASS.
         let templateAction: BatchResultRow["templateAction"] = "SKIPPED";
+        let templatePersistNotes: string | null = null;
         if (mode === "STORE_TEMPLATES_ON_PASS" && finalStatus === "PASS") {
           try {
             const derivedPlanRules =
@@ -714,7 +721,7 @@ export async function POST(req: NextRequest) {
                 // IMPORTANT: don't claim CREATED if we didn't store a usable template.
                 templateAction = "SKIPPED";
               } else {
-                await upsertRatePlanFromEfl({
+                const saved = await upsertRatePlanFromEfl({
                   mode: "live",
                   // Persist both: the resolved PDF URL and the upstream landing/enroll URL
                   // that led us to it, so future runs can match by either.
@@ -739,13 +746,54 @@ export async function POST(req: NextRequest) {
                   rateStructure: derivedRateStructure as any,
                   validation: planRulesValidation as any,
                 });
-                templateAction = "CREATED";
+                const templatePersisted = Boolean((saved as any)?.templatePersisted);
+                templateAction = templatePersisted ? "CREATED" : "SKIPPED";
+                const missing = Array.isArray((saved as any)?.missingTemplateFields)
+                  ? ((saved as any).missingTemplateFields as string[])
+                  : [];
+                if (missing.length) {
+                  templatePersistNotes = `Template not persisted (missing fields): ${missing.join(", ")}`;
+                }
+
+                // Force-reparse hygiene: if we successfully persisted a new template, invalidate any
+                // other templated rows for the same REP+planName that were missing core identity fields.
+                if (
+                  forceReparseTemplates &&
+                  templatePersisted &&
+                  det.repPuctCertificate &&
+                  (planName ?? "").trim()
+                ) {
+                  try {
+                    await (prisma as any).ratePlan.updateMany({
+                      where: {
+                        isUtilityTariff: false,
+                        rateStructure: { not: null },
+                        repPuctCertificate: det.repPuctCertificate,
+                        planName: { equals: planName as string, mode: "insensitive" },
+                        OR: [
+                          { eflVersionCode: null },
+                          { termMonths: null },
+                          { supplier: null },
+                        ],
+                        ...(saved as any)?.ratePlan?.id
+                          ? { id: { not: (saved as any).ratePlan.id } }
+                          : {},
+                      },
+                      data: {
+                        rateStructure: null,
+                        eflRequiresManualReview: true,
+                      },
+                    });
+                  } catch {
+                    // Best-effort only; never fail a successful template write.
+                  }
+                }
 
                 // If this EFL was previously quarantined (OPEN review-queue item) and it now
                 // PASSes strongly *and* we successfully persisted a template, auto-resolve the
                 // matching OPEN queue row(s). This keeps the quarantine list focused on items
                 // that still need attention.
-                if (passStrength === "STRONG") {
+                if (templatePersisted && passStrength === "STRONG") {
                   try {
                     const repPuct = det.repPuctCertificate ?? null;
                     const ver = det.eflVersionCode ?? null;
@@ -782,6 +830,12 @@ export async function POST(req: NextRequest) {
         const finalQueueReasonRaw: string | null =
           effectiveValidation?.queueReason ?? null;
         let finalQueueReason = normalizeQueueReason(finalQueueReasonRaw);
+
+        if (templatePersistNotes) {
+          finalQueueReason = finalQueueReason
+            ? `${finalQueueReason} | ${templatePersistNotes}`
+            : templatePersistNotes;
+        }
 
         // Enrich queueReason with pass-strength information when applicable.
         if (

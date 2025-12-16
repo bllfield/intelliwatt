@@ -196,7 +196,7 @@ export async function POST(req: NextRequest) {
     // Live-mode persistence with guardrails. Test mode remains read-only.
     if (mode === "live" && planRules && pdfSha256) {
       try {
-        await upsertRatePlanFromEfl({
+        const saved = await upsertRatePlanFromEfl({
           mode,
           eflUrl: normalizedUrl,
           repPuctCertificate:
@@ -205,11 +205,17 @@ export async function POST(req: NextRequest) {
           eflPdfSha256: pdfSha256,
           providerName: (planRules as any)?.repName ?? null,
           planName: (planRules as any)?.planMarketingName ?? null,
+          termMonths:
+            typeof (planRules as any)?.termMonths === "number"
+              ? (planRules as any).termMonths
+              : null,
           planRules: planRules as any,
           rateStructure: rateStructure as any,
           validation: validation as any,
         });
-        steps.push("rateplan_persisted");
+        steps.push(
+          (saved as any)?.templatePersisted ? "rateplan_template_persisted" : "rateplan_saved_manual_review",
+        );
       } catch (persistError) {
         warnings.push(
           `EFL live persistence failed: ${

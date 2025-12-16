@@ -86,9 +86,35 @@ export async function upsertRatePlanFromEfl(
     );
   }
 
+  // ---------------- Persistence guardrails ----------------
+  // Even if PlanRules are structurally valid, we refuse to persist a *template*
+  // (rateStructure) unless we have enough identity/display fields to avoid
+  // collisions and "mystery rows" in Templates.
+  //
+  // If these fields are missing, we force manual review and clear rateStructure.
+  const missingTemplateFields: string[] = [];
+  if (!(planName ?? "").trim()) missingTemplateFields.push("planName");
+  if (typeof termMonths !== "number") missingTemplateFields.push("termMonths");
+  if (!(eflVersionCode ?? "").trim()) missingTemplateFields.push("eflVersionCode");
+  if (!(providerName ?? "").trim()) missingTemplateFields.push("providerName");
+
+  const forcedManualReviewForMissingFields = missingTemplateFields.length > 0;
+
   const requiresManualReview =
-    validation?.requiresManualReview === true;
-  const validationIssues = validation?.issues ?? [];
+    forcedManualReviewForMissingFields || validation?.requiresManualReview === true;
+
+  const validationIssues = [
+    ...(validation?.issues ?? []),
+    ...(forcedManualReviewForMissingFields
+      ? ([
+          {
+            code: "TEMPLATE_ID_FIELDS_MISSING",
+            severity: "ERROR",
+            message: `Template not persisted: missing required fields: ${missingTemplateFields.join(", ")}.`,
+          },
+        ] satisfies PlanRulesValidationResult["issues"])
+      : []),
+  ];
 
   // When manual review is required, DO NOT write rateStructure.
   const safeRateStructure = requiresManualReview
@@ -210,7 +236,7 @@ export async function upsertRatePlanFromEfl(
   }
 
   if (!existing) {
-    return prisma.ratePlan.create({
+    const created = await prisma.ratePlan.create({
       data: {
         // utilityId/state are required; use provided context if available.
         utilityId: (utilityId ?? "").trim() ? String(utilityId) : "UNKNOWN",
@@ -218,9 +244,15 @@ export async function upsertRatePlanFromEfl(
         ...dataCommon,
       },
     });
+    return {
+      ratePlan: created,
+      templatePersisted: Boolean(!requiresManualReview && safeRateStructure),
+      forcedManualReviewForMissingFields,
+      missingTemplateFields,
+    };
   }
 
-  return prisma.ratePlan.update({
+  const updated = await prisma.ratePlan.update({
     where: { id: existing.id },
     data: {
       ...(utilityId && utilityId.trim() ? { utilityId } : {}),
@@ -228,6 +260,12 @@ export async function upsertRatePlanFromEfl(
       ...dataCommon,
     },
   });
+  return {
+    ratePlan: updated,
+    templatePersisted: Boolean(!requiresManualReview && safeRateStructure),
+    forcedManualReviewForMissingFields,
+    missingTemplateFields,
+  };
 }
 
 

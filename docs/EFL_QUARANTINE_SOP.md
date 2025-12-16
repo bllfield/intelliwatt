@@ -50,6 +50,16 @@ This SOP defines **how IntelliWatt resolves quarantined EFLs** (items in the EFL
   - This is handled automatically by admin tooling (queue refresh / batch parsing) so admins do not have to clear items one-by-one.
   - DRY_RUN operations must remain side-effect-free and must not auto-resolve.
 
+### 3.2 Template persistence guardrail (no incomplete templates)
+
+- A RatePlan should only be considered a **Template** when it has a stored `rateStructure` *and* the core identity/display fields are present:
+  - `supplier` (provider/brand)
+  - `planName`
+  - `termMonths`
+  - `eflVersionCode`
+- If any of these are missing, the pipeline must **not** persist `rateStructure` (so the row does not appear in Templates) and the item must remain/land in quarantine for review.
+- Admin tooling may **invalidate** such templates (clear `rateStructure`, set `eflRequiresManualReview=true`) to allow clean reparse and prevent bad rows from acting as cache hits.
+
 ## 4. Triage Workflow
 
 1. **Open admin review item**

@@ -168,15 +168,18 @@ export async function POST(req: NextRequest) {
             validation: prValidation as any,
           });
 
-          templatePersisted = true;
-          persistedRatePlanId = (saved as any)?.id ? String((saved as any).id) : null;
+          templatePersisted = Boolean((saved as any)?.templatePersisted);
+          persistedRatePlanId = (saved as any)?.ratePlan?.id
+            ? String((saved as any).ratePlan.id)
+            : null;
 
           // If this EFL was previously quarantined (OPEN review-queue item), auto-resolve it now
           // that we have a persisted template from a PASS run.
           try {
             const repPuct = template.repPuctCertificate ?? null;
             const ver = template.eflVersionCode ?? null;
-            const updated = await (prisma as any).eflParseReviewQueue.updateMany({
+            const updated = templatePersisted
+              ? await (prisma as any).eflParseReviewQueue.updateMany({
               where: {
                 resolvedAt: null,
                 OR: [
@@ -193,7 +196,8 @@ export async function POST(req: NextRequest) {
                 resolvedBy: "auto",
                 resolutionNotes: `AUTO_RESOLVED: templatePersisted=true via manual_url. ratePlanId=${persistedRatePlanId ?? "—"}`,
               },
-            });
+                })
+              : { count: 0 };
             autoResolvedQueueCount = Number(updated?.count ?? 0) || 0;
           } catch {
             autoResolvedQueueCount = 0;
