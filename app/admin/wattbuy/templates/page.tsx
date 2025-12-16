@@ -185,6 +185,17 @@ export default function WattbuyTemplatedPlansPage() {
     <div className="p-6 max-w-7xl mx-auto space-y-4">
       <h1 className="text-2xl font-semibold">📦 Templated Plans (RatePlan.rateStructure)</h1>
 
+      <div className="rounded-2xl border bg-white p-4 text-sm">
+        <div className="font-medium">Fact Card ops are now unified</div>
+        <div className="text-xs text-gray-600 mt-1">
+          For templates + queue + batch parsing + manual loader (URL/upload/text) in one place, use{" "}
+          <a className="text-blue-700 underline" href="/admin/efl/fact-cards">
+            /admin/efl/fact-cards
+          </a>
+          .
+        </div>
+      </div>
+
       <div className="rounded-2xl border bg-white p-4 space-y-3">
         <div className="grid gap-3 md:grid-cols-4">
           <div className="md:col-span-2">

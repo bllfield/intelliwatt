@@ -119,6 +119,17 @@ export default function EflReviewPage() {
   return (
     <main className="min-h-screen w-full bg-gray-50">
       <div className="mx-auto max-w-6xl px-4 py-8 space-y-6">
+        <div className="rounded-2xl border bg-white p-4 text-sm">
+          <div className="font-medium">Fact Card ops are now unified</div>
+          <div className="text-xs text-gray-600 mt-1">
+            For batch parsing + queue + templates + manual loader (URL/upload/text) in one place, use{" "}
+            <a className="text-blue-700 underline" href="/admin/efl/fact-cards">
+              /admin/efl/fact-cards
+            </a>
+            .
+          </div>
+        </div>
+
         <header className="flex items-baseline justify-between gap-3">
           <div>
             <h1 className="text-2xl md:text-3xl font-bold">EFL Parse Review Queue</h1>

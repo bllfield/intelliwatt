@@ -247,6 +247,16 @@ export default function WattBuyInspector() {
     <div className="p-6 max-w-6xl mx-auto space-y-6">
       <h1 className="text-2xl font-semibold">WattBuy Inspector</h1>
 
+      <div className="rounded-2xl border bg-white p-4 text-sm">
+        <div className="font-medium">Fact Card parsing tools moved</div>
+        <div className="text-xs text-gray-600 mt-1">
+          Use the unified ops page to run batch parses, inspect the review queue, browse templates, and load any plan into the manual loader:{" "}
+          <a className="text-blue-700 underline" href="/admin/efl/fact-cards">
+            /admin/efl/fact-cards
+          </a>
+        </div>
+      </div>
+
       <section className="grid md:grid-cols-2 gap-4">
         <div className="p-4 rounded-2xl border">
           <h2 className="font-medium mb-3">Auth</h2>
