@@ -47,6 +47,8 @@ const DOC_HOST_ALLOWLIST = new Set<string>([
   // Generic
   'docs.google.com',
   's3.amazonaws.com',
+  // WattBuy/partner shortlinks (redirect to allowlisted PDF hosts)
+  'bit.ly',
   'wattbuy.com',
   // WattBuy partner doc hosts (seen in enrollment-form "Electricity Facts Label" links)
   // OhmConnect / SmartGridCIS (host varies by utility / plan; allow the base domain)

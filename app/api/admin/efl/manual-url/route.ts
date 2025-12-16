@@ -16,6 +16,8 @@ export const dynamic = "force-dynamic";
 type ManualUrlBody = {
   eflUrl?: string;
   forceReparse?: boolean;
+  overridePdfUrl?: string;
+  offerId?: string;
 };
 
 export async function POST(req: NextRequest) {
@@ -42,7 +44,24 @@ export async function POST(req: NextRequest) {
 
     const forceReparse = body.forceReparse === true;
 
-    const fetched = await fetchEflPdfFromUrl(eflUrl);
+    const offerId = (body.offerId ?? "").trim() || null;
+    const overridePdfUrlRaw = (body.overridePdfUrl ?? "").trim();
+    let overridePdfUrl: string | null = null;
+    if (overridePdfUrlRaw) {
+      try {
+        overridePdfUrl = new URL(overridePdfUrlRaw).toString();
+      } catch {
+        return NextResponse.json({ ok: false, error: "Invalid overridePdfUrl." }, { status: 400 });
+      }
+    }
+
+    // If an override is provided, treat it as the authoritative PDF location and
+    // treat eflUrl as the source URL (e.g., WattBuy enrollment link).
+    const pdfFetchUrl = overridePdfUrl ?? eflUrl;
+    const effectiveEflUrl = overridePdfUrl ?? eflUrl;
+    const eflSourceUrl = eflUrl;
+
+    const fetched = await fetchEflPdfFromUrl(pdfFetchUrl);
     if (!fetched.ok) {
       return NextResponse.json(
         { ok: false, error: `Failed to fetch EFL PDF: ${fetched.error}` },
@@ -128,8 +147,8 @@ export async function POST(req: NextRequest) {
 
           const saved = await upsertRatePlanFromEfl({
             mode: "live",
-            eflUrl,
-            eflSourceUrl: eflUrl,
+            eflUrl: effectiveEflUrl,
+            eflSourceUrl,
             repPuctCertificate: template.repPuctCertificate ?? null,
             eflVersionCode: template.eflVersionCode ?? null,
             eflPdfSha256: template.eflPdfSha256,
@@ -158,10 +177,11 @@ export async function POST(req: NextRequest) {
               where: {
                 resolvedAt: null,
                 OR: [
+                  offerId ? { offerId } : undefined,
                   repPuct && ver
                     ? { repPuctCertificate: repPuct, eflVersionCode: ver }
                     : undefined,
-                  eflUrl ? { eflUrl: eflUrl } : undefined,
+                  effectiveEflUrl ? { eflUrl: effectiveEflUrl } : undefined,
                   template.eflPdfSha256 ? { eflPdfSha256: template.eflPdfSha256 } : undefined,
                 ].filter(Boolean),
               },
@@ -185,7 +205,8 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      eflUrl,
+      eflUrl: effectiveEflUrl,
+      eflSourceUrl,
       eflPdfSha256: template.eflPdfSha256,
       repPuctCertificate: template.repPuctCertificate,
       eflVersionCode: template.eflVersionCode,

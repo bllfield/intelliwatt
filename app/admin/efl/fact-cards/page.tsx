@@ -111,12 +111,14 @@ export default function FactCardOpsPage() {
 
   // Manual loader is rendered at the bottom; we prefill it from Queue/Templates/Batch via this state.
   const [manualPrefillUrl, setManualPrefillUrl] = useState("");
+  const [manualPrefillOfferId, setManualPrefillOfferId] = useState<string>("");
   const manualRef = useRef<HTMLDivElement | null>(null);
 
-  function loadIntoManual(args: { eflUrl?: string | null }) {
+  function loadIntoManual(args: { eflUrl?: string | null; offerId?: string | null }) {
     const u = (args.eflUrl ?? "").trim();
     if (!u) return;
     setManualPrefillUrl(u);
+    setManualPrefillOfferId((args.offerId ?? "").trim());
     setTimeout(() => {
       manualRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 50);
@@ -729,7 +731,7 @@ export default function FactCardOpsPage() {
                             <button
                               className="px-2 py-1 rounded border hover:bg-gray-50 disabled:opacity-60"
                               disabled={!m.eflUrl || m.eflUrl === "—"}
-                              onClick={() => loadIntoManual({ eflUrl: m.eflUrl === "—" ? "" : m.eflUrl })}
+                              onClick={() => loadIntoManual({ eflUrl: m.eflUrl === "—" ? "" : m.eflUrl, offerId: (m as any).offerId ?? null })}
                             >
                               Load
                             </button>
@@ -780,7 +782,7 @@ export default function FactCardOpsPage() {
                           <button
                             className="px-2 py-1 rounded border hover:bg-gray-50 disabled:opacity-60"
                             disabled={!eflUrl}
-                            onClick={() => loadIntoManual({ eflUrl })}
+                            onClick={() => loadIntoManual({ eflUrl, offerId: r.offerId ?? null })}
                           >
                             Load
                           </button>
@@ -891,7 +893,7 @@ export default function FactCardOpsPage() {
                         <button
                           className="px-2 py-1 rounded border hover:bg-gray-50 disabled:opacity-60"
                           disabled={!eflUrl}
-                          onClick={() => loadIntoManual({ eflUrl })}
+                          onClick={() => loadIntoManual({ eflUrl, offerId: it.offerId ?? null })}
                         >
                           Load
                         </button>
@@ -981,7 +983,7 @@ export default function FactCardOpsPage() {
                     <td className="px-2 py-2">{r.eflVersionCode ?? "-"}</td>
                     <td className="px-2 py-2">
                       <div className="flex flex-wrap gap-2">
-                        <button className="px-2 py-1 rounded border hover:bg-gray-50 disabled:opacity-60" disabled={!eflUrl} onClick={() => loadIntoManual({ eflUrl })}>
+                        <button className="px-2 py-1 rounded border hover:bg-gray-50 disabled:opacity-60" disabled={!eflUrl} onClick={() => loadIntoManual({ eflUrl, offerId: (r as any)?.offerId ?? null })}>
                           Load
                         </button>
                       </div>
@@ -1017,7 +1019,7 @@ export default function FactCardOpsPage() {
 
       {/* Manual loader lives at the bottom (per ops workflow) */}
       <section ref={manualRef} className="rounded-2xl border bg-white p-4">
-        <ManualFactCardLoader adminToken={token} prefillEflUrl={manualPrefillUrl} />
+        <ManualFactCardLoader adminToken={token} prefillEflUrl={manualPrefillUrl} prefillOfferId={manualPrefillOfferId} />
       </section>
     </div>
   );

@@ -55,10 +55,13 @@ async function copyToClipboard(text: string) {
 export function ManualFactCardLoader(props: {
   adminToken?: string;
   prefillEflUrl?: string;
+  prefillOfferId?: string;
   onPrefillConsumed?: () => void;
 }) {
   const [activeTab, setActiveTab] = useState<"url" | "upload" | "text">("url");
   const [eflUrl, setEflUrl] = useState("");
+  const [offerId, setOfferId] = useState("");
+  const [overridePdfUrl, setOverridePdfUrl] = useState("");
   const [forceReparse, setForceReparse] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [result, setResult] = useState<UploadResponse | null>(null);
@@ -76,6 +79,8 @@ export function ManualFactCardLoader(props: {
     lastPrefillRef.current = next;
     setActiveTab("url");
     setEflUrl(next);
+    setOverridePdfUrl("");
+    setOfferId((props.prefillOfferId ?? "").trim());
     props.onPrefillConsumed?.();
   }, [props.prefillEflUrl, props]);
 
@@ -98,7 +103,12 @@ export function ManualFactCardLoader(props: {
           "Content-Type": "application/json",
           ...(headerToken ? { "x-admin-token": headerToken } : {}),
         },
-        body: JSON.stringify({ eflUrl: u, forceReparse }),
+        body: JSON.stringify({
+          eflUrl: u,
+          forceReparse,
+          offerId: offerId.trim() || undefined,
+          overridePdfUrl: overridePdfUrl.trim() || undefined,
+        }),
       });
       const data = (await res.json()) as UploadResponse | UploadError;
       if (!res.ok || !(data as any)?.ok) {
@@ -252,6 +262,33 @@ export function ManualFactCardLoader(props: {
               onChange={(e) => setEflUrl(e.target.value)}
               placeholder="https://.../electricity-facts-label.pdf"
             />
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <div>
+              <label className="block text-sm font-medium text-brand-navy mb-1">offerId (optional)</label>
+              <input
+                className="w-full rounded-lg border px-3 py-2 text-sm font-mono"
+                value={offerId}
+                onChange={(e) => setOfferId(e.target.value)}
+                placeholder="wbdb-..."
+              />
+              <div className="mt-1 text-[11px] text-brand-navy/60">
+                If provided, successful template persistence will auto-resolve matching OPEN quarantine rows by offerId.
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-brand-navy mb-1">Override EFL PDF URL (optional)</label>
+              <input
+                className="w-full rounded-lg border px-3 py-2 text-sm"
+                value={overridePdfUrl}
+                onChange={(e) => setOverridePdfUrl(e.target.value)}
+                placeholder="https://ohm-gridlink.smartgridcis.net/Documents/Download.aspx?ProductDocumentID=..."
+              />
+              <div className="mt-1 text-[11px] text-brand-navy/60">
+                Use this when the EFL URL is a WattBuy enrollment page blocked by WAF. Paste the “Electricity Facts Label”
+                direct PDF link instead.
+              </div>
+            </div>
           </div>
           <div className="flex flex-wrap gap-2">
             <button
