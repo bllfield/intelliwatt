@@ -68,7 +68,7 @@ export default function WattbuyTemplatedPlansPage() {
   const [error, setError] = useState<string | null>(null);
   const [backfillNote, setBackfillNote] = useState<string | null>(null);
   const [q, setQ] = useState("");
-  const [limit, setLimit] = useState(200);
+  const [limit, setLimit] = useState(1000);
 
   const [sortKey, setSortKey] = useState<
     | "supplier"

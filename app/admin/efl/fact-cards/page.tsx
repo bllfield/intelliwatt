@@ -444,7 +444,7 @@ export default function FactCardOpsPage() {
 
   // ---------------- Templates ----------------
   const [tplQ, setTplQ] = useState("");
-  const [tplLimit, setTplLimit] = useState(200);
+  const [tplLimit, setTplLimit] = useState(1000);
   const [tplLoading, setTplLoading] = useState(false);
   const [tplErr, setTplErr] = useState<string | null>(null);
   const [tplRows, setTplRows] = useState<TemplateRow[]>([]);
