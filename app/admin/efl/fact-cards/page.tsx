@@ -107,7 +107,6 @@ export default function FactCardOpsPage() {
   const [wattkey, setWattkey] = useState("");
 
   const [offerLimit, setOfferLimit] = useState(500);
-  const [startIndex, setStartIndex] = useState(0);
   const [runAll, setRunAll] = useState(true);
   const [dryRun, setDryRun] = useState(false);
   const [forceReparseTemplates, setForceReparseTemplates] = useState(false);
@@ -142,7 +141,9 @@ export default function FactCardOpsPage() {
     setBatchRaw(null);
 
     const all: BatchRow[] = [];
-    let next = startIndex;
+    // Always start from the beginning. Chunking/continuation is handled automatically
+    // via nextStartIndex returned from the API when runAll=true.
+    let next = 0;
 
     try {
       while (true) {
@@ -179,7 +180,6 @@ export default function FactCardOpsPage() {
 
         if (typeof data.nextStartIndex === "number" && Number.isFinite(data.nextStartIndex)) {
           next = data.nextStartIndex;
-          setStartIndex(next);
         }
 
         setBatchNote(
@@ -542,16 +542,6 @@ export default function FactCardOpsPage() {
               />
               Overwrite existing templates (force reparse)
             </label>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-gray-600">Start index</span>
-              <input
-                className="w-24 rounded border px-2 py-1 text-xs"
-                type="number"
-                min={0}
-                value={startIndex}
-                onChange={(e) => setStartIndex(Math.max(0, numOrNull(e.target.value) ?? 0))}
-              />
-            </div>
           </div>
 
           <button
