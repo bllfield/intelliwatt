@@ -231,22 +231,40 @@ function parseCentsPerKwhToken(s: string): number | null {
 function pickBestTdspPerKwhLine(
   lines: string[],
 ): { value: number | null; line: string | null } {
-  const best = lines.find(
-    (l) =>
-      /(TDU|TDSP)/i.test(l) &&
-      /Delivery/i.test(l) &&
-      /(¢\s*(?:[\/⁄]\s*kWh|per\s*kWh))/i.test(l),
-  );
+  const isTdspTokenLine = (l: string): boolean => {
+    if (!/(TDU|TDSP)/i.test(l)) return false;
+    if (!/Delivery/i.test(l)) return false;
+    if (!/(¢\s*(?:[\/⁄]\s*kWh|per\s*kWh))/i.test(l)) return false;
+
+    // Avoid false positives where our joined-line window contains "TDU Delivery Charges"
+    // but the only ¢/kWh token is actually the REP "Energy Charge".
+    const tokenCount = Array.from(
+      l.replace(/,/g, "").matchAll(/(\d+(?:\.\d+)?)\s*¢\s*(?:[\/⁄]\s*kWh|per\s*kWh)/gi),
+    ).length;
+    if (/Energy\s*Charge/i.test(l) && tokenCount === 1) return false;
+    return true;
+  };
+
+  const best = lines.find(isTdspTokenLine);
   if (best) return { value: parseCentsPerKwhFromLine(best), line: best };
 
   const next = lines.find(
     (l) =>
-      /Delivery/i.test(l) && /(¢\s*(?:[\/⁄]\s*kWh|per\s*kWh))/i.test(l),
+      /Delivery/i.test(l) &&
+      /(¢\s*(?:[\/⁄]\s*kWh|per\s*kWh))/i.test(l) &&
+      !(/Energy\s*Charge/i.test(l) &&
+        Array.from(
+          l.replace(/,/g, "").matchAll(/(\d+(?:\.\d+)?)\s*¢\s*(?:[\/⁄]\s*kWh|per\s*kWh)/gi),
+        ).length === 1),
   );
   if (next) return { value: parseCentsPerKwhFromLine(next), line: next };
 
   const any = lines.find((l) =>
-    /(¢\s*(?:[\/⁄]\s*kWh|per\s*kWh))/i.test(l),
+    /(¢\s*(?:[\/⁄]\s*kWh|per\s*kWh))/i.test(l) &&
+    !(/Energy\s*Charge/i.test(l) &&
+      Array.from(
+        l.replace(/,/g, "").matchAll(/(\d+(?:\.\d+)?)\s*¢\s*(?:[\/⁄]\s*kWh|per\s*kWh)/gi),
+      ).length === 1),
   );
   if (any) return { value: parseCentsPerKwhFromLine(any), line: any };
 
