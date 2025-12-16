@@ -342,38 +342,40 @@ OUTPUT CONTRACT:
     });
 
     // Best-effort OpenAI usage logging (feeds /admin/openai/usage).
+    // Best-effort OpenAI usage logging (feeds /admin/openai/usage).
+    // IMPORTANT: await this so the serverless runtime doesn't drop the write.
     const usage = (response as any)?.usage ?? null;
-    if (usage) {
-      const inputTokens = usage.input_tokens ?? usage.prompt_tokens ?? 0;
-      const outputTokens = usage.output_tokens ?? usage.completion_tokens ?? 0;
-      const totalTokens = usage.total_tokens ?? inputTokens + outputTokens;
+    const inputTokens = usage?.input_tokens ?? usage?.prompt_tokens ?? 0;
+    const outputTokens = usage?.output_tokens ?? usage?.completion_tokens ?? 0;
+    const totalTokens = usage?.total_tokens ?? inputTokens + outputTokens;
 
-      // Cost estimation:
-      // - We have explicit pricing for gpt-4.1-mini in other modules.
-      // - For other models, log tokens and set costUsd=0 (unknown pricing).
-      const modelLower = String((response as any)?.model ?? modelName).toLowerCase();
-      const isMini = modelLower.includes("mini");
-      const inputPer1k = isMini ? 0.00025 : 0;
-      const outputPer1k = isMini ? 0.00075 : 0;
-      const costUsd = (inputTokens / 1000) * inputPer1k + (outputTokens / 1000) * outputPer1k;
+    // Cost estimation:
+    // - We have explicit pricing for gpt-4.1-mini in other modules.
+    // - For other models, log tokens and set costUsd=0 (unknown pricing).
+    const modelLower = String((response as any)?.model ?? modelName).toLowerCase();
+    const isMini = modelLower.includes("mini");
+    const inputPer1k = isMini ? 0.00025 : 0;
+    const outputPer1k = isMini ? 0.00075 : 0;
+    const costUsd =
+      (inputTokens / 1000) * inputPer1k + (outputTokens / 1000) * outputPer1k;
 
-      void logOpenAIUsage({
-        module: "efl-fact-card",
-        operation: "efl-ai-parser-v2",
-        model: (response as any)?.model ?? modelName,
-        inputTokens,
-        outputTokens,
-        totalTokens,
-        costUsd,
-        requestId: (response as any)?.id ?? null,
-        metadata: {
-          eflPdfSha256,
-          usedNormalizedText: true,
-          normalizedTextLen: normalizedText.length,
-          modelPricingKnown: isMini,
-        },
-      });
-    }
+    await logOpenAIUsage({
+      module: "efl-fact-card",
+      operation: "efl-ai-parser-v2",
+      model: (response as any)?.model ?? modelName,
+      inputTokens,
+      outputTokens,
+      totalTokens,
+      costUsd,
+      requestId: (response as any)?.id ?? null,
+      metadata: {
+        eflPdfSha256,
+        usedNormalizedText: true,
+        normalizedTextLen: normalizedText.length,
+        modelPricingKnown: isMini,
+        usagePresent: Boolean(usage),
+      },
+    });
 
     rawJson = (response as any).output?.[0]?.content?.[0]?.text ?? "{}";
   } catch (err: any) {

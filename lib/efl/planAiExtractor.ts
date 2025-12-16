@@ -89,7 +89,7 @@ async function callOpenAiPlanRulesModel(args: {
     const outputCost = (outputTokens / 1000) * 0.00075;
     const costUsd = inputCost + outputCost;
 
-    void logOpenAIUsage({
+    await logOpenAIUsage({
       module: "efl-fact-card",
       operation: "plan-rules-extract-v1",
       model: (completion as any).model ?? "gpt-4.1-mini",
@@ -279,7 +279,7 @@ export async function extractPlanRulesAndRateStructureFromEflUrlVision(args: {
     const outputCost = (outputTokens / 1000) * 0.00075;
     const costUsd = inputCost + outputCost;
 
-    void logOpenAIUsage({
+    await logOpenAIUsage({
       module: "efl-fact-card",
       operation: "plan-rules-vision-fallback-v1",
       model: (completion as any).model ?? "gpt-4.1-mini",

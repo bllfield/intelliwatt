@@ -360,7 +360,7 @@ Return ONLY a JSON object matching ParsedCurrentPlanPayload (no extra keys, no c
       const outputCost = (outputTokens / 1000) * 0.00075;
       const costUsd = inputCost + outputCost;
 
-      void logOpenAIUsage({
+      await logOpenAIUsage({
         module: 'current-plan',
         operation: 'bill-parse-v3-json',
         model: (completion as any).model ?? 'gpt-4.1-mini',
