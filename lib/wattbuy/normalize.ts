@@ -49,7 +49,9 @@ const DOC_HOST_ALLOWLIST = new Set<string>([
   's3.amazonaws.com',
   'wattbuy.com',
   // WattBuy partner doc hosts (seen in enrollment-form "Electricity Facts Label" links)
-  'ohm-gridlink.smartgridcis.net',
+  // OhmConnect / SmartGridCIS (host varies by utility / plan; allow the base domain)
+  'smartgridcis.net',
+  'ohmconnect.com',
 
   // Chariot
   'signup.chariotenergy.com',
@@ -76,7 +78,12 @@ export function sanitizeDocURL(url: string | null): string | null {
   try {
     const u = new URL(url);
     if (!/^https?:$/i.test(u.protocol)) return null;
-    if (!DOC_HOST_ALLOWLIST.has(u.hostname)) return null;
+    const host = u.hostname.toLowerCase();
+    const allowed = Array.from(DOC_HOST_ALLOWLIST).some((d) => {
+      const domain = d.toLowerCase();
+      return host === domain || host.endsWith(`.${domain}`);
+    });
+    if (!allowed) return null;
     return u.toString();
   } catch {
     return null;
@@ -112,10 +119,51 @@ function supplierSlug(o: any): string | null {
 }
 
 export function normalizeOffer(o: any): OfferNormalized {
+  const rawDocs = o?.offer_data?.docs ?? o?.offer_data?.documents ?? o?.docs ?? null;
+  const docsArray: any[] = Array.isArray(rawDocs) ? rawDocs : [];
+  const docsObj: any =
+    rawDocs && typeof rawDocs === 'object' && !Array.isArray(rawDocs) ? rawDocs : null;
+
+  const findDocUrl = (needle: RegExp) => {
+    for (const d of docsArray) {
+      const label = String(d?.name ?? d?.label ?? d?.type ?? d?.title ?? '').toLowerCase();
+      if (!label) continue;
+      if (!needle.test(label)) continue;
+      const url = d?.url ?? d?.href ?? d?.link ?? null;
+      if (typeof url === 'string' && url) return url;
+    }
+    return null;
+  };
+
   const docs = {
-    efl: sanitizeDocURL(o?.offer_data?.efl ?? null),
-    tos: sanitizeDocURL(o?.offer_data?.tos ?? null),
-    yrac: sanitizeDocURL(o?.offer_data?.yrac ?? null),
+    // EFLs vary across suppliers: sometimes `offer_data.efl`, sometimes nested docs, sometimes an array.
+    efl: sanitizeDocURL(
+      o?.offer_data?.efl ??
+        docsObj?.efl ??
+        docsObj?.efl_url ??
+        docsObj?.electricity_facts_label ??
+        docsObj?.electricityFactsLabel ??
+        docsObj?.ElectricityFactsLabel ??
+        findDocUrl(/electricity\s*facts\s*label|efl/) ??
+        null,
+    ),
+    tos: sanitizeDocURL(
+      o?.offer_data?.tos ??
+        docsObj?.tos ??
+        docsObj?.terms_of_service ??
+        docsObj?.termsOfService ??
+        findDocUrl(/terms\s*of\s*service|tos/) ??
+        null,
+    ),
+    yrac: sanitizeDocURL(
+      o?.offer_data?.yrac ??
+        docsObj?.yrac ??
+        docsObj?.yrca ??
+        docsObj?.your_rights_as_a_customer ??
+        docsObj?.yourRightsAsACustomer ??
+        findDocUrl(/your\s*rights|yrac|yra[cs]/) ??
+        null,
+    ),
   };
 
   return {

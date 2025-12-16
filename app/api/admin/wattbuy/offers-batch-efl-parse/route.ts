@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Buffer } from "node:buffer";
 
 import { wbGetOffers } from "@/lib/wattbuy/client";
-import { normalizeOffers } from "@/lib/wattbuy/normalize";
+import { normalizeOffers, type OfferNormalized } from "@/lib/wattbuy/normalize";
 import { computePdfSha256 } from "@/lib/efl/eflExtractor";
 import { fetchEflPdfFromUrl } from "@/lib/efl/fetchEflPdf";
 import { getOrCreateEflTemplate } from "@/lib/efl/getOrCreateEflTemplate";
@@ -202,20 +202,18 @@ export async function POST(req: NextRequest) {
     let truncated = false;
     let nextStartIndex: number | null = null;
 
-    for (const offer of sliced) {
+    for (const offer of sliced as OfferNormalized[]) {
       scannedCount++;
-      const offerId = (offer as any)?.offer_id ?? null;
-      const supplier: string | null =
-        (offer as any)?.supplier_name ?? (offer as any)?.supplier ?? null;
-      const planName: string | null =
-        (offer as any)?.plan_name ?? (offer as any)?.offer_name ?? offerId;
-      const termMonths: number | null =
-        typeof (offer as any)?.term === "number" && Number.isFinite((offer as any)?.term)
-          ? (offer as any).term
-          : null;
+      const offerId = offer.offer_id ?? null;
+      const supplier: string | null = offer.supplier_name ?? null;
+      const planName: string | null = offer.plan_name ?? offer.offer_id ?? null;
+      const termMonths: number | null = offer.term_months ?? null;
       const tdspName: string | null =
-        (offer as any)?.offer_data?.utility ?? (offer as any)?.tdspName ?? null;
-      const eflUrl: string | null = (offer as any)?.docs?.efl ?? null;
+        (offer.raw as any)?.offer_data?.utility ??
+        offer.distributor_name ??
+        offer.tdsp ??
+        null;
+      const eflUrl: string | null = offer.docs?.efl ?? null;
 
       // Safety: cap how many EFL-bearing offers we run per invocation to avoid Vercel timeouts.
       if (processedCount >= processLimit) {
