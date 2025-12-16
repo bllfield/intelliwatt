@@ -17,6 +17,8 @@ type Row = {
   modeledRate500?: number | null;
   modeledRate1000?: number | null;
   modeledRate2000?: number | null;
+  modeledTdspCode?: string | null;
+  modeledTdspSnapshotAt?: string | null;
   cancelFee: string | null;
   eflUrl: string | null;
   eflPdfSha256: string | null;
@@ -296,7 +298,10 @@ export default function WattbuyTemplatedPlansPage() {
         {backfillNote ? <div className="text-xs text-gray-600">{backfillNote}</div> : null}
         <div className="text-xs text-gray-500">
           Shows plans where <span className="font-mono">RatePlan.rateStructure</span> is already stored (fast for users).
-          Click headers to sort (best deals = lowest ¢/kWh).
+          <span className="ml-2">
+            <span className="font-medium">Modeled</span> = admin sanity check only (RateStructure + TDSP snapshot);
+            customer pricing uses TDSP from the user’s address/ESIID + their actual usage.
+          </span>
         </div>
       </div>
 
@@ -355,20 +360,47 @@ export default function WattbuyTemplatedPlansPage() {
                   </td>
                   <td className="px-2 py-1 align-top text-right font-mono">
                     <div>{typeof r.rate500 === "number" ? r.rate500.toFixed(3) : "—"}</div>
-                    <div className="text-[10px] text-gray-500">
-                      {typeof r.modeledRate500 === "number" ? `model ${r.modeledRate500.toFixed(3)}` : "model —"}
+                    <div
+                      className="text-[10px] text-gray-500"
+                      title={
+                        r.modeledTdspCode
+                          ? `Admin sanity check: adds TDSP delivery from snapshot (${r.modeledTdspCode} @ ${String(r.modeledTdspSnapshotAt ?? "").slice(0, 10) || "latest"}).`
+                          : "Admin sanity check: modeled all-in rates require a TDSP snapshot; customer pricing uses TDSP from address."
+                      }
+                    >
+                      {typeof r.modeledRate500 === "number"
+                        ? `model ${r.modeledRate500.toFixed(3)}${r.modeledTdspCode ? ` (${r.modeledTdspCode} ${String(r.modeledTdspSnapshotAt ?? "").slice(0, 10) || "latest"})` : ""}`
+                        : "model —"}
                     </div>
                   </td>
                   <td className="px-2 py-1 align-top text-right font-mono">
                     <div>{typeof r.rate1000 === "number" ? r.rate1000.toFixed(3) : "—"}</div>
-                    <div className="text-[10px] text-gray-500">
-                      {typeof r.modeledRate1000 === "number" ? `model ${r.modeledRate1000.toFixed(3)}` : "model —"}
+                    <div
+                      className="text-[10px] text-gray-500"
+                      title={
+                        r.modeledTdspCode
+                          ? `Admin sanity check: adds TDSP delivery from snapshot (${r.modeledTdspCode} @ ${String(r.modeledTdspSnapshotAt ?? "").slice(0, 10) || "latest"}).`
+                          : "Admin sanity check: modeled all-in rates require a TDSP snapshot; customer pricing uses TDSP from address."
+                      }
+                    >
+                      {typeof r.modeledRate1000 === "number"
+                        ? `model ${r.modeledRate1000.toFixed(3)}${r.modeledTdspCode ? ` (${r.modeledTdspCode} ${String(r.modeledTdspSnapshotAt ?? "").slice(0, 10) || "latest"})` : ""}`
+                        : "model —"}
                     </div>
                   </td>
                   <td className="px-2 py-1 align-top text-right font-mono">
                     <div>{typeof r.rate2000 === "number" ? r.rate2000.toFixed(3) : "—"}</div>
-                    <div className="text-[10px] text-gray-500">
-                      {typeof r.modeledRate2000 === "number" ? `model ${r.modeledRate2000.toFixed(3)}` : "model —"}
+                    <div
+                      className="text-[10px] text-gray-500"
+                      title={
+                        r.modeledTdspCode
+                          ? `Admin sanity check: adds TDSP delivery from snapshot (${r.modeledTdspCode} @ ${String(r.modeledTdspSnapshotAt ?? "").slice(0, 10) || "latest"}).`
+                          : "Admin sanity check: modeled all-in rates require a TDSP snapshot; customer pricing uses TDSP from address."
+                      }
+                    >
+                      {typeof r.modeledRate2000 === "number"
+                        ? `model ${r.modeledRate2000.toFixed(3)}${r.modeledTdspCode ? ` (${r.modeledTdspCode} ${String(r.modeledTdspSnapshotAt ?? "").slice(0, 10) || "latest"})` : ""}`
+                        : "model —"}
                     </div>
                   </td>
                   <td className="px-2 py-1 align-top font-mono">{r.repPuctCertificate ?? "—"}</td>

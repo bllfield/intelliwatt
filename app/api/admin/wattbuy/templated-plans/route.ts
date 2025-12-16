@@ -7,6 +7,7 @@ export const dynamic = "force-dynamic";
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 
 type TdspDelivery = { monthlyFeeCents: number; deliveryCentsPerKwh: number };
+type TdspSnapshotMeta = TdspDelivery & { tdspCode: string; snapshotAt: string };
 
 function mapUtilityIdToTdspCode(utilityId: string | null | undefined): string | null {
   const u = String(utilityId ?? "").trim();
@@ -185,6 +186,8 @@ type Row = {
   modeledRate500: number | null;
   modeledRate1000: number | null;
   modeledRate2000: number | null;
+  modeledTdspCode: string | null;
+  modeledTdspSnapshotAt: string | null;
   cancelFee: string | null;
   eflUrl: string | null;
   eflPdfSha256: string | null;
@@ -274,8 +277,8 @@ export async function GET(req: NextRequest) {
 
     const totalCount = await (prisma as any).ratePlan.count({ where });
 
-    const tdspCache = new Map<string, Promise<TdspDelivery | null>>();
-    const getTdsp = async (utilId: string): Promise<TdspDelivery | null> => {
+    const tdspCache = new Map<string, Promise<TdspSnapshotMeta | null>>();
+    const getTdsp = async (utilId: string): Promise<TdspSnapshotMeta | null> => {
       const code = mapUtilityIdToTdspCode(utilId);
       if (!code) return null;
       const cached = tdspCache.get(code);
@@ -293,10 +296,13 @@ export async function GET(req: NextRequest) {
           }));
         if (!row) return null;
         const payload: any = row.payload ?? {};
+        const snapAt = (row.effectiveAt ?? row.createdAt) as Date;
         return {
+          tdspCode: code,
+          snapshotAt: new Date(snapAt).toISOString(),
           monthlyFeeCents: Number(payload?.monthlyFeeCents || 0),
           deliveryCentsPerKwh: Number(payload?.deliveryCentsPerKwh || 0),
-        } satisfies TdspDelivery;
+        } satisfies TdspSnapshotMeta;
       })();
       tdspCache.set(code, p);
       return p;
@@ -330,6 +336,8 @@ export async function GET(req: NextRequest) {
           modeledRate500: computeAllInAvgCentsPerKwhFromRateStructure(p.rateStructure, 500, tdsp),
           modeledRate1000: computeAllInAvgCentsPerKwhFromRateStructure(p.rateStructure, 1000, tdsp),
           modeledRate2000: computeAllInAvgCentsPerKwhFromRateStructure(p.rateStructure, 2000, tdsp),
+          modeledTdspCode: tdsp?.tdspCode ?? null,
+          modeledTdspSnapshotAt: tdsp?.snapshotAt ?? null,
           cancelFee: p.cancelFee ?? null,
           eflUrl: p.eflUrl ?? null,
           eflPdfSha256: p.eflPdfSha256 ?? null,
