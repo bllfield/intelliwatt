@@ -41,6 +41,13 @@ type BatchRequest = {
    */
   dryRun?: boolean | null;
   mode?: BatchMode | null;
+  /**
+   * When true, bypass all template fast-path checks (by URL and by EFL PDF sha256)
+   * so we can re-run the pipeline and overwrite stored templates with newer parsing logic.
+   *
+   * Note: DRY_RUN remains side-effect-free (we still won't persist templates).
+   */
+  forceReparseTemplates?: boolean | null;
 };
 
 type BatchResultRow = {
@@ -164,6 +171,8 @@ export async function POST(req: NextRequest) {
       : body.mode === "DRY_RUN"
         ? "DRY_RUN"
         : "STORE_TEMPLATES_ON_PASS";
+
+    const forceReparseTemplates = body.forceReparseTemplates === true;
 
     const startIndexRaw = body.startIndex ?? null;
     const startIndex = Math.max(
@@ -353,40 +362,42 @@ export async function POST(req: NextRequest) {
 
       // 0) Fast path by URL: if we already have a persisted template for this URL,
       // skip fetching PDFs and re-running the EFL pipeline.
-      const existingUrlPlan = urlToRatePlan.get(eflSeedUrl);
-      if (
-        existingUrlPlan &&
-        existingUrlPlan.rateStructure &&
-        (existingUrlPlan.eflRequiresManualReview ?? false) === false
-      ) {
-        results.push({
-          offerId,
-          supplier,
-          planName,
-          termMonths,
-          tdspName,
-          eflUrl: existingUrlPlan.eflUrl ?? eflSeedUrl,
-          eflPdfSha256: existingUrlPlan.eflPdfSha256 ?? null,
-          repPuctCertificate: existingUrlPlan.repPuctCertificate ?? null,
-          eflVersionCode: existingUrlPlan.eflVersionCode ?? null,
-          validationStatus: "PASS",
-          originalValidationStatus: "PASS",
-          finalValidationStatus: "PASS",
-          tdspAppliedMode: null,
-          parseConfidence: null,
-          passStrength: null,
-          passStrengthReasons: null,
-          templateHit: true,
-          templateAction: mode === "STORE_TEMPLATES_ON_PASS" ? "TEMPLATE" : "SKIPPED",
-          queueReason: null,
-          finalQueueReason: null,
-          solverApplied: null,
-          notes:
-            docsEflUrl
-              ? "Template hit (by URL): RatePlan already has rateStructure for this EFL."
-              : "Template hit (via enroll_link): RatePlan already has rateStructure for this offer.",
-        });
-        continue;
+      if (!forceReparseTemplates) {
+        const existingUrlPlan = urlToRatePlan.get(eflSeedUrl);
+        if (
+          existingUrlPlan &&
+          existingUrlPlan.rateStructure &&
+          (existingUrlPlan.eflRequiresManualReview ?? false) === false
+        ) {
+          results.push({
+            offerId,
+            supplier,
+            planName,
+            termMonths,
+            tdspName,
+            eflUrl: existingUrlPlan.eflUrl ?? eflSeedUrl,
+            eflPdfSha256: existingUrlPlan.eflPdfSha256 ?? null,
+            repPuctCertificate: existingUrlPlan.repPuctCertificate ?? null,
+            eflVersionCode: existingUrlPlan.eflVersionCode ?? null,
+            validationStatus: "PASS",
+            originalValidationStatus: "PASS",
+            finalValidationStatus: "PASS",
+            tdspAppliedMode: null,
+            parseConfidence: null,
+            passStrength: null,
+            passStrengthReasons: null,
+            templateHit: true,
+            templateAction: mode === "STORE_TEMPLATES_ON_PASS" ? "TEMPLATE" : "SKIPPED",
+            queueReason: null,
+            finalQueueReason: null,
+            solverApplied: null,
+            notes:
+              docsEflUrl
+                ? "Template hit (by URL): RatePlan already has rateStructure for this EFL."
+                : "Template hit (via enroll_link): RatePlan already has rateStructure for this offer.",
+          });
+          continue;
+        }
       }
 
       processedCount++;
@@ -420,48 +431,50 @@ export async function POST(req: NextRequest) {
         // 2a) Fast path: if we already have a saved RatePlan.rateStructure for
         // this exact EFL fingerprint (and it doesn't require manual review),
         // skip running the expensive EFL pipeline entirely.
-        const existing = (await prisma.ratePlan.findFirst({
-          where: { eflPdfSha256: pdfSha256 } as any,
-        })) as any;
+        if (!forceReparseTemplates) {
+          const existing = (await prisma.ratePlan.findFirst({
+            where: { eflPdfSha256: pdfSha256 } as any,
+          })) as any;
 
-        if (
-          existing &&
-          existing.rateStructure &&
-          (existing.eflRequiresManualReview ?? false) === false
-        ) {
-          results.push({
-            offerId,
-            supplier,
-            planName,
-            termMonths,
-            tdspName,
-            eflUrl: resolvedPdfUrl,
-            eflPdfSha256: pdfSha256,
-            repPuctCertificate: existing.repPuctCertificate ?? null,
-            eflVersionCode: existing.eflVersionCode ?? null,
-            // IMPORTANT: validationStatus must remain a real validation outcome
-            // so downstream consumers that gate on PASS behave correctly.
-            // "Template-ness" is represented by templateAction below.
-            validationStatus: "PASS",
-            originalValidationStatus: "PASS",
-            finalValidationStatus: "PASS",
-            tdspAppliedMode: null,
-            parseConfidence: null,
-            passStrength: null,
-            passStrengthReasons: null,
-            templateHit: true,
-            // DRY_RUN contract: templateAction is always SKIPPED (no template
-            // handling semantics). In STORE_TEMPLATES_ON_PASS, surface TEMPLATE.
-            templateAction: mode === "STORE_TEMPLATES_ON_PASS" ? "TEMPLATE" : "SKIPPED",
-            queueReason: null,
-            finalQueueReason: null,
-            solverApplied: null,
-            notes:
-              docsEflUrl
-                ? "Template hit: RatePlan already has rateStructure for this EFL fingerprint."
-                : "Template hit: resolved EFL via enroll_link and found existing RatePlan.rateStructure.",
-          });
-          continue;
+          if (
+            existing &&
+            existing.rateStructure &&
+            (existing.eflRequiresManualReview ?? false) === false
+          ) {
+            results.push({
+              offerId,
+              supplier,
+              planName,
+              termMonths,
+              tdspName,
+              eflUrl: resolvedPdfUrl,
+              eflPdfSha256: pdfSha256,
+              repPuctCertificate: existing.repPuctCertificate ?? null,
+              eflVersionCode: existing.eflVersionCode ?? null,
+              // IMPORTANT: validationStatus must remain a real validation outcome
+              // so downstream consumers that gate on PASS behave correctly.
+              // "Template-ness" is represented by templateAction below.
+              validationStatus: "PASS",
+              originalValidationStatus: "PASS",
+              finalValidationStatus: "PASS",
+              tdspAppliedMode: null,
+              parseConfidence: null,
+              passStrength: null,
+              passStrengthReasons: null,
+              templateHit: true,
+              // DRY_RUN contract: templateAction is always SKIPPED (no template
+              // handling semantics). In STORE_TEMPLATES_ON_PASS, surface TEMPLATE.
+              templateAction: mode === "STORE_TEMPLATES_ON_PASS" ? "TEMPLATE" : "SKIPPED",
+              queueReason: null,
+              finalQueueReason: null,
+              solverApplied: null,
+              notes:
+                docsEflUrl
+                  ? "Template hit: RatePlan already has rateStructure for this EFL fingerprint."
+                  : "Template hit: resolved EFL via enroll_link and found existing RatePlan.rateStructure.",
+            });
+            continue;
+          }
         }
 
         // 2b) Run full EFL pipeline WITHOUT persisting templates.

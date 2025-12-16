@@ -47,6 +47,7 @@ export default function WattBuyInspector() {
   const [batchProcessLimit, setBatchProcessLimit] = useState(25);
   const [batchStartIndex, setBatchStartIndex] = useState(0);
   const [batchRunAll, setBatchRunAll] = useState(true);
+  const [batchForceReparseTemplates, setBatchForceReparseTemplates] = useState(false);
   const [batchResults, setBatchResults] = useState<any[] | null>(null);
 
   const ready = useMemo(() => Boolean(token), [token]);
@@ -167,6 +168,7 @@ export default function WattBuyInspector() {
           startIndex: next,
           processLimit: batchProcessLimit,
           dryRun: batchDryRun,
+          forceReparseTemplates: batchForceReparseTemplates,
           // Back-compat: keep mode for older deployments.
           mode,
         };
@@ -201,6 +203,7 @@ export default function WattBuyInspector() {
           ok: true,
           note: [
             `Processed ${data.processedCount} EFLs (scanned ${data.scannedCount ?? data.processedCount} offers) in mode=${data.mode}.`,
+            batchForceReparseTemplates ? `forceReparseTemplates=true` : null,
             data.truncated && typeof data.nextStartIndex === 'number'
               ? `Continuing… nextStartIndex=${data.nextStartIndex}.`
               : 'Done.',
@@ -440,6 +443,14 @@ export default function WattBuyInspector() {
                   onChange={(e) => setBatchDryRun(e.target.checked)}
                 />
                 Dry run (don&apos;t store templates)
+              </label>
+              <label className="flex items-center gap-2 select-none text-blue-900">
+                <input
+                  type="checkbox"
+                  checked={batchForceReparseTemplates}
+                  onChange={(e) => setBatchForceReparseTemplates(e.target.checked)}
+                />
+                Overwrite existing templates (force reparse)
               </label>
               <label className="flex items-center gap-2 select-none text-blue-900">
                 <input
