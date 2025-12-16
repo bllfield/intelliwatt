@@ -499,6 +499,7 @@ export default function FactCardOpsPage() {
     const inQueue = (r: BatchRow): boolean => makeIdentityKeys(r).some((k) => queueKeySet.has(k));
     const inTpl = (r: BatchRow): boolean => makeIdentityKeys(r).some((k) => tplKeySet.has(k));
 
+    let accountedOffers = 0;
     for (const r of batch) {
       const offerId = normStr(r.offerId) || "—";
       const supplier = normStr(r.supplier) || "—";
@@ -519,6 +520,8 @@ export default function FactCardOpsPage() {
 
       const foundTpl = inTpl(r);
       const foundQueue = inQueue(r);
+
+      if (foundTpl || foundQueue) accountedOffers++;
 
       if (!foundTpl && !foundQueue && (expectTemplates || expectQueue)) {
         missingFromBoth.push({
@@ -551,6 +554,7 @@ export default function FactCardOpsPage() {
       batchCount: batch.length,
       queueCount: queue.length,
       templatesCount: tpls.length,
+      accountedOffers,
       missingFromBoth,
       dupOfferIds,
     };
@@ -669,7 +673,11 @@ export default function FactCardOpsPage() {
 
           {batchRows?.length ? (
             <div className="rounded-xl border bg-gray-50 p-3 text-xs space-y-2">
-              <div className="font-medium">Reconciliation (this should sum to the batch)</div>
+              <div className="font-medium">Offer coverage (accounting)</div>
+              <div className="text-gray-600">
+                Note: <span className="font-mono">Templates rows</span> are unique stored templates, not a 1:1 list of offers.
+                Coverage is computed by matching each batch row to either a queue row or a template (by offerId / sha / URL / cert+ver).
+              </div>
               <div className="flex flex-wrap gap-3 text-gray-700">
                 <div>
                   Batch rows: <span className="font-mono">{reconciliation.batchCount}</span>
@@ -679,6 +687,10 @@ export default function FactCardOpsPage() {
                 </div>
                 <div>
                   Templates rows (visible): <span className="font-mono">{reconciliation.templatesCount}</span>
+                </div>
+                <div>
+                  Offers accounted for:{" "}
+                  <span className="font-mono">{reconciliation.accountedOffers}</span>
                 </div>
                 <div>
                   Missing (in neither):{" "}
