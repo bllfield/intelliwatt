@@ -44,7 +44,9 @@ export default function WattBuyInspector() {
   // Batch EFL parser harness (admin tool): default to STORE semantics, with optional dry run.
   const [batchDryRun, setBatchDryRun] = useState(false);
   const [batchLimit, setBatchLimit] = useState(500);
-  const [batchProcessLimit, setBatchProcessLimit] = useState(25);
+  // Do not expose per-run cap: the API uses a time budget to avoid Vercel timeouts and
+  // returns nextStartIndex so we can auto-continue until all offers are processed.
+  const batchProcessLimit = 500;
   const [batchStartIndex, setBatchStartIndex] = useState(0);
   const [batchRunAll, setBatchRunAll] = useState(true);
   const [batchForceReparseTemplates, setBatchForceReparseTemplates] = useState(false);
@@ -167,6 +169,7 @@ export default function WattBuyInspector() {
           offerLimit: batchLimit,
           startIndex: next,
           processLimit: batchProcessLimit,
+          timeBudgetMs: 240_000,
           dryRun: batchDryRun,
           forceReparseTemplates: batchForceReparseTemplates,
           // Back-compat: keep mode for older deployments.
@@ -414,16 +417,10 @@ export default function WattBuyInspector() {
                 />
               </div>
               <div>
-                <label className="block font-medium mb-1 text-blue-900">Process / run</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={50}
-                  value={batchProcessLimit}
-                  onChange={(e) => setBatchProcessLimit(Number(e.target.value) || 1)}
-                  className="w-24 rounded border border-blue-200 bg-white px-2 py-1"
-                  title="Safety cap to avoid Vercel timeouts; run again to continue."
-                />
+                <label className="block font-medium mb-1 text-blue-900">Chunking</label>
+                <div className="text-[11px] text-blue-800">
+                  Auto-chunked by time budget (keeps running until complete).
+                </div>
               </div>
               <div>
                 <label className="block font-medium mb-1 text-blue-900">Start index</label>

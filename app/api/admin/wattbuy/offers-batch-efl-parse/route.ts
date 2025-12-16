@@ -36,6 +36,13 @@ type BatchRequest = {
    */
   processLimit?: number | null;
   /**
+   * Soft time budget for a single invocation (ms). The handler will stop early and return
+   * `truncated=true` when it approaches this budget, so callers can continue with `nextStartIndex`.
+   *
+   * This is the preferred guardrail vs a fixed processLimit because EFL parse time varies widely.
+   */
+  timeBudgetMs?: number | null;
+  /**
    * Convenience flag; when true this forces mode="DRY_RUN".
    * UI prefers this over a mode dropdown.
    */
@@ -184,12 +191,24 @@ export async function POST(req: NextRequest) {
     const processLimit = Math.max(
       1,
       Math.min(
-        50,
+        500,
         processLimitRaw && Number.isFinite(processLimitRaw)
           ? Math.floor(Number(processLimitRaw))
-          : 25,
+          : 500,
       ),
     );
+
+    const timeBudgetRaw = body.timeBudgetMs ?? null;
+    const timeBudgetMs = Math.max(
+      5_000,
+      Math.min(
+        270_000,
+        timeBudgetRaw && Number.isFinite(timeBudgetRaw) ? Math.floor(Number(timeBudgetRaw)) : 240_000,
+      ),
+    );
+    const startedAtMs = Date.now();
+    const deadlineMs = startedAtMs + timeBudgetMs;
+    const shouldStopForTimeBudget = () => Date.now() >= deadlineMs - 2_500;
 
     // 1) Fetch offers from WattBuy via the existing client + normalizer.
     const offersRes = await wbGetOffers({
@@ -274,7 +293,14 @@ export async function POST(req: NextRequest) {
       // store an "UNKNOWN" placeholder unless we later thread a real utilityId.
       const offerUtilityId = "UNKNOWN";
 
-      // Safety: cap how many EFL-bearing offers we run per invocation to avoid Vercel timeouts.
+      // Safety: stop early if we are approaching our time budget, so we never hit a Vercel timeout.
+      if (shouldStopForTimeBudget()) {
+        truncated = true;
+        nextStartIndex = offerSliceStartIndex + (scannedCount - 1);
+        break;
+      }
+
+      // Secondary safety: cap how many EFL-bearing offers we run per invocation.
       if (processedCount >= processLimit) {
         truncated = true;
         nextStartIndex = offerSliceStartIndex + (scannedCount - 1);
