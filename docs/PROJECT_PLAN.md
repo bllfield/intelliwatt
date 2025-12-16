@@ -5283,6 +5283,15 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
     - When a base charge is found, the solver populates **both** `derivedPlanRules.baseChargePerMonthCents` and `derivedRateStructure.baseMonthlyFeeCents` (creating a minimal `derivedRateStructure` object if necessary) and pushes a new `solverApplied` tag: `"SYNC_BASE_CHARGE_FROM_EFL_TEXT"`.
     - Because this adds a solverApplied entry, the solver always re-runs `validateEflAvgPriceTable` after base-charge sync so any FAIL arising solely from a missing base fee can be upgraded to PASS when the numeric base charge is known.
 
+- **Solver: prepaid daily charge + max-usage monthly credit (2025‑12‑16)**:
+  - Added generalized solver modeling for prepaid EFLs that disclose:
+    - `Daily Charge $X per day` → converted to `derivedPlanRules.baseChargePerMonthCents` assuming a 30‑day month, so avg-price validation can model the always-on daily fee.
+    - `Monthly Credit -$Y applies: N kWh usage or less` → converted to a `billCredits[]` entry with `type: "THRESHOLD_MAX"` so the validator can apply credits at/below a max usage threshold.
+  - **Rule tags**:
+    - `"DAILY_CHARGE_PER_DAY_TO_MONTHLY_BASE_FEE"`
+    - `"MONTHLY_CREDIT_MAX_USAGE_TO_THRESHOLD_MAX_CREDIT"`
+  - **Regression**: `tests/efl/payless.prepaid.daily-charge.monthly-credit.solver.test.ts`
+
 - **Applying solver-derived shapes when PASS**:
   - Adjusted `lib/efl/runEflPipelineNoStore.ts` so that solver results are reflected in the pipeline outputs:
     - The wrapper still calls `parseEflTextWithAi` + `solveEflValidationGaps`, but now:

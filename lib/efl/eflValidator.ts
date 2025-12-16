@@ -803,6 +803,14 @@ function applyThresholdCredits(planRules: any, usageKwh: number): number {
       continue;
     }
 
+    // Standard "usage <= threshold" bill credits.
+    // Used by prepaid products that offer a credit up to a max usage threshold
+    // (e.g. "Monthly Credit -$15 applies: 500 kWh usage or less").
+    if (type === "THRESHOLD_MAX") {
+      if (threshold == null || usageKwh <= threshold) totalCredit += dollars;
+      continue;
+    }
+
     // Minimum usage fee modeled as negative credit with threshold and
     // "usage < threshold" semantics.
     if (dollars < 0 && threshold != null) {

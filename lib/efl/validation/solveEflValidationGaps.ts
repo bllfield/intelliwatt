@@ -233,6 +233,55 @@ export async function solveEflValidationGaps(args: {
     }
   }
 
+  // ---------------- Prepaid: Daily Charge + max-usage Monthly Credit ----------------
+  // Example (Payless prepaid):
+  //   "Daily Charge $0.85 per day."
+  //   "Monthly Credit -$15.00 Applies: 500 kWh usage or less"
+  //
+  // Generalized modeling for avg-table validation:
+  // - Convert daily charge into an equivalent monthly base fee assuming a 30-day month
+  //   (EFLs commonly state "prorated if under 30 days" and the disclosure table assumes 30 days).
+  // - Convert "usage or less" monthly credits into a negative bill credit that applies
+  //   when usage < (maxKwh+1). The validator already supports this semantics for negative credits.
+  if (validation?.status === "FAIL" && derivedPlanRules) {
+    const daily = extractDailyCharge(rawText);
+    const credit = extractMonthlyCreditMaxUsage(rawText);
+
+    // Only apply when we are missing base fee / credits in the derived shapes.
+    const hasBase =
+      typeof derivedPlanRules.baseChargePerMonthCents === "number" ||
+      (derivedRateStructure && typeof (derivedRateStructure as any).baseMonthlyFeeCents === "number");
+    const existingCredits: any[] = Array.isArray(derivedPlanRules.billCredits)
+      ? derivedPlanRules.billCredits
+      : [];
+    const hasAnyCredits = existingCredits.length > 0;
+
+    if (daily && daily.dailyDollars > 0 && !hasBase) {
+      const baseCents = Math.round(daily.dailyDollars * 30 * 100);
+      derivedPlanRules.baseChargePerMonthCents = baseCents;
+      if (!derivedRateStructure) derivedRateStructure = {};
+      if (typeof (derivedRateStructure as any).baseMonthlyFeeCents !== "number") {
+        (derivedRateStructure as any).baseMonthlyFeeCents = baseCents;
+      }
+      solverApplied.push("DAILY_CHARGE_PER_DAY_TO_MONTHLY_BASE_FEE");
+    }
+
+    if (credit && credit.creditDollars > 0 && credit.maxUsageKwh >= 1 && !hasAnyCredits) {
+      // Represent as a "usage <= threshold" credit (supported by the validator).
+      const thresholdKwh = credit.maxUsageKwh;
+      derivedPlanRules.billCredits = [
+        {
+          label: `Monthly credit $${credit.creditDollars.toFixed(2)} applies <= ${credit.maxUsageKwh} kWh`,
+          creditDollars: credit.creditDollars,
+          thresholdKwh,
+          monthsOfYear: null,
+          type: "THRESHOLD_MAX",
+        },
+      ];
+      solverApplied.push("MONTHLY_CREDIT_MAX_USAGE_TO_THRESHOLD_MAX_CREDIT");
+    }
+  }
+
   // If nothing was applied, return quickly with the original validation.
   if (solverApplied.length === 0) {
     return {
@@ -484,6 +533,28 @@ function baseFeeInferredFromValidation(args: {
   const avg = inferred.reduce((a, b) => a + b, 0) / inferred.length;
   // Accept if inferred missing fee is within ~$0.75 of the stated fee.
   return Math.abs(avg - feeCents) <= 75;
+}
+
+function extractDailyCharge(rawText: string): { dailyDollars: number } | null {
+  const t = rawText || "";
+  const m = t.match(/Daily\s+Charge[\s:]*\$?\s*([0-9]+(?:\.[0-9]{1,2})?)\s*per\s*day/i);
+  if (!m?.[1]) return null;
+  const d = Number(m[1]);
+  if (!Number.isFinite(d) || d <= 0) return null;
+  return { dailyDollars: d };
+}
+
+function extractMonthlyCreditMaxUsage(rawText: string): { creditDollars: number; maxUsageKwh: number } | null {
+  const t = rawText || "";
+  // Example: "Monthly Credit     -$15.00     Applies: 500 kWh usage or less"
+  const m = t.match(
+    /Monthly\s+Credit[\s\S]{0,80}?-?\$?\s*([0-9]+(?:\.[0-9]{1,2})?)\b[\s\S]{0,120}?Applies\s*:\s*([0-9,]{1,6})\s*kwh[\s\S]{0,40}?(?:or\s+less|usage\s+or\s+less|usage\s+or\s+lower)/i,
+  );
+  if (!m?.[1] || !m?.[2]) return null;
+  const dollars = Number(m[1]);
+  const maxKwh = Number(String(m[2]).replace(/,/g, ""));
+  if (!Number.isFinite(dollars) || !Number.isFinite(maxKwh) || dollars <= 0 || maxKwh <= 0) return null;
+  return { creditDollars: dollars, maxUsageKwh: Math.round(maxKwh) };
 }
 
 
