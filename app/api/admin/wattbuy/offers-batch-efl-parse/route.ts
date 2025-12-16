@@ -23,6 +23,21 @@ type BatchRequest = {
     zip?: string | null;
   } | null;
   offerLimit?: number | null;
+  /**
+   * Start scanning the WattBuy offers list at this index.
+   * Used to chunk large batches across multiple runs to avoid Vercel timeouts.
+   */
+  startIndex?: number | null;
+  /**
+   * Max number of offers with EFL URLs to actually run through the EFL pipeline in this run.
+   * (Offers without EFL URLs are cheap to skip, so we don't count those here.)
+   */
+  processLimit?: number | null;
+  /**
+   * Convenience flag; when true this forces mode="DRY_RUN".
+   * UI prefers this over a mode dropdown.
+   */
+  dryRun?: boolean | null;
   mode?: BatchMode | null;
 };
 
@@ -70,7 +85,12 @@ type BatchResponse =
       ok: true;
       mode: BatchMode;
       offerCount: number;
+      offerSliceStartIndex: number;
+      offerSliceEndIndex: number;
+      scannedCount: number;
       processedCount: number;
+      truncated: boolean;
+      nextStartIndex: number | null;
       results: BatchResultRow[];
     }
   | {
@@ -126,12 +146,35 @@ export async function POST(req: NextRequest) {
     }
 
     const offerLimitRaw = body.offerLimit ?? null;
+    // UI wants 500; we still keep a hard cap and chunk actual processing via processLimit.
     const offerLimit = Math.max(
       1,
-      Math.min(50, offerLimitRaw && Number.isFinite(offerLimitRaw) ? Number(offerLimitRaw) : 25),
+      Math.min(500, offerLimitRaw && Number.isFinite(offerLimitRaw) ? Number(offerLimitRaw) : 500),
     );
 
-    const mode: BatchMode = body.mode === "STORE_TEMPLATES_ON_PASS" ? "STORE_TEMPLATES_ON_PASS" : "DRY_RUN";
+    const dryRunFlag = body.dryRun === true;
+    const mode: BatchMode = dryRunFlag
+      ? "DRY_RUN"
+      : body.mode === "DRY_RUN"
+        ? "DRY_RUN"
+        : "STORE_TEMPLATES_ON_PASS";
+
+    const startIndexRaw = body.startIndex ?? null;
+    const startIndex = Math.max(
+      0,
+      startIndexRaw && Number.isFinite(startIndexRaw) ? Math.floor(Number(startIndexRaw)) : 0,
+    );
+
+    const processLimitRaw = body.processLimit ?? null;
+    const processLimit = Math.max(
+      1,
+      Math.min(
+        50,
+        processLimitRaw && Number.isFinite(processLimitRaw)
+          ? Math.floor(Number(processLimitRaw))
+          : 25,
+      ),
+    );
 
     // 1) Fetch offers from WattBuy via the existing client + normalizer.
     const offersRes = await wbGetOffers({
@@ -149,12 +192,18 @@ export async function POST(req: NextRequest) {
     }
 
     const { offers } = normalizeOffers(offersRes.data);
-    const sliced = offers.slice(0, offerLimit);
+    const offerSliceStartIndex = Math.min(startIndex, offers.length);
+    const offerSliceEndIndex = Math.min(offers.length, offerSliceStartIndex + offerLimit);
+    const sliced = offers.slice(offerSliceStartIndex, offerSliceEndIndex);
 
     const results: BatchResultRow[] = [];
-    let processedCount = 0;
+    let scannedCount = 0;
+    let processedCount = 0; // count of offers with EFL URLs attempted in this run
+    let truncated = false;
+    let nextStartIndex: number | null = null;
 
     for (const offer of sliced) {
+      scannedCount++;
       const offerId = (offer as any)?.offer_id ?? null;
       const supplier: string | null =
         (offer as any)?.supplier_name ?? (offer as any)?.supplier ?? null;
@@ -167,6 +216,13 @@ export async function POST(req: NextRequest) {
       const tdspName: string | null =
         (offer as any)?.offer_data?.utility ?? (offer as any)?.tdspName ?? null;
       const eflUrl: string | null = (offer as any)?.docs?.efl ?? null;
+
+      // Safety: cap how many EFL-bearing offers we run per invocation to avoid Vercel timeouts.
+      if (processedCount >= processLimit) {
+        truncated = true;
+        nextStartIndex = offerSliceStartIndex + (scannedCount - 1);
+        break;
+      }
 
       if (!eflUrl) {
         results.push({
@@ -459,7 +515,12 @@ export async function POST(req: NextRequest) {
       ok: true,
       mode,
       offerCount: offers.length,
+      offerSliceStartIndex,
+      offerSliceEndIndex,
+      scannedCount,
       processedCount,
+      truncated,
+      nextStartIndex,
       results,
     };
 

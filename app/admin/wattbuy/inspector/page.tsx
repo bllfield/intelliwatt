@@ -41,8 +41,11 @@ export default function WattBuyInspector() {
   const [result, setResult] = useState<InspectResult | null>(null);
   const [raw, setRaw] = useState<Json | null>(null);
   const [loading, setLoading] = useState(false);
-  const [batchMode, setBatchMode] = useState<'DRY_RUN' | 'STORE_TEMPLATES_ON_PASS'>('DRY_RUN');
-  const [batchLimit, setBatchLimit] = useState(25);
+  // Batch EFL parser harness (admin tool): default to STORE semantics, with optional dry run.
+  const [batchDryRun, setBatchDryRun] = useState(false);
+  const [batchLimit, setBatchLimit] = useState(500);
+  const [batchProcessLimit, setBatchProcessLimit] = useState(25);
+  const [batchStartIndex, setBatchStartIndex] = useState(0);
   const [batchResults, setBatchResults] = useState<any[] | null>(null);
 
   const ready = useMemo(() => Boolean(token), [token]);
@@ -144,6 +147,7 @@ export default function WattBuyInspector() {
     setBatchResults(null);
 
     try {
+      const mode = batchDryRun ? 'DRY_RUN' : 'STORE_TEMPLATES_ON_PASS';
       const body = {
         address: {
           line1: trimmedAddress,
@@ -152,7 +156,11 @@ export default function WattBuyInspector() {
           zip: trimmedZip,
         },
         offerLimit: batchLimit,
-        mode: batchMode,
+        startIndex: batchStartIndex,
+        processLimit: batchProcessLimit,
+        dryRun: batchDryRun,
+        // Back-compat: keep mode for older deployments.
+        mode,
       };
 
       const res = await fetch('/api/admin/wattbuy/offers-batch-efl-parse', {
@@ -172,9 +180,19 @@ export default function WattBuyInspector() {
       }
 
       setBatchResults(data.results ?? []);
+      if (typeof data.nextStartIndex === 'number' && Number.isFinite(data.nextStartIndex)) {
+        setBatchStartIndex(data.nextStartIndex);
+      }
       setResult({
         ok: true,
-        note: `Processed ${data.processedCount} offers (of ${data.offerCount}) in mode=${data.mode}.`,
+        note: [
+          `Processed ${data.processedCount} EFLs (scanned ${data.scannedCount ?? data.processedCount} offers) in mode=${data.mode}.`,
+          data.truncated && typeof data.nextStartIndex === 'number'
+            ? `Truncated to avoid timeouts; nextStartIndex=${data.nextStartIndex}.`
+            : null,
+        ]
+          .filter(Boolean)
+          .join(' '),
       });
     } catch (err: any) {
       console.error(err);
@@ -364,31 +382,43 @@ export default function WattBuyInspector() {
                 <input
                   type="number"
                   min={1}
-                  max={50}
+                  max={500}
                   value={batchLimit}
                   onChange={(e) => setBatchLimit(Number(e.target.value) || 1)}
-                  className="w-20 rounded border border-blue-200 bg-white px-2 py-1"
+                  className="w-24 rounded border border-blue-200 bg-white px-2 py-1"
                 />
               </div>
               <div>
-                <label className="block font-medium mb-1 text-blue-900">Mode</label>
-                <select
-                  value={batchMode}
-                  onChange={(e) =>
-                    setBatchMode(
-                      e.target.value === 'STORE_TEMPLATES_ON_PASS'
-                        ? 'STORE_TEMPLATES_ON_PASS'
-                        : 'DRY_RUN',
-                    )
-                  }
-                  className="rounded border border-blue-200 bg-white px-2 py-1 text-[11px]"
-                >
-                  <option value="DRY_RUN">Dry run (no template write semantics)</option>
-                  <option value="STORE_TEMPLATES_ON_PASS">
-                    Store templates on PASS (via existing pipeline)
-                  </option>
-                </select>
+                <label className="block font-medium mb-1 text-blue-900">Process / run</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={batchProcessLimit}
+                  onChange={(e) => setBatchProcessLimit(Number(e.target.value) || 1)}
+                  className="w-24 rounded border border-blue-200 bg-white px-2 py-1"
+                  title="Safety cap to avoid Vercel timeouts; run again to continue."
+                />
               </div>
+              <div>
+                <label className="block font-medium mb-1 text-blue-900">Start index</label>
+                <input
+                  type="number"
+                  min={0}
+                  value={batchStartIndex}
+                  onChange={(e) => setBatchStartIndex(Math.max(0, Number(e.target.value) || 0))}
+                  className="w-28 rounded border border-blue-200 bg-white px-2 py-1"
+                  title="Start scanning offers from this index; auto-advances when truncated."
+                />
+              </div>
+              <label className="flex items-center gap-2 select-none text-blue-900">
+                <input
+                  type="checkbox"
+                  checked={batchDryRun}
+                  onChange={(e) => setBatchDryRun(e.target.checked)}
+                />
+                Dry run (don&apos;t store templates)
+              </label>
               <button
                 onClick={hitBatchEflParse}
                 disabled={loading || !ready}

@@ -5145,12 +5145,15 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
   - Added a new admin‑only API route `POST /api/admin/wattbuy/offers-batch-efl-parse` wired to `app/api/admin/wattbuy/offers-batch-efl-parse/route.ts`.
   - Request shape:
     - `address: { line1: string; city: string; state: string; zip: string }` (all required)
-    - `offerLimit?: number` (defaults to 25, hard‑capped at 50)
-    - `mode?: "STORE_TEMPLATES_ON_PASS" | "DRY_RUN"` (controls whether PASS results are persisted as templates).
+    - `offerLimit?: number` (defaults to 500, hard‑capped at 500) — controls how many offers we *scan* from the WattBuy list for this run.
+    - `startIndex?: number` (defaults to 0) — scan offset into the WattBuy offers list (for chunking large runs).
+    - `processLimit?: number` (defaults to 25, hard‑capped at 50) — max number of **EFL-bearing** offers actually run through the EFL pipeline per invocation (timeout safety).
+    - `dryRun?: boolean` (defaults to false) — convenience flag to force `mode="DRY_RUN"`.
+    - `mode?: "STORE_TEMPLATES_ON_PASS" | "DRY_RUN"` (defaults to `"STORE_TEMPLATES_ON_PASS"` unless `dryRun=true`).
   - Behavior:
     - Authenticates via `x-admin-token` against `ADMIN_TOKEN` (same guard as other admin WattBuy tools).
     - Calls `wbGetOffers` + `normalizeOffers` for the given address.
-    - For each offer with an `docs.efl` URL (up to `offerLimit`):
+    - Scans offers from `startIndex` up to `startIndex + offerLimit` and, for each offer with an `docs.efl` URL (up to `processLimit` per run):
       - Downloads the EFL PDF and passes the bytes to `runEflPipelineNoStore` (shared pdftotext + AI + validator + solver pipeline used by admin manual upload), which **does not persist any template**.
       - Computes:
         - `originalValidationStatus` from `validation.eflAvgPriceValidation?.status` (pre‑solver).
@@ -5171,8 +5174,10 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
 - **Admin UI wiring (WattBuy Inspector)**:
   - Extended the WattBuy inspector page (`app/admin/wattbuy/inspector/page.tsx`) with a **“Batch EFL Parser Test (manual‑upload pipeline)”** panel under the existing _EFL PlanRules Probe_ section.
   - New controls (reuses the existing address fields and admin token):
-    - `Offer limit` numeric input (1–50; defaults to 25).
-    - `Mode` select: `"DRY_RUN"` vs `"STORE_TEMPLATES_ON_PASS"` (passed through to the API for future policy, currently informational).
+    - `Offer limit` numeric input (1–500; defaults to 500) — scan size.
+    - `Process / run` numeric input (1–50; defaults to 25) — timeout safety cap.
+    - `Start index` numeric input (≥ 0; defaults to 0) — resume scanning when runs are truncated.
+    - `Dry run (don’t store templates)` checkbox (default unchecked).
     - `Run Batch EFL Parser` button that POSTs to `/api/admin/wattbuy/offers-batch-efl-parse` with `x-admin-token` and shows progress via the existing `loading` state.
   - Results surface in two places:
     - The existing **Inspector Summary / Raw Response** panes (raw JSON body and high‑level note like “Processed N offers (of M) in mode=…”).

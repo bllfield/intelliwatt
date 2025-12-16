@@ -57,3 +57,8 @@ coverage/
 
 .vercel
 .env*.local
+
+# Local artifacts (avoid committing large binary samples)
+docs/*.pdf
+tmp-*.pdf
+deploy/droplet/__pycache__/
