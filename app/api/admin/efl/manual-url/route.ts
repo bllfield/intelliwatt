@@ -220,7 +220,8 @@ export async function POST(req: NextRequest) {
           try {
             const repPuct = template.repPuctCertificate ?? null;
             const ver = template.eflVersionCode ?? null;
-            const updated = templatePersisted
+          const shouldAutoResolveQueue = templatePersisted && passStrength === "STRONG";
+          const updated = shouldAutoResolveQueue
               ? await (prisma as any).eflParseReviewQueue.updateMany({
               where: {
                 resolvedAt: null,
