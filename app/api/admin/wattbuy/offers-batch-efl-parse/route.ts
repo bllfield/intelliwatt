@@ -608,6 +608,36 @@ export async function POST(req: NextRequest) {
                   validation: planRulesValidation as any,
                 });
                 templateAction = "CREATED";
+
+                // If this EFL was previously quarantined (OPEN review-queue item) and it now
+                // PASSes strongly *and* we successfully persisted a template, auto-resolve the
+                // matching OPEN queue row(s). This keeps the quarantine list focused on items
+                // that still need attention.
+                if (passStrength === "STRONG") {
+                  try {
+                    const repPuct = det.repPuctCertificate ?? null;
+                    const ver = det.eflVersionCode ?? null;
+                    await (prisma as any).eflParseReviewQueue.updateMany({
+                      where: {
+                        resolvedAt: null,
+                        OR: [
+                          repPuct && ver
+                            ? { repPuctCertificate: repPuct, eflVersionCode: ver }
+                            : undefined,
+                          resolvedPdfUrl ? { eflUrl: resolvedPdfUrl } : undefined,
+                          det.eflPdfSha256 ? { eflPdfSha256: det.eflPdfSha256 } : undefined,
+                        ].filter(Boolean),
+                      },
+                      data: {
+                        resolvedAt: new Date(),
+                        resolvedBy: "auto",
+                        resolutionNotes: `AUTO_RESOLVED: PASS STRONG + template persisted via wattbuy_batch. offerId=${offerId ?? "—"} sha256=${det.eflPdfSha256 ?? "—"}`,
+                      },
+                    });
+                  } catch {
+                    // Best-effort only; never fail a successful template write due to queue bookkeeping.
+                  }
+                }
               }
             }
           } catch {
