@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { ManualFactCardLoader } from "@/components/admin/ManualFactCardLoader";
 
 type Json = any;
 
@@ -74,15 +75,14 @@ export default function FactCardOpsPage() {
   const { token, setToken } = useLocalToken();
   const ready = useMemo(() => Boolean(token), [token]);
 
-  // Shared "manual loader" state (prefilled by table buttons)
-  const [manualEflUrl, setManualEflUrl] = useState("");
-  const [manualMode, setManualMode] = useState<"test" | "live">("test");
+  // Manual loader is rendered at the bottom; we prefill it from Queue/Templates/Batch via this state.
+  const [manualPrefillUrl, setManualPrefillUrl] = useState("");
   const manualRef = useRef<HTMLDivElement | null>(null);
 
   function loadIntoManual(args: { eflUrl?: string | null }) {
     const u = (args.eflUrl ?? "").trim();
     if (!u) return;
-    setManualEflUrl(u);
+    setManualPrefillUrl(u);
     setTimeout(() => {
       manualRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 50);
@@ -326,91 +326,6 @@ export default function FactCardOpsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready]);
 
-  // ---------------- Manual loader (URL + upload + pasted text) ----------------
-  const [manualRunning, setManualRunning] = useState(false);
-  const [manualOut, setManualOut] = useState<Json | null>(null);
-  const [manualErr, setManualErr] = useState<string | null>(null);
-  const [manualForceUploadReparse, setManualForceUploadReparse] = useState(true);
-  const [manualUploadLabel, setManualUploadLabel] = useState("No file selected");
-  const [manualText, setManualText] = useState("");
-  const [manualTextRunning, setManualTextRunning] = useState(false);
-
-  async function runManualByUrl() {
-    if (!token) {
-      setManualErr("Admin token required.");
-      return;
-    }
-    const u = manualEflUrl.trim();
-    if (!u) {
-      setManualErr("Paste an EFL URL first.");
-      return;
-    }
-    setManualRunning(true);
-    setManualErr(null);
-    setManualOut(null);
-    try {
-      const res = await fetch("/api/admin/efl/run-link", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-admin-token": token,
-        },
-        body: JSON.stringify({ eflUrl: u, mode: manualMode }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`);
-      setManualOut(data);
-    } catch (e: any) {
-      setManualErr(e?.message || "Run-link failed.");
-    } finally {
-      setManualRunning(false);
-    }
-  }
-
-  async function runManualText() {
-    const trimmed = manualText.trim();
-    if (!trimmed) {
-      setManualErr("Paste EFL text first.");
-      return;
-    }
-    setManualTextRunning(true);
-    setManualErr(null);
-    setManualOut(null);
-    try {
-      const res = await fetch("/api/admin/efl/manual-text", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rawText: trimmed }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`);
-      setManualOut(data);
-    } catch (e: any) {
-      setManualErr(e?.message || "Manual text failed.");
-    } finally {
-      setManualTextRunning(false);
-    }
-  }
-
-  async function runManualUpload(file: File) {
-    setManualRunning(true);
-    setManualErr(null);
-    setManualOut(null);
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
-      const url = manualForceUploadReparse ? "/api/admin/efl/manual-upload?force=1" : "/api/admin/efl/manual-upload";
-      const res = await fetch(url, { method: "POST", body: fd });
-      const data = await res.json();
-      if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`);
-      setManualOut(data);
-    } catch (e: any) {
-      setManualErr(e?.message || "Manual upload failed.");
-    } finally {
-      setManualRunning(false);
-    }
-  }
-
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6">
       <header className="space-y-1">
@@ -598,95 +513,6 @@ export default function FactCardOpsPage() {
         </div>
       </section>
 
-      <section ref={manualRef} className="rounded-2xl border bg-white p-4 space-y-3">
-        <div className="flex items-baseline justify-between gap-3">
-          <div>
-            <h2 className="font-medium">Manual Fact Card Loader</h2>
-            <div className="text-xs text-gray-600">Paste a link, upload a PDF, or paste extracted text. Buttons in Queue/Templates prefill the link here.</div>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              className="px-2 py-1 rounded border text-xs hover:bg-gray-50 disabled:opacity-60"
-              disabled={!manualEflUrl.trim()}
-              onClick={async () => {
-                const ok = await copyToClipboard(manualEflUrl.trim());
-                if (!ok) setManualErr("Copy failed.");
-              }}
-            >
-              Copy URL
-            </button>
-            <button
-              className="px-2 py-1 rounded border text-xs hover:bg-gray-50 disabled:opacity-60"
-              disabled={!manualEflUrl.trim()}
-              onClick={() => {
-                const u = manualEflUrl.trim();
-                if (!u) return;
-                window.open(u, "_blank", "noopener,noreferrer");
-              }}
-            >
-              Open
-            </button>
-          </div>
-        </div>
-
-        <div className="grid gap-3 md:grid-cols-3">
-          <div className="md:col-span-2">
-            <label className="block text-sm mb-1">EFL URL</label>
-            <input className="w-full rounded-lg border px-3 py-2" value={manualEflUrl} onChange={(e) => setManualEflUrl(e.target.value)} placeholder="https://.../electricity-facts-label.pdf" />
-          </div>
-          <div>
-            <label className="block text-sm mb-1">Mode</label>
-            <select className="w-full rounded-lg border px-3 py-2" value={manualMode} onChange={(e) => setManualMode(e.target.value as any)}>
-              <option value="test">test (no DB writes)</option>
-              <option value="live">live (persist template)</option>
-            </select>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60"
-            onClick={() => void runManualByUrl()}
-            disabled={!ready || manualRunning}
-          >
-            {manualRunning ? "Running…" : "Run from URL"}
-          </button>
-
-          <label className="text-xs text-gray-700 inline-flex items-center gap-2">
-            <input type="checkbox" checked={manualForceUploadReparse} onChange={(e) => setManualForceUploadReparse(e.target.checked)} />
-            Force reparse (upload)
-          </label>
-
-          <label className="px-3 py-2 rounded-lg border hover:bg-gray-50 cursor-pointer text-sm">
-            Upload PDF
-            <input
-              type="file"
-              accept="application/pdf,.pdf"
-              className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                setManualUploadLabel(f ? f.name : "No file selected");
-                if (f) void runManualUpload(f);
-              }}
-            />
-          </label>
-          <span className="text-xs text-gray-600">{manualUploadLabel}</span>
-        </div>
-
-        <div className="grid gap-2">
-          <label className="block text-sm">Or paste EFL text</label>
-          <textarea className="w-full rounded-lg border px-3 py-2 text-xs font-mono h-28" value={manualText} onChange={(e) => setManualText(e.target.value)} placeholder="Paste EFL text…" />
-          <button className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60 w-fit" onClick={() => void runManualText()} disabled={manualTextRunning}>
-            {manualTextRunning ? "Processing…" : "Process pasted text"}
-          </button>
-        </div>
-
-        {manualErr ? <div className="text-sm text-red-700">{manualErr}</div> : null}
-        {manualOut ? (
-          <pre className="text-xs bg-gray-50 rounded-lg p-3 overflow-auto max-h-[520px]">{pretty(manualOut)}</pre>
-        ) : null}
-      </section>
-
       <section className="rounded-2xl border bg-white p-4 space-y-3">
         <div className="flex items-center justify-between gap-3">
           <h2 className="font-medium">EFL Parse Review Queue</h2>
@@ -839,6 +665,11 @@ export default function FactCardOpsPage() {
             <pre className="text-xs bg-gray-50 rounded-lg p-3 overflow-auto max-h-72">{batchRaw ? pretty(batchRaw) : "—"}</pre>
           </div>
         </div>
+      </section>
+
+      {/* Manual loader lives at the bottom (per ops workflow) */}
+      <section ref={manualRef} className="rounded-2xl border bg-white p-4">
+        <ManualFactCardLoader adminToken={token} prefillEflUrl={manualPrefillUrl} />
       </section>
     </div>
   );
