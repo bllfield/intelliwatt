@@ -40,12 +40,13 @@ Contract Term                                           1 Month
     expect(tdsp.snippet ?? "").toContain("$4.23");
 
     // This test intentionally mirrors the "admin pipeline output" shape where rateStructure
-    // may be a tier array with energyChargeCentsPerKwh rather than the canonical contract.
+    // may be a tier array rather than the canonical contract, and field names can vary.
     const v = await validateEflAvgPriceTable({
       rawText,
       planRules: {},
       rateStructure: [
-        { energyChargeCentsPerKwh: 14.3, minUsageKwh: null, maxUsageKwh: null },
+        // Common variant names seen in real-world outputs:
+        { energyChargeCentsPerkWh: 14.3, minimumUsageKWh: null, maximumUsageKWh: null },
       ],
     });
 

@@ -652,14 +652,29 @@ function getEnergyRateCentsForUsage(
   if (tiersB && tiersB.length) {
     const t = tiersB.find(
       (x: any) =>
-        usageKwh >= (x.tierMinKWh ?? x.minUsageKwh ?? 0) &&
-        ((x.tierMaxKWh ?? x.maxUsageKwh) == null ||
-          usageKwh < (x.tierMaxKWh ?? x.maxUsageKwh)),
+        usageKwh >=
+          (x.tierMinKWh ??
+            x.minUsageKwh ??
+            x.minimumUsageKWh ??
+            x.minimumUsageKwh ??
+            0) &&
+        ((x.tierMaxKWh ??
+          x.maxUsageKwh ??
+          x.maximumUsageKWh ??
+          x.maximumUsageKwh) == null ||
+          usageKwh <
+            (x.tierMaxKWh ??
+              x.maxUsageKwh ??
+              x.maximumUsageKWh ??
+              x.maximumUsageKwh)),
     );
     const rate =
       t?.energyRateCentsPerKWh ??
       t?.energyChargeCentsPerKwh ??
-      t?.energyChargeCentsPerKWh;
+      t?.energyChargeCentsPerKWh ??
+      // Common model typo/variant: "...PerkWh" with lowercase k in "kWh"
+      t?.energyChargeCentsPerkWh ??
+      t?.energyChargeCentsPerkWh;
     if (rate != null) {
       return Number(rate);
     }
