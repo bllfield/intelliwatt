@@ -439,23 +439,29 @@ export async function POST(req: NextRequest) {
                 ? (solved as any).derivedRateStructure
                 : pipeline.rateStructure;
 
-            if (derivedPlanRules && derivedRateStructure && det.eflPdfSha256) {
-              const planRulesValidation = validatePlanRules(derivedPlanRules as any);
-              await upsertRatePlanFromEfl({
-                mode: "live",
-                eflUrl,
-                repPuctCertificate: det.repPuctCertificate ?? null,
-                eflVersionCode: det.eflVersionCode ?? null,
-                eflPdfSha256: det.eflPdfSha256,
-                providerName: supplier,
-                planName,
-                planRules: derivedPlanRules as any,
-                rateStructure: derivedRateStructure as any,
-                validation: planRulesValidation as any,
-              });
-              templateAction = "CREATED";
-            } else {
+            if (!derivedPlanRules || !derivedRateStructure || !det.eflPdfSha256) {
               templateAction = "SKIPPED";
+            } else {
+              const planRulesValidation = validatePlanRules(derivedPlanRules as any);
+              if (planRulesValidation?.requiresManualReview === true) {
+                // Guardrail: do not persist rateStructure for ambiguous/invalid shapes.
+                // IMPORTANT: don't claim CREATED if we didn't store a usable template.
+                templateAction = "SKIPPED";
+              } else {
+                await upsertRatePlanFromEfl({
+                  mode: "live",
+                  eflUrl,
+                  repPuctCertificate: det.repPuctCertificate ?? null,
+                  eflVersionCode: det.eflVersionCode ?? null,
+                  eflPdfSha256: det.eflPdfSha256,
+                  providerName: supplier,
+                  planName,
+                  planRules: derivedPlanRules as any,
+                  rateStructure: derivedRateStructure as any,
+                  validation: planRulesValidation as any,
+                });
+                templateAction = "CREATED";
+              }
             }
           } catch {
             // Best-effort: if persistence fails, we still return the pipeline
