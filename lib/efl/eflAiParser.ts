@@ -242,6 +242,28 @@ export async function parseEflTextWithAi(opts: {
       (planRules as any).currentBillEnergyRateCents = deterministicSingleEnergy;
     }
 
+    // Even in deterministic-only mode, prefer the Disclosure Chart metadata when present.
+    // Many EFLs are column-aligned ("Type of Product   Variable Rate") with no colon.
+    const { rateType: fallbackRateType, termMonths: fallbackTerm } =
+      fallbackExtractRateTypeAndTerm(rawText);
+
+    if (
+      fallbackRateType &&
+      // Never downgrade explicit TOU classification.
+      planRules.rateType !== "TIME_OF_USE"
+    ) {
+      planRules.rateType = fallbackRateType;
+      warnings.push("Fallback filled rateType from 'Type of Product' line.");
+      if (!(planRules as any).planType && (fallbackRateType === "FIXED" || fallbackRateType === "VARIABLE")) {
+        (planRules as any).planType = "flat";
+      }
+    }
+
+    if (fallbackTerm != null && typeof (planRules as any).termMonths !== "number") {
+      (planRules as any).termMonths = fallbackTerm;
+      warnings.push("Fallback filled contract term (months) from 'Contract Term' line.");
+    }
+
     if (deterministicTdspIncluded != null) {
       planRules.tdspDeliveryIncludedInEnergyCharge = deterministicTdspIncluded;
     }
@@ -473,9 +495,6 @@ OUTPUT CONTRACT:
 
     if (shouldOverrideTiers) {
       planRules.usageTiers = deterministicTiers;
-      if (!planRules.rateType) {
-        planRules.rateType = "FIXED";
-      }
       if (!(planRules as any).planType) {
         (planRules as any).planType = "flat";
       }
@@ -540,11 +559,16 @@ OUTPUT CONTRACT:
   const { rateType: fallbackRateType, termMonths: fallbackTerm } =
     fallbackExtractRateTypeAndTerm(fallbackSourceText);
 
-  if (!planRules.rateType && fallbackRateType) {
+  // Prefer the EFL's Disclosure Chart classification when present. Do NOT let
+  // earlier "energy charge" heuristics force FIXED when the EFL says VARIABLE.
+  if (
+    fallbackRateType &&
+    (planRules.rateType == null ||
+      // Allow VARIABLE to override a previously-inferred FIXED classification.
+      (planRules.rateType === "FIXED" && fallbackRateType === "VARIABLE"))
+  ) {
     planRules.rateType = fallbackRateType;
-    warnings.push(
-      "Fallback filled rateType from 'Type of Product' line.",
-    );
+    warnings.push("Fallback filled rateType from 'Type of Product' line.");
   }
 
   // Ensure RateStructure.type tracks a clear FIXED classification when present.
@@ -564,7 +588,7 @@ OUTPUT CONTRACT:
     let inferredPlanType: string | null = null;
     if (fallbackRateType === "FIXED") inferredPlanType = "flat";
     else if (fallbackRateType === "TIME_OF_USE") inferredPlanType = "tou";
-    else if (fallbackRateType === "VARIABLE") inferredPlanType = "other";
+    else if (fallbackRateType === "VARIABLE") inferredPlanType = "flat";
 
     if (inferredPlanType) {
       (planRules as any).planType = inferredPlanType;
@@ -587,6 +611,17 @@ OUTPUT CONTRACT:
   const singleEnergy =
     deterministicSingleEnergy ??
     fallbackExtractSingleEnergyChargeCents(fallbackSourceText);
+
+  // Last-resort inference: if we have strong evidence of a single/tiered energy
+  // charge but the Disclosure Chart didn't provide a rate type, treat as FIXED.
+  if (
+    !planRules.rateType &&
+    (singleEnergy != null ||
+      (Array.isArray(planRules.usageTiers) && planRules.usageTiers.length > 0))
+  ) {
+    planRules.rateType = "FIXED";
+    warnings.push("Fallback inferred rateType=FIXED from Energy Charge line(s).");
+  }
 
   if (
     singleEnergy != null &&
@@ -1522,7 +1557,12 @@ function fallbackExtractRateTypeAndTerm(text: string): {
   let rateType: "FIXED" | "VARIABLE" | "TIME_OF_USE" | null = null;
   let termMonths: number | null = null;
 
-  const typeMatch = text.match(/Type\s*of\s*Product\s*:\s*(.+)$/im);
+  // Some pdftotext outputs render the Disclosure Chart as fixed-width columns,
+  // e.g. "Type of Product                                         Variable Rate"
+  // (no colon). Support both ":" and multi-space column separators.
+  const typeMatch = text.match(
+    /^\s*Type\s*of\s*Product(?::|\s+)\s*(.+)$/im,
+  );
   const typeLine = typeMatch?.[1]?.trim() ?? null;
   if (typeLine) {
     if (/fixed/i.test(typeLine)) {
@@ -1536,14 +1576,14 @@ function fallbackExtractRateTypeAndTerm(text: string): {
     }
   }
 
+  // Contract term can be "12 Months" or "1 Month" and may also be column-aligned
+  // with no colon.
   const termMatch = text.match(
-    /Contract\s*Term\s*:\s*(\d{1,3})\s*Months?/i,
+    /^\s*Contract\s*Term(?::|\s+)\s*(\d{1,3})\s*Month(?:s)?\b/im,
   );
   if (termMatch?.[1]) {
     const n = Number(termMatch[1]);
-    if (Number.isFinite(n)) {
-      termMonths = n;
-    }
+    if (Number.isFinite(n)) termMonths = n;
   }
 
   return { rateType, termMonths };

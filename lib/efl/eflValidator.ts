@@ -171,7 +171,8 @@ function parseMoneyDollars(s: string): number | null {
 function parseCentsPerKwhFromLine(line: string): number | null {
   const cleaned = line.replace(/,/g, "");
   const matches = Array.from(
-    cleaned.matchAll(/(\d+(?:\.\d+)?)\s*¢\s*(?:\/\s*kWh|per\s*kWh)/gi),
+    // Handle both "/" and the unicode fraction slash "⁄" that sometimes appears in pdftotext output.
+    cleaned.matchAll(/(\d+(?:\.\d+)?)\s*¢\s*(?:[\/⁄]\s*kWh|per\s*kWh)/gi),
   );
   if (matches.length === 0) return null;
 
@@ -219,7 +220,8 @@ function parseMonthlyDollarsFromLine(line: string): number | null {
 function parseCentsPerKwhToken(s: string): number | null {
   const cleaned = s.replace(/,/g, "");
   const m = cleaned.match(
-    /(\d+(?:\.\d+)?)\s*¢\s*(?:\/\s*kwh|per\s*kwh)/i,
+    // Handle both "/" and the unicode fraction slash "⁄" that sometimes appears in pdftotext output.
+    /(\d+(?:\.\d+)?)\s*¢\s*(?:[\/⁄]\s*kwh|per\s*kwh)/i,
   );
   if (!m?.[1]) return null;
   const n = Number(m[1]);
@@ -233,18 +235,18 @@ function pickBestTdspPerKwhLine(
     (l) =>
       /(TDU|TDSP)/i.test(l) &&
       /Delivery/i.test(l) &&
-      /(¢\s*(?:\/\s*kWh|per\s*kWh))/i.test(l),
+      /(¢\s*(?:[\/⁄]\s*kWh|per\s*kWh))/i.test(l),
   );
   if (best) return { value: parseCentsPerKwhFromLine(best), line: best };
 
   const next = lines.find(
     (l) =>
-      /Delivery/i.test(l) && /(¢\s*(?:\/\s*kWh|per\s*kWh))/i.test(l),
+      /Delivery/i.test(l) && /(¢\s*(?:[\/⁄]\s*kWh|per\s*kWh))/i.test(l),
   );
   if (next) return { value: parseCentsPerKwhFromLine(next), line: next };
 
   const any = lines.find((l) =>
-    /(¢\s*(?:\/\s*kWh|per\s*kWh))/i.test(l),
+    /(¢\s*(?:[\/⁄]\s*kWh|per\s*kWh))/i.test(l),
   );
   if (any) return { value: parseCentsPerKwhFromLine(any), line: any };
 
@@ -309,25 +311,23 @@ export function extractEflTdspCharges(rawText: string): EflTdspCharges {
   if (hitIdx.length > 0) {
     const set = new Set<string>();
     for (const i of hitIdx) {
-      const prev2 = lines[i - 2];
-      const prev = lines[i - 1];
-      const cur = lines[i];
-      const next = lines[i + 1];
-      const next2 = lines[i + 2];
-
-      if (prev2) set.add(prev2);
-      if (prev) set.add(prev);
-      if (cur) set.add(cur);
-      if (next) set.add(next);
-      if (next2) set.add(next2);
+      // Expand the window: in many EFL "Electricity Price" side-by-side tables,
+      // the word "Delivery" appears several rows above the numeric ¢/kWh value.
+      // A wider window avoids missing the delivery-charge row.
+      for (let d = -5; d <= 5; d++) {
+        const l = lines[i + d];
+        if (l) set.add(l);
+      }
 
       // Include simple joined windows so header/context + numeric values can be
-      // parsed even when split across lines.
-      if (cur && next) set.add(`${cur} ${next}`.trim());
-      if (next && next2) set.add(`${next} ${next2}`.trim());
-      if (cur && next2) set.add(`${cur} ${next2}`.trim());
-      if (prev && cur) set.add(`${prev} ${cur}`.trim());
-      if (prev2 && cur) set.add(`${prev2} ${cur}`.trim());
+      // parsed even when split across lines or columns.
+      for (let d = -2; d <= 2; d++) {
+        const a = lines[i + d];
+        const b = lines[i + d + 1];
+        const c = lines[i + d + 2];
+        if (a && b) set.add(`${a} ${b}`.trim());
+        if (a && b && c) set.add(`${a} ${b} ${c}`.trim());
+      }
     }
     searchLines = Array.from(set);
   }
@@ -335,8 +335,10 @@ export function extractEflTdspCharges(rawText: string): EflTdspCharges {
   const perPick = pickBestTdspPerKwhLine(searchLines);
   const moPick = pickBestTdspMonthlyLine(searchLines);
 
-  const perKwhCents = perPick.value;
+  let perKwhCents = perPick.value;
+  let perKwhLine: string | null = perPick.line;
   let monthlyDollars = moPick.dollars;
+  let monthlyLine: string | null = moPick.line;
 
   // Extra robustness: in many EFL tables, "per month" appears on a header line
   // and the "$4.23" value is on the next line (or even a couple lines later),
@@ -365,6 +367,29 @@ export function extractEflTdspCharges(rawText: string): EflTdspCharges {
         );
         if (parsed != null) {
           monthlyDollars = parsed;
+          monthlyLine = candidate;
+          break;
+        }
+      }
+    }
+  }
+
+  // Mirror the monthly scan for the per-kWh delivery charge: in side-by-side tables
+  // the "per kWh" header is often separated from the numeric value row.
+  if (perKwhCents == null) {
+    const perKwhIdx = lines.findIndex(
+      (l) =>
+        /per\s*kwh/i.test(l) && (/per\s*month/i.test(l) || /billing\s*cycle/i.test(l) || /month/i.test(l)),
+    );
+    if (perKwhIdx >= 0) {
+      for (let j = 1; j <= 6; j++) {
+        const candidate = lines[perKwhIdx + j];
+        if (!candidate) continue;
+        if (!/¢/.test(candidate)) continue;
+        const parsed = parseCentsPerKwhFromLine(candidate);
+        if (parsed != null) {
+          perKwhCents = parsed;
+          perKwhLine = candidate;
           break;
         }
       }
@@ -373,7 +398,7 @@ export function extractEflTdspCharges(rawText: string): EflTdspCharges {
   const monthlyCents =
     monthlyDollars == null ? null : Math.round(monthlyDollars * 100);
 
-  const snippetLines = [moPick.line, perPick.line].filter(
+  const snippetLines = [monthlyLine, perKwhLine].filter(
     (x): x is string => !!x,
   );
   const snippet = snippetLines.length ? snippetLines.join("\n") : null;
@@ -627,11 +652,16 @@ function getEnergyRateCentsForUsage(
   if (tiersB && tiersB.length) {
     const t = tiersB.find(
       (x: any) =>
-        usageKwh >= (x.tierMinKWh ?? 0) &&
-        (x.tierMaxKWh == null || usageKwh < x.tierMaxKWh),
+        usageKwh >= (x.tierMinKWh ?? x.minUsageKwh ?? 0) &&
+        ((x.tierMaxKWh ?? x.maxUsageKwh) == null ||
+          usageKwh < (x.tierMaxKWh ?? x.maxUsageKwh)),
     );
-    if (t?.energyRateCentsPerKWh != null) {
-      return Number(t.energyRateCentsPerKWh);
+    const rate =
+      t?.energyRateCentsPerKWh ??
+      t?.energyChargeCentsPerKwh ??
+      t?.energyChargeCentsPerKWh;
+    if (rate != null) {
+      return Number(rate);
     }
   }
 
