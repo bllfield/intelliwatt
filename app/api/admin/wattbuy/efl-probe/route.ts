@@ -252,7 +252,7 @@ export async function POST(req: NextRequest) {
             offerId,
             planName,
             supplierName,
-            eflUrl,
+            eflUrl: resolvedPdfUrl,
             pdfSha256,
             status: "parse_error",
             notes:
@@ -266,7 +266,7 @@ export async function POST(req: NextRequest) {
           offerId,
           planName,
           supplierName,
-          eflUrl,
+          eflUrl: eflSeedUrl,
           pdfSha256,
           status: "fetch_error",
           notes:
