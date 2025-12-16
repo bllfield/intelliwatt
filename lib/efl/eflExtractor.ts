@@ -431,6 +431,74 @@ export function extractEflVersionCodeFromText(text: string): string | null {
   return extractEflVersionCode(text);
 }
 
+// Exported for admin template persistence: best-effort label extraction from the EFL header/footer.
+export function extractProviderAndPlanNameFromEflText(rawText: string): {
+  providerName: string | null;
+  planName: string | null;
+} {
+  const lines = (rawText || "")
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+
+  const header = lines.slice(0, 30);
+
+  const isNoise = (l: string): boolean => {
+    const s = l.toLowerCase();
+    return (
+      s.includes("electricity facts label") ||
+      s === "electricity facts label" ||
+      s.includes("(efl)") ||
+      s.includes("service area") ||
+      s.includes("delivery") ||
+      s.includes("tdu") ||
+      s.includes("tdsp") ||
+      s.startsWith("date:") ||
+      s.includes("average monthly use") ||
+      s.includes("average price per") ||
+      s.includes("puct certificate") ||
+      s.startsWith("puct") ||
+      s.startsWith("rep name:") ||
+      s.startsWith("rep name") ||
+      /^[0-9]{1,2}[-/][a-z]{3}[-/][0-9]{4}$/i.test(l) || // "08-Dec-2025"
+      /^[a-z]+\s+\d{1,2},\s+\d{4}$/i.test(l) // "October 16, 2025"
+    );
+  };
+
+  const headerCandidates = header.filter((l) => !isNoise(l));
+
+  let providerName: string | null = headerCandidates[0] ?? null;
+  let planName: string | null = headerCandidates[1] ?? null;
+
+  // Footer fallback for provider: "dba <Brand>" (common in REP legal footer lines)
+  if (!providerName) {
+    const dbaLine = lines.find((l) => /dba\s+/i.test(l)) ?? null;
+    if (dbaLine) {
+      const m = dbaLine.match(/dba\s+(.+?)(?:,|$)/i);
+      if (m?.[1]) providerName = m[1].trim();
+    }
+  }
+
+  // Footer fallback for provider: "REP Name: <Brand>"
+  if (!providerName) {
+    const repLine = lines.find((l) => /^rep\s+name\s*:/i.test(l)) ?? null;
+    if (repLine) {
+      const m = repLine.match(/^rep\s+name\s*:\s*(.+)$/i);
+      if (m?.[1]) providerName = m[1].trim();
+    }
+  }
+
+  // Normalize overly-long provider strings (keep first clause)
+  if (providerName) {
+    providerName = providerName.split(" / ")[0]?.split(" • ")[0]?.trim() || providerName;
+  }
+
+  return {
+    providerName: providerName && providerName.length >= 2 ? providerName : null,
+    planName: planName && planName.length >= 2 ? planName : null,
+  };
+}
+
 /**
  * Extract text from a PDF using the droplet `pdftotext` helper only.
  *

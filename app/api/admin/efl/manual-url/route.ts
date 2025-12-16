@@ -5,6 +5,7 @@ import { fetchEflPdfFromUrl } from "@/lib/efl/fetchEflPdf";
 import { getOrCreateEflTemplate } from "@/lib/efl/getOrCreateEflTemplate";
 import { upsertRatePlanFromEfl } from "@/lib/efl/planPersistence";
 import { validatePlanRules, planRulesToRateStructure } from "@/lib/efl/planEngine";
+import { extractProviderAndPlanNameFromEflText } from "@/lib/efl/eflExtractor";
 import { inferTdspTerritoryFromEflText } from "@/lib/efl/eflValidator";
 import { solveEflValidationGaps } from "@/lib/efl/validation/solveEflValidationGaps";
 import { prisma } from "@/lib/db";
@@ -145,6 +146,8 @@ export async function POST(req: NextRequest) {
             return Number.isFinite(v) ? v : null;
           };
 
+          const names = extractProviderAndPlanNameFromEflText(rawText);
+
           const saved = await upsertRatePlanFromEfl({
             mode: "live",
             eflUrl: effectiveEflUrl,
@@ -158,8 +161,8 @@ export async function POST(req: NextRequest) {
             rate500: pick(500),
             rate1000: pick(1000),
             rate2000: pick(2000),
-            providerName: null,
-            planName: null,
+            providerName: names.providerName,
+            planName: names.planName,
             planRules: planRules as any,
             rateStructure: canonicalRateStructure as any,
             validation: prValidation as any,
