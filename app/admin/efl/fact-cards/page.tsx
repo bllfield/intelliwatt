@@ -1134,9 +1134,24 @@ export default function FactCardOpsPage() {
                     <td className="px-2 py-2">{r.supplier ?? "-"}</td>
                     <td className="px-2 py-2">{r.planName ?? "-"}</td>
                     <td className="px-2 py-2 text-right">{typeof r.termMonths === "number" ? `${r.termMonths} mo` : "-"}</td>
-                    <td className="px-2 py-2 text-right">{typeof r.rate500 === "number" ? r.rate500.toFixed(3) : "—"}</td>
-                    <td className="px-2 py-2 text-right">{typeof r.rate1000 === "number" ? r.rate1000.toFixed(3) : "—"}</td>
-                    <td className="px-2 py-2 text-right">{typeof r.rate2000 === "number" ? r.rate2000.toFixed(3) : "—"}</td>
+                    <td className="px-2 py-2 text-right">
+                      <div className="font-mono">{typeof r.rate500 === "number" ? r.rate500.toFixed(3) : "—"}</div>
+                      <div className="font-mono text-[10px] text-gray-600">
+                        {typeof r.modeledRate500 === "number" ? `model ${r.modeledRate500.toFixed(3)}` : "model —"}
+                      </div>
+                    </td>
+                    <td className="px-2 py-2 text-right">
+                      <div className="font-mono">{typeof r.rate1000 === "number" ? r.rate1000.toFixed(3) : "—"}</div>
+                      <div className="font-mono text-[10px] text-gray-600">
+                        {typeof r.modeledRate1000 === "number" ? `model ${r.modeledRate1000.toFixed(3)}` : "model —"}
+                      </div>
+                    </td>
+                    <td className="px-2 py-2 text-right">
+                      <div className="font-mono">{typeof r.rate2000 === "number" ? r.rate2000.toFixed(3) : "—"}</div>
+                      <div className="font-mono text-[10px] text-gray-600">
+                        {typeof r.modeledRate2000 === "number" ? `model ${r.modeledRate2000.toFixed(3)}` : "model —"}
+                      </div>
+                    </td>
                     <td className="px-2 py-2">{r.eflVersionCode ?? "-"}</td>
                     <td className="px-2 py-2">
                       <div className="flex flex-wrap gap-2">

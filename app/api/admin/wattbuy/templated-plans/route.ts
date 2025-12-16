@@ -6,6 +6,25 @@ export const dynamic = "force-dynamic";
 
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 
+type TdspDelivery = { monthlyFeeCents: number; deliveryCentsPerKwh: number };
+
+function mapUtilityIdToTdspCode(utilityId: string | null | undefined): string | null {
+  const u = String(utilityId ?? "").trim();
+  if (!u) return null;
+  const upper = u.toUpperCase();
+  // Already normalized TdspCode (manual loader tends to write these).
+  if (["ONCOR", "CENTERPOINT", "AEP_NORTH", "AEP_CENTRAL", "TNMP"].includes(upper)) return upper;
+  // WattBuy utilityIDs (EIDs) we see in practice.
+  const byWattbuyId: Record<string, string> = {
+    "44372": "ONCOR",
+    "8901": "CENTERPOINT",
+    "20404": "AEP_NORTH",
+    "3278": "AEP_CENTRAL",
+    "40051": "TNMP",
+  };
+  return byWattbuyId[u] ?? null;
+}
+
 function inferTermMonths(planName: string | null | undefined): number | null {
   if (!planName) return null;
   const s = String(planName);
@@ -136,6 +155,23 @@ function computeAvgCentsPerKwhFromRateStructure(
   return totalCents / usageKwh;
 }
 
+function computeAllInAvgCentsPerKwhFromRateStructure(
+  rateStructure: any,
+  usageKwh: number,
+  tdsp: TdspDelivery | null,
+): number | null {
+  const supplyAvg = computeAvgCentsPerKwhFromRateStructure(rateStructure, usageKwh);
+  if (supplyAvg == null) return null;
+  // If the REP rate already includes TDSP delivery, do NOT add utility delivery charges.
+  if (rateStructure?.tdspDeliveryIncludedInEnergyCharge === true) return supplyAvg;
+  // "All-in model" requires a known TDSP tariff snapshot; otherwise we don't show a misleading value.
+  if (!tdsp) return null;
+  const tdspMonthly = toNum(tdsp.monthlyFeeCents) ?? 0;
+  const tdspPerKwh = toNum(tdsp.deliveryCentsPerKwh) ?? 0;
+  const totalCents = supplyAvg * usageKwh + tdspMonthly + tdspPerKwh * usageKwh;
+  return totalCents / usageKwh;
+}
+
 type Row = {
   id: string;
   utilityId: string;
@@ -146,6 +182,9 @@ type Row = {
   rate500: number | null;
   rate1000: number | null;
   rate2000: number | null;
+  modeledRate500: number | null;
+  modeledRate1000: number | null;
+  modeledRate2000: number | null;
   cancelFee: string | null;
   eflUrl: string | null;
   eflPdfSha256: string | null;
@@ -235,38 +274,74 @@ export async function GET(req: NextRequest) {
 
     const totalCount = await (prisma as any).ratePlan.count({ where });
 
-    const rows: Row[] = (plans as any[]).map((p) => ({
-      id: p.id,
-      utilityId: p.utilityId,
-      state: p.state,
-      supplier: p.supplier ?? null,
-      planName: p.planName ?? null,
-      termMonths:
-        typeof p.termMonths === "number"
-          ? p.termMonths
-          : inferTermMonths(p.planName ?? null),
-      rate500:
-        typeof p.rate500 === "number"
-          ? p.rate500
-          : computeAvgCentsPerKwhFromRateStructure(p.rateStructure, 500),
-      rate1000:
-        typeof p.rate1000 === "number"
-          ? p.rate1000
-          : computeAvgCentsPerKwhFromRateStructure(p.rateStructure, 1000),
-      rate2000:
-        typeof p.rate2000 === "number"
-          ? p.rate2000
-          : computeAvgCentsPerKwhFromRateStructure(p.rateStructure, 2000),
-      cancelFee: p.cancelFee ?? null,
-      eflUrl: p.eflUrl ?? null,
-      eflPdfSha256: p.eflPdfSha256 ?? null,
-      repPuctCertificate: p.repPuctCertificate ?? null,
-      eflVersionCode: p.eflVersionCode ?? null,
-      eflRequiresManualReview: Boolean(p.eflRequiresManualReview),
-      updatedAt: new Date(p.updatedAt).toISOString(),
-      lastSeenAt: new Date(p.lastSeenAt).toISOString(),
-      rateStructure: p.rateStructure ?? null,
-    }));
+    const tdspCache = new Map<string, Promise<TdspDelivery | null>>();
+    const getTdsp = async (utilId: string): Promise<TdspDelivery | null> => {
+      const code = mapUtilityIdToTdspCode(utilId);
+      if (!code) return null;
+      const cached = tdspCache.get(code);
+      if (cached) return cached;
+      const p = (async () => {
+        const at = new Date();
+        const row =
+          (await (prisma as any).tdspRateSnapshot.findFirst({
+            where: { tdsp: code, effectiveAt: { lte: at } },
+            orderBy: { effectiveAt: "desc" },
+          })) ||
+          (await (prisma as any).tdspRateSnapshot.findFirst({
+            where: { tdsp: code },
+            orderBy: { createdAt: "desc" },
+          }));
+        if (!row) return null;
+        const payload: any = row.payload ?? {};
+        return {
+          monthlyFeeCents: Number(payload?.monthlyFeeCents || 0),
+          deliveryCentsPerKwh: Number(payload?.deliveryCentsPerKwh || 0),
+        } satisfies TdspDelivery;
+      })();
+      tdspCache.set(code, p);
+      return p;
+    };
+
+    const rows: Row[] = await Promise.all(
+      (plans as any[]).map(async (p) => {
+        const tdsp = await getTdsp(p.utilityId);
+        return {
+          id: p.id,
+          utilityId: p.utilityId,
+          state: p.state,
+          supplier: p.supplier ?? null,
+          planName: p.planName ?? null,
+          termMonths:
+            typeof p.termMonths === "number"
+              ? p.termMonths
+              : inferTermMonths(p.planName ?? null),
+          rate500:
+            typeof p.rate500 === "number"
+              ? p.rate500
+              : computeAvgCentsPerKwhFromRateStructure(p.rateStructure, 500),
+          rate1000:
+            typeof p.rate1000 === "number"
+              ? p.rate1000
+              : computeAvgCentsPerKwhFromRateStructure(p.rateStructure, 1000),
+          rate2000:
+            typeof p.rate2000 === "number"
+              ? p.rate2000
+              : computeAvgCentsPerKwhFromRateStructure(p.rateStructure, 2000),
+          modeledRate500: computeAllInAvgCentsPerKwhFromRateStructure(p.rateStructure, 500, tdsp),
+          modeledRate1000: computeAllInAvgCentsPerKwhFromRateStructure(p.rateStructure, 1000, tdsp),
+          modeledRate2000: computeAllInAvgCentsPerKwhFromRateStructure(p.rateStructure, 2000, tdsp),
+          cancelFee: p.cancelFee ?? null,
+          eflUrl: p.eflUrl ?? null,
+          eflPdfSha256: p.eflPdfSha256 ?? null,
+          repPuctCertificate: p.repPuctCertificate ?? null,
+          eflVersionCode: p.eflVersionCode ?? null,
+          eflRequiresManualReview: Boolean(p.eflRequiresManualReview),
+          updatedAt: new Date(p.updatedAt).toISOString(),
+          lastSeenAt: new Date(p.lastSeenAt).toISOString(),
+          rateStructure: p.rateStructure ?? null,
+        };
+      }),
+    );
 
     const body: Ok = { ok: true, count: rows.length, totalCount, limit, rows };
     return NextResponse.json(body);

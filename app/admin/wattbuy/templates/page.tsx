@@ -14,6 +14,9 @@ type Row = {
   rate500: number | null;
   rate1000: number | null;
   rate2000: number | null;
+  modeledRate500?: number | null;
+  modeledRate1000?: number | null;
+  modeledRate2000?: number | null;
   cancelFee: string | null;
   eflUrl: string | null;
   eflPdfSha256: string | null;
@@ -309,13 +312,22 @@ export default function WattbuyTemplatedPlansPage() {
                     {typeof best === "number" ? best.toFixed(3) : "—"}
                   </td>
                   <td className="px-2 py-1 align-top text-right font-mono">
-                    {typeof r.rate500 === "number" ? r.rate500.toFixed(3) : "—"}
+                    <div>{typeof r.rate500 === "number" ? r.rate500.toFixed(3) : "—"}</div>
+                    <div className="text-[10px] text-gray-500">
+                      {typeof r.modeledRate500 === "number" ? `model ${r.modeledRate500.toFixed(3)}` : "model —"}
+                    </div>
                   </td>
                   <td className="px-2 py-1 align-top text-right font-mono">
-                    {typeof r.rate1000 === "number" ? r.rate1000.toFixed(3) : "—"}
+                    <div>{typeof r.rate1000 === "number" ? r.rate1000.toFixed(3) : "—"}</div>
+                    <div className="text-[10px] text-gray-500">
+                      {typeof r.modeledRate1000 === "number" ? `model ${r.modeledRate1000.toFixed(3)}` : "model —"}
+                    </div>
                   </td>
                   <td className="px-2 py-1 align-top text-right font-mono">
-                    {typeof r.rate2000 === "number" ? r.rate2000.toFixed(3) : "—"}
+                    <div>{typeof r.rate2000 === "number" ? r.rate2000.toFixed(3) : "—"}</div>
+                    <div className="text-[10px] text-gray-500">
+                      {typeof r.modeledRate2000 === "number" ? `model ${r.modeledRate2000.toFixed(3)}` : "model —"}
+                    </div>
                   </td>
                   <td className="px-2 py-1 align-top font-mono">{r.repPuctCertificate ?? "—"}</td>
                   <td className="px-2 py-1 align-top">
