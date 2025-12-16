@@ -183,8 +183,12 @@ export async function POST(req: NextRequest) {
                   where: {
                     resolvedAt: null,
                     OR: [
-                      id ? { id } : undefined,
+                      // Safety-first matching: resolve by sha/offerId/rep+version only (never by URL).
+                      det.eflPdfSha256 ? { eflPdfSha256: det.eflPdfSha256 } : undefined,
                       it?.offerId ? { offerId: String(it.offerId) } : undefined,
+                      det.repPuctCertificate && det.eflVersionCode
+                        ? { repPuctCertificate: det.repPuctCertificate, eflVersionCode: det.eflVersionCode }
+                        : undefined,
                     ].filter(Boolean),
                   },
                   data: {

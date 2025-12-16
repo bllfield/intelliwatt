@@ -167,6 +167,7 @@ export async function POST(req: NextRequest) {
     let templatePersisted: boolean = false;
     let persistedRatePlanId: string | null = null;
     let autoResolvedQueueCount: number = 0;
+    let queueAutoResolveUpdatedCount: number = 0;
   let persistAttempted: boolean = false;
   let persistNotes: string | null = null;
   let persistUsedDerived: boolean = false;
@@ -255,15 +256,18 @@ export async function POST(req: NextRequest) {
               offerId,
               repPuctCertificate: repPuct,
               eflVersionCode: ver,
-              eflUrl: effectiveEflUrl,
               eflPdfSha256: template.eflPdfSha256 ?? null,
             };
 
+            // Auto-resolve matching (safety):
+            // - allow exact eflPdfSha256 when present
+            // - allow offerId when present
+            // - allow repPuctCertificate + eflVersionCode when both present
+            // - DO NOT resolve by eflUrl alone (too risky); if sha is missing, leave OPEN rather than clear the wrong row.
             const whereOr = [
+              template.eflPdfSha256 ? { eflPdfSha256: template.eflPdfSha256 } : undefined,
               offerId ? { offerId } : undefined,
               repPuct && ver ? { repPuctCertificate: repPuct, eflVersionCode: ver } : undefined,
-              effectiveEflUrl ? { eflUrl: effectiveEflUrl } : undefined,
-              template.eflPdfSha256 ? { eflPdfSha256: template.eflPdfSha256 } : undefined,
             ].filter(Boolean);
 
             if (whereOr.length > 0) {
@@ -284,7 +288,16 @@ export async function POST(req: NextRequest) {
                 take: 25,
               });
               queueAutoResolveOpenMatchesPreview = Array.isArray(matches) ? matches : [];
-              queueAutoResolveOpenMatchesCount = queueAutoResolveOpenMatchesPreview.length;
+
+              // Count all OPEN matches (not just preview) so admins can see full impact.
+              try {
+                const c = await (prisma as any).eflParseReviewQueue.count({
+                  where: { resolvedAt: null, OR: whereOr },
+                });
+                queueAutoResolveOpenMatchesCount = Number(c ?? 0) || 0;
+              } catch {
+                queueAutoResolveOpenMatchesCount = queueAutoResolveOpenMatchesPreview.length;
+              }
             }
 
             const updated = shouldAutoResolveQueue
@@ -299,8 +312,10 @@ export async function POST(req: NextRequest) {
               : { count: 0 };
 
             autoResolvedQueueCount = Number(updated?.count ?? 0) || 0;
+            queueAutoResolveUpdatedCount = autoResolvedQueueCount;
           } catch {
             autoResolvedQueueCount = 0;
+            queueAutoResolveUpdatedCount = 0;
           }
         }
       }
@@ -308,6 +323,7 @@ export async function POST(req: NextRequest) {
       templatePersisted = false;
       persistedRatePlanId = null;
       autoResolvedQueueCount = 0;
+      queueAutoResolveUpdatedCount = 0;
     }
 
     return NextResponse.json({
@@ -341,6 +357,7 @@ export async function POST(req: NextRequest) {
       queueAutoResolveCriteria,
       queueAutoResolveOpenMatchesCount,
       queueAutoResolveOpenMatchesPreview,
+      queueAutoResolveUpdatedCount,
       extractorMethod: template.extractorMethod ?? "pdftotext",
       ai,
     });

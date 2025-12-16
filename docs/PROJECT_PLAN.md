@@ -5443,3 +5443,37 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
     - **Secondary**: `repPuctCertificate + eflVersionCode` (only when the version looks real) **and only when `planName` is missing**.
     - **Fallback**: `eflPdfSha256`.
   - If `eflVersionCode` is weak/generic (e.g., `"ENGLISH"` fragments), deterministic extraction returns null and the pipeline queues it for review rather than persisting an unsafe identity.
+
+## Remediation Rule: Pattern-driven fixes (no label hardcoding)
+
+### A) Safety split
+- Always OK to show disclosed EFL/WattBuy 500/1000/2000 values.
+- IntelliWatt usage-based modeled costs shown ONLY when eligible: **PASS + STRONG** and not `requiresManualReview`.
+- If queued: show disclosure numbers + “IntelliWatt calculation unavailable (queued for inspection)”.
+
+### B) Manual remediation goal
+- Do NOT add “if label == X then …” logic.
+- Every fix must improve a general extraction/normalization/solver **pattern** so similar future EFLs parse correctly.
+
+### C) Solver numbers vs learning
+- Solver may persist derived numeric values for THAT card into the DB (do not break this).
+- Remediation work must ensure those values are discoverable from `rawText` next time (general patterns).
+
+### D) Done criteria
+- PASS anchors + `passStrength=STRONG` => eligible.
+- Otherwise remains queued with an explicit reason.
+
+### Queue item processing checklist (end-to-end)
+- From an OPEN queue row, run Manual Fact Card Loader by URL (or upload) and confirm:
+  - `finalStatus === PASS`
+  - `passStrength === STRONG`
+  - `templatePersisted === true` (RatePlan.rateStructure stored)
+  - Auto-resolve only clears matching OPEN queue rows by **sha/offerId/rep+version** (never URL-only)
+
+## DONE (2025‑12‑16)
+- `/admin/efl/manual-upload` now shows OPEN `EflParseReviewQueue` items with:
+  - “Open EFL URL” and “Run manual” deep link.
+- Auto-resolve matching tightened (no `eflUrl`-only resolve) in:
+  - `POST /api/admin/efl/manual-url`
+  - `POST /api/admin/efl-review/process-open`
+- Docs updated with “Remediation Rule: Pattern-driven fixes (no label hardcoding)” + end-to-end checklist.

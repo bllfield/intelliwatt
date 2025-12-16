@@ -46,6 +46,7 @@ type UploadResponse = {
   queueAutoResolveCriteria?: any;
   queueAutoResolveOpenMatchesCount?: number;
   queueAutoResolveOpenMatchesPreview?: any[];
+  queueAutoResolveUpdatedCount?: number;
   ai?: { enabled: boolean; hasKey: boolean; used: boolean; reason?: string };
 };
 
@@ -577,6 +578,7 @@ export function ManualFactCardLoader(props: {
                 queueAutoResolveCriteria: (result as any).queueAutoResolveCriteria ?? null,
                 queueAutoResolveOpenMatchesCount: (result as any).queueAutoResolveOpenMatchesCount ?? null,
                 queueAutoResolveOpenMatchesPreview: (result as any).queueAutoResolveOpenMatchesPreview ?? null,
+                queueAutoResolveUpdatedCount: (result as any).queueAutoResolveUpdatedCount ?? null,
               })}
             </pre>
           </details>
