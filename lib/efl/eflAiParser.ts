@@ -1,6 +1,7 @@
 import { Buffer } from "node:buffer";
 
-import { getOpenAiClient } from "@/lib/ai/openaiFactCardParser";
+import { factCardAiEnabled, getOpenAiClient } from "@/lib/ai/openaiFactCardParser";
+import { logOpenAIUsage } from "@/lib/admin/openaiUsage";
 import {
   validateEflAvgPriceTable,
   type EflAvgPriceValidation,
@@ -201,8 +202,7 @@ export async function parseEflTextWithAi(opts: {
     );
   }
 
-  const aiEnabledFlag =
-    process.env.OPENAI_IntelliWatt_Fact_Card_Parser === "1";
+  const aiEnabledFlag = factCardAiEnabled();
   const openaiClient = getOpenAiClient();
 
   // When AI is disabled via flag or missing key, we still want deterministic
@@ -320,8 +320,9 @@ OUTPUT CONTRACT:
   let rawJson = "{}";
   try {
     const client = openaiClient;
+    const modelName = process.env.OPENAI_EFL_MODEL || "gpt-4.1";
     const response = await (client as any).responses.create({
-      model: process.env.OPENAI_EFL_MODEL || "gpt-4.1",
+      model: modelName,
       text: { format: { type: "json_object" } },
       input: [
         {
@@ -339,6 +340,40 @@ OUTPUT CONTRACT:
         },
       ],
     });
+
+    // Best-effort OpenAI usage logging (feeds /admin/openai/usage).
+    const usage = (response as any)?.usage ?? null;
+    if (usage) {
+      const inputTokens = usage.input_tokens ?? usage.prompt_tokens ?? 0;
+      const outputTokens = usage.output_tokens ?? usage.completion_tokens ?? 0;
+      const totalTokens = usage.total_tokens ?? inputTokens + outputTokens;
+
+      // Cost estimation:
+      // - We have explicit pricing for gpt-4.1-mini in other modules.
+      // - For other models, log tokens and set costUsd=0 (unknown pricing).
+      const modelLower = String((response as any)?.model ?? modelName).toLowerCase();
+      const isMini = modelLower.includes("mini");
+      const inputPer1k = isMini ? 0.00025 : 0;
+      const outputPer1k = isMini ? 0.00075 : 0;
+      const costUsd = (inputTokens / 1000) * inputPer1k + (outputTokens / 1000) * outputPer1k;
+
+      void logOpenAIUsage({
+        module: "efl-fact-card",
+        operation: "efl-ai-parser-v2",
+        model: (response as any)?.model ?? modelName,
+        inputTokens,
+        outputTokens,
+        totalTokens,
+        costUsd,
+        requestId: (response as any)?.id ?? null,
+        metadata: {
+          eflPdfSha256,
+          usedNormalizedText: true,
+          normalizedTextLen: normalizedText.length,
+          modelPricingKnown: isMini,
+        },
+      });
+    }
 
     rawJson = (response as any).output?.[0]?.content?.[0]?.text ?? "{}";
   } catch (err: any) {
