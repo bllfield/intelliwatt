@@ -5408,6 +5408,11 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
     - The batch harness enqueues the EFL into `EflParseReviewQueue` with full context for admins.
     - Future steps will wire this queue into customer-facing plan gating so that only PASS templates (original or solver-assisted) can be surfaced by default.
 
+- **Solver rule: Monthly Service Fee cutoff (<=N kWh)**:
+  - Some EFLs specify a monthly/service fee that only applies up to a maximum usage threshold (e.g., “$8.00 per billing cycle for usage (<=1999) kWh”) but do not specify an alternate fee above the cutoff.
+  - The solver models this as **baseMonthlyFeeCents = fee** plus an **offsetting bill credit** of the same amount at `minUsageKWh = N+1`, enabling avg-table validation to PASS without supplier-specific logic.
+  - Regression test: `tests/efl/frontier.light-saver-12plus.service-fee-cutoff.solver.test.ts`.
+
 - **Template dedupe guardrail**:
   - `upsertRatePlanFromEfl` uses a **fail-safe fingerprint** to prevent plan collisions:
     - **Primary**: `repPuctCertificate + planName + eflVersionCode` (case-insensitive on `planName`), when `eflVersionCode` looks like a real “Ver. #” token.

@@ -146,6 +146,93 @@ export async function solveEflValidationGaps(args: {
     }
   }
 
+  // ---------------- Conditional service fee cutoff (<= N kWh) ----------------
+  // Some EFLs describe a monthly/service fee that only applies up to a maximum usage,
+  // e.g., "Monthly Service Fee $8.00 per billing cycle for usage (<=1999) kWh".
+  //
+  // The canonical RateStructure contract does not currently support conditional base fees.
+  // For validation math (and downstream persistence), we model this as:
+  //   baseMonthlyFeeCents = feeCents
+  //   AND a "bill credit" of feeCents that applies when usage >= (maxKwh + 1)
+  //
+  // This makes the fee apply for 500/1000 but net to $0 at 2000+ (matching the EFL table),
+  // without introducing supplier-specific patches.
+  if (validation?.status === "FAIL" && derivedPlanRules) {
+    const fee = extractMonthlyServiceFeeCutoff(rawText);
+    if (fee && fee.feeCents > 0 && fee.maxUsageKwh >= 1) {
+      const alreadyHasBase =
+        typeof derivedPlanRules.baseChargePerMonthCents === "number" ||
+        (derivedRateStructure &&
+          typeof (derivedRateStructure as any).baseMonthlyFeeCents === "number");
+
+      const thresholdKwh = fee.maxUsageKwh + 1;
+      const inferredOk = baseFeeInferredFromValidation({
+        validation,
+        feeCents: fee.feeCents,
+        maxUsageKwh: fee.maxUsageKwh,
+      });
+
+      if (!alreadyHasBase && inferredOk) {
+        // Apply base fee
+        derivedPlanRules.baseChargePerMonthCents = fee.feeCents;
+        if (!derivedRateStructure) derivedRateStructure = {};
+        if (typeof (derivedRateStructure as any).baseMonthlyFeeCents !== "number") {
+          (derivedRateStructure as any).baseMonthlyFeeCents = fee.feeCents;
+        }
+
+        // Apply offsetting credit at >= threshold
+        const rsCredits = (derivedRateStructure as any).billCredits;
+        const rules: any[] =
+          rsCredits && Array.isArray(rsCredits.rules) ? rsCredits.rules : [];
+        const hasSame =
+          rules.some(
+            (r) =>
+              Number(r?.creditAmountCents) === fee.feeCents &&
+              Number(r?.minUsageKWh) === thresholdKwh,
+          ) ?? false;
+        if (!hasSame) {
+          const nextRules = [
+            ...rules,
+            {
+              label: `Service fee waived at >= ${thresholdKwh} kWh (derived from <=${fee.maxUsageKwh} fee)`,
+              creditAmountCents: fee.feeCents,
+              minUsageKWh: thresholdKwh,
+            },
+          ];
+          (derivedRateStructure as any).billCredits = {
+            hasBillCredit: true,
+            rules: nextRules,
+          };
+        }
+
+        // Mirror to PlanRules billCredits for consistency/debugging.
+        const prCredits: any[] = Array.isArray(derivedPlanRules.billCredits)
+          ? derivedPlanRules.billCredits
+          : [];
+        const hasPrSame =
+          prCredits.some(
+            (r) =>
+              Number(r?.creditDollars) === fee.feeCents / 100 &&
+              Number(r?.thresholdKwh) === thresholdKwh,
+          ) ?? false;
+        if (!hasPrSame) {
+          derivedPlanRules.billCredits = [
+            ...prCredits,
+            {
+              label: `Service fee waived at >= ${thresholdKwh} kWh (derived)`,
+              creditDollars: fee.feeCents / 100,
+              thresholdKwh: thresholdKwh,
+              monthsOfYear: null,
+              type: "THRESHOLD_MIN",
+            },
+          ];
+        }
+
+        solverApplied.push("SERVICE_FEE_CUTOFF_MAXKWH_TO_BASE_PLUS_CREDIT");
+      }
+    }
+  }
+
   // If nothing was applied, return quickly with the original validation.
   if (solverApplied.length === 0) {
     return {
@@ -344,6 +431,59 @@ function extractBaseChargeCentsFromEflText(rawText: string): number | null {
   }
 
   return null;
+}
+
+function extractMonthlyServiceFeeCutoff(rawText: string): { feeCents: number; maxUsageKwh: number } | null {
+  const t = rawText || "";
+  // Example:
+  // "Monthly Service Fee                                      $8.00 per billing cycle for usage ( <=1999) kWh"
+  const re =
+    /Monthly\s+Service\s+Fee[\s\S]{0,120}?\$?\s*([0-9]+(?:\.[0-9]{1,2})?)\s*(?:per\s+billing\s*cycle|per\s+month|monthly)[\s\S]{0,160}?\(\s*<=\s*([0-9]{1,6})\s*\)\s*kwh/i;
+  const m = t.match(re);
+  if (!m?.[1] || !m?.[2]) return null;
+  const dollars = Number(m[1]);
+  const maxKwh = Number(String(m[2]).replace(/,/g, ""));
+  if (!Number.isFinite(dollars) || !Number.isFinite(maxKwh) || maxKwh <= 0) return null;
+  return { feeCents: Math.round(dollars * 100), maxUsageKwh: Math.round(maxKwh) };
+}
+
+function baseFeeInferredFromValidation(args: {
+  validation: EflAvgPriceValidation;
+  feeCents: number;
+  maxUsageKwh: number;
+}): boolean {
+  const { validation, feeCents, maxUsageKwh } = args;
+  const tol = typeof validation.toleranceCentsPerKwh === "number" ? validation.toleranceCentsPerKwh : 0.25;
+  const pts: any[] = Array.isArray(validation.points) ? validation.points : [];
+  if (pts.length < 2) return true; // best-effort
+
+  // Require at least one "above cutoff" point that's already basically OK (otherwise this rule isn't a fit).
+  const aboveOk = pts.some((p) => {
+    const u = Number(p?.usageKwh);
+    const diff = Number(p?.diffCentsPerKwh);
+    if (!Number.isFinite(u) || !Number.isFinite(diff)) return false;
+    if (u <= maxUsageKwh) return false;
+    return Math.abs(diff) <= Math.max(tol, 0.35);
+  });
+  if (!aboveOk) return false;
+
+  // Compare inferred missing cents for points at/below cutoff.
+  const inferred: number[] = [];
+  for (const p of pts) {
+    const u = Number(p?.usageKwh);
+    const diff = Number(p?.diffCentsPerKwh); // modeled - expected
+    if (!Number.isFinite(u) || !Number.isFinite(diff)) continue;
+    if (u > maxUsageKwh) continue;
+    // We only care about cases where modeled is too low.
+    if (diff >= 0) continue;
+    const impliedMissingCents = Math.round((-diff) * u);
+    if (Number.isFinite(impliedMissingCents)) inferred.push(impliedMissingCents);
+  }
+  if (inferred.length === 0) return false;
+
+  const avg = inferred.reduce((a, b) => a + b, 0) / inferred.length;
+  // Accept if inferred missing fee is within ~$0.75 of the stated fee.
+  return Math.abs(avg - feeCents) <= 75;
 }
 
 
