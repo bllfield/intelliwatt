@@ -553,6 +553,15 @@ export default function AdminDashboard() {
           <h2 className="text-2xl font-bold text-brand-navy mb-4">🔧 Admin Tools</h2>
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
             <a
+              href="/admin/efl/fact-cards"
+              className="block p-4 border-2 border-brand-blue/20 rounded-lg hover:border-brand-blue hover:bg-brand-blue/5 transition-colors"
+            >
+              <div className="font-semibold text-brand-navy mb-1">🧾 Fact Card Parsing Ops</div>
+              <div className="text-sm text-brand-navy/60">
+                Unified page: batch parse, review queue, templates, and manual loader (URL/upload/text)
+              </div>
+            </a>
+            <a
               href="/admin/tools/hitthejackwatt-ads"
               className="block p-4 border-2 border-brand-blue/20 rounded-lg hover:border-brand-blue hover:bg-brand-blue/5 transition-colors"
             >
