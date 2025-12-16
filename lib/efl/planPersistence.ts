@@ -73,6 +73,7 @@ export async function upsertRatePlanFromEfl(
 
   const dataCommon = {
     // EFL identity + source URL
+    eflUrl: eflUrl,
     eflSourceUrl: eflUrl,
     repPuctCertificate: repPuctCertificate ?? null,
     eflVersionCode: eflVersionCode ?? null,

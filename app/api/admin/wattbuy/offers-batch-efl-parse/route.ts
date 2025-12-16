@@ -5,8 +5,9 @@ import { wbGetOffers } from "@/lib/wattbuy/client";
 import { normalizeOffers, type OfferNormalized } from "@/lib/wattbuy/normalize";
 import { computePdfSha256 } from "@/lib/efl/eflExtractor";
 import { fetchEflPdfFromUrl } from "@/lib/efl/fetchEflPdf";
-import { getOrCreateEflTemplate } from "@/lib/efl/getOrCreateEflTemplate";
 import { runEflPipelineNoStore } from "@/lib/efl/runEflPipelineNoStore";
+import { upsertRatePlanFromEfl } from "@/lib/efl/planPersistence";
+import { validatePlanRules } from "@/lib/efl/planEngine";
 import { prisma } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -196,6 +197,38 @@ export async function POST(req: NextRequest) {
     const offerSliceEndIndex = Math.min(offers.length, offerSliceStartIndex + offerLimit);
     const sliced = offers.slice(offerSliceStartIndex, offerSliceEndIndex);
 
+    // Pre-fetch existing templates by EFL URL so we can skip work before even downloading PDFs.
+    const eflUrls = (sliced as OfferNormalized[])
+      .map((o) => o?.docs?.efl ?? null)
+      .filter((u): u is string => Boolean(u));
+
+    const urlToRatePlan = new Map<string, any>();
+    if (eflUrls.length > 0) {
+      const existingByUrl = (await prisma.ratePlan.findMany({
+        where: {
+          OR: [
+            { eflSourceUrl: { in: eflUrls } },
+            { eflUrl: { in: eflUrls } },
+          ],
+        },
+        select: {
+          id: true,
+          eflSourceUrl: true,
+          eflUrl: true,
+          eflPdfSha256: true,
+          repPuctCertificate: true,
+          eflVersionCode: true,
+          eflRequiresManualReview: true,
+          rateStructure: true,
+        },
+      })) as any[];
+
+      for (const p of existingByUrl) {
+        if (p?.eflSourceUrl) urlToRatePlan.set(String(p.eflSourceUrl), p);
+        if (p?.eflUrl) urlToRatePlan.set(String(p.eflUrl), p);
+      }
+    }
+
     const results: BatchResultRow[] = [];
     let scannedCount = 0;
     let processedCount = 0; // count of offers with EFL URLs attempted in this run
@@ -238,6 +271,41 @@ export async function POST(req: NextRequest) {
           parseConfidence: null,
           templateAction: "NOT_ELIGIBLE",
           notes: "No EFL URL present on offer.",
+        });
+        continue;
+      }
+
+      // 0) Fast path by URL: if we already have a persisted template for this URL,
+      // skip fetching PDFs and re-running the EFL pipeline.
+      const existingUrlPlan = urlToRatePlan.get(eflUrl);
+      if (
+        existingUrlPlan &&
+        existingUrlPlan.rateStructure &&
+        (existingUrlPlan.eflRequiresManualReview ?? false) === false
+      ) {
+        results.push({
+          offerId,
+          supplier,
+          planName,
+          termMonths,
+          tdspName,
+          eflUrl,
+          eflPdfSha256: existingUrlPlan.eflPdfSha256 ?? null,
+          repPuctCertificate: existingUrlPlan.repPuctCertificate ?? null,
+          eflVersionCode: existingUrlPlan.eflVersionCode ?? null,
+          validationStatus: "PASS",
+          originalValidationStatus: "PASS",
+          finalValidationStatus: "PASS",
+          tdspAppliedMode: null,
+          parseConfidence: null,
+          passStrength: null,
+          passStrengthReasons: null,
+          templateHit: true,
+          templateAction: mode === "STORE_TEMPLATES_ON_PASS" ? "TEMPLATE" : "SKIPPED",
+          queueReason: null,
+          finalQueueReason: null,
+          solverApplied: null,
+          notes: "Template hit (by URL): RatePlan already has rateStructure for this EFL.",
         });
         continue;
       }
@@ -362,21 +430,33 @@ export async function POST(req: NextRequest) {
         let templateAction: BatchResultRow["templateAction"] = "SKIPPED";
         if (mode === "STORE_TEMPLATES_ON_PASS" && finalStatus === "PASS") {
           try {
-            const { wasCreated } = await getOrCreateEflTemplate({
-              source: "wattbuy",
-              rawText: det.rawText,
-              eflPdfSha256: det.eflPdfSha256 ?? null,
-              repPuctCertificate: det.repPuctCertificate ?? null,
-              eflVersionCode: det.eflVersionCode ?? null,
-              wattbuy: {
+            const derivedPlanRules =
+              finalStatus === "PASS" && (solved as any)?.derivedPlanRules
+                ? (solved as any).derivedPlanRules
+                : pipeline.planRules;
+            const derivedRateStructure =
+              finalStatus === "PASS" && (solved as any)?.derivedRateStructure
+                ? (solved as any).derivedRateStructure
+                : pipeline.rateStructure;
+
+            if (derivedPlanRules && derivedRateStructure && det.eflPdfSha256) {
+              const planRulesValidation = validatePlanRules(derivedPlanRules as any);
+              await upsertRatePlanFromEfl({
+                mode: "live",
+                eflUrl,
+                repPuctCertificate: det.repPuctCertificate ?? null,
+                eflVersionCode: det.eflVersionCode ?? null,
+                eflPdfSha256: det.eflPdfSha256,
                 providerName: supplier,
                 planName,
-                termMonths,
-                tdspName,
-                offerId,
-              },
-            });
-            templateAction = wasCreated ? "CREATED" : "HIT";
+                planRules: derivedPlanRules as any,
+                rateStructure: derivedRateStructure as any,
+                validation: planRulesValidation as any,
+              });
+              templateAction = "CREATED";
+            } else {
+              templateAction = "SKIPPED";
+            }
           } catch {
             // Best-effort: if persistence fails, we still return the pipeline
             // result and mark this as SKIPPED for templateAction.
