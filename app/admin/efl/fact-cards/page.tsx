@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ManualFactCardLoader } from "@/components/admin/ManualFactCardLoader";
 
 type Json = any;
+type SortDir = "asc" | "desc";
 
 function useLocalToken(key = "iw_admin_token") {
   const [token, setToken] = useState("");
@@ -70,6 +71,15 @@ type BatchRow = {
 
 type QueueItem = any;
 type TemplateRow = any;
+
+function cmp(a: any, b: any, dir: SortDir): number {
+  const d = dir === "asc" ? 1 : -1;
+  if (a == null && b == null) return 0;
+  if (a == null) return 1 * d;
+  if (b == null) return -1 * d;
+  if (typeof a === "number" && typeof b === "number") return (a - b) * d;
+  return String(a).localeCompare(String(b)) * d;
+}
 
 export default function FactCardOpsPage() {
   const { token, setToken } = useLocalToken();
@@ -242,6 +252,10 @@ export default function FactCardOpsPage() {
   const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
   const [queueLoading, setQueueLoading] = useState(false);
   const [queueErr, setQueueErr] = useState<string | null>(null);
+  const [queueSortKey, setQueueSortKey] = useState<
+    "supplier" | "planName" | "offerId" | "eflVersionCode" | "queueReason"
+  >("supplier");
+  const [queueSortDir, setQueueSortDir] = useState<SortDir>("asc");
 
   async function loadQueue() {
     if (!token) {
@@ -290,12 +304,53 @@ export default function FactCardOpsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, queueStatus]);
 
+  const sortedQueueItems = useMemo(() => {
+    const out = [...queueItems];
+    out.sort((a: any, b: any) => {
+      const av =
+        queueSortKey === "supplier"
+          ? a?.supplier
+          : queueSortKey === "planName"
+            ? a?.planName
+            : queueSortKey === "offerId"
+              ? a?.offerId
+              : queueSortKey === "eflVersionCode"
+                ? a?.eflVersionCode
+                : a?.queueReason;
+      const bv =
+        queueSortKey === "supplier"
+          ? b?.supplier
+          : queueSortKey === "planName"
+            ? b?.planName
+            : queueSortKey === "offerId"
+              ? b?.offerId
+              : queueSortKey === "eflVersionCode"
+                ? b?.eflVersionCode
+                : b?.queueReason;
+      return cmp(av ?? null, bv ?? null, queueSortDir);
+    });
+    return out;
+  }, [queueItems, queueSortKey, queueSortDir]);
+
+  function toggleQueueSort(k: typeof queueSortKey) {
+    if (queueSortKey === k) {
+      setQueueSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setQueueSortKey(k);
+      setQueueSortDir("asc");
+    }
+  }
+
   // ---------------- Templates ----------------
   const [tplQ, setTplQ] = useState("");
   const [tplLimit, setTplLimit] = useState(200);
   const [tplLoading, setTplLoading] = useState(false);
   const [tplErr, setTplErr] = useState<string | null>(null);
   const [tplRows, setTplRows] = useState<TemplateRow[]>([]);
+  const [tplSortKey, setTplSortKey] = useState<
+    "supplier" | "planName" | "termMonths" | "rate500" | "rate1000" | "rate2000" | "eflVersionCode"
+  >("supplier");
+  const [tplSortDir, setTplSortDir] = useState<SortDir>("asc");
 
   async function loadTemplates() {
     if (!token) {
@@ -325,6 +380,67 @@ export default function FactCardOpsPage() {
     if (ready) void loadTemplates();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready]);
+
+  const sortedTplRows = useMemo(() => {
+    const out = [...tplRows];
+    out.sort((a: any, b: any) => {
+      const av =
+        tplSortKey === "supplier"
+          ? a?.supplier
+          : tplSortKey === "planName"
+            ? a?.planName
+            : tplSortKey === "termMonths"
+              ? typeof a?.termMonths === "number"
+                ? a.termMonths
+                : null
+              : tplSortKey === "rate500"
+                ? typeof a?.rate500 === "number"
+                  ? a.rate500
+                  : null
+                : tplSortKey === "rate1000"
+                  ? typeof a?.rate1000 === "number"
+                    ? a.rate1000
+                    : null
+                  : tplSortKey === "rate2000"
+                    ? typeof a?.rate2000 === "number"
+                      ? a.rate2000
+                      : null
+                    : a?.eflVersionCode;
+      const bv =
+        tplSortKey === "supplier"
+          ? b?.supplier
+          : tplSortKey === "planName"
+            ? b?.planName
+            : tplSortKey === "termMonths"
+              ? typeof b?.termMonths === "number"
+                ? b.termMonths
+                : null
+              : tplSortKey === "rate500"
+                ? typeof b?.rate500 === "number"
+                  ? b.rate500
+                  : null
+                : tplSortKey === "rate1000"
+                  ? typeof b?.rate1000 === "number"
+                    ? b.rate1000
+                    : null
+                  : tplSortKey === "rate2000"
+                    ? typeof b?.rate2000 === "number"
+                      ? b.rate2000
+                      : null
+                    : b?.eflVersionCode;
+      return cmp(av ?? null, bv ?? null, tplSortDir);
+    });
+    return out;
+  }, [tplRows, tplSortKey, tplSortDir]);
+
+  function toggleTplSort(k: typeof tplSortKey) {
+    if (tplSortKey === k) {
+      setTplSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setTplSortKey(k);
+      setTplSortDir("asc");
+    }
+  }
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6">
@@ -534,23 +650,34 @@ export default function FactCardOpsPage() {
         </div>
         {queueErr ? <div className="text-sm text-red-700">{queueErr}</div> : null}
 
-        <div className="overflow-x-auto rounded-xl border">
+        {/* ~5 visible rows + sticky header */}
+        <div className="overflow-x-auto overflow-y-auto max-h-[280px] rounded-xl border">
           <table className="min-w-full text-xs">
-            <thead className="bg-gray-50 text-gray-700">
-              <tr>
-                <th className="px-2 py-2 text-left">Supplier</th>
-                <th className="px-2 py-2 text-left">Plan</th>
-                <th className="px-2 py-2 text-left">Offer</th>
-                <th className="px-2 py-2 text-left">Ver</th>
-                <th className="px-2 py-2 text-left">Reason</th>
+            <thead className="sticky top-0 z-10 bg-gray-50 text-gray-700">
+              <tr className="h-10">
+                <th className="px-2 py-2 text-left cursor-pointer select-none" onClick={() => toggleQueueSort("supplier")}>
+                  Supplier {queueSortKey === "supplier" ? (queueSortDir === "asc" ? "▲" : "▼") : ""}
+                </th>
+                <th className="px-2 py-2 text-left cursor-pointer select-none" onClick={() => toggleQueueSort("planName")}>
+                  Plan {queueSortKey === "planName" ? (queueSortDir === "asc" ? "▲" : "▼") : ""}
+                </th>
+                <th className="px-2 py-2 text-left cursor-pointer select-none" onClick={() => toggleQueueSort("offerId")}>
+                  Offer {queueSortKey === "offerId" ? (queueSortDir === "asc" ? "▲" : "▼") : ""}
+                </th>
+                <th className="px-2 py-2 text-left cursor-pointer select-none" onClick={() => toggleQueueSort("eflVersionCode")}>
+                  Ver {queueSortKey === "eflVersionCode" ? (queueSortDir === "asc" ? "▲" : "▼") : ""}
+                </th>
+                <th className="px-2 py-2 text-left cursor-pointer select-none" onClick={() => toggleQueueSort("queueReason")}>
+                  Reason {queueSortKey === "queueReason" ? (queueSortDir === "asc" ? "▲" : "▼") : ""}
+                </th>
                 <th className="px-2 py-2 text-left">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {queueItems.map((it: any) => {
+              {sortedQueueItems.map((it: any) => {
                 const eflUrl = (it?.eflUrl ?? "").trim();
                 return (
-                  <tr key={it.id} className="border-t">
+                  <tr key={it.id} className="border-t h-12">
                     <td className="px-2 py-2">{it.supplier ?? "-"}</td>
                     <td className="px-2 py-2">{it.planName ?? "-"}</td>
                     <td className="px-2 py-2">{it.offerId ?? "-"}</td>
@@ -605,25 +732,40 @@ export default function FactCardOpsPage() {
         </div>
         {tplErr ? <div className="text-sm text-red-700">{tplErr}</div> : null}
 
-        <div className="overflow-x-auto rounded-xl border">
+        {/* ~5 visible rows + sticky header */}
+        <div className="overflow-x-auto overflow-y-auto max-h-[280px] rounded-xl border">
           <table className="min-w-full text-xs">
-            <thead className="bg-gray-50 text-gray-700">
-              <tr>
-                <th className="px-2 py-2 text-left">Supplier</th>
-                <th className="px-2 py-2 text-left">Plan</th>
-                <th className="px-2 py-2 text-right">Term</th>
-                <th className="px-2 py-2 text-right">500</th>
-                <th className="px-2 py-2 text-right">1000</th>
-                <th className="px-2 py-2 text-right">2000</th>
-                <th className="px-2 py-2 text-left">Ver</th>
+            <thead className="sticky top-0 z-10 bg-gray-50 text-gray-700">
+              <tr className="h-10">
+                <th className="px-2 py-2 text-left cursor-pointer select-none" onClick={() => toggleTplSort("supplier")}>
+                  Supplier {tplSortKey === "supplier" ? (tplSortDir === "asc" ? "▲" : "▼") : ""}
+                </th>
+                <th className="px-2 py-2 text-left cursor-pointer select-none" onClick={() => toggleTplSort("planName")}>
+                  Plan {tplSortKey === "planName" ? (tplSortDir === "asc" ? "▲" : "▼") : ""}
+                </th>
+                <th className="px-2 py-2 text-right cursor-pointer select-none" onClick={() => toggleTplSort("termMonths")}>
+                  Term {tplSortKey === "termMonths" ? (tplSortDir === "asc" ? "▲" : "▼") : ""}
+                </th>
+                <th className="px-2 py-2 text-right cursor-pointer select-none" onClick={() => toggleTplSort("rate500")}>
+                  500 {tplSortKey === "rate500" ? (tplSortDir === "asc" ? "▲" : "▼") : ""}
+                </th>
+                <th className="px-2 py-2 text-right cursor-pointer select-none" onClick={() => toggleTplSort("rate1000")}>
+                  1000 {tplSortKey === "rate1000" ? (tplSortDir === "asc" ? "▲" : "▼") : ""}
+                </th>
+                <th className="px-2 py-2 text-right cursor-pointer select-none" onClick={() => toggleTplSort("rate2000")}>
+                  2000 {tplSortKey === "rate2000" ? (tplSortDir === "asc" ? "▲" : "▼") : ""}
+                </th>
+                <th className="px-2 py-2 text-left cursor-pointer select-none" onClick={() => toggleTplSort("eflVersionCode")}>
+                  Ver {tplSortKey === "eflVersionCode" ? (tplSortDir === "asc" ? "▲" : "▼") : ""}
+                </th>
                 <th className="px-2 py-2 text-left">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {tplRows.map((r: any) => {
+              {sortedTplRows.map((r: any) => {
                 const eflUrl = (r?.eflUrl ?? "").trim();
                 return (
-                  <tr key={r.id} className="border-t">
+                  <tr key={r.id} className="border-t h-12">
                     <td className="px-2 py-2">{r.supplier ?? "-"}</td>
                     <td className="px-2 py-2">{r.planName ?? "-"}</td>
                     <td className="px-2 py-2 text-right">{typeof r.termMonths === "number" ? `${r.termMonths} mo` : "-"}</td>
