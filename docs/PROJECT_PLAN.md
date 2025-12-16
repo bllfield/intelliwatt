@@ -5347,6 +5347,7 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
 ## OBSERVABILITY — OpenAI usage logging (2025‑12‑16)
 
 - **Admin usage page**: `/admin/openai/usage` reads from `OpenAIUsageEvent` via `GET /api/admin/openai/usage`.
+- **Smoke test**: `POST /api/admin/openai/usage/smoke` writes a dummy row (admin-only). Use this to confirm the runtime can write to `OpenAIUsageEvent` when the chart appears stale.
 - **Important serverless constraint**: OpenAI usage writes must be awaited; fire‑and‑forget promises can be dropped when a Vercel function returns.
 - **Current logging behavior**:
   - `lib/efl/eflAiParser.ts` logs `module="efl-fact-card", operation="efl-ai-parser-v2"` after each Responses API call.

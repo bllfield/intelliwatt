@@ -44,6 +44,8 @@ export default function OpenAIUsageClient() {
   const [data, setData] = useState<OpenAIUsageResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [smokeLoading, setSmokeLoading] = useState(false);
+  const [smokeNote, setSmokeNote] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -52,6 +54,7 @@ export default function OpenAIUsageClient() {
       try {
         setLoading(true);
         setError(null);
+        setSmokeNote(null);
 
         const adminToken =
           typeof window !== 'undefined'
@@ -113,6 +116,52 @@ export default function OpenAIUsageClient() {
     };
   }, []);
 
+  async function runSmoke() {
+    const adminToken =
+      typeof window !== 'undefined'
+        ? window.localStorage.getItem('intelliwattAdminToken') ??
+          window.localStorage.getItem('intelliwatt_admin_token') ??
+          window.localStorage.getItem('iw_admin_token')
+        : null;
+
+    if (!adminToken) {
+      setSmokeNote('Admin token not found in local storage.');
+      return;
+    }
+
+    setSmokeLoading(true);
+    setSmokeNote(null);
+    try {
+      const res = await fetch('/api/admin/openai/usage/smoke', {
+        method: 'POST',
+        headers: { 'x-admin-token': adminToken },
+      });
+      const body = (await res.json().catch(() => null)) as any;
+      if (!res.ok || !body?.ok) {
+        setSmokeNote(body?.error || `Smoke request failed (HTTP ${res.status})`);
+        return;
+      }
+      setSmokeNote('Smoke event logged. Reloading…');
+      // Reload usage after writing the row.
+      const reload = await fetch('/api/admin/openai/usage', {
+        headers: { 'x-admin-token': adminToken },
+      });
+      const reloadBody = (await reload.json().catch(() => null)) as any;
+      if (reload.ok && reloadBody?.ok) {
+        setData(reloadBody as OpenAIUsageResponse);
+        setSmokeNote('Smoke event logged and usage refreshed.');
+      } else {
+        setSmokeNote('Smoke event logged, but reload failed — refresh the page.');
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[OpenAIUsageClient] Smoke failed', err);
+      setSmokeNote('Smoke event failed (see console).');
+    } finally {
+      setSmokeLoading(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="text-sm text-brand-navy/70">Loading OpenAI usage…</div>
@@ -140,6 +189,22 @@ export default function OpenAIUsageClient() {
 
   return (
     <div className="space-y-6">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-xs text-brand-navy/70">
+          If this page isn’t updating, use the smoke test to verify DB writes from this runtime.
+        </div>
+        <button
+          type="button"
+          onClick={() => void runSmoke()}
+          disabled={smokeLoading}
+          className="rounded-md border border-brand-navy/20 bg-white px-3 py-1.5 text-xs font-medium text-brand-navy hover:bg-brand-navy/5 disabled:opacity-60"
+        >
+          {smokeLoading ? 'Logging…' : 'Log smoke event'}
+        </button>
+      </div>
+      {smokeNote ? (
+        <div className="text-xs text-brand-navy/70">{smokeNote}</div>
+      ) : null}
       <div className="grid gap-4 sm:grid-cols-3">
         <div className="rounded-md border border-brand-navy/10 bg-brand-navy/5 p-4">
           <div className="text-xs font-medium text-brand-navy/70">Window</div>
