@@ -58,6 +58,18 @@ describe("fetchEflPdf landing-page candidate selection (HTML heuristics)", () =>
     const out = __pickEflPdfCandidateUrlsFromHtmlForTest(html, "https://example.com/page");
     expect(out.some((u) => u.includes("Home/EFl?productId=40790"))).toBe(true);
   });
+
+  it("finds SmartGridCIS/OhmConnect Download.aspx EFL links by label text", () => {
+    const html = `
+      <html><body>
+        <a href="https://ohm-gridlink.smartgridcis.net/Documents/Download.aspx?ProductDocumentID=32831">
+          Electricity Facts Label
+        </a>
+      </body></html>
+    `;
+    const out = __pickEflPdfCandidateUrlsFromHtmlForTest(html, "https://wattbuy.com/enrollment-form/x");
+    expect(out[0]).toContain("Download.aspx?ProductDocumentID=32831");
+  });
 });
 
 

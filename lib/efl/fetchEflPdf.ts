@@ -49,10 +49,43 @@ function resolveUrl(baseUrl: string, href: string): string | null {
 }
 
 function sniffPdf(buf: Uint8Array): boolean {
-  return (
-    buf.byteLength >= 4 &&
-    String.fromCharCode(buf[0], buf[1], buf[2], buf[3]) === "%PDF"
-  );
+  if (!buf || buf.byteLength < 4) return false;
+
+  // Some servers prepend whitespace or a UTF-8 BOM before the PDF header.
+  // Be tolerant: skip BOM + ASCII whitespace, then also scan a small prefix.
+  let i = 0;
+  if (
+    buf.byteLength >= 3 &&
+    buf[0] === 0xef &&
+    buf[1] === 0xbb &&
+    buf[2] === 0xbf
+  ) {
+    i = 3;
+  }
+  while (i < buf.byteLength) {
+    const b = buf[i];
+    if (b === 0x09 || b === 0x0a || b === 0x0d || b === 0x20) {
+      i++;
+      continue;
+    }
+    break;
+  }
+  if (i + 4 <= buf.byteLength) {
+    if (
+      String.fromCharCode(buf[i], buf[i + 1], buf[i + 2], buf[i + 3]) === "%PDF"
+    ) {
+      return true;
+    }
+  }
+
+  // Fallback: scan the first 2KB for the magic bytes (handles odd wrappers / redirects).
+  const max = Math.min(buf.byteLength - 4, 2048);
+  for (let j = 0; j <= max; j++) {
+    if (buf[j] === 0x25 && buf[j + 1] === 0x50 && buf[j + 2] === 0x44 && buf[j + 3] === 0x46) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function scoreCandidate(args: {
@@ -124,7 +157,9 @@ function looksLikeEflDocUrl(u: string): boolean {
     s.includes("electricity") && s.includes("facts") ||
     s.includes("facts") && s.includes("label") ||
     s.includes("/home/efl") ||
-    s.includes("efl")
+    s.includes("efl") ||
+    // SmartGridCIS/OhmConnect doc host uses a non-.pdf download endpoint.
+    (s.includes("/documents/download.aspx") && s.includes("productdocumentid="))
   );
 }
 
