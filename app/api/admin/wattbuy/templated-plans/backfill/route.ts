@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { prisma } from "@/lib/db";
+import { deterministicEflExtract } from "@/lib/efl/eflExtractor";
+import { fetchEflPdfFromUrl } from "@/lib/efl/fetchEflPdf";
+import { extractEflAvgPricePoints } from "@/lib/efl/eflValidator";
 
 export const dynamic = "force-dynamic";
 
@@ -157,39 +160,60 @@ export async function POST(req: NextRequest) {
     const limit = Math.max(1, Math.min(1000, Number.isFinite(limitRaw) ? limitRaw : 200));
     const q = (req.nextUrl.searchParams.get("q") ?? "").trim();
     const dryRun = (req.nextUrl.searchParams.get("dryRun") ?? "") === "1";
+    const overwrite = (req.nextUrl.searchParams.get("overwrite") ?? "") === "1";
+    const source = String(req.nextUrl.searchParams.get("source") ?? "efl").toLowerCase();
+    const useEflSource = source === "efl" || source === "avg" || source === "avg_table";
+
+    const andClauses: any[] = [];
 
     const where: any = {
       rateStructure: { not: null },
       eflRequiresManualReview: false,
       isUtilityTariff: false,
-      OR: [
-        { termMonths: null },
-        { rate500: null },
-        { rate1000: null },
-        { rate2000: null },
-      ],
+      ...(overwrite
+        ? {}
+        : {
+            OR: [
+              { termMonths: null },
+              { rate500: null },
+              { rate1000: null },
+              { rate2000: null },
+            ],
+          }),
       ...(q
         ? {
-            AND: [
-              {
-                OR: [
-                  { supplier: { contains: q, mode: "insensitive" } },
-                  { planName: { contains: q, mode: "insensitive" } },
-                  { eflVersionCode: { contains: q, mode: "insensitive" } },
-                  { repPuctCertificate: { contains: q, mode: "insensitive" } },
-                  { eflPdfSha256: { contains: q, mode: "insensitive" } },
-                ],
-              },
-            ],
+            // placeholder; actual AND clauses are merged below
           }
         : {}),
     };
+
+    if (useEflSource) {
+      andClauses.push({
+        OR: [{ eflUrl: { not: null } }, { eflSourceUrl: { not: null } }],
+      });
+    }
+
+    if (q) {
+      andClauses.push({
+        OR: [
+          { supplier: { contains: q, mode: "insensitive" } },
+          { planName: { contains: q, mode: "insensitive" } },
+          { eflVersionCode: { contains: q, mode: "insensitive" } },
+          { repPuctCertificate: { contains: q, mode: "insensitive" } },
+          { eflPdfSha256: { contains: q, mode: "insensitive" } },
+        ],
+      });
+    }
+
+    if (andClauses.length > 0) where.AND = andClauses;
 
     const plans = await (prisma as any).ratePlan.findMany({
       where,
       select: {
         id: true,
         planName: true,
+        eflUrl: true,
+        eflSourceUrl: true,
         termMonths: true,
         rate500: true,
         rate1000: true,
@@ -207,31 +231,66 @@ export async function POST(req: NextRequest) {
     for (const p of plans as any[]) {
       const computedTerm =
         typeof p.termMonths === "number" ? null : inferTermMonths(p.planName);
-      const computed500 =
-        typeof p.rate500 === "number"
-          ? null
-          : computeAvgCentsPerKwhFromRateStructure(p.rateStructure, 500);
-      const computed1000 =
-        typeof p.rate1000 === "number"
-          ? null
-          : computeAvgCentsPerKwhFromRateStructure(p.rateStructure, 1000);
-      const computed2000 =
-        typeof p.rate2000 === "number"
-          ? null
-          : computeAvgCentsPerKwhFromRateStructure(p.rateStructure, 2000);
+
+      let computed500: number | null = null;
+      let computed1000: number | null = null;
+      let computed2000: number | null = null;
+
+      if (useEflSource) {
+        const seedUrl = (p.eflUrl ?? p.eflSourceUrl) as string | null;
+        if (!seedUrl) {
+          skipped += 1;
+          reasons.NO_EFL_URL = (reasons.NO_EFL_URL ?? 0) + 1;
+          continue;
+        }
+
+        try {
+          const pdf = await fetchEflPdfFromUrl(seedUrl);
+          if (!pdf.ok) {
+            skipped += 1;
+            reasons.EFL_FETCH_FAILED = (reasons.EFL_FETCH_FAILED ?? 0) + 1;
+            continue;
+          }
+          const extract = await deterministicEflExtract(pdf.pdfBytes);
+          const points = extractEflAvgPricePoints(extract.rawText);
+          if (!points || points.length < 3) {
+            skipped += 1;
+            reasons.NO_EFL_AVG_TABLE = (reasons.NO_EFL_AVG_TABLE ?? 0) + 1;
+            continue;
+          }
+          const p500 = points.find((x) => x.kwh === 500)?.eflAvgCentsPerKwh ?? null;
+          const p1000 = points.find((x) => x.kwh === 1000)?.eflAvgCentsPerKwh ?? null;
+          const p2000 = points.find((x) => x.kwh === 2000)?.eflAvgCentsPerKwh ?? null;
+          computed500 = typeof p500 === "number" && Number.isFinite(p500) ? p500 : null;
+          computed1000 = typeof p1000 === "number" && Number.isFinite(p1000) ? p1000 : null;
+          computed2000 = typeof p2000 === "number" && Number.isFinite(p2000) ? p2000 : null;
+        } catch {
+          skipped += 1;
+          reasons.EFL_FETCH_OR_PARSE_FAILED = (reasons.EFL_FETCH_OR_PARSE_FAILED ?? 0) + 1;
+          continue;
+        }
+      } else {
+        computed500 = computeAvgCentsPerKwhFromRateStructure(p.rateStructure, 500);
+        computed1000 = computeAvgCentsPerKwhFromRateStructure(p.rateStructure, 1000);
+        computed2000 = computeAvgCentsPerKwhFromRateStructure(p.rateStructure, 2000);
+      }
 
       const data: any = {};
       if (typeof computedTerm === "number") data.termMonths = computedTerm;
-      if (typeof computed500 === "number") data.rate500 = computed500;
-      if (typeof computed1000 === "number") data.rate1000 = computed1000;
-      if (typeof computed2000 === "number") data.rate2000 = computed2000;
+
+      // Rates: overwrite only when explicitly requested (used to correct supply-only values).
+      if (typeof computed500 === "number" && (overwrite || p.rate500 == null)) data.rate500 = computed500;
+      if (typeof computed1000 === "number" && (overwrite || p.rate1000 == null)) data.rate1000 = computed1000;
+      if (typeof computed2000 === "number" && (overwrite || p.rate2000 == null)) data.rate2000 = computed2000;
 
       if (Object.keys(data).length === 0) {
         skipped += 1;
         const kind =
-          String(p?.rateStructure?.type ?? "").toUpperCase() === "TIME_OF_USE"
-            ? "SKIP_TOU_NOT_COMPUTABLE"
-            : "SKIP_NO_DERIVABLE_FIELDS";
+          useEflSource
+            ? "SKIP_NO_UPDATES"
+            : String(p?.rateStructure?.type ?? "").toUpperCase() === "TIME_OF_USE"
+              ? "SKIP_TOU_NOT_COMPUTABLE"
+              : "SKIP_NO_DERIVABLE_FIELDS";
         reasons[kind] = (reasons[kind] ?? 0) + 1;
         continue;
       }
@@ -248,6 +307,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       dryRun,
+      source: useEflSource ? "efl" : "rateStructure",
+      overwrite,
       scanned: plans.length,
       updated,
       skipped,

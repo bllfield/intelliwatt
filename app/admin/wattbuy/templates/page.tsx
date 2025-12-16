@@ -109,7 +109,7 @@ export default function WattbuyTemplatedPlansPage() {
     }
   }
 
-  async function backfill() {
+  async function backfillFromEflAvgTableOverwrite() {
     if (!token) {
       setError("Admin token required.");
       return;
@@ -121,6 +121,10 @@ export default function WattbuyTemplatedPlansPage() {
       const params = new URLSearchParams();
       params.set("limit", String(limit));
       if (q.trim()) params.set("q", q.trim());
+      // Overwrite existing stored rate500/1000/2000 using the EFL Facts Label avg-price table
+      // (includes TDSP). This fixes stale/incorrect values in older rows.
+      params.set("source", "efl");
+      params.set("overwrite", "1");
       const res = await fetch(`/api/admin/wattbuy/templated-plans/backfill?${params}`, {
         method: "POST",
         headers: { "x-admin-token": token },
@@ -223,11 +227,11 @@ export default function WattbuyTemplatedPlansPage() {
             </button>
             <button
               className="px-3 py-2 rounded-lg border hover:bg-gray-50"
-              onClick={() => void backfill()}
+              onClick={() => void backfillFromEflAvgTableOverwrite()}
               disabled={loading}
-              title="Persist missing Term/500/1000/2000 into RatePlan using the stored rateStructure (does not guess TOU)."
+              title="Overwrite Term/500/1000/2000 using the EFL Facts Label avg-price table (all-in, includes TDSP)."
             >
-              {loading ? "Working…" : "Backfill missing columns"}
+              {loading ? "Working…" : "Backfill from EFL avg table (overwrite)"}
             </button>
           </div>
         </div>

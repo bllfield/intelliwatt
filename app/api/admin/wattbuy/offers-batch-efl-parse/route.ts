@@ -508,6 +508,18 @@ export async function POST(req: NextRequest) {
               }))
             : undefined;
 
+        // WattBuy offer kWh rates are often supply-only (REP) and do not include TDSP.
+        // When the EFL avg-price table is present, prefer those "expected" all-in values
+        // so /admin/wattbuy/templates matches the EFL Facts Label disclosure table.
+        const expectedRateFor = (kwh: number): number | null => {
+          const hit = (diffs as any[] | undefined)?.find((d: any) => d.kwh === kwh);
+          const n = Number(hit?.expected);
+          return Number.isFinite(n) ? n : null;
+        };
+        const expected500 = expectedRateFor(500);
+        const expected1000 = expectedRateFor(1000);
+        const expected2000 = expectedRateFor(2000);
+
         // 3) Conditionally persist template ONLY when explicitly requested and
         // the final (derived) validation status is PASS.
         let templateAction: BatchResultRow["templateAction"] = "SKIPPED";
@@ -544,20 +556,11 @@ export async function POST(req: NextRequest) {
                   state: offerState ?? null,
                   termMonths: termMonths ?? null,
                   rate500:
-                    typeof offerRate500 === "number"
-                      ? offerRate500
-                      : (diffs as any[] | undefined)?.find((d: any) => d.kwh === 500)?.expected ??
-                        null,
+                    expected500 ?? (typeof offerRate500 === "number" ? offerRate500 : null),
                   rate1000:
-                    typeof offerRate1000 === "number"
-                      ? offerRate1000
-                      : (diffs as any[] | undefined)?.find((d: any) => d.kwh === 1000)?.expected ??
-                        null,
+                    expected1000 ?? (typeof offerRate1000 === "number" ? offerRate1000 : null),
                   rate2000:
-                    typeof offerRate2000 === "number"
-                      ? offerRate2000
-                      : (diffs as any[] | undefined)?.find((d: any) => d.kwh === 2000)?.expected ??
-                        null,
+                    expected2000 ?? (typeof offerRate2000 === "number" ? offerRate2000 : null),
                   cancelFee: offerCancelFee ?? null,
                   providerName: supplier,
                   planName,

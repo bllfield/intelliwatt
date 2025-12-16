@@ -5366,9 +5366,15 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
 - Some legacy rows may have `rateStructure` but missing the headline fields used for sorting/display:
   - `termMonths`, `rate500`, `rate1000`, `rate2000`
 - Admin backfill endpoint:
-  - `POST /api/admin/wattbuy/templated-plans/backfill?limit=...&q=...`
-  - Computes missing fields from the stored `rateStructure` (FIXED/VARIABLE + tiers + bill credits + base fee).
-  - **Does not guess TIME_OF_USE** usage distribution; TOU plans may remain blank for 500/1000/2000.
+  - **Default / legacy behavior (fill blanks from `rateStructure`):**
+    - `POST /api/admin/wattbuy/templated-plans/backfill?limit=...&q=...`
+    - Computes missing fields from the stored `rateStructure` (FIXED/VARIABLE + tiers + bill credits + base fee).
+    - Note: this is typically **REP-only** math (does not include TDSP delivery unless it was embedded into the stored structure).
+    - **Does not guess TIME_OF_USE** usage distribution; TOU plans may remain blank for 500/1000/2000.
+  - **Preferred behavior (overwrite from EFL Facts Label avg-price table — all‑in, includes TDSP):**
+    - `POST /api/admin/wattbuy/templated-plans/backfill?source=efl&overwrite=1&limit=...&q=...`
+    - Fetches the stored `eflUrl`/`eflSourceUrl`, re-runs deterministic extraction, and writes `rate500/1000/2000` from the EFL “Average price per kWh” table (when present).
+    - This fixes stale/incorrect legacy values (especially for 2000 kWh) and aligns `/admin/wattbuy/templates` with the disclosure table in the PDF.
 
 - **Admin APIs + review UI**:
   - New admin API routes for inspecting and resolving queue items:
