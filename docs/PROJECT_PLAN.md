@@ -5380,8 +5380,13 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
   - New admin API routes for inspecting and resolving queue items:
     - `GET /api/admin/efl-review/list` (`app/api/admin/efl-review/list/route.ts`):
       - Gated by `ADMIN_TOKEN` via `x-admin-token` header.
-      - Query params: `status=OPEN|RESOLVED` (OPEN = `resolvedAt IS NULL` by default), `limit` (default 50, max 200), and `q` (search supplier/plan/offerId/sha/version via case-insensitive `contains`).
-      - Returns `{ ok, status, count, items }` with newest items first.
+      - Query params:
+        - `status=OPEN|RESOLVED` (OPEN = `resolvedAt IS NULL` by default)
+        - `limit` (default 50, max 200)
+        - `q` (search supplier/plan/offerId/sha/version via case-insensitive `contains`)
+        - `autoResolve=1` (OPEN only): **auto-resolves** queue rows that already have a persisted `RatePlan` template (`rateStructure != null` and `eflRequiresManualReview = false`). Matching is done by `repPuctCertificate+eflVersionCode`, `eflPdfSha256`, or URL (`eflUrl` / `eflSourceUrl`).
+          - Guardrail: **never** enabled for DRY_RUN batch operations (DRY_RUN must remain side-effect-free).
+      - Returns `{ ok, status, count, items, autoResolvedCount }` with newest items first.
     - `POST /api/admin/efl-review/resolve` (`app/api/admin/efl-review/resolve/route.ts`):
       - Gated by `ADMIN_TOKEN`.
       - Body: `{ id, resolutionNotes?, resolvedBy? }`.

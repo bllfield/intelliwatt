@@ -43,6 +43,13 @@ This SOP defines **how IntelliWatt resolves quarantined EFLs** (items in the EFL
   - The EFL **must not** be presented to users.
   - It **must** remain in admin review (quarantined) unless explicitly labeled as “unsolvable / needs human data” and protected by policy.
 
+### 3.1 Auto-resolution (queue self-healing)
+
+- The review queue should only contain items that **still need attention**.
+- If a matching EFL template (`RatePlan.rateStructure`) exists and does **not** require manual review, the corresponding **OPEN** quarantine row should be auto-resolved.
+  - This is handled automatically by admin tooling (queue refresh / batch parsing) so admins do not have to clear items one-by-one.
+  - DRY_RUN operations must remain side-effect-free and must not auto-resolve.
+
 ## 4. Triage Workflow
 
 1. **Open admin review item**
