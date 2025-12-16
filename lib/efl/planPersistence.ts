@@ -11,6 +11,14 @@ export interface UpsertEflRatePlanArgs {
   repPuctCertificate: string | null;
   eflVersionCode: string | null;
   eflPdfSha256: string;
+  // Optional offer context so templated-plans UI is useful.
+  utilityId?: string | null;
+  state?: string | null;
+  termMonths?: number | null;
+  rate500?: number | null;
+  rate1000?: number | null;
+  rate2000?: number | null;
+  cancelFee?: string | null;
   providerName?: string | null;
   planName?: string | null;
   planRules: PlanRules | null;
@@ -49,6 +57,13 @@ export async function upsertRatePlanFromEfl(
     repPuctCertificate,
     eflVersionCode,
     eflPdfSha256,
+    utilityId,
+    state,
+    termMonths,
+    rate500,
+    rate1000,
+    rate2000,
+    cancelFee,
     providerName,
     planName,
     planRules,
@@ -78,6 +93,13 @@ export async function upsertRatePlanFromEfl(
     repPuctCertificate: repPuctCertificate ?? null,
     eflVersionCode: eflVersionCode ?? null,
     eflPdfSha256,
+
+    // Offer/display metadata (best-effort)
+    ...(typeof termMonths === "number" ? { termMonths } : {}),
+    ...(typeof rate500 === "number" ? { rate500 } : {}),
+    ...(typeof rate1000 === "number" ? { rate1000 } : {}),
+    ...(typeof rate2000 === "number" ? { rate2000 } : {}),
+    ...(cancelFee ? { cancelFee } : {}),
 
     // Validation + gating
     eflRequiresManualReview: requiresManualReview,
@@ -128,11 +150,9 @@ export async function upsertRatePlanFromEfl(
   if (!existing) {
     return prisma.ratePlan.create({
       data: {
-        // utilityId/state are required; in a future step we will
-        // thread these from the ingest context. For now, we create
-        // a placeholder that is safe but clearly marked.
-        utilityId: "UNKNOWN",
-        state: "TX",
+        // utilityId/state are required; use provided context if available.
+        utilityId: (utilityId ?? "").trim() ? String(utilityId) : "UNKNOWN",
+        state: (state ?? "").trim() ? String(state) : "TX",
         ...dataCommon,
       },
     });
@@ -140,7 +160,11 @@ export async function upsertRatePlanFromEfl(
 
   return prisma.ratePlan.update({
     where: { id: existing.id },
-    data: dataCommon,
+    data: {
+      ...(utilityId && utilityId.trim() ? { utilityId } : {}),
+      ...(state && state.trim() ? { state } : {}),
+      ...dataCommon,
+    },
   });
 }
 

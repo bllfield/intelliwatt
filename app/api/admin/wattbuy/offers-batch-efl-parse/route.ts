@@ -247,6 +247,14 @@ export async function POST(req: NextRequest) {
         offer.tdsp ??
         null;
       const eflUrl: string | null = offer.docs?.efl ?? null;
+      const offerRate500 = (offer as any)?.kwh500_cents ?? null;
+      const offerRate1000 = (offer as any)?.kwh1000_cents ?? null;
+      const offerRate2000 = (offer as any)?.kwh2000_cents ?? null;
+      const offerCancelFee = (offer as any)?.cancel_fee_text ?? null;
+      const offerState = state;
+      // WattBuy catalog does not currently return a stable EIA utilityId per offer;
+      // store an "UNKNOWN" placeholder unless we later thread a real utilityId.
+      const offerUtilityId = "UNKNOWN";
 
       // Safety: cap how many EFL-bearing offers we run per invocation to avoid Vercel timeouts.
       if (processedCount >= processLimit) {
@@ -454,6 +462,25 @@ export async function POST(req: NextRequest) {
                   repPuctCertificate: det.repPuctCertificate ?? null,
                   eflVersionCode: det.eflVersionCode ?? null,
                   eflPdfSha256: det.eflPdfSha256,
+                  utilityId: offerUtilityId ?? null,
+                  state: offerState ?? null,
+                  termMonths: termMonths ?? null,
+                  rate500:
+                    typeof offerRate500 === "number"
+                      ? offerRate500
+                      : (diffs as any[] | undefined)?.find((d: any) => d.kwh === 500)?.expected ??
+                        null,
+                  rate1000:
+                    typeof offerRate1000 === "number"
+                      ? offerRate1000
+                      : (diffs as any[] | undefined)?.find((d: any) => d.kwh === 1000)?.expected ??
+                        null,
+                  rate2000:
+                    typeof offerRate2000 === "number"
+                      ? offerRate2000
+                      : (diffs as any[] | undefined)?.find((d: any) => d.kwh === 2000)?.expected ??
+                        null,
+                  cancelFee: offerCancelFee ?? null,
                   providerName: supplier,
                   planName,
                   planRules: derivedPlanRules as any,

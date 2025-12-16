@@ -5164,8 +5164,10 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
         - These rows report `validationStatus: "PASS"` (so downstream PASS‑gates remain correct) and include `templateHit: true` to indicate the plan was already templated.
         - In `mode === "DRY_RUN"`, these rows still report `templateAction: "SKIPPED"` (contract), but `templateHit: true` exposes that a template existed.
       - Only when `mode === "STORE_TEMPLATES_ON_PASS"` **and** `finalValidationStatus === "PASS"`:
-        - Calls `getOrCreateEflTemplate({ source: "wattbuy", rawText, eflPdfSha256, repPuctCertificate, eflVersionCode, wattbuy })` to persist/lookup a template.
-        - Sets `templateAction` to `"CREATED"` when a new template is stored or `"HIT"` when an existing template matches.
+        - Persists templates by writing to `RatePlan` via `upsertRatePlanFromEfl`:
+          - Stores `rateStructure` (only when `validatePlanRules(...).requiresManualReview === false`)
+          - Also stores `termMonths`, `rate500/rate1000/rate2000` (from WattBuy offer when present; else from the EFL avg‑price table expected values), and `cancelFee` when available.
+        - `templateAction` is reported as `"CREATED"` **only** when a usable `rateStructure` was actually persisted.
       - In all other cases (including DRY_RUN or non‑PASS validation), `templateAction` is `"SKIPPED"` (and `"NOT_ELIGIBLE"` for offers without an EFL URL).
     - Returns JSON:
       - `ok`, `mode`, `offerCount`, `processedCount`,
@@ -5341,6 +5343,15 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
     - One OPEN row per `eflUrl` (`resolvedAt IS NULL`)
     - One OPEN row per `repPuctCertificate + eflVersionCode` (`resolvedAt IS NULL`)
   - **Migration note**: if duplicates already exist, unique-index creation will fail; resolve by running the “fix” migration which auto-resolves duplicate OPEN rows before creating the indexes.
+
+## OBSERVABILITY — OpenAI usage logging (2025‑12‑16)
+
+- **Admin usage page**: `/admin/openai/usage` reads from `OpenAIUsageEvent` via `GET /api/admin/openai/usage`.
+- **Important serverless constraint**: OpenAI usage writes must be awaited; fire‑and‑forget promises can be dropped when a Vercel function returns.
+- **Current logging behavior**:
+  - `lib/efl/eflAiParser.ts` logs `module="efl-fact-card", operation="efl-ai-parser-v2"` after each Responses API call.
+  - `lib/efl/planAiExtractor.ts` logs fact‑card extraction + vision fallback.
+  - `lib/billing/parseBillText.ts` logs `module="current-plan", operation="bill-parse-v3-json"`.
 
 - **Admin APIs + review UI**:
   - New admin API routes for inspecting and resolving queue items:
