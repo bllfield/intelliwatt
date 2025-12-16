@@ -182,8 +182,16 @@ export async function upsertRatePlanFromEfl(
     });
   }
 
-  // 2) Next-best: REP PUCT Certificate + EFL Version Code (when it looks real).
-  if (!existing && repPuctCertificate && eflVersionCode && isLikelyRealEflVersionCode(eflVersionCode)) {
+  // 2) Next-best: REP PUCT Certificate + EFL Version Code (when it looks real),
+  // ONLY when we do not have a planName. When planName is present, falling back
+  // to REP+Version re-introduces cross-plan overwrites (exactly what we're preventing).
+  if (
+    !existing &&
+    !(planName ?? "").trim() &&
+    repPuctCertificate &&
+    eflVersionCode &&
+    isLikelyRealEflVersionCode(eflVersionCode)
+  ) {
     existing = await prisma.ratePlan.findFirst({
       where: {
         repPuctCertificate: repPuctCertificate,

@@ -5411,6 +5411,6 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
 - **Template dedupe guardrail**:
   - `upsertRatePlanFromEfl` uses a **fail-safe fingerprint** to prevent plan collisions:
     - **Primary**: `repPuctCertificate + planName + eflVersionCode` (case-insensitive on `planName`), when `eflVersionCode` looks like a real “Ver. #” token.
-    - **Secondary**: `repPuctCertificate + eflVersionCode` (only when the version looks real).
+    - **Secondary**: `repPuctCertificate + eflVersionCode` (only when the version looks real) **and only when `planName` is missing**.
     - **Fallback**: `eflPdfSha256`.
   - If `eflVersionCode` is weak/generic (e.g., `"ENGLISH"` fragments), deterministic extraction returns null and the pipeline queues it for review rather than persisting an unsafe identity.
