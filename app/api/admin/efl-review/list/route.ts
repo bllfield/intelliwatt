@@ -57,10 +57,14 @@ export async function GET(req: NextRequest) {
       take: limit,
     });
 
+    const totalCount = await (prisma as any).eflParseReviewQueue.count({ where });
+
     return NextResponse.json({
       ok: true,
       status: statusParam === "RESOLVED" ? "RESOLVED" : "OPEN",
       count: items.length,
+      totalCount,
+      limit,
       items,
     });
   } catch (error) {

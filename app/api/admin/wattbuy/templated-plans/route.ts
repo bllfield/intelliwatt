@@ -160,6 +160,8 @@ type Row = {
 type Ok = {
   ok: true;
   count: number;
+  totalCount: number;
+  limit: number;
   rows: Row[];
 };
 
@@ -231,6 +233,8 @@ export async function GET(req: NextRequest) {
       take: limit,
     });
 
+    const totalCount = await (prisma as any).ratePlan.count({ where });
+
     const rows: Row[] = (plans as any[]).map((p) => ({
       id: p.id,
       utilityId: p.utilityId,
@@ -264,7 +268,7 @@ export async function GET(req: NextRequest) {
       rateStructure: p.rateStructure ?? null,
     }));
 
-    const body: Ok = { ok: true, count: rows.length, rows };
+    const body: Ok = { ok: true, count: rows.length, totalCount, limit, rows };
     return NextResponse.json(body);
   } catch (err: any) {
     // eslint-disable-next-line no-console

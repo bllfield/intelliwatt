@@ -250,6 +250,7 @@ export default function FactCardOpsPage() {
   const [queueStatus, setQueueStatus] = useState<"OPEN" | "RESOLVED">("OPEN");
   const [queueQ, setQueueQ] = useState("");
   const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
+  const [queueTotalCount, setQueueTotalCount] = useState<number | null>(null);
   const [queueLoading, setQueueLoading] = useState(false);
   const [queueErr, setQueueErr] = useState<string | null>(null);
   const [queueSortKey, setQueueSortKey] = useState<
@@ -273,6 +274,11 @@ export default function FactCardOpsPage() {
       const data = await res.json();
       if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`);
       setQueueItems(Array.isArray(data.items) ? data.items : []);
+      setQueueTotalCount(
+        typeof data.totalCount === "number" && Number.isFinite(data.totalCount)
+          ? data.totalCount
+          : null,
+      );
     } catch (e: any) {
       setQueueErr(e?.message || "Failed to load queue.");
     } finally {
@@ -347,6 +353,7 @@ export default function FactCardOpsPage() {
   const [tplLoading, setTplLoading] = useState(false);
   const [tplErr, setTplErr] = useState<string | null>(null);
   const [tplRows, setTplRows] = useState<TemplateRow[]>([]);
+  const [tplTotalCount, setTplTotalCount] = useState<number | null>(null);
   const [tplSortKey, setTplSortKey] = useState<
     "supplier" | "planName" | "termMonths" | "rate500" | "rate1000" | "rate2000" | "eflVersionCode"
   >("supplier");
@@ -369,6 +376,11 @@ export default function FactCardOpsPage() {
       const data = await res.json();
       if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`);
       setTplRows(Array.isArray(data.rows) ? data.rows : []);
+      setTplTotalCount(
+        typeof data.totalCount === "number" && Number.isFinite(data.totalCount)
+          ? data.totalCount
+          : null,
+      );
     } catch (e: any) {
       setTplErr(e?.message || "Failed to load templates.");
     } finally {
@@ -631,7 +643,12 @@ export default function FactCardOpsPage() {
 
       <section className="rounded-2xl border bg-white p-4 space-y-3">
         <div className="flex items-center justify-between gap-3">
-          <h2 className="font-medium">EFL Parse Review Queue</h2>
+          <h2 className="font-medium">
+            EFL Parse Review Queue{" "}
+            <span className="text-xs text-gray-600">
+              ({queueTotalCount ?? queueItems.length})
+            </span>
+          </h2>
           <button className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60" onClick={() => void loadQueue()} disabled={!ready || queueLoading}>
             {queueLoading ? "Loading…" : "Refresh"}
           </button>
@@ -718,7 +735,12 @@ export default function FactCardOpsPage() {
 
       <section className="rounded-2xl border bg-white p-4 space-y-3">
         <div className="flex items-center justify-between gap-3">
-          <h2 className="font-medium">Templates (RatePlan.rateStructure stored)</h2>
+          <h2 className="font-medium">
+            Templates (RatePlan.rateStructure stored){" "}
+            <span className="text-xs text-gray-600">
+              ({tplTotalCount ?? tplRows.length})
+            </span>
+          </h2>
           <button className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60" onClick={() => void loadTemplates()} disabled={!ready || tplLoading}>
             {tplLoading ? "Loading…" : "Refresh"}
           </button>
