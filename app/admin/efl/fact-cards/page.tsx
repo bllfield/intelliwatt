@@ -450,7 +450,7 @@ export default function FactCardOpsPage() {
   const [tplRows, setTplRows] = useState<TemplateRow[]>([]);
   const [tplTotalCount, setTplTotalCount] = useState<number | null>(null);
   const [tplSortKey, setTplSortKey] = useState<
-    "supplier" | "planName" | "termMonths" | "rate500" | "rate1000" | "rate2000" | "eflVersionCode"
+    "utilityId" | "supplier" | "planName" | "termMonths" | "rate500" | "rate1000" | "rate2000" | "eflVersionCode"
   >("supplier");
   const [tplSortDir, setTplSortDir] = useState<SortDir>("asc");
 
@@ -561,8 +561,10 @@ export default function FactCardOpsPage() {
     const out = [...tplRows];
     out.sort((a: any, b: any) => {
       const av =
-        tplSortKey === "supplier"
-          ? a?.supplier
+        tplSortKey === "utilityId"
+          ? a?.utilityId
+          : tplSortKey === "supplier"
+            ? a?.supplier
           : tplSortKey === "planName"
             ? a?.planName
             : tplSortKey === "termMonths"
@@ -583,8 +585,10 @@ export default function FactCardOpsPage() {
                       : null
                     : a?.eflVersionCode;
       const bv =
-        tplSortKey === "supplier"
-          ? b?.supplier
+        tplSortKey === "utilityId"
+          ? b?.utilityId
+          : tplSortKey === "supplier"
+            ? b?.supplier
           : tplSortKey === "planName"
             ? b?.planName
             : tplSortKey === "termMonths"
@@ -1094,6 +1098,9 @@ export default function FactCardOpsPage() {
           <table className="min-w-full text-xs">
             <thead className="sticky top-0 z-10 bg-gray-50 text-gray-700">
               <tr className="h-10">
+                <th className="px-2 py-2 text-left cursor-pointer select-none" onClick={() => toggleTplSort("utilityId")}>
+                  Utility {tplSortKey === "utilityId" ? (tplSortDir === "asc" ? "▲" : "▼") : ""}
+                </th>
                 <th className="px-2 py-2 text-left cursor-pointer select-none" onClick={() => toggleTplSort("supplier")}>
                   Supplier {tplSortKey === "supplier" ? (tplSortDir === "asc" ? "▲" : "▼") : ""}
                 </th>
@@ -1123,6 +1130,7 @@ export default function FactCardOpsPage() {
                 const eflUrl = (r?.eflUrl ?? "").trim();
                 return (
                   <tr key={r.id} className="border-t h-12">
+                    <td className="px-2 py-2">{r.utilityId ?? "-"}</td>
                     <td className="px-2 py-2">{r.supplier ?? "-"}</td>
                     <td className="px-2 py-2">{r.planName ?? "-"}</td>
                     <td className="px-2 py-2 text-right">{typeof r.termMonths === "number" ? `${r.termMonths} mo` : "-"}</td>
@@ -1145,7 +1153,7 @@ export default function FactCardOpsPage() {
               })}
               {tplRows.length === 0 ? (
                 <tr>
-                  <td className="px-2 py-3 text-gray-500" colSpan={8}>
+                  <td className="px-2 py-3 text-gray-500" colSpan={9}>
                     No templates.
                   </td>
                 </tr>
