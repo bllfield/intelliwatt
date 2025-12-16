@@ -76,9 +76,35 @@ function computeAvgCentsPerKwhFromRateStructure(
     if (!usageTiers || usageTiers.length === 0) return null;
     const tiers = usageTiers
       .map((t) => ({
-        minKWh: toNum((t as any).minKWh ?? (t as any).minKwh ?? 0) ?? 0,
-        maxKWh: toNum((t as any).maxKWh ?? (t as any).maxKwh ?? null),
-        centsPerKWh: toNum((t as any).centsPerKWh ?? (t as any).priceCents ?? (t as any).rateCentsPerKwh),
+        // Support multiple historical tier field variants.
+        // Canonical: { minKWh, maxKWh, centsPerKWh }
+        // Legacy/admin: { minimumUsageKWh, maximumUsageKwh, energyChargeCentsPerkWh }
+        minKWh:
+          toNum(
+            (t as any).minKWh ??
+              (t as any).minKwh ??
+              (t as any).minimumUsageKWh ??
+              (t as any).minimumUsageKwh ??
+              (t as any).tierMinKWh ??
+              (t as any).tierMinKwh ??
+              0,
+          ) ?? 0,
+        maxKWh: toNum(
+          (t as any).maxKWh ??
+            (t as any).maxKwh ??
+            (t as any).maximumUsageKWh ??
+            (t as any).maximumUsageKwh ??
+            (t as any).tierMaxKWh ??
+            (t as any).tierMaxKwh ??
+            null,
+        ),
+        centsPerKWh: toNum(
+          (t as any).centsPerKWh ??
+            (t as any).priceCents ??
+            (t as any).rateCentsPerKwh ??
+            (t as any).energyChargeCentsPerkWh ??
+            (t as any).energyChargeCentsPerKwh,
+        ),
       }))
       .filter((t) => Number.isFinite(t.minKWh) && typeof t.centsPerKWh === "number")
       .sort((a, b) => a.minKWh - b.minKWh);
@@ -127,7 +153,10 @@ function computeAvgCentsPerKwhFromRateStructure(
 
   if (energyCents == null) {
     if (type === "FIXED") {
-      energyCents = computeFlatEnergyCents(toNum(rateStructure.energyRateCents));
+      // Some stored shapes use defaultRateCentsPerKwh rather than energyRateCents.
+      energyCents = computeFlatEnergyCents(
+        toNum(rateStructure.energyRateCents) ?? toNum(rateStructure.defaultRateCentsPerKwh),
+      );
     } else if (type === "VARIABLE") {
       energyCents = computeFlatEnergyCents(toNum(rateStructure.currentBillEnergyRateCents));
     } else {
