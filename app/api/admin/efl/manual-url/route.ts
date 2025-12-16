@@ -7,6 +7,7 @@ import { upsertRatePlanFromEfl } from "@/lib/efl/planPersistence";
 import { validatePlanRules, planRulesToRateStructure } from "@/lib/efl/planEngine";
 import { inferTdspTerritoryFromEflText } from "@/lib/efl/eflValidator";
 import { solveEflValidationGaps } from "@/lib/efl/validation/solveEflValidationGaps";
+import { prisma } from "@/lib/db";
 
 const MAX_PREVIEW_CHARS = 20000;
 
@@ -103,6 +104,7 @@ export async function POST(req: NextRequest) {
     // structurally valid, upsert a RatePlan template so it appears in Templates.
     let templatePersisted: boolean = false;
     let persistedRatePlanId: string | null = null;
+    let autoResolvedQueueCount: number = 0;
     try {
       const validationAfter =
         (derivedForValidation as any)?.validationAfter ??
@@ -146,11 +148,39 @@ export async function POST(req: NextRequest) {
 
           templatePersisted = true;
           persistedRatePlanId = (saved as any)?.id ? String((saved as any).id) : null;
+
+          // If this EFL was previously quarantined (OPEN review-queue item), auto-resolve it now
+          // that we have a persisted template from a PASS run.
+          try {
+            const repPuct = template.repPuctCertificate ?? null;
+            const ver = template.eflVersionCode ?? null;
+            const updated = await (prisma as any).eflParseReviewQueue.updateMany({
+              where: {
+                resolvedAt: null,
+                OR: [
+                  repPuct && ver
+                    ? { repPuctCertificate: repPuct, eflVersionCode: ver }
+                    : undefined,
+                  eflUrl ? { eflUrl: eflUrl } : undefined,
+                  template.eflPdfSha256 ? { eflPdfSha256: template.eflPdfSha256 } : undefined,
+                ].filter(Boolean),
+              },
+              data: {
+                resolvedAt: new Date(),
+                resolvedBy: "auto",
+                resolutionNotes: `AUTO_RESOLVED: templatePersisted=true via manual_url. ratePlanId=${persistedRatePlanId ?? "—"}`,
+              },
+            });
+            autoResolvedQueueCount = Number(updated?.count ?? 0) || 0;
+          } catch {
+            autoResolvedQueueCount = 0;
+          }
         }
       }
     } catch {
       templatePersisted = false;
       persistedRatePlanId = null;
+      autoResolvedQueueCount = 0;
     }
 
     return NextResponse.json({
@@ -172,6 +202,7 @@ export async function POST(req: NextRequest) {
       derivedForValidation,
       templatePersisted,
       persistedRatePlanId,
+      autoResolvedQueueCount,
       extractorMethod: template.extractorMethod ?? "pdftotext",
       ai,
     });

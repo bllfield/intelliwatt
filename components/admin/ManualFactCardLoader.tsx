@@ -29,6 +29,7 @@ type UploadResponse = {
   derivedForValidation?: any | null;
   templatePersisted?: boolean;
   persistedRatePlanId?: string | null;
+  autoResolvedQueueCount?: number;
   ai?: { enabled: boolean; hasKey: boolean; used: boolean; reason?: string };
 };
 
@@ -410,6 +411,14 @@ export function ManualFactCardLoader(props: {
                 {result.persistedRatePlanId ? ` (RatePlan.id=${result.persistedRatePlanId})` : ""}
               </div>
             </div>
+            <div>
+              <div className="font-semibold text-brand-navy mb-1">Queue auto-resolved</div>
+              <div className="font-mono">
+                {typeof result.autoResolvedQueueCount === "number"
+                  ? String(result.autoResolvedQueueCount)
+                  : "—"}
+              </div>
+            </div>
           </div>
 
           <div className="space-y-2">
@@ -453,6 +462,7 @@ export function ManualFactCardLoader(props: {
                 ai: result.ai ?? null,
                 templatePersisted: (result as any).templatePersisted ?? null,
                 persistedRatePlanId: (result as any).persistedRatePlanId ?? null,
+                autoResolvedQueueCount: (result as any).autoResolvedQueueCount ?? null,
               })}
             </pre>
           </details>
