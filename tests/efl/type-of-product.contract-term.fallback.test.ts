@@ -28,6 +28,8 @@ Energy Charge                                            14.3000 ¢ per kWh
     expect(res.planRules).toBeTruthy();
     expect(res.planRules.rateType).toBe("VARIABLE");
     expect((res.planRules as any).termMonths).toBe(1);
+    // VARIABLE plans should validate without defaultRateCentsPerKwh when current bill rate exists.
+    expect((res.planRules as any).currentBillEnergyRateCents).toBeTruthy();
   });
 });
 

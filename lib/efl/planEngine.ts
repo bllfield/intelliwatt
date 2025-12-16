@@ -383,21 +383,41 @@ export function validatePlanRules(plan: PlanRules): PlanRulesValidationResult {
     }
   }
 
-  // Non-TOU plans: require a well-formed defaultRateCentsPerKwh.
+  // Non-TOU plans: require a well-formed default rate.
+  // - FIXED: defaultRateCentsPerKwh is required.
+  // - VARIABLE: currentBillEnergyRateCents is preferred; defaultRateCentsPerKwh may be absent.
   if (!hasTou) {
-    const v = plan.defaultRateCentsPerKwh;
-    if (typeof v !== "number" || !Number.isFinite(v)) {
-      addIssue(
-        "MISSING_DEFAULT_RATE",
-        "Plan has no TOU periods and defaultRateCentsPerKwh is not a finite number.",
-        "ERROR",
-      );
-    } else if (v < 0) {
-      addIssue(
-        "NEGATIVE_DEFAULT_RATE",
-        "defaultRateCentsPerKwh must be non-negative.",
-        "ERROR",
-      );
+    const rateType = plan.rateType;
+    if (rateType === "VARIABLE") {
+      const v = plan.currentBillEnergyRateCents;
+      if (typeof v !== "number" || !Number.isFinite(v)) {
+        addIssue(
+          "MISSING_VARIABLE_CURRENT_RATE",
+          "VARIABLE plan has no TOU periods and currentBillEnergyRateCents is not a finite number.",
+          "ERROR",
+        );
+      } else if (v < 0) {
+        addIssue(
+          "NEGATIVE_VARIABLE_CURRENT_RATE",
+          "currentBillEnergyRateCents must be non-negative.",
+          "ERROR",
+        );
+      }
+    } else {
+      const v = plan.defaultRateCentsPerKwh;
+      if (typeof v !== "number" || !Number.isFinite(v)) {
+        addIssue(
+          "MISSING_DEFAULT_RATE",
+          "Plan has no TOU periods and defaultRateCentsPerKwh is not a finite number.",
+          "ERROR",
+        );
+      } else if (v < 0) {
+        addIssue(
+          "NEGATIVE_DEFAULT_RATE",
+          "defaultRateCentsPerKwh must be non-negative.",
+          "ERROR",
+        );
+      }
     }
   }
 
@@ -510,18 +530,36 @@ export function planRulesToRateStructure(plan: PlanRules): RateStructure {
     };
   }
 
-  // 2) Default: treat as FIXED plan using the defaultRateCentsPerKwh.
+  // 2) VARIABLE: use currentBillEnergyRateCents when explicitly provided.
+  if (plan.rateType === "VARIABLE") {
+    if (typeof plan.currentBillEnergyRateCents !== "number") {
+      throw new Error(
+        "planRulesToRateStructure: currentBillEnergyRateCents is not defined for VARIABLE plan. Validation should have caught this earlier.",
+      );
+    }
+
+    const variableStructure: VariableRateStructure = {
+      type: "VARIABLE",
+      currentBillEnergyRateCents: plan.currentBillEnergyRateCents,
+      indexType: plan.variableIndexType ?? undefined,
+      baseMonthlyFeeCents,
+      billCredits,
+      usageTiers,
+    };
+
+    return variableStructure;
+  }
+
+  // 3) Default: treat as FIXED plan using the defaultRateCentsPerKwh.
   if (typeof plan.defaultRateCentsPerKwh !== "number") {
     throw new Error(
       "planRulesToRateStructure: defaultRateCentsPerKwh is not defined for non-TOU plan. Validation should have caught this.",
     );
   }
 
-  const energyRateCents = plan.defaultRateCentsPerKwh;
-
   const fixedStructure: FixedRateStructure = {
     type: "FIXED",
-    energyRateCents,
+    energyRateCents: plan.defaultRateCentsPerKwh,
     baseMonthlyFeeCents,
     billCredits,
     usageTiers,

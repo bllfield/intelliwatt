@@ -3,6 +3,9 @@ import { Buffer } from "node:buffer";
 
 import { fetchEflPdfFromUrl } from "@/lib/efl/fetchEflPdf";
 import { getOrCreateEflTemplate } from "@/lib/efl/getOrCreateEflTemplate";
+import { upsertRatePlanFromEfl } from "@/lib/efl/planPersistence";
+import { validatePlanRules, planRulesToRateStructure } from "@/lib/efl/planEngine";
+import { inferTdspTerritoryFromEflText } from "@/lib/efl/eflValidator";
 import { solveEflValidationGaps } from "@/lib/efl/validation/solveEflValidationGaps";
 
 const MAX_PREVIEW_CHARS = 20000;
@@ -96,6 +99,57 @@ export async function POST(req: NextRequest) {
       derivedForValidation = null;
     }
 
+    // Best-effort persistence: if the EFL PASSes after solver (or already PASSed) and PlanRules are
+    // structurally valid, upsert a RatePlan template so it appears in Templates.
+    let templatePersisted: boolean = false;
+    try {
+      const validationAfter =
+        (derivedForValidation as any)?.validationAfter ??
+        (template.validation as any)?.eflAvgPriceValidation ??
+        null;
+      const finalStatus = validationAfter?.status ?? null;
+      const planRules = template.planRules ?? null;
+
+      if (finalStatus === "PASS" && planRules) {
+        const prValidation = validatePlanRules(planRules as any);
+        if (prValidation?.requiresManualReview !== true) {
+          const canonicalRateStructure = planRulesToRateStructure(planRules as any);
+          const tdsp = inferTdspTerritoryFromEflText(rawText);
+
+          const avgRows = Array.isArray(validationAfter?.avgTableRows) ? validationAfter.avgTableRows : [];
+          const pick = (kwh: number): number | null => {
+            const row = avgRows.find((r: any) => Number(r?.kwh) === kwh);
+            const v = Number(row?.avgPriceCentsPerKwh);
+            return Number.isFinite(v) ? v : null;
+          };
+
+          await upsertRatePlanFromEfl({
+            mode: "live",
+            eflUrl,
+            eflSourceUrl: eflUrl,
+            repPuctCertificate: template.repPuctCertificate ?? null,
+            eflVersionCode: template.eflVersionCode ?? null,
+            eflPdfSha256: template.eflPdfSha256,
+            utilityId: tdsp ?? "UNKNOWN",
+            state: "TX",
+            termMonths: typeof (planRules as any)?.termMonths === "number" ? (planRules as any).termMonths : null,
+            rate500: pick(500),
+            rate1000: pick(1000),
+            rate2000: pick(2000),
+            providerName: null,
+            planName: null,
+            planRules: planRules as any,
+            rateStructure: canonicalRateStructure as any,
+            validation: prValidation as any,
+          });
+
+          templatePersisted = true;
+        }
+      }
+    } catch {
+      templatePersisted = false;
+    }
+
     return NextResponse.json({
       ok: true,
       eflUrl,
@@ -113,6 +167,7 @@ export async function POST(req: NextRequest) {
       parseWarnings: template.parseWarnings,
       validation: template.validation ?? null,
       derivedForValidation,
+      templatePersisted,
       extractorMethod: template.extractorMethod ?? "pdftotext",
       ai,
     });

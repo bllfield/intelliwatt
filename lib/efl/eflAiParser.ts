@@ -6,6 +6,7 @@ import {
   validateEflAvgPriceTable,
   type EflAvgPriceValidation,
 } from "@/lib/efl/eflValidator";
+import { planRulesToRateStructure, validatePlanRules } from "@/lib/efl/planEngine";
 
 export interface EflAiParseResult {
   planRules: any | null;
@@ -662,6 +663,24 @@ OUTPUT CONTRACT:
     rs.energyRateCents = singleEnergy;
   }
 
+  // VARIABLE plans: align RateStructure to the canonical contract so validator/persistence
+  // can model bills and persist templates safely.
+  if (planRules.rateType === "VARIABLE") {
+    if (!rs.type) rs.type = "VARIABLE";
+    if (
+      typeof rs.currentBillEnergyRateCents !== "number" &&
+      typeof planRules.currentBillEnergyRateCents === "number"
+    ) {
+      rs.currentBillEnergyRateCents = planRules.currentBillEnergyRateCents;
+    }
+    if (
+      typeof rs.indexType !== "string" &&
+      typeof planRules.variableIndexType === "string"
+    ) {
+      rs.indexType = planRules.variableIndexType;
+    }
+  }
+
   // Normalize bill credits: fix autopay thresholdKwh and mirror into RateStructure.
   if (Array.isArray(planRules.billCredits) && planRules.billCredits.length > 0) {
     const normalizedCredits: any[] = [];
@@ -991,6 +1010,18 @@ OUTPUT CONTRACT:
 
   const dedupedWarnings = Array.from(new Set(warnings));
 
+  // Final normalization: if PlanRules are structurally valid, prefer generating the canonical
+  // engine-side RateStructure from PlanRules. This prevents accidental schema drift (e.g. array shapes)
+  // from the AI response and keeps template persistence safe.
+  try {
+    const prValidation = validatePlanRules(planRules as any);
+    if (prValidation?.requiresManualReview !== true) {
+      rateStructure = planRulesToRateStructure(planRules as any) as any;
+    }
+  } catch {
+    // best-effort only
+  }
+
   const normalizedConfidence = Math.max(
     0,
     Math.min(1, computedConfidence / 100),
@@ -1063,8 +1094,48 @@ function fallbackExtractSingleEnergyChargeCents(text: string): number | null {
   const re =
     /Energy\s*Charge[\s:]*([0-9]+(?:\.[0-9]+)?)\s*¢?\s*(?:\/|per)\s*kwh/i;
   const m = text.match(re);
-  if (!m?.[1]) return null;
-  return centsStringToNumber(`${m[1]}¢`);
+  if (m?.[1]) {
+    const v = centsStringToNumber(`${m[1]}¢`);
+    if (v != null) return v;
+  }
+
+  // Table-style fallback: in many EFLs, "Energy Charge (per kWh)" is a header row
+  // and the numeric value appears on a subsequent line (often alongside Base Charge).
+  const lines = (text || "")
+    .split(/\r?\n/g)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+
+  const centsTokenRe = /(\d+(?:\.\d+)?)\s*¢\s*(?:\/\s*kwh|per\s*kwh)/i;
+  const parseAllCentsTokens = (line: string): number[] => {
+    const cleaned = line.replace(/,/g, "");
+    const hits = Array.from(
+      cleaned.matchAll(/(\d+(?:\.\d+)?)\s*¢\s*(?:\/\s*kwh|per\s*kwh)/gi),
+    );
+    return hits
+      .map((h) => (h?.[1] ? Number(h[1]) : NaN))
+      .filter((n) => Number.isFinite(n));
+  };
+
+  const energyHeaderIdx = lines.findIndex((l) => /Energy\s*Charge/i.test(l));
+  if (energyHeaderIdx >= 0) {
+    const candidates: number[] = [];
+    for (let j = 1; j <= 10; j++) {
+      const candidate = lines[energyHeaderIdx + j];
+      if (!candidate) continue;
+      // Skip obvious TDSP delivery rows.
+      if (/Delivery/i.test(candidate) || /TDSP/i.test(candidate) || /TDU/i.test(candidate)) continue;
+      if (!centsTokenRe.test(candidate)) continue;
+      candidates.push(...parseAllCentsTokens(candidate));
+    }
+    if (candidates.length > 0) {
+      // Heuristic: REP energy charge is usually >= TDSP ¢/kWh and appears as the larger token.
+      const best = Math.max(...candidates);
+      if (Number.isFinite(best)) return best;
+    }
+  }
+
+  return null;
 }
 
 // ----------------------------------------------------------------------
