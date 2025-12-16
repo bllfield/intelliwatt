@@ -150,6 +150,7 @@ interface SummaryStats {
   activeHouseCount: number;
   applianceCount: number;
   pendingSmtRevocations: number;
+  eflQuarantineOpenCount: number;
   testimonialSubmissionCount: number;
   testimonialPendingCount: number;
   referralPendingCount: number;
@@ -423,6 +424,7 @@ export default function AdminDashboard() {
   const totalUsageCustomers = summary?.totalUsageCustomers ?? 0;
   const applianceCount = summary?.applianceCount ?? 0;
   const pendingRevocationsCount = summary?.pendingSmtRevocations ?? 0;
+  const eflQuarantineOpenCount = summary?.eflQuarantineOpenCount ?? 0;
   const testimonialsTotal = summary?.testimonialSubmissionCount ?? testimonials.length;
   const testimonialsPendingCount = summary?.testimonialPendingCount ?? testimonials.filter((record) => record.status === 'PENDING').length;
   const pendingEmailConfirmationsCount =
@@ -459,11 +461,22 @@ export default function AdminDashboard() {
     (record) => record.attentionCode === 'smt_email_declined',
   );
 
-  const overviewStats = [
+  const overviewStats: Array<{
+    label: string;
+    value: string;
+    href?: string;
+    tone?: 'default' | 'danger';
+  }> = [
     { label: 'Users', value: totalUsersCount.toLocaleString() },
     { label: "SMT API's", value: smtApiCount.toLocaleString() },
     { label: 'Manual Entries', value: manualEntriesCount.toLocaleString() },
     { label: 'Total Usage Customers', value: totalUsageCustomers.toLocaleString() },
+    {
+      label: 'EFL Quarantine (Open)',
+      value: eflQuarantineOpenCount.toLocaleString(),
+      href: '/admin/efl/fact-cards',
+      tone: eflQuarantineOpenCount > 0 ? 'danger' : 'default',
+    },
     { label: 'Appliances #', value: applianceCount.toLocaleString() },
     { label: 'Testimonials', value: testimonialsTotal.toLocaleString() },
     { label: 'Testimonials Pending', value: testimonialsPendingCount.toLocaleString() },
@@ -541,10 +554,19 @@ export default function AdminDashboard() {
         {/* Stats Overview */}
         <div className="grid gap-6 mb-8 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {overviewStats.map((stat) => (
-            <div key={stat.label} className="bg-brand-white rounded-lg p-6 shadow-lg">
+            <a
+              key={stat.label}
+              href={stat.href ?? undefined}
+              className={
+                (stat.href ? 'block ' : '') +
+                (stat.tone === 'danger'
+                  ? 'bg-rose-50 border border-rose-200 rounded-lg p-6 shadow-lg hover:bg-rose-100 transition-colors'
+                  : 'bg-brand-white rounded-lg p-6 shadow-lg')
+              }
+            >
               <div className="text-2xl font-bold text-brand-navy">{stat.value}</div>
               <div className="text-brand-navy/60">{stat.label}</div>
-            </div>
+            </a>
           ))}
         </div>
 

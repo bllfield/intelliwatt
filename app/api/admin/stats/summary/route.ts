@@ -23,6 +23,7 @@ export async function GET() {
       activeManualUploads,
       applianceCount,
       pendingSmtRevocations,
+      eflQuarantineOpenCount,
       smtUserResults,
       manualUserResults,
       referralPendingCountBase,
@@ -44,6 +45,11 @@ export async function GET() {
           esiidAttentionRequired: true,
           esiidAttentionCode: 'smt_revoke_requested',
         },
+      }),
+      // EFL "quarantine" = items in the parse review queue that are still OPEN.
+      // These require admin attention before becoming user-facing.
+      prismaAny.eflParseReviewQueue.count({
+        where: { resolvedAt: null },
       }),
       prisma.smtAuthorization.findMany({
         where: { archivedAt: null },
@@ -115,6 +121,7 @@ export async function GET() {
       activeHouseCount: 0,
       applianceCount,
       pendingSmtRevocations,
+      eflQuarantineOpenCount,
       totalUsageCustomers: usageUserSet.size,
       testimonialSubmissionCount: totalTestimonials,
       testimonialPendingCount: pendingTestimonials,
