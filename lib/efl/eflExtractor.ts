@@ -423,6 +423,32 @@ function extractEflVersionCode(text: string): string | null {
     }
   }
 
+  // E) Last-resort numeric footer IDs: date-like tokens at the very bottom.
+  // Example (Payless prepaid): "... REP# 10110 202512074"
+  // We only accept these when they appear near REP/PUCT context to avoid
+  // confusing ZIP/phone numbers for version IDs.
+  for (const l of tail) {
+    const hasContext = /(?:\bPUCT\b|\bREP\b\s*#|\bREP#)/i.test(l);
+    if (!hasContext) continue;
+    const mAll = Array.from(l.matchAll(/\b(20\d{6}\d{0,3})\b/g));
+    for (const m of mAll) {
+      const token = m?.[1] ?? "";
+      if (!token) continue;
+      const y = Number(token.slice(0, 4));
+      const mo = Number(token.slice(4, 6));
+      const d = Number(token.slice(6, 8));
+      if (!Number.isFinite(y) || !Number.isFinite(mo) || !Number.isFinite(d)) continue;
+      if (y < 2015 || y > 2035) continue;
+      if (mo < 1 || mo > 12) continue;
+      if (d < 1 || d > 31) continue;
+      // Reject if token is actually part of a longer number string.
+      if (token.length < 8 || token.length > 11) continue;
+      // Must not be "weak" per our collision guardrail.
+      if (!isWeakVersionCandidate(token)) return token;
+      return token;
+    }
+  }
+
   return null;
 }
 

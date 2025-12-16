@@ -54,6 +54,14 @@ describe("eflExtractor - EFL Version code extraction", () => {
       "GreenVolt 24_ONC_U_1220_2995_150_10162025",
     );
   });
+
+  test("extracts numeric date-like footer ids when they appear near REP context (Payless-style)", () => {
+    const text = `
+      Young Energy, LLC DBA Payless Power, REP# 10110                              202512074
+      Customer Service: Toll Free 1-888-963-9363
+    `;
+    expect(extractEflVersionCodeFromText(text)).toBe("202512074");
+  });
 });
 
 
