@@ -39,6 +39,13 @@ type UploadResponse = {
   templatePersisted?: boolean;
   persistedRatePlanId?: string | null;
   autoResolvedQueueCount?: number;
+  persistAttempted?: boolean;
+  persistUsedDerived?: boolean;
+  persistNotes?: string | null;
+  queueAutoResolveAttempted?: boolean;
+  queueAutoResolveCriteria?: any;
+  queueAutoResolveOpenMatchesCount?: number;
+  queueAutoResolveOpenMatchesPreview?: any[];
   ai?: { enabled: boolean; hasKey: boolean; used: boolean; reason?: string };
 };
 
@@ -563,6 +570,13 @@ export function ManualFactCardLoader(props: {
                 templatePersisted: (result as any).templatePersisted ?? null,
                 persistedRatePlanId: (result as any).persistedRatePlanId ?? null,
                 autoResolvedQueueCount: (result as any).autoResolvedQueueCount ?? null,
+                persistAttempted: (result as any).persistAttempted ?? null,
+                persistUsedDerived: (result as any).persistUsedDerived ?? null,
+                persistNotes: (result as any).persistNotes ?? null,
+                queueAutoResolveAttempted: (result as any).queueAutoResolveAttempted ?? null,
+                queueAutoResolveCriteria: (result as any).queueAutoResolveCriteria ?? null,
+                queueAutoResolveOpenMatchesCount: (result as any).queueAutoResolveOpenMatchesCount ?? null,
+                queueAutoResolveOpenMatchesPreview: (result as any).queueAutoResolveOpenMatchesPreview ?? null,
               })}
             </pre>
           </details>

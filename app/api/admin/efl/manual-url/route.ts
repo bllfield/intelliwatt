@@ -167,18 +167,34 @@ export async function POST(req: NextRequest) {
     let templatePersisted: boolean = false;
     let persistedRatePlanId: string | null = null;
     let autoResolvedQueueCount: number = 0;
+  let persistAttempted: boolean = false;
+  let persistNotes: string | null = null;
+  let persistUsedDerived: boolean = false;
+  let queueAutoResolveAttempted: boolean = false;
+  let queueAutoResolveCriteria: any = null;
+  let queueAutoResolveOpenMatchesPreview: any[] = [];
+  let queueAutoResolveOpenMatchesCount: number = 0;
     try {
       const validationAfter =
         (derivedForValidation as any)?.validationAfter ??
         (template.validation as any)?.eflAvgPriceValidation ??
         null;
       const finalStatus = validationAfter?.status ?? null;
-      const planRules = template.planRules ?? null;
+      const planRulesBase = template.planRules ?? null;
 
-      if (finalStatus === "PASS" && planRules) {
-        const prValidation = validatePlanRules(planRules as any);
+      // Prefer solver-derived shapes when available (aligns manual loader with batch + queue processors).
+      const planRulesForPersist =
+        (derivedForValidation as any)?.derivedPlanRules ?? planRulesBase ?? null;
+      const rateStructureForPersist =
+        (derivedForValidation as any)?.derivedRateStructure ?? template.rateStructure ?? null;
+      const canonicalRateStructure =
+        rateStructureForPersist ?? (planRulesForPersist ? planRulesToRateStructure(planRulesForPersist as any) : null);
+      persistUsedDerived = Boolean((derivedForValidation as any)?.derivedPlanRules || (derivedForValidation as any)?.derivedRateStructure);
+
+      if (finalStatus === "PASS" && planRulesForPersist && canonicalRateStructure) {
+        persistAttempted = true;
+        const prValidation = validatePlanRules(planRulesForPersist as any);
         if (prValidation?.requiresManualReview !== true) {
-          const canonicalRateStructure = planRulesToRateStructure(planRules as any);
           const tdsp = inferTdspTerritoryFromEflText(rawText);
 
           const avgRows = Array.isArray(validationAfter?.avgTableRows) ? validationAfter.avgTableRows : [];
@@ -199,13 +215,16 @@ export async function POST(req: NextRequest) {
             eflPdfSha256: template.eflPdfSha256,
             utilityId: tdsp ?? "UNKNOWN",
             state: "TX",
-            termMonths: typeof (planRules as any)?.termMonths === "number" ? (planRules as any).termMonths : null,
+            termMonths:
+              typeof (planRulesForPersist as any)?.termMonths === "number"
+                ? (planRulesForPersist as any).termMonths
+                : null,
             rate500: pick(500),
             rate1000: pick(1000),
             rate2000: pick(2000),
             providerName: names.providerName,
             planName: names.planName,
-            planRules: planRules as any,
+            planRules: planRulesForPersist as any,
             rateStructure: canonicalRateStructure as any,
             validation: prValidation as any,
           });
@@ -215,32 +234,70 @@ export async function POST(req: NextRequest) {
             ? String((saved as any).ratePlan.id)
             : null;
 
+          const missing = Array.isArray((saved as any)?.missingTemplateFields)
+            ? ((saved as any).missingTemplateFields as string[])
+            : [];
+          if (!templatePersisted && missing.length) {
+            persistNotes = `Template not persisted (missing fields): ${missing.join(", ")}`;
+          }
+
           // If this EFL was previously quarantined (OPEN review-queue item), auto-resolve it now
-          // that we have a persisted template from a PASS run.
+          // that we have a persisted template from a PASS run AND passStrength is STRONG.
           try {
             const repPuct = template.repPuctCertificate ?? null;
             const ver = template.eflVersionCode ?? null;
-          const shouldAutoResolveQueue = templatePersisted && passStrength === "STRONG";
-          const updated = shouldAutoResolveQueue
+            const shouldAutoResolveQueue = templatePersisted && passStrength === "STRONG";
+            queueAutoResolveAttempted = shouldAutoResolveQueue;
+            queueAutoResolveCriteria = {
+              shouldAutoResolveQueue,
+              passStrength,
+              templatePersisted,
+              offerId,
+              repPuctCertificate: repPuct,
+              eflVersionCode: ver,
+              eflUrl: effectiveEflUrl,
+              eflPdfSha256: template.eflPdfSha256 ?? null,
+            };
+
+            const whereOr = [
+              offerId ? { offerId } : undefined,
+              repPuct && ver ? { repPuctCertificate: repPuct, eflVersionCode: ver } : undefined,
+              effectiveEflUrl ? { eflUrl: effectiveEflUrl } : undefined,
+              template.eflPdfSha256 ? { eflPdfSha256: template.eflPdfSha256 } : undefined,
+            ].filter(Boolean);
+
+            if (whereOr.length > 0) {
+              // Preview what we'd resolve so the UI can show exactly what matched.
+              const matches = await (prisma as any).eflParseReviewQueue.findMany({
+                where: { resolvedAt: null, OR: whereOr },
+                select: {
+                  id: true,
+                  offerId: true,
+                  eflUrl: true,
+                  repPuctCertificate: true,
+                  eflVersionCode: true,
+                  eflPdfSha256: true,
+                  supplier: true,
+                  planName: true,
+                },
+                orderBy: { createdAt: "asc" },
+                take: 25,
+              });
+              queueAutoResolveOpenMatchesPreview = Array.isArray(matches) ? matches : [];
+              queueAutoResolveOpenMatchesCount = queueAutoResolveOpenMatchesPreview.length;
+            }
+
+            const updated = shouldAutoResolveQueue
               ? await (prisma as any).eflParseReviewQueue.updateMany({
-              where: {
-                resolvedAt: null,
-                OR: [
-                  offerId ? { offerId } : undefined,
-                  repPuct && ver
-                    ? { repPuctCertificate: repPuct, eflVersionCode: ver }
-                    : undefined,
-                  effectiveEflUrl ? { eflUrl: effectiveEflUrl } : undefined,
-                  template.eflPdfSha256 ? { eflPdfSha256: template.eflPdfSha256 } : undefined,
-                ].filter(Boolean),
-              },
-              data: {
-                resolvedAt: new Date(),
-                resolvedBy: "auto",
-                resolutionNotes: `AUTO_RESOLVED: templatePersisted=true via manual_url. ratePlanId=${persistedRatePlanId ?? "—"}`,
-              },
+                  where: { resolvedAt: null, OR: whereOr },
+                  data: {
+                    resolvedAt: new Date(),
+                    resolvedBy: "auto",
+                    resolutionNotes: `AUTO_RESOLVED: templatePersisted=true via manual_url. ratePlanId=${persistedRatePlanId ?? "—"}`,
+                  },
                 })
               : { count: 0 };
+
             autoResolvedQueueCount = Number(updated?.count ?? 0) || 0;
           } catch {
             autoResolvedQueueCount = 0;
@@ -277,6 +334,13 @@ export async function POST(req: NextRequest) {
       templatePersisted,
       persistedRatePlanId,
       autoResolvedQueueCount,
+      persistAttempted,
+      persistUsedDerived,
+      persistNotes,
+      queueAutoResolveAttempted,
+      queueAutoResolveCriteria,
+      queueAutoResolveOpenMatchesCount,
+      queueAutoResolveOpenMatchesPreview,
       extractorMethod: template.extractorMethod ?? "pdftotext",
       ai,
     });
