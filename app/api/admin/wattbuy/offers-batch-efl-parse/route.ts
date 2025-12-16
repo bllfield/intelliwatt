@@ -496,47 +496,60 @@ export async function POST(req: NextRequest) {
         // (regardless of DRY_RUN vs STORE_TEMPLATES_ON_PASS).
         if (shouldQueue) {
           try {
-            await (prisma as any).eflParseReviewQueue.upsert({
-              where: { eflPdfSha256: det.eflPdfSha256 },
-              create: {
-                source: "wattbuy_batch",
-                eflPdfSha256: det.eflPdfSha256,
-                repPuctCertificate: det.repPuctCertificate,
-                eflVersionCode: det.eflVersionCode,
-                offerId: offerId ?? null,
-                supplier: supplier ?? null,
-                planName: planName ?? null,
-                eflUrl,
-                tdspName,
-                termMonths,
-                rawText: det.rawText,
-                planRules: pipeline.planRules ?? null,
-                rateStructure: pipeline.rateStructure ?? null,
-                validation: pipeline.validation ?? null,
-                derivedForValidation: pipeline.derivedForValidation ?? null,
-                finalStatus: finalStatus,
-                queueReason: finalQueueReason,
-                solverApplied: solverApplied ?? [],
+            const payload = {
+              source: "wattbuy_batch",
+              eflPdfSha256: det.eflPdfSha256,
+              repPuctCertificate: det.repPuctCertificate,
+              eflVersionCode: det.eflVersionCode,
+              offerId: offerId ?? null,
+              supplier: supplier ?? null,
+              planName: planName ?? null,
+              eflUrl,
+              tdspName,
+              termMonths,
+              rawText: det.rawText,
+              planRules: pipeline.planRules ?? null,
+              rateStructure: pipeline.rateStructure ?? null,
+              validation: pipeline.validation ?? null,
+              derivedForValidation: pipeline.derivedForValidation ?? null,
+              finalStatus: finalStatus,
+              queueReason: finalQueueReason,
+              solverApplied: solverApplied ?? [],
+            } as const;
+
+            // De-dupe strategy:
+            // 1) Prefer reusing an OPEN record for this REP+EFL version (stable across PDF byte drift).
+            // 2) Fall back to an OPEN record for this eflUrl (stable across PDF byte drift).
+            // 3) Finally, upsert by eflPdfSha256 (strictest fingerprint).
+            const repPuct = det.repPuctCertificate ?? null;
+            const ver = det.eflVersionCode ?? null;
+
+            const existingOpen = await (prisma as any).eflParseReviewQueue.findFirst({
+              where: {
+                resolvedAt: null,
+                OR: [
+                  repPuct && ver ? { repPuctCertificate: repPuct, eflVersionCode: ver } : undefined,
+                  eflUrl ? { eflUrl } : undefined,
+                  det.eflPdfSha256 ? { eflPdfSha256: det.eflPdfSha256 } : undefined,
+                ].filter(Boolean),
               },
-              update: {
-                repPuctCertificate: det.repPuctCertificate,
-                eflVersionCode: det.eflVersionCode,
-                offerId: offerId ?? null,
-                supplier: supplier ?? null,
-                planName: planName ?? null,
-                eflUrl,
-                tdspName,
-                termMonths,
-                rawText: det.rawText,
-                planRules: pipeline.planRules ?? null,
-                rateStructure: pipeline.rateStructure ?? null,
-                validation: pipeline.validation ?? null,
-                derivedForValidation: pipeline.derivedForValidation ?? null,
-                finalStatus: finalStatus,
-                queueReason: finalQueueReason,
-                solverApplied: solverApplied ?? [],
-              },
+              select: { id: true },
             });
+
+            if (existingOpen?.id) {
+              await (prisma as any).eflParseReviewQueue.update({
+                where: { id: existingOpen.id },
+                data: {
+                  ...payload,
+                },
+              });
+            } else {
+              await (prisma as any).eflParseReviewQueue.upsert({
+                where: { eflPdfSha256: det.eflPdfSha256 },
+                create: payload,
+                update: { ...payload },
+              });
+            }
           } catch {
             // Best-effort only; do not fail the batch because the review queue write failed.
           }
