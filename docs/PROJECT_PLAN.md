@@ -5180,6 +5180,9 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
     - `Process / run` numeric input (1–50; defaults to 25) — timeout safety cap.
     - `Start index` numeric input (≥ 0; defaults to 0) — resume scanning when runs are truncated.
     - `Dry run (don’t store templates)` checkbox (default unchecked).
+    - `Run all (auto-continue)` checkbox (default checked):
+      - Runs the batch tool in multiple back-to-back calls using `nextStartIndex` until the server reports `truncated=false`.
+      - This is the supported “no timeout” strategy on Vercel (no single request tries to process all offers).
     - `Run Batch EFL Parser` button that POSTs to `/api/admin/wattbuy/offers-batch-efl-parse` with `x-admin-token` and shows progress via the existing `loading` state.
   - Results surface in two places:
     - The existing **Inspector Summary / Raw Response** panes (raw JSON body and high‑level note like “Processed N offers (of M) in mode=…”).

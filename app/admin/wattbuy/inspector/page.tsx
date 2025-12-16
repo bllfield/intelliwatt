@@ -46,6 +46,7 @@ export default function WattBuyInspector() {
   const [batchLimit, setBatchLimit] = useState(500);
   const [batchProcessLimit, setBatchProcessLimit] = useState(25);
   const [batchStartIndex, setBatchStartIndex] = useState(0);
+  const [batchRunAll, setBatchRunAll] = useState(true);
   const [batchResults, setBatchResults] = useState<any[] | null>(null);
 
   const ready = useMemo(() => Boolean(token), [token]);
@@ -141,59 +142,80 @@ export default function WattBuyInspector() {
       return;
     }
 
-    setLoading(true);
-    setResult(null);
-    setRaw(null);
-    setBatchResults(null);
-
     try {
+      // Run once or auto-continue until the API reports no truncation.
+      setLoading(true);
+      setResult(null);
+      setRaw(null);
+      setBatchResults(null);
+
       const mode = batchDryRun ? 'DRY_RUN' : 'STORE_TEMPLATES_ON_PASS';
-      const body = {
-        address: {
-          line1: trimmedAddress,
-          city: trimmedCity,
-          state: trimmedState,
-          zip: trimmedZip,
-        },
-        offerLimit: batchLimit,
-        startIndex: batchStartIndex,
-        processLimit: batchProcessLimit,
-        dryRun: batchDryRun,
-        // Back-compat: keep mode for older deployments.
-        mode,
-      };
 
-      const res = await fetch('/api/admin/wattbuy/offers-batch-efl-parse', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-admin-token': token,
-        },
-        body: JSON.stringify(body),
-      });
+      let next = batchStartIndex;
+      let lastData: any = null;
+      const allRows: any[] = [];
 
-      const data = await res.json();
-      setRaw(data);
-      if (!res.ok || !data.ok) {
-        setResult({ ok: false, error: (data as any)?.error || 'Batch EFL parse failed.' });
-        return;
+      while (true) {
+        const body = {
+          address: {
+            line1: trimmedAddress,
+            city: trimmedCity,
+            state: trimmedState,
+            zip: trimmedZip,
+          },
+          offerLimit: batchLimit,
+          startIndex: next,
+          processLimit: batchProcessLimit,
+          dryRun: batchDryRun,
+          // Back-compat: keep mode for older deployments.
+          mode,
+        };
+
+        const res = await fetch('/api/admin/wattbuy/offers-batch-efl-parse', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-admin-token': token,
+          },
+          body: JSON.stringify(body),
+        });
+
+        const data = await res.json();
+        lastData = data;
+        setRaw(data);
+        if (!res.ok || !data.ok) {
+          setResult({ ok: false, error: (data as any)?.error || 'Batch EFL parse failed.' });
+          return;
+        }
+
+        const rows = Array.isArray(data.results) ? data.results : [];
+        allRows.push(...rows);
+        setBatchResults([...allRows]);
+
+        if (typeof data.nextStartIndex === 'number' && Number.isFinite(data.nextStartIndex)) {
+          next = data.nextStartIndex;
+          setBatchStartIndex(next);
+        }
+
+        setResult({
+          ok: true,
+          note: [
+            `Processed ${data.processedCount} EFLs (scanned ${data.scannedCount ?? data.processedCount} offers) in mode=${data.mode}.`,
+            data.truncated && typeof data.nextStartIndex === 'number'
+              ? `Continuing… nextStartIndex=${data.nextStartIndex}.`
+              : 'Done.',
+          ]
+            .filter(Boolean)
+            .join(' '),
+        });
+
+        if (!batchRunAll) break;
+        if (!data.truncated) break;
+        // Small delay between chunks to reduce burst pressure.
+        await new Promise((r) => setTimeout(r, 150));
       }
 
-      setBatchResults(data.results ?? []);
-      if (typeof data.nextStartIndex === 'number' && Number.isFinite(data.nextStartIndex)) {
-        setBatchStartIndex(data.nextStartIndex);
-      }
-      setResult({
-        ok: true,
-        note: [
-          `Processed ${data.processedCount} EFLs (scanned ${data.scannedCount ?? data.processedCount} offers) in mode=${data.mode}.`,
-          data.truncated && typeof data.nextStartIndex === 'number'
-            ? `Truncated to avoid timeouts; nextStartIndex=${data.nextStartIndex}.`
-            : null,
-        ]
-          .filter(Boolean)
-          .join(' '),
-      });
+      setRaw(lastData);
     } catch (err: any) {
       console.error(err);
       setResult({ ok: false, error: err?.message || 'Unknown batch error' });
@@ -418,6 +440,14 @@ export default function WattBuyInspector() {
                   onChange={(e) => setBatchDryRun(e.target.checked)}
                 />
                 Dry run (don&apos;t store templates)
+              </label>
+              <label className="flex items-center gap-2 select-none text-blue-900">
+                <input
+                  type="checkbox"
+                  checked={batchRunAll}
+                  onChange={(e) => setBatchRunAll(e.target.checked)}
+                />
+                Run all (auto-continue)
               </label>
               <button
                 onClick={hitBatchEflParse}
