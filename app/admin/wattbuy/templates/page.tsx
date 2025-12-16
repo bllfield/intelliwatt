@@ -148,6 +148,40 @@ export default function WattbuyTemplatedPlansPage() {
     }
   }
 
+  async function backfillUtilityFromEfl() {
+    if (!token) {
+      setError("Admin token required.");
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    setBackfillNote(null);
+    try {
+      const params = new URLSearchParams();
+      params.set("limit", String(limit));
+      if (q.trim()) params.set("q", q.trim());
+      params.set("source", "efl");
+      params.set("utility", "1");
+      const res = await fetch(`/api/admin/wattbuy/templated-plans/backfill?${params}`, {
+        method: "POST",
+        headers: { "x-admin-token": token },
+      });
+      const data = (await res.json().catch(() => null)) as any;
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || `HTTP ${res.status}`);
+      }
+      setBackfillNote(
+        `Utility backfill complete: scanned=${data.scanned} updated=${data.updated} skipped=${data.skipped} ` +
+          (data.reasons ? `reasons=${JSON.stringify(data.reasons)}` : ""),
+      );
+      await load();
+    } catch (e: any) {
+      setError(e?.message || "Utility backfill failed.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   useEffect(() => {
     if (token) {
       void load();
@@ -246,6 +280,14 @@ export default function WattbuyTemplatedPlansPage() {
               title="Overwrite Term/500/1000/2000 using the EFL Facts Label avg-price table (all-in, includes TDSP)."
             >
               {loading ? "Working…" : "Backfill from EFL avg table (overwrite)"}
+            </button>
+            <button
+              className="px-3 py-2 rounded-lg border hover:bg-gray-50"
+              onClick={() => void backfillUtilityFromEfl()}
+              disabled={loading}
+              title='Populate RatePlan.utilityId (TDSP code) for UNKNOWN rows by inferring it from the EFL text. Enables "model" all-in rates.'
+            >
+              {loading ? "Working…" : "Backfill utility (enables model rates)"}
             </button>
           </div>
         </div>

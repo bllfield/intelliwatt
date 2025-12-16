@@ -5,6 +5,7 @@ import { fetchEflPdfFromUrl } from "@/lib/efl/fetchEflPdf";
 import { runEflPipelineNoStore } from "@/lib/efl/runEflPipelineNoStore";
 import { upsertRatePlanFromEfl } from "@/lib/efl/planPersistence";
 import { validatePlanRules } from "@/lib/efl/planEngine";
+import { inferTdspTerritoryFromEflText } from "@/lib/efl/eflValidator";
 import { prisma } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -156,7 +157,7 @@ export async function POST(req: NextRequest) {
                 repPuctCertificate: det.repPuctCertificate ?? null,
                 eflVersionCode: det.eflVersionCode ?? null,
                 eflPdfSha256: det.eflPdfSha256,
-                utilityId: "UNKNOWN",
+                utilityId: inferTdspTerritoryFromEflText(det.rawText) ?? "UNKNOWN",
                 state: "TX",
                 termMonths: typeof it?.termMonths === "number" ? it.termMonths : null,
                 rate500: expectedRateFor(500),

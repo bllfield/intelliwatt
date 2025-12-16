@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { deterministicEflExtract } from "@/lib/efl/eflExtractor";
 import { fetchEflPdfFromUrl } from "@/lib/efl/fetchEflPdf";
 import { extractEflAvgPricePoints } from "@/lib/efl/eflValidator";
+import { inferTdspTerritoryFromEflText } from "@/lib/efl/eflValidator";
 
 export const dynamic = "force-dynamic";
 
@@ -163,6 +164,7 @@ export async function POST(req: NextRequest) {
     const overwrite = (req.nextUrl.searchParams.get("overwrite") ?? "") === "1";
     const source = String(req.nextUrl.searchParams.get("source") ?? "efl").toLowerCase();
     const useEflSource = source === "efl" || source === "avg" || source === "avg_table";
+    const backfillUtility = (req.nextUrl.searchParams.get("utility") ?? "") === "1";
 
     const andClauses: any[] = [];
 
@@ -178,6 +180,7 @@ export async function POST(req: NextRequest) {
               { rate500: null },
               { rate1000: null },
               { rate2000: null },
+              ...(backfillUtility ? [{ utilityId: "UNKNOWN" }] : []),
             ],
           }),
       ...(q
@@ -235,6 +238,7 @@ export async function POST(req: NextRequest) {
       let computed500: number | null = null;
       let computed1000: number | null = null;
       let computed2000: number | null = null;
+      let computedUtilityId: string | null = null;
 
       if (useEflSource) {
         const seedUrl = (p.eflUrl ?? p.eflSourceUrl) as string | null;
@@ -264,6 +268,10 @@ export async function POST(req: NextRequest) {
           computed500 = typeof p500 === "number" && Number.isFinite(p500) ? p500 : null;
           computed1000 = typeof p1000 === "number" && Number.isFinite(p1000) ? p1000 : null;
           computed2000 = typeof p2000 === "number" && Number.isFinite(p2000) ? p2000 : null;
+
+          if (backfillUtility) {
+            computedUtilityId = inferTdspTerritoryFromEflText(extract.rawText) ?? null;
+          }
         } catch {
           skipped += 1;
           reasons.EFL_FETCH_OR_PARSE_FAILED = (reasons.EFL_FETCH_OR_PARSE_FAILED ?? 0) + 1;
@@ -282,6 +290,9 @@ export async function POST(req: NextRequest) {
       if (typeof computed500 === "number" && (overwrite || p.rate500 == null)) data.rate500 = computed500;
       if (typeof computed1000 === "number" && (overwrite || p.rate1000 == null)) data.rate1000 = computed1000;
       if (typeof computed2000 === "number" && (overwrite || p.rate2000 == null)) data.rate2000 = computed2000;
+
+      // Utility: populate when requested (and only when we can infer a real TDSP code).
+      if (backfillUtility && computedUtilityId) data.utilityId = computedUtilityId;
 
       if (Object.keys(data).length === 0) {
         skipped += 1;
@@ -309,6 +320,7 @@ export async function POST(req: NextRequest) {
       dryRun,
       source: useEflSource ? "efl" : "rateStructure",
       overwrite,
+      utility: backfillUtility,
       scanned: plans.length,
       updated,
       skipped,
