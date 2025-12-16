@@ -44,6 +44,16 @@ describe("eflExtractor - EFL Version code extraction", () => {
     `;
     expect(extractEflVersionCodeFromText(text)).toBe("TexasConnect 12 20251208E V1");
   });
+
+  test("stitches Chariot-style 'Ver. #' plan-family label with following underscore code", () => {
+    const text = `
+      Ver. #: GreenVolt
+      PUCT Certificate # 10260                                                                                         24_ONC_U_1220_2995_150_10162025
+    `;
+    expect(extractEflVersionCodeFromText(text)).toBe(
+      "GreenVolt 24_ONC_U_1220_2995_150_10162025",
+    );
+  });
 });
 
 

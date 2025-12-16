@@ -298,11 +298,46 @@ function extractEflVersionCode(text: string): string | null {
   }
 
   // A) Common inline "Ver. #:" patterns, with or without leading "EFL".
-  for (const line of lines) {
+  // Some providers put a plan-family label on the Ver.# line and the unique
+  // structured code on the next line (e.g., "Ver. #: GreenVolt" + "24_ONC_U_...").
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
     const m = line.match(/\b(?:EFL\s*)?Ver\.\s*#\s*:\s*(.+)\b/i);
-    if (m?.[1]) {
-      const val = normalizeToken(m[1].trim());
-      if (val && val.length >= 3 && !isWeakVersionCandidate(val)) return val;
+    if (!m?.[1]) continue;
+
+    const val = normalizeToken(m[1].trim());
+    if (val && val.length >= 3 && !isWeakVersionCandidate(val)) return val;
+
+    // If the inline token is weak (e.g. "GreenVolt"), try to find a strong
+    // underscore token in the next few lines and combine them for uniqueness.
+    const label = val || m[1].trim();
+    const window: string[] = [];
+    for (let j = i + 1; j < Math.min(i + 6, lines.length); j++) {
+      const candidate = lines[j]?.trim();
+      if (!candidate) continue;
+      window.push(candidate);
+      if (window.length >= 4) break;
+    }
+    if (!label || !window.length) continue;
+
+    let strong: string | null = null;
+    for (const w of window) {
+      // Prefer the last underscore token on the line; these codes often appear
+      // after "PUCT Certificate # #####" in footer layouts.
+      const tokens = Array.from(w.matchAll(/\b([A-Z0-9_.-]*_[A-Z0-9_.-]+)\b/gi)).map((x) => x[1]);
+      const best = tokens.length ? normalizeToken(tokens[tokens.length - 1]!) : null;
+      if (!best) continue;
+      if (!isWeakVersionCandidate(best)) {
+        strong = best;
+        break;
+      }
+    }
+    if (strong) {
+      const combined = `${label} ${strong}`.trim();
+      // Combined string will include digits from the strong token, so it will
+      // pass the weak-candidate guard unless it contains junk language fragments.
+      if (!isWeakVersionCandidate(combined)) return combined;
+      return combined;
     }
   }
 
