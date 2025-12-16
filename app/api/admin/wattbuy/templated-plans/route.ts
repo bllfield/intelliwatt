@@ -6,6 +6,121 @@ export const dynamic = "force-dynamic";
 
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 
+function inferTermMonths(planName: string | null | undefined): number | null {
+  if (!planName) return null;
+  const s = String(planName);
+  // Common patterns: "Plan 12", "Plan-12", "Plan 12 mo", "12 Month"
+  const m =
+    s.match(/\b(3|6|9|12|18|24|36|48|60)\b\s*(?:mo|mos|month|months)?/i) ??
+    s.match(/-(3|6|9|12|18|24|36|48|60)\b/);
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isFinite(n) ? n : null;
+}
+
+function toNum(x: any): number | null {
+  const n = Number(x);
+  return Number.isFinite(n) ? n : null;
+}
+
+function computeAvgCentsPerKwhFromRateStructure(
+  rateStructure: any,
+  usageKwh: number,
+): number | null {
+  if (!rateStructure || typeof rateStructure !== "object") return null;
+  if (!Number.isFinite(usageKwh) || usageKwh <= 0) return null;
+
+  const type = String(rateStructure.type ?? "").toUpperCase();
+  const baseFee = toNum(rateStructure.baseMonthlyFeeCents) ?? 0;
+
+  const usageTiers: any[] | null = Array.isArray(rateStructure.usageTiers)
+    ? rateStructure.usageTiers
+    : null;
+
+  const computeTieredEnergyCents = (): number | null => {
+    if (!usageTiers || usageTiers.length === 0) return null;
+    const tiers = usageTiers
+      .map((t) => ({
+        minKWh: toNum((t as any).minKWh ?? (t as any).minKwh ?? 0) ?? 0,
+        maxKWh: toNum((t as any).maxKWh ?? (t as any).maxKwh ?? null),
+        centsPerKWh: toNum((t as any).centsPerKWh ?? (t as any).priceCents ?? (t as any).rateCentsPerKwh),
+      }))
+      .filter((t) => Number.isFinite(t.minKWh) && typeof t.centsPerKWh === "number")
+      .sort((a, b) => a.minKWh - b.minKWh);
+
+    if (tiers.length === 0) return null;
+
+    let remaining = usageKwh;
+    let energyCents = 0;
+
+    for (let i = 0; i < tiers.length && remaining > 0; i++) {
+      const t = tiers[i];
+      const nextMin = tiers[i + 1]?.minKWh ?? null;
+      const upper =
+        typeof t.maxKWh === "number"
+          ? t.maxKWh
+          : typeof nextMin === "number"
+            ? nextMin
+            : null;
+      const span = upper != null ? Math.max(0, upper - t.minKWh) : remaining;
+      const kwhInTier = Math.min(remaining, span);
+      if (kwhInTier <= 0) continue;
+      energyCents += kwhInTier * (t.centsPerKWh as number);
+      remaining -= kwhInTier;
+    }
+
+    // If there is remaining usage beyond the last tier, bill it at the last tier's rate.
+    if (remaining > 0) {
+      const last = tiers[tiers.length - 1];
+      if (typeof last?.centsPerKWh === "number") {
+        energyCents += remaining * last.centsPerKWh;
+      }
+    }
+
+    return energyCents;
+  };
+
+  const computeFlatEnergyCents = (centsPerKwh: number | null): number | null => {
+    if (typeof centsPerKwh !== "number") return null;
+    return usageKwh * centsPerKwh;
+  };
+
+  let energyCents: number | null = null;
+  if (usageTiers && usageTiers.length > 0) {
+    energyCents = computeTieredEnergyCents();
+  }
+
+  if (energyCents == null) {
+    if (type === "FIXED") {
+      energyCents = computeFlatEnergyCents(toNum(rateStructure.energyRateCents));
+    } else if (type === "VARIABLE") {
+      energyCents = computeFlatEnergyCents(toNum(rateStructure.currentBillEnergyRateCents));
+    } else {
+      // TIME_OF_USE requires usage distribution; we don't guess.
+      return null;
+    }
+  }
+
+  const credits = rateStructure.billCredits;
+  let billCreditCents = 0;
+  if (credits && credits.hasBillCredit && Array.isArray(credits.rules)) {
+    for (const r of credits.rules) {
+      const credit = toNum((r as any).creditAmountCents);
+      const min = toNum((r as any).minUsageKWh) ?? 0;
+      const max = toNum((r as any).maxUsageKWh ?? null);
+      if (typeof credit !== "number" || credit <= 0) continue;
+      const okMin = usageKwh >= min;
+      const okMax = max == null ? true : usageKwh <= max;
+      if (okMin && okMax) {
+        billCreditCents += credit;
+      }
+    }
+  }
+
+  const totalCents = (energyCents ?? 0) + baseFee - billCreditCents;
+  return totalCents / usageKwh;
+}
+
 type Row = {
   id: string;
   utilityId: string;
@@ -107,10 +222,22 @@ export async function GET(req: NextRequest) {
       state: p.state,
       supplier: p.supplier ?? null,
       planName: p.planName ?? null,
-      termMonths: p.termMonths ?? null,
-      rate500: typeof p.rate500 === "number" ? p.rate500 : null,
-      rate1000: typeof p.rate1000 === "number" ? p.rate1000 : null,
-      rate2000: typeof p.rate2000 === "number" ? p.rate2000 : null,
+      termMonths:
+        typeof p.termMonths === "number"
+          ? p.termMonths
+          : inferTermMonths(p.planName ?? null),
+      rate500:
+        typeof p.rate500 === "number"
+          ? p.rate500
+          : computeAvgCentsPerKwhFromRateStructure(p.rateStructure, 500),
+      rate1000:
+        typeof p.rate1000 === "number"
+          ? p.rate1000
+          : computeAvgCentsPerKwhFromRateStructure(p.rateStructure, 1000),
+      rate2000:
+        typeof p.rate2000 === "number"
+          ? p.rate2000
+          : computeAvgCentsPerKwhFromRateStructure(p.rateStructure, 2000),
       cancelFee: p.cancelFee ?? null,
       eflUrl: p.eflUrl ?? null,
       eflPdfSha256: p.eflPdfSha256 ?? null,
