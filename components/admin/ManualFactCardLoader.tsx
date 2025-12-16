@@ -56,14 +56,14 @@ export function ManualFactCardLoader(props: {
 }) {
   const [activeTab, setActiveTab] = useState<"url" | "upload" | "text">("url");
   const [eflUrl, setEflUrl] = useState("");
-  const [mode, setMode] = useState<"test" | "live">("test");
   const [forceReparse, setForceReparse] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [result, setResult] = useState<UploadResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fileLabel, setFileLabel] = useState<string>("No file selected");
   const [pastedText, setPastedText] = useState("");
-  const [showRawPreview, setShowRawPreview] = useState(false);
+  // Default ON: admins want to see the "fact-card-like" text output immediately.
+  const [showRawPreview, setShowRawPreview] = useState(true);
 
   const lastPrefillRef = useRef<string>("");
   useEffect(() => {
@@ -233,15 +233,9 @@ export function ManualFactCardLoader(props: {
           Force reparse (recommended)
         </label>
         <label className="flex items-center gap-2 text-xs text-brand-navy/70">
-          <span>Mode</span>
-          <select
-            className="rounded border px-2 py-1 text-xs"
-            value={mode}
-            onChange={(e) => setMode(e.target.value as any)}
-          >
-            <option value="test">test (no DB writes)</option>
-            <option value="live">live (best-effort persist)</option>
-          </select>
+          <span className="text-[11px]">
+            Pipeline: deterministic extract → AI assist (optional) → validator → solver (validation-only)
+          </span>
         </label>
       </div>
 
@@ -408,13 +402,25 @@ export function ManualFactCardLoader(props: {
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-2">
               <div className="font-semibold text-brand-navy">Raw Text Preview ({result.rawTextLength.toLocaleString()} chars)</div>
-              <button
-                type="button"
-                className="text-xs underline text-brand-navy/70"
-                onClick={() => setShowRawPreview((v) => !v)}
-              >
-                {showRawPreview ? "Hide raw text preview" : "Toggle raw text preview"}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className="text-xs underline text-brand-navy/70"
+                  onClick={() => setShowRawPreview((v) => !v)}
+                >
+                  {showRawPreview ? "Hide" : "Show"}
+                </button>
+                <button
+                  type="button"
+                  className="text-xs underline text-brand-navy/70"
+                  onClick={async () => {
+                    const ok = await copyToClipboard(result.rawTextPreview ?? "");
+                    if (!ok) setError("Unable to copy preview.");
+                  }}
+                >
+                  Copy Preview
+                </button>
+              </div>
             </div>
             {showRawPreview ? (
               <pre className="text-xs bg-gray-50 rounded-lg p-3 overflow-auto max-h-72">{result.rawTextPreview}</pre>
@@ -422,13 +428,16 @@ export function ManualFactCardLoader(props: {
           </div>
 
           <details className="rounded-lg border bg-white p-3">
-            <summary className="cursor-pointer text-sm font-semibold text-brand-navy">Parsed Plan Snapshot (AI EFL Parser)</summary>
+            <summary className="cursor-pointer text-sm font-semibold text-brand-navy">
+              Parsed Plan Snapshot (EFL pipeline output)
+            </summary>
             <pre className="mt-2 text-xs bg-gray-50 rounded-lg p-3 overflow-auto max-h-[520px]">
               {pretty({
                 planRules: result.planRules ?? null,
                 rateStructure: result.rateStructure ?? null,
                 parseWarnings: result.parseWarnings ?? null,
                 validation: result.validation ?? null,
+                ai: result.ai ?? null,
               })}
             </pre>
           </details>
