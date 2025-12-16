@@ -296,6 +296,16 @@ Next step: Step 5 — Admin list/view/approve templates + collision detection
   - New route: `POST /api/admin/efl/backfill` (requires `x-admin-token` matching `ADMIN_TOKEN`), which accepts `{ limit?: number, providerName?: string, tdspName?: string, offers?: any[] }`.
   - When `offers[]` are provided, it filters by `providerName`/`tdspName`, skips entries without `rawText` / `eflRawText`, and calls `getOrCreateEflTemplate({ source: "wattbuy", ... })` for the rest.
   - Returns a summary: `{ ok: true, processed, created, hits, misses, warnings }`, where warnings include skips (no text) and any parser/template warnings per offer.
+- Admin templates list + backfill (WattBuy ops UI support):
+  - `GET /api/admin/wattbuy/templated-plans` lists persisted `RatePlan` templates (where `rateStructure` is present) and computes:
+    - `modeledRate500/1000/2000` as an **admin sanity check**: `RatePlan.rateStructure` + a TDSP delivery snapshot (from `tdspRateSnapshot`).
+    - `modeledTdspCode` + `modeledTdspSnapshotAt` so ops can see **exactly which TDSP tariff snapshot** was used to produce the modeled numbers.
+  - `POST /api/admin/wattbuy/templated-plans/backfill` supports:
+    - `source=efl&overwrite=1` to overwrite headline `rate500/1000/2000` using the EFL “Average price per kWh” table (all‑in, includes TDSP as disclosed on the EFL).
+    - `utility=1` to backfill `RatePlan.utilityId` for `UNKNOWN` rows by inferring TDSP territory from the EFL text (e.g., `ONCOR`, `CENTERPOINT`, `AEP_NORTH`, `AEP_CENTRAL`, `TNMP`) so the modeled sanity-check rates can be computed.
+- Quarantine bulk processor (review-queue drain):
+  - `POST /api/admin/efl-review/process-open` processes OPEN `EflParseReviewQueue` rows with an `eflUrl` in time-budgeted chunks.
+  - Runs the full EFL pipeline and only persists templates + auto-resolves queue rows when the result is **PASS + STRONG** (never “makes up” missing data).
 - No Redis/KV or schema changes were introduced; correctness remains anchored in the deterministic extract + AI parser behavior, with caching and metrics strictly additive for performance and observability.
 
 ✅ Step 6 complete: backfill + cache + metrics  
@@ -339,10 +349,14 @@ Next step: Step 7 — Documentation + runbooks + failure modes
      - `eflPdfSha256`, `repPuctCertificate`, `eflVersionCode`, `rawText`, `extractorMethod`.
      - `planRules`, `rateStructure`, `parseConfidence`, `parseWarnings`.
    - Long-term persistence uses `RatePlan` in the master schema via `lib/efl/planPersistence.ts#upsertRatePlanFromEfl` (EFL identity + `rateStructure` with manual-review gating).
+   - `RatePlan.utilityId` on EFL templates is treated as **best-effort ops metadata**:
+     - When persisting templates via batch/queue/manual tooling we attempt to infer a normalized TDSP code from EFL text (so admin tools can compute “modeled” sanity-check values).
+     - Customer-facing pricing still uses TDSP derived from the user’s address/ESIID + current TDSP tariff snapshots; it does not rely on template `utilityId`.
 
 ### What we intentionally ignore
 
-- **TDU/TDSP delivery charges** (volumetric and fixed) — handled by the separate Utility/TDSP cost module.
+- **TDU/TDSP delivery charges** (volumetric and fixed) — customer billing uses the separate Utility/TDSP cost module (address/ESIID-derived TDSP + `tdspRateSnapshot`).
+  - Admin pages may display a “modeled” all‑in sanity-check value by overlaying a TDSP snapshot; this is for ops validation only and is always annotated with the TDSP code + snapshot date.
 - **Average price tables** (`Average Monthly Use / Average Price per kWh`) — these are examples, not billable rates.
 - **Taxes, municipal fees, and generic disclosures** — ignored unless they directly change recurring REP charges that cannot be modeled elsewhere.
 
