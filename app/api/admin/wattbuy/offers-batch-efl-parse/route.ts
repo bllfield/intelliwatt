@@ -799,8 +799,10 @@ export async function POST(req: NextRequest) {
             : strengthMsg;
         }
 
+        // Always queue review-needed outcomes. If deterministic fingerprint metadata
+        // is missing for any reason, fall back to a stable synthetic fingerprint so
+        // the offer cannot "disappear" from ops accounting.
         const shouldQueue =
-          !!det.eflPdfSha256 &&
           (finalStatus === "FAIL" ||
             (finalStatus === "PASS" &&
               passStrength &&
@@ -816,9 +818,22 @@ export async function POST(req: NextRequest) {
         // (regardless of DRY_RUN vs STORE_TEMPLATES_ON_PASS).
         if (shouldQueue) {
           try {
+            const queueSha =
+              det.eflPdfSha256 ??
+              sha256Hex(
+                [
+                  "wattbuy-queue-fallback",
+                  resolvedPdfUrl ?? "",
+                  offerId ?? "",
+                  supplier ?? "",
+                  planName ?? "",
+                  tdspName ?? "",
+                  String(termMonths ?? ""),
+                ].join("|"),
+              );
             const payload = {
               source: "wattbuy_batch",
-              eflPdfSha256: det.eflPdfSha256,
+              eflPdfSha256: queueSha,
               repPuctCertificate: det.repPuctCertificate,
               eflVersionCode: det.eflVersionCode,
               offerId: offerId ?? null,
@@ -838,9 +853,10 @@ export async function POST(req: NextRequest) {
             } as const;
 
             // De-dupe strategy:
-            // 1) Prefer reusing an OPEN record for this REP+EFL version (stable across PDF byte drift).
-            // 2) Fall back to an OPEN record for this eflUrl (stable across PDF byte drift).
-            // 3) Finally, upsert by eflPdfSha256 (strictest fingerprint).
+            // 1) Prefer reusing an OPEN record for this offerId (best for ops accounting).
+            // 2) Prefer reusing an OPEN record for this REP+EFL version (stable across PDF byte drift).
+            // 3) Fall back to an OPEN record for this eflUrl (stable across PDF byte drift).
+            // 4) Finally, upsert by eflPdfSha256 (strictest fingerprint).
             const repPuct = det.repPuctCertificate ?? null;
             const ver = det.eflVersionCode ?? null;
 
@@ -848,9 +864,10 @@ export async function POST(req: NextRequest) {
               where: {
                 resolvedAt: null,
                 OR: [
+                  offerId ? { offerId: offerId } : undefined,
                   repPuct && ver ? { repPuctCertificate: repPuct, eflVersionCode: ver } : undefined,
                   resolvedPdfUrl ? { eflUrl: resolvedPdfUrl } : undefined,
-                  det.eflPdfSha256 ? { eflPdfSha256: det.eflPdfSha256 } : undefined,
+                  queueSha ? { eflPdfSha256: queueSha } : undefined,
                 ].filter(Boolean),
               },
               select: { id: true },
@@ -865,7 +882,7 @@ export async function POST(req: NextRequest) {
               });
             } else {
               await (prisma as any).eflParseReviewQueue.upsert({
-                where: { eflPdfSha256: det.eflPdfSha256 },
+                where: { eflPdfSha256: queueSha },
                 create: payload,
                 update: { ...payload },
               });
