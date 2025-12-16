@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Buffer } from "node:buffer";
+import crypto from "node:crypto";
 
 import { wbGetOffers } from "@/lib/wattbuy/client";
 import { normalizeOffers, type OfferNormalized } from "@/lib/wattbuy/normalize";
@@ -116,6 +117,10 @@ function normalizeQueueReason(reason: string | null | undefined): string | null 
     .replace(/â€”/g, "—")
     .replace(/â€“/g, "–")
     .replace(/â€™/g, "’");
+}
+
+function sha256Hex(s: string): string {
+  return crypto.createHash("sha256").update(s).digest("hex");
 }
 
 export async function POST(req: NextRequest) {
@@ -264,6 +269,63 @@ export async function POST(req: NextRequest) {
       }
 
       if (!eflUrl) {
+        // Since we already filter out non-electricity offers upstream, a missing EFL
+        // URL is an operational issue we must surface. We queue it for review using
+        // a stable synthetic fingerprint (we don't have a PDF SHA).
+        const syntheticSha = sha256Hex(
+          [
+            "wattbuy-no-efl",
+            offerId ?? "",
+            supplier ?? "",
+            planName ?? "",
+            tdspName ?? "",
+            String(termMonths ?? ""),
+            line1,
+            city,
+            state,
+            zip,
+          ].join("|"),
+        );
+
+        try {
+          await (prisma as any).eflParseReviewQueue.upsert({
+            where: { eflPdfSha256: syntheticSha },
+            create: {
+              source: "wattbuy_batch",
+              eflPdfSha256: syntheticSha,
+              repPuctCertificate: null,
+              eflVersionCode: null,
+              offerId: offerId ?? null,
+              supplier: supplier ?? null,
+              planName: planName ?? null,
+              eflUrl: null,
+              tdspName: tdspName ?? null,
+              termMonths: termMonths ?? null,
+              rawText: null,
+              planRules: null,
+              rateStructure: null,
+              validation: null,
+              derivedForValidation: null,
+              finalStatus: "SKIP",
+              queueReason:
+                "WattBuy electricity offer is missing docs.efl (no EFL URL provided).",
+              solverApplied: [],
+            },
+            update: {
+              offerId: offerId ?? null,
+              supplier: supplier ?? null,
+              planName: planName ?? null,
+              tdspName: tdspName ?? null,
+              termMonths: termMonths ?? null,
+              finalStatus: "SKIP",
+              queueReason:
+                "WattBuy electricity offer is missing docs.efl (no EFL URL provided).",
+            },
+          });
+        } catch {
+          // Best-effort only; do not fail the batch because queue write failed.
+        }
+
         results.push({
           offerId,
           supplier,
@@ -278,7 +340,9 @@ export async function POST(req: NextRequest) {
           tdspAppliedMode: null,
           parseConfidence: null,
           templateAction: "NOT_ELIGIBLE",
-          notes: "No EFL URL present on offer.",
+          queueReason:
+            "Queued: WattBuy electricity offer is missing docs.efl (no EFL URL provided).",
+          notes: "No EFL URL present on offer (queued for admin review).",
         });
         continue;
       }

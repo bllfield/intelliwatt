@@ -5333,6 +5333,9 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
           - Source `"wattbuy_batch"`, the EFL identity, offer metadata, and the effective `planRules`/`rateStructure` returned by the pipeline.
           - `validation`, `derivedForValidation`, `finalStatus`, a normalized `queueReason` (fixing common mojibake like `"â€”"` → `"—"`), and `solverApplied` tags.
       - This happens regardless of batch mode (`DRY_RUN` vs. `STORE_TEMPLATES_ON_PASS`) because the endpoint is admin-only and the queue is strictly for operator review.
+    - **Missing EFL URL on an electricity offer**:
+      - Because the normalizer filters out non-electricity offers, any remaining offer without `docs.efl` is treated as an upstream data issue.
+      - These offers are queued into `EflParseReviewQueue` with `finalStatus="SKIP"` and a stable **synthetic** `eflPdfSha256` (since there is no PDF to fingerprint yet).
     - PASS plans remain unchanged:
       - No queue insert when `finalStatus === "PASS"`.
       - When `mode === "STORE_TEMPLATES_ON_PASS"`, PASS plans are persisted as templates by writing `RatePlan.rateStructure` (via `upsertRatePlanFromEfl`) so future runs can skip parsing across serverless invocations.
