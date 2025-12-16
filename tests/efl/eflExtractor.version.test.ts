@@ -37,6 +37,13 @@ describe("eflExtractor - EFL Version code extraction", () => {
     // rather than risk template identity collisions.
     expect(extractEflVersionCodeFromText(text)).toBeNull();
   });
+
+  test("extracts OhmConnect-style footer 'EFL Ref #' identifiers", () => {
+    const text = `
+      PUCT Certificate No. 10280   TX.OhmConnect.com   EFL Ref # TexasConnect 12 20251208E V1
+    `;
+    expect(extractEflVersionCodeFromText(text)).toBe("TexasConnect 12 20251208E V1");
+  });
 });
 
 

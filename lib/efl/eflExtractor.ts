@@ -306,6 +306,22 @@ function extractEflVersionCode(text: string): string | null {
     }
   }
 
+  // A2) OhmConnect-style footer: "EFL Ref # TexasConnect 12 20251208E V1"
+  // This appears at the bottom of many OhmConnect EFLs and functions as the effective label/version identifier.
+  for (const line of lines) {
+    const m = line.match(/\bEFL\s*Ref\s*#\s*(.+)$/i);
+    if (m?.[1]) {
+      const raw = m[1].trim();
+      // Keep spaces for readability, but strip surrounding punctuation. (These are not underscore-style EFL_* tokens.)
+      const cleaned = raw.replace(/^[^A-Z0-9]+/i, "").replace(/[^A-Z0-9]+$/i, "");
+      // Require enough digits to avoid collisions; this usually includes a YYYYMMDD-like block + a version suffix.
+      const digitCount = (cleaned.match(/\d/g) ?? []).length;
+      if (cleaned && cleaned.length >= 8 && digitCount >= 6 && !isWeakVersionCandidate(cleaned)) {
+        return cleaned;
+      }
+    }
+  }
+
   // B) "EFL Version:" header with value either on the same line or the next
   // non-empty line.
   for (let i = 0; i < lines.length; i++) {
