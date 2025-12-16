@@ -229,6 +229,29 @@ function extractEflVersionCode(text: string): string | null {
     return false;
   };
 
+  // Fail-closed: if we can't confidently extract a unique "Ver. #" token,
+  // return null so downstream systems can queue it for review rather than
+  // risk identity collisions (template overwrites).
+  const isWeakVersionCandidate = (sRaw: string): boolean => {
+    const s = normalizeToken(sRaw);
+    if (!s) return true;
+    if (isObviousJunkToken(s)) return true;
+    const upper = s.toUpperCase();
+    const digitCount = (s.match(/\d/g) ?? []).length;
+
+    // Strong signal: explicit EFL_* tokens are generally safe.
+    if (upper.includes("EFL_")) return false;
+
+    // Allow simple version-number footers like "Version 10.0" handled earlier.
+    // For everything else, require enough digits to be plausibly unique (dates/IDs).
+    if (digitCount < 6) return true;
+
+    // Reject language-tag fragments that still slip through with digits.
+    if (/ENGLISH|SPANISH/i.test(upper)) return true;
+
+    return false;
+  };
+
   const scoreCandidate = (raw: string): number => {
     const s = normalizeToken(raw);
     if (!s) return -999;
@@ -279,7 +302,7 @@ function extractEflVersionCode(text: string): string | null {
     const m = line.match(/\b(?:EFL\s*)?Ver\.\s*#\s*:\s*(.+)\b/i);
     if (m?.[1]) {
       const val = normalizeToken(m[1].trim());
-      if (val && val.length >= 3 && !isObviousJunkToken(val)) return val;
+      if (val && val.length >= 3 && !isWeakVersionCandidate(val)) return val;
     }
   }
 
@@ -292,7 +315,7 @@ function extractEflVersionCode(text: string): string | null {
       const same = line.match(/^EFL\s*Version\s*:\s*(.+)$/i);
       if (same?.[1]) {
         const val = normalizeToken(same[1].trim());
-        if (val && val.length >= 3 && !isObviousJunkToken(val)) return val;
+        if (val && val.length >= 3 && !isWeakVersionCandidate(val)) return val;
       }
 
       // Next non-empty lines within a small window; choose best candidate (and try to stitch wraps).
@@ -320,7 +343,7 @@ function extractEflVersionCode(text: string): string | null {
             best = norm;
           }
         }
-        if (best && best.length >= 3 && !isObviousJunkToken(best)) return best;
+        if (best && best.length >= 3 && !isWeakVersionCandidate(best)) return best;
       }
     }
   }
@@ -329,7 +352,10 @@ function extractEflVersionCode(text: string): string | null {
   for (const line of lines) {
     // Allow + and - in case the plan name embeds them.
     const m = line.match(/\b(EFL_[A-Z0-9+_.-]+)\b/i);
-    if (m?.[1]) return normalizeToken(m[1]);
+    if (m?.[1]) {
+      const val = normalizeToken(m[1]);
+      if (val && !isWeakVersionCandidate(val)) return val;
+    }
   }
 
   // D) Bottom-of-doc version token (e.g., TX_JE_NF_EFL_ENG_V1.5_SEP_01_25).
@@ -341,7 +367,8 @@ function extractEflVersionCode(text: string): string | null {
       /^[A-Z0-9_.-]+$/i.test(l) &&
       l.length >= 8
     ) {
-      return l;
+      const val = normalizeToken(l);
+      if (val && !isWeakVersionCandidate(val)) return val;
     }
   }
 

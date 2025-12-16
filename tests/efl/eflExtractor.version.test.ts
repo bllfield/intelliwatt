@@ -33,7 +33,9 @@ describe("eflExtractor - EFL Version code extraction", () => {
       EFL Version:
       5_ENGLISH
     `;
-    expect(extractEflVersionCodeFromText(text)).toBe("5_ENGLISH");
+    // Fail-closed: treat non-unique language fragments as missing so we queue for review
+    // rather than risk template identity collisions.
+    expect(extractEflVersionCodeFromText(text)).toBeNull();
   });
 });
 
