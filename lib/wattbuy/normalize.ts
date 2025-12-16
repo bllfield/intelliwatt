@@ -48,6 +48,8 @@ const DOC_HOST_ALLOWLIST = new Set<string>([
   'docs.google.com',
   's3.amazonaws.com',
   'wattbuy.com',
+  // WattBuy partner doc hosts (seen in enrollment-form "Electricity Facts Label" links)
+  'ohm-gridlink.smartgridcis.net',
 
   // Chariot
   'signup.chariotenergy.com',
@@ -148,7 +150,15 @@ export function normalizeOffer(o: any): OfferNormalized {
 }
 
 export function normalizeOffers(rawResp: any): { offers: OfferNormalized[]; tdsp: string | null } {
-  const offers = Array.isArray(rawResp?.offers) ? rawResp.offers.map(normalizeOffer) : [];
+  // Some WattBuy responses include non-electricity "offers" (e.g., Optiwatt, Qmerit, etc.).
+  // Only electricity plans have EFL/TOS/YRAC docs and should enter our EFL pipeline.
+  const offersRaw = Array.isArray(rawResp?.offers) ? rawResp.offers : [];
+  const offers = offersRaw
+    .filter((o: any) => {
+      const cat = (o?.offer_category ?? '').toString();
+      return !cat || cat === 'electricity_plans';
+    })
+    .map(normalizeOffer);
   const tdsp =
     normalizeTdsp(rawResp?.offers?.[0]?.offer_data?.utility ?? null) ||
     extractTdspSlug(rawResp);
