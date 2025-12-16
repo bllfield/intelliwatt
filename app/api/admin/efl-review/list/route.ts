@@ -60,6 +60,7 @@ export async function GET(req: NextRequest) {
     });
 
     let autoResolvedCount = 0;
+    let autoDedupedCount = 0;
     if (autoResolve && where.resolvedAt === null) {
       // Auto-resolve OPEN queue items that already have a persisted template.
       //
@@ -156,6 +157,48 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    if (autoResolve && where.resolvedAt === null) {
+      // Auto-dedupe OPEN queue items by offerId to prevent duplicate rows showing up for
+      // the same WattBuy offer (e.g., earlier runs that queued "missing docs.efl" and later
+      // runs that queued "fetch failed" for the same offerId).
+      const openItems = Array.isArray(items) ? items : [];
+      const groups = new Map<string, any[]>();
+      for (const it of openItems) {
+        const oid = String(it?.offerId ?? "").trim();
+        if (!oid) continue;
+        const arr = groups.get(oid) ?? [];
+        arr.push(it);
+        groups.set(oid, arr);
+      }
+
+      const resolveIds: string[] = [];
+      Array.from(groups.values()).forEach((arr) => {
+        if (arr.length <= 1) return;
+        // Keep newest (already sorted desc), resolve the rest.
+        const toResolve = arr
+          .slice(1)
+          .map((x: any) => String(x?.id))
+          .filter(Boolean);
+        resolveIds.push(...toResolve);
+      });
+
+      if (resolveIds.length) {
+        const r = await (prisma as any).eflParseReviewQueue.updateMany({
+          where: { id: { in: resolveIds }, resolvedAt: null },
+          data: {
+            resolvedAt: new Date(),
+            resolvedBy: "AUTO_DEDUPE_OFFERID",
+            resolutionNotes: "Auto-resolved duplicate OPEN queue rows for the same offerId.",
+          },
+        });
+        autoDedupedCount = Number(r?.count) || 0;
+        if (autoDedupedCount > 0) {
+          const resolvedSet = new Set(resolveIds);
+          items = openItems.filter((it: any) => !resolvedSet.has(String(it?.id)));
+        }
+      }
+    }
+
     const totalCount = await (prisma as any).eflParseReviewQueue.count({ where });
 
     return NextResponse.json({
@@ -165,6 +208,7 @@ export async function GET(req: NextRequest) {
       totalCount,
       limit,
       autoResolvedCount,
+      autoDedupedCount,
       items,
     });
   } catch (error) {

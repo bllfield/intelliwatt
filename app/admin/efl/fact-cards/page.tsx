@@ -72,6 +72,30 @@ type BatchRow = {
 type QueueItem = any;
 type TemplateRow = any;
 
+function normStr(x: any): string {
+  return String(x ?? "").trim();
+}
+
+function makeIdentityKeys(x: {
+  offerId?: any;
+  eflUrl?: any;
+  eflPdfSha256?: any;
+  repPuctCertificate?: any;
+  eflVersionCode?: any;
+}): string[] {
+  const keys: string[] = [];
+  const offerId = normStr(x.offerId);
+  const url = normStr(x.eflUrl);
+  const sha = normStr(x.eflPdfSha256);
+  const cert = normStr(x.repPuctCertificate);
+  const ver = normStr(x.eflVersionCode);
+  if (offerId) keys.push(`offer:${offerId}`);
+  if (sha) keys.push(`sha:${sha}`);
+  if (url) keys.push(`url:${url}`);
+  if (cert && ver) keys.push(`cv:${cert}::${ver}`);
+  return keys;
+}
+
 function cmp(a: any, b: any, dir: SortDir): number {
   const d = dir === "asc" ? 1 : -1;
   if (a == null && b == null) return 0;
@@ -448,6 +472,90 @@ export default function FactCardOpsPage() {
     return out;
   }, [tplRows, tplSortKey, tplSortDir]);
 
+  const reconciliation = useMemo(() => {
+    const batch = Array.isArray(batchRows) ? batchRows : [];
+    const queue = Array.isArray(queueItems) ? queueItems : [];
+    const tpls = Array.isArray(tplRows) ? tplRows : [];
+
+    const queueKeySet = new Set<string>();
+    const tplKeySet = new Set<string>();
+
+    for (const it of queue) {
+      for (const k of makeIdentityKeys(it)) queueKeySet.add(k);
+    }
+    for (const it of tpls) {
+      for (const k of makeIdentityKeys(it)) tplKeySet.add(k);
+    }
+
+    const missingFromBoth: Array<{
+      offerId: string;
+      supplier: string;
+      planName: string;
+      eflUrl: string;
+      expectedBucket: "QUEUE" | "TEMPLATES";
+      reason: string;
+    }> = [];
+
+    const inQueue = (r: BatchRow): boolean => makeIdentityKeys(r).some((k) => queueKeySet.has(k));
+    const inTpl = (r: BatchRow): boolean => makeIdentityKeys(r).some((k) => tplKeySet.has(k));
+
+    for (const r of batch) {
+      const offerId = normStr(r.offerId) || "—";
+      const supplier = normStr(r.supplier) || "—";
+      const planName = normStr(r.planName) || "—";
+      const eflUrl = normStr(r.eflUrl) || "—";
+
+      const status = normStr(r.finalValidationStatus ?? r.validationStatus) || "—";
+      const templateAction = normStr(r.templateAction) || "—";
+      const qReason = normStr(r.finalQueueReason ?? r.queueReason);
+
+      const expectTemplates = templateAction === "CREATED" || templateAction === "TEMPLATE" || templateAction === "HIT";
+      const expectQueue =
+        !expectTemplates &&
+        (status === "FAIL" ||
+          status === "SKIP" ||
+          // Any row with a queueReason is intended to be reviewable.
+          Boolean(qReason));
+
+      const foundTpl = inTpl(r);
+      const foundQueue = inQueue(r);
+
+      if (!foundTpl && !foundQueue && (expectTemplates || expectQueue)) {
+        missingFromBoth.push({
+          offerId,
+          supplier,
+          planName,
+          eflUrl,
+          expectedBucket: expectTemplates ? "TEMPLATES" : "QUEUE",
+          reason:
+            expectTemplates
+              ? `Batch says templateAction=${templateAction} but template not visible in templates list.`
+              : `Batch indicates review needed (status=${status}${qReason ? `, reason=${qReason}` : ""}) but item not visible in queue list.`,
+        });
+      }
+    }
+
+    // Detect duplicates in the OPEN queue by offerId (UI-level visibility).
+    const dupOfferIds: Array<{ offerId: string; count: number }> = [];
+    const counts = new Map<string, number>();
+    for (const it of queue) {
+      const oid = normStr(it?.offerId);
+      if (!oid) continue;
+      counts.set(oid, (counts.get(oid) ?? 0) + 1);
+    }
+    Array.from(counts.entries()).forEach(([offerId, count]) => {
+      if (count > 1) dupOfferIds.push({ offerId, count });
+    });
+
+    return {
+      batchCount: batch.length,
+      queueCount: queue.length,
+      templatesCount: tpls.length,
+      missingFromBoth,
+      dupOfferIds,
+    };
+  }, [batchRows, queueItems, tplRows]);
+
   function toggleTplSort(k: typeof tplSortKey) {
     if (tplSortKey === k) {
       setTplSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -556,6 +664,77 @@ export default function FactCardOpsPage() {
           {batchRows?.length ? (
             <div className="text-xs text-gray-600">
               Rows: <span className="font-mono">{batchRows.length}</span>. Tip: click “Load” on any row to prefill the manual loader.
+            </div>
+          ) : null}
+
+          {batchRows?.length ? (
+            <div className="rounded-xl border bg-gray-50 p-3 text-xs space-y-2">
+              <div className="font-medium">Reconciliation (this should sum to the batch)</div>
+              <div className="flex flex-wrap gap-3 text-gray-700">
+                <div>
+                  Batch rows: <span className="font-mono">{reconciliation.batchCount}</span>
+                </div>
+                <div>
+                  Queue rows (visible): <span className="font-mono">{reconciliation.queueCount}</span>
+                </div>
+                <div>
+                  Templates rows (visible): <span className="font-mono">{reconciliation.templatesCount}</span>
+                </div>
+                <div>
+                  Missing (in neither):{" "}
+                  <span className="font-mono">{reconciliation.missingFromBoth.length}</span>
+                </div>
+                <div>
+                  Queue duplicates (by offerId):{" "}
+                  <span className="font-mono">{reconciliation.dupOfferIds.length}</span>
+                </div>
+              </div>
+
+              {reconciliation.missingFromBoth.length ? (
+                <div className="overflow-x-auto rounded-lg border bg-white">
+                  <table className="min-w-full text-xs">
+                    <thead className="bg-gray-50 text-gray-700">
+                      <tr>
+                        <th className="px-2 py-2 text-left">OfferId</th>
+                        <th className="px-2 py-2 text-left">Supplier</th>
+                        <th className="px-2 py-2 text-left">Plan</th>
+                        <th className="px-2 py-2 text-left">Expected</th>
+                        <th className="px-2 py-2 text-left">Reason</th>
+                        <th className="px-2 py-2 text-left">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {reconciliation.missingFromBoth.slice(0, 20).map((m, idx) => (
+                        <tr key={`${m.offerId}:${idx}`} className="border-t">
+                          <td className="px-2 py-2 font-mono">{m.offerId}</td>
+                          <td className="px-2 py-2">{m.supplier}</td>
+                          <td className="px-2 py-2">{m.planName}</td>
+                          <td className="px-2 py-2">{m.expectedBucket}</td>
+                          <td className="px-2 py-2 max-w-[520px] truncate" title={m.reason}>
+                            {m.reason}
+                          </td>
+                          <td className="px-2 py-2">
+                            <button
+                              className="px-2 py-1 rounded border hover:bg-gray-50 disabled:opacity-60"
+                              disabled={!m.eflUrl || m.eflUrl === "—"}
+                              onClick={() => loadIntoManual({ eflUrl: m.eflUrl === "—" ? "" : m.eflUrl })}
+                            >
+                              Load
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {reconciliation.missingFromBoth.length > 20 ? (
+                    <div className="px-3 py-2 text-xs text-gray-600">
+                      Showing first 20 missing rows (total {reconciliation.missingFromBoth.length}).
+                    </div>
+                  ) : null}
+                </div>
+              ) : (
+                <div className="text-gray-700">No missing batch rows detected by current matching rules.</div>
+              )}
             </div>
           ) : null}
 

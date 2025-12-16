@@ -5409,5 +5409,8 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
     - Future steps will wire this queue into customer-facing plan gating so that only PASS templates (original or solver-assisted) can be surfaced by default.
 
 - **Template dedupe guardrail**:
-  - `upsertRatePlanFromEfl` prefers de-duping by `repPuctCertificate + eflVersionCode` **only** when the extracted `eflVersionCode` looks like a real “Ver. #” token (has digits / expected structure).
-  - If `eflVersionCode` is weak/generic (e.g., `"ENGLISH"` or a plan family label like `"PowerBank"`), it falls back to de-duping by `eflPdfSha256` to avoid unrelated plans overwriting each other.
+  - `upsertRatePlanFromEfl` uses a **fail-safe fingerprint** to prevent plan collisions:
+    - **Primary**: `repPuctCertificate + planName + eflVersionCode` (case-insensitive on `planName`), when `eflVersionCode` looks like a real “Ver. #” token.
+    - **Secondary**: `repPuctCertificate + eflVersionCode` (only when the version looks real).
+    - **Fallback**: `eflPdfSha256`.
+  - If `eflVersionCode` is weak/generic (e.g., `"ENGLISH"` fragments), deterministic extraction returns null and the pipeline queues it for review rather than persisting an unsafe identity.

@@ -163,8 +163,27 @@ export async function upsertRatePlanFromEfl(
   };
 
   // 1) Prefer an existing RatePlan with the same REP PUCT Certificate + EFL
-  // Version Code, when available.
-  if (repPuctCertificate && eflVersionCode && isLikelyRealEflVersionCode(eflVersionCode)) {
+  // Version Code, scoped by planName when available (prevents different plans
+  // from overwriting each other when a supplier reuses version tokens).
+  //
+  // User-facing guardrail: fingerprint = REP + PlanName + EFL Version.
+  if (
+    repPuctCertificate &&
+    eflVersionCode &&
+    isLikelyRealEflVersionCode(eflVersionCode) &&
+    (planName ?? "").trim()
+  ) {
+    existing = await prisma.ratePlan.findFirst({
+      where: {
+        repPuctCertificate: repPuctCertificate,
+        eflVersionCode: eflVersionCode,
+        planName: { equals: planName as string, mode: "insensitive" },
+      },
+    });
+  }
+
+  // 2) Next-best: REP PUCT Certificate + EFL Version Code (when it looks real).
+  if (!existing && repPuctCertificate && eflVersionCode && isLikelyRealEflVersionCode(eflVersionCode)) {
     existing = await prisma.ratePlan.findFirst({
       where: {
         repPuctCertificate: repPuctCertificate,
@@ -173,7 +192,7 @@ export async function upsertRatePlanFromEfl(
     });
   }
 
-  // 2) If not found, fall back to the EFL PDF SHA-256 fingerprint.
+  // 3) If not found, fall back to the EFL PDF SHA-256 fingerprint.
   if (!existing && eflPdfSha256) {
     // Note: we use a raw where cast here because the generated types may not yet
     // include eflPdfSha256 until after Prisma client regeneration.
