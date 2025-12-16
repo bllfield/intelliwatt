@@ -202,9 +202,11 @@ export async function POST(req: NextRequest) {
     const offerSliceEndIndex = Math.min(offers.length, offerSliceStartIndex + offerLimit);
     const sliced = offers.slice(offerSliceStartIndex, offerSliceEndIndex);
 
-    // Pre-fetch existing templates by EFL URL so we can skip work before even downloading PDFs.
+    // Pre-fetch existing templates by likely upstream URLs so we can skip work before downloading PDFs.
+    // For some suppliers (e.g. OhmConnect), docs.efl may be missing and the EFL link is only discoverable
+    // from the offer enrollment/landing page (offer.enroll_link).
     const eflUrls = (sliced as OfferNormalized[])
-      .map((o) => o?.docs?.efl ?? null)
+      .flatMap((o) => [o?.docs?.efl ?? null, (o as any)?.enroll_link ?? null])
       .filter((u): u is string => Boolean(u));
 
     const urlToRatePlan = new Map<string, any>();
@@ -251,7 +253,9 @@ export async function POST(req: NextRequest) {
         offer.distributor_name ??
         offer.tdsp ??
         null;
-      const eflUrl: string | null = offer.docs?.efl ?? null;
+      const docsEflUrl: string | null = offer.docs?.efl ?? null;
+      const enrollLink: string | null = (offer as any)?.enroll_link ?? null;
+      const eflSeedUrl: string | null = docsEflUrl ?? enrollLink ?? null;
       const offerRate500 = (offer as any)?.kwh500_cents ?? null;
       const offerRate1000 = (offer as any)?.kwh1000_cents ?? null;
       const offerRate2000 = (offer as any)?.kwh2000_cents ?? null;
@@ -268,7 +272,7 @@ export async function POST(req: NextRequest) {
         break;
       }
 
-      if (!eflUrl) {
+      if (!eflSeedUrl) {
         // Since we already filter out non-electricity offers upstream, a missing EFL
         // URL is an operational issue we must surface. We queue it for review using
         // a stable synthetic fingerprint (we don't have a PDF SHA).
@@ -308,7 +312,7 @@ export async function POST(req: NextRequest) {
               derivedForValidation: null,
               finalStatus: "SKIP",
               queueReason:
-                "WattBuy electricity offer is missing docs.efl (no EFL URL provided).",
+                "WattBuy electricity offer is missing docs.efl and has no enroll_link to discover the EFL.",
               solverApplied: [],
             },
             update: {
@@ -319,7 +323,7 @@ export async function POST(req: NextRequest) {
               termMonths: termMonths ?? null,
               finalStatus: "SKIP",
               queueReason:
-                "WattBuy electricity offer is missing docs.efl (no EFL URL provided).",
+                "WattBuy electricity offer is missing docs.efl and has no enroll_link to discover the EFL.",
             },
           });
         } catch {
@@ -341,7 +345,7 @@ export async function POST(req: NextRequest) {
           parseConfidence: null,
           templateAction: "NOT_ELIGIBLE",
           queueReason:
-            "Queued: WattBuy electricity offer is missing docs.efl (no EFL URL provided).",
+            "Queued: WattBuy electricity offer is missing docs.efl and has no enroll_link to discover the EFL.",
           notes: "No EFL URL present on offer (queued for admin review).",
         });
         continue;
@@ -349,7 +353,7 @@ export async function POST(req: NextRequest) {
 
       // 0) Fast path by URL: if we already have a persisted template for this URL,
       // skip fetching PDFs and re-running the EFL pipeline.
-      const existingUrlPlan = urlToRatePlan.get(eflUrl);
+      const existingUrlPlan = urlToRatePlan.get(eflSeedUrl);
       if (
         existingUrlPlan &&
         existingUrlPlan.rateStructure &&
@@ -361,7 +365,7 @@ export async function POST(req: NextRequest) {
           planName,
           termMonths,
           tdspName,
-          eflUrl,
+          eflUrl: existingUrlPlan.eflUrl ?? eflSeedUrl,
           eflPdfSha256: existingUrlPlan.eflPdfSha256 ?? null,
           repPuctCertificate: existingUrlPlan.repPuctCertificate ?? null,
           eflVersionCode: existingUrlPlan.eflVersionCode ?? null,
@@ -377,7 +381,10 @@ export async function POST(req: NextRequest) {
           queueReason: null,
           finalQueueReason: null,
           solverApplied: null,
-          notes: "Template hit (by URL): RatePlan already has rateStructure for this EFL.",
+          notes:
+            docsEflUrl
+              ? "Template hit (by URL): RatePlan already has rateStructure for this EFL."
+              : "Template hit (via enroll_link): RatePlan already has rateStructure for this offer.",
         });
         continue;
       }
@@ -385,7 +392,7 @@ export async function POST(req: NextRequest) {
       processedCount++;
 
       try {
-        const fetched = await fetchEflPdfFromUrl(eflUrl);
+        const fetched = await fetchEflPdfFromUrl(eflSeedUrl);
         if (!fetched.ok) {
           results.push({
             offerId,
@@ -393,7 +400,7 @@ export async function POST(req: NextRequest) {
             planName,
             termMonths,
             tdspName,
-            eflUrl,
+            eflUrl: eflSeedUrl,
             eflPdfSha256: null,
             repPuctCertificate: null,
             eflVersionCode: null,
@@ -408,6 +415,7 @@ export async function POST(req: NextRequest) {
 
         const pdfBytes = fetched.pdfBytes;
         const pdfSha256 = computePdfSha256(pdfBytes);
+        const resolvedPdfUrl = fetched.pdfUrl ?? eflSeedUrl;
 
         // 2a) Fast path: if we already have a saved RatePlan.rateStructure for
         // this exact EFL fingerprint (and it doesn't require manual review),
@@ -427,7 +435,7 @@ export async function POST(req: NextRequest) {
             planName,
             termMonths,
             tdspName,
-            eflUrl,
+            eflUrl: resolvedPdfUrl,
             eflPdfSha256: pdfSha256,
             repPuctCertificate: existing.repPuctCertificate ?? null,
             eflVersionCode: existing.eflVersionCode ?? null,
@@ -448,7 +456,10 @@ export async function POST(req: NextRequest) {
             queueReason: null,
             finalQueueReason: null,
             solverApplied: null,
-            notes: "Template hit: RatePlan already has rateStructure for this EFL fingerprint.",
+            notes:
+              docsEflUrl
+                ? "Template hit: RatePlan already has rateStructure for this EFL fingerprint."
+                : "Template hit: resolved EFL via enroll_link and found existing RatePlan.rateStructure.",
           });
           continue;
         }
@@ -522,7 +533,10 @@ export async function POST(req: NextRequest) {
               } else {
                 await upsertRatePlanFromEfl({
                   mode: "live",
-                  eflUrl,
+                  // Persist both: the resolved PDF URL and the upstream landing/enroll URL
+                  // that led us to it, so future runs can match by either.
+                  eflUrl: resolvedPdfUrl,
+                  eflSourceUrl: eflSeedUrl,
                   repPuctCertificate: det.repPuctCertificate ?? null,
                   eflVersionCode: det.eflVersionCode ?? null,
                   eflPdfSha256: det.eflPdfSha256,
@@ -587,7 +601,7 @@ export async function POST(req: NextRequest) {
             (finalStatus === "PASS" &&
               passStrength &&
               passStrength !== "STRONG") ||
-            (finalStatus === "SKIP" && !!eflUrl));
+            (finalStatus === "SKIP" && !!eflSeedUrl));
 
         // Queue FAILs, PASS-but-weak/invalid, and SKIPs-with-EFL for admin review
         // (regardless of DRY_RUN vs STORE_TEMPLATES_ON_PASS).
@@ -601,7 +615,7 @@ export async function POST(req: NextRequest) {
               offerId: offerId ?? null,
               supplier: supplier ?? null,
               planName: planName ?? null,
-              eflUrl,
+              eflUrl: resolvedPdfUrl,
               tdspName,
               termMonths,
               rawText: det.rawText,
@@ -626,7 +640,7 @@ export async function POST(req: NextRequest) {
                 resolvedAt: null,
                 OR: [
                   repPuct && ver ? { repPuctCertificate: repPuct, eflVersionCode: ver } : undefined,
-                  eflUrl ? { eflUrl } : undefined,
+                  resolvedPdfUrl ? { eflUrl: resolvedPdfUrl } : undefined,
                   det.eflPdfSha256 ? { eflPdfSha256: det.eflPdfSha256 } : undefined,
                 ].filter(Boolean),
               },
@@ -658,7 +672,7 @@ export async function POST(req: NextRequest) {
           planName,
           termMonths,
           tdspName,
-          eflUrl,
+          eflUrl: resolvedPdfUrl,
           eflPdfSha256: det.eflPdfSha256 ?? null,
           repPuctCertificate: det.repPuctCertificate ?? null,
           eflVersionCode: det.eflVersionCode ?? null,
@@ -686,7 +700,7 @@ export async function POST(req: NextRequest) {
           planName,
           termMonths,
           tdspName,
-          eflUrl,
+          eflUrl: eflSeedUrl,
           eflPdfSha256: null,
           repPuctCertificate: null,
           eflVersionCode: null,

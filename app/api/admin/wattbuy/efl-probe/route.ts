@@ -127,9 +127,11 @@ export async function POST(req: NextRequest) {
       const offerId = offer.offer_id;
       const planName = offer.plan_name ?? null;
       const supplierName = offer.supplier_name ?? null;
-      const eflUrl = offer.docs?.efl ?? null;
+      const docsEflUrl = offer.docs?.efl ?? null;
+      const enrollLink = (offer as any)?.enroll_link ?? null;
+      const eflSeedUrl = docsEflUrl ?? enrollLink ?? null;
 
-      if (!eflUrl) {
+      if (!eflSeedUrl) {
         results.push({
           offerId,
           planName,
@@ -137,7 +139,7 @@ export async function POST(req: NextRequest) {
           eflUrl: null,
           pdfSha256: null,
           status: "no_efl",
-          notes: "No EFL URL present on offer.",
+          notes: "No EFL URL present on offer (docs.efl missing and no enroll_link).",
         });
         continue;
       }
@@ -146,13 +148,13 @@ export async function POST(req: NextRequest) {
 
       try {
         // 2) Download the EFL PDF
-        const fetched = await fetchEflPdfFromUrl(eflUrl);
+        const fetched = await fetchEflPdfFromUrl(eflSeedUrl);
         if (!fetched.ok) {
           results.push({
             offerId,
             planName,
             supplierName,
-            eflUrl,
+            eflUrl: eflSeedUrl,
             pdfSha256: null,
             status: "fetch_error",
             notes: fetched.error,
@@ -162,6 +164,7 @@ export async function POST(req: NextRequest) {
 
         const pdfBytes = fetched.pdfBytes;
         pdfSha256 = computePdfSha256(pdfBytes);
+        const resolvedPdfUrl = fetched.pdfUrl ?? eflSeedUrl;
 
         // 3) Check for an existing RatePlan with this fingerprint
         const existing = (await prisma.ratePlan.findFirst({
@@ -177,7 +180,7 @@ export async function POST(req: NextRequest) {
             offerId,
             planName,
             supplierName,
-            eflUrl,
+            eflUrl: resolvedPdfUrl,
             pdfSha256,
             status: "template",
             requiresManualReview: existing.eflRequiresManualReview ?? false,
@@ -220,7 +223,8 @@ export async function POST(req: NextRequest) {
           if (mode === "live") {
             await upsertRatePlanFromEfl({
               mode,
-              eflUrl,
+              eflUrl: resolvedPdfUrl,
+              eflSourceUrl: eflSeedUrl,
               repPuctCertificate: extract.repPuctCertificate,
               eflVersionCode: extract.eflVersionCode,
               eflPdfSha256: extract.eflPdfSha256,
@@ -236,7 +240,7 @@ export async function POST(req: NextRequest) {
             offerId,
             planName,
             supplierName,
-            eflUrl,
+            eflUrl: resolvedPdfUrl,
             pdfSha256: extract.eflPdfSha256,
             status: requiresManualReview ? "parsed_manual_review" : "parsed_ok",
             requiresManualReview,

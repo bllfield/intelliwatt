@@ -7,7 +7,15 @@ import type {
 import { getTemplateKey } from "@/lib/efl/templateIdentity";
 
 export interface UpsertEflRatePlanArgs {
+  /**
+   * Canonical EFL URL (prefer the resolved PDF URL when available).
+   */
   eflUrl: string;
+  /**
+   * Original upstream URL that led us to the EFL (landing page or enroll page).
+   * When omitted, defaults to eflUrl.
+   */
+  eflSourceUrl?: string | null;
   repPuctCertificate: string | null;
   eflVersionCode: string | null;
   eflPdfSha256: string;
@@ -54,6 +62,7 @@ export async function upsertRatePlanFromEfl(
 
   const {
     eflUrl,
+    eflSourceUrl,
     repPuctCertificate,
     eflVersionCode,
     eflPdfSha256,
@@ -89,7 +98,7 @@ export async function upsertRatePlanFromEfl(
   const dataCommon = {
     // EFL identity + source URL
     eflUrl: eflUrl,
-    eflSourceUrl: eflUrl,
+    eflSourceUrl: (eflSourceUrl ?? "").trim() ? (eflSourceUrl as string) : eflUrl,
     repPuctCertificate: repPuctCertificate ?? null,
     eflVersionCode: eflVersionCode ?? null,
     eflPdfSha256,
