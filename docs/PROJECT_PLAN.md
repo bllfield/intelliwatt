@@ -5322,14 +5322,25 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
   - `app/api/admin/wattbuy/offers-batch-efl-parse/route.ts` now **upserts** any EFL whose final (post-solver) validation status is `"FAIL"` into `EflParseReviewQueue`:
     - For each offer with an EFL PDF:
       - Runs `runEflPipelineNoStore` to obtain `deterministic`, `planRules`, `rateStructure`, `validation`, `derivedForValidation`, and `finalValidation`.
-      - When `finalStatus === "FAIL"` and `det.eflPdfSha256` is present:
-        - Performs `prisma.eflParseReviewQueue.upsert({ where: { eflPdfSha256 }, create: {...}, update: {...} })` with:
+      - When `finalStatus === "FAIL"` (or `SKIP` with EFL, or PASS-but-weak) and `det.eflPdfSha256` is present:
+        - Performs an **OPEN-row de-dupe** before writing:
+          - Prefer updating an existing OPEN row matching `repPuctCertificate + eflVersionCode` (stable across PDF-byte drift).
+          - Else prefer updating an existing OPEN row matching `eflUrl`.
+          - Else fall back to `upsert` by `eflPdfSha256`.
+        - Writes the queue record with:
           - Source `"wattbuy_batch"`, the EFL identity, offer metadata, and the effective `planRules`/`rateStructure` returned by the pipeline.
           - `validation`, `derivedForValidation`, `finalStatus`, a normalized `queueReason` (fixing common mojibake like `"â€”"` → `"—"`), and `solverApplied` tags.
       - This happens regardless of batch mode (`DRY_RUN` vs. `STORE_TEMPLATES_ON_PASS`) because the endpoint is admin-only and the queue is strictly for operator review.
     - PASS plans remain unchanged:
       - No queue insert when `finalStatus === "PASS"`.
-      - When `mode === "STORE_TEMPLATES_ON_PASS"`, the existing template-write behavior (via `getOrCreateEflTemplate`) is preserved.
+      - When `mode === "STORE_TEMPLATES_ON_PASS"`, PASS plans are persisted as templates by writing `RatePlan.rateStructure` (via `upsertRatePlanFromEfl`) so future runs can skip parsing across serverless invocations.
+
+- **Queue de-dupe guardrails (2025‑12‑16)**:
+  - Real-world EFLs can drift at the PDF byte level (landing pages, regenerated PDFs), producing different `eflPdfSha256` values for the same effective EFL version.
+  - To prevent duplicate OPEN items, the main schema adds partial unique indexes:
+    - One OPEN row per `eflUrl` (`resolvedAt IS NULL`)
+    - One OPEN row per `repPuctCertificate + eflVersionCode` (`resolvedAt IS NULL`)
+  - **Migration note**: if duplicates already exist, unique-index creation will fail; resolve by running the “fix” migration which auto-resolves duplicate OPEN rows before creating the indexes.
 
 - **Admin APIs + review UI**:
   - New admin API routes for inspecting and resolving queue items:
