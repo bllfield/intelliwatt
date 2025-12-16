@@ -282,6 +282,59 @@ export async function solveEflValidationGaps(args: {
     }
   }
 
+  // ---------------- TOU: Peak / Off-Peak rates + disclosed Off-Peak usage % ----------------
+  // Example (OhmConnect EVConnect):
+  //   Energy Charge Peak 11.84¢ / kWh
+  //   Energy Charge Off-Peak 5.92¢ / kWh
+  //   "Average price is based on usage profile ... of 32% of Off-Peak consumption..."
+  //   Off-Peak hours are 9:00 PM - 4:59 AM. Peak hours are 5:00 AM - 8:59 PM
+  //
+  // When we only capture a single "Energy Charge" rate, modeled prices end up too low.
+  // This solver derives `timeOfUsePeriods[]` so the validator can model the disclosed
+  // usage split (night/off-peak percent) and PASS avg-table validation.
+  if (validation?.status === "FAIL" && derivedPlanRules) {
+    const hasTou =
+      Array.isArray((derivedPlanRules as any).timeOfUsePeriods) &&
+      (derivedPlanRules as any).timeOfUsePeriods.length > 0;
+
+    if (!hasTou) {
+      const tou = extractPeakOffPeakTouFromEflText(rawText);
+      if (tou) {
+        const allDays = [0, 1, 2, 3, 4, 5, 6];
+        (derivedPlanRules as any).rateType = "TIME_OF_USE";
+        (derivedPlanRules as any).planType = "tou";
+        // Keep a sane fallback default rate even for TOU plans to avoid downstream
+        // engines that still expect this field to be present.
+        (derivedPlanRules as any).defaultRateCentsPerKwh =
+          typeof (derivedPlanRules as any).defaultRateCentsPerKwh === "number"
+            ? (derivedPlanRules as any).defaultRateCentsPerKwh
+            : tou.offPeakRateCents;
+        (derivedPlanRules as any).timeOfUsePeriods = [
+          {
+            label: "Off-Peak",
+            startHour: tou.offPeakStartHour,
+            endHour: tou.offPeakEndHour,
+            daysOfWeek: allDays,
+            months: undefined,
+            rateCentsPerKwh: tou.offPeakRateCents,
+            isFree: false,
+          },
+          {
+            label: "Peak",
+            startHour: tou.peakStartHour,
+            endHour: tou.peakEndHour,
+            daysOfWeek: allDays,
+            months: undefined,
+            rateCentsPerKwh: tou.peakRateCents,
+            isFree: false,
+          },
+        ];
+
+        solverApplied.push("TOU_PEAK_OFFPEAK_FROM_EFL_TEXT");
+      }
+    }
+  }
+
   // If nothing was applied, return quickly with the original validation.
   if (solverApplied.length === 0) {
     return {
@@ -555,6 +608,104 @@ function extractMonthlyCreditMaxUsage(rawText: string): { creditDollars: number;
   const maxKwh = Number(String(m[2]).replace(/,/g, ""));
   if (!Number.isFinite(dollars) || !Number.isFinite(maxKwh) || dollars <= 0 || maxKwh <= 0) return null;
   return { creditDollars: dollars, maxUsageKwh: Math.round(maxKwh) };
+}
+
+function extractPeakOffPeakTouFromEflText(rawText: string): {
+  peakRateCents: number;
+  offPeakRateCents: number;
+  peakStartHour: number;
+  peakEndHour: number;
+  offPeakStartHour: number;
+  offPeakEndHour: number;
+  offPeakUsagePercent: number;
+} | null {
+  const t = rawText || "";
+
+  const peakRate =
+    t.match(/Energy\s*Charge\s*Peak\s*([0-9]+(?:\.[0-9]+)?)\s*¢/i) ??
+    t.match(/Peak\s*Energy\s*Charge\s*([0-9]+(?:\.[0-9]+)?)\s*¢/i) ??
+    null;
+  const offRate =
+    t.match(/Energy\s*Charge\s*Off-?\s*Peak\s*([0-9]+(?:\.[0-9]+)?)\s*¢/i) ??
+    t.match(/Off-?\s*Peak\s*Energy\s*Charge\s*([0-9]+(?:\.[0-9]+)?)\s*¢/i) ??
+    null;
+  if (!peakRate?.[1] || !offRate?.[1]) return null;
+
+  const peakRateCents = Number(peakRate[1]);
+  const offPeakRateCents = Number(offRate[1]);
+  if (!Number.isFinite(peakRateCents) || !Number.isFinite(offPeakRateCents)) return null;
+
+  // Usage split assumption (required to match avg-table)
+  const pct =
+    t.match(/([0-9]{1,3})%\s+of\s+Off-?Peak\s+consumption/i) ??
+    t.match(/([0-9]{1,3})%\s+of\s+Off-?Peak\b/i) ??
+    null;
+  const offPeakUsagePercent = pct?.[1] ? Number(pct[1]) / 100 : NaN;
+  if (!Number.isFinite(offPeakUsagePercent) || offPeakUsagePercent <= 0 || offPeakUsagePercent >= 1) {
+    return null;
+  }
+
+  // Hours parsing: prefer explicit Off-Peak hours, then Peak hours.
+  const offHours =
+    t.match(
+      /Off-?Peak\s+hours?\s+are\s+([0-9]{1,2})\s*:\s*([0-9]{2})\s*(AM|PM)\s*[–-]\s*([0-9]{1,2})\s*:\s*([0-9]{2})\s*(AM|PM)/i,
+    ) ?? null;
+  const peakHours =
+    t.match(
+      // Require whitespace or start before "Peak" so we don't accidentally match "Off-Peak hours are ..."
+      /(?:^|\s)Peak\s+hours?\s+are\s+([0-9]{1,2})\s*:\s*([0-9]{2})\s*(AM|PM)\s*[–-]\s*([0-9]{1,2})\s*:\s*([0-9]{2})\s*(AM|PM)/i,
+    ) ?? null;
+
+  const to24 = (hh: string, mm: string, ap: string): number | null => {
+    let h = Number(hh);
+    const minute = Number(mm);
+    if (!Number.isFinite(h) || !Number.isFinite(minute)) return null;
+    const isPm = ap.toUpperCase() === "PM";
+    if (h === 12) h = isPm ? 12 : 0;
+    else h = isPm ? h + 12 : h;
+    return h;
+  };
+  const to24EndExclusive = (hh: string, mm: string, ap: string): number | null => {
+    const base = to24(hh, mm, ap);
+    if (base == null) return null;
+    const minute = Number(mm);
+    if (!Number.isFinite(minute)) return base;
+    if (minute > 0) return (base + 1) % 24;
+    return base;
+  };
+
+  // Default to common peak/off-peak split when times are present but parsing fails.
+  let offPeakStartHour = 21;
+  let offPeakEndHour = 5;
+  let peakStartHour = 5;
+  let peakEndHour = 21;
+
+  if (offHours) {
+    const s = to24(offHours[1], offHours[2], offHours[3]);
+    const e = to24EndExclusive(offHours[4], offHours[5], offHours[6]);
+    if (s != null && e != null) {
+      offPeakStartHour = s;
+      offPeakEndHour = e;
+    }
+  }
+  if (peakHours) {
+    const s = to24(peakHours[1], peakHours[2], peakHours[3]);
+    const e = to24EndExclusive(peakHours[4], peakHours[5], peakHours[6]);
+    if (s != null && e != null) {
+      peakStartHour = s;
+      peakEndHour = e;
+    }
+  }
+
+  return {
+    peakRateCents: peakRateCents,
+    offPeakRateCents: offPeakRateCents,
+    peakStartHour,
+    peakEndHour,
+    offPeakStartHour,
+    offPeakEndHour,
+    offPeakUsagePercent,
+  };
 }
 
 

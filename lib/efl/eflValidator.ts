@@ -832,6 +832,7 @@ function computeValidatorModeledBreakdown(
   eflTdsp: EflTdspCharges,
   tdspDeliveryIncludedInEnergyCharge: boolean | null | undefined,
   weekendUsagePercent?: number,
+  nightUsagePercent?: number,
 ): ValidatorModeledBreakdown | null {
   // Special-case: simple weekday/weekend TOU expressed as all-day weekday vs all-day weekend.
   const touPeriods: any[] = Array.isArray(planRules?.timeOfUsePeriods)
@@ -872,6 +873,48 @@ function computeValidatorModeledBreakdown(
       const weekdayShare = 1 - wp;
       const blendedCents = Number(weekdayRate) * weekdayShare + Number(weekendRate) * wp;
       repEnergyDollars = (usageKwh * blendedCents) / 100;
+    }
+  }
+
+  // Special-case: Peak/Off-Peak TOU where the EFL discloses an assumed off-peak usage percent.
+  // We model energy charges as a blended rate based on that percent.
+  if (
+    repEnergyDollars == null &&
+    isTou &&
+    nightUsagePercent != null &&
+    Number.isFinite(nightUsagePercent) &&
+    touPeriods.length >= 2
+  ) {
+    const pct = Math.max(0, Math.min(1, nightUsagePercent));
+    const rated = touPeriods
+      .map((p: any) => ({
+        p,
+        rate: Number(p?.rateCentsPerKwh),
+        start: Number(p?.startHour),
+        end: Number(p?.endHour),
+        label: String(p?.label ?? ""),
+      }))
+      .filter((x) => Number.isFinite(x.rate) && Number.isFinite(x.start) && Number.isFinite(x.end));
+
+    if (rated.length >= 2) {
+      const crossesMidnight = (x: any) => x.start > x.end;
+      const offLabel = (x: any) => /off\s*-?\s*peak|night/i.test(x.label.toLowerCase());
+      const peakLabel = (x: any) => /\bpeak\b|on\s*-?\s*peak|day/i.test(x.label.toLowerCase());
+
+      let off = rated.find((x) => offLabel(x) || crossesMidnight(x));
+      let peak = rated.find((x) => peakLabel(x) && x !== off);
+
+      // Fallback: choose lowest-rate as off-peak and highest-rate as peak.
+      if (!off || !peak) {
+        const sorted = [...rated].sort((a, b) => a.rate - b.rate);
+        off = off ?? sorted[0];
+        peak = peak ?? sorted[sorted.length - 1];
+      }
+
+      if (off && peak && Number.isFinite(off.rate) && Number.isFinite(peak.rate)) {
+        const blendedCents = off.rate * pct + peak.rate * (1 - pct);
+        repEnergyDollars = (usageKwh * blendedCents) / 100;
+      }
     }
   }
 
@@ -1038,6 +1081,7 @@ export async function modelAvgCentsPerKwhAtUsage(args: {
       effectiveTdsp,
       tdspIncludedFlag,
       weekendUsagePercent,
+      nightUsagePercent,
     );
     if (components) {
       notes.push("FALLBACK_VALIDATOR_MATH");
@@ -1226,9 +1270,16 @@ export function parseEflNightHoursAssumption(rawText: string): {
   nightEndHour?: number;
   nightUsagePercent?: number;
 } | null {
-  const percentMatch = rawText.match(
-    /estimated\s+(\d{1,3})%\s+consumption\s+during\s+night\s+hours/i,
-  );
+  const percentMatch =
+    rawText.match(
+      /estimated\s+(\d{1,3})%\s+consumption\s+during\s+night\s+hours/i,
+    ) ??
+    // Common TOU disclosure phrasing:
+    // "Average price is based on usage profile ... of 32% of Off-Peak consumption ..."
+    rawText.match(/(\d{1,3})%\s+of\s+Off-?Peak\s+consumption/i) ??
+    // Fallback: "32% of Off-Peak" without the word consumption
+    rawText.match(/(\d{1,3})%\s+of\s+Off-?Peak\b/i) ??
+    null;
   const nightUsagePercent =
     percentMatch && percentMatch[1]
       ? Number(percentMatch[1]) / 100
@@ -1237,7 +1288,12 @@ export function parseEflNightHoursAssumption(rawText: string): {
   const hoursMatch =
     rawText.match(
       /Night\s*Hours\s*=\s*([0-9]{1,2})\s*:\s*([0-9]{2})\s*(AM|PM)\s*[–-]\s*([0-9]{1,2})\s*:\s*([0-9]{2})\s*(AM|PM)/i,
-    ) ?? null;
+    ) ??
+    // Common TOU phrasing: "Off-Peak hours are 9:00 PM - 4:59 AM."
+    rawText.match(
+      /Off-?Peak\s+hours?\s+are\s+([0-9]{1,2})\s*:\s*([0-9]{2})\s*(AM|PM)\s*[–-]\s*([0-9]{1,2})\s*:\s*([0-9]{2})\s*(AM|PM)/i,
+    ) ??
+    null;
 
   const to24 = (hh: string, mm: string, ap: string): number | null => {
     let h = Number(hh);
@@ -1252,11 +1308,23 @@ export function parseEflNightHoursAssumption(rawText: string): {
     return h;
   };
 
+  const to24EndExclusive = (hh: string, mm: string, ap: string): number | null => {
+    const base = to24(hh, mm, ap);
+    if (base == null) return null;
+    const minute = Number(mm);
+    if (!Number.isFinite(minute)) return base;
+    // Treat minute-level end times as inclusive within the hour (e.g. 4:59 AM),
+    // and round up to the next hour to form an exclusive end boundary for our
+    // hour-bucket modeling.
+    if (minute > 0) return (base + 1) % 24;
+    return base;
+  };
+
   let nightStartHour: number | undefined;
   let nightEndHour: number | undefined;
   if (hoursMatch) {
     const start = to24(hoursMatch[1], hoursMatch[2], hoursMatch[3]);
-    const end = to24(hoursMatch[4], hoursMatch[5], hoursMatch[6]);
+    const end = to24EndExclusive(hoursMatch[4], hoursMatch[5], hoursMatch[6]);
     if (start != null && end != null) {
       nightStartHour = start;
       nightEndHour = end;
@@ -1325,15 +1393,14 @@ async function computeModeledComponentsOrNull(args: {
     typeof args.nightStartHour === "number" &&
     typeof args.nightEndHour === "number";
 
-  // Simple uniform usage across 24 hours when no explicit night-hours
-  // assumption is available or plan is not clearly TOU with free nights.
-  const isTouFreeNights =
+  // Use explicit night-hours usage split when available AND the plan has any TOU periods.
+  // This supports both Free Nights plans and Peak/Off-Peak TOU plans that disclose
+  // an assumed night/off-peak usage percent in the EFL.
+  const hasTouPeriods =
     Array.isArray((planRules as any).timeOfUsePeriods) &&
-    (planRules as any).timeOfUsePeriods.some(
-      (p: any) => p && p.isFree === true,
-    );
+    (planRules as any).timeOfUsePeriods.length > 0;
 
-  if (!isTouFreeNights || nightPercent == null || !hasNightWindow) {
+  if (!hasTouPeriods || nightPercent == null || !hasNightWindow) {
     const perHour = kwh / 24;
     for (let h = 0; h < 24; h++) {
       usage.push({
@@ -1593,6 +1660,7 @@ export async function validateEflAvgPriceTable(args: {
         effectiveTdspForValidation,
         tdspIncludedFlag,
         weekendAssumption?.weekendUsagePercent,
+        nightAssumption?.nightUsagePercent,
       );
     }
 
