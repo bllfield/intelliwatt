@@ -136,9 +136,25 @@ export async function upsertRatePlanFromEfl(
     ReturnType<(typeof prisma)["ratePlan"]["findFirst"]>
   >;
 
+  // IMPORTANT: Only treat REP+EFL version as a safe dedupe key when the extracted
+  // version code looks like a real "Ver. #" token. Some PDFs contain the word
+  // "ENGLISH" or the plan family name near the "EFL Version" label; if we dedupe
+  // on that, unrelated plans will overwrite each other and "CREATED" rows won't
+  // show up as distinct templates.
+  const isLikelyRealEflVersionCode = (v: string | null | undefined): boolean => {
+    const s = String(v ?? "").trim();
+    if (!s) return false;
+    // Most real EFL version codes contain digits and/or separators.
+    const hasDigit = /\d/.test(s);
+    const hasSeparators = /[-_]/.test(s);
+    // Avoid short generic tokens like "ENGLISH", "ISH", "NGLISH", or plan-family labels.
+    if (s.length < 8) return false;
+    return hasDigit && (hasSeparators || s.length >= 10);
+  };
+
   // 1) Prefer an existing RatePlan with the same REP PUCT Certificate + EFL
   // Version Code, when available.
-  if (repPuctCertificate && eflVersionCode) {
+  if (repPuctCertificate && eflVersionCode && isLikelyRealEflVersionCode(eflVersionCode)) {
     existing = await prisma.ratePlan.findFirst({
       where: {
         repPuctCertificate: repPuctCertificate,

@@ -5407,3 +5407,7 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
     - The pipeline marks `needsAdminReview = true`.
     - The batch harness enqueues the EFL into `EflParseReviewQueue` with full context for admins.
     - Future steps will wire this queue into customer-facing plan gating so that only PASS templates (original or solver-assisted) can be surfaced by default.
+
+- **Template dedupe guardrail**:
+  - `upsertRatePlanFromEfl` prefers de-duping by `repPuctCertificate + eflVersionCode` **only** when the extracted `eflVersionCode` looks like a real “Ver. #” token (has digits / expected structure).
+  - If `eflVersionCode` is weak/generic (e.g., `"ENGLISH"` or a plan family label like `"PowerBank"`), it falls back to de-duping by `eflPdfSha256` to avoid unrelated plans overwriting each other.
