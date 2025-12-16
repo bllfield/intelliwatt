@@ -74,6 +74,13 @@ type BatchResultRow = {
   parseConfidence: number | null;
   passStrength?: "STRONG" | "WEAK" | "INVALID" | null;
   passStrengthReasons?: string[] | null;
+  passStrengthOffPointDiffs?: Array<{
+    usageKwh: number;
+    expectedInterp: number;
+    modeled: number | null;
+    diff: number | null;
+    ok: boolean;
+  }> | null;
   /**
    * True when we detected a previously persisted RatePlan.rateStructure for this
    * EFL fingerprint (i.e., a “template hit”), and skipped re-parsing.
@@ -462,6 +469,7 @@ export async function POST(req: NextRequest) {
             parseConfidence: null,
             passStrength: null,
             passStrengthReasons: null,
+            passStrengthOffPointDiffs: null,
             templateHit: true,
             templateAction: mode === "STORE_TEMPLATES_ON_PASS" ? "TEMPLATE" : "SKIPPED",
             queueReason: null,
@@ -625,6 +633,7 @@ export async function POST(req: NextRequest) {
               parseConfidence: null,
               passStrength: null,
               passStrengthReasons: null,
+              passStrengthOffPointDiffs: null,
               templateHit: true,
               // DRY_RUN contract: templateAction is always SKIPPED (no template
               // handling semantics). In STORE_TEMPLATES_ON_PASS, surface TEMPLATE.
@@ -672,6 +681,17 @@ export async function POST(req: NextRequest) {
           (pipeline as any).passStrengthReasons,
         )
           ? ((pipeline as any).passStrengthReasons as string[])
+          : null;
+        const passStrengthOffPointDiffs:
+          | Array<{
+              usageKwh: number;
+              expectedInterp: number;
+              modeled: number | null;
+              diff: number | null;
+              ok: boolean;
+            }>
+          | null = Array.isArray((pipeline as any).passStrengthOffPointDiffs)
+          ? ((pipeline as any).passStrengthOffPointDiffs as any[])
           : null;
 
         const diffs =
@@ -963,6 +983,7 @@ export async function POST(req: NextRequest) {
           parseConfidence: pipeline.parseConfidence ?? null,
           passStrength,
           passStrengthReasons,
+          passStrengthOffPointDiffs,
           templateAction,
           queueReason: finalQueueReason,
           finalQueueReason,

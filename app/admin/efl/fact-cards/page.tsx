@@ -463,6 +463,29 @@ export default function FactCardOpsPage() {
     }
   }
 
+  async function invalidateAllTemplates() {
+    if (!token) {
+      setTplErr("Admin token required.");
+      return;
+    }
+    const phrase = window.prompt(
+      'DANGER: This will invalidate ALL templates (clear rateStructure) so they must be re-parsed.\n\nType INVALIDATE_ALL_TEMPLATES to proceed.',
+    );
+    if (!phrase) return;
+    try {
+      const res = await fetch("/api/admin/efl/templates/invalidate-all", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-admin-token": token },
+        body: JSON.stringify({ confirm: phrase }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      await loadTemplates();
+    } catch (e: any) {
+      setTplErr(e?.message || "Failed to invalidate all templates.");
+    }
+  }
+
   useEffect(() => {
     if (ready) void loadTemplates();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -979,6 +1002,9 @@ export default function FactCardOpsPage() {
             </button>
             <button className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60" onClick={() => void cleanupInvalidTemplates()} disabled={!ready || tplLoading}>
               Cleanup missing fields
+            </button>
+            <button className="px-3 py-2 rounded-lg border border-red-200 text-red-700 hover:bg-red-50 disabled:opacity-60" onClick={() => void invalidateAllTemplates()} disabled={!ready || tplLoading}>
+              Invalidate ALL templates (danger)
             </button>
           </div>
         </div>

@@ -6,7 +6,7 @@ import { getOrCreateEflTemplate } from "@/lib/efl/getOrCreateEflTemplate";
 import { upsertRatePlanFromEfl } from "@/lib/efl/planPersistence";
 import { validatePlanRules, planRulesToRateStructure } from "@/lib/efl/planEngine";
 import { extractProviderAndPlanNameFromEflText } from "@/lib/efl/eflExtractor";
-import { inferTdspTerritoryFromEflText } from "@/lib/efl/eflValidator";
+import { inferTdspTerritoryFromEflText, scoreEflPassStrength } from "@/lib/efl/eflValidator";
 import { solveEflValidationGaps } from "@/lib/efl/validation/solveEflValidationGaps";
 import { prisma } from "@/lib/db";
 
@@ -120,6 +120,48 @@ export async function POST(req: NextRequest) {
       derivedForValidation = null;
     }
 
+    // PASS strength scoring (ops visibility): show why an item is PASS but quarantined (WEAK/INVALID),
+    // especially for off-point deviations at 750/1250/1500 kWh.
+    let passStrength: "STRONG" | "WEAK" | "INVALID" | null = null;
+    let passStrengthReasons: string[] = [];
+    let passStrengthOffPointDiffs:
+      | Array<{
+          usageKwh: number;
+          expectedInterp: number;
+          modeled: number | null;
+          diff: number | null;
+          ok: boolean;
+        }>
+      | null = null;
+    try {
+      const validationAfter =
+        (derivedForValidation as any)?.validationAfter ??
+        (template.validation as any)?.eflAvgPriceValidation ??
+        null;
+      const finalStatus = validationAfter?.status ?? null;
+      if (finalStatus === "PASS") {
+        const finalPlanRules =
+          (derivedForValidation as any)?.derivedPlanRules ?? template.planRules ?? null;
+        const finalRateStructure =
+          (derivedForValidation as any)?.derivedRateStructure ?? template.rateStructure ?? null;
+        const scored = await scoreEflPassStrength({
+          rawText,
+          validation: validationAfter,
+          planRules: finalPlanRules,
+          rateStructure: finalRateStructure,
+        });
+        passStrength = scored.strength ?? null;
+        passStrengthReasons = Array.isArray(scored.reasons) ? scored.reasons : [];
+        passStrengthOffPointDiffs = Array.isArray(scored.offPointDiffs)
+          ? scored.offPointDiffs
+          : null;
+      }
+    } catch {
+      passStrength = null;
+      passStrengthReasons = [];
+      passStrengthOffPointDiffs = null;
+    }
+
     // Best-effort persistence: if the EFL PASSes after solver (or already PASSed) and PlanRules are
     // structurally valid, upsert a RatePlan template so it appears in Templates.
     let templatePersisted: boolean = false;
@@ -228,6 +270,9 @@ export async function POST(req: NextRequest) {
       parseWarnings: template.parseWarnings,
       validation: template.validation ?? null,
       derivedForValidation,
+      passStrength,
+      passStrengthReasons,
+      passStrengthOffPointDiffs,
       templatePersisted,
       persistedRatePlanId,
       autoResolvedQueueCount,

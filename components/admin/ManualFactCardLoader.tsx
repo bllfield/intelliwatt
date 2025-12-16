@@ -27,6 +27,15 @@ type UploadResponse = {
   parseWarnings?: string[];
   validation?: any | null;
   derivedForValidation?: any | null;
+  passStrength?: "STRONG" | "WEAK" | "INVALID" | null;
+  passStrengthReasons?: string[];
+  passStrengthOffPointDiffs?: Array<{
+    usageKwh: number;
+    expectedInterp: number;
+    modeled: number | null;
+    diff: number | null;
+    ok: boolean;
+  }> | null;
   templatePersisted?: boolean;
   persistedRatePlanId?: string | null;
   autoResolvedQueueCount?: number;
@@ -438,6 +447,15 @@ export function ManualFactCardLoader(props: {
               </div>
             </div>
             <div>
+              <div className="font-semibold text-brand-navy mb-1">PASS strength</div>
+              <div className="font-mono">
+                {result.passStrength ?? "—"}
+                {Array.isArray(result.passStrengthReasons) && result.passStrengthReasons.length
+                  ? ` (${result.passStrengthReasons.join(",")})`
+                  : ""}
+              </div>
+            </div>
+            <div>
               <div className="font-semibold text-brand-navy mb-1">Template persisted</div>
               <div className="font-mono">
                 {typeof result.templatePersisted === "boolean"
@@ -457,6 +475,44 @@ export function ManualFactCardLoader(props: {
               </div>
             </div>
           </div>
+
+          {Array.isArray(result.passStrengthOffPointDiffs) && result.passStrengthOffPointDiffs.length ? (
+            <details className="rounded-lg border bg-white p-3">
+              <summary className="cursor-pointer text-sm font-semibold text-brand-navy">
+                Off-point diffs (750 / 1250 / 1500 kWh)
+              </summary>
+              <div className="mt-2 overflow-x-auto">
+                <table className="min-w-full text-xs">
+                  <thead className="text-gray-700">
+                    <tr className="h-9 border-b bg-gray-50">
+                      <th className="px-2 text-left">kWh</th>
+                      <th className="px-2 text-right">expected (interp)</th>
+                      <th className="px-2 text-right">modeled</th>
+                      <th className="px-2 text-right">diff</th>
+                      <th className="px-2 text-left">ok</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {result.passStrengthOffPointDiffs.map((d) => (
+                      <tr key={d.usageKwh} className="border-b">
+                        <td className="px-2 py-2 font-mono">{d.usageKwh}</td>
+                        <td className="px-2 py-2 text-right font-mono">
+                          {Number.isFinite(d.expectedInterp) ? d.expectedInterp.toFixed(3) : "—"}
+                        </td>
+                        <td className="px-2 py-2 text-right font-mono">
+                          typeof d.modeled === "number" && Number.isFinite(d.modeled) ? d.modeled.toFixed(3) : "—"
+                        </td>
+                        <td className="px-2 py-2 text-right font-mono">
+                          typeof d.diff === "number" && Number.isFinite(d.diff) ? d.diff.toFixed(3) : "—"
+                        </td>
+                        <td className="px-2 py-2 font-mono">{d.ok ? "true" : "false"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          ) : null}
 
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-2">
@@ -497,6 +553,9 @@ export function ManualFactCardLoader(props: {
                 parseWarnings: result.parseWarnings ?? null,
                 validation: result.validation ?? null,
                 ai: result.ai ?? null,
+                passStrength: (result as any).passStrength ?? null,
+                passStrengthReasons: (result as any).passStrengthReasons ?? null,
+                passStrengthOffPointDiffs: (result as any).passStrengthOffPointDiffs ?? null,
                 templatePersisted: (result as any).templatePersisted ?? null,
                 persistedRatePlanId: (result as any).persistedRatePlanId ?? null,
                 autoResolvedQueueCount: (result as any).autoResolvedQueueCount ?? null,
