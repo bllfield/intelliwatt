@@ -500,10 +500,14 @@ export function ManualFactCardLoader(props: {
                           {Number.isFinite(d.expectedInterp) ? d.expectedInterp.toFixed(3) : "—"}
                         </td>
                         <td className="px-2 py-2 text-right font-mono">
-                          typeof d.modeled === "number" && Number.isFinite(d.modeled) ? d.modeled.toFixed(3) : "—"
+                          {typeof d.modeled === "number" && Number.isFinite(d.modeled)
+                            ? d.modeled.toFixed(3)
+                            : "—"}
                         </td>
                         <td className="px-2 py-2 text-right font-mono">
-                          typeof d.diff === "number" && Number.isFinite(d.diff) ? d.diff.toFixed(3) : "—"
+                          {typeof d.diff === "number" && Number.isFinite(d.diff)
+                            ? d.diff.toFixed(3)
+                            : "—"}
                         </td>
                         <td className="px-2 py-2 font-mono">{d.ok ? "true" : "false"}</td>
                       </tr>

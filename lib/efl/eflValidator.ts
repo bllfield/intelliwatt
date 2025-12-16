@@ -2014,6 +2014,36 @@ export async function scoreEflPassStrength(args: {
     return { strength: "WEAK", reasons: Array.from(new Set(reasons)) };
   }
 
+  // Off-point interpolation checks are meant to catch "cancellation passes" where the
+  // model matches the three anchors but behaves strangely between them (typically due to
+  // tiers/credits/TOU discontinuities). For a simple flat plan with only a base fee, the
+  // avg-price curve is naturally non-linear (\(base / kWh\)), so linear interpolation will
+  // produce false OFFPOINT_DEVIATION flags.
+  const rateType = String((planRules as any)?.rateType ?? (rateStructure as any)?.type ?? "").toUpperCase();
+  const hasAnyCredits =
+    (Array.isArray((planRules as any)?.billCredits) && (planRules as any).billCredits.length > 0) ||
+    Boolean((rateStructure as any)?.billCredits?.hasBillCredit);
+  const hasAnyUsageTiers =
+    (Array.isArray((planRules as any)?.usageTiers) && (planRules as any).usageTiers.length > 0) ||
+    (Array.isArray((rateStructure as any)?.usageTiers) && (rateStructure as any).usageTiers.length > 0);
+  const hasTouTiers =
+    Array.isArray((rateStructure as any)?.timeOfUsePeriods) ||
+    Array.isArray((rateStructure as any)?.tiers);
+
+  const isSimpleFlat =
+    rateType === "FIXED" &&
+    !hasAnyCredits &&
+    !hasAnyUsageTiers &&
+    !hasTouTiers;
+
+  if (isSimpleFlat) {
+    return {
+      strength: "STRONG",
+      reasons: Array.from(new Set(reasons)),
+      offPointDiffs: [],
+    };
+  }
+
   const interp = (
     x: number,
     x1: number,
