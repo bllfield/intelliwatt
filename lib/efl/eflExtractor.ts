@@ -247,7 +247,16 @@ function extractEflVersionCode(text: string): string | null {
     if (digitCount < 6) return true;
 
     // Reject language-tag fragments that still slip through with digits.
-    if (/ENGLISH|SPANISH/i.test(upper)) return true;
+    // But allow structured underscore-style codes that *end* with language tags,
+    // as long as they still look like unique IDs (many digits + long enough).
+    if (/ENGLISH|SPANISH/i.test(upper)) {
+      const looksStructured =
+        s.includes("_") &&
+        digitCount >= 8 &&
+        s.length >= 12 &&
+        /^[A-Z0-9+_.-]+$/i.test(s);
+      if (!looksStructured) return true;
+    }
 
     return false;
   };
@@ -309,27 +318,48 @@ function extractEflVersionCode(text: string): string | null {
     if (val && val.length >= 3 && !isWeakVersionCandidate(val)) return val;
 
     // If the inline token is weak (e.g. "GreenVolt"), try to find a strong
-    // underscore token in the next few lines and combine them for uniqueness.
+    // structured token in the next lines and combine them for uniqueness.
     const label = val || m[1].trim();
     const window: string[] = [];
-    for (let j = i + 1; j < Math.min(i + 6, lines.length); j++) {
+    // Some PDFs interleave two columns and the unique code may appear several
+    // lines later (or after a page-break), so scan a wider window.
+    for (let j = i + 1; j < Math.min(i + 20, lines.length); j++) {
       const candidate = lines[j]?.trim();
       if (!candidate) continue;
       window.push(candidate);
-      if (window.length >= 4) break;
+      if (window.length >= 10) break;
     }
     if (!label || !window.length) continue;
 
     let strong: string | null = null;
+    let strongScore = -999;
     for (const w of window) {
       // Prefer the last underscore token on the line; these codes often appear
       // after "PUCT Certificate # #####" in footer layouts.
-      const tokens = Array.from(w.matchAll(/\b([A-Z0-9_.-]*_[A-Z0-9_.-]+)\b/gi)).map((x) => x[1]);
-      const best = tokens.length ? normalizeToken(tokens[tokens.length - 1]!) : null;
-      if (!best) continue;
-      if (!isWeakVersionCandidate(best)) {
-        strong = best;
-        break;
+      const tokens = Array.from(
+        w.matchAll(/\b([A-Z0-9+_.-]*_[A-Z0-9+_.-]+)\b/gi),
+      ).map((x) => x[1]);
+      for (const t of tokens) {
+        const cand = normalizeToken(t);
+        if (!cand) continue;
+        const sc = scoreCandidate(cand);
+        if (sc > strongScore) {
+          strongScore = sc;
+          strong = cand;
+        }
+      }
+
+      // Also consider numeric date-like tokens (e.g. 202512074) that might be
+      // printed in the footer near PUCT/REP info.
+      const nums = Array.from(w.matchAll(/\b(20\d{6}\d{0,3})\b/g)).map((x) => x[1]);
+      for (const n of nums) {
+        const cand = normalizeToken(n);
+        if (!cand) continue;
+        const sc = scoreCandidate(cand);
+        if (sc > strongScore) {
+          strongScore = sc;
+          strong = cand;
+        }
       }
     }
     if (strong) {
