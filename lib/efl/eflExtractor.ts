@@ -215,6 +215,57 @@ function extractRepPuctCertificate(text: string): string | null {
 function extractEflVersionCode(text: string): string | null {
   const lines = text.split(/\r?\n/).map((l) => l.trim());
 
+  const normalizeToken = (s: string): string => {
+    // Keep characters commonly seen in EFL version codes (including '+', which appears in some plan names).
+    return s.replace(/^[^A-Z0-9+_.-]+/i, "").replace(/[^A-Z0-9+_.-]+$/i, "");
+  };
+
+  const isObviousJunkToken = (s: string): boolean => {
+    const u = normalizeToken(s).toUpperCase();
+    // Common footer split artifacts
+    if (!u) return true;
+    if (u === "ENGLISH" || u === "NGLISH" || u === "ISH") return true;
+    if (u === "SPANISH" || u === "SP") return true;
+    return false;
+  };
+
+  const scoreCandidate = (raw: string): number => {
+    const s = normalizeToken(raw);
+    if (!s) return -999;
+    const u = s.toUpperCase();
+    let score = 0;
+    if (u.includes("EFL")) score += 50;
+    const digitCount = (s.match(/\d/g) ?? []).length;
+    if (digitCount >= 6) score += 25;
+    if (digitCount >= 8) score += 10;
+    if (s.includes("_")) score += 10;
+    if (s.includes("-")) score += 2;
+    if (s.includes("+")) score += 2;
+    if (isObviousJunkToken(s)) score -= 100;
+    score += Math.min(20, Math.floor(s.length / 4));
+    return score;
+  };
+
+  const stitchWrapped = (parts: string[]): string | null => {
+    const cleaned = parts.map((p) => normalizeToken(p)).filter(Boolean);
+    if (!cleaned.length) return null;
+    // If the first part looks like it ended mid-word and the next part is a small alpha suffix,
+    // stitch it (e.g., "..._ENGL" + "ISH" => "..._ENGLISH").
+    let out = cleaned[0];
+    for (let i = 1; i < cleaned.length; i++) {
+      const next = cleaned[i];
+      if (!next) continue;
+      const alphaOnly = /^[A-Z]+$/i.test(next);
+      if (alphaOnly && next.length <= 6 && out.length >= 6) {
+        out = `${out}${next}`;
+        continue;
+      }
+      // Otherwise stop; we don't want to accidentally join unrelated footer lines.
+      break;
+    }
+    return out || null;
+  };
+
   // 0) Simple footer-style "Version 10.0" pattern.
   const footerVersion = text.match(
     /\bVersion\s+([0-9]+(?:\.[0-9]+)?)\b/i,
@@ -227,8 +278,8 @@ function extractEflVersionCode(text: string): string | null {
   for (const line of lines) {
     const m = line.match(/\b(?:EFL\s*)?Ver\.\s*#\s*:\s*(.+)\b/i);
     if (m?.[1]) {
-      const val = m[1].trim();
-      if (val && val.length >= 3) return val;
+      const val = normalizeToken(m[1].trim());
+      if (val && val.length >= 3 && !isObviousJunkToken(val)) return val;
     }
   }
 
@@ -240,23 +291,45 @@ function extractEflVersionCode(text: string): string | null {
       // Same line value after colon
       const same = line.match(/^EFL\s*Version\s*:\s*(.+)$/i);
       if (same?.[1]) {
-        const val = same[1].trim();
-        if (val && val.length >= 3) return val;
+        const val = normalizeToken(same[1].trim());
+        if (val && val.length >= 3 && !isObviousJunkToken(val)) return val;
       }
-      // Next non-empty line within a small window
-      for (let j = i + 1; j < Math.min(i + 6, lines.length); j++) {
+
+      // Next non-empty lines within a small window; choose best candidate (and try to stitch wraps).
+      const window: string[] = [];
+      for (let j = i + 1; j < Math.min(i + 8, lines.length); j++) {
         const candidate = lines[j]?.trim();
         if (!candidate) continue;
-        if (/[A-Z0-9_]{6,}/i.test(candidate)) return candidate;
-        if (/[0-9]/.test(candidate) && candidate.length >= 3) return candidate;
+        window.push(candidate);
+        if (window.length >= 4) break;
+      }
+
+      if (window.length) {
+        // 1) Prefer any explicit EFL_* token in the window (stitching short suffixes).
+        const stitched = stitchWrapped(window);
+        if (stitched && /EFL_/i.test(stitched) && stitched.length >= 8) return stitched;
+
+        // 2) Otherwise pick the highest-scoring single-line candidate.
+        let best: string | null = null;
+        let bestScore = -999;
+        for (const cand of window) {
+          const norm = normalizeToken(cand);
+          const sc = scoreCandidate(norm);
+          if (sc > bestScore) {
+            bestScore = sc;
+            best = norm;
+          }
+        }
+        if (best && best.length >= 3 && !isObviousJunkToken(best)) return best;
       }
     }
   }
 
   // C) Fallback: standalone codes like "EFL_<...>" on any line.
   for (const line of lines) {
-    const m = line.match(/\b(EFL_[A-Z0-9_]+)\b/i);
-    if (m?.[1]) return m[1];
+    // Allow + and - in case the plan name embeds them.
+    const m = line.match(/\b(EFL_[A-Z0-9+_.-]+)\b/i);
+    if (m?.[1]) return normalizeToken(m[1]);
   }
 
   // D) Bottom-of-doc version token (e.g., TX_JE_NF_EFL_ENG_V1.5_SEP_01_25).
@@ -273,6 +346,11 @@ function extractEflVersionCode(text: string): string | null {
   }
 
   return null;
+}
+
+// Exported for tests and admin tooling.
+export function extractEflVersionCodeFromText(text: string): string | null {
+  return extractEflVersionCode(text);
 }
 
 /**
