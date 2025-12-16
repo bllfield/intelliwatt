@@ -66,6 +66,7 @@ export default function WattbuyTemplatedPlansPage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [backfillNote, setBackfillNote] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [limit, setLimit] = useState(200);
 
@@ -103,6 +104,38 @@ export default function WattbuyTemplatedPlansPage() {
       setRows((data as ApiOk).rows);
     } catch (e: any) {
       setError(e?.message || "Failed to load templated plans.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function backfill() {
+    if (!token) {
+      setError("Admin token required.");
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    setBackfillNote(null);
+    try {
+      const params = new URLSearchParams();
+      params.set("limit", String(limit));
+      if (q.trim()) params.set("q", q.trim());
+      const res = await fetch(`/api/admin/wattbuy/templated-plans/backfill?${params}`, {
+        method: "POST",
+        headers: { "x-admin-token": token },
+      });
+      const data = (await res.json().catch(() => null)) as any;
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || `HTTP ${res.status}`);
+      }
+      setBackfillNote(
+        `Backfill complete: scanned=${data.scanned} updated=${data.updated} skipped=${data.skipped} ` +
+          (data.reasons ? `reasons=${JSON.stringify(data.reasons)}` : ""),
+      );
+      await load();
+    } catch (e: any) {
+      setError(e?.message || "Backfill failed.");
     } finally {
       setLoading(false);
     }
@@ -188,10 +221,19 @@ export default function WattbuyTemplatedPlansPage() {
             >
               {loading ? "Loading…" : "Load"}
             </button>
+            <button
+              className="px-3 py-2 rounded-lg border hover:bg-gray-50"
+              onClick={() => void backfill()}
+              disabled={loading}
+              title="Persist missing Term/500/1000/2000 into RatePlan using the stored rateStructure (does not guess TOU)."
+            >
+              {loading ? "Working…" : "Backfill missing columns"}
+            </button>
           </div>
         </div>
 
         {error ? <div className="text-sm text-red-700">{error}</div> : null}
+        {backfillNote ? <div className="text-xs text-gray-600">{backfillNote}</div> : null}
         <div className="text-xs text-gray-500">
           Shows plans where <span className="font-mono">RatePlan.rateStructure</span> is already stored (fast for users).
           Click headers to sort (best deals = lowest ¢/kWh).

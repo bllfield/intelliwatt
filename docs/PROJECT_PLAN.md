@@ -5360,6 +5360,16 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
   - `lib/efl/planAiExtractor.ts` logs fact‑card extraction + vision fallback.
   - `lib/billing/parseBillText.ts` logs `module="current-plan", operation="bill-parse-v3-json"`.
 
+## ADMIN — Templated plans backfill (2025‑12‑16)
+
+- `/admin/wattbuy/templates` shows `RatePlan` rows where `rateStructure` is stored.
+- Some legacy rows may have `rateStructure` but missing the headline fields used for sorting/display:
+  - `termMonths`, `rate500`, `rate1000`, `rate2000`
+- Admin backfill endpoint:
+  - `POST /api/admin/wattbuy/templated-plans/backfill?limit=...&q=...`
+  - Computes missing fields from the stored `rateStructure` (FIXED/VARIABLE + tiers + bill credits + base fee).
+  - **Does not guess TIME_OF_USE** usage distribution; TOU plans may remain blank for 500/1000/2000.
+
 - **Admin APIs + review UI**:
   - New admin API routes for inspecting and resolving queue items:
     - `GET /api/admin/efl-review/list` (`app/api/admin/efl-review/list/route.ts`):

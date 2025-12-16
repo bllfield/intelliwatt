@@ -6,9 +6,17 @@ export const dynamic = "force-dynamic";
 
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 
+function jsonError(status: number, error: string, details?: unknown) {
+  return NextResponse.json(
+    { ok: false, error, ...(details ? { details } : {}) },
+    { status },
+  );
+}
+
 function inferTermMonths(planName: string | null | undefined): number | null {
   if (!planName) return null;
   const s = String(planName);
+
   // Strongest: explicit "mo/month" tokens
   const m1 = s.match(/\b(\d{1,2})\s*(?:mo|mos|month|months)\b/i);
   if (m1) {
@@ -58,7 +66,11 @@ function computeAvgCentsPerKwhFromRateStructure(
       .map((t) => ({
         minKWh: toNum((t as any).minKWh ?? (t as any).minKwh ?? 0) ?? 0,
         maxKWh: toNum((t as any).maxKWh ?? (t as any).maxKwh ?? null),
-        centsPerKWh: toNum((t as any).centsPerKWh ?? (t as any).priceCents ?? (t as any).rateCentsPerKwh),
+        centsPerKWh: toNum(
+          (t as any).centsPerKWh ??
+            (t as any).priceCents ??
+            (t as any).rateCentsPerKwh,
+        ),
       }))
       .filter((t) => Number.isFinite(t.minKWh) && typeof t.centsPerKWh === "number")
       .sort((a, b) => a.minKWh - b.minKWh);
@@ -84,7 +96,6 @@ function computeAvgCentsPerKwhFromRateStructure(
       remaining -= kwhInTier;
     }
 
-    // If there is remaining usage beyond the last tier, bill it at the last tier's rate.
     if (remaining > 0) {
       const last = tiers[tiers.length - 1];
       if (typeof last?.centsPerKWh === "number") {
@@ -116,7 +127,7 @@ function computeAvgCentsPerKwhFromRateStructure(
     }
   }
 
-  const credits = rateStructure.billCredits;
+  const credits = (rateStructure as any).billCredits;
   let billCreditCents = 0;
   if (credits && credits.hasBillCredit && Array.isArray(credits.rules)) {
     for (const r of credits.rules) {
@@ -126,9 +137,7 @@ function computeAvgCentsPerKwhFromRateStructure(
       if (typeof credit !== "number" || credit <= 0) continue;
       const okMin = usageKwh >= min;
       const okMax = max == null ? true : usageKwh <= max;
-      if (okMin && okMax) {
-        billCreditCents += credit;
-      }
+      if (okMin && okMax) billCreditCents += credit;
     }
   }
 
@@ -136,46 +145,9 @@ function computeAvgCentsPerKwhFromRateStructure(
   return totalCents / usageKwh;
 }
 
-type Row = {
-  id: string;
-  utilityId: string;
-  state: string;
-  supplier: string | null;
-  planName: string | null;
-  termMonths: number | null;
-  rate500: number | null;
-  rate1000: number | null;
-  rate2000: number | null;
-  cancelFee: string | null;
-  eflUrl: string | null;
-  eflPdfSha256: string | null;
-  repPuctCertificate: string | null;
-  eflVersionCode: string | null;
-  eflRequiresManualReview: boolean;
-  updatedAt: string;
-  lastSeenAt: string;
-  rateStructure: unknown;
-};
-
-type Ok = {
-  ok: true;
-  count: number;
-  rows: Row[];
-};
-
-type Err = { ok: false; error: string; details?: unknown };
-
-function jsonError(status: number, error: string, details?: unknown) {
-  const body: Err = { ok: false, error, ...(details ? { details } : {}) };
-  return NextResponse.json(body, { status });
-}
-
-export async function GET(req: NextRequest) {
+export async function POST(req: NextRequest) {
   try {
-    if (!ADMIN_TOKEN) {
-      return jsonError(500, "ADMIN_TOKEN is not configured");
-    }
-
+    if (!ADMIN_TOKEN) return jsonError(500, "ADMIN_TOKEN is not configured");
     const headerToken = req.headers.get("x-admin-token");
     if (!headerToken || headerToken !== ADMIN_TOKEN) {
       return jsonError(401, "Unauthorized (invalid admin token)");
@@ -183,22 +155,31 @@ export async function GET(req: NextRequest) {
 
     const limitRaw = Number(req.nextUrl.searchParams.get("limit") ?? "200");
     const limit = Math.max(1, Math.min(1000, Number.isFinite(limitRaw) ? limitRaw : 200));
-
     const q = (req.nextUrl.searchParams.get("q") ?? "").trim();
+    const dryRun = (req.nextUrl.searchParams.get("dryRun") ?? "") === "1";
 
     const where: any = {
-      // “Templated” means we already have a usable engine structure persisted.
       rateStructure: { not: null },
       eflRequiresManualReview: false,
       isUtilityTariff: false,
+      OR: [
+        { termMonths: null },
+        { rate500: null },
+        { rate1000: null },
+        { rate2000: null },
+      ],
       ...(q
         ? {
-            OR: [
-              { supplier: { contains: q, mode: "insensitive" } },
-              { planName: { contains: q, mode: "insensitive" } },
-              { eflVersionCode: { contains: q, mode: "insensitive" } },
-              { repPuctCertificate: { contains: q, mode: "insensitive" } },
-              { eflPdfSha256: { contains: q, mode: "insensitive" } },
+            AND: [
+              {
+                OR: [
+                  { supplier: { contains: q, mode: "insensitive" } },
+                  { planName: { contains: q, mode: "insensitive" } },
+                  { eflVersionCode: { contains: q, mode: "insensitive" } },
+                  { repPuctCertificate: { contains: q, mode: "insensitive" } },
+                  { eflPdfSha256: { contains: q, mode: "insensitive" } },
+                ],
+              },
             ],
           }
         : {}),
@@ -208,68 +189,74 @@ export async function GET(req: NextRequest) {
       where,
       select: {
         id: true,
-        utilityId: true,
-        state: true,
-        supplier: true,
         planName: true,
         termMonths: true,
         rate500: true,
         rate1000: true,
         rate2000: true,
-        cancelFee: true,
-        eflUrl: true,
-        eflPdfSha256: true,
-        repPuctCertificate: true,
-        eflVersionCode: true,
-        eflRequiresManualReview: true,
-        isUtilityTariff: true,
-        updatedAt: true,
-        lastSeenAt: true,
         rateStructure: true,
       },
       orderBy: [{ updatedAt: "desc" }],
       take: limit,
     });
 
-    const rows: Row[] = (plans as any[]).map((p) => ({
-      id: p.id,
-      utilityId: p.utilityId,
-      state: p.state,
-      supplier: p.supplier ?? null,
-      planName: p.planName ?? null,
-      termMonths:
-        typeof p.termMonths === "number"
-          ? p.termMonths
-          : inferTermMonths(p.planName ?? null),
-      rate500:
-        typeof p.rate500 === "number"
-          ? p.rate500
-          : computeAvgCentsPerKwhFromRateStructure(p.rateStructure, 500),
-      rate1000:
-        typeof p.rate1000 === "number"
-          ? p.rate1000
-          : computeAvgCentsPerKwhFromRateStructure(p.rateStructure, 1000),
-      rate2000:
-        typeof p.rate2000 === "number"
-          ? p.rate2000
-          : computeAvgCentsPerKwhFromRateStructure(p.rateStructure, 2000),
-      cancelFee: p.cancelFee ?? null,
-      eflUrl: p.eflUrl ?? null,
-      eflPdfSha256: p.eflPdfSha256 ?? null,
-      repPuctCertificate: p.repPuctCertificate ?? null,
-      eflVersionCode: p.eflVersionCode ?? null,
-      eflRequiresManualReview: Boolean(p.eflRequiresManualReview),
-      updatedAt: new Date(p.updatedAt).toISOString(),
-      lastSeenAt: new Date(p.lastSeenAt).toISOString(),
-      rateStructure: p.rateStructure ?? null,
-    }));
+    let updated = 0;
+    let skipped = 0;
+    const reasons: Record<string, number> = {};
 
-    const body: Ok = { ok: true, count: rows.length, rows };
-    return NextResponse.json(body);
+    for (const p of plans as any[]) {
+      const computedTerm =
+        typeof p.termMonths === "number" ? null : inferTermMonths(p.planName);
+      const computed500 =
+        typeof p.rate500 === "number"
+          ? null
+          : computeAvgCentsPerKwhFromRateStructure(p.rateStructure, 500);
+      const computed1000 =
+        typeof p.rate1000 === "number"
+          ? null
+          : computeAvgCentsPerKwhFromRateStructure(p.rateStructure, 1000);
+      const computed2000 =
+        typeof p.rate2000 === "number"
+          ? null
+          : computeAvgCentsPerKwhFromRateStructure(p.rateStructure, 2000);
+
+      const data: any = {};
+      if (typeof computedTerm === "number") data.termMonths = computedTerm;
+      if (typeof computed500 === "number") data.rate500 = computed500;
+      if (typeof computed1000 === "number") data.rate1000 = computed1000;
+      if (typeof computed2000 === "number") data.rate2000 = computed2000;
+
+      if (Object.keys(data).length === 0) {
+        skipped += 1;
+        const kind =
+          String(p?.rateStructure?.type ?? "").toUpperCase() === "TIME_OF_USE"
+            ? "SKIP_TOU_NOT_COMPUTABLE"
+            : "SKIP_NO_DERIVABLE_FIELDS";
+        reasons[kind] = (reasons[kind] ?? 0) + 1;
+        continue;
+      }
+
+      if (!dryRun) {
+        await (prisma as any).ratePlan.update({
+          where: { id: p.id },
+          data,
+        });
+      }
+      updated += 1;
+    }
+
+    return NextResponse.json({
+      ok: true,
+      dryRun,
+      scanned: plans.length,
+      updated,
+      skipped,
+      reasons,
+    });
   } catch (err: any) {
     // eslint-disable-next-line no-console
-    console.error("[ADMIN_WATTBUY_TEMPLATED_PLANS] error:", err);
-    return jsonError(500, "Internal error while listing templated plans", err?.message);
+    console.error("[ADMIN_WATTBUY_TEMPLATED_PLANS_BACKFILL] error:", err);
+    return jsonError(500, "Internal error while backfilling templated plans", err?.message);
   }
 }
 
