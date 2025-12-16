@@ -32,6 +32,8 @@ export async function GET(req: NextRequest) {
     const q = (searchParams.get("q") || "").trim();
     const limitRaw = Number(searchParams.get("limit") || "50");
     const limit = Math.max(1, Math.min(200, Number.isFinite(limitRaw) ? limitRaw : 50));
+    const autoResolve =
+      (searchParams.get("autoResolve") || searchParams.get("auto_resolve") || "") === "1";
 
     const where: any = {};
     if (statusParam === "RESOLVED") {
@@ -51,11 +53,108 @@ export async function GET(req: NextRequest) {
       ];
     }
 
-    const items = await (prisma as any).eflParseReviewQueue.findMany({
+    let items = await (prisma as any).eflParseReviewQueue.findMany({
       where,
       orderBy: { createdAt: "desc" },
       take: limit,
     });
+
+    let autoResolvedCount = 0;
+    if (autoResolve && where.resolvedAt === null) {
+      // Auto-resolve OPEN queue items that already have a persisted template.
+      //
+      // This keeps the queue self-healing after batch runs / manual loader creates
+      // templates, even if a prior run didn't update the queue row for whatever reason.
+      //
+      // IMPORTANT: Only resolves when a RatePlan exists with a stored rateStructure
+      // and it does NOT require manual review.
+      const openItems = Array.isArray(items) ? items : [];
+      const shas = new Set<string>();
+      const urls = new Set<string>();
+      const certVerPairs: Array<{ repPuctCertificate: string; eflVersionCode: string }> = [];
+
+      for (const it of openItems) {
+        const sha = String(it?.eflPdfSha256 || "").trim();
+        if (sha) shas.add(sha);
+        const url = String(it?.eflUrl || "").trim();
+        if (url) urls.add(url);
+
+        const cert = String(it?.repPuctCertificate || "").trim();
+        const ver = String(it?.eflVersionCode || "").trim();
+        if (cert && ver) certVerPairs.push({ repPuctCertificate: cert, eflVersionCode: ver });
+      }
+
+      const or: any[] = [];
+      if (shas.size) or.push({ eflPdfSha256: { in: Array.from(shas) } });
+      if (urls.size) {
+        const u = Array.from(urls);
+        or.push({ eflUrl: { in: u } });
+        or.push({ eflSourceUrl: { in: u } });
+      }
+      for (const p of certVerPairs) {
+        or.push({ repPuctCertificate: p.repPuctCertificate, eflVersionCode: p.eflVersionCode });
+      }
+
+      if (or.length) {
+        const plans = await prisma.ratePlan.findMany({
+          where: {
+            rateStructure: { not: null },
+            eflRequiresManualReview: false,
+            OR: or,
+          } as any,
+          select: {
+            id: true,
+            eflPdfSha256: true,
+            eflUrl: true,
+            eflSourceUrl: true,
+            repPuctCertificate: true,
+            eflVersionCode: true,
+          } as any,
+        });
+
+        const planShas = new Set<string>();
+        const planUrls = new Set<string>();
+        const planCertVer = new Set<string>();
+        for (const p of plans as any[]) {
+          if (p?.eflPdfSha256) planShas.add(String(p.eflPdfSha256));
+          if (p?.eflUrl) planUrls.add(String(p.eflUrl));
+          if (p?.eflSourceUrl) planUrls.add(String(p.eflSourceUrl));
+          if (p?.repPuctCertificate && p?.eflVersionCode) {
+            planCertVer.add(`${String(p.repPuctCertificate)}::${String(p.eflVersionCode)}`);
+          }
+        }
+
+        const resolveIds: string[] = [];
+        for (const it of openItems) {
+          const sha = String(it?.eflPdfSha256 || "").trim();
+          const url = String(it?.eflUrl || "").trim();
+          const cert = String(it?.repPuctCertificate || "").trim();
+          const ver = String(it?.eflVersionCode || "").trim();
+          const cv = cert && ver ? `${cert}::${ver}` : "";
+          if ((sha && planShas.has(sha)) || (url && planUrls.has(url)) || (cv && planCertVer.has(cv))) {
+            if (it?.id) resolveIds.push(String(it.id));
+          }
+        }
+
+        if (resolveIds.length) {
+          const now = new Date();
+          const r = await (prisma as any).eflParseReviewQueue.updateMany({
+            where: { id: { in: resolveIds }, resolvedAt: null },
+            data: {
+              resolvedAt: now,
+              resolvedBy: "AUTO_TEMPLATE_MATCH",
+              resolutionNotes: "Auto-resolved: matching RatePlan template already exists.",
+            },
+          });
+          autoResolvedCount = Number(r?.count) || 0;
+          if (autoResolvedCount > 0) {
+            // Remove newly resolved items from this response so the UI reflects the change immediately.
+            const resolvedSet = new Set(resolveIds);
+            items = openItems.filter((it: any) => !resolvedSet.has(String(it?.id)));
+          }
+        }
+      }
+    }
 
     const totalCount = await (prisma as any).eflParseReviewQueue.count({ where });
 
@@ -65,6 +164,7 @@ export async function GET(req: NextRequest) {
       count: items.length,
       totalCount,
       limit,
+      autoResolvedCount,
       items,
     });
   } catch (error) {

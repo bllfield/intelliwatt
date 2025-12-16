@@ -267,6 +267,9 @@ export default function FactCardOpsPage() {
     setQueueErr(null);
     try {
       const params = new URLSearchParams({ status: queueStatus, limit: "200" });
+      // Keep the OPEN queue self-healing: if a template already exists, the list API
+      // can auto-resolve the queue row so admins only see true attention-needed items.
+      if (queueStatus === "OPEN") params.set("autoResolve", "1");
       if (queueQ.trim()) params.set("q", queueQ.trim());
       const res = await fetch(`/api/admin/efl-review/list?${params.toString()}`, {
         headers: { "x-admin-token": token },

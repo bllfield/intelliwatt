@@ -395,6 +395,46 @@ export async function POST(req: NextRequest) {
           existingUrlPlan.rateStructure &&
           (existingUrlPlan.eflRequiresManualReview ?? false) === false
         ) {
+          // If we're in STORE mode, this "template hit" is evidence the queue item no longer
+          // needs attention. Auto-resolve any matching OPEN queue rows.
+          //
+          // IMPORTANT: DRY_RUN contract must remain side-effect-free, so never resolve there.
+          if (mode === "STORE_TEMPLATES_ON_PASS") {
+            try {
+              await (prisma as any).eflParseReviewQueue.updateMany({
+                where: {
+                  resolvedAt: null,
+                  OR: [
+                    ...(existingUrlPlan.eflUrl
+                      ? [{ eflUrl: String(existingUrlPlan.eflUrl) }]
+                      : []),
+                    { eflUrl: eflSeedUrl },
+                    ...(existingUrlPlan.eflSourceUrl
+                      ? [{ eflUrl: String(existingUrlPlan.eflSourceUrl) }]
+                      : []),
+                    ...(existingUrlPlan.repPuctCertificate && existingUrlPlan.eflVersionCode
+                      ? [
+                          {
+                            repPuctCertificate: String(existingUrlPlan.repPuctCertificate),
+                            eflVersionCode: String(existingUrlPlan.eflVersionCode),
+                          },
+                        ]
+                      : []),
+                    ...(existingUrlPlan.eflPdfSha256
+                      ? [{ eflPdfSha256: String(existingUrlPlan.eflPdfSha256) }]
+                      : []),
+                  ],
+                },
+                data: {
+                  resolvedAt: new Date(),
+                  resolvedBy: "AUTO_TEMPLATE_HIT",
+                  resolutionNotes: "Auto-resolved: template already exists for this EFL.",
+                },
+              });
+            } catch {
+              // Best-effort only: never block batch results on queue cleanup.
+            }
+          }
           results.push({
             offerId,
             supplier,
@@ -467,6 +507,41 @@ export async function POST(req: NextRequest) {
             existing.rateStructure &&
             (existing.eflRequiresManualReview ?? false) === false
           ) {
+            // Same logic as URL fast-path: in STORE mode, a template hit means any OPEN queue
+            // rows for this EFL should be cleared.
+            if (mode === "STORE_TEMPLATES_ON_PASS") {
+              try {
+                await (prisma as any).eflParseReviewQueue.updateMany({
+                  where: {
+                    resolvedAt: null,
+                    OR: [
+                      { eflPdfSha256: pdfSha256 },
+                      { eflUrl: resolvedPdfUrl },
+                      { eflUrl: eflSeedUrl },
+                      ...(existing.eflUrl ? [{ eflUrl: String(existing.eflUrl) }] : []),
+                      ...(existing.eflSourceUrl
+                        ? [{ eflUrl: String(existing.eflSourceUrl) }]
+                        : []),
+                      ...(existing.repPuctCertificate && existing.eflVersionCode
+                        ? [
+                            {
+                              repPuctCertificate: String(existing.repPuctCertificate),
+                              eflVersionCode: String(existing.eflVersionCode),
+                            },
+                          ]
+                        : []),
+                    ],
+                  },
+                  data: {
+                    resolvedAt: new Date(),
+                    resolvedBy: "AUTO_TEMPLATE_HIT",
+                    resolutionNotes: "Auto-resolved: template already exists for this EFL.",
+                  },
+                });
+              } catch {
+                // Best-effort only.
+              }
+            }
             results.push({
               offerId,
               supplier,
