@@ -187,6 +187,10 @@ Notes:
 - ⬜ Keep DNS + droplet nginx/certbot changes in sync with these docs whenever the helper hostname or topology changes.
 
 EFL parser model + extraction status:
+- **Admin tooling (single-pane rule):**
+  - All EFL admin tools (batch parsing, review queue, templates, manual runner) live on **`/admin/efl/fact-cards`**.
+  - Do **not** create additional EFL admin pages; keep tooling consolidated on the single ops page.
+  - Legacy `/admin/efl/manual-upload` redirects to `/admin/efl/fact-cards`.
 - ✅ OpenAI PDF file upload path removed for the EFL parser (413 capacity issues avoided); AI now runs **only** on the `pdftotext` output text.
 - ✅ REP PUCT Certificate number and EFL Ver. # are extracted deterministically from the normalized text via regex helpers in `lib/efl/eflExtractor.ts`.
 - ✅ EFL AI normalizer now strips **Average Price** rows and **TDU passthrough** blocks from the AI input text only, dropping only the “Average Monthly Use / Average Price per kWh” lines and never the subsequent price components table; key component tables (e.g., “This price disclosure is based on the following components: …”) are explicitly pinned so their rows are never removed. The EFL parser output shape (`planRules`, `rateStructure`, `parseConfidence`, `parseWarnings`) and the “Parsed Plan Snapshot” rendering remain unchanged.

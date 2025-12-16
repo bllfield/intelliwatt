@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { ManualFactCardLoader } from "@/components/admin/ManualFactCardLoader";
 
 type Json = any;
@@ -106,6 +107,7 @@ function cmp(a: any, b: any, dir: SortDir): number {
 }
 
 export default function FactCardOpsPage() {
+  const searchParams = useSearchParams();
   const { token, setToken } = useLocalToken();
   const ready = useMemo(() => Boolean(token), [token]);
 
@@ -123,6 +125,15 @@ export default function FactCardOpsPage() {
       manualRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 50);
   }
+
+  // Deep-link prefill: /admin/efl/fact-cards?eflUrl=...&offerId=...
+  useEffect(() => {
+    const u = (searchParams?.get("eflUrl") ?? "").trim();
+    if (!u) return;
+    const oid = (searchParams?.get("offerId") ?? "").trim();
+    loadIntoManual({ eflUrl: u, offerId: oid || null });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   // ---------------- Provider batch runner (WattBuy today; future sources later) ----------------
   const [source, setSource] = useState<ProviderSource>("wattbuy");
@@ -1051,6 +1062,13 @@ export default function FactCardOpsPage() {
             <tbody>
               {sortedQueueItems.map((it: any) => {
                 const eflUrl = (it?.eflUrl ?? "").trim();
+                const runHref =
+                  eflUrl
+                    ? `/admin/efl/fact-cards?${new URLSearchParams({
+                        eflUrl,
+                        ...(it?.offerId ? { offerId: String(it.offerId) } : {}),
+                      }).toString()}`
+                    : "";
                 return (
                   <tr key={it.id} className="border-t h-12">
                     <td className="px-2 py-2">{it.supplier ?? "-"}</td>
@@ -1069,6 +1087,26 @@ export default function FactCardOpsPage() {
                         >
                           Load
                         </button>
+                        {eflUrl ? (
+                          <a
+                            className="px-2 py-1 rounded border hover:bg-gray-50"
+                            href={eflUrl}
+                            target="_blank"
+                            rel="noreferrer noopener"
+                            title="Open EFL URL in a new tab"
+                          >
+                            Open EFL
+                          </a>
+                        ) : null}
+                        {runHref ? (
+                          <a
+                            className="px-2 py-1 rounded border hover:bg-gray-50"
+                            href={runHref}
+                            title="Deep link: prefill the manual runner on this page"
+                          >
+                            Run manual
+                          </a>
+                        ) : null}
                         {queueStatus === "OPEN" ? (
                           <button className="px-2 py-1 rounded border hover:bg-gray-50" onClick={() => void resolveQueueItem(String(it.id))}>
                             Resolve
