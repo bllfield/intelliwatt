@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
 import { ManualFactCardLoader } from "@/components/admin/ManualFactCardLoader";
 
 type Json = any;
@@ -107,7 +106,6 @@ function cmp(a: any, b: any, dir: SortDir): number {
 }
 
 export default function FactCardOpsPage() {
-  const searchParams = useSearchParams();
   const { token, setToken } = useLocalToken();
   const ready = useMemo(() => Boolean(token), [token]);
 
@@ -127,13 +125,20 @@ export default function FactCardOpsPage() {
   }
 
   // Deep-link prefill: /admin/efl/fact-cards?eflUrl=...&offerId=...
+  // NOTE: Avoid next/navigation useSearchParams() here — it requires a Suspense boundary during prerender.
+  // Since this page is client-only, we can safely read window.location after mount.
   useEffect(() => {
-    const u = (searchParams?.get("eflUrl") ?? "").trim();
-    if (!u) return;
-    const oid = (searchParams?.get("offerId") ?? "").trim();
-    loadIntoManual({ eflUrl: u, offerId: oid || null });
+    try {
+      const sp = new URLSearchParams(window.location.search);
+      const u = (sp.get("eflUrl") ?? "").trim();
+      if (!u) return;
+      const oid = (sp.get("offerId") ?? "").trim();
+      loadIntoManual({ eflUrl: u, offerId: oid || null });
+    } catch {
+      // ignore
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
+  }, []);
 
   // ---------------- Provider batch runner (WattBuy today; future sources later) ----------------
   const [source, setSource] = useState<ProviderSource>("wattbuy");
