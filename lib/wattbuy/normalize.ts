@@ -90,6 +90,80 @@ export function sanitizeDocURL(url: string | null): string | null {
   }
 }
 
+function looksLikeEflDocUrlLoose(u: string): boolean {
+  const s = (u || '').toLowerCase();
+  return (
+    s.includes('electricity') && s.includes('facts') ||
+    s.includes('facts') && s.includes('label') ||
+    s.includes('efl') ||
+    // SmartGridCIS/OhmConnect doc host uses a non-.pdf download endpoint.
+    (s.includes('/documents/download.aspx') && s.includes('productdocumentid=')) ||
+    s.endsWith('.pdf') ||
+    s.includes('.pdf?')
+  );
+}
+
+function deepFindBestDocUrl(
+  root: unknown,
+  opts: { kind: 'efl' | 'tos' | 'yrac' },
+): string | null {
+  const seen = new Set<unknown>();
+  const candidates: Array<{ url: string; score: number }> = [];
+
+  const scorePath = (path: string, url: string): number => {
+    const p = path.toLowerCase();
+    const u = url.toLowerCase();
+    let score = 0;
+    if (opts.kind === 'efl') {
+      if (p.includes('efl')) score += 200;
+      if (p.includes('electricity') && p.includes('facts')) score += 150;
+      if (p.includes('facts') && p.includes('label')) score += 150;
+      if (u.includes('/documents/download.aspx') && u.includes('productdocumentid=')) score += 120;
+      if (u.includes('smartgridcis')) score += 40;
+      if (u.includes('ohm')) score += 20;
+    } else if (opts.kind === 'tos') {
+      if (p.includes('tos') || p.includes('terms')) score += 200;
+      if (u.includes('terms')) score += 80;
+    } else if (opts.kind === 'yrac') {
+      if (p.includes('yrac') || p.includes('rights')) score += 200;
+      if (u.includes('rights')) score += 80;
+    }
+    if (u.endsWith('.pdf') || u.includes('.pdf?')) score += 50;
+    return score;
+  };
+
+  const walk = (node: unknown, path: string, depth: number) => {
+    if (depth > 10) return;
+    if (node == null) return;
+    if (typeof node === 'string') {
+      const sanitized = sanitizeDocURL(node);
+      if (sanitized && looksLikeEflDocUrlLoose(sanitized)) {
+        candidates.push({ url: sanitized, score: scorePath(path, sanitized) });
+      }
+      return;
+    }
+    if (typeof node !== 'object') return;
+    if (seen.has(node)) return;
+    seen.add(node);
+
+    if (Array.isArray(node)) {
+      for (let i = 0; i < node.length; i++) {
+        walk(node[i], `${path}[${i}]`, depth + 1);
+      }
+      return;
+    }
+
+    for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+      walk(v, path ? `${path}.${k}` : k, depth + 1);
+    }
+  };
+
+  walk(root, '', 0);
+  if (candidates.length === 0) return null;
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates[0].url;
+}
+
 function toNum(n: any): number | null {
   const v = Number(n);
   return Number.isFinite(v) ? v : null;
@@ -165,6 +239,23 @@ export function normalizeOffer(o: any): OfferNormalized {
         null,
     ),
   };
+
+  // Fallback: some suppliers embed doc links in unexpected nested shapes (or in `links.*`),
+  // and those links are not present in offer_data.docs. When the allowlist permits it,
+  // do a deep scan for likely doc URLs so EFL parsing doesn't have to scrape WAF-protected
+  // enrollment pages.
+  if (!docs.efl) {
+    const deepEfl = deepFindBestDocUrl(o, { kind: 'efl' });
+    if (deepEfl) docs.efl = deepEfl;
+  }
+  if (!docs.tos) {
+    const deepTos = deepFindBestDocUrl(o, { kind: 'tos' });
+    if (deepTos) docs.tos = deepTos;
+  }
+  if (!docs.yrac) {
+    const deepYrac = deepFindBestDocUrl(o, { kind: 'yrac' });
+    if (deepYrac) docs.yrac = deepYrac;
+  }
 
   return {
     offer_id: String(o?.offer_id ?? ''),
