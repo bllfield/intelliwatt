@@ -102,6 +102,7 @@ export async function POST(req: NextRequest) {
     // Best-effort persistence: if the EFL PASSes after solver (or already PASSed) and PlanRules are
     // structurally valid, upsert a RatePlan template so it appears in Templates.
     let templatePersisted: boolean = false;
+    let persistedRatePlanId: string | null = null;
     try {
       const validationAfter =
         (derivedForValidation as any)?.validationAfter ??
@@ -123,7 +124,7 @@ export async function POST(req: NextRequest) {
             return Number.isFinite(v) ? v : null;
           };
 
-          await upsertRatePlanFromEfl({
+          const saved = await upsertRatePlanFromEfl({
             mode: "live",
             eflUrl,
             eflSourceUrl: eflUrl,
@@ -144,10 +145,12 @@ export async function POST(req: NextRequest) {
           });
 
           templatePersisted = true;
+          persistedRatePlanId = (saved as any)?.id ? String((saved as any).id) : null;
         }
       }
     } catch {
       templatePersisted = false;
+      persistedRatePlanId = null;
     }
 
     return NextResponse.json({
@@ -168,6 +171,7 @@ export async function POST(req: NextRequest) {
       validation: template.validation ?? null,
       derivedForValidation,
       templatePersisted,
+      persistedRatePlanId,
       extractorMethod: template.extractorMethod ?? "pdftotext",
       ai,
     });

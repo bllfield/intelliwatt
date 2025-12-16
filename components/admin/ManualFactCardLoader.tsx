@@ -27,6 +27,8 @@ type UploadResponse = {
   parseWarnings?: string[];
   validation?: any | null;
   derivedForValidation?: any | null;
+  templatePersisted?: boolean;
+  persistedRatePlanId?: string | null;
   ai?: { enabled: boolean; hasKey: boolean; used: boolean; reason?: string };
 };
 
@@ -397,6 +399,17 @@ export function ManualFactCardLoader(props: {
                 {typeof result.parseConfidence === "number" ? `${Math.round(result.parseConfidence * 100)}%` : "—"}
               </div>
             </div>
+            <div>
+              <div className="font-semibold text-brand-navy mb-1">Template persisted</div>
+              <div className="font-mono">
+                {typeof result.templatePersisted === "boolean"
+                  ? result.templatePersisted
+                    ? "YES"
+                    : "NO"
+                  : "—"}
+                {result.persistedRatePlanId ? ` (RatePlan.id=${result.persistedRatePlanId})` : ""}
+              </div>
+            </div>
           </div>
 
           <div className="space-y-2">
@@ -438,6 +451,8 @@ export function ManualFactCardLoader(props: {
                 parseWarnings: result.parseWarnings ?? null,
                 validation: result.validation ?? null,
                 ai: result.ai ?? null,
+                templatePersisted: (result as any).templatePersisted ?? null,
+                persistedRatePlanId: (result as any).persistedRatePlanId ?? null,
               })}
             </pre>
           </details>
