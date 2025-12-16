@@ -144,12 +144,22 @@ export async function upsertRatePlanFromEfl(
   const isLikelyRealEflVersionCode = (v: string | null | undefined): boolean => {
     const s = String(v ?? "").trim();
     if (!s) return false;
-    // Most real EFL version codes contain digits and/or separators.
-    const hasDigit = /\d/.test(s);
+    const upper = s.toUpperCase();
+
+    // Reject obvious non-version placeholders.
+    if (upper === "ENGLISH" || upper === "NGLISH" || upper === "ISH") return false;
+
+    // Most real EFL version codes include a date-like token (e.g. 20251215 / 20230918)
+    // or a substantial digit payload. Generic strings like "5_ENGLISH" are *not* unique.
+    const digits = (s.match(/\d/g) ?? []).length;
+    if (digits < 6) return false;
+
+    // Prefer codes that explicitly look like EFL version IDs.
+    if (upper.includes("EFL")) return true;
+
+    // Otherwise allow long, structured, digit-heavy codes.
     const hasSeparators = /[-_]/.test(s);
-    // Avoid short generic tokens like "ENGLISH", "ISH", "NGLISH", or plan-family labels.
-    if (s.length < 8) return false;
-    return hasDigit && (hasSeparators || s.length >= 10);
+    return s.length >= 12 && hasSeparators;
   };
 
   // 1) Prefer an existing RatePlan with the same REP PUCT Certificate + EFL
