@@ -18,6 +18,10 @@ type Row = {
   rate2000: number | null;
   cancelFee: string | null;
   eflUrl: string | null;
+  eflPdfSha256: string | null;
+  repPuctCertificate: string | null;
+  eflVersionCode: string | null;
+  eflRequiresManualReview: boolean;
   updatedAt: string;
   lastSeenAt: string;
   rateStructure: unknown;
@@ -55,11 +59,16 @@ export async function GET(req: NextRequest) {
     const where: any = {
       // “Templated” means we already have a usable engine structure persisted.
       rateStructure: { not: null },
+      eflRequiresManualReview: false,
+      isUtilityTariff: false,
       ...(q
         ? {
             OR: [
               { supplier: { contains: q, mode: "insensitive" } },
               { planName: { contains: q, mode: "insensitive" } },
+              { eflVersionCode: { contains: q, mode: "insensitive" } },
+              { repPuctCertificate: { contains: q, mode: "insensitive" } },
+              { eflPdfSha256: { contains: q, mode: "insensitive" } },
             ],
           }
         : {}),
@@ -67,10 +76,6 @@ export async function GET(req: NextRequest) {
 
     const plans = await (prisma as any).ratePlan.findMany({
       where,
-      // IMPORTANT:
-      // Some deployments may not yet have newer columns migrated (e.g. repPuctCertificate).
-      // Prisma's default "select all columns" will then throw at runtime. Always use an
-      // explicit select with known-stable columns for admin listing endpoints.
       select: {
         id: true,
         utilityId: true,
@@ -83,6 +88,11 @@ export async function GET(req: NextRequest) {
         rate2000: true,
         cancelFee: true,
         eflUrl: true,
+        eflPdfSha256: true,
+        repPuctCertificate: true,
+        eflVersionCode: true,
+        eflRequiresManualReview: true,
+        isUtilityTariff: true,
         updatedAt: true,
         lastSeenAt: true,
         rateStructure: true,
@@ -103,6 +113,10 @@ export async function GET(req: NextRequest) {
       rate2000: typeof p.rate2000 === "number" ? p.rate2000 : null,
       cancelFee: p.cancelFee ?? null,
       eflUrl: p.eflUrl ?? null,
+      eflPdfSha256: p.eflPdfSha256 ?? null,
+      repPuctCertificate: p.repPuctCertificate ?? null,
+      eflVersionCode: p.eflVersionCode ?? null,
+      eflRequiresManualReview: Boolean(p.eflRequiresManualReview),
       updatedAt: new Date(p.updatedAt).toISOString(),
       lastSeenAt: new Date(p.lastSeenAt).toISOString(),
       rateStructure: p.rateStructure ?? null,

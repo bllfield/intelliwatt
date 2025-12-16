@@ -16,6 +16,9 @@ type Row = {
   rate2000: number | null;
   cancelFee: string | null;
   eflUrl: string | null;
+  eflPdfSha256: string | null;
+  repPuctCertificate: string | null;
+  eflVersionCode: string | null;
   updatedAt: string;
   lastSeenAt: string;
 };
@@ -153,7 +156,7 @@ export default function WattbuyTemplatedPlansPage() {
               className="w-full rounded-lg border px-3 py-2"
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="supplier, plan…"
+              placeholder="supplier, plan, cert, version, sha…"
             />
           </div>
           <div>
@@ -220,6 +223,8 @@ export default function WattbuyTemplatedPlansPage() {
               <th className="px-2 py-2 text-right cursor-pointer" onClick={() => toggleSort("rate2000")}>
                 2000
               </th>
+              <th className="px-2 py-2 text-left">PUCT</th>
+              <th className="px-2 py-2 text-left">Ver</th>
               <th className="px-2 py-2 text-left cursor-pointer" onClick={() => toggleSort("updatedAt")}>
                 Updated
               </th>
@@ -255,6 +260,12 @@ export default function WattbuyTemplatedPlansPage() {
                   <td className="px-2 py-1 align-top text-right font-mono">
                     {typeof r.rate2000 === "number" ? r.rate2000.toFixed(3) : "—"}
                   </td>
+                  <td className="px-2 py-1 align-top font-mono">{r.repPuctCertificate ?? "—"}</td>
+                  <td className="px-2 py-1 align-top">
+                    <div className="max-w-[160px] truncate font-mono" title={r.eflVersionCode ?? undefined}>
+                      {r.eflVersionCode ?? "—"}
+                    </div>
+                  </td>
                   <td className="px-2 py-1 align-top font-mono">
                     {r.updatedAt ? r.updatedAt.slice(0, 10) : "—"}
                   </td>
@@ -272,7 +283,7 @@ export default function WattbuyTemplatedPlansPage() {
             })}
             {sorted.length === 0 ? (
               <tr>
-                <td className="px-2 py-6 text-center text-sm text-gray-500" colSpan={9}>
+                <td className="px-2 py-6 text-center text-sm text-gray-500" colSpan={11}>
                   No templated plans found.
                 </td>
               </tr>
