@@ -29,6 +29,9 @@ type ApiResponse = {
   bestOffers?: OfferRow[];
   bestOffersBasis?: string | null;
   bestOffersDisclaimer?: string | null;
+  bestOffersAllIn?: OfferRow[];
+  bestOffersAllInBasis?: string | null;
+  bestOffersAllInDisclaimer?: string | null;
   page?: number;
   pageSize?: number;
   total?: number;
@@ -270,20 +273,26 @@ export default function PlansClient() {
       return;
     }
     if (bestRankAllIn !== null) return;
-    const apiBest = Array.isArray(resp?.bestOffers) ? (resp!.bestOffers as OfferRow[]) : [];
-    const pool = apiBest.length ? apiBest : offers;
+    const serverAllIn = Array.isArray((resp as any)?.bestOffersAllIn) ? ((resp as any).bestOffersAllIn as OfferRow[]) : [];
+    const serverEfl = Array.isArray(resp?.bestOffers) ? (resp!.bestOffers as OfferRow[]) : [];
+    const pool = serverAllIn.length ? serverAllIn : serverEfl.length ? serverEfl : offers;
     const anyOk = pool.some((o: any) => o?.intelliwatt?.trueCostEstimate?.status === "OK");
     setBestRankAllIn(anyOk);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasUsage, bestRankAllIn, resp?.bestOffers, offers]);
+  }, [hasUsage, bestRankAllIn, (resp as any)?.bestOffersAllIn, resp?.bestOffers, offers]);
 
   const bestStripOffers = useMemo(() => {
     if (!hasUsage) return [];
-    const apiBest = Array.isArray(resp?.bestOffers) ? (resp!.bestOffers as OfferRow[]) : [];
     const rankAllIn = bestRankAllIn === true;
+    const serverAllIn =
+      Array.isArray((resp as any)?.bestOffersAllIn) && ((resp as any).bestOffersAllIn as any[]).length > 0
+        ? ((resp as any).bestOffersAllIn as OfferRow[])
+        : null;
+    const serverEfl =
+      Array.isArray(resp?.bestOffers) && (resp!.bestOffers as any[]).length > 0 ? (resp!.bestOffers as OfferRow[]) : null;
 
     if (rankAllIn) {
-      const pool = apiBest.length ? apiBest : offers;
+      const pool = serverAllIn ?? offers;
       const scored = pool.map((o: any) => {
         const tce = o?.intelliwatt?.trueCostEstimate;
         const ok = tce?.status === "OK";
@@ -295,7 +304,7 @@ export default function PlansClient() {
     }
 
     // Default proxy basis: use API bestOffers when available.
-    if (apiBest.length > 0) return apiBest.slice(0, 5);
+    if (serverEfl) return serverEfl.slice(0, 5);
 
     // Fallback: compute client-side ranking from currently loaded offers (safe deploy).
     const scored = offers
@@ -303,7 +312,21 @@ export default function PlansClient() {
       .filter((x) => typeof x.metric === "number" && Number.isFinite(x.metric as number));
     scored.sort((a, b) => (a.metric as number) - (b.metric as number));
     return scored.slice(0, 5).map((x) => x.o);
-  }, [hasUsage, resp?.bestOffers, offers, bestRankAllIn]);
+  }, [hasUsage, (resp as any)?.bestOffersAllIn, resp?.bestOffers, offers, bestRankAllIn]);
+
+  const bestStripBasis = useMemo(() => {
+    if (!resp?.ok) return null;
+    const rankAllIn = bestRankAllIn === true;
+    const basis = rankAllIn ? (resp as any)?.bestOffersAllInBasis : resp?.bestOffersBasis;
+    return typeof basis === "string" && basis.trim() ? basis.trim() : null;
+  }, [resp?.ok, (resp as any)?.bestOffersAllInBasis, resp?.bestOffersBasis, bestRankAllIn]);
+
+  const bestStripDisclaimer = useMemo(() => {
+    if (!resp?.ok) return null;
+    const rankAllIn = bestRankAllIn === true;
+    const d = rankAllIn ? (resp as any)?.bestOffersAllInDisclaimer : resp?.bestOffersDisclaimer;
+    return typeof d === "string" && d.trim() ? d.trim() : null;
+  }, [resp?.ok, (resp as any)?.bestOffersAllInDisclaimer, resp?.bestOffersDisclaimer, bestRankAllIn]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -694,13 +717,12 @@ export default function PlansClient() {
                   Rank by all-in estimate (incl. TDSP)
                 </label>
                 <div className="mt-1 text-xs text-brand-cyan/70">
-                  {typeof resp?.bestOffersDisclaimer === "string" && resp.bestOffersDisclaimer.trim()
-                    ? resp.bestOffersDisclaimer.trim()
-                    : "Based on your last 12 months usage. Ranking uses provider estimates until IntelliWatt true-cost is enabled."}
+                  {bestStripDisclaimer ??
+                    "Based on your last 12 months usage. Ranking uses provider estimates until IntelliWatt true-cost is enabled."}
                 </div>
-                {typeof resp?.bestOffersBasis === "string" && resp.bestOffersBasis.trim() ? (
+                {bestStripBasis ? (
                   <div className="mt-1 text-[0.7rem] text-brand-cyan/55 font-mono">
-                    {resp.bestOffersBasis.trim()}
+                    {bestStripBasis}
                   </div>
                 ) : null}
               </div>
