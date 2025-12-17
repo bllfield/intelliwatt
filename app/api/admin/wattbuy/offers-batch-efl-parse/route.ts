@@ -647,6 +647,43 @@ export async function POST(req: NextRequest) {
                   ? "Template hit: RatePlan already has rateStructure for this EFL fingerprint."
                   : "Template hit: resolved EFL via enroll_link and found existing RatePlan.rateStructure.",
             });
+
+            // REAL FIX: Even when we "hit" an existing template (no new persistence),
+            // we must still link the WattBuy offer_id -> RatePlan.id so consumer UIs
+            // show "IntelliWatt calculation available" rather than "Queued".
+            //
+            // Safety: this mapping is keyed by the exact offerId.
+            if (mode === "STORE_TEMPLATES_ON_PASS" && offerId && (existing as any)?.id) {
+              const ratePlanId = String((existing as any).id);
+              try {
+                await (prisma as any).offerIdRatePlanMap.upsert({
+                  where: { offerId: String(offerId) },
+                  create: {
+                    offerId: String(offerId),
+                    ratePlanId,
+                    lastLinkedAt: new Date(),
+                    linkedBy: "wattbuy-batch-template-hit",
+                  },
+                  update: {
+                    ratePlanId,
+                    lastLinkedAt: new Date(),
+                    linkedBy: "wattbuy-batch-template-hit",
+                  },
+                });
+              } catch {
+                // Best-effort; do not fail the batch run due to mapping bookkeeping.
+              }
+
+              // Secondary enrichment: update OfferRateMap if it exists (never create).
+              try {
+                await (prisma as any).offerRateMap.updateMany({
+                  where: { offerId: String(offerId) },
+                  data: { ratePlanId, lastSeenAt: new Date() },
+                });
+              } catch {
+                // Best-effort only.
+              }
+            }
             continue;
           }
         }
@@ -806,11 +843,47 @@ export async function POST(req: NextRequest) {
                 });
                 const templatePersisted = Boolean((saved as any)?.templatePersisted);
                 templateAction = templatePersisted ? "CREATED" : "SKIPPED";
+                const persistedRatePlanId = (saved as any)?.ratePlan?.id
+                  ? String((saved as any).ratePlan.id)
+                  : null;
                 const missing = Array.isArray((saved as any)?.missingTemplateFields)
                   ? ((saved as any).missingTemplateFields as string[])
                   : [];
                 if (missing.length) {
                   templatePersistNotes = `Template not persisted (missing fields): ${missing.join(", ")}`;
+                }
+
+                // REAL FIX: Always create/refresh offerId -> RatePlan.id mapping when we have a usable template.
+                // This ensures consumer UIs don't show offers as QUEUED simply because the template already existed.
+                if (templatePersisted && offerId && persistedRatePlanId) {
+                  try {
+                    await (prisma as any).offerIdRatePlanMap.upsert({
+                      where: { offerId: String(offerId) },
+                      create: {
+                        offerId: String(offerId),
+                        ratePlanId: persistedRatePlanId,
+                        lastLinkedAt: new Date(),
+                        linkedBy: "wattbuy-batch",
+                      },
+                      update: {
+                        ratePlanId: persistedRatePlanId,
+                        lastLinkedAt: new Date(),
+                        linkedBy: "wattbuy-batch",
+                      },
+                    });
+                  } catch {
+                    // Best-effort only.
+                  }
+
+                  // Secondary enrichment: update OfferRateMap if it exists (never create).
+                  try {
+                    await (prisma as any).offerRateMap.updateMany({
+                      where: { offerId: String(offerId) },
+                      data: { ratePlanId: persistedRatePlanId, lastSeenAt: new Date() },
+                    });
+                  } catch {
+                    // Best-effort only.
+                  }
                 }
 
                 // Force-reparse hygiene: if we successfully persisted a new template, invalidate any
