@@ -2044,6 +2044,29 @@ export async function scoreEflPassStrength(args: {
     };
   }
 
+  // Plans with threshold-based bill credits (e.g., "credit applies <= 500 kWh")
+  // introduce a real discontinuity in the average-price curve at the threshold.
+  // A linear interpolation between the 500/1000/2000 anchor points is not a
+  // valid expectation model for off-point checks and will create false WEAKs.
+  const hasThresholdBillCredits = credits.some((c: any) => {
+    const t = String(c?.type ?? "").toUpperCase();
+    const thr = Number(c?.thresholdKwh);
+    return (
+      Number.isFinite(thr) &&
+      (t === "THRESHOLD_MAX" ||
+        t === "THRESHOLD_MIN" ||
+        t.includes("THRESHOLD"))
+    );
+  });
+
+  if (hasThresholdBillCredits) {
+    return {
+      strength: "STRONG",
+      reasons: Array.from(new Set(reasons)),
+      offPointDiffs: [],
+    };
+  }
+
   const interp = (
     x: number,
     x1: number,
