@@ -49,7 +49,6 @@ async function main() {
       { modeledRate500: null },
       { modeledRate1000: null },
       { modeledRate2000: null },
-      { modeledEflAvgPriceValidation: null },
     ];
   }
 
