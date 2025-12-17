@@ -1,5 +1,5 @@
 export type TrueCostEstimate =
-  | { status: "OK"; annualCostDollars: number; notes?: string[] }
+  | { status: "OK"; annualCostDollars: number; monthlyCostDollars: number; notes?: string[] }
   | { status: "MISSING_USAGE"; notes?: string[] }
   | { status: "MISSING_TEMPLATE"; notes?: string[] }
   | { status: "NOT_IMPLEMENTED"; notes?: string[] };
@@ -27,9 +27,11 @@ export function calculatePlanCostForUsage(args: {
 
   const annualEnergyCostEstimateDollars = (totalKwh * avg) / 100;
   const annualCostDollars = Number(annualEnergyCostEstimateDollars.toFixed(2));
+  const monthlyCostDollars = Number((annualCostDollars / 12).toFixed(2));
   return {
     status: "OK",
     annualCostDollars,
+    monthlyCostDollars,
     notes: ["Proxy: avgPriceCentsPerKwh1000 * annual kWh"],
   };
 }
