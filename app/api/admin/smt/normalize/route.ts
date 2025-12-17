@@ -237,53 +237,108 @@ export async function POST(req: NextRequest) {
     });
     const distinctEsiids = Array.from(new Set(boundedIntervals.map((i) => i.esiid))).filter(Boolean);
 
+    // Pre-group intervals by (esiid, meter) outside any DB transaction.
+    // This avoids spending transaction time on CPU-heavy filtering/mapping for large files.
+    const byPair = new Map<
+      string,
+      {
+        esiid: string;
+        meter: string;
+        minTsMs: number;
+        maxTsMs: number;
+        rows: Array<{
+          esiid: string;
+          meter: string;
+          ts: Date;
+          kwh: Prisma.Decimal;
+          source: string;
+        }>;
+      }
+    >();
+
+    for (const interval of boundedIntervals) {
+      const key = `${interval.esiid}|${interval.meter}`;
+      const tsMs = interval.ts.getTime();
+      const existing = byPair.get(key);
+      const row = {
+        esiid: interval.esiid,
+        meter: interval.meter,
+        ts: interval.ts,
+        kwh: new Prisma.Decimal(interval.kwh),
+        source: interval.source ?? file.source ?? 'smt',
+      };
+      if (!existing) {
+        byPair.set(key, {
+          esiid: interval.esiid,
+          meter: interval.meter,
+          minTsMs: tsMs,
+          maxTsMs: tsMs,
+          rows: [row],
+        });
+      } else {
+        existing.rows.push(row);
+        if (Number.isFinite(tsMs)) {
+          if (!Number.isFinite(existing.minTsMs) || tsMs < existing.minTsMs) existing.minTsMs = tsMs;
+          if (!Number.isFinite(existing.maxTsMs) || tsMs > existing.maxTsMs) existing.maxTsMs = tsMs;
+        }
+      }
+    }
+
     // Recompute bounds for the bounded set to drive delete + summary
     const boundedTimestamps = boundedIntervals.map((i) => i.ts.getTime()).filter((ms) => Number.isFinite(ms));
     const tsMinDate = boundedTimestamps.length ? new Date(Math.min(...boundedTimestamps)) : tsMinDateAll;
 
     if (!dryRun && tsMinDate && tsMaxDate) {
       try {
-        await prisma.$transaction(async (tx) => {
-          // For each (esiid, meter), delete the exact range then bulk insert all rows
-          for (const pair of distinctPairs) {
-            const pairIntervals = boundedIntervals.filter(
-              (i) => i.esiid === pair.esiid && i.meter === pair.meter,
-            );
-            if (pairIntervals.length === 0) continue;
+        await prisma.$transaction(
+          async (tx) => {
+            // For each (esiid, meter), delete the exact range then bulk insert rows.
+            // Keep the transaction focused on DB work only (all grouping/mapping done above).
+            for (const pair of distinctPairs) {
+              const key = `${pair.esiid}|${pair.meter}`;
+              const bucket = byPair.get(key);
+              if (!bucket || bucket.rows.length === 0) continue;
 
-            const pairTimestamps = pairIntervals
-              .map((i) => i.ts.getTime())
-              .filter((ms) => Number.isFinite(ms));
-            const pairMin = pairTimestamps.length ? new Date(Math.min(...pairTimestamps)) : tsMinDate;
-            const pairMax = pairTimestamps.length ? new Date(Math.max(...pairTimestamps)) : tsMaxDate;
+              const pairMin = Number.isFinite(bucket.minTsMs) ? new Date(bucket.minTsMs) : tsMinDate;
+              const pairMax = Number.isFinite(bucket.maxTsMs) ? new Date(bucket.maxTsMs) : tsMaxDate;
 
-            await tx.smtInterval.deleteMany({
-              where: {
-                esiid: pair.esiid,
-                meter: pair.meter,
-                ts: { gte: pairMin ?? tsMinDate, lte: pairMax ?? tsMaxDate },
-              },
-            });
-          }
+              await tx.smtInterval.deleteMany({
+                where: {
+                  esiid: pair.esiid,
+                  meter: pair.meter,
+                  ts: { gte: pairMin ?? tsMinDate, lte: pairMax ?? tsMaxDate },
+                },
+              });
+            }
 
-          const result = await tx.smtInterval.createMany({
-            data: boundedIntervals.map((interval) => ({
-              esiid: interval.esiid,
-              meter: interval.meter,
-              ts: interval.ts,
-              kwh: new Prisma.Decimal(interval.kwh),
-              source: interval.source ?? file.source ?? 'smt',
-            })),
-            skipDuplicates: false,
-          });
+            let insertedTotal = 0;
+            for (const pair of distinctPairs) {
+              const key = `${pair.esiid}|${pair.meter}`;
+              const bucket = byPair.get(key);
+              if (!bucket || bucket.rows.length === 0) continue;
 
-          inserted = result.count;
-          skipped = boundedIntervals.length - result.count;
+              // Chunk inserts to keep queries predictable for large SMT files.
+              for (let i = 0; i < bucket.rows.length; i += INSERT_BATCH_SIZE) {
+                const chunk = bucket.rows.slice(i, i + INSERT_BATCH_SIZE);
+                const result = await tx.smtInterval.createMany({
+                  data: chunk,
+                  skipDuplicates: false,
+                });
+                insertedTotal += result.count;
+              }
+            }
 
-          if (distinctEsiids.length > 0) {
-            await tx.smtBillingRead.deleteMany({ where: { esiid: { in: distinctEsiids } } });
-          }
-        });
+            inserted = insertedTotal;
+            skipped = boundedIntervals.length - insertedTotal;
+
+            if (distinctEsiids.length > 0) {
+              await tx.smtBillingRead.deleteMany({ where: { esiid: { in: distinctEsiids } } });
+            }
+          },
+          // Prisma interactive transaction default timeout is ~5s; large SMT files can exceed this.
+          // We keep the transaction narrow + chunked, but still bump timeout for safety.
+          { timeout: 60_000 },
+        );
 
         // Dual-write to usage DB so dashboards see SMT data
         try {
