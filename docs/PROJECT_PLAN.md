@@ -2312,6 +2312,7 @@ Guardrails
 - `intelliwatt.trueCostEstimate.OK` now includes `monthlyCostDollars` (proxy: `annualCostDollars / 12`).
 - `intelliwatt.trueCostEstimate.OK` now includes `confidence` (currently `"MEDIUM"` for the proxy path).
 - `intelliwatt.trueCostEstimate.OK` now includes a stable `components` breakdown contract (`energyOnlyDollars` and `totalDollars` now; delivery/base fees later).
+- `intelliwatt.trueCostEstimate.OK` now includes `componentsV2` (REP vs TDSP breakdown; proxy-filled initially). Next: implement TDSP lookup to populate `componentsV2.tdsp`.
 - Proxy basis standardized: `offer.efl.avgPriceCentsPerKwh1000` is the single source for proxy ranking + proxy cost estimate.
 - Shows **Queued / calculations not available** messaging when an EFL exists but no template mapping exists yet.
 - Uses a sticky filter/sort bar + pagination to avoid an infinite scroll plan list.

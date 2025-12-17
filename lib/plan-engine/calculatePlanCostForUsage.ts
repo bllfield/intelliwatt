@@ -10,6 +10,20 @@ export type TrueCostEstimate =
         baseFeesDollars?: number;
         totalDollars: number;
       };
+      componentsV2: {
+        rep: {
+          energyDollars: number;
+          fixedDollars?: number;
+          creditsDollars?: number;
+          totalDollars: number;
+        };
+        tdsp?: {
+          deliveryDollars: number;
+          fixedDollars: number;
+          totalDollars: number;
+        };
+        totalDollars: number;
+      };
       notes?: string[];
     }
   | { status: "MISSING_USAGE"; notes?: string[] }
@@ -40,6 +54,7 @@ export function calculatePlanCostForUsage(args: {
   const annualEnergyCostEstimateDollars = (totalKwh * avg) / 100;
   const annualCostDollars = Number(annualEnergyCostEstimateDollars.toFixed(2));
   const monthlyCostDollars = Number((annualCostDollars / 12).toFixed(2));
+  const repEnergy = annualCostDollars;
   return {
     status: "OK",
     annualCostDollars,
@@ -48,6 +63,13 @@ export function calculatePlanCostForUsage(args: {
     components: {
       energyOnlyDollars: annualCostDollars,
       totalDollars: annualCostDollars,
+    },
+    componentsV2: {
+      rep: {
+        energyDollars: repEnergy,
+        totalDollars: repEnergy,
+      },
+      totalDollars: repEnergy,
     },
     notes: ["Proxy: avgPriceCentsPerKwh1000 * annual kWh"],
   };
