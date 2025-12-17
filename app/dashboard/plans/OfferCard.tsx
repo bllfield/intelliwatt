@@ -67,6 +67,18 @@ function fmtDollars2(v: number | undefined): string | null {
   return v.toFixed(2);
 }
 
+function round2(v: number): number {
+  // Match our “2 decimals” behavior used across the UI/engine scaffolding.
+  return Math.round((v + Number.EPSILON) * 100) / 100;
+}
+
+function fmtPerMoPerYr(annualDollars: number | undefined): string | null {
+  if (typeof annualDollars !== "number" || !Number.isFinite(annualDollars)) return null;
+  const mo = round2(annualDollars / 12);
+  const yr = round2(annualDollars);
+  return `$${mo.toFixed(2)}/mo ($${yr.toFixed(2)}/yr)`;
+}
+
 function badgeClasses(status: OfferRow["intelliwatt"]["statusLabel"]): string {
   if (status === "AVAILABLE") return "border-emerald-400/40 bg-emerald-500/10 text-emerald-200";
   if (status === "QUEUED") return "border-amber-400/40 bg-amber-500/10 text-amber-200";
@@ -94,10 +106,10 @@ export default function OfferCard({ offer }: { offer: OfferRow }) {
   const estimateMonthly = showEstimateLine ? fmtDollars2((tce as any)?.monthlyCostDollars) : null;
   const tdspTag = offer.intelliwatt?.tdspRatesApplied ? "incl. TDSP" : null;
   const c2 = showEstimateLine ? (tce as any)?.componentsV2 : null;
-  const repEnergy = fmtDollars2(c2?.rep?.energyDollars);
-  const tdspDelivery = fmtDollars2(c2?.tdsp?.deliveryDollars);
-  const tdspFixed = fmtDollars2(c2?.tdsp?.fixedDollars);
-  const totalAnnual = fmtDollars2(c2?.totalDollars ?? (tce as any)?.annualCostDollars);
+  const repEnergy = fmtPerMoPerYr(c2?.rep?.energyDollars);
+  const tdspDelivery = fmtPerMoPerYr(c2?.tdsp?.deliveryDollars);
+  const tdspFixed = fmtPerMoPerYr(c2?.tdsp?.fixedDollars);
+  const totalAnnual = fmtPerMoPerYr(c2?.totalDollars ?? (tce as any)?.annualCostDollars);
   const tdspEffective = offer.intelliwatt?.tdspRatesApplied?.effectiveDate ?? null;
 
   return (
@@ -191,32 +203,30 @@ export default function OfferCard({ offer }: { offer: OfferRow }) {
 
             {estOpen ? (
               <div className="absolute left-0 top-full mt-2 w-[260px] rounded-2xl border border-brand-cyan/25 bg-brand-navy/95 p-3 shadow-[0_18px_40px_rgba(0,0,0,0.35)] backdrop-blur">
-                <div className="text-[0.65rem] uppercase tracking-[0.22em] text-brand-cyan/60">
-                  Estimate breakdown (annual)
-                </div>
+                <div className="text-[0.65rem] uppercase tracking-[0.22em] text-brand-cyan/60">Estimate breakdown</div>
                 <div className="mt-2 space-y-1 text-xs text-brand-cyan/75">
                   {repEnergy ? (
                     <div className="flex items-center justify-between gap-3">
-                      <span>REP energy</span>
-                      <span className="font-mono text-brand-white/90">${repEnergy}</span>
+                      <span>Plan (REP)</span>
+                      <span className="font-mono text-brand-white/90">{repEnergy}</span>
                     </div>
                   ) : null}
                   {tdspDelivery ? (
                     <div className="flex items-center justify-between gap-3">
                       <span>TDSP delivery</span>
-                      <span className="font-mono text-brand-white/90">${tdspDelivery}</span>
+                      <span className="font-mono text-brand-white/90">{tdspDelivery}</span>
                     </div>
                   ) : null}
                   {tdspFixed ? (
                     <div className="flex items-center justify-between gap-3">
                       <span>TDSP fixed</span>
-                      <span className="font-mono text-brand-white/90">${tdspFixed}</span>
+                      <span className="font-mono text-brand-white/90">{tdspFixed}</span>
                     </div>
                   ) : null}
                   {totalAnnual ? (
                     <div className="mt-1 flex items-center justify-between gap-3 border-t border-brand-cyan/15 pt-2">
                       <span className="text-brand-cyan/80">Total</span>
-                      <span className="font-mono font-semibold text-brand-white">${totalAnnual}</span>
+                      <span className="font-mono font-semibold text-brand-white">{totalAnnual}</span>
                     </div>
                   ) : null}
                   {tdspEffective ? (
