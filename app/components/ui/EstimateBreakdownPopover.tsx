@@ -54,7 +54,7 @@ export function EstimateBreakdownPopover(props: Props) {
       </button>
 
       {open ? (
-        <div className="absolute left-0 top-full mt-2 w-[260px] rounded-2xl border border-brand-cyan/25 bg-brand-navy/95 p-3 shadow-[0_18px_40px_rgba(0,0,0,0.35)] backdrop-blur">
+        <div className="absolute left-0 top-full z-50 mt-2 w-[260px] rounded-2xl border border-brand-cyan/25 bg-brand-navy/95 p-3 shadow-[0_18px_40px_rgba(0,0,0,0.35)] backdrop-blur">
           <div className="text-[0.65rem] uppercase tracking-[0.22em] text-brand-cyan/60">Estimate breakdown</div>
           <div className="mt-2 space-y-1 text-xs text-brand-cyan/75">
             {rep ? (
