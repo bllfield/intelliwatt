@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import type { ParsedPlace } from "@/lib/google/parsePlace";
+import AddressBar from "./AddressBar";
 
 type SortDir = "asc" | "desc";
 
@@ -28,7 +30,7 @@ type Row = {
   lastSeenAt: string;
 };
 
-type ApiOk = { ok: true; count: number; rows: Row[] };
+type ApiOk = { ok: true; count: number; rows: Row[]; offerCount?: number; mappedOfferCount?: number };
 type ApiErr = { ok: false; error: string; details?: unknown };
 
 function useLocalToken(key = "iw_admin_token") {
@@ -73,8 +75,10 @@ export default function WattbuyTemplatedPlansPage() {
   const [error, setError] = useState<string | null>(null);
   const [backfillNote, setBackfillNote] = useState<string | null>(null);
   const [tdspNote, setTdspNote] = useState<string | null>(null);
+  const [addrNote, setAddrNote] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [limit, setLimit] = useState(1000);
+  const [addr, setAddr] = useState<ParsedPlace | null>(null);
 
   const [sortKey, setSortKey] = useState<
     | "supplier"
@@ -95,10 +99,17 @@ export default function WattbuyTemplatedPlansPage() {
     }
     setLoading(true);
     setError(null);
+    setAddrNote(null);
     try {
       const params = new URLSearchParams();
       params.set("limit", String(limit));
       if (q.trim()) params.set("q", q.trim());
+      if (addr?.line1 && addr.city && addr.state && addr.zip) {
+        params.set("address", addr.line1);
+        params.set("city", addr.city);
+        params.set("state", addr.state);
+        params.set("zip", addr.zip);
+      }
 
       const res = await fetch(`/api/admin/wattbuy/templated-plans?${params}`, {
         headers: { "x-admin-token": token },
@@ -108,6 +119,14 @@ export default function WattbuyTemplatedPlansPage() {
         throw new Error((data as any)?.error || `HTTP ${res.status}`);
       }
       setRows((data as ApiOk).rows);
+      if (addr?.line1 && addr.city && addr.state && addr.zip) {
+        const ok = data as ApiOk;
+        const offerCount = typeof ok.offerCount === "number" ? ok.offerCount : null;
+        const mappedCount = typeof ok.mappedOfferCount === "number" ? ok.mappedOfferCount : null;
+        if (offerCount != null || mappedCount != null) {
+          setAddrNote(`Address filter: offers=${offerCount ?? "—"} mappedTemplates=${mappedCount ?? "—"}`);
+        }
+      }
     } catch (e: any) {
       setError(e?.message || "Failed to load templated plans.");
     } finally {
@@ -263,6 +282,17 @@ export default function WattbuyTemplatedPlansPage() {
           .
         </div>
       </div>
+
+      <AddressBar
+        value={addr}
+        onChange={(next) => {
+          setAddr(next);
+          if (token) {
+            void load();
+          }
+        }}
+      />
+      {addrNote ? <div className="rounded-lg border bg-white px-3 py-2 text-xs text-gray-700">{addrNote}</div> : null}
 
       <div className="rounded-2xl border bg-white p-4 space-y-3">
         <div className="grid gap-3 md:grid-cols-4">

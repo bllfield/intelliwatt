@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { prisma } from "@/lib/db";
+import { wattbuy } from "@/lib/wattbuy";
+import { normalizeOffers } from "@/lib/wattbuy/normalize";
 
 export const dynamic = "force-dynamic";
 
@@ -237,6 +239,8 @@ type Ok = {
   totalCount: number;
   limit: number;
   rows: Row[];
+  offerCount?: number;
+  mappedOfferCount?: number;
 };
 
 type Err = { ok: false; error: string; details?: unknown };
@@ -261,6 +265,12 @@ export async function GET(req: NextRequest) {
     const limit = Math.max(1, Math.min(1000, Number.isFinite(limitRaw) ? limitRaw : 200));
 
     const q = (req.nextUrl.searchParams.get("q") ?? "").trim();
+    const address = (req.nextUrl.searchParams.get("address") ?? "").trim();
+    const city = (req.nextUrl.searchParams.get("city") ?? "").trim();
+    const state = (req.nextUrl.searchParams.get("state") ?? "").trim();
+    const zip = (req.nextUrl.searchParams.get("zip") ?? "").trim();
+
+    const hasAddressFilter = Boolean(address && city && state && zip);
 
     const where: any = {
       // “Templated” means we already have a usable engine structure persisted.
@@ -279,6 +289,51 @@ export async function GET(req: NextRequest) {
           }
         : {}),
     };
+
+    let offerCount: number | undefined = undefined;
+    let mappedOfferCount: number | undefined = undefined;
+
+    if (hasAddressFilter) {
+      // Filter templates to only those linked to offers currently available for the requested home.
+      // This uses OfferIdRatePlanMap (canonical offer_id → RatePlan.id mapping).
+      const rawOffers = await wattbuy.offers({ address, city, state, zip });
+      const normalized = normalizeOffers(rawOffers ?? {});
+      const offerIds = normalized.offers.map((o) => o.offer_id).filter(Boolean);
+      offerCount = offerIds.length;
+
+      if (offerIds.length === 0) {
+        const body: Ok = { ok: true, count: 0, totalCount: 0, limit, rows: [], offerCount: 0, mappedOfferCount: 0 };
+        return NextResponse.json(body);
+      }
+
+      const maps = await (prisma as any).offerIdRatePlanMap.findMany({
+        where: { offerId: { in: offerIds }, ratePlanId: { not: null } },
+        select: { offerId: true, ratePlanId: true },
+      });
+
+      const ratePlanIds = Array.from(
+        new Set(
+          (maps as Array<{ ratePlanId: string | null }>).map((m) => m.ratePlanId).filter(Boolean) as string[],
+        ),
+      );
+      mappedOfferCount = ratePlanIds.length;
+
+      // If WattBuy offers exist but none are mapped to templates yet, return empty.
+      if (ratePlanIds.length === 0) {
+        const body: Ok = {
+          ok: true,
+          count: 0,
+          totalCount: 0,
+          limit,
+          rows: [],
+          offerCount,
+          mappedOfferCount: 0,
+        };
+        return NextResponse.json(body);
+      }
+
+      where.id = { in: ratePlanIds };
+    }
 
     const plans = await (prisma as any).ratePlan.findMany({
       where,
@@ -443,7 +498,7 @@ export async function GET(req: NextRequest) {
       }),
     );
 
-    const body: Ok = { ok: true, count: rows.length, totalCount, limit, rows };
+    const body: Ok = { ok: true, count: rows.length, totalCount, limit, rows, offerCount, mappedOfferCount };
     return NextResponse.json(body);
   } catch (err: any) {
     // eslint-disable-next-line no-console
