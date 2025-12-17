@@ -190,6 +190,7 @@ EFL parser model + extraction status:
 - **Admin tooling (single-pane rule):**
   - All EFL admin tools (batch parsing, review queue, templates, manual runner) live on **`/admin/efl/fact-cards`**.
   - Do **not** create additional EFL admin pages; keep tooling consolidated on the single ops page.
+  - `/admin/efl/fact-cards` includes an **Unmapped Templates** queue for `RatePlan` rows that have `rateStructure` but **no** `OfferIdRatePlanMap.ratePlanId` link (orphan templates). These won’t light up as “templateAvailable” for any WattBuy `offer_id` until the link exists.
   - Legacy `/admin/efl/manual-upload` redirects to `/admin/efl/fact-cards`.
 - ✅ OpenAI PDF file upload path removed for the EFL parser (413 capacity issues avoided); AI now runs **only** on the `pdftotext` output text.
 - ✅ REP PUCT Certificate number and EFL Ver. # are extracted deterministically from the normalized text via regex helpers in `lib/efl/eflExtractor.ts`.

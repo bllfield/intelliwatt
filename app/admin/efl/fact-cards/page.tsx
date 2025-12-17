@@ -71,6 +71,7 @@ type BatchRow = {
 
 type QueueItem = any;
 type TemplateRow = any;
+type UnmappedTemplateRow = any;
 
 function normStr(x: any): string {
   return String(x ?? "").trim();
@@ -474,6 +475,47 @@ export default function FactCardOpsPage() {
   >("supplier");
   const [tplSortDir, setTplSortDir] = useState<SortDir>("asc");
 
+  // ---------------- Unmapped Templates (orphan templates with no OfferIdRatePlanMap link) ----------------
+  const [unmappedTplQ, setUnmappedTplQ] = useState("");
+  const [unmappedTplLimit, setUnmappedTplLimit] = useState(200);
+  const [unmappedTplLoading, setUnmappedTplLoading] = useState(false);
+  const [unmappedTplErr, setUnmappedTplErr] = useState<string | null>(null);
+  const [unmappedTplRows, setUnmappedTplRows] = useState<UnmappedTemplateRow[]>([]);
+  const [unmappedTplTotalCount, setUnmappedTplTotalCount] = useState<number | null>(null);
+  const [unmappedTplSortKey, setUnmappedTplSortKey] = useState<
+    "utilityId" | "supplier" | "planName" | "termMonths" | "updatedAt" | "eflVersionCode"
+  >("updatedAt");
+  const [unmappedTplSortDir, setUnmappedTplSortDir] = useState<SortDir>("desc");
+
+  async function loadUnmappedTemplates() {
+    if (!token) {
+      setUnmappedTplErr("Admin token required.");
+      return;
+    }
+    setUnmappedTplLoading(true);
+    setUnmappedTplErr(null);
+    try {
+      const params = new URLSearchParams();
+      params.set("limit", String(unmappedTplLimit));
+      if (unmappedTplQ.trim()) params.set("q", unmappedTplQ.trim());
+      const res = await fetch(`/api/admin/efl/templates/unmapped?${params.toString()}`, {
+        headers: { "x-admin-token": token },
+      });
+      const data = await res.json();
+      if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      setUnmappedTplRows(Array.isArray(data.rows) ? data.rows : []);
+      setUnmappedTplTotalCount(
+        typeof data.totalCount === "number" && Number.isFinite(data.totalCount)
+          ? data.totalCount
+          : null,
+      );
+    } catch (e: any) {
+      setUnmappedTplErr(e?.message || "Failed to load unmapped templates.");
+    } finally {
+      setUnmappedTplLoading(false);
+    }
+  }
+
   async function loadTemplates() {
     if (!token) {
       setTplErr("Admin token required.");
@@ -664,6 +706,56 @@ export default function FactCardOpsPage() {
     if (ready) void loadTemplates();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready]);
+
+  useEffect(() => {
+    if (ready) void loadUnmappedTemplates();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready]);
+
+  const sortedUnmappedTplRows = useMemo(() => {
+    const out = [...unmappedTplRows];
+    out.sort((a: any, b: any) => {
+      const av =
+        unmappedTplSortKey === "utilityId"
+          ? a?.utilityId
+          : unmappedTplSortKey === "supplier"
+            ? a?.supplier
+            : unmappedTplSortKey === "planName"
+              ? a?.planName
+              : unmappedTplSortKey === "termMonths"
+                ? typeof a?.termMonths === "number"
+                  ? a.termMonths
+                  : null
+                : unmappedTplSortKey === "eflVersionCode"
+                  ? a?.eflVersionCode
+                  : a?.updatedAt;
+      const bv =
+        unmappedTplSortKey === "utilityId"
+          ? b?.utilityId
+          : unmappedTplSortKey === "supplier"
+            ? b?.supplier
+            : unmappedTplSortKey === "planName"
+              ? b?.planName
+              : unmappedTplSortKey === "termMonths"
+                ? typeof b?.termMonths === "number"
+                  ? b.termMonths
+                  : null
+                : unmappedTplSortKey === "eflVersionCode"
+                  ? b?.eflVersionCode
+                  : b?.updatedAt;
+      return cmp(av ?? null, bv ?? null, unmappedTplSortDir);
+    });
+    return out;
+  }, [unmappedTplRows, unmappedTplSortKey, unmappedTplSortDir]);
+
+  function toggleUnmappedTplSort(k: typeof unmappedTplSortKey) {
+    if (unmappedTplSortKey === k) {
+      setUnmappedTplSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setUnmappedTplSortKey(k);
+      setUnmappedTplSortDir("asc");
+    }
+  }
 
   const sortedTplRows = useMemo(() => {
     const out = [...tplRows];
@@ -1194,6 +1286,183 @@ export default function FactCardOpsPage() {
               {queueItems.length === 0 ? (
                 <tr>
                   <td className="px-2 py-3 text-gray-500" colSpan={6}>
+                    No items.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="rounded-2xl border bg-white p-4 space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="font-medium">
+            Unmapped Templates{" "}
+            <span className="text-xs text-gray-600">
+              ({unmappedTplTotalCount ?? unmappedTplRows.length})
+            </span>
+          </h2>
+          <div className="flex items-center gap-2">
+            <button
+              className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60"
+              onClick={() => void loadUnmappedTemplates()}
+              disabled={!ready || unmappedTplLoading}
+              title='RatePlan rows with stored rateStructure but no OfferIdRatePlanMap.ratePlanId link'
+            >
+              {unmappedTplLoading ? "Loading…" : "Refresh"}
+            </button>
+          </div>
+        </div>
+
+        <div className="text-xs text-gray-600">
+          These are stored templates that are not linked to any WattBuy{" "}
+          <span className="font-mono">offer_id</span>. They will not show{" "}
+          <span className="font-mono">templateAvailable=true</span> until a link exists.
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <input
+            className="flex-1 min-w-[220px] rounded-lg border px-3 py-2 text-sm"
+            placeholder="Search supplier / plan / cert / version / sha / utility…"
+            value={unmappedTplQ}
+            onChange={(e) => setUnmappedTplQ(e.target.value)}
+          />
+          <input
+            className="w-28 rounded-lg border px-3 py-2 text-sm"
+            type="number"
+            min={1}
+            max={1000}
+            value={unmappedTplLimit}
+            onChange={(e) =>
+              setUnmappedTplLimit(Math.max(1, Math.min(1000, numOrNull(e.target.value) ?? 200)))
+            }
+          />
+          <button
+            className="px-3 py-2 rounded-lg border hover:bg-gray-50"
+            onClick={() => void loadUnmappedTemplates()}
+            disabled={!ready || unmappedTplLoading}
+          >
+            Apply
+          </button>
+        </div>
+        {unmappedTplErr ? <div className="text-sm text-red-700">{unmappedTplErr}</div> : null}
+
+        {/* ~5 visible rows + sticky header */}
+        <div className="overflow-x-auto overflow-y-auto max-h-[280px] rounded-xl border">
+          <table className="min-w-full text-xs">
+            <thead className="sticky top-0 z-10 bg-gray-50 text-gray-700">
+              <tr className="h-10">
+                <th
+                  className="px-2 py-2 text-left cursor-pointer select-none"
+                  onClick={() => toggleUnmappedTplSort("utilityId")}
+                >
+                  Utility{" "}
+                  {unmappedTplSortKey === "utilityId"
+                    ? unmappedTplSortDir === "asc"
+                      ? "▲"
+                      : "▼"
+                    : ""}
+                </th>
+                <th
+                  className="px-2 py-2 text-left cursor-pointer select-none"
+                  onClick={() => toggleUnmappedTplSort("supplier")}
+                >
+                  Supplier{" "}
+                  {unmappedTplSortKey === "supplier"
+                    ? unmappedTplSortDir === "asc"
+                      ? "▲"
+                      : "▼"
+                    : ""}
+                </th>
+                <th
+                  className="px-2 py-2 text-left cursor-pointer select-none"
+                  onClick={() => toggleUnmappedTplSort("planName")}
+                >
+                  Plan{" "}
+                  {unmappedTplSortKey === "planName"
+                    ? unmappedTplSortDir === "asc"
+                      ? "▲"
+                      : "▼"
+                    : ""}
+                </th>
+                <th
+                  className="px-2 py-2 text-right cursor-pointer select-none"
+                  onClick={() => toggleUnmappedTplSort("termMonths")}
+                >
+                  Term{" "}
+                  {unmappedTplSortKey === "termMonths"
+                    ? unmappedTplSortDir === "asc"
+                      ? "▲"
+                      : "▼"
+                    : ""}
+                </th>
+                <th
+                  className="px-2 py-2 text-left cursor-pointer select-none"
+                  onClick={() => toggleUnmappedTplSort("eflVersionCode")}
+                >
+                  Ver{" "}
+                  {unmappedTplSortKey === "eflVersionCode"
+                    ? unmappedTplSortDir === "asc"
+                      ? "▲"
+                      : "▼"
+                    : ""}
+                </th>
+                <th
+                  className="px-2 py-2 text-left cursor-pointer select-none"
+                  onClick={() => toggleUnmappedTplSort("updatedAt")}
+                >
+                  Updated{" "}
+                  {unmappedTplSortKey === "updatedAt"
+                    ? unmappedTplSortDir === "asc"
+                      ? "▲"
+                      : "▼"
+                    : ""}
+                </th>
+                <th className="px-2 py-2 text-left">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sortedUnmappedTplRows.map((r: any) => {
+                const eflUrl = String(r?.eflUrl ?? "").trim();
+                const updatedAt =
+                  r?.updatedAt ? String(r.updatedAt).slice(0, 19).replace("T", " ") : "-";
+                return (
+                  <tr key={String(r.id)} className="border-t h-12">
+                    <td className="px-2 py-2">{r.utilityId ?? "-"}</td>
+                    <td className="px-2 py-2">{r.supplier ?? "-"}</td>
+                    <td className="px-2 py-2">{r.planName ?? "-"}</td>
+                    <td className="px-2 py-2 text-right">
+                      {typeof r.termMonths === "number" ? `${r.termMonths} mo` : "-"}
+                    </td>
+                    <td className="px-2 py-2">{r.eflVersionCode ?? "-"}</td>
+                    <td className="px-2 py-2 font-mono text-[11px] text-gray-700">{updatedAt}</td>
+                    <td className="px-2 py-2">
+                      <div className="flex flex-wrap gap-2">
+                        {eflUrl ? (
+                          <a
+                            className="px-2 py-1 rounded border hover:bg-gray-50"
+                            href={eflUrl}
+                            target="_blank"
+                            rel="noreferrer noopener"
+                          >
+                            Open EFL
+                          </a>
+                        ) : null}
+                        <button
+                          className="px-2 py-1 rounded border hover:bg-red-50 text-red-700 border-red-200"
+                          onClick={() => void invalidateTemplate(String(r.id))}
+                        >
+                          Invalidate
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+              {sortedUnmappedTplRows.length === 0 ? (
+                <tr>
+                  <td className="px-2 py-3 text-gray-500" colSpan={7}>
                     No items.
                   </td>
                 </tr>
