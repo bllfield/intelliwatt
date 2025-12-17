@@ -650,7 +650,9 @@ export default function FactCardOpsPage() {
       });
       const data = await res.json();
       if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`);
-      await loadTemplates();
+      // Keep both tables in sync: invalidation removes rateStructure, so it should disappear
+      // from both Templates and Unmapped Templates views.
+      await Promise.all([loadTemplates(), loadUnmappedTemplates()]);
     } catch (e: any) {
       setTplErr(e?.message || "Failed to invalidate template.");
     }
