@@ -48,6 +48,8 @@ export default function OfferCard({ offer }: { offer: OfferRow }) {
 
   const eflUrl = offer.efl?.eflUrl;
   const status = offer.intelliwatt.statusLabel;
+  const statusText =
+    status === "AVAILABLE" ? "AVAILABLE" : status === "QUEUED" ? "QUEUED" : "NOT AVAILABLE";
 
   return (
     <div className="rounded-3xl border border-brand-cyan/25 bg-brand-navy p-5 shadow-[0_18px_40px_rgba(10,20,60,0.35)]">
@@ -77,7 +79,7 @@ export default function OfferCard({ offer }: { offer: OfferRow }) {
             )}`}
             title={offer.intelliwatt.ratePlanId ? `RatePlan: ${offer.intelliwatt.ratePlanId}` : undefined}
           >
-            {status === "AVAILABLE" ? "IntelliWatt available" : status === "QUEUED" ? "Queued" : "Unavailable"}
+            {statusText}
           </div>
 
           {eflUrl ? (

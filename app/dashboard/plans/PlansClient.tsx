@@ -389,17 +389,18 @@ export default function PlansClient() {
                   <label className="text-[0.68rem] font-semibold uppercase tracking-[0.28em] text-brand-cyan/65">
                     IntelliWatt
                   </label>
-                  <select
-                    value={template}
-                    onChange={(e) => {
-                      setTemplate(e.target.value as any);
-                      setPage(1);
-                    }}
-                    className="mt-2 w-full rounded-2xl border border-brand-cyan/25 bg-brand-white/5 px-3 py-2 text-xs text-brand-white outline-none focus:border-brand-blue/60"
-                  >
-                    <option value="all">All</option>
-                    <option value="available">Available only</option>
-                  </select>
+                  <label className="mt-2 flex items-center gap-2 text-xs text-brand-cyan/75 select-none">
+                    <input
+                      type="checkbox"
+                      checked={template === "available"}
+                      onChange={(e) => {
+                        setTemplate(e.target.checked ? "available" : "all");
+                        setPage(1);
+                      }}
+                      className="h-4 w-4 rounded border-brand-cyan/40 bg-brand-white/10"
+                    />
+                    Show only AVAILABLE templates
+                  </label>
                 </div>
 
                 <div className="flex items-end">
