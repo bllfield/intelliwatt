@@ -399,6 +399,15 @@ export async function GET(req: NextRequest) {
         ...base,
         intelliwatt: {
           ...(base as any).intelliwatt,
+          ...(tdspRates
+            ? {
+                tdspRatesApplied: {
+                  effectiveDate: tdspRates.effectiveDate,
+                  perKwhDeliveryChargeCents: tdspRates.perKwhDeliveryChargeCents,
+                  monthlyCustomerChargeDollars: tdspRates.monthlyCustomerChargeDollars,
+                },
+              }
+            : {}),
           trueCostEstimate: calculatePlanCostForUsage({
             offerId: String((base as any).offerId),
             ratePlanId: templateOk ? ratePlanId : null,

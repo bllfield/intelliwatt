@@ -2315,6 +2315,7 @@ Guardrails
 - `intelliwatt.trueCostEstimate.OK` now includes `componentsV2` (REP vs TDSP breakdown; proxy-filled initially). Next: implement TDSP lookup to populate `componentsV2.tdsp`.
 - Proxy basis standardized: `offer.efl.avgPriceCentsPerKwh1000` is the single source for proxy ranking + proxy cost estimate.
 - `getTdspDeliveryRates` is now implemented via `TdspTariffVersion`/`TdspTariffComponent` (pick latest effectiveStart <= asOf, effectiveEnd null or >= asOf) and `trueCostEstimate.OK` populates `componentsV2.tdsp` when TDSP rates are available.
+- `/api/dashboard/plans` now returns `intelliwatt.tdspRatesApplied` when TDSP rates were applied (effectiveDate, per-kWh cents, monthly dollars).
 - Shows **Queued / calculations not available** messaging when an EFL exists but no template mapping exists yet.
 - Uses a sticky filter/sort bar + pagination to avoid an infinite scroll plan list.
 - When `hasUsage=true`, shows a compact **“Best plans for you (estimate)”** strip at the top using the offer’s 1000kWh EFL average price (field: `efl.avgPriceCentsPerKwh1000`) as a temporary proxy ranking.
