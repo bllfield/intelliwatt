@@ -71,6 +71,7 @@ export const wattbuy = {
     city?: string;
     state?: string;
     zip?: string;
+    isRenter?: boolean;
   }) {
     if (params.wattkey) {
       // For wattkey, we need to get address details first
@@ -81,7 +82,8 @@ export const wattbuy = {
         address: params.address,
         city: params.city,
         state: params.state,
-        zip: params.zip
+        zip: params.zip,
+        is_renter: params.isRenter ?? false,
       });
       return result;
     } else if (params.address && params.city && params.state && params.zip) {
@@ -89,7 +91,8 @@ export const wattbuy = {
         address: params.address,
         city: params.city,
         state: params.state,
-        zip: params.zip
+        zip: params.zip,
+        is_renter: params.isRenter ?? false,
       });
       return result;
     } else {

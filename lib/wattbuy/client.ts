@@ -316,17 +316,26 @@ export type OfferAddressInput = {
   state?: string | null;
   zip: string;
   tdsp?: string | null;
+  is_renter?: boolean | string | null;
 };
 
 export async function getOffersForAddress(addr: OfferAddressInput) {
   assertKey();
-  const params: Record<string, string> = { zip: addr.zip };
-  if (addr.line1) params.address = addr.line1;
-  if (addr.city) params.city = addr.city;
-  params.state = (addr.state && addr.state.trim()) || 'TX';
-  if (addr.tdsp) params.utility = addr.tdsp;
-  // Compliance: WattBuy offers are requested without ESIID.
-  const result = await wbGet('offers', params);
+  // Use the offers helper so we consistently include WattBuy defaults:
+  // language=en, all=true, and (critically) is_renter=true/false for eligibility filtering.
+  const result = await wbGetOffers({
+    address: addr.line1 ?? undefined,
+    city: addr.city ?? undefined,
+    state: (addr.state && addr.state.trim()) || 'TX',
+    zip: addr.zip,
+    // WattBuy supports is_renter as a query param. Always include it (true/false) so
+    // eligible plans are filtered upstream.
+    is_renter: addr.is_renter ?? false,
+    all: true,
+    // Existing behavior: pass TDSP hint through when present.
+    // The upstream param name we use here is `utility` (as historically used in this codepath).
+    ...(addr.tdsp ? { utility: addr.tdsp } : {}),
+  } as any);
   if (!result.ok) {
     const err: any = new Error(`Upstream ${result.status}`);
     err.status = result.status;
@@ -487,8 +496,29 @@ export class WattBuyClient {
   }
 
   // Instance methods for backward compatibility
-  async offersByAddress({ address, city, state, zip, tdsp }: { address?: string; city?: string; state?: string; zip: string; tdsp?: string | null }) {
-    return getOffersForAddress({ line1: address, city, state, zip, tdsp: tdsp ?? undefined });
+  async offersByAddress({
+    address,
+    city,
+    state,
+    zip,
+    tdsp,
+    is_renter,
+  }: {
+    address?: string;
+    city?: string;
+    state?: string;
+    zip: string;
+    tdsp?: string | null;
+    is_renter?: boolean | string;
+  }) {
+    return getOffersForAddress({
+      line1: address,
+      city,
+      state,
+      zip,
+      tdsp: tdsp ?? undefined,
+      is_renter: is_renter ?? false,
+    });
   }
 }
 

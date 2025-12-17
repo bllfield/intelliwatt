@@ -31,6 +31,15 @@ function strOrNull(v: any): string | null {
   return s ? s : null;
 }
 
+function parseBoolParam(v: string | null, fallback: boolean): boolean {
+  if (v == null) return fallback;
+  const s = v.trim().toLowerCase();
+  if (!s) return fallback;
+  if (s === "1" || s === "true" || s === "yes" || s === "y" || s === "on") return true;
+  if (s === "0" || s === "false" || s === "no" || s === "n" || s === "off") return false;
+  return fallback;
+}
+
 function sortOffers(offers: OfferNormalized[], sort: SortKey): OfferNormalized[] {
   const withKey = offers.map((o, idx) => ({ o, idx }));
 
@@ -167,6 +176,7 @@ export async function GET(req: NextRequest) {
     const renewableMin = clamp(toInt(url.searchParams.get("renewableMin"), 0), 0, 100);
     const template = (url.searchParams.get("template") ?? "all").trim().toLowerCase();
     const sort = (url.searchParams.get("sort") ?? "kwh1000_asc") as SortKey;
+    const isRenter = parseBoolParam(url.searchParams.get("isRenter"), false);
 
     const intervalCount =
       house.esiid
@@ -198,6 +208,7 @@ export async function GET(req: NextRequest) {
         city: house.addressCity,
         state: house.addressState,
         zip: house.addressZip5,
+        isRenter,
       });
     } catch (e) {
       rawOffersResp = house.rawWattbuyJson ?? null;

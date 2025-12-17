@@ -45,6 +45,7 @@ export default function PlansClient() {
   const [term, setTerm] = useState<"all" | "0-6" | "7-12" | "13-24" | "25+">("all");
   const [renewableMin, setRenewableMin] = useState<0 | 50 | 100>(0);
   const [template, setTemplate] = useState<"all" | "available">("all");
+  const [isRenter, setIsRenter] = useState(false);
   const [sort, setSort] = useState<SortKey>("kwh1000_asc");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<10 | 20 | 50>(20);
@@ -56,6 +57,16 @@ export default function PlansClient() {
   const [bestLoading, setBestLoading] = useState(false);
   const [bestOffers, setBestOffers] = useState<OfferRow[]>([]);
 
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem("dashboard_plans_is_renter");
+      if (raw === "true") setIsRenter(true);
+      if (raw === "false") setIsRenter(false);
+    } catch {
+      // ignore
+    }
+  }, []);
+
   const baseParams = useMemo(
     () => ({
       q,
@@ -63,11 +74,12 @@ export default function PlansClient() {
       term,
       renewableMin: String(renewableMin),
       template,
+      isRenter: String(isRenter),
       sort,
       page: String(page),
       pageSize: String(pageSize),
     }),
-    [q, rateType, term, renewableMin, template, sort, page, pageSize],
+    [q, rateType, term, renewableMin, template, isRenter, sort, page, pageSize],
   );
 
   useEffect(() => {
@@ -115,6 +127,7 @@ export default function PlansClient() {
           term,
           renewableMin: String(renewableMin),
           template,
+          isRenter: String(isRenter),
           sort: "best_for_you_proxy",
           page: "1",
           pageSize: "5",
@@ -136,7 +149,7 @@ export default function PlansClient() {
 
     runBest();
     return () => controller.abort();
-  }, [resp?.ok, resp?.hasUsage, q, rateType, term, renewableMin, template]);
+  }, [resp?.ok, resp?.hasUsage, q, rateType, term, renewableMin, template, isRenter]);
 
   const hasUsage = Boolean(resp?.ok && resp?.hasUsage);
   const offers = Array.isArray(resp?.offers) ? resp!.offers! : [];
@@ -238,6 +251,27 @@ export default function PlansClient() {
                     <option value="all">All</option>
                     <option value="available">Available only</option>
                   </select>
+                </div>
+
+                <div className="flex items-end">
+                  <label className="flex items-center gap-2 text-xs text-brand-cyan/75 select-none">
+                    <input
+                      type="checkbox"
+                      checked={isRenter}
+                      onChange={(e) => {
+                        const next = e.target.checked;
+                        setIsRenter(next);
+                        setPage(1);
+                        try {
+                          window.localStorage.setItem("dashboard_plans_is_renter", String(next));
+                        } catch {
+                          // ignore
+                        }
+                      }}
+                      className="h-4 w-4 rounded border-brand-cyan/40 bg-brand-white/10"
+                    />
+                    Renter (filters eligible plans)
+                  </label>
                 </div>
 
                 <div className="col-span-2 md:col-span-1">
