@@ -424,7 +424,25 @@ function extractEflVersionCode(text: string): string | null {
       const same = line.match(/^EFL\s*Version\s*:\s*(.+)$/i);
       if (same?.[1]) {
         const val = normalizeToken(same[1].trim());
-        if (val && val.length >= 3 && !isWeakVersionCandidate(val)) return val;
+        if (val && val.length >= 3) {
+          // If the value is wrapped across the next line (common with pdftotext),
+          // stitch before returning. Otherwise we'd return the truncated prefix
+          // like "..._2025121" and drop the following "5_ENGLISH"/"_ENGLISH".
+          const nextLines: string[] = [];
+          for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
+            const cand = lines[j]?.trim();
+            if (!cand) continue;
+            nextLines.push(cand);
+            if (nextLines.length >= 2) break;
+          }
+          if (nextLines.length) {
+            const stitched = stitchWrapped([val, ...nextLines]);
+            if (stitched && stitched.length >= 3 && !isWeakVersionCandidate(stitched)) {
+              return stitched;
+            }
+          }
+          if (!isWeakVersionCandidate(val)) return val;
+        }
       }
 
       // Next non-empty lines within a small window; choose best candidate (and try to stitch wraps).

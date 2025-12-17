@@ -30,6 +30,16 @@ describe("eflExtractor - EFL Version code extraction", () => {
     );
   });
 
+  test("stitches wrapped footer code when value is on the same EFL Version: line (date digit + language suffix)", () => {
+    const text = `
+      EFL Version: EFL_ONCOR_ELEC_GXAECOSVRADV12_2025121
+      5_ENGLISH
+    `;
+    expect(extractEflVersionCodeFromText(text)).toBe(
+      "EFL_ONCOR_ELEC_GXAECOSVRADV12_20251215_ENGLISH",
+    );
+  });
+
   test("stitches wrapped footer code split across lines (underscore-prefixed language suffix)", () => {
     const text = `
       EFL Version:
