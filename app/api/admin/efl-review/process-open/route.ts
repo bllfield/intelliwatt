@@ -135,6 +135,9 @@ export async function POST(req: NextRequest) {
         let persistNotes: string | null = null;
         let offerRateMapLinkAttempted: boolean = false;
         let offerRateMapLinkUpdatedCount: number = 0;
+        let offerIdRatePlanMapAttempted: boolean = false;
+        let offerIdRatePlanMapOk: boolean = false;
+        let offerIdRatePlanMapError: string | null = null;
 
         if (!dryRun && finalStatus === "PASS" && passStrength === "STRONG") {
           const derivedPlanRules =
@@ -226,6 +229,34 @@ export async function POST(req: NextRequest) {
                 } catch {
                   offerRateMapLinkAttempted = true;
                   offerRateMapLinkUpdatedCount = 0;
+                }
+
+                // Canonical link: offerId -> RatePlan.id (works even when OfferRateMap doesn't exist)
+                try {
+                  if (it?.offerId && persistedRatePlanId) {
+                    offerIdRatePlanMapAttempted = true;
+                    const now = new Date();
+                    await (prisma as any).offerIdRatePlanMap.upsert({
+                      where: { offerId: String(it.offerId) },
+                      create: {
+                        offerId: String(it.offerId),
+                        ratePlanId: persistedRatePlanId,
+                        lastLinkedAt: now,
+                        linkedBy: "process-open",
+                      },
+                      update: {
+                        ratePlanId: persistedRatePlanId,
+                        lastLinkedAt: now,
+                        linkedBy: "process-open",
+                      },
+                    });
+                    offerIdRatePlanMapOk = true;
+                    offerIdRatePlanMapError = null;
+                  }
+                } catch (e: any) {
+                  offerIdRatePlanMapAttempted = true;
+                  offerIdRatePlanMapOk = false;
+                  offerIdRatePlanMapError = e?.message ? String(e.message) : String(e);
                 }
 
                 // Resolve this queue item (and any dup by offerId) now that we have PASS+STRONG template.
@@ -321,6 +352,9 @@ export async function POST(req: NextRequest) {
           persistedRatePlanId,
           offerRateMapLinkAttempted,
           offerRateMapLinkUpdatedCount,
+          offerIdRatePlanMapAttempted,
+          offerIdRatePlanMapOk,
+          offerIdRatePlanMapError,
           notes: persistNotes,
         });
       } catch (e: any) {

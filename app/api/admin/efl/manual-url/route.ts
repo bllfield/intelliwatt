@@ -177,6 +177,10 @@ export async function POST(req: NextRequest) {
     let queueAutoResolveOpenMatchesCount: number = 0;
     let offerRateMapLinkAttempted: boolean = false;
     let offerRateMapLinkUpdatedCount: number = 0;
+    let offerIdRatePlanMapAttempted: boolean = false;
+    let offerIdRatePlanMapOk: boolean = false;
+    let offerIdRatePlanMapRatePlanId: string | null = null;
+    let offerIdRatePlanMapError: string | null = null;
     try {
       const validationAfter =
         (derivedForValidation as any)?.validationAfter ??
@@ -294,6 +298,37 @@ export async function POST(req: NextRequest) {
             offerRateMapLinkUpdatedCount = 0;
           }
 
+          // Canonical link: offerId -> RatePlan.id (works even when OfferRateMap doesn't exist)
+          try {
+            if (templatePersisted && persistedRatePlanId && offerId) {
+              offerIdRatePlanMapAttempted = true;
+              const now = new Date();
+              const row = await (prisma as any).offerIdRatePlanMap.upsert({
+                where: { offerId: String(offerId) },
+                create: {
+                  offerId: String(offerId),
+                  ratePlanId: persistedRatePlanId,
+                  lastLinkedAt: now,
+                  linkedBy: "manual-url",
+                },
+                update: {
+                  ratePlanId: persistedRatePlanId,
+                  lastLinkedAt: now,
+                  linkedBy: "manual-url",
+                },
+                select: { ratePlanId: true },
+              });
+              offerIdRatePlanMapOk = true;
+              offerIdRatePlanMapRatePlanId = row?.ratePlanId ? String(row.ratePlanId) : null;
+              offerIdRatePlanMapError = null;
+            }
+          } catch (e: any) {
+            offerIdRatePlanMapAttempted = true;
+            offerIdRatePlanMapOk = false;
+            offerIdRatePlanMapRatePlanId = null;
+            offerIdRatePlanMapError = e?.message ? String(e.message) : String(e);
+          }
+
           // If this EFL was previously quarantined (OPEN review-queue item), auto-resolve it now
           // that we have a persisted template from a PASS run AND passStrength is STRONG.
           try {
@@ -380,6 +415,10 @@ export async function POST(req: NextRequest) {
       queueAutoResolveUpdatedCount = 0;
       offerRateMapLinkAttempted = false;
       offerRateMapLinkUpdatedCount = 0;
+      offerIdRatePlanMapAttempted = false;
+      offerIdRatePlanMapOk = false;
+      offerIdRatePlanMapRatePlanId = null;
+      offerIdRatePlanMapError = null;
     }
 
     return NextResponse.json({
@@ -412,6 +451,10 @@ export async function POST(req: NextRequest) {
       persistedRatePlanId,
       offerRateMapLinkAttempted,
       offerRateMapLinkUpdatedCount,
+      offerIdRatePlanMapAttempted,
+      offerIdRatePlanMapOk,
+      offerIdRatePlanMapRatePlanId,
+      offerIdRatePlanMapError,
       autoResolvedQueueCount,
       persistAttempted,
       persistUsedDerived,

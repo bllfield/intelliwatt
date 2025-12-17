@@ -436,6 +436,25 @@ model OfferRateMap {
   @@index([ratePlanId])
 }
 
+/// Canonical offer_id -> RatePlan template link.
+/// Unlike OfferRateMap, this does NOT require a RateConfig row, so EFL tooling can always upsert it.
+model OfferIdRatePlanMap {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  offerId String @unique
+
+  ratePlanId String?
+  ratePlan   RatePlan? @relation(fields: [ratePlanId], references: [id], onDelete: SetNull)
+
+  lastLinkedAt DateTime?
+  linkedBy     String?
+  notes        String?
+
+  @@index([ratePlanId])
+}
+
 model MasterPlan {
   id             String      @id @default(uuid())
   source         PlanSource
@@ -910,7 +929,9 @@ model RatePlan {
   planName     String?
 
   /// Back-reference for OfferRateMap.ratePlan (WattBuy offer_id -> RatePlan template link)
-  offerRateMaps OfferRateMap[]
+  offerRateMaps       OfferRateMap[]
+  /// Back-reference for OfferIdRatePlanMap.ratePlan (canonical offerId -> RatePlan link)
+  offerIdRatePlanMaps OfferIdRatePlanMap[]
 
   termMonths Int?
   rate500    Float?

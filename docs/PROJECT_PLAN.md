@@ -2262,6 +2262,9 @@ Scope
     - New linkage: `OfferRateMap.ratePlanId` → `RatePlan.id` (the EFL template persisted for that exact WattBuy offer).
     - Safety rule: we **only update existing** `OfferRateMap` rows (never create them from EFL tooling), because `OfferRateMap` requires `rateConfigId`.
     - Schema note: `RatePlan.offerRateMaps` exists as the required opposite relation for Prisma schema validation (P1012).
+  - `OfferIdRatePlanMap` (master DB): **canonical** WattBuy `offer_id` → `RatePlan.id` mapping.
+    - This is written by EFL tooling on template persistence even if `OfferRateMap` is missing.
+    - `OfferRateMap.ratePlanId` remains a secondary enrichment when an offer has already been synced.
   - `HouseAddress.rawWattbuyJson` (master DB): legacy per-address WattBuy blob (still stored for ops/support).
   - `WattBuyApiSnapshot` (**WattBuy module DB**): append-only-ish raw response snapshots for:
     - `OFFERS` (offer list payloads)
@@ -2291,6 +2294,7 @@ Guardrails
 ✅ Done: WattBuy raw API response snapshot persistence (`WattBuyApiSnapshot`) for audit + replay (module DB is source of truth).
 
 ✅ Done: WattBuy offer_id → template identity bridge (`OfferRateMap.offerId` → `OfferRateMap.ratePlanId` → `RatePlan.id`).
+✅ Done: Canonical offer_id → template identity bridge (`OfferIdRatePlanMap.offerId` → `OfferIdRatePlanMap.ratePlanId` → `RatePlan.id`).
 
 Verification checklist (PowerShell):
 - Apply migrations:
@@ -2298,7 +2302,8 @@ Verification checklist (PowerShell):
 - Trigger a template persist with offerId:
   - Use `/admin/efl/fact-cards` manual loader (URL mode) and include the `offerId` field.
 - Confirm linkage exists (Prisma Studio / query):
-  - Find `OfferRateMap` by `offerId` and verify `ratePlanId` is set and matches the created `RatePlan.id`.
+  - Find `OfferIdRatePlanMap` by `offerId` and verify `ratePlanId` is set and matches the created `RatePlan.id`.
+  - If the offer was synced, confirm `OfferRateMap.ratePlanId` is also set (secondary enrichment).
 
 ---
 
