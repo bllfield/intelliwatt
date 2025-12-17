@@ -168,13 +168,15 @@ export async function POST(req: NextRequest) {
     let persistedRatePlanId: string | null = null;
     let autoResolvedQueueCount: number = 0;
     let queueAutoResolveUpdatedCount: number = 0;
-  let persistAttempted: boolean = false;
-  let persistNotes: string | null = null;
-  let persistUsedDerived: boolean = false;
-  let queueAutoResolveAttempted: boolean = false;
-  let queueAutoResolveCriteria: any = null;
-  let queueAutoResolveOpenMatchesPreview: any[] = [];
-  let queueAutoResolveOpenMatchesCount: number = 0;
+    let persistAttempted: boolean = false;
+    let persistNotes: string | null = null;
+    let persistUsedDerived: boolean = false;
+    let queueAutoResolveAttempted: boolean = false;
+    let queueAutoResolveCriteria: any = null;
+    let queueAutoResolveOpenMatchesPreview: any[] = [];
+    let queueAutoResolveOpenMatchesCount: number = 0;
+    let offerRateMapLinkAttempted: boolean = false;
+    let offerRateMapLinkUpdatedCount: number = 0;
     try {
       const validationAfter =
         (derivedForValidation as any)?.validationAfter ??
@@ -272,6 +274,22 @@ export async function POST(req: NextRequest) {
             persistNotes = `Template not persisted (missing fields): ${missing.join(", ")}`;
           }
 
+          // Link WattBuy offer_id -> RatePlan.id (authoritative fingerprint) without creating OfferRateMap rows.
+          // Safety: OfferRateMap requires rateConfigId, so we only update existing rows.
+          try {
+            if (templatePersisted && persistedRatePlanId && offerId) {
+              offerRateMapLinkAttempted = true;
+              const upd = await (prisma as any).offerRateMap.updateMany({
+                where: { offerId: String(offerId) },
+                data: { ratePlanId: persistedRatePlanId, lastSeenAt: new Date() },
+              });
+              offerRateMapLinkUpdatedCount = Number(upd?.count ?? 0) || 0;
+            }
+          } catch {
+            offerRateMapLinkAttempted = true;
+            offerRateMapLinkUpdatedCount = 0;
+          }
+
           // If this EFL was previously quarantined (OPEN review-queue item), auto-resolve it now
           // that we have a persisted template from a PASS run AND passStrength is STRONG.
           try {
@@ -364,6 +382,7 @@ export async function POST(req: NextRequest) {
       },
       eflUrl: effectiveEflUrl,
       eflSourceUrl,
+      offerId,
       eflPdfSha256: template.eflPdfSha256,
       repPuctCertificate: template.repPuctCertificate,
       eflVersionCode: template.eflVersionCode,
@@ -383,6 +402,8 @@ export async function POST(req: NextRequest) {
       passStrengthOffPointDiffs,
       templatePersisted,
       persistedRatePlanId,
+      offerRateMapLinkAttempted,
+      offerRateMapLinkUpdatedCount,
       autoResolvedQueueCount,
       persistAttempted,
       persistUsedDerived,

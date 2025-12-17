@@ -133,6 +133,8 @@ export async function POST(req: NextRequest) {
         let templateAction: "CREATED" | "SKIPPED" = "SKIPPED";
         let persistedRatePlanId: string | null = null;
         let persistNotes: string | null = null;
+        let offerRateMapLinkAttempted: boolean = false;
+        let offerRateMapLinkUpdatedCount: number = 0;
 
         if (!dryRun && finalStatus === "PASS" && passStrength === "STRONG") {
           const derivedPlanRules =
@@ -209,6 +211,22 @@ export async function POST(req: NextRequest) {
               if (templatePersisted) {
                 templateAction = "CREATED";
                 persisted++;
+
+                // Link WattBuy offer_id -> RatePlan.id (authoritative fingerprint) without creating OfferRateMap rows.
+                // Safety: OfferRateMap requires rateConfigId, so we only update existing rows.
+                try {
+                  if (it?.offerId && persistedRatePlanId) {
+                    offerRateMapLinkAttempted = true;
+                    const upd = await (prisma as any).offerRateMap.updateMany({
+                      where: { offerId: String(it.offerId) },
+                      data: { ratePlanId: persistedRatePlanId, lastSeenAt: new Date() },
+                    });
+                    offerRateMapLinkUpdatedCount = Number(upd?.count ?? 0) || 0;
+                  }
+                } catch {
+                  offerRateMapLinkAttempted = true;
+                  offerRateMapLinkUpdatedCount = 0;
+                }
 
                 // Resolve this queue item (and any dup by offerId) now that we have PASS+STRONG template.
                 const now = new Date();
@@ -301,6 +319,8 @@ export async function POST(req: NextRequest) {
           passStrength,
           templateAction,
           persistedRatePlanId,
+          offerRateMapLinkAttempted,
+          offerRateMapLinkUpdatedCount,
           notes: persistNotes,
         });
       } catch (e: any) {

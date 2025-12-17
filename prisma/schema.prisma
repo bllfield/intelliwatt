@@ -425,9 +425,15 @@ model OfferRateMap {
   rateConfigId String
   rateConfig   RateConfig @relation(fields: [rateConfigId], references: [id], onDelete: Cascade)
 
+  /// Optional link to the persisted RatePlan template created from this offer's EFL.
+  /// This makes WattBuy offer_id the authoritative fingerprint for attaching templates.
+  ratePlanId String?
+  ratePlan   RatePlan? @relation(fields: [ratePlanId], references: [id], onDelete: SetNull)
+
   @@index([supplierSlug, planId])
   @@index([supplierSlug, nameId])
   @@index([tdspSlug])
+  @@index([ratePlanId])
 }
 
 model MasterPlan {

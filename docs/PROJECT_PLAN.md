@@ -2259,6 +2259,8 @@ Scope
 
 - **WattBuy Persistence (Audit + Replay):**
   - `OfferRateMap` (master DB): per-offer mapping keyed by **WattBuy `offer_id`** (canonical offer identity in our system).
+    - New linkage: `OfferRateMap.ratePlanId` → `RatePlan.id` (the EFL template persisted for that exact WattBuy offer).
+    - Safety rule: we **only update existing** `OfferRateMap` rows (never create them from EFL tooling), because `OfferRateMap` requires `rateConfigId`.
   - `HouseAddress.rawWattbuyJson` (master DB): legacy per-address WattBuy blob (still stored for ops/support).
   - `WattBuyApiSnapshot` (**WattBuy module DB**): append-only-ish raw response snapshots for:
     - `OFFERS` (offer list payloads)
@@ -2286,6 +2288,16 @@ Guardrails
 - All responses include diagnostic metadata for troubleshooting.
 
 ✅ Done: WattBuy raw API response snapshot persistence (`WattBuyApiSnapshot`) for audit + replay (module DB is source of truth).
+
+✅ Done: WattBuy offer_id → template identity bridge (`OfferRateMap.offerId` → `OfferRateMap.ratePlanId` → `RatePlan.id`).
+
+Verification checklist (PowerShell):
+- Apply migrations:
+  - `npx prisma migrate deploy --schema prisma/schema.prisma`
+- Trigger a template persist with offerId:
+  - Use `/admin/efl/fact-cards` manual loader (URL mode) and include the `offerId` field.
+- Confirm linkage exists (Prisma Studio / query):
+  - Find `OfferRateMap` by `offerId` and verify `ratePlanId` is set and matches the created `RatePlan.id`.
 
 ---
 
