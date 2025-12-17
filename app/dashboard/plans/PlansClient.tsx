@@ -113,6 +113,7 @@ export default function PlansClient() {
   const [bestRankAllIn, setBestRankAllIn] = useState<boolean | null>(null);
   const [mobilePanel, setMobilePanel] = useState<"none" | "search" | "filters">("none");
   const [headerCollapsed, setHeaderCollapsed] = useState(false);
+  const [approxKwhPerMonth, setApproxKwhPerMonth] = useState<500 | 750 | 1000 | 1250 | 2000>(1000);
 
   // Reset prefetch attempts when the *user-visible dataset* changes (filters/pagination),
   // but do NOT reset on our internal refresh nonce (otherwise we could loop forever
@@ -185,10 +186,11 @@ export default function PlansClient() {
       sort,
       page: String(page),
       pageSize: String(pageSize),
+      approxKwhPerMonth: String(approxKwhPerMonth),
       // Used only to force a reload after background prefetch runs.
       _r: String(refreshNonce),
     }),
-    [q, rateType, term, renewableMin, template, isRenter, sort, page, pageSize, refreshNonce],
+    [q, rateType, term, renewableMin, template, isRenter, sort, page, pageSize, approxKwhPerMonth, refreshNonce],
   );
 
   useEffect(() => {
@@ -308,8 +310,8 @@ export default function PlansClient() {
   }, [hasUsage, bestRankAllIn, (resp as any)?.bestOffersAllIn, resp?.bestOffers, offers]);
 
   const bestStripOffers = useMemo(() => {
-    if (!hasUsage) return [];
-    const rankAllIn = bestRankAllIn === true;
+    if (!resp?.ok) return [];
+    const rankAllIn = hasUsage && bestRankAllIn === true;
     const serverAllIn =
       Array.isArray((resp as any)?.bestOffersAllIn) && ((resp as any).bestOffersAllIn as any[]).length > 0
         ? ((resp as any).bestOffersAllIn as OfferRow[])
@@ -329,7 +331,7 @@ export default function PlansClient() {
       return scored.slice(0, 5).map((x) => x.o);
     }
 
-    // Default proxy basis: use API bestOffers when available.
+    // Proxy basis: use server bestOffers when available.
     if (serverEfl) return serverEfl.slice(0, 5);
 
     // Fallback: compute client-side ranking from currently loaded offers (safe deploy).
@@ -338,7 +340,7 @@ export default function PlansClient() {
       .filter((x) => typeof x.metric === "number" && Number.isFinite(x.metric as number));
     scored.sort((a, b) => (a.metric as number) - (b.metric as number));
     return scored.slice(0, 5).map((x) => x.o);
-  }, [hasUsage, (resp as any)?.bestOffersAllIn, resp?.bestOffers, offers, bestRankAllIn]);
+  }, [resp?.ok, hasUsage, (resp as any)?.bestOffersAllIn, resp?.bestOffers, offers, bestRankAllIn]);
 
   const bestStripBasis = useMemo(() => {
     if (!resp?.ok) return null;
@@ -773,29 +775,55 @@ export default function PlansClient() {
         </div>
       </div>
 
-      {hasUsage ? (
+      {resp?.ok ? (
         <div className="mx-auto w-full max-w-5xl">
           <div className="rounded-3xl border border-brand-cyan/20 bg-brand-navy p-5 shadow-[0_18px_40px_rgba(10,20,60,0.35)]">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <div className="text-sm font-semibold text-brand-white">Best plans for you (estimate)</div>
-                <label className="mt-2 flex items-center gap-2 text-xs text-brand-cyan/75 select-none">
-                  <input
-                    type="checkbox"
-                    checked={bestRankAllIn === true}
-                    onChange={(e) => {
-                      setBestRankAllIn(e.target.checked);
-                      // Force a refresh so we immediately pick up the preferred server-ranked list
-                      // (and matching basis/disclaimer) when the user toggles.
-                      setRefreshNonce((n) => n + 1);
-                    }}
-                    className="h-4 w-4 rounded border-brand-cyan/40 bg-brand-white/10"
-                  />
-                  Rank by all-in estimate (incl. TDSP)
-                </label>
+                {hasUsage ? (
+                  <label className="mt-2 flex items-center gap-2 text-xs text-brand-cyan/75 select-none">
+                    <input
+                      type="checkbox"
+                      checked={bestRankAllIn === true}
+                      onChange={(e) => {
+                        setBestRankAllIn(e.target.checked);
+                        // Force a refresh so we immediately pick up the preferred server-ranked list
+                        // (and matching basis/disclaimer) when the user toggles.
+                        setRefreshNonce((n) => n + 1);
+                      }}
+                      className="h-4 w-4 rounded border-brand-cyan/40 bg-brand-white/10"
+                    />
+                    Rank by all-in estimate (incl. TDSP)
+                  </label>
+                ) : (
+                  <label className="mt-2 flex flex-wrap items-center gap-2 text-xs text-brand-cyan/75 select-none">
+                    <span className="text-brand-cyan/70">Approx monthly usage:</span>
+                    <select
+                      value={approxKwhPerMonth}
+                      onChange={(e) => {
+                        const v = Number(e.target.value) as any;
+                        if (v === 500 || v === 750 || v === 1000 || v === 1250 || v === 2000) {
+                          setApproxKwhPerMonth(v);
+                          setRefreshNonce((n) => n + 1);
+                        }
+                      }}
+                      className="rounded-full border border-brand-cyan/25 bg-brand-white/5 px-3 py-2 text-xs text-brand-white outline-none focus:border-brand-blue/60"
+                    >
+                      <option value={500}>500</option>
+                      <option value={750}>750</option>
+                      <option value={1000}>1000</option>
+                      <option value={1250}>1250</option>
+                      <option value={2000}>2000</option>
+                    </select>
+                    <span className="text-brand-cyan/60">kWh/mo</span>
+                  </label>
+                )}
                 <div className="mt-1 text-xs text-brand-cyan/70">
                   {bestStripDisclaimer ??
-                    "Based on your last 12 months usage. Ranking uses provider estimates until IntelliWatt true-cost is enabled."}
+                    (hasUsage
+                      ? "Based on your last 12 months usage. Ranking uses provider estimates until IntelliWatt true-cost is enabled."
+                      : "Pick an approximate monthly usage to rank plans by EFL averages.")}
                 </div>
                 {bestStripBasis ? (
                   <div className="mt-1 text-[0.7rem] text-brand-cyan/55 font-mono">

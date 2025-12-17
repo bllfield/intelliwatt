@@ -44,6 +44,36 @@ function parseBoolParam(v: string | null, fallback: boolean): boolean {
   return fallback;
 }
 
+type EflBucket = 500 | 1000 | 2000;
+
+function parseApproxKwhPerMonth(v: string | null): number | null {
+  if (!v) return null;
+  const n = Number(v);
+  if (!Number.isFinite(n)) return null;
+  const k = Math.trunc(n);
+  if (k === 500 || k === 750 || k === 1000 || k === 1250 || k === 2000) return k;
+  return null;
+}
+
+function pickNearestEflBucket(kwh: number): EflBucket {
+  // Nearest among 500/1000/2000; ties prefer 1000.
+  const buckets: EflBucket[] = [500, 1000, 2000];
+  let best: EflBucket = 1000;
+  let bestDist = Number.POSITIVE_INFINITY;
+  for (const b of buckets) {
+    const dist = Math.abs(kwh - b);
+    if (dist < bestDist) {
+      best = b;
+      bestDist = dist;
+      continue;
+    }
+    if (dist === bestDist && b === 1000) {
+      best = b;
+    }
+  }
+  return best;
+}
+
 function sortOffers(offers: OfferNormalized[], sort: SortKey): OfferNormalized[] {
   const withKey = offers.map((o, idx) => ({ o, idx }));
 
@@ -185,6 +215,7 @@ export async function GET(req: NextRequest) {
     const template = (url.searchParams.get("template") ?? "all").trim().toLowerCase();
     const sort = (url.searchParams.get("sort") ?? "kwh1000_asc") as SortKey;
     const isRenter = parseBoolParam(url.searchParams.get("isRenter"), false);
+    const approxKwhPerMonth = parseApproxKwhPerMonth(url.searchParams.get("approxKwhPerMonth"));
 
     // Usage summary: cheap aggregate over the last 12 months, best-effort.
     // Must never break offers response (wrap errors).
@@ -472,6 +503,36 @@ export async function GET(req: NextRequest) {
           bestOffersAllInBasis = "proxy_allin_monthly_trueCostEstimate";
           bestOffersAllInDisclaimer =
             "Includes TDSP delivery. REP energy is still based on provider 1000 kWh estimate until IntelliWatt true-cost is enabled.";
+        }
+      } else {
+        // No-usage mode: rank bestOffers by selected approximate monthly usage, mapped to nearest EFL bucket.
+        const chosen = approxKwhPerMonth ?? 1000;
+        const bucket = pickNearestEflBucket(chosen);
+        const basis =
+          bucket === 500
+            ? "proxy_efl_avgPriceCentsPerKwh500"
+            : bucket === 2000
+              ? "proxy_efl_avgPriceCentsPerKwh2000"
+              : "proxy_efl_avgPriceCentsPerKwh1000";
+
+        const metricFn = (b: EflBucket, o: any) => {
+          const e = shapeOfferBase(o)?.efl;
+          if (b === 500) return numOrNull(e?.avgPriceCentsPerKwh500);
+          if (b === 2000) return numOrNull(e?.avgPriceCentsPerKwh2000);
+          return numOrNull(e?.avgPriceCentsPerKwh1000);
+        };
+
+        const candidates = offers
+          .map((o) => ({ o, metric: metricFn(bucket, o) }))
+          .filter((x) => typeof x.metric === "number" && Number.isFinite(x.metric as number))
+          .sort((a, b) => (a.metric as number) - (b.metric as number))
+          .slice(0, 5)
+          .map((x) => x.o);
+
+        bestOffers = await Promise.all(candidates.map(shapeOffer));
+        if (bestOffers.length > 0) {
+          bestOffersBasis = basis;
+          bestOffersDisclaimer = `Based on your selected approx usage (${chosen} kWh/mo), ranking uses the nearest EFL average price bucket (${bucket} kWh).`;
         }
       }
     } catch {

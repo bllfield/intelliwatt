@@ -2329,6 +2329,7 @@ Guardrails
 - Best plans strip supports ranking by all-in proxy (monthlyCostDollars) vs EFL 1000kWh proxy.
 - `/api/dashboard/plans` now returns `bestOffersAllIn` (+ basis/disclaimer) using `trueCostEstimate.monthlyCostDollars` (OK-only).
 - Best Plans strip now prefers server-ranked lists (`bestOffers` / `bestOffersAllIn`) with client fallback.
+- Best plans (no-usage) ranking now uses an `approxKwhPerMonth` selector (mapped to nearest EFL bucket 500/1000/2000).
 - Shows a compact banner when **NOT AVAILABLE** plans are present, with a one-click action to enable **“Show only AVAILABLE templates”**.
 
 Next (Dashboard):
