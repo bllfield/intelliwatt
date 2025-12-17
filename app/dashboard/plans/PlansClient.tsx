@@ -3,7 +3,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import OfferCard from "./OfferCard";
 
-type UsageSummary = { source: string; annualKwh?: number; last12moKwh?: number } | null;
+type UsageSummary =
+  | {
+      source: string;
+      rangeStart?: string;
+      rangeEnd?: string;
+      totalKwh?: number;
+      rows?: number;
+      // legacy/forward-compatible fields (don’t break if server shape changes)
+      annualKwh?: number;
+      last12moKwh?: number;
+    }
+  | null;
 
 type OfferRow = Parameters<typeof OfferCard>[0]["offer"];
 
@@ -27,6 +38,39 @@ type SortKey =
   | "term_asc"
   | "renewable_desc"
   | "best_for_you_proxy";
+
+function firstFiniteNumber(vals: Array<any>): number | null {
+  for (const v of vals) {
+    const n = typeof v === "number" ? v : Number(v);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+}
+
+function pickBest1000MetricCentsPerKwh(offer: any): number | null {
+  // Prefer 1000kWh EFL avg cents/kWh (WattBuy’s anchor point), then fall back to 500/2000.
+  // Keep this robust to slight schema variations without hardcoding a single guess.
+  return firstFiniteNumber([
+    offer?.efl?.avgPriceCentsPerKwh1000,
+    offer?.avgPriceCentsPerKwh1000,
+    offer?.kwh1000_cents,
+    offer?.bill1000,
+    offer?.bill_1000,
+    offer?.price1000,
+    offer?.rate1000,
+    offer?.efl?.avgPriceCentsPerKwh500,
+    offer?.avgPriceCentsPerKwh500,
+    offer?.kwh500_cents,
+    offer?.efl?.avgPriceCentsPerKwh2000,
+    offer?.avgPriceCentsPerKwh2000,
+    offer?.kwh2000_cents,
+  ]);
+}
+
+function fmtCentsPerKwh(v: number | null | undefined): string {
+  if (typeof v !== "number" || !Number.isFinite(v)) return "—";
+  return `${v.toFixed(2)}¢/kWh`;
+}
 
 function buildQuery(params: Record<string, string>) {
   const usp = new URLSearchParams();
@@ -252,6 +296,15 @@ export default function PlansClient() {
   const total = typeof resp?.total === "number" ? resp.total : 0;
   const totalPages = typeof resp?.totalPages === "number" ? resp.totalPages : 0;
 
+  const bestStripOffers = useMemo(() => {
+    if (!hasUsage) return [];
+    const scored = (Array.isArray(bestOffers) ? bestOffers : [])
+      .map((o) => ({ o, metric: pickBest1000MetricCentsPerKwh(o) }))
+      .filter((x) => typeof x.metric === "number" && Number.isFinite(x.metric as number));
+    scored.sort((a, b) => (a.metric as number) - (b.metric as number));
+    return scored.slice(0, 5).map((x) => x.o);
+  }, [hasUsage, bestOffers]);
+
   return (
     <div className="flex flex-col gap-6">
       <div className="sticky top-0 z-20 -mx-4 px-4 pt-2 pb-3 bg-brand-white/90 backdrop-blur border-b border-brand-cyan/15">
@@ -445,21 +498,65 @@ export default function PlansClient() {
           <div className="rounded-3xl border border-brand-cyan/20 bg-brand-navy p-5 shadow-[0_18px_40px_rgba(10,20,60,0.35)]">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <div className="text-sm font-semibold text-brand-white">Best for you (preview)</div>
+                <div className="text-sm font-semibold text-brand-white">Best plans for you (estimate)</div>
                 <div className="mt-1 text-xs text-brand-cyan/70">
-                  Proxy ranking until IntelliWatt true-cost calculations are wired to your usage.
+                  Based on your last 12 months usage. Ranking uses provider estimates until IntelliWatt true-cost is enabled.
                 </div>
               </div>
               <div className="text-xs text-brand-cyan/60">
-                {bestLoading ? "Loading…" : bestOffers.length ? `Top ${bestOffers.length}` : "No results"}
+                {bestLoading
+                  ? "Loading…"
+                  : bestStripOffers.length
+                    ? `Top ${bestStripOffers.length}`
+                    : "No results"}
               </div>
             </div>
 
-            {bestOffers.length > 0 ? (
-              <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
-                {bestOffers.map((o) => (
-                  <OfferCard key={`best-${o.offerId}`} offer={o} />
-                ))}
+            {bestStripOffers.length > 0 ? (
+              <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap md:flex-nowrap md:overflow-x-auto">
+                {bestStripOffers.map((o) => {
+                  const metric = pickBest1000MetricCentsPerKwh(o);
+                  const supplier = (o as any)?.supplierName ?? "Unknown supplier";
+                  const plan = (o as any)?.planName ?? "Unknown plan";
+                  const status = (o as any)?.intelliwatt?.statusLabel ?? "UNAVAILABLE";
+                  const statusClass =
+                    status === "AVAILABLE"
+                      ? "border-emerald-400/40 bg-emerald-500/10 text-emerald-200"
+                      : status === "QUEUED"
+                        ? "border-amber-400/40 bg-amber-500/10 text-amber-200"
+                        : "border-brand-cyan/20 bg-brand-white/5 text-brand-cyan/70";
+
+                  return (
+                    <div
+                      key={`best-mini-${(o as any).offerId}`}
+                      className="rounded-2xl border border-brand-cyan/20 bg-brand-white/5 p-3 min-w-0 sm:w-[calc(50%-0.375rem)] md:w-[240px] md:flex-none"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="text-[0.7rem] text-brand-cyan/70 truncate">{supplier}</div>
+                          <div className="mt-0.5 text-sm font-semibold text-brand-white truncate">{plan}</div>
+                        </div>
+                        <div
+                          className={`shrink-0 rounded-full border px-2 py-1 text-[0.62rem] font-semibold uppercase tracking-[0.18em] ${statusClass}`}
+                        >
+                          {status === "AVAILABLE" ? "Available" : status === "QUEUED" ? "Queued" : "—"}
+                        </div>
+                      </div>
+
+                      <div className="mt-3 flex items-end justify-between gap-3">
+                        <div>
+                          <div className="text-[0.65rem] uppercase tracking-[0.25em] text-brand-cyan/55">1000</div>
+                          <div className="mt-0.5 text-base font-semibold text-brand-white">
+                            {fmtCentsPerKwh(metric)}
+                          </div>
+                        </div>
+                        <div className="text-[0.7rem] text-brand-cyan/60 text-right">
+                          {(o as any)?.termMonths ? `${(o as any).termMonths} mo` : "Term —"}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             ) : null}
           </div>
