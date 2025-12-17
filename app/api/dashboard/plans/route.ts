@@ -205,7 +205,13 @@ export async function GET(req: NextRequest) {
 
         const rows = Number(aggregates?._count?._all ?? 0) || 0;
         const totalKwhRaw: any = aggregates?._sum?.kwh ?? 0;
-        const totalKwh = Number(totalKwhRaw);
+        const totalKwh = (() => {
+          if (typeof totalKwhRaw === "number") return totalKwhRaw;
+          if (totalKwhRaw && typeof totalKwhRaw === "object" && typeof totalKwhRaw.toString === "function") {
+            return Number(totalKwhRaw.toString());
+          }
+          return Number(totalKwhRaw);
+        })();
 
         hasUsage = rows > 0;
         usageSummary = hasUsage
