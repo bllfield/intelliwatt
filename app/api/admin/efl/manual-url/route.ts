@@ -246,13 +246,24 @@ export async function POST(req: NextRequest) {
             const warned = candidates.find((s) =>
               /(termination\s+fee|early\s+termination|cancellation\s+fee)/i.test(s),
             );
-            if (warned) return warned;
+            if (warned) {
+              const mWarn =
+                warned.match(/\$([0-9]{1,4}(?:\.[0-9]{1,2})?)/) ?? null;
+              if (mWarn?.[1]) {
+                // Keep the admin table value consistent: store the $ amount (and formula hint if present),
+                // not a verbose sentence.
+                const hasMonthsRemaining = /months?\s+remaining/i.test(warned);
+                return hasMonthsRemaining
+                  ? `$${mWarn[1]} × months remaining`
+                  : `$${mWarn[1]}`;
+              }
+            }
 
             const m =
               rawText.match(
                 /(?:early\s+termination|termination|cancellation)\s+fee[\s\S]{0,180}?\$([0-9]{1,4}(?:\.[0-9]{1,2})?)/i,
               ) ?? null;
-            if (m?.[1]) return `Cancellation / termination fee: $${m[1]} (per EFL).`;
+            if (m?.[1]) return `$${m[1]}`;
 
             return null;
           })();

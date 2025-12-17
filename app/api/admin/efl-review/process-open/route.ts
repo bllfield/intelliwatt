@@ -183,7 +183,7 @@ export async function POST(req: NextRequest) {
                   src.match(
                     /(?:early\s+termination|termination|cancellation)\s+fee[\s\S]{0,180}?\$([0-9]{1,4}(?:\.[0-9]{1,2})?)/i,
                   ) ?? null;
-                if (m?.[1]) return `Cancellation / termination fee: $${m[1]} (per EFL).`;
+                if (m?.[1]) return `$${m[1]}`;
                 return null;
               })();
 
