@@ -202,7 +202,9 @@ export async function POST(req: NextRequest) {
 
           const avgRows = Array.isArray(validationAfter?.avgTableRows) ? validationAfter.avgTableRows : [];
           const pick = (kwh: number): number | null => {
-            const row = avgRows.find((r: any) => Number(r?.kwh) === kwh);
+            const row = avgRows.find(
+              (r: any) => Number(r?.usageKwh ?? r?.kwh ?? r?.usage) === kwh,
+            );
             const v = Number(row?.avgPriceCentsPerKwh);
             return Number.isFinite(v) ? v : null;
           };
@@ -211,7 +213,9 @@ export async function POST(req: NextRequest) {
             const pts = Array.isArray((validationAfter as any)?.points)
               ? ((validationAfter as any).points as any[])
               : [];
-            const row = pts.find((r: any) => Number(r?.kwh) === kwh);
+            const row = pts.find(
+              (r: any) => Number(r?.usageKwh ?? r?.kwh ?? r?.usage) === kwh,
+            );
             const v = Number(
               row?.modeledAvgCentsPerKwh ??
                 row?.modeledAvgPriceCentsPerKwh ??
