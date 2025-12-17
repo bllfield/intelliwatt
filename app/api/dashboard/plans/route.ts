@@ -379,6 +379,8 @@ export async function GET(req: NextRequest) {
     // Compute bestOffers (proxy ranking) server-side so the UI can render without an extra round-trip.
     // Must never throw; on any failure, fall back to [].
     let bestOffers: any[] = [];
+    let bestOffersBasis: string | null = null;
+    let bestOffersDisclaimer: string | null = null;
     try {
       if (hasUsage) {
         const candidates = offers
@@ -388,9 +390,17 @@ export async function GET(req: NextRequest) {
           .slice(0, 5)
           .map((x) => x.o);
         bestOffers = candidates.map(shapeOffer);
+
+        if (bestOffers.length > 0) {
+          bestOffersBasis = "proxy_1000kwh_efl_avgPriceCentsPerKwh1000";
+          bestOffersDisclaimer =
+            "Based on your last 12 months usage. Ranking uses provider 1000 kWh estimate until IntelliWatt true-cost is enabled.";
+        }
       }
     } catch {
       bestOffers = [];
+      bestOffersBasis = null;
+      bestOffersDisclaimer = null;
     }
 
     return NextResponse.json(
@@ -400,6 +410,8 @@ export async function GET(req: NextRequest) {
         usageSummary,
         offers: shaped,
         bestOffers,
+        bestOffersBasis,
+        bestOffersDisclaimer,
         page: safePage,
         pageSize,
         total,

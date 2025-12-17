@@ -26,6 +26,8 @@ type ApiResponse = {
   usageSummary?: UsageSummary;
   offers?: OfferRow[];
   bestOffers?: OfferRow[];
+  bestOffersBasis?: string | null;
+  bestOffersDisclaimer?: string | null;
   page?: number;
   pageSize?: number;
   total?: number;
@@ -466,8 +468,15 @@ export default function PlansClient() {
               <div>
                 <div className="text-sm font-semibold text-brand-white">Best plans for you (estimate)</div>
                 <div className="mt-1 text-xs text-brand-cyan/70">
-                  Based on your last 12 months usage. Ranking uses provider estimates until IntelliWatt true-cost is enabled.
+                  {typeof resp?.bestOffersDisclaimer === "string" && resp.bestOffersDisclaimer.trim()
+                    ? resp.bestOffersDisclaimer.trim()
+                    : "Based on your last 12 months usage. Ranking uses provider estimates until IntelliWatt true-cost is enabled."}
                 </div>
+                {typeof resp?.bestOffersBasis === "string" && resp.bestOffersBasis.trim() ? (
+                  <div className="mt-1 text-[0.7rem] text-brand-cyan/55 font-mono">
+                    {resp.bestOffersBasis.trim()}
+                  </div>
+                ) : null}
               </div>
               <div className="text-xs text-brand-cyan/60">
                 {bestStripOffers.length ? `Top ${bestStripOffers.length}` : "No results"}
