@@ -7,8 +7,9 @@ generator wattbuyOffersClient {
 
 datasource wattbuyOffersDb {
   provider = "postgresql"
-  url      = env("WATTBUY_OFFERS_DATABASE_URL")
-  directUrl = env("WATTBUY_OFFERS_DIRECT_URL")
+  // We use IntelliWatt-prefixed env vars in Vercel/.env for module databases.
+  url      = env("INTELLIWATT_WATTBUY_OFFERS_DATABASE_URL")
+  directUrl = env("INTELLIWATT_WATTBUY_OFFERS_DIRECT_URL")
 }
 
 model WattbuyOffersModuleBootstrap {
