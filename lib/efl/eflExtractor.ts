@@ -458,12 +458,27 @@ function extractEflVersionCode(text: string): string | null {
   }
 
   // C) Fallback: standalone codes like "EFL_<...>" on any line.
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? "";
     // Allow + and - in case the plan name embeds them.
     const m = line.match(/\b(EFL_[A-Z0-9+_.-]+)\b/i);
     if (m?.[1]) {
       const val = normalizeToken(m[1]);
-      if (val && !isWeakVersionCandidate(val)) return val;
+      if (!val) continue;
+
+      // Handle a very common pdftotext wrap where ENGL/SPA is split:
+      //   EFL_..._ENGL
+      //   ISH
+      // (or SPAN + ISH, etc.)
+      //
+      // We only stitch short alpha suffixes to avoid accidentally joining unrelated lines.
+      const next = lines[i + 1] ?? "";
+      if (next) {
+        const stitched = stitchWrapped([val, next]);
+        if (stitched && !isWeakVersionCandidate(stitched)) return stitched;
+      }
+
+      if (!isWeakVersionCandidate(val)) return val;
     }
   }
 

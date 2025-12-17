@@ -41,6 +41,17 @@ describe("eflExtractor - EFL Version code extraction", () => {
     );
   });
 
+  test("stitches fallback EFL_* token when trailing language suffix is on the next line (ENGL + ISH)", () => {
+    const text = `
+      ... footer stuff ...
+      EFL_ONCOR_ELEC_FSVRVAL12_20251215_ENGL
+      ISH
+    `;
+    expect(extractEflVersionCodeFromText(text)).toBe(
+      "EFL_ONCOR_ELEC_FSVRVAL12_20251215_ENGLISH",
+    );
+  });
+
   test("does not return junk fragments like ENGLISH when an EFL_* token exists nearby", () => {
     const text = `
       EFL Version:
