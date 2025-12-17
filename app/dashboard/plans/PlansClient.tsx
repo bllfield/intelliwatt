@@ -61,6 +61,31 @@ export default function PlansClient() {
   const prefetchInFlightRef = useRef(false);
   const prefetchAttemptsRef = useRef(0);
 
+  // Reset prefetch attempts when the *user-visible dataset* changes (filters/pagination),
+  // but do NOT reset on our internal refresh nonce (otherwise we could loop forever
+  // on truly manual-review items that remain QUEUED).
+  const datasetKey = useMemo(
+    () =>
+      JSON.stringify({
+        q,
+        rateType,
+        term,
+        renewableMin,
+        template,
+        isRenter,
+        sort,
+        page,
+        pageSize,
+      }),
+    [q, rateType, term, renewableMin, template, isRenter, sort, page, pageSize],
+  );
+
+  useEffect(() => {
+    prefetchAttemptsRef.current = 0;
+    prefetchInFlightRef.current = false;
+    setPrefetchNote(null);
+  }, [datasetKey]);
+
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem("dashboard_plans_is_renter");
