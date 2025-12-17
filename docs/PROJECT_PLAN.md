@@ -2267,6 +2267,9 @@ Scope
     - Captures `payloadJson`, `payloadSha256`, `fetchedAt`, and request context (`wattkey`, `esiid`, optional `houseAddressId` / `requestKey`).
   - Optional bridge: dual-write snapshots into master DB only when `WATTBUY_SNAPSHOT_DUALWRITE_MASTER=1`.
   - Optional bridge script: `npx tsx scripts/wattbuy/map-snapshots-to-master.ts` (when dual-write is disabled).
+  - **Module DB connection strategy (recommended):**
+    - `WATTBUY_OFFERS_DATABASE_URL`: pooled PgBouncer URL (port `25061`, `pgbouncer=true`) for Vercel runtime writes.
+    - `WATTBUY_OFFERS_DIRECT_URL`: direct URL (port `25060`, no PgBouncer) for Prisma migrations / introspection.
 
 Rollback
 
