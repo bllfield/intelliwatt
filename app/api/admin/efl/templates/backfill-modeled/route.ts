@@ -64,10 +64,11 @@ export async function POST(req: NextRequest) {
       ];
     }
 
-    const plans = await (prisma as any).ratePlan.findMany({
+    // Fetch one extra row so we can paginate even when we don't hit the time budget.
+    const plansPlus = await (prisma as any).ratePlan.findMany({
       where,
       orderBy: { id: "asc" },
-      take: limit,
+      take: limit + 1,
       select: {
         id: true,
         eflUrl: true,
@@ -79,6 +80,8 @@ export async function POST(req: NextRequest) {
         rateStructure: true,
       },
     });
+    const hasMore = Array.isArray(plansPlus) && plansPlus.length > limit;
+    const plans = hasMore ? plansPlus.slice(0, limit) : plansPlus;
 
     let processedCount = 0;
     let updatedCount = 0;
@@ -86,9 +89,13 @@ export async function POST(req: NextRequest) {
     let errorsCount = 0;
     let lastCursorId: string | null = null;
 
+    let ranOutOfTime = false;
     for (const p of plans as any[]) {
       lastCursorId = String(p.id);
-      if (Date.now() - startMs > timeBudgetMs) break;
+      if (Date.now() - startMs > timeBudgetMs) {
+        ranOutOfTime = true;
+        break;
+      }
 
       processedCount++;
 
@@ -190,7 +197,8 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const truncated = Boolean(lastCursorId && plans.length === limit && Date.now() - startMs > timeBudgetMs);
+    // Continue pagination whenever there might be more work, or we ran out of time.
+    const truncated = Boolean(lastCursorId && (ranOutOfTime || hasMore));
     const nextCursorId = truncated ? lastCursorId : null;
 
     const body: Ok = {
