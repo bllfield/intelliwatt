@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 
 type OfferRow = {
   offerId: string;
@@ -27,6 +28,20 @@ type OfferRow = {
           annualCostDollars: number;
           monthlyCostDollars: number;
           confidence?: "LOW" | "MEDIUM";
+          componentsV2?: {
+            rep?: {
+              energyDollars?: number;
+              fixedDollars?: number;
+              creditsDollars?: number;
+              totalDollars?: number;
+            };
+            tdsp?: {
+              deliveryDollars?: number;
+              fixedDollars?: number;
+              totalDollars?: number;
+            };
+            totalDollars?: number;
+          };
         }
       | { status: "MISSING_USAGE" }
       | { status: "MISSING_TEMPLATE" }
@@ -59,6 +74,7 @@ function badgeClasses(status: OfferRow["intelliwatt"]["statusLabel"]): string {
 }
 
 export default function OfferCard({ offer }: { offer: OfferRow }) {
+  const [estOpen, setEstOpen] = useState(false);
   const supplier = offer.supplierName ?? "Unknown supplier";
   const plan = offer.planName ?? "Unknown plan";
   const term = typeof offer.termMonths === "number" ? `${offer.termMonths} mo` : "Term —";
@@ -77,6 +93,12 @@ export default function OfferCard({ offer }: { offer: OfferRow }) {
   const showEstimateLine = tce?.status === "OK";
   const estimateMonthly = showEstimateLine ? fmtDollars2((tce as any)?.monthlyCostDollars) : null;
   const tdspTag = offer.intelliwatt?.tdspRatesApplied ? "incl. TDSP" : null;
+  const c2 = showEstimateLine ? (tce as any)?.componentsV2 : null;
+  const repEnergy = fmtDollars2(c2?.rep?.energyDollars);
+  const tdspDelivery = fmtDollars2(c2?.tdsp?.deliveryDollars);
+  const tdspFixed = fmtDollars2(c2?.tdsp?.fixedDollars);
+  const totalAnnual = fmtDollars2(c2?.totalDollars ?? (tce as any)?.annualCostDollars);
+  const tdspEffective = offer.intelliwatt?.tdspRatesApplied?.effectiveDate ?? null;
 
   return (
     <div className="rounded-3xl border border-brand-cyan/25 bg-brand-navy p-5 shadow-[0_18px_40px_rgba(10,20,60,0.35)]">
@@ -150,8 +172,62 @@ export default function OfferCard({ offer }: { offer: OfferRow }) {
 
       {showEstimateLine && estimateMonthly ? (
         <div className="mt-3 text-xs text-brand-cyan/70">
-          <span className="font-semibold text-brand-white/90">Est. ${estimateMonthly}/mo</span>
-          {tdspTag ? <span className="text-brand-cyan/60"> · {tdspTag}</span> : null}
+          <span
+            className="relative inline-flex"
+            onMouseEnter={() => setEstOpen(true)}
+            onMouseLeave={() => setEstOpen(false)}
+          >
+            <button
+              type="button"
+              className="font-semibold text-brand-white/90 hover:underline underline-offset-2"
+              aria-haspopup="dialog"
+              aria-expanded={estOpen}
+              onClick={() => setEstOpen((v) => !v)}
+              onBlur={() => setEstOpen(false)}
+            >
+              Est. ${estimateMonthly}/mo
+              {tdspTag ? <span className="text-brand-cyan/60"> · {tdspTag}</span> : null}
+            </button>
+
+            {estOpen ? (
+              <div className="absolute left-0 top-full mt-2 w-[260px] rounded-2xl border border-brand-cyan/25 bg-brand-navy/95 p-3 shadow-[0_18px_40px_rgba(0,0,0,0.35)] backdrop-blur">
+                <div className="text-[0.65rem] uppercase tracking-[0.22em] text-brand-cyan/60">
+                  Estimate breakdown (annual)
+                </div>
+                <div className="mt-2 space-y-1 text-xs text-brand-cyan/75">
+                  {repEnergy ? (
+                    <div className="flex items-center justify-between gap-3">
+                      <span>REP energy</span>
+                      <span className="font-mono text-brand-white/90">${repEnergy}</span>
+                    </div>
+                  ) : null}
+                  {tdspDelivery ? (
+                    <div className="flex items-center justify-between gap-3">
+                      <span>TDSP delivery</span>
+                      <span className="font-mono text-brand-white/90">${tdspDelivery}</span>
+                    </div>
+                  ) : null}
+                  {tdspFixed ? (
+                    <div className="flex items-center justify-between gap-3">
+                      <span>TDSP fixed</span>
+                      <span className="font-mono text-brand-white/90">${tdspFixed}</span>
+                    </div>
+                  ) : null}
+                  {totalAnnual ? (
+                    <div className="mt-1 flex items-center justify-between gap-3 border-t border-brand-cyan/15 pt-2">
+                      <span className="text-brand-cyan/80">Total</span>
+                      <span className="font-mono font-semibold text-brand-white">${totalAnnual}</span>
+                    </div>
+                  ) : null}
+                  {tdspEffective ? (
+                    <div className="mt-2 text-[0.7rem] text-brand-cyan/60">
+                      Effective: <span className="font-mono">{tdspEffective}</span>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+          </span>
         </div>
       ) : null}
 
