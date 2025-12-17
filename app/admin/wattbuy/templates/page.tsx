@@ -92,7 +92,7 @@ export default function WattbuyTemplatedPlansPage() {
   >("bestRate");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
 
-  async function load() {
+  async function load(addrOverride?: ParsedPlace | null) {
     if (!token) {
       setError("Admin token required.");
       return;
@@ -104,11 +104,12 @@ export default function WattbuyTemplatedPlansPage() {
       const params = new URLSearchParams();
       params.set("limit", String(limit));
       if (q.trim()) params.set("q", q.trim());
-      if (addr?.line1 && addr.city && addr.state && addr.zip) {
-        params.set("address", addr.line1);
-        params.set("city", addr.city);
-        params.set("state", addr.state);
-        params.set("zip", addr.zip);
+      const a = addrOverride ?? addr;
+      if (a?.line1 && a.city && a.state && a.zip) {
+        params.set("address", a.line1);
+        params.set("city", a.city);
+        params.set("state", a.state);
+        params.set("zip", a.zip);
       }
 
       const res = await fetch(`/api/admin/wattbuy/templated-plans?${params}`, {
@@ -119,7 +120,7 @@ export default function WattbuyTemplatedPlansPage() {
         throw new Error((data as any)?.error || `HTTP ${res.status}`);
       }
       setRows((data as ApiOk).rows);
-      if (addr?.line1 && addr.city && addr.state && addr.zip) {
+      if (a?.line1 && a.city && a.state && a.zip) {
         const ok = data as ApiOk;
         const offerCount = typeof ok.offerCount === "number" ? ok.offerCount : null;
         const mappedCount = typeof ok.mappedOfferCount === "number" ? ok.mappedOfferCount : null;
@@ -288,7 +289,7 @@ export default function WattbuyTemplatedPlansPage() {
         onChange={(next) => {
           setAddr(next);
           if (token) {
-            void load();
+            void load(next);
           }
         }}
       />
