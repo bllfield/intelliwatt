@@ -218,6 +218,8 @@ type Row = {
   modeledTdspCode: string | null;
   modeledTdspSnapshotAt: string | null;
   modeledSource?: "DB_VALIDATION" | "COMPUTED_TDSP_SNAPSHOT" | "NONE";
+  validationStatus?: "PASS" | "FAIL" | "SKIP" | null;
+  passStrength?: "STRONG" | "WEAK" | "INVALID" | null;
   cancelFee: string | null;
   eflUrl: string | null;
   eflPdfSha256: string | null;
@@ -347,6 +349,9 @@ export async function GET(req: NextRequest) {
       (plans as any[]).map(async (p) => {
         const rsObj: any = p.rateStructure && typeof p.rateStructure === "object" ? p.rateStructure : null;
         const v = rsObj?.__eflAvgPriceValidation ?? null;
+        const embeddedStrength =
+          (rsObj?.__eflAvgPriceEvidence?.passStrength as any) ?? null;
+        const embeddedStatus = (v?.status as any) ?? null;
         const points: any[] = Array.isArray(v?.points) ? v.points : [];
         const modeledFromDb = (kwh: number): number | null => {
           const hit = points.find(
@@ -417,6 +422,14 @@ export async function GET(req: NextRequest) {
           modeledTdspCode: tdsp?.tdspCode ?? null,
           modeledTdspSnapshotAt: tdsp?.snapshotAt ?? null,
           modeledSource,
+          validationStatus:
+            embeddedStatus === "PASS" || embeddedStatus === "FAIL" || embeddedStatus === "SKIP"
+              ? embeddedStatus
+              : null,
+          passStrength:
+            embeddedStrength === "STRONG" || embeddedStrength === "WEAK" || embeddedStrength === "INVALID"
+              ? embeddedStrength
+              : null,
           cancelFee: p.cancelFee ?? null,
           eflUrl: p.eflUrl ?? null,
           eflPdfSha256: p.eflPdfSha256 ?? null,

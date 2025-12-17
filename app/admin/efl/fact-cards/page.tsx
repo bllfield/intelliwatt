@@ -470,7 +470,7 @@ export default function FactCardOpsPage() {
     useState(false);
   const [backfillOverwrite, setBackfillOverwrite] = useState(false);
   const [tplSortKey, setTplSortKey] = useState<
-    "utilityId" | "supplier" | "planName" | "termMonths" | "rate500" | "rate1000" | "rate2000" | "eflVersionCode"
+    "utilityId" | "supplier" | "planName" | "termMonths" | "rate500" | "rate1000" | "rate2000" | "passStrength" | "eflVersionCode"
   >("supplier");
   const [tplSortDir, setTplSortDir] = useState<SortDir>("asc");
 
@@ -691,6 +691,8 @@ export default function FactCardOpsPage() {
                     ? typeof a?.rate2000 === "number"
                       ? a.rate2000
                       : null
+                    : tplSortKey === "passStrength"
+                      ? a?.passStrength
                     : a?.eflVersionCode;
       const bv =
         tplSortKey === "utilityId"
@@ -715,6 +717,8 @@ export default function FactCardOpsPage() {
                     ? typeof b?.rate2000 === "number"
                       ? b.rate2000
                       : null
+                    : tplSortKey === "passStrength"
+                      ? b?.passStrength
                     : b?.eflVersionCode;
       return cmp(av ?? null, bv ?? null, tplSortDir);
     });
@@ -1279,6 +1283,9 @@ export default function FactCardOpsPage() {
                 <th className="px-2 py-2 text-right cursor-pointer select-none" onClick={() => toggleTplSort("rate2000")}>
                   2000 {tplSortKey === "rate2000" ? (tplSortDir === "asc" ? "▲" : "▼") : ""}
                 </th>
+                <th className="px-2 py-2 text-left cursor-pointer select-none" onClick={() => toggleTplSort("passStrength")}>
+                  Strength {tplSortKey === "passStrength" ? (tplSortDir === "asc" ? "▲" : "▼") : ""}
+                </th>
                 <th className="px-2 py-2 text-left cursor-pointer select-none" onClick={() => toggleTplSort("eflVersionCode")}>
                   Ver {tplSortKey === "eflVersionCode" ? (tplSortDir === "asc" ? "▲" : "▼") : ""}
                 </th>
@@ -1338,6 +1345,26 @@ export default function FactCardOpsPage() {
                           ? `model ${r.modeledRate2000.toFixed(3)}${r?.modeledTdspCode ? ` (${r.modeledTdspCode} ${String(r.modeledTdspSnapshotAt ?? "").slice(0, 10) || "latest"})` : ""}`
                           : "model —"}
                       </div>
+                    </td>
+                    <td className="px-2 py-2">
+                      <span
+                        className={
+                          (r as any)?.passStrength === "STRONG"
+                            ? "inline-flex px-2 py-0.5 rounded-full bg-green-100 text-green-800"
+                            : (r as any)?.passStrength === "WEAK"
+                              ? "inline-flex px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-800"
+                              : (r as any)?.passStrength === "INVALID"
+                                ? "inline-flex px-2 py-0.5 rounded-full bg-red-100 text-red-800"
+                                : "inline-flex px-2 py-0.5 rounded-full bg-gray-100 text-gray-700"
+                        }
+                        title={
+                          (r as any)?.validationStatus
+                            ? `Validation: ${(r as any).validationStatus}`
+                            : "Validation: —"
+                        }
+                      >
+                        {(r as any)?.passStrength ?? "—"}
+                      </span>
                     </td>
                     <td className="px-2 py-2">{r.eflVersionCode ?? "-"}</td>
                     <td className="px-2 py-2">
