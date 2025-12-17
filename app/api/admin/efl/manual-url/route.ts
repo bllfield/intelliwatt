@@ -358,6 +358,10 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
+      build: {
+        vercelGitCommitSha: process.env.VERCEL_GIT_COMMIT_SHA ?? null,
+        vercelEnv: process.env.VERCEL_ENV ?? null,
+      },
       eflUrl: effectiveEflUrl,
       eflSourceUrl,
       eflPdfSha256: template.eflPdfSha256,

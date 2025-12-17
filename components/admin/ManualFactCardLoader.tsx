@@ -11,6 +11,7 @@ import React, { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 type UploadResponse = {
   ok: true;
+  build?: { vercelGitCommitSha?: string | null; vercelEnv?: string | null };
   eflUrl?: string;
   eflPdfSha256: string;
   repPuctCertificate: string | null;
@@ -436,6 +437,15 @@ export function ManualFactCardLoader(props: {
           </div>
 
           <div className="grid gap-3 md:grid-cols-2 text-xs text-brand-navy/80">
+            <div>
+              <div className="font-semibold text-brand-navy mb-1">Build</div>
+              <div className="font-mono">
+                {result.build?.vercelEnv ?? "—"}{" "}
+                {result.build?.vercelGitCommitSha
+                  ? `(${String(result.build.vercelGitCommitSha).slice(0, 8)})`
+                  : ""}
+              </div>
+            </div>
             <div>
               <div className="font-semibold text-brand-navy mb-1">REP PUCT Certificate</div>
               <div className="font-mono">{result.repPuctCertificate ?? "—"}</div>
