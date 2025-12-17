@@ -330,7 +330,7 @@ export async function GET(req: NextRequest) {
 
     const shapeOffer = (o: any) => {
       const ratePlanId = mapByOfferId.get(o.offer_id) ?? null;
-      const templateAvailable = Boolean(ratePlanId);
+      const templateAvailable = ratePlanId != null;
       const eflUrl = o.docs?.efl ?? null;
       const statusLabel = templateAvailable ? "AVAILABLE" : eflUrl ? "QUEUED" : "UNAVAILABLE";
 
@@ -364,7 +364,8 @@ export async function GET(req: NextRequest) {
         },
         intelliwatt: {
           templateAvailable,
-          ratePlanId: ratePlanId ?? undefined,
+          // Always return a stable shape for clients: string when mapped, else null.
+          ratePlanId,
           statusLabel,
         },
         utility: {

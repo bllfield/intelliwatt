@@ -2303,6 +2303,7 @@ Guardrails
 - Returns `bestOffers` (same offer card shape as `offers`) when `hasUsage=true`, using a temporary proxy metric (1000kWh EFL average price) for ranking.
 - Returns `bestOffersBasis` + `bestOffersDisclaimer` so the “Best plans for you” strip has consistent messaging from the API (and can be swapped later when true-cost goes live).
 - Wires `OfferIdRatePlanMap` into each offer card to show **IntelliWatt calculation available** when `ratePlanId` exists.
+- `/api/dashboard/plans` now returns `intelliwatt.ratePlanId` per offer (from `OfferIdRatePlanMap`) so true-cost can use `RatePlan` templates directly when wired.
 - Shows **Queued / calculations not available** messaging when an EFL exists but no template mapping exists yet.
 - Uses a sticky filter/sort bar + pagination to avoid an infinite scroll plan list.
 - When `hasUsage=true`, shows a compact **“Best plans for you (estimate)”** strip at the top using the offer’s 1000kWh EFL average price (field: `efl.avgPriceCentsPerKwh1000`) as a temporary proxy ranking.
