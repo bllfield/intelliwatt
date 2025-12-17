@@ -21,6 +21,23 @@ type OfferRow = {
     templateAvailable: boolean;
     ratePlanId?: string;
     statusLabel: "AVAILABLE" | "QUEUED" | "UNAVAILABLE";
+    trueCostEstimate?:
+      | {
+          status: "OK";
+          annualCostDollars: number;
+          monthlyCostDollars: number;
+          confidence?: "LOW" | "MEDIUM";
+        }
+      | { status: "MISSING_USAGE" }
+      | { status: "MISSING_TEMPLATE" }
+      | { status: "NOT_IMPLEMENTED" };
+    tdspRatesApplied?:
+      | {
+          effectiveDate?: string;
+          perKwhDeliveryChargeCents?: number;
+          monthlyCustomerChargeDollars?: number;
+        }
+      | null;
   };
   utility?: { tdspSlug?: string; utilityName?: string };
 };
@@ -28,6 +45,11 @@ type OfferRow = {
 function fmtCents(v: number | undefined): string {
   if (typeof v !== "number" || !Number.isFinite(v)) return "—";
   return `${v.toFixed(2)}¢`;
+}
+
+function fmtDollars2(v: number | undefined): string | null {
+  if (typeof v !== "number" || !Number.isFinite(v)) return null;
+  return v.toFixed(2);
 }
 
 function badgeClasses(status: OfferRow["intelliwatt"]["statusLabel"]): string {
@@ -50,6 +72,11 @@ export default function OfferCard({ offer }: { offer: OfferRow }) {
   const status = offer.intelliwatt.statusLabel;
   const statusText =
     status === "AVAILABLE" ? "AVAILABLE" : status === "QUEUED" ? "QUEUED" : "NOT AVAILABLE";
+
+  const tce = offer.intelliwatt?.trueCostEstimate;
+  const showEstimateLine = tce?.status === "OK";
+  const estimateMonthly = showEstimateLine ? fmtDollars2((tce as any)?.monthlyCostDollars) : null;
+  const tdspTag = offer.intelliwatt?.tdspRatesApplied ? "incl. TDSP" : null;
 
   return (
     <div className="rounded-3xl border border-brand-cyan/25 bg-brand-navy p-5 shadow-[0_18px_40px_rgba(10,20,60,0.35)]">
@@ -120,6 +147,13 @@ export default function OfferCard({ offer }: { offer: OfferRow }) {
           </div>
         </div>
       </div>
+
+      {showEstimateLine && estimateMonthly ? (
+        <div className="mt-3 text-xs text-brand-cyan/70">
+          <span className="font-semibold text-brand-white/90">Est. ${estimateMonthly}/mo</span>
+          {tdspTag ? <span className="text-brand-cyan/60"> · {tdspTag}</span> : null}
+        </div>
+      ) : null}
 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-xs text-brand-cyan/65">
         <div className="truncate">
