@@ -2307,6 +2307,7 @@ Guardrails
 - `/api/dashboard/plans` now returns `intelliwatt.trueCost` status scaffolding per offer (no calculations yet).
 - Added `lib/plan-engine/calculatePlanCostForUsage.ts` (pure stub + types), and `/api/dashboard/plans` now returns `intelliwatt.trueCostEstimate` per offer (placeholder).
 - Added `lib/plan-engine/getRatePlanTemplate.ts` (master DB read helper for `RatePlan` templates; no throwing; returns only fields needed for later true-cost calculations).
+- Added `lib/plan-engine/getTdspDeliveryRates.ts` (stub TDSP delivery rates contract; returns null for now).
 - Shows **Queued / calculations not available** messaging when an EFL exists but no template mapping exists yet.
 - Uses a sticky filter/sort bar + pagination to avoid an infinite scroll plan list.
 - When `hasUsage=true`, shows a compact **“Best plans for you (estimate)”** strip at the top using the offer’s 1000kWh EFL average price (field: `efl.avgPriceCentsPerKwh1000`) as a temporary proxy ranking.
