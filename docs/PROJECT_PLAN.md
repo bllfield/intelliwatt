@@ -2324,6 +2324,7 @@ Guardrails
 - Plan cards show a proxy monthly estimate when usage exists and `intelliwatt.trueCostEstimate.status === "OK"` (with an **“incl. TDSP”** tag when `intelliwatt.tdspRatesApplied` is present).
 - Added a breakdown popover on the plan card monthly estimate (REP vs TDSP split + TDSP effective date when available).
 - Estimate breakdown popover now shows monthly + annual for REP/TDSP/Total.
+- Extracted `EstimateBreakdownPopover` into a reusable component (used by `OfferCard`).
 - Shows a compact banner when **NOT AVAILABLE** plans are present, with a one-click action to enable **“Show only AVAILABLE templates”**.
 
 Next (Dashboard):
