@@ -133,7 +133,12 @@ export async function POST(req: NextRequest) {
           continue;
         }
 
-        const points = Array.isArray(finalValidation?.points) ? finalValidation.points : [];
+      const points = Array.isArray(finalValidation?.points) ? finalValidation.points : [];
+      if (!finalValidation || points.length === 0) {
+        skippedCount++;
+        notes.push(`SKIP no validation points: ratePlanId=${p.id} url=${eflUrl}`);
+        continue;
+      }
         const modeledRateFor = (kwh: number): number | null => {
           const hit = points.find(
             (x: any) => Number(x?.usageKwh ?? x?.kwh ?? x?.usage) === kwh,

@@ -466,6 +466,9 @@ export default function FactCardOpsPage() {
   const [tplRows, setTplRows] = useState<TemplateRow[]>([]);
   const [tplTotalCount, setTplTotalCount] = useState<number | null>(null);
   const [tdspNote, setTdspNote] = useState<string | null>(null);
+  const [backfillIncludeNonStrong, setBackfillIncludeNonStrong] =
+    useState(false);
+  const [backfillOverwrite, setBackfillOverwrite] = useState(false);
   const [tplSortKey, setTplSortKey] = useState<
     "utilityId" | "supplier" | "planName" | "termMonths" | "rate500" | "rate1000" | "rate2000" | "eflVersionCode"
   >("supplier");
@@ -532,7 +535,11 @@ export default function FactCardOpsPage() {
       return;
     }
     const ok = window.confirm(
-      "Backfill modeled 500/1000/2000 kWh rates + validator proof into RatePlan columns?\n\nThis refetches EFL PDFs and runs the full pipeline. Recommended: run on Preview/DEV first.",
+      `Backfill modeled 500/1000/2000 kWh rates + validator proof into RatePlan columns?\n\nMode: ${
+        backfillIncludeNonStrong
+          ? "Include WEAK/FAIL (stores proof even when validation isn't STRONG)"
+          : "PASS + STRONG only (default/safest)"
+      }\nOverwrite: ${backfillOverwrite ? "YES" : "NO (fill missing only)"}\n\nThis refetches EFL PDFs and runs the full pipeline.`,
     );
     if (!ok) return;
 
@@ -551,7 +558,8 @@ export default function FactCardOpsPage() {
         const qs = new URLSearchParams();
         qs.set("limit", "15");
         qs.set("timeBudgetMs", "110000");
-        qs.set("onlyStrong", "1");
+        qs.set("onlyStrong", backfillIncludeNonStrong ? "0" : "1");
+        if (backfillOverwrite) qs.set("overwrite", "1");
         if (cursorId) qs.set("cursorId", cursorId);
 
         const res = await fetch(`/api/admin/efl/templates/backfill-modeled?${qs.toString()}`, {
@@ -1209,6 +1217,24 @@ export default function FactCardOpsPage() {
             <button className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60" onClick={() => void backfillModeledProofIntoDb()} disabled={!ready || tplLoading}>
               Backfill modeled proof (DB)
             </button>
+            <label className="flex items-center gap-2 text-xs text-gray-700 select-none">
+              <input
+                type="checkbox"
+                checked={backfillIncludeNonStrong}
+                onChange={(e) => setBackfillIncludeNonStrong(e.target.checked)}
+                disabled={!ready || tplLoading}
+              />
+              Include WEAK/FAIL
+            </label>
+            <label className="flex items-center gap-2 text-xs text-gray-700 select-none">
+              <input
+                type="checkbox"
+                checked={backfillOverwrite}
+                onChange={(e) => setBackfillOverwrite(e.target.checked)}
+                disabled={!ready || tplLoading}
+              />
+              Overwrite existing
+            </label>
             <button className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60" onClick={() => void cleanupInvalidTemplates()} disabled={!ready || tplLoading}>
               Cleanup missing fields
             </button>
