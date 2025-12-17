@@ -368,10 +368,14 @@ export async function POST(req: NextRequest) {
         }
       }
     } catch {
+      // If persistence/auto-resolve/linking fails mid-flight, reset diagnostics to safe defaults
+      // so the API response never implies that OfferRateMap linking completed.
       templatePersisted = false;
       persistedRatePlanId = null;
       autoResolvedQueueCount = 0;
       queueAutoResolveUpdatedCount = 0;
+      offerRateMapLinkAttempted = false;
+      offerRateMapLinkUpdatedCount = 0;
     }
 
     return NextResponse.json({
