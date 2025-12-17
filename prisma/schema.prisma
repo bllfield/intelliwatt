@@ -879,6 +879,15 @@ model RatePlan {
   rate2000   Float?
   cancelFee  String?
 
+  /// Modeled all-in average prices (¢/kWh) as computed by the EFL avg-price validator at persistence time.
+  /// These are stored as evidence that our parsed RateStructure reproduces the EFL disclosure table.
+  modeledRate500  Float?
+  modeledRate1000 Float?
+  modeledRate2000 Float?
+  /// Full validator snapshot (includes expected vs modeled points, assumptionsUsed, snippet, etc.)
+  modeledEflAvgPriceValidation Json?
+  modeledComputedAt            DateTime?
+
   // Source documents for this plan (EFL, TOS, YRAC)
   eflUrl  String?
   tosUrl  String?

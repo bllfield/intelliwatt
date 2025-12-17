@@ -145,11 +145,28 @@ export async function POST(req: NextRequest) {
             if (prValidation?.requiresManualReview !== true) {
               const points: any[] = Array.isArray(finalValidation?.points) ? finalValidation.points : [];
               const expectedRateFor = (kwh: number): number | null => {
-                const p = points.find((x: any) => Number(x?.usageKwh) === kwh);
+                const p = points.find(
+                  (x: any) =>
+                    Number(x?.usageKwh ?? x?.kwh ?? x?.usage) === kwh,
+                );
                 const n = Number(p?.expectedAvgCentsPerKwh);
                 return Number.isFinite(n) ? n : null;
               };
 
+              const modeledRateFor = (kwh: number): number | null => {
+                const p = points.find(
+                  (x: any) =>
+                    Number(x?.usageKwh ?? x?.kwh ?? x?.usage) === kwh,
+                );
+                const n = Number(
+                  p?.modeledAvgCentsPerKwh ??
+                    p?.modeledAvgPriceCentsPerKwh ??
+                    p?.modeledCentsPerKwh,
+                );
+                return Number.isFinite(n) ? n : null;
+              };
+
+              const modeledAt = new Date();
               const saved = await upsertRatePlanFromEfl({
                 mode: "live",
                 eflUrl: fetched.pdfUrl ?? eflUrl,
@@ -163,6 +180,11 @@ export async function POST(req: NextRequest) {
                 rate500: expectedRateFor(500),
                 rate1000: expectedRateFor(1000),
                 rate2000: expectedRateFor(2000),
+                modeledRate500: modeledRateFor(500),
+                modeledRate1000: modeledRateFor(1000),
+                modeledRate2000: modeledRateFor(2000),
+                modeledEflAvgPriceValidation: finalValidation ?? null,
+                modeledComputedAt: modeledAt,
                 cancelFee: null,
                 providerName: it?.supplier ?? null,
                 planName: it?.planName ?? null,
@@ -173,7 +195,7 @@ export async function POST(req: NextRequest) {
                         ...(derivedRateStructure as any),
                         __eflAvgPriceValidation: finalValidation ?? null,
                         __eflAvgPriceEvidence: {
-                          computedAt: new Date().toISOString(),
+                          computedAt: modeledAt.toISOString(),
                           source: "queue_process",
                           passStrength: passStrength ?? null,
                         },

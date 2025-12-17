@@ -290,6 +290,11 @@ export async function GET(req: NextRequest) {
         rate500: true,
         rate1000: true,
         rate2000: true,
+        modeledRate500: true,
+        modeledRate1000: true,
+        modeledRate2000: true,
+        modeledEflAvgPriceValidation: true,
+        modeledComputedAt: true,
         cancelFee: true,
         eflUrl: true,
         eflPdfSha256: true,
@@ -344,17 +349,33 @@ export async function GET(req: NextRequest) {
         const v = rsObj?.__eflAvgPriceValidation ?? null;
         const points: any[] = Array.isArray(v?.points) ? v.points : [];
         const modeledFromDb = (kwh: number): number | null => {
-          const hit = points.find((x: any) => Number(x?.usageKwh) === kwh);
-          const n = Number(hit?.modeledAvgCentsPerKwh);
+          const hit = points.find(
+            (x: any) => Number(x?.usageKwh ?? x?.kwh ?? x?.usage) === kwh,
+          );
+          const n = Number(
+            hit?.modeledAvgCentsPerKwh ??
+              hit?.modeledAvgPriceCentsPerKwh ??
+              hit?.modeledCentsPerKwh,
+          );
           return Number.isFinite(n) ? n : null;
         };
         const modeledDb500 = modeledFromDb(500);
         const modeledDb1000 = modeledFromDb(1000);
         const modeledDb2000 = modeledFromDb(2000);
 
+        // Prefer the explicit modeled columns (evidence at persistence/backfill time),
+        // but fall back to embedded RateStructure proof for older rows.
+        const modeledCol500 = typeof p.modeledRate500 === "number" ? p.modeledRate500 : null;
+        const modeledCol1000 = typeof p.modeledRate1000 === "number" ? p.modeledRate1000 : null;
+        const modeledCol2000 = typeof p.modeledRate2000 === "number" ? p.modeledRate2000 : null;
+
+        const effectiveDb500 = modeledCol500 ?? modeledDb500;
+        const effectiveDb1000 = modeledCol1000 ?? modeledDb1000;
+        const effectiveDb2000 = modeledCol2000 ?? modeledDb2000;
+
         const tdsp = await getTdsp(p.utilityId);
         const modeledSource: Row["modeledSource"] =
-          typeof modeledDb500 === "number" || typeof modeledDb1000 === "number" || typeof modeledDb2000 === "number"
+          typeof effectiveDb500 === "number" || typeof effectiveDb1000 === "number" || typeof effectiveDb2000 === "number"
             ? "DB_VALIDATION"
             : tdsp
               ? "COMPUTED_TDSP_SNAPSHOT"
@@ -382,16 +403,16 @@ export async function GET(req: NextRequest) {
               ? p.rate2000
               : computeAvgCentsPerKwhFromRateStructure(p.rateStructure, 2000),
           modeledRate500:
-            typeof modeledDb500 === "number"
-              ? modeledDb500
+            typeof effectiveDb500 === "number"
+              ? effectiveDb500
               : computeAllInAvgCentsPerKwhFromRateStructure(p.rateStructure, 500, tdsp),
           modeledRate1000:
-            typeof modeledDb1000 === "number"
-              ? modeledDb1000
+            typeof effectiveDb1000 === "number"
+              ? effectiveDb1000
               : computeAllInAvgCentsPerKwhFromRateStructure(p.rateStructure, 1000, tdsp),
           modeledRate2000:
-            typeof modeledDb2000 === "number"
-              ? modeledDb2000
+            typeof effectiveDb2000 === "number"
+              ? effectiveDb2000
               : computeAllInAvgCentsPerKwhFromRateStructure(p.rateStructure, 2000, tdsp),
           modeledTdspCode: tdsp?.tdspCode ?? null,
           modeledTdspSnapshotAt: tdsp?.snapshotAt ?? null,

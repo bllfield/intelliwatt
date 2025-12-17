@@ -526,6 +526,63 @@ export default function FactCardOpsPage() {
     }
   }
 
+  async function backfillModeledProofIntoDb() {
+    if (!token) {
+      setTplErr("Admin token required.");
+      return;
+    }
+    const ok = window.confirm(
+      "Backfill modeled 500/1000/2000 kWh rates + validator proof into RatePlan columns?\n\nThis refetches EFL PDFs and runs the full pipeline. Recommended: run on Preview/DEV first.",
+    );
+    if (!ok) return;
+
+    setTplLoading(true);
+    setTplErr(null);
+    setTdspNote(null);
+    try {
+      let cursorId: string | null = null;
+      let loops = 0;
+      let processed = 0;
+      let updated = 0;
+      let skipped = 0;
+      let errors = 0;
+
+      while (loops < 500) {
+        const qs = new URLSearchParams();
+        qs.set("limit", "15");
+        qs.set("timeBudgetMs", "110000");
+        qs.set("onlyStrong", "1");
+        if (cursorId) qs.set("cursorId", cursorId);
+
+        const res = await fetch(`/api/admin/efl/templates/backfill-modeled?${qs.toString()}`, {
+          method: "POST",
+          headers: { "x-admin-token": token },
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+
+        processed += Number(data.processedCount ?? 0) || 0;
+        updated += Number(data.updatedCount ?? 0) || 0;
+        skipped += Number(data.skippedCount ?? 0) || 0;
+        errors += Number(data.errorsCount ?? 0) || 0;
+
+        setTdspNote(
+          `Modeled proof backfill: processed=${processed} updated=${updated} skipped=${skipped} errors=${errors} last=${data.lastCursorId ?? "—"}`,
+        );
+
+        if (!data.truncated || !data.nextCursorId) break;
+        cursorId = String(data.nextCursorId);
+        loops++;
+      }
+
+      await loadTemplates();
+    } catch (e: any) {
+      setTplErr(e?.message || "Failed to backfill modeled proof.");
+    } finally {
+      setTplLoading(false);
+    }
+  }
+
   async function invalidateTemplate(id: string) {
     if (!token) {
       setTplErr("Admin token required.");
@@ -1148,6 +1205,9 @@ export default function FactCardOpsPage() {
             </button>
             <button className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60" onClick={() => void refreshTdspSnapshots()} disabled={!ready || tplLoading}>
               Refresh TDSP snapshots
+            </button>
+            <button className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60" onClick={() => void backfillModeledProofIntoDb()} disabled={!ready || tplLoading}>
+              Backfill modeled proof (DB)
             </button>
             <button className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60" onClick={() => void cleanupInvalidTemplates()} disabled={!ready || tplLoading}>
               Cleanup missing fields

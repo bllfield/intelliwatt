@@ -744,13 +744,29 @@ export async function POST(req: NextRequest) {
               } else {
                 // Persist proof/evidence of avg-price validation into the stored RateStructure JSON so ops can
                 // inspect "modeled vs expected" later directly from the DB.
+                const modeledAt = new Date();
+                const points = Array.isArray((effectiveValidation as any)?.points)
+                  ? ((effectiveValidation as any).points as any[])
+                  : [];
+                const modeledRateFor = (kwh: number): number | null => {
+                  const p = points.find(
+                    (x: any) => Number(x?.usageKwh ?? x?.kwh ?? x?.usage) === kwh,
+                  );
+                  const n = Number(
+                    p?.modeledAvgCentsPerKwh ??
+                      p?.modeledAvgPriceCentsPerKwh ??
+                      p?.modeledCentsPerKwh,
+                  );
+                  return Number.isFinite(n) ? n : null;
+                };
+
                 const rsWithValidation =
                   derivedRateStructure && typeof derivedRateStructure === "object"
                     ? ({
                         ...(derivedRateStructure as any),
                         __eflAvgPriceValidation: effectiveValidation ?? null,
                         __eflAvgPriceEvidence: {
-                          computedAt: new Date().toISOString(),
+                          computedAt: modeledAt.toISOString(),
                           source: "wattbuy_batch",
                           passStrength: passStrength ?? null,
                           tdspAppliedMode: tdspAppliedMode ?? null,
@@ -776,6 +792,11 @@ export async function POST(req: NextRequest) {
                     expected1000 ?? (typeof offerRate1000 === "number" ? offerRate1000 : null),
                   rate2000:
                     expected2000 ?? (typeof offerRate2000 === "number" ? offerRate2000 : null),
+                  modeledRate500: modeledRateFor(500),
+                  modeledRate1000: modeledRateFor(1000),
+                  modeledRate2000: modeledRateFor(2000),
+                  modeledEflAvgPriceValidation: effectiveValidation ?? null,
+                  modeledComputedAt: modeledAt,
                   cancelFee: offerCancelFee ?? null,
                   providerName: supplier,
                   planName,

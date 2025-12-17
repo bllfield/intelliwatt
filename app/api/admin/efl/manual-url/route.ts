@@ -205,8 +205,22 @@ export async function POST(req: NextRequest) {
             return Number.isFinite(v) ? v : null;
           };
 
+          const modeledPick = (kwh: number): number | null => {
+            const pts = Array.isArray((validationAfter as any)?.points)
+              ? ((validationAfter as any).points as any[])
+              : [];
+            const row = pts.find((r: any) => Number(r?.kwh) === kwh);
+            const v = Number(
+              row?.modeledAvgCentsPerKwh ??
+                row?.modeledAvgPriceCentsPerKwh ??
+                row?.modeledCentsPerKwh,
+            );
+            return Number.isFinite(v) ? v : null;
+          };
+
           const names = extractProviderAndPlanNameFromEflText(rawText);
 
+          const modeledAt = new Date();
           const saved = await upsertRatePlanFromEfl({
             mode: "live",
             eflUrl: effectiveEflUrl,
@@ -223,6 +237,11 @@ export async function POST(req: NextRequest) {
             rate500: pick(500),
             rate1000: pick(1000),
             rate2000: pick(2000),
+            modeledRate500: modeledPick(500),
+            modeledRate1000: modeledPick(1000),
+            modeledRate2000: modeledPick(2000),
+            modeledEflAvgPriceValidation: validationAfter ?? null,
+            modeledComputedAt: modeledAt,
             providerName: names.providerName,
             planName: names.planName,
             planRules: planRulesForPersist as any,
@@ -232,7 +251,7 @@ export async function POST(req: NextRequest) {
                     ...(canonicalRateStructure as any),
                     __eflAvgPriceValidation: validationAfter ?? null,
                     __eflAvgPriceEvidence: {
-                      computedAt: new Date().toISOString(),
+                      computedAt: modeledAt.toISOString(),
                       source: "manual_url",
                       passStrength: passStrength ?? null,
                     },

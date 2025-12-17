@@ -26,6 +26,11 @@ export interface UpsertEflRatePlanArgs {
   rate500?: number | null;
   rate1000?: number | null;
   rate2000?: number | null;
+  modeledRate500?: number | null;
+  modeledRate1000?: number | null;
+  modeledRate2000?: number | null;
+  modeledEflAvgPriceValidation?: any | null;
+  modeledComputedAt?: Date | string | null;
   cancelFee?: string | null;
   providerName?: string | null;
   planName?: string | null;
@@ -72,6 +77,11 @@ export async function upsertRatePlanFromEfl(
     rate500,
     rate1000,
     rate2000,
+    modeledRate500,
+    modeledRate1000,
+    modeledRate2000,
+    modeledEflAvgPriceValidation,
+    modeledComputedAt,
     cancelFee,
     providerName,
     planName,
@@ -121,6 +131,16 @@ export async function upsertRatePlanFromEfl(
     ? null
     : rateStructure;
 
+  // Modeled proof columns are only meaningful when we persisted a usable template.
+  const canPersistModeledProof = Boolean(!requiresManualReview && safeRateStructure);
+
+  const modeledAt =
+    modeledComputedAt == null
+      ? null
+      : modeledComputedAt instanceof Date
+        ? modeledComputedAt
+        : new Date(String(modeledComputedAt));
+
   const dataCommon = {
     // EFL identity + source URL
     eflUrl: eflUrl,
@@ -134,6 +154,13 @@ export async function upsertRatePlanFromEfl(
     ...(typeof rate500 === "number" ? { rate500 } : {}),
     ...(typeof rate1000 === "number" ? { rate1000 } : {}),
     ...(typeof rate2000 === "number" ? { rate2000 } : {}),
+    ...(canPersistModeledProof && typeof modeledRate500 === "number" ? { modeledRate500 } : {}),
+    ...(canPersistModeledProof && typeof modeledRate1000 === "number" ? { modeledRate1000 } : {}),
+    ...(canPersistModeledProof && typeof modeledRate2000 === "number" ? { modeledRate2000 } : {}),
+    ...(canPersistModeledProof && modeledEflAvgPriceValidation != null
+      ? { modeledEflAvgPriceValidation: modeledEflAvgPriceValidation as any }
+      : {}),
+    ...(canPersistModeledProof && modeledAt != null ? { modeledComputedAt: modeledAt } : {}),
     ...(cancelFee ? { cancelFee } : {}),
 
     // Validation + gating
