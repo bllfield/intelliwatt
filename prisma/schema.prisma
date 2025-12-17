@@ -485,42 +485,42 @@ model TdspRateSnapshot {
 }
 
 model EflParseReviewQueue {
-  id                   String   @id @default(cuid())
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   /// Source of this record, e.g. "wattbuy_batch", "manual_upload".
-  source               String
+  source String
 
   /// Core EFL identity.
-  eflPdfSha256         String   @unique
-  repPuctCertificate   String?
-  eflVersionCode       String?
+  eflPdfSha256       String  @unique
+  repPuctCertificate String?
+  eflVersionCode     String?
 
   /// Offer / plan metadata (WattBuy or other upstream).
-  offerId              String?
-  supplier             String?
-  planName             String?
-  eflUrl               String?
-  tdspName             String?
-  termMonths           Int?
+  offerId    String?
+  supplier   String?
+  planName   String?
+  eflUrl     String?
+  tdspName   String?
+  termMonths Int?
 
   /// Parsed payloads used by the validator/solver.
-  rawText              String?  @db.Text
+  rawText              String? @db.Text
   planRules            Json?
   rateStructure        Json?
   validation           Json?
   derivedForValidation Json?
 
   /// Final solver+validator outcome at time of queueing.
-  finalStatus          String   // e.g. "FAIL", "SKIP"
-  queueReason          String?  @db.Text
-  solverApplied        Json?
+  finalStatus   String // e.g. "FAIL", "SKIP"
+  queueReason   String? @db.Text
+  solverApplied Json?
 
   /// Admin resolution metadata (null => OPEN).
-  resolvedAt           DateTime?
-  resolvedBy           String?
-  resolutionNotes      String?  @db.Text
+  resolvedAt      DateTime?
+  resolvedBy      String?
+  resolutionNotes String?   @db.Text
 
   @@index([finalStatus, createdAt])
 }
@@ -593,15 +593,15 @@ model SupplierControl {
 
 /// OpenAI usage tracking for admin-visible cost and volume monitoring.
 model OpenAIUsageEvent {
-  id          String   @id @default(cuid())
-  createdAt   DateTime @default(now())
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
 
   /// Logical module / subsystem (e.g. "current-plan", "rate-engine", "admin-tool")
-  module      String   @db.VarChar(64)
+  module    String @db.VarChar(64)
   /// Specific operation name (e.g. "bill-parse-v2", "efl-link-runner")
-  operation   String   @db.VarChar(128)
+  operation String @db.VarChar(128)
   /// OpenAI model id (e.g. "gpt-4.1-mini")
-  model       String   @db.VarChar(64)
+  model     String @db.VarChar(64)
 
   inputTokens  Int
   outputTokens Int
@@ -613,9 +613,9 @@ model OpenAIUsageEvent {
   /// Optional OpenAI request id for correlation
   requestId String? @db.VarChar(128)
   /// Optional IntelliWatt userId when known
-  userId   String? @db.VarChar(64)
+  userId    String? @db.VarChar(64)
   /// Optional houseId when call is tied to a home
-  houseId  String? @db.VarChar(64)
+  houseId   String? @db.VarChar(64)
 
   /// Arbitrary JSON metadata (e.g. { billParse: { houseId, esiid, fileId } })
   metadataJson Json?
@@ -909,6 +909,9 @@ model RatePlan {
   supplierPUCT String?
   planName     String?
 
+  /// Back-reference for OfferRateMap.ratePlan (WattBuy offer_id -> RatePlan template link)
+  offerRateMaps OfferRateMap[]
+
   termMonths Int?
   rate500    Float?
   rate1000   Float?
@@ -917,9 +920,9 @@ model RatePlan {
 
   /// Modeled all-in average prices (¢/kWh) as computed by the EFL avg-price validator at persistence time.
   /// These are stored as evidence that our parsed RateStructure reproduces the EFL disclosure table.
-  modeledRate500  Float?
-  modeledRate1000 Float?
-  modeledRate2000 Float?
+  modeledRate500               Float?
+  modeledRate1000              Float?
+  modeledRate2000              Float?
   /// Full validator snapshot (includes expected vs modeled points, assumptionsUsed, snippet, etc.)
   modeledEflAvgPriceValidation Json?
   modeledComputedAt            DateTime?
@@ -936,7 +939,7 @@ model RatePlan {
   // Canonical source URL for the EFL used for this plan version
   eflSourceUrl            String?
   // Whether the AI-derived PlanRules for this EFL require manual review
-  eflRequiresManualReview Boolean  @default(false)
+  eflRequiresManualReview Boolean @default(false)
   // Structured validation issues from PlanRulesValidationResult
   eflValidationIssues     Json?
   // Normalized pricing structure derived from PlanRules (see lib/efl/planEngine.ts)
@@ -1028,77 +1031,77 @@ enum ProductType {
 
 /// TDSP / utility master table (normalized by TdspCode).
 model TdspUtility {
-  id               String           @id @default(cuid())
-  code             TdspCode         @unique
+  id               String   @id @default(cuid())
+  code             TdspCode @unique
   name             String
   shortName        String?
   serviceTerritory String?
   websiteUrl       String?
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
-  tariffs          TdspTariffVersion[]
+  tariffs TdspTariffVersion[]
 }
 
 /// Versioned TDSP tariff documents, with effective date ranges and source metadata.
 model TdspTariffVersion {
-  id               String          @id @default(cuid())
-  tdspId           String
-  tdsp             TdspUtility     @relation(fields: [tdspId], references: [id])
-  tariffCode       String?
-  tariffName       String?
-  effectiveStart   DateTime
-  effectiveEnd     DateTime?
-  sourceUrl        String?
-  sourceDocSha256  String?         @unique
-  planSource       PlanSource
-  notes            String?
-  createdAt        DateTime        @default(now())
-  updatedAt        DateTime        @updatedAt
+  id              String      @id @default(cuid())
+  tdspId          String
+  tdsp            TdspUtility @relation(fields: [tdspId], references: [id])
+  tariffCode      String?
+  tariffName      String?
+  effectiveStart  DateTime
+  effectiveEnd    DateTime?
+  sourceUrl       String?
+  sourceDocSha256 String?     @unique
+  planSource      PlanSource
+  notes           String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
 
-  components       TdspTariffComponent[]
+  components TdspTariffComponent[]
 
   @@index([tdspId, effectiveStart, effectiveEnd])
 }
 
 /// Individual TDSP tariff components (customer charge, delivery ¢/kWh, riders, etc.).
 model TdspTariffComponent {
-  id               String           @id @default(cuid())
-  tariffVersionId  String
-  tariffVersion    TdspTariffVersion @relation(fields: [tariffVersionId], references: [id])
-  chargeName       String
-  chargeType       String
-  unit             String
+  id              String            @id @default(cuid())
+  tariffVersionId String
+  tariffVersion   TdspTariffVersion @relation(fields: [tariffVersionId], references: [id])
+  chargeName      String
+  chargeType      String
+  unit            String
   /// Canonical rate stored in "cents" for PER_MONTH / PER_KWH, or raw units for other charge types.
-  rate             Decimal          @db.Decimal(10, 4)
-  minKwh           Int?
-  maxKwh           Int?
-  notes            String?
-  rawSourceJson    Json?
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
+  rate            Decimal           @db.Decimal(10, 4)
+  minKwh          Int?
+  maxKwh          Int?
+  notes           String?
+  rawSourceJson   Json?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
 
   @@index([tariffVersionId, chargeType, unit])
 }
 
 model TdspTariffIngestRun {
-  id                  String                      @id @default(cuid())
-  createdAt           DateTime                    @default(now())
-  startedAt           DateTime
-  finishedAt          DateTime?
-  status              TdspTariffIngestRunStatus
-  trigger             String                      // "VERCEL_CRON" | "ADMIN_API" | "DROPLET_CRON" | etc.
-  sourceKind          String                      // e.g. "PUCT_RATE_REPORT_PDF"
+  id         String                    @id @default(cuid())
+  createdAt  DateTime                  @default(now())
+  startedAt  DateTime
+  finishedAt DateTime?
+  status     TdspTariffIngestRunStatus
+  trigger    String // "VERCEL_CRON" | "ADMIN_API" | "DROPLET_CRON" | etc.
+  sourceKind String // e.g. "PUCT_RATE_REPORT_PDF"
 
-  processedTdspCount  Int                         @default(0)
-  createdVersionCount Int                         @default(0)
-  noopVersionCount    Int                         @default(0)
-  skippedTdspCount    Int                         @default(0)
-  errorTdspCount      Int                         @default(0)
+  processedTdspCount  Int @default(0)
+  createdVersionCount Int @default(0)
+  noopVersionCount    Int @default(0)
+  skippedTdspCount    Int @default(0)
+  errorTdspCount      Int @default(0)
 
-  changesJson         Json?                       // array of {tdspCode, action, effectiveStartISO, versionId, sha256}
-  errorsJson          Json?                       // array of {tdspCode, message, stack?, hint?}
-  logs                String?                     // optional compact logs (keep short)
+  changesJson Json? // array of {tdspCode, action, effectiveStartISO, versionId, sha256}
+  errorsJson  Json? // array of {tdspCode, message, stack?, hint?}
+  logs        String? // optional compact logs (keep short)
 
   @@index([createdAt])
 }

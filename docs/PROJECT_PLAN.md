@@ -2261,6 +2261,7 @@ Scope
   - `OfferRateMap` (master DB): per-offer mapping keyed by **WattBuy `offer_id`** (canonical offer identity in our system).
     - New linkage: `OfferRateMap.ratePlanId` → `RatePlan.id` (the EFL template persisted for that exact WattBuy offer).
     - Safety rule: we **only update existing** `OfferRateMap` rows (never create them from EFL tooling), because `OfferRateMap` requires `rateConfigId`.
+    - Schema note: `RatePlan.offerRateMaps` exists as the required opposite relation for Prisma schema validation (P1012).
   - `HouseAddress.rawWattbuyJson` (master DB): legacy per-address WattBuy blob (still stored for ops/support).
   - `WattBuyApiSnapshot` (**WattBuy module DB**): append-only-ish raw response snapshots for:
     - `OFFERS` (offer list payloads)
