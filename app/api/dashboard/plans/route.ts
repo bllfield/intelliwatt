@@ -40,17 +40,20 @@ function sortOffers(offers: OfferNormalized[], sort: SortKey): OfferNormalized[]
   const numOrNegInf = (n: number | null | undefined) =>
     typeof n === "number" && Number.isFinite(n) ? n : Number.NEGATIVE_INFINITY;
 
+  const firstFiniteOrInf = (vals: Array<number | null | undefined>) => {
+    for (const v of vals) {
+      if (typeof v === "number" && Number.isFinite(v)) return v;
+    }
+    return Number.POSITIVE_INFINITY;
+  };
+
   const keyFn = (o: OfferNormalized) => {
     if (sort === "kwh500_asc") return numOrInf(o.kwh500_cents);
     if (sort === "kwh2000_asc") return numOrInf(o.kwh2000_cents);
     if (sort === "term_asc") return numOrInf(o.term_months);
     if (sort === "renewable_desc") return numOrNegInf(o.green_percentage);
     // best_for_you_proxy and default: use 1000kWh average if present, else fall back to 500/2000.
-    return (
-      numOrInf(o.kwh1000_cents) ??
-      numOrInf(o.kwh500_cents) ??
-      numOrInf(o.kwh2000_cents)
-    );
+    return firstFiniteOrInf([o.kwh1000_cents, o.kwh500_cents, o.kwh2000_cents]);
   };
 
   withKey.sort((a, b) => {
