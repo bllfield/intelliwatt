@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 
 import IdleGuard from '@/components/IdleGuard';
 import EntriesChecklistSidebar from '@/components/dashboard/EntriesChecklistSidebar';
+import IntelliwattBotHero from '@/components/dashboard/IntelliwattBotHero';
 import { prisma } from '@/lib/db';
 import { normalizeEmail } from '@/lib/utils/email';
 
@@ -101,7 +102,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
       <div className="min-h-screen bg-brand-white text-brand-navy">
         <EntriesChecklistSidebar />
         <div className="flex flex-col min-w-0">
-          <main className="flex-1 p-6 max-w-6xl mx-auto w-full">{children}</main>
+          <main className="flex-1 p-6 max-w-6xl mx-auto w-full">
+            <IntelliwattBotHero />
+            {children}
+          </main>
         </div>
       </div>
     </IdleGuard>

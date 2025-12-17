@@ -981,6 +981,25 @@ model RatePlan {
   @@index([utilityId, state, termMonths])
 }
 
+/// IntelliWattBot - per-page guidance messages shown across customer dashboard pages.
+model IntelliwattBotPageMessage {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// Stable key representing a dashboard page (e.g. "dashboard_plans").
+  pageKey String @unique
+
+  /// Message shown in the bot speech bubble.
+  message String @db.Text
+
+  enabled Boolean @default(true)
+
+  notes String? @db.Text
+
+  @@index([enabled])
+}
+
 /// ERCOT Ingest - tracks ingestion history
 model ErcotIngest {
   id          String   @id @default(cuid())
