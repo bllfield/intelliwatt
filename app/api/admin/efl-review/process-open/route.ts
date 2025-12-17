@@ -172,6 +172,19 @@ export async function POST(req: NextRequest) {
               };
 
               const modeledAt = new Date();
+
+              // Cancellation / early termination fee (best-effort). Do NOT invent values.
+              const cancelFeeText: string | null = (() => {
+                const src = String(det.rawText ?? "").trim();
+                if (!src) return null;
+                const m =
+                  src.match(
+                    /(?:early\s+termination|termination|cancellation)\s+fee[\s\S]{0,180}?\$([0-9]{1,4}(?:\.[0-9]{1,2})?)/i,
+                  ) ?? null;
+                if (m?.[1]) return `Cancellation / termination fee: $${m[1]} (per EFL).`;
+                return null;
+              })();
+
               const saved = await upsertRatePlanFromEfl({
                 mode: "live",
                 eflUrl: fetched.pdfUrl ?? eflUrl,
@@ -190,7 +203,7 @@ export async function POST(req: NextRequest) {
                 modeledRate2000: modeledRateFor(2000),
                 modeledEflAvgPriceValidation: finalValidation ?? null,
                 modeledComputedAt: modeledAt,
-                cancelFee: null,
+                ...(cancelFeeText ? { cancelFee: cancelFeeText } : {}),
                 providerName: it?.supplier ?? null,
                 planName: it?.planName ?? null,
                 planRules: derivedPlanRules as any,

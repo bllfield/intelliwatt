@@ -231,6 +231,31 @@ export async function POST(req: NextRequest) {
           const names = extractProviderAndPlanNameFromEflText(rawText);
 
           const modeledAt = new Date();
+
+          // Cancellation / early termination fee (best-effort). Prefer explicit text surfaced by parser warnings,
+          // otherwise regex-extract from raw EFL text. We do NOT invent values.
+          const cancelFeeText: string | null = (() => {
+            const candidates = [
+              ...((Array.isArray(template.parseWarnings) ? template.parseWarnings : []) as string[]),
+              ...((Array.isArray(topWarnings) ? topWarnings : []) as string[]),
+            ]
+              .map((s) => String(s ?? "").trim())
+              .filter(Boolean);
+
+            const warned = candidates.find((s) =>
+              /(termination\s+fee|early\s+termination|cancellation\s+fee)/i.test(s),
+            );
+            if (warned) return warned;
+
+            const m =
+              rawText.match(
+                /(?:early\s+termination|termination|cancellation)\s+fee[\s\S]{0,180}?\$([0-9]{1,4}(?:\.[0-9]{1,2})?)/i,
+              ) ?? null;
+            if (m?.[1]) return `Cancellation / termination fee: $${m[1]} (per EFL).`;
+
+            return null;
+          })();
+
           const saved = await upsertRatePlanFromEfl({
             mode: "live",
             eflUrl: effectiveEflUrl,
@@ -252,6 +277,7 @@ export async function POST(req: NextRequest) {
             modeledRate2000: modeledPick(2000),
             modeledEflAvgPriceValidation: validationAfter ?? null,
             modeledComputedAt: modeledAt,
+            ...(cancelFeeText ? { cancelFee: cancelFeeText } : {}),
             providerName: names.providerName,
             planName: names.planName,
             planRules: planRulesForPersist as any,
