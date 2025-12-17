@@ -107,6 +107,8 @@ export default function PlansClient() {
   const prefetchInFlightRef = useRef(false);
   const prefetchAttemptsRef = useRef(0);
 
+  const [bestRankAllIn, setBestRankAllIn] = useState<boolean | null>(null);
+
   // Reset prefetch attempts when the *user-visible dataset* changes (filters/pagination),
   // but do NOT reset on our internal refresh nonce (otherwise we could loop forever
   // on truly manual-review items that remain QUEUED).
@@ -260,9 +262,38 @@ export default function PlansClient() {
   const hasUnavailable = offers.some((o: any) => o?.intelliwatt?.statusLabel === "UNAVAILABLE");
   const availableFilterOn = template === "available";
 
+  // Default basis (only once per "hasUsage" session): if we already have OK all-in estimates, prefer them.
+  useEffect(() => {
+    if (!hasUsage) {
+      setBestRankAllIn(null);
+      return;
+    }
+    if (bestRankAllIn !== null) return;
+    const apiBest = Array.isArray(resp?.bestOffers) ? (resp!.bestOffers as OfferRow[]) : [];
+    const pool = apiBest.length ? apiBest : offers;
+    const anyOk = pool.some((o: any) => o?.intelliwatt?.trueCostEstimate?.status === "OK");
+    setBestRankAllIn(anyOk);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasUsage, bestRankAllIn, resp?.bestOffers, offers]);
+
   const bestStripOffers = useMemo(() => {
     if (!hasUsage) return [];
     const apiBest = Array.isArray(resp?.bestOffers) ? (resp!.bestOffers as OfferRow[]) : [];
+    const rankAllIn = bestRankAllIn === true;
+
+    if (rankAllIn) {
+      const pool = apiBest.length ? apiBest : offers;
+      const scored = pool.map((o: any) => {
+        const tce = o?.intelliwatt?.trueCostEstimate;
+        const ok = tce?.status === "OK";
+        const v = ok ? Number(tce?.monthlyCostDollars) : Number.POSITIVE_INFINITY;
+        return { o, v: Number.isFinite(v) ? v : Number.POSITIVE_INFINITY };
+      });
+      scored.sort((a, b) => a.v - b.v);
+      return scored.slice(0, 5).map((x) => x.o);
+    }
+
+    // Default proxy basis: use API bestOffers when available.
     if (apiBest.length > 0) return apiBest.slice(0, 5);
 
     // Fallback: compute client-side ranking from currently loaded offers (safe deploy).
@@ -271,7 +302,7 @@ export default function PlansClient() {
       .filter((x) => typeof x.metric === "number" && Number.isFinite(x.metric as number));
     scored.sort((a, b) => (a.metric as number) - (b.metric as number));
     return scored.slice(0, 5).map((x) => x.o);
-  }, [hasUsage, resp?.bestOffers, offers]);
+  }, [hasUsage, resp?.bestOffers, offers, bestRankAllIn]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -468,6 +499,15 @@ export default function PlansClient() {
             <div className="flex items-start justify-between gap-4">
               <div>
                 <div className="text-sm font-semibold text-brand-white">Best plans for you (estimate)</div>
+                <label className="mt-2 flex items-center gap-2 text-xs text-brand-cyan/75 select-none">
+                  <input
+                    type="checkbox"
+                    checked={bestRankAllIn === true}
+                    onChange={(e) => setBestRankAllIn(e.target.checked)}
+                    className="h-4 w-4 rounded border-brand-cyan/40 bg-brand-white/10"
+                  />
+                  Rank by all-in estimate (incl. TDSP)
+                </label>
                 <div className="mt-1 text-xs text-brand-cyan/70">
                   {typeof resp?.bestOffersDisclaimer === "string" && resp.bestOffersDisclaimer.trim()
                     ? resp.bestOffersDisclaimer.trim()
