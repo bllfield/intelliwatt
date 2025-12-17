@@ -2298,6 +2298,7 @@ Guardrails
 
 ✅ Done (Dashboard): `/dashboard/plans` now consumes a customer-facing API (`GET /api/dashboard/plans`) that:
 - Displays WattBuy EFL average prices (500/1000/2000 kWh) for the user’s saved home.
+- Returns `hasUsage` + a lightweight `usageSummary` (last-12-month window; rows + kWh total) so the UI can conditionally show “Best for you” sections without new ingestion.
 - Wires `OfferIdRatePlanMap` into each offer card to show **IntelliWatt calculation available** when `ratePlanId` exists.
 - Shows **Queued / calculations not available** messaging when an EFL exists but no template mapping exists yet.
 - Uses a sticky filter/sort bar + pagination to avoid an infinite scroll plan list.

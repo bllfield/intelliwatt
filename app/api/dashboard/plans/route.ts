@@ -178,26 +178,50 @@ export async function GET(req: NextRequest) {
     const sort = (url.searchParams.get("sort") ?? "kwh1000_asc") as SortKey;
     const isRenter = parseBoolParam(url.searchParams.get("isRenter"), false);
 
-    const intervalCount =
-      house.esiid
-        ? await prisma.smtInterval.count({ where: { esiid: house.esiid } })
-        : 0;
-    const greenButtonCount = await prisma.greenButtonUpload.count({
-      where: { houseId: house.id },
-    });
-    const manualUsageCount = await prisma.manualUsageUpload.count({
-      where: { houseId: house.id },
-    });
+    // Usage summary: cheap aggregate over the last 12 months, best-effort.
+    // Must never break offers response (wrap errors).
+    let hasUsage = false;
+    let usageSummary:
+      | {
+          source: string;
+          rangeStart?: string;
+          rangeEnd?: string;
+          totalKwh?: number;
+          rows?: number;
+        }
+      | null = null;
 
-    const hasUsage = intervalCount > 0 || greenButtonCount > 0 || manualUsageCount > 0;
-    const usageSummary =
-      intervalCount > 0
-        ? { source: "SMT", annualKwh: undefined, last12moKwh: undefined }
-        : greenButtonCount > 0
-          ? { source: "GREENBUTTON", annualKwh: undefined, last12moKwh: undefined }
-          : manualUsageCount > 0
-            ? { source: "MANUAL", annualKwh: undefined, last12moKwh: undefined }
-            : null;
+    try {
+      if (house.esiid) {
+        const rangeEnd = new Date();
+        const rangeStart = new Date(rangeEnd.getTime() - 365 * 24 * 60 * 60 * 1000);
+        const aggregates = await prisma.smtInterval.aggregate({
+          where: { esiid: house.esiid, ts: { gte: rangeStart, lte: rangeEnd } },
+          _count: { _all: true },
+          _sum: { kwh: true },
+          _min: { ts: true },
+          _max: { ts: true },
+        });
+
+        const rows = Number(aggregates?._count?._all ?? 0) || 0;
+        const totalKwhRaw: any = aggregates?._sum?.kwh ?? 0;
+        const totalKwh = Number(totalKwhRaw);
+
+        hasUsage = rows > 0;
+        usageSummary = hasUsage
+          ? {
+              source: "SMT",
+              rangeStart: rangeStart.toISOString(),
+              rangeEnd: rangeEnd.toISOString(),
+              totalKwh: Number.isFinite(totalKwh) ? Number(totalKwh.toFixed(6)) : undefined,
+              rows,
+            }
+          : null;
+      }
+    } catch {
+      hasUsage = false;
+      usageSummary = null;
+    }
 
     // Prefer live offers. If the call fails (transient upstream), fall back to the last stored snapshot.
     let rawOffersResp: any = null;
