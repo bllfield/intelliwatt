@@ -37,6 +37,12 @@ export function calculatePlanCostForUsage(args: {
   hasUsage: boolean;
   usageSummaryTotalKwh?: number | null;
   avgPriceCentsPerKwh1000?: number | null;
+  tdspRates?: {
+    tdspSlug: string;
+    effectiveDate: string; // ISO
+    perKwhDeliveryChargeCents: number;
+    monthlyCustomerChargeDollars: number;
+  } | null;
 }): TrueCostEstimate {
   if (!args.hasUsage) return { status: "MISSING_USAGE", notes: ["No usage available"] };
   if (!args.ratePlanId) return { status: "MISSING_TEMPLATE", notes: ["Missing EFL template"] };
@@ -51,27 +57,52 @@ export function calculatePlanCostForUsage(args: {
     return { status: "NOT_IMPLEMENTED", notes: ["Missing avg 1000 kWh EFL price"] };
   }
 
-  const annualEnergyCostEstimateDollars = (totalKwh * avg) / 100;
-  const annualCostDollars = Number(annualEnergyCostEstimateDollars.toFixed(2));
+  const repEnergyDollars = Number(((totalKwh * avg) / 100).toFixed(2));
+
+  const tdsp = args.tdspRates ?? null;
+  const tdspDeliveryDollars =
+    tdsp && typeof tdsp.perKwhDeliveryChargeCents === "number" && Number.isFinite(tdsp.perKwhDeliveryChargeCents)
+      ? Number(((totalKwh * tdsp.perKwhDeliveryChargeCents) / 100).toFixed(2))
+      : 0;
+  const tdspFixedDollars =
+    tdsp && typeof tdsp.monthlyCustomerChargeDollars === "number" && Number.isFinite(tdsp.monthlyCustomerChargeDollars)
+      ? Number((tdsp.monthlyCustomerChargeDollars * 12).toFixed(2))
+      : 0;
+  const tdspTotalDollars = Number((tdspDeliveryDollars + tdspFixedDollars).toFixed(2));
+
+  const totalDollars = Number((repEnergyDollars + tdspTotalDollars).toFixed(2));
+  const annualCostDollars = totalDollars;
   const monthlyCostDollars = Number((annualCostDollars / 12).toFixed(2));
-  const repEnergy = annualCostDollars;
   return {
     status: "OK",
     annualCostDollars,
     monthlyCostDollars,
     confidence: "MEDIUM",
     components: {
-      energyOnlyDollars: annualCostDollars,
+      energyOnlyDollars: repEnergyDollars,
+      ...(tdsp ? { deliveryDollars: tdspDeliveryDollars, baseFeesDollars: tdspFixedDollars } : {}),
       totalDollars: annualCostDollars,
     },
     componentsV2: {
       rep: {
-        energyDollars: repEnergy,
-        totalDollars: repEnergy,
+        energyDollars: repEnergyDollars,
+        totalDollars: repEnergyDollars,
       },
-      totalDollars: repEnergy,
+      ...(tdsp
+        ? {
+            tdsp: {
+              deliveryDollars: tdspDeliveryDollars,
+              fixedDollars: tdspFixedDollars,
+              totalDollars: tdspTotalDollars,
+            },
+          }
+        : {}),
+      totalDollars: annualCostDollars,
     },
-    notes: ["Proxy: avgPriceCentsPerKwh1000 * annual kWh"],
+    notes: [
+      "Proxy: avgPriceCentsPerKwh1000 * annual kWh",
+      ...(tdsp ? ["Includes TDSP delivery"] : []),
+    ],
   };
 }
 

@@ -7,6 +7,7 @@ import { normalizeOffers, type OfferNormalized } from "@/lib/wattbuy/normalize";
 import { getTrueCostStatus } from "@/lib/plan-engine/trueCostStatus";
 import { calculatePlanCostForUsage } from "@/lib/plan-engine/calculatePlanCostForUsage";
 import { getRatePlanTemplate } from "@/lib/plan-engine/getRatePlanTemplate";
+import { getTdspDeliveryRates } from "@/lib/plan-engine/getTdspDeliveryRates";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -362,6 +363,8 @@ export async function GET(req: NextRequest) {
       };
     };
 
+    const tdspRatesCache = new Map<string, any | null>();
+
     const shapeOffer = async (o: any) => {
       const base = shapeOfferBase(o);
       const ratePlanId = base?.intelliwatt?.ratePlanId ?? null;
@@ -377,6 +380,21 @@ export async function GET(req: NextRequest) {
       const avgPriceCentsPerKwh1000 = numOrNull((base as any)?.efl?.avgPriceCentsPerKwh1000);
       const tdspSlug = (base as any)?.utility?.tdspSlug ?? null;
 
+      let tdspRates: any | null = null;
+      if (typeof tdspSlug === "string" && tdspSlug.trim()) {
+        const key = tdspSlug.trim().toLowerCase();
+        if (tdspRatesCache.has(key)) {
+          tdspRates = tdspRatesCache.get(key) ?? null;
+        } else {
+          try {
+            tdspRates = await getTdspDeliveryRates({ tdspSlug: key, asOf: new Date() });
+          } catch {
+            tdspRates = null;
+          }
+          tdspRatesCache.set(key, tdspRates);
+        }
+      }
+
       return {
         ...base,
         intelliwatt: {
@@ -388,6 +406,7 @@ export async function GET(req: NextRequest) {
             hasUsage,
             usageSummaryTotalKwh,
             avgPriceCentsPerKwh1000,
+            tdspRates,
           }),
         },
       };
