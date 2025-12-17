@@ -3,6 +3,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { wattbuy } from '@/lib/wattbuy';
+import { persistWattBuySnapshot } from "@/lib/wattbuy/persistSnapshot";
 
 export const dynamic = 'force-dynamic';
 
@@ -42,6 +43,16 @@ export async function POST(req: NextRequest) {
       : { address: body.address!, city: body.city!, state: body.state!, zip: body.zip! };
 
     const data = await wattbuy.homeDetails(params);
+
+    if (data) {
+      void persistWattBuySnapshot({
+        endpoint: "ELECTRICITY_INFO",
+        payload: data,
+        esiid: hasEsiid ? body.esiid! : null,
+        wattkey: hasWattkey ? body.wattkey! : null,
+        requestKey: JSON.stringify({ source: "api_wattbuy_home", params }),
+      });
+    }
 
     // Some ERCOT addresses may return 204 upstream; our client returns null in that case
     if (!data) {

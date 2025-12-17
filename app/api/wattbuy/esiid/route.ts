@@ -3,6 +3,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { wattbuy } from '@/lib/wattbuy';
+import { persistWattBuySnapshot } from "@/lib/wattbuy/persistSnapshot";
 
 export const dynamic = 'force-dynamic';
 
@@ -25,6 +26,12 @@ export async function POST(req: NextRequest) {
     }
 
     const data: any = await wattbuy.esiidByAddress(address, city, state, zip);
+
+    void persistWattBuySnapshot({
+      endpoint: "ELECTRICITY_INFO",
+      payload: data,
+      requestKey: JSON.stringify({ source: "api_wattbuy_esiid", address, city, state, zip }),
+    });
 
     // Normalize the most useful fields for your frontend/runtime
     const first = Array.isArray(data?.addresses) ? data.addresses[0] : null;

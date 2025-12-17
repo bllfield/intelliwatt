@@ -1,6 +1,7 @@
 // lib/wattbuy/client.ts
 
 import { retailRatesParams, electricityParams, electricityInfoParams } from './params';
+import { persistWattBuySnapshot } from "@/lib/wattbuy/persistSnapshot";
 
 export const WB_BASE = 'https://apis.wattbuy.com/v3';
 
@@ -75,13 +76,66 @@ export async function wbGet<T = any>(
   path: string,
   params?: Record<string, unknown>,
   init?: Omit<RequestInit, 'headers'|'method'>,
-  retries = 1
+  retries = 1,
+  snapshotMeta?: {
+    houseAddressId?: string | null;
+    esiid?: string | null;
+    wattkey?: string | null;
+    requestKey?: string | null;
+    endpoint?: string | null;
+  }
 ): Promise<WbResponse<T>> {
   const url = buildUrl(path, params);
   let last: WbResponse<T> | undefined;
   for (let i = 0; i <= retries; i++) {
     try {
       const out = await doFetch<T>(url, init);
+      // Best-effort auditing: persist the raw payload for key WattBuy endpoints.
+      try {
+        const upperPath = String(path).toLowerCase();
+        const endpoint =
+          snapshotMeta?.endpoint?.trim()
+            ? String(snapshotMeta.endpoint)
+            : upperPath === "electricity"
+              ? "ELECTRICITY"
+              : upperPath === "electricity/info"
+                ? "ELECTRICITY_INFO"
+                : upperPath === "offers"
+                  ? "OFFERS"
+                  : null;
+        if (endpoint) {
+          const wattkeyFromParams =
+            typeof (params as any)?.wattkey === "string" ? String((params as any).wattkey) : null;
+          const esiidFromParams =
+            typeof (params as any)?.esiid === "string" ? String((params as any).esiid) : null;
+          const requestKey =
+            snapshotMeta?.requestKey ??
+            (params ? `${upperPath}:${JSON.stringify(params)}` : upperPath);
+
+          void persistWattBuySnapshot({
+            endpoint,
+            // Snapshot even when WattBuy returns empty / non-JSON / 204.
+            // This is critical for the Admin Inspector audit trail.
+            payload:
+              out.data ??
+              ({
+                __wattbuyNonJsonOrEmpty: true,
+                ok: out.ok,
+                status: out.status,
+                headers: out.headers ?? null,
+                text: out.text ?? null,
+                path: upperPath,
+                params: params ?? null,
+              } as any),
+            houseAddressId: snapshotMeta?.houseAddressId ?? null,
+            esiid: snapshotMeta?.esiid ?? esiidFromParams,
+            wattkey: snapshotMeta?.wattkey ?? wattkeyFromParams,
+            requestKey,
+          });
+        }
+      } catch {
+        // ignore snapshot errors
+      }
       if (out.ok) return out;
       if (out.status < 500 || i === retries) return out;
       await new Promise(r => setTimeout(r, 300 * (i + 1)));

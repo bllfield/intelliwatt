@@ -3,6 +3,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { wattbuy } from '@/lib/wattbuy';
+import { persistWattBuySnapshot } from "@/lib/wattbuy/persistSnapshot";
 
 export const dynamic = 'force-dynamic';
 
@@ -70,6 +71,13 @@ export async function POST(req: NextRequest) {
       : { address: body.address!, city: body.city!, state: body.state!, zip: body.zip! };
 
     const raw: any = await wattbuy.offers(params);
+
+    void persistWattBuySnapshot({
+      endpoint: "OFFERS",
+      payload: raw,
+      wattkey: hasWattkey ? body.wattkey! : null,
+      requestKey: JSON.stringify({ source: "api_wattbuy_offers", params }),
+    });
 
     const offers = extractElectricityOffers(raw);
     const payload = {

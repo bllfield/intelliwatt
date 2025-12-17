@@ -15,3 +15,32 @@ model WattbuyOffersModuleBootstrap {
   createdAt DateTime @default(now())
 }
 
+/// Raw WattBuy API response snapshots for audit + replay.
+/// Source of truth lives in the WattBuy module DB; master DB only receives normalized/mapped rows.
+model WattBuyApiSnapshot {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  fetchedAt DateTime @default(now())
+
+  /// Logical endpoint identifier (e.g. "OFFERS", "ELECTRICITY", "ELECTRICITY_INFO")
+  endpoint String
+
+  /// When the request can be tied to a stored address row (optional).
+  houseAddressId String?
+
+  /// When available from request or response.
+  esiid   String?
+  wattkey String?
+
+  /// Optional stable key when houseAddressId is not available (e.g., zip or address slug)
+  requestKey String?
+
+  payloadJson   Json
+  payloadSha256 String
+
+  @@index([endpoint, houseAddressId])
+  @@index([endpoint, esiid])
+  @@index([endpoint, wattkey])
+  @@index([payloadSha256])
+}
+

@@ -12,6 +12,7 @@ import { NextRequest, NextResponse } from 'next/server';
 export const dynamic = 'force-dynamic';
 import { wattbuy } from '@/lib/wattbuy';
 import { prisma } from '@/lib/db'; // If your prisma client is exported differently, adjust this import.
+import { persistWattBuySnapshot } from "@/lib/wattbuy/persistSnapshot";
 
 type ByWattkey = { wattkey: string };
 type ByAddress = { address: string; city: string; state: string; zip: string };
@@ -57,6 +58,11 @@ export async function POST(req: NextRequest) {
     // 1) Decide source of offers (passed-in or fetch upstream)
     let offers: any[] = [];
     if (Array.isArray(body.offers) && body.offers.length) {
+      void persistWattBuySnapshot({
+        endpoint: "OFFERS",
+        payload: body.offers,
+        requestKey: JSON.stringify({ source: "api_wattbuy_offers_sync", provided: true }),
+      });
       offers = extractElectricityOffers(body.offers);
     } else {
       const hasWattkey = typeof body.wattkey === 'string' && body.wattkey.length > 0;
@@ -82,6 +88,12 @@ export async function POST(req: NextRequest) {
         : { address: body.address!, city: body.city!, state: body.state!, zip: body.zip! };
 
       const raw = await wattbuy.offers(params);
+      void persistWattBuySnapshot({
+        endpoint: "OFFERS",
+        payload: raw,
+        wattkey: hasWattkey ? body.wattkey! : null,
+        requestKey: JSON.stringify({ source: "api_wattbuy_offers_sync", params }),
+      });
       offers = extractElectricityOffers(raw);
     }
 

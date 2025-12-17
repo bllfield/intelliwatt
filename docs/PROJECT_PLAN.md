@@ -2255,7 +2255,18 @@ Scope
   - `/v3/electricity/retail-rates`: Requires `utilityID` (camelCase, integer as string) + `state` (lowercase). Returns REP plans or utility tariffs.
   - `/v3/electricity`: Catalog endpoint, requires `zip`, optional `address`, `city`, `state` (lowercase).
   - `/v3/electricity/info`: Info endpoint, requires `zip`, optional `address`, `city`, `state` (lowercase), `housing_chars`, `utility_list`.
-  - `/v3/offers`: **DEPRECATED** - No longer used in our stack.
+  - `/v3/offers`: Used in a few support/ops paths to fetch the live offer list (primarily for `offer_id` mapping and EFL capture).
+
+- **WattBuy Persistence (Audit + Replay):**
+  - `OfferRateMap` (master DB): per-offer mapping keyed by **WattBuy `offer_id`** (canonical offer identity in our system).
+  - `HouseAddress.rawWattbuyJson` (master DB): legacy per-address WattBuy blob (still stored for ops/support).
+  - `WattBuyApiSnapshot` (**WattBuy module DB**): append-only-ish raw response snapshots for:
+    - `OFFERS` (offer list payloads)
+    - `ELECTRICITY` (`/v3/electricity`)
+    - `ELECTRICITY_INFO` (`/v3/electricity/info`)
+    - Captures `payloadJson`, `payloadSha256`, `fetchedAt`, and request context (`wattkey`, `esiid`, optional `houseAddressId` / `requestKey`).
+  - Optional bridge: dual-write snapshots into master DB only when `WATTBUY_SNAPSHOT_DUALWRITE_MASTER=1`.
+  - Optional bridge script: `npx tsx scripts/wattbuy/map-snapshots-to-master.ts` (when dual-write is disabled).
 
 Rollback
 
@@ -2270,6 +2281,8 @@ Guardrails
 - State always lowercase, utilityID always camelCase per WattBuy test page spec.
 - Multi-utility fallback only triggers on 204/empty responses.
 - All responses include diagnostic metadata for troubleshooting.
+
+✅ Done: WattBuy raw API response snapshot persistence (`WattBuyApiSnapshot`) for audit + replay (module DB is source of truth).
 
 ---
 
