@@ -19,6 +19,17 @@ describe("eflExtractor - EFL Version code extraction", () => {
     expect(extractEflVersionCodeFromText(text)).toBe("EFL_ONCOR_ELEC_LS12+_20251215_ENGLISH");
   });
 
+  test("stitches wrapped footer code split across lines (_E + NGLISH)", () => {
+    const text = `
+      EFL Version:
+      EFL_AEP_CENT_GXAECOSVRPR12_20251211_E
+      NGLISH
+    `;
+    expect(extractEflVersionCodeFromText(text)).toBe(
+      "EFL_AEP_CENT_GXAECOSVRPR12_20251211_ENGLISH",
+    );
+  });
+
   test("stitches wrapped footer code split across lines (date digit + language suffix)", () => {
     const text = `
       EFL Version:
