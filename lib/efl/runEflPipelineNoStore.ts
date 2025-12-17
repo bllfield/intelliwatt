@@ -1,6 +1,7 @@
 import { Buffer } from "node:buffer";
 
 import { deterministicEflExtract } from "@/lib/efl/eflExtractor";
+import type { PdfTextExtractor } from "@/lib/efl/eflExtractor";
 import { parseEflTextWithAi } from "@/lib/efl/eflAiParser";
 import { scoreEflPassStrength } from "@/lib/efl/eflValidator";
 import { solveEflValidationGaps } from "@/lib/efl/validation/solveEflValidationGaps";
@@ -10,6 +11,11 @@ const MAX_PREVIEW_CHARS = 20000;
 export type RunEflPipelineNoStoreArgs = {
   pdfBytes: Buffer;
   source?: "wattbuy" | "manual";
+  /**
+   * Optional PDF→text extractor override (useful for local scripts when the
+   * pdftotext microservice is not configured).
+   */
+  extractPdfText?: PdfTextExtractor;
   offerMeta?: {
     supplier?: string | null;
     planName?: string | null;
@@ -96,9 +102,9 @@ export type RunEflPipelineNoStoreResult = {
 export async function runEflPipelineNoStore(
   args: RunEflPipelineNoStoreArgs,
 ): Promise<RunEflPipelineNoStoreResult> {
-  const { pdfBytes } = args;
+  const { pdfBytes, extractPdfText } = args;
 
-  const extract = await deterministicEflExtract(pdfBytes);
+  const extract = await deterministicEflExtract(pdfBytes, extractPdfText);
   const rawText = extract.rawText ?? "";
 
   if (!rawText.trim()) {

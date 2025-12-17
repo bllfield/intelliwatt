@@ -109,6 +109,14 @@ async function main() {
       const pipeline = await runEflPipelineNoStore({
         pdfBytes: fetched.pdfBytes,
         source: "manual",
+        // Local-script override: allow running without the droplet pdftotext service.
+        extractPdfText: async (pdfBytes) => {
+          const mod: any = await import("pdf-parse");
+          const fn: any = mod?.pdf;
+          if (typeof fn !== "function") throw new Error("pdf-parse pdf export not found");
+          const r = await fn(Buffer.from(pdfBytes as any));
+          return String((r as any)?.text ?? "");
+        },
         offerMeta: null,
       });
 
