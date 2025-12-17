@@ -108,6 +108,7 @@ export default function PlansClient() {
   const prefetchAttemptsRef = useRef(0);
 
   const [bestRankAllIn, setBestRankAllIn] = useState<boolean | null>(null);
+  const [mobilePanel, setMobilePanel] = useState<"none" | "search" | "filters">("none");
 
   // Reset prefetch attempts when the *user-visible dataset* changes (filters/pagination),
   // but do NOT reset on our internal refresh nonce (otherwise we could loop forever
@@ -309,23 +310,226 @@ export default function PlansClient() {
       <div className="sticky top-0 z-20 -mx-4 px-4 pt-2 pb-3 bg-brand-white/90 backdrop-blur border-b border-brand-cyan/15">
         <div className="mx-auto max-w-5xl">
           <div className="rounded-3xl border border-brand-cyan/25 bg-brand-navy p-4 shadow-[0_18px_40px_rgba(10,20,60,0.35)]">
-            <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-              <div className="flex-1 min-w-0">
-                <label className="text-[0.68rem] font-semibold uppercase tracking-[0.28em] text-brand-cyan/65">
-                  Search
-                </label>
-                <input
-                  value={q}
-                  onChange={(e) => {
-                    setQ(e.target.value);
-                    setPage(1);
-                  }}
-                  placeholder="Plan name, provider…"
-                  className="mt-2 w-full rounded-2xl border border-brand-cyan/25 bg-brand-white/5 px-4 py-2 text-sm text-brand-white placeholder:text-brand-cyan/40 outline-none focus:border-brand-blue/60"
-                />
+            {/* Mobile: collapsible (so cards are visible) */}
+            <div className="md:hidden">
+              <div className="flex items-center justify-between gap-2">
+                <div className="inline-flex rounded-full border border-brand-cyan/25 bg-brand-white/5 p-1">
+                  <button
+                    type="button"
+                    className={`rounded-full px-3 py-2 text-xs font-semibold ${
+                      mobilePanel === "search" ? "bg-brand-white/10 text-brand-white" : "text-brand-cyan"
+                    }`}
+                    onClick={() => setMobilePanel((p) => (p === "search" ? "none" : "search"))}
+                  >
+                    Search
+                  </button>
+                  <button
+                    type="button"
+                    className={`rounded-full px-3 py-2 text-xs font-semibold ${
+                      mobilePanel === "filters" ? "bg-brand-white/10 text-brand-white" : "text-brand-cyan"
+                    }`}
+                    onClick={() => setMobilePanel((p) => (p === "filters" ? "none" : "filters"))}
+                  >
+                    Filters
+                  </button>
+                </div>
+
+                {mobilePanel !== "none" ? (
+                  <button
+                    type="button"
+                    className="rounded-full border border-brand-cyan/25 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-cyan hover:bg-brand-white/10"
+                    onClick={() => setMobilePanel("none")}
+                  >
+                    Close
+                  </button>
+                ) : null}
               </div>
 
-              <div className="grid grid-cols-2 gap-3 md:grid-cols-5 md:gap-2">
+              {mobilePanel === "search" ? (
+                <div className="mt-3">
+                  <label className="text-[0.68rem] font-semibold uppercase tracking-[0.28em] text-brand-cyan/65">
+                    Search
+                  </label>
+                  <input
+                    value={q}
+                    onChange={(e) => {
+                      setQ(e.target.value);
+                      setPage(1);
+                    }}
+                    placeholder="Plan name, provider…"
+                    className="mt-2 w-full rounded-2xl border border-brand-cyan/25 bg-brand-white/5 px-4 py-2 text-sm text-brand-white placeholder:text-brand-cyan/40 outline-none focus:border-brand-blue/60"
+                  />
+                </div>
+              ) : null}
+
+              {mobilePanel === "filters" ? (
+                <div className="mt-3 grid grid-cols-1 gap-3">
+                  <div>
+                    <label className="text-[0.68rem] font-semibold uppercase tracking-[0.28em] text-brand-cyan/65">
+                      Sort
+                    </label>
+                    <select
+                      value={sort}
+                      onChange={(e) => {
+                        setSort(e.target.value as any);
+                        setPage(1);
+                      }}
+                      className="mt-2 w-full rounded-2xl border border-brand-cyan/25 bg-brand-white/5 px-3 py-2 text-xs text-brand-white outline-none focus:border-brand-blue/60"
+                    >
+                      {hasUsage ? <option value="best_for_you_proxy">Best for you (preview)</option> : null}
+                      <option value="kwh1000_asc">Lowest @ 1000 kWh</option>
+                      <option value="kwh500_asc">Lowest @ 500 kWh</option>
+                      <option value="kwh2000_asc">Lowest @ 2000 kWh</option>
+                      <option value="term_asc">Shortest term</option>
+                      <option value="renewable_desc">Highest renewable</option>
+                    </select>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="text-[0.68rem] font-semibold uppercase tracking-[0.28em] text-brand-cyan/65">
+                        Rate
+                      </label>
+                      <select
+                        value={rateType}
+                        onChange={(e) => {
+                          setRateType(e.target.value as any);
+                          setPage(1);
+                        }}
+                        className="mt-2 w-full rounded-2xl border border-brand-cyan/25 bg-brand-white/5 px-3 py-2 text-xs text-brand-white outline-none focus:border-brand-blue/60"
+                      >
+                        <option value="all">All</option>
+                        <option value="fixed">Fixed</option>
+                        <option value="variable">Variable</option>
+                        <option value="renewable">Renewable</option>
+                        <option value="unknown">Unknown</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="text-[0.68rem] font-semibold uppercase tracking-[0.28em] text-brand-cyan/65">
+                        Term
+                      </label>
+                      <select
+                        value={term}
+                        onChange={(e) => {
+                          setTerm(e.target.value as any);
+                          setPage(1);
+                        }}
+                        className="mt-2 w-full rounded-2xl border border-brand-cyan/25 bg-brand-white/5 px-3 py-2 text-xs text-brand-white outline-none focus:border-brand-blue/60"
+                      >
+                        <option value="all">All</option>
+                        <option value="0-6">≤ 6 mo</option>
+                        <option value="7-12">7–12 mo</option>
+                        <option value="13-24">13–24 mo</option>
+                        <option value="25+">25+ mo</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="text-[0.68rem] font-semibold uppercase tracking-[0.28em] text-brand-cyan/65">
+                        Green
+                      </label>
+                      <select
+                        value={renewableMin}
+                        onChange={(e) => {
+                          setRenewableMin(Number(e.target.value) as any);
+                          setPage(1);
+                        }}
+                        className="mt-2 w-full rounded-2xl border border-brand-cyan/25 bg-brand-white/5 px-3 py-2 text-xs text-brand-white outline-none focus:border-brand-blue/60"
+                      >
+                        <option value={0}>Any</option>
+                        <option value={50}>50%+</option>
+                        <option value={100}>100%</option>
+                      </select>
+                    </div>
+
+                    <div className="flex items-end">
+                      <div className="w-full">
+                        <label className="text-[0.68rem] font-semibold uppercase tracking-[0.28em] text-brand-cyan/65">
+                          IntelliWatt
+                        </label>
+                        <label className="mt-2 flex items-center gap-2 text-xs text-brand-cyan/75 select-none">
+                          <input
+                            type="checkbox"
+                            checked={template === "available"}
+                            onChange={(e) => {
+                              setTemplate(e.target.checked ? "available" : "all");
+                              setPage(1);
+                            }}
+                            className="h-4 w-4 rounded border-brand-cyan/40 bg-brand-white/10"
+                          />
+                          Show only AVAILABLE templates
+                        </label>
+                      </div>
+                    </div>
+
+                    <div className="flex items-end">
+                      <label className="flex items-center gap-2 text-xs text-brand-cyan/75 select-none">
+                        <input
+                          type="checkbox"
+                          checked={isRenter}
+                          onChange={(e) => {
+                            const next = e.target.checked;
+                            setIsRenter(next);
+                            setPage(1);
+                            try {
+                              window.localStorage.setItem("dashboard_plans_is_renter", String(next));
+                            } catch {
+                              // ignore
+                            }
+                          }}
+                          className="h-4 w-4 rounded border-brand-cyan/40 bg-brand-white/10"
+                        />
+                        Renter (filters eligible plans)
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            {/* Desktop: grid (prevents overlap / label collisions) */}
+            <div className="hidden md:block">
+              <div className="grid grid-cols-[minmax(0,1fr)_260px] items-end gap-3">
+                <div className="min-w-0">
+                  <label className="text-[0.68rem] font-semibold uppercase tracking-[0.28em] text-brand-cyan/65">
+                    Search
+                  </label>
+                  <input
+                    value={q}
+                    onChange={(e) => {
+                      setQ(e.target.value);
+                      setPage(1);
+                    }}
+                    placeholder="Plan name, provider…"
+                    className="mt-2 w-full rounded-2xl border border-brand-cyan/25 bg-brand-white/5 px-4 py-2 text-sm text-brand-white placeholder:text-brand-cyan/40 outline-none focus:border-brand-blue/60"
+                  />
+                </div>
+
+                <div className="min-w-0">
+                  <label className="text-[0.68rem] font-semibold uppercase tracking-[0.28em] text-brand-cyan/65">
+                    Sort
+                  </label>
+                  <select
+                    value={sort}
+                    onChange={(e) => {
+                      setSort(e.target.value as any);
+                      setPage(1);
+                    }}
+                    className="mt-2 w-full rounded-2xl border border-brand-cyan/25 bg-brand-white/5 px-3 py-2 text-xs text-brand-white outline-none focus:border-brand-blue/60"
+                  >
+                    {hasUsage ? <option value="best_for_you_proxy">Best for you (preview)</option> : null}
+                    <option value="kwh1000_asc">Lowest @ 1000 kWh</option>
+                    <option value="kwh500_asc">Lowest @ 500 kWh</option>
+                    <option value="kwh2000_asc">Lowest @ 2000 kWh</option>
+                    <option value="term_asc">Shortest term</option>
+                    <option value="renewable_desc">Highest renewable</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="mt-3 grid grid-cols-5 gap-2">
                 <div>
                   <label className="text-[0.68rem] font-semibold uppercase tracking-[0.28em] text-brand-cyan/65">
                     Rate
@@ -384,22 +588,24 @@ export default function PlansClient() {
                   </select>
                 </div>
 
-                <div>
-                  <label className="text-[0.68rem] font-semibold uppercase tracking-[0.28em] text-brand-cyan/65">
-                    IntelliWatt
-                  </label>
-                  <label className="mt-2 flex items-center gap-2 text-xs text-brand-cyan/75 select-none">
-                    <input
-                      type="checkbox"
-                      checked={template === "available"}
-                      onChange={(e) => {
-                        setTemplate(e.target.checked ? "available" : "all");
-                        setPage(1);
-                      }}
-                      className="h-4 w-4 rounded border-brand-cyan/40 bg-brand-white/10"
-                    />
-                    Show only AVAILABLE templates
-                  </label>
+                <div className="flex items-end">
+                  <div className="w-full">
+                    <label className="text-[0.68rem] font-semibold uppercase tracking-[0.28em] text-brand-cyan/65">
+                      IntelliWatt
+                    </label>
+                    <label className="mt-2 flex items-center gap-2 text-xs text-brand-cyan/75 select-none">
+                      <input
+                        type="checkbox"
+                        checked={template === "available"}
+                        onChange={(e) => {
+                          setTemplate(e.target.checked ? "available" : "all");
+                          setPage(1);
+                        }}
+                        className="h-4 w-4 rounded border-brand-cyan/40 bg-brand-white/10"
+                      />
+                      Show only AVAILABLE templates
+                    </label>
+                  </div>
                 </div>
 
                 <div className="flex items-end">
@@ -421,27 +627,6 @@ export default function PlansClient() {
                     />
                     Renter (filters eligible plans)
                   </label>
-                </div>
-
-                <div className="col-span-2 md:col-span-1">
-                  <label className="text-[0.68rem] font-semibold uppercase tracking-[0.28em] text-brand-cyan/65">
-                    Sort
-                  </label>
-                  <select
-                    value={sort}
-                    onChange={(e) => {
-                      setSort(e.target.value as any);
-                      setPage(1);
-                    }}
-                    className="mt-2 w-full rounded-2xl border border-brand-cyan/25 bg-brand-white/5 px-3 py-2 text-xs text-brand-white outline-none focus:border-brand-blue/60"
-                  >
-                    {hasUsage ? <option value="best_for_you_proxy">Best for you (preview)</option> : null}
-                    <option value="kwh1000_asc">Lowest @ 1000 kWh</option>
-                    <option value="kwh500_asc">Lowest @ 500 kWh</option>
-                    <option value="kwh2000_asc">Lowest @ 2000 kWh</option>
-                    <option value="term_asc">Shortest term</option>
-                    <option value="renewable_desc">Highest renewable</option>
-                  </select>
                 </div>
               </div>
             </div>
