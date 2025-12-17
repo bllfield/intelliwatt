@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
 import { wattbuy } from "@/lib/wattbuy";
 import { normalizeOffers, type OfferNormalized } from "@/lib/wattbuy/normalize";
+import { getTrueCostStatus } from "@/lib/plan-engine/trueCostStatus";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -367,6 +368,7 @@ export async function GET(req: NextRequest) {
           // Always return a stable shape for clients: string when mapped, else null.
           ratePlanId,
           statusLabel,
+          trueCost: getTrueCostStatus({ hasUsage, ratePlanId }),
         },
         utility: {
           tdspSlug: o.tdsp ?? house.tdspSlug ?? undefined,
