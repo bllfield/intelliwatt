@@ -2307,6 +2307,7 @@ Guardrails
 - `/api/dashboard/plans` now returns `intelliwatt.trueCost` status scaffolding per offer (no calculations yet).
 - Added `lib/plan-engine/calculatePlanCostForUsage.ts` (pure stub + types), and `/api/dashboard/plans` now returns `intelliwatt.trueCostEstimate` per offer (placeholder).
 - Added `lib/plan-engine/getRatePlanTemplate.ts` (master DB read helper for `RatePlan` templates; no throwing; returns only fields needed for later true-cost calculations).
+- Fixed `RatePlan` template lookup for `ratePlanId` so `trueCostEstimate` doesn’t incorrectly show `MISSING_TEMPLATE` on transient lookup errors.
 - Added `lib/plan-engine/getTdspDeliveryRates.ts` (stub TDSP delivery rates contract; returns null for now).
 - `intelliwatt.trueCostEstimate` now returns `OK` using annual kWh (`usageSummary.totalKwh`) + `efl.avgPriceCentsPerKwh1000` proxy (still not true-cost).
 - `intelliwatt.trueCostEstimate.OK` now includes `monthlyCostDollars` (proxy: `annualCostDollars / 12`).

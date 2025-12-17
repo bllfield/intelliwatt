@@ -6,7 +6,7 @@ import { wattbuy } from "@/lib/wattbuy";
 import { normalizeOffers, type OfferNormalized } from "@/lib/wattbuy/normalize";
 import { getTrueCostStatus } from "@/lib/plan-engine/trueCostStatus";
 import { calculatePlanCostForUsage } from "@/lib/plan-engine/calculatePlanCostForUsage";
-import { getRatePlanTemplate } from "@/lib/plan-engine/getRatePlanTemplate";
+import { getRatePlanTemplateProbe } from "@/lib/plan-engine/getRatePlanTemplate";
 import { getTdspDeliveryRates } from "@/lib/plan-engine/getTdspDeliveryRates";
 
 export const runtime = "nodejs";
@@ -373,8 +373,10 @@ export async function GET(req: NextRequest) {
       // treat this offer as missing a template for true-cost estimate purposes.
       let templateOk = ratePlanId != null;
       if (ratePlanId) {
-        const tpl = await getRatePlanTemplate({ ratePlanId });
-        if (!tpl) templateOk = false;
+        const probed = await getRatePlanTemplateProbe({ ratePlanId });
+        // Only force "missing template" when we are sure the row is missing (null without throw).
+        // If the lookup threw (transient DB issues), do NOT downgrade the estimate.
+        if (!probed.didThrow && !probed.template) templateOk = false;
       }
 
       const avgPriceCentsPerKwh1000 = numOrNull((base as any)?.efl?.avgPriceCentsPerKwh1000);
