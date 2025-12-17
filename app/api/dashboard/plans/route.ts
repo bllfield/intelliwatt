@@ -98,32 +98,8 @@ function sortOffers(offers: OfferNormalized[], sort: SortKey): OfferNormalized[]
   return withKey.map((x) => x.o);
 }
 
-function firstFiniteNumber(vals: Array<any>): number | null {
-  for (const v of vals) {
-    const n = typeof v === "number" ? v : Number(v);
-    if (Number.isFinite(n)) return n;
-  }
-  return null;
-}
-
-function pickBest1000MetricCentsPerKwh(offer: any): number | null {
-  // Prefer 1000kWh EFL avg cents/kWh (WattBuy’s anchor point), then fall back to 500/2000.
-  // Keep this robust to slight schema variations without hardcoding a single guess.
-  return firstFiniteNumber([
-    offer?.efl?.avgPriceCentsPerKwh1000,
-    offer?.avgPriceCentsPerKwh1000,
-    offer?.kwh1000_cents,
-    offer?.bill1000,
-    offer?.bill_1000,
-    offer?.price1000,
-    offer?.rate1000,
-    offer?.efl?.avgPriceCentsPerKwh500,
-    offer?.avgPriceCentsPerKwh500,
-    offer?.kwh500_cents,
-    offer?.efl?.avgPriceCentsPerKwh2000,
-    offer?.avgPriceCentsPerKwh2000,
-    offer?.kwh2000_cents,
-  ]);
+function numOrNull(n: any): number | null {
+  return typeof n === "number" && Number.isFinite(n) ? n : null;
 }
 
 export async function GET(req: NextRequest) {
@@ -331,20 +307,18 @@ export async function GET(req: NextRequest) {
     const startIdx = (safePage - 1) * pageSize;
     const pageSlice = offers.slice(startIdx, startIdx + pageSize);
 
-    const usageSummaryTotalKwh =
-      usageSummary && typeof (usageSummary as any).totalKwh === "number"
-        ? (usageSummary as any).totalKwh
-        : null;
+    const usageSummaryTotalKwh = numOrNull((usageSummary as any)?.totalKwh);
 
-    const shapeOffer = async (o: any) => {
+    const shapeOfferBase = (o: any) => {
       const ratePlanId = mapByOfferId.get(o.offer_id) ?? null;
       const templateAvailable = ratePlanId != null;
       const eflUrl = o.docs?.efl ?? null;
       const statusLabel = templateAvailable ? "AVAILABLE" : eflUrl ? "QUEUED" : "UNAVAILABLE";
-      const avgPriceCentsPerKwh1000 =
-        typeof o?.kwh1000_cents === "number" && Number.isFinite(o.kwh1000_cents)
-          ? o.kwh1000_cents
-          : null;
+
+      // Normalize proxy pricing fields once, under offer.efl.* (single source of truth).
+      const eflAvg1000 = numOrNull(o?.kwh1000_cents);
+      const eflAvg500 = numOrNull(o?.kwh500_cents);
+      const eflAvg2000 = numOrNull(o?.kwh2000_cents);
 
       const earlyTerminationFeeDollars = (() => {
         const t = strOrNull(o.cancel_fee_text);
@@ -354,14 +328,6 @@ export async function GET(req: NextRequest) {
         const v = Number(m[1]);
         return Number.isFinite(v) ? v : undefined;
       })();
-
-      // Best-effort template existence check: if we have a ratePlanId but can't load the template,
-      // treat this offer as missing a template for true-cost estimate purposes.
-      let templateOk = ratePlanId != null;
-      if (ratePlanId) {
-        const tpl = await getRatePlanTemplate({ ratePlanId });
-        if (!tpl) templateOk = false;
-      }
 
       return {
         offerId: o.offer_id,
@@ -373,9 +339,9 @@ export async function GET(req: NextRequest) {
         earlyTerminationFeeDollars,
         baseMonthlyFeeDollars: undefined, // not reliably in WattBuy offer payload today
         efl: {
-          avgPriceCentsPerKwh500: o.kwh500_cents ?? undefined,
-          avgPriceCentsPerKwh1000: o.kwh1000_cents ?? undefined,
-          avgPriceCentsPerKwh2000: o.kwh2000_cents ?? undefined,
+          avgPriceCentsPerKwh500: eflAvg500 ?? undefined,
+          avgPriceCentsPerKwh1000: eflAvg1000 ?? undefined,
+          avgPriceCentsPerKwh2000: eflAvg2000 ?? undefined,
           eflUrl: eflUrl ?? undefined,
           eflPdfSha256: undefined,
           repPuctCertificate: undefined,
@@ -388,18 +354,41 @@ export async function GET(req: NextRequest) {
           ratePlanId,
           statusLabel,
           trueCost: getTrueCostStatus({ hasUsage, ratePlanId }),
-          trueCostEstimate: calculatePlanCostForUsage({
-            offerId: String(o.offer_id),
-            ratePlanId: templateOk ? ratePlanId : null,
-            tdspSlug: (o.tdsp ?? house.tdspSlug ?? null) as any,
-            hasUsage,
-            usageSummaryTotalKwh,
-            avgPriceCentsPerKwh1000,
-          }),
         },
         utility: {
           tdspSlug: o.tdsp ?? house.tdspSlug ?? undefined,
           utilityName: o.distributor_name ?? house.utilityName ?? undefined,
+        },
+      };
+    };
+
+    const shapeOffer = async (o: any) => {
+      const base = shapeOfferBase(o);
+      const ratePlanId = base?.intelliwatt?.ratePlanId ?? null;
+
+      // Best-effort template existence check: if we have a ratePlanId but can't load the template,
+      // treat this offer as missing a template for true-cost estimate purposes.
+      let templateOk = ratePlanId != null;
+      if (ratePlanId) {
+        const tpl = await getRatePlanTemplate({ ratePlanId });
+        if (!tpl) templateOk = false;
+      }
+
+      const avgPriceCentsPerKwh1000 = numOrNull((base as any)?.efl?.avgPriceCentsPerKwh1000);
+      const tdspSlug = (base as any)?.utility?.tdspSlug ?? null;
+
+      return {
+        ...base,
+        intelliwatt: {
+          ...(base as any).intelliwatt,
+          trueCostEstimate: calculatePlanCostForUsage({
+            offerId: String((base as any).offerId),
+            ratePlanId: templateOk ? ratePlanId : null,
+            tdspSlug,
+            hasUsage,
+            usageSummaryTotalKwh,
+            avgPriceCentsPerKwh1000,
+          }),
         },
       };
     };
@@ -414,7 +403,10 @@ export async function GET(req: NextRequest) {
     try {
       if (hasUsage) {
         const candidates = offers
-          .map((o) => ({ o, metric: pickBest1000MetricCentsPerKwh(o) }))
+          .map((o) => ({
+            o,
+            metric: numOrNull(shapeOfferBase(o)?.efl?.avgPriceCentsPerKwh1000),
+          }))
           .filter((x) => typeof x.metric === "number" && Number.isFinite(x.metric as number))
           .sort((a, b) => (a.metric as number) - (b.metric as number))
           .slice(0, 5)
