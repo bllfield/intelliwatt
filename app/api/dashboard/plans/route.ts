@@ -6,6 +6,7 @@ import { wattbuy } from "@/lib/wattbuy";
 import { normalizeOffers, type OfferNormalized } from "@/lib/wattbuy/normalize";
 import { getTrueCostStatus } from "@/lib/plan-engine/trueCostStatus";
 import { calculatePlanCostForUsage } from "@/lib/plan-engine/calculatePlanCostForUsage";
+import { getRatePlanTemplate } from "@/lib/plan-engine/getRatePlanTemplate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -330,11 +331,20 @@ export async function GET(req: NextRequest) {
     const startIdx = (safePage - 1) * pageSize;
     const pageSlice = offers.slice(startIdx, startIdx + pageSize);
 
-    const shapeOffer = (o: any) => {
+    const usageSummaryTotalKwh =
+      usageSummary && typeof (usageSummary as any).totalKwh === "number"
+        ? (usageSummary as any).totalKwh
+        : null;
+
+    const shapeOffer = async (o: any) => {
       const ratePlanId = mapByOfferId.get(o.offer_id) ?? null;
       const templateAvailable = ratePlanId != null;
       const eflUrl = o.docs?.efl ?? null;
       const statusLabel = templateAvailable ? "AVAILABLE" : eflUrl ? "QUEUED" : "UNAVAILABLE";
+      const avgPriceCentsPerKwh1000 =
+        typeof o?.kwh1000_cents === "number" && Number.isFinite(o.kwh1000_cents)
+          ? o.kwh1000_cents
+          : null;
 
       const earlyTerminationFeeDollars = (() => {
         const t = strOrNull(o.cancel_fee_text);
@@ -344,6 +354,14 @@ export async function GET(req: NextRequest) {
         const v = Number(m[1]);
         return Number.isFinite(v) ? v : undefined;
       })();
+
+      // Best-effort template existence check: if we have a ratePlanId but can't load the template,
+      // treat this offer as missing a template for true-cost estimate purposes.
+      let templateOk = ratePlanId != null;
+      if (ratePlanId) {
+        const tpl = await getRatePlanTemplate({ ratePlanId });
+        if (!tpl) templateOk = false;
+      }
 
       return {
         offerId: o.offer_id,
@@ -372,9 +390,11 @@ export async function GET(req: NextRequest) {
           trueCost: getTrueCostStatus({ hasUsage, ratePlanId }),
           trueCostEstimate: calculatePlanCostForUsage({
             offerId: String(o.offer_id),
-            ratePlanId,
+            ratePlanId: templateOk ? ratePlanId : null,
             tdspSlug: (o.tdsp ?? house.tdspSlug ?? null) as any,
             hasUsage,
+            usageSummaryTotalKwh,
+            avgPriceCentsPerKwh1000,
           }),
         },
         utility: {
@@ -384,7 +404,7 @@ export async function GET(req: NextRequest) {
       };
     };
 
-    const shaped = pageSlice.map(shapeOffer);
+    const shaped = await Promise.all(pageSlice.map(shapeOffer));
 
     // Compute bestOffers (proxy ranking) server-side so the UI can render without an extra round-trip.
     // Must never throw; on any failure, fall back to [].
@@ -399,7 +419,7 @@ export async function GET(req: NextRequest) {
           .sort((a, b) => (a.metric as number) - (b.metric as number))
           .slice(0, 5)
           .map((x) => x.o);
-        bestOffers = candidates.map(shapeOffer);
+        bestOffers = await Promise.all(candidates.map(shapeOffer));
 
         if (bestOffers.length > 0) {
           bestOffersBasis = "proxy_1000kwh_efl_avgPriceCentsPerKwh1000";
