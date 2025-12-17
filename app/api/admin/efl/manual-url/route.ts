@@ -179,6 +179,7 @@ export async function POST(req: NextRequest) {
     let offerRateMapLinkUpdatedCount: number = 0;
     let offerIdRatePlanMapAttempted: boolean = false;
     let offerIdRatePlanMapOk: boolean = false;
+    let offerIdRatePlanMapOfferId: string | null = null;
     let offerIdRatePlanMapRatePlanId: string | null = null;
     let offerIdRatePlanMapError: string | null = null;
     try {
@@ -328,6 +329,7 @@ export async function POST(req: NextRequest) {
           try {
             if (templatePersisted && persistedRatePlanId && offerId) {
               offerIdRatePlanMapAttempted = true;
+              offerIdRatePlanMapOfferId = String(offerId);
               const now = new Date();
               const row = await (prisma as any).offerIdRatePlanMap.upsert({
                 where: { offerId: String(offerId) },
@@ -351,6 +353,7 @@ export async function POST(req: NextRequest) {
           } catch (e: any) {
             offerIdRatePlanMapAttempted = true;
             offerIdRatePlanMapOk = false;
+            offerIdRatePlanMapOfferId = offerId ? String(offerId) : null;
             offerIdRatePlanMapRatePlanId = null;
             offerIdRatePlanMapError = e?.message ? String(e.message) : String(e);
           }
@@ -443,6 +446,7 @@ export async function POST(req: NextRequest) {
       offerRateMapLinkUpdatedCount = 0;
       offerIdRatePlanMapAttempted = false;
       offerIdRatePlanMapOk = false;
+      offerIdRatePlanMapOfferId = null;
       offerIdRatePlanMapRatePlanId = null;
       offerIdRatePlanMapError = null;
     }
@@ -479,6 +483,7 @@ export async function POST(req: NextRequest) {
       offerRateMapLinkUpdatedCount,
       offerIdRatePlanMapAttempted,
       offerIdRatePlanMapOk,
+      offerIdRatePlanMapOfferId,
       offerIdRatePlanMapRatePlanId,
       offerIdRatePlanMapError,
       autoResolvedQueueCount,

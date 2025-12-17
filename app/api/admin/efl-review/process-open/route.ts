@@ -137,6 +137,8 @@ export async function POST(req: NextRequest) {
         let offerRateMapLinkUpdatedCount: number = 0;
         let offerIdRatePlanMapAttempted: boolean = false;
         let offerIdRatePlanMapOk: boolean = false;
+        let offerIdRatePlanMapOfferId: string | null = null;
+        let offerIdRatePlanMapRatePlanId: string | null = null;
         let offerIdRatePlanMapError: string | null = null;
 
         if (!dryRun && finalStatus === "PASS" && passStrength === "STRONG") {
@@ -248,6 +250,8 @@ export async function POST(req: NextRequest) {
                 try {
                   if (it?.offerId && persistedRatePlanId) {
                     offerIdRatePlanMapAttempted = true;
+                    offerIdRatePlanMapOfferId = String(it.offerId);
+                    offerIdRatePlanMapRatePlanId = persistedRatePlanId;
                     const now = new Date();
                     await (prisma as any).offerIdRatePlanMap.upsert({
                       where: { offerId: String(it.offerId) },
@@ -367,6 +371,8 @@ export async function POST(req: NextRequest) {
           offerRateMapLinkUpdatedCount,
           offerIdRatePlanMapAttempted,
           offerIdRatePlanMapOk,
+          offerIdRatePlanMapOfferId,
+          offerIdRatePlanMapRatePlanId,
           offerIdRatePlanMapError,
           notes: persistNotes,
         });

@@ -428,7 +428,7 @@ model OfferRateMap {
   /// Optional link to the persisted RatePlan template created from this offer's EFL.
   /// This makes WattBuy offer_id the authoritative fingerprint for attaching templates.
   ratePlanId String?
-  ratePlan   RatePlan? @relation(fields: [ratePlanId], references: [id], onDelete: SetNull)
+  ratePlan   RatePlan? @relation("OfferRateMap_RatePlan", fields: [ratePlanId], references: [id], onDelete: SetNull)
 
   @@index([supplierSlug, planId])
   @@index([supplierSlug, nameId])
@@ -929,7 +929,7 @@ model RatePlan {
   planName     String?
 
   /// Back-reference for OfferRateMap.ratePlan (WattBuy offer_id -> RatePlan template link)
-  offerRateMaps       OfferRateMap[]
+  offerRateMaps       OfferRateMap[]       @relation("OfferRateMap_RatePlan")
   /// Back-reference for OfferIdRatePlanMap.ratePlan (canonical offerId -> RatePlan link)
   offerIdRatePlanMaps OfferIdRatePlanMap[]
 

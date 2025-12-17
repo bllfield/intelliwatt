@@ -2299,11 +2299,17 @@ Guardrails
 Verification checklist (PowerShell):
 - Apply migrations:
   - `npx prisma migrate deploy --schema prisma/schema.prisma`
+- Validate schema:
+  - `npx prisma validate --schema prisma/schema.prisma`
+- (Optional) regenerate client after schema changes:
+  - `npx prisma generate --schema prisma/schema.prisma`
 - Trigger a template persist with offerId:
   - Use `/admin/efl/fact-cards` manual loader (URL mode) and include the `offerId` field.
 - Confirm linkage exists (Prisma Studio / query):
   - Find `OfferIdRatePlanMap` by `offerId` and verify `ratePlanId` is set and matches the created `RatePlan.id`.
   - If the offer was synced, confirm `OfferRateMap.ratePlanId` is also set (secondary enrichment).
+ - CLI verify:
+   - `npx tsx scripts/efl/verify-offerid-rateplan-map.ts <offerId>`
 
 ---
 
