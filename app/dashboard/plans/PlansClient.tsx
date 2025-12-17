@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import OfferCard from "./OfferCard";
 
 type UsageSummary = { source: string; annualKwh?: number; last12moKwh?: number } | null;
@@ -49,6 +49,7 @@ export default function PlansClient() {
   const [sort, setSort] = useState<SortKey>("kwh1000_asc");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<10 | 20 | 50>(20);
+  const [refreshNonce, setRefreshNonce] = useState(0);
 
   const [loading, setLoading] = useState(false);
   const [resp, setResp] = useState<ApiResponse | null>(null);
@@ -56,6 +57,9 @@ export default function PlansClient() {
 
   const [bestLoading, setBestLoading] = useState(false);
   const [bestOffers, setBestOffers] = useState<OfferRow[]>([]);
+  const [prefetchNote, setPrefetchNote] = useState<string | null>(null);
+  const prefetchInFlightRef = useRef(false);
+  const prefetchAttemptsRef = useRef(0);
 
   useEffect(() => {
     try {
@@ -78,8 +82,10 @@ export default function PlansClient() {
       sort,
       page: String(page),
       pageSize: String(pageSize),
+      // Used only to force a reload after background prefetch runs.
+      _r: String(refreshNonce),
     }),
-    [q, rateType, term, renewableMin, template, isRenter, sort, page, pageSize],
+    [q, rateType, term, renewableMin, template, isRenter, sort, page, pageSize, refreshNonce],
   );
 
   useEffect(() => {
@@ -150,6 +156,71 @@ export default function PlansClient() {
     runBest();
     return () => controller.abort();
   }, [resp?.ok, resp?.hasUsage, q, rateType, term, renewableMin, template, isRenter]);
+
+  // Auto-prefetch templates in the background so customer cards converge to "AVAILABLE".
+  // This will only leave "QUEUED" for genuine manual-review cases.
+  useEffect(() => {
+    if (!resp?.ok) return;
+    if (!resp?.hasUsage) return;
+    if (loading) return;
+    if (error) return;
+    if (prefetchInFlightRef.current) return;
+    if (prefetchAttemptsRef.current >= 10) return; // safety cap per page load
+
+    const offersNow = Array.isArray(resp?.offers) ? (resp!.offers as OfferRow[]) : [];
+    const queuedOffers = offersNow.filter((o) => o?.intelliwatt?.statusLabel === "QUEUED");
+    if (queuedOffers.length === 0) {
+      setPrefetchNote(null);
+      return;
+    }
+
+    prefetchInFlightRef.current = true;
+    prefetchAttemptsRef.current += 1;
+    setPrefetchNote(`Preparing IntelliWatt calculations… (${queuedOffers.length} pending)`);
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      controller.abort();
+    }, 12_000);
+
+    async function runPrefetch() {
+      try {
+        const params = new URLSearchParams();
+        params.set("timeBudgetMs", "9000");
+        params.set("maxOffers", "4");
+        params.set("isRenter", String(isRenter));
+        const r = await fetch(`/api/dashboard/plans/prefetch?${params.toString()}`, {
+          method: "POST",
+          signal: controller.signal,
+        });
+        const j = await r.json().catch(() => null);
+        if (!r.ok || !j?.ok) {
+          setPrefetchNote("Preparing IntelliWatt calculations… (retrying)");
+          return;
+        }
+
+        const linked = Number(j?.linked ?? 0) || 0;
+        const qd = Number(j?.queued ?? 0) || 0;
+        const remaining = Number(j?.remaining ?? 0) || 0;
+        setPrefetchNote(`Preparing IntelliWatt calculations… linked=${linked} queued=${qd} remaining=${remaining}`);
+      } catch (e: any) {
+        if (e?.name === "AbortError") return;
+        setPrefetchNote("Preparing IntelliWatt calculations… (retrying)");
+      } finally {
+        window.clearTimeout(timer);
+        prefetchInFlightRef.current = false;
+        // Trigger a refresh of the offers list after the prefetch attempt.
+        setRefreshNonce((n) => n + 1);
+      }
+    }
+
+    runPrefetch();
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resp?.ok, resp?.hasUsage, resp?.offers, isRenter, loading, error]);
 
   const hasUsage = Boolean(resp?.ok && resp?.hasUsage);
   const offers = Array.isArray(resp?.offers) ? resp!.offers! : [];
@@ -305,6 +376,8 @@ export default function PlansClient() {
                   <span className="text-amber-200">{error}</span>
                 ) : resp?.message ? (
                   <span>{resp.message}</span>
+                ) : prefetchNote ? (
+                  <span className="text-brand-cyan/80">{prefetchNote}</span>
                 ) : (
                   <span>
                     Showing <span className="text-brand-white font-semibold">{offers.length}</span> of{" "}
