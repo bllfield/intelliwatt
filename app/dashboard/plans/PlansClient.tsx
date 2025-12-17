@@ -295,6 +295,8 @@ export default function PlansClient() {
   const offers = Array.isArray(resp?.offers) ? resp!.offers! : [];
   const total = typeof resp?.total === "number" ? resp.total : 0;
   const totalPages = typeof resp?.totalPages === "number" ? resp.totalPages : 0;
+  const hasUnavailable = offers.some((o: any) => o?.intelliwatt?.statusLabel === "UNAVAILABLE");
+  const availableFilterOn = template === "available";
 
   const bestStripOffers = useMemo(() => {
     if (!hasUsage) return [];
@@ -560,6 +562,33 @@ export default function PlansClient() {
                 })}
               </div>
             ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {hasUnavailable && !availableFilterOn ? (
+        <div className="mx-auto w-full max-w-5xl">
+          <div className="rounded-2xl border border-brand-cyan/20 bg-brand-navy px-4 py-3 text-brand-cyan/75">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-brand-white">
+                  Some plans are missing IntelliWatt templates
+                </div>
+                <div className="mt-0.5 text-xs text-brand-cyan/70">
+                  You can still compare provider estimates, but IntelliWatt true-cost ranking requires a parsed EFL template.
+                  <span className="ml-2 text-brand-cyan/55">Templates are added continuously.</span>
+                </div>
+              </div>
+              <button
+                className="shrink-0 rounded-full border border-brand-cyan/25 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-cyan hover:bg-brand-white/10"
+                onClick={() => {
+                  setTemplate("available");
+                  setPage(1);
+                }}
+              >
+                Show AVAILABLE only
+              </button>
+            </div>
           </div>
         </div>
       ) : null}

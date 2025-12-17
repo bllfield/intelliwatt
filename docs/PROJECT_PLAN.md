@@ -2305,6 +2305,7 @@ Guardrails
 - Uses a sticky filter/sort bar + pagination to avoid an infinite scroll plan list.
 - When `hasUsage=true`, shows a compact **“Best plans for you (estimate)”** strip at the top using the offer’s 1000kWh EFL average price (field: `efl.avgPriceCentsPerKwh1000`) as a temporary proxy ranking.
 - Plan cards show a template status badge: **AVAILABLE / QUEUED / NOT AVAILABLE**, plus a filter toggle **“Show only AVAILABLE templates”**.
+- Shows a compact banner when **NOT AVAILABLE** plans are present, with a one-click action to enable **“Show only AVAILABLE templates”**.
 
 Next (Dashboard):
 - Replace “Best for you (preview)” proxy sort with true usage-based ranking by connecting usage → plan engine (`calculatePlanCostForUsage`).
