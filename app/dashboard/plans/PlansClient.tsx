@@ -112,6 +112,7 @@ export default function PlansClient() {
 
   const [bestRankAllIn, setBestRankAllIn] = useState<boolean | null>(null);
   const [mobilePanel, setMobilePanel] = useState<"none" | "search" | "filters">("none");
+  const [headerCollapsed, setHeaderCollapsed] = useState(false);
 
   // Reset prefetch attempts when the *user-visible dataset* changes (filters/pagination),
   // but do NOT reset on our internal refresh nonce (otherwise we could loop forever
@@ -147,6 +148,31 @@ export default function PlansClient() {
       // ignore
     }
   }, []);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem("dashboard_plans_header_collapsed");
+      if (raw === "true") setHeaderCollapsed(true);
+      if (raw === "false") setHeaderCollapsed(false);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const setCollapsed = (next: boolean) => {
+    setHeaderCollapsed(next);
+    if (next) setMobilePanel("none");
+    try {
+      window.localStorage.setItem("dashboard_plans_header_collapsed", String(next));
+    } catch {
+      // ignore
+    }
+  };
+
+  const openHeader = (panel?: "search" | "filters") => {
+    setCollapsed(false);
+    if (panel) setMobilePanel(panel);
+  };
 
   const baseParams = useMemo(
     () => ({
@@ -333,6 +359,50 @@ export default function PlansClient() {
       <div className="sticky top-0 z-20 -mx-4 px-4 pt-2 pb-3 bg-brand-white/90 backdrop-blur border-b border-brand-cyan/15">
         <div className="mx-auto max-w-5xl">
           <div className="rounded-3xl border border-brand-cyan/25 bg-brand-navy p-4 shadow-[0_18px_40px_rgba(10,20,60,0.35)]">
+            {/* Always-visible tiny bar (lets user collapse the whole search/filter UI) */}
+            <div className="flex items-center justify-between gap-2">
+              {headerCollapsed ? (
+                <div className="flex items-center gap-2 min-w-0">
+                  <button
+                    type="button"
+                    className="rounded-full border border-brand-cyan/25 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-cyan hover:bg-brand-white/10"
+                    onClick={() => openHeader("search")}
+                  >
+                    Search
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-full border border-brand-cyan/25 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-cyan hover:bg-brand-white/10"
+                    onClick={() => openHeader("filters")}
+                  >
+                    Filters
+                  </button>
+                  <div className="ml-1 truncate text-xs text-brand-cyan/60">
+                    {loading ? (
+                      <span>Loading…</span>
+                    ) : (
+                      <span>
+                        Showing <span className="text-brand-white font-semibold">{offers.length}</span> of{" "}
+                        <span className="text-brand-white font-semibold">{total}</span>
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="text-xs text-brand-cyan/60">Search & filters</div>
+              )}
+
+              <button
+                type="button"
+                className="shrink-0 rounded-full border border-brand-cyan/25 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-cyan hover:bg-brand-white/10"
+                onClick={() => setCollapsed(!headerCollapsed)}
+              >
+                {headerCollapsed ? "Expand" : "Collapse"}
+              </button>
+            </div>
+
+            {headerCollapsed ? null : (
+              <>
             {/* Mobile: collapsible (so cards are visible) */}
             <div className="md:hidden">
               <div className="flex items-center justify-between gap-2">
@@ -697,6 +767,8 @@ export default function PlansClient() {
                 </div>
               </div>
             </div>
+              </>
+            )}
           </div>
         </div>
       </div>
