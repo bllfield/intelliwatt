@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import OfferCard from "./OfferCard";
+import { EstimateBreakdownPopover } from "../../components/ui/EstimateBreakdownPopover";
 
 type UsageSummary =
   | {
@@ -497,6 +498,17 @@ export default function PlansClient() {
                         ? "border-amber-400/40 bg-amber-500/10 text-amber-200"
                         : "border-brand-cyan/20 bg-brand-white/5 text-brand-cyan/70";
 
+                  const tce = (o as any)?.intelliwatt?.trueCostEstimate;
+                  const tdspRatesApplied = (o as any)?.intelliwatt?.tdspRatesApplied ?? null;
+                  const showEst = tce?.status === "OK" && typeof tce?.monthlyCostDollars === "number";
+                  const estMonthly = showEst ? (tce.monthlyCostDollars as number) : null;
+                  const c2 = showEst ? tce?.componentsV2 : null;
+                  const repAnnual = c2?.rep?.energyDollars ?? tce?.annualCostDollars;
+                  const totalAnnual = c2?.totalDollars ?? tce?.annualCostDollars;
+                  const tdspDeliveryAnnual = c2?.tdsp?.deliveryDollars;
+                  const tdspFixedAnnual = c2?.tdsp?.fixedDollars;
+                  const inclTdsp = Boolean(tdspRatesApplied);
+
                   return (
                     <div
                       key={`best-mini-${(o as any).offerId}`}
@@ -525,6 +537,32 @@ export default function PlansClient() {
                           {(o as any)?.termMonths ? `${(o as any).termMonths} mo` : "Term —"}
                         </div>
                       </div>
+
+                      {showEst && typeof repAnnual === "number" && typeof totalAnnual === "number" ? (
+                        <div className="mt-2 text-xs text-brand-cyan/70">
+                          <EstimateBreakdownPopover
+                            trigger={
+                              <>
+                                Est. ${Number(estMonthly).toFixed(2)}/mo
+                                {inclTdsp ? <span className="text-brand-cyan/60"> · incl. TDSP</span> : null}
+                              </>
+                            }
+                            repAnnualDollars={repAnnual}
+                            tdspDeliveryAnnualDollars={
+                              typeof tdspDeliveryAnnual === "number" && Number.isFinite(tdspDeliveryAnnual)
+                                ? tdspDeliveryAnnual
+                                : undefined
+                            }
+                            tdspFixedAnnualDollars={
+                              typeof tdspFixedAnnual === "number" && Number.isFinite(tdspFixedAnnual)
+                                ? tdspFixedAnnual
+                                : undefined
+                            }
+                            totalAnnualDollars={totalAnnual}
+                            effectiveDate={tdspRatesApplied?.effectiveDate}
+                          />
+                        </div>
+                      ) : null}
                     </div>
                   );
                 })}

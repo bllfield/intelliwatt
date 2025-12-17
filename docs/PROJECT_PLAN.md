@@ -2325,6 +2325,7 @@ Guardrails
 - Added a breakdown popover on the plan card monthly estimate (REP vs TDSP split + TDSP effective date when available).
 - Estimate breakdown popover now shows monthly + annual for REP/TDSP/Total.
 - Extracted `EstimateBreakdownPopover` into a reusable component (used by `OfferCard`).
+- Best plans strip now uses `EstimateBreakdownPopover` for the estimate breakdown (same as plan cards).
 - Shows a compact banner when **NOT AVAILABLE** plans are present, with a one-click action to enable **“Show only AVAILABLE templates”**.
 
 Next (Dashboard):
