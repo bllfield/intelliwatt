@@ -104,7 +104,11 @@ export default function WattbuyTemplatedPlansPage() {
       const params = new URLSearchParams();
       params.set("limit", String(limit));
       if (q.trim()) params.set("q", q.trim());
-      const a = addrOverride ?? addr;
+      // NOTE: addrOverride distinguishes:
+      // - undefined: no override (use current state)
+      // - null: explicit clear (no address filter)
+      // - ParsedPlace: explicit address filter
+      const a = typeof addrOverride === "undefined" ? addr : addrOverride;
       if (a?.line1 && a.city && a.state && a.zip) {
         params.set("address", a.line1);
         params.set("city", a.city);
