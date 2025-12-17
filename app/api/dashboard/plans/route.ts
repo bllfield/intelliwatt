@@ -430,6 +430,9 @@ export async function GET(req: NextRequest) {
     let bestOffers: any[] = [];
     let bestOffersBasis: string | null = null;
     let bestOffersDisclaimer: string | null = null;
+    let bestOffersAllIn: any[] = [];
+    let bestOffersAllInBasis: string | null = null;
+    let bestOffersAllInDisclaimer: string | null = null;
     try {
       if (hasUsage) {
         const candidates = offers
@@ -448,11 +451,36 @@ export async function GET(req: NextRequest) {
           bestOffersDisclaimer =
             "Based on your last 12 months usage. Ranking uses provider 1000 kWh estimate until IntelliWatt true-cost is enabled.";
         }
+
+        // Also compute a best-effort "all-in" ranking using trueCostEstimate.monthlyCostDollars (OK-only).
+        // Keep this best-effort and bounded: re-rank the already-shaped bestOffers when available.
+        const allInPool = Array.isArray(bestOffers) && bestOffers.length > 0 ? bestOffers : shaped;
+        const scoredAllIn = (allInPool ?? [])
+          .map((o: any) => {
+            const tce = o?.intelliwatt?.trueCostEstimate;
+            const ok = tce?.status === "OK";
+            const v = ok ? Number(tce?.monthlyCostDollars) : Number.POSITIVE_INFINITY;
+            return { o, v: Number.isFinite(v) ? v : Number.POSITIVE_INFINITY };
+          })
+          .filter((x) => x.v !== Number.POSITIVE_INFINITY)
+          .sort((a, b) => a.v - b.v)
+          .slice(0, 5)
+          .map((x) => x.o);
+
+        bestOffersAllIn = scoredAllIn;
+        if (bestOffersAllIn.length > 0) {
+          bestOffersAllInBasis = "proxy_allin_monthly_trueCostEstimate";
+          bestOffersAllInDisclaimer =
+            "Includes TDSP delivery. REP energy is still based on provider 1000 kWh estimate until IntelliWatt true-cost is enabled.";
+        }
       }
     } catch {
       bestOffers = [];
       bestOffersBasis = null;
       bestOffersDisclaimer = null;
+      bestOffersAllIn = [];
+      bestOffersAllInBasis = null;
+      bestOffersAllInDisclaimer = null;
     }
 
     return NextResponse.json(
@@ -464,6 +492,9 @@ export async function GET(req: NextRequest) {
         bestOffers,
         bestOffersBasis,
         bestOffersDisclaimer,
+        bestOffersAllIn,
+        bestOffersAllInBasis,
+        bestOffersAllInDisclaimer,
         page: safePage,
         pageSize,
         total,

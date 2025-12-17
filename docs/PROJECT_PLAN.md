@@ -2327,6 +2327,7 @@ Guardrails
 - Extracted `EstimateBreakdownPopover` into a reusable component (used by `OfferCard`).
 - Best plans strip now uses `EstimateBreakdownPopover` for the estimate breakdown (same as plan cards).
 - Best plans strip supports ranking by all-in proxy (monthlyCostDollars) vs EFL 1000kWh proxy.
+- `/api/dashboard/plans` now returns `bestOffersAllIn` (+ basis/disclaimer) using `trueCostEstimate.monthlyCostDollars` (OK-only).
 - Shows a compact banner when **NOT AVAILABLE** plans are present, with a one-click action to enable **“Show only AVAILABLE templates”**.
 
 Next (Dashboard):
