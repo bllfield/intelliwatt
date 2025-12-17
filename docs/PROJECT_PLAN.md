@@ -2310,6 +2310,7 @@ Guardrails
 - Added `lib/plan-engine/getTdspDeliveryRates.ts` (stub TDSP delivery rates contract; returns null for now).
 - `intelliwatt.trueCostEstimate` now returns `OK` using annual kWh (`usageSummary.totalKwh`) + `efl.avgPriceCentsPerKwh1000` proxy (still not true-cost).
 - `intelliwatt.trueCostEstimate.OK` now includes `monthlyCostDollars` (proxy: `annualCostDollars / 12`).
+- `intelliwatt.trueCostEstimate.OK` now includes `confidence` (currently `"MEDIUM"` for the proxy path).
 - Proxy basis standardized: `offer.efl.avgPriceCentsPerKwh1000` is the single source for proxy ranking + proxy cost estimate.
 - Shows **Queued / calculations not available** messaging when an EFL exists but no template mapping exists yet.
 - Uses a sticky filter/sort bar + pagination to avoid an infinite scroll plan list.

@@ -1,5 +1,11 @@
 export type TrueCostEstimate =
-  | { status: "OK"; annualCostDollars: number; monthlyCostDollars: number; notes?: string[] }
+  | {
+      status: "OK";
+      annualCostDollars: number;
+      monthlyCostDollars: number;
+      confidence: "LOW" | "MEDIUM";
+      notes?: string[];
+    }
   | { status: "MISSING_USAGE"; notes?: string[] }
   | { status: "MISSING_TEMPLATE"; notes?: string[] }
   | { status: "NOT_IMPLEMENTED"; notes?: string[] };
@@ -32,6 +38,7 @@ export function calculatePlanCostForUsage(args: {
     status: "OK",
     annualCostDollars,
     monthlyCostDollars,
+    confidence: "MEDIUM",
     notes: ["Proxy: avgPriceCentsPerKwh1000 * annual kWh"],
   };
 }
