@@ -5,6 +5,7 @@ import { normalizeEmail } from "@/lib/utils/email";
 import { wattbuy } from "@/lib/wattbuy";
 import { normalizeOffers, type OfferNormalized } from "@/lib/wattbuy/normalize";
 import { getTrueCostStatus } from "@/lib/plan-engine/trueCostStatus";
+import { calculatePlanCostForUsage } from "@/lib/plan-engine/calculatePlanCostForUsage";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -369,6 +370,12 @@ export async function GET(req: NextRequest) {
           ratePlanId,
           statusLabel,
           trueCost: getTrueCostStatus({ hasUsage, ratePlanId }),
+          trueCostEstimate: calculatePlanCostForUsage({
+            offerId: String(o.offer_id),
+            ratePlanId,
+            tdspSlug: (o.tdsp ?? house.tdspSlug ?? null) as any,
+            hasUsage,
+          }),
         },
         utility: {
           tdspSlug: o.tdsp ?? house.tdspSlug ?? undefined,
