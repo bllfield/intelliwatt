@@ -711,7 +711,12 @@ export default function PlansClient() {
                   <input
                     type="checkbox"
                     checked={bestRankAllIn === true}
-                    onChange={(e) => setBestRankAllIn(e.target.checked)}
+                    onChange={(e) => {
+                      setBestRankAllIn(e.target.checked);
+                      // Force a refresh so we immediately pick up the preferred server-ranked list
+                      // (and matching basis/disclaimer) when the user toggles.
+                      setRefreshNonce((n) => n + 1);
+                    }}
                     className="h-4 w-4 rounded border-brand-cyan/40 bg-brand-white/10"
                   />
                   Rank by all-in estimate (incl. TDSP)
