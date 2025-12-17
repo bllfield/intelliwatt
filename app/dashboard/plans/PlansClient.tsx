@@ -25,6 +25,7 @@ type ApiResponse = {
   hasUsage?: boolean;
   usageSummary?: UsageSummary;
   offers?: OfferRow[];
+  bestOffers?: OfferRow[];
   page?: number;
   pageSize?: number;
   total?: number;
@@ -99,8 +100,6 @@ export default function PlansClient() {
   const [resp, setResp] = useState<ApiResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const [bestLoading, setBestLoading] = useState(false);
-  const [bestOffers, setBestOffers] = useState<OfferRow[]>([]);
   const [prefetchNote, setPrefetchNote] = useState<string | null>(null);
   const prefetchInFlightRef = useRef(false);
   const prefetchAttemptsRef = useRef(0);
@@ -162,7 +161,6 @@ export default function PlansClient() {
     setLoading(true);
     setError(null);
     setResp(null);
-    setBestOffers([]);
 
     async function run() {
       try {
@@ -186,45 +184,6 @@ export default function PlansClient() {
     run();
     return () => controller.abort();
   }, [baseParams]);
-
-  useEffect(() => {
-    const hasUsage = Boolean(resp?.ok && resp?.hasUsage);
-    if (!hasUsage) return;
-
-    const controller = new AbortController();
-    setBestLoading(true);
-
-    async function runBest() {
-      try {
-        const qs = buildQuery({
-          q,
-          rateType,
-          term,
-          renewableMin: String(renewableMin),
-          template,
-          isRenter: String(isRenter),
-          sort: "best_for_you_proxy",
-          page: "1",
-          pageSize: "5",
-        });
-        const r = await fetch(`/api/dashboard/plans?${qs}`, { signal: controller.signal });
-        const j = (await r.json()) as ApiResponse;
-        if (!r.ok || !j?.ok) {
-          setBestOffers([]);
-          return;
-        }
-        setBestOffers(Array.isArray(j.offers) ? j.offers : []);
-      } catch (e: any) {
-        if (e?.name === "AbortError") return;
-        setBestOffers([]);
-      } finally {
-        setBestLoading(false);
-      }
-    }
-
-    runBest();
-    return () => controller.abort();
-  }, [resp?.ok, resp?.hasUsage, q, rateType, term, renewableMin, template, isRenter]);
 
   // Auto-prefetch templates in the background so customer cards converge to "AVAILABLE".
   // This will only leave "QUEUED" for genuine manual-review cases.
@@ -300,12 +259,16 @@ export default function PlansClient() {
 
   const bestStripOffers = useMemo(() => {
     if (!hasUsage) return [];
-    const scored = (Array.isArray(bestOffers) ? bestOffers : [])
+    const apiBest = Array.isArray(resp?.bestOffers) ? (resp!.bestOffers as OfferRow[]) : [];
+    if (apiBest.length > 0) return apiBest.slice(0, 5);
+
+    // Fallback: compute client-side ranking from currently loaded offers (safe deploy).
+    const scored = offers
       .map((o) => ({ o, metric: pickBest1000MetricCentsPerKwh(o) }))
       .filter((x) => typeof x.metric === "number" && Number.isFinite(x.metric as number));
     scored.sort((a, b) => (a.metric as number) - (b.metric as number));
     return scored.slice(0, 5).map((x) => x.o);
-  }, [hasUsage, bestOffers]);
+  }, [hasUsage, resp?.bestOffers, offers]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -507,11 +470,7 @@ export default function PlansClient() {
                 </div>
               </div>
               <div className="text-xs text-brand-cyan/60">
-                {bestLoading
-                  ? "Loading…"
-                  : bestStripOffers.length
-                    ? `Top ${bestStripOffers.length}`
-                    : "No results"}
+                {bestStripOffers.length ? `Top ${bestStripOffers.length}` : "No results"}
               </div>
             </div>
 

@@ -95,6 +95,34 @@ function sortOffers(offers: OfferNormalized[], sort: SortKey): OfferNormalized[]
   return withKey.map((x) => x.o);
 }
 
+function firstFiniteNumber(vals: Array<any>): number | null {
+  for (const v of vals) {
+    const n = typeof v === "number" ? v : Number(v);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+}
+
+function pickBest1000MetricCentsPerKwh(offer: any): number | null {
+  // Prefer 1000kWh EFL avg cents/kWh (WattBuy’s anchor point), then fall back to 500/2000.
+  // Keep this robust to slight schema variations without hardcoding a single guess.
+  return firstFiniteNumber([
+    offer?.efl?.avgPriceCentsPerKwh1000,
+    offer?.avgPriceCentsPerKwh1000,
+    offer?.kwh1000_cents,
+    offer?.bill1000,
+    offer?.bill_1000,
+    offer?.price1000,
+    offer?.rate1000,
+    offer?.efl?.avgPriceCentsPerKwh500,
+    offer?.avgPriceCentsPerKwh500,
+    offer?.kwh500_cents,
+    offer?.efl?.avgPriceCentsPerKwh2000,
+    offer?.avgPriceCentsPerKwh2000,
+    offer?.kwh2000_cents,
+  ]);
+}
+
 export async function GET(req: NextRequest) {
   try {
     const cookieStore = cookies();
@@ -300,7 +328,7 @@ export async function GET(req: NextRequest) {
     const startIdx = (safePage - 1) * pageSize;
     const pageSlice = offers.slice(startIdx, startIdx + pageSize);
 
-    const shaped = pageSlice.map((o) => {
+    const shapeOffer = (o: any) => {
       const ratePlanId = mapByOfferId.get(o.offer_id) ?? null;
       const templateAvailable = Boolean(ratePlanId);
       const eflUrl = o.docs?.efl ?? null;
@@ -344,7 +372,26 @@ export async function GET(req: NextRequest) {
           utilityName: o.distributor_name ?? house.utilityName ?? undefined,
         },
       };
-    });
+    };
+
+    const shaped = pageSlice.map(shapeOffer);
+
+    // Compute bestOffers (proxy ranking) server-side so the UI can render without an extra round-trip.
+    // Must never throw; on any failure, fall back to [].
+    let bestOffers: any[] = [];
+    try {
+      if (hasUsage) {
+        const candidates = offers
+          .map((o) => ({ o, metric: pickBest1000MetricCentsPerKwh(o) }))
+          .filter((x) => typeof x.metric === "number" && Number.isFinite(x.metric as number))
+          .sort((a, b) => (a.metric as number) - (b.metric as number))
+          .slice(0, 5)
+          .map((x) => x.o);
+        bestOffers = candidates.map(shapeOffer);
+      }
+    } catch {
+      bestOffers = [];
+    }
 
     return NextResponse.json(
       {
@@ -352,6 +399,7 @@ export async function GET(req: NextRequest) {
         hasUsage,
         usageSummary,
         offers: shaped,
+        bestOffers,
         page: safePage,
         pageSize,
         total,
