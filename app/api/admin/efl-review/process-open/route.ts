@@ -167,7 +167,18 @@ export async function POST(req: NextRequest) {
                 providerName: it?.supplier ?? null,
                 planName: it?.planName ?? null,
                 planRules: derivedPlanRules as any,
-                rateStructure: derivedRateStructure as any,
+                rateStructure:
+                  derivedRateStructure && typeof derivedRateStructure === "object"
+                    ? ({
+                        ...(derivedRateStructure as any),
+                        __eflAvgPriceValidation: finalValidation ?? null,
+                        __eflAvgPriceEvidence: {
+                          computedAt: new Date().toISOString(),
+                          source: "queue_process",
+                          passStrength: passStrength ?? null,
+                        },
+                      } as any)
+                    : (derivedRateStructure as any),
                 validation: prValidation as any,
               });
 

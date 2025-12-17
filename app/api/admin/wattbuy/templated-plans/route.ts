@@ -217,6 +217,7 @@ type Row = {
   modeledRate2000: number | null;
   modeledTdspCode: string | null;
   modeledTdspSnapshotAt: string | null;
+  modeledSource?: "DB_VALIDATION" | "COMPUTED_TDSP_SNAPSHOT" | "NONE";
   cancelFee: string | null;
   eflUrl: string | null;
   eflPdfSha256: string | null;
@@ -339,7 +340,25 @@ export async function GET(req: NextRequest) {
 
     const rows: Row[] = await Promise.all(
       (plans as any[]).map(async (p) => {
+        const rsObj: any = p.rateStructure && typeof p.rateStructure === "object" ? p.rateStructure : null;
+        const v = rsObj?.__eflAvgPriceValidation ?? null;
+        const points: any[] = Array.isArray(v?.points) ? v.points : [];
+        const modeledFromDb = (kwh: number): number | null => {
+          const hit = points.find((x: any) => Number(x?.usageKwh) === kwh);
+          const n = Number(hit?.modeledAvgCentsPerKwh);
+          return Number.isFinite(n) ? n : null;
+        };
+        const modeledDb500 = modeledFromDb(500);
+        const modeledDb1000 = modeledFromDb(1000);
+        const modeledDb2000 = modeledFromDb(2000);
+
         const tdsp = await getTdsp(p.utilityId);
+        const modeledSource: Row["modeledSource"] =
+          typeof modeledDb500 === "number" || typeof modeledDb1000 === "number" || typeof modeledDb2000 === "number"
+            ? "DB_VALIDATION"
+            : tdsp
+              ? "COMPUTED_TDSP_SNAPSHOT"
+              : "NONE";
         return {
           id: p.id,
           utilityId: p.utilityId,
@@ -362,11 +381,21 @@ export async function GET(req: NextRequest) {
             typeof p.rate2000 === "number"
               ? p.rate2000
               : computeAvgCentsPerKwhFromRateStructure(p.rateStructure, 2000),
-          modeledRate500: computeAllInAvgCentsPerKwhFromRateStructure(p.rateStructure, 500, tdsp),
-          modeledRate1000: computeAllInAvgCentsPerKwhFromRateStructure(p.rateStructure, 1000, tdsp),
-          modeledRate2000: computeAllInAvgCentsPerKwhFromRateStructure(p.rateStructure, 2000, tdsp),
+          modeledRate500:
+            typeof modeledDb500 === "number"
+              ? modeledDb500
+              : computeAllInAvgCentsPerKwhFromRateStructure(p.rateStructure, 500, tdsp),
+          modeledRate1000:
+            typeof modeledDb1000 === "number"
+              ? modeledDb1000
+              : computeAllInAvgCentsPerKwhFromRateStructure(p.rateStructure, 1000, tdsp),
+          modeledRate2000:
+            typeof modeledDb2000 === "number"
+              ? modeledDb2000
+              : computeAllInAvgCentsPerKwhFromRateStructure(p.rateStructure, 2000, tdsp),
           modeledTdspCode: tdsp?.tdspCode ?? null,
           modeledTdspSnapshotAt: tdsp?.snapshotAt ?? null,
+          modeledSource,
           cancelFee: p.cancelFee ?? null,
           eflUrl: p.eflUrl ?? null,
           eflPdfSha256: p.eflPdfSha256 ?? null,

@@ -742,6 +742,22 @@ export async function POST(req: NextRequest) {
                 // IMPORTANT: don't claim CREATED if we didn't store a usable template.
                 templateAction = "SKIPPED";
               } else {
+                // Persist proof/evidence of avg-price validation into the stored RateStructure JSON so ops can
+                // inspect "modeled vs expected" later directly from the DB.
+                const rsWithValidation =
+                  derivedRateStructure && typeof derivedRateStructure === "object"
+                    ? ({
+                        ...(derivedRateStructure as any),
+                        __eflAvgPriceValidation: effectiveValidation ?? null,
+                        __eflAvgPriceEvidence: {
+                          computedAt: new Date().toISOString(),
+                          source: "wattbuy_batch",
+                          passStrength: passStrength ?? null,
+                          tdspAppliedMode: tdspAppliedMode ?? null,
+                        },
+                      } as any)
+                    : (derivedRateStructure as any);
+
                 const saved = await upsertRatePlanFromEfl({
                   mode: "live",
                   // Persist both: the resolved PDF URL and the upstream landing/enroll URL
@@ -764,7 +780,7 @@ export async function POST(req: NextRequest) {
                   providerName: supplier,
                   planName,
                   planRules: derivedPlanRules as any,
-                  rateStructure: derivedRateStructure as any,
+                  rateStructure: rsWithValidation as any,
                   validation: planRulesValidation as any,
                 });
                 const templatePersisted = Boolean((saved as any)?.templatePersisted);

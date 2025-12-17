@@ -226,7 +226,18 @@ export async function POST(req: NextRequest) {
             providerName: names.providerName,
             planName: names.planName,
             planRules: planRulesForPersist as any,
-            rateStructure: canonicalRateStructure as any,
+            rateStructure:
+              canonicalRateStructure && typeof canonicalRateStructure === "object"
+                ? ({
+                    ...(canonicalRateStructure as any),
+                    __eflAvgPriceValidation: validationAfter ?? null,
+                    __eflAvgPriceEvidence: {
+                      computedAt: new Date().toISOString(),
+                      source: "manual_url",
+                      passStrength: passStrength ?? null,
+                    },
+                  } as any)
+                : (canonicalRateStructure as any),
             validation: prValidation as any,
           });
 
