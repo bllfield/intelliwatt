@@ -293,6 +293,18 @@ function extractEflVersionCode(text: string): string | null {
         continue;
       }
 
+      // Another common pdftotext wrap: the language suffix is printed on its own line
+      // with a leading underscore, e.g.:
+      //   EFL_ONCOR_ELEC_..._20251215
+      //   _ENGLISH
+      // => EFL_ONCOR_ELEC_..._20251215_ENGLISH
+      const looksLikeEfl = /EFL_/i.test(out);
+      const rightIsUnderscoreLang = /^_(?:ENGLISH|SPANISH)$/i.test(next);
+      if (looksLikeEfl && rightIsUnderscoreLang) {
+        out = `${out}${next}`;
+        continue;
+      }
+
       // Common pdftotext wrap: last digit(s) of a YYYYMMDD token end up on the next line
       // together with a language suffix, e.g.:
       //   EFL_ONCOR_ELEC_..._2025121
@@ -301,7 +313,6 @@ function extractEflVersionCode(text: string): string | null {
       //
       // We only stitch this when the left side already looks like an EFL_* token and
       // the right side matches "<digits>_<LANG>" to avoid accidental joins.
-      const looksLikeEfl = /EFL_/i.test(out);
       const leftEndsWithDigits = /\d{4,}$/.test(out);
       const rightIsDigitLang = /^\d{1,3}_(?:ENGLISH|SPANISH)$/i.test(next);
       if (looksLikeEfl && leftEndsWithDigits && rightIsDigitLang) {

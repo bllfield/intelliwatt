@@ -30,6 +30,17 @@ describe("eflExtractor - EFL Version code extraction", () => {
     );
   });
 
+  test("stitches wrapped footer code split across lines (underscore-prefixed language suffix)", () => {
+    const text = `
+      EFL Version:
+      EFL_ONCOR_ELEC_GXAECOSVRPR24_20251215
+      _ENGLISH
+    `;
+    expect(extractEflVersionCodeFromText(text)).toBe(
+      "EFL_ONCOR_ELEC_GXAECOSVRPR24_20251215_ENGLISH",
+    );
+  });
+
   test("does not return junk fragments like ENGLISH when an EFL_* token exists nearby", () => {
     const text = `
       EFL Version:
