@@ -2296,6 +2296,16 @@ Guardrails
 ✅ Done: WattBuy offer_id → template identity bridge (`OfferRateMap.offerId` → `OfferRateMap.ratePlanId` → `RatePlan.id`).
 ✅ Done: Canonical offer_id → template identity bridge (`OfferIdRatePlanMap.offerId` → `OfferIdRatePlanMap.ratePlanId` → `RatePlan.id`).
 
+✅ Done (Dashboard): `/dashboard/plans` now consumes a customer-facing API (`GET /api/dashboard/plans`) that:
+- Displays WattBuy EFL average prices (500/1000/2000 kWh) for the user’s saved home.
+- Wires `OfferIdRatePlanMap` into each offer card to show **IntelliWatt calculation available** when `ratePlanId` exists.
+- Shows **Queued / calculations not available** messaging when an EFL exists but no template mapping exists yet.
+- Uses a sticky filter/sort bar + pagination to avoid an infinite scroll plan list.
+
+Next (Dashboard):
+- Replace “Best for you (preview)” proxy sort with true usage-based ranking by connecting usage → plan engine (`calculatePlanCostForUsage`).
+- Expand displayed fees (base monthly fee, more structured ETF) once those fields are reliably present in the WattBuy offer payload and/or derived from templates.
+
 Verification checklist (PowerShell):
 - Apply migrations:
   - `npx prisma migrate deploy --schema prisma/schema.prisma`
