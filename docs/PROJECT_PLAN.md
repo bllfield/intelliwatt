@@ -2311,6 +2311,7 @@ Guardrails
 - Added **Usage module DB** tall-table storage for bucket totals:
   - `UsageBucketDefinition` (global catalog of canonical bucket keys + metadata)
   - `HomeMonthlyUsageBucket` (per-home, per-month kWh totals per bucket key; `@@unique([homeId, yearMonth, bucketKey])`)
+- Added `aggregateMonthlyBuckets()` + manual script (`scripts/usage/rebuild-core-buckets-for-home.ts`) to populate `CORE_MONTHLY_BUCKETS` into the **usage module DB** from master `SmtInterval` rows (best-effort; not yet wired into any API/UI).
 - Added `lib/plan-engine/getRatePlanTemplate.ts` (master DB read helper for `RatePlan` templates; no throwing; returns only fields needed for later true-cost calculations).
 - Fixed `RatePlan` template lookup for `ratePlanId` so `trueCostEstimate` doesn’t incorrectly show `MISSING_TEMPLATE` on transient lookup errors.
 - Added `lib/plan-engine/getTdspDeliveryRates.ts` (stub TDSP delivery rates contract; returns null for now).
