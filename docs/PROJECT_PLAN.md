@@ -2404,6 +2404,7 @@ Guardrails
 - `/api/dashboard/plans` now prefers stored `requiredBucketKeys` and lazily backfills older RatePlans by deriving requirements from `rateStructure` (best-effort; never breaks offers).
 - `PLAN_CALC_QUARANTINE` queue items now include `missingBucketKeys` + `planCalcReasonCode` in `queueReason` JSON for reliable debugging/auditing.
 - Shows a compact banner when **NOT AVAILABLE** plans are present, with a one-click action to enable **“Show only AVAILABLE templates”**.
+- Status semantics: **AVAILABLE** now means "template is mapped *and* computable by the current plan-cost engine". Mapped-but-unsupported templates (e.g. TOU / variable until v2) show as **QUEUED** for calculation review.
 
 Next (Dashboard):
 - Replace “Best for you (preview)” proxy sort with true usage-based ranking by connecting usage → plan engine (`calculatePlanCostForUsage`).

@@ -448,6 +448,77 @@ export async function GET(req: NextRequest) {
         .map((m: { offerId: string; ratePlanId: string | null }) => [m.offerId, m.ratePlanId ?? null]),
     );
 
+    // Precompute computability for mapped templates (best-effort).
+    // Semantics: statusLabel=AVAILABLE means "computable by current engine", not just "mapped".
+    const mappedRatePlanIds = Array.from(
+      new Set(
+        offerIds
+          .map((offerId) => mapByOfferId.get(offerId) ?? null)
+          .filter((v): v is string => typeof v === "string" && v.length > 0),
+      ),
+    );
+
+    const isRateStructurePresent = (v: any): boolean => {
+      if (v == null) return false;
+      // Prisma JSON null sentinels can surface as objects; treat them as absent.
+      if (typeof v === "object" && (v as any)?.toJSON?.() === null) return false;
+      if (typeof v !== "object") return false;
+      try {
+        return Object.keys(v).length > 0;
+      } catch {
+        return false;
+      }
+    };
+
+    const planCalcByRatePlanId = new Map<
+      string,
+      { planCalcStatus: "COMPUTABLE" | "NOT_COMPUTABLE" | "UNKNOWN"; planCalcReasonCode: string; rateStructurePresent: boolean }
+    >();
+
+    if (mappedRatePlanIds.length) {
+      try {
+        const rows = await (prisma as any).ratePlan.findMany({
+          where: { id: { in: mappedRatePlanIds } },
+          select: {
+            id: true,
+            rateStructure: true,
+            planCalcStatus: true,
+            planCalcReasonCode: true,
+          },
+        });
+
+        for (const rp of rows as any[]) {
+          const id = String(rp.id);
+          const rsPresent = isRateStructurePresent(rp.rateStructure);
+          const storedStatus =
+            typeof rp?.planCalcStatus === "string" ? (String(rp.planCalcStatus) as any) : null;
+          const storedReason =
+            typeof rp?.planCalcReasonCode === "string" ? String(rp.planCalcReasonCode) : null;
+
+          if (storedStatus === "COMPUTABLE" || storedStatus === "NOT_COMPUTABLE") {
+            planCalcByRatePlanId.set(id, {
+              planCalcStatus: storedStatus,
+              planCalcReasonCode: storedReason ?? "UNKNOWN",
+              rateStructurePresent: rsPresent,
+            });
+            continue;
+          }
+
+          // Fall back to deriving from rateStructure (if present); otherwise treat as unknown.
+          const derived = derivePlanCalcRequirementsFromTemplate({
+            rateStructure: rsPresent ? rp.rateStructure : null,
+          });
+          planCalcByRatePlanId.set(id, {
+            planCalcStatus: derived.planCalcStatus,
+            planCalcReasonCode: derived.planCalcReasonCode,
+            rateStructurePresent: rsPresent,
+          });
+        }
+      } catch {
+        // Best-effort only; absence means we won't refine status labels server-side.
+      }
+    }
+
     // Filter
     offers = offers.filter((o) => {
       if (q) {
@@ -476,6 +547,9 @@ export async function GET(req: NextRequest) {
       if (template === "available") {
         const ratePlanId = mapByOfferId.get(o.offer_id) ?? null;
         if (!ratePlanId) return false;
+        const calc = planCalcByRatePlanId.get(ratePlanId) ?? null;
+        // "available" means computable templates only (not just mapped).
+        if (!calc || calc.planCalcStatus !== "COMPUTABLE") return false;
       }
       return true;
     });
@@ -495,7 +569,13 @@ export async function GET(req: NextRequest) {
       const ratePlanId = mapByOfferId.get(o.offer_id) ?? null;
       const templateAvailable = ratePlanId != null;
       const eflUrl = o.docs?.efl ?? null;
-      const statusLabel = templateAvailable ? "AVAILABLE" : eflUrl ? "QUEUED" : "UNAVAILABLE";
+      const statusLabel = (() => {
+        if (!ratePlanId) return eflUrl ? "QUEUED" : "UNAVAILABLE";
+        const calc = planCalcByRatePlanId.get(ratePlanId) ?? null;
+        if (calc && calc.planCalcStatus === "COMPUTABLE") return "AVAILABLE";
+        // Mapped but not computable (yet) => queued for calc review / next engine version.
+        return "QUEUED";
+      })();
 
       // Normalize proxy pricing fields once, under offer.efl.* (single source of truth).
       const eflAvg1000 = numOrNull(o?.kwh1000_cents);
