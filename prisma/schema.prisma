@@ -503,6 +503,11 @@ model TdspRateSnapshot {
   @@index([effectiveAt])
 }
 
+enum QueueKind {
+  EFL_PARSE
+  PLAN_CALC_QUARANTINE
+}
+
 model EflParseReviewQueue {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
@@ -510,6 +515,13 @@ model EflParseReviewQueue {
 
   /// Source of this record, e.g. "wattbuy_batch", "manual_upload".
   source String
+
+  kind      QueueKind @default(EFL_PARSE)
+  /// Cross-kind dedupe key used for schema-level de-duplication.
+  /// Note: kept default/triggered for EFL_PARSE so existing writers don't need code changes.
+  dedupeKey String    @default("")
+  /// Optional but helpful for PLAN_CALC_QUARANTINE items.
+  ratePlanId String?
 
   /// Core EFL identity.
   eflPdfSha256       String  @unique
@@ -542,6 +554,7 @@ model EflParseReviewQueue {
   resolutionNotes String?   @db.Text
 
   @@index([finalStatus, createdAt])
+  @@unique([kind, dedupeKey])
 }
 
 model OfferAudit {
