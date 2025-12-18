@@ -2320,6 +2320,9 @@ Guardrails
   - Aggregator supports overnight attribution modes: ACTUAL_DAY (default) and START_DAY ("night belongs to previous day" for day filters)
   - Validator supports `--overnight=start_day` to sanity-check START_DAY attribution on the 20:00-07:00 buckets
 - CORE bucket aggregation now correctly attributes overnight dayType (post-midnight counts toward prior local dayType) for the WEEKDAY/WEEKEND 20:00-07:00 buckets.
+- Added pure plan “bucket requirements + computability” helpers (`requiredBucketsForPlan`, `canComputePlanFromBuckets`) as the gating layer for true-cost.
+- `/api/dashboard/plans` now returns `intelliwatt.planComputability` per offer (when usage exists and a template is mapped).
+- Plans that are NOT computable (excluding missing-template) are queued as `PLAN_CALC_QUARANTINE` (dedupeKey = offerId) via `EflParseReviewQueue` (best-effort; no UI changes).
 - Added `lib/plan-engine/getRatePlanTemplate.ts` (master DB read helper for `RatePlan` templates; no throwing; returns only fields needed for later true-cost calculations).
 - Fixed `RatePlan` template lookup for `ratePlanId` so `trueCostEstimate` doesn’t incorrectly show `MISSING_TEMPLATE` on transient lookup errors.
 - Added `lib/plan-engine/getTdspDeliveryRates.ts` (stub TDSP delivery rates contract; returns null for now).

@@ -10,6 +10,8 @@ import { getRatePlanTemplateProbe } from "@/lib/plan-engine/getRatePlanTemplate"
 import { getTdspDeliveryRates } from "@/lib/plan-engine/getTdspDeliveryRates";
 import { usagePrisma } from "@/lib/db/usageClient";
 import { ensureCoreMonthlyBuckets } from "@/lib/usage/aggregateMonthlyBuckets";
+import crypto from "node:crypto";
+import { canComputePlanFromBuckets } from "@/lib/plan-engine/planComputability";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -452,11 +454,14 @@ export async function GET(req: NextRequest) {
       // Best-effort template existence check: if we have a ratePlanId but can't load the template,
       // treat this offer as missing a template for true-cost estimate purposes.
       let templateOk = ratePlanId != null;
+      let template: any | null = null;
       if (ratePlanId) {
         const probed = await getRatePlanTemplateProbe({ ratePlanId });
         // Only force "missing template" when we are sure the row is missing (null without throw).
         // If the lookup threw (transient DB issues), do NOT downgrade the estimate.
         if (!probed.didThrow && !probed.template) templateOk = false;
+        // For computability, only use the template when we have it (and didn't throw).
+        template = !probed.didThrow ? probed.template : null;
       }
 
       const avgPriceCentsPerKwh1000 = numOrNull((base as any)?.efl?.avgPriceCentsPerKwh1000);
@@ -499,6 +504,67 @@ export async function GET(req: NextRequest) {
             avgPriceCentsPerKwh1000,
             tdspRates,
           }),
+          ...(hasUsage && (base as any)?.intelliwatt?.templateAvailable
+            ? (() => {
+                const offerId = String((base as any).offerId ?? "");
+                const templateAvailable = Boolean((base as any)?.intelliwatt?.templateAvailable);
+                const effectiveRatePlanId = templateOk ? ratePlanId : null;
+
+                const status = canComputePlanFromBuckets({
+                  offerId,
+                  ratePlanId: effectiveRatePlanId,
+                  templateAvailable: templateAvailable && templateOk,
+                  template: templateOk ? (template ? { rateStructure: template.rateStructure } : null) : null,
+                });
+
+                // Best-effort: queue NOT_COMPUTABLE plans for later admin inspection (skip missing template).
+                // Must never break the plans endpoint.
+                if (status.status === "NOT_COMPUTABLE" && status.reasonCode !== "MISSING_TEMPLATE" && offerId) {
+                  const sha = crypto.createHash("sha256").update(`plan_calc_quarantine|${offerId}`).digest("hex");
+                  (prisma as any).eflParseReviewQueue
+                    .upsert({
+                      where: { kind_dedupeKey: { kind: "PLAN_CALC_QUARANTINE", dedupeKey: offerId } },
+                      create: {
+                        source: "dashboard_plans",
+                        kind: "PLAN_CALC_QUARANTINE",
+                        dedupeKey: offerId,
+                        eflPdfSha256: sha,
+                        offerId,
+                        supplier: (base as any)?.supplierName ?? null,
+                        planName: (base as any)?.planName ?? null,
+                        tdspName: (base as any)?.utility?.utilityName ?? null,
+                        termMonths: (base as any)?.termMonths ?? null,
+                        ratePlanId: effectiveRatePlanId,
+                        rawText: null,
+                        planRules: null,
+                        rateStructure: null,
+                        validation: null,
+                        derivedForValidation: (status as any).details ?? null,
+                        finalStatus: "OPEN",
+                        queueReason: status.reasonCode,
+                        solverApplied: [],
+                        resolvedAt: null,
+                        resolvedBy: null,
+                        resolutionNotes: status.reason,
+                      },
+                      update: {
+                        supplier: (base as any)?.supplierName ?? null,
+                        planName: (base as any)?.planName ?? null,
+                        tdspName: (base as any)?.utility?.utilityName ?? null,
+                        termMonths: (base as any)?.termMonths ?? null,
+                        ratePlanId: effectiveRatePlanId,
+                        derivedForValidation: (status as any).details ?? null,
+                        finalStatus: "OPEN",
+                        queueReason: status.reasonCode,
+                        resolutionNotes: status.reason,
+                      },
+                    })
+                    .catch(() => {});
+                }
+
+                return { planComputability: status };
+              })()
+            : {}),
         },
       };
     };
