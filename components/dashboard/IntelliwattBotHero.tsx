@@ -54,7 +54,7 @@ export default function IntelliwattBotHero() {
         if (cancelled) return;
         setTyped(full.slice(0, i + 1));
         // Keep the latest text in view when the bubble scrolls
-        await sleep(14);
+        await sleep(28);
       }
       if (!cancelled) setIsTyping(false);
     }
@@ -97,7 +97,7 @@ export default function IntelliwattBotHero() {
     <div className="mb-6 rounded-3xl border border-brand-cyan/20 bg-brand-navy px-5 py-5 text-brand-cyan shadow-[0_16px_45px_rgba(16,46,90,0.2)]">
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-start gap-4 min-w-0">
-          <div className="relative h-16 w-16 shrink-0">
+          <div className="relative h-32 w-32 shrink-0">
             <Image
               src="/Intelliwatt Bot Final Gif.gif"
               alt="IntelliWatt Bot"
