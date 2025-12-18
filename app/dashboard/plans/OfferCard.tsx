@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { EstimateBreakdownPopover } from "../../components/ui/EstimateBreakdownPopover";
+import { PlanDetailsPopover } from "../../components/ui/PlanDetailsPopover";
 
 type OfferRow = {
   offerId: string;
@@ -128,18 +129,22 @@ export default function OfferCard({ offer }: { offer: OfferRow }) {
             {statusText}
           </div>
 
-          {eflUrl ? (
-            <Link
-              href={eflUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="text-xs font-semibold text-brand-blue hover:underline"
-            >
-              View EFL
-            </Link>
-          ) : (
-            <div className="text-xs text-brand-cyan/60">No EFL link</div>
-          )}
+          <div className="flex items-center gap-3">
+            {eflUrl ? (
+              <Link
+                href={eflUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs font-semibold text-brand-blue hover:underline"
+              >
+                View EFL
+              </Link>
+            ) : (
+              <div className="text-xs text-brand-cyan/60">No EFL link</div>
+            )}
+
+            <PlanDetailsPopover trigger="Plan Details" title="Plan Details (parsed fields)" data={offer as any} />
+          </div>
         </div>
       </div>
 
