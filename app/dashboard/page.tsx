@@ -3,6 +3,7 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import { useState, useEffect, type ReactNode } from 'react';
+import DashboardHero from '@/components/dashboard/DashboardHero';
 
 const ICON_COLOR = '#00F0FF';
 
@@ -465,16 +466,16 @@ const [mounted, setMounted] = useState(false);
 
   return (
     <div className="min-h-screen bg-brand-white">
-      {/* Hero Section */}
-      <section className="bg-brand-navy py-16 px-4">
+      <DashboardHero
+        title="Welcome to"
+        highlight="IntelliWatt™"
+        description="Your FREE AI-powered energy optimization dashboard. Track savings, manage your plan, and earn rewards."
+      />
+
+      {/* Hero Actions */}
+      <section className="bg-brand-navy py-10 px-4">
         <div className="mx-auto max-w-6xl rounded-3xl border-2 border-[#00F0FF]/40 bg-brand-navy/85 p-8 text-center shadow-[0_30px_80px_rgba(10,20,60,0.55)] backdrop-blur sm:p-12">
-          <h1 className="text-4xl font-bold text-brand-white sm:text-5xl md:text-6xl">
-            Welcome to <span className="text-brand-blue">IntelliWatt™</span>
-          </h1>
-          <p className="mx-auto mt-4 max-w-4xl text-lg leading-relaxed text-brand-white/85 sm:text-xl">
-            Your FREE AI-powered energy optimization dashboard. Track savings, manage your plan, and earn rewards.
-          </p>
-          <div className="mt-8 flex flex-col items-center gap-4">
+          <div className="flex flex-col items-center gap-4">
             <a
               href="https://www.hitthejackwatt.com"
               target="_blank"

@@ -1,4 +1,5 @@
 import { ReactNode } from 'react';
+import IntelliwattBotHero from '@/components/dashboard/IntelliwattBotHero';
 
 type DashboardHeroProps = {
   title: string;
@@ -39,6 +40,11 @@ export default function DashboardHero({
             </p>
             {children ? <div className="pt-1 flex justify-center">{children}</div> : null}
           </div>
+        </div>
+
+        {/* IntelliWattBot appears right below the page title section */}
+        <div className="mt-4">
+          <IntelliwattBotHero />
         </div>
       </div>
     </section>
