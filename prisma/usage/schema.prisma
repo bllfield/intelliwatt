@@ -16,6 +16,19 @@ datasource usageDb {
   url      = env("USAGE_DATABASE_URL")
 }
 
+enum DayType {
+  ALL
+  WEEKDAY
+  WEEKEND
+}
+
+enum Season {
+  ALL
+  SUMMER
+  WINTER
+  SHOULDER
+}
+
 model UsageModuleBootstrap {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
@@ -75,4 +88,37 @@ model GreenButtonInterval {
   @@index([timestamp])
   @@index([rawId, timestamp])
   @@index([homeId, timestamp])
+}
+
+model UsageBucketDefinition {
+  id        String   @id @default(cuid())
+  key       String   @unique // canonical key: kwh.m.<dayType>.<start>-<end>[.<season>]
+  label     String
+  dayType   DayType
+  season    Season?
+  startHHMM String
+  endHHMM   String
+  tz        String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  monthly HomeMonthlyUsageBucket[]
+
+  @@index([dayType])
+}
+
+model HomeMonthlyUsageBucket {
+  id         String   @id @default(cuid())
+  homeId     String
+  yearMonth  String // "YYYY-MM"
+  bucketKey  String // FK by key (string) to keep lookups stable across environments
+  kwhTotal   Decimal  @usageDb.Decimal(12, 6)
+  source     String
+  computedAt DateTime @default(now())
+
+  bucket UsageBucketDefinition @relation(fields: [bucketKey], references: [key], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([homeId, yearMonth, bucketKey])
+  @@index([homeId, yearMonth])
+  @@index([bucketKey])
 }
