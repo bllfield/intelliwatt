@@ -70,6 +70,11 @@ export function makeBucketKey(args: { dayType: DayType; window: { startHHMM: str
   return `kwh.m.${args.dayType}.${start}-${end}${season}`;
 }
 
+// Stable JSON representation of a bucket definition (stored as ruleJson in usage DB).
+export function bucketDefToRuleJson(def: UsageBucketDef): BucketRuleV1 {
+  return def.rule;
+}
+
 function makeDef(args: {
   dayType: DayType;
   window: { startHHMM: string; endHHMM: string };
@@ -104,9 +109,19 @@ export const CORE_MONTHLY_BUCKETS: UsageBucketDef[] = [
   // B) Generic nights windows (common in TX)
   makeDef({ dayType: "ALL", window: { startHHMM: "2000", endHHMM: "0700" }, label: "ALL 20:00-07:00" }),
   makeDef({ dayType: "ALL", window: { startHHMM: "0700", endHHMM: "2000" }, label: "ALL 07:00-20:00" }),
-  makeDef({ dayType: "WEEKDAY", window: { startHHMM: "2000", endHHMM: "0700" }, label: "WEEKDAY 20:00-07:00" }),
+  makeDef({
+    dayType: "WEEKDAY",
+    window: { startHHMM: "2000", endHHMM: "0700" },
+    label: "WEEKDAY 20:00-07:00",
+    overnightAttribution: "START_DAY",
+  }),
   makeDef({ dayType: "WEEKDAY", window: { startHHMM: "0700", endHHMM: "2000" }, label: "WEEKDAY 07:00-20:00" }),
-  makeDef({ dayType: "WEEKEND", window: { startHHMM: "2000", endHHMM: "0700" }, label: "WEEKEND 20:00-07:00" }),
+  makeDef({
+    dayType: "WEEKEND",
+    window: { startHHMM: "2000", endHHMM: "0700" },
+    label: "WEEKEND 20:00-07:00",
+    overnightAttribution: "START_DAY",
+  }),
   makeDef({ dayType: "WEEKEND", window: { startHHMM: "0700", endHHMM: "2000" }, label: "WEEKEND 07:00-20:00" }),
 ];
 

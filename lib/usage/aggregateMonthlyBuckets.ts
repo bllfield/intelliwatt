@@ -314,7 +314,9 @@ export async function ensureCoreMonthlyBuckets(
       ...notes,
       `Buckets: ${bucketDefs === CORE_MONTHLY_BUCKETS ? "CORE_MONTHLY_BUCKETS (9)" : `custom (${bucketDefs.length})`}`,
       "Best-effort: skips non-finite/<=0 kWh intervals",
-      sawStartDay ? "Overnight attribution: START_DAY enabled for at least one bucket (day filters only)" : "Overnight attribution: ACTUAL_DAY (default)",
+      sawStartDay
+        ? "Overnight bucket dayType attribution: post-midnight intervals count toward previous local dayType"
+        : "Overnight attribution: ACTUAL_DAY (default)",
     ],
   };
 }
