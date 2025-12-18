@@ -292,7 +292,7 @@ export async function GET(req: NextRequest) {
           return `${String(y)}-${String(m).padStart(2, "0")}`;
         })();
 
-        const bucketKey = "kwh.m.ALL.0000-2400";
+        const bucketKey = "kwh.m.all.total";
         const yearMonths = prev ? [ym0, prev] : [ym0];
 
         const existing = await (usagePrisma as any).homeMonthlyUsageBucket.findMany({
@@ -520,7 +520,6 @@ export async function GET(req: NextRequest) {
                 // Best-effort: queue NOT_COMPUTABLE plans for later admin inspection (skip missing template).
                 // Must never break the plans endpoint.
                 if (status.status === "NOT_COMPUTABLE" && status.reasonCode !== "MISSING_TEMPLATE" && offerId) {
-                  const sha = crypto.createHash("sha256").update(`plan_calc_quarantine|${offerId}`).digest("hex");
                   (prisma as any).eflParseReviewQueue
                     .upsert({
                       where: { kind_dedupeKey: { kind: "PLAN_CALC_QUARANTINE", dedupeKey: offerId } },
@@ -528,10 +527,14 @@ export async function GET(req: NextRequest) {
                         source: "dashboard_plans",
                         kind: "PLAN_CALC_QUARANTINE",
                         dedupeKey: offerId,
-                        eflPdfSha256: sha,
+                        // NOTE: eflPdfSha256 is a legacy NOT NULL unique field on this table (EFL queue origin).
+                        // For PLAN_CALC_QUARANTINE we do NOT use it as identity; we set it to offerId so it's stable
+                        // and does not pretend to be an EFL fingerprint.
+                        eflPdfSha256: offerId,
                         offerId,
                         supplier: (base as any)?.supplierName ?? null,
                         planName: (base as any)?.planName ?? null,
+                        eflUrl: (base as any)?.efl?.eflUrl ?? null,
                         tdspName: (base as any)?.utility?.utilityName ?? null,
                         termMonths: (base as any)?.termMonths ?? null,
                         ratePlanId: effectiveRatePlanId,
@@ -550,6 +553,7 @@ export async function GET(req: NextRequest) {
                       update: {
                         supplier: (base as any)?.supplierName ?? null,
                         planName: (base as any)?.planName ?? null,
+                        eflUrl: (base as any)?.efl?.eflUrl ?? null,
                         tdspName: (base as any)?.utility?.utilityName ?? null,
                         termMonths: (base as any)?.termMonths ?? null,
                         ratePlanId: effectiveRatePlanId,

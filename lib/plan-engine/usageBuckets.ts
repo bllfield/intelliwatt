@@ -27,12 +27,12 @@ export type TimeHHMM = string; // expected "HH:MM" (e.g. "20:00", "07:00", "24:0
 export type Window = { start: TimeHHMM; end: TimeHHMM };
 
 // Canonical key format (stable, deterministic):
-//   kwh.m.<dayType>.<startHHMM>-<endHHMM>[.<season>]
+//   kwh.m.<dayType-lower>.<window>|total[.<season>]
 //
 // Examples:
-//   kwh.m.ALL.0000-2400
-//   kwh.m.WEEKDAY.2000-0700
-//   kwh.m.WEEKEND.0000-2400
+//   kwh.m.all.total
+//   kwh.m.weekday.2000-0700
+//   kwh.m.weekend.total
 
 export function normalizeTime(hhmm: TimeHHMM): "HHMM" {
   const s = String(hhmm ?? "").trim();
@@ -67,7 +67,11 @@ export function makeBucketKey(args: { dayType: DayType; window: { startHHMM: str
   const start = assertHHMM(args.window.startHHMM);
   const end = assertHHMM(args.window.endHHMM);
   const season = args.season && args.season !== "ALL" ? `.${args.season}` : "";
-  return `kwh.m.${args.dayType}.${start}-${end}${season}`;
+  const day = String(args.dayType).toLowerCase();
+  if (String(start) === "0000" && String(end) === "2400") {
+    return `kwh.m.${day}.total${season}`;
+  }
+  return `kwh.m.${day}.${start}-${end}${season}`;
 }
 
 // Stable JSON representation of a bucket definition (stored as ruleJson in usage DB).
