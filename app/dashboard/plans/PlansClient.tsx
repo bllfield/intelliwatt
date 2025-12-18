@@ -111,7 +111,18 @@ export default function PlansClient() {
   const [term, setTerm] = useState<"all" | "0-6" | "7-12" | "13-24" | "25+">("all");
   const [renewableMin, setRenewableMin] = useState<0 | 50 | 100>(0);
   const [template, setTemplate] = useState<"all" | "available">("all");
-  const [isRenter, setIsRenter] = useState(false);
+  // Tri-state: don't fetch until we have a stable value (prevents double-fetch on initial localStorage hydrate).
+  const [isRenter, setIsRenter] = useState<boolean | null>(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      const raw = window.localStorage.getItem("dashboard_plans_is_renter");
+      if (raw === "true") return true;
+      if (raw === "false") return false;
+    } catch {
+      // ignore
+    }
+    return null;
+  });
   const [sort, setSort] = useState<SortKey>("kwh1000_asc");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<10 | 20 | 50>(20);
@@ -120,6 +131,7 @@ export default function PlansClient() {
   const [loading, setLoading] = useState(false);
   const [resp, setResp] = useState<ApiResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const reqSeqRef = useRef(0);
 
   const [prefetchNote, setPrefetchNote] = useState<string | null>(null);
   const prefetchInFlightRef = useRef(false);
@@ -157,6 +169,7 @@ export default function PlansClient() {
   }, [datasetKey]);
 
   useEffect(() => {
+    if (isRenter !== null) return;
     try {
       const raw = window.localStorage.getItem("dashboard_plans_is_renter");
       if (raw === "true") setIsRenter(true);
@@ -164,7 +177,7 @@ export default function PlansClient() {
     } catch {
       // ignore
     }
-  }, []);
+  }, [isRenter]);
 
   useEffect(() => {
     try {
@@ -191,52 +204,62 @@ export default function PlansClient() {
     if (panel) setMobilePanel(panel);
   };
 
-  const baseParams = useMemo(
-    () => ({
+  const baseParams = useMemo(() => {
+    const params: Record<string, string> = {
       q,
       rateType,
       term,
       renewableMin: String(renewableMin),
       template,
-      isRenter: String(isRenter),
       sort,
       page: String(page),
       pageSize: String(pageSize),
       approxKwhPerMonth: String(approxKwhPerMonth),
       // Used only to force a reload after background prefetch runs.
       _r: String(refreshNonce),
-    }),
-    [q, rateType, term, renewableMin, template, isRenter, sort, page, pageSize, approxKwhPerMonth, refreshNonce],
-  );
+    };
+    if (isRenter !== null) {
+      params.isRenter = String(isRenter);
+    }
+    return params;
+  }, [q, rateType, term, renewableMin, template, sort, page, pageSize, approxKwhPerMonth, refreshNonce, isRenter]);
+
+  const plansQueryString = useMemo(() => buildQuery(baseParams as any), [baseParams]);
 
   useEffect(() => {
+    if (isRenter === null) return; // wait for stable renter value
     const controller = new AbortController();
+    const mySeq = ++reqSeqRef.current;
     setLoading(true);
     setError(null);
-    setResp(null);
 
     async function run() {
       try {
-        const qs = buildQuery(baseParams as any);
-        const r = await fetch(`/api/dashboard/plans?${qs}`, { signal: controller.signal });
-        const j = (await r.json()) as ApiResponse;
+        const r = await fetch(`/api/dashboard/plans?${plansQueryString}`, { signal: controller.signal });
+        const j = (await r.json().catch(() => null)) as ApiResponse | null;
+        if (controller.signal.aborted) return;
+        if (mySeq !== reqSeqRef.current) return; // stale response
         if (!r.ok || !j?.ok) {
           setError(j?.error ?? j?.message ?? `Request failed (${r.status})`);
-          setResp(j);
+          setResp(j ?? null);
           return;
         }
         setResp(j);
       } catch (e: any) {
+        if (controller.signal.aborted) return;
+        if (mySeq !== reqSeqRef.current) return;
         if (e?.name === "AbortError") return;
         setError(e?.message ?? String(e));
       } finally {
+        if (controller.signal.aborted) return;
+        if (mySeq !== reqSeqRef.current) return;
         setLoading(false);
       }
     }
 
     run();
     return () => controller.abort();
-  }, [baseParams]);
+  }, [plansQueryString, isRenter]);
 
   // Auto-prefetch templates in the background so customer cards converge to "AVAILABLE".
   // This will only leave "QUEUED" for genuine manual-review cases.
@@ -247,6 +270,7 @@ export default function PlansClient() {
     if (error) return;
     if (prefetchInFlightRef.current) return;
     if (prefetchAttemptsRef.current >= 10) return; // safety cap per page load
+    if (isRenter === null) return;
 
     const offersNow = Array.isArray(resp?.offers) ? (resp!.offers as OfferRow[]) : [];
     const queuedOffers = offersNow.filter((o) => o?.intelliwatt?.statusLabel === "QUEUED");
@@ -628,7 +652,7 @@ export default function PlansClient() {
                       <label className="flex items-center gap-2 text-xs text-brand-cyan/75 select-none">
                         <input
                           type="checkbox"
-                          checked={isRenter}
+                          checked={isRenter === true}
                           onChange={(e) => {
                             const next = e.target.checked;
                             setIsRenter(next);
@@ -812,7 +836,7 @@ export default function PlansClient() {
                   <label className="flex items-center gap-2 text-xs text-brand-cyan/75 select-none">
                     <input
                       type="checkbox"
-                      checked={isRenter}
+                      checked={isRenter === true}
                       onChange={(e) => {
                         const next = e.target.checked;
                         setIsRenter(next);

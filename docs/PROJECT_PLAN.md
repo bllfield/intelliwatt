@@ -2356,6 +2356,7 @@ Guardrails
 - Added per-page IntelliWattBot message overrides in DB (`IntelliwattBotPageMessage`) + public fetch API (`GET /api/bot/message`).
 - Added admin editor: `/admin/tools/bot-messages` to update IntelliWattBot messages per dashboard page.
 - Dashboard Plans header: search/filter section is now globally **collapsible** (both mobile + desktop) so plan cards stay visible.
+- PlansClient: prevent double-fetch by gating `/api/dashboard/plans` until `isRenter` is resolved from localStorage, and use AbortController + request sequencing to cancel/ignore stale responses when params change.
 - Shows a compact banner when **NOT AVAILABLE** plans are present, with a one-click action to enable **“Show only AVAILABLE templates”**.
 
 Next (Dashboard):
