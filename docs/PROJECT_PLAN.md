@@ -2370,6 +2370,7 @@ Guardrails
     - `npm run admin:rateplan:diagnose-missing-templates` (counts possible template matches by REP/Plan/Version keys to debug lookup mismatches)
     - `npm run admin:rateplan:rewire-maps` (rewires offer→template links from orphan `RatePlan`s → best matching template `RatePlan` with `rateStructure` present; updates both `OfferIdRatePlanMap` and `OfferRateMap`)
     - `npm run admin:rateplan:link-offers` (backfills missing offer→template links by matching **DB-backed offers** (`MasterPlan` / `OfferRateMap`) → existing template `RatePlan`s; writes `OfferIdRatePlanMap` and mirrors `OfferRateMap` when present)
+    - `npm run admin:rateplan:offer-template-coverage` (offer-level coverage report: joins `OfferIdRatePlanMap` → `RatePlan` and summarizes computable/unknown/not-computable + missing `rateStructure`/bucket keys)
   - Note: `prisma db execute` often does not print `SELECT` results; prefer these node scripts for reporting.
   - Interpretation:
     - If templates exist but lookup mismatch suspected → fix lookup strategy in identity/derivation logic.
