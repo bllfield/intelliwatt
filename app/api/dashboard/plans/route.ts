@@ -466,10 +466,24 @@ export async function GET(req: NextRequest) {
     let bestOffersAllInDisclaimer: string | null = null;
     try {
       if (hasUsage) {
+        // Respect the UI's kWh sort selection when computing the proxy-ranked Best Plans strip.
+        // If the user is sorting by 500/2000, bestOffers should match that anchor (not hardcode 1000).
+        const bestBucket: EflBucket = (() => {
+          if (sort === "kwh500_asc") return 500;
+          if (sort === "kwh2000_asc") return 2000;
+          // best_for_you_proxy, kwh1000_asc, term_asc, renewable_desc → default to 1000 anchor.
+          return 1000;
+        })();
+
         const candidates = offers
           .map((o) => ({
             o,
-            metric: numOrNull(shapeOfferBase(o)?.efl?.avgPriceCentsPerKwh1000),
+            metric:
+              bestBucket === 500
+                ? numOrNull(shapeOfferBase(o)?.efl?.avgPriceCentsPerKwh500)
+                : bestBucket === 2000
+                  ? numOrNull(shapeOfferBase(o)?.efl?.avgPriceCentsPerKwh2000)
+                  : numOrNull(shapeOfferBase(o)?.efl?.avgPriceCentsPerKwh1000),
           }))
           .filter((x) => typeof x.metric === "number" && Number.isFinite(x.metric as number))
           .sort((a, b) => (a.metric as number) - (b.metric as number))
@@ -478,9 +492,14 @@ export async function GET(req: NextRequest) {
         bestOffers = await Promise.all(candidates.map(shapeOffer));
 
         if (bestOffers.length > 0) {
-          bestOffersBasis = "proxy_1000kwh_efl_avgPriceCentsPerKwh1000";
+          bestOffersBasis =
+            bestBucket === 500
+              ? "proxy_500kwh_efl_avgPriceCentsPerKwh500"
+              : bestBucket === 2000
+                ? "proxy_2000kwh_efl_avgPriceCentsPerKwh2000"
+                : "proxy_1000kwh_efl_avgPriceCentsPerKwh1000";
           bestOffersDisclaimer =
-            "Based on your last 12 months usage. Ranking uses provider 1000 kWh estimate until IntelliWatt true-cost is enabled.";
+            `Based on your last 12 months usage. Ranking uses provider EFL average price at ${bestBucket} kWh until IntelliWatt true-cost is enabled.`;
         }
 
         // Also compute a best-effort "all-in" ranking using trueCostEstimate.monthlyCostDollars (OK-only).

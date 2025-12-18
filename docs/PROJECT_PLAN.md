@@ -2300,7 +2300,7 @@ Guardrails
 ✅ Done (Dashboard): `/dashboard/plans` now consumes a customer-facing API (`GET /api/dashboard/plans`) that:
 - Displays WattBuy EFL average prices (500/1000/2000 kWh) for the user’s saved home.
 - Returns `hasUsage` + a lightweight `usageSummary` (last-12-month window; rows + kWh total) so the UI can conditionally show “Best for you” sections without new ingestion.
-- Returns `bestOffers` (same offer card shape as `offers`) when `hasUsage=true`, using a temporary proxy metric (1000kWh EFL average price) for ranking.
+- Returns `bestOffers` (same offer card shape as `offers`) when `hasUsage=true`, using a temporary proxy metric (EFL average price at the currently selected kWh anchor: 500/1000/2000) for ranking.
 - Returns `bestOffersBasis` + `bestOffersDisclaimer` so the “Best plans for you” strip has consistent messaging from the API (and can be swapped later when true-cost goes live).
 - Wires `OfferIdRatePlanMap` into each offer card to show **IntelliWatt calculation available** when `ratePlanId` exists.
 - `/api/dashboard/plans` now returns `intelliwatt.ratePlanId` per offer (from `OfferIdRatePlanMap`) so true-cost can use `RatePlan` templates directly when wired.
