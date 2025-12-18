@@ -469,14 +469,28 @@ export default function PlansClient() {
                         setSort(e.target.value as any);
                         setPage(1);
                       }}
-                      className="mt-2 w-full rounded-2xl border border-brand-cyan/25 bg-brand-white/5 px-3 py-2 text-xs text-brand-white outline-none focus:border-brand-blue/60"
+                      className="mt-2 w-full rounded-2xl border border-brand-cyan/25 bg-brand-white/5 px-3 py-2 text-xs text-brand-white outline-none focus:border-brand-blue/60 focus:bg-white focus:text-brand-navy"
                     >
-                      {hasUsage ? <option value="best_for_you_proxy">Best for you (preview)</option> : null}
-                      <option value="kwh1000_asc">Lowest @ 1000 kWh</option>
-                      <option value="kwh500_asc">Lowest @ 500 kWh</option>
-                      <option value="kwh2000_asc">Lowest @ 2000 kWh</option>
-                      <option value="term_asc">Shortest term</option>
-                      <option value="renewable_desc">Highest renewable</option>
+                      {hasUsage ? (
+                        <option className="text-brand-navy" value="best_for_you_proxy">
+                          Best for you (preview)
+                        </option>
+                      ) : null}
+                      <option className="text-brand-navy" value="kwh1000_asc">
+                        Lowest @ 1000 kWh
+                      </option>
+                      <option className="text-brand-navy" value="kwh500_asc">
+                        Lowest @ 500 kWh
+                      </option>
+                      <option className="text-brand-navy" value="kwh2000_asc">
+                        Lowest @ 2000 kWh
+                      </option>
+                      <option className="text-brand-navy" value="term_asc">
+                        Shortest term
+                      </option>
+                      <option className="text-brand-navy" value="renewable_desc">
+                        Highest renewable
+                      </option>
                     </select>
                   </div>
 
@@ -491,13 +505,23 @@ export default function PlansClient() {
                           setRateType(e.target.value as any);
                           setPage(1);
                         }}
-                        className="mt-2 w-full rounded-2xl border border-brand-cyan/25 bg-brand-white/5 px-3 py-2 text-xs text-brand-white outline-none focus:border-brand-blue/60"
+                        className="mt-2 w-full rounded-2xl border border-brand-cyan/25 bg-brand-white/5 px-3 py-2 text-xs text-brand-white outline-none focus:border-brand-blue/60 focus:bg-white focus:text-brand-navy"
                       >
-                        <option value="all">All</option>
-                        <option value="fixed">Fixed</option>
-                        <option value="variable">Variable</option>
-                        <option value="renewable">Renewable</option>
-                        <option value="unknown">Unknown</option>
+                        <option className="text-brand-navy" value="all">
+                          All
+                        </option>
+                        <option className="text-brand-navy" value="fixed">
+                          Fixed
+                        </option>
+                        <option className="text-brand-navy" value="variable">
+                          Variable
+                        </option>
+                        <option className="text-brand-navy" value="renewable">
+                          Renewable
+                        </option>
+                        <option className="text-brand-navy" value="unknown">
+                          Unknown
+                        </option>
                       </select>
                     </div>
 
@@ -511,13 +535,23 @@ export default function PlansClient() {
                           setTerm(e.target.value as any);
                           setPage(1);
                         }}
-                        className="mt-2 w-full rounded-2xl border border-brand-cyan/25 bg-brand-white/5 px-3 py-2 text-xs text-brand-white outline-none focus:border-brand-blue/60"
+                        className="mt-2 w-full rounded-2xl border border-brand-cyan/25 bg-brand-white/5 px-3 py-2 text-xs text-brand-white outline-none focus:border-brand-blue/60 focus:bg-white focus:text-brand-navy"
                       >
-                        <option value="all">All</option>
-                        <option value="0-6">≤ 6 mo</option>
-                        <option value="7-12">7–12 mo</option>
-                        <option value="13-24">13–24 mo</option>
-                        <option value="25+">25+ mo</option>
+                        <option className="text-brand-navy" value="all">
+                          All
+                        </option>
+                        <option className="text-brand-navy" value="0-6">
+                          ≤ 6 mo
+                        </option>
+                        <option className="text-brand-navy" value="7-12">
+                          7–12 mo
+                        </option>
+                        <option className="text-brand-navy" value="13-24">
+                          13–24 mo
+                        </option>
+                        <option className="text-brand-navy" value="25+">
+                          25+ mo
+                        </option>
                       </select>
                     </div>
 
@@ -531,11 +565,17 @@ export default function PlansClient() {
                           setRenewableMin(Number(e.target.value) as any);
                           setPage(1);
                         }}
-                        className="mt-2 w-full rounded-2xl border border-brand-cyan/25 bg-brand-white/5 px-3 py-2 text-xs text-brand-white outline-none focus:border-brand-blue/60"
+                        className="mt-2 w-full rounded-2xl border border-brand-cyan/25 bg-brand-white/5 px-3 py-2 text-xs text-brand-white outline-none focus:border-brand-blue/60 focus:bg-white focus:text-brand-navy"
                       >
-                        <option value={0}>Any</option>
-                        <option value={50}>50%+</option>
-                        <option value={100}>100%</option>
+                        <option className="text-brand-navy" value={0}>
+                          Any
+                        </option>
+                        <option className="text-brand-navy" value={50}>
+                          50%+
+                        </option>
+                        <option className="text-brand-navy" value={100}>
+                          100%
+                        </option>
                       </select>
                     </div>
 
@@ -612,14 +652,28 @@ export default function PlansClient() {
                       setSort(e.target.value as any);
                       setPage(1);
                     }}
-                    className="mt-2 w-full rounded-2xl border border-brand-cyan/25 bg-brand-white/5 px-3 py-2 text-xs text-brand-white outline-none focus:border-brand-blue/60"
+                    className="mt-2 w-full rounded-2xl border border-brand-cyan/25 bg-brand-white/5 px-3 py-2 text-xs text-brand-white outline-none focus:border-brand-blue/60 focus:bg-white focus:text-brand-navy"
                   >
-                    {hasUsage ? <option value="best_for_you_proxy">Best for you (preview)</option> : null}
-                    <option value="kwh1000_asc">Lowest @ 1000 kWh</option>
-                    <option value="kwh500_asc">Lowest @ 500 kWh</option>
-                    <option value="kwh2000_asc">Lowest @ 2000 kWh</option>
-                    <option value="term_asc">Shortest term</option>
-                    <option value="renewable_desc">Highest renewable</option>
+                    {hasUsage ? (
+                      <option className="text-brand-navy" value="best_for_you_proxy">
+                        Best for you (preview)
+                      </option>
+                    ) : null}
+                    <option className="text-brand-navy" value="kwh1000_asc">
+                      Lowest @ 1000 kWh
+                    </option>
+                    <option className="text-brand-navy" value="kwh500_asc">
+                      Lowest @ 500 kWh
+                    </option>
+                    <option className="text-brand-navy" value="kwh2000_asc">
+                      Lowest @ 2000 kWh
+                    </option>
+                    <option className="text-brand-navy" value="term_asc">
+                      Shortest term
+                    </option>
+                    <option className="text-brand-navy" value="renewable_desc">
+                      Highest renewable
+                    </option>
                   </select>
                 </div>
               </div>
@@ -635,13 +689,23 @@ export default function PlansClient() {
                       setRateType(e.target.value as any);
                       setPage(1);
                     }}
-                    className="mt-2 w-full rounded-2xl border border-brand-cyan/25 bg-brand-white/5 px-3 py-2 text-xs text-brand-white outline-none focus:border-brand-blue/60"
+                    className="mt-2 w-full rounded-2xl border border-brand-cyan/25 bg-brand-white/5 px-3 py-2 text-xs text-brand-white outline-none focus:border-brand-blue/60 focus:bg-white focus:text-brand-navy"
                   >
-                    <option value="all">All</option>
-                    <option value="fixed">Fixed</option>
-                    <option value="variable">Variable</option>
-                    <option value="renewable">Renewable</option>
-                    <option value="unknown">Unknown</option>
+                    <option className="text-brand-navy" value="all">
+                      All
+                    </option>
+                    <option className="text-brand-navy" value="fixed">
+                      Fixed
+                    </option>
+                    <option className="text-brand-navy" value="variable">
+                      Variable
+                    </option>
+                    <option className="text-brand-navy" value="renewable">
+                      Renewable
+                    </option>
+                    <option className="text-brand-navy" value="unknown">
+                      Unknown
+                    </option>
                   </select>
                 </div>
 
@@ -655,13 +719,23 @@ export default function PlansClient() {
                       setTerm(e.target.value as any);
                       setPage(1);
                     }}
-                    className="mt-2 w-full rounded-2xl border border-brand-cyan/25 bg-brand-white/5 px-3 py-2 text-xs text-brand-white outline-none focus:border-brand-blue/60"
+                    className="mt-2 w-full rounded-2xl border border-brand-cyan/25 bg-brand-white/5 px-3 py-2 text-xs text-brand-white outline-none focus:border-brand-blue/60 focus:bg-white focus:text-brand-navy"
                   >
-                    <option value="all">All</option>
-                    <option value="0-6">≤ 6 mo</option>
-                    <option value="7-12">7–12 mo</option>
-                    <option value="13-24">13–24 mo</option>
-                    <option value="25+">25+ mo</option>
+                    <option className="text-brand-navy" value="all">
+                      All
+                    </option>
+                    <option className="text-brand-navy" value="0-6">
+                      ≤ 6 mo
+                    </option>
+                    <option className="text-brand-navy" value="7-12">
+                      7–12 mo
+                    </option>
+                    <option className="text-brand-navy" value="13-24">
+                      13–24 mo
+                    </option>
+                    <option className="text-brand-navy" value="25+">
+                      25+ mo
+                    </option>
                   </select>
                 </div>
 
@@ -675,11 +749,17 @@ export default function PlansClient() {
                       setRenewableMin(Number(e.target.value) as any);
                       setPage(1);
                     }}
-                    className="mt-2 w-full rounded-2xl border border-brand-cyan/25 bg-brand-white/5 px-3 py-2 text-xs text-brand-white outline-none focus:border-brand-blue/60"
+                    className="mt-2 w-full rounded-2xl border border-brand-cyan/25 bg-brand-white/5 px-3 py-2 text-xs text-brand-white outline-none focus:border-brand-blue/60 focus:bg-white focus:text-brand-navy"
                   >
-                    <option value={0}>Any</option>
-                    <option value={50}>50%+</option>
-                    <option value={100}>100%</option>
+                    <option className="text-brand-navy" value={0}>
+                      Any
+                    </option>
+                    <option className="text-brand-navy" value={50}>
+                      50%+
+                    </option>
+                    <option className="text-brand-navy" value={100}>
+                      100%
+                    </option>
                   </select>
                 </div>
 
@@ -760,11 +840,17 @@ export default function PlansClient() {
                       setPageSize(Number(e.target.value) as any);
                       setPage(1);
                     }}
-                    className="rounded-full border border-brand-cyan/25 bg-brand-white/5 px-2 py-1 text-xs text-brand-white outline-none focus:border-brand-blue/60"
+                    className="rounded-full border border-brand-cyan/25 bg-brand-white/5 px-2 py-1 text-xs text-brand-white outline-none focus:border-brand-blue/60 focus:bg-white focus:text-brand-navy"
                   >
-                    <option value={10}>10</option>
-                    <option value={20}>20</option>
-                    <option value={50}>50</option>
+                    <option className="text-brand-navy" value={10}>
+                      10
+                    </option>
+                    <option className="text-brand-navy" value={20}>
+                      20
+                    </option>
+                    <option className="text-brand-navy" value={50}>
+                      50
+                    </option>
                   </select>
                 </div>
               </div>
@@ -808,13 +894,23 @@ export default function PlansClient() {
                           setRefreshNonce((n) => n + 1);
                         }
                       }}
-                      className="rounded-full border border-brand-cyan/25 bg-brand-white/5 px-3 py-2 text-xs text-brand-white outline-none focus:border-brand-blue/60"
+                      className="rounded-full border border-brand-cyan/25 bg-brand-white/5 px-3 py-2 text-xs text-brand-white outline-none focus:border-brand-blue/60 focus:bg-white focus:text-brand-navy"
                     >
-                      <option value={500}>500</option>
-                      <option value={750}>750</option>
-                      <option value={1000}>1000</option>
-                      <option value={1250}>1250</option>
-                      <option value={2000}>2000</option>
+                      <option className="text-brand-navy" value={500}>
+                        500
+                      </option>
+                      <option className="text-brand-navy" value={750}>
+                        750
+                      </option>
+                      <option className="text-brand-navy" value={1000}>
+                        1000
+                      </option>
+                      <option className="text-brand-navy" value={1250}>
+                        1250
+                      </option>
+                      <option className="text-brand-navy" value={2000}>
+                        2000
+                      </option>
                     </select>
                     <span className="text-brand-cyan/60">kWh/mo</span>
                   </label>
@@ -837,7 +933,7 @@ export default function PlansClient() {
             </div>
 
             {bestStripOffers.length > 0 ? (
-              <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap md:flex-nowrap md:overflow-x-auto">
+              <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
                 {bestStripOffers.map((o) => {
                   const metric = pickBest1000MetricCentsPerKwh(o);
                   const supplier = (o as any)?.supplierName ?? "Unknown supplier";
@@ -893,6 +989,8 @@ export default function PlansClient() {
                       {showEst && typeof repAnnual === "number" && typeof totalAnnual === "number" ? (
                         <div className="mt-2 text-xs text-brand-cyan/70">
                           <EstimateBreakdownPopover
+                            side="top"
+                            align="right"
                             trigger={
                               <>
                                 Est. ${Number(estMonthly).toFixed(2)}/mo

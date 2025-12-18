@@ -9,6 +9,8 @@ type Props = {
   tdspFixedAnnualDollars?: number;
   totalAnnualDollars: number;
   effectiveDate?: string; // ISO
+  side?: "top" | "bottom";
+  align?: "left" | "right";
 };
 
 function round2(v: number): number {
@@ -39,6 +41,8 @@ export function EstimateBreakdownPopover(props: Props) {
   const tdspFixed = fmtPerMoPerYr(props.tdspFixedAnnualDollars);
   const total = fmtPerMoPerYr(props.totalAnnualDollars);
   const effective = fmtIsoDate(props.effectiveDate);
+  const side = props.side ?? "bottom";
+  const align = props.align ?? "left";
 
   return (
     <span className="relative inline-flex" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
@@ -54,7 +58,13 @@ export function EstimateBreakdownPopover(props: Props) {
       </button>
 
       {open ? (
-        <div className="absolute left-0 top-full z-50 mt-2 w-[260px] rounded-2xl border border-brand-cyan/25 bg-brand-navy/95 p-3 shadow-[0_18px_40px_rgba(0,0,0,0.35)] backdrop-blur">
+        <div
+          className={[
+            "absolute z-50 w-[260px] rounded-2xl border border-brand-cyan/25 bg-brand-navy/95 p-3 shadow-[0_18px_40px_rgba(0,0,0,0.35)] backdrop-blur",
+            side === "top" ? "bottom-full mb-2" : "top-full mt-2",
+            align === "right" ? "right-0" : "left-0",
+          ].join(" ")}
+        >
           <div className="text-[0.65rem] uppercase tracking-[0.22em] text-brand-cyan/60">Estimate breakdown</div>
           <div className="mt-2 space-y-1 text-xs text-brand-cyan/75">
             {rep ? (
