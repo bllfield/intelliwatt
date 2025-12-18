@@ -2367,7 +2367,11 @@ Guardrails
     - `node scripts/admin/backfill-rateplan-calc.mjs` (or `npm run admin:rateplan:backfill`)
     - `npm run admin:rateplan:missing-buckets` (lists up to 100 `RatePlan` rows where `requiredBucketKeys` is empty)
     - `npm run admin:rateplan:rederive` (re-derives bucket keys/status for rows with empty buckets or `planCalcReasonCode="MISSING_TEMPLATE"`)
+    - `npm run admin:rateplan:diagnose-missing-templates` (counts possible template matches by REP/Plan/Version keys to debug lookup mismatches)
   - Note: `prisma db execute` often does not print `SELECT` results; prefer these node scripts for reporting.
+  - Interpretation:
+    - If templates exist but lookup mismatch suspected → fix lookup strategy in identity/derivation logic.
+    - If templates truly missing → backfill templates from offers/EFL sources for those plans.
 - `/api/dashboard/plans` now prefers stored `requiredBucketKeys` and lazily backfills older RatePlans by deriving requirements from `rateStructure` (best-effort; never breaks offers).
 - `PLAN_CALC_QUARANTINE` queue items now include `missingBucketKeys` + `planCalcReasonCode` in `queueReason` JSON for reliable debugging/auditing.
 - Shows a compact banner when **NOT AVAILABLE** plans are present, with a one-click action to enable **“Show only AVAILABLE templates”**.
