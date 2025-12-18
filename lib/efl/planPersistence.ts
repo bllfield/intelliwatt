@@ -5,6 +5,7 @@ import type {
   PlanRulesValidationResult,
 } from "@/lib/efl/planEngine";
 import { getTemplateKey } from "@/lib/efl/templateIdentity";
+import { derivePlanCalcRequirementsFromTemplate } from "@/lib/plan-engine/planComputability";
 
 export interface UpsertEflRatePlanArgs {
   /**
@@ -131,6 +132,9 @@ export async function upsertRatePlanFromEfl(
     ? null
     : rateStructure;
 
+  // Plan-calc requirements are derived from the stored template (safeRateStructure) and persisted for auditing.
+  const planCalcReq = derivePlanCalcRequirementsFromTemplate({ rateStructure: safeRateStructure as any });
+
   // Modeled proof columns are only meaningful when we persisted a usable template.
   const canPersistModeledProof = Boolean(!requiresManualReview && safeRateStructure);
 
@@ -170,6 +174,14 @@ export async function upsertRatePlanFromEfl(
 
     // Pricing structure (only when safe)
     rateStructure: safeRateStructure as any,
+
+    // IntelliWatt plan-calc persistence (best-effort; derived from template)
+    planCalcVersion: planCalcReq.planCalcVersion,
+    planCalcStatus: planCalcReq.planCalcStatus,
+    planCalcReasonCode: planCalcReq.planCalcReasonCode,
+    requiredBucketKeys: planCalcReq.requiredBucketKeys,
+    supportedFeatures: planCalcReq.supportedFeatures as any,
+    planCalcDerivedAt: new Date(),
 
     // Optional display helpers; we do not override existing values if absent
     supplier: providerName ?? undefined,

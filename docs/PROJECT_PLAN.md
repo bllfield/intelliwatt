@@ -2358,6 +2358,9 @@ Guardrails
 - Dashboard Plans header: search/filter section is now globally **collapsible** (both mobile + desktop) so plan cards stay visible.
 - PlansClient: prevent double-fetch by gating `/api/dashboard/plans` until `isRenter` is resolved from localStorage, and use AbortController + request sequencing to cancel/ignore stale responses when params change.
 - True-cost v1: `/api/dashboard/plans` now computes fixed-rate-only costs from `kwh.m.all.total` monthly buckets + TDSP delivery (fail-closed); unsupported rateStructure is quarantined as `PLAN_CALC_QUARANTINE`.
+- Persisted plan calc requirements on `RatePlan`: `planCalcStatus`, `planCalcReasonCode`, `requiredBucketKeys`, and `supportedFeatures` are stored when EFL templates are upserted (best-effort).
+- `/api/dashboard/plans` now prefers stored `requiredBucketKeys` and lazily backfills older RatePlans by deriving requirements from `rateStructure` (best-effort; never breaks offers).
+- `PLAN_CALC_QUARANTINE` queue items now include `missingBucketKeys` + `planCalcReasonCode` in `queueReason` JSON for reliable debugging/auditing.
 - Shows a compact banner when **NOT AVAILABLE** plans are present, with a one-click action to enable **“Show only AVAILABLE templates”**.
 
 Next (Dashboard):

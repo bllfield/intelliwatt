@@ -979,6 +979,14 @@ model RatePlan {
   // Normalized pricing structure derived from PlanRules (see lib/efl/planEngine.ts)
   rateStructure           Json?
 
+  // IntelliWatt plan-calc persistence (derived from template; stable for auditing)
+  planCalcVersion     Int      @default(1)
+  planCalcStatus      String?  // "COMPUTABLE" | "NOT_COMPUTABLE" | "UNKNOWN"
+  planCalcReasonCode  String?  // e.g. "FIXED_RATE_OK", "UNSUPPORTED_RATE_STRUCTURE", "MISSING_TEMPLATE"
+  requiredBucketKeys  String[] @default([])
+  supportedFeatures   Json?
+  planCalcDerivedAt   DateTime?
+
   isUtilityTariff Boolean   @default(false)
   tariffStructure Json?
   customerCharge  Float?

@@ -6,12 +6,11 @@ import { wattbuy } from "@/lib/wattbuy";
 import { normalizeOffers, type OfferNormalized } from "@/lib/wattbuy/normalize";
 import { getTrueCostStatus } from "@/lib/plan-engine/trueCostStatus";
 import { calculatePlanCostForUsage } from "@/lib/plan-engine/calculatePlanCostForUsage";
-import { getRatePlanTemplateProbe } from "@/lib/plan-engine/getRatePlanTemplate";
 import { getTdspDeliveryRates } from "@/lib/plan-engine/getTdspDeliveryRates";
 import { usagePrisma } from "@/lib/db/usageClient";
 import { ensureCoreMonthlyBuckets } from "@/lib/usage/aggregateMonthlyBuckets";
 import crypto from "node:crypto";
-import { canComputePlanFromBuckets } from "@/lib/plan-engine/planComputability";
+import { canComputePlanFromBuckets, derivePlanCalcRequirementsFromTemplate } from "@/lib/plan-engine/planComputability";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -311,6 +310,8 @@ export async function GET(req: NextRequest) {
 
     // Best-effort: on-demand ensure CORE bucket totals exist for recent months (never break offers).
     // This is a lazy backfill path in case ingest hooks were skipped or buckets were never computed.
+    let recentYearMonths: string[] = [];
+    let bucketPresenceByKey: Map<string, Set<string>> = new Map();
     try {
       if (hasUsage && house.id && house.esiid) {
         const tz = "America/Chicago";
@@ -331,6 +332,7 @@ export async function GET(req: NextRequest) {
 
         const bucketKey = "kwh.m.all.total";
         const yearMonths = prev ? [ym0, prev] : [ym0];
+        recentYearMonths = yearMonths.slice();
 
         const existing = await (usagePrisma as any).homeMonthlyUsageBucket.findMany({
           where: { homeId: house.id, bucketKey, yearMonth: { in: yearMonths } },
@@ -350,6 +352,26 @@ export async function GET(req: NextRequest) {
             source: "SMT",
             intervalSource: "SMT",
           });
+        }
+
+        // Build a small "presence map" for recent months so we can check requiredBucketKeys per plan
+        // without doing per-offer DB queries.
+        try {
+          const rows = await (usagePrisma as any).homeMonthlyUsageBucket.findMany({
+            where: { homeId: house.id, yearMonth: { in: yearMonths } },
+            select: { bucketKey: true, yearMonth: true },
+          });
+          const map = new Map<string, Set<string>>();
+          for (const r of rows ?? []) {
+            const k = String((r as any)?.bucketKey ?? "");
+            const ym = String((r as any)?.yearMonth ?? "");
+            if (!k || !ym) continue;
+            if (!map.has(k)) map.set(k, new Set());
+            map.get(k)!.add(ym);
+          }
+          bucketPresenceByKey = map;
+        } catch {
+          bucketPresenceByKey = new Map();
         }
       }
     } catch (err) {
@@ -387,6 +409,14 @@ export async function GET(req: NextRequest) {
       annualKwhFromBuckets = null;
       bucketMonthsCount = 0;
     }
+
+    const hasRecentBucket = (bucketKey: string): boolean => {
+      if (!bucketKey) return false;
+      if (!recentYearMonths || recentYearMonths.length === 0) return false;
+      const s = bucketPresenceByKey.get(bucketKey);
+      if (!s) return false;
+      return recentYearMonths.every((ym) => s.has(ym));
+    };
 
     // Prefer live offers. If the call fails (transient upstream), fall back to the last stored snapshot.
     let rawOffersResp: any = null;
@@ -520,18 +550,35 @@ export async function GET(req: NextRequest) {
       const base = shapeOfferBase(o);
       const ratePlanId = base?.intelliwatt?.ratePlanId ?? null;
 
-      // Best-effort template existence check: if we have a ratePlanId but can't load the template,
-      // treat this offer as missing a template for true-cost estimate purposes.
+      // Best-effort RatePlan/template probe (includes persisted plan-calc requirements).
+      // Guardrail: only treat as missing when we're sure the row is missing (no throw).
       let templateOk = ratePlanId != null;
-      let template: any | null = null;
+      let ratePlanRow: any | null = null;
+      let didThrowTemplateProbe = false;
       if (ratePlanId) {
-        const probed = await getRatePlanTemplateProbe({ ratePlanId });
-        // Only force "missing template" when we are sure the row is missing (null without throw).
-        // If the lookup threw (transient DB issues), do NOT downgrade the estimate.
-        if (!probed.didThrow && !probed.template) templateOk = false;
-        // For computability, only use the template when we have it (and didn't throw).
-        template = !probed.didThrow ? probed.template : null;
+        try {
+          ratePlanRow = await (prisma as any).ratePlan.findUnique({
+            where: { id: ratePlanId },
+            select: {
+              id: true,
+              rateStructure: true,
+              planCalcVersion: true,
+              planCalcStatus: true,
+              planCalcReasonCode: true,
+              requiredBucketKeys: true,
+              supportedFeatures: true,
+              planCalcDerivedAt: true,
+            },
+          });
+          if (!ratePlanRow) templateOk = false;
+        } catch {
+          didThrowTemplateProbe = true;
+          // do not downgrade templateOk on transient errors
+          ratePlanRow = null;
+        }
       }
+
+      const template = ratePlanRow ? { rateStructure: ratePlanRow.rateStructure ?? null } : null;
 
       const avgPriceCentsPerKwh1000 = numOrNull((base as any)?.efl?.avgPriceCentsPerKwh1000);
       const tdspSlug = (base as any)?.utility?.tdspSlug ?? null;
@@ -551,12 +598,54 @@ export async function GET(req: NextRequest) {
         }
       }
 
-      // Plan computability (pure; best-effort) + quarantine queue (best-effort, never throws).
+      // Persisted plan-calc requirements (preferred), with lazy backfill for older RatePlans.
+      // Also compute planComputability for UI + quarantine logic without breaking offers.
       let planComputability: any | null = null;
-      if (hasUsage && (base as any)?.intelliwatt?.templateAvailable) {
+      let requiredBucketKeys: string[] = [];
+      let planCalcStatus: string | null = null;
+      let planCalcReasonCode: string | null = null;
+
+      if (hasUsage && (base as any)?.intelliwatt?.templateAvailable && templateOk) {
         const offerId = String((base as any).offerId ?? "");
         const templateAvailable = Boolean((base as any)?.intelliwatt?.templateAvailable);
         const effectiveRatePlanId = templateOk ? ratePlanId : null;
+
+        // Prefer stored fields on RatePlan when present.
+        const storedKeys = Array.isArray(ratePlanRow?.requiredBucketKeys) ? (ratePlanRow.requiredBucketKeys as any[]) : [];
+        const storedStatus = typeof ratePlanRow?.planCalcStatus === "string" ? String(ratePlanRow.planCalcStatus) : null;
+        const storedReason = typeof ratePlanRow?.planCalcReasonCode === "string" ? String(ratePlanRow.planCalcReasonCode) : null;
+
+        if (storedKeys.length > 0 && storedStatus) {
+          requiredBucketKeys = storedKeys.map((k) => String(k));
+          planCalcStatus = storedStatus;
+          planCalcReasonCode = storedReason ?? "UNKNOWN";
+        } else {
+          const derived = derivePlanCalcRequirementsFromTemplate({ rateStructure: template?.rateStructure });
+          requiredBucketKeys = derived.requiredBucketKeys;
+          planCalcStatus = derived.planCalcStatus;
+          planCalcReasonCode = derived.planCalcReasonCode;
+
+          // Lazy backfill so older RatePlans self-heal (best-effort; never breaks offers).
+          if (effectiveRatePlanId) {
+            try {
+              (prisma as any).ratePlan
+                .update({
+                  where: { id: effectiveRatePlanId },
+                  data: {
+                    planCalcVersion: derived.planCalcVersion,
+                    planCalcStatus: derived.planCalcStatus,
+                    planCalcReasonCode: derived.planCalcReasonCode,
+                    requiredBucketKeys: derived.requiredBucketKeys,
+                    supportedFeatures: derived.supportedFeatures as any,
+                    planCalcDerivedAt: new Date(),
+                  },
+                })
+                .catch(() => {});
+            } catch {
+              // swallow
+            }
+          }
+        }
 
         planComputability = canComputePlanFromBuckets({
           offerId,
@@ -565,11 +654,22 @@ export async function GET(req: NextRequest) {
           template: templateOk ? (template ? { rateStructure: template.rateStructure } : null) : null,
         });
 
-        if (planComputability?.status === "NOT_COMPUTABLE" && planComputability?.reasonCode !== "MISSING_TEMPLATE" && offerId) {
+        // Bucket presence check (uses requiredBucketKeys rather than hardcoding total).
+        // v1: mostly ["kwh.m.all.total"], but this makes TOU/tier expansion deterministic.
+        const missingBucketKeys = (requiredBucketKeys ?? []).filter((k) => !hasRecentBucket(String(k)));
+
+        // Quarantine best-effort when plan is not computable OR required buckets are missing.
+        const shouldQuarantine =
+          (planCalcStatus === "NOT_COMPUTABLE" || planComputability?.status === "NOT_COMPUTABLE") ||
+          missingBucketKeys.length > 0;
+
+        if (shouldQuarantine && offerId) {
           const queueReasonPayload = {
             type: "PLAN_CALC_QUARANTINE",
-            reasonCode: planComputability.reasonCode,
-            requiredBucketKeys: planComputability.requiredBucketKeys ?? null,
+            planCalcStatus: planCalcStatus ?? null,
+            planCalcReasonCode: planCalcReasonCode ?? (planComputability?.reasonCode ?? null),
+            requiredBucketKeys: requiredBucketKeys ?? null,
+            missingBucketKeys: missingBucketKeys.length > 0 ? missingBucketKeys : null,
             ratePlanId: effectiveRatePlanId,
             offerId,
           };
@@ -581,9 +681,7 @@ export async function GET(req: NextRequest) {
                   source: "dashboard_plans",
                   kind: "PLAN_CALC_QUARANTINE",
                   dedupeKey: offerId,
-                  // NOTE: eflPdfSha256 is a legacy NOT NULL unique field on this table (EFL queue origin).
-                  // For PLAN_CALC_QUARANTINE we do NOT use it as identity; we set it to offerId so it's stable
-                  // and does not pretend to be an EFL fingerprint.
+                  // Legacy NOT NULL unique field (EFL queue origin). For quarantine we do not use it as identity.
                   eflPdfSha256: offerId,
                   offerId,
                   supplier: (base as any)?.supplierName ?? null,
@@ -596,13 +694,16 @@ export async function GET(req: NextRequest) {
                   planRules: null,
                   rateStructure: null,
                   validation: null,
-                  derivedForValidation: (planComputability as any).details ?? null,
+                  derivedForValidation: { ...(planComputability as any)?.details, missingBucketKeys },
                   finalStatus: "OPEN",
                   queueReason: JSON.stringify(queueReasonPayload),
                   solverApplied: [],
                   resolvedAt: null,
                   resolvedBy: null,
-                  resolutionNotes: planComputability.reason,
+                  resolutionNotes:
+                    missingBucketKeys.length > 0
+                      ? `Missing required buckets: ${missingBucketKeys.join(", ")}`
+                      : (planComputability?.reason ?? planCalcReasonCode ?? "Not computable"),
                 },
                 update: {
                   supplier: (base as any)?.supplierName ?? null,
@@ -611,10 +712,13 @@ export async function GET(req: NextRequest) {
                   tdspName: (base as any)?.utility?.utilityName ?? null,
                   termMonths: (base as any)?.termMonths ?? null,
                   ratePlanId: effectiveRatePlanId,
-                  derivedForValidation: (planComputability as any).details ?? null,
+                  derivedForValidation: { ...(planComputability as any)?.details, missingBucketKeys },
                   finalStatus: "OPEN",
                   queueReason: JSON.stringify(queueReasonPayload),
-                  resolutionNotes: planComputability.reason,
+                  resolutionNotes:
+                    missingBucketKeys.length > 0
+                      ? `Missing required buckets: ${missingBucketKeys.join(", ")}`
+                      : (planComputability?.reason ?? planCalcReasonCode ?? "Not computable"),
                 },
               })
               .catch(() => {});
@@ -641,7 +745,7 @@ export async function GET(req: NextRequest) {
           trueCostEstimate: (() => {
             if (!hasUsage) return { status: "NOT_IMPLEMENTED", reason: "No usage available" };
             if (annualKwhFromBuckets == null) {
-              return { status: "NOT_IMPLEMENTED", reason: "Missing kwh.m.all.total buckets for annual kWh" };
+              return { status: "NOT_IMPLEMENTED", reason: "Missing required usage buckets for annual kWh" };
             }
             if (!templateOk || !template?.rateStructure) {
               return { status: "NOT_IMPLEMENTED", reason: "Missing template rateStructure" };

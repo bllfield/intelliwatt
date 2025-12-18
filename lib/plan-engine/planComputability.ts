@@ -79,6 +79,50 @@ export function inferSupportedFeaturesFromTemplate(input: {
   };
 }
 
+export function derivePlanCalcRequirementsFromTemplate(args: {
+  rateStructure: any | null | undefined;
+}): {
+  planCalcStatus: "COMPUTABLE" | "NOT_COMPUTABLE" | "UNKNOWN";
+  planCalcReasonCode: string;
+  requiredBucketKeys: string[];
+  supportedFeatures: Record<string, any>;
+  planCalcVersion: number; // 1
+} {
+  const planCalcVersion = 1 as const;
+
+  if (!args.rateStructure) {
+    return {
+      planCalcVersion,
+      planCalcStatus: "UNKNOWN",
+      planCalcReasonCode: "MISSING_TEMPLATE",
+      requiredBucketKeys: [],
+      supportedFeatures: {},
+    };
+  }
+
+  const inferred = inferSupportedFeaturesFromTemplate({ rateStructure: args.rateStructure });
+  const fixed = extractFixedRepEnergyCentsPerKwh(args.rateStructure);
+
+  if (fixed != null) {
+    return {
+      planCalcVersion,
+      planCalcStatus: "COMPUTABLE",
+      planCalcReasonCode: "FIXED_RATE_OK",
+      requiredBucketKeys: ["kwh.m.all.total"],
+      supportedFeatures: { ...inferred.features, notes: inferred.notes },
+    };
+  }
+
+  return {
+    planCalcVersion,
+    planCalcStatus: "NOT_COMPUTABLE",
+    planCalcReasonCode: "UNSUPPORTED_RATE_STRUCTURE",
+    // Even though we can't compute, we still record the intended usage bucket key for auditing/debug.
+    requiredBucketKeys: ["kwh.m.all.total"],
+    supportedFeatures: { ...inferred.features, notes: inferred.notes },
+  };
+}
+
 export function canComputePlanFromBuckets(input: {
   ratePlanId: string | null;
   offerId: string;
@@ -99,12 +143,13 @@ export function canComputePlanFromBuckets(input: {
   }
 
   const inferred = inferSupportedFeaturesFromTemplate({ rateStructure: input.template.rateStructure });
+  const derived = derivePlanCalcRequirementsFromTemplate({ rateStructure: input.template.rateStructure });
 
   // v1 strictness: we only consider fixed-rate energy computable from buckets (fail-closed).
-  if (!inferred.features.supportsFixedEnergyRate) {
+  if (derived.planCalcStatus !== "COMPUTABLE") {
     return {
       status: "NOT_COMPUTABLE",
-      reasonCode: "UNSUPPORTED_RATE_STRUCTURE",
+      reasonCode: derived.planCalcReasonCode,
       reason: "Rate structure is not supported by the bucket-based calculator v1 (fixed-rate-only).",
       details: {
         offerId: input.offerId,
