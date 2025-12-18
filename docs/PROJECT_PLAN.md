@@ -2368,7 +2368,7 @@ Guardrails
     - `npm run admin:rateplan:missing-buckets` (lists up to 100 `RatePlan` rows where `requiredBucketKeys` is empty)
     - `npm run admin:rateplan:rederive` (re-derives bucket keys/status for rows with empty buckets or `planCalcReasonCode="MISSING_TEMPLATE"`)
     - `npm run admin:rateplan:diagnose-missing-templates` (counts possible template matches by REP/Plan/Version keys to debug lookup mismatches)
-    - `npm run admin:rateplan:rewire-maps` (rewires `OfferIdRatePlanMap` rows from orphan `RatePlan`s → best matching template `RatePlan` with `rateStructure` present)
+    - `npm run admin:rateplan:rewire-maps` (rewires offer→template links from orphan `RatePlan`s → best matching template `RatePlan` with `rateStructure` present; updates both `OfferIdRatePlanMap` and `OfferRateMap`)
   - Note: `prisma db execute` often does not print `SELECT` results; prefer these node scripts for reporting.
   - Interpretation:
     - If templates exist but lookup mismatch suspected → fix lookup strategy in identity/derivation logic.

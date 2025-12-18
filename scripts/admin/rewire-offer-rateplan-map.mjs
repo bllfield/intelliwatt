@@ -52,6 +52,10 @@ async function main() {
     console.error('ERROR: Prisma client has no model "offerIdRatePlanMap". Check Prisma model name.');
     process.exit(2);
   }
+  if (!prisma.offerRateMap) {
+    console.error('ERROR: Prisma client has no model "offerRateMap". Check Prisma model name.');
+    process.exit(2);
+  }
 
   /**
    * Find "orphans":
@@ -88,6 +92,8 @@ async function main() {
     dryRun: DRY_RUN,
     scanned: orphansFiltered.length,
     rewiredMaps: 0,
+    rewiredOfferIdMaps: 0,
+    rewiredOfferRateMaps: 0,
     affectedOffers: 0,
     skippedNoMap: 0,
     skippedNoTemplate: 0,
@@ -179,27 +185,37 @@ async function main() {
 
     if (matchCount > 1) summary.ambiguous += 1;
 
-    const maps = await prisma.offerIdRatePlanMap.findMany({
+    const idMaps = await prisma.offerIdRatePlanMap.findMany({
       where: { ratePlanId: orphan.id },
       select: { id: true, offerId: true, ratePlanId: true },
       take: 5000,
     });
 
-    if (!maps.length) {
+    const rateMaps = await prisma.offerRateMap.findMany({
+      where: { ratePlanId: orphan.id },
+      select: { id: true, offerId: true, ratePlanId: true },
+      take: 5000,
+    });
+
+    const totalMaps = idMaps.length + rateMaps.length;
+
+    if (!totalMaps) {
       summary.skippedNoMap += 1;
       summary.details.push({
         orphanId: orphan.id,
         templateId: chosen.id,
         strategy,
         matches: matchCount,
+        offerIdRatePlanMapUpdated: 0,
+        offerRateMapUpdated: 0,
         mapsUpdated: 0,
-        note: 'No OfferIdRatePlanMap rows referenced this orphan (safe to ignore or delete later).',
+        note: 'No OfferIdRatePlanMap or OfferRateMap rows referenced this orphan (safe to ignore or delete later).',
       });
       continue;
     }
 
     if (!DRY_RUN) {
-      const res = await prisma.offerIdRatePlanMap.updateMany({
+      const resOfferId = await prisma.offerIdRatePlanMap.updateMany({
         where: { ratePlanId: orphan.id },
         data: {
           ratePlanId: chosen.id,
@@ -208,19 +224,31 @@ async function main() {
           notes: `rewired from orphan RatePlan ${orphan.id} via ${strategy}`,
         },
       });
-      summary.rewiredMaps += res.count;
+      const resOfferRate = await prisma.offerRateMap.updateMany({
+        where: { ratePlanId: orphan.id },
+        data: {
+          ratePlanId: chosen.id,
+        },
+      });
+      summary.rewiredOfferIdMaps += resOfferId.count;
+      summary.rewiredOfferRateMaps += resOfferRate.count;
+      summary.rewiredMaps += resOfferId.count + resOfferRate.count;
     } else {
-      summary.rewiredMaps += maps.length;
+      summary.rewiredOfferIdMaps += idMaps.length;
+      summary.rewiredOfferRateMaps += rateMaps.length;
+      summary.rewiredMaps += totalMaps;
     }
 
-    summary.affectedOffers += maps.length;
+    summary.affectedOffers += totalMaps;
     summary.details.push({
       orphanId: orphan.id,
       templateId: chosen.id,
       strategy,
       matches: matchCount,
-      mapsUpdated: maps.length,
-      offerIdsSample: maps.slice(0, 10).map((m) => m.offerId),
+      offerIdRatePlanMapUpdated: idMaps.length,
+      offerRateMapUpdated: rateMaps.length,
+      mapsUpdated: totalMaps,
+      offerIdsSample: [...idMaps, ...rateMaps].slice(0, 10).map((m) => m.offerId),
       dryRun: DRY_RUN,
     });
   }
