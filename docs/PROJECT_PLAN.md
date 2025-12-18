@@ -2331,8 +2331,11 @@ Guardrails
 - Best Plans strip now prefers server-ranked lists (`bestOffers` / `bestOffersAllIn`) with client fallback.
 - Best plans (no-usage) ranking now uses an `approxKwhPerMonth` selector (mapped to nearest EFL bucket 500/1000/2000).
 - Added IntelliWattBot dashboard hero (typed speech bubble) on all `/dashboard/*` pages.
+  - Placement: shown **below** each dashboard page title/description section (`DashboardHero`), not above it.
+  - UX: bot image is **2× larger** and typing speed is **half-speed** vs initial implementation.
 - Added per-page IntelliWattBot message overrides in DB (`IntelliwattBotPageMessage`) + public fetch API (`GET /api/bot/message`).
 - Added admin editor: `/admin/tools/bot-messages` to update IntelliWattBot messages per dashboard page.
+- Dashboard Plans header: search/filter section is now globally **collapsible** (both mobile + desktop) so plan cards stay visible.
 - Shows a compact banner when **NOT AVAILABLE** plans are present, with a one-click action to enable **“Show only AVAILABLE templates”**.
 
 Next (Dashboard):

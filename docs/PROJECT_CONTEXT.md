@@ -24,6 +24,12 @@
 7. **Appliances**
 8. **Upgrades**
 9. **Optimal Energy (future)**
+
+## IntelliWattBot (Dashboard Guidance)
+
+- The customer dashboard includes an **IntelliWattBot** helper that guides users through the intended onboarding flow (address → usage → current rate → home → appliances).
+- Bot messages are **per-page configurable** via admin tool: `/admin/tools/bot-messages` (admin-token required).
+- Customer pages fetch the current message via `GET /api/bot/message?path=/dashboard/<page>`.
 # IntelliWatt Project Context
 
 **Purpose**: This document provides operational context for the IntelliWatt project, including current deployment state, database information, and development guidelines for AI chat sessions.
