@@ -2369,6 +2369,7 @@ Guardrails
     - `npm run admin:rateplan:rederive` (re-derives bucket keys/status for rows with empty buckets or `planCalcReasonCode="MISSING_TEMPLATE"`)
     - `npm run admin:rateplan:diagnose-missing-templates` (counts possible template matches by REP/Plan/Version keys to debug lookup mismatches)
     - `npm run admin:rateplan:rewire-maps` (rewires offer→template links from orphan `RatePlan`s → best matching template `RatePlan` with `rateStructure` present; updates both `OfferIdRatePlanMap` and `OfferRateMap`)
+    - `npm run admin:rateplan:link-offers` (backfills missing offer→template links by matching DB-backed offers → existing template `RatePlan`s; writes `OfferIdRatePlanMap` and mirrors `OfferRateMap` when present)
   - Note: `prisma db execute` often does not print `SELECT` results; prefer these node scripts for reporting.
   - Interpretation:
     - If templates exist but lookup mismatch suspected → fix lookup strategy in identity/derivation logic.
@@ -2386,6 +2387,17 @@ Guardrails
       - `npm run admin:rateplan:missing-buckets`
       - `npm run admin:rateplan:rederive`
     - Only the `trulyMissing[]` rows in the output need EFL/template regeneration.
+  - Link offers runbook (PowerShell):
+    - `$env:DATABASE_URL="<prod master url>"`
+    - `# dry run first`
+    - `$env:DRY_RUN="1"`
+    - `npm run admin:rateplan:link-offers`
+    - `Remove-Item Env:\DRY_RUN -ErrorAction SilentlyContinue`
+    - `# optional: allow ambiguous (NOT recommended unless you inspect candidates first)`
+    - `# $env:ALLOW_AMBIGUOUS="1"`
+    - `# optional: scope to specific offer ids`
+    - `# $env:OFFER_IDS="offerId1,offerId2"`
+    - `npm run admin:rateplan:link-offers`
 - `/api/dashboard/plans` now prefers stored `requiredBucketKeys` and lazily backfills older RatePlans by deriving requirements from `rateStructure` (best-effort; never breaks offers).
 - `PLAN_CALC_QUARANTINE` queue items now include `missingBucketKeys` + `planCalcReasonCode` in `queueReason` JSON for reliable debugging/auditing.
 - Shows a compact banner when **NOT AVAILABLE** plans are present, with a one-click action to enable **“Show only AVAILABLE templates”**.
