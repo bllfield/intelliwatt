@@ -438,6 +438,10 @@ export async function POST(req: NextRequest) {
     }
 
     const remaining = Math.max(0, candidates.length - processed);
+    const offersCount = Array.isArray(normalized?.offers) ? normalized.offers.length : 0;
+    const offersWithEflUrl = Array.isArray(normalized?.offers)
+      ? normalized.offers.filter((o: any) => Boolean(o?.docs?.efl)).length
+      : 0;
     return NextResponse.json({
       ok: true,
       processed,
@@ -446,6 +450,22 @@ export async function POST(req: NextRequest) {
       remaining,
       timeBudgetMs,
       durationMs: Date.now() - startedAt,
+      debug: {
+        isRenter,
+        maxOffers,
+        offersCount,
+        offersWithEflUrl,
+        offerIdsCount: offerIds.length,
+        mappedOfferIdsCount: mappedOfferIds.size,
+        candidatesCount: candidates.length,
+        existingMapsCount: Array.isArray(existingMaps) ? existingMaps.length : 0,
+        offersSample: (Array.isArray(normalized?.offers) ? normalized.offers : [])
+          .slice(0, 3)
+          .map((o: any) => ({
+            offerId: o?.offer_id ?? null,
+            hasEflUrl: Boolean(o?.docs?.efl),
+          })),
+      },
       results,
     });
   } catch (e: any) {
