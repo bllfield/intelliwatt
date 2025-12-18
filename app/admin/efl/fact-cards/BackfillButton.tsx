@@ -59,6 +59,7 @@ export default function BackfillButton() {
   const [busy, setBusy] = React.useState(false);
   const [out, setOut] = React.useState<string>("");
   const [refreshKey, setRefreshKey] = React.useState(0);
+  const [zip, setZip] = React.useState<string>("75201");
 
   const picked = React.useMemo(() => pickAdminToken(), [refreshKey]);
 
@@ -90,7 +91,7 @@ export default function BackfillButton() {
           "content-type": "application/json",
           "x-admin-token": token,
         },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ zip: (zip || "75201").trim() }),
       });
 
       const text = await res.text();
@@ -127,17 +128,26 @@ export default function BackfillButton() {
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={runBackfill}
-          disabled={busy}
-          className={[
-            "rounded-lg px-3 py-2 text-sm font-semibold",
-            busy ? "cursor-not-allowed bg-slate-200 text-slate-600" : "bg-slate-900 text-white hover:bg-slate-800",
-          ].join(" ")}
-        >
-          {busy ? "Running…" : "Backfill Now"}
-        </button>
+        <div className="flex items-center gap-2">
+          <input
+            value={zip}
+            onChange={(e) => setZip(e.target.value)}
+            inputMode="numeric"
+            placeholder="ZIP (e.g., 75201)"
+            className="w-32 rounded-lg border border-slate-200 px-3 py-2 text-sm"
+          />
+          <button
+            type="button"
+            onClick={runBackfill}
+            disabled={busy}
+            className={[
+              "rounded-lg px-3 py-2 text-sm font-semibold",
+              busy ? "cursor-not-allowed bg-slate-200 text-slate-600" : "bg-slate-900 text-white hover:bg-slate-800",
+            ].join(" ")}
+          >
+            {busy ? "Running…" : "Backfill Now"}
+          </button>
+        </div>
       </div>
 
       <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">

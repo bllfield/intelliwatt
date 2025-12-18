@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getOrCreateEflTemplate } from "@/lib/efl/getOrCreateEflTemplate";
+import { getOffersForAddress } from "@/lib/wattbuy/client";
+import { normalizeOffers } from "@/lib/wattbuy/normalize";
+import { fetchEflPdfFromUrl } from "@/lib/efl/fetchEflPdf";
+import { deterministicEflExtract } from "@/lib/efl/eflExtractor";
 
 export const dynamic = "force-dynamic";
 
@@ -8,6 +12,7 @@ type BackfillBody = {
   limit?: number;
   providerName?: string | null;
   tdspName?: string | null;
+  zip?: string | null;
   offers?: any[]; // Optional: caller-provided WattBuy offers with optional rawText
 };
 
@@ -43,19 +48,87 @@ export async function POST(req: NextRequest) {
     const providerFilter = (body.providerName ?? "").toLowerCase().trim();
     const tdspFilter = (body.tdspName ?? "").toLowerCase().trim();
 
-    const offers = Array.isArray(body.offers) ? body.offers : [];
+    let offers = Array.isArray(body.offers) ? body.offers : [];
 
     if (!offers.length) {
-      return NextResponse.json({
-        ok: true,
-        processed: 0,
-        created: 0,
-        hits: 0,
-        misses: 0,
-        warnings: [
-          "No offers array provided; automated WattBuy fetch is not wired in this step. Pass offers[] with optional rawText to backfill.",
-        ],
-      });
+      const zip = String(body.zip || "75201").trim();
+      if (!/^\d{5}$/.test(zip)) {
+        return jsonError(400, "Invalid zip (expected 5 digits)", { zip });
+      }
+
+      // Auto-fetch WattBuy offers by ZIP (address optional in our WattBuy client).
+      // Then fetch each offer's EFL PDF and extract rawText via the pdftotext helper.
+      const fetchedWarnings: string[] = [];
+      let fetchedOffersCount = 0;
+      try {
+        const upstream = await getOffersForAddress({ zip });
+        const normalized = normalizeOffers(upstream ?? {});
+        const list = Array.isArray(normalized.offers) ? normalized.offers : [];
+        fetchedOffersCount = list.length;
+
+        const hydrated: any[] = [];
+        for (const o of list.slice(0, limit)) {
+          try {
+            const offerId = (o as any)?.offer_id ?? null;
+            const eflUrl = (o as any)?.docs?.efl ?? null;
+            const fallbackUrl = (o as any)?.enroll_link ?? null;
+            const url = (eflUrl && String(eflUrl).trim()) ? String(eflUrl).trim() : (fallbackUrl ? String(fallbackUrl).trim() : "");
+            if (!url) {
+              fetchedWarnings.push(`Offer ${offerId ?? "unknown"}: missing EFL url; skipped.`);
+              continue;
+            }
+
+            const pdf = await fetchEflPdfFromUrl(url);
+            if (!pdf.ok) {
+              fetchedWarnings.push(`Offer ${offerId ?? "unknown"}: fetchEflPdfFromUrl failed: ${pdf.error}`);
+              continue;
+            }
+
+            const det = await deterministicEflExtract(pdf.pdfBytes);
+            if (!det.rawText || !det.rawText.trim()) {
+              fetchedWarnings.push(`Offer ${offerId ?? "unknown"}: extracted rawText empty; skipped.`);
+              continue;
+            }
+
+            hydrated.push({
+              ...(o as any),
+              rawText: det.rawText,
+              eflPdfSha256: det.eflPdfSha256,
+              repPuctCertificate: det.repPuctCertificate,
+              eflVersionCode: det.eflVersionCode,
+              // Keep a hint for debugging.
+              _backfill: { zip, sourceUrl: url, pdfSource: pdf.source, pdfUrl: pdf.pdfUrl },
+            });
+          } catch (err: any) {
+            fetchedWarnings.push(
+              `Offer ${(o as any)?.offer_id ?? "unknown"}: hydrate failed: ${err?.message || String(err)}`,
+            );
+          }
+        }
+
+        offers = hydrated;
+      } catch (err: any) {
+        return jsonError(502, "Failed to auto-fetch WattBuy offers for zip", {
+          zip,
+          message: err?.message || String(err),
+        });
+      }
+
+      if (!offers.length) {
+        return NextResponse.json({
+          ok: true,
+          fetchedZip: zip,
+          fetchedOffers: fetchedOffersCount,
+          processed: 0,
+          created: 0,
+          hits: 0,
+          misses: 0,
+          warnings: [
+            ...(fetchedWarnings.length ? fetchedWarnings : []),
+            `No offers were hydrated for backfill (zip=${zip}).`,
+          ],
+        });
+      }
     }
 
     let processed = 0;
@@ -69,9 +142,14 @@ export async function POST(req: NextRequest) {
         const od = (offer as any)?.offer_data ?? {};
 
         const providerName: string | null =
-          od.supplier_name ?? od.supplier ?? (offer as any)?.supplierName ?? null;
+          od.supplier_name ??
+          od.supplier ??
+          (offer as any)?.supplierName ??
+          (offer as any)?.supplier_name ??
+          (offer as any)?.supplier ??
+          null;
         const tdspName: string | null =
-          od.utility ?? (offer as any)?.tdspName ?? null;
+          od.utility ?? (offer as any)?.tdspName ?? (offer as any)?.distributor_name ?? null;
 
         if (providerFilter && (providerName ?? "").toLowerCase().trim() !== providerFilter) {
           continue;
@@ -95,7 +173,14 @@ export async function POST(req: NextRequest) {
         processed++;
 
         const termMonths =
-          typeof od.term === "number" && Number.isFinite(od.term) ? od.term : null;
+          typeof od.term === "number" && Number.isFinite(od.term)
+            ? od.term
+            : typeof (offer as any)?.term_months === "number" && Number.isFinite((offer as any).term_months)
+              ? (offer as any).term_months
+              : null;
+
+        const offerId = (offer as any)?.offer_id ?? (offer as any)?.offerId ?? null;
+        const planName = (offer as any)?.offer_name ?? (offer as any)?.plan_name ?? (offer as any)?.planName ?? null;
 
         const res = await getOrCreateEflTemplate({
           source: "wattbuy",
@@ -105,10 +190,10 @@ export async function POST(req: NextRequest) {
           eflVersionCode: (offer as any)?.eflVersionCode ?? null,
           wattbuy: {
             providerName,
-            planName: (offer as any)?.offer_name ?? null,
+            planName,
             termMonths,
             tdspName,
-            offerId: (offer as any)?.offer_id ?? null,
+            offerId,
           },
         });
 
@@ -120,13 +205,11 @@ export async function POST(req: NextRequest) {
         }
 
         if (Array.isArray(res.warnings) && res.warnings.length > 0) {
-          warnings.push(
-            `Offer ${offer?.offer_id ?? "unknown"}: ${res.warnings.join(" • ")}`,
-          );
+          warnings.push(`Offer ${offerId ?? "unknown"}: ${res.warnings.join(" • ")}`);
         }
       } catch (err: any) {
         warnings.push(
-          `Offer ${offer?.offer_id ?? "unknown"}: backfill failed: ${
+          `Offer ${(offer as any)?.offer_id ?? (offer as any)?.offerId ?? "unknown"}: backfill failed: ${
             err?.message || String(err)
           }`,
         );
