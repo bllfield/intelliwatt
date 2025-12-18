@@ -101,10 +101,11 @@ export async function ensureCoreMonthlyBuckets(
     const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
     const year = get("year");
     const month = get("month");
+    const day = get("day");
     const weekday = get("weekday"); // Mon/Tue/.../Sat/Sun (en-US)
     const hour = get("hour");
     const minute = get("minute");
-    return { year, month, weekday, hour, minute };
+    return { year, month, day, weekday, hour, minute };
   };
 
   const weekdayShortToIndex = (w: string): number | null => {
@@ -132,7 +133,10 @@ export async function ensureCoreMonthlyBuckets(
     return hh * 60 + mm;
   };
 
-  const evalRule = (rule: BucketRuleV1, local: { month: number; weekdayIndex: number; minutesOfDay: number }): boolean => {
+  const evalRule = (
+    rule: BucketRuleV1,
+    local: { month: number; dayOfMonth: number; weekdayIndex: number; minutesOfDay: number },
+  ): boolean => {
     if (!rule || rule.v !== 1) return false;
     if (rule.tz !== "America/Chicago") return false;
 
@@ -154,7 +158,12 @@ export async function ensureCoreMonthlyBuckets(
     const isWeekend = isWeekendByIndex(weekdayIndex);
 
     if (Array.isArray(rule.months) && rule.months.length > 0) {
-      if (!rule.months.includes(local.month)) return false;
+      // Month filtering should match the same attribution semantics as day filtering.
+      // If START_DAY is active for early-morning overnight hours, treat 01:00 on Jan 1 as "previous day" for filters,
+      // which implies month=Dec for the months[] check (without changing yearMonth aggregation in this step).
+      const attributedMonth =
+        usePrevDayForFilter && local.dayOfMonth === 1 ? (local.month === 1 ? 12 : local.month - 1) : local.month;
+      if (!rule.months.includes(attributedMonth)) return false;
     }
 
     if (Array.isArray(rule.daysOfWeek) && rule.daysOfWeek.length > 0) {
@@ -208,11 +217,13 @@ export async function ensureCoreMonthlyBuckets(
     const localMinute = Number(p.hour) * 60 + Number(p.minute);
     const localMonth = Number(p.month);
     if (!Number.isFinite(localMonth) || localMonth < 1 || localMonth > 12) continue;
+    const localDayOfMonth = Number(p.day);
+    if (!Number.isFinite(localDayOfMonth) || localDayOfMonth < 1 || localDayOfMonth > 31) continue;
 
     for (const b of bucketDefs) {
       const rule = b?.rule as BucketRuleV1;
       if (rule?.overnightAttribution === "START_DAY") sawStartDay = true;
-      if (!evalRule(rule, { month: localMonth, weekdayIndex, minutesOfDay: localMinute })) continue;
+      if (!evalRule(rule, { month: localMonth, dayOfMonth: localDayOfMonth, weekdayIndex, minutesOfDay: localMinute })) continue;
       const mk = `${yearMonth}|${b.key}`;
       sumByMonthBucket.set(mk, (sumByMonthBucket.get(mk) ?? 0) + kwh);
     }
