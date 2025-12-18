@@ -1,6 +1,12 @@
 import { prisma } from "@/lib/db";
 import { usagePrisma } from "@/lib/db/usageClient";
-import { CORE_MONTHLY_BUCKETS, normalizeTime, type DayType, type UsageBucketDef } from "@/lib/plan-engine/usageBuckets";
+import {
+  CORE_MONTHLY_BUCKETS,
+  type BucketRuleV1,
+  type DayType,
+  type OvernightAttribution,
+  type UsageBucketDef,
+} from "@/lib/plan-engine/usageBuckets";
 
 export type UsageIntervalSource = "SMT" | "GREENBUTTON";
 export type BucketComputeSource = "SMT" | "GREENBUTTON" | "SIMULATED";
@@ -13,6 +19,7 @@ export type EnsureCoreMonthlyBucketsInput = {
   rangeEnd: Date;
   source: BucketComputeSource;
   intervalSource?: UsageIntervalSource;
+  bucketDefs?: UsageBucketDef[];
 };
 
 export type EnsureCoreMonthlyBucketsResult = {
@@ -75,6 +82,8 @@ export async function ensureCoreMonthlyBuckets(
   notes.push(`intervalSource=${intervalSource}`);
   notes.push(`source=${input.source}`);
 
+  const bucketDefs = Array.isArray(input.bucketDefs) && input.bucketDefs.length > 0 ? input.bucketDefs : CORE_MONTHLY_BUCKETS;
+
   // Cache the formatter (Intl construction is relatively expensive).
   const fmt = new Intl.DateTimeFormat("en-US", {
     timeZone: tz,
@@ -98,11 +107,19 @@ export async function ensureCoreMonthlyBuckets(
     return { year, month, weekday, hour, minute };
   };
 
-  const weekdayToDayType = (w: string): DayType => {
+  const weekdayShortToIndex = (w: string): number | null => {
     const s = String(w ?? "").trim().toLowerCase();
-    if (s === "sat" || s === "sun") return "WEEKEND";
-    return "WEEKDAY";
+    if (s === "sun") return 0;
+    if (s === "mon") return 1;
+    if (s === "tue") return 2;
+    if (s === "wed") return 3;
+    if (s === "thu") return 4;
+    if (s === "fri") return 5;
+    if (s === "sat") return 6;
+    return null;
   };
+
+  const isWeekendByIndex = (idx: number): boolean => idx === 0 || idx === 6;
 
   const hhmmToMinutes = (hhmm: string): number => {
     const s = String(hhmm ?? "").trim();
@@ -115,30 +132,40 @@ export async function ensureCoreMonthlyBuckets(
     return hh * 60 + mm;
   };
 
-  const bucketWindowMinutes = (b: UsageBucketDef) => {
-    const startHHMM = normalizeTime(b.window.start);
-    const endHHMM = normalizeTime(b.window.end);
+  const evalRule = (rule: BucketRuleV1, local: { month: number; weekdayIndex: number; minutesOfDay: number }): boolean => {
+    if (!rule || rule.v !== 1) return false;
+    if (rule.tz !== "America/Chicago") return false;
+
+    const startHHMM = String(rule.window?.startHHMM ?? "").trim();
+    const endHHMM = String(rule.window?.endHHMM ?? "").trim();
     const startMin = hhmmToMinutes(startHHMM);
     const endMin = hhmmToMinutes(endHHMM);
-    return { startMin, endMin };
-  };
+    if (startMin === endMin) return false;
 
-  const bucketMatches = (b: UsageBucketDef, localDayType: DayType, localMinute: number): boolean => {
-    // DayType filtering is applied to the interval's local day-of-week.
-    // Note: for overnight windows (e.g. 20:00-07:00), this means 01:00 Saturday is treated as WEEKEND.
-    // If we later want “Friday night” semantics, we can shift overnight early-morning attribution.
-    if (b.dayType !== "ALL" && b.dayType !== localDayType) return false;
+    const overnight = startMin > endMin;
+    const t = local.minutesOfDay;
+    const inWindow = overnight ? t >= startMin || t < endMin : t >= startMin && t < endMin;
+    if (!inWindow) return false;
 
-    const { startMin, endMin } = bucketWindowMinutes(b);
-    if (startMin === 0 && endMin === 24 * 60) return true; // full day
+    // Overnight attribution affects only day filters (not month/yearMonth attribution in this step).
+    const attribution: OvernightAttribution = rule.overnightAttribution ?? "ACTUAL_DAY";
+    const usePrevDayForFilter = overnight && attribution === "START_DAY" && t < endMin;
+    const weekdayIndex = usePrevDayForFilter ? (local.weekdayIndex + 6) % 7 : local.weekdayIndex;
+    const isWeekend = isWeekendByIndex(weekdayIndex);
 
-    if (endMin > startMin) {
-      // Half-open interval: [start, end)
-      return localMinute >= startMin && localMinute < endMin;
+    if (Array.isArray(rule.months) && rule.months.length > 0) {
+      if (!rule.months.includes(local.month)) return false;
     }
 
-    // Overnight: e.g. 20:00-07:00
-    return localMinute >= startMin || localMinute < endMin;
+    if (Array.isArray(rule.daysOfWeek) && rule.daysOfWeek.length > 0) {
+      if (!rule.daysOfWeek.includes(weekdayIndex)) return false;
+    } else if (rule.dayType) {
+      const dt = rule.dayType;
+      if (dt === "WEEKDAY" && isWeekend) return false;
+      if (dt === "WEEKEND" && !isWeekend) return false;
+    }
+
+    return true;
   };
 
   const decimalToNumber = (v: any): number => {
@@ -165,6 +192,7 @@ export async function ensureCoreMonthlyBuckets(
   const monthSet = new Set<string>();
   const sumByMonthBucket = new Map<string, number>(); // key = `${yearMonth}|${bucketKey}`
   let kwhSummed = 0;
+  let sawStartDay = false;
 
   for (const row of intervals) {
     const kwh = decimalToNumber((row as any).kwh);
@@ -175,11 +203,16 @@ export async function ensureCoreMonthlyBuckets(
     const yearMonth = `${p.year}-${p.month}`;
     monthSet.add(yearMonth);
 
-    const dayType: DayType = weekdayToDayType(p.weekday);
+    const weekdayIndex = weekdayShortToIndex(p.weekday);
+    if (weekdayIndex == null) continue;
     const localMinute = Number(p.hour) * 60 + Number(p.minute);
+    const localMonth = Number(p.month);
+    if (!Number.isFinite(localMonth) || localMonth < 1 || localMonth > 12) continue;
 
-    for (const b of CORE_MONTHLY_BUCKETS) {
-      if (!bucketMatches(b, dayType, localMinute)) continue;
+    for (const b of bucketDefs) {
+      const rule = b?.rule as BucketRuleV1;
+      if (rule?.overnightAttribution === "START_DAY") sawStartDay = true;
+      if (!evalRule(rule, { month: localMonth, weekdayIndex, minutesOfDay: localMinute })) continue;
       const mk = `${yearMonth}|${b.key}`;
       sumByMonthBucket.set(mk, (sumByMonthBucket.get(mk) ?? 0) + kwh);
     }
@@ -189,27 +222,34 @@ export async function ensureCoreMonthlyBuckets(
 
   // Ensure bucket definitions exist (idempotent upsert by key).
   // (We store start/end as HHMM, matching canonical key format.)
-  for (const b of CORE_MONTHLY_BUCKETS) {
-    const startHHMM = normalizeTime(b.window.start);
-    const endHHMM = normalizeTime(b.window.end);
+  for (const b of bucketDefs) {
+    const rule = b.rule as BucketRuleV1;
+    const dayType: DayType = rule.dayType ?? "ALL";
+    const startHHMM = String(rule.window?.startHHMM ?? "").trim();
+    const endHHMM = String(rule.window?.endHHMM ?? "").trim();
+    const overnightAttribution: OvernightAttribution = rule.overnightAttribution ?? "ACTUAL_DAY";
     await (usagePrisma as any).usageBucketDefinition.upsert({
       where: { key: b.key },
       create: {
         key: b.key,
         label: b.label,
-        dayType: b.dayType,
-        season: (b as any).season ?? null,
+        dayType,
+        season: null,
         startHHMM,
         endHHMM,
         tz: tz,
+        overnightAttribution,
+        ruleJson: rule,
       },
       update: {
         label: b.label,
-        dayType: b.dayType,
-        season: (b as any).season ?? null,
+        dayType,
+        season: null,
         startHHMM,
         endHHMM,
         tz: tz,
+        overnightAttribution,
+        ruleJson: rule,
         updatedAt: now,
       },
     });
@@ -261,9 +301,9 @@ export async function ensureCoreMonthlyBuckets(
     kwhSummed: Number.isFinite(kwhSummed) ? Number(kwhSummed.toFixed(6)) : 0,
     notes: [
       ...notes,
-      "Buckets: CORE_MONTHLY_BUCKETS (9)",
+      `Buckets: ${bucketDefs === CORE_MONTHLY_BUCKETS ? "CORE_MONTHLY_BUCKETS (9)" : `custom (${bucketDefs.length})`}`,
       "Best-effort: skips non-finite/<=0 kWh intervals",
-      "Overnight bucket dayType is evaluated on the interval's local day-of-week (no cross-midnight attribution yet)",
+      sawStartDay ? "Overnight attribution: START_DAY enabled for at least one bucket (day filters only)" : "Overnight attribution: ACTUAL_DAY (default)",
     ],
   };
 }

@@ -29,6 +29,11 @@ enum Season {
   SHOULDER
 }
 
+enum OvernightAttribution {
+  ACTUAL_DAY
+  START_DAY
+}
+
 model UsageModuleBootstrap {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
@@ -99,6 +104,8 @@ model UsageBucketDefinition {
   startHHMM String
   endHHMM   String
   tz        String
+  overnightAttribution OvernightAttribution @default(ACTUAL_DAY)
+  ruleJson  Json?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

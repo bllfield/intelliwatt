@@ -2315,6 +2315,10 @@ Guardrails
   - After SMT ingest/normalize completes (`/api/admin/smt/normalize` and inline `/api/admin/smt/raw-upload` paths)
   - After Green Button upload completes (`/api/green-button/upload` and `/api/admin/green-button/upload`)
   - On-demand inside `GET /api/dashboard/plans` when recent bucket rows are missing (lazy backfill; never breaks offers)
+- Usage buckets are now **future-proof**:
+  - `UsageBucketDefinition` stores `ruleJson` (canonical bucket matching rule) + `overnightAttribution` (ACTUAL_DAY default)
+  - Aggregator supports overnight attribution modes: ACTUAL_DAY (default) and START_DAY ("night belongs to previous day" for day filters)
+  - Validator supports `--overnight=start_day` to sanity-check START_DAY attribution on the 20:00-07:00 buckets
 - Added `lib/plan-engine/getRatePlanTemplate.ts` (master DB read helper for `RatePlan` templates; no throwing; returns only fields needed for later true-cost calculations).
 - Fixed `RatePlan` template lookup for `ratePlanId` so `trueCostEstimate` doesn’t incorrectly show `MISSING_TEMPLATE` on transient lookup errors.
 - Added `lib/plan-engine/getTdspDeliveryRates.ts` (stub TDSP delivery rates contract; returns null for now).
