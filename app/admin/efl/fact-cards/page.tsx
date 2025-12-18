@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ManualFactCardLoader } from "@/components/admin/ManualFactCardLoader";
+import BackfillButton from "./BackfillButton";
 
 type Json = any;
 type SortDir = "asc" | "desc";
@@ -924,6 +925,10 @@ export default function FactCardOpsPage() {
           One page for: provider batch parsing → review queue → templates → manual loader (URL / upload / text).
         </div>
       </header>
+
+      <div className="mb-6">
+        <BackfillButton />
+      </div>
 
       <section className="rounded-2xl border bg-white p-4 space-y-3">
         <div className="flex flex-wrap items-end gap-3">
