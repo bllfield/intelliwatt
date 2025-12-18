@@ -46,6 +46,8 @@ type SortKey =
   | "renewable_desc"
   | "best_for_you_proxy";
 
+type EflBucket = 500 | 1000 | 2000;
+
 function firstFiniteNumber(vals: Array<any>): number | null {
   for (const v of vals) {
     const n = typeof v === "number" ? v : Number(v);
@@ -54,24 +56,37 @@ function firstFiniteNumber(vals: Array<any>): number | null {
   return null;
 }
 
-function pickBest1000MetricCentsPerKwh(offer: any): number | null {
-  // Prefer 1000kWh EFL avg cents/kWh (WattBuy’s anchor point), then fall back to 500/2000.
-  // Keep this robust to slight schema variations without hardcoding a single guess.
-  return firstFiniteNumber([
-    offer?.efl?.avgPriceCentsPerKwh1000,
-    offer?.avgPriceCentsPerKwh1000,
-    offer?.kwh1000_cents,
-    offer?.bill1000,
-    offer?.bill_1000,
-    offer?.price1000,
-    offer?.rate1000,
-    offer?.efl?.avgPriceCentsPerKwh500,
-    offer?.avgPriceCentsPerKwh500,
-    offer?.kwh500_cents,
-    offer?.efl?.avgPriceCentsPerKwh2000,
-    offer?.avgPriceCentsPerKwh2000,
-    offer?.kwh2000_cents,
-  ]);
+function selectedBestBucket(sort: SortKey): EflBucket {
+  if (sort === "kwh500_asc") return 500;
+  if (sort === "kwh2000_asc") return 2000;
+  return 1000;
+}
+
+function pickMetricCentsPerKwhForBucket(offer: any, bucket: EflBucket): number | null {
+  const pick500 = () =>
+    firstFiniteNumber([offer?.efl?.avgPriceCentsPerKwh500, offer?.avgPriceCentsPerKwh500, offer?.kwh500_cents]);
+  const pick1000 = () =>
+    firstFiniteNumber([
+      offer?.efl?.avgPriceCentsPerKwh1000,
+      offer?.avgPriceCentsPerKwh1000,
+      offer?.kwh1000_cents,
+      offer?.bill1000,
+      offer?.bill_1000,
+      offer?.price1000,
+      offer?.rate1000,
+    ]);
+  const pick2000 = () =>
+    firstFiniteNumber([offer?.efl?.avgPriceCentsPerKwh2000, offer?.avgPriceCentsPerKwh2000, offer?.kwh2000_cents]);
+
+  const v = bucket === 500 ? pick500() : bucket === 2000 ? pick2000() : pick1000();
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+
+  // Fallback order mirrors the UI sort fallbacks.
+  return bucket === 500
+    ? firstFiniteNumber([pick1000(), pick2000()])
+    : bucket === 2000
+      ? firstFiniteNumber([pick1000(), pick500()])
+      : firstFiniteNumber([pick500(), pick2000()]);
 }
 
 function fmtCentsPerKwh(v: number | null | undefined): string {
@@ -114,6 +129,7 @@ export default function PlansClient() {
   const [mobilePanel, setMobilePanel] = useState<"none" | "search" | "filters">("none");
   const [headerCollapsed, setHeaderCollapsed] = useState(false);
   const [approxKwhPerMonth, setApproxKwhPerMonth] = useState<500 | 750 | 1000 | 1250 | 2000>(1000);
+  const bestBucket = useMemo(() => selectedBestBucket(sort), [sort]);
 
   // Reset prefetch attempts when the *user-visible dataset* changes (filters/pagination),
   // but do NOT reset on our internal refresh nonce (otherwise we could loop forever
@@ -336,11 +352,11 @@ export default function PlansClient() {
 
     // Fallback: compute client-side ranking from currently loaded offers (safe deploy).
     const scored = offers
-      .map((o) => ({ o, metric: pickBest1000MetricCentsPerKwh(o) }))
+      .map((o) => ({ o, metric: pickMetricCentsPerKwhForBucket(o, bestBucket) }))
       .filter((x) => typeof x.metric === "number" && Number.isFinite(x.metric as number));
     scored.sort((a, b) => (a.metric as number) - (b.metric as number));
     return scored.slice(0, 5).map((x) => x.o);
-  }, [resp?.ok, hasUsage, (resp as any)?.bestOffersAllIn, resp?.bestOffers, offers, bestRankAllIn]);
+  }, [resp?.ok, hasUsage, (resp as any)?.bestOffersAllIn, resp?.bestOffers, offers, bestRankAllIn, bestBucket]);
 
   const bestStripBasis = useMemo(() => {
     if (!resp?.ok) return null;
@@ -355,6 +371,15 @@ export default function PlansClient() {
     const d = rankAllIn ? (resp as any)?.bestOffersAllInDisclaimer : resp?.bestOffersDisclaimer;
     return typeof d === "string" && d.trim() ? d.trim() : null;
   }, [resp?.ok, (resp as any)?.bestOffersAllInDisclaimer, resp?.bestOffersDisclaimer, bestRankAllIn]);
+
+  const bestStripDisclaimerWithAnchor = useMemo(() => {
+    const base = bestStripDisclaimer;
+    if (!base) return null;
+    // If the server already injected an anchor, keep it. Otherwise append a short hint
+    // so the user understands the mini-card kWh label/price matches their selected sort.
+    if (base.includes("500 kWh") || base.includes("1000 kWh") || base.includes("2000 kWh")) return base;
+    return `${base} (showing ${bestBucket} kWh EFL average)`;
+  }, [bestStripDisclaimer, bestBucket]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -916,7 +941,7 @@ export default function PlansClient() {
                   </label>
                 )}
                 <div className="mt-1 text-xs text-brand-cyan/70">
-                  {bestStripDisclaimer ??
+                  {bestStripDisclaimerWithAnchor ??
                     (hasUsage
                       ? "Based on your last 12 months usage. Ranking uses provider estimates until IntelliWatt true-cost is enabled."
                       : "Pick an approximate monthly usage to rank plans by EFL averages.")}
@@ -935,7 +960,7 @@ export default function PlansClient() {
             {bestStripOffers.length > 0 ? (
               <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
                 {bestStripOffers.map((o) => {
-                  const metric = pickBest1000MetricCentsPerKwh(o);
+                  const metric = pickMetricCentsPerKwhForBucket(o, bestBucket);
                   const supplier = (o as any)?.supplierName ?? "Unknown supplier";
                   const plan = (o as any)?.planName ?? "Unknown plan";
                   const status = (o as any)?.intelliwatt?.statusLabel ?? "UNAVAILABLE";
@@ -976,7 +1001,9 @@ export default function PlansClient() {
 
                       <div className="mt-3 flex items-end justify-between gap-3">
                         <div>
-                          <div className="text-[0.65rem] uppercase tracking-[0.25em] text-brand-cyan/55">1000</div>
+                          <div className="text-[0.65rem] uppercase tracking-[0.25em] text-brand-cyan/55">
+                            {bestBucket}
+                          </div>
                           <div className="mt-0.5 text-base font-semibold text-brand-white">
                             {fmtCentsPerKwh(metric)}
                           </div>
