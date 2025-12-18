@@ -26,7 +26,7 @@ async function main() {
         "planCalcReasonCode",
         "requiredBucketKeys",
         "planCalcDerivedAt",
-        ("rateStructure" IS NOT NULL) AS "rateStructurePresent"
+        ("rateStructure" IS NOT NULL AND "rateStructure"::text <> 'null') AS "rateStructurePresent"
       FROM "RatePlan"
       WHERE COALESCE(array_length("requiredBucketKeys", 1), 0) = 0
       ORDER BY "updatedAt" DESC

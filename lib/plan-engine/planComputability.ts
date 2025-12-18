@@ -1,5 +1,6 @@
 import { requiredBucketsForPlan } from "@/lib/plan-engine/requiredBucketsForPlan";
 import { extractFixedRepEnergyCentsPerKwh } from "@/lib/plan-engine/calculatePlanCostForUsage";
+import { Prisma } from "@prisma/client";
 
 export type ComputabilityStatus =
   | { status: "COMPUTABLE"; requiredBucketKeys: string[]; notes?: string[] }
@@ -32,6 +33,12 @@ function numOrNull(v: unknown): number | null {
 
 function hasNonEmptyArray(v: unknown): boolean {
   return Array.isArray(v) && v.length > 0;
+}
+
+function isPrismaJsonNullLike(v: unknown): boolean {
+  // In Postgres JSONB, a stored JSON null is NOT SQL NULL, and Prisma represents it using sentinels.
+  // Treat these as "missing rateStructure" for plan-calc purposes.
+  return v === (Prisma as any).JsonNull || v === (Prisma as any).DbNull || v === (Prisma as any).AnyNull;
 }
 
 export function inferSupportedFeaturesFromTemplate(input: {
@@ -90,7 +97,8 @@ export function derivePlanCalcRequirementsFromTemplate(args: {
 } {
   const planCalcVersion = 1 as const;
 
-  if (!args.rateStructure) {
+  const rs = args.rateStructure;
+  if (!rs || isPrismaJsonNullLike(rs)) {
     return {
       planCalcVersion,
       planCalcStatus: "UNKNOWN",
@@ -100,8 +108,8 @@ export function derivePlanCalcRequirementsFromTemplate(args: {
     };
   }
 
-  const inferred = inferSupportedFeaturesFromTemplate({ rateStructure: args.rateStructure });
-  const fixed = extractFixedRepEnergyCentsPerKwh(args.rateStructure);
+  const inferred = inferSupportedFeaturesFromTemplate({ rateStructure: rs });
+  const fixed = extractFixedRepEnergyCentsPerKwh(rs);
 
   if (fixed != null) {
     return {
