@@ -1,13 +1,16 @@
 export type DayType = "ALL" | "WEEKDAY" | "WEEKEND";
 export type Season = "ALL" | "SUMMER" | "WINTER" | "SHOULDER";
 
-export type Window = { start: "HH:MM" | string; end: "HH:MM" | string };
+// We intentionally keep this as a lightweight string type (validated at runtime in normalizeTime()).
+export type TimeHHMM = string; // expected "HH:MM" (e.g. "20:00", "07:00", "24:00")
+
+export type Window = { start: TimeHHMM; end: TimeHHMM };
 
 export type UsageBucketDef = {
   key: string; // canonical stable key
   label: string; // human-friendly
   dayType: DayType;
-  window: { start: "HH:MM"; end: "HH:MM" };
+  window: { start: TimeHHMM; end: TimeHHMM };
   season?: Season;
   tz: "America/Chicago";
 };
@@ -20,7 +23,7 @@ export type UsageBucketDef = {
 //   kwh.m.WEEKDAY.2000-0700
 //   kwh.m.WEEKEND.0000-2400
 
-export function normalizeTime(hhmm: "HH:MM" | string): "HHMM" {
+export function normalizeTime(hhmm: TimeHHMM): "HHMM" {
   const s = String(hhmm ?? "").trim();
   const m = s.match(/^(\d{1,2}):(\d{2})$/);
   if (!m) throw new Error(`Invalid time (expected HH:MM): ${s}`);
@@ -47,7 +50,7 @@ export function makeBucketKey(args: { dayType: DayType; window: Window; season?:
 
 function makeDef(args: {
   dayType: DayType;
-  window: { start: "HH:MM"; end: "HH:MM" };
+  window: { start: TimeHHMM; end: TimeHHMM };
   season?: Season;
   label: string;
 }): UsageBucketDef {
