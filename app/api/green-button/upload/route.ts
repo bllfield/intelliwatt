@@ -9,6 +9,7 @@ import { refreshUserEntryStatuses } from "@/lib/hitthejackwatt/entryLifecycle";
 import { normalizeEmail } from "@/lib/utils/email";
 import { parseGreenButtonBuffer } from "@/lib/usage/greenButtonParser";
 import { normalizeGreenButtonReadingsTo15Min } from "@/lib/usage/greenButtonNormalize";
+import { ensureCoreMonthlyBuckets } from "@/lib/usage/aggregateMonthlyBuckets";
 
 // No explicit upload cap; rely on platform limits. Large files are allowed to ensure full 12-month coverage.
 const MANUAL_USAGE_LIFETIME_DAYS = 365;
@@ -226,6 +227,25 @@ export async function POST(request: Request) {
         const slice = intervalData.slice(i, i + BATCH_SIZE);
         if (slice.length === 0) continue;
         await (usagePrisma as any).greenButtonInterval.createMany({ data: slice });
+      }
+
+      // Best-effort: ensure CORE monthly bucket totals exist for this Green Button upload.
+      // Must never fail upload flow.
+      try {
+        const earliest = trimmed[0]?.timestamp ?? null;
+        const latest = trimmed[trimmed.length - 1]?.timestamp ?? null;
+        if (earliest && latest) {
+          await ensureCoreMonthlyBuckets({
+            homeId: house.id,
+            esiid: house.esiid ?? null,
+            rangeStart: earliest,
+            rangeEnd: latest,
+            source: "GREENBUTTON",
+            intervalSource: "GREENBUTTON",
+          });
+        }
+      } catch (bucketErr) {
+        console.error("[green-button/upload] CORE bucket aggregation failed (best-effort)", bucketErr);
       }
 
       const totalKwh = trimmed.reduce((sum, row) => sum + row.consumptionKwh, 0);

@@ -2311,7 +2311,10 @@ Guardrails
 - Added **Usage module DB** tall-table storage for bucket totals:
   - `UsageBucketDefinition` (global catalog of canonical bucket keys + metadata)
   - `HomeMonthlyUsageBucket` (per-home, per-month kWh totals per bucket key; `@@unique([homeId, yearMonth, bucketKey])`)
-- Added `aggregateMonthlyBuckets()` + manual script (`scripts/usage/rebuild-core-buckets-for-home.ts`) to populate `CORE_MONTHLY_BUCKETS` into the **usage module DB** from master `SmtInterval` rows (best-effort; not yet wired into any API/UI).
+- Added `aggregateMonthlyBuckets()` + manual script (`scripts/usage/rebuild-core-buckets-for-home.ts`) to populate `CORE_MONTHLY_BUCKETS` into the **usage module DB** from interval data (best-effort; now wired):
+  - After SMT ingest/normalize completes (`/api/admin/smt/normalize` and inline `/api/admin/smt/raw-upload` paths)
+  - After Green Button upload completes (`/api/green-button/upload` and `/api/admin/green-button/upload`)
+  - On-demand inside `GET /api/dashboard/plans` when recent bucket rows are missing (lazy backfill; never breaks offers)
 - Added `lib/plan-engine/getRatePlanTemplate.ts` (master DB read helper for `RatePlan` templates; no throwing; returns only fields needed for later true-cost calculations).
 - Fixed `RatePlan` template lookup for `ratePlanId` so `trueCostEstimate` doesn’t incorrectly show `MISSING_TEMPLATE` on transient lookup errors.
 - Added `lib/plan-engine/getTdspDeliveryRates.ts` (stub TDSP delivery rates contract; returns null for now).

@@ -4,6 +4,7 @@ import { GetObjectCommand, DeleteObjectCommand, S3Client } from '@aws-sdk/client
 import { requireAdmin } from '@/lib/auth/admin';
 import { prisma } from '@/lib/db';
 import { usagePrisma } from '@/lib/db/usageClient';
+import { ensureCoreMonthlyBuckets } from '@/lib/usage/aggregateMonthlyBuckets';
 import { normalizeSmtIntervals, type NormalizeStats } from '@/app/lib/smt/normalize';
 
 export const runtime = 'nodejs';
@@ -424,7 +425,7 @@ export async function POST(req: NextRequest) {
       try {
         const houses = await prisma.houseAddress.findMany({
           where: { esiid: { in: distinctEsiids }, archivedAt: null },
-          select: { id: true },
+          select: { id: true, esiid: true },
         });
         const houseIds = houses.map((h) => h.id);
 
@@ -439,6 +440,28 @@ export async function POST(req: NextRequest) {
 
           await usagePrisma.greenButtonInterval.deleteMany({ where: { homeId: { in: houseIds } } });
           await usagePrisma.rawGreenButton.deleteMany({ where: { homeId: { in: houseIds } } });
+        }
+
+        // Best-effort: ensure CORE monthly bucket totals exist for homes touched by this ingest.
+        // Must never fail SMT normalization.
+        try {
+          const rangeEnd = tsMaxDate ?? new Date();
+          const rangeStart =
+            tsMinDate ?? new Date(rangeEnd.getTime() - 365 * 24 * 60 * 60 * 1000);
+
+          for (const h of houses) {
+            if (!h?.id) continue;
+            await ensureCoreMonthlyBuckets({
+              homeId: h.id,
+              esiid: h.esiid,
+              rangeStart,
+              rangeEnd,
+              source: "SMT",
+              intervalSource: "SMT",
+            });
+          }
+        } catch (bucketErr) {
+          console.error('[smt/normalize] CORE bucket aggregation failed (best-effort)', bucketErr);
         }
       } catch (err) {
         console.error('[smt/normalize] failed to cleanup green-button/manual data for ESIID(s)', { distinctEsiids, err });

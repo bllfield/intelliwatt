@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import { usagePrisma } from '@/lib/db/usageClient';
+import { ensureCoreMonthlyBuckets } from '@/lib/usage/aggregateMonthlyBuckets';
 import { normalizeSmtIntervals } from '@/app/lib/smt/normalize';
 import { requireAdmin } from '@/lib/auth/admin';
 
@@ -278,7 +279,7 @@ export async function POST(req: NextRequest) {
             try {
               const houses = await prisma.houseAddress.findMany({
                 where: { esiid: { in: distinctEsiids }, archivedAt: null },
-                select: { id: true },
+                select: { id: true, esiid: true },
               });
               const houseIds = houses.map((h) => h.id);
 
@@ -298,6 +299,27 @@ export async function POST(req: NextRequest) {
 
                 await usagePrisma.greenButtonInterval.deleteMany({ where: { homeId: { in: houseIds } } });
                 await usagePrisma.rawGreenButton.deleteMany({ where: { homeId: { in: houseIds } } });
+              }
+
+              // Best-effort: ensure CORE monthly bucket totals exist for homes touched by this upload.
+              // Must never fail SMT ingest.
+              try {
+                const rangeEnd = tsMax ?? new Date();
+                const rangeStart =
+                  windowStart ?? new Date(rangeEnd.getTime() - 365 * 24 * 60 * 60 * 1000);
+                for (const h of houses) {
+                  if (!h?.id) continue;
+                  await ensureCoreMonthlyBuckets({
+                    homeId: h.id,
+                    esiid: h.esiid,
+                    rangeStart,
+                    rangeEnd,
+                    source: "SMT",
+                    intervalSource: "SMT",
+                  });
+                }
+              } catch (bucketErr) {
+                console.error('[raw-upload:inline] CORE bucket aggregation failed (best-effort)', bucketErr);
               }
             } catch (err) {
               console.error('[raw-upload:inline] failed to cleanup green-button/manual data for ESIID(s)', {

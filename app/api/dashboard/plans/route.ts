@@ -8,6 +8,8 @@ import { getTrueCostStatus } from "@/lib/plan-engine/trueCostStatus";
 import { calculatePlanCostForUsage } from "@/lib/plan-engine/calculatePlanCostForUsage";
 import { getRatePlanTemplateProbe } from "@/lib/plan-engine/getRatePlanTemplate";
 import { getTdspDeliveryRates } from "@/lib/plan-engine/getTdspDeliveryRates";
+import { usagePrisma } from "@/lib/db/usageClient";
+import { ensureCoreMonthlyBuckets } from "@/lib/usage/aggregateMonthlyBuckets";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -266,6 +268,53 @@ export async function GET(req: NextRequest) {
     } catch {
       hasUsage = false;
       usageSummary = null;
+    }
+
+    // Best-effort: on-demand ensure CORE bucket totals exist for recent months (never break offers).
+    // This is a lazy backfill path in case ingest hooks were skipped or buckets were never computed.
+    try {
+      if (hasUsage && house.id && house.esiid) {
+        const tz = "America/Chicago";
+        const fmt = new Intl.DateTimeFormat("en-US", { timeZone: tz, year: "numeric", month: "2-digit" });
+        const parts = fmt.formatToParts(new Date());
+        const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+        const yearStr = get("year");
+        const monthStr = get("month");
+        const year = Number(yearStr);
+        const month = Number(monthStr);
+        const ym0 = `${yearStr}-${monthStr}`;
+        const prev = (() => {
+          if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) return null;
+          const y = month === 1 ? year - 1 : year;
+          const m = month === 1 ? 12 : month - 1;
+          return `${String(y)}-${String(m).padStart(2, "0")}`;
+        })();
+
+        const bucketKey = "kwh.m.ALL.0000-2400";
+        const yearMonths = prev ? [ym0, prev] : [ym0];
+
+        const existing = await (usagePrisma as any).homeMonthlyUsageBucket.findMany({
+          where: { homeId: house.id, bucketKey, yearMonth: { in: yearMonths } },
+          select: { yearMonth: true },
+        });
+        const present = new Set<string>((existing ?? []).map((r: any) => String(r.yearMonth)));
+        const missing = yearMonths.filter((ym) => !present.has(ym));
+
+        if (missing.length > 0) {
+          const rangeEnd = new Date();
+          const rangeStart = new Date(rangeEnd.getTime() - 365 * 24 * 60 * 60 * 1000);
+          await ensureCoreMonthlyBuckets({
+            homeId: house.id,
+            esiid: house.esiid,
+            rangeStart,
+            rangeEnd,
+            source: "SMT",
+            intervalSource: "SMT",
+          });
+        }
+      }
+    } catch (err) {
+      console.error("[dashboard/plans] CORE bucket on-demand backfill failed (best-effort)", err);
     }
 
     // Prefer live offers. If the call fails (transient upstream), fall back to the last stored snapshot.

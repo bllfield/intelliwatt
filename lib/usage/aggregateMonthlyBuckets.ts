@@ -2,24 +2,78 @@ import { prisma } from "@/lib/db";
 import { usagePrisma } from "@/lib/db/usageClient";
 import { CORE_MONTHLY_BUCKETS, normalizeTime, type DayType, type UsageBucketDef } from "@/lib/plan-engine/usageBuckets";
 
+export type UsageIntervalSource = "SMT" | "GREENBUTTON";
+export type BucketComputeSource = "SMT" | "GREENBUTTON" | "SIMULATED";
+
+export type EnsureCoreMonthlyBucketsInput = {
+  homeId: string;
+  // Only required for SMT interval reads. Green Button buckets can be computed without ESIID.
+  esiid?: string | null;
+  rangeStart: Date;
+  rangeEnd: Date;
+  source: BucketComputeSource;
+  intervalSource?: UsageIntervalSource;
+};
+
+export type EnsureCoreMonthlyBucketsResult = {
+  monthsProcessed: number;
+  rowsUpserted: number;
+  intervalRowsRead: number;
+  kwhSummed: number;
+  notes: string[];
+};
+
 export type AggregateMonthlyBucketsInput = { homeId: string; esiid: string; rangeStart: Date; rangeEnd: Date };
 
 export async function aggregateMonthlyBuckets(
   input: AggregateMonthlyBucketsInput,
 ): Promise<{ monthsProcessed: number; rowsUpserted: number; notes: string[] }> {
-  if (!input?.homeId) throw new Error("aggregateMonthlyBuckets: missing homeId");
-  if (!input?.esiid) throw new Error("aggregateMonthlyBuckets: missing esiid");
+  // Back-compat wrapper for older scripts/callers (SMT-only).
+  const res = await ensureCoreMonthlyBuckets({
+    homeId: input?.homeId,
+    esiid: input?.esiid,
+    rangeStart: input?.rangeStart,
+    rangeEnd: input?.rangeEnd,
+    source: "SMT",
+    intervalSource: "SMT",
+  });
+
+  return { monthsProcessed: res.monthsProcessed, rowsUpserted: res.rowsUpserted, notes: res.notes };
+}
+
+export async function ensureCoreMonthlyBuckets(
+  input: EnsureCoreMonthlyBucketsInput,
+): Promise<EnsureCoreMonthlyBucketsResult> {
+  const notes: string[] = [];
+
+  if (!input?.homeId) {
+    return { monthsProcessed: 0, rowsUpserted: 0, intervalRowsRead: 0, kwhSummed: 0, notes: ["missing_homeId"] };
+  }
   if (!(input.rangeStart instanceof Date) || Number.isNaN(input.rangeStart.getTime())) {
-    throw new Error("aggregateMonthlyBuckets: invalid rangeStart");
+    return { monthsProcessed: 0, rowsUpserted: 0, intervalRowsRead: 0, kwhSummed: 0, notes: ["invalid_rangeStart"] };
   }
   if (!(input.rangeEnd instanceof Date) || Number.isNaN(input.rangeEnd.getTime())) {
-    throw new Error("aggregateMonthlyBuckets: invalid rangeEnd");
+    return { monthsProcessed: 0, rowsUpserted: 0, intervalRowsRead: 0, kwhSummed: 0, notes: ["invalid_rangeEnd"] };
   }
   if (input.rangeEnd.getTime() <= input.rangeStart.getTime()) {
-    throw new Error("aggregateMonthlyBuckets: rangeEnd must be > rangeStart");
+    return { monthsProcessed: 0, rowsUpserted: 0, intervalRowsRead: 0, kwhSummed: 0, notes: ["rangeEnd_must_be_gt_rangeStart"] };
+  }
+
+  const intervalSource: UsageIntervalSource = input.intervalSource ?? "SMT";
+  if (intervalSource === "SMT" && !input.esiid) {
+    return {
+      monthsProcessed: 0,
+      rowsUpserted: 0,
+      intervalRowsRead: 0,
+      kwhSummed: 0,
+      notes: ["missing_esiid_for_smt_interval_read"],
+    };
   }
 
   const tz = "America/Chicago";
+  notes.push(`TZ=${tz}`);
+  notes.push(`intervalSource=${intervalSource}`);
+  notes.push(`source=${input.source}`);
 
   // Cache the formatter (Intl construction is relatively expensive).
   const fmt = new Intl.DateTimeFormat("en-US", {
@@ -93,18 +147,29 @@ export async function aggregateMonthlyBuckets(
     return Number(v);
   };
 
-  const intervals = await prisma.smtInterval.findMany({
-    where: { esiid: input.esiid, ts: { gte: input.rangeStart, lte: input.rangeEnd } },
-    orderBy: { ts: "asc" },
-    select: { ts: true, kwh: true },
-  });
+  const intervals: Array<{ ts: Date; kwh: any }> =
+    intervalSource === "GREENBUTTON"
+      ? await (usagePrisma as any).greenButtonInterval.findMany({
+          where: { homeId: input.homeId, timestamp: { gte: input.rangeStart, lte: input.rangeEnd } },
+          orderBy: { timestamp: "asc" },
+          select: { timestamp: true, consumptionKwh: true },
+        }).then((rows: Array<{ timestamp: Date; consumptionKwh: any }>) =>
+          rows.map((r) => ({ ts: r.timestamp, kwh: r.consumptionKwh })),
+        )
+      : await prisma.smtInterval.findMany({
+          where: { esiid: input.esiid!, ts: { gte: input.rangeStart, lte: input.rangeEnd } },
+          orderBy: { ts: "asc" },
+          select: { ts: true, kwh: true },
+        });
 
   const monthSet = new Set<string>();
   const sumByMonthBucket = new Map<string, number>(); // key = `${yearMonth}|${bucketKey}`
+  let kwhSummed = 0;
 
   for (const row of intervals) {
     const kwh = decimalToNumber((row as any).kwh);
     if (!Number.isFinite(kwh) || kwh <= 0) continue;
+    kwhSummed += kwh;
 
     const p = toChicagoParts(row.ts);
     const yearMonth = `${p.year}-${p.month}`;
@@ -175,12 +240,12 @@ export async function aggregateMonthlyBuckets(
             yearMonth,
             bucketKey,
             kwhTotal,
-            source: "SMT",
+            source: input.source,
             computedAt: now,
           },
           update: {
             kwhTotal,
-            source: "SMT",
+            source: input.source,
             computedAt: now,
           },
         });
@@ -192,8 +257,10 @@ export async function aggregateMonthlyBuckets(
   return {
     monthsProcessed: monthSet.size,
     rowsUpserted,
+    intervalRowsRead: intervals.length,
+    kwhSummed: Number.isFinite(kwhSummed) ? Number(kwhSummed.toFixed(6)) : 0,
     notes: [
-      `TZ=${tz}`,
+      ...notes,
       "Buckets: CORE_MONTHLY_BUCKETS (9)",
       "Best-effort: skips non-finite/<=0 kWh intervals",
       "Overnight bucket dayType is evaluated on the interval's local day-of-week (no cross-midnight attribution yet)",

@@ -7,6 +7,7 @@ import { qualifyReferralsForUser } from "@/lib/referral/qualify";
 import { parseGreenButtonBuffer } from "@/lib/usage/greenButtonParser";
 import { normalizeGreenButtonReadingsTo15Min } from "@/lib/usage/greenButtonNormalize";
 import { usagePrisma } from "@/lib/db/usageClient";
+import { ensureCoreMonthlyBuckets } from "@/lib/usage/aggregateMonthlyBuckets";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs"; // ensure Node runtime so Buffer/crypto and larger payloads work
@@ -176,6 +177,25 @@ export async function POST(request: NextRequest) {
       const slice = intervalData.slice(i, i + BATCH_SIZE);
       if (slice.length === 0) continue;
       await (usagePrisma as any).greenButtonInterval.createMany({ data: slice });
+    }
+
+    // Best-effort: ensure CORE monthly bucket totals exist for this Green Button upload.
+    // Must never fail upload flow.
+    try {
+      const earliest = trimmed[0]?.timestamp ?? null;
+      const latest = trimmed[trimmed.length - 1]?.timestamp ?? null;
+      if (earliest && latest) {
+        await ensureCoreMonthlyBuckets({
+          homeId: houseId,
+          esiid: houseMeta?.esiid ?? null,
+          rangeStart: earliest,
+          rangeEnd: latest,
+          source: "GREENBUTTON",
+          intervalSource: "GREENBUTTON",
+        });
+      }
+    } catch (bucketErr) {
+      console.error("[admin/green-button/upload] CORE bucket aggregation failed (best-effort)", bucketErr);
     }
 
     const totalKwh = trimmed.reduce((sum, row) => sum + row.consumptionKwh, 0);
