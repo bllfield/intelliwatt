@@ -1,5 +1,5 @@
-import { CORE_MONTHLY_BUCKETS } from "@/lib/plan-engine/usageBuckets";
 import { requiredBucketsForPlan } from "@/lib/plan-engine/requiredBucketsForPlan";
+import { extractFixedRepEnergyCentsPerKwh } from "@/lib/plan-engine/calculatePlanCostForUsage";
 
 export type ComputabilityStatus =
   | { status: "COMPUTABLE"; requiredBucketKeys: string[]; notes?: string[] }
@@ -34,34 +34,12 @@ function hasNonEmptyArray(v: unknown): boolean {
   return Array.isArray(v) && v.length > 0;
 }
 
-function tryExtractFixedRepCentsPerKwh(rateStructure: unknown): number | null {
-  if (!isObject(rateStructure)) return null;
-
-  // Fail-closed if any tiering/TOU constructs are present.
-  if (hasNonEmptyArray((rateStructure as any).usageTiers)) return null;
-  if (hasNonEmptyArray((rateStructure as any).tiers)) return null;
-  if (hasNonEmptyArray((rateStructure as any).timeOfUseTiers)) return null;
-
-  const rsType =
-    typeof (rateStructure as any).type === "string" ? String((rateStructure as any).type).trim().toUpperCase() : null;
-  if (rsType && rsType !== "FIXED" && rsType !== "FIXED_RATE" && rsType !== "FLAT" && rsType !== "SINGLE_RATE") {
-    // Unknown type: be conservative.
-    return null;
-  }
-
-  return (
-    numOrNull((rateStructure as any).energyRateCents) ??
-    numOrNull((rateStructure as any).energyChargeCentsPerKwh) ??
-    numOrNull((rateStructure as any).defaultRateCentsPerKwh)
-  );
-}
-
 export function inferSupportedFeaturesFromTemplate(input: {
   rateStructure: unknown;
 }): { features: SupportedPlanFeatures; notes: string[] } {
   const notes: string[] = [];
 
-  const fixedCents = tryExtractFixedRepCentsPerKwh(input.rateStructure);
+  const fixedCents = extractFixedRepEnergyCentsPerKwh(input.rateStructure as any);
   const supportsFixedEnergyRate = fixedCents != null;
   if (!supportsFixedEnergyRate) {
     notes.push("Could not confidently extract a single fixed REP ¢/kWh rate from rateStructure (fail-closed).");
@@ -139,23 +117,6 @@ export function canComputePlanFromBuckets(input: {
 
   const reqs = requiredBucketsForPlan({ features: inferred.features });
   const requiredBucketKeys = reqs.map((r) => r.key);
-
-  const coreKeys = new Set(CORE_MONTHLY_BUCKETS.map((b) => b.key));
-  const missingFromCore = requiredBucketKeys.filter((k) => !coreKeys.has(k));
-
-  if (inferred.features.supportsTouEnergy && missingFromCore.length > 0) {
-    return {
-      status: "NOT_COMPUTABLE",
-      reasonCode: "MISSING_BUCKETS",
-      reason: "Required usage buckets are not in the CORE bucket set yet.",
-      requiredBucketKeys,
-      details: {
-        missingBucketKeys: missingFromCore,
-        notes: inferred.notes,
-        features: inferred.features,
-      },
-    };
-  }
 
   return {
     status: "COMPUTABLE",

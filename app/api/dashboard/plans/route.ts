@@ -137,6 +137,43 @@ function numOrNull(n: any): number | null {
   return typeof n === "number" && Number.isFinite(n) ? n : null;
 }
 
+function decimalToNumber(v: any): number | null {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (v && typeof v === "object" && typeof v.toString === "function") {
+    const n = Number(v.toString());
+    return Number.isFinite(n) ? n : null;
+  }
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function chicagoYearMonthParts(now: Date): { year: number; month: number } | null {
+  try {
+    const fmt = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", year: "numeric", month: "2-digit" });
+    const parts = fmt.formatToParts(now);
+    const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+    const y = Number(get("year"));
+    const m = Number(get("month"));
+    if (!Number.isFinite(y) || !Number.isFinite(m) || m < 1 || m > 12) return null;
+    return { year: y, month: m };
+  } catch {
+    return null;
+  }
+}
+
+function lastNYearMonthsChicago(n: number): string[] {
+  const base = chicagoYearMonthParts(new Date());
+  if (!base) return [];
+  const out: string[] = [];
+  for (let i = 0; i < n; i++) {
+    const idx = base.month - i;
+    const y = idx >= 1 ? base.year : base.year - Math.ceil((1 - idx) / 12);
+    const m0 = ((idx - 1) % 12 + 12) % 12 + 1;
+    out.push(`${String(y)}-${String(m0).padStart(2, "0")}`);
+  }
+  return out;
+}
+
 export async function GET(req: NextRequest) {
   try {
     const cookieStore = cookies();
@@ -319,6 +356,38 @@ export async function GET(req: NextRequest) {
       console.error("[dashboard/plans] CORE bucket on-demand backfill failed (best-effort)", err);
     }
 
+    // Load kwh.m.all.total monthly buckets (usage DB) and annualize to 12 months, best-effort.
+    let annualKwhFromBuckets: number | null = null;
+    let bucketMonthsCount: number = 0;
+    try {
+      if (hasUsage && house.id) {
+        const yearMonths = lastNYearMonthsChicago(12);
+        if (yearMonths.length > 0) {
+          const rows = await (usagePrisma as any).homeMonthlyUsageBucket.findMany({
+            where: { homeId: house.id, bucketKey: "kwh.m.all.total", yearMonth: { in: yearMonths } },
+            select: { yearMonth: true, kwhTotal: true },
+          });
+          const byYm = new Map<string, number>();
+          for (const r of rows ?? []) {
+            const ym = String((r as any)?.yearMonth ?? "");
+            const kwh = decimalToNumber((r as any)?.kwhTotal);
+            if (!ym || kwh == null || kwh <= 0) continue;
+            byYm.set(ym, (byYm.get(ym) ?? 0) + kwh);
+          }
+          bucketMonthsCount = byYm.size;
+          if (bucketMonthsCount > 0) {
+            const sumKwh = Array.from(byYm.values()).reduce((a, b) => a + b, 0);
+            // Annualize to 12 months if fewer months are present.
+            annualKwhFromBuckets = (sumKwh * 12) / bucketMonthsCount;
+          }
+        }
+      }
+    } catch (err) {
+      console.error("[dashboard/plans] failed to load kwh.m.all.total buckets (best-effort)", err);
+      annualKwhFromBuckets = null;
+      bucketMonthsCount = 0;
+    }
+
     // Prefer live offers. If the call fails (transient upstream), fall back to the last stored snapshot.
     let rawOffersResp: any = null;
     let usedFallbackSnapshot = false;
@@ -482,6 +551,79 @@ export async function GET(req: NextRequest) {
         }
       }
 
+      // Plan computability (pure; best-effort) + quarantine queue (best-effort, never throws).
+      let planComputability: any | null = null;
+      if (hasUsage && (base as any)?.intelliwatt?.templateAvailable) {
+        const offerId = String((base as any).offerId ?? "");
+        const templateAvailable = Boolean((base as any)?.intelliwatt?.templateAvailable);
+        const effectiveRatePlanId = templateOk ? ratePlanId : null;
+
+        planComputability = canComputePlanFromBuckets({
+          offerId,
+          ratePlanId: effectiveRatePlanId,
+          templateAvailable: templateAvailable && templateOk,
+          template: templateOk ? (template ? { rateStructure: template.rateStructure } : null) : null,
+        });
+
+        if (planComputability?.status === "NOT_COMPUTABLE" && planComputability?.reasonCode !== "MISSING_TEMPLATE" && offerId) {
+          const queueReasonPayload = {
+            type: "PLAN_CALC_QUARANTINE",
+            reasonCode: planComputability.reasonCode,
+            requiredBucketKeys: planComputability.requiredBucketKeys ?? null,
+            ratePlanId: effectiveRatePlanId,
+            offerId,
+          };
+          try {
+            (prisma as any).eflParseReviewQueue
+              .upsert({
+                where: { kind_dedupeKey: { kind: "PLAN_CALC_QUARANTINE", dedupeKey: offerId } },
+                create: {
+                  source: "dashboard_plans",
+                  kind: "PLAN_CALC_QUARANTINE",
+                  dedupeKey: offerId,
+                  // NOTE: eflPdfSha256 is a legacy NOT NULL unique field on this table (EFL queue origin).
+                  // For PLAN_CALC_QUARANTINE we do NOT use it as identity; we set it to offerId so it's stable
+                  // and does not pretend to be an EFL fingerprint.
+                  eflPdfSha256: offerId,
+                  offerId,
+                  supplier: (base as any)?.supplierName ?? null,
+                  planName: (base as any)?.planName ?? null,
+                  eflUrl: (base as any)?.efl?.eflUrl ?? null,
+                  tdspName: (base as any)?.utility?.utilityName ?? null,
+                  termMonths: (base as any)?.termMonths ?? null,
+                  ratePlanId: effectiveRatePlanId,
+                  rawText: null,
+                  planRules: null,
+                  rateStructure: null,
+                  validation: null,
+                  derivedForValidation: (planComputability as any).details ?? null,
+                  finalStatus: "OPEN",
+                  queueReason: JSON.stringify(queueReasonPayload),
+                  solverApplied: [],
+                  resolvedAt: null,
+                  resolvedBy: null,
+                  resolutionNotes: planComputability.reason,
+                },
+                update: {
+                  supplier: (base as any)?.supplierName ?? null,
+                  planName: (base as any)?.planName ?? null,
+                  eflUrl: (base as any)?.efl?.eflUrl ?? null,
+                  tdspName: (base as any)?.utility?.utilityName ?? null,
+                  termMonths: (base as any)?.termMonths ?? null,
+                  ratePlanId: effectiveRatePlanId,
+                  derivedForValidation: (planComputability as any).details ?? null,
+                  finalStatus: "OPEN",
+                  queueReason: JSON.stringify(queueReasonPayload),
+                  resolutionNotes: planComputability.reason,
+                },
+              })
+              .catch(() => {});
+          } catch {
+            // swallow
+          }
+        }
+      }
+
       return {
         ...base,
         intelliwatt: {
@@ -495,80 +637,30 @@ export async function GET(req: NextRequest) {
                 },
               }
             : {}),
-          trueCostEstimate: calculatePlanCostForUsage({
-            offerId: String((base as any).offerId),
-            ratePlanId: templateOk ? ratePlanId : null,
-            tdspSlug,
-            hasUsage,
-            usageSummaryTotalKwh,
-            avgPriceCentsPerKwh1000,
-            tdspRates,
-          }),
-          ...(hasUsage && (base as any)?.intelliwatt?.templateAvailable
-            ? (() => {
-                const offerId = String((base as any).offerId ?? "");
-                const templateAvailable = Boolean((base as any)?.intelliwatt?.templateAvailable);
-                const effectiveRatePlanId = templateOk ? ratePlanId : null;
-
-                const status = canComputePlanFromBuckets({
-                  offerId,
-                  ratePlanId: effectiveRatePlanId,
-                  templateAvailable: templateAvailable && templateOk,
-                  template: templateOk ? (template ? { rateStructure: template.rateStructure } : null) : null,
-                });
-
-                // Best-effort: queue NOT_COMPUTABLE plans for later admin inspection (skip missing template).
-                // Must never break the plans endpoint.
-                if (status.status === "NOT_COMPUTABLE" && status.reasonCode !== "MISSING_TEMPLATE" && offerId) {
-                  (prisma as any).eflParseReviewQueue
-                    .upsert({
-                      where: { kind_dedupeKey: { kind: "PLAN_CALC_QUARANTINE", dedupeKey: offerId } },
-                      create: {
-                        source: "dashboard_plans",
-                        kind: "PLAN_CALC_QUARANTINE",
-                        dedupeKey: offerId,
-                        // NOTE: eflPdfSha256 is a legacy NOT NULL unique field on this table (EFL queue origin).
-                        // For PLAN_CALC_QUARANTINE we do NOT use it as identity; we set it to offerId so it's stable
-                        // and does not pretend to be an EFL fingerprint.
-                        eflPdfSha256: offerId,
-                        offerId,
-                        supplier: (base as any)?.supplierName ?? null,
-                        planName: (base as any)?.planName ?? null,
-                        eflUrl: (base as any)?.efl?.eflUrl ?? null,
-                        tdspName: (base as any)?.utility?.utilityName ?? null,
-                        termMonths: (base as any)?.termMonths ?? null,
-                        ratePlanId: effectiveRatePlanId,
-                        rawText: null,
-                        planRules: null,
-                        rateStructure: null,
-                        validation: null,
-                        derivedForValidation: (status as any).details ?? null,
-                        finalStatus: "OPEN",
-                        queueReason: status.reasonCode,
-                        solverApplied: [],
-                        resolvedAt: null,
-                        resolvedBy: null,
-                        resolutionNotes: status.reason,
-                      },
-                      update: {
-                        supplier: (base as any)?.supplierName ?? null,
-                        planName: (base as any)?.planName ?? null,
-                        eflUrl: (base as any)?.efl?.eflUrl ?? null,
-                        tdspName: (base as any)?.utility?.utilityName ?? null,
-                        termMonths: (base as any)?.termMonths ?? null,
-                        ratePlanId: effectiveRatePlanId,
-                        derivedForValidation: (status as any).details ?? null,
-                        finalStatus: "OPEN",
-                        queueReason: status.reasonCode,
-                        resolutionNotes: status.reason,
-                      },
-                    })
-                    .catch(() => {});
-                }
-
-                return { planComputability: status };
-              })()
-            : {}),
+          ...(planComputability ? { planComputability } : {}),
+          trueCostEstimate: (() => {
+            if (!hasUsage) return { status: "NOT_IMPLEMENTED", reason: "No usage available" };
+            if (annualKwhFromBuckets == null) {
+              return { status: "NOT_IMPLEMENTED", reason: "Missing kwh.m.all.total buckets for annual kWh" };
+            }
+            if (!templateOk || !template?.rateStructure) {
+              return { status: "NOT_IMPLEMENTED", reason: "Missing template rateStructure" };
+            }
+            if (planComputability && planComputability.status === "NOT_COMPUTABLE") {
+              return { status: "NOT_COMPUTABLE", reason: planComputability.reason ?? "Plan not computable" };
+            }
+            const tdspApplied = {
+              perKwhDeliveryChargeCents: Number(tdspRates?.perKwhDeliveryChargeCents ?? 0) || 0,
+              monthlyCustomerChargeDollars: Number(tdspRates?.monthlyCustomerChargeDollars ?? 0) || 0,
+              effectiveDate: tdspRates?.effectiveDate ?? undefined,
+            };
+            return calculatePlanCostForUsage({
+              annualKwh: annualKwhFromBuckets,
+              monthsCount: 12,
+              tdsp: tdspApplied,
+              rateStructure: template.rateStructure,
+            });
+          })(),
         },
       };
     };
