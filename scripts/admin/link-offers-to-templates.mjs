@@ -155,7 +155,16 @@ async function main() {
   if (!offerIdsAll.length) {
     console.log(
       JSON.stringify(
-        { ok: true, note: 'No DB-backed offers found to link (MasterPlan/OfferRateMap empty?)' },
+        {
+          ok: true,
+          note:
+            'No DB-backed offers found to link (MasterPlan/OfferRateMap empty). This script only links offers that already exist in the DB.',
+          nextSteps: [
+            'If you want the dashboard (/dashboard/plans) to show templates, run the in-app prefetch which upserts OfferIdRatePlanMap for live offers:',
+            "In browser DevTools (while logged in): await fetch('/api/dashboard/plans/prefetch?maxOffers=10&timeBudgetMs=25000', { method: 'POST' }).then(r => r.json())",
+            'If you want OfferRateMap/RateConfig populated in DB for scripting, run POST /api/wattbuy/offers/sync (writes OfferRateMap).',
+          ],
+        },
         null,
         2,
       ),

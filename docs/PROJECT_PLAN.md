@@ -2369,7 +2369,7 @@ Guardrails
     - `npm run admin:rateplan:rederive` (re-derives bucket keys/status for rows with empty buckets or `planCalcReasonCode="MISSING_TEMPLATE"`)
     - `npm run admin:rateplan:diagnose-missing-templates` (counts possible template matches by REP/Plan/Version keys to debug lookup mismatches)
     - `npm run admin:rateplan:rewire-maps` (rewires offer→template links from orphan `RatePlan`s → best matching template `RatePlan` with `rateStructure` present; updates both `OfferIdRatePlanMap` and `OfferRateMap`)
-    - `npm run admin:rateplan:link-offers` (backfills missing offer→template links by matching DB-backed offers → existing template `RatePlan`s; writes `OfferIdRatePlanMap` and mirrors `OfferRateMap` when present)
+    - `npm run admin:rateplan:link-offers` (backfills missing offer→template links by matching **DB-backed offers** (`MasterPlan` / `OfferRateMap`) → existing template `RatePlan`s; writes `OfferIdRatePlanMap` and mirrors `OfferRateMap` when present)
   - Note: `prisma db execute` often does not print `SELECT` results; prefer these node scripts for reporting.
   - Interpretation:
     - If templates exist but lookup mismatch suspected → fix lookup strategy in identity/derivation logic.
@@ -2398,6 +2398,8 @@ Guardrails
     - `# optional: scope to specific offer ids`
     - `# $env:OFFER_IDS="offerId1,offerId2"`
     - `npm run admin:rateplan:link-offers`
+    - Note: if this script prints “No DB-backed offers found”, the dashboard is pulling live offers (not stored). Use dashboard prefetch to populate mappings:
+      - In browser DevTools (while logged in): `await fetch('/api/dashboard/plans/prefetch?maxOffers=10&timeBudgetMs=25000', { method: 'POST' }).then(r => r.json())`
 - `/api/dashboard/plans` now prefers stored `requiredBucketKeys` and lazily backfills older RatePlans by deriving requirements from `rateStructure` (best-effort; never breaks offers).
 - `PLAN_CALC_QUARANTINE` queue items now include `missingBucketKeys` + `planCalcReasonCode` in `queueReason` JSON for reliable debugging/auditing.
 - Shows a compact banner when **NOT AVAILABLE** plans are present, with a one-click action to enable **“Show only AVAILABLE templates”**.
