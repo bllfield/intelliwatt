@@ -48,6 +48,7 @@ export default function PlanDetailsClient({ offerId }: { offerId: string }) {
   const [data, setData] = useState<ApiResp | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [bucketsMode, setBucketsMode] = useState<"core" | "all">("core");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -55,9 +56,12 @@ export default function PlanDetailsClient({ offerId }: { offerId: string }) {
       setLoading(true);
       setError(null);
       try {
-        const r = await fetch(`/api/dashboard/plans/detail?offerId=${encodeURIComponent(offerId)}`, {
+        const r = await fetch(
+          `/api/dashboard/plans/detail?offerId=${encodeURIComponent(offerId)}&buckets=${encodeURIComponent(bucketsMode)}`,
+          {
           signal: controller.signal,
-        });
+          },
+        );
         const j = (await r.json().catch(() => null)) as ApiResp | null;
         if (controller.signal.aborted) return;
         if (!r.ok || !j || !(j as any).ok) {
@@ -76,7 +80,7 @@ export default function PlanDetailsClient({ offerId }: { offerId: string }) {
     }
     run();
     return () => controller.abort();
-  }, [offerId]);
+  }, [offerId, bucketsMode]);
 
   const ok = Boolean((data as any)?.ok);
   const plan = ok ? (data as any).plan : null;
@@ -117,6 +121,23 @@ export default function PlanDetailsClient({ offerId }: { offerId: string }) {
 
       {ok ? (
         <>
+          <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-xs text-brand-cyan/60">
+              Buckets shown control the table below (Core is fast + readable; All shows every UsageBucketDefinition bucket).
+            </div>
+            <label className="text-xs text-brand-cyan/70">
+              <span className="mr-2 font-semibold">Buckets:</span>
+              <select
+                className="rounded-lg border border-brand-cyan/20 bg-brand-navy px-2 py-1 text-brand-white/90"
+                value={bucketsMode}
+                onChange={(e) => setBucketsMode(e.target.value === "all" ? "all" : "core")}
+              >
+                <option value="core">Core (9)</option>
+                <option value="all">All</option>
+              </select>
+            </label>
+          </div>
+
           <div className="mt-8 grid grid-cols-1 gap-4 lg:grid-cols-3">
             <div className="rounded-2xl border border-brand-cyan/20 bg-brand-navy p-4">
               <div className="text-[0.7rem] font-semibold uppercase tracking-[0.22em] text-brand-cyan/60">Usage snapshot</div>
@@ -234,7 +255,7 @@ export default function PlanDetailsClient({ offerId }: { offerId: string }) {
 
           <div className="mt-8 rounded-2xl border border-brand-cyan/20 bg-brand-navy p-4">
             <div className="text-[0.7rem] font-semibold uppercase tracking-[0.22em] text-brand-cyan/60">
-              Bucket totals (months overlapping the last-365-days window)
+              Bucket totals ({bucketsMode === "all" ? "all defined buckets" : "core buckets"}; months overlapping the last-365-days window)
             </div>
             <div className="mt-3 overflow-auto rounded-xl border border-brand-cyan/15">
               <table className="min-w-[900px] w-full text-xs">

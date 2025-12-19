@@ -149,6 +149,26 @@ function evalRule(rule: any, interval: { month: number; weekdayIndex: number; is
   return t >= startMin || t < endMin;
 }
 
+function usageDefToRule(def: any): any | null {
+  // Prefer stored ruleJson when present and compatible.
+  const rj = def?.ruleJson ?? null;
+  if (rj && typeof rj === "object" && (rj as any).v === 1 && (rj as any).tz === "America/Chicago") return rj;
+
+  const dayType = typeof def?.dayType === "string" ? def.dayType : null;
+  const tz = typeof def?.tz === "string" ? def.tz : null;
+  const startHHMM = typeof def?.startHHMM === "string" ? def.startHHMM : null;
+  const endHHMM = typeof def?.endHHMM === "string" ? def.endHHMM : null;
+  if (!dayType || !tz || !startHHMM || !endHHMM) return null;
+
+  return {
+    v: 1,
+    tz,
+    dayType: dayType === "ALL" || dayType === "WEEKDAY" || dayType === "WEEKEND" ? dayType : undefined,
+    window: { startHHMM: startHHMM, endHHMM: endHHMM },
+    ...(def?.overnightAttribution ? { overnightAttribution: def.overnightAttribution } : {}),
+  };
+}
+
 async function fetchSmtUsageWindow(esiid: string): Promise<{ latest: Date; cutoff: Date } | null> {
   const latest = await prisma.smtInterval.findFirst({
     where: { esiid },
@@ -195,6 +215,8 @@ export async function GET(req: NextRequest) {
     const url = new URL(req.url);
     const offerId = String(url.searchParams.get("offerId") ?? "").trim();
     const isRenter = parseBool(url.searchParams.get("isRenter"), false);
+    const bucketsMode = String(url.searchParams.get("buckets") ?? "core").trim().toLowerCase();
+    const includeAllBuckets = bucketsMode === "all";
     if (!offerId) {
       return NextResponse.json({ ok: false, error: "missing_offerId" }, { status: 400 });
     }
@@ -316,15 +338,49 @@ export async function GET(req: NextRequest) {
         .filter((r: any) => Number.isFinite(r.kwh) && r.kwh > 0);
     }
 
-    // Build per-month core bucket totals from the SAME 365-day interval window.
-    const bucketDefs = CORE_MONTHLY_BUCKETS.map((b) => ({ key: b.key, label: b.label }));
+    // Choose which bucket definitions to render:
+    // - core: lightweight, predictable 9 buckets
+    // - all: every UsageBucketDefinition row in the usage DB (can be wider)
+    const allBucketDefsRaw = includeAllBuckets
+      ? await (usagePrisma as any).usageBucketDefinition
+          .findMany({
+            select: {
+              key: true,
+              label: true,
+              dayType: true,
+              season: true,
+              startHHMM: true,
+              endHHMM: true,
+              tz: true,
+              overnightAttribution: true,
+              ruleJson: true,
+            },
+            orderBy: { key: "asc" },
+            take: 200,
+          })
+          .catch(() => [])
+      : [];
+
+    const bucketDefs: Array<{ key: string; label: string; rule: any }> = includeAllBuckets
+      ? (allBucketDefsRaw ?? [])
+          .map((d: any) => {
+            const key = typeof d?.key === "string" ? d.key : null;
+            const label = typeof d?.label === "string" ? d.label : key;
+            const rule = usageDefToRule(d);
+            if (!key || !label || !rule) return null;
+            return { key, label, rule };
+          })
+          .filter(Boolean)
+      : CORE_MONTHLY_BUCKETS.map((b) => ({ key: b.key, label: b.label, rule: b.rule }));
+
+    const bucketDefsForResponse = bucketDefs.map((b) => ({ key: b.key, label: b.label }));
     const byYmKey = new Map<string, number>();
     const yearMonthSet = new Set<string>();
     for (const row of intervalRows) {
       const parts = chicagoParts(row.ts);
       if (!parts) continue;
       yearMonthSet.add(parts.yearMonth);
-      for (const b of CORE_MONTHLY_BUCKETS) {
+      for (const b of bucketDefs) {
         if (!evalRule(b.rule, parts)) continue;
         const key = `${parts.yearMonth}||${b.key}`;
         byYmKey.set(key, (byYmKey.get(key) ?? 0) + row.kwh);
@@ -333,7 +389,7 @@ export async function GET(req: NextRequest) {
     const yearMonths = Array.from(yearMonthSet).sort((a, b) => (a < b ? -1 : 1));
     const bucketTable = yearMonths.map((ym) => {
       const r: any = { yearMonth: ym };
-      for (const b of CORE_MONTHLY_BUCKETS) {
+      for (const b of bucketDefs) {
         r[b.key] = byYmKey.get(`${ym}||${b.key}`) ?? null;
       }
       return r;
@@ -494,10 +550,11 @@ export async function GET(req: NextRequest) {
           windowStart: windowStart ? windowStart.toISOString() : null,
           windowEnd: windowEnd ? windowEnd.toISOString() : null,
           cutoff: window.cutoff.toISOString(),
+          bucketsMode: includeAllBuckets ? "all" : "core",
           yearMonths,
           avgMonthlyKwh,
           annualKwh, // strict last-365-days total
-          bucketDefs,
+          bucketDefs: bucketDefsForResponse,
           bucketTable,
         },
         variables: {
@@ -515,7 +572,9 @@ export async function GET(req: NextRequest) {
         notes: [
           "Usage window matches /api/user/usage: strict last 365 days ending at your latest interval timestamp.",
           "Bucket totals are computed from those same intervals in America/Chicago local time.",
-          "CORE_MONTHLY_BUCKETS shown (9). More buckets will appear as plan engine v2 expands.",
+          includeAllBuckets
+            ? "All UsageBucketDefinition buckets shown (usage DB)."
+            : "CORE_MONTHLY_BUCKETS shown (9). More buckets will appear as plan engine v2 expands.",
         ],
       },
       { status: 200 },
