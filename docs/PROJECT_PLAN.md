@@ -2498,6 +2498,16 @@ Usage buckets (canonicalize keys on write going forward):
   - In-memory aggregation map keys (prevents future legacy keys from being emitted)
 - Existing legacy rows are NOT rewritten; read paths remain tolerant via offer-estimate loader aliasing.
 
+Admin tooling (usage bucket audit; no psql):
+- Added read-only audit script: `scripts/admin/usage-bucket-audit.ts`
+- Run (PowerShell):
+  - `npm run admin:usage:buckets:audit -- --homeId=<uuid> --limitMonths=12`
+- Reports:
+  - top bucketKey frequencies + min/max month
+  - legacy key detection (uppercase dayType and/or `.0000-2400`)
+  - missing canonical keys by month (recent window)
+  - duplicate safety check for `(homeId, yearMonth, bucketKey)`
+
 Next (Dashboard):
 - Replace “Best for you (preview)” proxy sort with true usage-based ranking by connecting usage → plan engine (`calculatePlanCostForUsage`).
 - Expand displayed fees (base monthly fee, more structured ETF) once those fields are reliably present in the WattBuy offer payload and/or derived from templates.
