@@ -55,13 +55,17 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "home_not_found" }, { status: 404 });
     }
 
+    const tdspSlug = String(house.tdspSlug ?? "")
+      .trim()
+      .toLowerCase();
+
     const esiid = house.esiid ? String(house.esiid) : null;
     const annualKwh = await computeAnnualKwhForEsiid(esiid);
     if (annualKwh == null) {
       return NextResponse.json({ ok: false, error: "missing_usage_totals", offerId }, { status: 409 });
     }
 
-    const tdspApplied = await getTdspApplied(house.tdspSlug ? String(house.tdspSlug) : null);
+    const tdspApplied = await getTdspApplied(tdspSlug || null);
 
     const res = await estimateOfferFromOfferId({
       offerId,
@@ -69,7 +73,7 @@ export async function GET(req: NextRequest) {
       backfill: backfillRequested,
       homeId: house.id,
       esiid,
-      tdspSlug: house.tdspSlug ? String(house.tdspSlug) : null,
+      tdspSlug: tdspSlug || null,
       tdsp: tdspApplied,
       annualKwh,
     });
@@ -82,7 +86,7 @@ export async function GET(req: NextRequest) {
       ok: true,
       offerId,
       ratePlan: res.ratePlan ?? null,
-      tdspSlug: house.tdspSlug ?? null,
+      tdspSlug: tdspSlug || null,
       monthsCount: res.monthsCount,
       annualKwh: res.annualKwh,
       usageBucketsByMonthIncluded: res.usageBucketsByMonthIncluded,
@@ -95,5 +99,4 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "internal_error", message: e?.message ?? String(e) }, { status: 500 });
   }
 }
-
 
