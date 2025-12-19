@@ -286,6 +286,7 @@ export default function AdminProbePage() {
                   <thead className="bg-gray-50">
                     <tr>
                       <Th>Offer ID</Th>
+                      <Th>Type</Th>
                       <Th>Supplier</Th>
                       <Th>Plan</Th>
                       <Th>TDSP</Th>
@@ -300,6 +301,7 @@ export default function AdminProbePage() {
                     {res.offers.slice(0, 25).map((o) => (
                       <tr key={o.offer_id} className="border-t">
                         <Td>{o.offer_id}</Td>
+                        <Td className="font-mono text-xs">{classifyPlanTypeFromOffer(o)}</Td>
                         <Td>{o.supplier || '—'}</Td>
                         <Td>{o.offer_name}</Td>
                         <Td className="uppercase">{o.tdsp || '—'}</Td>
@@ -362,6 +364,21 @@ function Td({ children, align, className = '' }: { children: React.ReactNode; al
 
 function fmtCents(v: number | null) {
   return typeof v === 'number' && Number.isFinite(v) ? `${v.toFixed(1)}` : '—';
+}
+
+function classifyPlanTypeFromOffer(o: any): 'fixed' | 'tou' | 'free-weekends' | 'free-nights' | 'variable' | 'other' | 'unknown' {
+  const name = String(o?.offer_name ?? o?.planName ?? o?.name ?? '').toLowerCase();
+  const supplier = String(o?.supplier ?? o?.supplier_name ?? '').toLowerCase();
+  const tdsp = String(o?.tdsp ?? o?.utility ?? '').toLowerCase();
+  const hay = `${name} ${supplier} ${tdsp}`;
+
+  if (hay.includes('free weekend')) return 'free-weekends';
+  if (hay.includes('free night')) return 'free-nights';
+  if (hay.includes('tou') || hay.includes('time of use') || hay.includes('time-of-use')) return 'tou';
+  if (hay.includes('variable')) return 'variable';
+  if (hay.includes('fixed rate') || hay.includes('fixed-rate')) return 'fixed';
+  if (name.trim()) return 'unknown';
+  return 'other';
 }
 
 function Doc({ href, label }: { href: string | null; label: string }) {

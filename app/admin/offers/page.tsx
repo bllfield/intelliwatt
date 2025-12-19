@@ -38,6 +38,23 @@ type OffersResponse = {
   error?: string;
 };
 
+function classifyOfferLikeWattbuy(o: any): 'fixed' | 'tou' | 'free-weekends' | 'free-nights' | 'variable' | 'other' | 'unknown' {
+  const od = o?.offer_data ?? {};
+  const name = String(o?.offer_name ?? o?.name ?? od?.offer_name ?? od?.name ?? '').toLowerCase();
+  const supplier = String(od?.supplier ?? od?.supplier_name ?? '').toLowerCase();
+  const productType = String(od?.product_type ?? od?.productType ?? '').toLowerCase();
+  const planType = String(od?.plan_type ?? od?.planType ?? od?.rate_type ?? od?.rateType ?? '').toLowerCase();
+  const hay = `${name} ${supplier} ${productType} ${planType}`;
+
+  if (hay.includes('free weekend')) return 'free-weekends';
+  if (hay.includes('free night')) return 'free-nights';
+  if (hay.includes('tou') || hay.includes('time of use') || hay.includes('time-of-use')) return 'tou';
+  if (hay.includes('variable')) return 'variable';
+  if (productType.includes('fixed') || planType.includes('fixed') || hay.includes('fixed rate') || hay.includes('fixed-rate')) return 'fixed';
+  if (name.trim()) return 'unknown';
+  return 'other';
+}
+
 export default function AdminOffersExplorer() {
   // ---- form
   const [mode, setMode] = useState<'address' | 'esiid'>('address');
@@ -88,6 +105,19 @@ export default function AdminOffersExplorer() {
       setLoading(false);
     }
   }, [mode, address, city, state, zip, esiid, canFetch, loading]);
+
+  const kindByOfferId = useMemo(() => {
+    const out: Record<string, string> = {};
+    const offers = (res as any)?.raw?.offers;
+    if (Array.isArray(offers)) {
+      for (const o of offers) {
+        const id = String(o?.offer_id ?? '').trim();
+        if (!id) continue;
+        out[id] = classifyOfferLikeWattbuy(o);
+      }
+    }
+    return out;
+  }, [res]);
 
   return (
     <main className="min-h-screen w-full bg-gray-50">
@@ -211,6 +241,7 @@ export default function AdminOffersExplorer() {
                 <thead className="bg-gray-50">
                   <tr>
                     <Th>Supplier</Th>
+                    <Th>Type</Th>
                     <Th>Plan</Th>
                     <Th>TDSP</Th>
                     <Th>Term</Th>
@@ -226,6 +257,7 @@ export default function AdminOffersExplorer() {
                   {res.mini.map((m) => (
                     <tr key={m.offer_id} className="border-t">
                       <Td>{m.supplier || '-'}</Td>
+                      <Td className="font-mono text-xs">{String(kindByOfferId[m.offer_id] ?? classifyOfferLikeWattbuy(m))}</Td>
                       <Td>{m.name || m.offer_id}</Td>
                       <Td>{m.tdsp || '-'}</Td>
                       <Td>{m.term ? `${m.term} mo` : '-'}</Td>
@@ -243,7 +275,7 @@ export default function AdminOffersExplorer() {
                   ))}
                   {!res.mini.length && (
                     <tr>
-                      <Td colSpan={10} className="text-center text-gray-500">
+                      <Td colSpan={11} className="text-center text-gray-500">
                         No offers found for this query.
                       </Td>
                     </tr>

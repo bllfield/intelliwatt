@@ -298,6 +298,13 @@ export default function PlanEngineLabPage() {
     return 'other';
   }
 
+  function classifyEstimateRow(r: any): 'fixed' | 'tou' | 'free-weekends' | 'free-nights' | 'variable' | 'other' {
+    if (r?.detected?.freeWeekends) return 'free-weekends';
+    if (r?.detected?.dayNightTou) return 'tou';
+    const k = classifyUsingTemplateResult(r);
+    return (k === 'free-weekends' || k === 'free-nights' || k === 'tou' || k === 'variable' || k === 'fixed') ? (k as any) : 'other';
+  }
+
   const offersFiltered = offersList.filter((o: any) => {
     const id = String(o?.offer_id ?? '').trim();
     const kind = (id && templateKindByOfferId[id] ? templateKindByOfferId[id] : classifyOffer(o)) as any;
@@ -556,6 +563,7 @@ export default function PlanEngineLabPage() {
           <thead>
             <tr className="bg-gray-50 text-left">
               <th className="p-2">offerId</th>
+              <th className="p-2">type</th>
               <th className="p-2">estimate.status</th>
               <th className="p-2">estimate.reason</th>
               <th className="p-2">backfill.ok</th>
@@ -565,20 +573,24 @@ export default function PlanEngineLabPage() {
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td className="p-2 text-gray-500" colSpan={5}>
+                <td className="p-2 text-gray-500" colSpan={6}>
                   No results yet.
                 </td>
               </tr>
             ) : (
-              rows.map((r: any, idx: number) => (
-                <tr key={r?.offerId ?? idx} className="border-t border-gray-200">
-                  <td className="p-2 font-mono text-xs break-all">{String(r?.offerId ?? '')}</td>
-                  <td className="p-2 font-mono text-xs">{String(r?.estimate?.status ?? r?.estimate?.statusLabel ?? '')}</td>
-                  <td className="p-2 font-mono text-xs break-all">{String(r?.estimate?.reason ?? r?.error ?? '')}</td>
-                  <td className="p-2 font-mono text-xs">{String(Boolean(r?.backfill?.ok))}</td>
-                  <td className="p-2 font-mono text-xs">{String(r?.backfill?.missingKeysAfter ?? '')}</td>
-                </tr>
-              ))
+              rows.map((r: any, idx: number) => {
+                const kind = classifyEstimateRow(r);
+                return (
+                  <tr key={r?.offerId ?? idx} className="border-t border-gray-200">
+                    <td className="p-2 font-mono text-xs break-all">{String(r?.offerId ?? '')}</td>
+                    <td className="p-2 font-mono text-xs">{String(kind)}</td>
+                    <td className="p-2 font-mono text-xs">{String(r?.estimate?.status ?? r?.estimate?.statusLabel ?? '')}</td>
+                    <td className="p-2 font-mono text-xs break-all">{String(r?.estimate?.reason ?? r?.error ?? '')}</td>
+                    <td className="p-2 font-mono text-xs">{String(Boolean(r?.backfill?.ok))}</td>
+                    <td className="p-2 font-mono text-xs">{String(r?.backfill?.missingKeysAfter ?? '')}</td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
