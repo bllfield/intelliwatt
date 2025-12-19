@@ -25,6 +25,7 @@ type ApiResponse = {
   message?: string;
   hasUsage?: boolean;
   usageSummary?: UsageSummary;
+  avgMonthlyKwh?: number;
   offers?: OfferRow[];
   bestOffers?: OfferRow[];
   bestOffersBasis?: string | null;
@@ -92,6 +93,11 @@ function pickMetricCentsPerKwhForBucket(offer: any, bucket: EflBucket): number |
 function fmtCentsPerKwh(v: number | null | undefined): string {
   if (typeof v !== "number" || !Number.isFinite(v)) return "—";
   return `${v.toFixed(2)}¢/kWh`;
+}
+
+function fmtKwhPerMonth(v: number | null | undefined): string {
+  if (typeof v !== "number" || !Number.isFinite(v) || v <= 0) return "—";
+  return `${Math.round(v)} kWh/mo`;
 }
 
 function buildQuery(params: Record<string, string>) {
@@ -329,6 +335,10 @@ export default function PlansClient() {
 
   const hasUsage = Boolean(resp?.ok && resp?.hasUsage);
   const offers = Array.isArray(resp?.offers) ? resp!.offers! : [];
+  const avgMonthlyKwh =
+    resp?.ok && typeof (resp as any)?.avgMonthlyKwh === "number" && Number.isFinite((resp as any).avgMonthlyKwh)
+      ? ((resp as any).avgMonthlyKwh as number)
+      : null;
   const total = typeof resp?.total === "number" ? resp.total : 0;
   const totalPages = typeof resp?.totalPages === "number" ? resp.totalPages : 0;
   const hasUnavailable = offers.some((o: any) => o?.intelliwatt?.statusLabel === "UNAVAILABLE");
@@ -965,6 +975,12 @@ export default function PlansClient() {
                   </label>
                 )}
                 <div className="mt-1 text-xs text-brand-cyan/70">
+                  {hasUsage && avgMonthlyKwh ? (
+                    <div className="mb-1">
+                      Based on your historic usage of{" "}
+                      <span className="font-semibold text-brand-white/90">{fmtKwhPerMonth(avgMonthlyKwh)}</span>.
+                    </div>
+                  ) : null}
                   {bestStripDisclaimerWithAnchor ??
                     (hasUsage
                       ? "Based on your last 12 months usage. Ranking uses provider estimates until IntelliWatt true-cost is enabled."
@@ -984,7 +1000,14 @@ export default function PlansClient() {
             {bestStripOffers.length > 0 ? (
               <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
                 {bestStripOffers.map((o) => {
-                  const metric = pickMetricCentsPerKwhForBucket(o, bestBucket);
+                  const tce = (o as any)?.intelliwatt?.trueCostEstimate;
+                  const effCents =
+                    tce?.status === "OK" &&
+                    typeof tce?.effectiveCentsPerKwh === "number" &&
+                    Number.isFinite(tce.effectiveCentsPerKwh)
+                      ? (tce.effectiveCentsPerKwh as number)
+                      : null;
+                  const metric = hasUsage && effCents != null ? effCents : pickMetricCentsPerKwhForBucket(o, bestBucket);
                   const supplier = (o as any)?.supplierName ?? "Unknown supplier";
                   const plan = (o as any)?.planName ?? "Unknown plan";
                   const status = (o as any)?.intelliwatt?.statusLabel ?? "UNAVAILABLE";
@@ -995,7 +1018,6 @@ export default function PlansClient() {
                         ? "border-amber-400/40 bg-amber-500/10 text-amber-200"
                         : "border-brand-cyan/20 bg-brand-white/5 text-brand-cyan/70";
 
-                  const tce = (o as any)?.intelliwatt?.trueCostEstimate;
                   const tdspRatesApplied = (o as any)?.intelliwatt?.tdspRatesApplied ?? null;
                   const showEst = tce?.status === "OK" && typeof tce?.monthlyCostDollars === "number";
                   const estMonthly = showEst ? (tce.monthlyCostDollars as number) : null;
@@ -1026,7 +1048,7 @@ export default function PlansClient() {
                       <div className="mt-3 flex items-end justify-between gap-3">
                         <div>
                           <div className="text-[0.65rem] uppercase tracking-[0.25em] text-brand-cyan/55">
-                            {bestBucket}
+                            {hasUsage && avgMonthlyKwh ? `${Math.round(avgMonthlyKwh)} kWh/mo` : bestBucket}
                           </div>
                           <div className="mt-0.5 text-base font-semibold text-brand-white">
                             {fmtCentsPerKwh(metric)}

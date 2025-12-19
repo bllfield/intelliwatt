@@ -410,6 +410,12 @@ export async function GET(req: NextRequest) {
       bucketMonthsCount = 0;
     }
 
+    // Average monthly usage (kWh/mo) based on the same bucket data used for true-cost.
+    const avgMonthlyKwhFromBuckets: number | null =
+      typeof annualKwhFromBuckets === "number" && Number.isFinite(annualKwhFromBuckets) && annualKwhFromBuckets > 0
+        ? annualKwhFromBuckets / 12
+        : null;
+
     const hasRecentBucket = (bucketKey: string): boolean => {
       if (!bucketKey) return false;
       if (!recentYearMonths || recentYearMonths.length === 0) return false;
@@ -615,6 +621,10 @@ export async function GET(req: NextRequest) {
           // Always return a stable shape for clients: string when mapped, else null.
           ratePlanId,
           statusLabel,
+          usageKwhPerMonth:
+            typeof avgMonthlyKwhFromBuckets === "number" && Number.isFinite(avgMonthlyKwhFromBuckets)
+              ? avgMonthlyKwhFromBuckets
+              : undefined,
           trueCost: getTrueCostStatus({ hasUsage, ratePlanId }),
         },
         utility: {
@@ -838,12 +848,25 @@ export async function GET(req: NextRequest) {
               monthlyCustomerChargeDollars: Number(tdspRates?.monthlyCustomerChargeDollars ?? 0) || 0,
               effectiveDate: tdspRates?.effectiveDate ?? undefined,
             };
-            return calculatePlanCostForUsage({
+            const est = calculatePlanCostForUsage({
               annualKwh: annualKwhFromBuckets,
               monthsCount: 12,
               tdsp: tdspApplied,
               rateStructure: template.rateStructure,
             });
+            if (
+              est &&
+              (est as any).status === "OK" &&
+              typeof (est as any).annualCostDollars === "number" &&
+              Number.isFinite((est as any).annualCostDollars) &&
+              typeof annualKwhFromBuckets === "number" &&
+              Number.isFinite(annualKwhFromBuckets) &&
+              annualKwhFromBuckets > 0
+            ) {
+              const eff = (((est as any).annualCostDollars as number) / annualKwhFromBuckets) * 100;
+              return { ...(est as any), effectiveCentsPerKwh: eff };
+            }
+            return est;
           })(),
         },
       };
@@ -963,6 +986,7 @@ export async function GET(req: NextRequest) {
         ok: true,
         hasUsage,
         usageSummary,
+        avgMonthlyKwh: avgMonthlyKwhFromBuckets ?? undefined,
         offers: shaped,
         bestOffers,
         bestOffersBasis,

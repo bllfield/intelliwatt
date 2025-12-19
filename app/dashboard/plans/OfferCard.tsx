@@ -23,11 +23,13 @@ type OfferRow = {
     templateAvailable: boolean;
     ratePlanId?: string;
     statusLabel: "AVAILABLE" | "QUEUED" | "UNAVAILABLE";
+    usageKwhPerMonth?: number;
     trueCostEstimate?:
       | {
           status: "OK";
           annualCostDollars: number;
           monthlyCostDollars: number;
+          effectiveCentsPerKwh?: number;
           confidence?: "LOW" | "MEDIUM";
           componentsV2?: {
             rep?: {
@@ -93,6 +95,10 @@ export default function OfferCard({ offer }: { offer: OfferRow }) {
   const showEstimateLine = tce?.status === "OK";
   const estimateMonthly = showEstimateLine ? fmtDollars2((tce as any)?.monthlyCostDollars) : null;
   const tdspTag = offer.intelliwatt?.tdspRatesApplied ? "incl. TDSP" : null;
+  const usageTag =
+    typeof offer.intelliwatt?.usageKwhPerMonth === "number" && Number.isFinite(offer.intelliwatt.usageKwhPerMonth)
+      ? `based on your historic usage of ${Math.round(offer.intelliwatt.usageKwhPerMonth)} kWh/mo`
+      : null;
   const c2 = showEstimateLine ? (tce as any)?.componentsV2 : null;
   const tdspEffective = offer.intelliwatt?.tdspRatesApplied?.effectiveDate ?? null;
   const repAnnualDollarsRaw = c2?.rep?.energyDollars ?? (tce as any)?.annualCostDollars;
@@ -183,6 +189,7 @@ export default function OfferCard({ offer }: { offer: OfferRow }) {
                 <>
                   Est. ${estimateMonthly}/mo
                   {tdspTag ? <span className="text-brand-cyan/60"> · {tdspTag}</span> : null}
+                  {usageTag ? <span className="text-brand-cyan/60"> · {usageTag}</span> : null}
                 </>
               }
               repAnnualDollars={repAnnualDollarsRaw}
@@ -203,6 +210,7 @@ export default function OfferCard({ offer }: { offer: OfferRow }) {
             <span className="font-semibold text-brand-white/90">
               Est. ${estimateMonthly}/mo
               {tdspTag ? <span className="text-brand-cyan/60"> · {tdspTag}</span> : null}
+              {usageTag ? <span className="text-brand-cyan/60"> · {usageTag}</span> : null}
             </span>
           )}
         </div>
