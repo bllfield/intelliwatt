@@ -4,6 +4,7 @@ import React, { useState, Suspense } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
+import IntelliwattBotHero from '@/components/dashboard/IntelliwattBotHero';
 
 function LandingPageContent() {
   const [email, setEmail] = useState('');
@@ -171,10 +172,19 @@ function LandingPageContent() {
             <h1 className="text-5xl md:text-7xl font-bold text-brand-white mb-6">
               Stop <span className="text-brand-blue">Overpaying</span> for Power
             </h1>
+            <p className="text-xl md:text-2xl leading-relaxed text-brand-white max-w-3xl mx-auto">
+              Join IntelliWatt today to unlock free, personalized energy insights and tools that show you exactly how to save.
+            </p>
+          </div>
+
+          {/* IntelliWattBot below the main hero section */}
+          <div className="mb-10">
+            <IntelliwattBotHero />
+          </div>
+
+          {/* Everything else in the hero goes below IntelliWattBot */}
+          <div className="text-center">
             <div className="mb-10 space-y-4 text-brand-white max-w-3xl mx-auto text-left md:text-center">
-              <p className="text-xl md:text-2xl leading-relaxed">
-                Join IntelliWatt today to unlock free, personalized energy insights and tools that show you exactly how to save.
-              </p>
               <div className="grid gap-3 text-base md:grid-cols-2 md:text-lg">
                 <div className="flex items-center gap-3 rounded-xl bg-white/10 px-4 py-3 border border-white/15">
                   <span className="text-[#39FF14] text-2xl">✔</span>
@@ -249,6 +259,7 @@ function LandingPageContent() {
             </div>
               )}
             </div>
+          </div>
 
             <div className="max-w-3xl mx-auto grid gap-4 md:grid-cols-2 mt-10">
               <div className="rounded-2xl border border-[#39FF14]/50 bg-[#39FF14]/10 p-4 text-center shadow-[0_0_25px_rgba(57,255,20,0.25)]">
@@ -303,7 +314,6 @@ function LandingPageContent() {
                 </div>
               )}
             </div>
-          </div>
           
           {/* Hero Stats */}
           <div className="grid md:grid-cols-3 gap-8 mb-16">
@@ -318,67 +328,6 @@ function LandingPageContent() {
             <div className="text-center">
               <div className="text-4xl font-bold text-brand-blue mb-2">2min</div>
               <div className="text-brand-white">Setup Time</div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* IntelliWatt Bot Section */}
-      <section className="py-24 px-4 bg-brand-white">
-        <div className="max-w-6xl mx-auto">
-          <div className="grid md:grid-cols-2 gap-12 items-center">
-            {/* Bot Animation */}
-            <div className="text-center md:text-left">
-              {/* Bot Quote */}
-              <div className="mb-8 p-6 bg-brand-navy rounded-2xl shadow-lg">
-                <p className="text-brand-white text-lg italic mb-2">
-                  "I analyze your energy usage patterns and find the perfect plan for your unique needs. 
-                  No more guesswork — just smart, data-driven recommendations!"
-                </p>
-                <p className="text-brand-blue font-semibold">— IntelliWatt Bot</p>
-              </div>
-              
-              <div className="relative w-80 h-80 mx-auto md:mx-0 mb-8">
-                <Image
-                  src="/Intelliwatt Bot Final Gif.gif"
-                  alt="IntelliWatt Bot"
-                  fill
-                  className="object-contain"
-                  unoptimized
-                />
-              </div>
-            </div>
-            
-            {/* Bot Content */}
-            <div className="text-center md:text-left">
-              <h2 className="text-4xl md:text-5xl font-bold text-brand-navy mb-6">
-                Meet Your <span className="text-brand-blue">AI Energy Assistant</span> — IntelliWatt Bot
-              </h2>
-              <p className="text-xl text-brand-navy mb-8 leading-relaxed">
-                Our intelligent bot analyzes your energy usage patterns and finds the perfect plan for your unique needs. 
-                No more guesswork — just smart, data-driven recommendations.
-              </p>
-              
-              <div className="space-y-4 mb-8">
-                <div className="flex items-center text-brand-navy">
-                  <div className="w-8 h-8 bg-brand-navy rounded-full flex items-center justify-center mr-4">
-                    <span className="text-brand-blue font-bold">✓</span>
-                  </div>
-                  <span className="text-lg">24/7 energy monitoring</span>
-                </div>
-                <div className="flex items-center text-brand-navy">
-                  <div className="w-8 h-8 bg-brand-navy rounded-full flex items-center justify-center mr-4">
-                    <span className="text-brand-blue font-bold">✓</span>
-                  </div>
-                  <span className="text-lg">Advanced energy analysis</span>
-                </div>
-                <div className="flex items-center text-brand-navy">
-                  <div className="w-8 h-8 bg-brand-navy rounded-full flex items-center justify-center mr-4">
-                    <span className="text-brand-blue font-bold">✓</span>
-                  </div>
-                  <span className="text-lg">Real-time savings alerts</span>
-                </div>
-              </div>
             </div>
           </div>
         </div>

@@ -24,6 +24,15 @@ export default function IntelliwattBotHero() {
   const [open, setOpen] = useState(true);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
+  // Optional fallback message (used by non-dashboard pages without requiring DB rows/migrations).
+  // Keep the component usable without props everywhere it is already used.
+  const defaultMessage = useMemo(() => {
+    if (pathname === "/") {
+      return 'Enter your email address and I will send you a link to get access to your user dashboard and I can help you save on your electric bill';
+    }
+    return "";
+  }, [pathname]);
+
   const key = useMemo(() => (pathname ? String(pathname) : "/dashboard"), [pathname]);
 
   useEffect(() => {
@@ -33,16 +42,17 @@ export default function IntelliwattBotHero() {
         const r = await fetch(`/api/bot/message?path=${encodeURIComponent(key)}`, { cache: "no-store" });
         const j = (await r.json().catch(() => null)) as BotMsgResp | null;
         const msg = j?.ok && typeof j?.message === "string" ? j.message : "";
-        if (!cancelled) setFull(msg || "");
+        const next = msg || defaultMessage || "";
+        if (!cancelled) setFull(next);
       } catch {
-        if (!cancelled) setFull("");
+        if (!cancelled) setFull(defaultMessage || "");
       }
     }
     run();
     return () => {
       cancelled = true;
     };
-  }, [key]);
+  }, [key, defaultMessage]);
 
   useEffect(() => {
     let cancelled = false;
