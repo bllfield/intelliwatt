@@ -39,7 +39,7 @@ function extractOfferIdsFromJsonText(input: string): { ok: true; offerIds: strin
   const seen = new Set<string>();
 
   const push = (v: unknown) => {
-    const s = typeof v === "string" ? v.trim() : "";
+    const s = typeof v === "string" ? v.trim() : typeof v === "number" ? String(v) : "";
     if (!s) return;
     if (seen.has(s)) return;
     seen.add(s);
@@ -51,14 +51,18 @@ function extractOfferIdsFromJsonText(input: string): { ok: true; offerIds: strin
     if (typeof node === "string") return;
     if (Array.isArray(node)) {
       for (const item of node) {
-        if (typeof item === "string") push(item);
+        if (typeof item === "string" || typeof item === "number") push(item);
         else walk(item);
       }
       return;
     }
     if (typeof node === "object") {
       for (const [k, v] of Object.entries(node)) {
-        if (k === "offer_id" || k === "offerId" || k === "offerID") {
+        const nk = String(k ?? "")
+          .trim()
+          .replace(/_/g, "")
+          .toLowerCase();
+        if (nk === "offerid") {
           push(v);
         }
         walk(v);
@@ -96,7 +100,11 @@ export default function PlanEngineLabPage() {
       return;
     }
     setOfferIdsText(res.offerIds.join("\n"));
-    setExtractStatus(`Extracted ${res.offerIds.length} offerIds.`);
+    setExtractStatus(
+      res.offerIds.length > 0
+        ? `Extracted ${res.offerIds.length} offerIds.`
+        : `Extracted 0 offerIds. Make sure you pasted valid JSON that includes offerId/offer_id fields (or an array of offerId strings).`,
+    );
   }, [offersJsonText]);
 
   const run = useCallback(async () => {
