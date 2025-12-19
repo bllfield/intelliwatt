@@ -53,6 +53,8 @@ function parseBoolParam(v: string | null, fallback: boolean): boolean {
 
 type EflBucket = 500 | 1000 | 2000;
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 function parseApproxKwhPerMonth(v: string | null): number | null {
   if (!v) return null;
   const n = Number(v);
@@ -276,8 +278,14 @@ export async function GET(req: NextRequest) {
 
     try {
       if (house.esiid) {
-        const rangeEnd = new Date();
-        const rangeStart = new Date(rangeEnd.getTime() - 365 * 24 * 60 * 60 * 1000);
+        // Align with /api/user/usage behavior: strict last 365 days ending at latest interval timestamp.
+        const latest = await prisma.smtInterval.findFirst({
+          where: { esiid: house.esiid },
+          orderBy: { ts: "desc" },
+          select: { ts: true },
+        });
+        const rangeEnd = latest?.ts ?? new Date();
+        const rangeStart = new Date(rangeEnd.getTime() - 365 * DAY_MS);
         const aggregates = await prisma.smtInterval.aggregate({
           where: { esiid: house.esiid, ts: { gte: rangeStart, lte: rangeEnd } },
           _count: { _all: true },
@@ -419,6 +427,19 @@ export async function GET(req: NextRequest) {
       typeof annualKwhFromBuckets === "number" && Number.isFinite(annualKwhFromBuckets) && annualKwhFromBuckets > 0
         ? annualKwhFromBuckets / 12
         : null;
+
+    // Prefer usageSummary totals for display + math consistency (matches Usage page and Plan Details page),
+    // but keep bucket-derived values as best-effort fallback.
+    const annualKwhFromUsageSummary: number | null =
+      typeof usageSummaryTotalKwh === "number" && Number.isFinite(usageSummaryTotalKwh) && usageSummaryTotalKwh > 0
+        ? usageSummaryTotalKwh
+        : null;
+    const avgMonthlyKwhFromUsageSummary: number | null =
+      annualKwhFromUsageSummary != null ? annualKwhFromUsageSummary / 12 : null;
+
+    const annualKwhForCalc: number | null = annualKwhFromUsageSummary ?? annualKwhFromBuckets ?? null;
+    const avgMonthlyKwhForDisplay: number | null =
+      avgMonthlyKwhFromUsageSummary ?? (typeof avgMonthlyKwhFromBuckets === "number" ? avgMonthlyKwhFromBuckets : null);
 
     const hasRecentBucket = (bucketKey: string): boolean => {
       if (!bucketKey) return false;
@@ -626,8 +647,8 @@ export async function GET(req: NextRequest) {
           ratePlanId,
           statusLabel,
           usageKwhPerMonth:
-            typeof avgMonthlyKwhFromBuckets === "number" && Number.isFinite(avgMonthlyKwhFromBuckets)
-              ? avgMonthlyKwhFromBuckets
+            typeof avgMonthlyKwhForDisplay === "number" && Number.isFinite(avgMonthlyKwhForDisplay)
+              ? avgMonthlyKwhForDisplay
               : undefined,
           trueCost: getTrueCostStatus({ hasUsage, ratePlanId }),
         },
@@ -756,8 +777,8 @@ export async function GET(req: NextRequest) {
           const repEnergyCentsPerKwh = rs ? extractFixedRepEnergyCentsPerKwh(rs) : null;
           const repFixedMonthlyChargeDollars = rs ? extractRepFixedMonthlyChargeDollars(rs) : null;
           planCalcInputs = {
-            annualKwh: annualKwhFromBuckets ?? null,
-            monthlyKwh: avgMonthlyKwhFromBuckets ?? null,
+            annualKwh: annualKwhForCalc ?? null,
+            monthlyKwh: avgMonthlyKwhForDisplay ?? null,
             tdsp: tdspRates
               ? {
                   perKwhDeliveryChargeCents: Number(tdspRates?.perKwhDeliveryChargeCents ?? 0) || 0,
@@ -865,8 +886,8 @@ export async function GET(req: NextRequest) {
           ...(planCalcInputs ? { planCalcInputs } : {}),
           trueCostEstimate: (() => {
             if (!hasUsage) return { status: "NOT_IMPLEMENTED", reason: "No usage available" };
-            if (annualKwhFromBuckets == null) {
-              return { status: "NOT_IMPLEMENTED", reason: "Missing required usage buckets for annual kWh" };
+            if (annualKwhForCalc == null) {
+              return { status: "NOT_IMPLEMENTED", reason: "Missing usage totals for annual kWh" };
             }
             if (!templateOk || !template?.rateStructure) {
               return { status: "NOT_IMPLEMENTED", reason: "Missing template rateStructure" };
@@ -880,7 +901,7 @@ export async function GET(req: NextRequest) {
               effectiveDate: tdspRates?.effectiveDate ?? undefined,
             };
             const est = calculatePlanCostForUsage({
-              annualKwh: annualKwhFromBuckets,
+              annualKwh: annualKwhForCalc,
               monthsCount: 12,
               tdsp: tdspApplied,
               rateStructure: template.rateStructure,
@@ -890,11 +911,11 @@ export async function GET(req: NextRequest) {
               (est as any).status === "OK" &&
               typeof (est as any).annualCostDollars === "number" &&
               Number.isFinite((est as any).annualCostDollars) &&
-              typeof annualKwhFromBuckets === "number" &&
-              Number.isFinite(annualKwhFromBuckets) &&
-              annualKwhFromBuckets > 0
+              typeof annualKwhForCalc === "number" &&
+              Number.isFinite(annualKwhForCalc) &&
+              annualKwhForCalc > 0
             ) {
-              const eff = (((est as any).annualCostDollars as number) / annualKwhFromBuckets) * 100;
+              const eff = (((est as any).annualCostDollars as number) / annualKwhForCalc) * 100;
               return { ...(est as any), effectiveCentsPerKwh: eff };
             }
             return est;
@@ -1017,7 +1038,7 @@ export async function GET(req: NextRequest) {
         ok: true,
         hasUsage,
         usageSummary,
-        avgMonthlyKwh: avgMonthlyKwhFromBuckets ?? undefined,
+        avgMonthlyKwh: avgMonthlyKwhForDisplay ?? undefined,
         offers: shaped,
         bestOffers,
         bestOffersBasis,
