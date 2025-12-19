@@ -226,6 +226,8 @@ function extractTouPhase1Rates(rateStructure: any): null | (
 
 function sumMonthBucketKwh(month: Record<string, number> | null | undefined, key: string): number | null {
   const v = month ? (month as any)[key] : undefined;
+  if (v == null) return null;
+  if (typeof v === "string" && v.trim() === "") return null;
   const n = typeof v === "number" ? v : Number(v);
   return Number.isFinite(n) ? n : null;
 }

@@ -2454,6 +2454,15 @@ Phase-1 TOU (math strictness):
 - Day/Night TOU math now **requires** `kwh.m.all.total`, `kwh.m.all.2000-0700`, and `kwh.m.all.0700-2000` for every month used.
 - If `day + night` does not match `total` for any month, calculation fails closed (`USAGE_BUCKET_SUM_MISMATCH`). No auto-normalization/assumptions.
 
+Phase-1 TOU (non-dashboard call site):
+- Added `GET /api/plan-engine/offer-estimate?offerId=...&monthsCount=12` in `app/api/plan-engine/offer-estimate/route.ts`.
+  - Reads per-month bucket totals from usage DB (`HomeMonthlyUsageBucket`) for:
+    - `kwh.m.all.total`
+    - `kwh.m.all.2000-0700`
+    - `kwh.m.all.0700-2000`
+  - Passes `usageBucketsByMonth` into `calculatePlanCostForUsage()` **only when all required keys exist for all requested months**.
+  - Dashboard remains unchanged/locked; TOU plans remain QUEUED at plan-level. This endpoint is for accurate plan-engine validation.
+
 Next (Dashboard):
 - Replace “Best for you (preview)” proxy sort with true usage-based ranking by connecting usage → plan engine (`calculatePlanCostForUsage`).
 - Expand displayed fees (base monthly fee, more structured ETF) once those fields are reliably present in the WattBuy offer payload and/or derived from templates.
