@@ -2508,6 +2508,16 @@ Admin tooling (usage bucket audit; no psql):
   - missing canonical keys by month (recent window)
   - duplicate safety check for `(homeId, yearMonth, bucketKey)`
 
+Admin tooling (usage bucket backfill; canonical-only, idempotent):
+- Added admin script: `scripts/admin/usage-bucket-backfill.ts`
+- Purpose: backfill **canonical** monthly bucket keys for TOU / Free Weekends estimates without rewriting legacy rows.
+- Run (PowerShell):
+  - Dry run (no writes): `npm run admin:usage:buckets:backfill -- --homeId=<uuid> --months=12 --mode=all --dryRun=1`
+  - Execute: `npm run admin:usage:buckets:backfill -- --homeId=<uuid> --months=12 --mode=all`
+- Notes:
+  - Writes only `HomeMonthlyUsageBucket` + ensures `UsageBucketDefinition` for the canonical keys.
+  - Legacy keys remain in DB (loader continues to alias them when reading).
+
 Next (Dashboard):
 - Replace “Best for you (preview)” proxy sort with true usage-based ranking by connecting usage → plan engine (`calculatePlanCostForUsage`).
 - Expand displayed fees (base monthly fee, more structured ETF) once those fields are reliably present in the WattBuy offer payload and/or derived from templates.
