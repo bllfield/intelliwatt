@@ -60,6 +60,81 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: res.error ?? "estimate_failed", offerId }, { status: res.httpStatus ?? 500 });
   }
 
+  // If estimation is blocked, queue for admin review (PLAN_CALC_QUARANTINE).
+  // This is admin-only visibility; it does not change dashboard semantics.
+  try {
+    const estStatus = String(res?.estimate?.status ?? "");
+    const reason = String(res?.estimate?.reason ?? "").trim();
+    const isBlocked = estStatus && estStatus !== "OK";
+    if (isBlocked && res?.ratePlan?.id) {
+      const rp = await prisma.ratePlan.findUnique({
+        where: { id: String(res.ratePlan.id) },
+        select: {
+          id: true,
+          eflPdfSha256: true,
+          repPuctCertificate: true,
+          eflVersionCode: true,
+          eflUrl: true,
+          supplier: true,
+          planName: true,
+          termMonths: true,
+          utilityId: true,
+          rateStructure: true,
+        } as any,
+      });
+      const sha = String((rp as any)?.eflPdfSha256 ?? "").trim();
+      if (sha) {
+        await (prisma as any).eflParseReviewQueue.upsert({
+          where: { eflPdfSha256: sha },
+          create: {
+            source: "admin_estimate",
+            kind: "PLAN_CALC_QUARANTINE",
+            dedupeKey: `plan_calc:${String(rp?.id ?? "")}`,
+            ratePlanId: rp?.id ?? null,
+            eflPdfSha256: sha,
+            repPuctCertificate: (rp as any)?.repPuctCertificate ?? null,
+            eflVersionCode: (rp as any)?.eflVersionCode ?? null,
+            offerId,
+            supplier: (rp as any)?.supplier ?? null,
+            planName: (rp as any)?.planName ?? null,
+            eflUrl: (rp as any)?.eflUrl ?? null,
+            tdspName: (rp as any)?.utilityId ?? null,
+            termMonths: (rp as any)?.termMonths ?? null,
+            planRules: null,
+            rateStructure: (rp as any)?.rateStructure ?? null,
+            validation: null,
+            derivedForValidation: null,
+            finalStatus: "NEEDS_REVIEW",
+            queueReason: reason ? `ESTIMATE_BLOCKED: ${reason}` : "ESTIMATE_BLOCKED",
+            solverApplied: null,
+            resolvedAt: null,
+            resolvedBy: null,
+            resolutionNotes: null,
+          },
+          update: {
+            kind: "PLAN_CALC_QUARANTINE",
+            dedupeKey: `plan_calc:${String(rp?.id ?? "")}`,
+            ratePlanId: rp?.id ?? null,
+            offerId,
+            supplier: (rp as any)?.supplier ?? null,
+            planName: (rp as any)?.planName ?? null,
+            eflUrl: (rp as any)?.eflUrl ?? null,
+            tdspName: (rp as any)?.utilityId ?? null,
+            termMonths: (rp as any)?.termMonths ?? null,
+            rateStructure: (rp as any)?.rateStructure ?? null,
+            finalStatus: "NEEDS_REVIEW",
+            queueReason: reason ? `ESTIMATE_BLOCKED: ${reason}` : "ESTIMATE_BLOCKED",
+            resolvedAt: null,
+            resolvedBy: null,
+            resolutionNotes: null,
+          },
+        });
+      }
+    }
+  } catch {
+    // ignore (never block admin estimate)
+  }
+
   return NextResponse.json({
     ok: true,
     offerId,

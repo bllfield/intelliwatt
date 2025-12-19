@@ -9,6 +9,7 @@ import { extractProviderAndPlanNameFromEflText } from "@/lib/efl/eflExtractor";
 import { inferTdspTerritoryFromEflText, scoreEflPassStrength } from "@/lib/efl/eflValidator";
 import { solveEflValidationGaps } from "@/lib/efl/validation/solveEflValidationGaps";
 import { prisma } from "@/lib/db";
+import { introspectPlanFromRateStructure } from "@/lib/plan-engine/introspectPlanFromRateStructure";
 
 const MAX_PREVIEW_CHARS = 20000;
 
@@ -312,6 +313,82 @@ export async function POST(req: NextRequest) {
           persistedRatePlanId = (saved as any)?.ratePlan?.id
             ? String((saved as any).ratePlan.id)
             : null;
+
+          // If a template was persisted but plan-calc introspection indicates a non-fixed, non-TOU-bucket-gated
+          // failure/unsupported shape, queue it for admin review (PLAN_CALC_QUARANTINE).
+          try {
+            if (templatePersisted && persistedRatePlanId) {
+              const rsForIntrospection = canonicalRateStructure;
+              const intro = introspectPlanFromRateStructure({ rateStructure: rsForIntrospection });
+              const rc = String(intro?.planCalc?.planCalcReasonCode ?? "").trim();
+              const shouldQueue =
+                intro?.planCalc?.planCalcStatus === "NOT_COMPUTABLE" &&
+                rc &&
+                rc !== "FIXED_RATE_OK" &&
+                rc !== "TOU_REQUIRES_USAGE_BUCKETS_PHASE2";
+
+              if (shouldQueue) {
+                await (prisma as any).eflParseReviewQueue.upsert({
+                  where: { eflPdfSha256: template.eflPdfSha256 },
+                  create: {
+                    source: "manual_url",
+                    kind: "PLAN_CALC_QUARANTINE",
+                    dedupeKey: `plan_calc:${persistedRatePlanId}`,
+                    ratePlanId: persistedRatePlanId,
+                    eflPdfSha256: template.eflPdfSha256,
+                    repPuctCertificate: template.repPuctCertificate ?? null,
+                    eflVersionCode: template.eflVersionCode ?? null,
+                    offerId: offerId ?? null,
+                    supplier: names.providerName ?? null,
+                    planName: names.planName ?? null,
+                    eflUrl: effectiveEflUrl,
+                    tdspName: tdsp ?? null,
+                    termMonths:
+                      typeof (planRulesForPersist as any)?.termMonths === "number"
+                        ? (planRulesForPersist as any).termMonths
+                        : null,
+                    rawText: template.rawText ?? null,
+                    planRules: planRulesForPersist as any,
+                    rateStructure: rsForIntrospection as any,
+                    validation: prValidation as any,
+                    derivedForValidation: derivedForValidation ?? null,
+                    finalStatus: "NEEDS_REVIEW",
+                    queueReason: `PLAN_CALC_BLOCKED: ${rc}`,
+                    solverApplied: null,
+                    resolvedAt: null,
+                    resolvedBy: null,
+                    resolutionNotes: null,
+                  },
+                  update: {
+                    kind: "PLAN_CALC_QUARANTINE",
+                    dedupeKey: `plan_calc:${persistedRatePlanId}`,
+                    ratePlanId: persistedRatePlanId,
+                    offerId: offerId ?? null,
+                    supplier: names.providerName ?? null,
+                    planName: names.planName ?? null,
+                    eflUrl: effectiveEflUrl,
+                    tdspName: tdsp ?? null,
+                    termMonths:
+                      typeof (planRulesForPersist as any)?.termMonths === "number"
+                        ? (planRulesForPersist as any).termMonths
+                        : null,
+                    rawText: template.rawText ?? null,
+                    planRules: planRulesForPersist as any,
+                    rateStructure: rsForIntrospection as any,
+                    validation: prValidation as any,
+                    derivedForValidation: derivedForValidation ?? null,
+                    finalStatus: "NEEDS_REVIEW",
+                    queueReason: `PLAN_CALC_BLOCKED: ${rc}`,
+                    resolvedAt: null,
+                    resolvedBy: null,
+                    resolutionNotes: null,
+                  },
+                });
+              }
+            }
+          } catch {
+            // ignore (never block manual-url flow)
+          }
 
           const missing = Array.isArray((saved as any)?.missingTemplateFields)
             ? ((saved as any).missingTemplateFields as string[])

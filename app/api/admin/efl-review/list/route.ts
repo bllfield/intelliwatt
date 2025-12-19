@@ -69,7 +69,10 @@ export async function GET(req: NextRequest) {
       //
       // IMPORTANT: Only resolves when a RatePlan exists with a stored rateStructure
       // and it does NOT require manual review.
-      const openItems = Array.isArray(items) ? items : [];
+      // Only auto-resolve parse-type queue rows. PLAN_CALC_QUARANTINE is intentionally sticky.
+      const openItems = (Array.isArray(items) ? items : []).filter(
+        (it: any) => String(it?.kind ?? "") !== "PLAN_CALC_QUARANTINE",
+      );
       const shas = new Set<string>();
       const urls = new Set<string>();
       const certVerPairs: Array<{ repPuctCertificate: string; eflVersionCode: string }> = [];
@@ -161,7 +164,10 @@ export async function GET(req: NextRequest) {
       // Auto-dedupe OPEN queue items by offerId to prevent duplicate rows showing up for
       // the same WattBuy offer (e.g., earlier runs that queued "missing docs.efl" and later
       // runs that queued "fetch failed" for the same offerId).
-      const openItems = Array.isArray(items) ? items : [];
+      // Only dedupe parse-type queue rows. PLAN_CALC_QUARANTINE is intentionally sticky.
+      const openItems = (Array.isArray(items) ? items : []).filter(
+        (it: any) => String(it?.kind ?? "") !== "PLAN_CALC_QUARANTINE",
+      );
       const groups = new Map<string, any[]>();
       for (const it of openItems) {
         const oid = String(it?.offerId ?? "").trim();

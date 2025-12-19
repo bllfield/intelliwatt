@@ -111,6 +111,56 @@ export default function AdminPlanDetailsPage({ params }: { params: { offerId: st
     }
   }, [token, offerId, homeId, monthsClamped, backfill]);
 
+  // --- bucket coverage matrix (homeId + requiredBucketKeys)
+  const [coverageLoading, setCoverageLoading] = useState(false);
+  const [coverageErr, setCoverageErr] = useState<string | null>(null);
+  const [coverageJson, setCoverageJson] = useState<any>(null);
+
+  const requiredBucketKeys = useMemo(() => {
+    const keys = data?.introspection?.requiredBucketKeys;
+    return Array.isArray(keys) ? (keys as string[]).map((k) => String(k)).filter(Boolean) : [];
+  }, [data]);
+
+  const loadCoverage = useCallback(async () => {
+    setCoverageLoading(true);
+    setCoverageErr(null);
+    setCoverageJson(null);
+    try {
+      if (!token) {
+        setCoverageErr("admin_token_required");
+        return;
+      }
+      const hid = homeId.trim();
+      if (!hid) {
+        setCoverageErr("homeId_required");
+        return;
+      }
+      if (!requiredBucketKeys.length) {
+        setCoverageErr("no_requiredBucketKeys");
+        return;
+      }
+
+      const sp = new URLSearchParams();
+      sp.set("homeId", hid);
+      sp.set("monthsCount", String(monthsClamped));
+      for (const k of requiredBucketKeys) sp.append("bucketKeys", k);
+
+      const res = await fetch(`/api/admin/usage/bucket-coverage?${sp.toString()}`, {
+        headers: { "x-admin-token": token },
+        cache: "no-store",
+      });
+      const json = await res.json().catch(() => null);
+      setCoverageJson(json);
+      if (!res.ok) {
+        setCoverageErr(json?.error ? String(json.error) : `http_${res.status}`);
+      }
+    } catch (e: any) {
+      setCoverageErr(e?.message ?? String(e));
+    } finally {
+      setCoverageLoading(false);
+    }
+  }, [token, homeId, monthsClamped, requiredBucketKeys]);
+
   return (
     <main className="min-h-screen w-full bg-gray-50">
       <div className="mx-auto max-w-6xl px-4 py-10 space-y-6">
@@ -241,11 +291,100 @@ export default function AdminPlanDetailsPage({ params }: { params: { offerId: st
             >
               {estimateLoading ? "Running…" : "Run estimate"}
             </button>
+            <button
+              className="rounded-lg border px-4 py-2 text-sm hover:bg-gray-50 disabled:opacity-60 mt-5"
+              disabled={!token || !homeId.trim() || coverageLoading || requiredBucketKeys.length === 0}
+              onClick={() => void loadCoverage()}
+              title="Reads existing monthly buckets only (no backfill)."
+            >
+              {coverageLoading ? "Loading…" : "Load bucket coverage"}
+            </button>
           </div>
           {estimateErr ? <div className="text-sm text-red-700">{estimateErr}</div> : null}
           <pre className="text-xs bg-gray-50 rounded-lg p-3 overflow-auto max-h-[520px]">
             {estimateJson ? pretty(estimateJson) : "—"}
           </pre>
+        </div>
+
+        <div className="rounded-xl border bg-white p-4 space-y-3">
+          <div className="text-sm font-semibold">Bucket Coverage (read-only)</div>
+          <div className="text-xs text-gray-600">
+            Matrix of <span className="font-mono">requiredBucketKeys</span> × months for the selected <span className="font-mono">homeId</span>.
+          </div>
+          {coverageErr ? <div className="text-sm text-red-700">{coverageErr}</div> : null}
+
+          {coverageJson?.ok && Array.isArray(coverageJson.months) && Array.isArray(coverageJson.bucketKeys) ? (
+            <div className="space-y-3">
+              <div className="text-xs text-gray-700">
+                fullyCoveredMonths:{" "}
+                <span className="font-mono">{String(coverageJson?.summary?.fullyCoveredMonths ?? "—")}</span> /{" "}
+                <span className="font-mono">{String((coverageJson.months as any[]).length)}</span>
+              </div>
+
+              {Array.isArray(coverageJson?.summary?.missingKeysTop) && coverageJson.summary.missingKeysTop.length > 0 ? (
+                <div className="flex flex-wrap gap-2 text-xs">
+                  {coverageJson.summary.missingKeysTop.map((k: any) => (
+                    <span key={String(k)} className="px-2 py-1 rounded-full bg-red-50 text-red-700 border border-red-200 font-mono">
+                      {String(k)}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+
+              <div className="overflow-auto rounded border">
+                <table className="min-w-full text-xs">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-2 py-2 text-left">month</th>
+                      {(coverageJson.bucketKeys as any[]).map((k: any) => (
+                        <th key={String(k)} className="px-2 py-2 text-left font-mono">
+                          {String(k).replace(/^kwh\.m\./, "")}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(coverageJson.months as any[]).map((m: any) => {
+                      const ym = String(m);
+                      const row = (coverageJson.cells && coverageJson.cells[ym]) ? coverageJson.cells[ym] : {};
+                      return (
+                        <tr key={ym} className="border-t">
+                          <td className="px-2 py-2 font-mono">{ym}</td>
+                          {(coverageJson.bucketKeys as any[]).map((k: any) => {
+                            const kk = String(k);
+                            const cell = row?.[kk] ?? null;
+                            const present = Boolean(cell?.present);
+                            const kwh = typeof cell?.kwhTotal === "number" ? cell.kwhTotal : null;
+                            const sourceKey = cell?.sourceKey ? String(cell.sourceKey) : null;
+                            const title = sourceKey ? `from ${sourceKey}` : "";
+                            return (
+                              <td key={`${ym}:${kk}`} className="px-2 py-2" title={title}>
+                                {present ? (
+                                  <span className="font-mono text-green-700">
+                                    ✅ {kwh != null ? kwh.toFixed(3) : ""}
+                                    {sourceKey ? <span className="text-gray-500"> (alias)</span> : null}
+                                  </span>
+                                ) : (
+                                  <span className="font-mono text-red-700">❌</span>
+                                )}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : (
+            <div className="text-xs text-gray-500">No coverage loaded yet.</div>
+          )}
+
+          <details className="text-xs text-gray-700">
+            <summary className="cursor-pointer select-none">Coverage raw JSON</summary>
+            <pre className="mt-2 bg-gray-50 rounded-lg p-3 overflow-auto max-h-[520px]">{coverageJson ? pretty(coverageJson) : "—"}</pre>
+          </details>
         </div>
 
         <details className="rounded-xl border bg-white p-4">

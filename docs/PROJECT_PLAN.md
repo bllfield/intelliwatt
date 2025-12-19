@@ -2490,12 +2490,19 @@ Plan engine (non-dashboard): estimate a set of offers
   - Improved offer “type” classification in Plan Engine Lab: supports template-backed classification (via non-dashboard estimate-set), since WattBuy payload fields are not reliable enough to identify TOU vs fixed consistently
   - OfferId Finder now uses deterministic **type precedence** + **flags** from template-backed estimate-set results (with `HEURISTIC` flag when falling back to WattBuy text fields)
   - Added Plan Details page: `/admin/plans/[offerId]` (offer + linked RatePlan + rateStructure + plan-engine introspection + optional admin estimate runner by homeId)
+  - Plan Details page: added Bucket Coverage matrix (read-only) showing requiredBucketKeys × months for a given homeId (alias-tolerant, no backfill)
   - Added “Details” links from admin offer tables to `/admin/plans/[offerId]` (Plan Engine Lab, offers explorer, probe, and EFL ops tables)
   - Added Plan Engine View (introspection) to Fact Cards manual loader (`/admin/efl/fact-cards`) so admins can see extracted TOU periods + required buckets immediately after parsing
 
 - Admin-only APIs:
   - `GET /api/admin/plans/details?offerId=...` (RatePlan + rateStructure + introspection; token-gated)
   - `POST /api/admin/plan-engine/offer-estimate` (admin wrapper for offer estimate by homeId; token-gated)
+  - `GET /api/admin/usage/bucket-coverage` (read-only coverage matrix for HomeMonthlyUsageBucket; token-gated; alias-tolerant)
+
+- Review queue persistence:
+  - When a template is persisted but plan-calc introspection indicates an unsupported/non-computable shape (beyond TOU bucket gating), a `PLAN_CALC_QUARANTINE` entry is upserted into `EflParseReviewQueue`.
+  - When an admin home-scoped estimate is blocked (e.g. missing buckets / sum mismatch), a `PLAN_CALC_QUARANTINE` entry is also upserted.
+  - Admin queue auto-resolve/dedupe skips `PLAN_CALC_QUARANTINE` so these items remain visible until explicitly resolved.
 
 TOU Phase-2 (arbitrary windows; non-dashboard only)
 - Added deterministic TOU window schedule extraction: `lib/plan-engine/touPeriods.ts`
