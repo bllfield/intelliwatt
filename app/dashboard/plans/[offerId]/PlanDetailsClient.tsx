@@ -23,10 +23,19 @@ function fmtNum(n: any, digits = 2): string {
   return v.toFixed(digits);
 }
 
+function fmtKwh0(n: any): string {
+  const v = typeof n === "number" ? n : Number(n);
+  if (!Number.isFinite(v)) return "—";
+  const whole = Number(v.toFixed(0));
+  return whole.toLocaleString();
+}
+
 function fmtKwh(n: any): string {
   const v = typeof n === "number" ? n : Number(n);
   if (!Number.isFinite(v)) return "—";
-  return `${Math.round(v).toLocaleString()} kWh`;
+  // Show whole kWh like the Usage page (no decimals shown).
+  const whole = Number(v.toFixed(0));
+  return `${whole.toLocaleString()} kWh`;
 }
 
 function fmtDollars(n: any): string {
@@ -113,14 +122,24 @@ export default function PlanDetailsClient({ offerId }: { offerId: string }) {
               <div className="text-[0.7rem] font-semibold uppercase tracking-[0.22em] text-brand-cyan/60">Usage snapshot</div>
               <div className="mt-3 text-sm text-brand-cyan/75">
                 <div>
-                  Avg monthly: <span className="font-semibold text-brand-white/90">{fmtKwh(usage?.avgMonthlyKwh)}</span> / mo
+                  Total (last 365 days): <span className="font-semibold text-brand-white/90">{fmtKwh(usage?.annualKwh)}</span>
                 </div>
                 <div>
-                  Annualized: <span className="font-semibold text-brand-white/90">{fmtKwh(usage?.annualKwh)}</span> / yr
+                  Avg monthly (total/12): <span className="font-semibold text-brand-white/90">{fmtKwh(usage?.avgMonthlyKwh)}</span> / mo
                 </div>
                 <div className="mt-2 text-xs text-brand-cyan/60">
-                  Months present: <span className="font-mono">{usage?.monthsPresent ?? "—"}</span> / 12
+                  Source: <span className="font-mono">{usage?.source ?? "—"}</span>{" "}
+                  {usage?.windowEnd ? (
+                    <>
+                      · Window ends: <span className="font-mono">{String(usage.windowEnd).slice(0, 10)}</span>
+                    </>
+                  ) : null}
                 </div>
+                {usage?.cutoff ? (
+                  <div className="mt-1 text-xs text-brand-cyan/60">
+                    Cutoff (latest - 365d): <span className="font-mono">{String(usage.cutoff).slice(0, 10)}</span>
+                  </div>
+                ) : null}
               </div>
             </div>
 
@@ -215,7 +234,7 @@ export default function PlanDetailsClient({ offerId }: { offerId: string }) {
 
           <div className="mt-8 rounded-2xl border border-brand-cyan/20 bg-brand-navy p-4">
             <div className="text-[0.7rem] font-semibold uppercase tracking-[0.22em] text-brand-cyan/60">
-              Bucket totals (last 12 months)
+              Bucket totals (months overlapping the last-365-days window)
             </div>
             <div className="mt-3 overflow-auto rounded-xl border border-brand-cyan/15">
               <table className="min-w-[900px] w-full text-xs">
@@ -235,7 +254,7 @@ export default function PlanDetailsClient({ offerId }: { offerId: string }) {
                       <td className="px-3 py-2 font-mono text-brand-white/90">{r.yearMonth}</td>
                       {bucketDefs.map((b) => (
                         <td key={b.key} className="px-3 py-2 whitespace-nowrap">
-                          {r[b.key] == null ? "—" : fmtNum(r[b.key], 3)}
+                          {r[b.key] == null ? "—" : fmtKwh0(r[b.key])}
                         </td>
                       ))}
                     </tr>
