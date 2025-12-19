@@ -29,7 +29,7 @@ export default function IntelliwattBotHero() {
   const defaultMessage = useMemo(() => {
     if (pathname === "/") {
       return `Hey — I’m IntelliWattBot.
-Enter your email adderss and I will send you a link to get access to your user dashboard. Then I can help you save on your electric bill!`;
+Enter your email address and I will send you a link to get access to your user dashboard. Then I can help you save on your electric bill!`;
     }
     return "";
   }, [pathname]);
