@@ -74,7 +74,10 @@ export function EstimateBreakdownPopover(props: Props) {
         className="font-semibold text-brand-white/90 hover:underline underline-offset-2"
         aria-haspopup="dialog"
         aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
       >
         {props.trigger}
       </button>

@@ -148,7 +148,10 @@ export function PlanDetailsPopover(props: Props) {
         className="text-xs font-semibold text-brand-blue hover:underline underline-offset-2"
         aria-haspopup="dialog"
         aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
       >
         {props.trigger}
       </button>

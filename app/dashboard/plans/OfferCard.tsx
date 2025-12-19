@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { EstimateBreakdownPopover } from "../../components/ui/EstimateBreakdownPopover";
 import { PlanDetailsPopover } from "@/app/components/ui/PlanDetailsPopover";
 
@@ -77,6 +78,7 @@ function badgeClasses(status: OfferRow["intelliwatt"]["statusLabel"]): string {
 }
 
 export default function OfferCard({ offer }: { offer: OfferRow }) {
+  const router = useRouter();
   const supplier = offer.supplierName ?? "Unknown supplier";
   const plan = offer.planName ?? "Unknown plan";
   const term = typeof offer.termMonths === "number" ? `${offer.termMonths} mo` : "Term —";
@@ -105,7 +107,18 @@ export default function OfferCard({ offer }: { offer: OfferRow }) {
   const totalAnnualDollarsRaw = c2?.totalDollars ?? (tce as any)?.annualCostDollars;
 
   return (
-    <div className="rounded-3xl border border-brand-cyan/25 bg-brand-navy p-5 shadow-[0_18px_40px_rgba(10,20,60,0.35)]">
+    <div
+      className="rounded-3xl border border-brand-cyan/25 bg-brand-navy p-5 shadow-[0_18px_40px_rgba(10,20,60,0.35)] cursor-pointer"
+      role="button"
+      tabIndex={0}
+      onClick={() => router.push(`/dashboard/plans/${encodeURIComponent(offer.offerId)}`)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          router.push(`/dashboard/plans/${encodeURIComponent(offer.offerId)}`);
+        }
+      }}
+    >
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="text-sm text-brand-cyan/70 truncate">{supplier}</div>
@@ -142,6 +155,7 @@ export default function OfferCard({ offer }: { offer: OfferRow }) {
                 target="_blank"
                 rel="noreferrer"
                 className="text-xs font-semibold text-brand-blue hover:underline"
+                onClick={(e) => e.stopPropagation()}
               >
                 View EFL
               </Link>
@@ -149,7 +163,9 @@ export default function OfferCard({ offer }: { offer: OfferRow }) {
               <div className="text-xs text-brand-cyan/60">No EFL link</div>
             )}
 
-            <PlanDetailsPopover trigger="Plan Details" title="Plan Details" offer={offer as any} />
+            <span onClick={(e) => e.stopPropagation()}>
+              <PlanDetailsPopover trigger="Plan Details" title="Plan Details" offer={offer as any} />
+            </span>
           </div>
         </div>
       </div>
