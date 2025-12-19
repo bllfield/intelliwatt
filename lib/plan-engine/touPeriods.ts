@@ -111,7 +111,8 @@ function validateNonOverlappingFullCoverage(periods: TouRatePeriod[]): { ok: tru
     groups.set(k, arr);
   }
 
-  for (const [, arr] of groups) {
+  // Avoid `for..of` over Map to support older TS downlevel targets.
+  groups.forEach((arr) => {
     type Seg = { start: number; end: number };
     const segs: Seg[] = [];
 
@@ -139,7 +140,7 @@ function validateNonOverlappingFullCoverage(periods: TouRatePeriod[]): { ok: tru
       curEnd = s.end;
     }
     if (curEnd !== 1440) return { ok: false, reasonCode: "UNSUPPORTED_SCHEDULE_PARTIAL_COVERAGE" };
-  }
+  });
 
   return { ok: true };
 }
