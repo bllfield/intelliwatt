@@ -2478,6 +2478,10 @@ Plan engine (non-dashboard): estimate a set of offers
 - Output JSON:
   - `{ monthsCount, backfillRequested, results: OfferEstimateResult[] }`
 - Dashboard routes unchanged/locked.
+- Tests:
+  - Added minimal Vitest contract coverage for:
+    - `POST /api/plan-engine/estimate-set` caps/shape
+    - `GET /api/plan-engine/offer-estimate` `tdspSlug` normalization
 
 Free Weekends (bucket-gated; plan-level remains QUEUED):
 - **Bucket requirements**: `lib/plan-engine/requiredBucketsForPlan.ts`

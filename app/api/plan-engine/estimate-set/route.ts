@@ -46,11 +46,13 @@ export async function POST(req: NextRequest) {
       if (seen.has(id)) continue;
       seen.add(id);
       offerIds.push(id);
-      if (offerIds.length >= 25) break;
     }
 
     if (offerIds.length <= 0) {
       return NextResponse.json({ ok: false, error: "offerIds_empty" }, { status: 400 });
+    }
+    if (offerIds.length > 25) {
+      return NextResponse.json({ ok: false, error: "offerIds_too_many", max: 25 }, { status: 400 });
     }
 
     const user = await prisma.user.findUnique({
