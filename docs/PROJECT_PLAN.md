@@ -2418,6 +2418,17 @@ Guardrails
     - `RatePlan`: total=232, COMPUTABLE=222, NOT_COMPUTABLE=2, UNKNOWN=8
     - Mapped offers by template status: COMPUTABLE=97, NOT_COMPUTABLE=4
 
+### Bucket System Addendum: inventory complete (2025-12-19)
+
+Key paths found (no design changes in this log entry):
+- **Bucket requirements**: `lib/plan-engine/requiredBucketsForPlan.ts` (`requiredBucketsForPlan()` returns `kwh.m.all.total` today; TOU requirements are stubbed behind `supportsTouEnergy`)
+- **Computability + reason codes**: `lib/plan-engine/planComputability.ts` (`FIXED_RATE_OK`, `MISSING_TEMPLATE`, `UNSUPPORTED_RATE_STRUCTURE`)
+- **v1 calculator entrypoint**: `lib/plan-engine/calculatePlanCostForUsage.ts` (fixed-rate-only; fail-closed if no single REP ¢/kWh is extractable)
+- **Bucket definitions/grammar (code)**: `lib/plan-engine/usageBuckets.ts` (`BucketRuleV1`, canonical key format, `CORE_MONTHLY_BUCKETS`)
+- **Bucket aggregation**: `lib/usage/aggregateMonthlyBuckets.ts` (`ensureCoreMonthlyBuckets()` reads intervals and upserts usage DB tall-table buckets)
+- **Bucket tables (usage DB)**: `prisma/usage/schema.prisma` (`UsageBucketDefinition`, `HomeMonthlyUsageBucket`)
+- **Dashboard gating (do not regress)**: `app/api/dashboard/plans/route.ts` (statusLabel AVAILABLE/QUEUED/UNAVAILABLE, template=available filter, quarantine wiring)
+
 Next (Dashboard):
 - Replace “Best for you (preview)” proxy sort with true usage-based ranking by connecting usage → plan engine (`calculatePlanCostForUsage`).
 - Expand displayed fees (base monthly fee, more structured ETF) once those fields are reliably present in the WattBuy offer payload and/or derived from templates.
