@@ -320,6 +320,10 @@ export async function GET(req: NextRequest) {
       usageSummary = null;
     }
 
+    // Convenience: pull the strict last-365-days total kWh from usageSummary (if present).
+    // Must be declared before any downstream usage-window / display logic uses it.
+    const usageSummaryTotalKwh = numOrNull((usageSummary as any)?.totalKwh);
+
     // Best-effort: on-demand ensure CORE bucket totals exist for recent months (never break offers).
     // This is a lazy backfill path in case ingest hooks were skipped or buckets were never computed.
     let recentYearMonths: string[] = [];
@@ -593,8 +597,6 @@ export async function GET(req: NextRequest) {
     const safePage = totalPages === 0 ? 1 : clamp(page, 1, totalPages);
     const startIdx = (safePage - 1) * pageSize;
     const pageSlice = offers.slice(startIdx, startIdx + pageSize);
-
-    const usageSummaryTotalKwh = numOrNull((usageSummary as any)?.totalKwh);
 
     const shapeOfferBase = (o: any) => {
       const ratePlanId = mapByOfferId.get(o.offer_id) ?? null;
