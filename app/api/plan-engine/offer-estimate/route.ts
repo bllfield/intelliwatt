@@ -13,8 +13,20 @@ export const dynamic = "force-dynamic";
 // Bucket-key aliasing (loader boundary only).
 // - Canonical all-day bucket key is `.total`.
 // - Legacy/alternate storage may use explicit `0000-2400`.
-const WEEKDAY_ALLDAY_KEYS = ["kwh.m.weekday.total", "kwh.m.weekday.0000-2400"] as const;
-const WEEKEND_ALLDAY_KEYS = ["kwh.m.weekend.total", "kwh.m.weekend.0000-2400"] as const;
+// - Historical rows may also have uppercase dayType segment (e.g. `kwh.m.WEEKDAY.0000-2400`).
+const ALL_ALLDAY_KEYS = ["kwh.m.all.total", "kwh.m.all.0000-2400", "kwh.m.ALL.total", "kwh.m.ALL.0000-2400"] as const;
+const WEEKDAY_ALLDAY_KEYS = [
+  "kwh.m.weekday.total",
+  "kwh.m.weekday.0000-2400",
+  "kwh.m.WEEKDAY.total",
+  "kwh.m.WEEKDAY.0000-2400",
+] as const;
+const WEEKEND_ALLDAY_KEYS = [
+  "kwh.m.weekend.total",
+  "kwh.m.weekend.0000-2400",
+  "kwh.m.WEEKEND.total",
+  "kwh.m.WEEKEND.0000-2400",
+] as const;
 
 function isObject(v: unknown): v is Record<string, any> {
   return typeof v === "object" && v !== null;
@@ -242,7 +254,7 @@ export async function GET(req: NextRequest) {
         : (["kwh.m.all.total", "kwh.m.all.2000-0700", "kwh.m.all.0700-2000"] as const);
 
     const dbQueryKeys: string[] = wantsFreeWeekends
-      ? Array.from(new Set<string>(["kwh.m.all.total", ...WEEKDAY_ALLDAY_KEYS, ...WEEKEND_ALLDAY_KEYS]))
+      ? Array.from(new Set<string>([...ALL_ALLDAY_KEYS, ...WEEKDAY_ALLDAY_KEYS, ...WEEKEND_ALLDAY_KEYS]))
       : [...canonicalRequiredKeys];
 
     const rows = await (usagePrisma as any).homeMonthlyUsageBucket.findMany({
@@ -262,7 +274,7 @@ export async function GET(req: NextRequest) {
       if (!ym || !key || kwh == null) continue;
       if (!byMonth[ym]) byMonth[ym] = {};
       byMonth[ym][key] = kwh;
-      if (key === "kwh.m.all.total" && !seenMonths.has(ym)) {
+      if (ALL_ALLDAY_KEYS.includes(key as any) && !seenMonths.has(ym)) {
         seenMonths.add(ym);
         monthsWithTotal.push(ym);
       }
@@ -274,15 +286,23 @@ export async function GET(req: NextRequest) {
     const usageBucketsByMonth = (() => {
       if (months.length !== monthsCount) return null;
       const out: Record<string, Record<string, number>> = {};
+      let allDbKeyUsed: string | null = null;
       let weekdayDbKeyUsed: string | null = null;
       let weekendDbKeyUsed: string | null = null;
       for (const ym of months) {
         const m = byMonth[ym] ?? {};
         // Only pass when complete; otherwise omit entirely (fixed-rate still works, TOU fails closed).
-        if (wantsFreeWeekends) {
-          const allKwh = m["kwh.m.all.total"];
-          if (!isFiniteNumber(allKwh)) return null;
+        const all = resolveAliasedMonthlyBucket({
+          monthBuckets: m,
+          preferKey: "kwh.m.all.total",
+          aliasKeys: ALL_ALLDAY_KEYS,
+        });
+        if (!all) return null;
 
+        allDbKeyUsed = allDbKeyUsed ?? all.dbKeyUsed;
+        if (allDbKeyUsed !== all.dbKeyUsed) return null;
+
+        if (wantsFreeWeekends) {
           const wk = resolveAliasedMonthlyBucket({
             monthBuckets: m,
             preferKey: "kwh.m.weekday.total",
@@ -305,15 +325,18 @@ export async function GET(req: NextRequest) {
 
           // Emit canonical keys expected by calculator.
           out[ym] = {
-            "kwh.m.all.total": allKwh,
+            "kwh.m.all.total": all.kwh,
             "kwh.m.weekday.total": wk.kwh,
             "kwh.m.weekend.total": we.kwh,
           };
         } else {
           for (const k of canonicalRequiredKeys) {
+            if (k === "kwh.m.all.total") continue; // handled via alias resolver above
             if (!isFiniteNumber(m[k])) return null;
           }
-          out[ym] = Object.fromEntries(canonicalRequiredKeys.map((k) => [k, m[k]]));
+          out[ym] = Object.fromEntries(
+            canonicalRequiredKeys.map((k) => (k === "kwh.m.all.total" ? [k, all.kwh] : [k, m[k]])),
+          );
         }
       }
       return out;

@@ -2479,6 +2479,9 @@ Free Weekends (bucketKey shape aliasing; loader boundary only):
 - Some historical/alternate stored rows may use explicit all-day window keys:
   - `kwh.m.weekday.0000-2400`
   - `kwh.m.weekend.0000-2400`
+- Verified in usage DB (example homeId: `d8ee2a47-02f8-4e01-9c48-988ef4449214`) that older months can also appear with an **uppercase dayType segment**, e.g.:
+  - `kwh.m.WEEKDAY.0000-2400`
+  - `kwh.m.WEEKEND.0000-2400`
 - `app/api/plan-engine/offer-estimate/route.ts` now queries for both aliases when Free Weekends buckets are needed, and:
   - Normalizes to canonical keys (`kwh.m.weekday.total`, `kwh.m.weekend.total`) when calling `calculatePlanCostForUsage()`
   - **Fails closed** if the alias differs across months (prevents silent mixed-key month sets)
