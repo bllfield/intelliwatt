@@ -602,6 +602,15 @@ export default function AdminDashboard() {
               </div>
             </a>
             <a
+              href="/admin/plan-engine"
+              className="block p-4 border-2 border-brand-blue/20 rounded-lg hover:border-brand-blue hover:bg-brand-blue/5 transition-colors"
+            >
+              <div className="font-semibold text-brand-navy mb-1">🧪 Plan Engine Lab</div>
+              <div className="text-sm text-brand-navy/60">
+                Run estimate-set (TOU / Free Weekends bucket-gated) with optional backfill.
+              </div>
+            </a>
+            <a
               href="/admin/tools/bot-messages"
               className="block p-4 border-2 border-brand-blue/20 rounded-lg hover:border-brand-blue hover:bg-brand-blue/5 transition-colors"
             >

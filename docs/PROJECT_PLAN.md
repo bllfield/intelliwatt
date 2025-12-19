@@ -2482,6 +2482,9 @@ Plan engine (non-dashboard): estimate a set of offers
   - Added minimal Vitest contract coverage for:
     - `POST /api/plan-engine/estimate-set` caps/shape
     - `GET /api/plan-engine/offer-estimate` `tdspSlug` normalization
+- Admin UI:
+  - Added Admin Tools card: **Plan Engine Lab** → `/admin/plan-engine`
+  - Added minimal admin page `/admin/plan-engine` to run `estimate-set` and render JSON + summary table
 
 Free Weekends (bucket-gated; plan-level remains QUEUED):
 - **Bucket requirements**: `lib/plan-engine/requiredBucketsForPlan.ts`
