@@ -10,6 +10,12 @@ import { calculatePlanCostForUsage } from "@/lib/plan-engine/calculatePlanCostFo
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// Bucket-key aliasing (loader boundary only).
+// - Canonical all-day bucket key is `.total`.
+// - Legacy/alternate storage may use explicit `0000-2400`.
+const WEEKDAY_ALLDAY_KEYS = ["kwh.m.weekday.total", "kwh.m.weekday.0000-2400"] as const;
+const WEEKEND_ALLDAY_KEYS = ["kwh.m.weekend.total", "kwh.m.weekend.0000-2400"] as const;
+
 function isObject(v: unknown): v is Record<string, any> {
   return typeof v === "object" && v !== null;
 }
@@ -82,6 +88,32 @@ function detectDayNightTou(rateStructure: any): boolean {
   const hasNight = periods.some((p) => numOrNull(p?.startHour) === 20 && numOrNull(p?.endHour) === 7);
   const hasDay = periods.some((p) => numOrNull(p?.startHour) === 7 && numOrNull(p?.endHour) === 20);
   return hasNight && hasDay;
+}
+
+function isFiniteNumber(v: unknown): v is number {
+  return typeof v === "number" && Number.isFinite(v);
+}
+
+function resolveAliasedMonthlyBucket(args: {
+  monthBuckets: Record<string, number>;
+  preferKey: string;
+  aliasKeys: readonly string[];
+}): { dbKeyUsed: string; kwh: number } | null {
+  const month = args.monthBuckets ?? {};
+  const present = args.aliasKeys.filter((k) => isFiniteNumber(month[k]));
+  if (present.length <= 0) return null;
+
+  // If both exist, we prefer preferKey but fail-closed on mismatched values.
+  if (present.length > 1) {
+    const v0 = month[present[0]]!;
+    for (const k of present.slice(1)) {
+      const v = month[k]!;
+      if (Math.abs(v - v0) > 1e-6) return null;
+    }
+  }
+
+  const preferred = isFiniteNumber(month[args.preferKey]) ? args.preferKey : present[0]!;
+  return { dbKeyUsed: preferred, kwh: month[preferred]! };
 }
 
 export async function GET(req: NextRequest) {
@@ -203,14 +235,18 @@ export async function GET(req: NextRequest) {
     const wantsFreeWeekends = detectFreeWeekends(rateStructure);
     const wantsDayNight = !wantsFreeWeekends && detectDayNightTou(rateStructure);
 
-    const requiredKeys = wantsFreeWeekends
+    const canonicalRequiredKeys = wantsFreeWeekends
       ? (["kwh.m.all.total", "kwh.m.weekday.total", "kwh.m.weekend.total"] as const)
       : wantsDayNight
         ? (["kwh.m.all.total", "kwh.m.all.2000-0700", "kwh.m.all.0700-2000"] as const)
         : (["kwh.m.all.total", "kwh.m.all.2000-0700", "kwh.m.all.0700-2000"] as const);
 
+    const dbQueryKeys: string[] = wantsFreeWeekends
+      ? Array.from(new Set<string>(["kwh.m.all.total", ...WEEKDAY_ALLDAY_KEYS, ...WEEKEND_ALLDAY_KEYS]))
+      : [...canonicalRequiredKeys];
+
     const rows = await (usagePrisma as any).homeMonthlyUsageBucket.findMany({
-      where: { homeId: house.id, bucketKey: { in: requiredKeys as any } },
+      where: { homeId: house.id, bucketKey: { in: dbQueryKeys as any } },
       select: { yearMonth: true, bucketKey: true, kwhTotal: true },
       orderBy: { yearMonth: "desc" },
     });
@@ -238,13 +274,47 @@ export async function GET(req: NextRequest) {
     const usageBucketsByMonth = (() => {
       if (months.length !== monthsCount) return null;
       const out: Record<string, Record<string, number>> = {};
+      let weekdayDbKeyUsed: string | null = null;
+      let weekendDbKeyUsed: string | null = null;
       for (const ym of months) {
         const m = byMonth[ym] ?? {};
         // Only pass when complete; otherwise omit entirely (fixed-rate still works, TOU fails closed).
-        for (const k of requiredKeys) {
-          if (typeof m[k] !== "number" || !Number.isFinite(m[k])) return null;
+        if (wantsFreeWeekends) {
+          const allKwh = m["kwh.m.all.total"];
+          if (!isFiniteNumber(allKwh)) return null;
+
+          const wk = resolveAliasedMonthlyBucket({
+            monthBuckets: m,
+            preferKey: "kwh.m.weekday.total",
+            aliasKeys: WEEKDAY_ALLDAY_KEYS,
+          });
+          if (!wk) return null;
+
+          const we = resolveAliasedMonthlyBucket({
+            monthBuckets: m,
+            preferKey: "kwh.m.weekend.total",
+            aliasKeys: WEEKEND_ALLDAY_KEYS,
+          });
+          if (!we) return null;
+
+          // Require month-to-month consistency of the underlying DB key shape.
+          weekdayDbKeyUsed = weekdayDbKeyUsed ?? wk.dbKeyUsed;
+          weekendDbKeyUsed = weekendDbKeyUsed ?? we.dbKeyUsed;
+          if (weekdayDbKeyUsed !== wk.dbKeyUsed) return null;
+          if (weekendDbKeyUsed !== we.dbKeyUsed) return null;
+
+          // Emit canonical keys expected by calculator.
+          out[ym] = {
+            "kwh.m.all.total": allKwh,
+            "kwh.m.weekday.total": wk.kwh,
+            "kwh.m.weekend.total": we.kwh,
+          };
+        } else {
+          for (const k of canonicalRequiredKeys) {
+            if (!isFiniteNumber(m[k])) return null;
+          }
+          out[ym] = Object.fromEntries(canonicalRequiredKeys.map((k) => [k, m[k]]));
         }
-        out[ym] = Object.fromEntries(requiredKeys.map((k) => [k, m[k]]));
       }
       return out;
     })();
