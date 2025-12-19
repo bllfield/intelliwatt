@@ -95,9 +95,32 @@ export default function IntelliwattBotHero() {
 
   return (
     <div className="mb-6 rounded-3xl border border-brand-cyan/20 bg-brand-navy px-5 py-5 text-brand-cyan shadow-[0_16px_45px_rgba(16,46,90,0.2)]">
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex items-start gap-4 min-w-0">
-          <div className="relative h-32 w-32 shrink-0">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        {/* Left content: mobile = message full-width above bot image; desktop = bot + message side-by-side */}
+        <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-start sm:gap-4">
+          {/* Message (mobile-first: full width) */}
+          <div className="min-w-0 w-full order-1 sm:order-2 sm:w-auto">
+            <div className="text-xs font-semibold uppercase tracking-[0.28em] text-brand-cyan/60">
+              IntelliWattBot
+            </div>
+            <div className="relative mt-2 w-full">
+              {/* Speech bubble */}
+              <div className="relative w-full rounded-2xl border border-brand-cyan/25 bg-brand-white/5 px-4 py-3">
+                <div
+                  ref={scrollRef}
+                  className="max-h-[200px] overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed text-brand-cyan/85"
+                >
+                  {typed || (full ? "" : "…")}
+                  {isTyping ? <span className="opacity-60">▍</span> : null}
+                </div>
+              </div>
+              {/* bubble tail (desktop only; mobile is full-width so a tail is visually noisy) */}
+              <div className="hidden sm:block absolute -left-2 top-5 h-4 w-4 rotate-45 border-l border-t border-brand-cyan/25 bg-brand-white/5" />
+            </div>
+          </div>
+
+          {/* Bot image */}
+          <div className="relative h-32 w-32 shrink-0 order-2 sm:order-1 mx-auto sm:mx-0">
             <Image
               src="/Intelliwatt Bot Final Gif.gif"
               alt="IntelliWatt Bot"
@@ -105,26 +128,6 @@ export default function IntelliwattBotHero() {
               className="object-contain"
               unoptimized
             />
-          </div>
-
-          <div className="min-w-0">
-            <div className="text-xs font-semibold uppercase tracking-[0.28em] text-brand-cyan/60">
-              IntelliWattBot
-            </div>
-            <div className="relative mt-2">
-              {/* Speech bubble */}
-              <div className="relative rounded-2xl border border-brand-cyan/25 bg-brand-white/5 px-4 py-3">
-                <div
-                  ref={scrollRef}
-                  className="max-h-[140px] overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed text-brand-cyan/85"
-                >
-                  {typed || (full ? "" : "…")}
-                  {isTyping ? <span className="opacity-60">▍</span> : null}
-                </div>
-              </div>
-              {/* bubble tail */}
-              <div className="absolute -left-2 top-5 h-4 w-4 rotate-45 border-l border-t border-brand-cyan/25 bg-brand-white/5" />
-            </div>
           </div>
         </div>
 
