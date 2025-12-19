@@ -107,6 +107,18 @@ function cmp(a: any, b: any, dir: SortDir): number {
   return String(a).localeCompare(String(b)) * d;
 }
 
+function deriveTemplatePlanTypeLabel(r: any): string {
+  const planTypeRaw = String(r?.planType ?? r?.planRules?.planType ?? "").trim();
+  if (planTypeRaw) return planTypeRaw.toUpperCase().replace(/-/g, "_");
+
+  const rateStructureTypeRaw = String(
+    r?.rateStructureType ?? r?.rateStructure?.type ?? r?.rate_structure?.type ?? "",
+  ).trim();
+  if (rateStructureTypeRaw) return rateStructureTypeRaw.toUpperCase();
+
+  return "—";
+}
+
 export default function FactCardOpsPage() {
   const { token, setToken } = useLocalToken();
   const ready = useMemo(() => Boolean(token), [token]);
@@ -1547,6 +1559,9 @@ export default function FactCardOpsPage() {
                 <th className="px-2 py-2 text-left cursor-pointer select-none" onClick={() => toggleTplSort("planName")}>
                   Plan {tplSortKey === "planName" ? (tplSortDir === "asc" ? "▲" : "▼") : ""}
                 </th>
+                <th className="px-2 py-2 text-left">
+                  Type
+                </th>
                 <th className="px-2 py-2 text-right cursor-pointer select-none" onClick={() => toggleTplSort("termMonths")}>
                   Term {tplSortKey === "termMonths" ? (tplSortDir === "asc" ? "▲" : "▼") : ""}
                 </th>
@@ -1571,11 +1586,13 @@ export default function FactCardOpsPage() {
             <tbody>
               {sortedTplRows.map((r: any) => {
                 const eflUrl = (r?.eflUrl ?? "").trim();
+                const planTypeLabel = deriveTemplatePlanTypeLabel(r);
                 return (
                   <tr key={r.id} className="border-t h-12">
                     <td className="px-2 py-2">{r.utilityId ?? "-"}</td>
                     <td className="px-2 py-2">{r.supplier ?? "-"}</td>
                     <td className="px-2 py-2">{r.planName ?? "-"}</td>
+                    <td className="px-2 py-2 font-mono text-[11px]">{planTypeLabel}</td>
                     <td className="px-2 py-2 text-right">{typeof r.termMonths === "number" ? `${r.termMonths} mo` : "-"}</td>
                     <td className="px-2 py-2 text-right">
                       <div className="font-mono">{typeof r.rate500 === "number" ? r.rate500.toFixed(3) : "—"}</div>
@@ -1658,7 +1675,7 @@ export default function FactCardOpsPage() {
               })}
               {tplRows.length === 0 ? (
                 <tr>
-                  <td className="px-2 py-3 text-gray-500" colSpan={9}>
+                  <td className="px-2 py-3 text-gray-500" colSpan={11}>
                     No templates.
                   </td>
                 </tr>
