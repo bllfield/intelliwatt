@@ -10,6 +10,10 @@ import { calculatePlanCostForUsage } from "@/lib/plan-engine/calculatePlanCostFo
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+function isObject(v: unknown): v is Record<string, any> {
+  return typeof v === "object" && v !== null;
+}
+
 function numOrNull(v: unknown): number | null {
   const n = typeof v === "number" ? v : typeof v === "string" ? Number(v) : NaN;
   return Number.isFinite(n) ? n : null;
@@ -31,6 +35,53 @@ function decimalishToNumber(v: any): number | null {
 
 function daysAgo(d: Date, days: number): Date {
   return new Date(d.getTime() - days * 24 * 60 * 60 * 1000);
+}
+
+function detectFreeWeekends(rateStructure: any): boolean {
+  if (!rateStructure || !isObject(rateStructure)) return false;
+  const rs: any = rateStructure;
+  const periods: any[] = Array.isArray(rs?.timeOfUsePeriods)
+    ? rs.timeOfUsePeriods
+    : Array.isArray(rs?.planRules?.timeOfUsePeriods)
+      ? rs.planRules.timeOfUsePeriods
+      : [];
+  if (!Array.isArray(periods) || periods.length === 0) return false;
+
+  const hasWeekdayAllDay = periods.some((p) => {
+    const startHour = numOrNull(p?.startHour);
+    const endHour = numOrNull(p?.endHour);
+    const days = Array.isArray(p?.daysOfWeek) ? (p.daysOfWeek as number[]) : null;
+    return (
+      startHour === 0 &&
+      endHour === 24 &&
+      Array.isArray(days) &&
+      days.length === 5 &&
+      days.every((d) => d === 1 || d === 2 || d === 3 || d === 4 || d === 5)
+    );
+  });
+  const hasWeekendAllDay = periods.some((p) => {
+    const startHour = numOrNull(p?.startHour);
+    const endHour = numOrNull(p?.endHour);
+    const days = Array.isArray(p?.daysOfWeek) ? (p.daysOfWeek as number[]) : null;
+    return startHour === 0 && endHour === 24 && Array.isArray(days) && days.length === 2 && days.includes(0) && days.includes(6);
+  });
+
+  return hasWeekdayAllDay && hasWeekendAllDay;
+}
+
+function detectDayNightTou(rateStructure: any): boolean {
+  if (!rateStructure || !isObject(rateStructure)) return false;
+  const rs: any = rateStructure;
+  const periods: any[] = Array.isArray(rs?.timeOfUsePeriods)
+    ? rs.timeOfUsePeriods
+    : Array.isArray(rs?.planRules?.timeOfUsePeriods)
+      ? rs.planRules.timeOfUsePeriods
+      : [];
+  if (!Array.isArray(periods) || periods.length === 0) return false;
+
+  const hasNight = periods.some((p) => numOrNull(p?.startHour) === 20 && numOrNull(p?.endHour) === 7);
+  const hasDay = periods.some((p) => numOrNull(p?.startHour) === 7 && numOrNull(p?.endHour) === 20);
+  return hasNight && hasDay;
 }
 
 export async function GET(req: NextRequest) {
@@ -149,7 +200,15 @@ export async function GET(req: NextRequest) {
     }
 
     // Attempt to load per-month bucket totals from usage DB (no on-demand aggregation here).
-    const requiredKeys = ["kwh.m.all.total", "kwh.m.all.2000-0700", "kwh.m.all.0700-2000"] as const;
+    const wantsFreeWeekends = detectFreeWeekends(rateStructure);
+    const wantsDayNight = !wantsFreeWeekends && detectDayNightTou(rateStructure);
+
+    const requiredKeys = wantsFreeWeekends
+      ? (["kwh.m.all.total", "kwh.m.weekday.total", "kwh.m.weekend.total"] as const)
+      : wantsDayNight
+        ? (["kwh.m.all.total", "kwh.m.all.2000-0700", "kwh.m.all.0700-2000"] as const)
+        : (["kwh.m.all.total", "kwh.m.all.2000-0700", "kwh.m.all.0700-2000"] as const);
+
     const rows = await (usagePrisma as any).homeMonthlyUsageBucket.findMany({
       where: { homeId: house.id, bucketKey: { in: requiredKeys as any } },
       select: { yearMonth: true, bucketKey: true, kwhTotal: true },
@@ -185,11 +244,7 @@ export async function GET(req: NextRequest) {
         for (const k of requiredKeys) {
           if (typeof m[k] !== "number" || !Number.isFinite(m[k])) return null;
         }
-        out[ym] = {
-          "kwh.m.all.total": m["kwh.m.all.total"],
-          "kwh.m.all.2000-0700": m["kwh.m.all.2000-0700"],
-          "kwh.m.all.0700-2000": m["kwh.m.all.0700-2000"],
-        };
+        out[ym] = Object.fromEntries(requiredKeys.map((k) => [k, m[k]]));
       }
       return out;
     })();
@@ -214,6 +269,10 @@ export async function GET(req: NextRequest) {
       monthsCount,
       annualKwh,
       usageBucketsByMonthIncluded: Boolean(usageBucketsByMonth),
+      detected: {
+        freeWeekends: wantsFreeWeekends,
+        dayNightTou: wantsDayNight,
+      },
       monthsIncluded: months,
       estimate,
     });

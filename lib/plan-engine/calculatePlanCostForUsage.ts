@@ -226,6 +226,7 @@ function extractTouPhase1Rates(rateStructure: any): null | (
 
 function sumMonthBucketKwh(month: Record<string, number> | null | undefined, key: string): number | null {
   const v = month ? (month as any)[key] : undefined;
+  // Fail-closed: treat null/undefined/blank as missing (do NOT allow Number(null) => 0).
   if (v == null) return null;
   if (typeof v === "string" && v.trim() === "") return null;
   const n = typeof v === "number" ? v : Number(v);
@@ -331,9 +332,6 @@ export function calculatePlanCostForUsage(args: {
     if (!tou) {
       return { status: "NOT_COMPUTABLE", reason: "TOU_RATE_EXTRACTION_UNSUPPORTED" };
     }
-    if (tou.kind !== "DAY_NIGHT_ALL_DAYS") {
-      return { status: "NOT_COMPUTABLE", reason: "TOU_UNSUPPORTED_PHASE1" };
-    }
 
     const byMonth = args.usageBucketsByMonth;
     const allMonths = Object.keys(byMonth ?? {}).sort();
@@ -361,27 +359,51 @@ export function calculatePlanCostForUsage(args: {
       if (!m || typeof m !== "object") continue;
 
       const totalKey = "kwh.m.all.total";
-      const nightKey = "kwh.m.all.2000-0700";
-      const dayKey = "kwh.m.all.0700-2000";
       const monthTotalKwh = sumMonthBucketKwh(m, totalKey);
-      const nightKwh = sumMonthBucketKwh(m, nightKey);
-      const dayKwh = sumMonthBucketKwh(m, dayKey);
 
-      if (monthTotalKwh == null) missing.push(`${ym}:${totalKey}`);
-      if (nightKwh == null) missing.push(`${ym}:${nightKey}`);
-      if (dayKwh == null) missing.push(`${ym}:${dayKey}`);
-      if (monthTotalKwh == null || nightKwh == null || dayKwh == null) continue;
+      if (tou.kind === "DAY_NIGHT_ALL_DAYS") {
+        const nightKey = "kwh.m.all.2000-0700";
+        const dayKey = "kwh.m.all.0700-2000";
+        const nightKwh = sumMonthBucketKwh(m, nightKey);
+        const dayKwh = sumMonthBucketKwh(m, dayKey);
 
-      const sum = nightKwh + dayKwh;
-      // Safety: if buckets disagree, do NOT attempt to normalize/adjust.
-      // Treat this as non-computable so we don't produce un-auditable math.
-      if (Math.abs(sum - monthTotalKwh) > 0.01) {
-        mismatched.push(`${ym}:sum(day+night)=${sum.toFixed(3)} total=${monthTotalKwh.toFixed(3)}`);
-        continue;
+        if (monthTotalKwh == null) missing.push(`${ym}:${totalKey}`);
+        if (nightKwh == null) missing.push(`${ym}:${nightKey}`);
+        if (dayKwh == null) missing.push(`${ym}:${dayKey}`);
+        if (monthTotalKwh == null || nightKwh == null || dayKwh == null) continue;
+
+        const sum = nightKwh + dayKwh;
+        // Safety: if buckets disagree, do NOT attempt to normalize/adjust.
+        if (Math.abs(sum - monthTotalKwh) > 0.01) {
+          mismatched.push(`${ym}:sum(day+night)=${sum.toFixed(3)} total=${monthTotalKwh.toFixed(3)}`);
+          continue;
+        }
+
+        repEnergyDollars +=
+          (nightKwh * (tou.nightRateCentsPerKwh / 100)) + (dayKwh * (tou.dayRateCentsPerKwh / 100));
+        totalKwh += monthTotalKwh;
+      } else {
+        // Free Weekends (weekday vs weekend all-day)
+        const wkKey = "kwh.m.weekday.total";
+        const weKey = "kwh.m.weekend.total";
+        const weekdayKwh = sumMonthBucketKwh(m, wkKey);
+        const weekendKwh = sumMonthBucketKwh(m, weKey);
+
+        if (weekdayKwh == null) missing.push(`${ym}:${wkKey}`);
+        if (weekendKwh == null) missing.push(`${ym}:${weKey}`);
+        if (weekdayKwh == null || weekendKwh == null) continue;
+
+        const sum = weekdayKwh + weekendKwh;
+        // If total exists, enforce strict equality; otherwise we can still compute TDSP off sum.
+        if (monthTotalKwh != null && Math.abs(sum - monthTotalKwh) > 0.01) {
+          mismatched.push(`${ym}:sum(weekday+weekend)=${sum.toFixed(3)} total=${monthTotalKwh.toFixed(3)}`);
+          continue;
+        }
+
+        repEnergyDollars +=
+          (weekdayKwh * (tou.weekdayRateCentsPerKwh / 100)) + (weekendKwh * (tou.weekendRateCentsPerKwh / 100));
+        totalKwh += monthTotalKwh != null ? monthTotalKwh : sum;
       }
-
-      repEnergyDollars += (nightKwh * (tou.nightRateCentsPerKwh / 100)) + (dayKwh * (tou.dayRateCentsPerKwh / 100));
-      totalKwh += monthTotalKwh;
     }
 
     if (missing.length > 0) {
@@ -402,8 +424,13 @@ export function calculatePlanCostForUsage(args: {
     const tdspTotal = tdspDeliveryDollars + tdspFixedDollars;
     const total = repTotal + tdspTotal;
 
-    notes.push(`TOU Phase-1 (day/night): months=${months.length}`);
-    notes.push("TOU buckets: kwh.m.all.total + kwh.m.all.2000-0700 + kwh.m.all.0700-2000");
+    if (tou.kind === "DAY_NIGHT_ALL_DAYS") {
+      notes.push(`TOU Phase-1 (day/night): months=${months.length}`);
+      notes.push("TOU buckets: kwh.m.all.total + kwh.m.all.2000-0700 + kwh.m.all.0700-2000");
+    } else {
+      notes.push(`Free Weekends (weekday/weekend): months=${months.length}`);
+      notes.push("Buckets: kwh.m.weekday.total + kwh.m.weekend.total (+ optional kwh.m.all.total sanity)");
+    }
     if (repFixedMonthly > 0) notes.push("Includes REP fixed monthly charge (from template)");
     else notes.push("REP fixed monthly charge not found (assumed $0)");
     if (tdspPerKwhCents > 0 || tdspMonthly > 0) notes.push("Includes TDSP delivery");

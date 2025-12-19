@@ -2463,6 +2463,17 @@ Phase-1 TOU (non-dashboard call site):
   - Passes `usageBucketsByMonth` into `calculatePlanCostForUsage()` **only when all required keys exist for all requested months**.
   - Dashboard remains unchanged/locked; TOU plans remain QUEUED at plan-level. This endpoint is for accurate plan-engine validation.
 
+Free Weekends (bucket-gated; plan-level remains QUEUED):
+- **Bucket requirements**: `lib/plan-engine/requiredBucketsForPlan.ts`
+  - Added `supportsWeekendSplitEnergy` flag (canonical buckets: `kwh.m.weekday.total`, `kwh.m.weekend.total`)
+- **Computability**: `lib/plan-engine/planComputability.ts`
+  - Detects weekday/weekend all-day periods and returns `planCalcReasonCode="FREE_WEEKENDS_REQUIRES_BUCKETS"` (still NOT_COMPUTABLE)
+- **Cost math**: `lib/plan-engine/calculatePlanCostForUsage.ts`
+  - Added Free Weekends calc path (only runs when `usageBucketsByMonth` is provided + complete)
+  - Fails closed on missing buckets or bucket sum mismatch (no normalization/assumptions)
+- **Endpoint wiring**: `app/api/plan-engine/offer-estimate/route.ts`
+  - Detects Free Weekends templates and loads `kwh.m.all.total` + `kwh.m.weekday.total` + `kwh.m.weekend.total` buckets when present
+
 Next (Dashboard):
 - Replace “Best for you (preview)” proxy sort with true usage-based ranking by connecting usage → plan engine (`calculatePlanCostForUsage`).
 - Expand displayed fees (base monthly fee, more structured ETF) once those fields are reliably present in the WattBuy offer payload and/or derived from templates.

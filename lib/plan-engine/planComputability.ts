@@ -15,6 +15,7 @@ export type ComputabilityStatus =
 export type SupportedPlanFeatures = {
   supportsFixedEnergyRate: boolean;
   supportsTouEnergy: boolean;
+  supportsWeekendSplitEnergy: boolean;
   supportsTieredEnergy: boolean;
   supportsCredits: boolean;
   supportsBaseFees: boolean;
@@ -83,6 +84,39 @@ export function inferSupportedFeaturesFromTemplate(input: {
     if (hasNonEmptyArray((rs?.planRules as any)?.timeOfUsePeriods)) return true;
     return false;
   })();
+
+  // Detect "Free Weekends" style templates (weekday all-day vs weekend all-day).
+  const supportsWeekendSplitEnergy = (() => {
+    if (!isObject(rsAny)) return false;
+    const rs = rsAny as any;
+    const periods: any[] = Array.isArray(rs?.timeOfUsePeriods)
+      ? rs.timeOfUsePeriods
+      : Array.isArray((rs?.planRules as any)?.timeOfUsePeriods)
+        ? (rs.planRules as any).timeOfUsePeriods
+        : [];
+    if (!Array.isArray(periods) || periods.length === 0) return false;
+
+    const hasWeekdayAllDay = periods.some((p) => {
+      const startHour = numOrNull(p?.startHour);
+      const endHour = numOrNull(p?.endHour);
+      const days = Array.isArray(p?.daysOfWeek) ? (p.daysOfWeek as number[]) : null;
+      return (
+        startHour === 0 &&
+        endHour === 24 &&
+        Array.isArray(days) &&
+        days.length === 5 &&
+        days.every((d) => d === 1 || d === 2 || d === 3 || d === 4 || d === 5)
+      );
+    });
+    const hasWeekendAllDay = periods.some((p) => {
+      const startHour = numOrNull(p?.startHour);
+      const endHour = numOrNull(p?.endHour);
+      const days = Array.isArray(p?.daysOfWeek) ? (p.daysOfWeek as number[]) : null;
+      return startHour === 0 && endHour === 24 && Array.isArray(days) && days.length === 2 && days.includes(0) && days.includes(6);
+    });
+
+    return hasWeekdayAllDay && hasWeekendAllDay;
+  })();
   const supportsTieredEnergy = false;
 
   if (isObject(input.rateStructure)) {
@@ -104,6 +138,7 @@ export function inferSupportedFeaturesFromTemplate(input: {
     features: {
       supportsFixedEnergyRate,
       supportsTouEnergy,
+      supportsWeekendSplitEnergy,
       supportsTieredEnergy,
       supportsCredits,
       supportsBaseFees,
@@ -152,6 +187,16 @@ export function derivePlanCalcRequirementsFromTemplate(args: {
     }
 
     if (inferred.features.supportsTouEnergy) {
+      if (inferred.features.supportsWeekendSplitEnergy) {
+        const reqs = requiredBucketsForPlan({ features: { supportsTouEnergy: false, supportsWeekendSplitEnergy: true } });
+        return {
+          planCalcVersion,
+          planCalcStatus: "NOT_COMPUTABLE" as const,
+          planCalcReasonCode: "FREE_WEEKENDS_REQUIRES_BUCKETS",
+          requiredBucketKeys: reqs.map((r) => r.key),
+          supportedFeatures: { ...inferred.features, notes: inferred.notes },
+        };
+      }
       // We are not marking TOU computable yet (dashboard remains v1 fixed-only), but we want:
       // - a precise reason code
       // - requiredBucketKeys populated so the bucket registry can self-register definitions

@@ -1,5 +1,6 @@
 export type SupportedPlanFeaturesLike = {
   supportsTouEnergy: boolean;
+  supportsWeekendSplitEnergy?: boolean;
 };
 
 export type UsageBucketRequirement = {
@@ -53,6 +54,19 @@ export function requiredBucketsForPlan(input: {
       key: "kwh.m.weekend.0700-2000",
       description: "Day kWh (weekends, 07:00-20:00)",
       optional: true,
+    });
+  }
+
+  // Phase: Free Weekends (weekday vs weekend all-day), bucket-gated.
+  // IMPORTANT: canonical "all-day" buckets use `.total` (not `.0000-2400`).
+  if (input.features.supportsWeekendSplitEnergy) {
+    out.push({
+      key: "kwh.m.weekday.total",
+      description: "Total monthly kWh (weekdays, 00:00-24:00)",
+    });
+    out.push({
+      key: "kwh.m.weekend.total",
+      description: "Total monthly kWh (weekends, 00:00-24:00)",
     });
   }
 
