@@ -327,13 +327,23 @@ export function calculatePlanCostForUsage(args: {
 
   const repEnergyCents = extractFixedRepEnergyCentsPerKwh(args.rateStructure);
   if (repEnergyCents === null) {
-    // IMPORTANT: Preserve current v1 behavior for existing call sites.
-    // Only attempt TOU math when explicit bucket totals are provided (future wiring).
+    // IMPORTANT: Preserve current v1 fixed-rate behavior. For non-fixed plans:
+    // - If we have buckets, attempt TOU computations.
+    // - If we don't have buckets, still try to classify the structure to return a precise fail-closed reason.
+    const tou2Maybe = extractDeterministicTouSchedule(args.rateStructure);
     if (!args.usageBucketsByMonth) {
-      return { status: "NOT_COMPUTABLE", reason: "Unsupported rateStructure (no single fixed REP energy rate)" };
+      if (tou2Maybe.schedule) {
+        return { status: "NOT_COMPUTABLE", reason: "MISSING_USAGE_BUCKETS" };
+      }
+      const tou1Maybe = extractTouPhase1Rates(args.rateStructure);
+      if (tou1Maybe) {
+        return { status: "NOT_COMPUTABLE", reason: "MISSING_USAGE_BUCKETS" };
+      }
+      const reasonCode = (tou2Maybe as any)?.reasonCode ? String((tou2Maybe as any).reasonCode) : "UNSUPPORTED_RATE_STRUCTURE";
+      return { status: "NOT_COMPUTABLE", reason: reasonCode };
     }
 
-    const tou2 = extractDeterministicTouSchedule(args.rateStructure);
+    const tou2 = tou2Maybe;
     if (tou2.schedule) {
       const schedule = tou2.schedule;
       const byMonth = args.usageBucketsByMonth;

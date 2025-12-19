@@ -91,6 +91,10 @@ export default function PlanEngineLabPage() {
   const [offersError, setOffersError] = useState<string | null>(null);
   const [offersRaw, setOffersRaw] = useState<any>(null);
   const [offersList, setOffersList] = useState<any[]>([]);
+  const [templateClassifying, setTemplateClassifying] = useState(false);
+  const [templateClassError, setTemplateClassError] = useState<string | null>(null);
+  const [templateKindByOfferId, setTemplateKindByOfferId] = useState<Record<string, string>>({});
+  const [templateReasonByOfferId, setTemplateReasonByOfferId] = useState<Record<string, string>>({});
   const [monthsCount, setMonthsCount] = useState(12);
   const [backfill, setBackfill] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -176,12 +180,71 @@ export default function PlanEngineLabPage() {
       const offers = Array.isArray(json?.offers) ? json.offers : [];
       setOffersList(offers);
       setExtractStatus(`Fetched ${offers.length} offers.`);
+      setTemplateKindByOfferId({});
+      setTemplateReasonByOfferId({});
     } catch (e: any) {
       setOffersError(e?.message ?? String(e));
     } finally {
       setOffersLoading(false);
     }
   }, [lookupMode, wattkey, address, city, state, zip]);
+
+  function classifyUsingTemplateResult(r: any): string {
+    const estimate = r?.estimate ?? null;
+    const notes: string[] = Array.isArray(estimate?.notes) ? estimate.notes.map((x: any) => String(x)) : [];
+    const reason = String(estimate?.reason ?? "").toUpperCase();
+    const notesHay = notes.join(" ").toUpperCase();
+
+    if (notesHay.includes("FREE WEEKENDS") || reason.includes("FREE_WEEKENDS")) return "free-weekends";
+    if (notesHay.includes("FREE NIGHTS") || notesHay.includes("NIGHT") && notesHay.includes("TOU")) return "free-nights";
+    if (notesHay.includes("TOU PHASE-2") || notesHay.includes("TOU PHASE-1") || reason.includes("TOU")) return "tou";
+    if (reason.includes("NON_DETERMINISTIC")) return "variable";
+
+    if (estimate?.status === "OK") return "fixed";
+    return "other";
+  }
+
+  const classifyOffersFromTemplates = useCallback(async () => {
+    setTemplateClassifying(true);
+    setTemplateClassError(null);
+    try {
+      const offerIds = offersList.map((o: any) => String(o?.offer_id ?? "").trim()).filter(Boolean).slice(0, 25);
+      if (offerIds.length === 0) {
+        setTemplateClassError("No offers to classify.");
+        return;
+      }
+
+      const res = await fetch("/api/plan-engine/estimate-set", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ offerIds, monthsCount: 12, backfill: false }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) {
+        setTemplateClassError(json?.error ? String(json.error) : `http_${res.status}`);
+        return;
+      }
+
+      const results = Array.isArray(json?.results) ? json.results : [];
+      const kindMap: Record<string, string> = {};
+      const reasonMap: Record<string, string> = {};
+      for (const r of results) {
+        const id = String(r?.offerId ?? "").trim();
+        if (!id) continue;
+        kindMap[id] = classifyUsingTemplateResult(r);
+        const est = r?.estimate ?? {};
+        reasonMap[id] = String(est?.reason ?? "");
+      }
+
+      setTemplateKindByOfferId(kindMap);
+      setTemplateReasonByOfferId(reasonMap);
+      setExtractStatus(`Classified ${Object.keys(kindMap).length} offers from templates.`);
+    } catch (e: any) {
+      setTemplateClassError(e?.message ?? String(e));
+    } finally {
+      setTemplateClassifying(false);
+    }
+  }, [offersList]);
 
   const run = useCallback(async () => {
     setBusy(true);
@@ -235,7 +298,11 @@ export default function PlanEngineLabPage() {
     return 'other';
   }
 
-  const offersFiltered = offersList.filter((o: any) => (offerKind === 'all' ? true : classifyOffer(o) === offerKind));
+  const offersFiltered = offersList.filter((o: any) => {
+    const id = String(o?.offer_id ?? '').trim();
+    const kind = (id && templateKindByOfferId[id] ? templateKindByOfferId[id] : classifyOffer(o)) as any;
+    return offerKind === 'all' ? true : kind === offerKind;
+  });
   const offerIdsFromFiltered = offersFiltered.map((o: any) => String(o?.offer_id ?? '').trim()).filter(Boolean);
 
   return (
@@ -344,7 +411,17 @@ export default function PlanEngineLabPage() {
             >
               {offersLoading ? 'Fetching…' : 'Fetch offers'}
             </button>
+            <button
+              type="button"
+              onClick={classifyOffersFromTemplates}
+              disabled={templateClassifying || offersList.length === 0}
+              className="px-4 py-2 rounded border bg-white hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
+              title="Uses our stored RatePlan templates via /api/plan-engine/estimate-set to classify offers (up to 25)."
+            >
+              {templateClassifying ? 'Classifying…' : 'Classify from templates'}
+            </button>
             {offersError ? <div className="text-sm text-red-600">{offersError}</div> : null}
+            {templateClassError ? <div className="text-sm text-red-600">{templateClassError}</div> : null}
             {offersFiltered.length > 0 ? (
               <div className="flex items-center gap-2">
                 <button
@@ -371,6 +448,7 @@ export default function PlanEngineLabPage() {
                 <thead className="bg-gray-50 text-left">
                   <tr>
                     <th className="p-2">offer_id</th>
+                    <th className="p-2">type</th>
                     <th className="p-2">supplier</th>
                     <th className="p-2">plan</th>
                     <th className="p-2">term</th>
@@ -382,6 +460,8 @@ export default function PlanEngineLabPage() {
                   {offersFiltered.slice(0, 50).map((o: any, idx: number) => {
                     const offerId = String(o?.offer_id ?? '').trim();
                     const od = o?.offer_data ?? {};
+                    const kind = offerId && templateKindByOfferId[offerId] ? templateKindByOfferId[offerId] : classifyOffer(o);
+                    const kindReason = offerId && templateReasonByOfferId[offerId] ? templateReasonByOfferId[offerId] : "";
                     const supplier = String(od?.supplier ?? od?.supplier_name ?? '').trim();
                     const plan = String(o?.offer_name ?? od?.offer_name ?? od?.name ?? '').trim();
                     const term = od?.term ?? od?.term_months ?? null;
@@ -389,6 +469,7 @@ export default function PlanEngineLabPage() {
                     return (
                       <tr key={offerId || idx} className="border-t border-gray-200">
                         <td className="p-2 font-mono break-all">{offerId}</td>
+                        <td className="p-2 font-mono text-[11px]" title={kindReason}>{String(kind)}</td>
                         <td className="p-2">{supplier}</td>
                         <td className="p-2">{plan}</td>
                         <td className="p-2 font-mono">{term != null ? String(term) : ''}</td>

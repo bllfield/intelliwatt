@@ -2487,6 +2487,7 @@ Plan engine (non-dashboard): estimate a set of offers
   - Added minimal admin page `/admin/plan-engine` to run `estimate-set` and render JSON + summary table
   - Added helper to extract `offerId` list from pasted dashboard JSON (keys: `offer_id`, `offerId`, `offerID`) + clean/de-dupe button
   - Added OfferId Finder panel on `/admin/plan-engine` to fetch live WattBuy offers (`/api/wattbuy/offers`) and click-to-add `offer_id` values into estimate-set input
+  - Improved offer “type” classification in Plan Engine Lab: supports template-backed classification (via non-dashboard estimate-set), since WattBuy payload fields are not reliable enough to identify TOU vs fixed consistently
 
 TOU Phase-2 (arbitrary windows; non-dashboard only)
 - Added deterministic TOU window schedule extraction: `lib/plan-engine/touPeriods.ts`
