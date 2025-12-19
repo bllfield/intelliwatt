@@ -139,16 +139,21 @@ async function main() {
     return { yearMonth: ym, missing };
   });
 
-  // D) Duplicate safety check: any (yearMonth,bucketKey) with count > 1 for that homeId
-  const dupRows = await usagePrisma.$queryRaw<
-    Array<{ yearMonth: string; bucketKey: string; n: number }>
-  >`select "yearMonth", "bucketKey", count(*)::int as n
-    from "HomeMonthlyUsageBucket"
-    where "homeId" = ${homeId}
-    group by "yearMonth", "bucketKey"
-    having count(*) > 1
-    order by n desc, "yearMonth" desc, "bucketKey" asc
-    limit 200`;
+  // D) Duplicate safety check (read-only):
+  // Find any (yearMonth, bucketKey) pairs with count > 1 for that homeId.
+  //
+  // Note: we intentionally avoid raw SQL here to eliminate any chance of
+  // SQL-injection from CLI arguments.
+  const dupAgg = await usagePrisma.homeMonthlyUsageBucket.groupBy({
+    by: ["yearMonth", "bucketKey"],
+    where: { homeId },
+    _count: { bucketKey: true },
+    orderBy: [{ _count: { bucketKey: "desc" } }, { yearMonth: "desc" }, { bucketKey: "asc" }],
+  });
+  const dupRows = dupAgg
+    .filter((r) => Number(r._count.bucketKey) > 1)
+    .slice(0, 200)
+    .map((r) => ({ yearMonth: String(r.yearMonth), bucketKey: String(r.bucketKey), n: Number(r._count.bucketKey) }));
 
   // Output
   console.log(`\n=== Usage Bucket Key Audit (read-only) ===`);
