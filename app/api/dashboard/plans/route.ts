@@ -507,7 +507,12 @@ export async function GET(req: NextRequest) {
 
     const planCalcByRatePlanId = new Map<
       string,
-      { planCalcStatus: "COMPUTABLE" | "NOT_COMPUTABLE" | "UNKNOWN"; planCalcReasonCode: string; rateStructurePresent: boolean }
+      {
+        planCalcStatus: "COMPUTABLE" | "NOT_COMPUTABLE" | "UNKNOWN";
+        planCalcReasonCode: string;
+        rateStructurePresent: boolean;
+        rateStructure?: any | null;
+      }
     >();
 
     if (mappedRatePlanIds.length) {
@@ -535,6 +540,7 @@ export async function GET(req: NextRequest) {
               planCalcStatus: storedStatus,
               planCalcReasonCode: storedReason ?? "UNKNOWN",
               rateStructurePresent: rsPresent,
+              rateStructure: rsPresent ? rp.rateStructure : null,
             });
             continue;
           }
@@ -547,6 +553,7 @@ export async function GET(req: NextRequest) {
             planCalcStatus: derived.planCalcStatus,
             planCalcReasonCode: derived.planCalcReasonCode,
             rateStructurePresent: rsPresent,
+            rateStructure: rsPresent ? rp.rateStructure : null,
           });
         }
       } catch {
@@ -974,26 +981,70 @@ export async function GET(req: NextRequest) {
             `Based on your last 12 months usage. Ranking uses provider EFL average price at ${bestBucket} kWh until IntelliWatt true-cost is enabled.`;
         }
 
-        // Also compute a best-effort "all-in" ranking using trueCostEstimate.monthlyCostDollars (OK-only).
-        // Keep this best-effort and bounded: re-rank the already-shaped bestOffers when available.
-        const allInPool = Array.isArray(bestOffers) && bestOffers.length > 0 ? bestOffers : shaped;
-        const scoredAllIn = (allInPool ?? [])
-          .map((o: any) => {
-            const tce = o?.intelliwatt?.trueCostEstimate;
-            const ok = tce?.status === "OK";
-            const v = ok ? Number(tce?.monthlyCostDollars) : Number.POSITIVE_INFINITY;
-            return { o, v: Number.isFinite(v) ? v : Number.POSITIVE_INFINITY };
-          })
+        // Compute "all-in" best offers by scoring the ENTIRE offer set (not the proxy bestOffers or current page slice).
+        // Score = trueCostEstimate.monthlyCostDollars for computable plans only (fail-closed).
+        // Then shape only the top 5 to keep response bounded.
+        const allInTdspCache = new Map<string, any | null>();
+        const scoreOfferAllIn = async (o: any): Promise<number> => {
+          if (annualKwhForCalc == null) return Number.POSITIVE_INFINITY;
+          const offerId = String(o?.offer_id ?? "");
+          if (!offerId) return Number.POSITIVE_INFINITY;
+
+          const ratePlanId = mapByOfferId.get(offerId) ?? null;
+          if (!ratePlanId) return Number.POSITIVE_INFINITY;
+
+          const calc = planCalcByRatePlanId.get(ratePlanId) ?? null;
+          if (!calc || calc.planCalcStatus !== "COMPUTABLE" || !calc.rateStructurePresent || !calc.rateStructure) {
+            return Number.POSITIVE_INFINITY;
+          }
+
+          const tdspSlugRaw = (shapeOfferBase(o) as any)?.utility?.tdspSlug ?? null;
+          const tdspSlug = typeof tdspSlugRaw === "string" ? tdspSlugRaw.trim().toLowerCase() : "";
+          let tdspRates: any | null = null;
+          if (tdspSlug) {
+            if (allInTdspCache.has(tdspSlug)) {
+              tdspRates = allInTdspCache.get(tdspSlug) ?? null;
+            } else {
+              try {
+                tdspRates = await getTdspDeliveryRates({ tdspSlug: tdspSlug, asOf: new Date() });
+              } catch {
+                tdspRates = null;
+              }
+              allInTdspCache.set(tdspSlug, tdspRates);
+            }
+          }
+
+          const est = calculatePlanCostForUsage({
+            annualKwh: annualKwhForCalc,
+            monthsCount: 12,
+            tdsp: {
+              perKwhDeliveryChargeCents: Number(tdspRates?.perKwhDeliveryChargeCents ?? 0) || 0,
+              monthlyCustomerChargeDollars: Number(tdspRates?.monthlyCustomerChargeDollars ?? 0) || 0,
+              effectiveDate: tdspRates?.effectiveDate ?? undefined,
+            },
+            rateStructure: calc.rateStructure,
+          });
+
+          if (est?.status !== "OK") return Number.POSITIVE_INFINITY;
+          const v = Number((est as any)?.monthlyCostDollars);
+          return Number.isFinite(v) ? v : Number.POSITIVE_INFINITY;
+        };
+
+        const scored = await Promise.all(
+          offers.map(async (o: any) => ({ o, v: await scoreOfferAllIn(o) })),
+        );
+
+        const topAllInRaw = scored
           .filter((x) => x.v !== Number.POSITIVE_INFINITY)
           .sort((a, b) => a.v - b.v)
           .slice(0, 5)
           .map((x) => x.o);
 
-        bestOffersAllIn = scoredAllIn;
+        bestOffersAllIn = await Promise.all(topAllInRaw.map(shapeOffer));
         if (bestOffersAllIn.length > 0) {
           bestOffersAllInBasis = "proxy_allin_monthly_trueCostEstimate";
           bestOffersAllInDisclaimer =
-            "Includes TDSP delivery. REP energy is still based on provider 1000 kWh estimate until IntelliWatt true-cost is enabled.";
+            "Includes TDSP delivery. Ranked by IntelliWatt all-in estimate (fixed-rate-only; TOU/variable plans excluded).";
         }
       } else {
         // No-usage mode: rank bestOffers by selected approximate monthly usage, mapped to nearest EFL bucket.
