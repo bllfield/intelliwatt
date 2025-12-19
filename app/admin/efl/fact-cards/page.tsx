@@ -1077,6 +1077,7 @@ export default function FactCardOpsPage() {
                         <th className="px-2 py-2 text-left">Expected</th>
                         <th className="px-2 py-2 text-left">Reason</th>
                         <th className="px-2 py-2 text-left">Action</th>
+                        <th className="px-2 py-2 text-left">Details</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1097,6 +1098,13 @@ export default function FactCardOpsPage() {
                             >
                               Load
                             </button>
+                          </td>
+                          <td className="px-2 py-2">
+                            {m.offerId && m.offerId !== "—" ? (
+                              <a className="underline" href={`/admin/plans/${encodeURIComponent(m.offerId)}`} target="_blank" rel="noreferrer">
+                                Details
+                              </a>
+                            ) : null}
                           </td>
                         </tr>
                       ))}
@@ -1125,6 +1133,7 @@ export default function FactCardOpsPage() {
                     <th className="px-2 py-2 text-left">Status</th>
                     <th className="px-2 py-2 text-left">Template</th>
                     <th className="px-2 py-2 text-left">Actions</th>
+                    <th className="px-2 py-2 text-left">Details</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1148,6 +1157,13 @@ export default function FactCardOpsPage() {
                           >
                             Load
                           </button>
+                        </td>
+                        <td className="px-2 py-2">
+                          {r.offerId ? (
+                            <a className="underline" href={`/admin/plans/${encodeURIComponent(String(r.offerId))}`} target="_blank" rel="noreferrer">
+                              Details
+                            </a>
+                          ) : null}
                         </td>
                       </tr>
                     );
@@ -1290,6 +1306,17 @@ export default function FactCardOpsPage() {
                             title="Deep link: prefill the manual runner on this page"
                           >
                             Run manual
+                          </a>
+                        ) : null}
+                        {it?.offerId ? (
+                          <a
+                            className="px-2 py-1 rounded border hover:bg-gray-50"
+                            href={`/admin/plans/${encodeURIComponent(String(it.offerId))}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            title="Open Plan Details"
+                          >
+                            Details
                           </a>
                         ) : null}
                         {queueStatus === "OPEN" ? (

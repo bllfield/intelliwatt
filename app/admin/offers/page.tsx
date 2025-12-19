@@ -428,6 +428,15 @@ function RowActions({ offerId, raw }: { offerId: string; raw: any }) {
   return (
     <div className="flex flex-col gap-1 text-xs">
       <div className="flex items-center gap-2">
+        <a
+          className="rounded border px-2 py-1 bg-white hover:bg-gray-50"
+          href={`/admin/plans/${encodeURIComponent(offerId)}`}
+          target="_blank"
+          rel="noreferrer"
+          title="Open Plan Details"
+        >
+          Details
+        </a>
         <button
           className="rounded border px-2 py-1 bg-white hover:bg-gray-50"
           onClick={showOffer}

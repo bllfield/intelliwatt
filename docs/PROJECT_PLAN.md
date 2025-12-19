@@ -2489,6 +2489,13 @@ Plan engine (non-dashboard): estimate a set of offers
   - Added OfferId Finder panel on `/admin/plan-engine` to fetch live WattBuy offers (`/api/wattbuy/offers`) and click-to-add `offer_id` values into estimate-set input
   - Improved offer “type” classification in Plan Engine Lab: supports template-backed classification (via non-dashboard estimate-set), since WattBuy payload fields are not reliable enough to identify TOU vs fixed consistently
   - OfferId Finder now uses deterministic **type precedence** + **flags** from template-backed estimate-set results (with `HEURISTIC` flag when falling back to WattBuy text fields)
+  - Added Plan Details page: `/admin/plans/[offerId]` (offer + linked RatePlan + rateStructure + plan-engine introspection + optional admin estimate runner by homeId)
+  - Added “Details” links from admin offer tables to `/admin/plans/[offerId]` (Plan Engine Lab, offers explorer, probe, and EFL ops tables)
+  - Added Plan Engine View (introspection) to Fact Cards manual loader (`/admin/efl/fact-cards`) so admins can see extracted TOU periods + required buckets immediately after parsing
+
+- Admin-only APIs:
+  - `GET /api/admin/plans/details?offerId=...` (RatePlan + rateStructure + introspection; token-gated)
+  - `POST /api/admin/plan-engine/offer-estimate` (admin wrapper for offer estimate by homeId; token-gated)
 
 TOU Phase-2 (arbitrary windows; non-dashboard only)
 - Added deterministic TOU window schedule extraction: `lib/plan-engine/touPeriods.ts`

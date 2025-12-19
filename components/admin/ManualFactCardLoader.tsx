@@ -8,6 +8,7 @@
 "use client";
 
 import React, { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { introspectPlanFromRateStructure } from "@/lib/plan-engine/introspectPlanFromRateStructure";
 
 type UploadResponse = {
   ok: true;
@@ -220,6 +221,15 @@ export function ManualFactCardLoader(props: {
 
   const derived = result?.derivedForValidation ?? null;
   const derivedText = derived ? pretty(derived) : null;
+  const planEngineView = useMemo(() => {
+    const rs = (result as any)?.rateStructure ?? null;
+    if (!rs) return null;
+    try {
+      return introspectPlanFromRateStructure({ rateStructure: rs });
+    } catch (e: any) {
+      return { ok: false, error: e?.message ?? String(e) };
+    }
+  }, [result]);
 
   return (
     <div className="space-y-6">
@@ -592,6 +602,75 @@ export function ManualFactCardLoader(props: {
               })}
             </pre>
           </details>
+
+          {planEngineView ? (
+            <details className="rounded-lg border bg-white p-3">
+              <summary className="cursor-pointer text-sm font-semibold text-brand-navy">Plan Engine View (introspection)</summary>
+              {"planCalc" in (planEngineView as any) ? (
+                <div className="mt-2 space-y-3">
+                  <div className="grid gap-2 md:grid-cols-2 text-xs">
+                    <div className="rounded border bg-gray-50 p-2">
+                      <div className="font-semibold text-brand-navy">Computability (dashboard-safe)</div>
+                      <div className="mt-1 font-mono">
+                        status={(planEngineView as any).planCalc.planCalcStatus}{" "}
+                        reason={(planEngineView as any).planCalc.planCalcReasonCode}
+                      </div>
+                    </div>
+                    <div className="rounded border bg-gray-50 p-2">
+                      <div className="font-semibold text-brand-navy">Required buckets</div>
+                      <div className="mt-1 font-mono break-all">
+                        {Array.isArray((planEngineView as any).requiredBucketKeys)
+                          ? (planEngineView as any).requiredBucketKeys.join(", ")
+                          : "—"}
+                      </div>
+                    </div>
+                  </div>
+
+                  {(planEngineView as any)?.tou?.schedule?.periods?.length ? (
+                    <div className="space-y-1">
+                      <div className="text-xs font-semibold text-brand-navy">Deterministic TOU schedule</div>
+                      <div className="overflow-x-auto rounded border">
+                        <table className="min-w-full text-xs">
+                          <thead className="bg-gray-50">
+                            <tr>
+                              <th className="px-2 py-1 text-left">dayType</th>
+                              <th className="px-2 py-1 text-left">window</th>
+                              <th className="px-2 py-1 text-left">months</th>
+                              <th className="px-2 py-1 text-right">¢/kWh</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(planEngineView as any).tou.schedule.periods.map((p: any, i: number) => (
+                              <tr key={i} className="border-t">
+                                <td className="px-2 py-1 font-mono">{String(p?.dayType ?? "")}</td>
+                                <td className="px-2 py-1 font-mono">
+                                  {String(p?.startHHMM ?? "")}-{String(p?.endHHMM ?? "")}
+                                </td>
+                                <td className="px-2 py-1 font-mono">
+                                  {Array.isArray(p?.months) && p.months.length > 0 ? p.months.join(",") : "—"}
+                                </td>
+                                <td className="px-2 py-1 text-right font-mono">
+                                  {typeof p?.repEnergyCentsPerKwh === "number" ? p.repEnergyCentsPerKwh.toFixed(4) : "—"}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-xs text-gray-600">
+                      TOU schedule: {(planEngineView as any)?.tou?.reasonCode ? String((planEngineView as any).tou.reasonCode) : "—"}
+                    </div>
+                  )}
+
+                  <pre className="text-xs bg-gray-50 rounded-lg p-3 overflow-auto max-h-[520px]">{pretty(planEngineView)}</pre>
+                </div>
+              ) : (
+                <pre className="mt-2 text-xs bg-gray-50 rounded-lg p-3 overflow-auto max-h-[520px]">{pretty(planEngineView)}</pre>
+              )}
+            </details>
+          ) : null}
 
           {derivedText ? (
             <details className="rounded-lg border bg-white p-3">

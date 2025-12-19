@@ -517,6 +517,7 @@ export default function PlanEngineLabPage() {
                     <th className="p-2">term</th>
                     <th className="p-2">¢/kWh</th>
                     <th className="p-2">add</th>
+                    <th className="p-2">details</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -555,6 +556,18 @@ export default function PlanEngineLabPage() {
                           >
                             Add
                           </button>
+                        </td>
+                        <td className="p-2">
+                          {offerId ? (
+                            <a
+                              className="px-2 py-1 rounded border bg-white hover:bg-gray-50"
+                              href={`/admin/plans/${encodeURIComponent(offerId)}`}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              Details
+                            </a>
+                          ) : null}
                         </td>
                       </tr>
                     );
@@ -647,7 +660,15 @@ export default function PlanEngineLabPage() {
                 const tf = deriveTypeAndFlagsFromTemplateResult(r);
                 return (
                   <tr key={r?.offerId ?? idx} className="border-t border-gray-200">
-                    <td className="p-2 font-mono text-xs break-all">{String(r?.offerId ?? '')}</td>
+                    <td className="p-2 font-mono text-xs break-all">
+                      {r?.offerId ? (
+                        <a className="underline" href={`/admin/plans/${encodeURIComponent(String(r.offerId))}`} target="_blank" rel="noreferrer">
+                          {String(r?.offerId ?? '')}
+                        </a>
+                      ) : (
+                        String(r?.offerId ?? "")
+                      )}
+                    </td>
                     <td className="p-2 font-mono text-xs" title={(tf.flags ?? []).join(",")}>{String(tf.type)}</td>
                     <td className="p-2 font-mono text-xs">{String(r?.estimate?.status ?? r?.estimate?.statusLabel ?? '')}</td>
                     <td className="p-2 font-mono text-xs break-all">{String(r?.estimate?.reason ?? r?.error ?? '')}</td>

@@ -295,6 +295,7 @@ export default function AdminProbePage() {
                       <Th className="text-right">1000 ¢/kWh</Th>
                       <Th className="text-right">2000 ¢/kWh</Th>
                       <Th>Docs</Th>
+                      <Th>Details</Th>
                     </tr>
                   </thead>
                   <tbody>
@@ -313,6 +314,11 @@ export default function AdminProbePage() {
                           <Doc href={o.efl} label="EFL" />{' '}
                           <Doc href={o.tos} label="TOS" />{' '}
                           <Doc href={o.yrac} label="YRAC" />
+                        </Td>
+                        <Td>
+                          <a className="underline" href={`/admin/plans/${encodeURIComponent(o.offer_id)}`} target="_blank" rel="noreferrer">
+                            Details
+                          </a>
                         </Td>
                       </tr>
                     ))}
