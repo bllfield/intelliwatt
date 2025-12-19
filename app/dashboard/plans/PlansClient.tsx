@@ -125,12 +125,10 @@ export default function PlansClient() {
       if (raw === "true") return true;
       if (raw === "false") return false;
     } catch {
-      // Some mobile browsers (or private mode) can block localStorage. Fail open to a stable default
-      // so plans still load.
-      return false;
+      // Some mobile browsers (or private mode) can block localStorage.
+      // Keep tri-state behavior: return null and let the effect below choose a stable default.
     }
-    // Default: treat as not-a-renter unless explicitly set.
-    return false;
+    return null;
   });
   const [sort, setSort] = useState<SortKey>("kwh1000_asc");
   const [page, setPage] = useState(1);
@@ -182,7 +180,7 @@ export default function PlansClient() {
     try {
       const raw = window.localStorage.getItem("dashboard_plans_is_renter");
       if (raw === "true") setIsRenter(true);
-      if (raw === "false") setIsRenter(false);
+      else setIsRenter(false); // default when unset or explicitly "false"
     } catch {
       // localStorage not accessible (mobile/private mode). Proceed with default.
       setIsRenter(false);
