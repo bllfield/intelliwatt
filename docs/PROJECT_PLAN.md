@@ -2462,6 +2462,10 @@ Phase-1 TOU (non-dashboard call site):
     - `kwh.m.all.0700-2000`
   - Passes `usageBucketsByMonth` into `calculatePlanCostForUsage()` **only when all required keys exist for all requested months**.
   - Dashboard remains unchanged/locked; TOU plans remain QUEUED at plan-level. This endpoint is for accurate plan-engine validation.
+  - Optional: supports bounded on-demand backfill via `&backfill=1`:
+    - Only attempts when required buckets are missing
+    - Bounded to `monthsCount` (max 12) and required keys for the detected plan type
+    - Uses `ensureCoreMonthlyBuckets` pipeline; still fails closed if buckets remain incomplete
 
 Free Weekends (bucket-gated; plan-level remains QUEUED):
 - **Bucket requirements**: `lib/plan-engine/requiredBucketsForPlan.ts`
