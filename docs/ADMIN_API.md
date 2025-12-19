@@ -23,6 +23,11 @@ $env:ADMIN_TOKEN = '<YOUR_ADMIN_TOKEN>'
 
 ## Notes
 - The script reads `ADMIN_TOKEN` from your **current PowerShell session** (`$env:ADMIN_TOKEN`).
+- If you prefer, you can pass it explicitly:
+  ```powershell
+  .\scripts\admin\Invoke-Intelliwatt.ps1 -Uri 'https://intelliwatt.com/api/admin/env-health' -AdminToken '<YOUR_ADMIN_TOKEN>'
+  ```
+- Best-effort fallback: if `$env:ADMIN_TOKEN` is not set, the wrapper will try to read `ADMIN_TOKEN=...` from `.env.local`, `.env.production.local`, then `.env` (do **not** commit these files).
 - No secrets are stored in the repo.
 - Use **Production token** for `intelliwatt.com` and **Preview token** for `*.vercel.app` if they differ.
 - If you rotate tokens in Vercel, update your local `$env:ADMIN_TOKEN` and re-run.
