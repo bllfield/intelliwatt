@@ -1,5 +1,6 @@
-import { requiredBucketsForPlan } from "@/lib/plan-engine/requiredBucketsForPlan";
+import { requiredBucketsForPlan, requiredBucketsForRateStructure } from "@/lib/plan-engine/requiredBucketsForPlan";
 import { extractFixedRepEnergyCentsPerKwh } from "@/lib/plan-engine/calculatePlanCostForUsage";
+import { extractDeterministicTouSchedule } from "@/lib/plan-engine/touPeriods";
 import { Prisma } from "@prisma/client";
 
 export type ComputabilityStatus =
@@ -186,28 +187,26 @@ export function derivePlanCalcRequirementsFromTemplate(args: {
       };
     }
 
+    const tou2 = extractDeterministicTouSchedule(rs);
+    if (tou2.schedule) {
+      const reqs = requiredBucketsForRateStructure({ rateStructure: rs });
+      return {
+        planCalcVersion,
+        // IMPORTANT: do NOT mark TOU computable at plan-level (dashboard gating must remain unchanged).
+        planCalcStatus: "NOT_COMPUTABLE" as const,
+        planCalcReasonCode: "TOU_REQUIRES_USAGE_BUCKETS_PHASE2",
+        requiredBucketKeys: reqs.map((r) => r.key),
+        supportedFeatures: { ...inferred.features, supportsTouEnergy: true, notes: [...inferred.notes, ...(tou2.notes ?? [])] },
+      };
+    }
+
     if (inferred.features.supportsTouEnergy) {
-      if (inferred.features.supportsWeekendSplitEnergy) {
-        const reqs = requiredBucketsForPlan({ features: { supportsTouEnergy: false, supportsWeekendSplitEnergy: true } });
-        return {
-          planCalcVersion,
-          planCalcStatus: "NOT_COMPUTABLE" as const,
-          planCalcReasonCode: "FREE_WEEKENDS_REQUIRES_BUCKETS",
-          requiredBucketKeys: reqs.map((r) => r.key),
-          supportedFeatures: { ...inferred.features, notes: inferred.notes },
-        };
-      }
-      // We are not marking TOU computable yet (dashboard remains v1 fixed-only), but we want:
-      // - a precise reason code
-      // - requiredBucketKeys populated so the bucket registry can self-register definitions
-      const reqs = requiredBucketsForPlan({ features: { supportsTouEnergy: true } });
+      const reasonCode = (tou2 as any)?.reasonCode ? String((tou2 as any).reasonCode) : "UNSUPPORTED_RATE_STRUCTURE";
       return {
         planCalcVersion,
         planCalcStatus: "NOT_COMPUTABLE" as const,
-        // NOTE: We intentionally keep this NOT_COMPUTABLE until the dashboard passes bucket totals
-        // into calculatePlanCostForUsage (no assumptions allowed).
-        planCalcReasonCode: "TOU_PHASE1_REQUIRES_BUCKETS",
-        requiredBucketKeys: reqs.map((r) => r.key),
+        planCalcReasonCode: reasonCode,
+        requiredBucketKeys: ["kwh.m.all.total"],
         supportedFeatures: { ...inferred.features, notes: inferred.notes },
       };
     }

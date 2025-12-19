@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { extractDeterministicTouSchedule } from "@/lib/plan-engine/touPeriods";
 
 export type TrueCostEstimateStatus = "OK" | "NOT_COMPUTABLE" | "NOT_IMPLEMENTED";
 
@@ -26,6 +27,10 @@ export type TrueCostEstimate = {
   };
 
   notes?: string[];
+
+  // Optional debug payload for non-dashboard tooling (admin lab / non-dashboard endpoints).
+  // Safe to omit; do not depend on this in dashboard gating.
+  debug?: any;
 };
 
 export type TdspRatesApplied = {
@@ -328,9 +333,122 @@ export function calculatePlanCostForUsage(args: {
       return { status: "NOT_COMPUTABLE", reason: "Unsupported rateStructure (no single fixed REP energy rate)" };
     }
 
+    const tou2 = extractDeterministicTouSchedule(args.rateStructure);
+    if (tou2.schedule) {
+      const schedule = tou2.schedule;
+      const byMonth = args.usageBucketsByMonth;
+      const allMonths = Object.keys(byMonth ?? {}).sort();
+      if (allMonths.length === 0) {
+        return { status: "NOT_COMPUTABLE", reason: "MISSING_USAGE_BUCKETS (no months present)" };
+      }
+
+      const wantMonths = Math.max(1, Math.floor(safeNum(args.monthsCount) ?? 12));
+      if (allMonths.length < wantMonths) {
+        return { status: "NOT_COMPUTABLE", reason: `MISSING_USAGE_BUCKETS (need ${wantMonths} months, have ${allMonths.length})` };
+      }
+      const months = allMonths.slice(-wantMonths);
+
+      const tdspPerKwhCents = safeNum(args.tdsp?.perKwhDeliveryChargeCents) ?? 0;
+      const tdspMonthly = safeNum(args.tdsp?.monthlyCustomerChargeDollars) ?? 0;
+      const repFixedMonthly = extractRepFixedMonthlyChargeDollars(args.rateStructure) ?? 0;
+
+      const requiredKeys = Array.from(
+        new Set<string>(["kwh.m.all.total", ...schedule.periods.map((p) => {
+          if (p.startHHMM === "0000" && p.endHHMM === "2400") return `kwh.m.${p.dayType}.total`;
+          return `kwh.m.${p.dayType}.${p.startHHMM}-${p.endHHMM}`;
+        })]),
+      );
+
+      let repEnergyDollars = 0;
+      let totalKwh = 0;
+      const missing: string[] = [];
+      const mismatched: string[] = [];
+      const debugPeriodsByMonth: any[] = [];
+
+      for (const ym of months) {
+        const m = byMonth[ym];
+        if (!m || typeof m !== "object") continue;
+
+        const monthTotalKwh = sumMonthBucketKwh(m, "kwh.m.all.total");
+        if (monthTotalKwh == null) missing.push(`${ym}:kwh.m.all.total`);
+
+        let sumPeriodsKwh = 0;
+        const dbg: any[] = [];
+        for (const p of schedule.periods) {
+          const k = p.startHHMM === "0000" && p.endHHMM === "2400"
+            ? `kwh.m.${p.dayType}.total`
+            : `kwh.m.${p.dayType}.${p.startHHMM}-${p.endHHMM}`;
+          const kwh = sumMonthBucketKwh(m, k);
+          if (kwh == null) {
+            missing.push(`${ym}:${k}`);
+            continue;
+          }
+          sumPeriodsKwh += kwh;
+          const repCost = kwh * (p.repEnergyCentsPerKwh / 100);
+          repEnergyDollars += repCost;
+          dbg.push({ bucketKey: k, kwh, repCentsPerKwh: p.repEnergyCentsPerKwh, repCostDollars: round2(repCost), label: p.label ?? null, dayType: p.dayType, startHHMM: p.startHHMM, endHHMM: p.endHHMM });
+        }
+
+        if (monthTotalKwh != null) {
+          if (Math.abs(sumPeriodsKwh - monthTotalKwh) > 0.001) {
+            mismatched.push(`${ym}:sum(periods)=${sumPeriodsKwh.toFixed(3)} total=${monthTotalKwh.toFixed(3)}`);
+            continue;
+          }
+          totalKwh += monthTotalKwh;
+        }
+
+        debugPeriodsByMonth.push({ yearMonth: ym, periods: dbg, requiredKeys });
+      }
+
+      if (missing.length > 0) {
+        return { status: "NOT_COMPUTABLE", reason: `MISSING_USAGE_BUCKETS: ${missing.slice(0, 12).join(", ")}${missing.length > 12 ? "…" : ""}` };
+      }
+      if (mismatched.length > 0) {
+        return {
+          status: "NOT_COMPUTABLE",
+          reason: `USAGE_BUCKET_SUM_MISMATCH: ${mismatched.slice(0, 6).join(", ")}${mismatched.length > 6 ? "…" : ""}`,
+        };
+      }
+
+      const repFixedDollars = months.length * repFixedMonthly;
+      const tdspDeliveryDollars = totalKwh * (tdspPerKwhCents / 100);
+      const tdspFixedDollars = months.length * tdspMonthly;
+
+      const repTotal = repEnergyDollars + repFixedDollars;
+      const tdspTotal = tdspDeliveryDollars + tdspFixedDollars;
+      const total = repTotal + tdspTotal;
+
+      notes.push(`TOU Phase-2 (windows): months=${months.length} periods=${schedule.periods.length}`);
+      if (repFixedMonthly > 0) notes.push("Includes REP fixed monthly charge (from template)");
+      else notes.push("REP fixed monthly charge not found (assumed $0)");
+      if (tdspPerKwhCents > 0 || tdspMonthly > 0) notes.push("Includes TDSP delivery (total-based)");
+      else notes.push("TDSP delivery missing/zero (check tdspRatesApplied)");
+
+      return {
+        status: "OK",
+        annualCostDollars: round2(total),
+        monthlyCostDollars: round2(total / months.length),
+        confidence: "MEDIUM",
+        components: {
+          energyOnlyDollars: round2(repEnergyDollars),
+          deliveryDollars: round2(tdspDeliveryDollars),
+          baseFeesDollars: round2(repFixedDollars + tdspFixedDollars),
+          totalDollars: round2(total),
+        },
+        componentsV2: {
+          rep: { energyDollars: round2(repEnergyDollars), fixedDollars: round2(repFixedDollars), totalDollars: round2(repTotal) },
+          tdsp: { deliveryDollars: round2(tdspDeliveryDollars), fixedDollars: round2(tdspFixedDollars), totalDollars: round2(tdspTotal) },
+          totalDollars: round2(total),
+        },
+        notes,
+        debug: { touPhase2: { requiredKeys, months, periodsByMonth: debugPeriodsByMonth } },
+      };
+    }
+
     const tou = extractTouPhase1Rates(args.rateStructure);
     if (!tou) {
-      return { status: "NOT_COMPUTABLE", reason: "TOU_RATE_EXTRACTION_UNSUPPORTED" };
+      const reasonCode = (tou2 as any)?.reasonCode ? String((tou2 as any).reasonCode) : "TOU_RATE_EXTRACTION_UNSUPPORTED";
+      return { status: "NOT_COMPUTABLE", reason: reasonCode };
     }
 
     const byMonth = args.usageBucketsByMonth;

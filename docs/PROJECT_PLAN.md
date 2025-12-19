@@ -2488,6 +2488,21 @@ Plan engine (non-dashboard): estimate a set of offers
   - Added helper to extract `offerId` list from pasted dashboard JSON (keys: `offer_id`, `offerId`, `offerID`) + clean/de-dupe button
   - Added OfferId Finder panel on `/admin/plan-engine` to fetch live WattBuy offers (`/api/wattbuy/offers`) and click-to-add `offer_id` values into estimate-set input
 
+TOU Phase-2 (arbitrary windows; non-dashboard only)
+- Added deterministic TOU window schedule extraction: `lib/plan-engine/touPeriods.ts`
+  - Supports canonical TOU period lists (all/weekday/weekend dayTypes + HHMM-HHMM windows) when ¢/kWh is fixed and windows fully cover 24h (fail-closed on overlaps/gaps).
+- Bucket requirements now derive from schedule (non-dashboard calculators):
+  - `lib/plan-engine/requiredBucketsForPlan.ts` exports `requiredBucketsForRateStructure()`
+- Calculator supports bucket-gated TOU window math:
+  - `lib/plan-engine/calculatePlanCostForUsage.ts` computes REP energy per window and enforces strict bucket integrity:
+    - `sum(periodBucketsKwh) == kwh.m.all.total` per month (epsilon 0.001) else `USAGE_BUCKET_SUM_MISMATCH`
+    - Missing any required bucket -> `MISSING_USAGE_BUCKETS`
+  - TDSP delivery remains total-based via `perKwhDeliveryChargeCents` (no TDSP TOU windows in tariff module yet).
+- Shared estimator/endpoints:
+  - `/api/plan-engine/offer-estimate` and `/api/plan-engine/estimate-set` can now backfill and load arbitrary window buckets derived from schedule (still explicit backfill only, bounded, fail-closed).
+- Tests:
+  - Added unit tests for TOU Phase-2 window math in `tests/plan-engine/touPhase2.cost.test.ts`
+
 Free Weekends (bucket-gated; plan-level remains QUEUED):
 - **Bucket requirements**: `lib/plan-engine/requiredBucketsForPlan.ts`
   - Added `supportsWeekendSplitEnergy` flag (canonical buckets: `kwh.m.weekday.total`, `kwh.m.weekend.total`)

@@ -9,6 +9,50 @@ export type UsageBucketRequirement = {
   optional?: boolean;
 };
 
+import { extractDeterministicTouSchedule } from "@/lib/plan-engine/touPeriods";
+
+function uniq<T>(arr: T[]): T[] {
+  const out: T[] = [];
+  const seen = new Set<T>();
+  for (const x of arr) {
+    if (seen.has(x)) continue;
+    seen.add(x);
+    out.push(x);
+  }
+  return out;
+}
+
+function keyForPeriod(p: { dayType: "all" | "weekday" | "weekend"; startHHMM: string; endHHMM: string }): string {
+  const day = p.dayType;
+  const start = String(p.startHHMM ?? "").trim();
+  const end = String(p.endHHMM ?? "").trim();
+  if (start === "0000" && end === "2400") return `kwh.m.${day}.total`;
+  return `kwh.m.${day}.${start}-${end}`;
+}
+
+export function requiredBucketsForRateStructure(args: { rateStructure: any }): UsageBucketRequirement[] {
+  const out: UsageBucketRequirement[] = [];
+
+  out.push({
+    key: "kwh.m.all.total",
+    description: "Total monthly kWh (all days, 00:00-24:00)",
+  });
+
+  const extracted = extractDeterministicTouSchedule(args.rateStructure);
+  if (!extracted.schedule) return out;
+
+  const periodKeys = uniq(extracted.schedule.periods.map((p) => keyForPeriod(p)));
+  for (const k of periodKeys) {
+    if (k === "kwh.m.all.total") continue;
+    out.push({
+      key: k,
+      description: `TOU window bucket: ${k}`,
+    });
+  }
+
+  return out;
+}
+
 export function requiredBucketsForPlan(input: {
   features: SupportedPlanFeaturesLike;
 }): UsageBucketRequirement[] {

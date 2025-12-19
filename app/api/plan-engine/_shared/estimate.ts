@@ -4,6 +4,7 @@ import { ensureCoreMonthlyBuckets } from "@/lib/usage/aggregateMonthlyBuckets";
 import { getTdspDeliveryRates } from "@/lib/plan-engine/getTdspDeliveryRates";
 import { calculatePlanCostForUsage } from "@/lib/plan-engine/calculatePlanCostForUsage";
 import { bucketRuleFromParsedKey, parseMonthlyBucketKey, type UsageBucketDef } from "@/lib/plan-engine/usageBuckets";
+import { requiredBucketsForRateStructure } from "@/lib/plan-engine/requiredBucketsForPlan";
 
 export type TdspApplied = {
   perKwhDeliveryChargeCents: number;
@@ -191,6 +192,83 @@ const WEEKEND_ALLDAY_KEYS = ["kwh.m.weekend.total", "kwh.m.weekend.0000-2400", "
 const ALL_DAY_KEYS = ["kwh.m.all.0700-2000", "kwh.m.ALL.0700-2000"] as const;
 const ALL_NIGHT_KEYS = ["kwh.m.all.2000-0700", "kwh.m.ALL.2000-0700"] as const;
 
+function aliasesForCanonicalMonthlyBucketKey(key: string): string[] {
+  const k = String(key ?? "").trim();
+  if (!k) return [];
+  const parts = k.split(".");
+  if (parts.length !== 4) return [k];
+  const [p0, gran, dayTypeRaw, tail] = parts;
+  if (p0 !== "kwh" || gran !== "m") return [k];
+
+  const day = String(dayTypeRaw ?? "").trim();
+  const dayLower = day.toLowerCase();
+  const dayUpper = day.toUpperCase();
+
+  const out: string[] = [k];
+  if (tail === "total") {
+    out.push(`kwh.m.${dayLower}.0000-2400`);
+    out.push(`kwh.m.${dayUpper}.total`);
+    out.push(`kwh.m.${dayUpper}.0000-2400`);
+  } else {
+    out.push(`kwh.m.${dayUpper}.${tail}`);
+  }
+
+  // Preserve legacy ALL variants for window buckets as well.
+  return Array.from(new Set(out));
+}
+
+function makeUsageBucketsByMonthForKeys(args: {
+  months: string[];
+  byMonth: Record<string, Record<string, number>>;
+  requiredCanonicalKeys: readonly string[];
+}): { usageBucketsByMonth: Record<string, Record<string, number>> | null; missingSlots: number } {
+  const months = args.months;
+  const byMonth = args.byMonth;
+
+  let missingSlots = 0;
+  if (months.length <= 0) return { usageBucketsByMonth: null, missingSlots: 0 };
+
+  const out: Record<string, Record<string, number>> = {};
+  const keyUsedByCanonical = new Map<string, string>(); // canonicalKey -> dbKeyUsed
+
+  for (const ym of months) {
+    const m = byMonth[ym] ?? {};
+    const outMonth: Record<string, number> = {};
+
+    let okMonth = true;
+
+    for (const canonicalKey of args.requiredCanonicalKeys) {
+      const aliases = aliasesForCanonicalMonthlyBucketKey(canonicalKey);
+      const resolved = resolveAliasedMonthlyBucket({
+        monthBuckets: m,
+        preferKey: canonicalKey,
+        aliasKeys: aliases,
+      });
+      if (!resolved) {
+        missingSlots += 1;
+        okMonth = false;
+        continue;
+      }
+
+      const prev = keyUsedByCanonical.get(canonicalKey);
+      if (prev && prev !== resolved.dbKeyUsed) {
+        missingSlots += args.requiredCanonicalKeys.length;
+        okMonth = false;
+        continue;
+      }
+      if (!prev) keyUsedByCanonical.set(canonicalKey, resolved.dbKeyUsed);
+
+      outMonth[canonicalKey] = resolved.kwh;
+    }
+
+    if (!okMonth) continue;
+    out[ym] = outMonth;
+  }
+
+  if (Object.keys(out).length !== months.length) return { usageBucketsByMonth: null, missingSlots };
+  return { usageBucketsByMonth: out, missingSlots };
+}
+
 function makeUsageBucketsByMonth(args: {
   months: string[];
   byMonth: Record<string, Record<string, number>>;
@@ -345,15 +423,20 @@ export async function estimateOfferFromOfferId(args: OfferEstimateInput & OfferE
   const wantsFreeWeekends = detectFreeWeekends(rateStructure);
   const wantsDayNight = !wantsFreeWeekends && detectDayNightTou(rateStructure);
 
-  const canonicalRequiredKeys = wantsFreeWeekends
-    ? (["kwh.m.all.total", "kwh.m.weekday.total", "kwh.m.weekend.total"] as const)
-    : wantsDayNight
-      ? (["kwh.m.all.total", "kwh.m.all.2000-0700", "kwh.m.all.0700-2000"] as const)
-      : (["kwh.m.all.total", "kwh.m.all.2000-0700", "kwh.m.all.0700-2000"] as const);
+  const reqs = requiredBucketsForRateStructure({ rateStructure });
+  const canonicalRequiredKeys = Array.from(new Set(reqs.filter((r) => !r.optional).map((r) => String(r.key).trim()).filter(Boolean)));
 
-  const dbQueryKeys: string[] = wantsFreeWeekends
-    ? Array.from(new Set<string>([...ALL_ALLDAY_KEYS, ...WEEKDAY_ALLDAY_KEYS, ...WEEKEND_ALLDAY_KEYS]))
-    : Array.from(new Set<string>([...ALL_ALLDAY_KEYS, ...ALL_DAY_KEYS, ...ALL_NIGHT_KEYS]));
+  // Back-compat: if no schedule-derived buckets are found but this is a known Phase-1 pattern, keep the old requirements.
+  const fallbackKeys =
+    wantsFreeWeekends
+      ? (["kwh.m.all.total", "kwh.m.weekday.total", "kwh.m.weekend.total"] as const)
+      : wantsDayNight
+        ? (["kwh.m.all.total", "kwh.m.all.2000-0700", "kwh.m.all.0700-2000"] as const)
+        : (["kwh.m.all.total"] as const);
+
+  const effectiveRequiredKeys = canonicalRequiredKeys.length > 1 ? canonicalRequiredKeys : Array.from(fallbackKeys);
+
+  const dbQueryKeys: string[] = Array.from(new Set<string>(effectiveRequiredKeys.flatMap((k) => aliasesForCanonicalMonthlyBucketKey(k))));
 
   // Define the month window as the latest N months present for this homeId (regardless of key shape).
   const recentMonthsRows = await (usagePrisma as any).homeMonthlyUsageBucket.findMany({
@@ -389,11 +472,10 @@ export async function estimateOfferFromOfferId(args: OfferEstimateInput & OfferE
   let missingKeysBefore = 0;
   let missingKeysAfter = 0;
 
-  let { usageBucketsByMonth, missingSlots } = makeUsageBucketsByMonth({
+  let { usageBucketsByMonth, missingSlots } = makeUsageBucketsByMonthForKeys({
     months,
     byMonth,
-    wantsFreeWeekends,
-    requiredCanonicalKeys: canonicalRequiredKeys,
+    requiredCanonicalKeys: effectiveRequiredKeys,
   });
   missingKeysBefore = missingSlots;
   missingKeysAfter = missingKeysBefore;
@@ -407,7 +489,7 @@ export async function estimateOfferFromOfferId(args: OfferEstimateInput & OfferE
       const rangeStart = firstInstantOfMonthUtc(startParsed.year, startParsed.month);
       const rangeEnd = lastInstantOfMonthUtc(endParsed.year, endParsed.month);
 
-      const bucketDefs = makeBucketDefsFromKeys([...canonicalRequiredKeys]);
+      const bucketDefs = makeBucketDefsFromKeys([...effectiveRequiredKeys]);
       const intervalSource = args.esiid ? ("SMT" as const) : ("GREENBUTTON" as const);
       const source = intervalSource === "SMT" ? ("SMT" as const) : ("GREENBUTTON" as const);
 
@@ -444,11 +526,10 @@ export async function estimateOfferFromOfferId(args: OfferEstimateInput & OfferE
         byMonth2[ym][key] = kwh;
       }
 
-      const after = makeUsageBucketsByMonth({
+      const after = makeUsageBucketsByMonthForKeys({
         months,
         byMonth: byMonth2,
-        wantsFreeWeekends,
-        requiredCanonicalKeys: canonicalRequiredKeys,
+        requiredCanonicalKeys: effectiveRequiredKeys,
       });
       usageBucketsByMonth = after.usageBucketsByMonth;
       missingKeysAfter = after.missingSlots;
