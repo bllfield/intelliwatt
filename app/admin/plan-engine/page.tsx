@@ -78,6 +78,19 @@ export default function PlanEngineLabPage() {
   const [offerIdsText, setOfferIdsText] = useState('');
   const [offersJsonText, setOffersJsonText] = useState('');
   const [extractStatus, setExtractStatus] = useState<string | null>(null);
+
+  // OfferId finder (WattBuy offers proxy)
+  const [lookupMode, setLookupMode] = useState<'address' | 'wattkey'>('address');
+  const [offerKind, setOfferKind] = useState<'all' | 'fixed' | 'tou' | 'free-weekends' | 'free-nights' | 'variable' | 'other'>('all');
+  const [address, setAddress] = useState('');
+  const [city, setCity] = useState('');
+  const [state, setState] = useState('tx');
+  const [zip, setZip] = useState('');
+  const [wattkey, setWattkey] = useState('');
+  const [offersLoading, setOffersLoading] = useState(false);
+  const [offersError, setOffersError] = useState<string | null>(null);
+  const [offersRaw, setOffersRaw] = useState<any>(null);
+  const [offersList, setOffersList] = useState<any[]>([]);
   const [monthsCount, setMonthsCount] = useState(12);
   const [backfill, setBackfill] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -89,9 +102,19 @@ export default function PlanEngineLabPage() {
 
   const cleanOfferIds = useCallback(() => {
     const cleaned = parseOfferIds(offerIdsText);
-    setOfferIdsText(cleaned.join("\n"));
+    setOfferIdsText(cleaned.join('\n'));
     setExtractStatus(`Cleaned to ${cleaned.length} unique offerIds.`);
   }, [offerIdsText]);
+
+  const addOfferIdsToTextarea = useCallback(
+    (ids: string[], mode: 'append' | 'replace') => {
+      const base = mode === 'replace' ? '' : offerIdsText;
+      const merged = parseOfferIds([base, ...(ids ?? [])].filter(Boolean).join('\n'));
+      setOfferIdsText(merged.join('\n'));
+      setExtractStatus(`Now have ${merged.length} unique offerIds.`);
+    },
+    [offerIdsText],
+  );
 
   const extractOfferIds = useCallback(() => {
     const res = extractOfferIdsFromJsonText(offersJsonText);
@@ -99,13 +122,66 @@ export default function PlanEngineLabPage() {
       setExtractStatus(`Extract error: ${res.error}`);
       return;
     }
-    setOfferIdsText(res.offerIds.join("\n"));
+    setOfferIdsText(res.offerIds.join('\n'));
     setExtractStatus(
       res.offerIds.length > 0
         ? `Extracted ${res.offerIds.length} offerIds.`
         : `Extracted 0 offerIds. Make sure you pasted valid JSON that includes offerId/offer_id fields (or an array of offerId strings).`,
     );
   }, [offersJsonText]);
+
+  const fetchOffers = useCallback(async () => {
+    setOffersLoading(true);
+    setOffersError(null);
+    setOffersRaw(null);
+    setOffersList([]);
+
+    try {
+      const body: any = {};
+      if (lookupMode === 'wattkey') {
+        const wk = wattkey.trim();
+        if (!wk) {
+          setOffersError('Enter a wattkey.');
+          return;
+        }
+        body.wattkey = wk;
+      } else {
+        const a = address.trim();
+        const c = city.trim();
+        const s = state.trim();
+        const z = zip.trim();
+        if (!a || !c || !s || !z) {
+          setOffersError('Enter address + city + state + zip.');
+          return;
+        }
+        body.address = a;
+        body.city = c;
+        body.state = s;
+        body.zip = z;
+      }
+
+      const res = await fetch('/api/wattbuy/offers', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json().catch(() => null);
+      setOffersRaw(json);
+
+      if (!res.ok) {
+        setOffersError(json?.error ? String(json.error) : `http_${res.status}`);
+        return;
+      }
+
+      const offers = Array.isArray(json?.offers) ? json.offers : [];
+      setOffersList(offers);
+      setExtractStatus(`Fetched ${offers.length} offers.`);
+    } catch (e: any) {
+      setOffersError(e?.message ?? String(e));
+    } finally {
+      setOffersLoading(false);
+    }
+  }, [lookupMode, wattkey, address, city, state, zip]);
 
   const run = useCallback(async () => {
     setBusy(true);
@@ -143,6 +219,25 @@ export default function PlanEngineLabPage() {
 
   const rows = Array.isArray(rawJson?.results) ? rawJson.results : [];
 
+  function classifyOffer(o: any): 'fixed' | 'tou' | 'free-weekends' | 'free-nights' | 'variable' | 'other' {
+    const od = o?.offer_data ?? {};
+    const name = String(o?.offer_name ?? od?.offer_name ?? od?.name ?? '').toLowerCase();
+    const supplier = String(od?.supplier ?? od?.supplier_name ?? '').toLowerCase();
+    const productType = String(od?.product_type ?? od?.productType ?? '').toLowerCase();
+    const planType = String(od?.plan_type ?? od?.planType ?? od?.rate_type ?? od?.rateType ?? '').toLowerCase();
+    const hay = `${name} ${supplier} ${productType} ${planType}`;
+
+    if (hay.includes('free weekend')) return 'free-weekends';
+    if (hay.includes('free night')) return 'free-nights';
+    if (hay.includes('tou') || hay.includes('time of use') || hay.includes('time-of-use')) return 'tou';
+    if (productType.includes('fixed') || planType.includes('fixed') || hay.includes('fixed rate') || hay.includes('fixed-rate')) return 'fixed';
+    if (productType.includes('variable') || planType.includes('variable') || hay.includes('variable rate') || hay.includes('variable-rate')) return 'variable';
+    return 'other';
+  }
+
+  const offersFiltered = offersList.filter((o: any) => (offerKind === 'all' ? true : classifyOffer(o) === offerKind));
+  const offerIdsFromFiltered = offersFiltered.map((o: any) => String(o?.offer_id ?? '').trim()).filter(Boolean);
+
   return (
     <div className="p-6 space-y-6">
       <div className="space-y-2">
@@ -173,6 +268,159 @@ export default function PlanEngineLabPage() {
             {extractStatus ? <div className="text-xs text-gray-600">{extractStatus}</div> : null}
           </div>
         </label>
+
+        <div className="space-y-2 rounded border border-gray-200 bg-white p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-gray-800">OfferId Finder</div>
+              <div className="text-xs text-gray-500">Fetch live offers (WattBuy) and click to add their offerIds.</div>
+            </div>
+            <div className="flex items-center gap-3">
+              <label className="inline-flex items-center gap-2 text-sm">
+                <input type="radio" checked={lookupMode === 'address'} onChange={() => setLookupMode('address')} />
+                Address
+              </label>
+              <label className="inline-flex items-center gap-2 text-sm">
+                <input type="radio" checked={lookupMode === 'wattkey'} onChange={() => setLookupMode('wattkey')} />
+                Wattkey
+              </label>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-gray-700">Offer type</span>
+              <select className="border px-2 py-2 rounded text-sm" value={offerKind} onChange={(e) => setOfferKind(e.target.value as any)}>
+                <option value="all">All</option>
+                <option value="fixed">Fixed</option>
+                <option value="tou">TOU</option>
+                <option value="free-weekends">Free Weekends</option>
+                <option value="free-nights">Free Nights</option>
+                <option value="variable">Variable</option>
+                <option value="other">Other</option>
+              </select>
+            </label>
+            {offersList.length > 0 ? (
+              <div className="text-xs text-gray-500">
+                Showing {offersFiltered.length} of {offersList.length} fetched offers.
+              </div>
+            ) : null}
+          </div>
+
+          {lookupMode === 'address' ? (
+            <div className="grid md:grid-cols-6 gap-3">
+              <div className="md:col-span-3">
+                <label className="block text-xs font-semibold mb-1 text-gray-700">Street</label>
+                <input className="w-full border px-3 py-2 rounded" value={address} onChange={(e) => setAddress(e.target.value)} />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-xs font-semibold mb-1 text-gray-700">City</label>
+                <input className="w-full border px-3 py-2 rounded" value={city} onChange={(e) => setCity(e.target.value)} />
+              </div>
+              <div className="md:col-span-1">
+                <label className="block text-xs font-semibold mb-1 text-gray-700">State</label>
+                <input className="w-full border px-3 py-2 rounded" value={state} onChange={(e) => setState(e.target.value)} maxLength={2} />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-xs font-semibold mb-1 text-gray-700">ZIP</label>
+                <input className="w-full border px-3 py-2 rounded" value={zip} onChange={(e) => setZip(e.target.value)} />
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-xs font-semibold mb-1 text-gray-700">Wattkey</label>
+                <input className="w-full border px-3 py-2 rounded" value={wattkey} onChange={(e) => setWattkey(e.target.value)} />
+              </div>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={fetchOffers}
+              disabled={offersLoading}
+              className="px-4 py-2 rounded bg-gray-800 text-white hover:bg-gray-700 disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {offersLoading ? 'Fetching…' : 'Fetch offers'}
+            </button>
+            {offersError ? <div className="text-sm text-red-600">{offersError}</div> : null}
+            {offersFiltered.length > 0 ? (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => addOfferIdsToTextarea(offerIdsFromFiltered, 'replace')}
+                  className="px-3 py-2 rounded bg-black text-white hover:bg-gray-800"
+                >
+                  Use filtered offerIds
+                </button>
+                <button
+                  type="button"
+                  onClick={() => addOfferIdsToTextarea(offerIdsFromFiltered, 'append')}
+                  className="px-3 py-2 rounded border bg-white hover:bg-gray-50"
+                >
+                  Append filtered
+                </button>
+              </div>
+            ) : null}
+          </div>
+
+          {offersFiltered.length > 0 ? (
+            <div className="overflow-x-auto rounded border border-gray-200">
+              <table className="w-full text-xs">
+                <thead className="bg-gray-50 text-left">
+                  <tr>
+                    <th className="p-2">offer_id</th>
+                    <th className="p-2">supplier</th>
+                    <th className="p-2">plan</th>
+                    <th className="p-2">term</th>
+                    <th className="p-2">¢/kWh</th>
+                    <th className="p-2">add</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {offersFiltered.slice(0, 50).map((o: any, idx: number) => {
+                    const offerId = String(o?.offer_id ?? '').trim();
+                    const od = o?.offer_data ?? {};
+                    const supplier = String(od?.supplier ?? od?.supplier_name ?? '').trim();
+                    const plan = String(o?.offer_name ?? od?.offer_name ?? od?.name ?? '').trim();
+                    const term = od?.term ?? od?.term_months ?? null;
+                    const cost = o?.cost ?? od?.cost ?? null;
+                    return (
+                      <tr key={offerId || idx} className="border-t border-gray-200">
+                        <td className="p-2 font-mono break-all">{offerId}</td>
+                        <td className="p-2">{supplier}</td>
+                        <td className="p-2">{plan}</td>
+                        <td className="p-2 font-mono">{term != null ? String(term) : ''}</td>
+                        <td className="p-2 font-mono">{cost != null ? String(cost) : ''}</td>
+                        <td className="p-2">
+                          <button
+                            type="button"
+                            onClick={() => addOfferIdsToTextarea([offerId].filter(Boolean), 'append')}
+                            className="px-2 py-1 rounded bg-gray-800 text-white hover:bg-gray-700 disabled:opacity-60"
+                            disabled={!offerId}
+                          >
+                            Add
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {offersFiltered.length > 50 ? (
+                <div className="p-2 text-xs text-gray-500">Showing first 50 offers (filtered {offersFiltered.length}).</div>
+              ) : null}
+            </div>
+          ) : null}
+
+          {offersRaw ? (
+            <details className="text-xs text-gray-700">
+              <summary className="cursor-pointer select-none">Raw offers response (debug)</summary>
+              <pre className="mt-2 bg-gray-100 p-3 rounded whitespace-pre-wrap">{JSON.stringify(offersRaw, null, 2)}</pre>
+            </details>
+          ) : null}
+        </div>
 
         <label className="space-y-1">
           <div className="text-sm font-semibold text-gray-800">Offer IDs (one per line)</div>

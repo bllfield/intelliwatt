@@ -2486,6 +2486,7 @@ Plan engine (non-dashboard): estimate a set of offers
   - Added Admin Tools card: **Plan Engine Lab** → `/admin/plan-engine`
   - Added minimal admin page `/admin/plan-engine` to run `estimate-set` and render JSON + summary table
   - Added helper to extract `offerId` list from pasted dashboard JSON (keys: `offer_id`, `offerId`, `offerID`) + clean/de-dupe button
+  - Added OfferId Finder panel on `/admin/plan-engine` to fetch live WattBuy offers (`/api/wattbuy/offers`) and click-to-add `offer_id` values into estimate-set input
 
 Free Weekends (bucket-gated; plan-level remains QUEUED):
 - **Bucket requirements**: `lib/plan-engine/requiredBucketsForPlan.ts`
