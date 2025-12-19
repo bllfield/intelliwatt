@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { EstimateBreakdownPopover } from "../../components/ui/EstimateBreakdownPopover";
-import { PlanDetailsPopover } from "../../components/ui/PlanDetailsPopover";
+import { PlanDetailsPopover } from "@/app/components/ui/PlanDetailsPopover";
 
 type OfferRow = {
   offerId: string;
@@ -149,7 +149,7 @@ export default function OfferCard({ offer }: { offer: OfferRow }) {
               <div className="text-xs text-brand-cyan/60">No EFL link</div>
             )}
 
-            <PlanDetailsPopover trigger="Plan Details" title="Plan Details (parsed fields)" data={offer as any} />
+            <PlanDetailsPopover trigger="Plan Details" title="Plan Details" offer={offer as any} />
           </div>
         </div>
       </div>

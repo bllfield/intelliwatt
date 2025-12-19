@@ -11,6 +11,10 @@ import { usagePrisma } from "@/lib/db/usageClient";
 import { ensureCoreMonthlyBuckets } from "@/lib/usage/aggregateMonthlyBuckets";
 import crypto from "node:crypto";
 import { canComputePlanFromBuckets, derivePlanCalcRequirementsFromTemplate } from "@/lib/plan-engine/planComputability";
+import {
+  extractFixedRepEnergyCentsPerKwh,
+  extractRepFixedMonthlyChargeDollars,
+} from "@/lib/plan-engine/calculatePlanCostForUsage";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -694,6 +698,7 @@ export async function GET(req: NextRequest) {
       let requiredBucketKeys: string[] = [];
       let planCalcStatus: string | null = null;
       let planCalcReasonCode: string | null = null;
+      let planCalcInputs: any | null = null;
 
       if (hasUsage && (base as any)?.intelliwatt?.templateAvailable && templateOk) {
         const offerId = String((base as any).offerId ?? "");
@@ -743,6 +748,31 @@ export async function GET(req: NextRequest) {
           templateAvailable: templateAvailable && templateOk,
           template: templateOk ? (template ? { rateStructure: template.rateStructure } : null) : null,
         });
+
+        // Expose the actual variables we used (or would use) for plan-cost calcs.
+        // Keep it minimal and only populate when we have the template.
+        try {
+          const rs = template?.rateStructure ?? null;
+          const repEnergyCentsPerKwh = rs ? extractFixedRepEnergyCentsPerKwh(rs) : null;
+          const repFixedMonthlyChargeDollars = rs ? extractRepFixedMonthlyChargeDollars(rs) : null;
+          planCalcInputs = {
+            annualKwh: annualKwhFromBuckets ?? null,
+            monthlyKwh: avgMonthlyKwhFromBuckets ?? null,
+            tdsp: tdspRates
+              ? {
+                  perKwhDeliveryChargeCents: Number(tdspRates?.perKwhDeliveryChargeCents ?? 0) || 0,
+                  monthlyCustomerChargeDollars: Number(tdspRates?.monthlyCustomerChargeDollars ?? 0) || 0,
+                  effectiveDate: tdspRates?.effectiveDate ?? null,
+                }
+              : null,
+            rep: {
+              energyCentsPerKwh: repEnergyCentsPerKwh,
+              fixedMonthlyChargeDollars: repFixedMonthlyChargeDollars,
+            },
+          };
+        } catch {
+          planCalcInputs = null;
+        }
 
         // Bucket presence check (uses requiredBucketKeys rather than hardcoding total).
         // v1: mostly ["kwh.m.all.total"], but this makes TOU/tier expansion deterministic.
@@ -832,6 +862,7 @@ export async function GET(req: NextRequest) {
               }
             : {}),
           ...(planComputability ? { planComputability } : {}),
+          ...(planCalcInputs ? { planCalcInputs } : {}),
           trueCostEstimate: (() => {
             if (!hasUsage) return { status: "NOT_IMPLEMENTED", reason: "No usage available" };
             if (annualKwhFromBuckets == null) {
