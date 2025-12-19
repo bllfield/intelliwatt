@@ -93,7 +93,9 @@ export default function PlanEngineLabPage() {
   const [offersList, setOffersList] = useState<any[]>([]);
   const [templateClassifying, setTemplateClassifying] = useState(false);
   const [templateClassError, setTemplateClassError] = useState<string | null>(null);
-  const [templateKindByOfferId, setTemplateKindByOfferId] = useState<Record<string, string>>({});
+  type OfferPrimaryType = "INDEXED" | "TIERED" | "FREE_WEEKENDS" | "FREE_NIGHTS" | "TOU" | "FIXED" | "OTHER";
+  const [templateTypeByOfferId, setTemplateTypeByOfferId] = useState<Record<string, OfferPrimaryType>>({});
+  const [templateFlagsByOfferId, setTemplateFlagsByOfferId] = useState<Record<string, string[]>>({});
   const [templateReasonByOfferId, setTemplateReasonByOfferId] = useState<Record<string, string>>({});
   const [monthsCount, setMonthsCount] = useState(12);
   const [backfill, setBackfill] = useState(false);
@@ -180,7 +182,8 @@ export default function PlanEngineLabPage() {
       const offers = Array.isArray(json?.offers) ? json.offers : [];
       setOffersList(offers);
       setExtractStatus(`Fetched ${offers.length} offers.`);
-      setTemplateKindByOfferId({});
+      setTemplateTypeByOfferId({});
+      setTemplateFlagsByOfferId({});
       setTemplateReasonByOfferId({});
     } catch (e: any) {
       setOffersError(e?.message ?? String(e));
@@ -189,19 +192,53 @@ export default function PlanEngineLabPage() {
     }
   }, [lookupMode, wattkey, address, city, state, zip]);
 
-  function classifyUsingTemplateResult(r: any): string {
+  function deriveTypeAndFlagsFromTemplateResult(r: any): { type: OfferPrimaryType; flags: string[] } {
     const estimate = r?.estimate ?? null;
-    const notes: string[] = Array.isArray(estimate?.notes) ? estimate.notes.map((x: any) => String(x)) : [];
     const reason = String(estimate?.reason ?? "").toUpperCase();
+    const notes: string[] = Array.isArray(estimate?.notes) ? estimate.notes.map((x: any) => String(x)) : [];
     const notesHay = notes.join(" ").toUpperCase();
+    const detected = r?.detected ?? {};
 
-    if (notesHay.includes("FREE WEEKENDS") || reason.includes("FREE_WEEKENDS")) return "free-weekends";
-    if (notesHay.includes("FREE NIGHTS") || notesHay.includes("NIGHT") && notesHay.includes("TOU")) return "free-nights";
-    if (notesHay.includes("TOU PHASE-2") || notesHay.includes("TOU PHASE-1") || reason.includes("TOU")) return "tou";
-    if (reason.includes("NON_DETERMINISTIC")) return "variable";
+    const flags: string[] = [];
 
-    if (estimate?.status === "OK") return "fixed";
-    return "other";
+    if (detected?.freeWeekends) flags.push("FREE_WEEKENDS");
+    if (detected?.dayNightTou) flags.push("TOU_DAY_NIGHT");
+    if (detected?.freeNights) flags.push("FREE_NIGHTS");
+    if (detected?.tiered) flags.push("TIERED");
+    if (detected?.indexed || detected?.variable) flags.push("INDEXED");
+    if (detected?.fixedRate) flags.push("FIXED");
+
+    if (reason.includes("MISSING_USAGE_BUCKETS")) flags.push("MISSING_BUCKETS");
+    if (reason.includes("USAGE_BUCKET_SUM_MISMATCH")) flags.push("SUM_MISMATCH");
+
+    // Deterministic precedence:
+    // 1) INDEXED
+    if (reason.includes("NON_DETERMINISTIC") || reason.includes("INDEX") || detected?.indexed || detected?.variable) {
+      return { type: "INDEXED", flags: Array.from(new Set(flags)) };
+    }
+    // 2) TIERED
+    if (detected?.tiered || reason.includes("TIER")) {
+      return { type: "TIERED", flags: Array.from(new Set(flags)) };
+    }
+    // 3) FREE_WEEKENDS
+    if (detected?.freeWeekends || notesHay.includes("FREE WEEKEND") || reason.includes("FREE_WEEKENDS")) {
+      return { type: "FREE_WEEKENDS", flags: Array.from(new Set(flags)) };
+    }
+    // 4) FREE_NIGHTS
+    if (detected?.freeNights || notesHay.includes("FREE NIGHT")) {
+      return { type: "FREE_NIGHTS", flags: Array.from(new Set(flags)) };
+    }
+    // 5) TOU
+    if (detected?.dayNightTou || notesHay.includes("TOU PHASE-2") || notesHay.includes("TOU PHASE-1") || reason.includes("TOU")) {
+      return { type: "TOU", flags: Array.from(new Set(flags)) };
+    }
+    // 6) FIXED (only with explicit detection; do NOT infer from OK)
+    if (detected?.fixedRate) {
+      return { type: "FIXED", flags: Array.from(new Set(flags)) };
+    }
+    // 7) OTHER
+    if (estimate?.status === "OK") flags.push("OK_BUT_UNKNOWN_TYPE");
+    return { type: "OTHER", flags: Array.from(new Set(flags)) };
   }
 
   const classifyOffersFromTemplates = useCallback(async () => {
@@ -226,19 +263,23 @@ export default function PlanEngineLabPage() {
       }
 
       const results = Array.isArray(json?.results) ? json.results : [];
-      const kindMap: Record<string, string> = {};
+      const typeMap: Record<string, OfferPrimaryType> = {};
+      const flagsMap: Record<string, string[]> = {};
       const reasonMap: Record<string, string> = {};
       for (const r of results) {
         const id = String(r?.offerId ?? "").trim();
         if (!id) continue;
-        kindMap[id] = classifyUsingTemplateResult(r);
+        const tf = deriveTypeAndFlagsFromTemplateResult(r);
+        typeMap[id] = tf.type;
+        flagsMap[id] = tf.flags;
         const est = r?.estimate ?? {};
         reasonMap[id] = String(est?.reason ?? "");
       }
 
-      setTemplateKindByOfferId(kindMap);
+      setTemplateTypeByOfferId(typeMap);
+      setTemplateFlagsByOfferId(flagsMap);
       setTemplateReasonByOfferId(reasonMap);
-      setExtractStatus(`Classified ${Object.keys(kindMap).length} offers from templates.`);
+      setExtractStatus(`Classified ${Object.keys(typeMap).length} offers from templates.`);
     } catch (e: any) {
       setTemplateClassError(e?.message ?? String(e));
     } finally {
@@ -298,17 +339,31 @@ export default function PlanEngineLabPage() {
     return 'other';
   }
 
-  function classifyEstimateRow(r: any): 'fixed' | 'tou' | 'free-weekends' | 'free-nights' | 'variable' | 'other' {
-    if (r?.detected?.freeWeekends) return 'free-weekends';
-    if (r?.detected?.dayNightTou) return 'tou';
-    const k = classifyUsingTemplateResult(r);
-    return (k === 'free-weekends' || k === 'free-nights' || k === 'tou' || k === 'variable' || k === 'fixed') ? (k as any) : 'other';
+  function heuristicToPrimaryType(k: ReturnType<typeof classifyOffer>): OfferPrimaryType {
+    if (k === "free-weekends") return "FREE_WEEKENDS";
+    if (k === "free-nights") return "FREE_NIGHTS";
+    if (k === "tou") return "TOU";
+    if (k === "fixed") return "FIXED";
+    if (k === "variable") return "INDEXED";
+    return "OTHER";
+  }
+
+  function matchesOfferKindFilter(t: OfferPrimaryType): boolean {
+    if (offerKind === "all") return true;
+    if (offerKind === "fixed") return t === "FIXED";
+    if (offerKind === "tou") return t === "TOU";
+    if (offerKind === "free-weekends") return t === "FREE_WEEKENDS";
+    if (offerKind === "free-nights") return t === "FREE_NIGHTS";
+    if (offerKind === "variable") return t === "INDEXED" || t === "TIERED";
+    return t === "OTHER";
   }
 
   const offersFiltered = offersList.filter((o: any) => {
     const id = String(o?.offer_id ?? '').trim();
-    const kind = (id && templateKindByOfferId[id] ? templateKindByOfferId[id] : classifyOffer(o)) as any;
-    return offerKind === 'all' ? true : kind === offerKind;
+    const t: OfferPrimaryType | null = id && templateTypeByOfferId[id] ? templateTypeByOfferId[id] : null;
+    const fallback = heuristicToPrimaryType(classifyOffer(o));
+    const primary = t ?? fallback;
+    return matchesOfferKindFilter(primary);
   });
   const offerIdsFromFiltered = offersFiltered.map((o: any) => String(o?.offer_id ?? '').trim()).filter(Boolean);
 
@@ -456,6 +511,7 @@ export default function PlanEngineLabPage() {
                   <tr>
                     <th className="p-2">offer_id</th>
                     <th className="p-2">type</th>
+                    <th className="p-2">flags</th>
                     <th className="p-2">supplier</th>
                     <th className="p-2">plan</th>
                     <th className="p-2">term</th>
@@ -467,8 +523,11 @@ export default function PlanEngineLabPage() {
                   {offersFiltered.slice(0, 50).map((o: any, idx: number) => {
                     const offerId = String(o?.offer_id ?? '').trim();
                     const od = o?.offer_data ?? {};
-                    const kind = offerId && templateKindByOfferId[offerId] ? templateKindByOfferId[offerId] : classifyOffer(o);
-                    const kindReason = offerId && templateReasonByOfferId[offerId] ? templateReasonByOfferId[offerId] : "";
+                    const primaryType = offerId && templateTypeByOfferId[offerId] ? templateTypeByOfferId[offerId] : heuristicToPrimaryType(classifyOffer(o));
+                    const isHeuristic = !(offerId && templateTypeByOfferId[offerId]);
+                    const reason = offerId && templateReasonByOfferId[offerId] ? templateReasonByOfferId[offerId] : "";
+                    const flags = offerId && templateFlagsByOfferId[offerId] ? templateFlagsByOfferId[offerId] : [];
+                    const flagsWithFallback = Array.from(new Set([...(flags ?? []), ...(isHeuristic ? ["HEURISTIC"] : [])]));
                     const supplier = String(od?.supplier ?? od?.supplier_name ?? '').trim();
                     const plan = String(o?.offer_name ?? od?.offer_name ?? od?.name ?? '').trim();
                     const term = od?.term ?? od?.term_months ?? null;
@@ -476,7 +535,13 @@ export default function PlanEngineLabPage() {
                     return (
                       <tr key={offerId || idx} className="border-t border-gray-200">
                         <td className="p-2 font-mono break-all">{offerId}</td>
-                        <td className="p-2 font-mono text-[11px]" title={kindReason}>{String(kind)}</td>
+                        <td className="p-2 font-mono text-[11px]" title={reason}>{String(primaryType)}</td>
+                        <td
+                          className="p-2 font-mono text-[11px] max-w-[220px] truncate"
+                          title={flagsWithFallback.join(",")}
+                        >
+                          {flagsWithFallback.join(",")}
+                        </td>
                         <td className="p-2">{supplier}</td>
                         <td className="p-2">{plan}</td>
                         <td className="p-2 font-mono">{term != null ? String(term) : ''}</td>
@@ -579,11 +644,11 @@ export default function PlanEngineLabPage() {
               </tr>
             ) : (
               rows.map((r: any, idx: number) => {
-                const kind = classifyEstimateRow(r);
+                const tf = deriveTypeAndFlagsFromTemplateResult(r);
                 return (
                   <tr key={r?.offerId ?? idx} className="border-t border-gray-200">
                     <td className="p-2 font-mono text-xs break-all">{String(r?.offerId ?? '')}</td>
-                    <td className="p-2 font-mono text-xs">{String(kind)}</td>
+                    <td className="p-2 font-mono text-xs" title={(tf.flags ?? []).join(",")}>{String(tf.type)}</td>
                     <td className="p-2 font-mono text-xs">{String(r?.estimate?.status ?? r?.estimate?.statusLabel ?? '')}</td>
                     <td className="p-2 font-mono text-xs break-all">{String(r?.estimate?.reason ?? r?.error ?? '')}</td>
                     <td className="p-2 font-mono text-xs">{String(Boolean(r?.backfill?.ok))}</td>
