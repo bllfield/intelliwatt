@@ -24,8 +24,56 @@ function parseOfferIds(text: string): string[] {
   return out;
 }
 
+function extractOfferIdsFromJsonText(input: string): { ok: true; offerIds: string[] } | { ok: false; error: string } {
+  const raw = String(input ?? "").trim();
+  if (!raw) return { ok: true, offerIds: [] };
+
+  let parsed: any;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (e: any) {
+    return { ok: false, error: e?.message ? String(e.message) : "invalid_json" };
+  }
+
+  const out: string[] = [];
+  const seen = new Set<string>();
+
+  const push = (v: unknown) => {
+    const s = typeof v === "string" ? v.trim() : "";
+    if (!s) return;
+    if (seen.has(s)) return;
+    seen.add(s);
+    out.push(s);
+  };
+
+  const walk = (node: any) => {
+    if (node == null) return;
+    if (typeof node === "string") return;
+    if (Array.isArray(node)) {
+      for (const item of node) {
+        if (typeof item === "string") push(item);
+        else walk(item);
+      }
+      return;
+    }
+    if (typeof node === "object") {
+      for (const [k, v] of Object.entries(node)) {
+        if (k === "offer_id" || k === "offerId" || k === "offerID") {
+          push(v);
+        }
+        walk(v);
+      }
+    }
+  };
+
+  walk(parsed);
+  return { ok: true, offerIds: out };
+}
+
 export default function PlanEngineLabPage() {
   const [offerIdsText, setOfferIdsText] = useState('');
+  const [offersJsonText, setOffersJsonText] = useState('');
+  const [extractStatus, setExtractStatus] = useState<string | null>(null);
   const [monthsCount, setMonthsCount] = useState(12);
   const [backfill, setBackfill] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -34,6 +82,22 @@ export default function PlanEngineLabPage() {
 
   const offerIds = useMemo(() => parseOfferIds(offerIdsText), [offerIdsText]);
   const monthsCountClamped = useMemo(() => clampInt(monthsCount, 1, 12, 12), [monthsCount]);
+
+  const cleanOfferIds = useCallback(() => {
+    const cleaned = parseOfferIds(offerIdsText);
+    setOfferIdsText(cleaned.join("\n"));
+    setExtractStatus(`Cleaned to ${cleaned.length} unique offerIds.`);
+  }, [offerIdsText]);
+
+  const extractOfferIds = useCallback(() => {
+    const res = extractOfferIdsFromJsonText(offersJsonText);
+    if (!res.ok) {
+      setExtractStatus(`Extract error: ${res.error}`);
+      return;
+    }
+    setOfferIdsText(res.offerIds.join("\n"));
+    setExtractStatus(`Extracted ${res.offerIds.length} offerIds.`);
+  }, [offersJsonText]);
 
   const run = useCallback(async () => {
     setBusy(true);
@@ -83,6 +147,26 @@ export default function PlanEngineLabPage() {
 
       <div className="grid gap-4 max-w-3xl">
         <label className="space-y-1">
+          <div className="text-sm font-semibold text-gray-800">Paste Offers JSON (optional)</div>
+          <textarea
+            className="w-full border px-3 py-2 rounded font-mono text-xs min-h-[120px]"
+            placeholder='Paste /api/dashboard/plans results, or any JSON containing offer_id/offerId fields.'
+            value={offersJsonText}
+            onChange={(e) => setOffersJsonText(e.target.value)}
+          />
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={extractOfferIds}
+              className="px-4 py-2 rounded bg-gray-800 text-white hover:bg-gray-700"
+            >
+              Extract offerIds
+            </button>
+            {extractStatus ? <div className="text-xs text-gray-600">{extractStatus}</div> : null}
+          </div>
+        </label>
+
+        <label className="space-y-1">
           <div className="text-sm font-semibold text-gray-800">Offer IDs (one per line)</div>
           <textarea
             className="w-full border px-3 py-2 rounded font-mono text-xs min-h-[160px]"
@@ -90,7 +174,12 @@ export default function PlanEngineLabPage() {
             value={offerIdsText}
             onChange={(e) => setOfferIdsText(e.target.value)}
           />
-          <div className="text-xs text-gray-500">Parsed: {offerIds.length} unique offerIds (max 25).</div>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-xs text-gray-500">Parsed: {offerIds.length} unique offerIds (max 25).</div>
+            <button type="button" onClick={cleanOfferIds} className="text-xs font-semibold text-gray-700 hover:text-gray-900">
+              Clean / De-dupe
+            </button>
+          </div>
         </label>
 
         <div className="flex flex-wrap items-center gap-3">

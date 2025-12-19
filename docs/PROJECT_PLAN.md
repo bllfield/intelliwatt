@@ -2485,6 +2485,7 @@ Plan engine (non-dashboard): estimate a set of offers
 - Admin UI:
   - Added Admin Tools card: **Plan Engine Lab** → `/admin/plan-engine`
   - Added minimal admin page `/admin/plan-engine` to run `estimate-set` and render JSON + summary table
+  - Added helper to extract `offerId` list from pasted dashboard JSON (keys: `offer_id`, `offerId`, `offerID`) + clean/de-dupe button
 
 Free Weekends (bucket-gated; plan-level remains QUEUED):
 - **Bucket requirements**: `lib/plan-engine/requiredBucketsForPlan.ts`
