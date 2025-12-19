@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { usagePrisma } from "@/lib/db/usageClient";
 import {
   CORE_MONTHLY_BUCKETS,
+  canonicalizeMonthlyBucketKey,
   bucketRuleFromParsedKey,
   parseMonthlyBucketKey,
   type BucketRuleV1,
@@ -162,7 +163,28 @@ export async function ensureCoreMonthlyBuckets(
   notes.push(`intervalSource=${intervalSource}`);
   notes.push(`source=${input.source}`);
 
-  const bucketDefs = Array.isArray(input.bucketDefs) && input.bucketDefs.length > 0 ? input.bucketDefs : CORE_MONTHLY_BUCKETS;
+  const bucketDefsRaw = Array.isArray(input.bucketDefs) && input.bucketDefs.length > 0 ? input.bucketDefs : CORE_MONTHLY_BUCKETS;
+  const bucketDefs = (() => {
+    // Canonicalize keys for storage going forward (do not rewrite old rows; loader aliases legacy reads).
+    // Also avoid double-counting if multiple defs canonicalize to the same key.
+    const out: UsageBucketDef[] = [];
+    const seen = new Set<string>();
+    let deduped = 0;
+
+    for (const b of bucketDefsRaw) {
+      const canonicalKey = canonicalizeMonthlyBucketKey(b?.key);
+      if (!canonicalKey) continue;
+      if (seen.has(canonicalKey)) {
+        deduped++;
+        continue;
+      }
+      seen.add(canonicalKey);
+      out.push({ ...b, key: canonicalKey });
+    }
+
+    if (deduped > 0) notes.push(`bucketDefs_deduped_after_key_canonicalization=${deduped}`);
+    return out;
+  })();
 
   // Cache the formatter (Intl construction is relatively expensive).
   const fmt = new Intl.DateTimeFormat("en-US", {
@@ -392,7 +414,7 @@ export async function ensureCoreMonthlyBuckets(
     kwhSummed: Number.isFinite(kwhSummed) ? Number(kwhSummed.toFixed(6)) : 0,
     notes: [
       ...notes,
-      `Buckets: ${bucketDefs === CORE_MONTHLY_BUCKETS ? "CORE_MONTHLY_BUCKETS (9)" : `custom (${bucketDefs.length})`}`,
+      `Buckets: ${bucketDefsRaw === CORE_MONTHLY_BUCKETS ? "CORE_MONTHLY_BUCKETS" : "custom"} (raw=${bucketDefsRaw.length}, canonical=${bucketDefs.length})`,
       "Best-effort: skips non-finite/<=0 kWh intervals",
       sawStartDay
         ? "Overnight bucket dayType attribution: post-midnight intervals count toward previous local dayType"

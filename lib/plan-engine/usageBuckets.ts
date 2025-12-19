@@ -74,6 +74,12 @@ export function makeBucketKey(args: { dayType: DayType; window: { startHHMM: str
   return `kwh.m.${day}.${start}-${end}${season}`;
 }
 
+export function isAllDayWindow(startHHMM: string, endHHMM: string): boolean {
+  const a = String(startHHMM ?? "").trim();
+  const b = String(endHHMM ?? "").trim();
+  return a === "0000" && b === "2400";
+}
+
 // Stable JSON representation of a bucket definition (stored as ruleJson in usage DB).
 export function bucketDefToRuleJson(def: UsageBucketDef): BucketRuleV1 {
   return def.rule;
@@ -99,6 +105,52 @@ function isValidHHMM(s: string, opts?: { allow2400?: boolean }): boolean {
   if (hh < 0 || hh > 23) return false;
   if (mm < 0 || mm > 59) return false;
   return true;
+}
+
+/**
+ * Canonicalize monthly bucket keys for storage and lookups.
+ *
+ * Accepts legacy variants such as:
+ * - `kwh.m.WEEKDAY.0000-2400` -> `kwh.m.weekday.total`
+ * - `kwh.m.weekend.0000-2400` -> `kwh.m.weekend.total`
+ * - `kwh.m.ALL.total` -> `kwh.m.all.total`
+ * - `kwh.m.WEEKDAY.2000-0700` -> `kwh.m.weekday.2000-0700`
+ *
+ * Safety: if the key is not parseable by a compatible monthly grammar, returns the original key unchanged.
+ */
+export function canonicalizeMonthlyBucketKey(key: string): string {
+  const k = String(key ?? "").trim();
+  if (!k) return k;
+
+  const parts = k.split(".");
+  if (parts.length !== 4) return k;
+  const [p0, granularity, dayTypeRaw, tailRaw] = parts;
+  if (p0 !== "kwh") return k;
+  if (granularity !== "m") return k;
+
+  const dayType = String(dayTypeRaw ?? "").trim().toLowerCase();
+  if (dayType !== "all" && dayType !== "weekday" && dayType !== "weekend") return k;
+
+  const tail = String(tailRaw ?? "").trim();
+  if (!tail) return k;
+
+  if (tail.toLowerCase() === "total") {
+    return `kwh.m.${dayType}.total`;
+  }
+
+  const m = tail.match(/^(\d{4})-(\d{4})$/);
+  if (!m?.[1] || !m?.[2]) return k;
+  const startHHMM = m[1];
+  const endHHMM = m[2];
+  if (!isValidHHMM(startHHMM, { allow2400: false })) return k;
+  if (!isValidHHMM(endHHMM, { allow2400: true })) return k;
+  if (startHHMM === endHHMM) return k;
+
+  if (isAllDayWindow(startHHMM, endHHMM)) {
+    return `kwh.m.${dayType}.total`;
+  }
+
+  return `kwh.m.${dayType}.${startHHMM}-${endHHMM}`;
 }
 
 /**

@@ -2487,6 +2487,17 @@ Free Weekends (bucketKey shape aliasing; loader boundary only):
   - **Fails closed** if the alias differs across months (prevents silent mixed-key month sets)
   - Dashboard routes unchanged; schema unchanged; TOU math strictness preserved
 
+Usage buckets (canonicalize keys on write going forward):
+- Added `canonicalizeMonthlyBucketKey()` in `lib/plan-engine/usageBuckets.ts` to normalize legacy variants:
+  - DayType segment forced to lowercase: `all|weekday|weekend`
+  - All-day forced to `.total` (never `.0000-2400`)
+  - Non-all-day windows preserved as `HHMM-HHMM` but dayType still normalized
+- `lib/usage/aggregateMonthlyBuckets.ts` now uses canonicalized keys for:
+  - `UsageBucketDefinition.key`
+  - `HomeMonthlyUsageBucket.bucketKey`
+  - In-memory aggregation map keys (prevents future legacy keys from being emitted)
+- Existing legacy rows are NOT rewritten; read paths remain tolerant via offer-estimate loader aliasing.
+
 Next (Dashboard):
 - Replace “Best for you (preview)” proxy sort with true usage-based ranking by connecting usage → plan engine (`calculatePlanCostForUsage`).
 - Expand displayed fees (base monthly fee, more structured ETF) once those fields are reliably present in the WattBuy offer payload and/or derived from templates.
