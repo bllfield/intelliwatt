@@ -79,6 +79,94 @@ export function bucketDefToRuleJson(def: UsageBucketDef): BucketRuleV1 {
   return def.rule;
 }
 
+export type ParsedBucketKey = {
+  key: string;
+  granularity: "m";
+  dayType: "all" | "weekday" | "weekend";
+  startHHMM: string | null; // null when "total"
+  endHHMM: string | null;
+  tz: "America/Chicago";
+  isTotal: boolean;
+};
+
+function isValidHHMM(s: string, opts?: { allow2400?: boolean }): boolean {
+  const v = String(s ?? "").trim();
+  if (!/^\d{4}$/.test(v)) return false;
+  const hh = Number(v.slice(0, 2));
+  const mm = Number(v.slice(2, 4));
+  if (!Number.isInteger(hh) || !Number.isInteger(mm)) return false;
+  if (hh === 24 && mm === 0) return !!opts?.allow2400;
+  if (hh < 0 || hh > 23) return false;
+  if (mm < 0 || mm > 59) return false;
+  return true;
+}
+
+/**
+ * Bucket key grammar (v1, monthly only):
+ * - kwh.m.<dayType>.total
+ * - kwh.m.<dayType>.<HHMM>-<HHMM>
+ * where dayType in {all,weekday,weekend} and HHMM in 0000..2359 (end may be 2400).
+ */
+export function parseMonthlyBucketKey(key: string): ParsedBucketKey | null {
+  const k = String(key ?? "").trim();
+  if (!k) return null;
+
+  const parts = k.split(".");
+  if (parts.length !== 4) return null;
+  const [p0, granularity, dayType, tail] = parts;
+  if (p0 !== "kwh") return null;
+  if (granularity !== "m") return null;
+  if (dayType !== "all" && dayType !== "weekday" && dayType !== "weekend") return null;
+
+  if (tail === "total") {
+    return {
+      key: k,
+      granularity: "m",
+      dayType,
+      startHHMM: null,
+      endHHMM: null,
+      tz: "America/Chicago",
+      isTotal: true,
+    };
+  }
+
+  const m = tail.match(/^(\d{4})-(\d{4})$/);
+  if (!m?.[1] || !m?.[2]) return null;
+  const startHHMM = m[1];
+  const endHHMM = m[2];
+  if (!isValidHHMM(startHHMM, { allow2400: false })) return null;
+  if (!isValidHHMM(endHHMM, { allow2400: true })) return null;
+  if (startHHMM === endHHMM) return null;
+
+  return {
+    key: k,
+    granularity: "m",
+    dayType,
+    startHHMM,
+    endHHMM,
+    tz: "America/Chicago",
+    isTotal: false,
+  };
+}
+
+export function bucketRuleFromParsedKey(p: ParsedBucketKey): BucketRuleV1 {
+  const dayType: DayType = p.dayType === "all" ? "ALL" : p.dayType === "weekday" ? "WEEKDAY" : "WEEKEND";
+
+  const window =
+    p.isTotal || (p.startHHMM == null && p.endHHMM == null)
+      ? { startHHMM: "0000", endHHMM: "2400" }
+      : { startHHMM: p.startHHMM!, endHHMM: p.endHHMM! };
+
+  // Parse-time validation ensures HHMM format correctness.
+  return {
+    v: 1,
+    tz: "America/Chicago",
+    dayType,
+    window,
+    overnightAttribution: "ACTUAL_DAY",
+  };
+}
+
 function makeDef(args: {
   dayType: DayType;
   window: { startHHMM: string; endHHMM: string };

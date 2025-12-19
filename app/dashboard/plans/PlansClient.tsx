@@ -125,9 +125,12 @@ export default function PlansClient() {
       if (raw === "true") return true;
       if (raw === "false") return false;
     } catch {
-      // ignore
+      // Some mobile browsers (or private mode) can block localStorage. Fail open to a stable default
+      // so plans still load.
+      return false;
     }
-    return null;
+    // Default: treat as not-a-renter unless explicitly set.
+    return false;
   });
   const [sort, setSort] = useState<SortKey>("kwh1000_asc");
   const [page, setPage] = useState(1);
@@ -181,7 +184,8 @@ export default function PlansClient() {
       if (raw === "true") setIsRenter(true);
       if (raw === "false") setIsRenter(false);
     } catch {
-      // ignore
+      // localStorage not accessible (mobile/private mode). Proceed with default.
+      setIsRenter(false);
     }
   }, [isRenter]);
 
@@ -1123,7 +1127,15 @@ export default function PlansClient() {
       ) : null}
 
       <div className="mx-auto w-full max-w-5xl">
-        {offers.length === 0 ? (
+        {resp == null || (resp?.ok !== true && loading) ? (
+          <div className="rounded-3xl border border-brand-cyan/20 bg-brand-navy p-8 text-brand-cyan/75">
+            Loading plans…
+          </div>
+        ) : resp?.ok !== true ? (
+          <div className="rounded-3xl border border-amber-400/25 bg-brand-navy p-8 text-amber-200">
+            {error ? `Error: ${error}` : resp?.message ? resp.message : "Unable to load plans."}
+          </div>
+        ) : offers.length === 0 ? (
           <div className="rounded-3xl border border-brand-cyan/20 bg-brand-navy p-8 text-brand-cyan/75">
             No plans found for your current filters.
           </div>

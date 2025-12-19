@@ -2429,6 +2429,18 @@ Key paths found (no design changes in this log entry):
 - **Bucket tables (usage DB)**: `prisma/usage/schema.prisma` (`UsageBucketDefinition`, `HomeMonthlyUsageBucket`)
 - **Dashboard gating (do not regress)**: `app/api/dashboard/plans/route.ts` (statusLabel AVAILABLE/QUEUED/UNAVAILABLE, template=available filter, quarantine wiring)
 
+Bucket System (Design+Scaffold plumbing added; semantics unchanged):
+- **Bucket grammar parser**: `lib/plan-engine/usageBuckets.ts`
+  - `parseMonthlyBucketKey()` (supports `kwh.m.<dayType>.total` and `kwh.m.<dayType>.<HHMM>-<HHMM>`)
+  - `bucketRuleFromParsedKey()` (builds `BucketRuleV1` with `window=0000-2400` for totals)
+- **Bucket registry auto-create**: `lib/usage/aggregateMonthlyBuckets.ts`
+  - `ensureBucketsExist({ bucketKeys })` upserts `UsageBucketDefinition` by key (registry only; does not compute `HomeMonthlyUsageBucket`)
+- **Side-effect wiring point**: `lib/plan-engine/planComputability.ts`
+  - `derivePlanCalcRequirementsFromTemplate()` now best-effort calls `ensureBucketsExist()` (server-only via dynamic import; swallowed on failure)
+- Confirmed unchanged:
+  - `app/api/dashboard/plans/route.ts` (locked; no edits in this step)
+  - `lib/plan-engine/calculatePlanCostForUsage.ts` (no behavior changes in this step)
+
 Next (Dashboard):
 - Replace “Best for you (preview)” proxy sort with true usage-based ranking by connecting usage → plan engine (`calculatePlanCostForUsage`).
 - Expand displayed fees (base monthly fee, more structured ETF) once those fields are reliably present in the WattBuy offer payload and/or derived from templates.

@@ -2,6 +2,8 @@ import { prisma } from "@/lib/db";
 import { usagePrisma } from "@/lib/db/usageClient";
 import {
   CORE_MONTHLY_BUCKETS,
+  bucketRuleFromParsedKey,
+  parseMonthlyBucketKey,
   type BucketRuleV1,
   type DayType,
   type OvernightAttribution,
@@ -10,6 +12,84 @@ import {
 
 export type UsageIntervalSource = "SMT" | "GREENBUTTON";
 export type BucketComputeSource = "SMT" | "GREENBUTTON" | "SIMULATED";
+
+export class BucketKeyParseError extends Error {
+  readonly key: string;
+  constructor(key: string, message?: string) {
+    super(message ?? `Unparseable monthly bucket key: ${key}`);
+    this.name = "BucketKeyParseError";
+    this.key = key;
+  }
+}
+
+function hhmmToLabel(hhmm: string): string {
+  const s = String(hhmm ?? "").trim();
+  if (!/^\d{4}$/.test(s)) return s;
+  return `${s.slice(0, 2)}:${s.slice(2, 4)}`;
+}
+
+export async function ensureBucketsExist(args: {
+  bucketKeys: string[];
+  tz?: string; // default "America/Chicago"
+}): Promise<{ ensured: string[]; created: string[]; skipped: string[] }> {
+  const tz = typeof args?.tz === "string" && args.tz.trim() ? args.tz.trim() : "America/Chicago";
+  const inKeys = Array.isArray(args?.bucketKeys) ? args.bucketKeys : [];
+  const uniq = Array.from(new Set(inKeys.map((k) => String(k ?? "").trim()).filter(Boolean)));
+
+  const ensured: string[] = [];
+  const created: string[] = [];
+  const skipped: string[] = [];
+
+  for (const key of uniq) {
+    const parsed = parseMonthlyBucketKey(key);
+    if (!parsed) throw new BucketKeyParseError(key);
+    if (parsed.tz !== "America/Chicago" || tz !== "America/Chicago") {
+      // For now we only support America/Chicago in the stored rule format + evaluator.
+      skipped.push(key);
+      continue;
+    }
+
+    const rule = bucketRuleFromParsedKey(parsed);
+    const dayType: DayType = rule.dayType ?? "ALL";
+    const startHHMM = String(rule.window?.startHHMM ?? "").trim();
+    const endHHMM = String(rule.window?.endHHMM ?? "").trim();
+    const overnightAttribution: OvernightAttribution = rule.overnightAttribution ?? "ACTUAL_DAY";
+
+    const label = parsed.isTotal
+      ? `Monthly kWh (${dayType}, 00:00-24:00)`
+      : `Monthly kWh (${dayType}, ${hhmmToLabel(startHHMM)}-${hhmmToLabel(endHHMM)})`;
+
+    // Best-effort: idempotent upsert by key (registry only, no totals computed here).
+    await (usagePrisma as any).usageBucketDefinition.upsert({
+      where: { key },
+      create: {
+        key,
+        label,
+        dayType,
+        season: null,
+        startHHMM,
+        endHHMM,
+        tz,
+        overnightAttribution,
+        ruleJson: rule,
+      },
+      update: {
+        label,
+        dayType,
+        season: null,
+        startHHMM,
+        endHHMM,
+        tz,
+        overnightAttribution,
+        ruleJson: rule,
+      },
+    });
+
+    ensured.push(key);
+  }
+
+  return { ensured, created, skipped };
+}
 
 export type EnsureCoreMonthlyBucketsInput = {
   homeId: string;

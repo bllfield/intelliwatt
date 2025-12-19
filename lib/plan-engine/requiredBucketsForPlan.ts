@@ -19,6 +19,9 @@ export function requiredBucketsForPlan(input: {
     description: "Total monthly kWh (all days, 00:00-24:00)",
   });
 
+  // TODO(v2): requiredBucketKeys must be derived from template schedules/windows (rateStructure),
+  // not from feature flags. This file is a temporary, conservative placeholder.
+
   // If/when we support TOU energy, require at least the CORE day/night buckets.
   if (input.features.supportsTouEnergy) {
     out.push({

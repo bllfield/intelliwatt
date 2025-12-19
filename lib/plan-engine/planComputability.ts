@@ -41,6 +41,23 @@ function isPrismaJsonNullLike(v: unknown): boolean {
   return v === (Prisma as any).JsonNull || v === (Prisma as any).DbNull || v === (Prisma as any).AnyNull;
 }
 
+function bestEffortEnsureBucketsExist(requiredBucketKeys: string[]) {
+  // Design+scaffold only: registry side-effect, no change to status logic in this step.
+  // IMPORTANT: keep this server-only and best-effort; never let it break dashboard semantics.
+  if (!Array.isArray(requiredBucketKeys) || requiredBucketKeys.length === 0) return;
+  if (typeof window !== "undefined") return;
+
+  void import("@/lib/usage/aggregateMonthlyBuckets")
+    .then(({ ensureBucketsExist }) =>
+      ensureBucketsExist({ bucketKeys: requiredBucketKeys }).catch((err: unknown) => {
+        console.warn("[planComputability] ensureBucketsExist failed (best-effort)", err);
+      }),
+    )
+    .catch((err: unknown) => {
+      console.warn("[planComputability] ensureBucketsExist import failed (best-effort)", err);
+    });
+}
+
 export function inferSupportedFeaturesFromTemplate(input: {
   rateStructure: unknown;
 }): { features: SupportedPlanFeatures; notes: string[] } {
@@ -111,24 +128,29 @@ export function derivePlanCalcRequirementsFromTemplate(args: {
   const inferred = inferSupportedFeaturesFromTemplate({ rateStructure: rs });
   const fixed = extractFixedRepEnergyCentsPerKwh(rs);
 
-  if (fixed != null) {
-    return {
-      planCalcVersion,
-      planCalcStatus: "COMPUTABLE",
-      planCalcReasonCode: "FIXED_RATE_OK",
-      requiredBucketKeys: ["kwh.m.all.total"],
-      supportedFeatures: { ...inferred.features, notes: inferred.notes },
-    };
-  }
+  const out =
+    fixed != null
+      ? {
+          planCalcVersion,
+          planCalcStatus: "COMPUTABLE" as const,
+          planCalcReasonCode: "FIXED_RATE_OK",
+          requiredBucketKeys: ["kwh.m.all.total"],
+          supportedFeatures: { ...inferred.features, notes: inferred.notes },
+        }
+      : {
+          planCalcVersion,
+          planCalcStatus: "NOT_COMPUTABLE" as const,
+          planCalcReasonCode: "UNSUPPORTED_RATE_STRUCTURE",
+          // Even though we can't compute, we still record the intended usage bucket key for auditing/debug.
+          requiredBucketKeys: ["kwh.m.all.total"],
+          supportedFeatures: { ...inferred.features, notes: inferred.notes },
+        };
 
-  return {
-    planCalcVersion,
-    planCalcStatus: "NOT_COMPUTABLE",
-    planCalcReasonCode: "UNSUPPORTED_RATE_STRUCTURE",
-    // Even though we can't compute, we still record the intended usage bucket key for auditing/debug.
-    requiredBucketKeys: ["kwh.m.all.total"],
-    supportedFeatures: { ...inferred.features, notes: inferred.notes },
-  };
+  // Side-effect only (best-effort): ensure usage bucket definitions exist in the registry table.
+  // This must not change status logic yet; unparsable keys are swallowed.
+  bestEffortEnsureBucketsExist(out.requiredBucketKeys);
+
+  return out;
 }
 
 export function canComputePlanFromBuckets(input: {
