@@ -43,6 +43,193 @@ function safeNum(n: unknown): number | null {
   return Number.isFinite(x) ? x : null;
 }
 
+type UsageBucketsByMonth = Record<string /* YYYY-MM */, Record<string /* bucketKey */, number /* kWh */>>;
+type HHMM = string; // "0000".."2400" (validated at runtime in callers/parsers)
+
+function isObject(v: unknown): v is Record<string, any> {
+  return typeof v === "object" && v !== null;
+}
+
+function numOrNull(v: unknown): number | null {
+  const n = typeof v === "number" ? v : typeof v === "string" ? Number(v) : NaN;
+  return Number.isFinite(n) ? n : null;
+}
+
+function parseHHMMishToHHMM(v: unknown): HHMM | null {
+  const s = String(v ?? "").trim();
+  if (!s) return null;
+  // Accept "HH:MM" and "HHMM"
+  const m1 = s.match(/^(\d{1,2}):(\d{2})$/);
+  if (m1?.[1] && m1?.[2]) {
+    const hh = Number(m1[1]);
+    const mm = Number(m1[2]);
+    if (!Number.isInteger(hh) || !Number.isInteger(mm)) return null;
+    if (hh === 24 && mm === 0) return "2400" as HHMM;
+    if (hh < 0 || hh > 23) return null;
+    if (mm < 0 || mm > 59) return null;
+    return `${String(hh).padStart(2, "0")}${String(mm).padStart(2, "0")}` as HHMM;
+  }
+  const m2 = s.match(/^(\d{4})$/);
+  if (m2?.[1]) {
+    const hh = Number(s.slice(0, 2));
+    const mm = Number(s.slice(2, 4));
+    if (hh === 24 && mm === 0) return "2400" as HHMM;
+    if (!Number.isInteger(hh) || hh < 0 || hh > 23) return null;
+    if (!Number.isInteger(mm) || mm < 0 || mm > 59) return null;
+    return s as HHMM;
+  }
+  return null;
+}
+
+function weekdayStringToIndex(s: string): number | null {
+  const v = String(s ?? "").trim().toLowerCase();
+  if (v === "sun" || v === "sunday") return 0;
+  if (v === "mon" || v === "monday") return 1;
+  if (v === "tue" || v === "tues" || v === "tuesday") return 2;
+  if (v === "wed" || v === "wednesday") return 3;
+  if (v === "thu" || v === "thur" || v === "thurs" || v === "thursday") return 4;
+  if (v === "fri" || v === "friday") return 5;
+  if (v === "sat" || v === "saturday") return 6;
+  return null;
+}
+
+function extractTouPhase1Rates(rateStructure: any): null | (
+  | { kind: "DAY_NIGHT_ALL_DAYS"; dayRateCentsPerKwh: number; nightRateCentsPerKwh: number }
+  | { kind: "WEEKDAY_WEEKEND_ALL_DAY"; weekdayRateCentsPerKwh: number; weekendRateCentsPerKwh: number }
+) {
+  if (!rateStructure || !isObject(rateStructure)) return null;
+  const rs: any = rateStructure;
+
+  // Prefer "periods" (canonical numeric-hour representation from EFL pipeline)
+  const periods: any[] = Array.isArray(rs.timeOfUsePeriods)
+    ? rs.timeOfUsePeriods
+    : Array.isArray(rs.planRules?.timeOfUsePeriods)
+      ? rs.planRules.timeOfUsePeriods
+      : [];
+
+  if (periods.length > 0) {
+    // Weekday/weekend all-day
+    const weekday = periods.find((p) => {
+      const rate = numOrNull(p?.rateCentsPerKwh);
+      const startHour = numOrNull(p?.startHour);
+      const endHour = numOrNull(p?.endHour);
+      const days = Array.isArray(p?.daysOfWeek) ? (p.daysOfWeek as number[]) : null;
+      return (
+        rate != null &&
+        startHour === 0 &&
+        endHour === 24 &&
+        Array.isArray(days) &&
+        days.length === 5 &&
+        days.every((d) => d === 1 || d === 2 || d === 3 || d === 4 || d === 5)
+      );
+    });
+    const weekend = periods.find((p) => {
+      const rate = numOrNull(p?.rateCentsPerKwh);
+      const startHour = numOrNull(p?.startHour);
+      const endHour = numOrNull(p?.endHour);
+      const days = Array.isArray(p?.daysOfWeek) ? (p.daysOfWeek as number[]) : null;
+      return (
+        rate != null &&
+        startHour === 0 &&
+        endHour === 24 &&
+        Array.isArray(days) &&
+        days.length === 2 &&
+        days.includes(0) &&
+        days.includes(6)
+      );
+    });
+    if (weekday && weekend) {
+      const weekdayRate = numOrNull((weekday as any).rateCentsPerKwh);
+      const weekendRate = numOrNull((weekend as any).rateCentsPerKwh);
+      if (weekdayRate != null && weekendRate != null) {
+        return { kind: "WEEKDAY_WEEKEND_ALL_DAY", weekdayRateCentsPerKwh: weekdayRate, weekendRateCentsPerKwh: weekendRate };
+      }
+    }
+
+    // Day/night all-days (canonical 07:00-20:00, 20:00-07:00)
+    const night = periods.find((p) => {
+      const rate = numOrNull(p?.rateCentsPerKwh);
+      const startHour = numOrNull(p?.startHour);
+      const endHour = numOrNull(p?.endHour);
+      const days = p?.daysOfWeek;
+      return rate != null && startHour === 20 && endHour === 7 && (!Array.isArray(days) || days.length === 0);
+    });
+    const day = periods.find((p) => {
+      const rate = numOrNull(p?.rateCentsPerKwh);
+      const startHour = numOrNull(p?.startHour);
+      const endHour = numOrNull(p?.endHour);
+      const days = p?.daysOfWeek;
+      return rate != null && startHour === 7 && endHour === 20 && (!Array.isArray(days) || days.length === 0);
+    });
+    if (day && night) {
+      const dayRate = numOrNull((day as any).rateCentsPerKwh);
+      const nightRate = numOrNull((night as any).rateCentsPerKwh);
+      if (dayRate != null && nightRate != null) {
+        return { kind: "DAY_NIGHT_ALL_DAYS", dayRateCentsPerKwh: dayRate, nightRateCentsPerKwh: nightRate };
+      }
+    }
+  }
+
+  // Fallback: "tiers" (current-plan style time-of-use tiers)
+  const tiers: any[] = rs?.type === "TIME_OF_USE" && Array.isArray(rs?.tiers) ? rs.tiers : Array.isArray(rs?.timeOfUseTiers) ? rs.timeOfUseTiers : [];
+  if (tiers.length > 0) {
+    const normTier = (t: any) => {
+      const price = numOrNull(t?.priceCents);
+      const startHHMM = parseHHMMishToHHMM(t?.startTime);
+      const endHHMM = parseHHMMishToHHMM(t?.endTime);
+      const daysRaw = t?.daysOfWeek;
+      const days =
+        Array.isArray(daysRaw)
+          ? (daysRaw.map((d: any) => weekdayStringToIndex(String(d))).filter((x: any) => x != null) as number[])
+          : typeof daysRaw === "string" && String(daysRaw).toUpperCase() === "ALL"
+            ? null
+            : null;
+      return { price, startHHMM, endHHMM, days };
+    };
+
+    const normalized = tiers.map(normTier);
+
+    // Day/night all-days
+    const night = normalized.find((t) => t.price != null && t.startHHMM === "2000" && t.endHHMM === "0700" && !t.days);
+    const day = normalized.find((t) => t.price != null && t.startHHMM === "0700" && t.endHHMM === "2000" && !t.days);
+    if (day && night) {
+      return { kind: "DAY_NIGHT_ALL_DAYS", dayRateCentsPerKwh: day.price!, nightRateCentsPerKwh: night.price! };
+    }
+
+    // Weekday/weekend all-day (00:00-24:00)
+    const wk = normalized.find(
+      (t) =>
+        t.price != null &&
+        t.startHHMM === "0000" &&
+        t.endHHMM === "2400" &&
+        Array.isArray(t.days) &&
+        t.days.length === 5 &&
+        t.days.every((d) => d >= 1 && d <= 5),
+    );
+    const we = normalized.find(
+      (t) =>
+        t.price != null &&
+        t.startHHMM === "0000" &&
+        t.endHHMM === "2400" &&
+        Array.isArray(t.days) &&
+        t.days.length === 2 &&
+        t.days.includes(0) &&
+        t.days.includes(6),
+    );
+    if (wk && we) {
+      return { kind: "WEEKDAY_WEEKEND_ALL_DAY", weekdayRateCentsPerKwh: wk.price!, weekendRateCentsPerKwh: we.price! };
+    }
+  }
+
+  return null;
+}
+
+function sumMonthBucketKwh(month: Record<string, number> | null | undefined, key: string): number | null {
+  const v = month ? (month as any)[key] : undefined;
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 /**
  * Conservative extractor: tries common shapes to find a single fixed energy rate (cents/kWh).
  * Fail-closed: returns null unless we find exactly one confident number.
@@ -120,6 +307,8 @@ export function calculatePlanCostForUsage(args: {
   monthsCount: number; // typically 12
   tdsp: TdspRatesApplied;
   rateStructure: any;
+  // Optional Phase-1: bucket totals by month for TOU math paths (no call sites use this yet).
+  usageBucketsByMonth?: UsageBucketsByMonth;
 }): TrueCostEstimate {
   const notes: string[] = [];
 
@@ -130,7 +319,120 @@ export function calculatePlanCostForUsage(args: {
 
   const repEnergyCents = extractFixedRepEnergyCentsPerKwh(args.rateStructure);
   if (repEnergyCents === null) {
-    return { status: "NOT_COMPUTABLE", reason: "Unsupported rateStructure (no single fixed REP energy rate)" };
+    // IMPORTANT: Preserve current v1 behavior for existing call sites.
+    // Only attempt TOU math when explicit bucket totals are provided (future wiring).
+    if (!args.usageBucketsByMonth) {
+      return { status: "NOT_COMPUTABLE", reason: "Unsupported rateStructure (no single fixed REP energy rate)" };
+    }
+
+    const tou = extractTouPhase1Rates(args.rateStructure);
+    if (!tou) {
+      return { status: "NOT_COMPUTABLE", reason: "TOU_RATE_EXTRACTION_UNSUPPORTED" };
+    }
+    if (tou.kind !== "DAY_NIGHT_ALL_DAYS") {
+      return { status: "NOT_COMPUTABLE", reason: "TOU_UNSUPPORTED_PHASE1" };
+    }
+
+    const byMonth = args.usageBucketsByMonth;
+    const allMonths = Object.keys(byMonth ?? {}).sort();
+    if (allMonths.length === 0) {
+      return { status: "NOT_COMPUTABLE", reason: "MISSING_USAGE_BUCKETS (no months present)" };
+    }
+
+    const wantMonths = Math.max(1, Math.floor(safeNum(args.monthsCount) ?? 12));
+    if (allMonths.length < wantMonths) {
+      return { status: "NOT_COMPUTABLE", reason: `MISSING_USAGE_BUCKETS (need ${wantMonths} months, have ${allMonths.length})` };
+    }
+    const months = allMonths.slice(-wantMonths);
+
+    const tdspPerKwhCents = safeNum(args.tdsp?.perKwhDeliveryChargeCents) ?? 0;
+    const tdspMonthly = safeNum(args.tdsp?.monthlyCustomerChargeDollars) ?? 0;
+    const repFixedMonthly = extractRepFixedMonthlyChargeDollars(args.rateStructure) ?? 0;
+
+    let repEnergyDollars = 0;
+    let totalKwh = 0;
+    const missing: string[] = [];
+    const mismatched: string[] = [];
+
+    for (const ym of months) {
+      const m = byMonth[ym];
+      if (!m || typeof m !== "object") continue;
+
+      const totalKey = "kwh.m.all.total";
+      const nightKey = "kwh.m.all.2000-0700";
+      const dayKey = "kwh.m.all.0700-2000";
+      const monthTotalKwh = sumMonthBucketKwh(m, totalKey);
+      const nightKwh = sumMonthBucketKwh(m, nightKey);
+      const dayKwh = sumMonthBucketKwh(m, dayKey);
+
+      if (monthTotalKwh == null) missing.push(`${ym}:${totalKey}`);
+      if (nightKwh == null) missing.push(`${ym}:${nightKey}`);
+      if (dayKwh == null) missing.push(`${ym}:${dayKey}`);
+      if (monthTotalKwh == null || nightKwh == null || dayKwh == null) continue;
+
+      const sum = nightKwh + dayKwh;
+      // Safety: if buckets disagree, do NOT attempt to normalize/adjust.
+      // Treat this as non-computable so we don't produce un-auditable math.
+      if (Math.abs(sum - monthTotalKwh) > 0.01) {
+        mismatched.push(`${ym}:sum(day+night)=${sum.toFixed(3)} total=${monthTotalKwh.toFixed(3)}`);
+        continue;
+      }
+
+      repEnergyDollars += (nightKwh * (tou.nightRateCentsPerKwh / 100)) + (dayKwh * (tou.dayRateCentsPerKwh / 100));
+      totalKwh += monthTotalKwh;
+    }
+
+    if (missing.length > 0) {
+      return { status: "NOT_COMPUTABLE", reason: `MISSING_USAGE_BUCKETS: ${missing.slice(0, 12).join(", ")}${missing.length > 12 ? "…" : ""}` };
+    }
+    if (mismatched.length > 0) {
+      return {
+        status: "NOT_COMPUTABLE",
+        reason: `USAGE_BUCKET_SUM_MISMATCH: ${mismatched.slice(0, 6).join(", ")}${mismatched.length > 6 ? "…" : ""}`,
+      };
+    }
+
+    const repFixedDollars = months.length * repFixedMonthly;
+    const tdspDeliveryDollars = totalKwh * (tdspPerKwhCents / 100);
+    const tdspFixedDollars = months.length * tdspMonthly;
+
+    const repTotal = repEnergyDollars + repFixedDollars;
+    const tdspTotal = tdspDeliveryDollars + tdspFixedDollars;
+    const total = repTotal + tdspTotal;
+
+    notes.push(`TOU Phase-1 (day/night): months=${months.length}`);
+    notes.push("TOU buckets: kwh.m.all.total + kwh.m.all.2000-0700 + kwh.m.all.0700-2000");
+    if (repFixedMonthly > 0) notes.push("Includes REP fixed monthly charge (from template)");
+    else notes.push("REP fixed monthly charge not found (assumed $0)");
+    if (tdspPerKwhCents > 0 || tdspMonthly > 0) notes.push("Includes TDSP delivery");
+    else notes.push("TDSP delivery missing/zero (check tdspRatesApplied)");
+
+    return {
+      status: "OK",
+      annualCostDollars: round2(total),
+      monthlyCostDollars: round2(total / months.length),
+      confidence: "MEDIUM",
+      components: {
+        energyOnlyDollars: round2(repEnergyDollars),
+        deliveryDollars: round2(tdspDeliveryDollars),
+        baseFeesDollars: round2(repFixedDollars + tdspFixedDollars),
+        totalDollars: round2(total),
+      },
+      componentsV2: {
+        rep: {
+          energyDollars: round2(repEnergyDollars),
+          fixedDollars: round2(repFixedDollars),
+          totalDollars: round2(repTotal),
+        },
+        tdsp: {
+          deliveryDollars: round2(tdspDeliveryDollars),
+          fixedDollars: round2(tdspFixedDollars),
+          totalDollars: round2(tdspTotal),
+        },
+        totalDollars: round2(total),
+      },
+      notes,
+    };
   }
 
   const repFixedMonthly = extractRepFixedMonthlyChargeDollars(args.rateStructure) ?? 0;

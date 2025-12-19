@@ -2441,6 +2441,19 @@ Bucket System (Design+Scaffold plumbing added; semantics unchanged):
   - `app/api/dashboard/plans/route.ts` (locked; no edits in this step)
   - `lib/plan-engine/calculatePlanCostForUsage.ts` (no behavior changes in this step)
 
+Phase-1 TOU (Design+Scaffold; dashboard still v1 fixed-only):
+- **Bucket requirements**: `lib/plan-engine/requiredBucketsForPlan.ts`
+  - TOU now includes required day/night buckets (`kwh.m.all.2000-0700`, `kwh.m.all.0700-2000`)
+- **Computability reason codes**: `lib/plan-engine/planComputability.ts`
+  - TOU-like templates now return `planCalcReasonCode="TOU_PHASE1_REQUIRES_BUCKETS"` and populate `requiredBucketKeys` (still NOT_COMPUTABLE to avoid dashboard regression)
+- **TOU calc path (not wired yet)**: `lib/plan-engine/calculatePlanCostForUsage.ts`
+  - Added optional `usageBucketsByMonth` input + Phase-1 TOU math branch (only runs when buckets are provided)
+  - Existing fixed-rate math path remains unchanged; dashboard routes unchanged/locked
+
+Phase-1 TOU (math strictness):
+- Day/Night TOU math now **requires** `kwh.m.all.total`, `kwh.m.all.2000-0700`, and `kwh.m.all.0700-2000` for every month used.
+- If `day + night` does not match `total` for any month, calculation fails closed (`USAGE_BUCKET_SUM_MISMATCH`). No auto-normalization/assumptions.
+
 Next (Dashboard):
 - Replace “Best for you (preview)” proxy sort with true usage-based ranking by connecting usage → plan engine (`calculatePlanCostForUsage`).
 - Expand displayed fees (base monthly fee, more structured ETF) once those fields are reliably present in the WattBuy offer payload and/or derived from templates.

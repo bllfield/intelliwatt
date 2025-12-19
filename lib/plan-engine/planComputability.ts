@@ -63,19 +63,31 @@ export function inferSupportedFeaturesFromTemplate(input: {
 }): { features: SupportedPlanFeatures; notes: string[] } {
   const notes: string[] = [];
 
+  const rsAny = input.rateStructure as any;
   const fixedCents = extractFixedRepEnergyCentsPerKwh(input.rateStructure as any);
   const supportsFixedEnergyRate = fixedCents != null;
   if (!supportsFixedEnergyRate) {
     notes.push("Could not confidently extract a single fixed REP ¢/kWh rate from rateStructure (fail-closed).");
   }
 
-  // Conservative: treat any detected TOU/tier arrays as unsupported by the bucket calculator layer (for now).
-  const supportsTouEnergy = false;
+  // Detect TOU-like templates so we can set precise reason codes + required buckets (even if still not computable in v1).
+  const supportsTouEnergy = (() => {
+    if (!isObject(rsAny)) return false;
+    const rs = rsAny as any;
+    if (rs?.type === "TIME_OF_USE") return true;
+    if (rs?.planType === "tou") return true;
+    if (hasNonEmptyArray(rs?.timeOfUseTiers)) return true;
+    // Current-plan style: TOU tiers may be stored under `tiers` when type=TIME_OF_USE.
+    if (rs?.type === "TIME_OF_USE" && hasNonEmptyArray(rs?.tiers)) return true;
+    if (hasNonEmptyArray(rs?.timeOfUsePeriods)) return true;
+    if (hasNonEmptyArray((rs?.planRules as any)?.timeOfUsePeriods)) return true;
+    return false;
+  })();
   const supportsTieredEnergy = false;
 
   if (isObject(input.rateStructure)) {
     if (hasNonEmptyArray((input.rateStructure as any).timeOfUseTiers)) {
-      notes.push("Detected timeOfUseTiers; TOU bucket calculation is not enabled in v1 (conservative).");
+      notes.push("Detected timeOfUseTiers; TOU bucket calculation is limited (Phase-1 only) and not enabled in v1 dashboard yet.");
     }
     if (hasNonEmptyArray((input.rateStructure as any).tiers) || hasNonEmptyArray((input.rateStructure as any).usageTiers)) {
       notes.push("Detected tiered energy structures; tiered monthly computation is not enabled in v1 (conservative).");
@@ -128,23 +140,42 @@ export function derivePlanCalcRequirementsFromTemplate(args: {
   const inferred = inferSupportedFeaturesFromTemplate({ rateStructure: rs });
   const fixed = extractFixedRepEnergyCentsPerKwh(rs);
 
-  const out =
-    fixed != null
-      ? {
-          planCalcVersion,
-          planCalcStatus: "COMPUTABLE" as const,
-          planCalcReasonCode: "FIXED_RATE_OK",
-          requiredBucketKeys: ["kwh.m.all.total"],
-          supportedFeatures: { ...inferred.features, notes: inferred.notes },
-        }
-      : {
-          planCalcVersion,
-          planCalcStatus: "NOT_COMPUTABLE" as const,
-          planCalcReasonCode: "UNSUPPORTED_RATE_STRUCTURE",
-          // Even though we can't compute, we still record the intended usage bucket key for auditing/debug.
-          requiredBucketKeys: ["kwh.m.all.total"],
-          supportedFeatures: { ...inferred.features, notes: inferred.notes },
-        };
+  const out = (() => {
+    if (fixed != null) {
+      return {
+        planCalcVersion,
+        planCalcStatus: "COMPUTABLE" as const,
+        planCalcReasonCode: "FIXED_RATE_OK",
+        requiredBucketKeys: ["kwh.m.all.total"],
+        supportedFeatures: { ...inferred.features, notes: inferred.notes },
+      };
+    }
+
+    if (inferred.features.supportsTouEnergy) {
+      // We are not marking TOU computable yet (dashboard remains v1 fixed-only), but we want:
+      // - a precise reason code
+      // - requiredBucketKeys populated so the bucket registry can self-register definitions
+      const reqs = requiredBucketsForPlan({ features: { supportsTouEnergy: true } });
+      return {
+        planCalcVersion,
+        planCalcStatus: "NOT_COMPUTABLE" as const,
+        // NOTE: We intentionally keep this NOT_COMPUTABLE until the dashboard passes bucket totals
+        // into calculatePlanCostForUsage (no assumptions allowed).
+        planCalcReasonCode: "TOU_PHASE1_REQUIRES_BUCKETS",
+        requiredBucketKeys: reqs.map((r) => r.key),
+        supportedFeatures: { ...inferred.features, notes: inferred.notes },
+      };
+    }
+
+    return {
+      planCalcVersion,
+      planCalcStatus: "NOT_COMPUTABLE" as const,
+      planCalcReasonCode: "UNSUPPORTED_RATE_STRUCTURE",
+      // Even though we can't compute, we still record the intended usage bucket key for auditing/debug.
+      requiredBucketKeys: ["kwh.m.all.total"],
+      supportedFeatures: { ...inferred.features, notes: inferred.notes },
+    };
+  })();
 
   // Side-effect only (best-effort): ensure usage bucket definitions exist in the registry table.
   // This must not change status logic yet; unparsable keys are swallowed.
