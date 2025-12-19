@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 type Props = {
   trigger: React.ReactNode;
@@ -12,6 +12,7 @@ type Props = {
 
 export function PlanDetailsPopover(props: Props) {
   const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLSpanElement | null>(null);
 
   const fields = useMemo(() => {
     const o = props.offer ?? props.data ?? {};
@@ -118,15 +119,36 @@ export function PlanDetailsPopover(props: Props) {
     return Array.from(map.entries());
   }, [fields]);
 
+  useEffect(() => {
+    if (!open) return;
+
+    function onPointerDown(e: PointerEvent) {
+      const root = rootRef.current;
+      if (!root) return;
+      if (e.target && root.contains(e.target as Node)) return;
+      setOpen(false);
+    }
+
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+
+    document.addEventListener("pointerdown", onPointerDown, { capture: true });
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, { capture: true } as any);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
   return (
-    <span className="relative inline-flex" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
+    <span ref={rootRef} className="relative inline-flex">
       <button
         type="button"
         className="text-xs font-semibold text-brand-blue hover:underline underline-offset-2"
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        onBlur={() => setOpen(false)}
       >
         {props.trigger}
       </button>

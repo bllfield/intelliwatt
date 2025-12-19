@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
 type Props = {
   trigger: React.ReactNode; // the inline "Est. $X/mo · incl. TDSP" element
@@ -35,6 +35,7 @@ function fmtIsoDate(iso: string | undefined): string | null {
 
 export function EstimateBreakdownPopover(props: Props) {
   const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLSpanElement | null>(null);
 
   const rep = fmtPerMoPerYr(props.repAnnualDollars);
   const tdspDelivery = fmtPerMoPerYr(props.tdspDeliveryAnnualDollars);
@@ -44,15 +45,36 @@ export function EstimateBreakdownPopover(props: Props) {
   const side = props.side ?? "bottom";
   const align = props.align ?? "left";
 
+  useEffect(() => {
+    if (!open) return;
+
+    function onPointerDown(e: PointerEvent) {
+      const root = rootRef.current;
+      if (!root) return;
+      if (e.target && root.contains(e.target as Node)) return;
+      setOpen(false);
+    }
+
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+
+    document.addEventListener("pointerdown", onPointerDown, { capture: true });
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, { capture: true } as any);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
   return (
-    <span className="relative inline-flex" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
+    <span ref={rootRef} className="relative inline-flex">
       <button
         type="button"
         className="font-semibold text-brand-white/90 hover:underline underline-offset-2"
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        onBlur={() => setOpen(false)}
       >
         {props.trigger}
       </button>
