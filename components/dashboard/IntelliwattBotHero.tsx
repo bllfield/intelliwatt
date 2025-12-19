@@ -28,7 +28,8 @@ export default function IntelliwattBotHero() {
   // Keep the component usable without props everywhere it is already used.
   const defaultMessage = useMemo(() => {
     if (pathname === "/") {
-      return 'Enter your email address and I will send you a link to get access to your user dashboard and I can help you save on your electric bill';
+      return `Hey — I’m IntelliWattBot.
+Enter your email adderss and I will send you a link to get access to your user dashboard. Then I can help you save on your electric bill!`;
     }
     return "";
   }, [pathname]);
@@ -38,6 +39,11 @@ export default function IntelliwattBotHero() {
   useEffect(() => {
     let cancelled = false;
     async function run() {
+      // Landing page uses a fixed message (no DB/API dependency, no migrations).
+      if (pathname === "/") {
+        if (!cancelled) setFull(defaultMessage || "");
+        return;
+      }
       try {
         const r = await fetch(`/api/bot/message?path=${encodeURIComponent(key)}`, { cache: "no-store" });
         const j = (await r.json().catch(() => null)) as BotMsgResp | null;
@@ -52,7 +58,7 @@ export default function IntelliwattBotHero() {
     return () => {
       cancelled = true;
     };
-  }, [key, defaultMessage]);
+  }, [key, defaultMessage, pathname]);
 
   useEffect(() => {
     let cancelled = false;
