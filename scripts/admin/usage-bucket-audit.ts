@@ -149,10 +149,10 @@ async function main() {
     where: { homeId },
     _count: { bucketKey: true },
     orderBy: [{ _count: { bucketKey: "desc" } }, { yearMonth: "desc" }, { bucketKey: "asc" }],
+    take: 200,
   });
   const dupRows = dupAgg
     .filter((r) => Number(r._count.bucketKey) > 1)
-    .slice(0, 200)
     .map((r) => ({ yearMonth: String(r.yearMonth), bucketKey: String(r.bucketKey), n: Number(r._count.bucketKey) }));
 
   // Output
