@@ -2467,6 +2467,18 @@ Phase-1 TOU (non-dashboard call site):
     - Bounded to `monthsCount` (max 12) and required keys for the detected plan type
     - Uses `ensureCoreMonthlyBuckets` pipeline; still fails closed if buckets remain incomplete
 
+Plan engine (non-dashboard): estimate a set of offers
+- Added `POST /api/plan-engine/estimate-set` in `app/api/plan-engine/estimate-set/route.ts`
+- Input JSON:
+  - `{ offerIds: string[], monthsCount?: number (default 12, max 12), backfill?: boolean (default false) }`
+- Constraints:
+  - `offerIds`: 1..25 (deduped)
+  - `monthsCount`: 1..12
+  - Backfill writes are only attempted when `backfill=true` (bounded + fail-closed)
+- Output JSON:
+  - `{ monthsCount, backfillRequested, results: OfferEstimateResult[] }`
+- Dashboard routes unchanged/locked.
+
 Free Weekends (bucket-gated; plan-level remains QUEUED):
 - **Bucket requirements**: `lib/plan-engine/requiredBucketsForPlan.ts`
   - Added `supportsWeekendSplitEnergy` flag (canonical buckets: `kwh.m.weekday.total`, `kwh.m.weekend.total`)
