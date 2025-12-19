@@ -149,17 +149,17 @@ function LandingPageContent() {
         )}
 
       {/* Hero Section */}
-      <section className="relative bg-brand-navy py-20 px-4 overflow-hidden">
+      <section className="relative bg-brand-navy pt-10 pb-10 px-4 overflow-hidden">
         {/* Background Pattern */}
         <div className="absolute inset-0 bg-gradient-to-br from-brand-navy via-brand-navy to-brand-navy/95">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(0,240,255,0.1),transparent_50%)]"></div>
         </div>
         
         <div className="relative z-10 max-w-6xl mx-auto">
-          <div className="text-center mb-16">
+          <div className="text-center mb-6">
             {/* Logo */}
-            <div className="flex justify-center mb-8">
-              <div className="relative w-[36rem] h-[18rem]">
+            <div className="flex justify-center mb-2">
+              <div className="relative w-[36rem] h-[10rem] p-0">
                 <Image
                   src="/IntelliWatt Logo TM.png"
                   alt="IntelliWatt™ Logo"
@@ -169,16 +169,16 @@ function LandingPageContent() {
               </div>
             </div>
             
-            <h1 className="text-5xl md:text-7xl font-bold text-brand-white mb-6">
+            <h1 className="text-4xl md:text-6xl font-bold text-brand-white mb-3">
               Stop <span className="text-brand-blue">Overpaying</span> for Power
             </h1>
-            <p className="text-xl md:text-2xl leading-relaxed text-brand-white max-w-3xl mx-auto">
+            <p className="text-lg md:text-xl leading-relaxed text-brand-white max-w-3xl mx-auto">
               Join IntelliWatt today to unlock free, personalized energy insights and tools that show you exactly how to save.
             </p>
           </div>
 
           {/* IntelliWattBot below the main hero section */}
-          <div className="mb-10">
+          <div className="mb-6">
             <IntelliwattBotHero />
           </div>
 
