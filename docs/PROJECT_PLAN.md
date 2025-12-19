@@ -2406,6 +2406,18 @@ Guardrails
 - Shows a compact banner when **NOT AVAILABLE** plans are present, with a one-click action to enable **“Show only AVAILABLE templates”**.
 - Status semantics: **AVAILABLE** now means "template is mapped *and* computable by the current plan-cost engine". Mapped-but-unsupported templates (e.g. TOU / variable until v2) show as **QUEUED** for calculation review.
 
+### Rate Engine Inventory (2025-12-19)
+
+- Added `docs/RATE_ENGINE_INVENTORY.md` as the single source of truth for:
+  - What the v1 plan-cost engine supports (fixed-rate-only, fail-closed)
+  - What is explicitly not supported yet (TOU/variable/tiered/solar buyback)
+  - How `planCalcStatus` / `planCalcReasonCode` / `requiredBucketKeys` are derived and used for dashboard AVAILABLE vs QUEUED
+  - Current PROD coverage stats + top NOT_COMPUTABLE templates
+- Added read-only script: `npm run admin:rateengine:inventory`
+  - Current snapshot:
+    - `RatePlan`: total=232, COMPUTABLE=222, NOT_COMPUTABLE=2, UNKNOWN=8
+    - Mapped offers by template status: COMPUTABLE=97, NOT_COMPUTABLE=4
+
 Next (Dashboard):
 - Replace “Best for you (preview)” proxy sort with true usage-based ranking by connecting usage → plan engine (`calculatePlanCostForUsage`).
 - Expand displayed fees (base monthly fee, more structured ETF) once those fields are reliably present in the WattBuy offer payload and/or derived from templates.
