@@ -66,7 +66,19 @@ export async function POST(req: NextRequest) {
     const fetched = await fetchEflPdfFromUrl(pdfFetchUrl);
     if (!fetched.ok) {
       return NextResponse.json(
-        { ok: false, error: `Failed to fetch EFL PDF: ${fetched.error}` },
+        {
+          ok: false,
+          error: `Failed to fetch EFL PDF: ${fetched.error}`,
+          details: {
+            eflUrl,
+            overridePdfUrl,
+            pdfFetchUrl,
+            // Include fetcher notes to diagnose WAF/TLS/CORS-style blocking.
+            notes: fetched.notes ?? [],
+            tip:
+              "If this host blocks server-side fetch (common WAF 403), use the Override EFL PDF URL field with a direct PDF link, or upload the PDF in the Upload tab.",
+          },
+        },
         { status: 502 },
       );
     }
