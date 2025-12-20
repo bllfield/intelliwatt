@@ -264,6 +264,11 @@ export default function AdminPlanDetailsPage({ params }: { params: { offerId: st
     const usageTiers: any[] = Array.isArray(rs?.usageTiers) ? rs.usageTiers : [];
     const hasTiers = usageTiers.length > 0;
 
+    // Validator TDSP inputs (used to make modeled proof match EFL avg-price table).
+    const validationAny = (rp as any)?.modeledEflAvgPriceValidation ?? null;
+    const assumptions: any = validationAny?.assumptionsUsed ?? null;
+    const tdspFromEfl = assumptions?.tdspFromEfl ?? null;
+
     const rows: Array<{ key: string; value: string; notes?: string }> = [
       { key: "rateStructure.type", value: type },
       {
@@ -290,6 +295,42 @@ export default function AdminPlanDetailsPage({ params }: { params: { offerId: st
       { key: "hasBillCredits", value: hasCredits ? "true" : "false" },
       { key: "hasTouTiers", value: hasTouTiers ? "true" : "false" },
     ];
+
+    // Surface TDSP/TDU numbers used for validation as "variables", so QA can see them
+    // alongside the template rates without digging through the proof JSON.
+    if (assumptions) {
+      rows.push({
+        key: "validator.tdspAppliedMode",
+        value: String(assumptions?.tdspAppliedMode ?? "—"),
+      });
+      rows.push({
+        key: "validator.usedEngineTdspFallback",
+        value: String(Boolean(assumptions?.usedEngineTdspFallback)),
+      });
+      rows.push({
+        key: "validator.tdspFromEfl.perKwhCents",
+        value: typeof tdspFromEfl?.perKwhCents === "number" ? String(tdspFromEfl.perKwhCents) : "—",
+        notes: "¢/kWh delivery from EFL snippet (used when tdspAppliedMode=ADDED_FROM_EFL).",
+      });
+      rows.push({
+        key: "validator.tdspFromEfl.monthlyCents",
+        value: typeof tdspFromEfl?.monthlyCents === "number" ? String(tdspFromEfl.monthlyCents) : "—",
+        notes: "Monthly delivery cents from EFL snippet (used when tdspAppliedMode=ADDED_FROM_EFL).",
+      });
+    }
+
+    if (data?.tdspSnapshotForValidation) {
+      rows.push({
+        key: "validator.tdspSnapshot.deliveryCentsPerKwh",
+        value: String(data.tdspSnapshotForValidation.deliveryCentsPerKwh),
+        notes: "TDSP table snapshot value used for validator when available.",
+      });
+      rows.push({
+        key: "validator.tdspSnapshot.monthlyFeeCents",
+        value: String(data.tdspSnapshotForValidation.monthlyFeeCents),
+        notes: "TDSP table snapshot monthly fee cents used for validator when available.",
+      });
+    }
 
     // Usage tiers (tiered REP energy) — show the actual bands we will use (if supported).
     if (hasTiers) {
