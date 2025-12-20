@@ -656,6 +656,11 @@ export function calculatePlanCostForUsage(args: {
           dbg.push({ bucketKey: k, kwh, repCentsPerKwh: p.repEnergyCentsPerKwh, repCostDollars: round2(repCostCents / 100), label: p.label ?? null, dayType: p.dayType, startHHMM: p.startHHMM, endHHMM: p.endHHMM });
         }
 
+        let monthCreditsCents = 0;
+        let monthMinUsageFeeCents = 0;
+        let monthMinimumBillTopUpCents = 0;
+        let monthFinalCents: number | null = null;
+
         if (monthTotalKwh != null) {
           if (Math.abs(sumPeriodsKwh - monthTotalKwh) > 0.001) {
             mismatched.push(`${ym}:sum(periods)=${sumPeriodsKwh.toFixed(3)} total=${monthTotalKwh.toFixed(3)}`);
@@ -667,7 +672,7 @@ export function calculatePlanCostForUsage(args: {
           const monthTdspDeliveryCents = monthTotalKwh * tdspPerKwhCents;
 
           const appliedCredits = creditsMaybe.ok ? applyBillCreditsToMonth({ monthlyKwh: monthTotalKwh, credits: creditsMaybe.credits }) : null;
-          const monthCreditsCents = appliedCredits ? appliedCredits.creditCentsTotal : 0;
+          monthCreditsCents = appliedCredits ? appliedCredits.creditCentsTotal : 0;
           if (appliedCredits) creditsDebug.push({ ym, monthTotalKwh, applied: appliedCredits.applied, creditCentsTotal: monthCreditsCents });
 
           const subtotalCents = monthRepEnergyCents + monthRepFixedCents + monthTdspFixedCents + monthTdspDeliveryCents + monthCreditsCents;
@@ -680,9 +685,12 @@ export function calculatePlanCostForUsage(args: {
             });
             minUsageFeeCentsTotal += appliedMin.minUsageFeeCents;
             minimumBillTopUpCentsTotal += appliedMin.minimumBillTopUpCents;
+            monthMinUsageFeeCents = appliedMin.minUsageFeeCents;
+            monthMinimumBillTopUpCents = appliedMin.minimumBillTopUpCents;
             finalCents = appliedMin.totalCentsAfter;
             minRulesDebug.push({ ym, monthTotalKwh, subtotalCents: roundCents(subtotalCents), applied: appliedMin.applied });
           }
+          monthFinalCents = finalCents;
 
           repEnergyCentsTotal += roundCents(monthRepEnergyCents);
           repFixedCentsTotal += roundCents(monthRepFixedCents);
@@ -692,7 +700,16 @@ export function calculatePlanCostForUsage(args: {
           totalCentsTotal += finalCents;
         }
 
-        debugPeriodsByMonth.push({ yearMonth: ym, periods: dbg, requiredKeys });
+        debugPeriodsByMonth.push({
+          yearMonth: ym,
+          periods: dbg,
+          requiredKeys,
+          repEnergyTouCents: roundCents(monthRepEnergyCents),
+          creditsAppliedCents: roundCents(monthCreditsCents),
+          minimumUsageFeeCents: monthMinUsageFeeCents,
+          minimumBillTopUpCents: monthMinimumBillTopUpCents,
+          monthTotalCents: monthFinalCents,
+        });
       }
 
       if (missing.length > 0) {

@@ -280,7 +280,38 @@ export function derivePlanCalcRequirementsFromTemplate(args: {
 
     const tou2 = extractDeterministicTouSchedule(rs);
     if (tou2.schedule) {
+      if (!credits.ok && credits.reason !== "NO_CREDITS") {
+        const reqs = requiredBucketsForRateStructure({ rateStructure: rs });
+        return {
+          planCalcVersion,
+          planCalcStatus: "NOT_COMPUTABLE" as const,
+          planCalcReasonCode: credits.reason,
+          requiredBucketKeys: reqs.map((r) => r.key),
+          supportedFeatures: {
+            ...inferred.features,
+            supportsTouEnergy: true,
+            supportsCredits: true,
+            notes: [...(inferred.notes ?? []), ...(tou2.notes ?? []), ...(credits.notes ?? [])],
+          },
+        };
+      }
+
       const reqs = requiredBucketsForRateStructure({ rateStructure: rs });
+      if (credits.ok && Array.isArray(credits.credits?.rules) && credits.credits.rules.length > 0) {
+        return {
+          planCalcVersion,
+          // IMPORTANT: do NOT mark TOU computable at plan-level (dashboard gating must remain unchanged).
+          planCalcStatus: "NOT_COMPUTABLE" as const,
+          planCalcReasonCode: "TOU_PLUS_CREDITS_REQUIRES_USAGE_BUCKETS",
+          requiredBucketKeys: reqs.map((r) => r.key),
+          supportedFeatures: {
+            ...inferred.features,
+            supportsTouEnergy: true,
+            supportsCredits: true,
+            notes: [...(inferred.notes ?? []), ...(tou2.notes ?? []), ...(credits.credits?.notes ?? [])],
+          },
+        };
+      }
       return {
         planCalcVersion,
         // IMPORTANT: do NOT mark TOU computable at plan-level (dashboard gating must remain unchanged).

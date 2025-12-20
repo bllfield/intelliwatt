@@ -165,8 +165,10 @@ export type PlanEngineIntrospection = {
   };
   combo?: {
     hasTiered: boolean;
+    hasTou: boolean;
     hasBillCredits: boolean; // only true when credits.ok and rules.length > 0
     supportedTieredPlusCredits: boolean;
+    supportedTouPlusCredits: boolean;
     reason?: string;
   };
   tou: ReturnType<typeof extractDeterministicTouSchedule>;
@@ -273,6 +275,36 @@ export function introspectPlanFromRateStructure(input: { rateStructure: any }): 
     }
 
     if (tou.schedule) {
+      // TOU + deterministic bill credits is supported in non-dashboard flows.
+      if (billCredits.ok && Array.isArray(billCredits.credits?.rules) && billCredits.credits.rules.length > 0) {
+        return {
+          planCalcVersion: 1,
+          // IMPORTANT: keep dashboard gating unchanged (TOU stays NOT_COMPUTABLE at plan-level).
+          planCalcStatus: "NOT_COMPUTABLE" as const,
+          planCalcReasonCode: "TOU_PLUS_CREDITS_REQUIRES_USAGE_BUCKETS",
+          requiredBucketKeys,
+          supportedFeatures: {
+            ...inferred.features,
+            supportsTouEnergy: true,
+            supportsCredits: true,
+            notes: [...inferred.notes, ...(tou.notes ?? []), ...(billCredits.credits?.notes ?? [])],
+          },
+        };
+      }
+      if (!billCredits.ok && billCredits.reason !== "NO_CREDITS") {
+        return {
+          planCalcVersion: 1,
+          planCalcStatus: "NOT_COMPUTABLE" as const,
+          planCalcReasonCode: billCredits.reason,
+          requiredBucketKeys,
+          supportedFeatures: {
+            ...inferred.features,
+            supportsTouEnergy: true,
+            supportsCredits: true,
+            notes: [...inferred.notes, ...(tou.notes ?? []), ...(billCredits.notes ?? [])],
+          },
+        };
+      }
       return {
         planCalcVersion: 1,
         // IMPORTANT: keep dashboard gating unchanged (TOU stays NOT_COMPUTABLE at plan-level).
@@ -445,15 +477,17 @@ export function introspectPlanFromRateStructure(input: { rateStructure: any }): 
     planCalc,
     combo: (() => {
       const hasTiered = tiered.ok;
+      const hasTou = !!tou.schedule;
       const hasBillCredits = billCredits.ok && Array.isArray(billCredits.credits?.rules) && billCredits.credits.rules.length > 0;
       const supportedTieredPlusCredits = hasTiered && hasBillCredits;
+      const supportedTouPlusCredits = hasTou && hasBillCredits;
       const reason =
-        hasTiered && !billCredits.ok && billCredits.reason !== "NO_CREDITS"
+        (hasTiered || hasTou) && !billCredits.ok && billCredits.reason !== "NO_CREDITS"
           ? billCredits.reason
           : !hasTiered && !tiered.ok && tiered.reason !== "NO_TIER_DATA"
             ? tiered.reason
             : undefined;
-      return { hasTiered, hasBillCredits, supportedTieredPlusCredits, ...(reason ? { reason } : {}) };
+      return { hasTiered, hasTou, hasBillCredits, supportedTieredPlusCredits, supportedTouPlusCredits, ...(reason ? { reason } : {}) };
     })(),
     tou,
     tiered,

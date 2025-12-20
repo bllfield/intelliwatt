@@ -2517,11 +2517,13 @@ TOU Phase-2 (arbitrary windows; non-dashboard only)
   - `lib/plan-engine/calculatePlanCostForUsage.ts` computes REP energy per window and enforces strict bucket integrity:
     - `sum(periodBucketsKwh) == kwh.m.all.total` per month (epsilon 0.001) else `USAGE_BUCKET_SUM_MISMATCH`
     - Missing any required bucket -> `MISSING_USAGE_BUCKETS`
+  - TOU can be combined with **deterministic bill credits** (Phase 1); credits apply after REP + TDSP, before minimum rules.
   - TDSP delivery remains total-based via `perKwhDeliveryChargeCents` (no TDSP TOU windows in tariff module yet).
 - Shared estimator/endpoints:
   - `/api/plan-engine/offer-estimate` and `/api/plan-engine/estimate-set` now auto-ensure monthly buckets by default (bounded, fail-closed) so deterministic TOU windows compute whenever intervals exist.
 - Tests:
   - Added unit tests for TOU Phase-2 window math in `tests/plan-engine/touPhase2.cost.test.ts`
+  - Added unit tests for TOU + credits combo in `tests/plan-engine/tou.plus.credits.test.ts`
 
 Indexed / Variable pricing (non-dashboard only; explicit approximation mode)
 - **Detection**: `lib/plan-engine/indexedPricing.ts`
