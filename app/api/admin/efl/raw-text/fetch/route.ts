@@ -49,8 +49,15 @@ export async function POST(req: NextRequest) {
     const eflUrl = String((ratePlan as any)?.eflSourceUrl ?? (ratePlan as any)?.eflUrl ?? "").trim();
     if (!eflUrl) return jsonError(409, "missing_efl_url");
 
-    const pdfBytes = await fetchEflPdfFromUrl(eflUrl);
-    const pdfBuf = Buffer.isBuffer(pdfBytes) ? pdfBytes : Buffer.from(pdfBytes);
+    const pdfRes = await fetchEflPdfFromUrl(eflUrl);
+    if (!pdfRes || (pdfRes as any).ok !== true) {
+      return jsonError(502, "efl_pdf_fetch_failed", {
+        eflUrl,
+        error: (pdfRes as any)?.error ?? null,
+        notes: (pdfRes as any)?.notes ?? null,
+      });
+    }
+    const pdfBuf = (pdfRes as any).pdfBytes as Buffer;
 
     // Run deterministic extract (via pipeline) to get rawText + sha.
     const pipeline = await runEflPipelineNoStore({
@@ -121,6 +128,7 @@ export async function POST(req: NextRequest) {
       offerId: offerId || null,
       ratePlanId: String(ratePlan.id),
       eflUrl,
+      pdfUrl: (pdfRes as any)?.pdfUrl ?? null,
       eflPdfSha256: sha,
       rawTextLength: rawText.length,
       stored: true,
