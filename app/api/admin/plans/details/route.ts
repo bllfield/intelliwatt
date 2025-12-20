@@ -43,17 +43,38 @@ export async function GET(req: NextRequest) {
     const ratePlan = link?.ratePlan ?? null;
     const rateStructure = (ratePlan as any)?.rateStructure ?? null;
 
-    const eflRawText = (() => {
+    const shaFromRatePlan = (() => {
       const sha = String((ratePlan as any)?.eflPdfSha256 ?? "").trim();
       return sha ? sha : null;
     })();
-    const queueRow =
-      eflRawText
+
+    // Prefer sha lookup (fast + unique), but fall back to ratePlanId/offerId since
+    // some upstream EFL links are HTML resolvers and the stored RatePlan sha can drift.
+    const queueRowBySha =
+      shaFromRatePlan
         ? await (prisma as any).eflParseReviewQueue.findUnique({
-            where: { eflPdfSha256: eflRawText },
-            select: { rawText: true },
+            where: { eflPdfSha256: shaFromRatePlan },
+            select: { rawText: true, eflPdfSha256: true },
           })
         : null;
+    const queueRowByRatePlan =
+      !queueRowBySha?.rawText && ratePlan?.id
+        ? await (prisma as any).eflParseReviewQueue.findFirst({
+            where: { ratePlanId: String(ratePlan.id), kind: "EFL_PARSE", rawText: { not: null } },
+            orderBy: { updatedAt: "desc" },
+            select: { rawText: true, eflPdfSha256: true },
+          })
+        : null;
+    const queueRowByOffer =
+      !queueRowBySha?.rawText && !queueRowByRatePlan?.rawText && offerId
+        ? await (prisma as any).eflParseReviewQueue.findFirst({
+            where: { offerId: String(offerId), kind: "EFL_PARSE", rawText: { not: null } },
+            orderBy: { updatedAt: "desc" },
+            select: { rawText: true, eflPdfSha256: true },
+          })
+        : null;
+
+    const queueRow = queueRowBySha?.rawText ? queueRowBySha : queueRowByRatePlan?.rawText ? queueRowByRatePlan : queueRowByOffer;
 
     // Best-effort offer snapshot if we have one in MasterPlan (admin QA table).
     const masterPlan = await prisma.masterPlan.findFirst({
