@@ -339,6 +339,8 @@ export default function FactCardOpsPage() {
   const [queueErr, setQueueErr] = useState<string | null>(null);
   const [queueProcessLoading, setQueueProcessLoading] = useState(false);
   const [queueProcessNote, setQueueProcessNote] = useState<string | null>(null);
+  const [queueEnqueueUnknownLoading, setQueueEnqueueUnknownLoading] = useState(false);
+  const [queueEnqueueUnknownNote, setQueueEnqueueUnknownNote] = useState<string | null>(null);
   const [queueSortKey, setQueueSortKey] = useState<
     "tdspName" | "supplier" | "planName" | "offerId" | "eflVersionCode" | "queueReason"
   >("supplier");
@@ -527,6 +529,36 @@ export default function FactCardOpsPage() {
       setQueueErr(e?.message || "Failed to process quarantine queue.");
     } finally {
       setQueueProcessLoading(false);
+    }
+  }
+
+  async function enqueueUnknownUtilityTemplates() {
+    if (!token) {
+      setQueueErr("Admin token required.");
+      return;
+    }
+    setQueueEnqueueUnknownLoading(true);
+    setQueueEnqueueUnknownNote(null);
+    setQueueErr(null);
+    try {
+      const params = new URLSearchParams();
+      params.set("limit", "1000");
+      // Reopen resolved parse items too so they show up immediately for triage.
+      params.set("reopenResolved", "1");
+      const res = await fetch(`/api/admin/efl-review/enqueue-unknown-utility?${params.toString()}`, {
+        method: "POST",
+        headers: { "x-admin-token": token },
+      });
+      const data: any = await res.json();
+      if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      setQueueEnqueueUnknownNote(
+        `Queued UNKNOWN utilities: scanned=${data.scanned ?? 0} created=${data.created ?? 0} reopened=${data.reopened ?? 0} updated=${data.updated ?? 0} (quarantine skipped=${data.skippedHasQuarantine ?? 0}).`,
+      );
+      await loadQueue();
+    } catch (e: any) {
+      setQueueErr(e?.message || "Failed to enqueue unknown utilities.");
+    } finally {
+      setQueueEnqueueUnknownLoading(false);
     }
   }
 
@@ -1464,9 +1496,18 @@ export default function FactCardOpsPage() {
           <button className="px-3 py-2 rounded-lg border hover:bg-gray-50" onClick={() => void loadQueue()} disabled={!ready || queueLoading}>
             Apply
           </button>
+          <button
+            className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60"
+            onClick={() => void enqueueUnknownUtilityTemplates()}
+            disabled={!ready || queueEnqueueUnknownLoading}
+            title='Find RatePlans with utilityId="UNKNOWN" and enqueue them into the EFL_PARSE queue for triage.'
+          >
+            {queueEnqueueUnknownLoading ? "Queueing…" : "Queue UNKNOWN utilities"}
+          </button>
         </div>
         {queueErr ? <div className="text-sm text-red-700">{queueErr}</div> : null}
         {queueProcessNote ? <div className="text-xs text-gray-700">{queueProcessNote}</div> : null}
+        {queueEnqueueUnknownNote ? <div className="text-xs text-gray-700">{queueEnqueueUnknownNote}</div> : null}
 
         {/* ~5 visible rows + sticky header */}
         <div className="overflow-x-auto overflow-y-auto max-h-[280px] rounded-xl border">

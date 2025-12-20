@@ -1,0 +1,196 @@
+import { NextRequest, NextResponse } from "next/server";
+
+import { prisma } from "@/lib/db";
+
+export const dynamic = "force-dynamic";
+
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
+
+function jsonError(status: number, error: string, details?: unknown) {
+  return NextResponse.json(
+    { ok: false, error, ...(details ? { details } : {}) },
+    { status },
+  );
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    if (!ADMIN_TOKEN) return jsonError(500, "ADMIN_TOKEN is not configured");
+    const headerToken = req.headers.get("x-admin-token");
+    if (!headerToken || headerToken !== ADMIN_TOKEN) {
+      return jsonError(401, "Unauthorized (invalid admin token)");
+    }
+
+    const sp = req.nextUrl.searchParams;
+    const limitRaw = Number(sp.get("limit") ?? "500");
+    const limit = Math.max(1, Math.min(2000, Number.isFinite(limitRaw) ? limitRaw : 500));
+    const dryRun = (sp.get("dryRun") ?? "") === "1";
+    const reopenResolved = (sp.get("reopenResolved") ?? "") === "1";
+
+    // Find RatePlans where utilityId is still UNKNOWN (we missed/failed to infer TDSP).
+    const plans = await prisma.ratePlan.findMany({
+      where: {
+        isUtilityTariff: false,
+        utilityId: "UNKNOWN",
+        eflPdfSha256: { not: null },
+        OR: [{ eflUrl: { not: null } }, { eflSourceUrl: { not: null } }],
+      } as any,
+      select: {
+        id: true,
+        utilityId: true,
+        supplier: true,
+        planName: true,
+        termMonths: true,
+        eflUrl: true,
+        eflSourceUrl: true,
+        repPuctCertificate: true,
+        eflVersionCode: true,
+        eflPdfSha256: true,
+        eflRequiresManualReview: true,
+        rateStructure: true,
+      } as any,
+      orderBy: { updatedAt: "desc" },
+      take: limit,
+    });
+
+    let scanned = 0;
+    let created = 0;
+    let reopened = 0;
+    let updated = 0;
+    let skippedAlreadyOpen = 0;
+    let skippedHasQuarantine = 0;
+    let skippedNoSha = 0;
+    const notes: string[] = [];
+
+    for (const p of plans as any[]) {
+      scanned++;
+
+      const sha = String(p?.eflPdfSha256 ?? "").trim();
+      if (!sha) {
+        skippedNoSha++;
+        continue;
+      }
+
+      const existing = await (prisma as any).eflParseReviewQueue.findUnique({
+        where: { eflPdfSha256: sha },
+      });
+
+      const eflUrl = (p?.eflUrl ?? p?.eflSourceUrl ?? null) as string | null;
+      const payloadCommon: any = {
+        ratePlanId: String(p.id),
+        repPuctCertificate: p.repPuctCertificate ?? null,
+        eflVersionCode: p.eflVersionCode ?? null,
+        supplier: p.supplier ?? null,
+        planName: p.planName ?? null,
+        eflUrl: eflUrl,
+        tdspName: p.utilityId ?? null,
+        termMonths: typeof p.termMonths === "number" ? p.termMonths : null,
+        finalStatus: "NEEDS_REVIEW",
+        queueReason: "UNKNOWN_UTILITY_ID: RatePlan.utilityId=UNKNOWN (needs TDSP inference fix)",
+      };
+
+      if (!existing) {
+        if (!dryRun) {
+          await (prisma as any).eflParseReviewQueue.create({
+            data: {
+              source: "unknown_utility_sweep",
+              kind: "EFL_PARSE",
+              // Leave dedupeKey blank; trigger will fill for EFL_PARSE.
+              dedupeKey: "",
+              eflPdfSha256: sha,
+              offerId: null,
+              rawText: null,
+              planRules: null,
+              rateStructure: p.rateStructure ?? null,
+              validation: null,
+              derivedForValidation: null,
+              solverApplied: null,
+              resolvedAt: null,
+              resolvedBy: null,
+              resolutionNotes: "Auto-queued because RatePlan.utilityId is UNKNOWN.",
+              ...payloadCommon,
+            },
+          });
+        }
+        created++;
+        continue;
+      }
+
+      // If an item already exists, do not override quarantines (sticky), but do keep metadata fresh.
+      const existingKind = String(existing?.kind ?? "");
+      if (existingKind === "PLAN_CALC_QUARANTINE") {
+        skippedHasQuarantine++;
+        if (!dryRun) {
+          await (prisma as any).eflParseReviewQueue.update({
+            where: { eflPdfSha256: sha },
+            data: {
+              ...payloadCommon,
+              ratePlanId: String(p.id),
+              // Do not change kind/dedupeKey for quarantines.
+              queueReason:
+                String(existing?.queueReason ?? "").includes("UNKNOWN_UTILITY_ID")
+                  ? existing.queueReason
+                  : `${String(existing?.queueReason ?? "").trim() || "PLAN_CALC_QUARANTINE"} | UNKNOWN_UTILITY_ID`,
+            },
+          });
+        }
+        updated++;
+        continue;
+      }
+
+      // Existing parse item:
+      if (existing?.resolvedAt && reopenResolved) {
+        if (!dryRun) {
+          await (prisma as any).eflParseReviewQueue.update({
+            where: { eflPdfSha256: sha },
+            data: {
+              ...payloadCommon,
+              resolvedAt: null,
+              resolvedBy: null,
+              resolutionNotes: "Re-opened by unknown-utility sweep.",
+            },
+          });
+        }
+        reopened++;
+        continue;
+      }
+
+      if (!existing?.resolvedAt) {
+        skippedAlreadyOpen++;
+        continue;
+      }
+
+      // Default: just refresh metadata on resolved parse item (do not reopen).
+      if (!dryRun) {
+        await (prisma as any).eflParseReviewQueue.update({
+          where: { eflPdfSha256: sha },
+          data: { ...payloadCommon },
+        });
+      }
+      updated++;
+    }
+
+    if ((plans as any[]).length === limit) {
+      notes.push("limit_reached");
+    }
+
+    return NextResponse.json({
+      ok: true,
+      dryRun,
+      limit,
+      scanned,
+      created,
+      reopened,
+      updated,
+      skippedAlreadyOpen,
+      skippedHasQuarantine,
+      skippedNoSha,
+      notes,
+    });
+  } catch (e: any) {
+    return jsonError(500, "Failed to enqueue UNKNOWN utility templates", {
+      message: e?.message ?? String(e),
+    });
+  }
+}
+
