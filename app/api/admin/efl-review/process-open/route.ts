@@ -7,6 +7,7 @@ import { upsertRatePlanFromEfl } from "@/lib/efl/planPersistence";
 import { validatePlanRules } from "@/lib/efl/planEngine";
 import { inferTdspTerritoryFromEflText } from "@/lib/efl/eflValidator";
 import { prisma } from "@/lib/db";
+import { ensureBucketsExist } from "@/lib/usage/aggregateMonthlyBuckets";
 
 export const dynamic = "force-dynamic";
 
@@ -62,6 +63,9 @@ export async function POST(req: NextRequest) {
       where: {
         resolvedAt: null,
         eflUrl: { not: null },
+        // IMPORTANT: This endpoint is for the EFL_PARSE queue only.
+        // PLAN_CALC_QUARANTINE is intentionally sticky and must not be auto-processed here.
+        kind: "EFL_PARSE",
       },
       orderBy: { createdAt: "asc" },
       take: limit,
@@ -140,6 +144,14 @@ export async function POST(req: NextRequest) {
         let offerIdRatePlanMapOfferId: string | null = null;
         let offerIdRatePlanMapRatePlanId: string | null = null;
         let offerIdRatePlanMapError: string | null = null;
+        let requiredBucketKeysEnsured: { ensured: number; skipped: number; error?: string } | null = null;
+        let planCalcSnapshot:
+          | {
+              planCalcStatus: string | null;
+              planCalcReasonCode: string | null;
+              requiredBucketKeys: string[];
+            }
+          | null = null;
 
         if (!dryRun && finalStatus === "PASS" && passStrength === "STRONG") {
           const derivedPlanRules =
@@ -226,6 +238,37 @@ export async function POST(req: NextRequest) {
 
               const templatePersisted = Boolean((saved as any)?.templatePersisted);
               persistedRatePlanId = (saved as any)?.ratePlan?.id ? String((saved as any).ratePlan.id) : null;
+              planCalcSnapshot = (() => {
+                const rp = (saved as any)?.ratePlan ?? null;
+                const keys = Array.isArray(rp?.requiredBucketKeys)
+                  ? (rp.requiredBucketKeys as any[]).map((k: any) => String(k ?? "").trim()).filter(Boolean)
+                  : [];
+                return {
+                  planCalcStatus: rp?.planCalcStatus ? String(rp.planCalcStatus) : null,
+                  planCalcReasonCode: rp?.planCalcReasonCode ? String(rp.planCalcReasonCode) : null,
+                  requiredBucketKeys: keys,
+                };
+              })();
+
+              // Ensure bucket definitions exist for requiredBucketKeys so downstream "auto-create monthly buckets"
+              // has the registry it needs. (Home-specific monthly totals are produced later, on-demand, per homeId.)
+              if (templatePersisted && planCalcSnapshot.requiredBucketKeys.length > 0) {
+                try {
+                  const ensured = await ensureBucketsExist({
+                    bucketKeys: planCalcSnapshot.requiredBucketKeys,
+                  });
+                  requiredBucketKeysEnsured = {
+                    ensured: Array.isArray(ensured?.ensured) ? ensured.ensured.length : 0,
+                    skipped: Array.isArray(ensured?.skipped) ? ensured.skipped.length : 0,
+                  };
+                } catch (e: any) {
+                  requiredBucketKeysEnsured = {
+                    ensured: 0,
+                    skipped: 0,
+                    error: e?.message ? String(e.message) : String(e),
+                  };
+                }
+              }
               if (templatePersisted) {
                 templateAction = "CREATED";
                 persisted++;
@@ -367,6 +410,8 @@ export async function POST(req: NextRequest) {
           passStrength,
           templateAction,
           persistedRatePlanId,
+          planCalc: planCalcSnapshot,
+          requiredBucketKeysEnsured,
           offerRateMapLinkAttempted,
           offerRateMapLinkUpdatedCount,
           offerIdRatePlanMapAttempted,

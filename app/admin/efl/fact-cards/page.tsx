@@ -1350,6 +1350,10 @@ export default function FactCardOpsPage() {
             </button>
           </div>
         </div>
+        <div className="text-xs text-gray-600">
+          Auto processor runs the full EFL pipeline and persists templates on <span className="font-medium">PASS + STRONG</span>.
+          It also registers required bucket definitions. Home monthly bucket totals are created later (on-demand) when you run an estimate for a specific home.
+        </div>
         <div className="flex flex-wrap items-center gap-3">
           <label className="inline-flex items-center gap-2 text-sm">
             <input type="radio" checked={queueStatus === "OPEN"} onChange={() => setQueueStatus("OPEN")} /> Open
