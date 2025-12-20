@@ -511,7 +511,16 @@ export default function FactCardOpsPage() {
     useState(false);
   const [backfillOverwrite, setBackfillOverwrite] = useState(false);
   const [tplSortKey, setTplSortKey] = useState<
-    "utilityId" | "supplier" | "planName" | "termMonths" | "rate500" | "rate1000" | "rate2000" | "passStrength" | "eflVersionCode"
+    | "utilityId"
+    | "supplier"
+    | "planName"
+    | "planType"
+    | "termMonths"
+    | "rate500"
+    | "rate1000"
+    | "rate2000"
+    | "passStrength"
+    | "eflVersionCode"
   >("supplier");
   const [tplSortDir, setTplSortDir] = useState<SortDir>("asc");
 
@@ -809,6 +818,8 @@ export default function FactCardOpsPage() {
             ? a?.supplier
           : tplSortKey === "planName"
             ? a?.planName
+            : tplSortKey === "planType"
+              ? deriveTemplatePlanTypeLabel(a)
             : tplSortKey === "termMonths"
               ? typeof a?.termMonths === "number"
                 ? a.termMonths
@@ -835,6 +846,8 @@ export default function FactCardOpsPage() {
             ? b?.supplier
           : tplSortKey === "planName"
             ? b?.planName
+            : tplSortKey === "planType"
+              ? deriveTemplatePlanTypeLabel(b)
             : tplSortKey === "termMonths"
               ? typeof b?.termMonths === "number"
                 ? b.termMonths
@@ -1646,8 +1659,8 @@ export default function FactCardOpsPage() {
                 <th className="px-2 py-2 text-left cursor-pointer select-none" onClick={() => toggleTplSort("planName")}>
                   Plan {tplSortKey === "planName" ? (tplSortDir === "asc" ? "▲" : "▼") : ""}
                 </th>
-                <th className="px-2 py-2 text-left">
-                  Type
+                <th className="px-2 py-2 text-left cursor-pointer select-none" onClick={() => toggleTplSort("planType")}>
+                  Type {tplSortKey === "planType" ? (tplSortDir === "asc" ? "▲" : "▼") : ""}
                 </th>
                 <th className="px-2 py-2 text-right cursor-pointer select-none" onClick={() => toggleTplSort("termMonths")}>
                   Term {tplSortKey === "termMonths" ? (tplSortDir === "asc" ? "▲" : "▼") : ""}
