@@ -28,6 +28,16 @@ type Body = {
   timeBudgetMs?: number | null;
   dryRun?: boolean | null;
   forceReparseTemplates?: boolean | null;
+  /**
+   * When true, keep paging and processing until timeBudgetMs is exhausted
+   * (or the queue is empty), instead of returning after one page.
+   */
+  drain?: boolean | null;
+  /**
+   * Optional cap on `results[]` returned (to keep responses small when draining).
+   * Counters are always complete even when results are truncated.
+   */
+  resultsLimit?: number | null;
 };
 
 function jsonError(status: number, error: string, details?: unknown) {
@@ -65,21 +75,17 @@ export async function POST(req: NextRequest) {
 
     const dryRun = body.dryRun === true;
     const forceReparseTemplates = body.forceReparseTemplates === true;
+    const drain = body.drain === true;
+    const resultsLimitRaw = body.resultsLimit ?? 200;
+    const resultsLimit = Math.max(
+      0,
+      Math.min(
+        2000,
+        Number.isFinite(resultsLimitRaw as any) ? Number(resultsLimitRaw) : 200,
+      ),
+    );
 
     const cursor = String(body.cursor ?? "").trim() || null;
-
-    const items = await (prisma as any).eflParseReviewQueue.findMany({
-      where: {
-        resolvedAt: null,
-        eflUrl: { not: null },
-        // IMPORTANT: This endpoint is for the EFL_PARSE queue only.
-        // PLAN_CALC_QUARANTINE is intentionally sticky and must not be auto-processed here.
-        kind: "EFL_PARSE",
-      },
-      orderBy: { createdAt: "asc" },
-      take: limit,
-      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-    });
 
     const results: any[] = [];
     let processed = 0;
@@ -89,58 +95,94 @@ export async function POST(req: NextRequest) {
     let fetchFailed = 0;
     let truncated = false;
     let nextCursor: string | null = null;
+    let resultsTruncated = false;
+    let iterations = 0;
+    let cursorLocal: string | null = cursor;
 
-    for (const it of items as any[]) {
-      if (shouldStop()) {
-        truncated = true;
+    while (!shouldStop()) {
+      iterations++;
+      const items = await (prisma as any).eflParseReviewQueue.findMany({
+        where: {
+          resolvedAt: null,
+          eflUrl: { not: null },
+          // IMPORTANT: This endpoint is for the EFL_PARSE queue only.
+          // PLAN_CALC_QUARANTINE is intentionally sticky and must not be auto-processed here.
+          kind: "EFL_PARSE",
+        },
+        orderBy: { createdAt: "asc" },
+        take: limit,
+        ...(cursorLocal ? { cursor: { id: cursorLocal }, skip: 1 } : {}),
+      });
+
+      if (!Array.isArray(items) || items.length === 0) {
+        truncated = false;
+        nextCursor = null;
         break;
       }
 
-      const id = String(it?.id ?? "");
-      nextCursor = id || nextCursor;
+      for (const it of items as any[]) {
+        if (shouldStop()) {
+          truncated = true;
+          break;
+        }
 
-      const eflUrl = String(it?.eflUrl ?? "").trim();
-      if (!eflUrl) {
-        skippedNoUrl++;
-        results.push({ id, offerId: it?.offerId ?? null, status: "SKIP_NO_URL" });
-        continue;
-      }
+        const id = String(it?.id ?? "");
+        nextCursor = id || nextCursor;
 
-      processed++;
-
-      try {
-        const fetched = await fetchEflPdfFromUrl(eflUrl);
-        if (!fetched.ok) {
-          fetchFailed++;
-          results.push({
-            id,
-            offerId: it?.offerId ?? null,
-            supplier: it?.supplier ?? null,
-            planName: it?.planName ?? null,
-            eflUrl,
-            status: "FETCH_FAIL",
-            error: fetched.error ?? "fetch failed",
-          });
+        const eflUrl = String(it?.eflUrl ?? "").trim();
+        if (!eflUrl) {
+          skippedNoUrl++;
+          if (!resultsTruncated && results.length < resultsLimit) {
+            results.push({
+              id,
+              offerId: it?.offerId ?? null,
+              status: "SKIP_NO_URL",
+            });
+          } else {
+            resultsTruncated = true;
+          }
           continue;
         }
 
-        const pdfBytes = Buffer.from(fetched.pdfBytes);
-        const pipeline = await runEflPipelineNoStore({
-          pdfBytes,
-          source: "manual",
-          offerMeta: {
-            supplier: it?.supplier ?? null,
-            planName: it?.planName ?? null,
-            termMonths: typeof it?.termMonths === "number" ? it.termMonths : null,
-            tdspName: it?.tdspName ?? null,
-            offerId: it?.offerId ?? null,
-          },
-        });
+        processed++;
 
-        const det = pipeline.deterministic;
-        const finalValidation = pipeline.finalValidation ?? null;
-        const finalStatus = finalValidation?.status ?? null;
-        const passStrength = (pipeline as any).passStrength ?? null;
+        try {
+          const fetched = await fetchEflPdfFromUrl(eflUrl);
+          if (!fetched.ok) {
+            fetchFailed++;
+            if (!resultsTruncated && results.length < resultsLimit) {
+              results.push({
+                id,
+                offerId: it?.offerId ?? null,
+                supplier: it?.supplier ?? null,
+                planName: it?.planName ?? null,
+                eflUrl,
+                status: "FETCH_FAIL",
+                error: fetched.error ?? "fetch failed",
+              });
+            } else {
+              resultsTruncated = true;
+            }
+            continue;
+          }
+
+          const pdfBytes = Buffer.from(fetched.pdfBytes);
+          const pipeline = await runEflPipelineNoStore({
+            pdfBytes,
+            source: "manual",
+            offerMeta: {
+              supplier: it?.supplier ?? null,
+              planName: it?.planName ?? null,
+              termMonths: typeof it?.termMonths === "number" ? it.termMonths : null,
+              tdspName: it?.tdspName ?? null,
+              offerId: it?.offerId ?? null,
+            },
+          });
+
+          const det = pipeline.deterministic;
+          const finalValidation = pipeline.finalValidation ?? null;
+          const finalStatus = finalValidation?.status ?? null;
+          const passStrength = (pipeline as any).passStrength ?? null;
 
         // Persist only on PASS+STRONG unless dryRun.
         let templateAction: "CREATED" | "SKIPPED" = "SKIPPED";
@@ -477,27 +519,42 @@ export async function POST(req: NextRequest) {
           offerIdRatePlanMapError,
           notes: persistNotes,
         });
-      } catch (e: any) {
-        results.push({
-          id,
-          offerId: it?.offerId ?? null,
-          supplier: it?.supplier ?? null,
-          planName: it?.planName ?? null,
-          eflUrl,
-          status: "ERROR",
-          error: e?.message || String(e),
-        });
-      }
-    }
+        } catch (e: any) {
+          if (!resultsTruncated && results.length < resultsLimit) {
+            results.push({
+              id,
+              offerId: it?.offerId ?? null,
+              supplier: it?.supplier ?? null,
+              planName: it?.planName ?? null,
+              eflUrl,
+              status: "ERROR",
+              error: e?.message || String(e),
+            });
+          } else {
+            resultsTruncated = true;
+          }
+        }
 
-    if (!truncated && (items as any[]).length === limit) {
-      // There may be more items.
-      truncated = true;
+        if (results.length >= resultsLimit) resultsTruncated = true;
+      }
+
+      cursorLocal = nextCursor;
+      if (!drain) {
+        truncated = (items as any[]).length === limit;
+        break;
+      }
+      if ((items as any[]).length < limit) {
+        // likely exhausted the queue
+        truncated = false;
+        nextCursor = null;
+        break;
+      }
     }
 
     return NextResponse.json({
       ok: true,
       dryRun,
+      drain,
       limit,
       processed,
       persisted,
@@ -506,6 +563,8 @@ export async function POST(req: NextRequest) {
       fetchFailed,
       truncated,
       nextCursor: truncated ? nextCursor : null,
+      iterations,
+      resultsTruncated,
       results,
     });
   } catch (e) {
