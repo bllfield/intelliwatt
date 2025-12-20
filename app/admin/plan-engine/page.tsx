@@ -217,8 +217,7 @@ export default function PlanEngineLabPage() {
     // 1) INDEXED
     const isIndexedApprox =
       estimateMode === "INDEXED_EFL_ANCHOR_APPROX" ||
-      notesHay.includes("EFL MODELED AVERAGE PRICE ANCHOR") ||
-      notesHay.includes("EFL MODELED AVERAGE PRICE ANCHORS");
+      /\bEFL MODELED AVERAGE PRICE ANCHORS?\b/.test(notesHay);
     if (
       reason.includes("NON_DETERMINISTIC_PRICING_INDEXED") ||
       reason.includes("MISSING_EFL_ANCHORS") ||
