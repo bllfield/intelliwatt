@@ -595,9 +595,11 @@ export async function estimateOfferFromOfferId(args: OfferEstimateInput & OfferE
       requiredBucketKeys: [...effectiveRequiredKeys],
     });
     bucketEnsureAttempted = bucketEnsureAttempted || Boolean(ensured.attempted);
-    bucketEnsureOk = bucketEnsureOk || Boolean(ensured.ok);
-    bucketEnsureReason = ensured.reason ?? bucketEnsureReason;
-    bucketEnsureDetail = ensured.detail ?? bucketEnsureDetail;
+    // IMPORTANT: if the latest attempt succeeds, clear any prior failure reason/details.
+    // Otherwise, a prior PARSE_BUCKET_KEY_FAILED could incorrectly mask a later success.
+    bucketEnsureOk = Boolean(ensured.ok) || bucketEnsureOk;
+    bucketEnsureReason = ensured.reason ?? null;
+    bucketEnsureDetail = ensured.detail ?? null;
 
     // Re-load months (in case none existed) and re-check coverage (fail-closed).
     months = await loadRecentMonths();
