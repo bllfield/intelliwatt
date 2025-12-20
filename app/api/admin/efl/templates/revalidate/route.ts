@@ -85,6 +85,7 @@ export async function POST(req: NextRequest) {
 
     let processedCount = 0;
     let quarantinedCount = 0;
+    let unknownUtilityQueuedCount = 0;
     let keptCount = 0;
     let errorsCount = 0;
     let lastCursorId: string | null = null;
@@ -99,6 +100,89 @@ export async function POST(req: NextRequest) {
 
       processedCount++;
       try {
+        // Guardrail: UNKNOWN utilityId must never remain "template available".
+        // Queue it for parse/TDSP inference fixes and remove the template from availability.
+        if (String(p.utilityId ?? "").trim().toUpperCase() === "UNKNOWN") {
+          const reason = "UNKNOWN_UTILITY_ID";
+          const issues: any[] = Array.isArray(p.eflValidationIssues) ? [...p.eflValidationIssues] : [];
+          issues.push({
+            code: "TEMPLATE_UNKNOWN_UTILITY",
+            severity: "ERROR",
+            message: "Template quarantined: utilityId is UNKNOWN (requires TDSP/utility inference fix).",
+          });
+
+          try {
+            const sha = String(p.eflPdfSha256 ?? "").trim();
+            if (sha) {
+              await (prisma as any).eflParseReviewQueue.upsert({
+                where: { eflPdfSha256: sha },
+                create: {
+                  source: "admin_revalidate_templates",
+                  kind: "EFL_PARSE",
+                  dedupeKey: "", // trigger fills dedupeKey=eflPdfSha256 for EFL_PARSE
+                  ratePlanId: String(p.id),
+                  eflPdfSha256: sha,
+                  repPuctCertificate: p.repPuctCertificate ?? null,
+                  eflVersionCode: p.eflVersionCode ?? null,
+                  offerId: null,
+                  supplier: p.supplier ?? null,
+                  planName: p.planName ?? null,
+                  eflUrl: (p.eflUrl ?? p.eflSourceUrl) ?? null,
+                  tdspName: p.utilityId ?? null,
+                  termMonths: typeof p.termMonths === "number" ? p.termMonths : null,
+                  rawText: null,
+                  planRules: null,
+                  rateStructure: (p.rateStructure ?? null) as any,
+                  validation: { revalidation: { reasonCode: reason } } as any,
+                  derivedForValidation: null,
+                  finalStatus: "NEEDS_REVIEW",
+                  queueReason: "UNKNOWN_UTILITY_ID: RatePlan.utilityId=UNKNOWN",
+                  solverApplied: null,
+                  resolvedAt: null,
+                  resolvedBy: null,
+                  resolutionNotes: "Auto-queued by admin revalidation tool (UNKNOWN utilityId).",
+                },
+                update: {
+                  kind: "EFL_PARSE",
+                  dedupeKey: "",
+                  ratePlanId: String(p.id),
+                  supplier: p.supplier ?? null,
+                  planName: p.planName ?? null,
+                  eflUrl: (p.eflUrl ?? p.eflSourceUrl) ?? null,
+                  tdspName: p.utilityId ?? null,
+                  termMonths: typeof p.termMonths === "number" ? p.termMonths : null,
+                  rateStructure: (p.rateStructure ?? null) as any,
+                  finalStatus: "NEEDS_REVIEW",
+                  queueReason: "UNKNOWN_UTILITY_ID: RatePlan.utilityId=UNKNOWN",
+                  resolvedAt: null,
+                  resolvedBy: null,
+                  resolutionNotes: "Auto-queued by admin revalidation tool (UNKNOWN utilityId).",
+                },
+              });
+              unknownUtilityQueuedCount++;
+            }
+          } catch {
+            // ignore
+          }
+
+          await (prisma as any).ratePlan.update({
+            where: { id: p.id },
+            data: {
+              rateStructure: null,
+              eflRequiresManualReview: true,
+              eflValidationIssues: issues,
+              planCalcStatus: "UNKNOWN",
+              planCalcReasonCode: "MISSING_TEMPLATE",
+              requiredBucketKeys: [],
+              supportedFeatures: {} as any,
+              planCalcDerivedAt: new Date(),
+            },
+          });
+
+          quarantinedCount++;
+          continue;
+        }
+
         const derived = derivePlanCalcRequirementsFromTemplate({ rateStructure: p.rateStructure });
         const isStillComputable = derived.planCalcStatus === "COMPUTABLE";
 
@@ -212,6 +296,7 @@ export async function POST(req: NextRequest) {
       ok: true,
       processedCount,
       quarantinedCount,
+      unknownUtilityQueuedCount,
       keptCount,
       errorsCount,
       truncated,

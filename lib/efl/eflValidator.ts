@@ -443,12 +443,32 @@ export function inferTdspTerritoryFromEflText(
   | "TNMP"
   | null {
   const t = rawText.toLowerCase();
+  const norm = t
+    .replace(/[\u2010-\u2015]/g, "-") // unicode hyphens → '-'
+    .replace(/\s+/g, " ")
+    .trim();
 
-  if (t.includes("centerpoint")) return "CENTERPOINT";
-  if (t.includes("oncor")) return "ONCOR";
-  if (t.includes("aep texas north")) return "AEP_NORTH";
-  if (t.includes("aep texas central")) return "AEP_CENTRAL";
-  if (t.includes("texas-new mexico power") || t.includes("tnmp")) return "TNMP";
+  if (norm.includes("centerpoint")) return "CENTERPOINT";
+  if (norm.includes("oncor")) return "ONCOR";
+  if (norm.includes("texas-new mexico power") || norm.includes("tnmp")) return "TNMP";
+
+  // AEP variants (common in EFL headers: "AEP North", "AEP Central")
+  if (
+    norm.includes("aep north") ||
+    norm.includes("aep-north") ||
+    norm.includes("aep texas north") ||
+    norm.includes("aep texas north company")
+  ) {
+    return "AEP_NORTH";
+  }
+  if (
+    norm.includes("aep central") ||
+    norm.includes("aep-central") ||
+    norm.includes("aep texas central") ||
+    norm.includes("aep texas central company")
+  ) {
+    return "AEP_CENTRAL";
+  }
 
   return null;
 }
