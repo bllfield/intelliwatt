@@ -392,6 +392,35 @@ function withReferer(headers: Record<string, string>, referer: string): Record<s
   return { ...headers, referer };
 }
 
+function pushWafFingerprintNotes(notes: string[], res: Response) {
+  const pick = (k: string) => {
+    const v = res.headers.get(k);
+    if (!v) return null;
+    // Keep notes single-line and bounded.
+    const s = String(v).replace(/\s+/g, " ").trim();
+    return s.length > 180 ? `${s.slice(0, 177)}...` : s;
+  };
+
+  const pairs: Array<[string, string | null]> = [
+    ["server", pick("server")],
+    ["via", pick("via")],
+    ["cf-ray", pick("cf-ray")],
+    ["cf-cache-status", pick("cf-cache-status")],
+    ["x-amz-cf-id", pick("x-amz-cf-id")],
+    ["x-cache", pick("x-cache")],
+    ["x-served-by", pick("x-served-by")],
+    ["x-akamai-request-id", pick("x-akamai-request-id")],
+    ["content-type", pick("content-type")],
+  ];
+
+  const compact = pairs
+    .filter(([, v]) => Boolean(v))
+    .map(([k, v]) => `${k}=${v}`)
+    .join(";");
+
+  if (compact) notes.push(`waf_fingerprint:${compact}`);
+}
+
 function refererVariantsForOrigin(origin: string, finalUrl?: string | null): string[] {
   const out: string[] = [];
   out.push(`${origin}/`);
@@ -479,6 +508,7 @@ async function fetchWithProfilesAndReferer(args: {
     }
 
     if (last.res.ok) return last;
+    pushWafFingerprintNotes(notes, last.res);
 
     // Retry with referer for the starting URL origin.
     if (last.res.status === 403 || last.res.status === 406) {
@@ -494,6 +524,7 @@ async function fetchWithProfilesAndReferer(args: {
             });
             last = attempt;
             if (attempt.res.ok) return attempt;
+            pushWafFingerprintNotes(notes, attempt.res);
           } catch (e) {
             notes.push(
               `referer_retry_error=${e instanceof Error ? e.message : String(e)}`,
@@ -519,6 +550,7 @@ async function fetchWithProfilesAndReferer(args: {
             });
             last = attempt;
             if (attempt.res.ok) return attempt;
+            pushWafFingerprintNotes(notes, attempt.res);
           } catch (e) {
             notes.push(
               `final_referer_retry_error=${e instanceof Error ? e.message : String(e)}`,
