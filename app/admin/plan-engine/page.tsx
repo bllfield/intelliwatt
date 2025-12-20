@@ -198,6 +198,7 @@ export default function PlanEngineLabPage() {
     const reason = String(estimate?.reason ?? "").toUpperCase();
     const notes: string[] = Array.isArray(estimate?.notes) ? estimate.notes.map((x: any) => String(x)) : [];
     const notesHay = notes.join(" ").toUpperCase();
+    const estimateMode = String(estimate?.estimateMode ?? "").toUpperCase();
     const detected = r?.detected ?? {};
 
     const flags: string[] = [];
@@ -214,17 +215,18 @@ export default function PlanEngineLabPage() {
 
     // Deterministic precedence:
     // 1) INDEXED
+    const isIndexedApprox =
+      estimateMode === "INDEXED_EFL_ANCHOR_APPROX" || notesHay.includes("EFL MODELED AVERAGE PRICE ANCHORS");
     if (
-      estimate?.status === "APPROXIMATE" ||
-      String(estimate?.estimateMode ?? "").toUpperCase() === "INDEXED_EFL_ANCHOR_APPROX" ||
-      notesHay.includes("EFL MODELED AVERAGE PRICE ANCHOR") ||
-      notesHay.includes("INDEXED/VARIABLE") ||
+      reason.includes("NON_DETERMINISTIC_PRICING_INDEXED") ||
+      reason.includes("MISSING_EFL_ANCHORS") ||
+      isIndexedApprox ||
       reason.includes("NON_DETERMINISTIC") ||
       reason.includes("INDEX") ||
       detected?.indexed ||
       detected?.variable
     ) {
-      if (estimate?.status === "APPROXIMATE") flags.push("INDEXED_APPROX");
+      if (estimate?.status === "APPROXIMATE" && isIndexedApprox) flags.push("INDEXED_APPROX");
       return { type: "INDEXED", flags: Array.from(new Set(flags)) };
     }
     // 2) TIERED
@@ -249,6 +251,7 @@ export default function PlanEngineLabPage() {
     }
     // 7) OTHER
     if (estimate?.status === "OK" || estimate?.status === "APPROXIMATE") flags.push("OK_BUT_UNKNOWN_TYPE");
+    if (estimate?.status === "APPROXIMATE" && !isIndexedApprox) flags.push("APPROXIMATE_BUT_UNKNOWN_TYPE");
     return { type: "OTHER", flags: Array.from(new Set(flags)) };
   }
 
@@ -708,4 +711,3 @@ export default function PlanEngineLabPage() {
     </div>
   );
 }
-
