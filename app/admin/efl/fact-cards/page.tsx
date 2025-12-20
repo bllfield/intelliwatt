@@ -331,6 +331,7 @@ export default function FactCardOpsPage() {
 
   // ---------------- Review Queue ----------------
   const [queueStatus, setQueueStatus] = useState<"OPEN" | "RESOLVED">("OPEN");
+  const [queueKind, setQueueKind] = useState<"EFL_PARSE" | "PLAN_CALC_QUARANTINE">("EFL_PARSE");
   const [queueQ, setQueueQ] = useState("");
   const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
   const [queueTotalCount, setQueueTotalCount] = useState<number | null>(null);
@@ -352,6 +353,7 @@ export default function FactCardOpsPage() {
     setQueueErr(null);
     try {
       const params = new URLSearchParams({ status: queueStatus, limit: "200" });
+      params.set("kind", queueKind);
       // Keep the OPEN queue self-healing: if a template already exists, the list API
       // can auto-resolve the queue row so admins only see true attention-needed items.
       if (queueStatus === "OPEN") params.set("autoResolve", "1");
@@ -400,6 +402,10 @@ export default function FactCardOpsPage() {
     }
     if (queueStatus !== "OPEN") {
       setQueueErr("Switch to Open queue status first.");
+      return;
+    }
+    if (queueKind !== "EFL_PARSE") {
+      setQueueErr('This auto processor only applies to kind="EFL_PARSE". Switch Kind to EFL_PARSE, or use the quarantine processor.');
       return;
     }
     setQueueProcessLoading(true);
@@ -457,10 +463,77 @@ export default function FactCardOpsPage() {
     }
   }
 
+  async function processOpenQuarantineQueue() {
+    if (!token) {
+      setQueueErr("Admin token required.");
+      return;
+    }
+    if (queueStatus !== "OPEN") {
+      setQueueErr("Switch to Open queue status first.");
+      return;
+    }
+    if (queueKind !== "PLAN_CALC_QUARANTINE") {
+      setQueueErr('Switch Kind to PLAN_CALC_QUARANTINE first.');
+      return;
+    }
+    setQueueProcessLoading(true);
+    setQueueProcessNote(null);
+    setQueueErr(null);
+    try {
+      let cursor: string | null = null;
+      let totalProcessed = 0;
+      let totalPersisted = 0;
+      let totalResolved = 0;
+      let totalFetchFailed = 0;
+
+      while (true) {
+        const res: Response = await fetch("/api/admin/efl-review/process-quarantine", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-admin-token": token,
+          },
+          body: JSON.stringify({
+            cursor,
+            limit: 50,
+            timeBudgetMs: 240_000,
+            dryRun: false,
+          }),
+        });
+        const data: any = await res.json();
+        if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+
+        totalProcessed += Number(data.processed ?? 0) || 0;
+        totalPersisted += Number(data.persisted ?? 0) || 0;
+        totalResolved += Number(data.resolved ?? 0) || 0;
+        totalFetchFailed += Number(data.fetchFailed ?? 0) || 0;
+
+        setQueueProcessNote(
+          `Processed ${totalProcessed}. Persisted ${totalPersisted}. Resolved ${totalResolved}. Fetch failed ${totalFetchFailed}.` +
+            (data.truncated ? " Continuing…" : " Done."),
+        );
+
+        cursor =
+          typeof data.nextCursor === "string" && data.nextCursor.trim()
+            ? data.nextCursor
+            : null;
+        if (!data.truncated || !cursor) break;
+        await new Promise((r) => setTimeout(r, 150));
+      }
+
+      await loadQueue();
+      await loadTemplates();
+    } catch (e: any) {
+      setQueueErr(e?.message || "Failed to process quarantine queue.");
+    } finally {
+      setQueueProcessLoading(false);
+    }
+  }
+
   useEffect(() => {
     if (ready) void loadQueue();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, queueStatus]);
+  }, [ready, queueStatus, queueKind]);
 
   const sortedQueueItems = useMemo(() => {
     const out = [...queueItems];
@@ -1349,14 +1422,29 @@ export default function FactCardOpsPage() {
             <button className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60" onClick={() => void loadQueue()} disabled={!ready || queueLoading}>
               {queueLoading ? "Loading…" : "Refresh"}
             </button>
-            <button className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60" onClick={() => void processOpenQueue()} disabled={!ready || queueLoading || queueProcessLoading || queueStatus !== "OPEN"}>
-              {queueProcessLoading ? "Processing…" : "Process OPEN queue (auto)"}
-            </button>
+            {queueKind === "EFL_PARSE" ? (
+              <button className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60" onClick={() => void processOpenQueue()} disabled={!ready || queueLoading || queueProcessLoading || queueStatus !== "OPEN"}>
+                {queueProcessLoading ? "Processing…" : "Process OPEN parse queue (auto)"}
+              </button>
+            ) : (
+              <button className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60" onClick={() => void processOpenQuarantineQueue()} disabled={!ready || queueLoading || queueProcessLoading || queueStatus !== "OPEN"}>
+                {queueProcessLoading ? "Processing…" : "Process OPEN quarantines (auto-fix)"}
+              </button>
+            )}
           </div>
         </div>
         <div className="text-xs text-gray-600">
-          Auto processor runs the full EFL pipeline and persists templates on <span className="font-medium">PASS + STRONG</span>.
-          It also registers required bucket definitions. Home monthly bucket totals are created later (on-demand) when you run an estimate for a specific home.
+          {queueKind === "EFL_PARSE" ? (
+            <>
+              Auto processor runs the full EFL pipeline and persists templates on{" "}
+              <span className="font-medium">PASS + STRONG</span>. It also registers required bucket definitions. Home monthly bucket totals are created later (on-demand) when you run an estimate for a specific home.
+            </>
+          ) : (
+            <>
+              Quarantine processor re-runs the full EFL pipeline and will auto-resolve a quarantine item{" "}
+              <span className="font-medium">only if</span> it can persist a safe template (PASS + STRONG, no manual-review gate).
+            </>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <label className="inline-flex items-center gap-2 text-sm">
@@ -1364,6 +1452,13 @@ export default function FactCardOpsPage() {
           </label>
           <label className="inline-flex items-center gap-2 text-sm">
             <input type="radio" checked={queueStatus === "RESOLVED"} onChange={() => setQueueStatus("RESOLVED")} /> Resolved
+          </label>
+          <label className="inline-flex items-center gap-2 text-sm">
+            <span className="text-gray-600">Kind</span>
+            <select className="rounded-lg border px-2 py-2 text-sm" value={queueKind} onChange={(e) => setQueueKind(e.target.value as any)}>
+              <option value="EFL_PARSE">EFL_PARSE</option>
+              <option value="PLAN_CALC_QUARANTINE">PLAN_CALC_QUARANTINE</option>
+            </select>
           </label>
           <input className="flex-1 min-w-[220px] rounded-lg border px-3 py-2 text-sm" placeholder="Search supplier / plan / utility / offer / sha / version" value={queueQ} onChange={(e) => setQueueQ(e.target.value)} />
           <button className="px-3 py-2 rounded-lg border hover:bg-gray-50" onClick={() => void loadQueue()} disabled={!ready || queueLoading}>

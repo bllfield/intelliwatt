@@ -30,6 +30,11 @@ export async function GET(req: NextRequest) {
     const { searchParams } = req.nextUrl;
     const statusParam = (searchParams.get("status") || "OPEN").toUpperCase();
     const q = (searchParams.get("q") || "").trim();
+    const kindParamRaw = (searchParams.get("kind") || "").trim().toUpperCase();
+    const kindParam =
+      kindParamRaw === "EFL_PARSE" || kindParamRaw === "PLAN_CALC_QUARANTINE"
+        ? kindParamRaw
+        : null;
     const limitRaw = Number(searchParams.get("limit") || "50");
     const limit = Math.max(1, Math.min(200, Number.isFinite(limitRaw) ? limitRaw : 50));
     const autoResolve =
@@ -47,10 +52,15 @@ export async function GET(req: NextRequest) {
       where.OR = [
         { supplier: { contains: q, mode: "insensitive" } },
         { planName: { contains: q, mode: "insensitive" } },
+        { tdspName: { contains: q, mode: "insensitive" } },
         { offerId: { contains: q, mode: "insensitive" } },
         { eflPdfSha256: { contains: q, mode: "insensitive" } },
         { eflVersionCode: { contains: q, mode: "insensitive" } },
       ];
+    }
+
+    if (kindParam) {
+      where.kind = kindParam;
     }
 
     let items = await (prisma as any).eflParseReviewQueue.findMany({
