@@ -254,9 +254,15 @@ export default function AdminPlanDetailsPage({ params }: { params: { offerId: st
     const baseMonthlyFeeCents = toNum(rs?.baseMonthlyFeeCents);
     const tdspIncluded = rs?.tdspDeliveryIncludedInEnergyCharge === true;
     const fixedEnergy = extractFixedEnergyCentsPerKwh(rs);
-    const hasTouTiers = Array.isArray(rs?.tiers) && rs.tiers.length > 0;
-    const hasCredits = Boolean(rs?.billCredits?.hasBillCredit) || Array.isArray(rs?.billCredits?.rules);
-    const hasTiers = Array.isArray(rs?.usageTiers) && rs.usageTiers.length > 0;
+    const touTiers: any[] = Array.isArray(rs?.tiers) ? rs.tiers : [];
+    const hasTouTiers = touTiers.length > 0;
+
+    const billCredits = rs?.billCredits ?? null;
+    const billCreditRules: any[] = Array.isArray((billCredits as any)?.rules) ? (billCredits as any).rules : [];
+    const hasCredits = Boolean((billCredits as any)?.hasBillCredit) || billCreditRules.length > 0;
+
+    const usageTiers: any[] = Array.isArray(rs?.usageTiers) ? rs.usageTiers : [];
+    const hasTiers = usageTiers.length > 0;
 
     const rows: Array<{ key: string; value: string; notes?: string }> = [
       { key: "rateStructure.type", value: type },
@@ -269,11 +275,109 @@ export default function AdminPlanDetailsPage({ params }: { params: { offerId: st
         value: fixedEnergy == null ? "—" : String(fixedEnergy),
         notes: fixedEnergy == null ? "Not a single unambiguous fixed rate (or not FIXED)." : undefined,
       },
+      {
+        key: "rateStructure.energyRateCents",
+        value: toNum(rs?.energyRateCents) == null ? "—" : String(toNum(rs?.energyRateCents)),
+        notes: type === "FIXED" ? "Headline fixed REP energy rate (¢/kWh) from template." : "Not a FIXED rateStructure.",
+      },
+      {
+        key: "rateStructure.currentBillEnergyRateCents",
+        value: toNum(rs?.currentBillEnergyRateCents) == null ? "—" : String(toNum(rs?.currentBillEnergyRateCents)),
+        notes: type === "VARIABLE" ? "Current-bill rate (¢/kWh) from template (variable plans)." : "Not a VARIABLE rateStructure.",
+      },
       { key: "tdspDeliveryIncludedInEnergyCharge", value: tdspIncluded ? "true" : "false" },
       { key: "hasUsageTiers", value: hasTiers ? "true" : "false" },
       { key: "hasBillCredits", value: hasCredits ? "true" : "false" },
       { key: "hasTouTiers", value: hasTouTiers ? "true" : "false" },
     ];
+
+    // Usage tiers (tiered REP energy) — show the actual bands we will use (if supported).
+    if (hasTiers) {
+      rows.push({
+        key: "usageTiers.length",
+        value: String(usageTiers.length),
+        notes: "Tier bands as stored in template (min/max kWh + ¢/kWh).",
+      });
+      usageTiers.forEach((t, idx) => {
+        const min = toNum((t as any)?.minKWh);
+        const max = toNum((t as any)?.maxKWh);
+        const cents = toNum((t as any)?.centsPerKWh);
+        rows.push({
+          key: `usageTiers[${idx}]`,
+          value:
+            min == null || cents == null
+              ? "—"
+              : `${min}–${max == null ? "∞" : String(max)} kWh @ ${cents} ¢/kWh`,
+          notes: min == null || cents == null ? "Missing required tier fields in template." : undefined,
+        });
+      });
+    }
+
+    // Bill credits — show rules so you can QA thresholds and amounts.
+    if (hasCredits) {
+      rows.push({
+        key: "billCredits.rules.length",
+        value: String(billCreditRules.length),
+        notes: (billCredits as any)?.hasBillCredit === true && billCreditRules.length === 0 ? "hasBillCredit=true but no rules stored." : undefined,
+      });
+      billCreditRules.forEach((r, idx) => {
+        const label = String((r as any)?.label ?? "").trim();
+        const amt = toNum((r as any)?.creditAmountCents);
+        const min = toNum((r as any)?.minUsageKWh);
+        const max = toNum((r as any)?.maxUsageKWh);
+        const months = Array.isArray((r as any)?.monthsOfYear) ? (r as any).monthsOfYear : null;
+        rows.push({
+          key: `billCredits.rules[${idx}]`,
+          value:
+            amt == null || min == null
+              ? "—"
+              : `${amt}¢ credit if usage ${min}–${max == null ? "∞" : String(max)} kWh`,
+          notes: [
+            label ? `label: ${label}` : null,
+            months ? `months: ${months.join(",")}` : null,
+            amt == null || min == null ? "Missing required credit fields in template." : null,
+          ]
+            .filter(Boolean)
+            .join(" • "),
+        });
+      });
+    }
+
+    // TOU tiers (deterministic) — show the actual schedule tiers in the template.
+    if (hasTouTiers) {
+      rows.push({
+        key: "tiers.length",
+        value: String(touTiers.length),
+        notes: "TOU tiers as stored in template (label + window + ¢/kWh).",
+      });
+      touTiers.forEach((t, idx) => {
+        const label = String((t as any)?.label ?? "").trim();
+        const price = toNum((t as any)?.priceCents);
+        const start = String((t as any)?.startTime ?? "").trim();
+        const end = String((t as any)?.endTime ?? "").trim();
+        const days = (t as any)?.daysOfWeek;
+        const daysLabel = Array.isArray(days) ? days.join(",") : typeof days === "string" ? days : "";
+        const months = Array.isArray((t as any)?.monthsOfYear) ? (t as any).monthsOfYear : null;
+        rows.push({
+          key: `tiers[${idx}]`,
+          value:
+            price == null
+              ? "—"
+              : `${price}¢ ${start && end ? `(${start}–${end})` : ""}`.trim(),
+          notes: [
+            label ? `label: ${label}` : null,
+            daysLabel ? `days: ${daysLabel}` : null,
+            months ? `months: ${months.join(",")}` : null,
+          ]
+            .filter(Boolean)
+            .join(" • "),
+        });
+      });
+    }
+
+    if ((rp as any)?.cancelFee) {
+      rows.push({ key: "ratePlan.cancelFee", value: String((rp as any).cancelFee), notes: "Cancellation fee (as stored)." });
+    }
     return rows;
   }, [data]);
 
