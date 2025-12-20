@@ -339,7 +339,7 @@ export default function FactCardOpsPage() {
   const [queueProcessLoading, setQueueProcessLoading] = useState(false);
   const [queueProcessNote, setQueueProcessNote] = useState<string | null>(null);
   const [queueSortKey, setQueueSortKey] = useState<
-    "supplier" | "planName" | "offerId" | "eflVersionCode" | "queueReason"
+    "tdspName" | "supplier" | "planName" | "offerId" | "eflVersionCode" | "queueReason"
   >("supplier");
   const [queueSortDir, setQueueSortDir] = useState<SortDir>("asc");
 
@@ -466,25 +466,29 @@ export default function FactCardOpsPage() {
     const out = [...queueItems];
     out.sort((a: any, b: any) => {
       const av =
-        queueSortKey === "supplier"
-          ? a?.supplier
-          : queueSortKey === "planName"
-            ? a?.planName
-            : queueSortKey === "offerId"
-              ? a?.offerId
-              : queueSortKey === "eflVersionCode"
-                ? a?.eflVersionCode
-                : a?.queueReason;
+        queueSortKey === "tdspName"
+          ? a?.tdspName
+          : queueSortKey === "supplier"
+            ? a?.supplier
+            : queueSortKey === "planName"
+              ? a?.planName
+              : queueSortKey === "offerId"
+                ? a?.offerId
+                : queueSortKey === "eflVersionCode"
+                  ? a?.eflVersionCode
+                  : a?.queueReason;
       const bv =
-        queueSortKey === "supplier"
-          ? b?.supplier
-          : queueSortKey === "planName"
-            ? b?.planName
-            : queueSortKey === "offerId"
-              ? b?.offerId
-              : queueSortKey === "eflVersionCode"
-                ? b?.eflVersionCode
-                : b?.queueReason;
+        queueSortKey === "tdspName"
+          ? b?.tdspName
+          : queueSortKey === "supplier"
+            ? b?.supplier
+            : queueSortKey === "planName"
+              ? b?.planName
+              : queueSortKey === "offerId"
+                ? b?.offerId
+                : queueSortKey === "eflVersionCode"
+                  ? b?.eflVersionCode
+                  : b?.queueReason;
       return cmp(av ?? null, bv ?? null, queueSortDir);
     });
     return out;
@@ -1361,7 +1365,7 @@ export default function FactCardOpsPage() {
           <label className="inline-flex items-center gap-2 text-sm">
             <input type="radio" checked={queueStatus === "RESOLVED"} onChange={() => setQueueStatus("RESOLVED")} /> Resolved
           </label>
-          <input className="flex-1 min-w-[220px] rounded-lg border px-3 py-2 text-sm" placeholder="Search supplier / plan / offer / sha / version" value={queueQ} onChange={(e) => setQueueQ(e.target.value)} />
+          <input className="flex-1 min-w-[220px] rounded-lg border px-3 py-2 text-sm" placeholder="Search supplier / plan / utility / offer / sha / version" value={queueQ} onChange={(e) => setQueueQ(e.target.value)} />
           <button className="px-3 py-2 rounded-lg border hover:bg-gray-50" onClick={() => void loadQueue()} disabled={!ready || queueLoading}>
             Apply
           </button>
@@ -1379,6 +1383,9 @@ export default function FactCardOpsPage() {
                 </th>
                 <th className="px-2 py-2 text-left cursor-pointer select-none" onClick={() => toggleQueueSort("planName")}>
                   Plan {queueSortKey === "planName" ? (queueSortDir === "asc" ? "▲" : "▼") : ""}
+                </th>
+                <th className="px-2 py-2 text-left cursor-pointer select-none" onClick={() => toggleQueueSort("tdspName")}>
+                  Utility {queueSortKey === "tdspName" ? (queueSortDir === "asc" ? "▲" : "▼") : ""}
                 </th>
                 <th className="px-2 py-2 text-left cursor-pointer select-none" onClick={() => toggleQueueSort("offerId")}>
                   Offer {queueSortKey === "offerId" ? (queueSortDir === "asc" ? "▲" : "▼") : ""}
@@ -1406,6 +1413,7 @@ export default function FactCardOpsPage() {
                   <tr key={it.id} className="border-t h-12">
                     <td className="px-2 py-2">{it.supplier ?? "-"}</td>
                     <td className="px-2 py-2">{it.planName ?? "-"}</td>
+                    <td className="px-2 py-2">{it.tdspName ?? "-"}</td>
                     <td className="px-2 py-2">{it.offerId ?? "-"}</td>
                     <td className="px-2 py-2">{it.eflVersionCode ?? "-"}</td>
                     <td className="px-2 py-2 max-w-[420px] truncate" title={it.queueReason ?? ""}>
@@ -1463,7 +1471,7 @@ export default function FactCardOpsPage() {
               })}
               {queueItems.length === 0 ? (
                 <tr>
-                  <td className="px-2 py-3 text-gray-500" colSpan={6}>
+                  <td className="px-2 py-3 text-gray-500" colSpan={7}>
                     No items.
                   </td>
                 </tr>
