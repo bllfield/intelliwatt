@@ -28,6 +28,12 @@ type UsageDatasetSummary = {
   latest: string | null;
 };
 
+type UsageTotals = {
+  importKwh: number;
+  exportKwh: number;
+  netKwh: number;
+};
+
 type IntervalRow = {
   houseId: string | null;
   esiid: string | null;
@@ -65,6 +71,7 @@ type UsageDataset = {
   daily?: DailyRow[];
   monthly?: MonthlyRow[];
   insights?: UsageInsights;
+  totals?: UsageTotals;
 } | null;
 
 type HouseUsage = {
@@ -104,6 +111,20 @@ function formatTimeLabel(hhmm: string) {
 
 function sumKwh(rows: { kwh: number }[]) {
   return rows.reduce((sum, r) => sum + r.kwh, 0);
+}
+
+function deriveTotalsFromRows(rows: { kwh: number }[]): UsageTotals {
+  let importKwh = 0;
+  let exportKwh = 0;
+  for (const row of rows) {
+    if (row.kwh >= 0) importKwh += row.kwh;
+    else exportKwh += Math.abs(row.kwh);
+  }
+  return {
+    importKwh,
+    exportKwh,
+    netKwh: importKwh - exportKwh,
+  };
 }
 
 function toDateKeyFromTimestamp(ts: string): string {
@@ -165,13 +186,15 @@ export const UsageDashboard: React.FC = () => {
       return toMinutes(a.hhmm) - toMinutes(b.hhmm);
     });
 
-    const totalKwh = monthly.length
-      ? sumKwh(monthly)
-      : fallbackDaily.length
-        ? sumKwh(fallbackDaily)
+    const totalsFromApi = dataset?.totals;
+    const totals = totalsFromApi
+      ?? (fallbackDaily.length
+        ? deriveTotalsFromRows(fallbackDaily)
         : intervals.length
-          ? sumKwh(intervals.map((i) => ({ kwh: i.kwh })))
-          : 0;
+          ? deriveTotalsFromRows(intervals.map((i) => ({ kwh: i.kwh })))
+          : { importKwh: 0, exportKwh: 0, netKwh: 0 });
+
+    const totalKwh = totals.netKwh;
 
     const avgDailyKwh = fallbackDaily.length ? totalKwh / fallbackDaily.length : 0;
     const weekdayKwh = dataset?.insights?.weekdayVsWeekend.weekday ?? 0;
@@ -192,6 +215,7 @@ export const UsageDashboard: React.FC = () => {
       daily: recentDaily,
       fifteenCurve,
       totalKwh,
+      totals,
       avgDailyKwh,
       weekdayKwh,
       weekendKwh,
@@ -265,9 +289,25 @@ export const UsageDashboard: React.FC = () => {
           {/* Summary cards */}
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
             <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Total usage</div>
+              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Net usage</div>
               <div className="mt-2 text-2xl font-semibold text-neutral-900">
                 {derived.totalKwh.toFixed(0)} <span className="text-base font-normal text-neutral-500">kWh</span>
+              </div>
+              <p className="mt-1 text-xs text-neutral-500">Imports minus exports.</p>
+            </div>
+
+            <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Exported to grid</div>
+              <div className="mt-2 text-2xl font-semibold text-amber-700">
+                {derived.totals.exportKwh.toFixed(0)} <span className="text-base font-normal text-neutral-500">kWh</span>
+              </div>
+              <p className="mt-1 text-xs text-neutral-500">Solar backfeed / buyback volume.</p>
+            </div>
+
+            <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Imported from grid</div>
+              <div className="mt-2 text-2xl font-semibold text-emerald-700">
+                {derived.totals.importKwh.toFixed(0)} <span className="text-base font-normal text-neutral-500">kWh</span>
               </div>
             </div>
 
@@ -331,14 +371,26 @@ export const UsageDashboard: React.FC = () => {
                 <div className="h-64">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart
-                      data={derived.monthly.map((m) => ({ ...m, label: formatMonthLabel(m.month) }))}
+                      data={derived.monthly.map((m) => ({
+                        ...m,
+                        label: formatMonthLabel(m.month),
+                        consumed: Math.max(m.kwh, 0),
+                        exported: Math.min(m.kwh, 0),
+                      }))}
                       margin={{ top: 10, right: 16, bottom: 8, left: 0 }}
                     >
                       <CartesianGrid strokeDasharray="3 3" vertical={false} />
                       <XAxis dataKey="label" />
                       <YAxis />
-                      <Tooltip formatter={(value: number) => `${value.toFixed(1)} kWh`} />
-                      <Bar dataKey="kwh" fill="#0EA5E9" radius={[6, 6, 0, 0]} />
+                      <Tooltip
+                        formatter={(value: number, key) => {
+                          const label = key === 'consumed' ? 'Imported' : 'Exported';
+                          return `${Math.abs(value as number).toFixed(1)} kWh (${label})`;
+                        }}
+                      />
+                      <Legend />
+                      <Bar dataKey="consumed" stackId="a" fill="#0EA5E9" radius={[6, 6, 0, 0]} name="Imported" />
+                      <Bar dataKey="exported" stackId="a" fill="#F59E0B" radius={[6, 6, 0, 0]} name="Exported" />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -358,14 +410,26 @@ export const UsageDashboard: React.FC = () => {
                 <div className="h-64">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart
-                      data={derived.daily.map((d) => ({ ...d, label: formatDateShort(d.date) }))}
+                      data={derived.daily.map((d) => ({
+                        ...d,
+                        label: formatDateShort(d.date),
+                        consumed: Math.max(d.kwh, 0),
+                        exported: Math.min(d.kwh, 0),
+                      }))}
                       margin={{ top: 10, right: 16, bottom: 8, left: 0 }}
                     >
                       <CartesianGrid strokeDasharray="3 3" vertical={false} />
                       <XAxis dataKey="label" />
                       <YAxis />
-                      <Tooltip formatter={(value: number) => `${value.toFixed(1)} kWh`} />
-                      <Bar dataKey="kwh" fill="#14B8A6" radius={[6, 6, 0, 0]} />
+                      <Tooltip
+                        formatter={(value: number, key) => {
+                          const label = key === 'consumed' ? 'Imported' : 'Exported';
+                          return `${Math.abs(value as number).toFixed(1)} kWh (${label})`;
+                        }}
+                      />
+                      <Legend />
+                      <Bar dataKey="consumed" stackId="daily" fill="#14B8A6" radius={[6, 6, 0, 0]} name="Imported" />
+                      <Bar dataKey="exported" stackId="daily" fill="#F59E0B" radius={[6, 6, 0, 0]} name="Exported" />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>

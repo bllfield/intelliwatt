@@ -37,10 +37,30 @@ type UsageDatasetResult = {
   };
 };
 
+type ImportExportTotals = {
+  importKwh: number;
+  exportKwh: number;
+  netKwh: number;
+};
+
 function decimalToNumber(value: Prisma.Decimal | number | null | undefined): number {
   if (value === null || value === undefined) return 0;
   if (typeof value === 'number') return value;
   return Number(value);
+}
+
+function computeImportExportTotals(rows: Array<{ kwh: number }>): ImportExportTotals {
+  let importKwh = 0;
+  let exportKwh = 0;
+  for (const row of rows) {
+    if (row.kwh >= 0) importKwh += row.kwh;
+    else exportKwh += Math.abs(row.kwh);
+  }
+  return {
+    importKwh,
+    exportKwh,
+    netKwh: importKwh - exportKwh,
+  };
 }
 
 function toSeriesPoint(rows: Array<{ bucket: Date; kwh: number }>): UsageSeriesPoint[] {
@@ -490,6 +510,7 @@ export async function GET(_request: NextRequest) {
                   weekdayVsWeekend: insights.weekdayVsWeekend,
                 }
               : null,
+            totals: computeImportExportTotals(insights?.intervals ?? intervals),
           }
         : null;
 
