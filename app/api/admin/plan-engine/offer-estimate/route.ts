@@ -141,6 +141,7 @@ export async function POST(req: NextRequest) {
     homeId,
     tdspSlug,
     esiid,
+    tdspApplied,
     monthsCount: res.monthsCount,
     annualKwh: res.annualKwh,
     usageBucketsByMonthIncluded: res.usageBucketsByMonthIncluded,

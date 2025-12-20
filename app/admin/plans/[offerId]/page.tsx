@@ -8,6 +8,7 @@ type ApiOk = {
   link: any | null;
   ratePlan: any | null;
   masterPlan: any | null;
+  eflRawText: string | null;
   introspection: any | null;
 };
 type ApiErr = { ok: false; error: string; detail?: any };
@@ -37,6 +38,36 @@ function useLocalToken(key = "iw_admin_token") {
     }
   }, [key, token]);
   return { token, setToken };
+}
+
+function toNum(v: any): number | null {
+  const n = typeof v === "number" ? v : typeof v === "string" ? Number(v) : NaN;
+  return Number.isFinite(n) ? n : null;
+}
+
+function extractFixedEnergyCentsPerKwh(rateStructure: any): number | null {
+  if (!rateStructure || typeof rateStructure !== "object") return null;
+  const candidates: any[] = [
+    rateStructure.energyRateCents,
+    rateStructure.defaultRateCentsPerKwh,
+    rateStructure.repEnergyCentsPerKwh,
+    rateStructure.energyCentsPerKwh,
+    rateStructure.energyChargeCentsPerKwh,
+  ];
+  const nums = candidates.map(toNum).filter((x): x is number => x != null);
+  if (nums.length === 0) return null;
+  // If multiple conflicting values exist, fail-closed and don’t show a single “fixed” number.
+  const uniq = Array.from(new Set(nums.map((n) => Math.round(n * 1000) / 1000)));
+  return uniq.length === 1 ? uniq[0] : null;
+}
+
+async function copyToClipboard(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export default function AdminPlanDetailsPage({ params }: { params: { offerId: string } }) {
@@ -121,6 +152,61 @@ export default function AdminPlanDetailsPage({ params }: { params: { offerId: st
     return Array.isArray(keys) ? (keys as string[]).map((k) => String(k)).filter(Boolean) : [];
   }, [data]);
 
+  const planVars = useMemo(() => {
+    const rp = data?.ratePlan ?? null;
+    const rs = rp?.rateStructure ?? null;
+    const type = String(rs?.type ?? "").toUpperCase() || "UNKNOWN";
+    const baseMonthlyFeeCents = toNum(rs?.baseMonthlyFeeCents);
+    const tdspIncluded = rs?.tdspDeliveryIncludedInEnergyCharge === true;
+    const fixedEnergy = extractFixedEnergyCentsPerKwh(rs);
+    const hasTouTiers = Array.isArray(rs?.tiers) && rs.tiers.length > 0;
+    const hasCredits = Boolean(rs?.billCredits?.hasBillCredit) || Array.isArray(rs?.billCredits?.rules);
+    const hasTiers = Array.isArray(rs?.usageTiers) && rs.usageTiers.length > 0;
+
+    const rows: Array<{ key: string; value: string; notes?: string }> = [
+      { key: "rateStructure.type", value: type },
+      {
+        key: "baseMonthlyFeeCents",
+        value: baseMonthlyFeeCents == null ? "—" : String(baseMonthlyFeeCents),
+      },
+      {
+        key: "fixedEnergyCentsPerKwh",
+        value: fixedEnergy == null ? "—" : String(fixedEnergy),
+        notes: fixedEnergy == null ? "Not a single unambiguous fixed rate (or not FIXED)." : undefined,
+      },
+      { key: "tdspDeliveryIncludedInEnergyCharge", value: tdspIncluded ? "true" : "false" },
+      { key: "hasUsageTiers", value: hasTiers ? "true" : "false" },
+      { key: "hasBillCredits", value: hasCredits ? "true" : "false" },
+      { key: "hasTouTiers", value: hasTouTiers ? "true" : "false" },
+    ];
+    return rows;
+  }, [data]);
+
+  const estimateVars = useMemo(() => {
+    if (!estimateJson?.ok) return null;
+    const tdsp = estimateJson?.tdspApplied ?? null;
+    const rows: Array<{ key: string; value: string }> = [
+      { key: "homeId", value: String(estimateJson.homeId ?? "—") },
+      { key: "esiid", value: String(estimateJson.esiid ?? "—") },
+      { key: "tdspSlug", value: String(estimateJson.tdspSlug ?? "—") },
+      { key: "annualKwh", value: String(estimateJson.annualKwh ?? "—") },
+      {
+        key: "tdspApplied.perKwhDeliveryChargeCents",
+        value: tdsp?.perKwhDeliveryChargeCents != null ? String(tdsp.perKwhDeliveryChargeCents) : "—",
+      },
+      {
+        key: "tdspApplied.monthlyCustomerChargeDollars",
+        value: tdsp?.monthlyCustomerChargeDollars != null ? String(tdsp.monthlyCustomerChargeDollars) : "—",
+      },
+      { key: "monthsCount", value: String(estimateJson.monthsCount ?? "—") },
+      { key: "monthsIncluded", value: Array.isArray(estimateJson.monthsIncluded) ? estimateJson.monthsIncluded.join(", ") : "—" },
+      { key: "backfill.ok", value: String(Boolean(estimateJson?.backfill?.ok)) },
+      { key: "estimate.status", value: String(estimateJson?.estimate?.status ?? "—") },
+      { key: "estimate.reason", value: String(estimateJson?.estimate?.reason ?? "—") },
+    ];
+    return rows;
+  }, [estimateJson]);
+
   const loadCoverage = useCallback(async () => {
     setCoverageLoading(true);
     setCoverageErr(null);
@@ -192,72 +278,119 @@ export default function AdminPlanDetailsPage({ params }: { params: { offerId: st
         </div>
 
         {data ? (
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="rounded-xl border bg-white p-4 space-y-2">
-              <div className="text-sm font-semibold">Offer summary</div>
-              <div className="text-xs text-gray-700 space-y-1">
-                <div>
-                  <span className="text-gray-500">MasterPlan:</span>{" "}
-                  <span className="font-mono">{data.masterPlan?.id ?? "—"}</span>
+          <div className="space-y-4">
+            <div className="rounded-xl border bg-white p-4 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-sm font-semibold">EFL raw text</div>
+                <button
+                  className="rounded-lg border px-3 py-1.5 text-xs hover:bg-gray-50 disabled:opacity-60"
+                  disabled={!data.eflRawText}
+                  onClick={async () => {
+                    if (!data.eflRawText) return;
+                    const ok = await copyToClipboard(data.eflRawText);
+                    if (!ok) alert("Copy failed.");
+                  }}
+                >
+                  Copy
+                </button>
+              </div>
+              <pre className="text-xs bg-gray-50 rounded-lg p-3 overflow-auto max-h-[520px]">
+                {data.eflRawText ? data.eflRawText : "— (no stored raw text found for this EFL fingerprint)"}
+              </pre>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="rounded-xl border bg-white p-4 space-y-2">
+                <div className="text-sm font-semibold">Offer summary</div>
+                <div className="text-xs text-gray-700 space-y-1">
+                  <div>
+                    <span className="text-gray-500">MasterPlan:</span>{" "}
+                    <span className="font-mono">{data.masterPlan?.id ?? "—"}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Supplier:</span> {data.masterPlan?.supplierName ?? data.ratePlan?.supplier ?? "—"}
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Plan:</span> {data.masterPlan?.planName ?? data.ratePlan?.planName ?? "—"}
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Term:</span>{" "}
+                    <span className="font-mono">{data.masterPlan?.termMonths ?? data.ratePlan?.termMonths ?? "—"}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">TDSP:</span>{" "}
+                    <span className="font-mono">{data.masterPlan?.tdsp ?? data.ratePlan?.utilityId ?? "—"}</span>
+                  </div>
                 </div>
-                <div>
-                  <span className="text-gray-500">Supplier:</span> {data.masterPlan?.supplierName ?? data.ratePlan?.supplier ?? "—"}
-                </div>
-                <div>
-                  <span className="text-gray-500">Plan:</span> {data.masterPlan?.planName ?? data.ratePlan?.planName ?? "—"}
-                </div>
-                <div>
-                  <span className="text-gray-500">Term:</span>{" "}
-                  <span className="font-mono">{data.masterPlan?.termMonths ?? data.ratePlan?.termMonths ?? "—"}</span>
-                </div>
-                <div>
-                  <span className="text-gray-500">TDSP:</span>{" "}
-                  <span className="font-mono">{data.masterPlan?.tdsp ?? data.ratePlan?.utilityId ?? "—"}</span>
+                <div className="flex flex-wrap gap-2 text-xs">
+                  {data.ratePlan?.eflSourceUrl ? (
+                    <a className="underline" href={String(data.ratePlan.eflSourceUrl)} target="_blank" rel="noreferrer">
+                      EFL source
+                    </a>
+                  ) : null}
+                  {data.ratePlan?.eflUrl ? (
+                    <a className="underline" href={String(data.ratePlan.eflUrl)} target="_blank" rel="noreferrer">
+                      EFL
+                    </a>
+                  ) : null}
+                  {data.ratePlan?.tosUrl ? (
+                    <a className="underline" href={String(data.ratePlan.tosUrl)} target="_blank" rel="noreferrer">
+                      TOS
+                    </a>
+                  ) : null}
+                  {data.ratePlan?.yracUrl ? (
+                    <a className="underline" href={String(data.ratePlan.yracUrl)} target="_blank" rel="noreferrer">
+                      YRAC
+                    </a>
+                  ) : null}
                 </div>
               </div>
-              <div className="flex flex-wrap gap-2 text-xs">
-                {data.ratePlan?.eflSourceUrl ? (
-                  <a className="underline" href={String(data.ratePlan.eflSourceUrl)} target="_blank" rel="noreferrer">
-                    EFL source
-                  </a>
-                ) : null}
-                {data.ratePlan?.eflUrl ? (
-                  <a className="underline" href={String(data.ratePlan.eflUrl)} target="_blank" rel="noreferrer">
-                    EFL
-                  </a>
-                ) : null}
-                {data.ratePlan?.tosUrl ? (
-                  <a className="underline" href={String(data.ratePlan.tosUrl)} target="_blank" rel="noreferrer">
-                    TOS
-                  </a>
-                ) : null}
-                {data.ratePlan?.yracUrl ? (
-                  <a className="underline" href={String(data.ratePlan.yracUrl)} target="_blank" rel="noreferrer">
-                    YRAC
-                  </a>
-                ) : null}
+
+              <div className="rounded-xl border bg-white p-4 space-y-2">
+                <div className="text-sm font-semibold">Plan variables (template → calculator inputs)</div>
+                <div className="text-xs text-gray-600">
+                  These are the variables the engine will use (or require) to compute this plan.
+                </div>
+                <div className="overflow-auto rounded border">
+                  <table className="min-w-full text-xs">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-2 py-2 text-left">variable</th>
+                        <th className="px-2 py-2 text-left">value</th>
+                        <th className="px-2 py-2 text-left">notes</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {planVars.map((r) => (
+                        <tr key={r.key} className="border-t">
+                          <td className="px-2 py-2 font-mono">{r.key}</td>
+                          <td className="px-2 py-2 font-mono">{r.value}</td>
+                          <td className="px-2 py-2 text-gray-600">{r.notes ?? ""}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
 
             <div className="rounded-xl border bg-white p-4 space-y-2">
-              <div className="text-sm font-semibold">Plan Engine View</div>
+              <div className="text-sm font-semibold">Plan calc requirements</div>
               <div className="text-xs font-mono">
                 status={data.introspection?.planCalc?.planCalcStatus ?? "—"} reason={data.introspection?.planCalc?.planCalcReasonCode ?? "—"}
               </div>
               <div className="text-xs text-gray-700">
                 <span className="text-gray-500">requiredBucketKeys:</span>{" "}
-                <span className="font-mono break-all">
-                  {Array.isArray(data.introspection?.requiredBucketKeys) ? data.introspection.requiredBucketKeys.join(", ") : "—"}
-                </span>
+                <span className="font-mono break-all">{requiredBucketKeys.length ? requiredBucketKeys.join(", ") : "—"}</span>
               </div>
             </div>
           </div>
         ) : null}
 
         <div className="rounded-xl border bg-white p-4 space-y-3">
-          <div className="text-sm font-semibold">Estimate for a home (optional)</div>
+          <div className="text-sm font-semibold">Estimate for a home (runs the calculator)</div>
           <div className="text-xs text-gray-600">
-            Requires a <span className="font-mono">homeId</span> (HouseAddress.id). Uses bucket-gated estimator + optional backfill.
+            Enter a <span className="font-mono">homeId</span>. If usage buckets exist (or you enable backfill), this will run the estimate for this specific home.
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <label className="text-xs">
@@ -291,25 +424,57 @@ export default function AdminPlanDetailsPage({ params }: { params: { offerId: st
             >
               {estimateLoading ? "Running…" : "Run estimate"}
             </button>
-            <button
-              className="rounded-lg border px-4 py-2 text-sm hover:bg-gray-50 disabled:opacity-60 mt-5"
-              disabled={!token || !homeId.trim() || coverageLoading || requiredBucketKeys.length === 0}
-              onClick={() => void loadCoverage()}
-              title="Reads existing monthly buckets only (no backfill)."
-            >
-              {coverageLoading ? "Loading…" : "Load bucket coverage"}
-            </button>
           </div>
+
           {estimateErr ? <div className="text-sm text-red-700">{estimateErr}</div> : null}
-          <pre className="text-xs bg-gray-50 rounded-lg p-3 overflow-auto max-h-[520px]">
-            {estimateJson ? pretty(estimateJson) : "—"}
-          </pre>
+
+          {estimateVars ? (
+            <div className="space-y-2">
+              <div className="text-xs text-gray-600">Calculator inputs (this run)</div>
+              <div className="overflow-auto rounded border">
+                <table className="min-w-full text-xs">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-2 py-2 text-left">variable</th>
+                      <th className="px-2 py-2 text-left">value</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {estimateVars.map((r) => (
+                      <tr key={r.key} className="border-t">
+                        <td className="px-2 py-2 font-mono">{r.key}</td>
+                        <td className="px-2 py-2 font-mono break-all">{r.value}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : null}
+
+          <details className="text-xs text-gray-700">
+            <summary className="cursor-pointer select-none">Estimate raw JSON</summary>
+            <pre className="mt-2 bg-gray-50 rounded-lg p-3 overflow-auto max-h-[520px]">{estimateJson ? pretty(estimateJson) : "—"}</pre>
+          </details>
         </div>
 
         <div className="rounded-xl border bg-white p-4 space-y-3">
           <div className="text-sm font-semibold">Bucket Coverage (read-only)</div>
           <div className="text-xs text-gray-600">
             Matrix of <span className="font-mono">requiredBucketKeys</span> × months for the selected <span className="font-mono">homeId</span>.
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              className="rounded-lg border px-3 py-1.5 text-xs hover:bg-gray-50 disabled:opacity-60"
+              disabled={!token || !homeId.trim() || coverageLoading || requiredBucketKeys.length === 0}
+              onClick={() => void loadCoverage()}
+              title="Reads existing monthly buckets only (no backfill)."
+            >
+              {coverageLoading ? "Loading…" : "Load bucket coverage"}
+            </button>
+            <div className="text-xs text-gray-500">
+              required keys: <span className="font-mono">{requiredBucketKeys.length}</span>
+            </div>
           </div>
           {coverageErr ? <div className="text-sm text-red-700">{coverageErr}</div> : null}
 

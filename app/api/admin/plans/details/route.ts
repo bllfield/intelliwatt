@@ -27,6 +27,18 @@ export async function GET(req: NextRequest) {
     const ratePlan = link?.ratePlan ?? null;
     const rateStructure = (ratePlan as any)?.rateStructure ?? null;
 
+    const eflRawText = (() => {
+      const sha = String((ratePlan as any)?.eflPdfSha256 ?? "").trim();
+      return sha ? sha : null;
+    })();
+    const queueRow =
+      eflRawText
+        ? await (prisma as any).eflParseReviewQueue.findUnique({
+            where: { eflPdfSha256: eflRawText },
+            select: { rawText: true },
+          })
+        : null;
+
     // Best-effort offer snapshot if we have one in MasterPlan (admin QA table).
     const masterPlan = await prisma.masterPlan.findFirst({
       where: { offerId },
@@ -72,6 +84,15 @@ export async function GET(req: NextRequest) {
             supplier: ratePlan.supplier,
             planName: ratePlan.planName,
             termMonths: ratePlan.termMonths,
+            rate500: (ratePlan as any).rate500 ?? null,
+            rate1000: (ratePlan as any).rate1000 ?? null,
+            rate2000: (ratePlan as any).rate2000 ?? null,
+            modeledRate500: (ratePlan as any).modeledRate500 ?? null,
+            modeledRate1000: (ratePlan as any).modeledRate1000 ?? null,
+            modeledRate2000: (ratePlan as any).modeledRate2000 ?? null,
+            modeledEflAvgPriceValidation: (ratePlan as any).modeledEflAvgPriceValidation ?? null,
+            modeledComputedAt: (ratePlan as any).modeledComputedAt ?? null,
+            cancelFee: (ratePlan as any).cancelFee ?? null,
             eflUrl: ratePlan.eflUrl,
             eflSourceUrl: ratePlan.eflSourceUrl,
             tosUrl: ratePlan.tosUrl,
@@ -79,6 +100,8 @@ export async function GET(req: NextRequest) {
             repPuctCertificate: ratePlan.repPuctCertificate,
             eflVersionCode: ratePlan.eflVersionCode,
             eflPdfSha256: ratePlan.eflPdfSha256,
+            eflRequiresManualReview: (ratePlan as any).eflRequiresManualReview ?? null,
+            eflValidationIssues: (ratePlan as any).eflValidationIssues ?? null,
             rateStructure: ratePlan.rateStructure,
             planCalcVersion: ratePlan.planCalcVersion,
             planCalcStatus: ratePlan.planCalcStatus,
@@ -90,6 +113,7 @@ export async function GET(req: NextRequest) {
           }
         : null,
       masterPlan: masterPlan ?? null,
+      eflRawText: queueRow?.rawText ?? null,
       introspection,
     });
   } catch (e: any) {
