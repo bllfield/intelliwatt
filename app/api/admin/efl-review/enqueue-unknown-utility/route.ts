@@ -6,6 +6,8 @@ export const dynamic = "force-dynamic";
 
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 
+const KNOWN_TDSP_CODES = ["ONCOR", "CENTERPOINT", "AEP_NORTH", "AEP_CENTRAL", "TNMP"] as const;
+
 function jsonError(status: number, error: string, details?: unknown) {
   return NextResponse.json(
     { ok: false, error, ...(details ? { details } : {}) },
@@ -27,11 +29,11 @@ export async function POST(req: NextRequest) {
     const dryRun = (sp.get("dryRun") ?? "") === "1";
     const reopenResolved = (sp.get("reopenResolved") ?? "") === "1";
 
-    // Find RatePlans where utilityId is still UNKNOWN (we missed/failed to infer TDSP).
+    // Find RatePlans where utilityId is UNKNOWN or otherwise UNMAPPED (we missed/failed to infer TDSP).
     const plans = await prisma.ratePlan.findMany({
       where: {
         isUtilityTariff: false,
-        utilityId: "UNKNOWN",
+        utilityId: { notIn: [...KNOWN_TDSP_CODES] },
         eflPdfSha256: { not: null },
         OR: [{ eflUrl: { not: null } }, { eflSourceUrl: { not: null } }],
       } as any,
@@ -86,6 +88,8 @@ export async function POST(req: NextRequest) {
           : null);
 
       const eflUrl = (p?.eflUrl ?? p?.eflSourceUrl ?? null) as string | null;
+      const utilNorm = String(p?.utilityId ?? "").trim().toUpperCase();
+      const reasonCode = utilNorm === "UNKNOWN" ? "UNKNOWN_UTILITY_ID" : "UNMAPPED_UTILITY_ID";
       const payloadCommon: any = {
         ratePlanId: String(p.id),
         repPuctCertificate: cert,
@@ -96,7 +100,7 @@ export async function POST(req: NextRequest) {
         tdspName: p.utilityId ?? null,
         termMonths: typeof p.termMonths === "number" ? p.termMonths : null,
         finalStatus: "NEEDS_REVIEW",
-        queueReason: "UNKNOWN_UTILITY_ID: RatePlan.utilityId=UNKNOWN (needs TDSP inference fix)",
+        queueReason: `${reasonCode}: RatePlan.utilityId=${utilNorm || "—"} (needs TDSP inference fix)`,
       };
 
       if (!existing) {
@@ -117,7 +121,7 @@ export async function POST(req: NextRequest) {
               solverApplied: null,
               resolvedAt: null,
               resolvedBy: null,
-              resolutionNotes: "Auto-queued because RatePlan.utilityId is UNKNOWN.",
+              resolutionNotes: `Auto-queued because RatePlan.utilityId is ${utilNorm || "—"} (${reasonCode}).`,
               ...payloadCommon,
             },
           });
@@ -138,9 +142,10 @@ export async function POST(req: NextRequest) {
               ratePlanId: String(p.id),
               // Do not change kind/dedupeKey for quarantines.
               queueReason:
-                String(existing?.queueReason ?? "").includes("UNKNOWN_UTILITY_ID")
+                String(existing?.queueReason ?? "").includes("UNKNOWN_UTILITY_ID") ||
+                String(existing?.queueReason ?? "").includes("UNMAPPED_UTILITY_ID")
                   ? existing.queueReason
-                  : `${String(existing?.queueReason ?? "").trim() || "PLAN_CALC_QUARANTINE"} | UNKNOWN_UTILITY_ID`,
+                  : `${String(existing?.queueReason ?? "").trim() || "PLAN_CALC_QUARANTINE"} | ${reasonCode}`,
             },
           });
         }
@@ -157,7 +162,7 @@ export async function POST(req: NextRequest) {
               ...payloadCommon,
               resolvedAt: null,
               resolvedBy: null,
-              resolutionNotes: "Re-opened by unknown-utility sweep.",
+              resolutionNotes: `Re-opened by unknown-utility sweep (${reasonCode}).`,
             },
           });
         }

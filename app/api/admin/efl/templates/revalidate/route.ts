@@ -7,6 +7,16 @@ export const dynamic = "force-dynamic";
 
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 
+const KNOWN_TDSP_CODES = ["ONCOR", "CENTERPOINT", "AEP_NORTH", "AEP_CENTRAL", "TNMP"] as const;
+
+function normalizeUtilityId(x: unknown): string {
+  return String(x ?? "").trim().toUpperCase();
+}
+
+function isKnownTdspCode(x: unknown): boolean {
+  return KNOWN_TDSP_CODES.includes(normalizeUtilityId(x) as any);
+}
+
 function jsonError(status: number, error: string, detail?: any) {
   return NextResponse.json({ ok: false, error, detail: detail ?? null }, { status });
 }
@@ -57,9 +67,13 @@ export async function POST(req: NextRequest) {
       ...(supplierContains ? { supplier: { contains: supplierContains, mode: "insensitive" } } : {}),
       ...(onlyComputable
         ? {
-            // Safety default (onlyComputable=true) should still sweep UNKNOWN utility templates.
-            // Unknown utilities are always unsafe to ship as "available templates", regardless of plan-calc status.
-            OR: [{ planCalcStatus: "COMPUTABLE" }, { utilityId: "UNKNOWN" }],
+            // Safety default (onlyComputable=true) should still sweep UNKNOWN/UNMAPPED utility templates.
+            // Unmapped utilities are always unsafe to ship as "available templates", regardless of plan-calc status.
+            OR: [
+              { planCalcStatus: "COMPUTABLE" },
+              { utilityId: "UNKNOWN" },
+              { utilityId: { notIn: [...KNOWN_TDSP_CODES] } },
+            ],
           }
         : {}),
     };
@@ -106,65 +120,81 @@ export async function POST(req: NextRequest) {
 
       processedCount++;
       try {
-        // Guardrail: UNKNOWN utilityId must never remain "template available".
+        // Guardrail: UNKNOWN/UNMAPPED utilityId must never remain "template available".
         // Queue it for parse/TDSP inference fixes and remove the template from availability.
-        if (String(p.utilityId ?? "").trim().toUpperCase() === "UNKNOWN") {
-          const reason = "UNKNOWN_UTILITY_ID";
+        const utilNorm = normalizeUtilityId(p.utilityId);
+        const isUnmappedUtility = utilNorm === "UNKNOWN" || (Boolean(utilNorm) && !isKnownTdspCode(utilNorm));
+        if (isUnmappedUtility) {
+          const reason = utilNorm === "UNKNOWN" ? "UNKNOWN_UTILITY_ID" : "UNMAPPED_UTILITY_ID";
           const issues: any[] = Array.isArray(p.eflValidationIssues) ? [...p.eflValidationIssues] : [];
           issues.push({
             code: "TEMPLATE_UNKNOWN_UTILITY",
             severity: "ERROR",
-            message: "Template quarantined: utilityId is UNKNOWN (requires TDSP/utility inference fix).",
+            message: `Template quarantined: utilityId is ${utilNorm || "—"} (requires TDSP/utility inference fix).`,
           });
 
           try {
             const sha = String(p.eflPdfSha256 ?? "").trim();
+            const cert = String(p?.repPuctCertificate ?? "").trim() || null;
+            const ver = String(p?.eflVersionCode ?? "").trim() || null;
             if (sha) {
-              await (prisma as any).eflParseReviewQueue.upsert({
-                where: { eflPdfSha256: sha },
-                create: {
-                  source: "admin_revalidate_templates",
-                  kind: "EFL_PARSE",
-                  dedupeKey: "", // trigger fills dedupeKey=eflPdfSha256 for EFL_PARSE
-                  ratePlanId: String(p.id),
-                  eflPdfSha256: sha,
-                  repPuctCertificate: p.repPuctCertificate ?? null,
-                  eflVersionCode: p.eflVersionCode ?? null,
-                  offerId: null,
-                  supplier: p.supplier ?? null,
-                  planName: p.planName ?? null,
-                  eflUrl: (p.eflUrl ?? p.eflSourceUrl) ?? null,
-                  tdspName: p.utilityId ?? null,
-                  termMonths: typeof p.termMonths === "number" ? p.termMonths : null,
-                  rawText: null,
-                  planRules: null,
-                  rateStructure: (p.rateStructure ?? null) as any,
-                  validation: { revalidation: { reasonCode: reason } } as any,
-                  derivedForValidation: null,
-                  finalStatus: "NEEDS_REVIEW",
-                  queueReason: "UNKNOWN_UTILITY_ID: RatePlan.utilityId=UNKNOWN",
-                  solverApplied: null,
-                  resolvedAt: null,
-                  resolvedBy: null,
-                  resolutionNotes: "Auto-queued by admin revalidation tool (UNKNOWN utilityId).",
-                },
-                update: {
-                  kind: "EFL_PARSE",
-                  dedupeKey: "",
-                  ratePlanId: String(p.id),
-                  supplier: p.supplier ?? null,
-                  planName: p.planName ?? null,
-                  eflUrl: (p.eflUrl ?? p.eflSourceUrl) ?? null,
-                  tdspName: p.utilityId ?? null,
-                  termMonths: typeof p.termMonths === "number" ? p.termMonths : null,
-                  rateStructure: (p.rateStructure ?? null) as any,
-                  finalStatus: "NEEDS_REVIEW",
-                  queueReason: "UNKNOWN_UTILITY_ID: RatePlan.utilityId=UNKNOWN",
-                  resolvedAt: null,
-                  resolvedBy: null,
-                  resolutionNotes: "Auto-queued by admin revalidation tool (UNKNOWN utilityId).",
-                },
-              });
+              // IMPORTANT: DB can enforce uniqueness on repPuctCertificate+eflVersionCode (legacy dedupe).
+              // So we must de-dupe on both sha AND cert+version to avoid create() failures.
+              const existing =
+                (await (prisma as any).eflParseReviewQueue.findUnique({ where: { eflPdfSha256: sha } })) ??
+                (cert && ver
+                  ? await (prisma as any).eflParseReviewQueue.findFirst({
+                      where: { repPuctCertificate: cert, eflVersionCode: ver },
+                    })
+                  : null);
+
+              const common: any = {
+                ratePlanId: String(p.id),
+                eflPdfSha256: sha,
+                repPuctCertificate: cert,
+                eflVersionCode: ver,
+                supplier: p.supplier ?? null,
+                planName: p.planName ?? null,
+                eflUrl: (p.eflUrl ?? p.eflSourceUrl) ?? null,
+                tdspName: p.utilityId ?? null,
+                termMonths: typeof p.termMonths === "number" ? p.termMonths : null,
+                finalStatus: "NEEDS_REVIEW",
+                queueReason: `${reason}: RatePlan.utilityId=${utilNorm || "—"}`,
+                resolvedAt: null,
+                resolvedBy: null,
+              };
+
+              if (!existing) {
+                await (prisma as any).eflParseReviewQueue.create({
+                  data: {
+                    source: "admin_revalidate_templates",
+                    kind: "EFL_PARSE",
+                    dedupeKey: "", // trigger fills dedupeKey=eflPdfSha256 for EFL_PARSE
+                    offerId: null,
+                    rawText: null,
+                    planRules: null,
+                    rateStructure: (p.rateStructure ?? null) as any,
+                    validation: { revalidation: { reasonCode: reason } } as any,
+                    derivedForValidation: null,
+                    solverApplied: null,
+                    resolutionNotes: `Auto-queued by admin revalidation tool (${reason}).`,
+                    ...common,
+                  },
+                });
+              } else {
+                await (prisma as any).eflParseReviewQueue.update({
+                  where: { id: String(existing.id) },
+                  data: {
+                    kind: "EFL_PARSE",
+                    dedupeKey: "",
+                    rateStructure: (p.rateStructure ?? null) as any,
+                    validation: { revalidation: { reasonCode: reason } } as any,
+                    resolutionNotes: `Auto-queued by admin revalidation tool (${reason}).`,
+                    ...common,
+                  },
+                });
+              }
+
               unknownUtilityQueuedCount++;
             }
           } catch {
