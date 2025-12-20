@@ -650,6 +650,37 @@ export default function AdminPlanDetailsPage({ params }: { params: { offerId: st
 
                 <div className="rounded border p-3">
                   <div className="text-xs text-gray-600 mb-2">Assumptions used</div>
+                  {validation.assumptions ? (
+                    <div className="mb-2 rounded bg-gray-50 p-2 text-xs">
+                      <div className="font-semibold text-gray-700 mb-1">TDSP numbers actually applied (from assumptions)</div>
+                      <div className="grid gap-x-4 gap-y-1 sm:grid-cols-2">
+                        <div>
+                          <span className="text-gray-500">tdspAppliedMode:</span>{" "}
+                          <span className="font-mono">{String((validation.assumptions as any)?.tdspAppliedMode ?? "—")}</span>
+                        </div>
+                        <div>
+                          <span className="text-gray-500">usedEngineTdspFallback:</span>{" "}
+                          <span className="font-mono">{String(Boolean((validation.assumptions as any)?.usedEngineTdspFallback))}</span>
+                        </div>
+                        <div>
+                          <span className="text-gray-500">tdspFromEfl.perKwhCents:</span>{" "}
+                          <span className="font-mono">
+                            {typeof (validation.assumptions as any)?.tdspFromEfl?.perKwhCents === "number"
+                              ? String((validation.assumptions as any).tdspFromEfl.perKwhCents)
+                              : "—"}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-gray-500">tdspFromEfl.monthlyCents:</span>{" "}
+                          <span className="font-mono">
+                            {typeof (validation.assumptions as any)?.tdspFromEfl?.monthlyCents === "number"
+                              ? String((validation.assumptions as any).tdspFromEfl.monthlyCents)
+                              : "—"}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
                   <pre className="text-xs bg-gray-50 rounded p-2 overflow-auto max-h-[220px]">
                     {validation.assumptions ? pretty(validation.assumptions) : "—"}
                   </pre>
