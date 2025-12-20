@@ -388,6 +388,25 @@ export async function fetchEflPdfFromUrl(
       }
     }
 
+    // If we followed redirects (e.g. bit.ly -> final PDF host) and still got 403/406,
+    // retry the *final* URL with a same-origin referer for that final host. Some doc hosts
+    // reject cross-site referers (or requests that appear to come from shortlinks).
+    if (!first.res.ok && (first.res.status === 403 || first.res.status === 406)) {
+      const finalUrl = first.res.url || eflUrl;
+      const finalOrigin = originFromUrl(finalUrl);
+      const startOrigin = originFromUrl(eflUrl);
+      if (finalOrigin && finalUrl !== eflUrl && finalOrigin !== startOrigin) {
+        notes.push(`retry_final_url_with_referer=${finalOrigin}/`);
+        try {
+          first = await fetchBytesWithReferer(finalUrl, timeoutMs, `${finalOrigin}/`);
+        } catch (e) {
+          notes.push(
+            `final_referer_retry_error=${e instanceof Error ? e.message : String(e)}`,
+          );
+        }
+      }
+    }
+
     const { res, contentType, buf } = first;
     if (!res.ok) {
       return {
