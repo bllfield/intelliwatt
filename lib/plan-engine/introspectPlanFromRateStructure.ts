@@ -2,6 +2,7 @@ import { requiredBucketsForRateStructure } from "@/lib/plan-engine/requiredBucke
 import { extractDeterministicTouSchedule } from "@/lib/plan-engine/touPeriods";
 import { detectIndexedOrVariable, extractEflAveragePriceAnchors } from "@/lib/plan-engine/indexedPricing";
 import { extractDeterministicTierSchedule } from "@/lib/plan-engine/tieredPricing";
+import { extractDeterministicBillCredits } from "@/lib/plan-engine/billCredits";
 
 function isObject(v: unknown): v is Record<string, any> {
   return typeof v === "object" && v !== null;
@@ -179,6 +180,7 @@ export type PlanEngineIntrospection = {
     notes: string[];
   };
   tiered?: ReturnType<typeof extractDeterministicTierSchedule>;
+  billCredits?: ReturnType<typeof extractDeterministicBillCredits>;
 };
 
 /**
@@ -199,6 +201,7 @@ export function introspectPlanFromRateStructure(input: { rateStructure: any }): 
   const indexed = detectIndexedOrVariable(rs);
   const anchors = extractEflAveragePriceAnchors(rs);
   const tiered = extractDeterministicTierSchedule(rs);
+  const billCredits = extractDeterministicBillCredits(rs);
   const requiredBuckets = requiredBucketsForRateStructure({ rateStructure: rs });
   const requiredBucketKeys = requiredBuckets.map((r) => r.key);
 
@@ -215,6 +218,24 @@ export function introspectPlanFromRateStructure(input: { rateStructure: any }): 
     }
 
     if (fixed != null) {
+      if (billCredits.ok) {
+        return {
+          planCalcVersion: 1,
+          planCalcStatus: "NOT_COMPUTABLE" as const,
+          planCalcReasonCode: "BILL_CREDITS_REQUIRES_USAGE_BUCKETS",
+          requiredBucketKeys: ["kwh.m.all.total"],
+          supportedFeatures: { ...inferred.features, supportsCredits: true, notes: [...inferred.notes, ...(billCredits.credits?.notes ?? [])] },
+        };
+      }
+      if (!billCredits.ok && billCredits.reason !== "NO_CREDITS") {
+        return {
+          planCalcVersion: 1,
+          planCalcStatus: "NOT_COMPUTABLE" as const,
+          planCalcReasonCode: billCredits.reason,
+          requiredBucketKeys: ["kwh.m.all.total"],
+          supportedFeatures: { ...inferred.features, supportsCredits: true, notes: [...inferred.notes, ...(billCredits.notes ?? [])] },
+        };
+      }
       return {
         planCalcVersion: 1,
         planCalcStatus: "COMPUTABLE" as const,
@@ -264,6 +285,25 @@ export function introspectPlanFromRateStructure(input: { rateStructure: any }): 
       };
     }
 
+    if (billCredits.ok) {
+      return {
+        planCalcVersion: 1,
+        planCalcStatus: "NOT_COMPUTABLE" as const,
+        planCalcReasonCode: "BILL_CREDITS_REQUIRES_USAGE_BUCKETS",
+        requiredBucketKeys: ["kwh.m.all.total"],
+        supportedFeatures: { ...inferred.features, supportsCredits: true, notes: [...inferred.notes, ...(billCredits.credits?.notes ?? [])] },
+      };
+    }
+    if (!billCredits.ok && billCredits.reason !== "NO_CREDITS") {
+      return {
+        planCalcVersion: 1,
+        planCalcStatus: "NOT_COMPUTABLE" as const,
+        planCalcReasonCode: billCredits.reason,
+        requiredBucketKeys: ["kwh.m.all.total"],
+        supportedFeatures: { ...inferred.features, supportsCredits: true, notes: [...inferred.notes, ...(billCredits.notes ?? [])] },
+      };
+    }
+
     if (inferred.features.supportsTouEnergy) {
       const reasonCode = (tou as any)?.reasonCode ? String((tou as any).reasonCode) : "UNSUPPORTED_RATE_STRUCTURE";
       return {
@@ -289,19 +329,23 @@ export function introspectPlanFromRateStructure(input: { rateStructure: any }): 
 
     const approxPossible = indexed.isIndexed && (anchors.centsPerKwhAt500 != null || anchors.centsPerKwhAt1000 != null || anchors.centsPerKwhAt2000 != null);
     const tieredPossible = tiered.ok;
+    const creditsPossible = billCredits.ok;
 
-    const canRunWithoutBuckets = fixed != null || approxPossible;
-    const canRunWithBuckets = fixed != null || !!tou.schedule || approxPossible || tieredPossible;
-    const requiresUsageBuckets = fixed == null && !approxPossible;
+    const canRunWithoutBuckets = (fixed != null && !creditsPossible) || approxPossible;
+    const canRunWithBuckets = fixed != null || !!tou.schedule || approxPossible || tieredPossible || creditsPossible;
+    const requiresUsageBuckets = fixed == null || tieredPossible || !!tou.schedule || creditsPossible;
 
     if (fixed != null) {
-      notes.push(`Fixed REP energy rate detected (${fixed} ¢/kWh); calculator can run without usage buckets.`);
+      if (creditsPossible) notes.push(`Fixed REP energy rate detected (${fixed} ¢/kWh); bill credits require monthly totals.`);
+      else notes.push(`Fixed REP energy rate detected (${fixed} ¢/kWh); calculator can run without usage buckets.`);
     } else if (tou.schedule) {
       notes.push(`Deterministic TOU schedule detected; calculator requires usage buckets: ${requiredBucketKeys.join(", ")}`);
     } else if (tieredPossible) {
       notes.push("Deterministic tiered schedule detected; calculator requires kwh.m.all.total buckets per month.");
     } else if (approxPossible) {
       notes.push("Indexed/variable plan detected; calculator can run only in APPROXIMATE mode using EFL modeled price anchors (500/1000/2000).");
+    } else if (creditsPossible) {
+      notes.push("Bill credits detected; calculator requires kwh.m.all.total buckets per month.");
     } else {
       notes.push("No single fixed REP energy rate detected; TOU schedule extraction failed or unsupported (fail-closed).");
     }
@@ -319,6 +363,7 @@ export function introspectPlanFromRateStructure(input: { rateStructure: any }): 
     planCalc,
     tou,
     tiered,
+    billCredits,
     requiredBuckets,
     requiredBucketKeys,
     calculatorDryRun,

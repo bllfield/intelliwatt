@@ -2568,6 +2568,32 @@ Tiered / Block pricing (non-dashboard only; bucket-gated, deterministic)
 - **Tests**:
   - Added `tests/plan-engine/tiered.pricing.test.ts` (extract + breakdown + calculator path).
 
+Bill credits Phase 1 (non-dashboard only; deterministic, bucket-gated)
+- **Scope (supported)**:
+  - Structured `rateStructure.billCredits` rules applied from **monthly total kWh only**.
+  - Credits apply to the **total bill** (REP + TDSP) and reduce it (clamped at $0 minimum).
+  - Range semantics follow the contract: `minUsageKWh <= usage < maxUsageKWh` (or no max).
+- **Supported rule shapes (deterministic)**:
+  - Flat monthly credit: `minUsageKWh=0` with no `maxUsageKWh` (always applies).
+  - Usage range credit: `minUsageKWh` with optional `maxUsageKWh` (max exclusive).
+- **Explicitly NOT supported (fail-closed reason codes)**:
+  - `UNSUPPORTED_CREDIT_DIMENSION` (seasonality via `monthsOfYear`, or other non-total dimensions)
+  - `UNSUPPORTED_CREDIT_COMBINATION` (overlapping usage ranges)
+  - `UNSUPPORTED_CREDIT_SHAPE` (missing/invalid numeric fields)
+  - `UNSUPPORTED_CREDIT_COMPONENT_SCOPE` (credit scope not expressible; reserved)
+  - `UNSUPPORTED_CREDIT_DEPENDENCY` (circular dependency on avg-price; reserved)
+  - `NON_DETERMINISTIC_CREDIT` (provider discretion/external riders; reserved)
+- **Plan-level gating (dashboard-safe)**:
+  - Credit plans remain `planCalcStatus=NOT_COMPUTABLE` with `planCalcReasonCode=BILL_CREDITS_REQUIRES_USAGE_BUCKETS`.
+- **Calculator behavior**: `lib/plan-engine/calculatePlanCostForUsage.ts`
+  - If deterministic credits exist and `usageBucketsByMonth` is missing → `NOT_COMPUTABLE: MISSING_USAGE_BUCKETS`.
+  - Credits are applied **after** energy + base fees + TDSP delivery.
+- **Admin surfacing**:
+  - `introspectPlanFromRateStructure()` includes `billCredits` output (ok/reason + normalized rules).
+  - Manual Fact Card Loader renders a credits table when deterministic credits are detected.
+- **Tests**:
+  - Added `tests/plan-engine/billCredits.phase1.test.ts`.
+
 Free Weekends (bucket-gated; plan-level remains QUEUED):
 - **Bucket requirements**: `lib/plan-engine/requiredBucketsForPlan.ts`
   - Added `supportsWeekendSplitEnergy` flag (canonical buckets: `kwh.m.weekday.total`, `kwh.m.weekend.total`)

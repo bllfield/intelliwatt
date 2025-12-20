@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { extractDeterministicTouSchedule } from "@/lib/plan-engine/touPeriods";
 import { detectIndexedOrVariable, extractEflAveragePriceAnchors, chooseEffectiveCentsPerKwhFromAnchors } from "@/lib/plan-engine/indexedPricing";
 import { computeRepEnergyCostForMonthlyKwhTiered, extractDeterministicTierSchedule } from "@/lib/plan-engine/tieredPricing";
+import { applyBillCreditsToMonth, extractDeterministicBillCredits } from "@/lib/plan-engine/billCredits";
 
 export type TrueCostEstimateStatus = "OK" | "APPROXIMATE" | "NOT_COMPUTABLE" | "NOT_IMPLEMENTED";
 
@@ -20,12 +21,14 @@ export type TrueCostEstimate = {
     energyOnlyDollars: number; // REP energy only
     deliveryDollars: number; // TDSP per-kWh
     baseFeesDollars: number; // TDSP fixed + REP fixed (if known)
+    creditsDollars?: number; // bill credits (negative dollars)
     totalDollars: number;
   };
 
   componentsV2?: {
     rep: { energyDollars: number; fixedDollars: number; totalDollars: number };
     tdsp: { deliveryDollars: number; fixedDollars: number; totalDollars: number };
+    creditsDollars?: number; // negative dollars
     totalDollars: number;
   };
 
@@ -61,6 +64,10 @@ function isObject(v: unknown): v is Record<string, any> {
 function numOrNull(v: unknown): number | null {
   const n = typeof v === "number" ? v : typeof v === "string" ? Number(v) : NaN;
   return Number.isFinite(n) ? n : null;
+}
+
+function clampNonNegative(n: number): number {
+  return n < 0 ? 0 : n;
 }
 
 function parseHHMMishToHHMM(v: unknown): HHMM | null {
@@ -401,10 +408,16 @@ export function calculatePlanCostForUsage(args: {
       };
     }
 
+    const creditsMaybe = extractDeterministicBillCredits(args.rateStructure);
+    if (!creditsMaybe.ok && creditsMaybe.reason !== "NO_CREDITS") {
+      return { status: "NOT_COMPUTABLE", reason: creditsMaybe.reason, notes: [...notes, ...(creditsMaybe.notes ?? [])] };
+    }
+
     // Tiered pricing (kWh blocks): requires monthly total bucket(s).
     const tieredMaybe = extractDeterministicTierSchedule(args.rateStructure);
     if (tieredMaybe.ok) {
       if (!args.usageBucketsByMonth) {
+        if (creditsMaybe.ok) return { status: "NOT_COMPUTABLE", reason: "MISSING_USAGE_BUCKETS", notes: ["bill_credits_require_monthly_totals"] };
         return { status: "NOT_COMPUTABLE", reason: "MISSING_USAGE_BUCKETS", notes: ["tiered_pricing_requires_monthly_totals"] };
       }
 
@@ -456,9 +469,23 @@ export function calculatePlanCostForUsage(args: {
       const tdspDeliveryDollars = totalKwh * (tdspPerKwhCents / 100);
       const tdspFixedDollars = months.length * tdspMonthly;
 
+      // Apply bill credits (Phase 1) from monthly total kWh.
+      let creditsDollars = 0;
+      const creditsDebug: any[] = [];
+      if (creditsMaybe.ok) {
+        for (const ym of months) {
+          const m = byMonth[ym];
+          const monthTotalKwh = m ? sumMonthBucketKwh(m, "kwh.m.all.total") : null;
+          if (monthTotalKwh == null) continue;
+          const applied = applyBillCreditsToMonth({ monthlyKwh: monthTotalKwh, credits: creditsMaybe.credits });
+          creditsDollars += applied.creditCentsTotal / 100;
+          creditsDebug.push({ ym, monthTotalKwh, applied: applied.applied, creditCentsTotal: applied.creditCentsTotal });
+        }
+      }
+
       const repTotal = repEnergyDollars + repFixedDollars;
       const tdspTotal = tdspDeliveryDollars + tdspFixedDollars;
-      const total = repTotal + tdspTotal;
+      const total = clampNonNegative(repTotal + tdspTotal + creditsDollars); // creditsDollars is negative
 
       const tierNotes: string[] = [];
       tierNotes.push("Computed from kwh.m.all.total + tiered REP energy + TDSP delivery");
@@ -467,6 +494,7 @@ export function calculatePlanCostForUsage(args: {
       else tierNotes.push("REP fixed monthly charge not found (assumed $0)");
       if (tdspPerKwhCents > 0 || tdspMonthly > 0) tierNotes.push("Includes TDSP delivery");
       else tierNotes.push("TDSP delivery missing/zero (check tdspRatesApplied)");
+      if (creditsMaybe.ok) tierNotes.push("Includes deterministic bill credits (Phase 1)");
 
       return {
         status: "OK",
@@ -477,15 +505,17 @@ export function calculatePlanCostForUsage(args: {
           energyOnlyDollars: round2(repEnergyDollars),
           deliveryDollars: round2(tdspDeliveryDollars),
           baseFeesDollars: round2(repFixedDollars + tdspFixedDollars),
+          ...(creditsMaybe.ok ? { creditsDollars: round2(creditsDollars) } : {}),
           totalDollars: round2(total),
         },
         componentsV2: {
           rep: { energyDollars: round2(repEnergyDollars), fixedDollars: round2(repFixedDollars), totalDollars: round2(repTotal) },
           tdsp: { deliveryDollars: round2(tdspDeliveryDollars), fixedDollars: round2(tdspFixedDollars), totalDollars: round2(tdspTotal) },
+          ...(creditsMaybe.ok ? { creditsDollars: round2(creditsDollars) } : {}),
           totalDollars: round2(total),
         },
         notes: tierNotes,
-        debug: { tieredByMonth: debugByMonth, schedule: tieredMaybe.schedule },
+        debug: { tieredByMonth: debugByMonth, schedule: tieredMaybe.schedule, billCreditsByMonth: creditsDebug },
       };
     }
 
@@ -582,15 +612,30 @@ export function calculatePlanCostForUsage(args: {
       const tdspDeliveryDollars = totalKwh * (tdspPerKwhCents / 100);
       const tdspFixedDollars = months.length * tdspMonthly;
 
+      // Apply bill credits (Phase 1) from monthly total kWh.
+      let creditsDollars = 0;
+      const creditsDebug: any[] = [];
+      if (creditsMaybe.ok) {
+        for (const ym of months) {
+          const m = byMonth[ym];
+          const monthTotalKwh = m ? sumMonthBucketKwh(m, "kwh.m.all.total") : null;
+          if (monthTotalKwh == null) continue;
+          const applied = applyBillCreditsToMonth({ monthlyKwh: monthTotalKwh, credits: creditsMaybe.credits });
+          creditsDollars += applied.creditCentsTotal / 100;
+          creditsDebug.push({ ym, monthTotalKwh, applied: applied.applied, creditCentsTotal: applied.creditCentsTotal });
+        }
+      }
+
       const repTotal = repEnergyDollars + repFixedDollars;
       const tdspTotal = tdspDeliveryDollars + tdspFixedDollars;
-      const total = repTotal + tdspTotal;
+      const total = clampNonNegative(repTotal + tdspTotal + creditsDollars);
 
       notes.push(`TOU Phase-2 (windows): months=${months.length} periods=${schedule.periods.length}`);
       if (repFixedMonthly > 0) notes.push("Includes REP fixed monthly charge (from template)");
       else notes.push("REP fixed monthly charge not found (assumed $0)");
       if (tdspPerKwhCents > 0 || tdspMonthly > 0) notes.push("Includes TDSP delivery (total-based)");
       else notes.push("TDSP delivery missing/zero (check tdspRatesApplied)");
+      if (creditsMaybe.ok) notes.push("Includes deterministic bill credits (Phase 1)");
 
       return {
         status: "OK",
@@ -601,15 +646,17 @@ export function calculatePlanCostForUsage(args: {
           energyOnlyDollars: round2(repEnergyDollars),
           deliveryDollars: round2(tdspDeliveryDollars),
           baseFeesDollars: round2(repFixedDollars + tdspFixedDollars),
+          ...(creditsMaybe.ok ? { creditsDollars: round2(creditsDollars) } : {}),
           totalDollars: round2(total),
         },
         componentsV2: {
           rep: { energyDollars: round2(repEnergyDollars), fixedDollars: round2(repFixedDollars), totalDollars: round2(repTotal) },
           tdsp: { deliveryDollars: round2(tdspDeliveryDollars), fixedDollars: round2(tdspFixedDollars), totalDollars: round2(tdspTotal) },
+          ...(creditsMaybe.ok ? { creditsDollars: round2(creditsDollars) } : {}),
           totalDollars: round2(total),
         },
         notes,
-        debug: { touPhase2: { requiredKeys, months, periodsByMonth: debugPeriodsByMonth } },
+        debug: { touPhase2: { requiredKeys, months, periodsByMonth: debugPeriodsByMonth }, billCreditsByMonth: creditsDebug },
       };
     }
 
@@ -706,9 +753,23 @@ export function calculatePlanCostForUsage(args: {
     const tdspDeliveryDollars = totalKwh * (tdspPerKwhCents / 100);
     const tdspFixedDollars = months.length * tdspMonthly;
 
+    // Apply bill credits (Phase 1) from monthly total kWh.
+    let creditsDollars = 0;
+    const creditsDebug: any[] = [];
+    if (creditsMaybe.ok) {
+      for (const ym of months) {
+        const m = byMonth[ym];
+        const monthTotalKwh = m ? sumMonthBucketKwh(m, "kwh.m.all.total") : null;
+        if (monthTotalKwh == null) continue;
+        const applied = applyBillCreditsToMonth({ monthlyKwh: monthTotalKwh, credits: creditsMaybe.credits });
+        creditsDollars += applied.creditCentsTotal / 100;
+        creditsDebug.push({ ym, monthTotalKwh, applied: applied.applied, creditCentsTotal: applied.creditCentsTotal });
+      }
+    }
+
     const repTotal = repEnergyDollars + repFixedDollars;
     const tdspTotal = tdspDeliveryDollars + tdspFixedDollars;
-    const total = repTotal + tdspTotal;
+    const total = clampNonNegative(repTotal + tdspTotal + creditsDollars);
 
     if (tou.kind === "DAY_NIGHT_ALL_DAYS") {
       notes.push(`TOU Phase-1 (day/night): months=${months.length}`);
@@ -717,6 +778,107 @@ export function calculatePlanCostForUsage(args: {
       notes.push(`Free Weekends (weekday/weekend): months=${months.length}`);
       notes.push("Buckets: kwh.m.weekday.total + kwh.m.weekend.total (+ optional kwh.m.all.total sanity)");
     }
+    if (repFixedMonthly > 0) notes.push("Includes REP fixed monthly charge (from template)");
+    else notes.push("REP fixed monthly charge not found (assumed $0)");
+    if (tdspPerKwhCents > 0 || tdspMonthly > 0) notes.push("Includes TDSP delivery");
+    else notes.push("TDSP delivery missing/zero (check tdspRatesApplied)");
+    if (creditsMaybe.ok) notes.push("Includes deterministic bill credits (Phase 1)");
+
+    return {
+      status: "OK",
+      annualCostDollars: round2(total),
+      monthlyCostDollars: round2(total / months.length),
+      confidence: "MEDIUM",
+      components: {
+        energyOnlyDollars: round2(repEnergyDollars),
+        deliveryDollars: round2(tdspDeliveryDollars),
+        baseFeesDollars: round2(repFixedDollars + tdspFixedDollars),
+        ...(creditsMaybe.ok ? { creditsDollars: round2(creditsDollars) } : {}),
+        totalDollars: round2(total),
+      },
+      componentsV2: {
+        rep: {
+          energyDollars: round2(repEnergyDollars),
+          fixedDollars: round2(repFixedDollars),
+          totalDollars: round2(repTotal),
+        },
+        tdsp: {
+          deliveryDollars: round2(tdspDeliveryDollars),
+          fixedDollars: round2(tdspFixedDollars),
+          totalDollars: round2(tdspTotal),
+        },
+        ...(creditsMaybe.ok ? { creditsDollars: round2(creditsDollars) } : {}),
+        totalDollars: round2(total),
+      },
+      notes,
+      debug: creditsMaybe.ok ? { billCreditsByMonth: creditsDebug } : undefined,
+    };
+  }
+
+  const repFixedMonthly = extractRepFixedMonthlyChargeDollars(args.rateStructure) ?? 0;
+
+  const tdspPerKwhCents = safeNum(args.tdsp?.perKwhDeliveryChargeCents) ?? 0;
+  const tdspMonthly = safeNum(args.tdsp?.monthlyCustomerChargeDollars) ?? 0;
+
+  const creditsMaybe = extractDeterministicBillCredits(args.rateStructure);
+  if (!creditsMaybe.ok && creditsMaybe.reason !== "NO_CREDITS") {
+    return { status: "NOT_COMPUTABLE", reason: creditsMaybe.reason, notes: [...notes, ...(creditsMaybe.notes ?? [])] };
+  }
+
+  // If deterministic bill credits exist, we must use monthly totals (fail-closed without buckets).
+  if (creditsMaybe.ok) {
+    if (!args.usageBucketsByMonth) {
+      return { status: "NOT_COMPUTABLE", reason: "MISSING_USAGE_BUCKETS", notes: ["bill_credits_require_monthly_totals"] };
+    }
+
+    const byMonth = args.usageBucketsByMonth;
+    const allMonths = Object.keys(byMonth ?? {}).sort();
+    if (allMonths.length === 0) {
+      return { status: "NOT_COMPUTABLE", reason: "MISSING_USAGE_BUCKETS (no months present)" };
+    }
+
+    const wantMonths = Math.max(1, Math.floor(safeNum(args.monthsCount) ?? 12));
+    if (allMonths.length < wantMonths) {
+      return { status: "NOT_COMPUTABLE", reason: `MISSING_USAGE_BUCKETS (need ${wantMonths} months, have ${allMonths.length})` };
+    }
+    const months = allMonths.slice(-wantMonths);
+
+    let repEnergyDollars = 0;
+    let totalKwh = 0;
+    let creditsDollars = 0;
+    const missing: string[] = [];
+    const creditsDebug: any[] = [];
+
+    for (const ym of months) {
+      const m = byMonth[ym];
+      const monthTotalKwh = m ? sumMonthBucketKwh(m, "kwh.m.all.total") : null;
+      if (monthTotalKwh == null) {
+        missing.push(`${ym}:kwh.m.all.total`);
+        continue;
+      }
+
+      totalKwh += monthTotalKwh;
+      repEnergyDollars += monthTotalKwh * (repEnergyCents / 100);
+
+      const applied = applyBillCreditsToMonth({ monthlyKwh: monthTotalKwh, credits: creditsMaybe.credits });
+      creditsDollars += applied.creditCentsTotal / 100;
+      creditsDebug.push({ ym, monthTotalKwh, applied: applied.applied, creditCentsTotal: applied.creditCentsTotal });
+    }
+
+    if (missing.length > 0) {
+      return { status: "NOT_COMPUTABLE", reason: `MISSING_USAGE_BUCKETS: ${missing.slice(0, 12).join(", ")}${missing.length > 12 ? "…" : ""}` };
+    }
+
+    const repFixedDollars = months.length * repFixedMonthly;
+    const tdspDeliveryDollars = totalKwh * (tdspPerKwhCents / 100);
+    const tdspFixedDollars = months.length * tdspMonthly;
+
+    const repTotal = repEnergyDollars + repFixedDollars;
+    const tdspTotal = tdspDeliveryDollars + tdspFixedDollars;
+    const total = clampNonNegative(repTotal + tdspTotal + creditsDollars);
+
+    notes.push("Computed from kwh.m.all.total (monthly) + TDSP delivery + bill credits");
+    notes.push("Includes deterministic bill credits (Phase 1)");
     if (repFixedMonthly > 0) notes.push("Includes REP fixed monthly charge (from template)");
     else notes.push("REP fixed monthly charge not found (assumed $0)");
     if (tdspPerKwhCents > 0 || tdspMonthly > 0) notes.push("Includes TDSP delivery");
@@ -731,30 +893,21 @@ export function calculatePlanCostForUsage(args: {
         energyOnlyDollars: round2(repEnergyDollars),
         deliveryDollars: round2(tdspDeliveryDollars),
         baseFeesDollars: round2(repFixedDollars + tdspFixedDollars),
+        creditsDollars: round2(creditsDollars),
         totalDollars: round2(total),
       },
       componentsV2: {
-        rep: {
-          energyDollars: round2(repEnergyDollars),
-          fixedDollars: round2(repFixedDollars),
-          totalDollars: round2(repTotal),
-        },
-        tdsp: {
-          deliveryDollars: round2(tdspDeliveryDollars),
-          fixedDollars: round2(tdspFixedDollars),
-          totalDollars: round2(tdspTotal),
-        },
+        rep: { energyDollars: round2(repEnergyDollars), fixedDollars: round2(repFixedDollars), totalDollars: round2(repTotal) },
+        tdsp: { deliveryDollars: round2(tdspDeliveryDollars), fixedDollars: round2(tdspFixedDollars), totalDollars: round2(tdspTotal) },
+        creditsDollars: round2(creditsDollars),
         totalDollars: round2(total),
       },
       notes,
+      debug: { billCreditsByMonth: creditsDebug },
     };
   }
 
-  const repFixedMonthly = extractRepFixedMonthlyChargeDollars(args.rateStructure) ?? 0;
-
-  const tdspPerKwhCents = safeNum(args.tdsp?.perKwhDeliveryChargeCents) ?? 0;
-  const tdspMonthly = safeNum(args.tdsp?.monthlyCustomerChargeDollars) ?? 0;
-
+  // No credits: preserve v1 fixed-rate behavior (annual-kWh based).
   const repEnergyDollars = annualKwh * (repEnergyCents / 100);
   const tdspDeliveryDollars = annualKwh * (tdspPerKwhCents / 100);
 
@@ -784,16 +937,8 @@ export function calculatePlanCostForUsage(args: {
       totalDollars: round2(total),
     },
     componentsV2: {
-      rep: {
-        energyDollars: round2(repEnergyDollars),
-        fixedDollars: round2(repFixedDollars),
-        totalDollars: round2(repTotal),
-      },
-      tdsp: {
-        deliveryDollars: round2(tdspDeliveryDollars),
-        fixedDollars: round2(tdspFixedDollars),
-        totalDollars: round2(tdspTotal),
-      },
+      rep: { energyDollars: round2(repEnergyDollars), fixedDollars: round2(repFixedDollars), totalDollars: round2(repTotal) },
+      tdsp: { deliveryDollars: round2(tdspDeliveryDollars), fixedDollars: round2(tdspFixedDollars), totalDollars: round2(tdspTotal) },
       totalDollars: round2(total),
     },
     notes,

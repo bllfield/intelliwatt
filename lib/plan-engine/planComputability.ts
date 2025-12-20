@@ -3,6 +3,7 @@ import { extractFixedRepEnergyCentsPerKwh } from "@/lib/plan-engine/calculatePla
 import { extractDeterministicTouSchedule } from "@/lib/plan-engine/touPeriods";
 import { detectIndexedOrVariable } from "@/lib/plan-engine/indexedPricing";
 import { extractDeterministicTierSchedule } from "@/lib/plan-engine/tieredPricing";
+import { extractDeterministicBillCredits } from "@/lib/plan-engine/billCredits";
 import { Prisma } from "@prisma/client";
 
 export type ComputabilityStatus =
@@ -189,9 +190,37 @@ export function derivePlanCalcRequirementsFromTemplate(args: {
 
   const inferred = inferSupportedFeaturesFromTemplate({ rateStructure: rs });
   const fixed = extractFixedRepEnergyCentsPerKwh(rs);
+  const credits = extractDeterministicBillCredits(rs);
 
   const out = (() => {
     if (fixed != null) {
+      if (credits.ok) {
+        return {
+          planCalcVersion,
+          planCalcStatus: "NOT_COMPUTABLE" as const,
+          planCalcReasonCode: "BILL_CREDITS_REQUIRES_USAGE_BUCKETS",
+          requiredBucketKeys: ["kwh.m.all.total"],
+          supportedFeatures: {
+            ...inferred.features,
+            supportsCredits: true,
+            notes: [...(inferred.notes ?? []), ...(credits.credits?.notes ?? [])],
+          },
+        };
+      }
+      if (!credits.ok && credits.reason !== "NO_CREDITS") {
+        return {
+          planCalcVersion,
+          planCalcStatus: "NOT_COMPUTABLE" as const,
+          planCalcReasonCode: credits.reason,
+          requiredBucketKeys: ["kwh.m.all.total"],
+          supportedFeatures: {
+            ...inferred.features,
+            supportsCredits: true,
+            notes: [...(inferred.notes ?? []), ...(credits.notes ?? [])],
+          },
+        };
+      }
+
       // SAFETY: If the template's own modeled proof says this is TOU-like (requires a usage split),
       // never mark it as a simple fixed-rate computable plan.
       const assumptionsUsed = (rs as any)?.__eflAvgPriceValidation?.assumptionsUsed ?? null;
@@ -282,6 +311,32 @@ export function derivePlanCalcRequirementsFromTemplate(args: {
           ...inferred.features,
           supportsTieredEnergy: true,
           notes: [...(inferred.notes ?? []), ...(tiered.notes ?? [])],
+        },
+      };
+    }
+
+    if (credits.ok) {
+      return {
+        planCalcVersion,
+        planCalcStatus: "NOT_COMPUTABLE" as const,
+        planCalcReasonCode: "BILL_CREDITS_REQUIRES_USAGE_BUCKETS",
+        requiredBucketKeys: ["kwh.m.all.total"],
+        supportedFeatures: {
+          ...inferred.features,
+          supportsCredits: true,
+          notes: [...(inferred.notes ?? []), ...(credits.credits?.notes ?? [])],
+        },
+      };
+    } else if (!credits.ok && credits.reason !== "NO_CREDITS") {
+      return {
+        planCalcVersion,
+        planCalcStatus: "NOT_COMPUTABLE" as const,
+        planCalcReasonCode: credits.reason,
+        requiredBucketKeys: ["kwh.m.all.total"],
+        supportedFeatures: {
+          ...inferred.features,
+          supportsCredits: true,
+          notes: [...(inferred.notes ?? []), ...(credits.notes ?? [])],
         },
       };
     }

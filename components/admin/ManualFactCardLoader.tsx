@@ -677,6 +677,42 @@ export function ManualFactCardLoader(props: {
                     </div>
                   ) : null}
 
+                  {(planEngineView as any)?.billCredits?.ok && Array.isArray((planEngineView as any)?.billCredits?.credits?.rules) ? (
+                    <div className="space-y-1">
+                      <div className="text-xs font-semibold text-brand-navy">Deterministic bill credits (Phase 1)</div>
+                      <div className="overflow-x-auto rounded border">
+                        <table className="min-w-full text-xs">
+                          <thead className="bg-gray-50">
+                            <tr>
+                              <th className="px-2 py-1 text-left">type</th>
+                              <th className="px-2 py-1 text-left">range</th>
+                              <th className="px-2 py-1 text-right">amount</th>
+                              <th className="px-2 py-1 text-left">label</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(planEngineView as any).billCredits.credits.rules.map((r: any, i: number) => {
+                              const typ = String(r?.type ?? "");
+                              const range =
+                                typ === "FLAT_MONTHLY_CREDIT"
+                                  ? "always"
+                                  : `${String(r?.minKwhInclusive ?? "")}–${r?.maxKwhExclusive == null ? "∞" : String(r?.maxKwhExclusive)} kWh (max exclusive)`;
+                              const amt = typeof r?.creditDollars === "number" ? `$${r.creditDollars.toFixed(2)}` : "—";
+                              return (
+                                <tr key={i} className="border-t">
+                                  <td className="px-2 py-1 font-mono">{typ}</td>
+                                  <td className="px-2 py-1 font-mono">{range}</td>
+                                  <td className="px-2 py-1 text-right font-mono">{amt}</td>
+                                  <td className="px-2 py-1">{String(r?.label ?? "")}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ) : null}
+
                   {(planEngineView as any)?.tou?.schedule?.periods?.length ? (
                     <div className="space-y-1">
                       <div className="text-xs font-semibold text-brand-navy">Deterministic TOU schedule</div>
