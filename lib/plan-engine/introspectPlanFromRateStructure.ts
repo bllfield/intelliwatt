@@ -1,6 +1,7 @@
 import { requiredBucketsForRateStructure } from "@/lib/plan-engine/requiredBucketsForPlan";
 import { extractDeterministicTouSchedule } from "@/lib/plan-engine/touPeriods";
 import { detectIndexedOrVariable, extractEflAveragePriceAnchors } from "@/lib/plan-engine/indexedPricing";
+import { extractDeterministicTierSchedule } from "@/lib/plan-engine/tieredPricing";
 
 function isObject(v: unknown): v is Record<string, any> {
   return typeof v === "object" && v !== null;
@@ -177,6 +178,7 @@ export type PlanEngineIntrospection = {
     approxPossible: boolean;
     notes: string[];
   };
+  tiered?: ReturnType<typeof extractDeterministicTierSchedule>;
 };
 
 /**
@@ -196,6 +198,7 @@ export function introspectPlanFromRateStructure(input: { rateStructure: any }): 
   const tou = extractDeterministicTouSchedule(rs);
   const indexed = detectIndexedOrVariable(rs);
   const anchors = extractEflAveragePriceAnchors(rs);
+  const tiered = extractDeterministicTierSchedule(rs);
   const requiredBuckets = requiredBucketsForRateStructure({ rateStructure: rs });
   const requiredBucketKeys = requiredBuckets.map((r) => r.key);
 
@@ -232,6 +235,35 @@ export function introspectPlanFromRateStructure(input: { rateStructure: any }): 
       };
     }
 
+    if (tiered.ok) {
+      return {
+        planCalcVersion: 1,
+        planCalcStatus: "NOT_COMPUTABLE" as const,
+        planCalcReasonCode: "TIERED_REQUIRES_USAGE_BUCKETS",
+        requiredBucketKeys: ["kwh.m.all.total"],
+        supportedFeatures: { ...inferred.features, supportsTieredEnergy: true, notes: [...inferred.notes, ...(tiered.schedule?.notes ?? [])] },
+      };
+    }
+    if (!tiered.ok && tiered.reason && tiered.reason.startsWith("UNSUPPORTED_")) {
+      return {
+        planCalcVersion: 1,
+        planCalcStatus: "NOT_COMPUTABLE" as const,
+        planCalcReasonCode: tiered.reason,
+        requiredBucketKeys: ["kwh.m.all.total"],
+        supportedFeatures: { ...inferred.features, supportsTieredEnergy: true, notes: [...inferred.notes, ...(tiered.notes ?? [])] },
+      };
+    }
+
+    if (indexed.isIndexed) {
+      return {
+        planCalcVersion: 1,
+        planCalcStatus: "NOT_COMPUTABLE" as const,
+        planCalcReasonCode: "NON_DETERMINISTIC_PRICING_INDEXED",
+        requiredBucketKeys: ["kwh.m.all.total"],
+        supportedFeatures: { ...inferred.features, notes: [...inferred.notes, ...(indexed.notes ?? [])] },
+      };
+    }
+
     if (inferred.features.supportsTouEnergy) {
       const reasonCode = (tou as any)?.reasonCode ? String((tou as any).reasonCode) : "UNSUPPORTED_RATE_STRUCTURE";
       return {
@@ -256,15 +288,18 @@ export function introspectPlanFromRateStructure(input: { rateStructure: any }): 
     const notes: string[] = [];
 
     const approxPossible = indexed.isIndexed && (anchors.centsPerKwhAt500 != null || anchors.centsPerKwhAt1000 != null || anchors.centsPerKwhAt2000 != null);
+    const tieredPossible = tiered.ok;
 
     const canRunWithoutBuckets = fixed != null || approxPossible;
-    const canRunWithBuckets = fixed != null || !!tou.schedule || approxPossible;
+    const canRunWithBuckets = fixed != null || !!tou.schedule || approxPossible || tieredPossible;
     const requiresUsageBuckets = fixed == null && !approxPossible;
 
     if (fixed != null) {
       notes.push(`Fixed REP energy rate detected (${fixed} ¢/kWh); calculator can run without usage buckets.`);
     } else if (tou.schedule) {
       notes.push(`Deterministic TOU schedule detected; calculator requires usage buckets: ${requiredBucketKeys.join(", ")}`);
+    } else if (tieredPossible) {
+      notes.push("Deterministic tiered schedule detected; calculator requires kwh.m.all.total buckets per month.");
     } else if (approxPossible) {
       notes.push("Indexed/variable plan detected; calculator can run only in APPROXIMATE mode using EFL modeled price anchors (500/1000/2000).");
     } else {
@@ -283,6 +318,7 @@ export function introspectPlanFromRateStructure(input: { rateStructure: any }): 
   return {
     planCalc,
     tou,
+    tiered,
     requiredBuckets,
     requiredBucketKeys,
     calculatorDryRun,

@@ -649,6 +649,34 @@ export function ManualFactCardLoader(props: {
                     </div>
                   ) : null}
 
+                  {(planEngineView as any)?.tiered?.ok && Array.isArray((planEngineView as any)?.tiered?.schedule?.tiers) ? (
+                    <div className="space-y-1">
+                      <div className="text-xs font-semibold text-brand-navy">Deterministic tiered schedule</div>
+                      <div className="overflow-x-auto rounded border">
+                        <table className="min-w-full text-xs">
+                          <thead className="bg-gray-50">
+                            <tr>
+                              <th className="px-2 py-1 text-left">start (kWh)</th>
+                              <th className="px-2 py-1 text-left">end (kWh)</th>
+                              <th className="px-2 py-1 text-right">¢/kWh</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(planEngineView as any).tiered.schedule.tiers.map((t: any, i: number) => (
+                              <tr key={i} className="border-t">
+                                <td className="px-2 py-1 font-mono">{String(t?.startKwhInclusive ?? "")}</td>
+                                <td className="px-2 py-1 font-mono">{t?.endKwhExclusive == null ? "∞" : String(t?.endKwhExclusive)}</td>
+                                <td className="px-2 py-1 text-right font-mono">
+                                  {typeof t?.repEnergyCentsPerKwh === "number" ? t.repEnergyCentsPerKwh.toFixed(4) : "—"}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ) : null}
+
                   {(planEngineView as any)?.tou?.schedule?.periods?.length ? (
                     <div className="space-y-1">
                       <div className="text-xs font-semibold text-brand-navy">Deterministic TOU schedule</div>

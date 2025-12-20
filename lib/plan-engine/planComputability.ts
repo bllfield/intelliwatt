@@ -2,6 +2,7 @@ import { requiredBucketsForPlan, requiredBucketsForRateStructure } from "@/lib/p
 import { extractFixedRepEnergyCentsPerKwh } from "@/lib/plan-engine/calculatePlanCostForUsage";
 import { extractDeterministicTouSchedule } from "@/lib/plan-engine/touPeriods";
 import { detectIndexedOrVariable } from "@/lib/plan-engine/indexedPricing";
+import { extractDeterministicTierSchedule } from "@/lib/plan-engine/tieredPricing";
 import { Prisma } from "@prisma/client";
 
 export type ComputabilityStatus =
@@ -248,6 +249,39 @@ export function derivePlanCalcRequirementsFromTemplate(args: {
             ...(indexed.notes ?? []),
             "Indexed/variable pricing is not deterministically computable without an explicit approximation mode.",
           ],
+        },
+      };
+    }
+
+    const tiered = extractDeterministicTierSchedule(rs);
+    if (tiered.ok) {
+      return {
+        planCalcVersion,
+        // IMPORTANT: do NOT mark tiered computable at plan-level (dashboard gating must remain unchanged).
+        planCalcStatus: "NOT_COMPUTABLE" as const,
+        planCalcReasonCode: "TIERED_REQUIRES_USAGE_BUCKETS",
+        requiredBucketKeys: ["kwh.m.all.total"],
+        supportedFeatures: {
+          ...inferred.features,
+          supportsTieredEnergy: true,
+          notes: [...(inferred.notes ?? []), ...(tiered.schedule.notes ?? [])],
+        },
+      };
+    } else if (
+      tiered.reason === "UNSUPPORTED_COMBINED_STRUCTURES" ||
+      tiered.reason === "UNSUPPORTED_CREDITS_IN_TIERED" ||
+      tiered.reason === "UNSUPPORTED_TIER_SHAPE" ||
+      tiered.reason === "UNSUPPORTED_TIER_VARIATION"
+    ) {
+      return {
+        planCalcVersion,
+        planCalcStatus: "NOT_COMPUTABLE" as const,
+        planCalcReasonCode: tiered.reason,
+        requiredBucketKeys: ["kwh.m.all.total"],
+        supportedFeatures: {
+          ...inferred.features,
+          supportsTieredEnergy: true,
+          notes: [...(inferred.notes ?? []), ...(tiered.notes ?? [])],
         },
       };
     }

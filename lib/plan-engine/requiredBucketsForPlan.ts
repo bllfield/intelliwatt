@@ -10,6 +10,7 @@ export type UsageBucketRequirement = {
 };
 
 import { extractDeterministicTouSchedule } from "@/lib/plan-engine/touPeriods";
+import { extractDeterministicTierSchedule } from "@/lib/plan-engine/tieredPricing";
 
 function uniq<T>(arr: T[]): T[] {
   const out: T[] = [];
@@ -37,6 +38,11 @@ export function requiredBucketsForRateStructure(args: { rateStructure: any }): U
     key: "kwh.m.all.total",
     description: "Total monthly kWh (all days, 00:00-24:00)",
   });
+
+  // Tiered pricing needs only monthly total kWh.
+  // (Combined TOU+tier is not supported; this is a safe early return when tiers are present.)
+  const tiered = extractDeterministicTierSchedule(args.rateStructure);
+  if (tiered.ok) return out;
 
   const extracted = extractDeterministicTouSchedule(args.rateStructure);
   if (!extracted.schedule) return out;

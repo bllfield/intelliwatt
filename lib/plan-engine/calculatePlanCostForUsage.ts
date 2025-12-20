@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { extractDeterministicTouSchedule } from "@/lib/plan-engine/touPeriods";
 import { detectIndexedOrVariable, extractEflAveragePriceAnchors, chooseEffectiveCentsPerKwhFromAnchors } from "@/lib/plan-engine/indexedPricing";
+import { computeRepEnergyCostForMonthlyKwhTiered, extractDeterministicTierSchedule } from "@/lib/plan-engine/tieredPricing";
 
 export type TrueCostEstimateStatus = "OK" | "APPROXIMATE" | "NOT_COMPUTABLE" | "NOT_IMPLEMENTED";
 
@@ -397,6 +398,94 @@ export function calculatePlanCostForUsage(args: {
             repEnergyCentsPerKwhEffective: chosen.centsPerKwh,
           },
         },
+      };
+    }
+
+    // Tiered pricing (kWh blocks): requires monthly total bucket(s).
+    const tieredMaybe = extractDeterministicTierSchedule(args.rateStructure);
+    if (tieredMaybe.ok) {
+      if (!args.usageBucketsByMonth) {
+        return { status: "NOT_COMPUTABLE", reason: "MISSING_USAGE_BUCKETS", notes: ["tiered_pricing_requires_monthly_totals"] };
+      }
+
+      const byMonth = args.usageBucketsByMonth;
+      const allMonths = Object.keys(byMonth ?? {}).sort();
+      if (allMonths.length === 0) {
+        return { status: "NOT_COMPUTABLE", reason: "MISSING_USAGE_BUCKETS (no months present)" };
+      }
+
+      const wantMonths = Math.max(1, Math.floor(safeNum(args.monthsCount) ?? 12));
+      if (allMonths.length < wantMonths) {
+        return { status: "NOT_COMPUTABLE", reason: `MISSING_USAGE_BUCKETS (need ${wantMonths} months, have ${allMonths.length})` };
+      }
+      const months = allMonths.slice(-wantMonths);
+
+      const tdspPerKwhCents = safeNum(args.tdsp?.perKwhDeliveryChargeCents) ?? 0;
+      const tdspMonthly = safeNum(args.tdsp?.monthlyCustomerChargeDollars) ?? 0;
+      const repFixedMonthly = extractRepFixedMonthlyChargeDollars(args.rateStructure) ?? 0;
+
+      let repEnergyDollars = 0;
+      let totalKwh = 0;
+      const missing: string[] = [];
+      const debugByMonth: any[] = [];
+
+      for (const ym of months) {
+        const m = byMonth[ym];
+        if (!m || typeof m !== "object") continue;
+
+        const monthTotalKwh = sumMonthBucketKwh(m, "kwh.m.all.total");
+        if (monthTotalKwh == null) {
+          missing.push(`${ym}:kwh.m.all.total`);
+          continue;
+        }
+
+        totalKwh += monthTotalKwh;
+        const tiered = computeRepEnergyCostForMonthlyKwhTiered({
+          monthlyKwh: monthTotalKwh,
+          schedule: tieredMaybe.schedule,
+        });
+        repEnergyDollars += tiered.repEnergyCentsTotal / 100;
+        debugByMonth.push({ ym, monthTotalKwh, tierBreakdown: tiered.tierBreakdown });
+      }
+
+      if (missing.length > 0) {
+        return { status: "NOT_COMPUTABLE", reason: `MISSING_USAGE_BUCKETS (${missing.slice(0, 10).join(", ")}${missing.length > 10 ? ", ..." : ""})` };
+      }
+
+      const repFixedDollars = months.length * repFixedMonthly;
+      const tdspDeliveryDollars = totalKwh * (tdspPerKwhCents / 100);
+      const tdspFixedDollars = months.length * tdspMonthly;
+
+      const repTotal = repEnergyDollars + repFixedDollars;
+      const tdspTotal = tdspDeliveryDollars + tdspFixedDollars;
+      const total = repTotal + tdspTotal;
+
+      const tierNotes: string[] = [];
+      tierNotes.push("Computed from kwh.m.all.total + tiered REP energy + TDSP delivery");
+      tierNotes.push("Tiered pricing: kWh blocks applied per month (REP energy only)");
+      if (repFixedMonthly > 0) tierNotes.push("Includes REP fixed monthly charge (from template)");
+      else tierNotes.push("REP fixed monthly charge not found (assumed $0)");
+      if (tdspPerKwhCents > 0 || tdspMonthly > 0) tierNotes.push("Includes TDSP delivery");
+      else tierNotes.push("TDSP delivery missing/zero (check tdspRatesApplied)");
+
+      return {
+        status: "OK",
+        annualCostDollars: round2(total),
+        monthlyCostDollars: round2(total / months.length),
+        confidence: "MEDIUM",
+        components: {
+          energyOnlyDollars: round2(repEnergyDollars),
+          deliveryDollars: round2(tdspDeliveryDollars),
+          baseFeesDollars: round2(repFixedDollars + tdspFixedDollars),
+          totalDollars: round2(total),
+        },
+        componentsV2: {
+          rep: { energyDollars: round2(repEnergyDollars), fixedDollars: round2(repFixedDollars), totalDollars: round2(repTotal) },
+          tdsp: { deliveryDollars: round2(tdspDeliveryDollars), fixedDollars: round2(tdspFixedDollars), totalDollars: round2(tdspTotal) },
+          totalDollars: round2(total),
+        },
+        notes: tierNotes,
+        debug: { tieredByMonth: debugByMonth, schedule: tieredMaybe.schedule },
       };
     }
 
