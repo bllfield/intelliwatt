@@ -190,12 +190,49 @@ export default function AdminPlanDetailsPage({ params }: { params: { offerId: st
   // Auto-fetch raw EFL text when missing (admin QA convenience).
   const [rawTextFetchState, setRawTextFetchState] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [rawTextFetchErr, setRawTextFetchErr] = useState<string | null>(null);
+  const [rawTextFetchDetail, setRawTextFetchDetail] = useState<any>(null);
+  const [overridePdfUrl, setOverridePdfUrl] = useState<string>("");
 
   // Reset auto-fetch state when navigating to a different offerId.
   useEffect(() => {
     setRawTextFetchState("idle");
     setRawTextFetchErr(null);
+    setRawTextFetchDetail(null);
   }, [offerId]);
+
+  const fetchRawTextNow = useCallback(
+    async (args?: { overridePdfUrl?: string }) => {
+      if (!token || !offerId) return;
+      try {
+        setRawTextFetchState("loading");
+        setRawTextFetchErr(null);
+        setRawTextFetchDetail(null);
+        const res = await fetch("/api/admin/efl/raw-text/fetch", {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-admin-token": token },
+          body: JSON.stringify({
+            offerId,
+            ...(args?.overridePdfUrl ? { overridePdfUrl: args.overridePdfUrl } : {}),
+          }),
+        });
+        const json = await res.json().catch(() => null);
+        if (!res.ok || !json?.ok) {
+          setRawTextFetchState("error");
+          setRawTextFetchErr(json?.error ? String(json.error) : `http_${res.status}`);
+          setRawTextFetchDetail(json?.detail ?? json ?? null);
+          return;
+        }
+        setRawTextFetchState("done");
+        setRawTextFetchDetail(json);
+        await load();
+      } catch (e: any) {
+        setRawTextFetchState("error");
+        setRawTextFetchErr(e?.message ?? String(e));
+        setRawTextFetchDetail(null);
+      }
+    },
+    [token, offerId, load],
+  );
 
   useEffect(() => {
     const canFetch =
@@ -206,31 +243,9 @@ export default function AdminPlanDetailsPage({ params }: { params: { offerId: st
     if (!canFetch) return;
     if (rawTextFetchState !== "idle") return;
 
-    (async () => {
-      try {
-        setRawTextFetchState("loading");
-        setRawTextFetchErr(null);
-        const res = await fetch("/api/admin/efl/raw-text/fetch", {
-          method: "POST",
-          headers: { "content-type": "application/json", "x-admin-token": token },
-          body: JSON.stringify({ offerId }),
-        });
-        const json = await res.json().catch(() => null);
-        if (!res.ok || !json?.ok) {
-          setRawTextFetchState("error");
-          setRawTextFetchErr(json?.error ? String(json.error) : `http_${res.status}`);
-          return;
-        }
-        setRawTextFetchState("done");
-        // Reload details so `eflRawText` appears.
-        await load();
-      } catch (e: any) {
-        setRawTextFetchState("error");
-        setRawTextFetchErr(e?.message ?? String(e));
-      }
-    })();
+    void fetchRawTextNow();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, offerId, data?.eflRawText, data?.ratePlan?.eflPdfSha256, rawTextFetchState]);
+  }, [token, offerId, data?.eflRawText, data?.ratePlan?.eflPdfSha256, rawTextFetchState, fetchRawTextNow]);
 
   const planVars = useMemo(() => {
     const rp = data?.ratePlan ?? null;
@@ -369,23 +384,61 @@ export default function AdminPlanDetailsPage({ params }: { params: { offerId: st
             <div className="rounded-xl border bg-white p-4 space-y-3">
               <div className="flex items-center justify-between gap-3">
                 <div className="text-sm font-semibold">EFL raw text</div>
-                <button
-                  className="rounded-lg border px-3 py-1.5 text-xs hover:bg-gray-50 disabled:opacity-60"
-                  disabled={!data.eflRawText}
-                  onClick={async () => {
-                    if (!data.eflRawText) return;
-                    const ok = await copyToClipboard(data.eflRawText);
-                    if (!ok) alert("Copy failed.");
-                  }}
-                >
-                  Copy
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    className="rounded-lg border px-3 py-1.5 text-xs hover:bg-gray-50 disabled:opacity-60"
+                    disabled={!data.eflRawText}
+                    onClick={async () => {
+                      if (!data.eflRawText) return;
+                      const ok = await copyToClipboard(data.eflRawText);
+                      if (!ok) alert("Copy failed.");
+                    }}
+                  >
+                    Copy
+                  </button>
+                  <button
+                    className="rounded-lg border px-3 py-1.5 text-xs hover:bg-gray-50 disabled:opacity-60"
+                    disabled={!token || !offerId || rawTextFetchState === "loading"}
+                    onClick={() => void fetchRawTextNow()}
+                    title="Fetches the EFL PDF and stores extracted raw text for this offer."
+                  >
+                    {rawTextFetchState === "loading" ? "Fetching…" : "Retry fetch"}
+                  </button>
+                </div>
               </div>
               {rawTextFetchState === "loading" ? (
                 <div className="text-xs text-gray-600">Fetching/storing raw text…</div>
               ) : rawTextFetchState === "error" ? (
-                <div className="text-xs text-red-700">
-                  Raw text fetch failed: {rawTextFetchErr ?? "unknown_error"}
+                <div className="space-y-2">
+                  <div className="text-xs text-red-700">
+                    Raw text fetch failed: {rawTextFetchErr ?? "unknown_error"}
+                  </div>
+                  <div className="grid gap-2 md:grid-cols-2">
+                    <label className="text-xs">
+                      <div className="text-gray-600 mb-1">Override PDF URL (optional)</div>
+                      <input
+                        className="w-full rounded-lg border px-3 py-2 font-mono text-xs"
+                        value={overridePdfUrl}
+                        onChange={(e) => setOverridePdfUrl(e.target.value)}
+                        placeholder="Paste a direct EFL PDF URL to bypass blocked pages"
+                      />
+                    </label>
+                    <div className="flex items-end">
+                      <button
+                        className="rounded-lg bg-black text-white px-3 py-2 text-xs disabled:opacity-60"
+                        disabled={!token || !offerId || !overridePdfUrl.trim()}
+                        onClick={() => void fetchRawTextNow({ overridePdfUrl: overridePdfUrl.trim() })}
+                      >
+                        Fetch using override
+                      </button>
+                    </div>
+                  </div>
+                  <details className="text-xs text-gray-700">
+                    <summary className="cursor-pointer select-none">Fetch debug</summary>
+                    <pre className="mt-2 bg-gray-50 rounded-lg p-3 overflow-auto max-h-[280px]">
+                      {rawTextFetchDetail ? pretty(rawTextFetchDetail) : "—"}
+                    </pre>
+                  </details>
                 </div>
               ) : null}
               <pre className="text-xs bg-gray-50 rounded-lg p-3 overflow-auto max-h-[520px]">

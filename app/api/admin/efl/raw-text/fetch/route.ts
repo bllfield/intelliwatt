@@ -26,6 +26,7 @@ export async function POST(req: NextRequest) {
 
   const offerId = String(body?.offerId ?? "").trim();
   const ratePlanId = String(body?.ratePlanId ?? "").trim();
+  const overridePdfUrl = String(body?.overridePdfUrl ?? body?.overrideEflPdfUrl ?? "").trim();
   if (!offerId && !ratePlanId) return jsonError(400, "offerId_or_ratePlanId_required");
 
   try {
@@ -46,13 +47,30 @@ export async function POST(req: NextRequest) {
 
     if (!ratePlan) return jsonError(404, "ratePlan_not_found");
 
-    const eflUrl = String((ratePlan as any)?.eflSourceUrl ?? (ratePlan as any)?.eflUrl ?? "").trim();
-    if (!eflUrl) return jsonError(409, "missing_efl_url");
+    const masterPlan = offerId
+      ? await prisma.masterPlan.findFirst({
+          where: { offerId },
+          select: { eflUrl: true, docs: true },
+        })
+      : null;
+
+    const docsEfl = (masterPlan as any)?.docs?.efl ? String((masterPlan as any).docs.efl).trim() : "";
+    const candidates = [
+      overridePdfUrl,
+      String((ratePlan as any)?.eflSourceUrl ?? "").trim(),
+      String((ratePlan as any)?.eflUrl ?? "").trim(),
+      String(masterPlan?.eflUrl ?? "").trim(),
+      docsEfl,
+    ].filter(Boolean);
+
+    if (candidates.length === 0) return jsonError(409, "missing_efl_url");
+    const eflUrl = candidates[0];
 
     const pdfRes = await fetchEflPdfFromUrl(eflUrl);
     if (!pdfRes || (pdfRes as any).ok !== true) {
       return jsonError(502, "efl_pdf_fetch_failed", {
-        eflUrl,
+        eflUrlTried: eflUrl,
+        candidates,
         error: (pdfRes as any)?.error ?? null,
         notes: (pdfRes as any)?.notes ?? null,
       });
@@ -128,6 +146,7 @@ export async function POST(req: NextRequest) {
       offerId: offerId || null,
       ratePlanId: String(ratePlan.id),
       eflUrl,
+      candidates,
       pdfUrl: (pdfRes as any)?.pdfUrl ?? null,
       eflPdfSha256: sha,
       rawTextLength: rawText.length,
