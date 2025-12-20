@@ -68,6 +68,27 @@ function extractFixedEnergyCentsPerKwh(rateStructure: any): number | null {
   return uniq.length === 1 ? uniq[0] : null;
 }
 
+function extractRepFixedMonthlyChargeDollars(rateStructure: any): number | null {
+  if (!rateStructure || typeof rateStructure !== "object") return null;
+  const candidates: unknown[] = [];
+  candidates.push((rateStructure as any)?.repMonthlyChargeDollars);
+  candidates.push((rateStructure as any)?.monthlyBaseChargeDollars);
+  candidates.push((rateStructure as any)?.baseChargeDollars);
+  candidates.push((rateStructure as any)?.charges?.rep?.fixedMonthlyDollars);
+  candidates.push((rateStructure as any)?.charges?.fixed?.monthlyDollars);
+
+  const cents = toNum((rateStructure as any)?.baseMonthlyFeeCents);
+  if (cents != null && cents >= 0 && cents < 50_000) candidates.push(cents / 100);
+
+  const nums = candidates
+    .map((v) => (typeof v === "number" ? v : typeof v === "string" ? Number(v) : NaN))
+    .filter((n) => Number.isFinite(n))
+    .filter((n) => n >= 0 && n < 200);
+
+  const uniq = Array.from(new Set(nums.map((n) => Math.round(n * 100) / 100)));
+  return uniq.length === 1 ? uniq[0] : null;
+}
+
 async function copyToClipboard(text: string) {
   try {
     await navigator.clipboard.writeText(text);
@@ -254,6 +275,7 @@ export default function AdminPlanDetailsPage({ params }: { params: { offerId: st
     const baseMonthlyFeeCents = toNum(rs?.baseMonthlyFeeCents);
     const tdspIncluded = rs?.tdspDeliveryIncludedInEnergyCharge === true;
     const fixedEnergy = extractFixedEnergyCentsPerKwh(rs);
+    const repFixedMonthlyDollars = extractRepFixedMonthlyChargeDollars(rs);
     const touTiers: any[] = Array.isArray(rs?.tiers) ? rs.tiers : [];
     const hasTouTiers = touTiers.length > 0;
 
@@ -274,6 +296,11 @@ export default function AdminPlanDetailsPage({ params }: { params: { offerId: st
       {
         key: "baseMonthlyFeeCents",
         value: baseMonthlyFeeCents == null ? "—" : String(baseMonthlyFeeCents),
+      },
+      {
+        key: "repFixedMonthlyChargeDollars",
+        value: repFixedMonthlyDollars == null ? "—" : String(repFixedMonthlyDollars),
+        notes: repFixedMonthlyDollars == null ? "No single confident REP fixed monthly charge found (assumed $0 by calculator)." : "REP fixed monthly charge used by calculator.",
       },
       {
         key: "fixedEnergyCentsPerKwh",
@@ -419,8 +446,68 @@ export default function AdminPlanDetailsPage({ params }: { params: { offerId: st
     if ((rp as any)?.cancelFee) {
       rows.push({ key: "ratePlan.cancelFee", value: String((rp as any).cancelFee), notes: "Cancellation fee (as stored)." });
     }
+
+    // ---- Calculation variables + outputs (this run) ----
+    if (estimateJson?.ok) {
+      const est = (estimateJson as any)?.estimate ?? null;
+      const tdsp = (estimateJson as any)?.tdspApplied ?? null;
+
+      rows.push({ key: "calc.homeId", value: String((estimateJson as any)?.homeId ?? "—") });
+      rows.push({ key: "calc.esiid", value: String((estimateJson as any)?.esiid ?? "—") });
+      rows.push({ key: "calc.tdspSlug", value: String((estimateJson as any)?.tdspSlug ?? "—") });
+      rows.push({ key: "calc.annualKwh", value: String((estimateJson as any)?.annualKwh ?? "—"), notes: "Annual usage total used for cost math." });
+      rows.push({ key: "calc.monthsCount", value: String((estimateJson as any)?.monthsCount ?? "—") });
+      rows.push({
+        key: "calc.monthsIncluded",
+        value: Array.isArray((estimateJson as any)?.monthsIncluded) ? (estimateJson as any).monthsIncluded.join(", ") : "—",
+      });
+      rows.push({
+        key: "calc.requiredBucketKeys",
+        value: requiredBucketKeys.length ? requiredBucketKeys.join(", ") : "—",
+        notes: "Buckets required by the template (coverage shown below).",
+      });
+
+      rows.push({
+        key: "calc.tdspApplied.perKwhDeliveryChargeCents",
+        value: tdsp?.perKwhDeliveryChargeCents != null ? String(tdsp.perKwhDeliveryChargeCents) : "—",
+        notes: "TDSP/TDU volumetric delivery rate applied by calculator.",
+      });
+      rows.push({
+        key: "calc.tdspApplied.monthlyCustomerChargeDollars",
+        value: tdsp?.monthlyCustomerChargeDollars != null ? String(tdsp.monthlyCustomerChargeDollars) : "—",
+        notes: "TDSP/TDU monthly customer charge applied by calculator.",
+      });
+
+      rows.push({ key: "calc.estimate.status", value: String(est?.status ?? "—") });
+      rows.push({ key: "calc.estimate.reason", value: String(est?.reason ?? "—") });
+      rows.push({ key: "calc.estimate.annualCostDollars", value: est?.annualCostDollars != null ? String(est.annualCostDollars) : "—" });
+      rows.push({ key: "calc.estimate.monthlyCostDollars", value: est?.monthlyCostDollars != null ? String(est.monthlyCostDollars) : "—" });
+
+      const c2 = est?.componentsV2 ?? null;
+      if (c2) {
+        rows.push({ key: "calc.components.rep.energyDollars", value: c2?.rep?.energyDollars != null ? String(c2.rep.energyDollars) : "—" });
+        rows.push({ key: "calc.components.rep.fixedDollars", value: c2?.rep?.fixedDollars != null ? String(c2.rep.fixedDollars) : "—" });
+        rows.push({ key: "calc.components.tdsp.deliveryDollars", value: c2?.tdsp?.deliveryDollars != null ? String(c2.tdsp.deliveryDollars) : "—" });
+        rows.push({ key: "calc.components.tdsp.fixedDollars", value: c2?.tdsp?.fixedDollars != null ? String(c2.tdsp.fixedDollars) : "—" });
+        rows.push({ key: "calc.components.totalDollars", value: c2?.totalDollars != null ? String(c2.totalDollars) : "—" });
+      }
+
+      // Show the explicit math for fixed-rate path (when applicable) as a human check.
+      const annualKwh = toNum((estimateJson as any)?.annualKwh);
+      const repCents = toNum(fixedEnergy);
+      const tdspPerKwh = toNum(tdsp?.perKwhDeliveryChargeCents);
+      const tdspMonthly = toNum(tdsp?.monthlyCustomerChargeDollars);
+      const mCount = toNum((estimateJson as any)?.monthsCount);
+      if (annualKwh != null && repCents != null && tdspPerKwh != null && tdspMonthly != null && mCount != null) {
+        rows.push({
+          key: "calc.formula",
+          value: "see notes",
+          notes: `repEnergy=$(${annualKwh}×${repCents}/100), tdspDelivery=$(${annualKwh}×${tdspPerKwh}/100), repFixed=$(${mCount}×${repFixedMonthlyDollars ?? 0}), tdspFixed=$(${mCount}×${tdspMonthly})`,
+        });
+      }
+    }
     return rows;
-  }, [data]);
+  }, [data, estimateJson, requiredBucketKeys]);
 
   const validation = useMemo(() => {
     const v = data?.ratePlan?.modeledEflAvgPriceValidation ?? null;
@@ -493,6 +580,18 @@ export default function AdminPlanDetailsPage({ params }: { params: { offerId: st
       setCoverageLoading(false);
     }
   }, [token, homeId, monthsClamped, requiredBucketKeys]);
+
+  // Auto-load bucket coverage after a successful estimate run so the "Plan variables" section
+  // can show the exact buckets/values without extra clicks.
+  useEffect(() => {
+    if (!estimateJson?.ok) return;
+    if (coverageLoading) return;
+    if (coverageJson?.ok) return;
+    if (!token) return;
+    if (!homeId.trim()) return;
+    if (!requiredBucketKeys.length) return;
+    void loadCoverage();
+  }, [estimateJson, coverageLoading, coverageJson, token, homeId, requiredBucketKeys, loadCoverage]);
 
   return (
     <main className="min-h-screen w-full bg-gray-50">
@@ -643,7 +742,7 @@ export default function AdminPlanDetailsPage({ params }: { params: { offerId: st
               <div className="rounded-xl border bg-white p-4 space-y-2">
                 <div className="text-sm font-semibold">Plan variables (numbers used)</div>
                 <div className="text-xs text-gray-600">
-                  Includes template rates and validator/solver inputs (when available).
+                  One end-to-end run sheet: template inputs, validator assumptions, calculator inputs/buckets, and calculator outputs.
                 </div>
                 <div className="overflow-auto rounded border">
                   <table className="min-w-full text-xs">
@@ -665,6 +764,59 @@ export default function AdminPlanDetailsPage({ params }: { params: { offerId: st
                     </tbody>
                   </table>
                 </div>
+
+                {estimateJson?.ok ? (
+                  <div className="rounded border p-3 bg-gray-50 text-xs">
+                    <div className="font-semibold text-gray-700 mb-2">Buckets used for this run</div>
+                    {coverageJson?.ok ? (
+                      <div className="space-y-2">
+                        <div className="text-gray-700">
+                          required keys: <span className="font-mono">{requiredBucketKeys.length}</span> • fullyCoveredMonths:{" "}
+                          <span className="font-mono">
+                            {String(coverageJson?.summary?.fullyCoveredMonths ?? "—")} / {String(coverageJson?.monthsCount ?? monthsClamped)}
+                          </span>
+                        </div>
+                        <div className="overflow-auto rounded border bg-white">
+                          <table className="min-w-full text-xs">
+                            <thead className="bg-gray-50">
+                              <tr>
+                                <th className="px-2 py-2 text-left">month</th>
+                                {requiredBucketKeys.map((k) => (
+                                  <th key={k} className="px-2 py-2 text-left font-mono">
+                                    {k.split(".").slice(-1)[0]}
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {(coverageJson?.months ?? []).map((ym: string) => (
+                                <tr key={ym} className="border-t">
+                                  <td className="px-2 py-2 font-mono">{ym}</td>
+                                  {requiredBucketKeys.map((k) => {
+                                    const cell = coverageJson?.cells?.[ym]?.[k];
+                                    const present = Boolean(cell?.present);
+                                    const kwh = cell?.kwhTotal;
+                                    return (
+                                      <td key={k} className="px-2 py-2 font-mono">
+                                        {present ? `✅ ${kwh ?? ""}` : "❌"}
+                                      </td>
+                                    );
+                                  })}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                        {coverageErr ? <div className="text-red-700">coverage error: {coverageErr}</div> : null}
+                      </div>
+                    ) : (
+                      <div className="text-gray-700">
+                        {coverageLoading ? "Loading bucket coverage…" : "Bucket coverage not loaded (run estimate again or click “Load bucket coverage” below)."}
+                        {coverageErr ? <div className="text-red-700">coverage error: {coverageErr}</div> : null}
+                      </div>
+                    )}
+                  </div>
+                ) : null}
               </div>
             </div>
 
