@@ -173,11 +173,42 @@ export function derivePlanCalcRequirementsFromTemplate(args: {
     };
   }
 
+  const hasTouAssumptionEvidence = (assumptionsUsed: any): boolean => {
+    if (!assumptionsUsed || typeof assumptionsUsed !== "object") return false;
+    const a = assumptionsUsed as any;
+    const hasPct = typeof a?.nightUsagePercent === "number" && Number.isFinite(a.nightUsagePercent);
+    const hasWindow =
+      (typeof a?.nightStartHour === "number" && Number.isFinite(a.nightStartHour)) ||
+      (typeof a?.nightEndHour === "number" && Number.isFinite(a.nightEndHour)) ||
+      (typeof a?.dayStartHour === "number" && Number.isFinite(a.dayStartHour)) ||
+      (typeof a?.dayEndHour === "number" && Number.isFinite(a.dayEndHour));
+    return hasPct || hasWindow;
+  };
+
   const inferred = inferSupportedFeaturesFromTemplate({ rateStructure: rs });
   const fixed = extractFixedRepEnergyCentsPerKwh(rs);
 
   const out = (() => {
     if (fixed != null) {
+      // SAFETY: If the template's own modeled proof says this is TOU-like (requires a usage split),
+      // never mark it as a simple fixed-rate computable plan.
+      const assumptionsUsed = (rs as any)?.__eflAvgPriceValidation?.assumptionsUsed ?? null;
+      if (hasTouAssumptionEvidence(assumptionsUsed)) {
+        return {
+          planCalcVersion,
+          planCalcStatus: "NOT_COMPUTABLE" as const,
+          planCalcReasonCode: "SUSPECT_TOU_EVIDENCE_IN_VALIDATION",
+          requiredBucketKeys: ["kwh.m.all.total"],
+          supportedFeatures: {
+            ...inferred.features,
+            supportsTouEnergy: true,
+            notes: [
+              ...(inferred.notes ?? []),
+              "Guardrail: modeled EFL validation assumptions indicate TOU-like usage split, so this template cannot be treated as a simple fixed-rate plan.",
+            ],
+          },
+        };
+      }
       return {
         planCalcVersion,
         planCalcStatus: "COMPUTABLE" as const,

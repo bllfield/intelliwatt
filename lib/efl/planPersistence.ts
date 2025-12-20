@@ -111,8 +111,28 @@ export async function upsertRatePlanFromEfl(
 
   const forcedManualReviewForMissingFields = missingTemplateFields.length > 0;
 
+  // CRITICAL SAFETY: If our modeled proof indicates TOU-like behavior (usage split/window),
+  // but the extracted template isn't explicitly TIME_OF_USE, force manual review so this
+  // plan cannot ship as a simple fixed-rate plan with incorrect math.
+  const forcedManualReviewForTouMismatch = (() => {
+    const rsAny = rateStructure as any;
+    const rsType = String(rsAny?.type ?? "").toUpperCase();
+    const isTouTemplate = rsType === "TIME_OF_USE";
+    const assumptions = (modeledEflAvgPriceValidation as any)?.assumptionsUsed ?? null;
+    const hasPct = typeof (assumptions as any)?.nightUsagePercent === "number" && Number.isFinite((assumptions as any).nightUsagePercent);
+    const hasWindow =
+      (typeof (assumptions as any)?.nightStartHour === "number" && Number.isFinite((assumptions as any).nightStartHour)) ||
+      (typeof (assumptions as any)?.nightEndHour === "number" && Number.isFinite((assumptions as any).nightEndHour)) ||
+      (typeof (assumptions as any)?.dayStartHour === "number" && Number.isFinite((assumptions as any).dayStartHour)) ||
+      (typeof (assumptions as any)?.dayEndHour === "number" && Number.isFinite((assumptions as any).dayEndHour));
+    const touEvidence = Boolean(hasPct || hasWindow);
+    return touEvidence && !isTouTemplate;
+  })();
+
   const requiresManualReview =
-    forcedManualReviewForMissingFields || validation?.requiresManualReview === true;
+    forcedManualReviewForMissingFields ||
+    forcedManualReviewForTouMismatch ||
+    validation?.requiresManualReview === true;
 
   const validationIssues = [
     ...(validation?.issues ?? []),
@@ -122,6 +142,16 @@ export async function upsertRatePlanFromEfl(
             code: "TEMPLATE_ID_FIELDS_MISSING",
             severity: "ERROR",
             message: `Template not persisted: missing required fields: ${missingTemplateFields.join(", ")}.`,
+          },
+        ] satisfies PlanRulesValidationResult["issues"])
+      : []),
+    ...(forcedManualReviewForTouMismatch
+      ? ([
+          {
+            code: "SUSPECT_TOU_CLASSIFIED_AS_NON_TOU",
+            severity: "ERROR",
+            message:
+              "Template not persisted: modeled EFL proof indicates TOU behavior (usage split/window assumptions) but extracted rateStructure is not TIME_OF_USE. Requires manual review to prevent incorrect pricing.",
           },
         ] satisfies PlanRulesValidationResult["issues"])
       : []),
@@ -135,8 +165,9 @@ export async function upsertRatePlanFromEfl(
   // Plan-calc requirements are derived from the stored template (safeRateStructure) and persisted for auditing.
   const planCalcReq = derivePlanCalcRequirementsFromTemplate({ rateStructure: safeRateStructure as any });
 
-  // Modeled proof columns are only meaningful when we persisted a usable template.
-  const canPersistModeledProof = Boolean(!requiresManualReview && safeRateStructure);
+  // Modeled proof columns are useful for debugging even when we refuse to persist a template.
+  // In particular, TOU-mismatch guardrails rely on the modeled proof to explain why it was quarantined.
+  const canPersistModeledProof = Boolean(modeledEflAvgPriceValidation != null);
 
   const modeledAt =
     modeledComputedAt == null
@@ -187,6 +218,54 @@ export async function upsertRatePlanFromEfl(
     supplier: providerName ?? undefined,
     planName: planName ?? undefined,
   } as const;
+
+  // Best-effort: queue suspicious TOU mismatches for admin review immediately.
+  // NOTE: EflParseReviewQueue has a unique constraint on eflPdfSha256, so this will coalesce
+  // with any existing row for the same PDF.
+  if (forcedManualReviewForTouMismatch) {
+    try {
+      await (prisma as any).eflParseReviewQueue.upsert({
+        where: { eflPdfSha256 },
+        create: {
+          source: "plan_persistence_guardrail",
+          kind: "PLAN_CALC_QUARANTINE",
+          dedupeKey: `plan_calc:${eflPdfSha256}`,
+          ratePlanId: null,
+          eflPdfSha256,
+          repPuctCertificate: repPuctCertificate ?? null,
+          eflVersionCode: eflVersionCode ?? null,
+          offerId: null,
+          supplier: providerName ?? null,
+          planName: planName ?? null,
+          eflUrl: eflUrl ?? null,
+          tdspName: utilityId ?? null,
+          termMonths: typeof termMonths === "number" ? termMonths : null,
+          rawText: null,
+          planRules: planRules ?? null,
+          rateStructure: rateStructure ?? null,
+          validation: (validation ?? null) as any,
+          derivedForValidation: null,
+          finalStatus: "NEEDS_REVIEW",
+          queueReason: "SUSPECT_TOU_CLASSIFIED_AS_NON_TOU",
+          solverApplied: null,
+          resolvedAt: null,
+          resolvedBy: null,
+          resolutionNotes: "Auto-queued: TOU evidence found but template is not TIME_OF_USE.",
+        },
+        update: {
+          kind: "PLAN_CALC_QUARANTINE",
+          dedupeKey: `plan_calc:${eflPdfSha256}`,
+          finalStatus: "NEEDS_REVIEW",
+          queueReason: "SUSPECT_TOU_CLASSIFIED_AS_NON_TOU",
+          resolvedAt: null,
+          resolvedBy: null,
+          resolutionNotes: "Auto-queued: TOU evidence found but template is not TIME_OF_USE.",
+        },
+      });
+    } catch {
+      // ignore (never block persistence)
+    }
+  }
 
   // Compute a stable template identity for this EFL so we can dedupe RatePlan
   // rows even when the same EFL arrives via multiple URLs or ingest paths.
