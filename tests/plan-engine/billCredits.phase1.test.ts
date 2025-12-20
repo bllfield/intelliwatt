@@ -53,6 +53,18 @@ describe("billCredits: extractDeterministicBillCredits", () => {
     expect(out.ok).toBe(false);
     if (!out.ok) expect(out.reason).toBe("UNSUPPORTED_CREDIT_COMBINATION");
   });
+
+  it("returns NO_CREDITS when only minimum usage fee (negative) rules exist", () => {
+    const rs: any = {
+      billCredits: {
+        hasBillCredit: true,
+        rules: [{ label: "Minimum Usage Fee $9.95 if usage < 1000 kWh", creditAmountCents: -995, minUsageKWh: 1000 }],
+      },
+    };
+    const out = extractDeterministicBillCredits(rs);
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.reason).toBe("NO_CREDITS");
+  });
 });
 
 describe("billCredits: applyBillCreditsToMonth", () => {

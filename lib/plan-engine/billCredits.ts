@@ -124,7 +124,9 @@ export function extractDeterministicBillCredits(
     });
   }
 
-  if (!hasBillCredit && normalized.length === 0) {
+  // If we ended up with zero usable deterministic credit rules (e.g. only "Minimum Usage Fee"
+  // negative rules which are handled by minimumRules.ts), treat this as NO_CREDITS.
+  if (normalized.length === 0) {
     return { ok: false, reason: "NO_CREDITS", notes: [...notes, "no_credit_rules_after_filter"] };
   }
 
