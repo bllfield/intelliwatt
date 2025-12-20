@@ -250,6 +250,7 @@ export async function POST(req: NextRequest) {
 
             const last = tried.length ? tried[tried.length - 1] : null;
             const errorMsg = last?.error ?? "fetch failed";
+            const errorShort = String(errorMsg).split(/\r?\n/)[0].trim().slice(0, 240);
 
             // Best-effort: store richer reason so stats can reveal WAF/403 vs missing PDF.
             try {
@@ -257,12 +258,14 @@ export async function POST(req: NextRequest) {
                 await (prisma as any).eflParseReviewQueue.update({
                   where: { id },
                   data: {
+                    // Keep queueReason short/stable for stats & UI (avoid DB size issues).
+                    // Store full diagnostics in validation.fetch below.
                     queueReason: (usedRawTextFallback
-                      ? `FETCH_FAIL: ${errorMsg} | RAWTEXT_FALLBACK_ELIGIBLE`
-                      : `FETCH_FAIL: ${errorMsg}`
+                      ? `FETCH_FAIL: ${errorShort} | RAWTEXT_FALLBACK_ELIGIBLE`
+                      : `FETCH_FAIL: ${errorShort}`
                     ).slice(0, 4000),
                     validation: {
-                      fetch: { usedUrl, candidates, tried },
+                      fetch: { usedUrl, candidates, tried, errorFull: errorMsg },
                       rawTextFallbackEligible: usedRawTextFallback,
                     } as any,
                   },
@@ -721,5 +724,4 @@ export async function POST(req: NextRequest) {
     });
   }
 }
-
 
