@@ -274,7 +274,9 @@ export async function POST(req: NextRequest) {
                 planName: it?.planName ?? null,
                 eflUrl,
                 status: "FETCH_FAIL",
-                error: errorMsg,
+                // Keep error short for callers/logs; preserve full text separately.
+                error: errorShort,
+                errorFull: errorMsg,
                 usedUrl,
                 candidatesTried: tried.length,
                 tried: tried.slice(0, 6),
