@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Buffer } from "node:buffer";
 
 import { fetchEflPdfFromUrl } from "@/lib/efl/fetchEflPdf";
+import { runEflPipelineFromRawTextNoStore } from "@/lib/efl/runEflPipelineFromRawTextNoStore";
 import { runEflPipelineNoStore } from "@/lib/efl/runEflPipelineNoStore";
 import { upsertRatePlanFromEfl } from "@/lib/efl/planPersistence";
 import { validatePlanRules } from "@/lib/efl/planEngine";
@@ -208,6 +209,7 @@ export async function POST(req: NextRequest) {
 
           let fetched: any = null;
           let usedUrl: string | null = null;
+          let usedRawTextFallback = false;
 
           for (const u of candidates.length ? candidates : [eflUrl]) {
             const res = await fetchEflPdfFromUrl(u);
@@ -224,7 +226,16 @@ export async function POST(req: NextRequest) {
           }
 
           if (!fetched || (fetched as any).ok !== true) {
-            fetchFailed++;
+            // Fallback: if we already have rawText + sha in the queue row, we can still
+            // run the EFL pipeline without fetching the PDF again (WAF/TLS blocks).
+            const rawTextStored = String((it as any)?.rawText ?? "").trim();
+            const shaStored = String((it as any)?.eflPdfSha256 ?? "").trim();
+            if (rawTextStored && shaStored) {
+              usedRawTextFallback = true;
+            } else {
+              fetchFailed++;
+            }
+
             const last = tried.length ? tried[tried.length - 1] : null;
             const errorMsg = last?.error ?? "fetch failed";
 
@@ -234,8 +245,13 @@ export async function POST(req: NextRequest) {
                 await (prisma as any).eflParseReviewQueue.update({
                   where: { id },
                   data: {
-                    queueReason: `FETCH_FAIL: ${errorMsg}`.slice(0, 4000),
-                    validation: { fetch: { usedUrl, candidates, tried } } as any,
+                    queueReason: usedRawTextFallback
+                      ? `FETCH_FAIL: ${errorMsg} | RAWTEXT_FALLBACK_ELIGIBLE`
+                      : `FETCH_FAIL: ${errorMsg}`.slice(0, 4000),
+                    validation: {
+                      fetch: { usedUrl, candidates, tried },
+                      rawTextFallbackEligible: usedRawTextFallback,
+                    } as any,
                   },
                 });
               }
@@ -243,6 +259,9 @@ export async function POST(req: NextRequest) {
               // ignore
             }
 
+            if (usedRawTextFallback) {
+              // Continue with the rawText pipeline below.
+            } else {
             if (!resultsTruncated && results.length < resultsLimit) {
               results.push({
                 id,
@@ -260,20 +279,35 @@ export async function POST(req: NextRequest) {
               resultsTruncated = true;
             }
             continue;
+            }
           }
 
-          const pdfBytes = Buffer.from((fetched as any).pdfBytes);
-          const pipeline = await runEflPipelineNoStore({
-            pdfBytes,
-            source: "manual",
-            offerMeta: {
-              supplier: it?.supplier ?? null,
-              planName: it?.planName ?? null,
-              termMonths: typeof it?.termMonths === "number" ? it.termMonths : null,
-              tdspName: it?.tdspName ?? null,
-              offerId: it?.offerId ?? null,
-            },
-          });
+          const pipeline = usedRawTextFallback
+            ? await runEflPipelineFromRawTextNoStore({
+                rawText: String((it as any)?.rawText ?? ""),
+                eflPdfSha256: String((it as any)?.eflPdfSha256 ?? ""),
+                repPuctCertificate: (it as any)?.repPuctCertificate ?? null,
+                eflVersionCode: (it as any)?.eflVersionCode ?? null,
+                source: "queue_rawtext",
+                offerMeta: {
+                  supplier: it?.supplier ?? null,
+                  planName: it?.planName ?? null,
+                  termMonths: typeof it?.termMonths === "number" ? it.termMonths : null,
+                  tdspName: it?.tdspName ?? null,
+                  offerId: it?.offerId ?? null,
+                },
+              })
+            : await runEflPipelineNoStore({
+                pdfBytes: Buffer.from((fetched as any).pdfBytes),
+                source: "manual",
+                offerMeta: {
+                  supplier: it?.supplier ?? null,
+                  planName: it?.planName ?? null,
+                  termMonths: typeof it?.termMonths === "number" ? it.termMonths : null,
+                  tdspName: it?.tdspName ?? null,
+                  offerId: it?.offerId ?? null,
+                },
+              });
 
           const det = pipeline.deterministic;
           const finalValidation = pipeline.finalValidation ?? null;
