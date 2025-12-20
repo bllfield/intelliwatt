@@ -374,7 +374,8 @@ export function introspectPlanFromRateStructure(input: { rateStructure: any }): 
 
     const canRunWithoutBuckets = (fixed != null && !creditsPossible && !minimumPossible) || approxPossible;
     const canRunWithBuckets = fixed != null || !!tou.schedule || approxPossible || tieredPossible || creditsPossible || minimumPossible;
-    const requiresUsageBuckets = fixed == null || tieredPossible || !!tou.schedule || creditsPossible || minimumPossible;
+    const requiresUsageBuckets =
+      (fixed == null && !approxPossible) || tieredPossible || !!tou.schedule || creditsPossible || minimumPossible;
 
     if (fixed != null) {
       if (creditsPossible && minimumPossible) notes.push(`Fixed REP energy rate detected (${fixed} ¢/kWh); bill credits + minimum rules require monthly totals.`);
