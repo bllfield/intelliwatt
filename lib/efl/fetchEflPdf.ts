@@ -343,6 +343,29 @@ async function fetchBytesWithHeaders(args: {
   }
 }
 
+async function fetchRedirectLocation(args: {
+  url: string;
+  timeoutMs: number;
+  headers: Record<string, string>;
+}): Promise<{ status: number; location: string | null; resUrl: string }> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), args.timeoutMs);
+  try {
+    const res = await fetch(args.url, {
+      method: "GET",
+      // IMPORTANT: we want to read the Location header ourselves.
+      redirect: "manual",
+      headers: args.headers,
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    const location = res.headers.get("location");
+    return { status: res.status, location, resUrl: res.url || args.url };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function baseHeaders(profile: "browser" | "bot" | "none"): Record<string, string> {
   if (profile === "none") return {};
   if (profile === "bot") {
@@ -375,6 +398,63 @@ function refererVariantsForOrigin(origin: string, finalUrl?: string | null): str
   out.push(`${origin}/Documents/`);
   if (finalUrl) out.push(finalUrl);
   return Array.from(new Set(out));
+}
+
+function isShortlinkHost(u: string): boolean {
+  try {
+    const host = new URL(u).hostname.toLowerCase();
+    return (
+      host === "bit.ly" ||
+      host === "t.co" ||
+      host === "tinyurl.com" ||
+      host === "rb.gy" ||
+      host === "is.gd" ||
+      host === "ow.ly"
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function resolveShortlinkFinalUrl(args: {
+  url: string;
+  timeoutMs: number;
+  notes: string[];
+}): Promise<string | null> {
+  const { url, timeoutMs, notes } = args;
+  if (!isShortlinkHost(url)) return null;
+
+  // Use conservative headers (browser) for the redirect resolver.
+  const headers = baseHeaders("browser");
+
+  let cur = url;
+  for (let hop = 0; hop < 6; hop++) {
+    notes.push(`shortlink_resolve_hop=${hop}`);
+    let r: { status: number; location: string | null; resUrl: string };
+    try {
+      r = await fetchRedirectLocation({ url: cur, timeoutMs, headers });
+    } catch (e) {
+      notes.push(`shortlink_resolve_error=${e instanceof Error ? e.message : String(e)}`);
+      return null;
+    }
+
+    // Not a redirect response (or no Location) → stop.
+    if (!(r.status >= 300 && r.status < 400) || !r.location) {
+      // Some shortlinks may respond 200 and rely on HTML/JS redirect; our main fetcher handles that.
+      return null;
+    }
+
+    const next = resolveUrl(cur, r.location);
+    if (!next) return null;
+
+    notes.push(`shortlink_resolved_to=${next}`);
+    cur = next;
+
+    // If we’re no longer on a shortlink host, return the resolved URL.
+    if (!isShortlinkHost(cur)) return cur;
+  }
+
+  return null;
 }
 
 async function fetchWithProfilesAndReferer(args: {
@@ -470,14 +550,21 @@ export async function fetchEflPdfFromUrl(
   const timeoutMs = opts?.timeoutMs ?? 20_000;
 
   try {
-    const first = await fetchWithProfilesAndReferer({ url: eflUrl, timeoutMs, notes });
+    // If the input URL is a shortlink, resolve it first and then fetch the final URL directly.
+    // This avoids sending requests to the final doc host via a redirect chain (some WAFs treat that as suspicious).
+    const resolvedShortlink =
+      (await resolveShortlinkFinalUrl({ url: eflUrl, timeoutMs, notes })) ?? null;
+    const fetchUrl = resolvedShortlink ?? eflUrl;
+    if (resolvedShortlink) notes.push(`shortlink_fetch_direct=${fetchUrl}`);
+
+    const first = await fetchWithProfilesAndReferer({ url: fetchUrl, timeoutMs, notes });
 
     const { res, contentType, buf } = first;
     if (!res.ok) {
       return {
         ok: false,
         error: `Failed to fetch EFL URL: HTTP ${res.status} ${res.statusText}`.trim(),
-        notes: [...notes, `finalUrl=${res.url || eflUrl}`],
+        notes: [...notes, `finalUrl=${res.url || fetchUrl}`],
       };
     }
 
@@ -491,7 +578,7 @@ export async function fetchEflPdfFromUrl(
       }
       return {
         ok: true,
-        pdfUrl: res.url || eflUrl,
+        pdfUrl: res.url || fetchUrl,
         pdfBytes: Buffer.from(buf),
         source: "DIRECT_PDF",
         contentType,
@@ -505,7 +592,7 @@ export async function fetchEflPdfFromUrl(
       ignoreBOM: true,
     }).decode(buf);
 
-    const finalUrl = res.url || eflUrl;
+    const finalUrl = res.url || fetchUrl;
     const candidates = pickEflPdfCandidateUrlsFromHtml(html, finalUrl);
     if (!candidates.length) {
       return {
