@@ -4,6 +4,7 @@ import { extractDeterministicTouSchedule } from "@/lib/plan-engine/touPeriods";
 import { detectIndexedOrVariable } from "@/lib/plan-engine/indexedPricing";
 import { extractDeterministicTierSchedule } from "@/lib/plan-engine/tieredPricing";
 import { extractDeterministicBillCredits } from "@/lib/plan-engine/billCredits";
+import { extractDeterministicMinimumRules } from "@/lib/plan-engine/minimumRules";
 import { Prisma } from "@prisma/client";
 
 export type ComputabilityStatus =
@@ -191,9 +192,37 @@ export function derivePlanCalcRequirementsFromTemplate(args: {
   const inferred = inferSupportedFeaturesFromTemplate({ rateStructure: rs });
   const fixed = extractFixedRepEnergyCentsPerKwh(rs);
   const credits = extractDeterministicBillCredits(rs);
+  const minimum = extractDeterministicMinimumRules({ rateStructure: rs });
 
   const out = (() => {
     if (fixed != null) {
+      if (minimum.ok) {
+        return {
+          planCalcVersion,
+          planCalcStatus: "NOT_COMPUTABLE" as const,
+          planCalcReasonCode: "MINIMUM_RULES_REQUIRES_USAGE_BUCKETS",
+          requiredBucketKeys: ["kwh.m.all.total"],
+          supportedFeatures: {
+            ...inferred.features,
+            supportsMinUsageFees: true,
+            notes: [...(inferred.notes ?? []), ...(minimum.minimum?.notes ?? [])],
+          },
+        };
+      }
+      if (!minimum.ok && minimum.reason !== "NO_MIN_RULES") {
+        return {
+          planCalcVersion,
+          planCalcStatus: "NOT_COMPUTABLE" as const,
+          planCalcReasonCode: minimum.reason,
+          requiredBucketKeys: ["kwh.m.all.total"],
+          supportedFeatures: {
+            ...inferred.features,
+            supportsMinUsageFees: true,
+            notes: [...(inferred.notes ?? []), ...(minimum.notes ?? [])],
+          },
+        };
+      }
+
       if (credits.ok) {
         return {
           planCalcVersion,
@@ -311,6 +340,32 @@ export function derivePlanCalcRequirementsFromTemplate(args: {
           ...inferred.features,
           supportsTieredEnergy: true,
           notes: [...(inferred.notes ?? []), ...(tiered.notes ?? [])],
+        },
+      };
+    }
+
+    if (minimum.ok) {
+      return {
+        planCalcVersion,
+        planCalcStatus: "NOT_COMPUTABLE" as const,
+        planCalcReasonCode: "MINIMUM_RULES_REQUIRES_USAGE_BUCKETS",
+        requiredBucketKeys: ["kwh.m.all.total"],
+        supportedFeatures: {
+          ...inferred.features,
+          supportsMinUsageFees: true,
+          notes: [...(inferred.notes ?? []), ...(minimum.minimum?.notes ?? [])],
+        },
+      };
+    } else if (!minimum.ok && minimum.reason !== "NO_MIN_RULES") {
+      return {
+        planCalcVersion,
+        planCalcStatus: "NOT_COMPUTABLE" as const,
+        planCalcReasonCode: minimum.reason,
+        requiredBucketKeys: ["kwh.m.all.total"],
+        supportedFeatures: {
+          ...inferred.features,
+          supportsMinUsageFees: true,
+          notes: [...(inferred.notes ?? []), ...(minimum.notes ?? [])],
         },
       };
     }

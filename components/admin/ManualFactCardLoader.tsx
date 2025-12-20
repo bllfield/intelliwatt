@@ -713,6 +713,47 @@ export function ManualFactCardLoader(props: {
                     </div>
                   ) : null}
 
+                  {(planEngineView as any)?.minimumRules?.ok && Array.isArray((planEngineView as any)?.minimumRules?.minimum?.rules) ? (
+                    <div className="space-y-1">
+                      <div className="text-xs font-semibold text-brand-navy">Minimum usage / minimum bill (Phase 1)</div>
+                      <div className="overflow-x-auto rounded border">
+                        <table className="min-w-full text-xs">
+                          <thead className="bg-gray-50">
+                            <tr>
+                              <th className="px-2 py-1 text-left">type</th>
+                              <th className="px-2 py-1 text-left">threshold / minimum</th>
+                              <th className="px-2 py-1 text-right">amount</th>
+                              <th className="px-2 py-1 text-left">label</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(planEngineView as any).minimumRules.minimum.rules.map((r: any, i: number) => {
+                              const typ = String(r?.type ?? "");
+                              const when =
+                                typ === "MIN_USAGE_FEE"
+                                  ? `usage < ${String(r?.thresholdKwhExclusive ?? "")} kWh`
+                                  : typ === "MINIMUM_BILL"
+                                    ? `min bill $${typeof r?.minimumBillDollars === "number" ? r.minimumBillDollars.toFixed(2) : "?"}`
+                                    : "—";
+                              const amt =
+                                typ === "MIN_USAGE_FEE" && typeof r?.feeDollars === "number"
+                                  ? `$${r.feeDollars.toFixed(2)}`
+                                  : "—";
+                              return (
+                                <tr key={i} className="border-t">
+                                  <td className="px-2 py-1 font-mono">{typ}</td>
+                                  <td className="px-2 py-1 font-mono">{when}</td>
+                                  <td className="px-2 py-1 text-right font-mono">{amt}</td>
+                                  <td className="px-2 py-1">{String(r?.label ?? "")}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ) : null}
+
                   {(planEngineView as any)?.tou?.schedule?.periods?.length ? (
                     <div className="space-y-1">
                       <div className="text-xs font-semibold text-brand-navy">Deterministic TOU schedule</div>

@@ -2594,6 +2594,35 @@ Bill credits Phase 1 (non-dashboard only; deterministic, bucket-gated)
 - **Tests**:
   - Added `tests/plan-engine/billCredits.phase1.test.ts`.
 
+Minimum usage fee + minimum bill Phase 1 (non-dashboard only; deterministic, bucket-gated)
+- **Scope (supported)**:
+  - `MIN_USAGE_FEE`: if monthly total kWh is below a threshold, **add a fixed fee** (positive dollars).
+  - `MINIMUM_BILL`: after all other components (REP + TDSP + credits + min-usage fee), clamp the month’s total to `>= minimumBillDollars`.
+  - Ordering per month: **credits → min-usage fee → minimum-bill clamp** (clamp last).
+  - Bucket-gated on **monthly total only**: `kwh.m.all.total`.
+- **Deterministic extraction**: `lib/plan-engine/minimumRules.ts`
+  - Phase 1 supports a single `MIN_USAGE_FEE` and/or a single `MINIMUM_BILL`.
+  - `MIN_USAGE_FEE` is currently represented by the EFL fallback as a **negative billCredits rule** labeled “Minimum Usage Fee …”; the plan engine interprets that deterministically as a fee when `usage < threshold`.
+  - `MINIMUM_BILL` is only recognized when present as explicit structured numeric fields on `rateStructure` (no free-text parsing here).
+- **Plan-level gating (dashboard-safe)**:
+  - Plans with minimum rules remain `planCalcStatus=NOT_COMPUTABLE` with `planCalcReasonCode=MINIMUM_RULES_REQUIRES_USAGE_BUCKETS`.
+  - Unsupported/invalid shapes fail-closed with:
+    - `UNSUPPORTED_MIN_RULE_SHAPE`
+    - `UNSUPPORTED_MIN_RULE_DIMENSION` (reserved)
+    - `UNSUPPORTED_MIN_RULE_DEPENDENCY` (reserved)
+    - `NON_DETERMINISTIC_MIN_RULE` (reserved)
+- **Calculator behavior**: `lib/plan-engine/calculatePlanCostForUsage.ts`
+  - If minimum rules exist and `usageBucketsByMonth` is missing → `NOT_COMPUTABLE: MISSING_USAGE_BUCKETS`.
+  - Applies minimum rules per month and surfaces:
+    - `components.minimumUsageFeeDollars`
+    - `components.minimumBillTopUpDollars`
+- **Admin surfacing**:
+  - `introspectPlanFromRateStructure()` includes `minimumRules` output.
+  - Manual Fact Card Loader renders a minimum rules table when detected.
+  - Admin plan details “Plan variables” surfaces the minimum usage fee when encoded via negative bill credit rule.
+- **Tests**:
+  - Added `tests/plan-engine/minimumRules.phase1.test.ts`.
+
 Free Weekends (bucket-gated; plan-level remains QUEUED):
 - **Bucket requirements**: `lib/plan-engine/requiredBucketsForPlan.ts`
   - Added `supportsWeekendSplitEnergy` flag (canonical buckets: `kwh.m.weekday.total`, `kwh.m.weekend.total`)

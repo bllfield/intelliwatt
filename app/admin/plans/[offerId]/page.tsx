@@ -413,6 +413,33 @@ export default function AdminPlanDetailsPage({ params }: { params: { offerId: st
       });
     }
 
+    // Minimum usage fee (Phase 1) — currently stored as a negative "bill credit" rule by the EFL fallback.
+    // We surface it explicitly here because the plan engine treats it as a fee when usage < threshold.
+    if (hasCredits) {
+      const minFeeRules = billCreditRules.filter((r) => {
+        const label = String((r as any)?.label ?? "");
+        const amt = toNum((r as any)?.creditAmountCents);
+        const min = toNum((r as any)?.minUsageKWh);
+        return amt != null && amt < 0 && min != null && min > 0 && /minimum\s*usage\s*fee/i.test(label);
+      });
+      if (minFeeRules.length === 1) {
+        const r = minFeeRules[0]!;
+        const amt = toNum((r as any)?.creditAmountCents) ?? 0;
+        const threshold = toNum((r as any)?.minUsageKWh) ?? 0;
+        rows.push({
+          key: "minimumRules.MIN_USAGE_FEE",
+          value: `+$${Math.abs(amt / 100).toFixed(2)} if usage < ${threshold} kWh`,
+          notes: "Interpreted from negative billCredits rule with label 'Minimum Usage Fee'.",
+        });
+      } else if (minFeeRules.length > 1) {
+        rows.push({
+          key: "minimumRules.MIN_USAGE_FEE",
+          value: "—",
+          notes: "Multiple Minimum Usage Fee rules detected; Phase 1 supports at most one.",
+        });
+      }
+    }
+
     // TOU tiers (deterministic) — show the actual schedule tiers in the template.
     if (hasTouTiers) {
       rows.push({

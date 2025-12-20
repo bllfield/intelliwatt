@@ -3,6 +3,7 @@ import { extractDeterministicTouSchedule } from "@/lib/plan-engine/touPeriods";
 import { detectIndexedOrVariable, extractEflAveragePriceAnchors, chooseEffectiveCentsPerKwhFromAnchors } from "@/lib/plan-engine/indexedPricing";
 import { computeRepEnergyCostForMonthlyKwhTiered, extractDeterministicTierSchedule } from "@/lib/plan-engine/tieredPricing";
 import { applyBillCreditsToMonth, extractDeterministicBillCredits } from "@/lib/plan-engine/billCredits";
+import { applyMinimumRulesToMonth, extractDeterministicMinimumRules } from "@/lib/plan-engine/minimumRules";
 
 export type TrueCostEstimateStatus = "OK" | "APPROXIMATE" | "NOT_COMPUTABLE" | "NOT_IMPLEMENTED";
 
@@ -22,6 +23,8 @@ export type TrueCostEstimate = {
     deliveryDollars: number; // TDSP per-kWh
     baseFeesDollars: number; // TDSP fixed + REP fixed (if known)
     creditsDollars?: number; // bill credits (negative dollars)
+    minimumUsageFeeDollars?: number; // min usage fee (positive dollars)
+    minimumBillTopUpDollars?: number; // min bill clamp top-up (positive dollars)
     totalDollars: number;
   };
 
@@ -29,6 +32,8 @@ export type TrueCostEstimate = {
     rep: { energyDollars: number; fixedDollars: number; totalDollars: number };
     tdsp: { deliveryDollars: number; fixedDollars: number; totalDollars: number };
     creditsDollars?: number; // negative dollars
+    minimumUsageFeeDollars?: number; // positive dollars
+    minimumBillTopUpDollars?: number; // positive dollars
     totalDollars: number;
   };
 
@@ -68,6 +73,10 @@ function numOrNull(v: unknown): number | null {
 
 function clampNonNegative(n: number): number {
   return n < 0 ? 0 : n;
+}
+
+function roundCents(n: number): number {
+  return Math.round(n);
 }
 
 function parseHHMMishToHHMM(v: unknown): HHMM | null {
@@ -413,11 +422,17 @@ export function calculatePlanCostForUsage(args: {
       return { status: "NOT_COMPUTABLE", reason: creditsMaybe.reason, notes: [...notes, ...(creditsMaybe.notes ?? [])] };
     }
 
+    const minimumMaybe = extractDeterministicMinimumRules({ rateStructure: args.rateStructure });
+    if (!minimumMaybe.ok && minimumMaybe.reason !== "NO_MIN_RULES") {
+      return { status: "NOT_COMPUTABLE", reason: minimumMaybe.reason, notes: [...notes, ...(minimumMaybe.notes ?? [])] };
+    }
+
     // Tiered pricing (kWh blocks): requires monthly total bucket(s).
     const tieredMaybe = extractDeterministicTierSchedule(args.rateStructure);
     if (tieredMaybe.ok) {
       if (!args.usageBucketsByMonth) {
         if (creditsMaybe.ok) return { status: "NOT_COMPUTABLE", reason: "MISSING_USAGE_BUCKETS", notes: ["bill_credits_require_monthly_totals"] };
+        if (minimumMaybe.ok) return { status: "NOT_COMPUTABLE", reason: "MISSING_USAGE_BUCKETS", notes: ["minimum_rules_require_monthly_totals"] };
         return { status: "NOT_COMPUTABLE", reason: "MISSING_USAGE_BUCKETS", notes: ["tiered_pricing_requires_monthly_totals"] };
       }
 
@@ -437,8 +452,14 @@ export function calculatePlanCostForUsage(args: {
       const tdspMonthly = safeNum(args.tdsp?.monthlyCustomerChargeDollars) ?? 0;
       const repFixedMonthly = extractRepFixedMonthlyChargeDollars(args.rateStructure) ?? 0;
 
-      let repEnergyDollars = 0;
-      let totalKwh = 0;
+      let repEnergyCentsTotal = 0;
+      let repFixedCentsTotal = 0;
+      let tdspDeliveryCentsTotal = 0;
+      let tdspFixedCentsTotal = 0;
+      let creditsCentsTotal = 0;
+      let minUsageFeeCentsTotal = 0;
+      let minimumBillTopUpCentsTotal = 0;
+      let totalCentsTotal = 0;
       const missing: string[] = [];
       const debugByMonth: any[] = [];
 
@@ -452,40 +473,66 @@ export function calculatePlanCostForUsage(args: {
           continue;
         }
 
-        totalKwh += monthTotalKwh;
         const tiered = computeRepEnergyCostForMonthlyKwhTiered({
           monthlyKwh: monthTotalKwh,
           schedule: tieredMaybe.schedule,
         });
-        repEnergyDollars += tiered.repEnergyCentsTotal / 100;
-        debugByMonth.push({ ym, monthTotalKwh, tierBreakdown: tiered.tierBreakdown });
+        const monthRepEnergyCents = tiered.repEnergyCentsTotal;
+        const monthRepFixedCents = repFixedMonthly * 100;
+        const monthTdspFixedCents = tdspMonthly * 100;
+        const monthTdspDeliveryCents = monthTotalKwh * tdspPerKwhCents;
+
+        const appliedCredits = creditsMaybe.ok ? applyBillCreditsToMonth({ monthlyKwh: monthTotalKwh, credits: creditsMaybe.credits }) : null;
+        const monthCreditsCents = appliedCredits ? appliedCredits.creditCentsTotal : 0;
+
+        const subtotalCents = monthRepEnergyCents + monthRepFixedCents + monthTdspFixedCents + monthTdspDeliveryCents + monthCreditsCents;
+        let finalCents = clampNonNegative(roundCents(subtotalCents));
+        let minApplied: any[] | null = null;
+        if (minimumMaybe.ok) {
+          const appliedMin = applyMinimumRulesToMonth({
+            monthlyKwh: monthTotalKwh,
+            minimum: minimumMaybe.minimum,
+            subtotalCents: roundCents(subtotalCents),
+          });
+          minUsageFeeCentsTotal += appliedMin.minUsageFeeCents;
+          minimumBillTopUpCentsTotal += appliedMin.minimumBillTopUpCents;
+          finalCents = appliedMin.totalCentsAfter;
+          minApplied = appliedMin.applied;
+        }
+
+        repEnergyCentsTotal += roundCents(monthRepEnergyCents);
+        repFixedCentsTotal += roundCents(monthRepFixedCents);
+        tdspDeliveryCentsTotal += roundCents(monthTdspDeliveryCents);
+        tdspFixedCentsTotal += roundCents(monthTdspFixedCents);
+        creditsCentsTotal += roundCents(monthCreditsCents);
+        totalCentsTotal += finalCents;
+
+        debugByMonth.push({
+          ym,
+          monthTotalKwh,
+          tierBreakdown: tiered.tierBreakdown,
+          creditCentsTotal: monthCreditsCents,
+          minApplied,
+          subtotalCents: roundCents(subtotalCents),
+          finalCents,
+        });
       }
 
       if (missing.length > 0) {
         return { status: "NOT_COMPUTABLE", reason: `MISSING_USAGE_BUCKETS (${missing.slice(0, 10).join(", ")}${missing.length > 10 ? ", ..." : ""})` };
       }
 
-      const repFixedDollars = months.length * repFixedMonthly;
-      const tdspDeliveryDollars = totalKwh * (tdspPerKwhCents / 100);
-      const tdspFixedDollars = months.length * tdspMonthly;
-
-      // Apply bill credits (Phase 1) from monthly total kWh.
-      let creditsDollars = 0;
-      const creditsDebug: any[] = [];
-      if (creditsMaybe.ok) {
-        for (const ym of months) {
-          const m = byMonth[ym];
-          const monthTotalKwh = m ? sumMonthBucketKwh(m, "kwh.m.all.total") : null;
-          if (monthTotalKwh == null) continue;
-          const applied = applyBillCreditsToMonth({ monthlyKwh: monthTotalKwh, credits: creditsMaybe.credits });
-          creditsDollars += applied.creditCentsTotal / 100;
-          creditsDebug.push({ ym, monthTotalKwh, applied: applied.applied, creditCentsTotal: applied.creditCentsTotal });
-        }
-      }
+      const repEnergyDollars = repEnergyCentsTotal / 100;
+      const repFixedDollars = repFixedCentsTotal / 100;
+      const tdspDeliveryDollars = tdspDeliveryCentsTotal / 100;
+      const tdspFixedDollars = tdspFixedCentsTotal / 100;
+      const creditsDollars = creditsCentsTotal / 100;
+      const minUsageFeeDollars = minUsageFeeCentsTotal / 100;
+      const minimumBillTopUpDollars = minimumBillTopUpCentsTotal / 100;
 
       const repTotal = repEnergyDollars + repFixedDollars;
       const tdspTotal = tdspDeliveryDollars + tdspFixedDollars;
-      const total = clampNonNegative(repTotal + tdspTotal + creditsDollars); // creditsDollars is negative
+      const total = totalCentsTotal / 100;
 
       const tierNotes: string[] = [];
       tierNotes.push("Computed from kwh.m.all.total + tiered REP energy + TDSP delivery");
@@ -495,6 +542,7 @@ export function calculatePlanCostForUsage(args: {
       if (tdspPerKwhCents > 0 || tdspMonthly > 0) tierNotes.push("Includes TDSP delivery");
       else tierNotes.push("TDSP delivery missing/zero (check tdspRatesApplied)");
       if (creditsMaybe.ok) tierNotes.push("Includes deterministic bill credits (Phase 1)");
+      if (minimumMaybe.ok) tierNotes.push("Includes deterministic minimum rules (Phase 1)");
 
       return {
         status: "OK",
@@ -506,16 +554,20 @@ export function calculatePlanCostForUsage(args: {
           deliveryDollars: round2(tdspDeliveryDollars),
           baseFeesDollars: round2(repFixedDollars + tdspFixedDollars),
           ...(creditsMaybe.ok ? { creditsDollars: round2(creditsDollars) } : {}),
+          ...(minimumMaybe.ok ? { minimumUsageFeeDollars: round2(minUsageFeeDollars) } : {}),
+          ...(minimumMaybe.ok ? { minimumBillTopUpDollars: round2(minimumBillTopUpDollars) } : {}),
           totalDollars: round2(total),
         },
         componentsV2: {
           rep: { energyDollars: round2(repEnergyDollars), fixedDollars: round2(repFixedDollars), totalDollars: round2(repTotal) },
           tdsp: { deliveryDollars: round2(tdspDeliveryDollars), fixedDollars: round2(tdspFixedDollars), totalDollars: round2(tdspTotal) },
           ...(creditsMaybe.ok ? { creditsDollars: round2(creditsDollars) } : {}),
+          ...(minimumMaybe.ok ? { minimumUsageFeeDollars: round2(minUsageFeeDollars) } : {}),
+          ...(minimumMaybe.ok ? { minimumBillTopUpDollars: round2(minimumBillTopUpDollars) } : {}),
           totalDollars: round2(total),
         },
         notes: tierNotes,
-        debug: { tieredByMonth: debugByMonth, schedule: tieredMaybe.schedule, billCreditsByMonth: creditsDebug },
+        debug: { tieredByMonth: debugByMonth, schedule: tieredMaybe.schedule },
       };
     }
 
@@ -557,11 +609,19 @@ export function calculatePlanCostForUsage(args: {
         })]),
       );
 
-      let repEnergyDollars = 0;
-      let totalKwh = 0;
+      let repEnergyCentsTotal = 0;
+      let repFixedCentsTotal = 0;
+      let tdspDeliveryCentsTotal = 0;
+      let tdspFixedCentsTotal = 0;
+      let creditsCentsTotal = 0;
+      let minUsageFeeCentsTotal = 0;
+      let minimumBillTopUpCentsTotal = 0;
+      let totalCentsTotal = 0;
       const missing: string[] = [];
       const mismatched: string[] = [];
       const debugPeriodsByMonth: any[] = [];
+      const creditsDebug: any[] = [];
+      const minRulesDebug: any[] = [];
 
       for (const ym of months) {
         const m = byMonth[ym];
@@ -571,6 +631,7 @@ export function calculatePlanCostForUsage(args: {
         if (monthTotalKwh == null) missing.push(`${ym}:kwh.m.all.total`);
 
         let sumPeriodsKwh = 0;
+        let monthRepEnergyCents = 0;
         const dbg: any[] = [];
         for (const p of schedule.periods) {
           const k = p.startHHMM === "0000" && p.endHHMM === "2400"
@@ -582,9 +643,9 @@ export function calculatePlanCostForUsage(args: {
             continue;
           }
           sumPeriodsKwh += kwh;
-          const repCost = kwh * (p.repEnergyCentsPerKwh / 100);
-          repEnergyDollars += repCost;
-          dbg.push({ bucketKey: k, kwh, repCentsPerKwh: p.repEnergyCentsPerKwh, repCostDollars: round2(repCost), label: p.label ?? null, dayType: p.dayType, startHHMM: p.startHHMM, endHHMM: p.endHHMM });
+          const repCostCents = kwh * p.repEnergyCentsPerKwh;
+          monthRepEnergyCents += repCostCents;
+          dbg.push({ bucketKey: k, kwh, repCentsPerKwh: p.repEnergyCentsPerKwh, repCostDollars: round2(repCostCents / 100), label: p.label ?? null, dayType: p.dayType, startHHMM: p.startHHMM, endHHMM: p.endHHMM });
         }
 
         if (monthTotalKwh != null) {
@@ -592,7 +653,35 @@ export function calculatePlanCostForUsage(args: {
             mismatched.push(`${ym}:sum(periods)=${sumPeriodsKwh.toFixed(3)} total=${monthTotalKwh.toFixed(3)}`);
             continue;
           }
-          totalKwh += monthTotalKwh;
+
+          const monthRepFixedCents = repFixedMonthly * 100;
+          const monthTdspFixedCents = tdspMonthly * 100;
+          const monthTdspDeliveryCents = monthTotalKwh * tdspPerKwhCents;
+
+          const appliedCredits = creditsMaybe.ok ? applyBillCreditsToMonth({ monthlyKwh: monthTotalKwh, credits: creditsMaybe.credits }) : null;
+          const monthCreditsCents = appliedCredits ? appliedCredits.creditCentsTotal : 0;
+          if (appliedCredits) creditsDebug.push({ ym, monthTotalKwh, applied: appliedCredits.applied, creditCentsTotal: monthCreditsCents });
+
+          const subtotalCents = monthRepEnergyCents + monthRepFixedCents + monthTdspFixedCents + monthTdspDeliveryCents + monthCreditsCents;
+          let finalCents = clampNonNegative(roundCents(subtotalCents));
+          if (minimumMaybe.ok) {
+            const appliedMin = applyMinimumRulesToMonth({
+              monthlyKwh: monthTotalKwh,
+              minimum: minimumMaybe.minimum,
+              subtotalCents: roundCents(subtotalCents),
+            });
+            minUsageFeeCentsTotal += appliedMin.minUsageFeeCents;
+            minimumBillTopUpCentsTotal += appliedMin.minimumBillTopUpCents;
+            finalCents = appliedMin.totalCentsAfter;
+            minRulesDebug.push({ ym, monthTotalKwh, subtotalCents: roundCents(subtotalCents), applied: appliedMin.applied });
+          }
+
+          repEnergyCentsTotal += roundCents(monthRepEnergyCents);
+          repFixedCentsTotal += roundCents(monthRepFixedCents);
+          tdspDeliveryCentsTotal += roundCents(monthTdspDeliveryCents);
+          tdspFixedCentsTotal += roundCents(monthTdspFixedCents);
+          creditsCentsTotal += roundCents(monthCreditsCents);
+          totalCentsTotal += finalCents;
         }
 
         debugPeriodsByMonth.push({ yearMonth: ym, periods: dbg, requiredKeys });
@@ -608,27 +697,17 @@ export function calculatePlanCostForUsage(args: {
         };
       }
 
-      const repFixedDollars = months.length * repFixedMonthly;
-      const tdspDeliveryDollars = totalKwh * (tdspPerKwhCents / 100);
-      const tdspFixedDollars = months.length * tdspMonthly;
-
-      // Apply bill credits (Phase 1) from monthly total kWh.
-      let creditsDollars = 0;
-      const creditsDebug: any[] = [];
-      if (creditsMaybe.ok) {
-        for (const ym of months) {
-          const m = byMonth[ym];
-          const monthTotalKwh = m ? sumMonthBucketKwh(m, "kwh.m.all.total") : null;
-          if (monthTotalKwh == null) continue;
-          const applied = applyBillCreditsToMonth({ monthlyKwh: monthTotalKwh, credits: creditsMaybe.credits });
-          creditsDollars += applied.creditCentsTotal / 100;
-          creditsDebug.push({ ym, monthTotalKwh, applied: applied.applied, creditCentsTotal: applied.creditCentsTotal });
-        }
-      }
+      const repEnergyDollars = repEnergyCentsTotal / 100;
+      const repFixedDollars = repFixedCentsTotal / 100;
+      const tdspDeliveryDollars = tdspDeliveryCentsTotal / 100;
+      const tdspFixedDollars = tdspFixedCentsTotal / 100;
+      const creditsDollars = creditsCentsTotal / 100;
+      const minUsageFeeDollars = minUsageFeeCentsTotal / 100;
+      const minimumBillTopUpDollars = minimumBillTopUpCentsTotal / 100;
 
       const repTotal = repEnergyDollars + repFixedDollars;
       const tdspTotal = tdspDeliveryDollars + tdspFixedDollars;
-      const total = clampNonNegative(repTotal + tdspTotal + creditsDollars);
+      const total = totalCentsTotal / 100;
 
       notes.push(`TOU Phase-2 (windows): months=${months.length} periods=${schedule.periods.length}`);
       if (repFixedMonthly > 0) notes.push("Includes REP fixed monthly charge (from template)");
@@ -636,6 +715,7 @@ export function calculatePlanCostForUsage(args: {
       if (tdspPerKwhCents > 0 || tdspMonthly > 0) notes.push("Includes TDSP delivery (total-based)");
       else notes.push("TDSP delivery missing/zero (check tdspRatesApplied)");
       if (creditsMaybe.ok) notes.push("Includes deterministic bill credits (Phase 1)");
+      if (minimumMaybe.ok) notes.push("Includes deterministic minimum rules (Phase 1)");
 
       return {
         status: "OK",
@@ -647,16 +727,24 @@ export function calculatePlanCostForUsage(args: {
           deliveryDollars: round2(tdspDeliveryDollars),
           baseFeesDollars: round2(repFixedDollars + tdspFixedDollars),
           ...(creditsMaybe.ok ? { creditsDollars: round2(creditsDollars) } : {}),
+          ...(minimumMaybe.ok ? { minimumUsageFeeDollars: round2(minUsageFeeDollars) } : {}),
+          ...(minimumMaybe.ok ? { minimumBillTopUpDollars: round2(minimumBillTopUpDollars) } : {}),
           totalDollars: round2(total),
         },
         componentsV2: {
           rep: { energyDollars: round2(repEnergyDollars), fixedDollars: round2(repFixedDollars), totalDollars: round2(repTotal) },
           tdsp: { deliveryDollars: round2(tdspDeliveryDollars), fixedDollars: round2(tdspFixedDollars), totalDollars: round2(tdspTotal) },
           ...(creditsMaybe.ok ? { creditsDollars: round2(creditsDollars) } : {}),
+          ...(minimumMaybe.ok ? { minimumUsageFeeDollars: round2(minUsageFeeDollars) } : {}),
+          ...(minimumMaybe.ok ? { minimumBillTopUpDollars: round2(minimumBillTopUpDollars) } : {}),
           totalDollars: round2(total),
         },
         notes,
-        debug: { touPhase2: { requiredKeys, months, periodsByMonth: debugPeriodsByMonth }, billCreditsByMonth: creditsDebug },
+        debug: {
+          touPhase2: { requiredKeys, months, periodsByMonth: debugPeriodsByMonth },
+          ...(creditsMaybe.ok ? { billCreditsByMonth: creditsDebug } : {}),
+          ...(minimumMaybe.ok ? { minimumRulesByMonth: minRulesDebug } : {}),
+        },
       };
     }
 
@@ -682,10 +770,18 @@ export function calculatePlanCostForUsage(args: {
     const tdspMonthly = safeNum(args.tdsp?.monthlyCustomerChargeDollars) ?? 0;
     const repFixedMonthly = extractRepFixedMonthlyChargeDollars(args.rateStructure) ?? 0;
 
-    let repEnergyDollars = 0;
-    let totalKwh = 0;
+    let repEnergyCentsTotal = 0;
+    let repFixedCentsTotal = 0;
+    let tdspDeliveryCentsTotal = 0;
+    let tdspFixedCentsTotal = 0;
+    let creditsCentsTotal = 0;
+    let minUsageFeeCentsTotal = 0;
+    let minimumBillTopUpCentsTotal = 0;
+    let totalCentsTotal = 0;
     const missing: string[] = [];
     const mismatched: string[] = [];
+    const creditsDebug: any[] = [];
+    const minRulesDebug: any[] = [];
 
     for (const ym of months) {
       const m = byMonth[ym];
@@ -693,17 +789,21 @@ export function calculatePlanCostForUsage(args: {
 
       const totalKey = "kwh.m.all.total";
       const monthTotalKwh = sumMonthBucketKwh(m, totalKey);
+      if (monthTotalKwh == null) {
+        missing.push(`${ym}:${totalKey}`);
+        continue;
+      }
 
+      let monthRepEnergyCents = 0;
       if (tou.kind === "DAY_NIGHT_ALL_DAYS") {
         const nightKey = "kwh.m.all.2000-0700";
         const dayKey = "kwh.m.all.0700-2000";
         const nightKwh = sumMonthBucketKwh(m, nightKey);
         const dayKwh = sumMonthBucketKwh(m, dayKey);
 
-        if (monthTotalKwh == null) missing.push(`${ym}:${totalKey}`);
         if (nightKwh == null) missing.push(`${ym}:${nightKey}`);
         if (dayKwh == null) missing.push(`${ym}:${dayKey}`);
-        if (monthTotalKwh == null || nightKwh == null || dayKwh == null) continue;
+        if (nightKwh == null || dayKwh == null) continue;
 
         const sum = nightKwh + dayKwh;
         // Safety: if buckets disagree, do NOT attempt to normalize/adjust.
@@ -712,9 +812,8 @@ export function calculatePlanCostForUsage(args: {
           continue;
         }
 
-        repEnergyDollars +=
-          (nightKwh * (tou.nightRateCentsPerKwh / 100)) + (dayKwh * (tou.dayRateCentsPerKwh / 100));
-        totalKwh += monthTotalKwh;
+        monthRepEnergyCents =
+          (nightKwh * tou.nightRateCentsPerKwh) + (dayKwh * tou.dayRateCentsPerKwh);
       } else {
         // Free Weekends (weekday vs weekend all-day)
         const wkKey = "kwh.m.weekday.total";
@@ -727,16 +826,44 @@ export function calculatePlanCostForUsage(args: {
         if (weekdayKwh == null || weekendKwh == null) continue;
 
         const sum = weekdayKwh + weekendKwh;
-        // If total exists, enforce strict equality; otherwise we can still compute TDSP off sum.
-        if (monthTotalKwh != null && Math.abs(sum - monthTotalKwh) > 0.01) {
+        // Enforce strict equality with total.
+        if (Math.abs(sum - monthTotalKwh) > 0.01) {
           mismatched.push(`${ym}:sum(weekday+weekend)=${sum.toFixed(3)} total=${monthTotalKwh.toFixed(3)}`);
           continue;
         }
 
-        repEnergyDollars +=
-          (weekdayKwh * (tou.weekdayRateCentsPerKwh / 100)) + (weekendKwh * (tou.weekendRateCentsPerKwh / 100));
-        totalKwh += monthTotalKwh != null ? monthTotalKwh : sum;
+        monthRepEnergyCents =
+          (weekdayKwh * tou.weekdayRateCentsPerKwh) + (weekendKwh * tou.weekendRateCentsPerKwh);
       }
+
+      const monthRepFixedCents = repFixedMonthly * 100;
+      const monthTdspFixedCents = tdspMonthly * 100;
+      const monthTdspDeliveryCents = monthTotalKwh * tdspPerKwhCents;
+
+      const appliedCredits = creditsMaybe.ok ? applyBillCreditsToMonth({ monthlyKwh: monthTotalKwh, credits: creditsMaybe.credits }) : null;
+      const monthCreditsCents = appliedCredits ? appliedCredits.creditCentsTotal : 0;
+      if (appliedCredits) creditsDebug.push({ ym, monthTotalKwh, applied: appliedCredits.applied, creditCentsTotal: monthCreditsCents });
+
+      const subtotalCents = monthRepEnergyCents + monthRepFixedCents + monthTdspFixedCents + monthTdspDeliveryCents + monthCreditsCents;
+      let finalCents = clampNonNegative(roundCents(subtotalCents));
+      if (minimumMaybe.ok) {
+        const appliedMin = applyMinimumRulesToMonth({
+          monthlyKwh: monthTotalKwh,
+          minimum: minimumMaybe.minimum,
+          subtotalCents: roundCents(subtotalCents),
+        });
+        minUsageFeeCentsTotal += appliedMin.minUsageFeeCents;
+        minimumBillTopUpCentsTotal += appliedMin.minimumBillTopUpCents;
+        finalCents = appliedMin.totalCentsAfter;
+        minRulesDebug.push({ ym, monthTotalKwh, subtotalCents: roundCents(subtotalCents), applied: appliedMin.applied });
+      }
+
+      repEnergyCentsTotal += roundCents(monthRepEnergyCents);
+      repFixedCentsTotal += roundCents(monthRepFixedCents);
+      tdspDeliveryCentsTotal += roundCents(monthTdspDeliveryCents);
+      tdspFixedCentsTotal += roundCents(monthTdspFixedCents);
+      creditsCentsTotal += roundCents(monthCreditsCents);
+      totalCentsTotal += finalCents;
     }
 
     if (missing.length > 0) {
@@ -749,27 +876,17 @@ export function calculatePlanCostForUsage(args: {
       };
     }
 
-    const repFixedDollars = months.length * repFixedMonthly;
-    const tdspDeliveryDollars = totalKwh * (tdspPerKwhCents / 100);
-    const tdspFixedDollars = months.length * tdspMonthly;
-
-    // Apply bill credits (Phase 1) from monthly total kWh.
-    let creditsDollars = 0;
-    const creditsDebug: any[] = [];
-    if (creditsMaybe.ok) {
-      for (const ym of months) {
-        const m = byMonth[ym];
-        const monthTotalKwh = m ? sumMonthBucketKwh(m, "kwh.m.all.total") : null;
-        if (monthTotalKwh == null) continue;
-        const applied = applyBillCreditsToMonth({ monthlyKwh: monthTotalKwh, credits: creditsMaybe.credits });
-        creditsDollars += applied.creditCentsTotal / 100;
-        creditsDebug.push({ ym, monthTotalKwh, applied: applied.applied, creditCentsTotal: applied.creditCentsTotal });
-      }
-    }
+    const repEnergyDollars = repEnergyCentsTotal / 100;
+    const repFixedDollars = repFixedCentsTotal / 100;
+    const tdspDeliveryDollars = tdspDeliveryCentsTotal / 100;
+    const tdspFixedDollars = tdspFixedCentsTotal / 100;
+    const creditsDollars = creditsCentsTotal / 100;
+    const minUsageFeeDollars = minUsageFeeCentsTotal / 100;
+    const minimumBillTopUpDollars = minimumBillTopUpCentsTotal / 100;
 
     const repTotal = repEnergyDollars + repFixedDollars;
     const tdspTotal = tdspDeliveryDollars + tdspFixedDollars;
-    const total = clampNonNegative(repTotal + tdspTotal + creditsDollars);
+    const total = totalCentsTotal / 100;
 
     if (tou.kind === "DAY_NIGHT_ALL_DAYS") {
       notes.push(`TOU Phase-1 (day/night): months=${months.length}`);
@@ -783,6 +900,7 @@ export function calculatePlanCostForUsage(args: {
     if (tdspPerKwhCents > 0 || tdspMonthly > 0) notes.push("Includes TDSP delivery");
     else notes.push("TDSP delivery missing/zero (check tdspRatesApplied)");
     if (creditsMaybe.ok) notes.push("Includes deterministic bill credits (Phase 1)");
+    if (minimumMaybe.ok) notes.push("Includes deterministic minimum rules (Phase 1)");
 
     return {
       status: "OK",
@@ -794,6 +912,8 @@ export function calculatePlanCostForUsage(args: {
         deliveryDollars: round2(tdspDeliveryDollars),
         baseFeesDollars: round2(repFixedDollars + tdspFixedDollars),
         ...(creditsMaybe.ok ? { creditsDollars: round2(creditsDollars) } : {}),
+        ...(minimumMaybe.ok ? { minimumUsageFeeDollars: round2(minUsageFeeDollars) } : {}),
+        ...(minimumMaybe.ok ? { minimumBillTopUpDollars: round2(minimumBillTopUpDollars) } : {}),
         totalDollars: round2(total),
       },
       componentsV2: {
@@ -808,10 +928,15 @@ export function calculatePlanCostForUsage(args: {
           totalDollars: round2(tdspTotal),
         },
         ...(creditsMaybe.ok ? { creditsDollars: round2(creditsDollars) } : {}),
+        ...(minimumMaybe.ok ? { minimumUsageFeeDollars: round2(minUsageFeeDollars) } : {}),
+        ...(minimumMaybe.ok ? { minimumBillTopUpDollars: round2(minimumBillTopUpDollars) } : {}),
         totalDollars: round2(total),
       },
       notes,
-      debug: creditsMaybe.ok ? { billCreditsByMonth: creditsDebug } : undefined,
+      debug: {
+        ...(creditsMaybe.ok ? { billCreditsByMonth: creditsDebug } : {}),
+        ...(minimumMaybe.ok ? { minimumRulesByMonth: minRulesDebug } : {}),
+      },
     };
   }
 
@@ -823,6 +948,11 @@ export function calculatePlanCostForUsage(args: {
   const creditsMaybe = extractDeterministicBillCredits(args.rateStructure);
   if (!creditsMaybe.ok && creditsMaybe.reason !== "NO_CREDITS") {
     return { status: "NOT_COMPUTABLE", reason: creditsMaybe.reason, notes: [...notes, ...(creditsMaybe.notes ?? [])] };
+  }
+
+  const minimumMaybe = extractDeterministicMinimumRules({ rateStructure: args.rateStructure });
+  if (!minimumMaybe.ok && minimumMaybe.reason !== "NO_MIN_RULES") {
+    return { status: "NOT_COMPUTABLE", reason: minimumMaybe.reason, notes: [...notes, ...(minimumMaybe.notes ?? [])] };
   }
 
   // If deterministic bill credits exist, we must use monthly totals (fail-closed without buckets).
@@ -843,11 +973,18 @@ export function calculatePlanCostForUsage(args: {
     }
     const months = allMonths.slice(-wantMonths);
 
-    let repEnergyDollars = 0;
-    let totalKwh = 0;
-    let creditsDollars = 0;
+    let repEnergyCentsTotal = 0;
+    let repFixedCentsTotal = 0;
+    let tdspDeliveryCentsTotal = 0;
+    let tdspFixedCentsTotal = 0;
+    let creditsCentsTotal = 0; // negative
+    let minUsageFeeCentsTotal = 0; // positive
+    let minimumBillTopUpCentsTotal = 0; // positive
+    let totalCentsTotal = 0;
+
     const missing: string[] = [];
     const creditsDebug: any[] = [];
+    const minRulesDebug: any[] = [];
 
     for (const ym of months) {
       const m = byMonth[ym];
@@ -857,28 +994,57 @@ export function calculatePlanCostForUsage(args: {
         continue;
       }
 
-      totalKwh += monthTotalKwh;
-      repEnergyDollars += monthTotalKwh * (repEnergyCents / 100);
+      const monthEnergyCents = monthTotalKwh * repEnergyCents;
+      const monthRepFixedCents = repFixedMonthly * 100;
+      const monthTdspFixedCents = tdspMonthly * 100;
+      const monthTdspDeliveryCents = monthTotalKwh * tdspPerKwhCents;
 
-      const applied = applyBillCreditsToMonth({ monthlyKwh: monthTotalKwh, credits: creditsMaybe.credits });
-      creditsDollars += applied.creditCentsTotal / 100;
-      creditsDebug.push({ ym, monthTotalKwh, applied: applied.applied, creditCentsTotal: applied.creditCentsTotal });
+      const appliedCredits = applyBillCreditsToMonth({ monthlyKwh: monthTotalKwh, credits: creditsMaybe.credits });
+      const monthCreditsCents = appliedCredits.creditCentsTotal; // negative
+      creditsDebug.push({ ym, monthTotalKwh, applied: appliedCredits.applied, creditCentsTotal: monthCreditsCents });
+
+      const subtotalCents = monthEnergyCents + monthRepFixedCents + monthTdspFixedCents + monthTdspDeliveryCents + monthCreditsCents;
+
+      let finalCents = clampNonNegative(roundCents(subtotalCents));
+      if (minimumMaybe.ok) {
+        const appliedMin = applyMinimumRulesToMonth({
+          monthlyKwh: monthTotalKwh,
+          minimum: minimumMaybe.minimum,
+          subtotalCents: roundCents(subtotalCents),
+        });
+        minUsageFeeCentsTotal += appliedMin.minUsageFeeCents;
+        minimumBillTopUpCentsTotal += appliedMin.minimumBillTopUpCents;
+        finalCents = appliedMin.totalCentsAfter;
+        minRulesDebug.push({ ym, monthTotalKwh, subtotalCents: roundCents(subtotalCents), applied: appliedMin.applied });
+      }
+
+      repEnergyCentsTotal += roundCents(monthEnergyCents);
+      repFixedCentsTotal += roundCents(monthRepFixedCents);
+      tdspDeliveryCentsTotal += roundCents(monthTdspDeliveryCents);
+      tdspFixedCentsTotal += roundCents(monthTdspFixedCents);
+      creditsCentsTotal += roundCents(monthCreditsCents);
+      totalCentsTotal += finalCents;
     }
 
     if (missing.length > 0) {
       return { status: "NOT_COMPUTABLE", reason: `MISSING_USAGE_BUCKETS: ${missing.slice(0, 12).join(", ")}${missing.length > 12 ? "…" : ""}` };
     }
 
-    const repFixedDollars = months.length * repFixedMonthly;
-    const tdspDeliveryDollars = totalKwh * (tdspPerKwhCents / 100);
-    const tdspFixedDollars = months.length * tdspMonthly;
+    const repEnergyDollars = repEnergyCentsTotal / 100;
+    const repFixedDollars = repFixedCentsTotal / 100;
+    const tdspDeliveryDollars = tdspDeliveryCentsTotal / 100;
+    const tdspFixedDollars = tdspFixedCentsTotal / 100;
+    const creditsDollars = creditsCentsTotal / 100;
+    const minUsageFeeDollars = minUsageFeeCentsTotal / 100;
+    const minimumBillTopUpDollars = minimumBillTopUpCentsTotal / 100;
 
     const repTotal = repEnergyDollars + repFixedDollars;
     const tdspTotal = tdspDeliveryDollars + tdspFixedDollars;
-    const total = clampNonNegative(repTotal + tdspTotal + creditsDollars);
+    const total = totalCentsTotal / 100;
 
     notes.push("Computed from kwh.m.all.total (monthly) + TDSP delivery + bill credits");
     notes.push("Includes deterministic bill credits (Phase 1)");
+    if (minimumMaybe.ok) notes.push("Includes deterministic minimum rules (Phase 1)");
     if (repFixedMonthly > 0) notes.push("Includes REP fixed monthly charge (from template)");
     else notes.push("REP fixed monthly charge not found (assumed $0)");
     if (tdspPerKwhCents > 0 || tdspMonthly > 0) notes.push("Includes TDSP delivery");
@@ -894,20 +1060,125 @@ export function calculatePlanCostForUsage(args: {
         deliveryDollars: round2(tdspDeliveryDollars),
         baseFeesDollars: round2(repFixedDollars + tdspFixedDollars),
         creditsDollars: round2(creditsDollars),
+        ...(minimumMaybe.ok ? { minimumUsageFeeDollars: round2(minUsageFeeDollars) } : {}),
+        ...(minimumMaybe.ok ? { minimumBillTopUpDollars: round2(minimumBillTopUpDollars) } : {}),
         totalDollars: round2(total),
       },
       componentsV2: {
         rep: { energyDollars: round2(repEnergyDollars), fixedDollars: round2(repFixedDollars), totalDollars: round2(repTotal) },
         tdsp: { deliveryDollars: round2(tdspDeliveryDollars), fixedDollars: round2(tdspFixedDollars), totalDollars: round2(tdspTotal) },
         creditsDollars: round2(creditsDollars),
+        ...(minimumMaybe.ok ? { minimumUsageFeeDollars: round2(minUsageFeeDollars) } : {}),
+        ...(minimumMaybe.ok ? { minimumBillTopUpDollars: round2(minimumBillTopUpDollars) } : {}),
         totalDollars: round2(total),
       },
       notes,
-      debug: { billCreditsByMonth: creditsDebug },
+      debug: { billCreditsByMonth: creditsDebug, ...(minimumMaybe.ok ? { minimumRulesByMonth: minRulesDebug } : {}) },
     };
   }
 
-  // No credits: preserve v1 fixed-rate behavior (annual-kWh based).
+  // No credits: if minimum rules exist, we must use monthly totals (fail-closed without buckets).
+  if (minimumMaybe.ok) {
+    if (!args.usageBucketsByMonth) {
+      return { status: "NOT_COMPUTABLE", reason: "MISSING_USAGE_BUCKETS", notes: ["minimum_rules_require_monthly_totals"] };
+    }
+    const byMonth = args.usageBucketsByMonth;
+    const allMonths = Object.keys(byMonth ?? {}).sort();
+    if (allMonths.length === 0) {
+      return { status: "NOT_COMPUTABLE", reason: "MISSING_USAGE_BUCKETS (no months present)" };
+    }
+    const wantMonths = Math.max(1, Math.floor(safeNum(args.monthsCount) ?? 12));
+    if (allMonths.length < wantMonths) {
+      return { status: "NOT_COMPUTABLE", reason: `MISSING_USAGE_BUCKETS (need ${wantMonths} months, have ${allMonths.length})` };
+    }
+    const months = allMonths.slice(-wantMonths);
+
+    let repEnergyCentsTotal = 0;
+    let repFixedCentsTotal = 0;
+    let tdspDeliveryCentsTotal = 0;
+    let tdspFixedCentsTotal = 0;
+    let minUsageFeeCentsTotal = 0;
+    let minimumBillTopUpCentsTotal = 0;
+    let totalCentsTotal = 0;
+    const missing: string[] = [];
+    const minRulesDebug: any[] = [];
+
+    for (const ym of months) {
+      const m = byMonth[ym];
+      const monthTotalKwh = m ? sumMonthBucketKwh(m, "kwh.m.all.total") : null;
+      if (monthTotalKwh == null) {
+        missing.push(`${ym}:kwh.m.all.total`);
+        continue;
+      }
+      const monthEnergyCents = monthTotalKwh * repEnergyCents;
+      const monthRepFixedCents = repFixedMonthly * 100;
+      const monthTdspFixedCents = tdspMonthly * 100;
+      const monthTdspDeliveryCents = monthTotalKwh * tdspPerKwhCents;
+
+      const subtotalCents = monthEnergyCents + monthRepFixedCents + monthTdspFixedCents + monthTdspDeliveryCents;
+      const appliedMin = applyMinimumRulesToMonth({
+        monthlyKwh: monthTotalKwh,
+        minimum: minimumMaybe.minimum,
+        subtotalCents: roundCents(subtotalCents),
+      });
+      minUsageFeeCentsTotal += appliedMin.minUsageFeeCents;
+      minimumBillTopUpCentsTotal += appliedMin.minimumBillTopUpCents;
+      totalCentsTotal += appliedMin.totalCentsAfter;
+      minRulesDebug.push({ ym, monthTotalKwh, subtotalCents: roundCents(subtotalCents), applied: appliedMin.applied });
+
+      repEnergyCentsTotal += roundCents(monthEnergyCents);
+      repFixedCentsTotal += roundCents(monthRepFixedCents);
+      tdspDeliveryCentsTotal += roundCents(monthTdspDeliveryCents);
+      tdspFixedCentsTotal += roundCents(monthTdspFixedCents);
+    }
+
+    if (missing.length > 0) {
+      return { status: "NOT_COMPUTABLE", reason: `MISSING_USAGE_BUCKETS: ${missing.slice(0, 12).join(", ")}${missing.length > 12 ? "…" : ""}` };
+    }
+
+    const repEnergyDollars = repEnergyCentsTotal / 100;
+    const repFixedDollars = repFixedCentsTotal / 100;
+    const tdspDeliveryDollars = tdspDeliveryCentsTotal / 100;
+    const tdspFixedDollars = tdspFixedCentsTotal / 100;
+    const minUsageFeeDollars = minUsageFeeCentsTotal / 100;
+    const minimumBillTopUpDollars = minimumBillTopUpCentsTotal / 100;
+
+    const repTotal = repEnergyDollars + repFixedDollars;
+    const tdspTotal = tdspDeliveryDollars + tdspFixedDollars;
+    const total = totalCentsTotal / 100;
+
+    notes.push("Computed from kwh.m.all.total (monthly) + TDSP delivery + minimum rules");
+    if (repFixedMonthly > 0) notes.push("Includes REP fixed monthly charge (from template)");
+    else notes.push("REP fixed monthly charge not found (assumed $0)");
+    if (tdspPerKwhCents > 0 || tdspMonthly > 0) notes.push("Includes TDSP delivery");
+    else notes.push("TDSP delivery missing/zero (check tdspRatesApplied)");
+
+    return {
+      status: "OK",
+      annualCostDollars: round2(total),
+      monthlyCostDollars: round2(total / months.length),
+      confidence: "MEDIUM",
+      components: {
+        energyOnlyDollars: round2(repEnergyDollars),
+        deliveryDollars: round2(tdspDeliveryDollars),
+        baseFeesDollars: round2(repFixedDollars + tdspFixedDollars),
+        minimumUsageFeeDollars: round2(minUsageFeeDollars),
+        minimumBillTopUpDollars: round2(minimumBillTopUpDollars),
+        totalDollars: round2(total),
+      },
+      componentsV2: {
+        rep: { energyDollars: round2(repEnergyDollars), fixedDollars: round2(repFixedDollars), totalDollars: round2(repTotal) },
+        tdsp: { deliveryDollars: round2(tdspDeliveryDollars), fixedDollars: round2(tdspFixedDollars), totalDollars: round2(tdspTotal) },
+        minimumUsageFeeDollars: round2(minUsageFeeDollars),
+        minimumBillTopUpDollars: round2(minimumBillTopUpDollars),
+        totalDollars: round2(total),
+      },
+      notes,
+      debug: { minimumRulesByMonth: minRulesDebug },
+    };
+  }
+
+  // No credits + no minimum rules: preserve v1 fixed-rate behavior (annual-kWh based).
   const repEnergyDollars = annualKwh * (repEnergyCents / 100);
   const tdspDeliveryDollars = annualKwh * (tdspPerKwhCents / 100);
 

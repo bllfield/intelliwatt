@@ -93,6 +93,18 @@ export function extractDeterministicBillCredits(
       return { ok: false, reason: "UNSUPPORTED_CREDIT_DIMENSION", notes: ["monthsOfYear_present"] };
     }
 
+    // Ignore deterministic "minimum usage fee" rules that the EFL fallback encodes
+    // as negative bill credits (handled by minimumRules.ts).
+    if (
+      typeof creditAmountCents === "number" &&
+      Number.isFinite(creditAmountCents) &&
+      creditAmountCents < 0 &&
+      /minimum\s*usage\s*fee/i.test(label)
+    ) {
+      notes.push("ignored_negative_min_usage_fee_rule");
+      continue;
+    }
+
     if (creditAmountCents == null || creditAmountCents <= 0) {
       return { ok: false, reason: "UNSUPPORTED_CREDIT_SHAPE", notes: ["invalid_creditAmountCents"] };
     }
@@ -110,6 +122,10 @@ export function extractDeterministicBillCredits(
       maxUsageKWh: maxUsageKWh ?? null,
       monthsOfYear: null,
     });
+  }
+
+  if (!hasBillCredit && normalized.length === 0) {
+    return { ok: false, reason: "NO_CREDITS", notes: [...notes, "no_credit_rules_after_filter"] };
   }
 
   const rules: BillCreditRule[] = normalized.map((r) => {
