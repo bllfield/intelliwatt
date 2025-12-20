@@ -12,6 +12,15 @@ import { ensureBucketsExist } from "@/lib/usage/aggregateMonthlyBuckets";
 export const dynamic = "force-dynamic";
 
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
+const KNOWN_TDSP_CODES = ["ONCOR", "CENTERPOINT", "AEP_NORTH", "AEP_CENTRAL", "TNMP"] as const;
+
+function normalizeUtilityId(x: unknown): string {
+  return String(x ?? "").trim().toUpperCase();
+}
+
+function isKnownTdspCode(x: unknown): boolean {
+  return KNOWN_TDSP_CODES.includes(normalizeUtilityId(x) as any);
+}
 
 type Body = {
   cursor?: string | null;
@@ -145,6 +154,8 @@ export async function POST(req: NextRequest) {
         let offerIdRatePlanMapRatePlanId: string | null = null;
         let offerIdRatePlanMapError: string | null = null;
         let requiredBucketKeysEnsured: { ensured: number; skipped: number; error?: string } | null = null;
+        let tdspCandidate: string | null = null;
+        let tdspIsKnown: boolean = false;
         let planCalcSnapshot:
           | {
               planCalcStatus: string | null;
@@ -199,6 +210,13 @@ export async function POST(req: NextRequest) {
                 return null;
               })();
 
+              // Prefer inferred TDSP from EFL text; fallback to queue tdspName if present.
+              const inferredTdsp = inferTdspTerritoryFromEflText(det.rawText);
+              const tdspFromQueue = normalizeUtilityId((it as any)?.tdspName ?? null);
+              const tdspCandidateRaw = inferredTdsp ?? (tdspFromQueue ? tdspFromQueue : null);
+              tdspCandidate = normalizeUtilityId(tdspCandidateRaw);
+              tdspIsKnown = Boolean(tdspCandidate) && isKnownTdspCode(tdspCandidate);
+
               const saved = await upsertRatePlanFromEfl({
                 mode: "live",
                 eflUrl: fetched.pdfUrl ?? eflUrl,
@@ -206,7 +224,7 @@ export async function POST(req: NextRequest) {
                 repPuctCertificate: det.repPuctCertificate ?? null,
                 eflVersionCode: det.eflVersionCode ?? null,
                 eflPdfSha256: det.eflPdfSha256,
-                utilityId: inferTdspTerritoryFromEflText(det.rawText) ?? "UNKNOWN",
+                utilityId: tdspCandidate || "UNKNOWN",
                 state: "TX",
                 termMonths: typeof it?.termMonths === "number" ? it.termMonths : null,
                 rate500: expectedRateFor(500),
@@ -250,9 +268,43 @@ export async function POST(req: NextRequest) {
                 };
               })();
 
+              // Safety: never allow auto-processed templates with unknown/unmapped TDSP to become "available".
+              const persistedUtilityId = normalizeUtilityId((saved as any)?.ratePlan?.utilityId ?? null);
+              const persistedUtilityKnown = Boolean(persistedUtilityId) && isKnownTdspCode(persistedUtilityId);
+              const templatePersistedOk = templatePersisted && tdspIsKnown && persistedUtilityKnown;
+
+              // If we persisted one anyway, immediately quarantine it and keep the queue OPEN.
+              if (templatePersisted && !templatePersistedOk && persistedRatePlanId && !dryRun) {
+                try {
+                  const issues: any[] = Array.isArray((saved as any)?.ratePlan?.eflValidationIssues)
+                    ? [...((saved as any).ratePlan.eflValidationIssues as any[])]
+                    : [];
+                  issues.push({
+                    code: "TEMPLATE_UNKNOWN_UTILITY",
+                    severity: "ERROR",
+                    message: `Template quarantined by queue processor: utilityId is ${persistedUtilityId || "UNKNOWN"} (unmapped).`,
+                  });
+                  await (prisma as any).ratePlan.update({
+                    where: { id: persistedRatePlanId },
+                    data: {
+                      rateStructure: null,
+                      eflRequiresManualReview: true,
+                      eflValidationIssues: issues,
+                      planCalcStatus: "UNKNOWN",
+                      planCalcReasonCode: "MISSING_TEMPLATE",
+                      requiredBucketKeys: [],
+                      supportedFeatures: {} as any,
+                      planCalcDerivedAt: new Date(),
+                    },
+                  });
+                } catch {
+                  // ignore
+                }
+              }
+
               // Ensure bucket definitions exist for requiredBucketKeys so downstream "auto-create monthly buckets"
               // has the registry it needs. (Home-specific monthly totals are produced later, on-demand, per homeId.)
-              if (templatePersisted && planCalcSnapshot.requiredBucketKeys.length > 0) {
+              if (templatePersistedOk && planCalcSnapshot.requiredBucketKeys.length > 0) {
                 try {
                   const ensured = await ensureBucketsExist({
                     bucketKeys: planCalcSnapshot.requiredBucketKeys,
@@ -269,7 +321,7 @@ export async function POST(req: NextRequest) {
                   };
                 }
               }
-              if (templatePersisted) {
+              if (templatePersistedOk) {
                 templateAction = "CREATED";
                 persisted++;
 
@@ -340,6 +392,9 @@ export async function POST(req: NextRequest) {
                   },
                 });
                 resolved += Number(upd?.count ?? 0) || 0;
+              } else if (templatePersisted && !templatePersistedOk) {
+                templateAction = "SKIPPED";
+                persistNotes = `Template quarantined: TDSP/utility is unknown/unmapped (candidate=${tdspCandidate || "—"} persisted=${persistedUtilityId || "—"}).`;
               } else {
                 const missing = Array.isArray((saved as any)?.missingTemplateFields)
                   ? ((saved as any).missingTemplateFields as string[])
@@ -361,6 +416,7 @@ export async function POST(req: NextRequest) {
                 eflPdfSha256: det.eflPdfSha256 ?? it.eflPdfSha256 ?? null,
                 repPuctCertificate: det.repPuctCertificate ?? it.repPuctCertificate ?? null,
                 eflVersionCode: det.eflVersionCode ?? it.eflVersionCode ?? null,
+                tdspName: tdspIsKnown ? tdspCandidate : ((it as any)?.tdspName ?? null),
                 rawText: det.rawText ?? it.rawText ?? null,
                 planRules: pipeline.planRules ?? null,
                 rateStructure: pipeline.rateStructure ?? null,

@@ -1594,7 +1594,22 @@ export default function FactCardOpsPage() {
                           >
                             Details
                           </a>
-                        ) : null}
+                        ) : runHref ? (
+                          <a
+                            className="px-2 py-1 rounded border hover:bg-gray-50"
+                            href={runHref}
+                            title="Details (no offerId): open the manual runner prefilled with this EFL"
+                          >
+                            Details
+                          </a>
+                        ) : (
+                          <span
+                            className="px-2 py-1 rounded border text-gray-400 border-gray-200 cursor-not-allowed"
+                            title="No offerId or eflUrl available to open details."
+                          >
+                            Details
+                          </span>
+                        )}
                         {queueStatus === "OPEN" ? (
                           <button className="px-2 py-1 rounded border hover:bg-gray-50" onClick={() => void resolveQueueItem(String(it.id))}>
                             Resolve
@@ -1747,6 +1762,12 @@ export default function FactCardOpsPage() {
             <tbody>
               {sortedUnmappedTplRows.map((r: any) => {
                 const eflUrl = String(r?.eflUrl ?? "").trim();
+                const runHref =
+                  eflUrl
+                    ? `/admin/efl/fact-cards?${new URLSearchParams({
+                        eflUrl,
+                      }).toString()}`
+                    : "";
                 const updatedAt =
                   r?.updatedAt ? String(r.updatedAt).slice(0, 19).replace("T", " ") : "-";
                 return (
@@ -1761,12 +1782,22 @@ export default function FactCardOpsPage() {
                     <td className="px-2 py-2 font-mono text-[11px] text-gray-700">{updatedAt}</td>
                     <td className="px-2 py-2">
                       <div className="flex flex-wrap gap-2">
-                        <span
-                          className="px-2 py-1 rounded border text-gray-400 border-gray-200 cursor-not-allowed"
-                          title="This template is unmapped (no OfferIdRatePlanMap), so it cannot open /admin/plans/[offerId] yet."
-                        >
-                          Details
-                        </span>
+                        {runHref ? (
+                          <a
+                            className="px-2 py-1 rounded border hover:bg-gray-50"
+                            href={runHref}
+                            title="Details: open manual runner prefilled with this EFL"
+                          >
+                            Details
+                          </a>
+                        ) : (
+                          <span
+                            className="px-2 py-1 rounded border text-gray-400 border-gray-200 cursor-not-allowed"
+                            title="No eflUrl available to open details."
+                          >
+                            Details
+                          </span>
+                        )}
                         {eflUrl ? (
                           <a
                             className="px-2 py-1 rounded border hover:bg-gray-50"
@@ -1904,6 +1935,13 @@ export default function FactCardOpsPage() {
               {sortedTplRows.map((r: any) => {
                 const eflUrl = (r?.eflUrl ?? "").trim();
                 const offerId = String((r as any)?.offerId ?? "").trim();
+                const runHref =
+                  eflUrl
+                    ? `/admin/efl/fact-cards?${new URLSearchParams({
+                        eflUrl,
+                        ...(offerId ? { offerId } : {}),
+                      }).toString()}`
+                    : "";
                 const planTypeLabel = deriveTemplatePlanTypeLabel(r);
                 return (
                   <tr key={r.id} className="border-t h-12">
@@ -1987,10 +2025,18 @@ export default function FactCardOpsPage() {
                           >
                             Details
                           </a>
+                        ) : runHref ? (
+                          <a
+                            className="px-2 py-1 rounded border hover:bg-gray-50"
+                            href={runHref}
+                            title="Details (no offerId): open the manual runner prefilled with this EFL"
+                          >
+                            Details
+                          </a>
                         ) : (
                           <span
                             className="px-2 py-1 rounded border text-gray-400 border-gray-200 cursor-not-allowed"
-                            title="No OfferIdRatePlanMap link found for this template (cannot open /admin/plans/[offerId])."
+                            title="No offerId or eflUrl available to open details."
                           >
                             Details
                           </span>
