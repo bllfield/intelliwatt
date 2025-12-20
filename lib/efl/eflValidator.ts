@@ -450,7 +450,13 @@ export function inferTdspTerritoryFromEflText(
 
   if (norm.includes("centerpoint")) return "CENTERPOINT";
   if (norm.includes("oncor")) return "ONCOR";
-  if (norm.includes("texas-new mexico power") || norm.includes("tnmp")) return "TNMP";
+  // TNMP appears in some EFL headers as either:
+  // - "Texas New Mexico Power Service Area"
+  // - "Texas-New Mexico Power"
+  // - "TNMP"
+  if (/\btexas\s*-?\s*new\s+mexico\s+power\b/i.test(norm) || norm.includes("tnmp")) {
+    return "TNMP";
+  }
 
   // AEP variants (common in EFL headers: "AEP North", "AEP Central")
   if (
