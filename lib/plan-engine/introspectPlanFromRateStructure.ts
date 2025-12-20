@@ -163,6 +163,7 @@ export type PlanEngineIntrospection = {
     requiredBucketKeys: string[];
     supportedFeatures: Record<string, any>;
   };
+  estimateModesAllowed?: Array<"INDEXED_EFL_ANCHOR_APPROX">;
   combo?: {
     hasTiered: boolean;
     hasTou: boolean;
@@ -475,6 +476,12 @@ export function introspectPlanFromRateStructure(input: { rateStructure: any }): 
 
   return {
     planCalc,
+    estimateModesAllowed: (() => {
+      const approxPossible =
+        indexed.isIndexed &&
+        (anchors.centsPerKwhAt500 != null || anchors.centsPerKwhAt1000 != null || anchors.centsPerKwhAt2000 != null);
+      return approxPossible ? ["INDEXED_EFL_ANCHOR_APPROX"] : [];
+    })(),
     combo: (() => {
       const hasTiered = tiered.ok;
       const hasTou = !!tou.schedule;

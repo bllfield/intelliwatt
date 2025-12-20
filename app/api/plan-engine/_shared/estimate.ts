@@ -455,7 +455,8 @@ export async function getTdspApplied(tdspSlug: string | null): Promise<TdspAppli
 export async function estimateOfferFromOfferId(args: OfferEstimateInput & OfferEstimateContext): Promise<OfferEstimateResult> {
   const offerId = String(args.offerId ?? "").trim();
   const monthsCount = Math.max(1, Math.min(12, Math.floor(Number(args.monthsCount ?? 12))));
-  const autoEnsureBuckets = Boolean((args as any).autoEnsureBuckets ?? (args as any).backfill);
+  // Default ON (production-safe): if caller doesn't specify, we auto-create monthly buckets from intervals (bounded).
+  const autoEnsureBuckets = Boolean((args as any).autoEnsureBuckets ?? (args as any).backfill ?? true);
 
   if (!offerId) return { offerId, ok: false, error: "missing_offerId", httpStatus: 400, monthsCount, monthsIncluded: [], annualKwh: args.annualKwh, usageBucketsByMonthIncluded: false, detected: { freeWeekends: false, dayNightTou: false }, backfill: { requested: autoEnsureBuckets, attempted: false, ok: false, missingKeysBefore: 0, missingKeysAfter: 0 } };
 

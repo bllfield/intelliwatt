@@ -2628,6 +2628,12 @@ Minimum usage fee + minimum bill Phase 1 (non-dashboard only; deterministic, buc
 - **Tests**:
   - Added `tests/plan-engine/minimumRules.phase1.test.ts`.
 
+Plan Calculator — COMPLETE
+- All known deterministic plan types compute end-to-end in the **non-dashboard** plan engine flow (bucket-gated where required).
+- Indexed/variable remains **NOT_COMPUTABLE by default**; admin can explicitly enable `INDEXED_EFL_ANCHOR_APPROX` (labeled APPROXIMATE).
+- Monthly bucket auto-creation is **enabled by default** in non-dashboard estimate flows (bounded on-demand).
+- Admin queueing is **only** for true plan defects (`UNSUPPORTED_*`, `NON_DETERMINISTIC_*`, `UNSUPPORTED_BUCKET_KEY`), never for availability gates.
+
 Free Weekends (bucket-gated; plan-level remains QUEUED):
 - **Bucket requirements**: `lib/plan-engine/requiredBucketsForPlan.ts`
   - Added `supportsWeekendSplitEnergy` flag (canonical buckets: `kwh.m.weekday.total`, `kwh.m.weekend.total`)
