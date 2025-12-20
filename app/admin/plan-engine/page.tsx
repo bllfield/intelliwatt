@@ -99,6 +99,7 @@ export default function PlanEngineLabPage() {
   const [templateReasonByOfferId, setTemplateReasonByOfferId] = useState<Record<string, string>>({});
   const [monthsCount, setMonthsCount] = useState(12);
   const [backfill, setBackfill] = useState(true);
+  const [approxIndexed, setApproxIndexed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rawJson, setRawJson] = useState<any>(null);
@@ -237,7 +238,7 @@ export default function PlanEngineLabPage() {
       return { type: "FIXED", flags: Array.from(new Set(flags)) };
     }
     // 7) OTHER
-    if (estimate?.status === "OK") flags.push("OK_BUT_UNKNOWN_TYPE");
+    if (estimate?.status === "OK" || estimate?.status === "APPROXIMATE") flags.push("OK_BUT_UNKNOWN_TYPE");
     return { type: "OTHER", flags: Array.from(new Set(flags)) };
   }
 
@@ -299,6 +300,7 @@ export default function PlanEngineLabPage() {
           offerIds,
           monthsCount: monthsCountClamped,
           backfill,
+          estimateMode: approxIndexed ? "INDEXED_EFL_ANCHOR_APPROX" : "DEFAULT",
         }),
       });
 
@@ -319,7 +321,7 @@ export default function PlanEngineLabPage() {
     } finally {
       setBusy(false);
     }
-  }, [offerIds, monthsCountClamped, backfill]);
+  }, [offerIds, monthsCountClamped, backfill, approxIndexed]);
 
   const rows = Array.isArray(rawJson?.results) ? rawJson.results : [];
 
@@ -620,6 +622,11 @@ export default function PlanEngineLabPage() {
           <label className="flex items-center gap-2">
             <input type="checkbox" checked={backfill} onChange={(e) => setBackfill(e.target.checked)} />
             <span className="text-sm font-semibold text-gray-800">Auto-create monthly buckets (recommended)</span>
+          </label>
+
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={approxIndexed} onChange={(e) => setApproxIndexed(e.target.checked)} />
+            <span className="text-sm font-semibold text-gray-800">Approx Indexed via EFL anchors</span>
           </label>
 
           <button

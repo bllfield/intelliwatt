@@ -16,6 +16,7 @@ export type OfferEstimateInput = {
   offerId: string;
   monthsCount: number;
   autoEnsureBuckets: boolean;
+  estimateMode?: "DEFAULT" | "INDEXED_EFL_ANCHOR_APPROX";
 };
 
 export type OfferEstimateContext = {
@@ -642,6 +643,7 @@ export async function estimateOfferFromOfferId(args: OfferEstimateInput & OfferE
     monthsCount,
     tdsp: args.tdsp,
     rateStructure,
+    ...(args.estimateMode ? { estimateMode: args.estimateMode } : {}),
     ...(usageBucketsByMonth ? { usageBucketsByMonth } : {}),
   });
 

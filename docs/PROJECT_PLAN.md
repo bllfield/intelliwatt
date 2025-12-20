@@ -2523,6 +2523,26 @@ TOU Phase-2 (arbitrary windows; non-dashboard only)
 - Tests:
   - Added unit tests for TOU Phase-2 window math in `tests/plan-engine/touPhase2.cost.test.ts`
 
+Indexed / Variable pricing (non-dashboard only; explicit approximation mode)
+- **Detection**: `lib/plan-engine/indexedPricing.ts`
+  - `detectIndexedOrVariable(rateStructure)` conservatively identifies VARIABLE/INDEXED templates (without misclassifying TOU).
+- **EFL avg-price anchors (no raw-text parsing here)**: `lib/plan-engine/indexedPricing.ts`
+  - Reads modeled average ¢/kWh at `500/1000/2000` kWh from `rateStructure.__eflAvgPriceValidation.points[*].modeledAvgCentsPerKwh` (or `modeledRate500/1000/2000` if embedded).
+- **Default behavior (fail-closed)**:
+  - `calculatePlanCostForUsage()` returns `NOT_COMPUTABLE` with reason `NON_DETERMINISTIC_PRICING_INDEXED`.
+  - `planComputability` returns `planCalcStatus=NOT_COMPUTABLE` with `planCalcReasonCode=NON_DETERMINISTIC_PRICING_INDEXED` (dashboard-safe; no regression).
+- **Optional APPROXIMATE mode**:
+  - Calculator supports `estimateMode="INDEXED_EFL_ANCHOR_APPROX"` which uses EFL anchors to choose an effective ¢/kWh (closest or linear interpolation).
+  - Output is clearly labeled: `status="APPROXIMATE"` and `estimateMode="INDEXED_EFL_ANCHOR_APPROX"`.
+  - TDSP is applied exactly as in fixed-rate math (total-based).
+- **Wiring**:
+  - `GET /api/plan-engine/offer-estimate`: query `estimateMode=INDEXED_EFL_ANCHOR_APPROX`
+  - `POST /api/plan-engine/estimate-set`: body `estimateMode`
+  - `POST /api/admin/plan-engine/offer-estimate`: body `estimateMode`
+  - Admin UIs expose a checkbox: “Approx Indexed via EFL anchors”.
+- **Tests**:
+  - Added `tests/plan-engine/indexed.anchors.test.ts` (anchor selection + calculator default vs approx).
+
 Free Weekends (bucket-gated; plan-level remains QUEUED):
 - **Bucket requirements**: `lib/plan-engine/requiredBucketsForPlan.ts`
   - Added `supportsWeekendSplitEnergy` flag (canonical buckets: `kwh.m.weekday.total`, `kwh.m.weekend.total`)

@@ -626,6 +626,29 @@ export function ManualFactCardLoader(props: {
                     </div>
                   </div>
 
+                  {(planEngineView as any)?.indexed?.isIndexed ? (
+                    <div className="rounded border bg-gray-50 p-2 text-xs">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="font-semibold text-brand-navy">Indexed / Variable</div>
+                        {(planEngineView as any)?.indexed?.approxPossible ? (
+                          <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[11px] font-semibold">
+                            Approx possible (anchors present)
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[11px] font-semibold">
+                            No anchors found
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-1 font-mono break-all">
+                        kind={(planEngineView as any)?.indexed?.kind ?? "—"}{" "}
+                        500={(planEngineView as any)?.indexed?.anchors?.centsPerKwhAt500 ?? "—"}{" "}
+                        1000={(planEngineView as any)?.indexed?.anchors?.centsPerKwhAt1000 ?? "—"}{" "}
+                        2000={(planEngineView as any)?.indexed?.anchors?.centsPerKwhAt2000 ?? "—"}
+                      </div>
+                    </div>
+                  ) : null}
+
                   {(planEngineView as any)?.tou?.schedule?.periods?.length ? (
                     <div className="space-y-1">
                       <div className="text-xs font-semibold text-brand-navy">Deterministic TOU schedule</div>

@@ -1,6 +1,7 @@
 import { requiredBucketsForPlan, requiredBucketsForRateStructure } from "@/lib/plan-engine/requiredBucketsForPlan";
 import { extractFixedRepEnergyCentsPerKwh } from "@/lib/plan-engine/calculatePlanCostForUsage";
 import { extractDeterministicTouSchedule } from "@/lib/plan-engine/touPeriods";
+import { detectIndexedOrVariable } from "@/lib/plan-engine/indexedPricing";
 import { Prisma } from "@prisma/client";
 
 export type ComputabilityStatus =
@@ -228,6 +229,26 @@ export function derivePlanCalcRequirementsFromTemplate(args: {
         planCalcReasonCode: "TOU_REQUIRES_USAGE_BUCKETS_PHASE2",
         requiredBucketKeys: reqs.map((r) => r.key),
         supportedFeatures: { ...inferred.features, supportsTouEnergy: true, notes: [...inferred.notes, ...(tou2.notes ?? [])] },
+      };
+    }
+
+    const indexed = detectIndexedOrVariable(rs);
+    if (indexed.isIndexed) {
+      return {
+        planCalcVersion,
+        planCalcStatus: "NOT_COMPUTABLE" as const,
+        planCalcReasonCode: "NON_DETERMINISTIC_PRICING_INDEXED",
+        requiredBucketKeys: ["kwh.m.all.total"],
+        supportedFeatures: {
+          ...inferred.features,
+          supportsFixedEnergyRate: false,
+          supportsTouEnergy: false,
+          notes: [
+            ...(inferred.notes ?? []),
+            ...(indexed.notes ?? []),
+            "Indexed/variable pricing is not deterministically computable without an explicit approximation mode.",
+          ],
+        },
       };
     }
 

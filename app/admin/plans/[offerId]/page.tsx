@@ -165,6 +165,7 @@ export default function AdminPlanDetailsPage({ params }: { params: { offerId: st
   const [homeId, setHomeId] = useState("");
   const [monthsCount, setMonthsCount] = useState(12);
   const [backfill, setBackfill] = useState(true);
+  const [approxIndexed, setApproxIndexed] = useState(false);
   const [estimateLoading, setEstimateLoading] = useState(false);
   const [estimateErr, setEstimateErr] = useState<string | null>(null);
   const [estimateJson, setEstimateJson] = useState<any>(null);
@@ -184,6 +185,7 @@ export default function AdminPlanDetailsPage({ params }: { params: { offerId: st
           homeId: homeId.trim(),
           monthsCount: monthsClamped,
           backfill,
+          estimateMode: approxIndexed ? "INDEXED_EFL_ANCHOR_APPROX" : "DEFAULT",
         }),
       });
       const json = await res.json().catch(() => null);
@@ -196,7 +198,7 @@ export default function AdminPlanDetailsPage({ params }: { params: { offerId: st
     } finally {
       setEstimateLoading(false);
     }
-  }, [token, offerId, homeId, monthsClamped, backfill]);
+  }, [token, offerId, homeId, monthsClamped, backfill, approxIndexed]);
 
   // --- bucket coverage matrix (homeId + requiredBucketKeys)
   const [coverageLoading, setCoverageLoading] = useState(false);
@@ -1011,6 +1013,10 @@ export default function AdminPlanDetailsPage({ params }: { params: { offerId: st
             <label className="inline-flex items-center gap-2 text-xs mt-5">
               <input type="checkbox" checked={backfill} onChange={(e) => setBackfill(e.target.checked)} />
               Auto-create monthly buckets (recommended)
+            </label>
+            <label className="inline-flex items-center gap-2 text-xs mt-5">
+              <input type="checkbox" checked={approxIndexed} onChange={(e) => setApproxIndexed(e.target.checked)} />
+              Approx Indexed via EFL anchors
             </label>
             <button
               className="rounded-lg bg-black text-white px-4 py-2 text-sm disabled:opacity-60 mt-5"

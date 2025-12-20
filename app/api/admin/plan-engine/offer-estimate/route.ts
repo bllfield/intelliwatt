@@ -40,6 +40,9 @@ export async function POST(req: NextRequest) {
   const backfillField = body?.backfill;
   const backfill =
     backfillField == null ? true : backfillField === true || String(backfillField ?? "").trim().toLowerCase() === "true" || String(backfillField ?? "").trim() === "1";
+  const estimateModeParam = String(body?.estimateMode ?? "").trim().toUpperCase();
+  const estimateMode =
+    estimateModeParam === "INDEXED_EFL_ANCHOR_APPROX" ? ("INDEXED_EFL_ANCHOR_APPROX" as const) : ("DEFAULT" as const);
 
   if (!offerId) return jsonError(400, "missing_offerId");
   if (!homeId) return jsonError(400, "missing_homeId");
@@ -100,6 +103,7 @@ export async function POST(req: NextRequest) {
     offerId,
     monthsCount,
     autoEnsureBuckets: backfill,
+    estimateMode,
     homeId: house.id,
     esiid,
     tdspSlug,
@@ -115,7 +119,7 @@ export async function POST(req: NextRequest) {
   // Availability gates (missing intervals/buckets) should NOT create review noise.
   const estStatus = String(res?.estimate?.status ?? "");
   const estReason = String(res?.estimate?.reason ?? "").trim();
-  const isBlocked = estStatus && estStatus !== "OK";
+  const isBlocked = estStatus && estStatus !== "OK" && estStatus !== "APPROXIMATE";
   const needsReview =
     isBlocked &&
     (estReason.startsWith("UNSUPPORTED_") ||

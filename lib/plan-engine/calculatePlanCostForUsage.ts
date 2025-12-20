@@ -1,13 +1,15 @@
 import crypto from "node:crypto";
 import { extractDeterministicTouSchedule } from "@/lib/plan-engine/touPeriods";
+import { detectIndexedOrVariable, extractEflAveragePriceAnchors, chooseEffectiveCentsPerKwhFromAnchors } from "@/lib/plan-engine/indexedPricing";
 
-export type TrueCostEstimateStatus = "OK" | "NOT_COMPUTABLE" | "NOT_IMPLEMENTED";
+export type TrueCostEstimateStatus = "OK" | "APPROXIMATE" | "NOT_COMPUTABLE" | "NOT_IMPLEMENTED";
 
 export type TrueCostConfidence = "HIGH" | "MEDIUM" | "LOW";
 
 export type TrueCostEstimate = {
   status: TrueCostEstimateStatus;
   reason?: string;
+  estimateMode?: "DEFAULT" | "INDEXED_EFL_ANCHOR_APPROX";
 
   annualCostDollars?: number;
   monthlyCostDollars?: number;
@@ -315,6 +317,7 @@ export function calculatePlanCostForUsage(args: {
   monthsCount: number; // typically 12
   tdsp: TdspRatesApplied;
   rateStructure: any;
+  estimateMode?: "DEFAULT" | "INDEXED_EFL_ANCHOR_APPROX";
   // Optional Phase-1: bucket totals by month for TOU math paths (no call sites use this yet).
   usageBucketsByMonth?: UsageBucketsByMonth;
 }): TrueCostEstimate {
@@ -331,6 +334,72 @@ export function calculatePlanCostForUsage(args: {
     // - If we have buckets, attempt TOU computations.
     // - If we don't have buckets, still try to classify the structure to return a precise fail-closed reason.
     const tou2Maybe = extractDeterministicTouSchedule(args.rateStructure);
+    const indexed = detectIndexedOrVariable(args.rateStructure);
+
+    // Indexed/variable pricing: fail-closed by default. Allow explicit approximation using EFL-modeled average price anchors.
+    if (indexed.isIndexed && !tou2Maybe.schedule && !extractTouPhase1Rates(args.rateStructure)) {
+      if (String(args.estimateMode ?? "DEFAULT") !== "INDEXED_EFL_ANCHOR_APPROX") {
+        return { status: "NOT_COMPUTABLE", reason: "NON_DETERMINISTIC_PRICING_INDEXED", notes: [...notes, ...(indexed.notes ?? [])] };
+      }
+
+      const anchors = extractEflAveragePriceAnchors(args.rateStructure);
+      const chosen = chooseEffectiveCentsPerKwhFromAnchors({ annualKwh, anchors });
+      if (!chosen.ok) {
+        return { status: "NOT_COMPUTABLE", reason: "MISSING_EFL_ANCHORS", notes: [...notes, ...(indexed.notes ?? []), ...(chosen.notes ?? [])] };
+      }
+
+      const repFixedMonthly = extractRepFixedMonthlyChargeDollars(args.rateStructure) ?? 0;
+      const tdspPerKwhCents = safeNum(args.tdsp?.perKwhDeliveryChargeCents) ?? 0;
+      const tdspMonthly = safeNum(args.tdsp?.monthlyCustomerChargeDollars) ?? 0;
+
+      const repEnergyDollars = annualKwh * (chosen.centsPerKwh / 100);
+      const tdspDeliveryDollars = annualKwh * (tdspPerKwhCents / 100);
+
+      const months = Math.max(1, Math.floor(safeNum(args.monthsCount) ?? 12));
+      const repFixedDollars = months * repFixedMonthly;
+      const tdspFixedDollars = months * tdspMonthly;
+
+      const repTotal = repEnergyDollars + repFixedDollars;
+      const tdspTotal = tdspDeliveryDollars + tdspFixedDollars;
+      const total = repTotal + tdspTotal;
+
+      notes.push("APPROXIMATE: indexed/variable plan using EFL modeled average price anchors (500/1000/2000 kWh).");
+      notes.push(`anchorMethod=${chosen.method}`);
+      notes.push(...(chosen.notes ?? []));
+      if (repFixedMonthly > 0) notes.push("Includes REP fixed monthly charge (from template)");
+      else notes.push("REP fixed monthly charge not found (assumed $0)");
+      if (tdspPerKwhCents > 0 || tdspMonthly > 0) notes.push("Includes TDSP delivery");
+      else notes.push("TDSP delivery missing/zero (check tdspRatesApplied)");
+
+      return {
+        status: "APPROXIMATE",
+        estimateMode: "INDEXED_EFL_ANCHOR_APPROX",
+        annualCostDollars: round2(total),
+        monthlyCostDollars: round2(total / months),
+        confidence: "LOW",
+        components: {
+          energyOnlyDollars: round2(repEnergyDollars),
+          deliveryDollars: round2(tdspDeliveryDollars),
+          baseFeesDollars: round2(repFixedDollars + tdspFixedDollars),
+          totalDollars: round2(total),
+        },
+        componentsV2: {
+          rep: { energyDollars: round2(repEnergyDollars), fixedDollars: round2(repFixedDollars), totalDollars: round2(repTotal) },
+          tdsp: { deliveryDollars: round2(tdspDeliveryDollars), fixedDollars: round2(tdspFixedDollars), totalDollars: round2(tdspTotal) },
+          totalDollars: round2(total),
+        },
+        notes,
+        debug: {
+          indexedApprox: {
+            kind: indexed.kind,
+            anchors,
+            chosen,
+            repEnergyCentsPerKwhEffective: chosen.centsPerKwh,
+          },
+        },
+      };
+    }
+
     if (!args.usageBucketsByMonth) {
       if (tou2Maybe.schedule) {
         return { status: "NOT_COMPUTABLE", reason: "MISSING_USAGE_BUCKETS" };

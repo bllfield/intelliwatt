@@ -39,6 +39,10 @@ export async function GET(req: NextRequest) {
             return false;
           })();
 
+    const estimateModeParam = String(url.searchParams.get("estimateMode") ?? "").trim().toUpperCase();
+    const estimateMode =
+      estimateModeParam === "INDEXED_EFL_ANCHOR_APPROX" ? ("INDEXED_EFL_ANCHOR_APPROX" as const) : ("DEFAULT" as const);
+
     const user = await prisma.user.findUnique({
       where: { email: normalizeEmail(sessionEmail) },
       select: { id: true },
@@ -80,6 +84,7 @@ export async function GET(req: NextRequest) {
       offerId,
       monthsCount,
       autoEnsureBuckets,
+      estimateMode,
       homeId: house.id,
       esiid,
       tdspSlug: tdspSlug || null,

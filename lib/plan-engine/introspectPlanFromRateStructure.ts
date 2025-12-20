@@ -1,5 +1,6 @@
 import { requiredBucketsForRateStructure } from "@/lib/plan-engine/requiredBucketsForPlan";
 import { extractDeterministicTouSchedule } from "@/lib/plan-engine/touPeriods";
+import { detectIndexedOrVariable, extractEflAveragePriceAnchors } from "@/lib/plan-engine/indexedPricing";
 
 function isObject(v: unknown): v is Record<string, any> {
   return typeof v === "object" && v !== null;
@@ -169,6 +170,13 @@ export type PlanEngineIntrospection = {
     requiredBucketKeys: string[];
     notes: string[];
   };
+  indexed?: {
+    isIndexed: boolean;
+    kind: "INDEXED" | "VARIABLE" | null;
+    anchors: { centsPerKwhAt500: number | null; centsPerKwhAt1000: number | null; centsPerKwhAt2000: number | null };
+    approxPossible: boolean;
+    notes: string[];
+  };
 };
 
 /**
@@ -186,6 +194,8 @@ export function introspectPlanFromRateStructure(input: { rateStructure: any }): 
   const inferred = inferSupportedFeaturesFromRateStructure(rs);
   const fixed = extractFixedRepEnergyCentsPerKwh(rs);
   const tou = extractDeterministicTouSchedule(rs);
+  const indexed = detectIndexedOrVariable(rs);
+  const anchors = extractEflAveragePriceAnchors(rs);
   const requiredBuckets = requiredBucketsForRateStructure({ rateStructure: rs });
   const requiredBucketKeys = requiredBuckets.map((r) => r.key);
 
@@ -245,14 +255,18 @@ export function introspectPlanFromRateStructure(input: { rateStructure: any }): 
   const calculatorDryRun = (() => {
     const notes: string[] = [];
 
-    const canRunWithoutBuckets = fixed != null;
-    const canRunWithBuckets = fixed != null || !!tou.schedule;
-    const requiresUsageBuckets = fixed == null;
+    const approxPossible = indexed.isIndexed && (anchors.centsPerKwhAt500 != null || anchors.centsPerKwhAt1000 != null || anchors.centsPerKwhAt2000 != null);
+
+    const canRunWithoutBuckets = fixed != null || approxPossible;
+    const canRunWithBuckets = fixed != null || !!tou.schedule || approxPossible;
+    const requiresUsageBuckets = fixed == null && !approxPossible;
 
     if (fixed != null) {
       notes.push(`Fixed REP energy rate detected (${fixed} ¢/kWh); calculator can run without usage buckets.`);
     } else if (tou.schedule) {
       notes.push(`Deterministic TOU schedule detected; calculator requires usage buckets: ${requiredBucketKeys.join(", ")}`);
+    } else if (approxPossible) {
+      notes.push("Indexed/variable plan detected; calculator can run only in APPROXIMATE mode using EFL modeled price anchors (500/1000/2000).");
     } else {
       notes.push("No single fixed REP energy rate detected; TOU schedule extraction failed or unsupported (fail-closed).");
     }
@@ -272,6 +286,15 @@ export function introspectPlanFromRateStructure(input: { rateStructure: any }): 
     requiredBuckets,
     requiredBucketKeys,
     calculatorDryRun,
+    indexed: {
+      isIndexed: indexed.isIndexed,
+      kind: indexed.kind,
+      anchors,
+      approxPossible:
+        indexed.isIndexed &&
+        (anchors.centsPerKwhAt500 != null || anchors.centsPerKwhAt1000 != null || anchors.centsPerKwhAt2000 != null),
+      notes: indexed.notes ?? [],
+    },
   };
 }
 

@@ -38,6 +38,9 @@ export async function POST(req: NextRequest) {
 
     const backfillField = body?.backfill;
     const backfillRequested = backfillField == null ? true : toBool(backfillField);
+    const estimateModeParam = String(body?.estimateMode ?? "").trim().toUpperCase();
+    const estimateMode =
+      estimateModeParam === "INDEXED_EFL_ANCHOR_APPROX" ? ("INDEXED_EFL_ANCHOR_APPROX" as const) : ("DEFAULT" as const);
 
     const offerIds: string[] = [];
     const seen = new Set<string>();
@@ -117,6 +120,7 @@ export async function POST(req: NextRequest) {
         offerId,
         monthsCount,
         autoEnsureBuckets: backfillRequested,
+        estimateMode,
         homeId: house.id,
         esiid,
         tdspSlug: house.tdspSlug ? String(house.tdspSlug) : null,
