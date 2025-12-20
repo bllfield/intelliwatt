@@ -294,10 +294,57 @@ async function fetchBytes(url: string, timeoutMs: number) {
       method: "GET",
       redirect: "follow",
       headers: {
+        // Some WAFs block "compatible; bot" user agents. Prefer a normal browser UA.
         "user-agent":
-          "Mozilla/5.0 (compatible; IntelliWatt-EFLFetcher/1.0; +https://intelliwatt.com)",
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
         accept:
-          "application/pdf, text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "application/pdf,text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "accept-language": "en-US,en;q=0.9",
+      },
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    const contentType = res.headers.get("content-type");
+    const buf = new Uint8Array(await res.arrayBuffer());
+    return { res, contentType, buf };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function fetchBytesWithWafFallback(url: string, timeoutMs: number, notes: string[]) {
+  // Attempt 1: normal browser-ish headers (default).
+  try {
+    return await fetchBytes(url, timeoutMs);
+  } catch (e) {
+    notes.push(`primary_fetch_error=${e instanceof Error ? e.message : String(e)}`);
+    throw e;
+  }
+}
+
+function originFromUrl(u: string): string | null {
+  try {
+    return new URL(u).origin;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchBytesWithReferer(url: string, timeoutMs: number, referer: string) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      redirect: "follow",
+      headers: {
+        "user-agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+        accept:
+          "application/pdf,text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "accept-language": "en-US,en;q=0.9",
+        // Some doc hosts require a same-origin referer.
+        referer,
       },
       cache: "no-store",
       signal: controller.signal,
@@ -325,12 +372,28 @@ export async function fetchEflPdfFromUrl(
   const timeoutMs = opts?.timeoutMs ?? 20_000;
 
   try {
-    const { res, contentType, buf } = await fetchBytes(eflUrl, timeoutMs);
+    // First fetch attempt.
+    let first = await fetchBytesWithWafFallback(eflUrl, timeoutMs, notes);
+
+    // WAF / doc hosts sometimes 403 without a referer.
+    if (!first.res.ok && (first.res.status === 403 || first.res.status === 406)) {
+      const origin = originFromUrl(eflUrl);
+      if (origin) {
+        notes.push(`retry_with_referer=${origin}/`);
+        try {
+          first = await fetchBytesWithReferer(eflUrl, timeoutMs, `${origin}/`);
+        } catch (e) {
+          notes.push(`referer_retry_error=${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+    }
+
+    const { res, contentType, buf } = first;
     if (!res.ok) {
       return {
         ok: false,
         error: `Failed to fetch EFL URL: HTTP ${res.status} ${res.statusText}`.trim(),
-        notes,
+        notes: [...notes, `finalUrl=${res.url || eflUrl}`],
       };
     }
 
