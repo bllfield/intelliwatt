@@ -817,6 +817,26 @@ export default function AdminPlanDetailsPage({ params }: { params: { offerId: st
                     )}
                   </div>
                 ) : null}
+
+                {/* Future-proof: always show full raw “inputs” and “debug” inside the same card so new plan types/fields appear automatically. */}
+                <details className="text-xs text-gray-700">
+                  <summary className="cursor-pointer select-none">Template rateStructure (raw)</summary>
+                  <pre className="mt-2 bg-gray-50 rounded-lg p-3 overflow-auto max-h-[360px]">
+                    {data?.ratePlan?.rateStructure ? pretty(data.ratePlan.rateStructure) : "—"}
+                  </pre>
+                </details>
+                <details className="text-xs text-gray-700">
+                  <summary className="cursor-pointer select-none">Validator assumptions (raw)</summary>
+                  <pre className="mt-2 bg-gray-50 rounded-lg p-3 overflow-auto max-h-[360px]">
+                    {validation.assumptions ? pretty(validation.assumptions) : "—"}
+                  </pre>
+                </details>
+                <details className="text-xs text-gray-700">
+                  <summary className="cursor-pointer select-none">Calculator debug (raw)</summary>
+                  <pre className="mt-2 bg-gray-50 rounded-lg p-3 overflow-auto max-h-[360px]">
+                    {estimateJson?.ok ? pretty((estimateJson as any)?.estimate?.debug ?? null) : "—"}
+                  </pre>
+                </details>
               </div>
             </div>
 
