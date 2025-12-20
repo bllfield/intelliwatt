@@ -216,7 +216,9 @@ export default function PlanEngineLabPage() {
     // Deterministic precedence:
     // 1) INDEXED
     const isIndexedApprox =
-      estimateMode === "INDEXED_EFL_ANCHOR_APPROX" || notesHay.includes("EFL MODELED AVERAGE PRICE ANCHORS");
+      estimateMode === "INDEXED_EFL_ANCHOR_APPROX" ||
+      notesHay.includes("EFL MODELED AVERAGE PRICE ANCHOR") ||
+      notesHay.includes("EFL MODELED AVERAGE PRICE ANCHORS");
     if (
       reason.includes("NON_DETERMINISTIC_PRICING_INDEXED") ||
       reason.includes("MISSING_EFL_ANCHORS") ||
