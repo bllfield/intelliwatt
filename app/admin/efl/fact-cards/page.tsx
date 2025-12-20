@@ -753,6 +753,67 @@ export default function FactCardOpsPage() {
     }
   }
 
+  async function revalidateTemplatesAndQuarantine() {
+    if (!token) {
+      setTplErr("Admin token required.");
+      return;
+    }
+    const phrase = window.prompt(
+      'Revalidate templates and quarantine any that fail new guardrails?\n\nThis will:\n- Recompute plan-calc for currently COMPUTABLE templates\n- If a template now fails, it will be removed (rateStructure cleared) and queued for review\n\nType REVALIDATE_TEMPLATES to proceed.',
+    );
+    if (!phrase) return;
+    if (phrase.trim() !== "REVALIDATE_TEMPLATES") {
+      setTplErr("Aborted (confirm phrase mismatch).");
+      return;
+    }
+
+    setTplLoading(true);
+    setTplErr(null);
+    setTdspNote(null);
+    try {
+      let cursorId: string | null = null;
+      let loops = 0;
+      let processed = 0;
+      let quarantined = 0;
+      let kept = 0;
+      let errors = 0;
+
+      while (loops < 500) {
+        const qs = new URLSearchParams();
+        qs.set("limit", "200");
+        qs.set("timeBudgetMs", "110000");
+        if (cursorId) qs.set("cursorId", cursorId);
+
+        const res = await fetch(`/api/admin/efl/templates/revalidate?${qs.toString()}`, {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-admin-token": token },
+          body: JSON.stringify({ confirm: "REVALIDATE_TEMPLATES", onlyComputable: true }),
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+
+        processed += Number(data.processedCount ?? 0) || 0;
+        quarantined += Number(data.quarantinedCount ?? 0) || 0;
+        kept += Number(data.keptCount ?? 0) || 0;
+        errors += Number(data.errorsCount ?? 0) || 0;
+
+        setTdspNote(
+          `Revalidate templates: processed=${processed} quarantined=${quarantined} kept=${kept} errors=${errors} last=${data.lastCursorId ?? "—"}`,
+        );
+
+        if (!data.truncated || !data.nextCursorId) break;
+        cursorId = String(data.nextCursorId);
+        loops++;
+      }
+
+      await loadTemplates();
+    } catch (e: any) {
+      setTplErr(e?.message || "Failed to revalidate templates.");
+    } finally {
+      setTplLoading(false);
+    }
+  }
+
   useEffect(() => {
     if (ready) void loadTemplates();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1608,6 +1669,14 @@ export default function FactCardOpsPage() {
             </button>
             <button className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60" onClick={() => void backfillModeledProofIntoDb()} disabled={!ready || tplLoading}>
               Backfill modeled proof (DB)
+            </button>
+            <button
+              className="px-3 py-2 rounded-lg border border-amber-200 text-amber-800 hover:bg-amber-50 disabled:opacity-60"
+              onClick={() => void revalidateTemplatesAndQuarantine()}
+              disabled={!ready || tplLoading}
+              title="Recompute plan-calc + quarantine templates that fail new guardrails."
+            >
+              Revalidate + quarantine (guardrails)
             </button>
             <label className="flex items-center gap-2 text-xs text-gray-700 select-none">
               <input
