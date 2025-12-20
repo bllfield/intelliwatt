@@ -190,6 +190,13 @@ export default function AdminPlanDetailsPage({ params }: { params: { offerId: st
   // Auto-fetch raw EFL text when missing (admin QA convenience).
   const [rawTextFetchState, setRawTextFetchState] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [rawTextFetchErr, setRawTextFetchErr] = useState<string | null>(null);
+
+  // Reset auto-fetch state when navigating to a different offerId.
+  useEffect(() => {
+    setRawTextFetchState("idle");
+    setRawTextFetchErr(null);
+  }, [offerId]);
+
   useEffect(() => {
     const canFetch =
       Boolean(token) &&
