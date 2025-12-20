@@ -257,9 +257,10 @@ export async function POST(req: NextRequest) {
                 await (prisma as any).eflParseReviewQueue.update({
                   where: { id },
                   data: {
-                    queueReason: usedRawTextFallback
+                    queueReason: (usedRawTextFallback
                       ? `FETCH_FAIL: ${errorMsg} | RAWTEXT_FALLBACK_ELIGIBLE`
-                      : `FETCH_FAIL: ${errorMsg}`.slice(0, 4000),
+                      : `FETCH_FAIL: ${errorMsg}`
+                    ).slice(0, 4000),
                     validation: {
                       fetch: { usedUrl, candidates, tried },
                       rawTextFallbackEligible: usedRawTextFallback,
