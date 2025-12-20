@@ -9,6 +9,13 @@ type ApiOk = {
   ratePlan: any | null;
   masterPlan: any | null;
   eflRawText: string | null;
+  tdspSnapshotForValidation?: {
+    tdspCode: string;
+    effectiveAt: string | null;
+    createdAt: string | null;
+    monthlyFeeCents: number;
+    deliveryCentsPerKwh: number;
+  } | null;
   introspection: any | null;
 };
 type ApiErr = { ok: false; error: string; detail?: any };
@@ -68,6 +75,34 @@ async function copyToClipboard(text: string) {
   } catch {
     return false;
   }
+}
+
+type HomePreset = { id: string; label: string; homeId: string };
+const HOME_PRESETS: HomePreset[] = [
+  {
+    id: "sample_d8ee",
+    label: "Sample home: d8ee2a47-02f8-4e01-9c48-988ef4449214",
+    homeId: "d8ee2a47-02f8-4e01-9c48-988ef4449214",
+  },
+];
+
+function fmtHhmm(hhmm: string): string {
+  const s = String(hhmm ?? "").trim();
+  const m = s.match(/^(\d{2})(\d{2})$/);
+  if (!m) return s;
+  return `${m[1]}:${m[2]}`;
+}
+
+function describeBucketKey(key: string): string {
+  const s = String(key ?? "").trim();
+  const m = s.match(/^kwh\.m\.(all|weekday|weekend)\.(total|(\d{4})-(\d{4}))$/);
+  if (!m) return "Monthly kWh (unknown key format)";
+  const day = m[1];
+  const dayLabel = day === "all" ? "All days" : day === "weekday" ? "Weekdays" : "Weekends";
+  if (m[2] === "total") return `${dayLabel}, 00:00–24:00`;
+  const start = m[3] ?? "";
+  const end = m[4] ?? "";
+  return `${dayLabel}, ${fmtHhmm(start)}–${fmtHhmm(end)}`;
 }
 
 export default function AdminPlanDetailsPage({ params }: { params: { offerId: string } }) {
@@ -152,6 +187,44 @@ export default function AdminPlanDetailsPage({ params }: { params: { offerId: st
     return Array.isArray(keys) ? (keys as string[]).map((k) => String(k)).filter(Boolean) : [];
   }, [data]);
 
+  // Auto-fetch raw EFL text when missing (admin QA convenience).
+  const [rawTextFetchState, setRawTextFetchState] = useState<"idle" | "loading" | "done" | "error">("idle");
+  const [rawTextFetchErr, setRawTextFetchErr] = useState<string | null>(null);
+  useEffect(() => {
+    const canFetch =
+      Boolean(token) &&
+      Boolean(offerId) &&
+      Boolean(data?.ratePlan?.eflPdfSha256) &&
+      (data?.eflRawText == null || String(data.eflRawText).trim().length === 0);
+    if (!canFetch) return;
+    if (rawTextFetchState !== "idle") return;
+
+    (async () => {
+      try {
+        setRawTextFetchState("loading");
+        setRawTextFetchErr(null);
+        const res = await fetch("/api/admin/efl/raw-text/fetch", {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-admin-token": token },
+          body: JSON.stringify({ offerId }),
+        });
+        const json = await res.json().catch(() => null);
+        if (!res.ok || !json?.ok) {
+          setRawTextFetchState("error");
+          setRawTextFetchErr(json?.error ? String(json.error) : `http_${res.status}`);
+          return;
+        }
+        setRawTextFetchState("done");
+        // Reload details so `eflRawText` appears.
+        await load();
+      } catch (e: any) {
+        setRawTextFetchState("error");
+        setRawTextFetchErr(e?.message ?? String(e));
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, offerId, data?.eflRawText, data?.ratePlan?.eflPdfSha256, rawTextFetchState]);
+
   const planVars = useMemo(() => {
     const rp = data?.ratePlan ?? null;
     const rs = rp?.rateStructure ?? null;
@@ -180,6 +253,13 @@ export default function AdminPlanDetailsPage({ params }: { params: { offerId: st
       { key: "hasTouTiers", value: hasTouTiers ? "true" : "false" },
     ];
     return rows;
+  }, [data]);
+
+  const validation = useMemo(() => {
+    const v = data?.ratePlan?.modeledEflAvgPriceValidation ?? null;
+    const points = Array.isArray(v?.points) ? v.points : [];
+    const assumptions = v?.assumptionsUsed ?? null;
+    return { v, points, assumptions };
   }, [data]);
 
   const estimateVars = useMemo(() => {
@@ -294,8 +374,17 @@ export default function AdminPlanDetailsPage({ params }: { params: { offerId: st
                   Copy
                 </button>
               </div>
+              {rawTextFetchState === "loading" ? (
+                <div className="text-xs text-gray-600">Fetching/storing raw text…</div>
+              ) : rawTextFetchState === "error" ? (
+                <div className="text-xs text-red-700">
+                  Raw text fetch failed: {rawTextFetchErr ?? "unknown_error"}
+                </div>
+              ) : null}
               <pre className="text-xs bg-gray-50 rounded-lg p-3 overflow-auto max-h-[520px]">
-                {data.eflRawText ? data.eflRawText : "— (no stored raw text found for this EFL fingerprint)"}
+                <code className="whitespace-pre-wrap break-words">
+                  {data.eflRawText ? data.eflRawText : "— (no stored raw text found yet; auto-fetch will attempt when available)"}
+                </code>
               </pre>
             </div>
 
@@ -347,9 +436,9 @@ export default function AdminPlanDetailsPage({ params }: { params: { offerId: st
               </div>
 
               <div className="rounded-xl border bg-white p-4 space-y-2">
-                <div className="text-sm font-semibold">Plan variables (template → calculator inputs)</div>
+                <div className="text-sm font-semibold">Plan variables (numbers used)</div>
                 <div className="text-xs text-gray-600">
-                  These are the variables the engine will use (or require) to compute this plan.
+                  Includes template rates and validator/solver inputs (when available).
                 </div>
                 <div className="overflow-auto rounded border">
                   <table className="min-w-full text-xs">
@@ -374,6 +463,85 @@ export default function AdminPlanDetailsPage({ params }: { params: { offerId: st
               </div>
             </div>
 
+            <div className="rounded-xl border bg-white p-4 space-y-3">
+              <div className="text-sm font-semibold">Validator proof (EFL avg-price validation)</div>
+              <div className="text-xs text-gray-600">
+                Shows the actual numbers used to make this template PASS (expected vs modeled, TDSP assumptions, and component breakdown).
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="rounded border p-3">
+                  <div className="text-xs text-gray-600 mb-2">TDSP used for validation (snapshot)</div>
+                  {data.tdspSnapshotForValidation ? (
+                    <div className="text-xs font-mono space-y-1">
+                      <div>tdspCode={data.tdspSnapshotForValidation.tdspCode}</div>
+                      <div>deliveryCentsPerKwh={data.tdspSnapshotForValidation.deliveryCentsPerKwh}</div>
+                      <div>monthlyFeeCents={data.tdspSnapshotForValidation.monthlyFeeCents}</div>
+                      <div>effectiveAt={data.tdspSnapshotForValidation.effectiveAt ?? "—"}</div>
+                    </div>
+                  ) : (
+                    <div className="text-xs text-gray-500">—</div>
+                  )}
+                </div>
+
+                <div className="rounded border p-3">
+                  <div className="text-xs text-gray-600 mb-2">Assumptions used</div>
+                  <pre className="text-xs bg-gray-50 rounded p-2 overflow-auto max-h-[220px]">
+                    {validation.assumptions ? pretty(validation.assumptions) : "—"}
+                  </pre>
+                </div>
+              </div>
+
+              <div className="overflow-auto rounded border">
+                <table className="min-w-full text-xs">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-2 py-2 text-right">kWh</th>
+                      <th className="px-2 py-2 text-right">expected ¢/kWh</th>
+                      <th className="px-2 py-2 text-right">modeled ¢/kWh</th>
+                      <th className="px-2 py-2 text-right">diff</th>
+                      <th className="px-2 py-2 text-left">ok</th>
+                      <th className="px-2 py-2 text-right">repEnergy $</th>
+                      <th className="px-2 py-2 text-right">repBase $</th>
+                      <th className="px-2 py-2 text-right">tdsp $</th>
+                      <th className="px-2 py-2 text-right">credits $</th>
+                      <th className="px-2 py-2 text-right">total $</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(validation.points as any[]).map((p: any, idx: number) => (
+                      <tr key={idx} className="border-t">
+                        <td className="px-2 py-2 text-right font-mono">{String(p?.usageKwh ?? "—")}</td>
+                        <td className="px-2 py-2 text-right font-mono">{p?.expectedAvgCentsPerKwh ?? "—"}</td>
+                        <td className="px-2 py-2 text-right font-mono">{p?.modeledAvgCentsPerKwh ?? "—"}</td>
+                        <td className="px-2 py-2 text-right font-mono">{p?.diffCentsPerKwh ?? "—"}</td>
+                        <td className="px-2 py-2">{p?.ok ? "✅" : "❌"}</td>
+                        <td className="px-2 py-2 text-right font-mono">{p?.modeled?.repEnergyDollars ?? "—"}</td>
+                        <td className="px-2 py-2 text-right font-mono">{p?.modeled?.repBaseDollars ?? "—"}</td>
+                        <td className="px-2 py-2 text-right font-mono">{p?.modeled?.tdspDollars ?? "—"}</td>
+                        <td className="px-2 py-2 text-right font-mono">{p?.modeled?.creditsDollars ?? "—"}</td>
+                        <td className="px-2 py-2 text-right font-mono">{p?.modeled?.totalDollars ?? "—"}</td>
+                      </tr>
+                    ))}
+                    {validation.points.length === 0 ? (
+                      <tr>
+                        <td className="px-2 py-3 text-gray-500" colSpan={10}>
+                          — (no modeled proof stored yet)
+                        </td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
+
+              <details className="text-xs text-gray-700">
+                <summary className="cursor-pointer select-none">Validation raw JSON</summary>
+                <pre className="mt-2 bg-gray-50 rounded-lg p-3 overflow-auto max-h-[520px]">
+                  {validation.v ? pretty(validation.v) : "—"}
+                </pre>
+              </details>
+            </div>
+
             <div className="rounded-xl border bg-white p-4 space-y-2">
               <div className="text-sm font-semibold">Plan calc requirements</div>
               <div className="text-xs font-mono">
@@ -393,6 +561,25 @@ export default function AdminPlanDetailsPage({ params }: { params: { offerId: st
             Enter a <span className="font-mono">homeId</span>. If usage buckets exist (or you enable backfill), this will run the estimate for this specific home.
           </div>
           <div className="flex flex-wrap items-center gap-3">
+            <label className="text-xs">
+              <div className="text-gray-600 mb-1">home preset</div>
+              <select
+                className="w-[420px] max-w-[90vw] rounded-lg border px-3 py-2 text-xs"
+                value=""
+                onChange={(e) => {
+                  const v = String(e.target.value);
+                  const p = HOME_PRESETS.find((x) => x.homeId === v) ?? null;
+                  if (p) setHomeId(p.homeId);
+                }}
+              >
+                <option value="">(pick a saved homeId)</option>
+                {HOME_PRESETS.map((p) => (
+                  <option key={p.id} value={p.homeId}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+            </label>
             <label className="text-xs">
               <div className="text-gray-600 mb-1">homeId</div>
               <input
@@ -463,6 +650,26 @@ export default function AdminPlanDetailsPage({ params }: { params: { offerId: st
           <div className="text-xs text-gray-600">
             Matrix of <span className="font-mono">requiredBucketKeys</span> × months for the selected <span className="font-mono">homeId</span>.
           </div>
+          {requiredBucketKeys.length ? (
+            <div className="overflow-auto rounded border">
+              <table className="min-w-full text-xs">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-2 py-2 text-left">bucketKey</th>
+                    <th className="px-2 py-2 text-left">covers</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {requiredBucketKeys.map((k) => (
+                    <tr key={k} className="border-t">
+                      <td className="px-2 py-2 font-mono">{k}</td>
+                      <td className="px-2 py-2 text-gray-700">{describeBucketKey(k)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
           <div className="flex flex-wrap items-center gap-2">
             <button
               className="rounded-lg border px-3 py-1.5 text-xs hover:bg-gray-50 disabled:opacity-60"

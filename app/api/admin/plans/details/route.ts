@@ -10,6 +10,22 @@ function jsonError(status: number, error: string, detail?: any) {
   return NextResponse.json({ ok: false, error, detail: detail ?? null }, { status });
 }
 
+function mapUtilityIdToTdspCode(utilityId: string | null | undefined): string | null {
+  const u = String(utilityId ?? "").trim();
+  if (!u) return null;
+  const upper = u.toUpperCase();
+  if (["ONCOR", "CENTERPOINT", "AEP_NORTH", "AEP_CENTRAL", "TNMP"].includes(upper)) return upper;
+  // WattBuy utility IDs we see in practice.
+  const byWattbuyId: Record<string, string> = {
+    "44372": "ONCOR",
+    "8901": "CENTERPOINT",
+    "20404": "AEP_NORTH",
+    "3278": "AEP_CENTRAL",
+    "40051": "TNMP",
+  };
+  return byWattbuyId[u] ?? null;
+}
+
 export async function GET(req: NextRequest) {
   const gate = requireAdmin(req);
   if (!gate.ok) return NextResponse.json(gate.body, { status: gate.status });
@@ -64,6 +80,25 @@ export async function GET(req: NextRequest) {
 
     const introspection = rateStructure ? introspectPlanFromRateStructure({ rateStructure }) : null;
 
+    // TDSP snapshot used for “validator/model proof” display (admin QA only).
+    const tdspCode = mapUtilityIdToTdspCode((ratePlan as any)?.utilityId ?? null);
+    const tdspSnapshot =
+      tdspCode
+        ? await (prisma as any).tdspRateSnapshot.findFirst({
+            where: { tdsp: tdspCode, effectiveAt: { lte: new Date() } },
+            orderBy: { effectiveAt: "desc" },
+          })
+        : null;
+    const tdspSnapshotMeta = tdspSnapshot
+      ? {
+          tdspCode,
+          effectiveAt: tdspSnapshot.effectiveAt ? new Date(tdspSnapshot.effectiveAt).toISOString() : null,
+          createdAt: tdspSnapshot.createdAt ? new Date(tdspSnapshot.createdAt).toISOString() : null,
+          monthlyFeeCents: Number((tdspSnapshot.payload as any)?.monthlyFeeCents ?? 0) || 0,
+          deliveryCentsPerKwh: Number((tdspSnapshot.payload as any)?.deliveryCentsPerKwh ?? 0) || 0,
+        }
+      : null;
+
     return NextResponse.json({
       ok: true,
       offerId,
@@ -114,6 +149,7 @@ export async function GET(req: NextRequest) {
         : null,
       masterPlan: masterPlan ?? null,
       eflRawText: queueRow?.rawText ?? null,
+      tdspSnapshotForValidation: tdspSnapshotMeta,
       introspection,
     });
   } catch (e: any) {
