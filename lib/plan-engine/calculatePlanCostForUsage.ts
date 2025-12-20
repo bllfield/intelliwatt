@@ -488,6 +488,8 @@ export function calculatePlanCostForUsage(args: {
         const subtotalCents = monthRepEnergyCents + monthRepFixedCents + monthTdspFixedCents + monthTdspDeliveryCents + monthCreditsCents;
         let finalCents = clampNonNegative(roundCents(subtotalCents));
         let minApplied: any[] | null = null;
+        let monthMinUsageFeeCents = 0;
+        let monthMinimumBillTopUpCents = 0;
         if (minimumMaybe.ok) {
           const appliedMin = applyMinimumRulesToMonth({
             monthlyKwh: monthTotalKwh,
@@ -496,6 +498,8 @@ export function calculatePlanCostForUsage(args: {
           });
           minUsageFeeCentsTotal += appliedMin.minUsageFeeCents;
           minimumBillTopUpCentsTotal += appliedMin.minimumBillTopUpCents;
+          monthMinUsageFeeCents = appliedMin.minUsageFeeCents;
+          monthMinimumBillTopUpCents = appliedMin.minimumBillTopUpCents;
           finalCents = appliedMin.totalCentsAfter;
           minApplied = appliedMin.applied;
         }
@@ -510,8 +514,12 @@ export function calculatePlanCostForUsage(args: {
         debugByMonth.push({
           ym,
           monthTotalKwh,
+          repEnergyTieredCents: roundCents(monthRepEnergyCents),
           tierBreakdown: tiered.tierBreakdown,
-          creditCentsTotal: monthCreditsCents,
+          creditsAppliedCents: roundCents(monthCreditsCents),
+          minimumUsageFeeCents: monthMinUsageFeeCents,
+          minimumBillTopUpCents: monthMinimumBillTopUpCents,
+          monthTotalCents: finalCents,
           minApplied,
           subtotalCents: roundCents(subtotalCents),
           finalCents,

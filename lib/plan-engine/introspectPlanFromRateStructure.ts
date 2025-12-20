@@ -163,6 +163,12 @@ export type PlanEngineIntrospection = {
     requiredBucketKeys: string[];
     supportedFeatures: Record<string, any>;
   };
+  combo?: {
+    hasTiered: boolean;
+    hasBillCredits: boolean; // only true when credits.ok and rules.length > 0
+    supportedTieredPlusCredits: boolean;
+    reason?: string;
+  };
   tou: ReturnType<typeof extractDeterministicTouSchedule>;
   requiredBuckets: ReturnType<typeof requiredBucketsForRateStructure>;
   requiredBucketKeys: string[];
@@ -278,6 +284,36 @@ export function introspectPlanFromRateStructure(input: { rateStructure: any }): 
     }
 
     if (tiered.ok) {
+      // Tiered + deterministic bill credits is supported in non-dashboard flows.
+      // Treat NO_CREDITS as "no credits present" (tiered-only), and propagate unsupported credit reasons.
+      if (billCredits.ok && Array.isArray(billCredits.credits?.rules) && billCredits.credits.rules.length > 0) {
+        return {
+          planCalcVersion: 1,
+          planCalcStatus: "NOT_COMPUTABLE" as const,
+          planCalcReasonCode: "TIERED_PLUS_CREDITS_REQUIRES_USAGE_BUCKETS",
+          requiredBucketKeys: ["kwh.m.all.total"],
+          supportedFeatures: {
+            ...inferred.features,
+            supportsTieredEnergy: true,
+            supportsCredits: true,
+            notes: [...inferred.notes, ...(tiered.schedule?.notes ?? []), ...(billCredits.credits?.notes ?? [])],
+          },
+        };
+      }
+      if (!billCredits.ok && billCredits.reason !== "NO_CREDITS") {
+        return {
+          planCalcVersion: 1,
+          planCalcStatus: "NOT_COMPUTABLE" as const,
+          planCalcReasonCode: billCredits.reason,
+          requiredBucketKeys: ["kwh.m.all.total"],
+          supportedFeatures: {
+            ...inferred.features,
+            supportsTieredEnergy: true,
+            supportsCredits: true,
+            notes: [...inferred.notes, ...(tiered.schedule?.notes ?? []), ...(billCredits.notes ?? [])],
+          },
+        };
+      }
       return {
         planCalcVersion: 1,
         planCalcStatus: "NOT_COMPUTABLE" as const,
@@ -407,6 +443,18 @@ export function introspectPlanFromRateStructure(input: { rateStructure: any }): 
 
   return {
     planCalc,
+    combo: (() => {
+      const hasTiered = tiered.ok;
+      const hasBillCredits = billCredits.ok && Array.isArray(billCredits.credits?.rules) && billCredits.credits.rules.length > 0;
+      const supportedTieredPlusCredits = hasTiered && hasBillCredits;
+      const reason =
+        hasTiered && !billCredits.ok && billCredits.reason !== "NO_CREDITS"
+          ? billCredits.reason
+          : !hasTiered && !tiered.ok && tiered.reason !== "NO_TIER_DATA"
+            ? tiered.reason
+            : undefined;
+      return { hasTiered, hasBillCredits, supportedTieredPlusCredits, ...(reason ? { reason } : {}) };
+    })(),
     tou,
     tiered,
     billCredits,

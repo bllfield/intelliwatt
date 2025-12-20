@@ -313,6 +313,37 @@ export function derivePlanCalcRequirementsFromTemplate(args: {
 
     const tiered = extractDeterministicTierSchedule(rs);
     if (tiered.ok) {
+      // Tiered + deterministic bill credits (Phase 1) is supported in non-dashboard flows.
+      // Treat NO_CREDITS as "no credits present" (tiered-only), and propagate unsupported credit reasons.
+      if (credits.ok && Array.isArray(credits.credits?.rules) && credits.credits.rules.length > 0) {
+        return {
+          planCalcVersion,
+          // IMPORTANT: do NOT mark tiered computable at plan-level (dashboard gating must remain unchanged).
+          planCalcStatus: "NOT_COMPUTABLE" as const,
+          planCalcReasonCode: "TIERED_PLUS_CREDITS_REQUIRES_USAGE_BUCKETS",
+          requiredBucketKeys: ["kwh.m.all.total"],
+          supportedFeatures: {
+            ...inferred.features,
+            supportsTieredEnergy: true,
+            supportsCredits: true,
+            notes: [...(inferred.notes ?? []), ...(tiered.schedule.notes ?? []), ...(credits.credits?.notes ?? [])],
+          },
+        };
+      }
+      if (!credits.ok && credits.reason !== "NO_CREDITS") {
+        return {
+          planCalcVersion,
+          planCalcStatus: "NOT_COMPUTABLE" as const,
+          planCalcReasonCode: credits.reason,
+          requiredBucketKeys: ["kwh.m.all.total"],
+          supportedFeatures: {
+            ...inferred.features,
+            supportsTieredEnergy: true,
+            supportsCredits: true,
+            notes: [...(inferred.notes ?? []), ...(tiered.schedule.notes ?? []), ...(credits.notes ?? [])],
+          },
+        };
+      }
       return {
         planCalcVersion,
         // IMPORTANT: do NOT mark tiered computable at plan-level (dashboard gating must remain unchanged).
@@ -327,7 +358,6 @@ export function derivePlanCalcRequirementsFromTemplate(args: {
       };
     } else if (
       tiered.reason === "UNSUPPORTED_COMBINED_STRUCTURES" ||
-      tiered.reason === "UNSUPPORTED_CREDITS_IN_TIERED" ||
       tiered.reason === "UNSUPPORTED_TIER_SHAPE" ||
       tiered.reason === "UNSUPPORTED_TIER_VARIATION"
     ) {

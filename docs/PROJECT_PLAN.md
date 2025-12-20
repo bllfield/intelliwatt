@@ -2548,9 +2548,9 @@ Tiered / Block pricing (non-dashboard only; bucket-gated, deterministic)
   - Monthly kWh tiers applied to **REP energy only** (e.g., 0–500 @ A ¢/kWh, 500–1000 @ B ¢/kWh, 1000+ @ C ¢/kWh).
   - Optional REP monthly base charge (already supported).
   - TDSP remains **total-based** (unchanged).
+  - Tiered can be combined with **deterministic bill credits** (Phase 1); credits apply after tiered energy + TDSP.
 - **Explicitly NOT supported (fail-closed reason codes)**:
   - `UNSUPPORTED_COMBINED_STRUCTURES` (TOU + tiered)
-  - `UNSUPPORTED_CREDITS_IN_TIERED` (bill credits/min-usage credits with tiered)
   - `UNSUPPORTED_TIER_VARIATION` (tiers varying by month/season/daytype)
   - `NON_DETERMINISTIC_PRICING` (variable/indexed riders with tiers)
 - **Deterministic extraction**: `lib/plan-engine/tieredPricing.ts`
@@ -2559,6 +2559,7 @@ Tiered / Block pricing (non-dashboard only; bucket-gated, deterministic)
   - Tiered needs only `kwh.m.all.total` (monthly total); auto-ensure covers this by default in estimate flows.
 - **Plan-level gating (dashboard-safe)**:
   - Tiered templates remain `planCalcStatus=NOT_COMPUTABLE` with `planCalcReasonCode=TIERED_REQUIRES_USAGE_BUCKETS` (no dashboard semantics change).
+  - Tiered + credits templates remain `planCalcStatus=NOT_COMPUTABLE` with `planCalcReasonCode=TIERED_PLUS_CREDITS_REQUIRES_USAGE_BUCKETS`.
 - **Calculator behavior**: `lib/plan-engine/calculatePlanCostForUsage.ts`
   - Requires `usageBucketsByMonth` (fails with `MISSING_USAGE_BUCKETS` otherwise).
   - Computes REP energy month-by-month via tier blocks and returns `status="OK"` when all required month totals exist.
@@ -2567,12 +2568,14 @@ Tiered / Block pricing (non-dashboard only; bucket-gated, deterministic)
   - Manual Fact Card Loader renders a tier table when deterministic tiers are detected.
 - **Tests**:
   - Added `tests/plan-engine/tiered.pricing.test.ts` (extract + breakdown + calculator path).
+  - Added `tests/plan-engine/tiered.plus.credits.test.ts` (tiered + credits combo).
 
 Bill credits Phase 1 (non-dashboard only; deterministic, bucket-gated)
 - **Scope (supported)**:
   - Structured `rateStructure.billCredits` rules applied from **monthly total kWh only**.
   - Credits apply to the **total bill** (REP + TDSP) and reduce it (clamped at $0 minimum).
   - Range semantics follow the contract: `minUsageKWh <= usage < maxUsageKWh` (or no max).
+  - Credits can be combined with **tiered REP energy** (Phase 1) when both are deterministic.
 - **Supported rule shapes (deterministic)**:
   - Flat monthly credit: `minUsageKWh=0` with no `maxUsageKWh` (always applies).
   - Usage range credit: `minUsageKWh` with optional `maxUsageKWh` (max exclusive).

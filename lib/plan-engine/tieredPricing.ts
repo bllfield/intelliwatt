@@ -107,17 +107,8 @@ export function extractDeterministicTierSchedule(
     }
   }
 
-  // Credits in tiered not supported in this step.
-  const hasCredits =
-    Boolean(rs?.billCredits?.hasBillCredit) ||
-    (Array.isArray(rs?.billCredits?.rules) && rs.billCredits.rules.length > 0) ||
-    (Array.isArray(rs?.planRules?.billCredits) && rs.planRules.billCredits.length > 0);
-
-  if (hasCredits) {
-    if (hasNonEmptyArray(rs?.usageTiers) || hasNonEmptyArray(rs?.planRules?.usageTiers)) {
-      return { ok: false, reason: "UNSUPPORTED_CREDITS_IN_TIERED", notes: ["billCredits_present"] };
-    }
-  }
+  // NOTE: Tiered + deterministic bill credits is supported (handled at the calculator/computability layer).
+  // This extractor is intentionally tier-only and does not attempt to validate credit shapes.
 
   // Non-deterministic pricing (indexed/variable riders) not supported here.
   const typeUpper = String(rs?.type ?? "").toUpperCase();
