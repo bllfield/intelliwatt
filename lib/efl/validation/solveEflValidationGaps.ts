@@ -290,9 +290,12 @@ export async function solveEflValidationGaps(args: {
   //   Off-Peak hours are 9:00 PM - 4:59 AM. Peak hours are 5:00 AM - 8:59 PM
   //
   // When we only capture a single "Energy Charge" rate, modeled prices end up too low.
-  // This solver derives `timeOfUsePeriods[]` so the validator can model the disclosed
-  // usage split (night/off-peak percent) and PASS avg-table validation.
-  if (validation?.status === "FAIL" && derivedPlanRules) {
+  //
+  // IMPORTANT: we apply this even when the avg-price table already PASSes, because
+  // the validator may have extracted TOU assumptions (nightUsagePercent / hours)
+  // directly from the EFL text. If we don't upgrade the template to TIME_OF_USE,
+  // we can end up with a plan that "validates" but is not safely computable.
+  if (derivedPlanRules) {
     const hasTou =
       Array.isArray((derivedPlanRules as any).timeOfUsePeriods) &&
       (derivedPlanRules as any).timeOfUsePeriods.length > 0;
@@ -329,6 +332,23 @@ export async function solveEflValidationGaps(args: {
             isFree: false,
           },
         ];
+
+        // Ensure RateStructure is also upgraded so plan-calc + template persistence
+        // can treat this as a real TIME_OF_USE plan (bucket-gated, deterministic).
+        if (!derivedRateStructure || typeof derivedRateStructure !== "object") {
+          derivedRateStructure = {};
+        }
+        if (typeof (derivedRateStructure as any).type !== "string") {
+          (derivedRateStructure as any).type = "TIME_OF_USE";
+        } else {
+          (derivedRateStructure as any).type = "TIME_OF_USE";
+        }
+        if (
+          !Array.isArray((derivedRateStructure as any).timeOfUsePeriods) ||
+          (derivedRateStructure as any).timeOfUsePeriods.length === 0
+        ) {
+          (derivedRateStructure as any).timeOfUsePeriods = (derivedPlanRules as any).timeOfUsePeriods;
+        }
 
         solverApplied.push("TOU_PEAK_OFFPEAK_FROM_EFL_TEXT");
       }
