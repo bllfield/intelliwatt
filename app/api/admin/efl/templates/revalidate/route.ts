@@ -54,8 +54,14 @@ export async function POST(req: NextRequest) {
       isUtilityTariff: false,
       rateStructure: { not: null },
       eflRequiresManualReview: false,
-      ...(onlyComputable ? { planCalcStatus: "COMPUTABLE" } : {}),
       ...(supplierContains ? { supplier: { contains: supplierContains, mode: "insensitive" } } : {}),
+      ...(onlyComputable
+        ? {
+            // Safety default (onlyComputable=true) should still sweep UNKNOWN utility templates.
+            // Unknown utilities are always unsafe to ship as "available templates", regardless of plan-calc status.
+            OR: [{ planCalcStatus: "COMPUTABLE" }, { utilityId: "UNKNOWN" }],
+          }
+        : {}),
     };
     if (cursorId) where.id = { gt: cursorId };
 
