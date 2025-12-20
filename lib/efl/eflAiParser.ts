@@ -681,50 +681,120 @@ OUTPUT CONTRACT:
     }
   }
 
-  // Normalize bill credits: fix autopay thresholdKwh and mirror into RateStructure.
-  if (Array.isArray(planRules.billCredits) && planRules.billCredits.length > 0) {
+  // Normalize + mirror bill credits into RateStructure.
+  //
+  // Important: Some EFLs have "usage or less" credits (THRESHOLD_MAX). The canonical
+  // RateStructure contract uses end-exclusive ranges:
+  //   - usage <= N  => maxUsageKWh = N + 1
+  //   - usage <  N  => maxUsageKWh = N
+  //
+  // We do NOT try to preserve any pre-existing rs.billCredits here. If PlanRules has
+  // billCredits, we treat PlanRules as the source of truth and regenerate rs.billCredits
+  // right before validation/return. This prevents the PlanEngine view from showing
+  // "NO_CREDITS" when credits were parsed into PlanRules.
+  const syncBillCreditsFromPlanRules = () => {
+    if (!Array.isArray(planRules.billCredits) || planRules.billCredits.length === 0) {
+      return;
+    }
+
     const normalizedCredits: any[] = [];
     for (const bc of planRules.billCredits as any[]) {
-      if (!bc || typeof bc.creditDollars !== "number") continue;
-      const cloned: any = { ...bc };
-      const labelStr =
-        typeof cloned.label === "string" ? cloned.label : "Bill credit";
+      if (!bc) continue;
+      const creditDollars =
+        typeof bc.creditDollars === "number"
+          ? bc.creditDollars
+          : typeof bc.creditDollars === "string"
+            ? Number(bc.creditDollars)
+            : NaN;
+      if (!Number.isFinite(creditDollars) || creditDollars === 0) continue;
+
+      const cloned: any = { ...bc, creditDollars };
+      const labelStr = typeof cloned.label === "string" ? cloned.label : "Bill credit";
       cloned.label = labelStr;
+
+      const rawType = typeof cloned.type === "string" ? String(cloned.type).trim() : "";
+      const upperType = rawType ? rawType.toUpperCase() : "";
+
       // For Auto Pay / Paperless behavior credits, thresholdKwh should be null.
       if (
         /auto\s*pay/i.test(labelStr) ||
         /paperless/i.test(labelStr) ||
-        (typeof cloned.type === "string" &&
-          /BEHAVIOR/i.test(String(cloned.type)))
+        (upperType && upperType.includes("BEHAVIOR"))
       ) {
         cloned.thresholdKwh = null;
       }
+
       normalizedCredits.push(cloned);
     }
     planRules.billCredits = normalizedCredits;
 
     const bcRules: any[] = [];
     for (const bc of normalizedCredits) {
-      const cents = Math.round(bc.creditDollars * 100);
-      const minUsage =
-        typeof bc.thresholdKwh === "number" && Number.isFinite(bc.thresholdKwh)
+      const cents = Math.round(Number(bc.creditDollars) * 100);
+
+      const threshold =
+        typeof bc.thresholdKwh === "number"
           ? bc.thresholdKwh
-          : null;
+          : typeof bc.thresholdKwh === "string"
+            ? Number(bc.thresholdKwh)
+            : NaN;
+      const hasThreshold = Number.isFinite(threshold);
+
+      const label = typeof bc.label === "string" ? bc.label : "Bill credit";
+      const rawType = typeof bc.type === "string" ? String(bc.type).trim() : "";
+      const upperType = rawType ? rawType.toUpperCase() : "";
+
+      // Infer max-usage semantics from explicit type, or (fallback) from label text.
+      const labelSuggestsLe =
+        /or\s+less/i.test(label) || /<=/.test(label) || /\bmax(?:imum)?\b/i.test(label);
+      const labelSuggestsLt = /less\s+than/i.test(label) || /\bbelow\b/i.test(label) || /</.test(label);
+
+      const isThresholdMax =
+        upperType === "THRESHOLD_MAX" ||
+        (upperType === "" && (labelSuggestsLe || labelSuggestsLt));
+
+      const isThresholdMin =
+        upperType === "THRESHOLD_MIN" ||
+        upperType === "USAGE_THRESHOLD" ||
+        (upperType === "" && !isThresholdMax && (/\bor\s+more\b/i.test(label) || />=/.test(label)));
+
+      let minUsageKWh: number | null = null;
+      let maxUsageKWh: number | null = null;
+
+      if (hasThreshold && isThresholdMax) {
+        minUsageKWh = 0;
+        // Default to "<=" modeling unless the label explicitly indicates strict "<".
+        maxUsageKWh = labelSuggestsLt && !labelSuggestsLe ? threshold : threshold + 1;
+      } else if (hasThreshold && isThresholdMin) {
+        minUsageKWh = threshold;
+        maxUsageKWh = null;
+      } else if (hasThreshold) {
+        // Back-compat: when we only have a threshold number, treat it as a >= threshold.
+        minUsageKWh = threshold;
+        maxUsageKWh = null;
+      }
+
+      const monthsOfYear =
+        Array.isArray(bc.monthsOfYear) && bc.monthsOfYear.length > 0
+          ? bc.monthsOfYear
+          : undefined;
+
       bcRules.push({
-        label: bc.label,
+        label,
         creditAmountCents: cents,
-        minUsageKWh: minUsage,
-        maxUsageKWh: null,
-        monthsOfYear: bc.monthsOfYear ?? null,
+        minUsageKWh,
+        maxUsageKWh,
+        ...(monthsOfYear ? { monthsOfYear } : {}),
       });
     }
+
     if (bcRules.length > 0) {
       rs.billCredits = {
         hasBillCredit: true,
         rules: bcRules,
       };
     }
-  }
+  };
 
   // TDSP delivery-included flag: prefer deterministic value when present.
   if (deterministicTdspIncluded !== null) {
@@ -926,6 +996,9 @@ OUTPUT CONTRACT:
   const billCreditsCount = Array.isArray(planRules.billCredits)
     ? planRules.billCredits.length
     : 0;
+
+  // Ensure RateStructure sees any billCredits we found (including THRESHOLD_MAX).
+  syncBillCreditsFromPlanRules();
 
   const rateType =
     typeof planRules.rateType === "string" ? planRules.rateType : null;
