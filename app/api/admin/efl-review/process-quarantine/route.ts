@@ -423,13 +423,18 @@ export async function POST(req: NextRequest) {
 
       cursorLocal = nextCursor;
       if (!drain) {
-        truncated = (items as any[]).length === limit;
+        // IMPORTANT: if we hit the time budget mid-page, `truncated` is already true.
+        // Do not overwrite it based on item count.
+        if (!truncated) truncated = (items as any[]).length === limit;
         break;
       }
       if ((items as any[]).length < limit) {
         // likely exhausted the queue
-        truncated = false;
-        nextCursor = null;
+        // Do not claim exhaustion if we already timed out mid-loop.
+        if (!truncated) {
+          truncated = false;
+          nextCursor = null;
+        }
         break;
       }
     }
