@@ -300,7 +300,53 @@ export async function solveEflValidationGaps(args: {
       Array.isArray((derivedPlanRules as any).timeOfUsePeriods) &&
       (derivedPlanRules as any).timeOfUsePeriods.length > 0;
 
-    if (!hasTou) {
+    if (hasTou) {
+      // If we already have TOU periods in PlanRules, we must ensure the RateStructure is also upgraded.
+      // This prevents "PASS" validations from slipping through as non-TOU templates (unsafe to compute).
+      const periods = Array.isArray((derivedPlanRules as any).timeOfUsePeriods)
+        ? ((derivedPlanRules as any).timeOfUsePeriods as any[])
+        : [];
+
+      let changed = false;
+
+      // Normalize PlanRules fields for consistency.
+      if (String((derivedPlanRules as any).rateType ?? "") !== "TIME_OF_USE") {
+        (derivedPlanRules as any).rateType = "TIME_OF_USE";
+        changed = true;
+      }
+      if (String((derivedPlanRules as any).planType ?? "") !== "tou") {
+        (derivedPlanRules as any).planType = "tou";
+        changed = true;
+      }
+
+      // Ensure a sane fallback default rate exists.
+      const fallbackRate = periods.find((p) => typeof p?.rateCentsPerKwh === "number")?.rateCentsPerKwh;
+      if (typeof (derivedPlanRules as any).defaultRateCentsPerKwh !== "number" && typeof fallbackRate === "number") {
+        (derivedPlanRules as any).defaultRateCentsPerKwh = fallbackRate;
+        changed = true;
+      }
+
+      // Ensure RateStructure is upgraded so plan-calc + template persistence treat this as TIME_OF_USE.
+      if (!derivedRateStructure || typeof derivedRateStructure !== "object") {
+        derivedRateStructure = {};
+        changed = true;
+      }
+      if (String((derivedRateStructure as any).type ?? "") !== "TIME_OF_USE") {
+        (derivedRateStructure as any).type = "TIME_OF_USE";
+        changed = true;
+      }
+      if (
+        !Array.isArray((derivedRateStructure as any).timeOfUsePeriods) ||
+        (derivedRateStructure as any).timeOfUsePeriods.length === 0
+      ) {
+        (derivedRateStructure as any).timeOfUsePeriods = periods;
+        changed = true;
+      }
+
+      if (changed) {
+        solverApplied.push("TOU_UPGRADE_FROM_EXISTING_PERIODS");
+      }
+    } else {
       const tou = extractPeakOffPeakTouFromEflText(rawText);
       if (tou) {
         const allDays = [0, 1, 2, 3, 4, 5, 6];
