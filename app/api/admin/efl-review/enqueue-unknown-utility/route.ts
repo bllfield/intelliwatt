@@ -71,15 +71,25 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
-      const existing = await (prisma as any).eflParseReviewQueue.findUnique({
-        where: { eflPdfSha256: sha },
-      });
+      // IMPORTANT: The DB may enforce uniqueness on repPuctCertificate+eflVersionCode (legacy dedupe).
+      // So we must de-dupe on both sha AND cert+version to avoid create() failures.
+      const cert = String(p?.repPuctCertificate ?? "").trim() || null;
+      const ver = String(p?.eflVersionCode ?? "").trim() || null;
+      const existing =
+        (await (prisma as any).eflParseReviewQueue.findUnique({
+          where: { eflPdfSha256: sha },
+        })) ??
+        (cert && ver
+          ? await (prisma as any).eflParseReviewQueue.findFirst({
+              where: { repPuctCertificate: cert, eflVersionCode: ver },
+            })
+          : null);
 
       const eflUrl = (p?.eflUrl ?? p?.eflSourceUrl ?? null) as string | null;
       const payloadCommon: any = {
         ratePlanId: String(p.id),
-        repPuctCertificate: p.repPuctCertificate ?? null,
-        eflVersionCode: p.eflVersionCode ?? null,
+        repPuctCertificate: cert,
+        eflVersionCode: ver,
         supplier: p.supplier ?? null,
         planName: p.planName ?? null,
         eflUrl: eflUrl,
@@ -122,7 +132,7 @@ export async function POST(req: NextRequest) {
         skippedHasQuarantine++;
         if (!dryRun) {
           await (prisma as any).eflParseReviewQueue.update({
-            where: { eflPdfSha256: sha },
+            where: { id: String(existing.id) },
             data: {
               ...payloadCommon,
               ratePlanId: String(p.id),
@@ -142,7 +152,7 @@ export async function POST(req: NextRequest) {
       if (existing?.resolvedAt && reopenResolved) {
         if (!dryRun) {
           await (prisma as any).eflParseReviewQueue.update({
-            where: { eflPdfSha256: sha },
+            where: { id: String(existing.id) },
             data: {
               ...payloadCommon,
               resolvedAt: null,
@@ -163,7 +173,7 @@ export async function POST(req: NextRequest) {
       // Default: just refresh metadata on resolved parse item (do not reopen).
       if (!dryRun) {
         await (prisma as any).eflParseReviewQueue.update({
-          where: { eflPdfSha256: sha },
+          where: { id: String(existing.id) },
           data: { ...payloadCommon },
         });
       }
