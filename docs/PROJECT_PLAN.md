@@ -2462,19 +2462,22 @@ Phase-1 TOU (non-dashboard call site):
     - `kwh.m.all.0700-2000`
   - Passes `usageBucketsByMonth` into `calculatePlanCostForUsage()` **only when all required keys exist for all requested months**.
   - Dashboard remains unchanged/locked; TOU plans remain QUEUED at plan-level. This endpoint is for accurate plan-engine validation.
-  - Optional: supports bounded on-demand backfill via `&backfill=1`:
-    - Only attempts when required buckets are missing
-    - Bounded to `monthsCount` (max 12) and required keys for the detected plan type
-    - Uses `ensureCoreMonthlyBuckets` pipeline; still fails closed if buckets remain incomplete
+  - **Operational completion (default ON)**: bounded on-demand monthly bucket generation from intervals.
+    - Query param: `backfill` (kept for compatibility) now acts as **autoEnsureBuckets**
+      - default: **enabled** when omitted
+      - set `backfill=0` / `backfill=false` to disable writes (read-only)
+    - Only attempts when required buckets are missing and is always bounded (`monthsCount` max 12)
+    - Uses `ensureCoreMonthlyBuckets` (interval → monthly buckets) and still fails closed if buckets remain incomplete
+    - Availability gate: if no intervals exist, estimate fails closed with `MISSING_USAGE_INTERVALS`
 
 Plan engine (non-dashboard): estimate a set of offers
 - Added `POST /api/plan-engine/estimate-set` in `app/api/plan-engine/estimate-set/route.ts`
 - Input JSON:
-  - `{ offerIds: string[], monthsCount?: number (default 12, max 12), backfill?: boolean (default false) }`
+  - `{ offerIds: string[], monthsCount?: number (default 12, max 12), backfill?: boolean (default true) }`
 - Constraints:
   - `offerIds`: 1..25 (deduped)
   - `monthsCount`: 1..12
-  - Backfill writes are only attempted when `backfill=true` (bounded + fail-closed)
+  - Auto-ensure writes are attempted by default (bounded + fail-closed). Set `backfill=false` to make it read-only.
 - Output JSON:
   - `{ monthsCount, backfillRequested, results: OfferEstimateResult[] }`
 - Dashboard routes unchanged/locked.
@@ -2501,7 +2504,8 @@ Plan engine (non-dashboard): estimate a set of offers
 
 - Review queue persistence:
   - When a template is persisted but plan-calc introspection indicates an unsupported/non-computable shape (beyond TOU bucket gating), a `PLAN_CALC_QUARANTINE` entry is upserted into `EflParseReviewQueue`.
-  - When an admin home-scoped estimate is blocked (e.g. missing buckets / sum mismatch), a `PLAN_CALC_QUARANTINE` entry is also upserted.
+  - When an admin home-scoped estimate is blocked for a **plan-defect** reason (e.g. unsupported schedule, non-deterministic pricing, unsupported bucket key), a `PLAN_CALC_QUARANTINE` entry is also upserted.
+  - Availability gates (missing intervals/buckets) do **not** create review noise.
   - Admin queue auto-resolve/dedupe skips `PLAN_CALC_QUARANTINE` so these items remain visible until explicitly resolved.
 
 TOU Phase-2 (arbitrary windows; non-dashboard only)
@@ -2515,7 +2519,7 @@ TOU Phase-2 (arbitrary windows; non-dashboard only)
     - Missing any required bucket -> `MISSING_USAGE_BUCKETS`
   - TDSP delivery remains total-based via `perKwhDeliveryChargeCents` (no TDSP TOU windows in tariff module yet).
 - Shared estimator/endpoints:
-  - `/api/plan-engine/offer-estimate` and `/api/plan-engine/estimate-set` can now backfill and load arbitrary window buckets derived from schedule (still explicit backfill only, bounded, fail-closed).
+  - `/api/plan-engine/offer-estimate` and `/api/plan-engine/estimate-set` now auto-ensure monthly buckets by default (bounded, fail-closed) so deterministic TOU windows compute whenever intervals exist.
 - Tests:
   - Added unit tests for TOU Phase-2 window math in `tests/plan-engine/touPhase2.cost.test.ts`
 

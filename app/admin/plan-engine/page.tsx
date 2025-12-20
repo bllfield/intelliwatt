@@ -98,7 +98,7 @@ export default function PlanEngineLabPage() {
   const [templateFlagsByOfferId, setTemplateFlagsByOfferId] = useState<Record<string, string[]>>({});
   const [templateReasonByOfferId, setTemplateReasonByOfferId] = useState<Record<string, string>>({});
   const [monthsCount, setMonthsCount] = useState(12);
-  const [backfill, setBackfill] = useState(false);
+  const [backfill, setBackfill] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rawJson, setRawJson] = useState<any>(null);
@@ -254,7 +254,7 @@ export default function PlanEngineLabPage() {
       const res = await fetch("/api/plan-engine/estimate-set", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ offerIds, monthsCount: 12, backfill: false }),
+        body: JSON.stringify({ offerIds, monthsCount: 12 }),
       });
       const json = await res.json().catch(() => null);
       if (!res.ok) {
@@ -373,7 +373,7 @@ export default function PlanEngineLabPage() {
         <h1 className="text-2xl font-semibold">Plan Engine Lab</h1>
         <p className="text-sm text-gray-600">
           Run <code className="font-mono">POST /api/plan-engine/estimate-set</code> to estimate multiple offers (bucket-gated, fail-closed),
-          with optional explicit backfill.
+          with bounded auto-creation of monthly buckets from intervals (recommended).
         </p>
       </div>
 
@@ -619,7 +619,7 @@ export default function PlanEngineLabPage() {
 
           <label className="flex items-center gap-2">
             <input type="checkbox" checked={backfill} onChange={(e) => setBackfill(e.target.checked)} />
-            <span className="text-sm font-semibold text-gray-800">backfill</span>
+            <span className="text-sm font-semibold text-gray-800">Auto-create monthly buckets (recommended)</span>
           </label>
 
           <button

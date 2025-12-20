@@ -28,7 +28,16 @@ export async function GET(req: NextRequest) {
       const m = Number.isFinite(n) ? Math.floor(n) : 12;
       return Math.max(1, Math.min(12, m));
     })();
-    const backfillRequested = String(url.searchParams.get("backfill") ?? "").trim() === "1";
+    const backfillParam = url.searchParams.get("backfill");
+    const autoEnsureBuckets =
+      backfillParam == null
+        ? true
+        : (() => {
+            const s = String(backfillParam ?? "").trim().toLowerCase();
+            if (s === "1" || s === "true") return true;
+            if (s === "0" || s === "false") return false;
+            return false;
+          })();
 
     const user = await prisma.user.findUnique({
       where: { email: normalizeEmail(sessionEmail) },
@@ -70,7 +79,7 @@ export async function GET(req: NextRequest) {
     const res = await estimateOfferFromOfferId({
       offerId,
       monthsCount,
-      backfill: backfillRequested,
+      autoEnsureBuckets,
       homeId: house.id,
       esiid,
       tdspSlug: tdspSlug || null,
@@ -91,6 +100,7 @@ export async function GET(req: NextRequest) {
       annualKwh: res.annualKwh,
       usageBucketsByMonthIncluded: res.usageBucketsByMonthIncluded,
       backfill: res.backfill,
+      bucketEnsure: (res as any).bucketEnsure ?? null,
       detected: res.detected,
       monthsIncluded: res.monthsIncluded,
       estimate: res.estimate,

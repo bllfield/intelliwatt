@@ -47,7 +47,7 @@ beforeEach(() => {
     annualKwh: args.annualKwh,
     usageBucketsByMonthIncluded: false,
     detected: { freeWeekends: false, dayNightTou: false },
-    backfill: { requested: Boolean(args.backfill), attempted: false, ok: false, missingKeysBefore: 0, missingKeysAfter: 0 },
+    backfill: { requested: Boolean(args.autoEnsureBuckets), attempted: false, ok: false, missingKeysBefore: 0, missingKeysAfter: 0 },
     estimate: { ok: true, offerId: String(args.offerId) },
   }));
 });

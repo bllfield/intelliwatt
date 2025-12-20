@@ -164,7 +164,7 @@ export default function AdminPlanDetailsPage({ params }: { params: { offerId: st
   // --- estimation runner (homeId-scoped)
   const [homeId, setHomeId] = useState("");
   const [monthsCount, setMonthsCount] = useState(12);
-  const [backfill, setBackfill] = useState(false);
+  const [backfill, setBackfill] = useState(true);
   const [estimateLoading, setEstimateLoading] = useState(false);
   const [estimateErr, setEstimateErr] = useState<string | null>(null);
   const [estimateJson, setEstimateJson] = useState<any>(null);
@@ -966,7 +966,7 @@ export default function AdminPlanDetailsPage({ params }: { params: { offerId: st
         <div className="rounded-xl border bg-white p-4 space-y-3">
           <div className="text-sm font-semibold">Estimate for a home (runs the calculator)</div>
           <div className="text-xs text-gray-600">
-            Enter a <span className="font-mono">homeId</span>. If usage buckets exist (or you enable backfill), this will run the estimate for this specific home.
+            Enter a <span className="font-mono">homeId</span>. This will run the estimate for this specific home (and can auto-create monthly buckets from intervals when available).
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <label className="text-xs">
@@ -1010,7 +1010,7 @@ export default function AdminPlanDetailsPage({ params }: { params: { offerId: st
             </label>
             <label className="inline-flex items-center gap-2 text-xs mt-5">
               <input type="checkbox" checked={backfill} onChange={(e) => setBackfill(e.target.checked)} />
-              backfill
+              Auto-create monthly buckets (recommended)
             </label>
             <button
               className="rounded-lg bg-black text-white px-4 py-2 text-sm disabled:opacity-60 mt-5"
@@ -1083,7 +1083,7 @@ export default function AdminPlanDetailsPage({ params }: { params: { offerId: st
               className="rounded-lg border px-3 py-1.5 text-xs hover:bg-gray-50 disabled:opacity-60"
               disabled={!token || !homeId.trim() || coverageLoading || requiredBucketKeys.length === 0}
               onClick={() => void loadCoverage()}
-              title="Reads existing monthly buckets only (no backfill)."
+              title="Reads existing monthly buckets only (does not auto-create)."
             >
               {coverageLoading ? "Loading…" : "Load bucket coverage"}
             </button>

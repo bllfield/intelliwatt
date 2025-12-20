@@ -36,7 +36,8 @@ export async function POST(req: NextRequest) {
       return Math.max(1, Math.min(12, m));
     })();
 
-    const backfillRequested = toBool(body?.backfill);
+    const backfillField = body?.backfill;
+    const backfillRequested = backfillField == null ? true : toBool(backfillField);
 
     const offerIds: string[] = [];
     const seen = new Set<string>();
@@ -115,7 +116,7 @@ export async function POST(req: NextRequest) {
       const r = await estimateOfferFromOfferId({
         offerId,
         monthsCount,
-        backfill: backfillRequested,
+        autoEnsureBuckets: backfillRequested,
         homeId: house.id,
         esiid,
         tdspSlug: house.tdspSlug ? String(house.tdspSlug) : null,

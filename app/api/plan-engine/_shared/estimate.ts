@@ -3,7 +3,7 @@ import { usagePrisma } from "@/lib/db/usageClient";
 import { ensureCoreMonthlyBuckets } from "@/lib/usage/aggregateMonthlyBuckets";
 import { getTdspDeliveryRates } from "@/lib/plan-engine/getTdspDeliveryRates";
 import { calculatePlanCostForUsage } from "@/lib/plan-engine/calculatePlanCostForUsage";
-import { bucketRuleFromParsedKey, parseMonthlyBucketKey, type UsageBucketDef } from "@/lib/plan-engine/usageBuckets";
+import { bucketDefsFromBucketKeys, MonthlyBucketKeyParseError } from "@/lib/plan-engine/usageBuckets";
 import { requiredBucketsForRateStructure } from "@/lib/plan-engine/requiredBucketsForPlan";
 
 export type TdspApplied = {
@@ -15,7 +15,7 @@ export type TdspApplied = {
 export type OfferEstimateInput = {
   offerId: string;
   monthsCount: number;
-  backfill: boolean;
+  autoEnsureBuckets: boolean;
 };
 
 export type OfferEstimateContext = {
@@ -38,6 +38,7 @@ export type OfferEstimateResult = {
   usageBucketsByMonthIncluded: boolean;
   detected: { freeWeekends: boolean; dayNightTou: boolean };
   backfill: { requested: boolean; attempted: boolean; ok: boolean; missingKeysBefore: number; missingKeysAfter: number };
+  bucketEnsure?: { attempted: boolean; ok: boolean; reason?: string; detail?: any };
   estimate?: any;
 };
 
@@ -168,22 +169,101 @@ function withTimeout<T>(p: Promise<T>, timeoutMs: number, label: string): Promis
   ]);
 }
 
-function makeBucketDefsFromKeys(keys: string[]): UsageBucketDef[] {
-  const out: UsageBucketDef[] = [];
-  const seen = new Set<string>();
-  for (const key of keys) {
-    const k = String(key ?? "").trim();
-    if (!k || seen.has(k)) continue;
-    seen.add(k);
-    const parsed = parseMonthlyBucketKey(k);
-    if (!parsed) continue;
-    out.push({
-      key: k,
-      label: `Monthly kWh (${k})`,
-      rule: bucketRuleFromParsedKey(parsed),
-    });
+async function ensureMonthlyBucketsForHome(args: {
+  homeId: string;
+  esiid: string | null;
+  monthsCount: number; // 1..12
+  requiredBucketKeys: string[]; // canonical keys
+}): Promise<{
+  ok: boolean;
+  attempted: boolean;
+  reason?: "NO_INTERVALS" | "PARSE_BUCKET_KEY_FAILED" | "AGGREGATION_FAILED";
+  error?: string;
+  detail?: any;
+}> {
+  const monthsCount = Math.max(1, Math.min(12, Math.floor(Number(args.monthsCount ?? 12) || 12)));
+  const homeId = String(args.homeId ?? "").trim();
+  if (!homeId) return { ok: false, attempted: false, reason: "AGGREGATION_FAILED", error: "missing_homeId" };
+
+  const intervalSource = args.esiid ? ("SMT" as const) : ("GREENBUTTON" as const);
+  const source = intervalSource;
+
+  let bucketDefs;
+  try {
+    bucketDefs = bucketDefsFromBucketKeys(args.requiredBucketKeys);
+  } catch (e: any) {
+    if (e instanceof MonthlyBucketKeyParseError) {
+      return {
+        ok: false,
+        attempted: true,
+        reason: "PARSE_BUCKET_KEY_FAILED",
+        error: e.message,
+        detail: { key: e.key, canonicalKey: e.canonicalKey },
+      };
+    }
+    return { ok: false, attempted: true, reason: "PARSE_BUCKET_KEY_FAILED", error: e?.message ?? String(e) };
   }
-  return out;
+
+  const latestTs: Date | null =
+    intervalSource === "SMT"
+      ? await prisma.smtInterval
+          .findFirst({
+            where: { esiid: String(args.esiid ?? "").trim() },
+            orderBy: { ts: "desc" },
+            select: { ts: true },
+          })
+          .then((r: any) => (r?.ts instanceof Date ? r.ts : null))
+          .catch(() => null)
+      : await (usagePrisma as any).greenButtonInterval
+          .findFirst({
+            where: { homeId },
+            orderBy: { timestamp: "desc" },
+            select: { timestamp: true },
+          })
+          .then((r: any) => (r?.timestamp instanceof Date ? r.timestamp : null))
+          .catch(() => null);
+
+  if (!latestTs) return { ok: false, attempted: true, reason: "NO_INTERVALS", error: "no_intervals_found" };
+
+  const rangeEnd = latestTs;
+  const rangeStart = (() => {
+    const d = new Date(rangeEnd.getTime());
+    d.setUTCHours(0, 0, 0, 0);
+    d.setUTCDate(1);
+    d.setUTCMonth(d.getUTCMonth() - (monthsCount - 1));
+    // Pad backward to avoid timezone boundary edge cases (Chicago vs UTC).
+    d.setUTCDate(d.getUTCDate() - 2);
+    return d;
+  })();
+
+  try {
+    const res = await withTimeout(
+      ensureCoreMonthlyBuckets({
+        homeId,
+        esiid: intervalSource === "SMT" ? String(args.esiid ?? "").trim() : null,
+        rangeStart,
+        rangeEnd,
+        source,
+        intervalSource,
+        bucketDefs,
+      }),
+      110000,
+      "bucket_ensure",
+    );
+
+    if (!res || typeof (res as any).intervalRowsRead !== "number" || (res as any).intervalRowsRead <= 0) {
+      return { ok: false, attempted: true, reason: "NO_INTERVALS", error: "no_intervals_in_range", detail: res ?? null };
+    }
+
+    return { ok: true, attempted: true, detail: res ?? null };
+  } catch (e: any) {
+    return { ok: false, attempted: true, reason: "AGGREGATION_FAILED", error: e?.message ?? String(e) };
+  }
+}
+
+function makeBucketDefsFromKeys(keys: string[]) {
+  // Legacy wrapper retained for minimal diff; now fail-closed via bucketDefsFromBucketKeys().
+  return bucketDefsFromBucketKeys(keys);
 }
 
 const ALL_ALLDAY_KEYS = ["kwh.m.all.total", "kwh.m.all.0000-2400", "kwh.m.ALL.total", "kwh.m.ALL.0000-2400"] as const;
@@ -374,9 +454,9 @@ export async function getTdspApplied(tdspSlug: string | null): Promise<TdspAppli
 export async function estimateOfferFromOfferId(args: OfferEstimateInput & OfferEstimateContext): Promise<OfferEstimateResult> {
   const offerId = String(args.offerId ?? "").trim();
   const monthsCount = Math.max(1, Math.min(12, Math.floor(Number(args.monthsCount ?? 12))));
-  const backfillRequested = Boolean(args.backfill);
+  const autoEnsureBuckets = Boolean((args as any).autoEnsureBuckets ?? (args as any).backfill);
 
-  if (!offerId) return { offerId, ok: false, error: "missing_offerId", httpStatus: 400, monthsCount, monthsIncluded: [], annualKwh: args.annualKwh, usageBucketsByMonthIncluded: false, detected: { freeWeekends: false, dayNightTou: false }, backfill: { requested: backfillRequested, attempted: false, ok: false, missingKeysBefore: 0, missingKeysAfter: 0 } };
+  if (!offerId) return { offerId, ok: false, error: "missing_offerId", httpStatus: 400, monthsCount, monthsIncluded: [], annualKwh: args.annualKwh, usageBucketsByMonthIncluded: false, detected: { freeWeekends: false, dayNightTou: false }, backfill: { requested: autoEnsureBuckets, attempted: false, ok: false, missingKeysBefore: 0, missingKeysAfter: 0 } };
 
   // Resolve template mapping (offerId -> RatePlan)
   const map = await (prisma as any).offerIdRatePlanMap.findUnique({
@@ -395,7 +475,7 @@ export async function estimateOfferFromOfferId(args: OfferEstimateInput & OfferE
       annualKwh: args.annualKwh,
       usageBucketsByMonthIncluded: false,
       detected: { freeWeekends: false, dayNightTou: false },
-      backfill: { requested: backfillRequested, attempted: false, ok: false, missingKeysBefore: 0, missingKeysAfter: 0 },
+      backfill: { requested: autoEnsureBuckets, attempted: false, ok: false, missingKeysBefore: 0, missingKeysAfter: 0 },
     };
   }
 
@@ -416,7 +496,7 @@ export async function estimateOfferFromOfferId(args: OfferEstimateInput & OfferE
       annualKwh: args.annualKwh,
       usageBucketsByMonthIncluded: false,
       detected: { freeWeekends: false, dayNightTou: false },
-      backfill: { requested: backfillRequested, attempted: false, ok: false, missingKeysBefore: 0, missingKeysAfter: 0 },
+      backfill: { requested: autoEnsureBuckets, attempted: false, ok: false, missingKeysBefore: 0, missingKeysAfter: 0 },
     };
   }
 
@@ -439,17 +519,41 @@ export async function estimateOfferFromOfferId(args: OfferEstimateInput & OfferE
   const dbQueryKeys: string[] = Array.from(new Set<string>(effectiveRequiredKeys.flatMap((k) => aliasesForCanonicalMonthlyBucketKey(k))));
 
   // Define the month window as the latest N months present for this homeId (regardless of key shape).
-  const recentMonthsRows = await (usagePrisma as any).homeMonthlyUsageBucket.findMany({
-    where: { homeId: args.homeId },
-    distinct: ["yearMonth"],
-    select: { yearMonth: true },
-    orderBy: { yearMonth: "desc" },
-    take: monthsCount,
-  });
-  const months = (recentMonthsRows ?? [])
-    .map((r: any) => String(r?.yearMonth ?? "").trim())
-    .filter(Boolean)
-    .reverse();
+  let bucketEnsureAttempted = false;
+  let bucketEnsureOk = false;
+  let bucketEnsureReason: string | null = null;
+  let bucketEnsureDetail: any = null;
+
+  const loadRecentMonths = async (): Promise<string[]> => {
+    const recentMonthsRows = await (usagePrisma as any).homeMonthlyUsageBucket.findMany({
+      where: { homeId: args.homeId },
+      distinct: ["yearMonth"],
+      select: { yearMonth: true },
+      orderBy: { yearMonth: "desc" },
+      take: monthsCount,
+    });
+    return (recentMonthsRows ?? [])
+      .map((r: any) => String(r?.yearMonth ?? "").trim())
+      .filter(Boolean)
+      .reverse();
+  };
+
+  let months = await loadRecentMonths();
+
+  // If we have few/no monthly buckets yet, try to auto-ensure them from raw intervals (bounded).
+  if (autoEnsureBuckets && months.length < monthsCount) {
+    const ensured = await ensureMonthlyBucketsForHome({
+      homeId: args.homeId,
+      esiid: args.esiid ?? null,
+      monthsCount,
+      requiredBucketKeys: [...effectiveRequiredKeys],
+    });
+    bucketEnsureAttempted = Boolean(ensured.attempted);
+    bucketEnsureOk = Boolean(ensured.ok);
+    bucketEnsureReason = ensured.reason ?? null;
+    bucketEnsureDetail = ensured.detail ?? null;
+    months = await loadRecentMonths();
+  }
 
   const rows = await (usagePrisma as any).homeMonthlyUsageBucket.findMany({
     where: { homeId: args.homeId, yearMonth: { in: months as any }, bucketKey: { in: dbQueryKeys as any } },
@@ -480,70 +584,74 @@ export async function estimateOfferFromOfferId(args: OfferEstimateInput & OfferE
   missingKeysBefore = missingSlots;
   missingKeysAfter = missingKeysBefore;
 
-  // Optional on-demand backfill (bounded): only when explicitly requested and missing.
-  if (!usageBucketsByMonth && backfillRequested && months.length === monthsCount && monthsCount <= 12) {
+  // Auto-ensure monthly buckets from intervals (bounded) when needed.
+  if (!usageBucketsByMonth && autoEnsureBuckets) {
     backfillAttempted = true;
-    const startParsed = parseYearMonth(months[0]);
-    const endParsed = parseYearMonth(months[months.length - 1]);
-    if (startParsed && endParsed) {
-      const rangeStart = firstInstantOfMonthUtc(startParsed.year, startParsed.month);
-      const rangeEnd = lastInstantOfMonthUtc(endParsed.year, endParsed.month);
 
-      const bucketDefs = makeBucketDefsFromKeys([...effectiveRequiredKeys]);
-      const intervalSource = args.esiid ? ("SMT" as const) : ("GREENBUTTON" as const);
-      const source = intervalSource === "SMT" ? ("SMT" as const) : ("GREENBUTTON" as const);
+    const ensured = await ensureMonthlyBucketsForHome({
+      homeId: args.homeId,
+      esiid: args.esiid ?? null,
+      monthsCount,
+      requiredBucketKeys: [...effectiveRequiredKeys],
+    });
+    bucketEnsureAttempted = bucketEnsureAttempted || Boolean(ensured.attempted);
+    bucketEnsureOk = bucketEnsureOk || Boolean(ensured.ok);
+    bucketEnsureReason = ensured.reason ?? bucketEnsureReason;
+    bucketEnsureDetail = ensured.detail ?? bucketEnsureDetail;
 
-      try {
-        await withTimeout(
-          ensureCoreMonthlyBuckets({
-            homeId: args.homeId,
-            esiid: intervalSource === "SMT" ? args.esiid : null,
-            rangeStart,
-            rangeEnd,
-            source,
-            intervalSource,
-            bucketDefs,
-          }),
-          60000,
-          "bucket_backfill",
-        );
-      } catch {
-        // Fail closed: re-check coverage below.
-      }
+    // Re-load months (in case none existed) and re-check coverage (fail-closed).
+    months = await loadRecentMonths();
 
-      const rows2 = await (usagePrisma as any).homeMonthlyUsageBucket.findMany({
-        where: { homeId: args.homeId, yearMonth: { in: months as any }, bucketKey: { in: dbQueryKeys as any } },
-        select: { yearMonth: true, bucketKey: true, kwhTotal: true },
-        orderBy: { yearMonth: "desc" },
-      });
-      const byMonth2: Record<string, Record<string, number>> = {};
-      for (const r of rows2 ?? []) {
-        const ym = String(r?.yearMonth ?? "").trim();
-        const key = String(r?.bucketKey ?? "").trim();
-        const kwh = decimalishToNumber(r?.kwhTotal);
-        if (!ym || !key || kwh == null) continue;
-        if (!byMonth2[ym]) byMonth2[ym] = {};
-        byMonth2[ym][key] = kwh;
-      }
-
-      const after = makeUsageBucketsByMonthForKeys({
-        months,
-        byMonth: byMonth2,
-        requiredCanonicalKeys: effectiveRequiredKeys,
-      });
-      usageBucketsByMonth = after.usageBucketsByMonth;
-      missingKeysAfter = after.missingSlots;
-      backfillOk = Boolean(usageBucketsByMonth);
+    const rows2 = await (usagePrisma as any).homeMonthlyUsageBucket.findMany({
+      where: { homeId: args.homeId, yearMonth: { in: months as any }, bucketKey: { in: dbQueryKeys as any } },
+      select: { yearMonth: true, bucketKey: true, kwhTotal: true },
+      orderBy: { yearMonth: "desc" },
+    });
+    const byMonth2: Record<string, Record<string, number>> = {};
+    for (const r of rows2 ?? []) {
+      const ym = String(r?.yearMonth ?? "").trim();
+      const key = String(r?.bucketKey ?? "").trim();
+      const kwh = decimalishToNumber(r?.kwhTotal);
+      if (!ym || !key || kwh == null) continue;
+      if (!byMonth2[ym]) byMonth2[ym] = {};
+      byMonth2[ym][key] = kwh;
     }
+
+    const after = makeUsageBucketsByMonthForKeys({
+      months,
+      byMonth: byMonth2,
+      requiredCanonicalKeys: effectiveRequiredKeys,
+    });
+    usageBucketsByMonth = after.usageBucketsByMonth;
+    missingKeysAfter = after.missingSlots;
+    backfillOk = Boolean(usageBucketsByMonth);
   }
 
-  const estimate = calculatePlanCostForUsage({
+  let estimate = calculatePlanCostForUsage({
     annualKwh: args.annualKwh,
     monthsCount,
     tdsp: args.tdsp,
     rateStructure,
     ...(usageBucketsByMonth ? { usageBucketsByMonth } : {}),
   });
+
+  // Precision: if we tried to produce buckets but found no intervals, return a clearer availability gate.
+  if (
+    estimate &&
+    typeof estimate === "object" &&
+    (estimate as any).status === "NOT_COMPUTABLE" &&
+    typeof (estimate as any).reason === "string" &&
+    String((estimate as any).reason).includes("MISSING_USAGE_BUCKETS") &&
+    bucketEnsureAttempted &&
+    bucketEnsureReason === "NO_INTERVALS"
+  ) {
+    estimate = { ...(estimate as any), reason: "MISSING_USAGE_INTERVALS" };
+  }
+
+  // Precision: if required keys are unparseable under the bucket grammar, fail-closed with a stable code.
+  if (bucketEnsureAttempted && bucketEnsureReason === "PARSE_BUCKET_KEY_FAILED") {
+    estimate = { status: "NOT_COMPUTABLE", reason: "UNSUPPORTED_BUCKET_KEY", debug: { bucketEnsureDetail } };
+  }
 
   return {
     offerId,
@@ -555,11 +663,17 @@ export async function estimateOfferFromOfferId(args: OfferEstimateInput & OfferE
     usageBucketsByMonthIncluded: Boolean(usageBucketsByMonth),
     detected: { freeWeekends: wantsFreeWeekends, dayNightTou: wantsDayNight },
     backfill: {
-      requested: backfillRequested,
+      requested: autoEnsureBuckets,
       attempted: backfillAttempted,
       ok: backfillOk,
       missingKeysBefore,
       missingKeysAfter,
+    },
+    bucketEnsure: {
+      attempted: bucketEnsureAttempted,
+      ok: bucketEnsureOk,
+      ...(bucketEnsureReason ? { reason: bucketEnsureReason } : {}),
+      ...(bucketEnsureDetail != null ? { detail: bucketEnsureDetail } : {}),
     },
     estimate,
   };

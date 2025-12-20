@@ -37,7 +37,9 @@ export async function POST(req: NextRequest) {
   const homeId = String(body?.homeId ?? "").trim();
   const monthsCountRaw = Number(body?.monthsCount ?? 12);
   const monthsCount = Math.max(1, Math.min(12, Number.isFinite(monthsCountRaw) ? Math.floor(monthsCountRaw) : 12));
-  const backfill = body?.backfill === true;
+  const backfillField = body?.backfill;
+  const backfill =
+    backfillField == null ? true : backfillField === true || String(backfillField ?? "").trim().toLowerCase() === "true" || String(backfillField ?? "").trim() === "1";
 
   if (!offerId) return jsonError(400, "missing_offerId");
   if (!homeId) return jsonError(400, "missing_homeId");
@@ -97,7 +99,7 @@ export async function POST(req: NextRequest) {
   const res = await estimateOfferFromOfferId({
     offerId,
     monthsCount,
-    backfill,
+    autoEnsureBuckets: backfill,
     homeId: house.id,
     esiid,
     tdspSlug,
@@ -109,13 +111,20 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: res.error ?? "estimate_failed", offerId }, { status: res.httpStatus ?? 500 });
   }
 
-  // If estimation is blocked, queue for admin review (PLAN_CALC_QUARANTINE).
-  // This is admin-only visibility; it does not change dashboard semantics.
+  // If estimation is blocked for a plan-defect reason, queue for admin review (PLAN_CALC_QUARANTINE).
+  // Availability gates (missing intervals/buckets) should NOT create review noise.
+  const estStatus = String(res?.estimate?.status ?? "");
+  const estReason = String(res?.estimate?.reason ?? "").trim();
+  const isBlocked = estStatus && estStatus !== "OK";
+  const needsReview =
+    isBlocked &&
+    (estReason.startsWith("UNSUPPORTED_") ||
+      estReason.startsWith("NON_DETERMINISTIC_") ||
+      estReason === "UNSUPPORTED_BUCKET_KEY");
+
   try {
-    const estStatus = String(res?.estimate?.status ?? "");
-    const reason = String(res?.estimate?.reason ?? "").trim();
-    const isBlocked = estStatus && estStatus !== "OK";
-    if (isBlocked && res?.ratePlan?.id) {
+    const reason = estReason;
+    if (needsReview && res?.ratePlan?.id) {
       const rp = await prisma.ratePlan.findUnique({
         where: { id: String(res.ratePlan.id) },
         select: {
@@ -195,6 +204,8 @@ export async function POST(req: NextRequest) {
     annualKwh: res.annualKwh,
     usageBucketsByMonthIncluded: res.usageBucketsByMonthIncluded,
     backfill: res.backfill,
+    bucketEnsure: (res as any).bucketEnsure ?? null,
+    needsReview,
     detected: res.detected,
     monthsIncluded: res.monthsIncluded,
     ratePlan: res.ratePlan ?? null,

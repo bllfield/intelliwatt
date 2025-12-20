@@ -153,6 +153,18 @@ export function canonicalizeMonthlyBucketKey(key: string): string {
   return `kwh.m.${dayType}.${startHHMM}-${endHHMM}`;
 }
 
+export class MonthlyBucketKeyParseError extends Error {
+  readonly key: string;
+  readonly canonicalKey: string;
+
+  constructor(key: string, canonicalKey: string, message?: string) {
+    super(message ?? `Unparseable monthly bucket key: ${canonicalKey}`);
+    this.name = "MonthlyBucketKeyParseError";
+    this.key = key;
+    this.canonicalKey = canonicalKey;
+  }
+}
+
 /**
  * Bucket key grammar (v1, monthly only):
  * - kwh.m.<dayType>.total
@@ -199,6 +211,40 @@ export function parseMonthlyBucketKey(key: string): ParsedBucketKey | null {
     tz: "America/Chicago",
     isTotal: false,
   };
+}
+
+/**
+ * Build `UsageBucketDef[]` for a set of monthly bucket keys.
+ *
+ * - Canonicalizes keys (`canonicalizeMonthlyBucketKey`) for stable storage/lookup.
+ * - Validates against the monthly bucket grammar (`parseMonthlyBucketKey`).
+ * - Throws `MonthlyBucketKeyParseError` on any unparseable key (fail-closed).
+ */
+export function bucketDefsFromBucketKeys(bucketKeys: string[]): UsageBucketDef[] {
+  const inKeys = Array.isArray(bucketKeys) ? bucketKeys : [];
+  const out: UsageBucketDef[] = [];
+  const seen = new Set<string>();
+
+  for (const rawKey of inKeys) {
+    const raw = String(rawKey ?? "").trim();
+    if (!raw) continue;
+    const canonical = canonicalizeMonthlyBucketKey(raw);
+    if (!canonical) continue;
+    if (seen.has(canonical)) continue;
+    const parsed = parseMonthlyBucketKey(canonical);
+    if (!parsed) {
+      throw new MonthlyBucketKeyParseError(raw, canonical);
+    }
+
+    seen.add(canonical);
+    out.push({
+      key: canonical,
+      label: `Monthly kWh (${canonical})`,
+      rule: bucketRuleFromParsedKey(parsed),
+    });
+  }
+
+  return out;
 }
 
 export function bucketRuleFromParsedKey(p: ParsedBucketKey): BucketRuleV1 {
