@@ -22,6 +22,74 @@ function isKnownTdspCode(x: unknown): boolean {
   return KNOWN_TDSP_CODES.includes(normalizeUtilityId(x) as any);
 }
 
+function normalizeUrl(u: unknown): string | null {
+  const s = String(u ?? "").trim();
+  if (!s) return null;
+  try {
+    return new URL(s).toString();
+  } catch {
+    return null;
+  }
+}
+
+async function buildEflUrlCandidatesForQueueItem(it: any): Promise<string[]> {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (u: unknown) => {
+    const n = normalizeUrl(u);
+    if (!n) return;
+    if (seen.has(n)) return;
+    seen.add(n);
+    out.push(n);
+  };
+
+  // 0) The queue row URL itself (may be WAF-protected enrollment page).
+  push(it?.eflUrl);
+
+  // 1) If we have a ratePlanId, prefer its stored URLs (often direct PDF).
+  const ratePlanId = String(it?.ratePlanId ?? "").trim();
+  if (ratePlanId) {
+    try {
+      const rp = await (prisma as any).ratePlan.findUnique({
+        where: { id: ratePlanId },
+        select: { eflSourceUrl: true, eflUrl: true } as any,
+      });
+      push(rp?.eflSourceUrl);
+      push(rp?.eflUrl);
+    } catch {
+      // ignore
+    }
+  }
+
+  // 2) If we have offerId, masterPlan.docs.efl tends to be the WAF-safe direct PDF link.
+  const offerId = String(it?.offerId ?? "").trim();
+  if (offerId) {
+    try {
+      const mp = await (prisma as any).masterPlan.findFirst({
+        where: { offerId: offerId },
+        select: { eflUrl: true, docs: true } as any,
+      });
+      push(mp?.eflUrl);
+      push((mp as any)?.docs?.efl);
+    } catch {
+      // ignore
+    }
+    // Also try via offerIdRatePlanMap if present.
+    try {
+      const link = await (prisma as any).offerIdRatePlanMap.findUnique({
+        where: { offerId: offerId },
+        include: { ratePlan: true } as any,
+      });
+      push((link as any)?.ratePlan?.eflSourceUrl);
+      push((link as any)?.ratePlan?.eflUrl);
+    } catch {
+      // ignore
+    }
+  }
+
+  return out;
+}
+
 type Body = {
   cursor?: string | null;
   limit?: number | null;
@@ -147,9 +215,46 @@ export async function POST(req: NextRequest) {
         processed++;
 
         try {
-          const fetched = await fetchEflPdfFromUrl(eflUrl);
-          if (!fetched.ok) {
+          const candidates = await buildEflUrlCandidatesForQueueItem(it);
+          const tried: Array<{ url: string; error: string | null; notes: string[] }> = [];
+
+          let fetched: any = null;
+          let usedUrl: string | null = null;
+
+          for (const u of candidates.length ? candidates : [eflUrl]) {
+            const res = await fetchEflPdfFromUrl(u);
+            if ((res as any)?.ok === true) {
+              fetched = res;
+              usedUrl = u;
+              break;
+            }
+            tried.push({
+              url: u,
+              error: (res as any)?.error ?? "fetch failed",
+              notes: Array.isArray((res as any)?.notes) ? (res as any).notes : [],
+            });
+          }
+
+          if (!fetched || (fetched as any).ok !== true) {
             fetchFailed++;
+            const last = tried.length ? tried[tried.length - 1] : null;
+            const errorMsg = last?.error ?? "fetch failed";
+
+            // Best-effort: store richer reason so stats can reveal WAF/403 vs missing PDF.
+            try {
+              if (!dryRun) {
+                await (prisma as any).eflParseReviewQueue.update({
+                  where: { id },
+                  data: {
+                    queueReason: `FETCH_FAIL: ${errorMsg}`.slice(0, 4000),
+                    validation: { fetch: { usedUrl, candidates, tried } } as any,
+                  },
+                });
+              }
+            } catch {
+              // ignore
+            }
+
             if (!resultsTruncated && results.length < resultsLimit) {
               results.push({
                 id,
@@ -158,7 +263,10 @@ export async function POST(req: NextRequest) {
                 planName: it?.planName ?? null,
                 eflUrl,
                 status: "FETCH_FAIL",
-                error: fetched.error ?? "fetch failed",
+                error: errorMsg,
+                usedUrl,
+                candidatesTried: tried.length,
+                tried: tried.slice(0, 6),
               });
             } else {
               resultsTruncated = true;
@@ -166,7 +274,7 @@ export async function POST(req: NextRequest) {
             continue;
           }
 
-          const pdfBytes = Buffer.from(fetched.pdfBytes);
+          const pdfBytes = Buffer.from((fetched as any).pdfBytes);
           const pipeline = await runEflPipelineNoStore({
             pdfBytes,
             source: "manual",
