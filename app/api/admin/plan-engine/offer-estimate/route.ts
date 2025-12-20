@@ -11,6 +11,17 @@ function jsonError(status: number, error: string, detail?: any) {
   return NextResponse.json({ ok: false, error, detail: detail ?? null }, { status });
 }
 
+function inferTdspSlugFromUtilityId(utilityId: unknown): string | null {
+  const u = String(utilityId ?? "").trim().toUpperCase();
+  if (!u) return null;
+  if (u === "ONCOR") return "oncor";
+  if (u === "CENTERPOINT") return "centerpoint";
+  if (u === "TNMP") return "tnmp";
+  if (u === "AEP_NORTH") return "aep_north";
+  if (u === "AEP_CENTRAL") return "aep_central";
+  return null;
+}
+
 export async function POST(req: NextRequest) {
   const gate = requireAdmin(req);
   if (!gate.ok) return NextResponse.json(gate.body, { status: gate.status });
@@ -37,13 +48,51 @@ export async function POST(req: NextRequest) {
   });
   if (!house) return jsonError(404, "home_not_found");
 
-  const tdspSlug = String(house.tdspSlug ?? "").trim().toLowerCase() || null;
+  // TDSP slug is required to apply delivery charges; home records can be missing it.
+  // Fallback to the plan's utilityId territory when needed.
+  const tdspSlugFromHome = String(house.tdspSlug ?? "").trim().toLowerCase() || null;
   const esiid = house.esiid ? String(house.esiid) : null;
 
   const annualKwh = await computeAnnualKwhForEsiid(esiid);
   if (annualKwh == null) return jsonError(409, "missing_usage_totals", { esiid });
 
-  const tdspApplied = await getTdspApplied(tdspSlug);
+  // Best-effort: derive TDSP from the offer's RatePlan when home tdspSlug is missing.
+  const planTdsp = await prisma.offerIdRatePlanMap.findUnique({
+    where: { offerId },
+    include: {
+      ratePlan: {
+        select: {
+          utilityId: true,
+          modeledEflAvgPriceValidation: true,
+        } as any,
+      },
+    },
+  });
+  const tdspSlug =
+    tdspSlugFromHome ??
+    inferTdspSlugFromUtilityId((planTdsp as any)?.ratePlan?.utilityId ?? null) ??
+    null;
+
+  let tdspApplied = await getTdspApplied(tdspSlug);
+
+  // If tariff tables aren't populated (or lookup fails), avoid a misleading $0 TDSP by falling back
+  // to the EFL-derived TDSP assumption used during modeled validation (when available).
+  const isZeroTdsp =
+    !tdspApplied ||
+    (Number(tdspApplied.perKwhDeliveryChargeCents) === 0 && Number(tdspApplied.monthlyCustomerChargeDollars) === 0);
+  if (isZeroTdsp) {
+    const assumptions = (planTdsp as any)?.ratePlan?.modeledEflAvgPriceValidation?.assumptionsUsed ?? null;
+    const eflTdsp = assumptions?.tdspFromEfl ?? null;
+    const perKwhCents = typeof eflTdsp?.perKwhCents === "number" ? eflTdsp.perKwhCents : null;
+    const monthlyCents = typeof eflTdsp?.monthlyCents === "number" ? eflTdsp.monthlyCents : null;
+    if (perKwhCents != null && monthlyCents != null) {
+      tdspApplied = {
+        perKwhDeliveryChargeCents: perKwhCents,
+        monthlyCustomerChargeDollars: Number((monthlyCents / 100).toFixed(2)),
+        effectiveDate: tdspApplied?.effectiveDate,
+      };
+    }
+  }
 
   const res = await estimateOfferFromOfferId({
     offerId,
