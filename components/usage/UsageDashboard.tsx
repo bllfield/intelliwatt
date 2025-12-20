@@ -375,7 +375,9 @@ export const UsageDashboard: React.FC = () => {
                         ...m,
                         label: formatMonthLabel(m.month),
                         consumed: Math.max(m.kwh, 0),
-                        exported: Math.min(m.kwh, 0),
+                        // Recharts stacked bars do not reliably render negative values in a stack.
+                        // Represent exports as positive magnitude.
+                        exported: Math.max(-m.kwh, 0),
                       }))}
                       margin={{ top: 10, right: 16, bottom: 8, left: 0 }}
                     >
@@ -385,7 +387,7 @@ export const UsageDashboard: React.FC = () => {
                       <Tooltip
                         formatter={(value: number, key) => {
                           const label = key === 'consumed' ? 'Imported' : 'Exported';
-                          return `${Math.abs(value as number).toFixed(1)} kWh (${label})`;
+                          return `${(value as number).toFixed(1)} kWh (${label})`;
                         }}
                       />
                       <Legend />
@@ -414,7 +416,9 @@ export const UsageDashboard: React.FC = () => {
                         ...d,
                         label: formatDateShort(d.date),
                         consumed: Math.max(d.kwh, 0),
-                        exported: Math.min(d.kwh, 0),
+                        // Recharts stacked bars do not reliably render negative values in a stack.
+                        // Represent exports as positive magnitude.
+                        exported: Math.max(-d.kwh, 0),
                       }))}
                       margin={{ top: 10, right: 16, bottom: 8, left: 0 }}
                     >
@@ -424,7 +428,7 @@ export const UsageDashboard: React.FC = () => {
                       <Tooltip
                         formatter={(value: number, key) => {
                           const label = key === 'consumed' ? 'Imported' : 'Exported';
-                          return `${Math.abs(value as number).toFixed(1)} kWh (${label})`;
+                          return `${(value as number).toFixed(1)} kWh (${label})`;
                         }}
                       />
                       <Legend />
