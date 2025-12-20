@@ -574,6 +574,8 @@ export async function estimateOfferFromOfferId(args: OfferEstimateInput & OfferE
   }
 
   let backfillAttempted = false;
+  // Semantics: "ok" should reflect whether we have sufficient buckets to run the calculator
+  // (either they already existed, or we created them on-demand).
   let backfillOk = false;
   let missingKeysBefore = 0;
   let missingKeysAfter = 0;
@@ -585,6 +587,7 @@ export async function estimateOfferFromOfferId(args: OfferEstimateInput & OfferE
   });
   missingKeysBefore = missingSlots;
   missingKeysAfter = missingKeysBefore;
+  backfillOk = Boolean(usageBucketsByMonth);
 
   // Auto-ensure monthly buckets from intervals (bounded) when needed.
   if (!usageBucketsByMonth && autoEnsureBuckets) {
