@@ -312,16 +312,6 @@ async function fetchBytes(url: string, timeoutMs: number) {
   }
 }
 
-async function fetchBytesWithWafFallback(url: string, timeoutMs: number, notes: string[]) {
-  // Attempt 1: normal browser-ish headers (default).
-  try {
-    return await fetchBytes(url, timeoutMs);
-  } catch (e) {
-    notes.push(`primary_fetch_error=${e instanceof Error ? e.message : String(e)}`);
-    throw e;
-  }
-}
-
 function originFromUrl(u: string): string | null {
   try {
     return new URL(u).origin;
@@ -330,22 +320,18 @@ function originFromUrl(u: string): string | null {
   }
 }
 
-async function fetchBytesWithReferer(url: string, timeoutMs: number, referer: string) {
+async function fetchBytesWithHeaders(args: {
+  url: string;
+  timeoutMs: number;
+  headers: Record<string, string>;
+}): Promise<{ res: Response; contentType: string | null; buf: Uint8Array }> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const timeout = setTimeout(() => controller.abort(), args.timeoutMs);
   try {
-    const res = await fetch(url, {
+    const res = await fetch(args.url, {
       method: "GET",
       redirect: "follow",
-      headers: {
-        "user-agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-        accept:
-          "application/pdf,text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "accept-language": "en-US,en;q=0.9",
-        // Some doc hosts require a same-origin referer.
-        referer,
-      },
+      headers: args.headers,
       cache: "no-store",
       signal: controller.signal,
     });
@@ -355,6 +341,118 @@ async function fetchBytesWithReferer(url: string, timeoutMs: number, referer: st
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function baseHeaders(profile: "browser" | "bot" | "none"): Record<string, string> {
+  if (profile === "none") return {};
+  if (profile === "bot") {
+    // Older hosts sometimes allow a friendly/explicit bot UA.
+    return {
+      "user-agent":
+        "Mozilla/5.0 (compatible; IntelliWatt-EFLFetcher/1.0; +https://intelliwatt.com)",
+      accept:
+        "application/pdf,text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "accept-language": "en-US,en;q=0.9",
+    };
+  }
+  // browser
+  return {
+    "user-agent":
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+    accept:
+      "application/pdf,text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "accept-language": "en-US,en;q=0.9",
+  };
+}
+
+function withReferer(headers: Record<string, string>, referer: string): Record<string, string> {
+  return { ...headers, referer };
+}
+
+function refererVariantsForOrigin(origin: string, finalUrl?: string | null): string[] {
+  const out: string[] = [];
+  out.push(`${origin}/`);
+  out.push(`${origin}/Documents/`);
+  if (finalUrl) out.push(finalUrl);
+  return Array.from(new Set(out));
+}
+
+async function fetchWithProfilesAndReferer(args: {
+  url: string;
+  timeoutMs: number;
+  notes: string[];
+}): Promise<{ res: Response; contentType: string | null; buf: Uint8Array }> {
+  const { url, timeoutMs, notes } = args;
+  const profiles: Array<"browser" | "none" | "bot"> = ["browser", "none", "bot"];
+
+  let last: { res: Response; contentType: string | null; buf: Uint8Array } | null = null;
+
+  for (const profile of profiles) {
+    const headers0 = baseHeaders(profile);
+    notes.push(`fetch_profile=${profile}`);
+
+    try {
+      last = await fetchBytesWithHeaders({ url, timeoutMs, headers: headers0 });
+    } catch (e) {
+      notes.push(`fetch_error=${e instanceof Error ? e.message : String(e)}`);
+      continue;
+    }
+
+    if (last.res.ok) return last;
+
+    // Retry with referer for the starting URL origin.
+    if (last.res.status === 403 || last.res.status === 406) {
+      const origin = originFromUrl(url);
+      if (origin) {
+        for (const ref of refererVariantsForOrigin(origin)) {
+          notes.push(`retry_with_referer=${ref}`);
+          try {
+            const attempt = await fetchBytesWithHeaders({
+              url,
+              timeoutMs,
+              headers: withReferer(headers0, ref),
+            });
+            last = attempt;
+            if (attempt.res.ok) return attempt;
+          } catch (e) {
+            notes.push(
+              `referer_retry_error=${e instanceof Error ? e.message : String(e)}`,
+            );
+          }
+        }
+      }
+    }
+
+    // If redirected to a different host and still blocked, retry the final URL with same-origin referer variants.
+    if (last.res.status === 403 || last.res.status === 406) {
+      const finalUrl = last.res.url || url;
+      const finalOrigin = originFromUrl(finalUrl);
+      const startOrigin = originFromUrl(url);
+      if (finalOrigin && finalUrl !== url && finalOrigin !== startOrigin) {
+        for (const ref of refererVariantsForOrigin(finalOrigin, finalUrl)) {
+          notes.push(`retry_final_url_with_referer=${ref}`);
+          try {
+            const attempt = await fetchBytesWithHeaders({
+              url: finalUrl,
+              timeoutMs,
+              headers: withReferer(headers0, ref),
+            });
+            last = attempt;
+            if (attempt.res.ok) return attempt;
+          } catch (e) {
+            notes.push(
+              `final_referer_retry_error=${e instanceof Error ? e.message : String(e)}`,
+            );
+          }
+        }
+      }
+    }
+  }
+
+  if (last) return last;
+
+  // Should be unreachable, but keep things safe.
+  return await fetchBytes(url, timeoutMs);
 }
 
 /**
@@ -372,40 +470,7 @@ export async function fetchEflPdfFromUrl(
   const timeoutMs = opts?.timeoutMs ?? 20_000;
 
   try {
-    // First fetch attempt.
-    let first = await fetchBytesWithWafFallback(eflUrl, timeoutMs, notes);
-
-    // WAF / doc hosts sometimes 403 without a referer.
-    if (!first.res.ok && (first.res.status === 403 || first.res.status === 406)) {
-      const origin = originFromUrl(eflUrl);
-      if (origin) {
-        notes.push(`retry_with_referer=${origin}/`);
-        try {
-          first = await fetchBytesWithReferer(eflUrl, timeoutMs, `${origin}/`);
-        } catch (e) {
-          notes.push(`referer_retry_error=${e instanceof Error ? e.message : String(e)}`);
-        }
-      }
-    }
-
-    // If we followed redirects (e.g. bit.ly -> final PDF host) and still got 403/406,
-    // retry the *final* URL with a same-origin referer for that final host. Some doc hosts
-    // reject cross-site referers (or requests that appear to come from shortlinks).
-    if (!first.res.ok && (first.res.status === 403 || first.res.status === 406)) {
-      const finalUrl = first.res.url || eflUrl;
-      const finalOrigin = originFromUrl(finalUrl);
-      const startOrigin = originFromUrl(eflUrl);
-      if (finalOrigin && finalUrl !== eflUrl && finalOrigin !== startOrigin) {
-        notes.push(`retry_final_url_with_referer=${finalOrigin}/`);
-        try {
-          first = await fetchBytesWithReferer(finalUrl, timeoutMs, `${finalOrigin}/`);
-        } catch (e) {
-          notes.push(
-            `final_referer_retry_error=${e instanceof Error ? e.message : String(e)}`,
-          );
-        }
-      }
-    }
+    const first = await fetchWithProfilesAndReferer({ url: eflUrl, timeoutMs, notes });
 
     const { res, contentType, buf } = first;
     if (!res.ok) {
