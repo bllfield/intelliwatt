@@ -206,6 +206,7 @@ function computeAllInAvgCentsPerKwhFromRateStructure(
 
 type Row = {
   id: string;
+  offerId?: string | null;
   utilityId: string;
   state: string;
   supplier: string | null;
@@ -369,6 +370,27 @@ export async function GET(req: NextRequest) {
 
     const totalCount = await (prisma as any).ratePlan.count({ where });
 
+    // Attach offerId (so admin UI can deep-link to /admin/plans/[offerId]).
+    // Note: multiple offers can map to the same ratePlanId; we pick the newest link by lastLinkedAt.
+    const planIds = Array.isArray(plans)
+      ? (plans as any[]).map((p) => String(p?.id ?? "")).filter(Boolean)
+      : [];
+    const offerIdByPlanId = new Map<string, string>();
+    if (planIds.length > 0) {
+      const links = await (prisma as any).offerIdRatePlanMap.findMany({
+        where: { ratePlanId: { in: planIds } },
+        select: { offerId: true, ratePlanId: true, lastLinkedAt: true },
+        orderBy: { lastLinkedAt: "desc" },
+        take: Math.min(10_000, planIds.length * 5),
+      });
+      for (const l of Array.isArray(links) ? (links as any[]) : []) {
+        const pid = String(l?.ratePlanId ?? "").trim();
+        const oid = String(l?.offerId ?? "").trim();
+        if (!pid || !oid) continue;
+        if (!offerIdByPlanId.has(pid)) offerIdByPlanId.set(pid, oid);
+      }
+    }
+
     const tdspCache = new Map<string, Promise<TdspSnapshotMeta | null>>();
     const getTdsp = async (utilId: string): Promise<TdspSnapshotMeta | null> => {
       const code = mapUtilityIdToTdspCode(utilId);
@@ -442,6 +464,7 @@ export async function GET(req: NextRequest) {
               : "NONE";
         return {
           id: p.id,
+          offerId: offerIdByPlanId.get(String(p.id)) ?? null,
           utilityId: p.utilityId,
           state: p.state,
           supplier: p.supplier ?? null,

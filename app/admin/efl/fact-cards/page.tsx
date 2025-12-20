@@ -1539,6 +1539,12 @@ export default function FactCardOpsPage() {
                     <td className="px-2 py-2 font-mono text-[11px] text-gray-700">{updatedAt}</td>
                     <td className="px-2 py-2">
                       <div className="flex flex-wrap gap-2">
+                        <span
+                          className="px-2 py-1 rounded border text-gray-400 border-gray-200 cursor-not-allowed"
+                          title="This template is unmapped (no OfferIdRatePlanMap), so it cannot open /admin/plans/[offerId] yet."
+                        >
+                          Details
+                        </span>
                         {eflUrl ? (
                           <a
                             className="px-2 py-1 rounded border hover:bg-gray-50"
@@ -1667,6 +1673,7 @@ export default function FactCardOpsPage() {
             <tbody>
               {sortedTplRows.map((r: any) => {
                 const eflUrl = (r?.eflUrl ?? "").trim();
+                const offerId = String((r as any)?.offerId ?? "").trim();
                 const planTypeLabel = deriveTemplatePlanTypeLabel(r);
                 return (
                   <tr key={r.id} className="border-t h-12">
@@ -1743,6 +1750,21 @@ export default function FactCardOpsPage() {
                     <td className="px-2 py-2">{r.eflVersionCode ?? "-"}</td>
                     <td className="px-2 py-2">
                       <div className="flex flex-wrap gap-2">
+                        {offerId ? (
+                          <a
+                            className="px-2 py-1 rounded border hover:bg-gray-50"
+                            href={`/admin/plans/${encodeURIComponent(offerId)}`}
+                          >
+                            Details
+                          </a>
+                        ) : (
+                          <span
+                            className="px-2 py-1 rounded border text-gray-400 border-gray-200 cursor-not-allowed"
+                            title="No OfferIdRatePlanMap link found for this template (cannot open /admin/plans/[offerId])."
+                          >
+                            Details
+                          </span>
+                        )}
                         <button className="px-2 py-1 rounded border hover:bg-gray-50 disabled:opacity-60" disabled={!eflUrl} onClick={() => loadIntoManual({ eflUrl, offerId: (r as any)?.offerId ?? null })}>
                           Load
                         </button>
