@@ -683,7 +683,7 @@ function extractPeakOffPeakTouFromEflText(rawText: string): {
   peakEndHour: number;
   offPeakStartHour: number;
   offPeakEndHour: number;
-  offPeakUsagePercent?: number;
+  offPeakUsagePercent: number;
 } | null {
   const t = rawText || "";
 
@@ -701,19 +701,21 @@ function extractPeakOffPeakTouFromEflText(rawText: string): {
   const offPeakRateCents = Number(offRate[1]);
   if (!Number.isFinite(peakRateCents) || !Number.isFinite(offPeakRateCents)) return null;
 
-  // Usage split assumption (optional). Some EFLs use decimals (e.g. 37.5%).
+  // Usage split assumption (required to match avg-table and to safely upgrade templates).
+  // Some EFLs use decimals (e.g. 37.5%).
   const pct =
     t.match(/([0-9]{1,3}(?:\.[0-9]+)?)%\s+of\s+Off-?Peak\s+consumption/i) ??
     t.match(/([0-9]{1,3}(?:\.[0-9]+)?)%\s+of\s+Off-?Peak\b/i) ??
     null;
-  const offPeakUsagePercentRaw = pct?.[1] ? Number(pct[1]) / 100 : null;
-  const offPeakUsagePercent =
-    offPeakUsagePercentRaw != null &&
-    Number.isFinite(offPeakUsagePercentRaw) &&
-    offPeakUsagePercentRaw > 0 &&
-    offPeakUsagePercentRaw < 1
-      ? offPeakUsagePercentRaw
-      : undefined;
+  if (!pct?.[1]) return null;
+  const offPeakUsagePercent = Number(pct[1]) / 100;
+  if (
+    !Number.isFinite(offPeakUsagePercent) ||
+    offPeakUsagePercent <= 0 ||
+    offPeakUsagePercent >= 1
+  ) {
+    return null;
+  }
 
   // Hours parsing: prefer explicit Off-Peak hours, then Peak hours.
   const offHours =
