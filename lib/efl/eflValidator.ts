@@ -1292,13 +1292,13 @@ export function parseEflNightHoursAssumption(rawText: string): {
 } | null {
   const percentMatch =
     rawText.match(
-      /estimated\s+(\d{1,3})%\s+consumption\s+during\s+night\s+hours/i,
+      /estimated\s+(\d{1,3}(?:\.[0-9]+)?)%\s+consumption\s+during\s+night\s+hours/i,
     ) ??
     // Common TOU disclosure phrasing:
     // "Average price is based on usage profile ... of 32% of Off-Peak consumption ..."
-    rawText.match(/(\d{1,3})%\s+of\s+Off-?Peak\s+consumption/i) ??
+    rawText.match(/(\d{1,3}(?:\.[0-9]+)?)%\s+of\s+Off-?Peak\s+consumption/i) ??
     // Fallback: "32% of Off-Peak" without the word consumption
-    rawText.match(/(\d{1,3})%\s+of\s+Off-?Peak\b/i) ??
+    rawText.match(/(\d{1,3}(?:\.[0-9]+)?)%\s+of\s+Off-?Peak\b/i) ??
     null;
   const nightUsagePercent =
     percentMatch && percentMatch[1]
