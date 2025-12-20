@@ -310,9 +310,8 @@ function mapBillCreditsToRateStructure(
         return null;
       }
 
-      const threshold =
-        rule.thresholdKwh == null ? 0 : rule.thresholdKwh;
-      if (!Number.isFinite(threshold) || threshold < 0) {
+      const threshold = rule.thresholdKwh == null ? null : Number(rule.thresholdKwh);
+      if (threshold != null && (!Number.isFinite(threshold) || threshold < 0)) {
         return null;
       }
 
@@ -321,10 +320,25 @@ function mapBillCreditsToRateStructure(
           ? rule.label.trim()
           : `Bill credit ${idx + 1}`;
 
+      // Support both "usage >= threshold" and "usage <= threshold" semantics.
+      //
+      // Notes:
+      // - Some EFL solvers encode:
+      //   - type="THRESHOLD_MIN" for usage >= threshold
+      //   - type="THRESHOLD_MAX" for usage <= threshold
+      // - The RateStructure contract uses minUsageKWh + optional maxUsageKWh.
+      // - In plan-engine, we treat maxUsageKWh as an EXCLUSIVE upper bound, so for
+      //   "usage <= N" we store maxUsageKWh = N + 1.
+      const type = String((rule as any).type ?? "").trim().toUpperCase();
+      const minUsageKWh = type === "THRESHOLD_MAX" ? 0 : Math.floor(threshold ?? 0);
+      const maxUsageKWh =
+        type === "THRESHOLD_MAX" && threshold != null ? Math.floor(threshold) + 1 : undefined;
+
       return {
         label,
         creditAmountCents: Math.round(rule.creditDollars * 100),
-        minUsageKWh: threshold,
+        minUsageKWh,
+        ...(typeof maxUsageKWh === "number" && Number.isFinite(maxUsageKWh) ? { maxUsageKWh } : {}),
         ...(Array.isArray(rule.monthsOfYear) &&
         rule.monthsOfYear.length > 0
           ? { monthsOfYear: rule.monthsOfYear }
