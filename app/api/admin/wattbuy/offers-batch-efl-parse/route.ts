@@ -180,8 +180,10 @@ export async function POST(req: NextRequest) {
     const state = (addr?.state ?? "").trim();
     const zip = (addr?.zip ?? "").trim();
 
-    if (!line1 || !city || !state || !zip) {
-      return jsonError(400, "address.line1, address.city, address.state, and address.zip are required.");
+    const hasZip = Boolean(zip);
+    const hasFullAddress = Boolean(line1 && city && state && zip);
+    if (!hasZip) {
+      return jsonError(400, "address.zip is required (zip-only lookup is supported).");
     }
 
     const offerLimitRaw = body.offerLimit ?? null;
@@ -230,12 +232,15 @@ export async function POST(req: NextRequest) {
     const shouldStopForTimeBudget = () => Date.now() >= deadlineMs - 2_500;
 
     // 1) Fetch offers from WattBuy via the existing client + normalizer.
-    const offersRes = await wbGetOffers({
-      address: line1,
-      city,
-      state,
-      zip,
-    });
+    const offersRes = await wbGetOffers(
+      hasFullAddress
+        ? { address: line1, city, state, zip }
+        : {
+            // Zip-only lookup (state optional; WattBuy can infer territory from zip in many cases)
+            ...(state ? { state } : {}),
+            zip,
+          },
+    );
 
     if (!offersRes.ok || !offersRes.data) {
       return jsonError(502, "Failed to fetch offers from WattBuy", {

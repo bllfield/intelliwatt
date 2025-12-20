@@ -51,6 +51,30 @@ async function copyToClipboard(text: string) {
 
 type ProviderSource = "wattbuy";
 
+type TerritoryPreset = {
+  id: string;
+  label: string;
+  line1: string;
+  city: string;
+  state: string;
+  zip: string;
+};
+
+const TERRITORY_PRESETS: TerritoryPreset[] = [
+  { id: "oncor_76108", label: "Oncor: 76108", line1: "", city: "", state: "tx", zip: "76108" },
+  { id: "centerpoint_77373", label: "Centerpoint: 77373", line1: "", city: "", state: "tx", zip: "77373" },
+  {
+    id: "tnmp_lewisville_75067",
+    label: "TNMP: 146 Valley View Dr, Apt 512, Lewisville, TX 75067",
+    line1: "146 Valley View Dr, Apt 512",
+    city: "Lewisville",
+    state: "tx",
+    zip: "75067",
+  },
+  { id: "aepcnt_78414", label: "AEPCNT: 78414", line1: "", city: "", state: "tx", zip: "78414" },
+  { id: "aepnorth_79601", label: "AEP North: 79601", line1: "", city: "", state: "tx", zip: "79601" },
+];
+
 type BatchRow = {
   offerId: string | null;
   supplier: string | null;
@@ -156,6 +180,7 @@ export default function FactCardOpsPage() {
 
   // ---------------- Provider batch runner (WattBuy today; future sources later) ----------------
   const [source, setSource] = useState<ProviderSource>("wattbuy");
+  const [territoryPresetId, setTerritoryPresetId] = useState<string>("");
   const [address, setAddress] = useState("9514 Santa Paula Dr");
   const [city, setCity] = useState("Fort Worth");
   const [state, setState] = useState("tx");
@@ -184,10 +209,12 @@ export default function FactCardOpsPage() {
 
     const a = address.trim();
     const c = city.trim();
-    const s = state.trim();
+    const s = state.trim() || "tx";
     const z = zip.trim();
-    if (!a || !c || !s || !z) {
-      alert("Provide full address (address, city, state, zip).");
+
+    // ZIP-only lookups are allowed; full address is optional.
+    if (!z) {
+      alert("Provide ZIP (or full address).");
       return;
     }
 
@@ -203,8 +230,8 @@ export default function FactCardOpsPage() {
 
     try {
       while (true) {
-        const body = {
-          address: { line1: a, city: c, state: s, zip: z },
+          const body = {
+            address: { line1: a, city: c, state: s, zip: z },
           offerLimit,
           startIndex: next,
           // Secondary cap; primary safety is timeBudgetMs in the API
@@ -971,6 +998,33 @@ export default function FactCardOpsPage() {
         <div className="rounded-2xl border bg-white p-4 space-y-3">
           <h2 className="font-medium">Provider Batch Parser (safe auto-chunk)</h2>
           <div className="grid gap-3 md:grid-cols-2">
+            <div className="md:col-span-2">
+              <label className="block text-sm mb-1">Territory preset (optional)</label>
+              <select
+                className="w-full rounded-lg border px-3 py-2"
+                value={territoryPresetId}
+                onChange={(e) => {
+                  const id = String(e.target.value);
+                  setTerritoryPresetId(id);
+                  const p = TERRITORY_PRESETS.find((x) => x.id === id) ?? null;
+                  if (!p) return;
+                  setAddress(p.line1);
+                  setCity(p.city);
+                  setState(p.state);
+                  setZip(p.zip);
+                }}
+              >
+                <option value="">Custom / manual</option>
+                {TERRITORY_PRESETS.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+              <div className="text-xs text-gray-500 mt-1">
+                Selecting a preset fills the fields; you can still edit them after. ZIP-only is allowed for most territories.
+              </div>
+            </div>
             <div className="md:col-span-2">
               <label className="block text-sm mb-1">Address</label>
               <input className="w-full rounded-lg border px-3 py-2" value={address} onChange={(e) => setAddress(e.target.value)} />
