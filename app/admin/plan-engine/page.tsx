@@ -214,7 +214,17 @@ export default function PlanEngineLabPage() {
 
     // Deterministic precedence:
     // 1) INDEXED
-    if (reason.includes("NON_DETERMINISTIC") || reason.includes("INDEX") || detected?.indexed || detected?.variable) {
+    if (
+      estimate?.status === "APPROXIMATE" ||
+      String(estimate?.estimateMode ?? "").toUpperCase() === "INDEXED_EFL_ANCHOR_APPROX" ||
+      notesHay.includes("EFL MODELED AVERAGE PRICE ANCHOR") ||
+      notesHay.includes("INDEXED/VARIABLE") ||
+      reason.includes("NON_DETERMINISTIC") ||
+      reason.includes("INDEX") ||
+      detected?.indexed ||
+      detected?.variable
+    ) {
+      if (estimate?.status === "APPROXIMATE") flags.push("INDEXED_APPROX");
       return { type: "INDEXED", flags: Array.from(new Set(flags)) };
     }
     // 2) TIERED
