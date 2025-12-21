@@ -180,14 +180,22 @@ export async function upsertRatePlanFromEfl(
     canPersistModeledProof
       ? ({
           ...(safeRateStructureBase as any),
-          __eflAvgPriceValidation: modeledEflAvgPriceValidation ?? null,
-          __eflAvgPriceEvidence: {
-            computedAt: (modeledAt ?? new Date()).toISOString(),
-            source: "canonical_pipeline",
-            passStrength: passStrength ?? null,
-            tdspAppliedMode:
-              (modeledEflAvgPriceValidation as any)?.assumptionsUsed?.tdspAppliedMode ?? null,
-          },
+          // Preserve any existing embedded proof/evidence (some callers pre-embed their own source).
+          __eflAvgPriceValidation:
+            (safeRateStructureBase as any)?.__eflAvgPriceValidation ?? modeledEflAvgPriceValidation ?? null,
+          __eflAvgPriceEvidence: (() => {
+            const existing = (safeRateStructureBase as any)?.__eflAvgPriceEvidence ?? null;
+            const computedAtIso = (modeledAt ?? new Date()).toISOString();
+            const tdspAppliedMode =
+              (modeledEflAvgPriceValidation as any)?.assumptionsUsed?.tdspAppliedMode ?? null;
+            return {
+              ...(existing && typeof existing === "object" ? existing : {}),
+              computedAt: (existing as any)?.computedAt ?? computedAtIso,
+              source: (existing as any)?.source ?? "canonical_pipeline",
+              passStrength: (existing as any)?.passStrength ?? passStrength ?? null,
+              tdspAppliedMode: (existing as any)?.tdspAppliedMode ?? tdspAppliedMode,
+            };
+          })(),
         } as any)
       : (safeRateStructureBase as any);
 
