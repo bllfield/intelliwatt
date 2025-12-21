@@ -7,6 +7,7 @@ import { runEflPipelineNoStore } from "@/lib/efl/runEflPipelineNoStore";
 import { runEflPipelineFromRawTextNoStore } from "@/lib/efl/runEflPipelineFromRawTextNoStore";
 import { persistAndLinkFromPipeline } from "@/lib/efl/persistAndLinkFromPipeline";
 import { prisma } from "@/lib/db";
+import { derivePlanCalcRequirementsFromTemplate } from "@/lib/plan-engine/planComputability";
 
 export type EflPipelineSource =
   | "manual_url"
@@ -348,6 +349,7 @@ export async function runEflPipeline(input: RunEflPipelineInput): Promise<RunEfl
 
   const planRules = pipeline?.planRules ?? null;
   const rateStructure = pipeline?.rateStructure ?? null;
+  const templateCalc = derivePlanCalcRequirementsFromTemplate({ rateStructure });
 
   if (!rawText || !eflPdfSha256) {
     const msg = "PIPELINE_VALIDATE_FAIL: missing rawText or eflPdfSha256.";
@@ -427,9 +429,9 @@ export async function runEflPipeline(input: RunEflPipelineInput): Promise<RunEfl
       derivedForValidation: pipeline?.derivedForValidation ?? null,
       finalValidation,
       passStrength,
-      planCalcStatus: "UNKNOWN",
-      planCalcReasonCode: "PIPELINE_NOT_ELIGIBLE",
-      requiredBucketKeys: [],
+      planCalcStatus: templateCalc.planCalcStatus,
+      planCalcReasonCode: templateCalc.planCalcReasonCode,
+      requiredBucketKeys: templateCalc.requiredBucketKeys,
       queued: true,
       queueReason: reason,
     };
@@ -454,9 +456,9 @@ export async function runEflPipeline(input: RunEflPipelineInput): Promise<RunEfl
         derivedForValidation: pipeline?.derivedForValidation ?? null,
         finalValidation,
         passStrength,
-        planCalcStatus: "UNKNOWN",
-        planCalcReasonCode: "DRY_RUN",
-        requiredBucketKeys: [],
+        planCalcStatus: templateCalc.planCalcStatus,
+        planCalcReasonCode: templateCalc.planCalcReasonCode,
+        requiredBucketKeys: templateCalc.requiredBucketKeys,
         queued: false,
       };
     }

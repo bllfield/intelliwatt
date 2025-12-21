@@ -66,6 +66,17 @@ export async function POST(req: NextRequest) {
       parseWarnings: pipelineResult.parseWarnings ?? [],
       validation: pipelineResult.validation ?? null,
       derivedForValidation: pipelineResult.derivedForValidation ?? null,
+      finalValidation: pipelineResult.finalValidation ?? null,
+      passStrength: pipelineResult.passStrength ?? null,
+      passStrengthReasons: pipelineResult.passStrengthReasons ?? [],
+      passStrengthOffPointDiffs: pipelineResult.passStrengthOffPointDiffs ?? null,
+      queued: Boolean(pipelineResult.queued),
+      queueReason: pipelineResult.queueReason ?? null,
+      planCalcStatus: pipelineResult.planCalcStatus ?? "UNKNOWN",
+      planCalcReasonCode: String(pipelineResult.planCalcReasonCode ?? "UNKNOWN"),
+      requiredBucketKeys: Array.isArray(pipelineResult.requiredBucketKeys)
+        ? pipelineResult.requiredBucketKeys
+        : [],
       extractorMethod: pipelineResult.extractorMethod ?? "pdftotext",
       ai: {
         enabled: aiEnabled,

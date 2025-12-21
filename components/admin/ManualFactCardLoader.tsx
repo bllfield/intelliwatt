@@ -14,6 +14,8 @@ type UploadResponse = {
   ok: true;
   build?: { vercelGitCommitSha?: string | null; vercelEnv?: string | null };
   eflUrl?: string;
+  eflSourceUrl?: string;
+  offerId?: string | null;
   eflPdfSha256: string;
   repPuctCertificate: string | null;
   eflVersionCode: string | null;
@@ -29,6 +31,7 @@ type UploadResponse = {
   parseWarnings?: string[];
   validation?: any | null;
   derivedForValidation?: any | null;
+  finalValidation?: any | null;
   passStrength?: "STRONG" | "WEAK" | "INVALID" | null;
   passStrengthReasons?: string[];
   passStrengthOffPointDiffs?: Array<{
@@ -38,6 +41,11 @@ type UploadResponse = {
     diff: number | null;
     ok: boolean;
   }> | null;
+  queued?: boolean;
+  queueReason?: string | null;
+  planCalcStatus?: "COMPUTABLE" | "NOT_COMPUTABLE" | "UNKNOWN";
+  planCalcReasonCode?: string | null;
+  requiredBucketKeys?: string[];
   templatePersisted?: boolean;
   persistedRatePlanId?: string | null;
   autoResolvedQueueCount?: number;
@@ -604,10 +612,16 @@ export function ManualFactCardLoader(props: {
                 rateStructure: result.rateStructure ?? null,
                 parseWarnings: result.parseWarnings ?? null,
                 validation: result.validation ?? null,
+                finalValidation: (result as any).finalValidation ?? null,
                 ai: result.ai ?? null,
                 passStrength: (result as any).passStrength ?? null,
                 passStrengthReasons: (result as any).passStrengthReasons ?? null,
                 passStrengthOffPointDiffs: (result as any).passStrengthOffPointDiffs ?? null,
+                queued: (result as any).queued ?? null,
+                queueReason: (result as any).queueReason ?? null,
+                planCalcStatus: (result as any).planCalcStatus ?? null,
+                planCalcReasonCode: (result as any).planCalcReasonCode ?? null,
+                requiredBucketKeys: (result as any).requiredBucketKeys ?? null,
                 templatePersisted: (result as any).templatePersisted ?? null,
                 persistedRatePlanId: (result as any).persistedRatePlanId ?? null,
                 autoResolvedQueueCount: (result as any).autoResolvedQueueCount ?? null,
