@@ -783,6 +783,11 @@ export default function FactCardOpsPage() {
       if (tplHomeId.trim()) {
         params.set("homeId", tplHomeId.trim());
         params.set("usageMonths", "12");
+      } else {
+        // Default behavior: if any home in the DB has usage buckets, attach monthly estimates
+        // so the Templates table can show "Best for you" pricing without manual setup.
+        params.set("useDefaultHome", "1");
+        params.set("usageMonths", "12");
       }
       const res = await fetch(`/api/admin/wattbuy/templated-plans?${params.toString()}`, {
         headers: { "x-admin-token": token },

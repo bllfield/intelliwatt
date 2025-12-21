@@ -338,6 +338,7 @@ type Ok = {
   mappedOfferCount?: number;
   usageContext?: {
     homeId: string;
+    homeIdSource?: "EXPLICIT" | "AUTO" | null;
     monthsRequested: number;
     monthsFound: number;
     avgMonthlyKwh: number | null;
@@ -374,6 +375,7 @@ export async function GET(req: NextRequest) {
     const state = (req.nextUrl.searchParams.get("state") ?? "").trim();
     const zip = (req.nextUrl.searchParams.get("zip") ?? "").trim();
     const homeId = (req.nextUrl.searchParams.get("homeId") ?? "").trim();
+    const useDefaultHome = req.nextUrl.searchParams.get("useDefaultHome") === "1";
     const usageMonthsRaw = Number(req.nextUrl.searchParams.get("usageMonths") ?? "12");
     const usageMonths = Math.max(1, Math.min(12, Number.isFinite(usageMonthsRaw) ? Math.floor(usageMonthsRaw) : 12));
 
@@ -603,12 +605,43 @@ export async function GET(req: NextRequest) {
       return { p, derivedCalc, pcStatus, pcReason, queued, requiredBucketKeys };
     });
 
-    if (homeId) {
+    const resolvedHomeId = homeId.trim() ? homeId.trim() : null;
+    let autoHomeId: string | null = null;
+    let resolvedHomeIdSource: "EXPLICIT" | "AUTO" | null = resolvedHomeId ? "EXPLICIT" : null;
+
+    if (!resolvedHomeId && useDefaultHome) {
+      // Pick a "best available" homeId for usage-based previews:
+      // newest home with any kwh.m.all.total monthly bucket. Admin-only convenience.
+      try {
+        const newest = await (usagePrisma as any).homeMonthlyUsageBucket.findFirst({
+          where: { bucketKey: "kwh.m.all.total" },
+          orderBy: [{ yearMonth: "desc" }],
+          select: { homeId: true, yearMonth: true },
+        });
+        const candidate = String((newest as any)?.homeId ?? "").trim();
+        if (candidate) {
+          const house = await prisma.houseAddress.findUnique({
+            where: { id: candidate } as any,
+            select: { id: true, archivedAt: true },
+          });
+          if (house && !(house as any).archivedAt) {
+            autoHomeId = candidate;
+            resolvedHomeIdSource = "AUTO";
+          }
+        }
+      } catch {
+        // ignore: default home is best-effort only
+      }
+    }
+
+    const effectiveHomeId = resolvedHomeId ?? autoHomeId;
+
+    if (effectiveHomeId) {
       const house = await prisma.houseAddress.findUnique({
-        where: { id: homeId } as any,
+        where: { id: effectiveHomeId } as any,
         select: { id: true },
       });
-      if (!house) return jsonError(404, "home_not_found", { homeId });
+      if (!house) return jsonError(404, "home_not_found", { homeId: effectiveHomeId });
 
       const yearMonths = lastNYearMonthsChicago(usageMonths);
       const keys = new Set<string>(["kwh.m.all.total"]);
@@ -622,7 +655,7 @@ export async function GET(req: NextRequest) {
       const bucketKeysUsed = Array.from(keys);
 
       const rows = await (usagePrisma as any).homeMonthlyUsageBucket.findMany({
-        where: { homeId, yearMonth: { in: yearMonths }, bucketKey: { in: bucketKeysUsed } },
+        where: { homeId: effectiveHomeId, yearMonth: { in: yearMonths }, bucketKey: { in: bucketKeysUsed } },
         select: { yearMonth: true, bucketKey: true, kwhTotal: true },
       });
 
@@ -647,7 +680,7 @@ export async function GET(req: NextRequest) {
       const avgMonthlyKwh = monthsFound && annualKwh != null ? annualKwh / monthsFound : null;
 
       usageEnv = {
-        homeId,
+        homeId: effectiveHomeId,
         monthsRequested: usageMonths,
         monthsFound,
         annualKwh: annualKwh != null ? Number(annualKwh.toFixed(3)) : null,
@@ -837,6 +870,7 @@ export async function GET(req: NextRequest) {
       usageContext: usageEnv
         ? {
             homeId: usageEnv.homeId,
+            homeIdSource: resolvedHomeIdSource,
             monthsRequested: usageEnv.monthsRequested,
             monthsFound: usageEnv.monthsFound,
             avgMonthlyKwh: usageEnv.avgMonthlyKwh,
