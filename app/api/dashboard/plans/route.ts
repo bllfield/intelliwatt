@@ -12,6 +12,7 @@ import { ensureCoreMonthlyBuckets } from "@/lib/usage/aggregateMonthlyBuckets";
 import crypto from "node:crypto";
 import { canComputePlanFromBuckets, derivePlanCalcRequirementsFromTemplate } from "@/lib/plan-engine/planComputability";
 import { isPlanCalcQuarantineWorthyReasonCode } from "@/lib/plan-engine/planCalcQuarantine";
+import { bucketDefsFromBucketKeys } from "@/lib/plan-engine/usageBuckets";
 import {
   extractFixedRepEnergyCentsPerKwh,
   extractRepFixedMonthlyChargeDollars,
@@ -343,6 +344,7 @@ export async function GET(req: NextRequest) {
     // This is a lazy backfill path in case ingest hooks were skipped or buckets were never computed.
     let recentYearMonths: string[] = [];
     let bucketPresenceByKey: Map<string, Set<string>> = new Map();
+    let usageBucketsByMonthForCalc: Record<string, Record<string, number>> = {};
     try {
       if (hasUsage && house.id && house.esiid) {
         const tz = "America/Chicago";
@@ -361,20 +363,28 @@ export async function GET(req: NextRequest) {
           return `${String(y)}-${String(m).padStart(2, "0")}`;
         })();
 
-        const bucketKey = "kwh.m.all.total";
         const yearMonths = prev ? [ym0, prev] : [ym0];
         recentYearMonths = yearMonths.slice();
 
-        const existing = await (usagePrisma as any).homeMonthlyUsageBucket.findMany({
-          where: { homeId: house.id, bucketKey, yearMonth: { in: yearMonths } },
-          select: { yearMonth: true },
-        });
-        const present = new Set<string>((existing ?? []).map((r: any) => String(r.yearMonth)));
-        const missing = yearMonths.filter((ym) => !present.has(ym));
+        // Union required bucket keys across all mapped templates (fall back to ALL total).
+        const unionKeys = new Set<string>(["kwh.m.all.total"]);
+        try {
+          for (const [, v] of planCalcByRatePlanId.entries()) {
+            const keys = Array.isArray((v as any)?.requiredBucketKeys) ? ((v as any).requiredBucketKeys as string[]) : [];
+            for (const k of keys) {
+              const kk = String(k ?? "").trim();
+              if (kk) unionKeys.add(kk);
+            }
+          }
+        } catch {
+          // ignore
+        }
 
-        if (missing.length > 0) {
+        // Ensure bucket totals exist (best-effort) for ALL required keys.
+        try {
           const rangeEnd = new Date();
           const rangeStart = new Date(rangeEnd.getTime() - 365 * 24 * 60 * 60 * 1000);
+          const defs = bucketDefsFromBucketKeys(Array.from(unionKeys));
           await ensureCoreMonthlyBuckets({
             homeId: house.id,
             esiid: house.esiid,
@@ -382,7 +392,10 @@ export async function GET(req: NextRequest) {
             rangeEnd,
             source: "SMT",
             intervalSource: "SMT",
+            bucketDefs: defs,
           });
+        } catch {
+          // ignore (never break dashboard)
         }
 
         // Build a small "presence map" for recent months so we can check requiredBucketKeys per plan
@@ -403,6 +416,30 @@ export async function GET(req: NextRequest) {
           bucketPresenceByKey = map;
         } catch {
           bucketPresenceByKey = new Map();
+        }
+
+        // Load last-12-months bucket totals by month for calculation (TOU needs this).
+        try {
+          const yearMonths12 = lastNYearMonthsChicago(12);
+          const keysArr = Array.from(unionKeys);
+          if (yearMonths12.length > 0 && keysArr.length > 0) {
+            const rows12 = await (usagePrisma as any).homeMonthlyUsageBucket.findMany({
+              where: { homeId: house.id, yearMonth: { in: yearMonths12 }, bucketKey: { in: keysArr } },
+              select: { yearMonth: true, bucketKey: true, kwhTotal: true },
+            });
+            const byMonth: Record<string, Record<string, number>> = {};
+            for (const r of rows12 ?? []) {
+              const ym = String((r as any)?.yearMonth ?? "").trim();
+              const key = String((r as any)?.bucketKey ?? "").trim();
+              const kwh = decimalToNumber((r as any)?.kwhTotal);
+              if (!ym || !key || kwh == null) continue;
+              if (!byMonth[ym]) byMonth[ym] = {};
+              byMonth[ym][key] = kwh;
+            }
+            usageBucketsByMonthForCalc = byMonth;
+          }
+        } catch {
+          usageBucketsByMonthForCalc = {};
         }
       }
     } catch (err) {
@@ -527,6 +564,7 @@ export async function GET(req: NextRequest) {
         planCalcReasonCode: string;
         rateStructurePresent: boolean;
         rateStructure?: any | null;
+        requiredBucketKeys?: string[] | null;
       }
     >();
 
@@ -539,6 +577,7 @@ export async function GET(req: NextRequest) {
             rateStructure: true,
             planCalcStatus: true,
             planCalcReasonCode: true,
+            requiredBucketKeys: true,
           },
         });
 
@@ -556,6 +595,9 @@ export async function GET(req: NextRequest) {
               planCalcReasonCode: storedReason ?? "UNKNOWN",
               rateStructurePresent: rsPresent,
               rateStructure: rsPresent ? rp.rateStructure : null,
+              requiredBucketKeys: Array.isArray((rp as any)?.requiredBucketKeys)
+                ? ((rp as any).requiredBucketKeys as any[]).map((k) => String(k))
+                : null,
             });
             continue;
           }
@@ -569,6 +611,7 @@ export async function GET(req: NextRequest) {
             planCalcReasonCode: derived.planCalcReasonCode,
             rateStructurePresent: rsPresent,
             rateStructure: rsPresent ? rp.rateStructure : null,
+            requiredBucketKeys: derived.requiredBucketKeys,
           });
         }
       } catch {
@@ -1025,6 +1068,7 @@ export async function GET(req: NextRequest) {
       let planCalcStatus: string | null = null;
       let planCalcReasonCode: string | null = null;
       let planCalcInputs: any | null = null;
+      let missingBucketKeys: string[] = [];
 
       if (hasUsage && (base as any)?.intelliwatt?.templateAvailable && templateOk) {
         const offerId = String((base as any).offerId ?? "");
@@ -1102,7 +1146,7 @@ export async function GET(req: NextRequest) {
 
         // Bucket presence check (uses requiredBucketKeys rather than hardcoding total).
         // v1: mostly ["kwh.m.all.total"], but this makes TOU/tier expansion deterministic.
-        const missingBucketKeys = (requiredBucketKeys ?? []).filter((k) => !hasRecentBucket(String(k)));
+        missingBucketKeys = (requiredBucketKeys ?? []).filter((k) => !hasRecentBucket(String(k)));
 
         // Quarantine best-effort when plan is not computable OR required buckets are missing.
         const shouldQuarantine =
@@ -1174,10 +1218,65 @@ export async function GET(req: NextRequest) {
         }
       }
 
+      const trueCostEstimate: any = (() => {
+        if (!hasUsage) return { status: "NOT_IMPLEMENTED", reason: "No usage available" };
+        if (annualKwhForCalc == null) {
+          return { status: "NOT_IMPLEMENTED", reason: "Missing usage totals for annual kWh" };
+        }
+        if (!templateOk || !template?.rateStructure) {
+          return { status: "NOT_IMPLEMENTED", reason: "Missing template rateStructure" };
+        }
+        if (!tdspRates) {
+          return { status: "NOT_IMPLEMENTED", reason: "Missing TDSP delivery rates" };
+        }
+        if (planComputability && planComputability.status === "NOT_COMPUTABLE") {
+          return { status: "NOT_COMPUTABLE", reason: planComputability.reason ?? "Plan not computable" };
+        }
+        const tdspApplied = {
+          perKwhDeliveryChargeCents: Number(tdspRates?.perKwhDeliveryChargeCents ?? 0) || 0,
+          monthlyCustomerChargeDollars: Number(tdspRates?.monthlyCustomerChargeDollars ?? 0) || 0,
+          effectiveDate: tdspRates?.effectiveDate ?? undefined,
+        };
+        const est = calculatePlanCostForUsage({
+          annualKwh: annualKwhForCalc,
+          monthsCount: 12,
+          tdsp: tdspApplied,
+          rateStructure: template.rateStructure,
+          usageBucketsByMonth: usageBucketsByMonthForCalc,
+        });
+        if (
+          est &&
+          (est as any).status === "OK" &&
+          typeof (est as any).annualCostDollars === "number" &&
+          Number.isFinite((est as any).annualCostDollars) &&
+          typeof annualKwhForCalc === "number" &&
+          Number.isFinite(annualKwhForCalc) &&
+          annualKwhForCalc > 0
+        ) {
+          const eff = (((est as any).annualCostDollars as number) / annualKwhForCalc) * 100;
+          return { ...(est as any), effectiveCentsPerKwh: eff };
+        }
+        return est;
+      })();
+
+      const statusLabelFinal = (() => {
+        const current = String((base as any)?.intelliwatt?.statusLabel ?? "").trim() || "UNAVAILABLE";
+        if (!hasUsage) return current;
+        // If the template isn't even computable/mapped, keep the existing label.
+        if (current !== "AVAILABLE") return current;
+        // Fail-closed: if required buckets are missing, or estimator can't compute, treat as QUEUED.
+        if (missingBucketKeys.length > 0) return "QUEUED";
+        if (planComputability && planComputability.status === "NOT_COMPUTABLE") return "QUEUED";
+        const s = String(trueCostEstimate?.status ?? "").toUpperCase();
+        if (s && s !== "OK" && s !== "APPROXIMATE") return "QUEUED";
+        return current;
+      })();
+
       return {
         ...base,
         intelliwatt: {
           ...(base as any).intelliwatt,
+          statusLabel: statusLabelFinal,
           ...(tdspRates
             ? {
                 tdspRatesApplied: {
@@ -1189,42 +1288,7 @@ export async function GET(req: NextRequest) {
             : {}),
           ...(planComputability ? { planComputability } : {}),
           ...(planCalcInputs ? { planCalcInputs } : {}),
-          trueCostEstimate: (() => {
-            if (!hasUsage) return { status: "NOT_IMPLEMENTED", reason: "No usage available" };
-            if (annualKwhForCalc == null) {
-              return { status: "NOT_IMPLEMENTED", reason: "Missing usage totals for annual kWh" };
-            }
-            if (!templateOk || !template?.rateStructure) {
-              return { status: "NOT_IMPLEMENTED", reason: "Missing template rateStructure" };
-            }
-            if (planComputability && planComputability.status === "NOT_COMPUTABLE") {
-              return { status: "NOT_COMPUTABLE", reason: planComputability.reason ?? "Plan not computable" };
-            }
-            const tdspApplied = {
-              perKwhDeliveryChargeCents: Number(tdspRates?.perKwhDeliveryChargeCents ?? 0) || 0,
-              monthlyCustomerChargeDollars: Number(tdspRates?.monthlyCustomerChargeDollars ?? 0) || 0,
-              effectiveDate: tdspRates?.effectiveDate ?? undefined,
-            };
-            const est = calculatePlanCostForUsage({
-              annualKwh: annualKwhForCalc,
-              monthsCount: 12,
-              tdsp: tdspApplied,
-              rateStructure: template.rateStructure,
-            });
-            if (
-              est &&
-              (est as any).status === "OK" &&
-              typeof (est as any).annualCostDollars === "number" &&
-              Number.isFinite((est as any).annualCostDollars) &&
-              typeof annualKwhForCalc === "number" &&
-              Number.isFinite(annualKwhForCalc) &&
-              annualKwhForCalc > 0
-            ) {
-              const eff = (((est as any).annualCostDollars as number) / annualKwhForCalc) * 100;
-              return { ...(est as any), effectiveCentsPerKwh: eff };
-            }
-            return est;
-          })(),
+          trueCostEstimate,
         },
       };
     };
