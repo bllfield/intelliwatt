@@ -4,6 +4,7 @@ import { ensureCoreMonthlyBuckets } from "@/lib/usage/aggregateMonthlyBuckets";
 import { bucketDefsFromBucketKeys } from "@/lib/plan-engine/usageBuckets";
 import { getTdspDeliveryRates } from "@/lib/plan-engine/getTdspDeliveryRates";
 import { calculatePlanCostForUsage } from "@/lib/plan-engine/calculatePlanCostForUsage";
+import { inferTdspTerritoryFromEflText } from "@/lib/efl/eflValidator";
 
 function normalizeEmailLoose(s: string | null | undefined): string {
   return String(s ?? "").trim().toLowerCase();
@@ -73,6 +74,7 @@ export async function adminUsageAuditForHome(args: {
   requiredBucketKeys?: string[];
   rateStructure?: any;
   tdspSlug?: string | null;
+  rawTextForTdspInference?: string | null;
 }): Promise<AdminUsageAuditResult> {
   const usageEmail = normalizeEmailLoose(args.usageEmail);
   const usageMonths = Math.max(1, Math.min(24, Number(args.usageMonths ?? 12) || 12));
@@ -215,7 +217,12 @@ export async function adminUsageAuditForHome(args: {
     // Optional: compute a cost estimate if we have tdspSlug + rateStructure.
     let usageEstimate: any | null = null;
     try {
-      const tdspSlug = String(args.tdspSlug ?? "").trim().toLowerCase();
+      const inferred =
+        args.tdspSlug ??
+        (String(args.rawTextForTdspInference ?? "").trim()
+          ? inferTdspTerritoryFromEflText(String(args.rawTextForTdspInference ?? ""))
+          : null);
+      const tdspSlug = String(inferred ?? "").trim().toLowerCase();
       const rateStructure = args.rateStructure ?? null;
       if (tdspSlug && annualKwh && rateStructure) {
         const tdspRates = await getTdspDeliveryRates({ tdspSlug, asOf: new Date() });
@@ -231,7 +238,13 @@ export async function adminUsageAuditForHome(args: {
             rateStructure,
             usageBucketsByMonth: byMonth,
           });
+        } else {
+          usageContext.errors.push("missing_tdsp_rates");
         }
+      } else {
+        if (!tdspSlug) usageContext.errors.push("missing_tdsp_slug");
+        if (!annualKwh) usageContext.errors.push("missing_annual_kwh");
+        if (!rateStructure) usageContext.errors.push("missing_rateStructure");
       }
     } catch {
       usageEstimate = null;

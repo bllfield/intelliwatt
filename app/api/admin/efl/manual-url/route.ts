@@ -158,6 +158,7 @@ export async function POST(req: NextRequest) {
             : [],
           rateStructure: pipelineResult.rateStructure ?? null,
           tdspSlug: null,
+          rawTextForTdspInference: String(pipelineResult.rawTextPreview ?? ""),
         });
       } else {
         usageAudit = {
