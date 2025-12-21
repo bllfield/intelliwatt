@@ -174,7 +174,6 @@ app.post("/efl/fetch", requireBearerAuth, async (req: Request, res: ExpressRespo
         accept: "application/pdf,text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "accept-language": "en-US,en;q=0.9",
       },
-      cache: "no-store",
       signal: controller.signal,
     });
 
