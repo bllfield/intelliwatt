@@ -3,6 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { derivePlanCalcRequirementsFromTemplate } from "@/lib/plan-engine/planComputability";
 
+// Prisma requires Node.js runtime (not Edge).
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;

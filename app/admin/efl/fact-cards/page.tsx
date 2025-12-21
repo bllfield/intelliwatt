@@ -768,6 +768,47 @@ export default function FactCardOpsPage() {
     }
   }
 
+  async function setTemplateComputableOverride(input: { ratePlanId: string; offerId?: string | null; enable: boolean }) {
+    if (!token) {
+      setTplErr("Admin token required.");
+      return;
+    }
+    const ratePlanId = String(input.ratePlanId ?? "").trim();
+    if (!ratePlanId) {
+      setTplErr("Missing ratePlanId.");
+      return;
+    }
+    setTplLoading(true);
+    setTplErr(null);
+    try {
+      const res = await fetch("/api/admin/wattbuy/templated-plans/override-computable", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-admin-token": token,
+        },
+        body: JSON.stringify({
+          ratePlanId,
+          offerId: input.offerId ?? null,
+          mode: input.enable ? "FORCE_COMPUTABLE" : "RESET_DERIVED",
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      await loadTemplates();
+      // Also refresh queue view (best-effort) since override resolves quarantines.
+      try {
+        await loadQueue();
+      } catch {
+        // ignore
+      }
+    } catch (e: any) {
+      setTplErr(e?.message || "Failed to update computability override.");
+    } finally {
+      setTplLoading(false);
+    }
+  }
+
   async function refreshTdspSnapshots() {
     if (!token) {
       setTplErr("Admin token required.");
@@ -2184,6 +2225,9 @@ export default function FactCardOpsPage() {
               {sortedTplRows.map((r: any) => {
                 const eflUrl = (r?.eflUrl ?? "").trim();
                 const offerId = String((r as any)?.offerId ?? "").trim();
+                const pcStatus = String((r as any)?.planCalcStatus ?? "UNKNOWN").toUpperCase();
+                const pcReason = String((r as any)?.planCalcReasonCode ?? "").trim();
+                const isOverridden = pcReason === "ADMIN_OVERRIDE_COMPUTABLE";
                 const runHref =
                   eflUrl
                     ? `/admin/efl/fact-cards?${new URLSearchParams({
@@ -2292,6 +2336,38 @@ export default function FactCardOpsPage() {
                     <td className="px-2 py-2">{r.eflVersionCode ?? "-"}</td>
                     <td className="px-2 py-2">
                       <div className="flex flex-wrap gap-2">
+                        {pcStatus !== "COMPUTABLE" && !isOverridden ? (
+                          <button
+                            className="px-2 py-1 rounded border hover:bg-gray-50 disabled:opacity-60"
+                            disabled={!ready || tplLoading}
+                            title="After you test a plan, you can manually mark it COMPUTABLE to remove the dashboard gate."
+                            onClick={() =>
+                              void setTemplateComputableOverride({
+                                ratePlanId: String(r.id),
+                                offerId: offerId || null,
+                                enable: true,
+                              })
+                            }
+                          >
+                            Override → COMPUTABLE
+                          </button>
+                        ) : null}
+                        {isOverridden ? (
+                          <button
+                            className="px-2 py-1 rounded border hover:bg-gray-50 disabled:opacity-60"
+                            disabled={!ready || tplLoading}
+                            title="Undo override and re-derive planCalcStatus/Reason from the template."
+                            onClick={() =>
+                              void setTemplateComputableOverride({
+                                ratePlanId: String(r.id),
+                                offerId: offerId || null,
+                                enable: false,
+                              })
+                            }
+                          >
+                            Clear override
+                          </button>
+                        ) : null}
                         {offerId ? (
                           <a
                             className="px-2 py-1 rounded border hover:bg-gray-50"
