@@ -264,6 +264,21 @@ function sumMonthBucketKwh(month: Record<string, number> | null | undefined, key
 export function extractFixedRepEnergyCentsPerKwh(rateStructure: any): number | null {
   if (!rateStructure || typeof rateStructure !== "object") return null;
 
+  // IMPORTANT:
+  // If this structure is TOU-like, do NOT treat any single energyRateCents/defaultRate as a fixed-rate plan.
+  // Many TOU templates store an "energyRateCents" convenience value (often Off-Peak) which must not
+  // short-circuit TOU pricing paths.
+  const rsAny: any = rateStructure as any;
+  const hasTouSignals =
+    rsAny?.type === "TIME_OF_USE" ||
+    rsAny?.planType === "tou" ||
+    (Array.isArray(rsAny?.timeOfUsePeriods) && rsAny.timeOfUsePeriods.length > 0) ||
+    (Array.isArray(rsAny?.planRules?.timeOfUsePeriods) && rsAny.planRules.timeOfUsePeriods.length > 0) ||
+    (Array.isArray(rsAny?.timeOfUseTiers) && rsAny.timeOfUseTiers.length > 0) ||
+    (rsAny?.type === "TIME_OF_USE" && Array.isArray(rsAny?.tiers) && rsAny.tiers.length > 0) ||
+    (Array.isArray(rsAny?.tiers) && rsAny.tiers.length > 0);
+  if (hasTouSignals) return null;
+
   const candidates: unknown[] = [];
 
   // direct keys

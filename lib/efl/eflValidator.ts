@@ -463,6 +463,10 @@ export function inferTdspTerritoryFromEflText(
     norm.includes("aep north") ||
     norm.includes("aep-north") ||
     norm.includes("aep texas north") ||
+    // Some EFLs abbreviate North/Central as a single letter (e.g., "AEP Texas N").
+    norm.includes("aep texas n ") ||
+    norm.includes("aep texas n service area") ||
+    norm.includes("aep texas n delivery") ||
     norm.includes("aep texas north company")
   ) {
     return "AEP_NORTH";
@@ -471,6 +475,9 @@ export function inferTdspTerritoryFromEflText(
     norm.includes("aep central") ||
     norm.includes("aep-central") ||
     norm.includes("aep texas central") ||
+    norm.includes("aep texas c ") ||
+    norm.includes("aep texas c service area") ||
+    norm.includes("aep texas c delivery") ||
     norm.includes("aep texas central company")
   ) {
     return "AEP_CENTRAL";

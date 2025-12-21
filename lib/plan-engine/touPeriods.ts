@@ -93,8 +93,11 @@ function daysToDayTypeKey(daysOfWeek: unknown): DayTypeKey | null {
   if (days.length === 0) return "all";
 
   const uniq = Array.from(new Set(days)).sort((a, b) => a - b);
+  // Treat "all days" explicitly (0..6). This is common in EFL-derived TOU periods.
+  const isAllDays = uniq.length === 7 && uniq.every((d, i) => d === i);
   const isWeekday = uniq.length === 5 && uniq.every((d) => d >= 1 && d <= 5);
   const isWeekend = uniq.length === 2 && uniq.includes(0) && uniq.includes(6);
+  if (isAllDays) return "all";
   if (isWeekday) return "weekday";
   if (isWeekend) return "weekend";
   return null;
