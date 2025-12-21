@@ -57,6 +57,7 @@ export type AdminUsageAuditResult = {
     bucketKeys: string[];
     computed: any | null;
     errors: string[];
+    tdspSlugUsed?: string | null;
   };
   usagePreview: {
     months: number;
@@ -224,6 +225,8 @@ export async function adminUsageAuditForHome(args: {
           : null);
       const tdspSlug = String(inferred ?? "").trim().toLowerCase();
       const rateStructure = args.rateStructure ?? null;
+      usageContext.tdspSlugUsed = tdspSlug || null;
+
       if (tdspSlug && annualKwh && rateStructure) {
         const tdspRates = await getTdspDeliveryRates({ tdspSlug, asOf: new Date() });
         if (tdspRates) {
@@ -240,14 +243,25 @@ export async function adminUsageAuditForHome(args: {
           });
         } else {
           usageContext.errors.push("missing_tdsp_rates");
+          usageEstimate = { status: "NOT_IMPLEMENTED", reason: "Missing TDSP rates (tariff lookup failed)" };
         }
       } else {
         if (!tdspSlug) usageContext.errors.push("missing_tdsp_slug");
         if (!annualKwh) usageContext.errors.push("missing_annual_kwh");
         if (!rateStructure) usageContext.errors.push("missing_rateStructure");
+        usageEstimate = {
+          status: "NOT_COMPUTABLE",
+          reason: "Missing inputs for usage estimate",
+          notes: [
+            !tdspSlug ? "missing_tdsp_slug" : null,
+            !annualKwh ? "missing_annual_kwh" : null,
+            !rateStructure ? "missing_rateStructure" : null,
+          ].filter(Boolean),
+        };
       }
-    } catch {
-      usageEstimate = null;
+    } catch (e: any) {
+      usageContext.errors.push("usage_estimate_error");
+      usageEstimate = { status: "ERROR", reason: e?.message ?? String(e) };
     }
 
     return { ok: true, usageContext, usagePreview, usageEstimate };
