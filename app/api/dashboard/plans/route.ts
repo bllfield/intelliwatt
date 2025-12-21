@@ -658,6 +658,31 @@ export async function GET(req: NextRequest) {
         } catch {
           // keep previous best-effort map
         }
+
+        // IMPORTANT: refresh the bucket presence map AFTER ensureCoreMonthlyBuckets() ran.
+        // Otherwise `hasRecentBucket()` (and therefore missingBucketKeys/statusLabel) can be computed
+        // against a stale snapshot and incorrectly mark everything as missing/QUEUED.
+        try {
+          const recent = Array.isArray(recentYearMonths) ? recentYearMonths : [];
+          const keysArr = Array.from(unionKeys);
+          if (recent.length > 0 && keysArr.length > 0) {
+            const rowsRecent = await (usagePrisma as any).homeMonthlyUsageBucket.findMany({
+              where: { homeId: house.id, yearMonth: { in: recent }, bucketKey: { in: keysArr } },
+              select: { bucketKey: true, yearMonth: true },
+            });
+            const map = new Map<string, Set<string>>();
+            for (const r of rowsRecent ?? []) {
+              const k = String((r as any)?.bucketKey ?? "");
+              const ym = String((r as any)?.yearMonth ?? "");
+              if (!k || !ym) continue;
+              if (!map.has(k)) map.set(k, new Set());
+              map.get(k)!.add(ym);
+            }
+            bucketPresenceByKey = map;
+          }
+        } catch {
+          // ignore
+        }
       }
     } catch {
       // swallow (never break dashboard)
