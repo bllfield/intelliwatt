@@ -1,16 +1,52 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { prisma } from "@/lib/db";
+import { usagePrisma } from "@/lib/db/usageClient";
+import { calculatePlanCostForUsage } from "@/lib/plan-engine/calculatePlanCostForUsage";
 import { derivePlanCalcRequirementsFromTemplate } from "@/lib/plan-engine/planComputability";
 import { wattbuy } from "@/lib/wattbuy";
 import { normalizeOffers } from "@/lib/wattbuy/normalize";
 
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 
 type TdspDelivery = { monthlyFeeCents: number; deliveryCentsPerKwh: number };
 type TdspSnapshotMeta = TdspDelivery & { tdspCode: string; snapshotAt: string };
+
+function decimalToNumber(v: any): number | null {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (v && typeof v === "object" && typeof v.toString === "function") {
+    const n = Number(v.toString());
+    return Number.isFinite(n) ? n : null;
+  }
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function lastNYearMonthsChicago(n: number): string[] {
+  try {
+    const tz = "America/Chicago";
+    const fmt = new Intl.DateTimeFormat("en-US", { timeZone: tz, year: "numeric", month: "2-digit" });
+    const parts = fmt.formatToParts(new Date());
+    const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+    const year0 = Number(get("year"));
+    const month0 = Number(get("month"));
+    if (!Number.isFinite(year0) || !Number.isFinite(month0) || month0 < 1 || month0 > 12) return [];
+
+    const out: string[] = [];
+    for (let i = 0; i < n; i++) {
+      const idx = month0 - i;
+      const y = idx >= 1 ? year0 : year0 - Math.ceil((1 - idx) / 12);
+      const m0 = ((idx - 1) % 12 + 12) % 12 + 1;
+      out.push(`${String(y)}-${String(m0).padStart(2, "0")}`);
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
 
 function isPassStrength(v: any): v is "STRONG" | "WEAK" | "INVALID" {
   return v === "STRONG" || v === "WEAK" || v === "INVALID";
@@ -260,6 +296,7 @@ type Row = {
   termMonths: number | null;
   planCalcStatus?: "COMPUTABLE" | "NOT_COMPUTABLE" | "UNKNOWN" | null;
   planCalcReasonCode?: string | null;
+  requiredBucketKeys?: string[] | null;
   queued?: boolean;
   queuedReason?: string | null;
   rate500: number | null;
@@ -282,6 +319,13 @@ type Row = {
   updatedAt: string;
   lastSeenAt: string;
   rateStructure: unknown;
+  usagePreview?: {
+    months: number;
+    annualKwh: number | null;
+    avgMonthlyKwhByKey: Record<string, number>;
+    missingKeys: string[];
+  } | null;
+  usageEstimate?: any | null;
 };
 
 type Ok = {
@@ -292,6 +336,14 @@ type Ok = {
   rows: Row[];
   offerCount?: number;
   mappedOfferCount?: number;
+  usageContext?: {
+    homeId: string;
+    monthsRequested: number;
+    monthsFound: number;
+    avgMonthlyKwh: number | null;
+    annualKwh: number | null;
+    bucketKeysUsed: string[];
+  } | null;
 };
 
 type Err = { ok: false; error: string; details?: unknown };
@@ -321,6 +373,9 @@ export async function GET(req: NextRequest) {
     const city = (req.nextUrl.searchParams.get("city") ?? "").trim();
     const state = (req.nextUrl.searchParams.get("state") ?? "").trim();
     const zip = (req.nextUrl.searchParams.get("zip") ?? "").trim();
+    const homeId = (req.nextUrl.searchParams.get("homeId") ?? "").trim();
+    const usageMonthsRaw = Number(req.nextUrl.searchParams.get("usageMonths") ?? "12");
+    const usageMonths = Math.max(1, Math.min(12, Number.isFinite(usageMonthsRaw) ? Math.floor(usageMonthsRaw) : 12));
 
     const hasAddressFilter = Boolean(address && city && state && zip);
 
@@ -509,24 +564,104 @@ export async function GET(req: NextRequest) {
       return p;
     };
 
-    const rows: Row[] = await Promise.all(
-      (plans as any[]).map(async (p) => {
-        const storedStatusRaw =
-          typeof p?.planCalcStatus === "string" ? String(p.planCalcStatus) : null;
-        const storedReasonRaw =
-          typeof p?.planCalcReasonCode === "string" ? String(p.planCalcReasonCode) : null;
+    // Optional: attach usage-based monthly estimates for a specific homeId.
+    let usageByMonth: Record<string, Record<string, number>> | null = null;
+    let usageEnv:
+      | {
+          homeId: string;
+          monthsRequested: number;
+          monthsFound: number;
+          annualKwh: number | null;
+          avgMonthlyKwh: number | null;
+          bucketKeysUsed: string[];
+          byMonth: Record<string, Record<string, number>>;
+          yearMonths: string[];
+        }
+      | null = null;
 
-        const derivedCalc =
-          storedStatusRaw === "COMPUTABLE" ||
-          storedStatusRaw === "NOT_COMPUTABLE" ||
-          storedStatusRaw === "UNKNOWN"
-            ? {
-                planCalcStatus: storedStatusRaw as "COMPUTABLE" | "NOT_COMPUTABLE" | "UNKNOWN",
-                planCalcReasonCode: storedReasonRaw ?? "UNKNOWN",
-              }
-            : derivePlanCalcRequirementsFromTemplate({
-                rateStructure: p.rateStructure ?? null,
-              });
+    // Precompute plan-calc derivations so we can decide which bucket keys to load.
+    const planMeta = (plans as any[]).map((p) => {
+      const storedStatusRaw = typeof p?.planCalcStatus === "string" ? String(p.planCalcStatus) : null;
+      const storedReasonRaw = typeof p?.planCalcReasonCode === "string" ? String(p.planCalcReasonCode) : null;
+      const derivedCalc =
+        storedStatusRaw === "COMPUTABLE" || storedStatusRaw === "NOT_COMPUTABLE" || storedStatusRaw === "UNKNOWN"
+          ? {
+              planCalcStatus: storedStatusRaw as "COMPUTABLE" | "NOT_COMPUTABLE" | "UNKNOWN",
+              planCalcReasonCode: storedReasonRaw ?? "UNKNOWN",
+              requiredBucketKeys: Array.isArray(p?.requiredBucketKeys) ? (p.requiredBucketKeys as string[]) : null,
+            }
+          : derivePlanCalcRequirementsFromTemplate({ rateStructure: p.rateStructure ?? null });
+      const pcStatus = (derivedCalc as any)?.planCalcStatus ?? null;
+      const pcReason = String((derivedCalc as any)?.planCalcReasonCode ?? "UNKNOWN");
+      const queued = pcStatus !== "COMPUTABLE";
+      const requiredBucketKeys =
+        Array.isArray((derivedCalc as any)?.requiredBucketKeys)
+          ? ((derivedCalc as any).requiredBucketKeys as string[])
+          : Array.isArray(p?.requiredBucketKeys)
+            ? ((p.requiredBucketKeys as string[]) ?? [])
+            : [];
+      return { p, derivedCalc, pcStatus, pcReason, queued, requiredBucketKeys };
+    });
+
+    if (homeId) {
+      const house = await prisma.houseAddress.findUnique({
+        where: { id: homeId } as any,
+        select: { id: true },
+      });
+      if (!house) return jsonError(404, "home_not_found", { homeId });
+
+      const yearMonths = lastNYearMonthsChicago(usageMonths);
+      const keys = new Set<string>(["kwh.m.all.total"]);
+      for (const m of planMeta) {
+        if (m.queued) continue; // only compute estimates for non-queued templates
+        for (const k of m.requiredBucketKeys ?? []) {
+          const kk = String(k ?? "").trim();
+          if (kk) keys.add(kk);
+        }
+      }
+      const bucketKeysUsed = Array.from(keys);
+
+      const rows = await (usagePrisma as any).homeMonthlyUsageBucket.findMany({
+        where: { homeId, yearMonth: { in: yearMonths }, bucketKey: { in: bucketKeysUsed } },
+        select: { yearMonth: true, bucketKey: true, kwhTotal: true },
+      });
+
+      const byMonth: Record<string, Record<string, number>> = {};
+      for (const r of rows ?? []) {
+        const ym = String((r as any)?.yearMonth ?? "").trim();
+        const key = String((r as any)?.bucketKey ?? "").trim();
+        const kwh = decimalToNumber((r as any)?.kwhTotal);
+        if (!ym || !key || kwh == null) continue;
+        if (!byMonth[ym]) byMonth[ym] = {};
+        byMonth[ym][key] = kwh;
+      }
+      usageByMonth = byMonth;
+
+      const allVals: number[] = [];
+      for (const ym of yearMonths) {
+        const v = byMonth?.[ym]?.["kwh.m.all.total"];
+        if (typeof v === "number" && Number.isFinite(v)) allVals.push(v);
+      }
+      const monthsFound = allVals.length;
+      const annualKwh = monthsFound ? allVals.reduce((a, b) => a + b, 0) : null;
+      const avgMonthlyKwh = monthsFound && annualKwh != null ? annualKwh / monthsFound : null;
+
+      usageEnv = {
+        homeId,
+        monthsRequested: usageMonths,
+        monthsFound,
+        annualKwh: annualKwh != null ? Number(annualKwh.toFixed(3)) : null,
+        avgMonthlyKwh: avgMonthlyKwh != null ? Number(avgMonthlyKwh.toFixed(3)) : null,
+        bucketKeysUsed,
+        byMonth,
+        yearMonths,
+      };
+    }
+
+    const rows: Row[] = await Promise.all(
+      planMeta.map(async (m) => {
+        const p = m.p;
+        const derivedCalc = m.derivedCalc;
 
         const rsObj: any = p.rateStructure && typeof p.rateStructure === "object" ? p.rateStructure : null;
         const v = rsObj?.__eflAvgPriceValidation ?? null;
@@ -569,6 +704,59 @@ export async function GET(req: NextRequest) {
         const pcStatus = (derivedCalc as any)?.planCalcStatus ?? null;
         const pcReason = String((derivedCalc as any)?.planCalcReasonCode ?? "UNKNOWN");
         const queued = pcStatus !== "COMPUTABLE";
+
+        // Optional: usage-based monthly estimate (for admin ranking / preview)
+        let usagePreview: Row["usagePreview"] = null;
+        let usageEstimate: Row["usageEstimate"] = null;
+        const requiredKeys =
+          Array.isArray((derivedCalc as any)?.requiredBucketKeys)
+            ? ((derivedCalc as any).requiredBucketKeys as string[])
+            : Array.isArray(p?.requiredBucketKeys)
+              ? ((p.requiredBucketKeys as string[]) ?? [])
+              : [];
+        if (usageEnv && !queued) {
+          const keysForRow = requiredKeys.length ? requiredKeys : ["kwh.m.all.total"];
+          const missingKeys: string[] = [];
+          const avgMonthlyKwhByKey: Record<string, number> = {};
+          for (const k of keysForRow) {
+            const kk = String(k ?? "").trim();
+            if (!kk) continue;
+            const vals: number[] = [];
+            for (const ym of usageEnv.yearMonths) {
+              const v0 = usageEnv.byMonth?.[ym]?.[kk];
+              if (typeof v0 === "number" && Number.isFinite(v0)) vals.push(v0);
+            }
+            if (vals.length === 0) missingKeys.push(kk);
+            else avgMonthlyKwhByKey[kk] = Number((vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(3));
+          }
+          usagePreview = {
+            months: usageEnv.monthsFound,
+            annualKwh: usageEnv.annualKwh,
+            avgMonthlyKwhByKey,
+            missingKeys,
+          };
+
+          try {
+            if (!tdsp || !usageEnv.annualKwh || usageEnv.monthsFound <= 0 || !p.rateStructure) {
+              usageEstimate = null;
+            } else {
+              usageEstimate = calculatePlanCostForUsage({
+                annualKwh: usageEnv.annualKwh,
+                monthsCount: usageEnv.monthsFound,
+                tdsp: {
+                  perKwhDeliveryChargeCents: Number(tdsp.deliveryCentsPerKwh ?? 0) || 0,
+                  monthlyCustomerChargeDollars: Number(((tdsp.monthlyFeeCents ?? 0) / 100).toFixed(2)),
+                  effectiveDate: tdsp.snapshotAt,
+                },
+                rateStructure: p.rateStructure,
+                usageBucketsByMonth: usageByMonth ?? undefined,
+              });
+            }
+          } catch (e: any) {
+            usageEstimate = { status: "ERROR", reason: e?.message ?? String(e) };
+          }
+        }
+
         return {
           id: p.id,
           offerId: offerIdByPlanId.get(String(p.id)) ?? null,
@@ -582,6 +770,7 @@ export async function GET(req: NextRequest) {
               : inferTermMonths(p.planName ?? null),
           planCalcStatus: pcStatus,
           planCalcReasonCode: pcReason,
+          requiredBucketKeys: requiredKeys.length ? requiredKeys : null,
           queued,
           queuedReason: queued ? pcReason : null,
           rate500:
@@ -631,11 +820,31 @@ export async function GET(req: NextRequest) {
           updatedAt: new Date(p.updatedAt).toISOString(),
           lastSeenAt: new Date(p.lastSeenAt).toISOString(),
           rateStructure: p.rateStructure ?? null,
+          usagePreview,
+          usageEstimate,
         };
       }),
     );
 
-    const body: Ok = { ok: true, count: rows.length, totalCount, limit, rows, offerCount, mappedOfferCount };
+    const body: Ok = {
+      ok: true,
+      count: rows.length,
+      totalCount,
+      limit,
+      rows,
+      offerCount,
+      mappedOfferCount,
+      usageContext: usageEnv
+        ? {
+            homeId: usageEnv.homeId,
+            monthsRequested: usageEnv.monthsRequested,
+            monthsFound: usageEnv.monthsFound,
+            avgMonthlyKwh: usageEnv.avgMonthlyKwh,
+            annualKwh: usageEnv.annualKwh,
+            bucketKeysUsed: usageEnv.bucketKeysUsed,
+          }
+        : null,
+    };
     return NextResponse.json(body);
   } catch (err: any) {
     // eslint-disable-next-line no-console

@@ -703,10 +703,14 @@ export default function FactCardOpsPage() {
   const [hygieneErr, setHygieneErr] = useState<string | null>(null);
   const [hygieneRaw, setHygieneRaw] = useState<Json | null>(null);
   const [hygieneLimit, setHygieneLimit] = useState(500);
+  const [tplHomeId, setTplHomeId] = useState("");
+  const [tplUsageNote, setTplUsageNote] = useState<string | null>(null);
+  const [tplAutoSort, setTplAutoSort] = useState(true);
   const [backfillIncludeNonStrong, setBackfillIncludeNonStrong] =
     useState(false);
   const [backfillOverwrite, setBackfillOverwrite] = useState(false);
   const [tplSortKey, setTplSortKey] = useState<
+    | "bestForYou"
     | "utilityId"
     | "supplier"
     | "planName"
@@ -719,7 +723,7 @@ export default function FactCardOpsPage() {
     | "rate2000"
     | "passStrength"
     | "eflVersionCode"
-  >("supplier");
+  >("rate1000");
   const [tplSortDir, setTplSortDir] = useState<SortDir>("asc");
 
   // ---------------- Unmapped Templates (orphan templates with no OfferIdRatePlanMap link) ----------------
@@ -770,11 +774,16 @@ export default function FactCardOpsPage() {
     }
     setTplLoading(true);
     setTplErr(null);
+    setTplUsageNote(null);
     try {
       const params = new URLSearchParams();
       params.set("limit", String(tplLimit));
       if (tplQ.trim()) params.set("q", tplQ.trim());
       if (tplIncludeLegacy) params.set("includeLegacy", "1");
+      if (tplHomeId.trim()) {
+        params.set("homeId", tplHomeId.trim());
+        params.set("usageMonths", "12");
+      }
       const res = await fetch(`/api/admin/wattbuy/templated-plans?${params.toString()}`, {
         headers: { "x-admin-token": token },
       });
@@ -786,6 +795,30 @@ export default function FactCardOpsPage() {
           ? data.totalCount
           : null,
       );
+
+      const uc = (data as any)?.usageContext ?? null;
+      if (uc && typeof uc === "object") {
+        const monthsFound = typeof uc.monthsFound === "number" ? uc.monthsFound : null;
+        const avgMonthlyKwh = typeof uc.avgMonthlyKwh === "number" ? uc.avgMonthlyKwh : null;
+        setTplUsageNote(
+          monthsFound != null
+            ? `Usage context: homeId=${String(uc.homeId ?? "—")} monthsFound=${monthsFound}${avgMonthlyKwh != null ? ` avgMonthly=${avgMonthlyKwh.toFixed(0)} kWh` : ""}`
+            : `Usage context: homeId=${String(uc.homeId ?? "—")}`,
+        );
+
+        if (tplAutoSort) {
+          if (monthsFound != null && monthsFound > 0) {
+            setTplSortKey("bestForYou");
+            setTplSortDir("asc");
+          } else {
+            setTplSortKey("rate1000");
+            setTplSortDir("asc");
+          }
+        }
+      } else if (tplAutoSort) {
+        setTplSortKey("rate1000");
+        setTplSortDir("asc");
+      }
     } catch (e: any) {
       setTplErr(e?.message || "Failed to load templates.");
     } finally {
@@ -1159,8 +1192,12 @@ export default function FactCardOpsPage() {
     const out = [...tplRows];
     out.sort((a: any, b: any) => {
       const av =
-        tplSortKey === "utilityId"
-          ? a?.utilityId
+        tplSortKey === "bestForYou"
+          ? typeof (a as any)?.usageEstimate?.monthlyCostDollars === "number"
+            ? (a as any).usageEstimate.monthlyCostDollars
+            : null
+          : tplSortKey === "utilityId"
+            ? a?.utilityId
           : tplSortKey === "supplier"
             ? a?.supplier
           : tplSortKey === "planName"
@@ -1191,8 +1228,12 @@ export default function FactCardOpsPage() {
                       ? a?.passStrength
                     : a?.eflVersionCode;
       const bv =
-        tplSortKey === "utilityId"
-          ? b?.utilityId
+        tplSortKey === "bestForYou"
+          ? typeof (b as any)?.usageEstimate?.monthlyCostDollars === "number"
+            ? (b as any).usageEstimate.monthlyCostDollars
+            : null
+          : tplSortKey === "utilityId"
+            ? b?.utilityId
           : tplSortKey === "supplier"
             ? b?.supplier
           : tplSortKey === "planName"
@@ -1322,6 +1363,7 @@ export default function FactCardOpsPage() {
   }, [batchRows, queueItems, tplRows]);
 
   function toggleTplSort(k: typeof tplSortKey) {
+    setTplAutoSort(false);
     if (tplSortKey === k) {
       setTplSortDir((d) => (d === "asc" ? "desc" : "asc"));
     } else {
@@ -2200,18 +2242,53 @@ export default function FactCardOpsPage() {
         <div className="flex flex-wrap items-center gap-3">
           <input className="flex-1 min-w-[220px] rounded-lg border px-3 py-2 text-sm" placeholder="Search supplier / plan / cert / version / sha…" value={tplQ} onChange={(e) => setTplQ(e.target.value)} />
           <input className="w-28 rounded-lg border px-3 py-2 text-sm" type="number" min={1} max={1000} value={tplLimit} onChange={(e) => setTplLimit(Math.max(1, Math.min(1000, numOrNull(e.target.value) ?? 200)))} />
+          <input
+            className="w-[260px] rounded-lg border px-3 py-2 text-sm font-mono"
+            placeholder="homeId (usage context)"
+            value={tplHomeId}
+            onChange={(e) => setTplHomeId(e.target.value)}
+            title="Optional: attach usage-based monthly estimates using this homeId (reads usage bucket tables)."
+          />
+          <select
+            className="rounded-lg border px-3 py-2 text-sm"
+            value={tplSortKey}
+            onChange={(e) => {
+              setTplAutoSort(false);
+              setTplSortKey(e.target.value as any);
+              setTplSortDir("asc");
+            }}
+            title="Sort key"
+          >
+            <option value="bestForYou">Best for you (Est. $/mo)</option>
+            <option value="rate1000">1000 kWh</option>
+            <option value="rate500">500 kWh</option>
+            <option value="rate2000">2000 kWh</option>
+            <option value="supplier">Supplier</option>
+            <option value="planName">Plan</option>
+            <option value="utilityId">Utility</option>
+            <option value="termMonths">Term</option>
+            <option value="planType">Type</option>
+            <option value="queued">Queued</option>
+            <option value="queuedReason">Why</option>
+            <option value="passStrength">Strength</option>
+            <option value="eflVersionCode">Ver</option>
+          </select>
           <button className="px-3 py-2 rounded-lg border hover:bg-gray-50" onClick={() => void loadTemplates()} disabled={!ready || tplLoading}>
             Apply
           </button>
         </div>
         {tplErr ? <div className="text-sm text-red-700">{tplErr}</div> : null}
         {tdspNote ? <div className="text-xs text-gray-600">{tdspNote}</div> : null}
+        {tplUsageNote ? <div className="text-xs text-gray-600">{tplUsageNote}</div> : null}
 
         {/* ~5 visible rows + sticky header */}
         <div className="overflow-x-auto overflow-y-auto max-h-[280px] rounded-xl border">
           <table className="min-w-full text-xs">
             <thead className="sticky top-0 z-10 bg-gray-50 text-gray-700">
               <tr className="h-10">
+                <th className="px-2 py-2 text-left cursor-pointer select-none" onClick={() => toggleTplSort("bestForYou")}>
+                  Best {tplSortKey === "bestForYou" ? (tplSortDir === "asc" ? "▲" : "▼") : ""}
+                </th>
                 <th className="px-2 py-2 text-left cursor-pointer select-none" onClick={() => toggleTplSort("utilityId")}>
                   Utility {tplSortKey === "utilityId" ? (tplSortDir === "asc" ? "▲" : "▼") : ""}
                 </th>
@@ -2266,8 +2343,24 @@ export default function FactCardOpsPage() {
                       }).toString()}`
                     : "";
                 const planTypeLabel = deriveTemplatePlanTypeLabel(r);
+                const est = (r as any)?.usageEstimate ?? null;
+                const estMonthly =
+                  typeof est?.monthlyCostDollars === "number" && Number.isFinite(est.monthlyCostDollars)
+                    ? est.monthlyCostDollars
+                    : null;
+                const avgMonthly =
+                  typeof (r as any)?.usagePreview?.avgMonthlyKwhByKey?.["kwh.m.all.total"] === "number"
+                    ? (r as any).usagePreview.avgMonthlyKwhByKey["kwh.m.all.total"]
+                    : null;
                 return (
                   <tr key={r.id} className="border-t h-12">
+                    <td className="px-2 py-2">
+                      {!Boolean((r as any)?.queued) && estMonthly != null ? (
+                        <div className="font-mono">{`$${estMonthly.toFixed(2)}/mo`}</div>
+                      ) : (
+                        <span className="text-gray-400">—</span>
+                      )}
+                    </td>
                     <td className="px-2 py-2">{r.utilityId ?? "-"}</td>
                     <td className="px-2 py-2">{r.supplier ?? "-"}</td>
                     <td className="px-2 py-2">
@@ -2277,6 +2370,11 @@ export default function FactCardOpsPage() {
                           calc: {pcStatus}
                           {pcReason ? ` (${pcReason})` : ""}
                         </div>
+                        {!Boolean((r as any)?.queued) && estMonthly != null && avgMonthly != null ? (
+                          <div className="text-[11px] text-gray-700">
+                            {`Est. $${estMonthly.toFixed(2)}/mo · incl. TDSP · based on your historic usage of ${avgMonthly.toFixed(0)} kWh/mo`}
+                          </div>
+                        ) : null}
                         <div className="flex flex-wrap gap-2">
                           <button
                             className="px-2 py-1 rounded border hover:bg-gray-50 disabled:opacity-60"
@@ -2444,7 +2542,7 @@ export default function FactCardOpsPage() {
               })}
               {tplRows.length === 0 ? (
                 <tr>
-                  <td className="px-2 py-3 text-gray-500" colSpan={13}>
+                  <td className="px-2 py-3 text-gray-500" colSpan={14}>
                     No templates.
                   </td>
                 </tr>
