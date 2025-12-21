@@ -273,6 +273,31 @@ export async function GET(req: NextRequest) {
 
     const hasAddressFilter = Boolean(address && city && state && zip);
 
+    const normalizedQ = (() => {
+      const s = String(q ?? "").trim();
+      if (!s) return { raw: "", key: "" };
+      const key = s
+        .toLowerCase()
+        .replace(/[\s\-]+/g, "_")
+        .replace(/[^a-z0-9_]/g, "");
+      return { raw: s, key };
+    })();
+
+    const utilityIdHintsForQ = (key: string): string[] => {
+      const byKey: Record<string, string[]> = {
+        oncor: ["ONCOR", "44372"],
+        centerpoint: ["CENTERPOINT", "8901"],
+        aep_north: ["AEP_NORTH", "20404"],
+        aepnorth: ["AEP_NORTH", "20404"],
+        aep_central: ["AEP_CENTRAL", "3278"],
+        aepcentral: ["AEP_CENTRAL", "3278"],
+        tnmp: ["TNMP", "40051"],
+      };
+      return byKey[key] ?? [];
+    };
+
+    const utilityIdHints = normalizedQ.key ? utilityIdHintsForQ(normalizedQ.key) : [];
+
     const where: any = {
       // “Templated” means we already have a usable engine structure persisted.
       rateStructure: { not: null },
@@ -281,11 +306,16 @@ export async function GET(req: NextRequest) {
       ...(q
         ? {
             OR: [
+              // Common admin expectation: search by utility/territory (ONCOR, TNMP, etc.)
+              ...(utilityIdHints.length ? [{ utilityId: { in: utilityIdHints } }] : []),
+              { utilityId: { contains: q, mode: "insensitive" } },
               { supplier: { contains: q, mode: "insensitive" } },
               { planName: { contains: q, mode: "insensitive" } },
               { eflVersionCode: { contains: q, mode: "insensitive" } },
               { repPuctCertificate: { contains: q, mode: "insensitive" } },
               { eflPdfSha256: { contains: q, mode: "insensitive" } },
+              { eflUrl: { contains: q, mode: "insensitive" } },
+              { eflSourceUrl: { contains: q, mode: "insensitive" } },
             ],
           }
         : {}),

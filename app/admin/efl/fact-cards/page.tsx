@@ -1955,7 +1955,11 @@ export default function FactCardOpsPage() {
           <h2 className="font-medium">
             Templates (RatePlan.rateStructure stored){" "}
             <span className="text-xs text-gray-600">
-              ({tplTotalCount ?? tplRows.length})
+              ({tplRows.length}
+              {typeof tplTotalCount === "number" && Number.isFinite(tplTotalCount)
+                ? ` / ${tplTotalCount}`
+                : ""}
+              )
             </span>
           </h2>
           <div className="flex items-center gap-2">
