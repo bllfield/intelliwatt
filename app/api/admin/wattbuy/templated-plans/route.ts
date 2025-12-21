@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { prisma } from "@/lib/db";
+import { derivePlanCalcRequirementsFromTemplate } from "@/lib/plan-engine/planComputability";
 import { wattbuy } from "@/lib/wattbuy";
 import { normalizeOffers } from "@/lib/wattbuy/normalize";
 
@@ -257,6 +258,10 @@ type Row = {
   supplier: string | null;
   planName: string | null;
   termMonths: number | null;
+  planCalcStatus?: "COMPUTABLE" | "NOT_COMPUTABLE" | "UNKNOWN" | null;
+  planCalcReasonCode?: string | null;
+  queued?: boolean;
+  queuedReason?: string | null;
   rate500: number | null;
   rate1000: number | null;
   rate2000: number | null;
@@ -424,6 +429,9 @@ export async function GET(req: NextRequest) {
         supplier: true,
         planName: true,
         termMonths: true,
+        planCalcStatus: true,
+        planCalcReasonCode: true,
+        requiredBucketKeys: true,
         rate500: true,
         rate1000: true,
         rate2000: true,
@@ -503,6 +511,23 @@ export async function GET(req: NextRequest) {
 
     const rows: Row[] = await Promise.all(
       (plans as any[]).map(async (p) => {
+        const storedStatusRaw =
+          typeof p?.planCalcStatus === "string" ? String(p.planCalcStatus) : null;
+        const storedReasonRaw =
+          typeof p?.planCalcReasonCode === "string" ? String(p.planCalcReasonCode) : null;
+
+        const derivedCalc =
+          storedStatusRaw === "COMPUTABLE" ||
+          storedStatusRaw === "NOT_COMPUTABLE" ||
+          storedStatusRaw === "UNKNOWN"
+            ? {
+                planCalcStatus: storedStatusRaw as "COMPUTABLE" | "NOT_COMPUTABLE" | "UNKNOWN",
+                planCalcReasonCode: storedReasonRaw ?? "UNKNOWN",
+              }
+            : derivePlanCalcRequirementsFromTemplate({
+                rateStructure: p.rateStructure ?? null,
+              });
+
         const rsObj: any = p.rateStructure && typeof p.rateStructure === "object" ? p.rateStructure : null;
         const v = rsObj?.__eflAvgPriceValidation ?? null;
         const embeddedStrength = (rsObj?.__eflAvgPriceEvidence?.passStrength as any) ?? null;
@@ -540,6 +565,10 @@ export async function GET(req: NextRequest) {
             : tdsp
               ? "COMPUTED_TDSP_SNAPSHOT"
               : "NONE";
+
+        const pcStatus = (derivedCalc as any)?.planCalcStatus ?? null;
+        const pcReason = String((derivedCalc as any)?.planCalcReasonCode ?? "UNKNOWN");
+        const queued = pcStatus !== "COMPUTABLE";
         return {
           id: p.id,
           offerId: offerIdByPlanId.get(String(p.id)) ?? null,
@@ -551,6 +580,10 @@ export async function GET(req: NextRequest) {
             typeof p.termMonths === "number"
               ? p.termMonths
               : inferTermMonths(p.planName ?? null),
+          planCalcStatus: pcStatus,
+          planCalcReasonCode: pcReason,
+          queued,
+          queuedReason: queued ? pcReason : null,
           rate500:
             typeof p.rate500 === "number"
               ? p.rate500

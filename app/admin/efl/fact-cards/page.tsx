@@ -671,6 +671,8 @@ export default function FactCardOpsPage() {
     | "planName"
     | "planType"
     | "termMonths"
+    | "queued"
+    | "queuedReason"
     | "rate500"
     | "rate1000"
     | "rate2000"
@@ -1087,6 +1089,10 @@ export default function FactCardOpsPage() {
               ? typeof a?.termMonths === "number"
                 ? a.termMonths
                 : null
+              : tplSortKey === "queued"
+                ? Boolean((a as any)?.queued)
+                : tplSortKey === "queuedReason"
+                  ? ((a as any)?.queuedReason ?? (a as any)?.planCalcReasonCode ?? null)
               : tplSortKey === "rate500"
                 ? typeof a?.rate500 === "number"
                   ? a.rate500
@@ -1115,6 +1121,10 @@ export default function FactCardOpsPage() {
               ? typeof b?.termMonths === "number"
                 ? b.termMonths
                 : null
+              : tplSortKey === "queued"
+                ? Boolean((b as any)?.queued)
+                : tplSortKey === "queuedReason"
+                  ? ((b as any)?.queuedReason ?? (b as any)?.planCalcReasonCode ?? null)
               : tplSortKey === "rate500"
                 ? typeof b?.rate500 === "number"
                   ? b.rate500
@@ -1130,6 +1140,12 @@ export default function FactCardOpsPage() {
                     : tplSortKey === "passStrength"
                       ? b?.passStrength
                     : b?.eflVersionCode;
+
+      if (tplSortKey === "queued") {
+        const an = av ? 1 : 0;
+        const bn = bv ? 1 : 0;
+        return cmp(an, bn, tplSortDir);
+      }
       return cmp(av ?? null, bv ?? null, tplSortDir);
     });
     return out;
@@ -2100,6 +2116,12 @@ export default function FactCardOpsPage() {
                 <th className="px-2 py-2 text-left cursor-pointer select-none" onClick={() => toggleTplSort("passStrength")}>
                   Strength {tplSortKey === "passStrength" ? (tplSortDir === "asc" ? "▲" : "▼") : ""}
                 </th>
+                <th className="px-2 py-2 text-left cursor-pointer select-none" onClick={() => toggleTplSort("queued")}>
+                  Queued {tplSortKey === "queued" ? (tplSortDir === "asc" ? "▲" : "▼") : ""}
+                </th>
+                <th className="px-2 py-2 text-left cursor-pointer select-none" onClick={() => toggleTplSort("queuedReason")}>
+                  Why {tplSortKey === "queuedReason" ? (tplSortDir === "asc" ? "▲" : "▼") : ""}
+                </th>
                 <th className="px-2 py-2 text-left cursor-pointer select-none" onClick={() => toggleTplSort("eflVersionCode")}>
                   Ver {tplSortKey === "eflVersionCode" ? (tplSortDir === "asc" ? "▲" : "▼") : ""}
                 </th>
@@ -2190,6 +2212,31 @@ export default function FactCardOpsPage() {
                         {(r as any)?.passStrength ?? "—"}
                       </span>
                     </td>
+                    <td className="px-2 py-2">
+                      {Boolean((r as any)?.queued) ? (
+                        <span
+                          className="inline-flex px-2 py-0.5 rounded-full bg-amber-100 text-amber-800"
+                          title={`planCalcStatus=${String((r as any)?.planCalcStatus ?? "UNKNOWN")}`}
+                        >
+                          YES
+                        </span>
+                      ) : (
+                        <span
+                          className="inline-flex px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800"
+                          title={`planCalcStatus=${String((r as any)?.planCalcStatus ?? "COMPUTABLE")}`}
+                        >
+                          NO
+                        </span>
+                      )}
+                    </td>
+                    <td
+                      className="px-2 py-2 font-mono text-[11px]"
+                      title={String((r as any)?.queuedReason ?? (r as any)?.planCalcReasonCode ?? "")}
+                    >
+                      {Boolean((r as any)?.queued)
+                        ? ((r as any)?.queuedReason ?? (r as any)?.planCalcReasonCode ?? "UNKNOWN")
+                        : "—"}
+                    </td>
                     <td className="px-2 py-2">{r.eflVersionCode ?? "-"}</td>
                     <td className="px-2 py-2">
                       <div className="flex flex-wrap gap-2">
@@ -2229,7 +2276,7 @@ export default function FactCardOpsPage() {
               })}
               {tplRows.length === 0 ? (
                 <tr>
-                  <td className="px-2 py-3 text-gray-500" colSpan={11}>
+                  <td className="px-2 py-3 text-gray-500" colSpan={13}>
                     No templates.
                   </td>
                 </tr>
