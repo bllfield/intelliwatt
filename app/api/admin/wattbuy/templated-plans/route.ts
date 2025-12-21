@@ -11,6 +11,51 @@ const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 type TdspDelivery = { monthlyFeeCents: number; deliveryCentsPerKwh: number };
 type TdspSnapshotMeta = TdspDelivery & { tdspCode: string; snapshotAt: string };
 
+function isPassStrength(v: any): v is "STRONG" | "WEAK" | "INVALID" {
+  return v === "STRONG" || v === "WEAK" || v === "INVALID";
+}
+
+function isValidationStatus(v: any): v is "PASS" | "FAIL" | "SKIP" {
+  return v === "PASS" || v === "FAIL" || v === "SKIP";
+}
+
+/**
+ * Prefer persisted embedded evidence (rateStructure.__eflAvgPriceEvidence.passStrength).
+ * For older templates that predate evidence embedding, use a conservative fallback:
+ * - If validation is PASS and the stored template shape is a simple FIXED flat plan, treat as STRONG.
+ * - Otherwise return null (unknown).
+ */
+function inferPassStrengthFallback(args: {
+  rateStructure: any | null;
+  modeledValidationCol: any | null;
+}): "STRONG" | "WEAK" | "INVALID" | null {
+  const rsObj: any =
+    args.rateStructure && typeof args.rateStructure === "object"
+      ? args.rateStructure
+      : null;
+
+  const embedded = rsObj?.__eflAvgPriceEvidence?.passStrength ?? null;
+  if (isPassStrength(embedded)) return embedded;
+
+  const vCol = args.modeledValidationCol && typeof args.modeledValidationCol === "object"
+    ? args.modeledValidationCol
+    : null;
+  const status = (vCol as any)?.status ?? null;
+  if (!isValidationStatus(status) || status !== "PASS") return null;
+
+  const rateType = String(rsObj?.type ?? "").toUpperCase();
+  const hasCredits =
+    Boolean(rsObj?.billCredits?.hasBillCredit) ||
+    (Array.isArray(rsObj?.billCredits?.rules) && rsObj.billCredits.rules.length > 0);
+  const hasUsageTiers = Array.isArray(rsObj?.usageTiers) && rsObj.usageTiers.length > 0;
+  const hasTouTiers = Array.isArray(rsObj?.timeOfUsePeriods) || Array.isArray(rsObj?.tiers);
+
+  const isSimpleFlat =
+    rateType === "FIXED" && !hasCredits && !hasUsageTiers && !hasTouTiers;
+
+  return isSimpleFlat ? "STRONG" : null;
+}
+
 function mapUtilityIdToTdspCode(utilityId: string | null | undefined): string | null {
   const u = String(utilityId ?? "").trim();
   if (!u) return null;
@@ -460,8 +505,7 @@ export async function GET(req: NextRequest) {
       (plans as any[]).map(async (p) => {
         const rsObj: any = p.rateStructure && typeof p.rateStructure === "object" ? p.rateStructure : null;
         const v = rsObj?.__eflAvgPriceValidation ?? null;
-        const embeddedStrength =
-          (rsObj?.__eflAvgPriceEvidence?.passStrength as any) ?? null;
+        const embeddedStrength = (rsObj?.__eflAvgPriceEvidence?.passStrength as any) ?? null;
         const embeddedStatus = (v?.status as any) ?? null;
         const points: any[] = Array.isArray(v?.points) ? v.points : [];
         const modeledFromDb = (kwh: number): number | null => {
@@ -539,9 +583,12 @@ export async function GET(req: NextRequest) {
               ? embeddedStatus
               : null,
           passStrength:
-            embeddedStrength === "STRONG" || embeddedStrength === "WEAK" || embeddedStrength === "INVALID"
+            isPassStrength(embeddedStrength)
               ? embeddedStrength
-              : null,
+              : inferPassStrengthFallback({
+                  rateStructure: p.rateStructure ?? null,
+                  modeledValidationCol: p.modeledEflAvgPriceValidation ?? null,
+                }),
           cancelFee: p.cancelFee ?? null,
           eflUrl: p.eflUrl ?? null,
           eflPdfSha256: p.eflPdfSha256 ?? null,
