@@ -9,10 +9,6 @@ export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   try {
-    const forceReparse =
-      req.nextUrl.searchParams.get("force") === "1" ||
-      req.nextUrl.searchParams.get("forceReparse") === "1";
-
     const formData = await req.formData();
     const file = formData.get("file");
 
@@ -41,8 +37,7 @@ export async function POST(req: NextRequest) {
     });
 
     const rawTextPreview = String(pipelineResult.rawTextPreview ?? "").slice(0, MAX_PREVIEW_CHARS);
-    const rawTextLength =
-      Number(pipelineResult.rawTextLen ?? rawTextPreview.length) || rawTextPreview.length;
+    const rawTextLength = pipelineResult.rawTextLen ?? rawTextPreview.length;
     const rawTextTruncated = Boolean(pipelineResult.rawTextTruncated ?? false);
 
     const aiEnabled = process.env.OPENAI_IntelliWatt_Fact_Card_Parser === "1";
