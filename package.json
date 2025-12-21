@@ -23,6 +23,7 @@
     "admin:rateplan:missing-buckets": "node scripts/admin/list-rateplan-missing-buckets.mjs",
     "admin:rateplan:rederive": "node scripts/admin/rederive-rateplan-calc.mjs",
     "admin:rateplan:diagnose-missing-templates": "node scripts/admin/diagnose-missing-templates.mjs",
+    "admin:rateplan:template-hygiene": "node scripts/admin/template-hygiene.mjs",
     "admin:rateplan:rewire-maps": "node scripts/admin/rewire-offer-rateplan-map.mjs",
     "admin:rateplan:link-offers": "node scripts/admin/link-offers-to-templates.mjs",
     "admin:rateplan:offer-template-coverage": "node scripts/admin/report-offer-template-coverage.mjs",
