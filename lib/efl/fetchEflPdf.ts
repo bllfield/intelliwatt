@@ -17,6 +17,40 @@ export type FetchEflPdfResult =
 
 const PDF_HINT_RE = /\.pdf(?:$|\?)/i;
 
+/**
+ * Optional: route blocked PDF fetches through an external fetch proxy.
+ *
+ * Why:
+ * - Some doc hosts block Vercel/AWS IP ranges or require browser-like networks.
+ * - Vercel cannot rotate outbound IPs. A dedicated proxy service can.
+ *
+ * How it works:
+ * - If `process.env.EFL_FETCH_PROXY_URL` is set, and direct fetch returns 403/406,
+ *   we POST to the proxy to fetch the URL and return bytes back to us.
+ *
+ * Expected proxy contract (recommended):
+ * - Request: POST <EFL_FETCH_PROXY_URL>
+ *   body: { "url": "<target>", "timeoutMs": 20000 }
+ *   headers: "authorization: Bearer <EFL_FETCH_PROXY_TOKEN>" (optional)
+ *
+ * - Response (either):
+ *   A) Binary body (PDF/HTML/etc.) with headers:
+ *      - content-type: <mime>
+ *      - x-final-url: <final url after redirects> (optional)
+ *      - x-proxy-notes: <string> (optional)
+ *
+ *   B) JSON:
+ *      { ok: true, finalUrl?: string, contentType?: string, bytesBase64: string, notes?: string[] }
+ *
+ * NOTE: Read env vars at call-time (tests + serverless warm restarts).
+ */
+function getEflFetchProxyConfig(): { url: string; token: string } {
+  return {
+    url: String(process.env.EFL_FETCH_PROXY_URL ?? "").trim(),
+    token: String(process.env.EFL_FETCH_PROXY_TOKEN ?? "").trim(),
+  };
+}
+
 function decodeEntities(s: string): string {
   const map: Record<string, string> = {
     "&nbsp;": " ",
@@ -343,6 +377,73 @@ async function fetchBytesWithHeaders(args: {
   }
 }
 
+async function fetchBytesViaProxy(args: {
+  url: string;
+  timeoutMs: number;
+  notes: string[];
+}): Promise<{ resUrl: string; contentType: string | null; buf: Uint8Array; proxyNotes: string[] }> {
+  const { url, timeoutMs, notes } = args;
+  const cfg = getEflFetchProxyConfig();
+  if (!cfg.url) {
+    throw new Error("EFL_FETCH_PROXY_URL not configured");
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Math.min(timeoutMs, 45_000));
+
+  try {
+    const headers: Record<string, string> = {
+      "content-type": "application/json",
+      accept: "application/octet-stream,application/pdf,application/json,text/html,*/*",
+    };
+    if (cfg.token) {
+      headers.authorization = `Bearer ${cfg.token}`;
+    }
+
+    const res = await fetch(cfg.url, {
+      method: "POST",
+      redirect: "follow",
+      headers,
+      body: JSON.stringify({ url, timeoutMs }),
+      cache: "no-store",
+      signal: controller.signal,
+    });
+
+    const contentType = res.headers.get("content-type");
+    const finalUrlHeader = res.headers.get("x-final-url");
+    const proxyNotesHeader = res.headers.get("x-proxy-notes");
+    const proxyNotes: string[] = [];
+    if (proxyNotesHeader) proxyNotes.push(proxyNotesHeader.slice(0, 600));
+
+    // JSON variant (B)
+    if ((contentType ?? "").toLowerCase().includes("application/json")) {
+      const j = (await res.json().catch(() => null)) as any;
+      if (!res.ok || !j?.ok || !j?.bytesBase64) {
+        throw new Error(
+          `proxy_http_${res.status}: ${String(j?.error ?? res.statusText ?? "proxy_error")}`,
+        );
+      }
+      const b64 = String(j.bytesBase64);
+      const buf = Uint8Array.from(Buffer.from(b64, "base64"));
+      const finalUrl = String(j.finalUrl ?? finalUrlHeader ?? url);
+      const ct = (j.contentType ?? contentType ?? null) as string | null;
+      const extra = Array.isArray(j.notes) ? (j.notes as any[]).map((x) => String(x).slice(0, 300)) : [];
+      return { resUrl: finalUrl, contentType: ct, buf, proxyNotes: [...proxyNotes, ...extra] };
+    }
+
+    // Binary variant (A)
+    if (!res.ok) {
+      throw new Error(`proxy_http_${res.status}: ${res.statusText || "proxy_error"}`);
+    }
+
+    const buf = new Uint8Array(await res.arrayBuffer());
+    const finalUrl = String(finalUrlHeader ?? url);
+    return { resUrl: finalUrl, contentType, buf, proxyNotes };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function fetchRedirectLocation(args: {
   url: string;
   timeoutMs: number;
@@ -589,7 +690,34 @@ export async function fetchEflPdfFromUrl(
     const fetchUrl = resolvedShortlink ?? eflUrl;
     if (resolvedShortlink) notes.push(`shortlink_fetch_direct=${fetchUrl}`);
 
-    const first = await fetchWithProfilesAndReferer({ url: fetchUrl, timeoutMs, notes });
+    let first = await fetchWithProfilesAndReferer({ url: fetchUrl, timeoutMs, notes });
+
+    // If the doc host blocks Vercel/server-side fetch (403/406), optionally try a fetch proxy.
+    const proxyCfg = getEflFetchProxyConfig();
+    if (!first.res.ok && (first.res.status === 403 || first.res.status === 406) && Boolean(proxyCfg.url)) {
+      notes.push("proxy_fallback=1");
+      try {
+        const proxied = await fetchBytesViaProxy({ url: fetchUrl, timeoutMs, notes });
+        notes.push("proxy_ok=1");
+        if (proxied.proxyNotes.length) {
+          notes.push(`proxy_notes=${proxied.proxyNotes.join("|").slice(0, 900)}`);
+        }
+        // Synthesize a Response-like object for downstream logic.
+        first = {
+          // Use Buffer for BodyInit compatibility across TS lib targets.
+          res: new Response(Buffer.from(proxied.buf), {
+            status: 200,
+            headers: proxied.contentType ? { "content-type": proxied.contentType } : undefined,
+          }),
+          contentType: proxied.contentType,
+          buf: proxied.buf,
+        };
+        // Preserve the final URL we fetched through the proxy as a note (Response.url isn't settable).
+        notes.push(`proxy_finalUrl=${proxied.resUrl}`);
+      } catch (e) {
+        notes.push(`proxy_error=${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
 
     const { res, contentType, buf } = first;
     if (!res.ok) {
