@@ -2353,6 +2353,8 @@ export default function FactCardOpsPage() {
                   typeof est?.monthlyCostDollars === "number" && Number.isFinite(est.monthlyCostDollars)
                     ? est.monthlyCostDollars
                     : null;
+                const estStatus = String(est?.status ?? "").trim();
+                const estReason = String(est?.reason ?? "").trim();
                 const avgMonthly =
                   typeof (r as any)?.usagePreview?.avgMonthlyKwhByKey?.["kwh.m.all.total"] === "number"
                     ? (r as any).usagePreview.avgMonthlyKwhByKey["kwh.m.all.total"]
@@ -2360,8 +2362,12 @@ export default function FactCardOpsPage() {
                 return (
                   <tr key={r.id} className="border-t h-12">
                     <td className="px-2 py-2">
-                      {!Boolean((r as any)?.queued) && estMonthly != null ? (
+                      {estMonthly != null ? (
                         <div className="font-mono">{`$${estMonthly.toFixed(2)}/mo`}</div>
+                      ) : estStatus ? (
+                        <div className="font-mono text-[11px] text-gray-500" title={estReason || estStatus}>
+                          {estStatus}
+                        </div>
                       ) : (
                         <span className="text-gray-400">—</span>
                       )}
@@ -2375,9 +2381,11 @@ export default function FactCardOpsPage() {
                           calc: {pcStatus}
                           {pcReason ? ` (${pcReason})` : ""}
                         </div>
-                        {!Boolean((r as any)?.queued) && estMonthly != null && avgMonthly != null ? (
+                        {avgMonthly != null ? (
                           <div className="text-[11px] text-gray-700">
-                            {`Est. $${estMonthly.toFixed(2)}/mo · incl. TDSP · based on your historic usage of ${avgMonthly.toFixed(0)} kWh/mo`}
+                            {estMonthly != null
+                              ? `Est. $${estMonthly.toFixed(2)}/mo · incl. TDSP · based on your historic usage of ${avgMonthly.toFixed(0)} kWh/mo`
+                              : `Based on your historic usage of ${avgMonthly.toFixed(0)} kWh/mo${estStatus ? ` · est: ${estStatus}${estReason ? ` (${estReason})` : ""}` : ""}`}
                           </div>
                         ) : null}
                         <div className="flex flex-wrap gap-2">

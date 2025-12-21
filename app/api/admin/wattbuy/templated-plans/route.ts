@@ -646,7 +646,6 @@ export async function GET(req: NextRequest) {
       const yearMonths = lastNYearMonthsChicago(usageMonths);
       const keys = new Set<string>(["kwh.m.all.total"]);
       for (const m of planMeta) {
-        if (m.queued) continue; // only compute estimates for non-queued templates
         for (const k of m.requiredBucketKeys ?? []) {
           const kk = String(k ?? "").trim();
           if (kk) keys.add(kk);
@@ -747,7 +746,7 @@ export async function GET(req: NextRequest) {
             : Array.isArray(p?.requiredBucketKeys)
               ? ((p.requiredBucketKeys as string[]) ?? [])
               : [];
-        if (usageEnv && !queued) {
+        if (usageEnv) {
           const keysForRow = requiredKeys.length ? requiredKeys : ["kwh.m.all.total"];
           const missingKeys: string[] = [];
           const avgMonthlyKwhByKey: Record<string, number> = {};
@@ -770,8 +769,12 @@ export async function GET(req: NextRequest) {
           };
 
           try {
-            if (!tdsp || !usageEnv.annualKwh || usageEnv.monthsFound <= 0 || !p.rateStructure) {
-              usageEstimate = null;
+            if (!usageEnv.annualKwh || usageEnv.monthsFound <= 0) {
+              usageEstimate = { status: "NOT_IMPLEMENTED", reason: "Missing usage buckets (kwh.m.all.total)" };
+            } else if (!p.rateStructure) {
+              usageEstimate = { status: "NOT_IMPLEMENTED", reason: "Missing rateStructure" };
+            } else if (!tdsp) {
+              usageEstimate = { status: "NOT_IMPLEMENTED", reason: "Missing TDSP snapshot for utility" };
             } else {
               usageEstimate = calculatePlanCostForUsage({
                 annualKwh: usageEnv.annualKwh,
