@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { prisma } from "@/lib/db";
+import { normalizeTdspCode } from "@/lib/utility/tdspCode";
 
 export const dynamic = "force-dynamic";
 
@@ -89,6 +90,23 @@ export async function POST(req: NextRequest) {
 
       const eflUrl = (p?.eflUrl ?? p?.eflSourceUrl ?? null) as string | null;
       const utilNorm = String(p?.utilityId ?? "").trim().toUpperCase();
+      const canon = normalizeTdspCode(utilNorm);
+
+      // If this is just an alias/abbreviation (e.g., AEPNOR), fix it in-place rather than enqueueing.
+      if (canon && canon !== utilNorm) {
+        if (!dryRun) {
+          try {
+            await prisma.ratePlan.update({
+              where: { id: String(p.id) },
+              data: { utilityId: canon },
+            });
+          } catch {
+            // ignore
+          }
+        }
+        updated++;
+        continue;
+      }
       const reasonCode = utilNorm === "UNKNOWN" ? "UNKNOWN_UTILITY_ID" : "UNMAPPED_UTILITY_ID";
       const payloadCommon: any = {
         ratePlanId: String(p.id),

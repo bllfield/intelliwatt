@@ -7,20 +7,20 @@ import { runEflPipelineNoStore } from "@/lib/efl/runEflPipelineNoStore";
 import { upsertRatePlanFromEfl } from "@/lib/efl/planPersistence";
 import { validatePlanRules } from "@/lib/efl/planEngine";
 import { inferTdspTerritoryFromEflText } from "@/lib/efl/eflValidator";
+import { normalizeTdspCode } from "@/lib/utility/tdspCode";
 import { prisma } from "@/lib/db";
 import { ensureBucketsExist } from "@/lib/usage/aggregateMonthlyBuckets";
 
 export const dynamic = "force-dynamic";
 
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
-const KNOWN_TDSP_CODES = ["ONCOR", "CENTERPOINT", "AEP_NORTH", "AEP_CENTRAL", "TNMP"] as const;
 
 function normalizeUtilityId(x: unknown): string {
   return String(x ?? "").trim().toUpperCase();
 }
 
 function isKnownTdspCode(x: unknown): boolean {
-  return KNOWN_TDSP_CODES.includes(normalizeUtilityId(x) as any);
+  return normalizeTdspCode(x) !== null;
 }
 
 function normalizeUrl(u: unknown): string | null {
@@ -404,7 +404,7 @@ export async function POST(req: NextRequest) {
               const inferredTdsp = inferTdspTerritoryFromEflText(det.rawText);
               const tdspFromQueue = normalizeUtilityId((it as any)?.tdspName ?? null);
               const tdspCandidateRaw = inferredTdsp ?? (tdspFromQueue ? tdspFromQueue : null);
-              tdspCandidate = normalizeUtilityId(tdspCandidateRaw);
+              tdspCandidate = normalizeTdspCode(tdspCandidateRaw);
               tdspIsKnown = Boolean(tdspCandidate) && isKnownTdspCode(tdspCandidate);
 
               const saved = await upsertRatePlanFromEfl({
@@ -415,7 +415,7 @@ export async function POST(req: NextRequest) {
                 repPuctCertificate: det.repPuctCertificate ?? null,
                 eflVersionCode: det.eflVersionCode ?? null,
                 eflPdfSha256: det.eflPdfSha256,
-                utilityId: tdspCandidate || "UNKNOWN",
+                utilityId: tdspCandidate ?? "UNKNOWN",
                 state: "TX",
                 termMonths: typeof it?.termMonths === "number" ? it.termMonths : null,
                 rate500: expectedRateFor(500),
@@ -460,7 +460,8 @@ export async function POST(req: NextRequest) {
               })();
 
               // Safety: never allow auto-processed templates with unknown/unmapped TDSP to become "available".
-              const persistedUtilityId = normalizeUtilityId((saved as any)?.ratePlan?.utilityId ?? null);
+              const persistedUtilityIdRaw = normalizeUtilityId((saved as any)?.ratePlan?.utilityId ?? null);
+              const persistedUtilityId = normalizeTdspCode(persistedUtilityIdRaw);
               const persistedUtilityKnown = Boolean(persistedUtilityId) && isKnownTdspCode(persistedUtilityId);
               const templatePersistedOk = templatePersisted && tdspIsKnown && persistedUtilityKnown;
 
@@ -473,7 +474,7 @@ export async function POST(req: NextRequest) {
                   issues.push({
                     code: "TEMPLATE_UNKNOWN_UTILITY",
                     severity: "ERROR",
-                    message: `Template quarantined by queue processor: utilityId is ${persistedUtilityId || "UNKNOWN"} (unmapped).`,
+                    message: `Template quarantined by queue processor: utilityId is ${persistedUtilityIdRaw || "UNKNOWN"} (unmapped).`,
                   });
                   await (prisma as any).ratePlan.update({
                     where: { id: persistedRatePlanId },
@@ -585,7 +586,7 @@ export async function POST(req: NextRequest) {
                 resolved += Number(upd?.count ?? 0) || 0;
               } else if (templatePersisted && !templatePersistedOk) {
                 templateAction = "SKIPPED";
-                persistNotes = `Template quarantined: TDSP/utility is unknown/unmapped (candidate=${tdspCandidate || "—"} persisted=${persistedUtilityId || "—"}).`;
+                persistNotes = `Template quarantined: TDSP/utility is unknown/unmapped (candidate=${tdspCandidateRaw || "—"} persisted=${persistedUtilityIdRaw || "—"}).`;
               } else {
                 const missing = Array.isArray((saved as any)?.missingTemplateFields)
                   ? ((saved as any).missingTemplateFields as string[])
