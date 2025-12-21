@@ -886,6 +886,9 @@ export default function FactCardOpsPage() {
       let quarantined = 0;
       let kept = 0;
       let errors = 0;
+      let quarantinedPlanCalc = 0;
+      let quarantinedUnknownUtility = 0;
+      let unknownUtilityQueued = 0;
 
       while (loops < 500) {
         const qs = new URLSearchParams();
@@ -905,12 +908,12 @@ export default function FactCardOpsPage() {
         quarantined += Number(data.quarantinedCount ?? 0) || 0;
         kept += Number(data.keptCount ?? 0) || 0;
         errors += Number(data.errorsCount ?? 0) || 0;
-        const qPlanCalc = Number(data.quarantinedPlanCalcCount ?? 0) || 0;
-        const qUnknownUtil = Number(data.quarantinedUnknownUtilityCount ?? 0) || 0;
-        const qUnknownQueued = Number(data.unknownUtilityQueuedCount ?? 0) || 0;
+        quarantinedPlanCalc += Number(data.quarantinedPlanCalcCount ?? 0) || 0;
+        quarantinedUnknownUtility += Number(data.quarantinedUnknownUtilityCount ?? 0) || 0;
+        unknownUtilityQueued += Number(data.unknownUtilityQueuedCount ?? 0) || 0;
 
         setTdspNote(
-          `Revalidate templates: processed=${processed} quarantined=${quarantined} (planCalc=${qPlanCalc} unknownUtility=${qUnknownUtil} queuedUnknown=${qUnknownQueued}) kept=${kept} errors=${errors} last=${data.lastCursorId ?? "—"}`,
+          `Revalidate templates: processed=${processed} quarantined=${quarantined} (planCalc=${quarantinedPlanCalc} unknownUtility=${quarantinedUnknownUtility} queuedUnknown=${unknownUtilityQueued}) kept=${kept} errors=${errors} last=${data.lastCursorId ?? "—"}`,
         );
 
         if (!data.truncated || !data.nextCursorId) break;
@@ -2088,5 +2091,4 @@ export default function FactCardOpsPage() {
     </div>
   );
 }
-
 
