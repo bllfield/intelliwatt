@@ -366,25 +366,12 @@ export async function GET(req: NextRequest) {
         const yearMonths = prev ? [ym0, prev] : [ym0];
         recentYearMonths = yearMonths.slice();
 
-        // Union required bucket keys across all mapped templates (fall back to ALL total).
-        const unionKeys = new Set<string>(["kwh.m.all.total"]);
-        try {
-          for (const [, v] of planCalcByRatePlanId.entries()) {
-            const keys = Array.isArray((v as any)?.requiredBucketKeys) ? ((v as any).requiredBucketKeys as string[]) : [];
-            for (const k of keys) {
-              const kk = String(k ?? "").trim();
-              if (kk) unionKeys.add(kk);
-            }
-          }
-        } catch {
-          // ignore
-        }
-
-        // Ensure bucket totals exist (best-effort) for ALL required keys.
+        // Ensure CORE bucket totals exist (best-effort) for recent months.
+        // NOTE: plan-specific requiredBucketKeys are derived later after OfferIdRatePlanMap + RatePlan lookups.
+        // This early backfill keeps fixed-rate costs working even before we know plan-specific keys.
         try {
           const rangeEnd = new Date();
           const rangeStart = new Date(rangeEnd.getTime() - 365 * 24 * 60 * 60 * 1000);
-          const defs = bucketDefsFromBucketKeys(Array.from(unionKeys));
           await ensureCoreMonthlyBuckets({
             homeId: house.id,
             esiid: house.esiid,
@@ -392,7 +379,6 @@ export async function GET(req: NextRequest) {
             rangeEnd,
             source: "SMT",
             intervalSource: "SMT",
-            bucketDefs: defs,
           });
         } catch {
           // ignore (never break dashboard)
@@ -421,7 +407,7 @@ export async function GET(req: NextRequest) {
         // Load last-12-months bucket totals by month for calculation (TOU needs this).
         try {
           const yearMonths12 = lastNYearMonthsChicago(12);
-          const keysArr = Array.from(unionKeys);
+          const keysArr = ["kwh.m.all.total"];
           if (yearMonths12.length > 0 && keysArr.length > 0) {
             const rows12 = await (usagePrisma as any).homeMonthlyUsageBucket.findMany({
               where: { homeId: house.id, yearMonth: { in: yearMonths12 }, bucketKey: { in: keysArr } },
@@ -617,6 +603,64 @@ export async function GET(req: NextRequest) {
       } catch {
         // Best-effort only; absence means we won't refine status labels server-side.
       }
+    }
+
+    // Now that RatePlan rows are loaded, we can do a bounded, best-effort "ensure required buckets"
+    // and load per-month bucket totals for calculation (TOU / bucket-gated plans).
+    try {
+      if (hasUsage && house.id && house.esiid && mappedRatePlanIds.length > 0) {
+        const unionKeys = new Set<string>(["kwh.m.all.total"]);
+        planCalcByRatePlanId.forEach((v: any) => {
+          const keys = Array.isArray(v?.requiredBucketKeys) ? (v.requiredBucketKeys as string[]) : [];
+          for (const k of keys) {
+            const kk = String(k ?? "").trim();
+            if (kk) unionKeys.add(kk);
+          }
+        });
+
+        // Ensure buckets exist (bounded) and then reload the last-12-months bucket totals map.
+        const rangeEnd = new Date();
+        const rangeStart = new Date(rangeEnd.getTime() - 365 * 24 * 60 * 60 * 1000);
+        try {
+          const defs = bucketDefsFromBucketKeys(Array.from(unionKeys));
+          await ensureCoreMonthlyBuckets({
+            homeId: house.id,
+            esiid: house.esiid,
+            rangeStart,
+            rangeEnd,
+            source: "SMT",
+            intervalSource: "SMT",
+            bucketDefs: defs,
+          });
+        } catch {
+          // ignore (never break dashboard)
+        }
+
+        try {
+          const yearMonths12 = lastNYearMonthsChicago(12);
+          const keysArr = Array.from(unionKeys);
+          if (yearMonths12.length > 0 && keysArr.length > 0) {
+            const rows12 = await (usagePrisma as any).homeMonthlyUsageBucket.findMany({
+              where: { homeId: house.id, yearMonth: { in: yearMonths12 }, bucketKey: { in: keysArr } },
+              select: { yearMonth: true, bucketKey: true, kwhTotal: true },
+            });
+            const byMonth: Record<string, Record<string, number>> = {};
+            for (const r of rows12 ?? []) {
+              const ym = String((r as any)?.yearMonth ?? "").trim();
+              const key = String((r as any)?.bucketKey ?? "").trim();
+              const kwh = decimalToNumber((r as any)?.kwhTotal);
+              if (!ym || !key || kwh == null) continue;
+              if (!byMonth[ym]) byMonth[ym] = {};
+              byMonth[ym][key] = kwh;
+            }
+            usageBucketsByMonthForCalc = byMonth;
+          }
+        } catch {
+          // keep previous best-effort map
+        }
+      }
+    } catch {
+      // swallow (never break dashboard)
     }
 
     // Filter
