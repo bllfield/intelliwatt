@@ -6,6 +6,7 @@ import { wbGetOffers } from "@/lib/wattbuy/client";
 import { normalizeOffers, type OfferNormalized } from "@/lib/wattbuy/normalize";
 import { computePdfSha256 } from "@/lib/efl/eflExtractor";
 import { fetchEflPdfFromUrl } from "@/lib/efl/fetchEflPdf";
+import { runEflPipeline } from "@/lib/efl/runEflPipeline";
 import { runEflPipelineNoStore } from "@/lib/efl/runEflPipelineNoStore";
 import { upsertRatePlanFromEfl } from "@/lib/efl/planPersistence";
 import { validatePlanRules } from "@/lib/efl/planEngine";
@@ -575,6 +576,77 @@ export async function POST(req: NextRequest) {
         const pdfSha256 = computePdfSha256(pdfBytes);
         const resolvedPdfUrl = fetched.pdfUrl ?? eflSeedUrl;
 
+        // Canonical pipeline: one engine for batch/manual/queue.
+        // (Legacy path below kept temporarily for reference.)
+        if (true) {
+          const pipelineResult = await runEflPipeline({
+            source: "batch",
+            actor: "system",
+            dryRun: mode === "DRY_RUN",
+            offerId,
+            eflUrl: resolvedPdfUrl,
+            eflSourceUrl: eflSeedUrl,
+            pdfBytes,
+            offerMeta: {
+              supplier,
+              planName,
+              termMonths,
+              tdspName,
+            },
+          });
+
+          const effectiveValidation = pipelineResult.finalValidation ?? null;
+          const finalStatus: string | null = effectiveValidation?.status ?? null;
+          const tdspAppliedMode: string | null =
+            effectiveValidation?.assumptionsUsed?.tdspAppliedMode ?? null;
+
+          let templateAction: BatchResultRow["templateAction"] = "SKIPPED";
+          if (mode !== "DRY_RUN") {
+            if (pipelineResult.ratePlanId) templateAction = "CREATED";
+            else if (pipelineResult.queued) templateAction = "NOT_ELIGIBLE";
+            else templateAction = "SKIPPED";
+          }
+
+          const notes = pipelineResult.ok !== true
+            ? (pipelineResult.errors?.[0]?.message ?? "Pipeline failed")
+            : pipelineResult.queued
+              ? `Queued: ${pipelineResult.queueReason ?? "needs review"}`
+              : pipelineResult.ratePlanId
+                ? `Template persisted (ratePlanId=${pipelineResult.ratePlanId}).`
+                : "Processed (no persistence).";
+
+          results.push({
+            offerId,
+            supplier,
+            planName,
+            termMonths,
+            tdspName,
+            eflUrl: resolvedPdfUrl,
+            eflPdfSha256: pipelineResult.eflPdfSha256 ?? pdfSha256,
+            repPuctCertificate: pipelineResult.repPuctCertificate ?? null,
+            eflVersionCode: pipelineResult.eflVersionCode ?? null,
+            validationStatus: finalStatus,
+            originalValidationStatus: (pipelineResult.validation as any)?.status ?? null,
+            finalValidationStatus: finalStatus,
+            tdspAppliedMode,
+            parseConfidence: pipelineResult.parseConfidence ?? null,
+            passStrength: pipelineResult.passStrength ?? null,
+            passStrengthReasons: pipelineResult.passStrengthReasons ?? null,
+            passStrengthOffPointDiffs: pipelineResult.passStrengthOffPointDiffs ?? null,
+            templateHit: false,
+            templateAction,
+            queueReason: pipelineResult.queueReason ?? null,
+            finalQueueReason:
+              pipelineResult.queueReason ??
+              (effectiveValidation?.queueReason ? String(effectiveValidation.queueReason) : null),
+            solverApplied: Array.isArray(pipelineResult.derivedForValidation?.solverApplied)
+              ? (pipelineResult.derivedForValidation.solverApplied as string[])
+              : null,
+            notes,
+          });
+          continue;
+        }
+
         // 2a) Fast path: if we already have a saved RatePlan.rateStructure for
         // this exact EFL fingerprint (and it doesn't require manual review),
         // skip running the expensive EFL pipeline entirely.
@@ -824,7 +896,7 @@ export async function POST(req: NextRequest) {
                   eflSourceUrl: eflSeedUrl,
                   repPuctCertificate: det.repPuctCertificate ?? null,
                   eflVersionCode: det.eflVersionCode ?? null,
-                  eflPdfSha256: det.eflPdfSha256,
+                  eflPdfSha256: det.eflPdfSha256 ?? pdfSha256,
                   utilityId: inferTdspTerritoryFromEflText(det.rawText) ?? offerUtilityId ?? null,
                   state: offerState ?? null,
                   termMonths: termMonths ?? null,
@@ -974,19 +1046,12 @@ export async function POST(req: NextRequest) {
         }
 
         // Enrich queueReason with pass-strength information when applicable.
-        if (
-          finalStatus === "PASS" &&
-          passStrength &&
-          passStrength !== "STRONG"
-        ) {
+        if (finalStatus === "PASS" && passStrength && passStrength !== "STRONG") {
+          const reasons = Array.isArray(passStrengthReasons) ? passStrengthReasons : [];
           const strengthMsg = `PASS strength=${passStrength}${
-            passStrengthReasons && passStrengthReasons.length
-              ? ` reasons=${passStrengthReasons.join(",")}`
-              : ""
+            reasons.length ? ` reasons=${reasons.join(",")}` : ""
           }`;
-          finalQueueReason = finalQueueReason
-            ? `${finalQueueReason} | ${strengthMsg}`
-            : strengthMsg;
+          finalQueueReason = finalQueueReason ? `${finalQueueReason} | ${strengthMsg}` : strengthMsg;
         }
 
         // Always queue review-needed outcomes. If deterministic fingerprint metadata

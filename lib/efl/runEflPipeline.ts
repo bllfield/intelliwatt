@@ -33,6 +33,7 @@ export type RunEflPipelineInput = {
   dryRun?: boolean;
   offerId?: string | null;
   eflUrl?: string | null;
+  eflSourceUrl?: string | null;
   pdfBytes?: Buffer | Uint8Array | null;
   rawText?: string | null;
   identity?: {
@@ -74,6 +75,14 @@ export type RunEflPipelineResult = {
   derivedForValidation?: any | null;
   finalValidation?: any | null;
   passStrength?: "STRONG" | "WEAK" | "INVALID" | null;
+  passStrengthReasons?: string[] | null;
+  passStrengthOffPointDiffs?: Array<{
+    usageKwh: number;
+    expectedInterp: number;
+    modeled: number | null;
+    diff: number | null;
+    ok: boolean;
+  }> | null;
 
   // plan calc (persisted when template persisted; also returned for visibility)
   planCalcStatus: "COMPUTABLE" | "NOT_COMPUTABLE" | "UNKNOWN";
@@ -247,6 +256,7 @@ export async function runEflPipeline(input: RunEflPipelineInput): Promise<RunEfl
   const dryRun = input.dryRun === true;
   const offerId = String(input.offerId ?? "").trim() || null;
   const eflUrlCanonical = normalizeUrl(input.eflUrl ?? null);
+  const eflSourceUrlCanonical = normalizeUrl(input.eflSourceUrl ?? null) ?? eflUrlCanonical;
 
   const err = (stage: EflPipelineStage, code: string, message: string, queued = true): RunEflPipelineResult => ({
     ok: false,
@@ -329,6 +339,12 @@ export async function runEflPipeline(input: RunEflPipelineInput): Promise<RunEfl
   const finalValidation = pipeline?.finalValidation ?? null;
   const finalStatus = finalValidation?.status ?? null;
   const passStrength = pipeline?.passStrength ?? null;
+  const passStrengthReasons = Array.isArray(pipeline?.passStrengthReasons)
+    ? (pipeline.passStrengthReasons as string[])
+    : null;
+  const passStrengthOffPointDiffs = Array.isArray(pipeline?.passStrengthOffPointDiffs)
+    ? (pipeline.passStrengthOffPointDiffs as any[])
+    : null;
 
   const planRules = pipeline?.planRules ?? null;
   const rateStructure = pipeline?.rateStructure ?? null;
@@ -458,7 +474,7 @@ export async function runEflPipeline(input: RunEflPipelineInput): Promise<RunEfl
                 ? "manual_text"
                 : "manual_url",
       eflUrl: fetchedUrl ?? eflUrlCanonical,
-      eflSourceUrl: eflUrlCanonical,
+      eflSourceUrl: eflSourceUrlCanonical,
       offerId,
       offerMeta: offerMetaResolved,
       deterministic: {
@@ -572,6 +588,8 @@ export async function runEflPipeline(input: RunEflPipelineInput): Promise<RunEfl
       derivedForValidation: pipeline?.derivedForValidation ?? null,
       finalValidation,
       passStrength,
+      passStrengthReasons,
+      passStrengthOffPointDiffs,
       planCalcStatus:
         (persisted.planCalc?.planCalcStatus as any) === "COMPUTABLE"
           ? "COMPUTABLE"

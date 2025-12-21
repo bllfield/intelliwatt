@@ -2,14 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { Buffer } from "node:buffer";
 
 import { fetchEflPdfFromUrl } from "@/lib/efl/fetchEflPdf";
-import { getOrCreateEflTemplate } from "@/lib/efl/getOrCreateEflTemplate";
-import { upsertRatePlanFromEfl } from "@/lib/efl/planPersistence";
-import { validatePlanRules, planRulesToRateStructure } from "@/lib/efl/planEngine";
-import { extractProviderAndPlanNameFromEflText } from "@/lib/efl/eflExtractor";
-import { inferTdspTerritoryFromEflText, scoreEflPassStrength } from "@/lib/efl/eflValidator";
-import { solveEflValidationGaps } from "@/lib/efl/validation/solveEflValidationGaps";
+import { runEflPipeline } from "@/lib/efl/runEflPipeline";
 import { prisma } from "@/lib/db";
-import { introspectPlanFromRateStructure } from "@/lib/plan-engine/introspectPlanFromRateStructure";
 
 const MAX_PREVIEW_CHARS = 20000;
 
@@ -85,6 +79,90 @@ export async function POST(req: NextRequest) {
 
     const pdfBuffer = Buffer.from(fetched.pdfBytes);
 
+    const pipelineResult = await runEflPipeline({
+      source: "manual_url",
+      actor: "admin",
+      dryRun: false,
+      offerId,
+      eflUrl: effectiveEflUrl,
+      eflSourceUrl,
+      pdfBytes: pdfBuffer,
+    });
+
+    // Auto-resolve matching OPEN queue rows when we successfully persisted a template.
+    let autoResolvedQueueCount = 0;
+    if (pipelineResult.ratePlanId && !pipelineResult.queued) {
+      try {
+        const now = new Date();
+        const sha = String(pipelineResult.eflPdfSha256 ?? "").trim();
+        const rep = String(pipelineResult.repPuctCertificate ?? "").trim();
+        const ver = String(pipelineResult.eflVersionCode ?? "").trim();
+        const whereOr = [
+          sha ? { eflPdfSha256: sha } : undefined,
+          offerId ? { offerId: String(offerId) } : undefined,
+          rep && ver ? { repPuctCertificate: rep, eflVersionCode: ver } : undefined,
+        ].filter(Boolean);
+        if (whereOr.length > 0) {
+          const upd = await (prisma as any).eflParseReviewQueue.updateMany({
+            where: { resolvedAt: null, OR: whereOr },
+            data: {
+              resolvedAt: now,
+              resolvedBy: "manual_url",
+              resolutionNotes: `AUTO_RESOLVED: template persisted via manual-url. ratePlanId=${pipelineResult.ratePlanId ?? "—"}`,
+            },
+          });
+          autoResolvedQueueCount = Number(upd?.count ?? 0) || 0;
+        }
+      } catch {
+        autoResolvedQueueCount = 0;
+      }
+    }
+
+    const aiEnabled = process.env.OPENAI_IntelliWatt_Fact_Card_Parser === "1";
+    const hasKey = Boolean(process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.trim().length > 0);
+
+    return NextResponse.json({
+      ok: true,
+      build: {
+        vercelGitCommitSha: process.env.VERCEL_GIT_COMMIT_SHA ?? null,
+        vercelEnv: process.env.VERCEL_ENV ?? null,
+      },
+      eflUrl: effectiveEflUrl,
+      eflSourceUrl,
+      offerId,
+      eflPdfSha256: pipelineResult.eflPdfSha256 ?? null,
+      repPuctCertificate: pipelineResult.repPuctCertificate ?? null,
+      eflVersionCode: pipelineResult.eflVersionCode ?? null,
+      warnings: pipelineResult.deterministicWarnings ?? [],
+      prompt: "EFL PDF parsed by OpenAI using the standard planRules/rateStructure contract.",
+      rawTextPreview: String(pipelineResult.rawTextPreview ?? "").slice(0, MAX_PREVIEW_CHARS),
+      rawTextLength: pipelineResult.rawTextLen ?? 0,
+      rawTextTruncated: Boolean(pipelineResult.rawTextTruncated ?? false),
+      planRules: pipelineResult.planRules ?? null,
+      rateStructure: pipelineResult.rateStructure ?? null,
+      parseConfidence: pipelineResult.parseConfidence ?? null,
+      parseWarnings: pipelineResult.parseWarnings ?? [],
+      validation: pipelineResult.validation ?? null,
+      derivedForValidation: pipelineResult.derivedForValidation ?? null,
+      passStrength: pipelineResult.passStrength ?? null,
+      passStrengthReasons: pipelineResult.passStrengthReasons ?? [],
+      passStrengthOffPointDiffs: pipelineResult.passStrengthOffPointDiffs ?? null,
+      templatePersisted: Boolean(pipelineResult.ratePlanId),
+      persistedRatePlanId: pipelineResult.ratePlanId ?? null,
+      autoResolvedQueueCount,
+      persistAttempted: true,
+      persistUsedDerived: true,
+      persistNotes: pipelineResult.queued ? (pipelineResult.queueReason ?? null) : null,
+      extractorMethod: pipelineResult.extractorMethod ?? "pdftotext",
+      ai: {
+        enabled: aiEnabled,
+        hasKey,
+        used: aiEnabled && hasKey,
+      },
+      pipelineResult,
+    });
+
+    /*
     const { template, warnings: topWarnings } = await getOrCreateEflTemplate({
       source: "manual_upload",
       pdfBytes: pdfBuffer,
@@ -692,6 +770,7 @@ export async function POST(req: NextRequest) {
       extractorMethod: template.extractorMethod ?? "pdftotext",
       ai,
     });
+    */
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error("[EFL_MANUAL_URL] Failed to process EFL URL:", error);
