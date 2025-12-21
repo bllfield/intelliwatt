@@ -626,11 +626,12 @@ async function extractPdfTextWithFallback(
   pdfBytes: Uint8Array | Buffer,
 ): Promise<{
   rawText: string;
-  extractorMethod: "pdftotext";
+  extractorMethod: "pdftotext" | "pdf-parse" | "pdfjs";
   warnings: string[];
 }> {
   const warnings: string[] = [];
 
+  // 0) Preferred: canonical pdftotext service (best fidelity for EFL tables).
   try {
     const pdftotextOutput = (await runPdftotext(pdfBytes)).trim();
 
@@ -651,6 +652,58 @@ async function extractPdfTextWithFallback(
     );
   }
 
+  // 1) Fallback: pdf-parse (often works when pdftotext service is down).
+  try {
+    const mod = await import("pdf-parse");
+    const pdfParse = (mod as any).default || (mod as any);
+    if (typeof pdfParse !== "function") {
+      warnings.push("pdf-parse module did not export a function.");
+    } else {
+      const res = await pdfParse(Buffer.isBuffer(pdfBytes) ? pdfBytes : Buffer.from(pdfBytes));
+      const text = String(res?.text ?? "").trim();
+      if (text) {
+        warnings.push("pdftotext empty; used pdf-parse fallback.");
+        return { rawText: text, extractorMethod: "pdf-parse", warnings };
+      }
+      warnings.push("pdf-parse returned empty text.");
+    }
+  } catch (err) {
+    warnings.push(`pdf-parse fallback failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  // 2) Fallback: pdfjs-dist text extraction (last non-vision option).
+  try {
+    const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    // @ts-ignore
+    pdfjs.GlobalWorkerOptions.workerSrc = pdfjs.GlobalWorkerOptions.workerSrc || "";
+    const buf = Buffer.isBuffer(pdfBytes) ? new Uint8Array(pdfBytes) : new Uint8Array(pdfBytes);
+    const loadingTask = (pdfjs as any).getDocument({ data: buf });
+    const pdf = await loadingTask.promise;
+
+    let out = "";
+    const maxPages = Math.min(Number(pdf?.numPages ?? 0) || 0, 200);
+    for (let i = 1; i <= maxPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      const pageText = (content?.items ?? [])
+        .map((it: any) => ("str" in it ? it.str : it?.toString?.() ?? ""))
+        .join(" ");
+      out += "\n" + pageText;
+    }
+    try {
+      await pdf.destroy();
+    } catch {}
+
+    const text = String(out ?? "").trim();
+    if (text) {
+      warnings.push("pdftotext/pdf-parse empty; used pdfjs fallback.");
+      return { rawText: text, extractorMethod: "pdfjs", warnings };
+    }
+    warnings.push("pdfjs returned empty text.");
+  } catch (err) {
+    warnings.push(`pdfjs fallback failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
   return {
     rawText: "",
     extractorMethod: "pdftotext",
@@ -667,7 +720,7 @@ export async function deterministicEflExtract(
   extractPdfText?: PdfTextExtractor,
 ): Promise<EflDeterministicExtract> {
   const warnings: string[] = [];
-  let extractorMethod: "pdftotext" | undefined;
+  let extractorMethod: "pdftotext" | "pdf-parse" | "pdfjs" | undefined;
 
   const eflPdfSha256 = computePdfSha256(pdfBytes);
 
