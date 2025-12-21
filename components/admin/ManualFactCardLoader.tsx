@@ -503,11 +503,44 @@ export function ManualFactCardLoader(props: {
               </div>
             </div>
             <div>
+              <div className="font-semibold text-brand-navy mb-1">Final validation</div>
+              <div className="font-mono">
+                {String((result as any)?.finalValidation?.status ?? "—")}
+                {String((result as any)?.finalValidation?.solveMode ?? "").trim()
+                  ? ` (${String((result as any).finalValidation.solveMode)})`
+                  : ""}
+              </div>
+              <div className="mt-1 text-[11px] text-brand-navy/60">
+                Base validation may differ before solver.
+              </div>
+            </div>
+            <div>
               <div className="font-semibold text-brand-navy mb-1">PASS strength</div>
               <div className="font-mono">
                 {result.passStrength ?? "—"}
                 {Array.isArray(result.passStrengthReasons) && result.passStrengthReasons.length
                   ? ` (${result.passStrengthReasons.join(",")})`
+                  : ""}
+              </div>
+            </div>
+            <div>
+              <div className="font-semibold text-brand-navy mb-1">Plan calc</div>
+              <div className="font-mono">
+                status={String((result as any)?.planCalcStatus ?? "—")}{" "}
+                reason={String((result as any)?.planCalcReasonCode ?? "—")}
+              </div>
+              <div className="mt-1 font-mono break-all text-[11px] text-brand-navy/70">
+                {Array.isArray((result as any)?.requiredBucketKeys) && (result as any).requiredBucketKeys.length
+                  ? (result as any).requiredBucketKeys.join(", ")
+                  : "requiredBucketKeys=—"}
+              </div>
+            </div>
+            <div>
+              <div className="font-semibold text-brand-navy mb-1">Queued</div>
+              <div className="font-mono">
+                {Boolean((result as any)?.queued) ? "YES" : "NO"}
+                {String((result as any)?.queueReason ?? "").trim()
+                  ? ` (${String((result as any).queueReason)})`
                   : ""}
               </div>
             </div>
