@@ -1,4 +1,8 @@
-import express, { type NextFunction, type Request, type Response } from "express";
+import express, {
+  type NextFunction,
+  type Request,
+  type Response as ExpressResponse,
+} from "express";
 import dns from "node:dns/promises";
 import net from "node:net";
 
@@ -92,7 +96,7 @@ async function assertSafeUrl(target: URL) {
   }
 }
 
-async function readResponseBytesWithLimit(res: Response, limitBytes: number): Promise<Buffer> {
+async function readResponseBytesWithLimit(res: globalThis.Response, limitBytes: number): Promise<Buffer> {
   const body = res.body;
   if (!body) return Buffer.alloc(0);
 
@@ -115,7 +119,7 @@ async function readResponseBytesWithLimit(res: Response, limitBytes: number): Pr
   return Buffer.concat(chunks);
 }
 
-function requireBearerAuth(req: Request, res: Response, next: NextFunction) {
+function requireBearerAuth(req: Request, res: ExpressResponse, next: NextFunction) {
   if (!TOKEN) return next();
   const header = String(req.headers.authorization ?? "").trim();
   const expected = `Bearer ${TOKEN}`;
@@ -123,7 +127,7 @@ function requireBearerAuth(req: Request, res: Response, next: NextFunction) {
   res.status(401).json({ ok: false, error: "unauthorized" });
 }
 
-function jsonError(res: Response, status: number, error: string, details?: any) {
+function jsonError(res: ExpressResponse, status: number, error: string, details?: any) {
   return res.status(status).json({ ok: false, error, ...(details ? { details } : {}) });
 }
 
@@ -133,7 +137,7 @@ app.use(express.json({ limit: "64kb" }));
 
 app.get("/health", (_req, res) => res.type("text/plain").send("ok"));
 
-app.post("/efl/fetch", requireBearerAuth, async (req: Request, res: Response) => {
+app.post("/efl/fetch", requireBearerAuth, async (req: Request, res: ExpressResponse) => {
   const body = (req.body ?? {}) as ProxyRequestBody;
   const rawUrl = String(body.url ?? "").trim();
   const timeoutMsRaw = Number(body.timeoutMs ?? 20_000);
@@ -220,7 +224,7 @@ app.post("/efl/fetch", requireBearerAuth, async (req: Request, res: Response) =>
 
 // Last-resort error handler: keep JSON.
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+app.use((err: any, _req: Request, res: ExpressResponse, _next: NextFunction) => {
   // eslint-disable-next-line no-console
   console.error("[efl-fetch-proxy] unhandled", err);
   return jsonError(res, 500, "Internal error");
