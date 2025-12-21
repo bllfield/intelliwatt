@@ -37,7 +37,9 @@ export async function POST(req: NextRequest) {
     });
 
     const rawTextPreview = String(pipelineResult.rawTextPreview ?? "").slice(0, MAX_PREVIEW_CHARS);
-    const rawTextLength = pipelineResult.rawTextLen ?? rawTextPreview.length;
+    // If rawTextLen is unavailable, do NOT pretend the preview length is the full length.
+    // Use a conservative lower bound instead; callers can rely on `rawTextTruncated` + `rawTextLengthIsExact`.
+    const rawTextLength = pipelineResult.rawTextLen ?? (pipelineResult.rawTextTruncated ? MAX_PREVIEW_CHARS : rawTextPreview.length);
     const rawTextTruncated = Boolean(pipelineResult.rawTextTruncated ?? false);
 
     const aiEnabled = process.env.OPENAI_IntelliWatt_Fact_Card_Parser === "1";
@@ -56,6 +58,7 @@ export async function POST(req: NextRequest) {
         "EFL PDF parsed by OpenAI using the standard planRules/rateStructure contract.",
       rawTextPreview,
       rawTextLength,
+      rawTextLengthIsExact: pipelineResult.rawTextLen != null,
       rawTextTruncated,
       planRules: pipelineResult.planRules ?? null,
       rateStructure: pipelineResult.rateStructure ?? null,
