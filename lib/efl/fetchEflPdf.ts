@@ -776,7 +776,43 @@ export async function fetchEflPdfFromUrl(
     for (let i = 0; i < maxTries; i++) {
       const candidateUrl = candidates[i];
       try {
-        const second = await fetchBytes(candidateUrl, timeoutMs);
+        // Use the same WAF mitigation strategy as the primary fetch:
+        // - multiple header profiles
+        // - referer retries
+        // - optional proxy fallback on 403/406
+        let second = await fetchWithProfilesAndReferer({ url: candidateUrl, timeoutMs, notes });
+
+        // Proxy fallback on 403/406 for landing-page candidates too (critical for SmartGridCIS / WAF hosts).
+        const proxyCfg2 = getEflFetchProxyConfig();
+        if (
+          !second.res.ok &&
+          (second.res.status === 403 || second.res.status === 406) &&
+          Boolean(proxyCfg2.url)
+        ) {
+          notes.push("proxy_context=landing_candidate");
+          notes.push("proxy_fallback=1");
+          try {
+            const proxied = await fetchBytesViaProxy({ url: candidateUrl, timeoutMs, notes });
+            notes.push("proxy_ok=1");
+            if (proxied.proxyNotes.length) {
+              notes.push(`proxy_notes=${proxied.proxyNotes.join("|").slice(0, 900)}`);
+            }
+            second = {
+              res: new Response(Buffer.from(proxied.buf), {
+                status: 200,
+                headers: proxied.contentType
+                  ? { "content-type": proxied.contentType }
+                  : undefined,
+              }),
+              contentType: proxied.contentType,
+              buf: proxied.buf,
+            };
+            notes.push(`proxy_finalUrl=${proxied.resUrl}`);
+          } catch (e) {
+            notes.push(`proxy_error=${e instanceof Error ? e.message : String(e)}`);
+          }
+        }
+
         if (!second.res.ok) {
           notes.push(
             `candidate[${i}] HTTP ${second.res.status} for ${candidateUrl}`,

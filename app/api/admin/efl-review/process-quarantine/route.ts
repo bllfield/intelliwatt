@@ -374,7 +374,8 @@ export async function POST(req: NextRequest) {
 
                 const saved = await upsertRatePlanFromEfl({
                   mode: "live",
-                  eflUrl: fetched.pdfUrl ?? eflUrl,
+                  // When we used rawText fallback (no PDF fetch), keep the best URL we have for the template.
+                  eflUrl: usedRawTextFallback ? (usedUrl ?? eflUrl) : ((fetched as any)?.pdfUrl ?? eflUrl),
                   eflSourceUrl: eflUrl,
                   repPuctCertificate: det.repPuctCertificate ?? null,
                   eflVersionCode: det.eflVersionCode ?? null,
