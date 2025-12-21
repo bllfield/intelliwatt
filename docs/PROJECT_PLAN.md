@@ -212,7 +212,7 @@ EFL parser model + extraction status:
   - `POST /api/admin/efl-review/process-open`
   - `POST /api/admin/efl-review/process-quarantine`
 - **Queueing rule**: if a template is created but later stages fail (derive plan-calc, link offerId, etc.), the pipeline must enqueue an admin review row with a stable stage reason code (fail-closed).
-- **Dashboard semantics**: do not migrate or change `app/api/dashboard/plans/**` in this phase.
+- **Dashboard semantics**: treat `app/api/dashboard/plans/**` as production-critical; changes must remain fail-closed and preserve AVAILABLE/QUEUED semantics (see Dashboard section updates below).
 - ✅ OpenAI PDF file upload path removed for the EFL parser (413 capacity issues avoided); AI now runs **only** on the `pdftotext` output text.
 - ✅ REP PUCT Certificate number and EFL Ver. # are extracted deterministically from the normalized text via regex helpers in `lib/efl/eflExtractor.ts`.
 - ✅ EFL AI normalizer now strips **Average Price** rows and **TDU passthrough** blocks from the AI input text only, dropping only the “Average Monthly Use / Average Price per kWh” lines and never the subsequent price components table; key component tables (e.g., “This price disclosure is based on the following components: …”) are explicitly pinned so their rows are never removed. The EFL parser output shape (`planRules`, `rateStructure`, `parseConfidence`, `parseWarnings`) and the “Parsed Plan Snapshot” rendering remain unchanged.
@@ -326,9 +326,28 @@ Next step: Step 5 — Admin list/view/approve templates + collision detection
   - `GET /api/admin/wattbuy/templated-plans` lists persisted `RatePlan` templates (where `rateStructure` is present) and computes:
     - `modeledRate500/1000/2000` as an **admin sanity check**: `RatePlan.rateStructure` + a TDSP delivery snapshot (from `tdspRateSnapshot`).
     - `modeledTdspCode` + `modeledTdspSnapshotAt` so ops can see **exactly which TDSP tariff snapshot** was used to produce the modeled numbers.
+    - Optional usage-scoped preview (admin-only diagnostics; does not change gating):
+      - Query params:
+        - `homeId=<HouseAddress.id>`: attach usage preview + computed monthly estimate (best-effort).
+        - `useDefaultHome=1`: when `homeId` is omitted, auto-pick a recent home with usage buckets and attach the same preview (best-effort).
+        - `usageMonths=12` (bounded; default 12).
+      - Response additions:
+        - `rows[*].usagePreview` (avg monthly kWh by required bucket keys)
+        - `rows[*].usageEstimate` (output of `calculatePlanCostForUsage`, including `monthlyCostDollars` when computable)
+        - `usageContext` (which homeId was used + months found)
   - `POST /api/admin/wattbuy/templated-plans/backfill` supports:
     - `source=efl&overwrite=1` to overwrite headline `rate500/1000/2000` using the EFL “Average price per kWh” table (all‑in, includes TDSP as disclosed on the EFL).
     - `utility=1` to backfill `RatePlan.utilityId` for `UNKNOWN` rows by inferring TDSP territory from the EFL text (e.g., `ONCOR`, `CENTERPOINT`, `AEP_NORTH`, `AEP_CENTRAL`, `TNMP`) so the modeled sanity-check rates can be computed.
+  - Template computability override (ops-only):
+    - `POST /api/admin/wattbuy/templated-plans/override-computable` (requires `x-admin-token`)
+      - Forces `planCalcStatus=COMPUTABLE` with `planCalcReasonCode=ADMIN_OVERRIDE_COMPUTABLE` or resets to derived.
+      - **Must run on Node.js runtime** (Prisma): `export const runtime = "nodejs";`
+    - UI: override controls are visible on both:
+      - `/admin/wattbuy/templates`
+      - `/admin/efl/fact-cards` (Templates table)
+  - Deployment marker (debugging mismatched deploys):
+    - `GET /api/version` returns `{ ok, sha, ref }` when Vercel provides git env vars.
+    - `/admin/efl/fact-cards` shows a `build: <branch>@<sha7>` marker in the header.
 - Quarantine bulk processor (review-queue drain):
   - `POST /api/admin/efl-review/process-open` processes OPEN `EflParseReviewQueue` rows with an `eflUrl` in time-budgeted chunks.
   - Runs the full EFL pipeline and only persists templates + auto-resolves queue rows when the result is **PASS + STRONG** (never “makes up” missing data).
@@ -2325,8 +2344,16 @@ Guardrails
 - Returns `bestOffersBasis` + `bestOffersDisclaimer` so the “Best plans for you” strip has consistent messaging from the API (and can be swapped later when true-cost goes live).
 - Wires `OfferIdRatePlanMap` into each offer card to show **IntelliWatt calculation available** when `ratePlanId` exists.
 - `/api/dashboard/plans` now returns `intelliwatt.ratePlanId` per offer (from `OfferIdRatePlanMap`) so true-cost can use `RatePlan` templates directly when wired.
-- `/api/dashboard/plans` now returns `intelliwatt.trueCost` status scaffolding per offer (no calculations yet).
-- Added `lib/plan-engine/calculatePlanCostForUsage.ts` (pure stub + types), and `/api/dashboard/plans` now returns `intelliwatt.trueCostEstimate` per offer (placeholder).
+- `/api/dashboard/plans` now returns `intelliwatt.trueCost` status scaffolding per offer.
+- True-cost wiring (production):
+  - `intelliwatt.trueCostEstimate` is computed from:
+    - `RatePlan.rateStructure` (template)
+    - TDSP delivery rates (`getTdspDeliveryRates`)
+    - Home monthly usage buckets (`HomeMonthlyUsageBucket`) including any required TOU/weekday/weekend windows
+  - Endpoint best-effort **auto-ensures** required monthly buckets (bounded) when usage intervals exist.
+  - **Fail-closed availability**:
+    - **AVAILABLE** only when the template is mapped *and* the true-cost estimate for this home is `OK`/`APPROXIMATE`
+    - Otherwise the plan is shown as **QUEUED** (even if a template exists)
 - Added `lib/plan-engine/calculatePlanCostForIntervals.ts` + `lib/plan-engine/types.ts`: **pure 15‑minute interval true‑cost core** (fixed-rate-only v1; fail-closed; REP vs TDSP split; no API/UI wiring yet).
 - Added `lib/plan-engine/usageBuckets.ts`: canonical monthly usage bucket spec (`CORE_MONTHLY_BUCKETS` + `declareMonthlyBuckets`) as the foundation for auto-aggregation when new plan variables appear (no DB wiring yet).
 - Added **Usage module DB** tall-table storage for bucket totals:
@@ -2343,10 +2370,11 @@ Guardrails
 - CORE bucket aggregation now correctly attributes overnight dayType (post-midnight counts toward prior local dayType) for the WEEKDAY/WEEKEND 20:00-07:00 buckets.
 - Added pure plan “bucket requirements + computability” helpers (`requiredBucketsForPlan`, `canComputePlanFromBuckets`) as the gating layer for true-cost.
 - `/api/dashboard/plans` now returns `intelliwatt.planComputability` per offer (when usage exists and a template is mapped).
-- Plans that are NOT computable due to **true template defects** (unsupported/non-deterministic/suspect evidence; excluding missing-template and excluding bucket-gated/dashboard-gated reasons like credits/tiered/TOU/minimum rules) are queued as `PLAN_CALC_QUARANTINE` via `EflParseReviewQueue` (best-effort; no UI changes):
+- Plans that are NOT computable due to **true template defects** (unsupported/non-deterministic/suspect evidence) are queued as `PLAN_CALC_QUARANTINE` via `EflParseReviewQueue` (best-effort; no UI changes):
   - Dedupe identity: `(kind="PLAN_CALC_QUARANTINE", dedupeKey=offerId)`
   - `eflPdfSha256` is **not** used as identity for quarantine items (it is set to `offerId` only to satisfy the legacy NOT NULL unique column).
   - Bucket keys are canonical lowercase (total uses `kwh.m.all.total`).
+  - Availability gates (missing intervals/buckets) do **not** create review noise (do not enqueue quarantine for missing buckets).
 - Added `lib/plan-engine/getRatePlanTemplate.ts` (master DB read helper for `RatePlan` templates; no throwing; returns only fields needed for later true-cost calculations).
 - Fixed `RatePlan` template lookup for `ratePlanId` so `trueCostEstimate` doesn’t incorrectly show `MISSING_TEMPLATE` on transient lookup errors.
 - Added `lib/plan-engine/getTdspDeliveryRates.ts` (stub TDSP delivery rates contract; returns null for now).
@@ -2457,18 +2485,20 @@ Bucket System (Design+Scaffold plumbing added; semantics unchanged):
   - `ensureBucketsExist({ bucketKeys })` upserts `UsageBucketDefinition` by key (registry only; does not compute `HomeMonthlyUsageBucket`)
 - **Side-effect wiring point**: `lib/plan-engine/planComputability.ts`
   - `derivePlanCalcRequirementsFromTemplate()` now best-effort calls `ensureBucketsExist()` (server-only via dynamic import; swallowed on failure)
-- Confirmed unchanged:
-  - `app/api/dashboard/plans/route.ts` (locked; no edits in this step)
-  - `lib/plan-engine/calculatePlanCostForUsage.ts` (no behavior changes in this step)
+- Guardrails (do not regress):
+  - `app/api/dashboard/plans/route.ts` is production-critical and must remain **fail-closed**:
+    - No **AVAILABLE** without a computable estimate when `hasUsage=true`.
+    - Missing buckets should trigger bounded on-demand bucket generation when intervals exist, but should **not** create review-queue noise.
+  - `lib/plan-engine/calculatePlanCostForUsage.ts` is the canonical calculator entrypoint; callers must pass `usageBucketsByMonth` for bucket-gated features (TOU, weekday/weekend splits, etc.).
 
-Phase-1 TOU (Design+Scaffold; dashboard still v1 fixed-only):
+Phase-1 TOU (Design+Scaffold; dashboard must remain fail-closed):
 - **Bucket requirements**: `lib/plan-engine/requiredBucketsForPlan.ts`
   - TOU now includes required day/night buckets (`kwh.m.all.2000-0700`, `kwh.m.all.0700-2000`)
 - **Computability reason codes**: `lib/plan-engine/planComputability.ts`
   - TOU-like templates now return `planCalcReasonCode="TOU_PHASE1_REQUIRES_BUCKETS"` and populate `requiredBucketKeys` (still NOT_COMPUTABLE to avoid dashboard regression)
 - **TOU calc path (not wired yet)**: `lib/plan-engine/calculatePlanCostForUsage.ts`
   - Added optional `usageBucketsByMonth` input + Phase-1 TOU math branch (only runs when buckets are provided)
-  - Existing fixed-rate math path remains unchanged; dashboard routes unchanged/locked
+  - Existing fixed-rate math path remains unchanged; dashboard remains fail-closed for TOU unless plan-calc gating allows it.
 
 Phase-1 TOU (math strictness):
 - Day/Night TOU math now **requires** `kwh.m.all.total`, `kwh.m.all.2000-0700`, and `kwh.m.all.0700-2000` for every month used.
