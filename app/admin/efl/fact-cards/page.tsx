@@ -976,7 +976,7 @@ export default function FactCardOpsPage() {
 
   async function runTemplateHygiene(apply: boolean) {
     if (!token) {
-      setTplErr("Admin token required.");
+      setHygieneErr("Admin token required.");
       return;
     }
     if (apply) {
