@@ -2240,7 +2240,49 @@ export default function FactCardOpsPage() {
                   <tr key={r.id} className="border-t h-12">
                     <td className="px-2 py-2">{r.utilityId ?? "-"}</td>
                     <td className="px-2 py-2">{r.supplier ?? "-"}</td>
-                    <td className="px-2 py-2">{r.planName ?? "-"}</td>
+                    <td className="px-2 py-2">
+                      <div className="flex flex-col gap-1">
+                        <div>{r.planName ?? "-"}</div>
+                        <div className="text-[11px] text-gray-600 font-mono">
+                          calc: {pcStatus}
+                          {pcReason ? ` (${pcReason})` : ""}
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {pcStatus !== "COMPUTABLE" && !isOverridden ? (
+                            <button
+                              className="px-2 py-1 rounded border hover:bg-gray-50 disabled:opacity-60"
+                              disabled={!ready || tplLoading}
+                              title="After you test a plan, you can manually mark it COMPUTABLE to remove the dashboard gate."
+                              onClick={() =>
+                                void setTemplateComputableOverride({
+                                  ratePlanId: String(r.id),
+                                  offerId: offerId || null,
+                                  enable: true,
+                                })
+                              }
+                            >
+                              Override → COMPUTABLE
+                            </button>
+                          ) : null}
+                          {isOverridden ? (
+                            <button
+                              className="px-2 py-1 rounded border hover:bg-gray-50 disabled:opacity-60"
+                              disabled={!ready || tplLoading}
+                              title="Undo override and re-derive planCalcStatus/Reason from the template."
+                              onClick={() =>
+                                void setTemplateComputableOverride({
+                                  ratePlanId: String(r.id),
+                                  offerId: offerId || null,
+                                  enable: false,
+                                })
+                              }
+                            >
+                              Clear override
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                    </td>
                     <td className="px-2 py-2 font-mono text-[11px]">{planTypeLabel}</td>
                     <td className="px-2 py-2 text-right">{typeof r.termMonths === "number" ? `${r.termMonths} mo` : "-"}</td>
                     <td className="px-2 py-2 text-right">
@@ -2336,38 +2378,6 @@ export default function FactCardOpsPage() {
                     <td className="px-2 py-2">{r.eflVersionCode ?? "-"}</td>
                     <td className="px-2 py-2">
                       <div className="flex flex-wrap gap-2">
-                        {pcStatus !== "COMPUTABLE" && !isOverridden ? (
-                          <button
-                            className="px-2 py-1 rounded border hover:bg-gray-50 disabled:opacity-60"
-                            disabled={!ready || tplLoading}
-                            title="After you test a plan, you can manually mark it COMPUTABLE to remove the dashboard gate."
-                            onClick={() =>
-                              void setTemplateComputableOverride({
-                                ratePlanId: String(r.id),
-                                offerId: offerId || null,
-                                enable: true,
-                              })
-                            }
-                          >
-                            Override → COMPUTABLE
-                          </button>
-                        ) : null}
-                        {isOverridden ? (
-                          <button
-                            className="px-2 py-1 rounded border hover:bg-gray-50 disabled:opacity-60"
-                            disabled={!ready || tplLoading}
-                            title="Undo override and re-derive planCalcStatus/Reason from the template."
-                            onClick={() =>
-                              void setTemplateComputableOverride({
-                                ratePlanId: String(r.id),
-                                offerId: offerId || null,
-                                enable: false,
-                              })
-                            }
-                          >
-                            Clear override
-                          </button>
-                        ) : null}
                         {offerId ? (
                           <a
                             className="px-2 py-1 rounded border hover:bg-gray-50"
