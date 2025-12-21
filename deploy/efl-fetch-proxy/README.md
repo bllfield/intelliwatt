@@ -69,33 +69,31 @@ Invoke-WebRequest -Headers $headers -Method Post -Uri "http://127.0.0.1:8088/efl
 
 ## Droplet install (systemd)
 
-These steps assume:
+These steps follow the repo’s existing droplet conventions (see `deploy/droplet/post_pull.sh` and `deploy/droplet/efl-pdftotext.service`):
 
-- repo checkout at `/opt/intelliwatt/intelliwatt-clean`
-- service deployed at `/opt/intelliwatt/efl-fetch-proxy`
+- repo checkout: `/home/deploy/apps/intelliwatt`
+- per-service env: `/home/deploy/.efl-fetch-proxy.env`
+- nginx TLS terminates at `efl-pdftotext.intelliwatt.com` and proxies `/efl/fetch` → `127.0.0.1:8088`
 
 ### 1) Copy the service folder
 
 ```bash
-sudo mkdir -p /opt/intelliwatt
-sudo rm -rf /opt/intelliwatt/efl-fetch-proxy
-sudo cp -R /opt/intelliwatt/intelliwatt-clean/deploy/efl-fetch-proxy /opt/intelliwatt/efl-fetch-proxy
-sudo chown -R deploy:deploy /opt/intelliwatt/efl-fetch-proxy
+cd /home/deploy/apps/intelliwatt
+sudo bash deploy/droplet/post_pull.sh
 ```
 
-### 2) Install deps + build
+### 2) Install deps + build (first time only)
 
 ```bash
-cd /opt/intelliwatt/efl-fetch-proxy
+cd /home/deploy/apps/intelliwatt/deploy/efl-fetch-proxy
 npm ci
 npm run build
 ```
 
-### 3) Create env file
+### 3) Create env file (first time only)
 
 ```bash
-sudo mkdir -p /etc/intelliwatt
-sudo nano /etc/intelliwatt/efl-fetch-proxy.env
+sudo nano /home/deploy/.efl-fetch-proxy.env
 ```
 
 Example:
@@ -111,7 +109,7 @@ EFL_FETCH_PROXY_ALLOW_HOSTS=ohm-gridlink.smartgridcis.net,pp-gridlink.paylesspow
 ### 4) Install + start systemd unit
 
 ```bash
-sudo cp /opt/intelliwatt/efl-fetch-proxy/efl-fetch-proxy.service /etc/systemd/system/efl-fetch-proxy.service
+sudo cp /home/deploy/apps/intelliwatt/deploy/efl-fetch-proxy/efl-fetch-proxy.service /etc/systemd/system/efl-fetch-proxy.service
 sudo systemctl daemon-reload
 sudo systemctl enable efl-fetch-proxy
 sudo systemctl restart efl-fetch-proxy
@@ -126,14 +124,14 @@ curl -sS http://127.0.0.1:8088/health
 
 ## Optional: nginx + TLS
 
-If you want Vercel to call this over HTTPS on a hostname:
+This droplet already uses nginx + TLS for `efl-pdftotext.intelliwatt.com`. The repo vhost now also proxies:
 
-- Terminate TLS at nginx
-- Proxy `/efl/fetch` to `http://127.0.0.1:8088/efl/fetch`
-- Proxy `/health` to `http://127.0.0.1:8088/health`
+- `https://efl-pdftotext.intelliwatt.com/efl/fetch` → `http://127.0.0.1:8088/efl/fetch`
 
-Then set Vercel:
+So Vercel should point to:
 
-- `EFL_FETCH_PROXY_URL=https://<your-hostname>/efl/fetch`
+- `EFL_FETCH_PROXY_URL=https://efl-pdftotext.intelliwatt.com/efl/fetch`
 - `EFL_FETCH_PROXY_TOKEN=<same token as droplet>`
+
+If you prefer a dedicated hostname, you can still create one and proxy to port 8088.
 

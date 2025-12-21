@@ -4,13 +4,21 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/intelliwatt/efl-fetch-proxy
+User=deploy
+
+# Repo standard on this droplet:
+# - app repo lives at /home/deploy/apps/intelliwatt
+# - per-service env lives at /home/deploy/.<service>.env
+WorkingDirectory=/home/deploy/apps/intelliwatt/deploy/efl-fetch-proxy
 ExecStart=/usr/bin/node dist/server.js
 Restart=always
 RestartSec=2
 
-# Keep secrets out of repo; load from an OS-owned env file.
-EnvironmentFile=/etc/intelliwatt/efl-fetch-proxy.env
+# Load shared IntelliWatt env if present (optional)
+EnvironmentFile=-/home/deploy/.intelliwatt.env
+
+# Keep secrets out of repo; load from a deploy-owned env file.
+EnvironmentFile=/home/deploy/.efl-fetch-proxy.env
 
 # Hardening (minimal; adjust if needed).
 NoNewPrivileges=true

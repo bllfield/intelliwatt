@@ -35,6 +35,14 @@ else
   exit 1
 fi
 
+# 1b) Re-apply EFL fetch proxy systemd config (optional)
+if [[ -x "deploy/droplet/apply_efl_fetch_proxy.sh" ]]; then
+  log "Running apply_efl_fetch_proxy.sh"
+  sudo bash "deploy/droplet/apply_efl_fetch_proxy.sh"
+else
+  log "Skipping apply_efl_fetch_proxy.sh (not present)"
+fi
+
 # 2) Safe service restarts (ONLY if the unit exists on this droplet)
 restart_if_exists() {
   local unit="$1"
@@ -51,6 +59,7 @@ restart_if_exists "smt-webhook.service"
 restart_if_exists "smt-ingest.service"
 restart_if_exists "green-button-upload.service"
 restart_if_exists "efl-pdftotext.service"
+restart_if_exists "efl-fetch-proxy.service"
 restart_if_exists "nginx.service"
 
 # 3) Quick health checks (do not fail the script if curl isn't installed)

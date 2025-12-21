@@ -6,6 +6,7 @@
 ##
 ## and proxies:
 ##   /efl/pdftotext -> http://127.0.0.1:8095/efl/pdftotext
+##   /efl/fetch     -> http://127.0.0.1:8088/efl/fetch   (EFL fetch proxy; optional)
 ##   /health        -> http://127.0.0.1:8095/health
 ##
 
@@ -33,6 +34,20 @@ server {
 
     location /efl/pdftotext {
         proxy_pass http://127.0.0.1:8095/efl/pdftotext;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_read_timeout  60s;
+        proxy_connect_timeout 30s;
+        proxy_send_timeout 60s;
+    }
+
+    # Optional: EFL fetch proxy endpoint (used when some hosts block Vercel/AWS IP ranges)
+    location /efl/fetch {
+        proxy_pass http://127.0.0.1:8088/efl/fetch;
 
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
