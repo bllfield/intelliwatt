@@ -8,6 +8,7 @@ import { runEflPipelineFromRawTextNoStore } from "@/lib/efl/runEflPipelineFromRa
 import { persistAndLinkFromPipeline } from "@/lib/efl/persistAndLinkFromPipeline";
 import { prisma } from "@/lib/db";
 import { derivePlanCalcRequirementsFromTemplate } from "@/lib/plan-engine/planComputability";
+import { isPlanCalcQuarantineWorthyReasonCode } from "@/lib/plan-engine/planCalcQuarantine";
 
 export type EflPipelineSource =
   | "manual_url"
@@ -544,7 +545,8 @@ export async function runEflPipeline(input: RunEflPipelineInput): Promise<RunEfl
     // IMPORTANT: do not enqueue UNKNOWN/MISSING_TEMPLATE, which represents "no usable template/rateStructure".
     const pcStatus = persisted.planCalc?.planCalcStatus ?? null;
     const pcReason = String(persisted.planCalc?.planCalcReasonCode ?? "UNKNOWN");
-    if (pcStatus === "NOT_COMPUTABLE" && pcReason !== "MISSING_TEMPLATE") {
+    // Only queue TRUE plan defects. Do not queue dashboard/bucket gating (credits/tiered/TOU/minimum rules).
+    if (pcStatus === "NOT_COMPUTABLE" && isPlanCalcQuarantineWorthyReasonCode(pcReason)) {
       const dk = offerId || `plan_calc:${persisted.persistedRatePlanId}`;
       const synthetic = `plan_calc_quarantine:${dk}`;
       await upsertQueueItem({

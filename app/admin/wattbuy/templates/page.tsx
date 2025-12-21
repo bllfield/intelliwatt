@@ -8,11 +8,16 @@ type SortDir = "asc" | "desc";
 
 type Row = {
   id: string;
+  offerId?: string | null;
   utilityId: string;
   state: string;
   supplier: string | null;
   planName: string | null;
   termMonths: number | null;
+  planCalcStatus?: "COMPUTABLE" | "NOT_COMPUTABLE" | "UNKNOWN" | null;
+  planCalcReasonCode?: string | null;
+  queued?: boolean;
+  queuedReason?: string | null;
   rate500: number | null;
   rate1000: number | null;
   rate2000: number | null;
@@ -21,6 +26,9 @@ type Row = {
   modeledRate2000?: number | null;
   modeledTdspCode?: string | null;
   modeledTdspSnapshotAt?: string | null;
+  modeledSource?: "DB_VALIDATION" | "COMPUTED_TDSP_SNAPSHOT" | "NONE";
+  validationStatus?: "PASS" | "FAIL" | "SKIP" | null;
+  passStrength?: "STRONG" | "WEAK" | "INVALID" | null;
   cancelFee: string | null;
   eflUrl: string | null;
   eflPdfSha256: string | null;
@@ -30,7 +38,15 @@ type Row = {
   lastSeenAt: string;
 };
 
-type ApiOk = { ok: true; count: number; rows: Row[]; offerCount?: number; mappedOfferCount?: number };
+type ApiOk = {
+  ok: true;
+  count: number;
+  totalCount?: number;
+  limit?: number;
+  rows: Row[];
+  offerCount?: number;
+  mappedOfferCount?: number;
+};
 type ApiErr = { ok: false; error: string; details?: unknown };
 
 function useLocalToken(key = "iw_admin_token") {
@@ -76,6 +92,7 @@ export default function WattbuyTemplatedPlansPage() {
   const [backfillNote, setBackfillNote] = useState<string | null>(null);
   const [tdspNote, setTdspNote] = useState<string | null>(null);
   const [addrNote, setAddrNote] = useState<string | null>(null);
+  const [actionNote, setActionNote] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [limit, setLimit] = useState(1000);
   const [addr, setAddr] = useState<ParsedPlace | null>(null);
@@ -100,6 +117,7 @@ export default function WattbuyTemplatedPlansPage() {
     setLoading(true);
     setError(null);
     setAddrNote(null);
+    setActionNote(null);
     try {
       const params = new URLSearchParams();
       params.set("limit", String(limit));
@@ -134,6 +152,47 @@ export default function WattbuyTemplatedPlansPage() {
       }
     } catch (e: any) {
       setError(e?.message || "Failed to load templated plans.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function setComputableOverride(input: { ratePlanId: string; offerId?: string | null; enable: boolean }) {
+    if (!token) {
+      setError("Admin token required.");
+      return;
+    }
+    const ratePlanId = String(input.ratePlanId ?? "").trim();
+    if (!ratePlanId) return;
+
+    setLoading(true);
+    setError(null);
+    setActionNote(null);
+    try {
+      const res = await fetch("/api/admin/wattbuy/templated-plans/override-computable", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-admin-token": token,
+        },
+        body: JSON.stringify({
+          ratePlanId,
+          offerId: input.offerId ?? null,
+          mode: input.enable ? "FORCE_COMPUTABLE" : "RESET_DERIVED",
+        }),
+      });
+      const data = (await res.json().catch(() => null)) as any;
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || `HTTP ${res.status}`);
+      }
+      setActionNote(
+        input.enable
+          ? `Override set: ${ratePlanId} -> COMPUTABLE (resolvedQueueCount=${data.resolvedQueueCount ?? 0})`
+          : `Override cleared: ${ratePlanId} -> ${data.after?.planCalcStatus ?? "—"} (${data.after?.planCalcReasonCode ?? "—"})`,
+      );
+      await load();
+    } catch (e: any) {
+      setError(e?.message || "Failed to update computability gate.");
     } finally {
       setLoading(false);
     }
@@ -367,6 +426,7 @@ export default function WattbuyTemplatedPlansPage() {
         </div>
 
         {error ? <div className="text-sm text-red-700">{error}</div> : null}
+        {actionNote ? <div className="text-xs text-gray-700">{actionNote}</div> : null}
         {tdspNote ? <div className="text-xs text-gray-600">{tdspNote}</div> : null}
         {backfillNote ? <div className="text-xs text-gray-600">{backfillNote}</div> : null}
         <div className="text-xs text-gray-500">
@@ -388,6 +448,7 @@ export default function WattbuyTemplatedPlansPage() {
               <th className="px-2 py-2 text-left cursor-pointer" onClick={() => toggleSort("planName")}>
                 Plan
               </th>
+              <th className="px-2 py-2 text-left">Calc</th>
               <th className="px-2 py-2 text-right cursor-pointer" onClick={() => toggleSort("termMonths")}>
                 Term
               </th>
@@ -409,11 +470,15 @@ export default function WattbuyTemplatedPlansPage() {
                 Updated
               </th>
               <th className="px-2 py-2 text-left">EFL</th>
+              <th className="px-2 py-2 text-left">Actions</th>
             </tr>
           </thead>
           <tbody>
             {sorted.map((r) => {
               const best = bestRate(r);
+              const pcStatus = String(r.planCalcStatus ?? "UNKNOWN").toUpperCase();
+              const pcReason = String(r.planCalcReasonCode ?? "UNKNOWN").trim();
+              const isOverridden = pcReason === "ADMIN_OVERRIDE_COMPUTABLE";
               return (
                 <tr key={r.id} className="border-t">
                   <td className="px-2 py-1 align-top">{r.supplier ?? "—"}</td>
@@ -423,6 +488,53 @@ export default function WattbuyTemplatedPlansPage() {
                     </div>
                     <div className="text-[10px] text-gray-500">
                       {r.utilityId}/{r.state}
+                    </div>
+                    {r.offerId ? (
+                      <div className="text-[10px] text-gray-500">
+                        <a className="underline" href={`/admin/plans/${encodeURIComponent(r.offerId)}`}>
+                          Details
+                        </a>
+                      </div>
+                    ) : null}
+                  </td>
+                  <td className="px-2 py-1 align-top">
+                    <div className="font-mono">{pcStatus}</div>
+                    <div className="text-[10px] text-gray-500 max-w-[260px] truncate" title={pcReason || undefined}>
+                      {pcReason || "—"}
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {pcStatus !== "COMPUTABLE" ? (
+                        <button
+                          className="px-2 py-1 rounded border hover:bg-gray-50"
+                          disabled={loading}
+                          title="After you test a plan, you can manually mark it COMPUTABLE to remove the dashboard gate."
+                          onClick={() =>
+                            void setComputableOverride({
+                              ratePlanId: r.id,
+                              offerId: r.offerId ?? null,
+                              enable: true,
+                            })
+                          }
+                        >
+                          Override → COMPUTABLE
+                        </button>
+                      ) : null}
+                      {isOverridden ? (
+                        <button
+                          className="px-2 py-1 rounded border hover:bg-gray-50"
+                          disabled={loading}
+                          title="Recompute planCalcStatus/Reason from the template (undo override)."
+                          onClick={() =>
+                            void setComputableOverride({
+                              ratePlanId: r.id,
+                              offerId: r.offerId ?? null,
+                              enable: false,
+                            })
+                          }
+                        >
+                          Clear override
+                        </button>
+                      ) : null}
                     </div>
                   </td>
                   <td className="px-2 py-1 align-top text-right">
@@ -494,12 +606,36 @@ export default function WattbuyTemplatedPlansPage() {
                       "—"
                     )}
                   </td>
+                  <td className="px-2 py-1 align-top">
+                    <div className="flex flex-col gap-1">
+                      {pcStatus !== "COMPUTABLE" ? (
+                        <button
+                          className="px-2 py-1 rounded border hover:bg-gray-50 text-left"
+                          disabled={loading}
+                          title="After you test a plan, you can manually mark it COMPUTABLE to remove the dashboard gate."
+                          onClick={() => void setComputableOverride({ ratePlanId: r.id, offerId: r.offerId ?? null, enable: true })}
+                        >
+                          Mark COMPUTABLE (override)
+                        </button>
+                      ) : null}
+                      {isOverridden ? (
+                        <button
+                          className="px-2 py-1 rounded border hover:bg-gray-50 text-left"
+                          disabled={loading}
+                          title="Recompute planCalcStatus/Reason from the template (undo override)."
+                          onClick={() => void setComputableOverride({ ratePlanId: r.id, offerId: r.offerId ?? null, enable: false })}
+                        >
+                          Clear override (re-derive)
+                        </button>
+                      ) : null}
+                    </div>
+                  </td>
                 </tr>
               );
             })}
             {sorted.length === 0 ? (
               <tr>
-                <td className="px-2 py-6 text-center text-sm text-gray-500" colSpan={11}>
+                <td className="px-2 py-6 text-center text-sm text-gray-500" colSpan={13}>
                   No templated plans found.
                 </td>
               </tr>

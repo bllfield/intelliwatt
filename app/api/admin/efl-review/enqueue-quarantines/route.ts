@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { prisma } from "@/lib/db";
+import { isPlanCalcQuarantineWorthyReasonCode } from "@/lib/plan-engine/planCalcQuarantine";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -83,6 +84,7 @@ export async function POST(req: NextRequest) {
 
     let scanned = 0;
     let upserted = 0;
+    let skippedNonDefect = 0;
 
     for (const r of rows as any[]) {
       scanned += 1;
@@ -96,6 +98,13 @@ export async function POST(req: NextRequest) {
         typeof rp?.planCalcReasonCode === "string" && rp.planCalcReasonCode.trim()
           ? String(rp.planCalcReasonCode)
           : "UNKNOWN";
+
+      // Only enqueue TRUE plan defects. Do not create review-noise for bucket-gated plans
+      // (credits/tiered/TOU/minimum rules) which are supported in non-dashboard calculators.
+      if (!isPlanCalcQuarantineWorthyReasonCode(planCalcReasonCode)) {
+        skippedNonDefect += 1;
+        continue;
+      }
 
       const queueReasonPayload = {
         type: "PLAN_CALC_QUARANTINE",
@@ -178,6 +187,7 @@ export async function POST(req: NextRequest) {
       forceReopen,
       scanned,
       upserted,
+      skippedNonDefect,
     });
   } catch (error) {
     // eslint-disable-next-line no-console

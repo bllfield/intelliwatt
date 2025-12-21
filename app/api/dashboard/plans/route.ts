@@ -11,6 +11,7 @@ import { usagePrisma } from "@/lib/db/usageClient";
 import { ensureCoreMonthlyBuckets } from "@/lib/usage/aggregateMonthlyBuckets";
 import crypto from "node:crypto";
 import { canComputePlanFromBuckets, derivePlanCalcRequirementsFromTemplate } from "@/lib/plan-engine/planComputability";
+import { isPlanCalcQuarantineWorthyReasonCode } from "@/lib/plan-engine/planCalcQuarantine";
 import {
   extractFixedRepEnergyCentsPerKwh,
   extractRepFixedMonthlyChargeDollars,
@@ -825,7 +826,14 @@ export async function GET(req: NextRequest) {
         // IMPORTANT: UI statusLabel marks mapped offers as QUEUED when calc is missing, so we must also enqueue them.
         if (ratePlanId && (!calc || calc.planCalcStatus !== "COMPUTABLE")) {
           const planCalcStatus = calc?.planCalcStatus ?? "UNKNOWN";
-          const reasonCode = String(calc?.planCalcReasonCode ?? "UNKNOWN");
+          const reasonCode = String(calc?.planCalcReasonCode ?? "PLAN_CALC_MISSING");
+
+          // If calc is present, only create PLAN_CALC_QUARANTINE for true template defects.
+          // Do not create review noise for dashboard/bucket gating (credits/tiered/TOU/minimum rules).
+          //
+          // If calc is missing, we *do* enqueue to match the UI's QUEUED statusLabel behavior.
+          if (calc && !isPlanCalcQuarantineWorthyReasonCode(reasonCode)) continue;
+
           const queueReasonPayload = {
             type: "PLAN_CALC_QUARANTINE",
             planCalcStatus,

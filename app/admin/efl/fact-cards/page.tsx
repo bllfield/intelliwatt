@@ -152,6 +152,9 @@ function deriveTemplatePlanTypeLabel(r: any): string {
 export default function FactCardOpsPage() {
   const { token, setToken } = useLocalToken();
   const ready = useMemo(() => Boolean(token), [token]);
+  const [buildInfo, setBuildInfo] = useState<{ sha: string | null; ref: string | null } | null>(
+    null,
+  );
 
   // Manual loader is rendered at the bottom; we prefill it from Queue/Templates/Batch via this state.
   const [manualPrefillUrl, setManualPrefillUrl] = useState("");
@@ -182,6 +185,28 @@ export default function FactCardOpsPage() {
       // ignore
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Deployment/version marker (helps debug "deploy went through but UI didn't change").
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/version");
+        const data = (await res.json().catch(() => null)) as any;
+        if (!cancelled && res.ok && data?.ok) {
+          setBuildInfo({
+            sha: typeof data.sha === "string" ? data.sha : null,
+            ref: typeof data.ref === "string" ? data.ref : null,
+          });
+        }
+      } catch {
+        // ignore
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // ---------------- Provider batch runner (WattBuy today; future sources later) ----------------
@@ -763,6 +788,47 @@ export default function FactCardOpsPage() {
       );
     } catch (e: any) {
       setTplErr(e?.message || "Failed to load templates.");
+    } finally {
+      setTplLoading(false);
+    }
+  }
+
+  async function setTemplateComputableOverride(input: { ratePlanId: string; offerId?: string | null; enable: boolean }) {
+    if (!token) {
+      setTplErr("Admin token required.");
+      return;
+    }
+    const ratePlanId = String(input.ratePlanId ?? "").trim();
+    if (!ratePlanId) {
+      setTplErr("Missing ratePlanId.");
+      return;
+    }
+    setTplLoading(true);
+    setTplErr(null);
+    try {
+      const res = await fetch("/api/admin/wattbuy/templated-plans/override-computable", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-admin-token": token,
+        },
+        body: JSON.stringify({
+          ratePlanId,
+          offerId: input.offerId ?? null,
+          mode: input.enable ? "FORCE_COMPUTABLE" : "RESET_DERIVED",
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      await loadTemplates();
+      // Also refresh queue view (best-effort) since override resolves quarantines.
+      try {
+        await loadQueue();
+      } catch {
+        // ignore
+      }
+    } catch (e: any) {
+      setTplErr(e?.message || "Failed to update computability override.");
     } finally {
       setTplLoading(false);
     }
@@ -2032,6 +2098,11 @@ export default function FactCardOpsPage() {
               )
             </span>
           </h2>
+          {buildInfo ? (
+            <div className="text-[11px] text-gray-500 font-mono">
+              build: {buildInfo.ref ?? "—"}@{buildInfo.sha ? buildInfo.sha.slice(0, 7) : "—"}
+            </div>
+          ) : null}
           <div className="flex items-center gap-2">
             <button className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60" onClick={() => void loadTemplates()} disabled={!ready || tplLoading}>
               {tplLoading ? "Loading…" : "Refresh"}
@@ -2184,6 +2255,9 @@ export default function FactCardOpsPage() {
               {sortedTplRows.map((r: any) => {
                 const eflUrl = (r?.eflUrl ?? "").trim();
                 const offerId = String((r as any)?.offerId ?? "").trim();
+                const pcStatus = String((r as any)?.planCalcStatus ?? "UNKNOWN").toUpperCase();
+                const pcReason = String((r as any)?.planCalcReasonCode ?? "").trim();
+                const isOverridden = pcReason === "ADMIN_OVERRIDE_COMPUTABLE";
                 const runHref =
                   eflUrl
                     ? `/admin/efl/fact-cards?${new URLSearchParams({
@@ -2196,7 +2270,49 @@ export default function FactCardOpsPage() {
                   <tr key={r.id} className="border-t h-12">
                     <td className="px-2 py-2">{r.utilityId ?? "-"}</td>
                     <td className="px-2 py-2">{r.supplier ?? "-"}</td>
-                    <td className="px-2 py-2">{r.planName ?? "-"}</td>
+                    <td className="px-2 py-2">
+                      <div className="flex flex-col gap-1">
+                        <div>{r.planName ?? "-"}</div>
+                        <div className="text-[11px] text-gray-600 font-mono">
+                          calc: {pcStatus}
+                          {pcReason ? ` (${pcReason})` : ""}
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            className="px-2 py-1 rounded border hover:bg-gray-50 disabled:opacity-60"
+                            disabled={!ready || tplLoading}
+                            title="Force planCalcStatus=COMPUTABLE (sets reason ADMIN_OVERRIDE_COMPUTABLE)."
+                            onClick={() =>
+                              void setTemplateComputableOverride({
+                                ratePlanId: String(r.id),
+                                offerId: offerId || null,
+                                enable: true,
+                              })
+                            }
+                          >
+                            Force COMPUTABLE
+                          </button>
+                          <button
+                            className="px-2 py-1 rounded border hover:bg-gray-50 disabled:opacity-60"
+                            disabled={!ready || tplLoading || !isOverridden}
+                            title={
+                              isOverridden
+                                ? "Undo override and re-derive planCalcStatus/Reason from the template."
+                                : "No override is set for this row."
+                            }
+                            onClick={() =>
+                              void setTemplateComputableOverride({
+                                ratePlanId: String(r.id),
+                                offerId: offerId || null,
+                                enable: false,
+                              })
+                            }
+                          >
+                            Reset derived
+                          </button>
+                        </div>
+                      </div>
+                    </td>
                     <td className="px-2 py-2 font-mono text-[11px]">{planTypeLabel}</td>
                     <td className="px-2 py-2 text-right">{typeof r.termMonths === "number" ? `${r.termMonths} mo` : "-"}</td>
                     <td className="px-2 py-2 text-right">

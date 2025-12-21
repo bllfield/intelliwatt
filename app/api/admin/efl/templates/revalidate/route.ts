@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { prisma } from "@/lib/db";
 import { derivePlanCalcRequirementsFromTemplate } from "@/lib/plan-engine/planComputability";
+import { isPlanCalcQuarantineWorthyReasonCode } from "@/lib/plan-engine/planCalcQuarantine";
 import { normalizeTdspCode } from "@/lib/utility/tdspCode";
 
 export const dynamic = "force-dynamic";
@@ -225,8 +226,12 @@ export async function POST(req: NextRequest) {
 
         const derived = derivePlanCalcRequirementsFromTemplate({ rateStructure: p.rateStructure });
         const isStillComputable = derived.planCalcStatus === "COMPUTABLE";
+        const isPlanDefect = isPlanCalcQuarantineWorthyReasonCode(derived.planCalcReasonCode);
 
-        if (isStillComputable) {
+        // Keep templates that are:
+        // - truly COMPUTABLE (fixed-rate-only)
+        // - OR intentionally dashboard-gated but supported by non-dashboard calculators (tiered/credits/TOU/minimum rules)
+        if (isStillComputable || !isPlanDefect) {
           keptCount++;
           // Best-effort: keep derived fields in sync without changing the template.
           await (prisma as any).ratePlan.update({
