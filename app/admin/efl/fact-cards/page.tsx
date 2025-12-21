@@ -905,9 +905,12 @@ export default function FactCardOpsPage() {
         quarantined += Number(data.quarantinedCount ?? 0) || 0;
         kept += Number(data.keptCount ?? 0) || 0;
         errors += Number(data.errorsCount ?? 0) || 0;
+        const qPlanCalc = Number(data.quarantinedPlanCalcCount ?? 0) || 0;
+        const qUnknownUtil = Number(data.quarantinedUnknownUtilityCount ?? 0) || 0;
+        const qUnknownQueued = Number(data.unknownUtilityQueuedCount ?? 0) || 0;
 
         setTdspNote(
-          `Revalidate templates: processed=${processed} quarantined=${quarantined} kept=${kept} errors=${errors} last=${data.lastCursorId ?? "—"}`,
+          `Revalidate templates: processed=${processed} quarantined=${quarantined} (planCalc=${qPlanCalc} unknownUtility=${qUnknownUtil} queuedUnknown=${qUnknownQueued}) kept=${kept} errors=${errors} last=${data.lastCursorId ?? "—"}`,
         );
 
         if (!data.truncated || !data.nextCursorId) break;

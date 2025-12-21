@@ -2,19 +2,18 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { prisma } from "@/lib/db";
 import { derivePlanCalcRequirementsFromTemplate } from "@/lib/plan-engine/planComputability";
+import { normalizeTdspCode } from "@/lib/utility/tdspCode";
 
 export const dynamic = "force-dynamic";
 
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
-
-const KNOWN_TDSP_CODES = ["ONCOR", "CENTERPOINT", "AEP_NORTH", "AEP_CENTRAL", "TNMP"] as const;
 
 function normalizeUtilityId(x: unknown): string {
   return String(x ?? "").trim().toUpperCase();
 }
 
 function isKnownTdspCode(x: unknown): boolean {
-  return KNOWN_TDSP_CODES.includes(normalizeUtilityId(x) as any);
+  return normalizeTdspCode(x) !== null;
 }
 
 function jsonError(status: number, error: string, detail?: any) {
@@ -72,7 +71,8 @@ export async function POST(req: NextRequest) {
             OR: [
               { planCalcStatus: "COMPUTABLE" },
               { utilityId: "UNKNOWN" },
-              { utilityId: { notIn: [...KNOWN_TDSP_CODES] } },
+              // Note: this is a coarse DB filter; precise mapping (AEPNOR/AEPCEN → AEP_*) happens in code below.
+              { utilityId: { notIn: ["ONCOR", "CENTERPOINT", "AEP_NORTH", "AEP_CENTRAL", "TNMP"] } },
             ],
           }
         : {}),
@@ -105,6 +105,8 @@ export async function POST(req: NextRequest) {
 
     let processedCount = 0;
     let quarantinedCount = 0;
+    let quarantinedPlanCalcCount = 0;
+    let quarantinedUnknownUtilityCount = 0;
     let unknownUtilityQueuedCount = 0;
     let keptCount = 0;
     let errorsCount = 0;
@@ -123,7 +125,8 @@ export async function POST(req: NextRequest) {
         // Guardrail: UNKNOWN/UNMAPPED utilityId must never remain "template available".
         // Queue it for parse/TDSP inference fixes and remove the template from availability.
         const utilNorm = normalizeUtilityId(p.utilityId);
-        const isUnmappedUtility = utilNorm === "UNKNOWN" || (Boolean(utilNorm) && !isKnownTdspCode(utilNorm));
+        const isUnmappedUtility =
+          utilNorm === "UNKNOWN" || (Boolean(utilNorm) && !isKnownTdspCode(utilNorm));
         if (isUnmappedUtility) {
           const reason = utilNorm === "UNKNOWN" ? "UNKNOWN_UTILITY_ID" : "UNMAPPED_UTILITY_ID";
           const issues: any[] = Array.isArray(p.eflValidationIssues) ? [...p.eflValidationIssues] : [];
@@ -216,6 +219,7 @@ export async function POST(req: NextRequest) {
           });
 
           quarantinedCount++;
+          quarantinedUnknownUtilityCount++;
           continue;
         }
 
@@ -319,6 +323,7 @@ export async function POST(req: NextRequest) {
         });
 
         quarantinedCount++;
+        quarantinedPlanCalcCount++;
       } catch (e: any) {
         errorsCount++;
         notes.push(`ERROR ratePlanId=${String(p?.id ?? "—")} ${e?.message ?? String(e)}`);
@@ -332,6 +337,8 @@ export async function POST(req: NextRequest) {
       ok: true,
       processedCount,
       quarantinedCount,
+      quarantinedPlanCalcCount,
+      quarantinedUnknownUtilityCount,
       unknownUtilityQueuedCount,
       keptCount,
       errorsCount,
