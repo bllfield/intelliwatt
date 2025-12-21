@@ -36,7 +36,8 @@ else
 fi
 
 # 1b) Re-apply EFL fetch proxy systemd config (optional)
-if [[ -x "deploy/droplet/apply_efl_fetch_proxy.sh" ]]; then
+# Use -f (exists) rather than -x (executable) because git/filemode can differ across hosts.
+if [[ -f "deploy/droplet/apply_efl_fetch_proxy.sh" ]]; then
   log "Running apply_efl_fetch_proxy.sh"
   sudo bash "deploy/droplet/apply_efl_fetch_proxy.sh"
 else
