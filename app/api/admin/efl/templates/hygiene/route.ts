@@ -20,6 +20,18 @@ function normStr(v: unknown): string {
   return String(v ?? "").trim();
 }
 
+// Note: repPuctCertificate is intentionally NOT treated as required identity for “junk”.
+// It's optional in the schema and some providers/portals omit it, but a template can still be valid.
+function missingTemplateIdentityFields(r: any): string[] {
+  const missing: string[] = [];
+  if (!normStr(r.eflVersionCode)) missing.push("eflVersionCode");
+  if (!normStr(r.eflPdfSha256)) missing.push("eflPdfSha256");
+  if (!normStr(r.supplier)) missing.push("supplier");
+  if (!normStr(r.planName)) missing.push("planName");
+  if (typeof r.termMonths !== "number") missing.push("termMonths");
+  return missing;
+}
+
 export async function POST(req: NextRequest) {
   try {
     if (!ADMIN_TOKEN) return jsonError(500, "ADMIN_TOKEN is not configured");
@@ -62,7 +74,6 @@ export async function POST(req: NextRequest) {
           AND (rp."rateStructure" IS NOT NULL AND rp."rateStructure"::text <> 'null')
           AND (
             rp."eflRequiresManualReview" = true
-            OR rp."repPuctCertificate" IS NULL
             OR rp."eflVersionCode" IS NULL
             OR rp."eflPdfSha256" IS NULL
             OR rp."supplier" IS NULL
@@ -96,13 +107,9 @@ export async function POST(req: NextRequest) {
       const id = normStr(r.id);
       const linkedOfferCount = Number(r.linkedOfferCount ?? 0) || 0;
 
-      const missing: string[] = [];
-      if (!normStr(r.repPuctCertificate)) missing.push("repPuctCertificate");
-      if (!normStr(r.eflVersionCode)) missing.push("eflVersionCode");
-      if (!normStr(r.eflPdfSha256)) missing.push("eflPdfSha256");
-      if (!normStr(r.supplier)) missing.push("supplier");
-      if (!normStr(r.planName)) missing.push("planName");
-      if (typeof r.termMonths !== "number") missing.push("termMonths");
+      const missing = missingTemplateIdentityFields(r);
+      const missingMeta: string[] = [];
+      if (!normStr(r.repPuctCertificate)) missingMeta.push("repPuctCertificate");
 
       const isJunk = missing.length > 0 || Boolean(r.eflRequiresManualReview);
       const orphan = linkedOfferCount === 0;
@@ -122,6 +129,7 @@ export async function POST(req: NextRequest) {
         linkedOfferCount,
         action,
         missingIdentityFields: missing,
+        missingMetaFields: missingMeta,
         supplier: r.supplier ?? null,
         planName: r.planName ?? null,
         termMonths: typeof r.termMonths === "number" ? r.termMonths : null,

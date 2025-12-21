@@ -266,6 +266,7 @@ export async function GET(req: NextRequest) {
     const limit = Math.max(1, Math.min(1000, Number.isFinite(limitRaw) ? limitRaw : 200));
 
     const q = (req.nextUrl.searchParams.get("q") ?? "").trim();
+    const includeLegacy = req.nextUrl.searchParams.get("includeLegacy") === "1";
     const address = (req.nextUrl.searchParams.get("address") ?? "").trim();
     const city = (req.nextUrl.searchParams.get("city") ?? "").trim();
     const state = (req.nextUrl.searchParams.get("state") ?? "").trim();
@@ -303,6 +304,9 @@ export async function GET(req: NextRequest) {
       rateStructure: { not: null },
       eflRequiresManualReview: false,
       isUtilityTariff: false,
+      // Default to “new system only”: requires canonical modeled validation proof
+      // so legacy templates don't pollute the admin templates list.
+      ...(includeLegacy ? {} : { modeledEflAvgPriceValidation: { not: null } }),
       ...(q
         ? {
             OR: [

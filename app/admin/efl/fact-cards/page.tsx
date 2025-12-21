@@ -657,6 +657,7 @@ export default function FactCardOpsPage() {
   const [tplRows, setTplRows] = useState<TemplateRow[]>([]);
   const [tplTotalCount, setTplTotalCount] = useState<number | null>(null);
   const [tdspNote, setTdspNote] = useState<string | null>(null);
+  const [tplIncludeLegacy, setTplIncludeLegacy] = useState(false);
   const [hygieneLoading, setHygieneLoading] = useState(false);
   const [hygieneErr, setHygieneErr] = useState<string | null>(null);
   const [hygieneRaw, setHygieneRaw] = useState<Json | null>(null);
@@ -730,6 +731,7 @@ export default function FactCardOpsPage() {
       const params = new URLSearchParams();
       params.set("limit", String(tplLimit));
       if (tplQ.trim()) params.set("q", tplQ.trim());
+      if (tplIncludeLegacy) params.set("includeLegacy", "1");
       const res = await fetch(`/api/admin/wattbuy/templated-plans?${params.toString()}`, {
         headers: { "x-admin-token": token },
       });
@@ -1997,6 +1999,15 @@ export default function FactCardOpsPage() {
                 disabled={!ready || tplLoading}
               />
               Overwrite existing
+            </label>
+            <label className="flex items-center gap-2 text-xs text-gray-700 select-none" title="When off, hide legacy templates that lack canonical modeled validation proof (new-system only).">
+              <input
+                type="checkbox"
+                checked={tplIncludeLegacy}
+                onChange={(e) => setTplIncludeLegacy(e.target.checked)}
+                disabled={!ready || tplLoading}
+              />
+              Include legacy
             </label>
             <button className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60" onClick={() => void cleanupInvalidTemplates()} disabled={!ready || tplLoading}>
               Cleanup missing fields

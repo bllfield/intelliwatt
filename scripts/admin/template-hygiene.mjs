@@ -25,7 +25,6 @@ function isRateStructurePresent(rs) {
 
 function missingIdentityFields(rp) {
   const missing = [];
-  if (!normStr(rp.repPuctCertificate)) missing.push("repPuctCertificate");
   if (!normStr(rp.eflVersionCode)) missing.push("eflVersionCode");
   if (!normStr(rp.eflPdfSha256)) missing.push("eflPdfSha256");
   if (!normStr(rp.supplier)) missing.push("supplier");
@@ -55,7 +54,6 @@ async function main() {
         isUtilityTariff: false,
         OR: [
           { eflRequiresManualReview: true },
-          { repPuctCertificate: null },
           { eflVersionCode: null },
           { eflPdfSha256: null },
           { supplier: null },
