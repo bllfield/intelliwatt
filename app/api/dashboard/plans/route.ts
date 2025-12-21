@@ -824,13 +824,15 @@ export async function GET(req: NextRequest) {
 
         // Case B: queued because the template exists but is not computable (or we couldn't determine computability).
         // IMPORTANT: UI statusLabel marks mapped offers as QUEUED when calc is missing, so we must also enqueue them.
-        if (ratePlanId && calc && calc.planCalcStatus === "NOT_COMPUTABLE") {
-          const planCalcStatus = calc.planCalcStatus;
-          const reasonCode = String(calc.planCalcReasonCode ?? "UNKNOWN");
+        if (ratePlanId && (!calc || calc.planCalcStatus !== "COMPUTABLE")) {
+          const planCalcStatus = calc?.planCalcStatus ?? "UNKNOWN";
+          const reasonCode = String(calc?.planCalcReasonCode ?? "PLAN_CALC_MISSING");
 
-          // Only create PLAN_CALC_QUARANTINE for true template defects.
+          // If calc is present, only create PLAN_CALC_QUARANTINE for true template defects.
           // Do not create review noise for dashboard/bucket gating (credits/tiered/TOU/minimum rules).
-          if (!isPlanCalcQuarantineWorthyReasonCode(reasonCode)) continue;
+          //
+          // If calc is missing, we *do* enqueue to match the UI's QUEUED statusLabel behavior.
+          if (calc && !isPlanCalcQuarantineWorthyReasonCode(reasonCode)) continue;
 
           const queueReasonPayload = {
             type: "PLAN_CALC_QUARANTINE",
