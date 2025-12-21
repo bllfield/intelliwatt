@@ -195,6 +195,10 @@ export async function POST(req: NextRequest) {
     let offerIdRatePlanMapOfferId: string | null = null;
     let offerIdRatePlanMapRatePlanId: string | null = null;
     let offerIdRatePlanMapError: string | null = null;
+    let offerIdRatePlanMapBackfillAttempted: boolean = false;
+    let offerIdRatePlanMapBackfillOfferIdsCount: number = 0;
+    let offerIdRatePlanMapBackfillLinkedCount: number = 0;
+    let offerIdRatePlanMapBackfillError: string | null = null;
     try {
       const validationAfter =
         (derivedForValidation as any)?.validationAfter ??
@@ -458,6 +462,88 @@ export async function POST(req: NextRequest) {
             offerIdRatePlanMapError = e?.message ? String(e.message) : String(e);
           }
 
+          // Backfill links for all offers whose OfferRateMap.eflUrl matches this run.
+          // This is the main "why didn't the site update?" fix: the site keys off offerId -> RatePlan links.
+          try {
+            if (templatePersisted && persistedRatePlanId) {
+              offerIdRatePlanMapBackfillAttempted = true;
+              const urlsToMatch = Array.from(
+                new Set(
+                  [
+                    // upstream landing/enroll URL
+                    eflSourceUrl,
+                    // resolved/normalized URL used for persistence
+                    effectiveEflUrl,
+                    // resolved direct PDF URL from fetcher (if different)
+                    (fetched as any)?.pdfUrl ?? null,
+                  ]
+                    .map((x) => String(x ?? "").trim())
+                    .filter(Boolean),
+                ),
+              );
+
+              if (urlsToMatch.length) {
+                const rows = await (prisma as any).offerRateMap.findMany({
+                  where: { eflUrl: { in: urlsToMatch } },
+                  select: { offerId: true },
+                  take: 1000,
+                });
+                const offerIds = Array.from(
+                  new Set(
+                    (Array.isArray(rows) ? rows : [])
+                      .map((r: any) => String(r?.offerId ?? "").trim())
+                      .filter(Boolean),
+                  ),
+                );
+                offerIdRatePlanMapBackfillOfferIdsCount = offerIds.length;
+
+                if (offerIds.length) {
+                  const now = new Date();
+
+                  // Best-effort: update OfferRateMap.ratePlanId as well (some endpoints read it).
+                  try {
+                    await (prisma as any).offerRateMap.updateMany({
+                      where: { offerId: { in: offerIds } },
+                      data: { ratePlanId: persistedRatePlanId, lastSeenAt: now },
+                    });
+                  } catch {
+                    // ignore
+                  }
+
+                  let linked = 0;
+                  for (const oid of offerIds) {
+                    try {
+                      await (prisma as any).offerIdRatePlanMap.upsert({
+                        where: { offerId: oid },
+                        create: {
+                          offerId: oid,
+                          ratePlanId: persistedRatePlanId,
+                          lastLinkedAt: now,
+                          linkedBy: "manual-url:eflUrl-backfill",
+                          notes: `Backfilled by EFL URL match (${urlsToMatch[0]}).`,
+                        },
+                        update: {
+                          ratePlanId: persistedRatePlanId,
+                          lastLinkedAt: now,
+                          linkedBy: "manual-url:eflUrl-backfill",
+                          notes: `Backfilled by EFL URL match (${urlsToMatch[0]}).`,
+                        },
+                      });
+                      linked += 1;
+                    } catch {
+                      // ignore per-offer; keep going
+                    }
+                  }
+                  offerIdRatePlanMapBackfillLinkedCount = linked;
+                }
+              }
+              offerIdRatePlanMapBackfillError = null;
+            }
+          } catch (e: any) {
+            offerIdRatePlanMapBackfillAttempted = true;
+            offerIdRatePlanMapBackfillError = e?.message ? String(e.message) : String(e);
+          }
+
           // If this EFL was previously quarantined (OPEN review-queue item), auto-resolve it now
           // that we have a persisted template from a PASS run AND passStrength is STRONG.
           try {
@@ -549,6 +635,10 @@ export async function POST(req: NextRequest) {
       offerIdRatePlanMapOfferId = null;
       offerIdRatePlanMapRatePlanId = null;
       offerIdRatePlanMapError = null;
+      offerIdRatePlanMapBackfillAttempted = false;
+      offerIdRatePlanMapBackfillOfferIdsCount = 0;
+      offerIdRatePlanMapBackfillLinkedCount = 0;
+      offerIdRatePlanMapBackfillError = null;
     }
 
     return NextResponse.json({
@@ -586,6 +676,10 @@ export async function POST(req: NextRequest) {
       offerIdRatePlanMapOfferId,
       offerIdRatePlanMapRatePlanId,
       offerIdRatePlanMapError,
+      offerIdRatePlanMapBackfillAttempted,
+      offerIdRatePlanMapBackfillOfferIdsCount,
+      offerIdRatePlanMapBackfillLinkedCount,
+      offerIdRatePlanMapBackfillError,
       autoResolvedQueueCount,
       persistAttempted,
       persistUsedDerived,

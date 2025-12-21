@@ -331,7 +331,9 @@ export default function FactCardOpsPage() {
 
   // ---------------- Review Queue ----------------
   const [queueStatus, setQueueStatus] = useState<"OPEN" | "RESOLVED">("OPEN");
-  const [queueKind, setQueueKind] = useState<"EFL_PARSE" | "PLAN_CALC_QUARANTINE">("EFL_PARSE");
+  // Default to ALL so ops can see both parse + quarantine items.
+  // This matches how the customer site labels plans as QUEUED (often PLAN_CALC_QUARANTINE).
+  const [queueKind, setQueueKind] = useState<"ALL" | "EFL_PARSE" | "PLAN_CALC_QUARANTINE">("ALL");
   const [queueQ, setQueueQ] = useState("");
   const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
   const [queueTotalCount, setQueueTotalCount] = useState<number | null>(null);
@@ -341,6 +343,9 @@ export default function FactCardOpsPage() {
   const [queueProcessNote, setQueueProcessNote] = useState<string | null>(null);
   const [queueEnqueueUnknownLoading, setQueueEnqueueUnknownLoading] = useState(false);
   const [queueEnqueueUnknownNote, setQueueEnqueueUnknownNote] = useState<string | null>(null);
+  const [queueEnqueueQuarantineLoading, setQueueEnqueueQuarantineLoading] = useState(false);
+  const [queueEnqueueQuarantineNote, setQueueEnqueueQuarantineNote] = useState<string | null>(null);
+  const [queueUtilityId, setQueueUtilityId] = useState(""); // optional filter for enqueue helpers (e.g. "oncor")
   const [queueSortKey, setQueueSortKey] = useState<
     "tdspName" | "supplier" | "planName" | "offerId" | "eflVersionCode" | "queueReason"
   >("supplier");
@@ -355,7 +360,7 @@ export default function FactCardOpsPage() {
     setQueueErr(null);
     try {
       const params = new URLSearchParams({ status: queueStatus, limit: "200" });
-      params.set("kind", queueKind);
+      if (queueKind !== "ALL") params.set("kind", queueKind);
       // Keep the OPEN queue self-healing: if a template already exists, the list API
       // can auto-resolve the queue row so admins only see true attention-needed items.
       if (queueStatus === "OPEN") params.set("autoResolve", "1");
@@ -394,6 +399,42 @@ export default function FactCardOpsPage() {
       await loadQueue();
     } catch (e: any) {
       setQueueErr(e?.message || "Failed to resolve.");
+    }
+  }
+
+  async function enqueueQuarantinesFromMappings() {
+    if (!token) {
+      setQueueErr("Admin token required.");
+      return;
+    }
+    setQueueEnqueueQuarantineLoading(true);
+    setQueueEnqueueQuarantineNote(null);
+    setQueueErr(null);
+    try {
+      const res = await fetch("/api/admin/efl-review/enqueue-quarantines", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-admin-token": token,
+        },
+        body: JSON.stringify({
+          utilityId: queueUtilityId.trim() ? queueUtilityId.trim() : undefined,
+          limit: 800,
+          forceReopen: true,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      setQueueEnqueueQuarantineNote(
+        `Enqueued quarantines: ${Number(data.upserted ?? 0) || 0} (scanned ${Number(data.scanned ?? 0) || 0})` +
+          (data.utilityId ? ` for utilityId="${String(data.utilityId)}"` : "") +
+          ".",
+      );
+      await loadQueue();
+    } catch (e: any) {
+      setQueueErr(e?.message || "Failed to enqueue quarantines.");
+    } finally {
+      setQueueEnqueueQuarantineLoading(false);
     }
   }
 
@@ -1464,9 +1505,18 @@ export default function FactCardOpsPage() {
               <button className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60" onClick={() => void processOpenQueue()} disabled={!ready || queueLoading || queueProcessLoading || queueStatus !== "OPEN"}>
                 {queueProcessLoading ? "Processing…" : "Process OPEN parse queue (auto)"}
               </button>
-            ) : (
+            ) : queueKind === "PLAN_CALC_QUARANTINE" ? (
               <button className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60" onClick={() => void processOpenQuarantineQueue()} disabled={!ready || queueLoading || queueProcessLoading || queueStatus !== "OPEN"}>
                 {queueProcessLoading ? "Processing…" : "Process OPEN quarantines (auto-fix)"}
+              </button>
+            ) : (
+              <button
+                className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60"
+                onClick={() => setQueueErr('Pick Kind="EFL_PARSE" or "PLAN_CALC_QUARANTINE" to run an auto-processor.')}
+                disabled={!ready || queueLoading || queueProcessLoading || queueStatus !== "OPEN"}
+                title='Auto-processors run on a single Kind. Select a Kind first.'
+              >
+                Choose Kind to run processor
               </button>
             )}
           </div>
@@ -1477,11 +1527,13 @@ export default function FactCardOpsPage() {
               Auto processor runs the full EFL pipeline and persists templates on{" "}
               <span className="font-medium">PASS + STRONG</span>. It also registers required bucket definitions. Home monthly bucket totals are created later (on-demand) when you run an estimate for a specific home.
             </>
-          ) : (
+          ) : queueKind === "PLAN_CALC_QUARANTINE" ? (
             <>
               Quarantine processor re-runs the full EFL pipeline and will auto-resolve a quarantine item{" "}
               <span className="font-medium">only if</span> it can persist a safe template (PASS + STRONG, no manual-review gate).
             </>
+          ) : (
+            <>Showing <span className="font-medium">ALL</span> kinds. Select a specific Kind to see processor instructions.</>
           )}
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -1494,13 +1546,29 @@ export default function FactCardOpsPage() {
           <label className="inline-flex items-center gap-2 text-sm">
             <span className="text-gray-600">Kind</span>
             <select className="rounded-lg border px-2 py-2 text-sm" value={queueKind} onChange={(e) => setQueueKind(e.target.value as any)}>
+              <option value="ALL">ALL</option>
               <option value="EFL_PARSE">EFL_PARSE</option>
               <option value="PLAN_CALC_QUARANTINE">PLAN_CALC_QUARANTINE</option>
             </select>
           </label>
+          <input
+            className="w-[140px] rounded-lg border px-3 py-2 text-sm"
+            placeholder='utilityId (e.g. "oncor")'
+            value={queueUtilityId}
+            onChange={(e) => setQueueUtilityId(e.target.value)}
+            title='Optional filter for enqueue helpers (matches RatePlan.utilityId). Leave blank for all.'
+          />
           <input className="flex-1 min-w-[220px] rounded-lg border px-3 py-2 text-sm" placeholder="Search supplier / plan / utility / offer / sha / version" value={queueQ} onChange={(e) => setQueueQ(e.target.value)} />
           <button className="px-3 py-2 rounded-lg border hover:bg-gray-50" onClick={() => void loadQueue()} disabled={!ready || queueLoading}>
             Apply
+          </button>
+          <button
+            className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60"
+            onClick={() => void enqueueQuarantinesFromMappings()}
+            disabled={!ready || queueEnqueueQuarantineLoading}
+            title='Backfill PLAN_CALC_QUARANTINE rows from OfferIdRatePlanMap + RatePlan planCalcStatus. Useful when the customer site shows many "QUEUED" plans but the queue is empty.'
+          >
+            {queueEnqueueQuarantineLoading ? "Enqueueing…" : "Enqueue quarantines"}
           </button>
           <button
             className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60"
@@ -1514,6 +1582,7 @@ export default function FactCardOpsPage() {
         {queueErr ? <div className="text-sm text-red-700">{queueErr}</div> : null}
         {queueProcessNote ? <div className="text-xs text-gray-700">{queueProcessNote}</div> : null}
         {queueEnqueueUnknownNote ? <div className="text-xs text-gray-700">{queueEnqueueUnknownNote}</div> : null}
+        {queueEnqueueQuarantineNote ? <div className="text-xs text-gray-700">{queueEnqueueQuarantineNote}</div> : null}
 
         {/* ~5 visible rows + sticky header */}
         <div className="overflow-x-auto overflow-y-auto max-h-[280px] rounded-xl border">

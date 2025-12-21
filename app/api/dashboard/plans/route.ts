@@ -55,6 +55,20 @@ type EflBucket = 500 | 1000 | 2000;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+function sha256Hex(s: string): string {
+  return crypto.createHash("sha256").update(s).digest("hex");
+}
+
+function canonicalUrlKey(u: string): string | null {
+  try {
+    const url = new URL(u);
+    // Ignore query/hash to tolerate WattBuy tracking params and redirects.
+    return `${url.origin}${url.pathname}`;
+  } catch {
+    return null;
+  }
+}
+
 function parseApproxKwhPerMonth(v: string | null): number | null {
   if (!v) return null;
   const n = Number(v);
@@ -604,6 +618,280 @@ export async function GET(req: NextRequest) {
     const safePage = totalPages === 0 ? 1 : clamp(page, 1, totalPages);
     const startIdx = (safePage - 1) * pageSize;
     const pageSlice = offers.slice(startIdx, startIdx + pageSize);
+
+    // Ensure that any offer we mark as "QUEUED" is actually present in the admin review queue.
+    //
+    // Why this exists:
+    // - The dashboard historically used a heuristic: "no template yet + has eflUrl => queued".
+    // - If background prefetch didn't run (or ran out of budget), the admin queue could be empty,
+    //   which is confusing and blocks ops.
+    //
+    // Behavior:
+    // - If an offer has an EFL URL but no template mapping, create/refresh an OPEN EFL_PARSE row.
+    // - If an offer is mapped to a non-computable template, create/refresh a PLAN_CALC_QUARANTINE row.
+    //
+    // Best-effort: failures must never break dashboard.
+    try {
+      // (1) If a template already exists for this EFL URL, auto-link offerId -> RatePlan
+      // so the dashboard stops showing "QUEUED" purely due to missing OfferIdRatePlanMap rows.
+      const unmappedWithEfl = (pageSlice as any[])
+        .map((o) => {
+          const offerId = String(o?.offer_id ?? "").trim();
+          const eflUrl = String(o?.docs?.efl ?? "").trim();
+          if (!offerId || !eflUrl) return null;
+          const mapped = mapByOfferId.get(offerId) ?? null;
+          if (mapped) return null;
+          return { offerId, eflUrl };
+        })
+        .filter(Boolean) as Array<{ offerId: string; eflUrl: string }>;
+
+      if (unmappedWithEfl.length) {
+        const urls = Array.from(new Set(unmappedWithEfl.map((x) => x.eflUrl)));
+        const canonicalUrls = Array.from(
+          new Set(
+            urls
+              .map((u) => canonicalUrlKey(u))
+              .filter((v): v is string => typeof v === "string" && v.length > 0),
+          ),
+        );
+        const plans = await prisma.ratePlan.findMany({
+          where: {
+            rateStructure: { not: null },
+            eflRequiresManualReview: false,
+            OR: [
+              { eflUrl: { in: urls } },
+              { eflSourceUrl: { in: urls } },
+              // tolerate query-param differences by prefix matching origin+pathname
+              ...canonicalUrls.flatMap((c) => [{ eflUrl: { startsWith: c } }, { eflSourceUrl: { startsWith: c } }]),
+            ],
+          } as any,
+          select: {
+            id: true,
+            eflUrl: true,
+            eflSourceUrl: true,
+            rateStructure: true,
+            planCalcStatus: true,
+            planCalcReasonCode: true,
+          } as any,
+        });
+
+        const planByUrl = new Map<string, any>();
+        for (const p of plans as any[]) {
+          const id = String(p?.id ?? "").trim();
+          if (!id) continue;
+          const u1 = String(p?.eflUrl ?? "").trim();
+          const u2 = String(p?.eflSourceUrl ?? "").trim();
+          if (u1) {
+            planByUrl.set(u1, p);
+            const k = canonicalUrlKey(u1);
+            if (k) planByUrl.set(k, p);
+          }
+          if (u2) {
+            planByUrl.set(u2, p);
+            const k = canonicalUrlKey(u2);
+            if (k) planByUrl.set(k, p);
+          }
+        }
+
+        const now = new Date();
+        const linkWrites: Array<Promise<any>> = [];
+        for (const x of unmappedWithEfl) {
+          const p = planByUrl.get(x.eflUrl) ?? planByUrl.get(canonicalUrlKey(x.eflUrl) ?? "") ?? null;
+          const ratePlanId = p?.id ? String(p.id) : null;
+          if (!ratePlanId) continue;
+
+          linkWrites.push(
+            (prisma as any).offerIdRatePlanMap
+              .upsert({
+                where: { offerId: x.offerId },
+                create: {
+                  offerId: x.offerId,
+                  ratePlanId,
+                  lastLinkedAt: now,
+                  linkedBy: "dashboard_plans_auto_link",
+                },
+                update: {
+                  ratePlanId,
+                  lastLinkedAt: now,
+                  linkedBy: "dashboard_plans_auto_link",
+                },
+                select: { ratePlanId: true },
+              })
+              .then(() => {
+                // Keep local computations consistent in this request.
+                mapByOfferId.set(x.offerId, ratePlanId);
+
+                if (!planCalcByRatePlanId.has(ratePlanId)) {
+                  const rsPresent = isRateStructurePresent(p?.rateStructure);
+                  const storedStatus =
+                    typeof p?.planCalcStatus === "string" ? (String(p.planCalcStatus) as any) : null;
+                  const storedReason =
+                    typeof p?.planCalcReasonCode === "string" ? String(p.planCalcReasonCode) : null;
+
+                  if (storedStatus === "COMPUTABLE" || storedStatus === "NOT_COMPUTABLE") {
+                    planCalcByRatePlanId.set(ratePlanId, {
+                      planCalcStatus: storedStatus,
+                      planCalcReasonCode: storedReason ?? "UNKNOWN",
+                      rateStructurePresent: rsPresent,
+                      rateStructure: rsPresent ? p.rateStructure : null,
+                    });
+                  } else {
+                    const derived = derivePlanCalcRequirementsFromTemplate({
+                      rateStructure: rsPresent ? p.rateStructure : null,
+                    });
+                    planCalcByRatePlanId.set(ratePlanId, {
+                      planCalcStatus: derived.planCalcStatus,
+                      planCalcReasonCode: derived.planCalcReasonCode,
+                      rateStructurePresent: rsPresent,
+                      rateStructure: rsPresent ? p.rateStructure : null,
+                    });
+                  }
+                }
+              })
+              .catch(() => {}),
+          );
+        }
+        if (linkWrites.length) await Promise.all(linkWrites);
+      }
+
+      // (2) Ensure "QUEUED" offers are visible in admin review queue.
+      const queuedWrites: Array<Promise<any>> = [];
+      for (const o of pageSlice as any[]) {
+        const offerId = String(o?.offer_id ?? "").trim();
+        if (!offerId) continue;
+        const eflUrl = String(o?.docs?.efl ?? "").trim() || null;
+        const supplier = o?.supplier_name ?? null;
+        const planName = o?.plan_name ?? null;
+        const termMonths = typeof o?.term_months === "number" ? o.term_months : null;
+        const tdspName = o?.distributor_name ?? null;
+
+        const ratePlanId = mapByOfferId.get(offerId) ?? null;
+        const calc = ratePlanId ? (planCalcByRatePlanId.get(ratePlanId) ?? null) : null;
+
+        // Case A: queued because we have an EFL URL but no template mapping yet.
+        if (!ratePlanId && eflUrl) {
+          const syntheticSha = sha256Hex(["dashboard_plans", "EFL_PARSE", offerId, eflUrl].join("|"));
+          queuedWrites.push(
+            (prisma as any).eflParseReviewQueue
+              .upsert({
+                where: { eflPdfSha256: syntheticSha },
+                create: {
+                  source: "dashboard_plans",
+                  kind: "EFL_PARSE",
+                  dedupeKey: syntheticSha,
+                  eflPdfSha256: syntheticSha,
+                  offerId,
+                  supplier,
+                  planName,
+                  eflUrl,
+                  tdspName,
+                  termMonths,
+                  finalStatus: "NEEDS_REVIEW",
+                  queueReason: "DASHBOARD_QUEUED: offer has EFL URL but no template mapping yet.",
+                  resolvedAt: null,
+                  resolvedBy: null,
+                  resolutionNotes: null,
+                },
+                update: {
+                  updatedAt: new Date(),
+                  kind: "EFL_PARSE",
+                  dedupeKey: syntheticSha,
+                  offerId,
+                  supplier,
+                  planName,
+                  eflUrl,
+                  tdspName,
+                  termMonths,
+                  finalStatus: "NEEDS_REVIEW",
+                  queueReason: "DASHBOARD_QUEUED: offer has EFL URL but no template mapping yet.",
+                  resolvedAt: null,
+                  resolvedBy: null,
+                  resolutionNotes: null,
+                },
+              })
+              .catch((e: any) => {
+                // eslint-disable-next-line no-console
+                console.error("[dashboard_plans] failed to upsert EFL_PARSE queue row", {
+                  offerId,
+                  eflUrl,
+                  message: e?.message ?? String(e),
+                });
+              }),
+          );
+          continue;
+        }
+
+        // Case B: queued because the template exists but is not computable (or we couldn't determine computability).
+        // IMPORTANT: UI statusLabel marks mapped offers as QUEUED when calc is missing, so we must also enqueue them.
+        if (ratePlanId && (!calc || calc.planCalcStatus !== "COMPUTABLE")) {
+          const planCalcStatus = calc?.planCalcStatus ?? "UNKNOWN";
+          const reasonCode = String(calc?.planCalcReasonCode ?? "UNKNOWN");
+          const queueReasonPayload = {
+            type: "PLAN_CALC_QUARANTINE",
+            planCalcStatus,
+            planCalcReasonCode: reasonCode,
+            ratePlanId,
+            offerId,
+          };
+          queuedWrites.push(
+            (prisma as any).eflParseReviewQueue
+              .upsert({
+                where: { kind_dedupeKey: { kind: "PLAN_CALC_QUARANTINE", dedupeKey: offerId } },
+                create: {
+                  source: "dashboard_plans",
+                  kind: "PLAN_CALC_QUARANTINE",
+                  dedupeKey: offerId,
+                  // Required NOT NULL unique field; for quarantines we use a synthetic stable value.
+                  eflPdfSha256: sha256Hex(["dashboard_plans", "PLAN_CALC_QUARANTINE", offerId].join("|")),
+                  offerId,
+                  supplier,
+                  planName,
+                  eflUrl,
+                  tdspName,
+                  termMonths,
+                  ratePlanId,
+                  rawText: null,
+                  planRules: null,
+                  rateStructure: calc?.rateStructurePresent ? (calc.rateStructure ?? null) : null,
+                  validation: null,
+                  derivedForValidation: queueReasonPayload,
+                  finalStatus: "OPEN",
+                  queueReason: JSON.stringify(queueReasonPayload),
+                  solverApplied: [],
+                  resolvedAt: null,
+                  resolvedBy: null,
+                  resolutionNotes: reasonCode,
+                },
+                update: {
+                  supplier,
+                  planName,
+                  eflUrl,
+                  tdspName,
+                  termMonths,
+                  ratePlanId,
+                  derivedForValidation: queueReasonPayload,
+                  finalStatus: "OPEN",
+                  queueReason: JSON.stringify(queueReasonPayload),
+                  resolvedAt: null,
+                  resolvedBy: null,
+                  resolutionNotes: reasonCode,
+                },
+              })
+              .catch((e: any) => {
+                // eslint-disable-next-line no-console
+                console.error("[dashboard_plans] failed to upsert PLAN_CALC_QUARANTINE queue row", {
+                  offerId,
+                  ratePlanId,
+                  message: e?.message ?? String(e),
+                });
+              }),
+          );
+        }
+      }
+      if (queuedWrites.length) await Promise.all(queuedWrites);
+    } catch {
+      // Best-effort only.
+    }
 
     const shapeOfferBase = (o: any) => {
       const ratePlanId = mapByOfferId.get(o.offer_id) ?? null;
