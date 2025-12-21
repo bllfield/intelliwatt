@@ -31,6 +31,7 @@ export interface UpsertEflRatePlanArgs {
   modeledRate1000?: number | null;
   modeledRate2000?: number | null;
   modeledEflAvgPriceValidation?: any | null;
+  passStrength?: "STRONG" | "WEAK" | "INVALID" | null;
   modeledComputedAt?: Date | string | null;
   cancelFee?: string | null;
   providerName?: string | null;
@@ -82,6 +83,7 @@ export async function upsertRatePlanFromEfl(
     modeledRate1000,
     modeledRate2000,
     modeledEflAvgPriceValidation,
+    passStrength,
     modeledComputedAt,
     cancelFee,
     providerName,
@@ -157,14 +159,6 @@ export async function upsertRatePlanFromEfl(
       : []),
   ];
 
-  // When manual review is required, DO NOT write rateStructure.
-  const safeRateStructure = requiresManualReview
-    ? null
-    : rateStructure;
-
-  // Plan-calc requirements are derived from the stored template (safeRateStructure) and persisted for auditing.
-  const planCalcReq = derivePlanCalcRequirementsFromTemplate({ rateStructure: safeRateStructure as any });
-
   // Modeled proof columns are useful for debugging even when we refuse to persist a template.
   // In particular, TOU-mismatch guardrails rely on the modeled proof to explain why it was quarantined.
   const canPersistModeledProof = Boolean(modeledEflAvgPriceValidation != null);
@@ -175,6 +169,30 @@ export async function upsertRatePlanFromEfl(
       : modeledComputedAt instanceof Date
         ? modeledComputedAt
         : new Date(String(modeledComputedAt));
+
+  // When manual review is required, DO NOT write rateStructure.
+  // When safe, embed modeled validation proof + strength into the stored RateStructure JSON
+  // so admin UIs can show "PASS strength" for templates that went through canonical validation.
+  const safeRateStructureBase = requiresManualReview ? null : rateStructure;
+  const safeRateStructure =
+    safeRateStructureBase &&
+    typeof safeRateStructureBase === "object" &&
+    canPersistModeledProof
+      ? ({
+          ...(safeRateStructureBase as any),
+          __eflAvgPriceValidation: modeledEflAvgPriceValidation ?? null,
+          __eflAvgPriceEvidence: {
+            computedAt: (modeledAt ?? new Date()).toISOString(),
+            source: "canonical_pipeline",
+            passStrength: passStrength ?? null,
+            tdspAppliedMode:
+              (modeledEflAvgPriceValidation as any)?.assumptionsUsed?.tdspAppliedMode ?? null,
+          },
+        } as any)
+      : (safeRateStructureBase as any);
+
+  // Plan-calc requirements are derived from the stored template (safeRateStructure) and persisted for auditing.
+  const planCalcReq = derivePlanCalcRequirementsFromTemplate({ rateStructure: safeRateStructure as any });
 
   const dataCommon = {
     // EFL identity + source URL

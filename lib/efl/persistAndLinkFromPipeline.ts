@@ -211,6 +211,7 @@ export async function persistAndLinkFromPipeline(
     modeledRate1000,
     modeledRate2000,
     modeledEflAvgPriceValidation,
+    passStrength,
     modeledComputedAt: new Date(),
     cancelFee: null,
     providerName: args.offerMeta?.supplier ?? null,
