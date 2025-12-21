@@ -522,9 +522,11 @@ export async function runEflPipeline(input: RunEflPipelineInput): Promise<RunEfl
       return err("LINK_OFFER", "PIPELINE_STAGE_FAILED_LINK_OFFER", msg, true);
     }
 
-    // If persisted but NOT computable, enqueue a quarantine row (sticky ops signal).
-    if ((persisted.planCalc?.planCalcStatus ?? null) && persisted.planCalc?.planCalcStatus !== "COMPUTABLE") {
-      const reasonCode = String(persisted.planCalc?.planCalcReasonCode ?? "UNKNOWN");
+    // If persisted but NOT computable (excluding missing-template), enqueue a quarantine row (sticky ops signal).
+    // IMPORTANT: do not enqueue UNKNOWN/MISSING_TEMPLATE, which represents "no usable template/rateStructure".
+    const pcStatus = persisted.planCalc?.planCalcStatus ?? null;
+    const pcReason = String(persisted.planCalc?.planCalcReasonCode ?? "UNKNOWN");
+    if (pcStatus === "NOT_COMPUTABLE" && pcReason !== "MISSING_TEMPLATE") {
       const dk = offerId || `plan_calc:${persisted.persistedRatePlanId}`;
       const synthetic = `plan_calc_quarantine:${dk}`;
       await upsertQueueItem({
@@ -544,7 +546,7 @@ export async function runEflPipeline(input: RunEflPipelineInput): Promise<RunEfl
         validation: pipeline?.validation ?? null,
         derivedForValidation: pipeline?.derivedForValidation ?? null,
         finalStatus: "OPEN",
-        queueReason: `PLAN_CALC_${String(persisted.planCalc?.planCalcStatus)}:${reasonCode}`,
+        queueReason: `PLAN_CALC_${pcStatus}:${pcReason}`,
       });
     }
 
@@ -604,4 +606,3 @@ export async function runEflPipeline(input: RunEflPipelineInput): Promise<RunEfl
     return err("PERSIST", "PIPELINE_EXCEPTION_PERSIST", reason, true);
   }
 }
-
