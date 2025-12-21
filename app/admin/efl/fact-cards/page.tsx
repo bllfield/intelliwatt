@@ -152,6 +152,9 @@ function deriveTemplatePlanTypeLabel(r: any): string {
 export default function FactCardOpsPage() {
   const { token, setToken } = useLocalToken();
   const ready = useMemo(() => Boolean(token), [token]);
+  const [buildInfo, setBuildInfo] = useState<{ sha: string | null; ref: string | null } | null>(
+    null,
+  );
 
   // Manual loader is rendered at the bottom; we prefill it from Queue/Templates/Batch via this state.
   const [manualPrefillUrl, setManualPrefillUrl] = useState("");
@@ -182,6 +185,28 @@ export default function FactCardOpsPage() {
       // ignore
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Deployment/version marker (helps debug "deploy went through but UI didn't change").
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/version");
+        const data = (await res.json().catch(() => null)) as any;
+        if (!cancelled && res.ok && data?.ok) {
+          setBuildInfo({
+            sha: typeof data.sha === "string" ? data.sha : null,
+            ref: typeof data.ref === "string" ? data.ref : null,
+          });
+        }
+      } catch {
+        // ignore
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // ---------------- Provider batch runner (WattBuy today; future sources later) ----------------
@@ -2073,6 +2098,11 @@ export default function FactCardOpsPage() {
               )
             </span>
           </h2>
+          {buildInfo ? (
+            <div className="text-[11px] text-gray-500 font-mono">
+              build: {buildInfo.ref ?? "—"}@{buildInfo.sha ? buildInfo.sha.slice(0, 7) : "—"}
+            </div>
+          ) : null}
           <div className="flex items-center gap-2">
             <button className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60" onClick={() => void loadTemplates()} disabled={!ready || tplLoading}>
               {tplLoading ? "Loading…" : "Refresh"}
@@ -2248,38 +2278,38 @@ export default function FactCardOpsPage() {
                           {pcReason ? ` (${pcReason})` : ""}
                         </div>
                         <div className="flex flex-wrap gap-2">
-                          {pcStatus !== "COMPUTABLE" && !isOverridden ? (
-                            <button
-                              className="px-2 py-1 rounded border hover:bg-gray-50 disabled:opacity-60"
-                              disabled={!ready || tplLoading}
-                              title="After you test a plan, you can manually mark it COMPUTABLE to remove the dashboard gate."
-                              onClick={() =>
-                                void setTemplateComputableOverride({
-                                  ratePlanId: String(r.id),
-                                  offerId: offerId || null,
-                                  enable: true,
-                                })
-                              }
-                            >
-                              Override → COMPUTABLE
-                            </button>
-                          ) : null}
-                          {isOverridden ? (
-                            <button
-                              className="px-2 py-1 rounded border hover:bg-gray-50 disabled:opacity-60"
-                              disabled={!ready || tplLoading}
-                              title="Undo override and re-derive planCalcStatus/Reason from the template."
-                              onClick={() =>
-                                void setTemplateComputableOverride({
-                                  ratePlanId: String(r.id),
-                                  offerId: offerId || null,
-                                  enable: false,
-                                })
-                              }
-                            >
-                              Clear override
-                            </button>
-                          ) : null}
+                          <button
+                            className="px-2 py-1 rounded border hover:bg-gray-50 disabled:opacity-60"
+                            disabled={!ready || tplLoading}
+                            title="Force planCalcStatus=COMPUTABLE (sets reason ADMIN_OVERRIDE_COMPUTABLE)."
+                            onClick={() =>
+                              void setTemplateComputableOverride({
+                                ratePlanId: String(r.id),
+                                offerId: offerId || null,
+                                enable: true,
+                              })
+                            }
+                          >
+                            Force COMPUTABLE
+                          </button>
+                          <button
+                            className="px-2 py-1 rounded border hover:bg-gray-50 disabled:opacity-60"
+                            disabled={!ready || tplLoading || !isOverridden}
+                            title={
+                              isOverridden
+                                ? "Undo override and re-derive planCalcStatus/Reason from the template."
+                                : "No override is set for this row."
+                            }
+                            onClick={() =>
+                              void setTemplateComputableOverride({
+                                ratePlanId: String(r.id),
+                                offerId: offerId || null,
+                                enable: false,
+                              })
+                            }
+                          >
+                            Reset derived
+                          </button>
                         </div>
                       </div>
                     </td>
