@@ -81,6 +81,7 @@ type BatchRow = {
   planName: string | null;
   termMonths: number | null;
   tdspName: string | null;
+  tdspSlug?: string | null;
   eflUrl: string | null;
   eflPdfSha256: string | null;
   repPuctCertificate: string | null;
@@ -92,6 +93,11 @@ type BatchRow = {
   queueReason?: string | null;
   finalQueueReason?: string | null;
   notes?: string | null;
+  planCalcStatus?: string | null;
+  planCalcReasonCode?: string | null;
+  requiredBucketKeys?: string[] | null;
+  usagePreview?: any | null;
+  usageEstimate?: any | null;
 };
 
 type QueueItem = any;
@@ -191,6 +197,8 @@ export default function FactCardOpsPage() {
   const [runAll, setRunAll] = useState(true);
   const [dryRun, setDryRun] = useState(false);
   const [forceReparseTemplates, setForceReparseTemplates] = useState(false);
+  const [computeUsageBuckets, setComputeUsageBuckets] = useState(false);
+  const [usageEmail, setUsageEmail] = useState("bllfield32@gmail.com");
 
   const [batchLoading, setBatchLoading] = useState(false);
   const [batchNote, setBatchNote] = useState<string | null>(null);
@@ -240,6 +248,9 @@ export default function FactCardOpsPage() {
           dryRun,
           mode: dryRun ? "DRY_RUN" : "STORE_TEMPLATES_ON_PASS",
           forceReparseTemplates,
+            computeUsageBuckets,
+            usageEmail: computeUsageBuckets ? usageEmail.trim() : undefined,
+            usageMonths: 12,
         };
 
         const res = await fetch("/api/admin/wattbuy/offers-batch-efl-parse", {
@@ -268,6 +279,11 @@ export default function FactCardOpsPage() {
         setBatchNote(
           [
             `Processed ${data.processedCount} EFLs (scanned ${data.scannedCount ?? data.processedCount} offers).`,
+              data?.usageContext?.computed?.rowsUpserted
+                ? `Usage buckets: upserted ${data.usageContext.computed.rowsUpserted} rows (${data.usageContext.computed.monthsProcessed} months).`
+                : computeUsageBuckets
+                  ? `Usage buckets: ${data?.usageContext?.errors?.length ? "errors (see Raw Output)" : "not computed"}`
+                  : null,
             data.truncated ? `Continuing… nextStartIndex=${data.nextStartIndex}.` : "Done.",
             forceReparseTemplates ? "forceReparseTemplates=true" : null,
             dryRun ? "DRY_RUN (no writes)" : "STORE_TEMPLATES_ON_PASS",
@@ -1364,7 +1380,33 @@ export default function FactCardOpsPage() {
               />
               Overwrite existing templates (force reparse)
             </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={computeUsageBuckets}
+                onChange={(e) => setComputeUsageBuckets(e.target.checked)}
+                disabled={dryRun}
+              />
+              Compute usage buckets for home (Phase 2 check)
+            </label>
           </div>
+
+          {computeUsageBuckets ? (
+            <div className="grid gap-2 md:grid-cols-2">
+              <div className="md:col-span-2">
+                <label className="block text-sm mb-1">Home email (usage source)</label>
+                <input
+                  className="w-full rounded-lg border px-3 py-2"
+                  value={usageEmail}
+                  onChange={(e) => setUsageEmail(e.target.value)}
+                  placeholder="bllfield@yahoo.com"
+                />
+                <div className="text-xs text-gray-600 mt-1">
+                  This writes monthly bucket totals for that home (kwh.m.*) so you can audit TOU calculations while keeping TOU gated.
+                </div>
+              </div>
+            </div>
+          ) : null}
 
           <button
             className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60"
@@ -1478,6 +1520,8 @@ export default function FactCardOpsPage() {
                     <th className="px-2 py-2 text-left">EFL</th>
                     <th className="px-2 py-2 text-left">Status</th>
                     <th className="px-2 py-2 text-left">Template</th>
+                    <th className="px-2 py-2 text-left">PlanCalc</th>
+                    <th className="px-2 py-2 text-left">Usage (annual)</th>
                     <th className="px-2 py-2 text-left">Actions</th>
                     <th className="px-2 py-2 text-left">Details</th>
                   </tr>
@@ -1486,6 +1530,8 @@ export default function FactCardOpsPage() {
                   {batchRows.slice(0, 100).map((r, idx) => {
                     const eflUrl = (r.eflUrl ?? "").trim();
                     const status = r.finalValidationStatus ?? r.validationStatus ?? "-";
+                    const pc = String((r as any)?.planCalcReasonCode ?? (r as any)?.planCalcStatus ?? "").trim();
+                    const annual = (r as any)?.usagePreview?.annualKwh;
                     return (
                       <tr key={`${r.offerId ?? "offer"}:${idx}`} className="border-t">
                         <td className="px-2 py-2">{r.supplier ?? "-"}</td>
@@ -1495,6 +1541,12 @@ export default function FactCardOpsPage() {
                         </td>
                         <td className="px-2 py-2">{status}</td>
                         <td className="px-2 py-2">{r.templateAction ?? "-"}</td>
+                        <td className="px-2 py-2 font-mono text-[11px]" title={pc}>
+                          {pc || "—"}
+                        </td>
+                        <td className="px-2 py-2 font-mono text-[11px]" title={pretty((r as any)?.usagePreview ?? null)}>
+                          {typeof annual === "number" && Number.isFinite(annual) ? annual.toFixed(0) : "—"}
+                        </td>
                         <td className="px-2 py-2">
                           <button
                             className="px-2 py-1 rounded border hover:bg-gray-50 disabled:opacity-60"

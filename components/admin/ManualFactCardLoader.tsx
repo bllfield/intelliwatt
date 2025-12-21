@@ -58,6 +58,7 @@ type UploadResponse = {
   queueAutoResolveOpenMatchesPreview?: any[];
   queueAutoResolveUpdatedCount?: number;
   ai?: { enabled: boolean; hasKey: boolean; used: boolean; reason?: string };
+  usageAudit?: any | null;
 };
 
 type UploadError = { ok: false; error: any };
@@ -68,6 +69,88 @@ function pretty(x: unknown) {
   } catch {
     return String(x);
   }
+}
+
+function buildManualAuditBundle(args: {
+  result: UploadResponse;
+  planEngineView: any | null;
+}): string {
+  const r: any = args.result as any;
+  const ua: any = r?.usageAudit ?? null;
+  const fv: any = r?.finalValidation ?? null;
+  const v: any = r?.validation ?? null;
+  const derived: any = r?.derivedForValidation ?? null;
+
+  const header = [
+    "IntelliWatt — Manual Plan Audit Bundle",
+    `generatedAt=${new Date().toISOString()}`,
+  ].join("\n");
+
+  const summaryObj = {
+    // Identity (best-effort; depends on entrypoint)
+    eflUrl: r?.eflUrl ?? null,
+    eflSourceUrl: r?.eflSourceUrl ?? null,
+    offerId: r?.offerId ?? null,
+    eflPdfSha256: r?.eflPdfSha256 ?? null,
+    repPuctCertificate: r?.repPuctCertificate ?? null,
+    eflVersionCode: r?.eflVersionCode ?? null,
+    extractorMethod: r?.extractorMethod ?? null,
+
+    // Status / gating
+    passStrength: r?.passStrength ?? null,
+    passStrengthReasons: Array.isArray(r?.passStrengthReasons) ? r.passStrengthReasons : [],
+    queued: Boolean(r?.queued),
+    queueReason: r?.queueReason ?? null,
+
+    // Computability (dashboard-safe)
+    planCalcStatus: r?.planCalcStatus ?? null,
+    planCalcReasonCode: r?.planCalcReasonCode ?? null,
+    requiredBucketKeys: Array.isArray(r?.requiredBucketKeys) ? r.requiredBucketKeys : [],
+
+    // Persistence
+    templatePersisted: typeof r?.templatePersisted === "boolean" ? r.templatePersisted : null,
+    persistedRatePlanId: r?.persistedRatePlanId ?? null,
+    autoResolvedQueueCount:
+      typeof r?.autoResolvedQueueCount === "number" ? r.autoResolvedQueueCount : null,
+
+    // Validation
+    finalValidation: fv ?? null,
+    baseValidation: v ?? null,
+
+    // Usage audit / bucket writes (admin-only)
+    usageAudit: ua ?? null,
+
+    // Engine introspection of rateStructure (useful to debug TOU/buckets)
+    planEngineView: args.planEngineView ?? null,
+
+    // Warnings
+    warnings: Array.isArray(r?.warnings) ? r.warnings : [],
+    parseWarnings: Array.isArray(r?.parseWarnings) ? r.parseWarnings : [],
+  };
+
+  const rawTextPreview = String(r?.rawTextPreview ?? "");
+  const rawTextLength = typeof r?.rawTextLength === "number" ? r.rawTextLength : null;
+  const rawTextTruncated = Boolean(r?.rawTextTruncated);
+
+  return [
+    header,
+    "",
+    "## Summary (structured JSON)",
+    "```json",
+    pretty(summaryObj),
+    "```",
+    "",
+    "## Derived for validation (solver / assumptions)",
+    "```json",
+    pretty(derived ?? null),
+    "```",
+    "",
+    "## Raw text (SOURCE OF TRUTH)",
+    `rawTextLength=${rawTextLength ?? "—"} rawTextTruncated=${rawTextTruncated}`,
+    "```",
+    rawTextPreview,
+    "```",
+  ].join("\n");
 }
 
 async function copyToClipboard(text: string) {
@@ -91,6 +174,9 @@ export function ManualFactCardLoader(props: {
   const [overridePdfUrl, setOverridePdfUrl] = useState("");
   const [forceReparse, setForceReparse] = useState(true);
   const [persistTemplate, setPersistTemplate] = useState(true);
+  const [computeUsageBuckets, setComputeUsageBuckets] = useState(false);
+  const [usageEmail, setUsageEmail] = useState("bllfield32@gmail.com");
+  const [usageMonths, setUsageMonths] = useState(12);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [result, setResult] = useState<UploadResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -114,6 +200,7 @@ export function ManualFactCardLoader(props: {
 
   const headerToken = useMemo(() => (props.adminToken ?? "").trim(), [props.adminToken]);
   const canPersist = Boolean(persistTemplate && headerToken);
+  const canWriteUsage = Boolean(computeUsageBuckets && headerToken);
 
   async function handleSubmitUrl(e: FormEvent) {
     e.preventDefault();
@@ -137,6 +224,9 @@ export function ManualFactCardLoader(props: {
           forceReparse,
           offerId: offerId.trim() || undefined,
           overridePdfUrl: overridePdfUrl.trim() || undefined,
+          computeUsageBuckets: Boolean(canWriteUsage),
+          usageEmail: canWriteUsage ? usageEmail.trim() || undefined : undefined,
+          usageMonths: canWriteUsage ? usageMonths : undefined,
         }),
       });
       const data = (await res.json()) as UploadResponse | UploadError;
@@ -177,7 +267,10 @@ export function ManualFactCardLoader(props: {
       const url =
         "/api/admin/efl/manual-upload" +
         (canPersist ? "?persist=1" : "") +
-        (forceReparse ? (canPersist ? "&force=1" : "?force=1") : "");
+        (forceReparse ? (canPersist ? "&force=1" : "?force=1") : "") +
+        (canWriteUsage
+          ? `${canPersist || forceReparse ? "&" : "?"}usage=1&usageEmail=${encodeURIComponent(usageEmail.trim())}&usageMonths=${encodeURIComponent(String(usageMonths))}`
+          : "");
       const response = await fetch(url, {
         method: "POST",
         headers: {
@@ -213,7 +306,13 @@ export function ManualFactCardLoader(props: {
     }
     setIsSubmitting(true);
     try {
-      const response = await fetch(`/api/admin/efl/manual-text${canPersist ? "?persist=1" : ""}`, {
+      const textUrl =
+        `/api/admin/efl/manual-text${canPersist ? "?persist=1" : ""}` +
+        (canWriteUsage
+          ? `${canPersist ? "&" : "?"}usage=1&usageEmail=${encodeURIComponent(usageEmail.trim())}&usageMonths=${encodeURIComponent(String(usageMonths))}`
+          : "");
+
+      const response = await fetch(textUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -249,6 +348,15 @@ export function ManualFactCardLoader(props: {
       return { ok: false, error: e?.message ?? String(e) };
     }
   }, [result]);
+
+  const auditBundle = useMemo(() => {
+    if (!result) return null;
+    try {
+      return buildManualAuditBundle({ result, planEngineView });
+    } catch (e: any) {
+      return `Audit bundle build failed: ${e?.message ?? String(e)}`;
+    }
+  }, [result, planEngineView]);
 
   return (
     <div className="space-y-6">
@@ -293,19 +401,49 @@ export function ManualFactCardLoader(props: {
           Force reparse (recommended)
         </label>
         <label className="flex items-center gap-2 text-xs text-brand-navy/70">
-          <input
-            type="checkbox"
-            checked={persistTemplate}
-            onChange={(e) => setPersistTemplate(e.target.checked)}
-            className="h-4 w-4 rounded border-brand-blue text-brand-blue focus:ring-brand-blue"
-          />
-          Persist template (requires admin token)
-        </label>
-        <label className="flex items-center gap-2 text-xs text-brand-navy/70">
           <span className="text-[11px]">
             Pipeline: deterministic extract → AI assist (optional) → validator → solver (validation-only)
           </span>
         </label>
+      </div>
+
+      <div className="rounded-2xl border bg-white p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="font-semibold text-brand-navy">Options</div>
+          <div className="text-xs text-brand-navy/60">Admin-only diagnostics</div>
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-4 text-sm">
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={persistTemplate} onChange={(e) => setPersistTemplate(e.target.checked)} />
+            Persist template (requires token)
+          </label>
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={computeUsageBuckets} onChange={(e) => setComputeUsageBuckets(e.target.checked)} />
+            Compute usage buckets for home (Phase 2 audit)
+          </label>
+        </div>
+        {computeUsageBuckets ? (
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <div className="md:col-span-2">
+              <label className="block text-sm mb-1">Home email (usage source)</label>
+              <input className="w-full rounded-lg border px-3 py-2" value={usageEmail} onChange={(e) => setUsageEmail(e.target.value)} />
+              <div className="text-xs text-brand-navy/60 mt-1">
+                This writes monthly kWh bucket totals (kwh.m.*) so you can verify TOU math end-to-end while plans stay gated.
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm mb-1">Months</label>
+              <input
+                className="w-full rounded-lg border px-3 py-2"
+                type="number"
+                min={1}
+                max={24}
+                value={usageMonths}
+                onChange={(e) => setUsageMonths(Math.max(1, Math.min(24, Number(e.target.value) || 12)))}
+              />
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {activeTab === "url" ? (
@@ -474,6 +612,34 @@ export function ManualFactCardLoader(props: {
             </button>
           </div>
 
+          {auditBundle ? (
+            <details className="rounded-lg border bg-white p-3" open>
+              <summary className="cursor-pointer text-sm font-semibold text-brand-navy">
+                Audit Output (copy/paste into chat) — raw text is source of truth
+              </summary>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  className="rounded-md border px-3 py-1.5 text-sm hover:bg-gray-50"
+                  onClick={async () => {
+                    const ok = await copyToClipboard(String(auditBundle));
+                    if (!ok) setError("Unable to copy audit output.");
+                  }}
+                >
+                  Copy audit output
+                </button>
+                <div className="text-xs text-brand-navy/60">
+                  Includes: planCalc + queue reason + validation + usage bucket writes + raw text preview.
+                </div>
+              </div>
+              <textarea
+                className="mt-3 h-72 w-full resize-y rounded-md border border-brand-blue/30 bg-white px-3 py-2 text-xs font-mono text-brand-navy"
+                readOnly
+                value={auditBundle}
+              />
+            </details>
+          ) : null}
+
           <div className="grid gap-3 md:grid-cols-2 text-xs text-brand-navy/80">
             <div>
               <div className="font-semibold text-brand-navy mb-1">Build</div>
@@ -542,6 +708,32 @@ export function ManualFactCardLoader(props: {
                 {String((result as any)?.queueReason ?? "").trim()
                   ? ` (${String((result as any).queueReason)})`
                   : ""}
+              </div>
+            </div>
+            <div>
+              <div className="font-semibold text-brand-navy mb-1">Usage buckets</div>
+              <div className="font-mono">
+                {(() => {
+                  const ua: any = (result as any)?.usageAudit ?? null;
+                  const computed = ua?.usageContext?.computed ?? null;
+                  const rowsUpserted = typeof computed?.rowsUpserted === "number" ? computed.rowsUpserted : null;
+                  if (!ua) return "—";
+                  if (ua?.usageContext?.errors?.length) return `ERROR (${String(ua.usageContext.errors.join(","))})`;
+                  if (rowsUpserted == null) return "OK";
+                  return `OK (rowsUpserted=${rowsUpserted})`;
+                })()}
+              </div>
+              <div
+                className="mt-1 font-mono break-all text-[11px] text-brand-navy/70"
+                title={pretty((result as any)?.usageAudit ?? null)}
+              >
+                {(() => {
+                  const ua: any = (result as any)?.usageAudit ?? null;
+                  const annual = ua?.usagePreview?.annualKwh;
+                  const missing = Array.isArray(ua?.usagePreview?.missingKeys) ? ua.usagePreview.missingKeys.length : null;
+                  if (!ua?.usagePreview) return "annualKwh=—";
+                  return `annualKwh=${typeof annual === "number" ? annual.toFixed(0) : "—"} missingKeys=${missing ?? "—"}`;
+                })()}
               </div>
             </div>
             <div>

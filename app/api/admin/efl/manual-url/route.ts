@@ -4,6 +4,7 @@ import { Buffer } from "node:buffer";
 import { fetchEflPdfFromUrl } from "@/lib/efl/fetchEflPdf";
 import { runEflPipeline } from "@/lib/efl/runEflPipeline";
 import { prisma } from "@/lib/db";
+import { adminUsageAuditForHome } from "@/lib/usage/adminUsageAudit";
 
 const MAX_PREVIEW_CHARS = 20000;
 
@@ -14,6 +15,9 @@ type ManualUrlBody = {
   forceReparse?: boolean;
   overridePdfUrl?: string;
   offerId?: string;
+  computeUsageBuckets?: boolean;
+  usageEmail?: string;
+  usageMonths?: number;
 };
 
 export async function POST(req: NextRequest) {
@@ -121,6 +125,58 @@ export async function POST(req: NextRequest) {
     const aiEnabled = process.env.OPENAI_IntelliWatt_Fact_Card_Parser === "1";
     const hasKey = Boolean(process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.trim().length > 0);
 
+    const adminToken = process.env.ADMIN_TOKEN ?? null;
+    const headerToken = req.headers.get("x-admin-token");
+    const usageRequested = body.computeUsageBuckets === true;
+    const usageEmail = String(body.usageEmail ?? "").trim();
+    const usageMonths = Number(body.usageMonths ?? 12) || 12;
+    const canWriteUsage = Boolean(usageRequested && adminToken && headerToken === adminToken);
+
+    let usageAudit: any | null = null;
+    if (usageRequested) {
+      if (!canWriteUsage) {
+        usageAudit = {
+          ok: false,
+          usageContext: {
+            email: String(usageEmail || "").trim().toLowerCase(),
+            homeId: null,
+            esiid: null,
+            months: Math.max(1, Math.min(24, usageMonths)),
+            bucketKeys: [],
+            computed: null,
+            errors: ["unauthorized_or_missing_token"],
+          },
+          usagePreview: null,
+          usageEstimate: null,
+        };
+      } else if (usageEmail) {
+        usageAudit = await adminUsageAuditForHome({
+          usageEmail,
+          usageMonths,
+          requiredBucketKeys: Array.isArray(pipelineResult.requiredBucketKeys)
+            ? pipelineResult.requiredBucketKeys
+            : [],
+          rateStructure: pipelineResult.rateStructure ?? null,
+          tdspSlug: null,
+        });
+      } else {
+        usageAudit = {
+          ok: false,
+          usageContext: {
+            email: "",
+            homeId: null,
+            esiid: null,
+            months: Math.max(1, Math.min(24, usageMonths)),
+            bucketKeys: [],
+            computed: null,
+            errors: ["missing_usageEmail"],
+          },
+          usagePreview: null,
+          usageEstimate: null,
+        };
+      }
+    }
+
     return NextResponse.json({
       ok: true,
       build: {
@@ -167,6 +223,7 @@ export async function POST(req: NextRequest) {
         hasKey,
         used: aiEnabled && hasKey,
       },
+      usageAudit,
       pipelineResult,
     });
 

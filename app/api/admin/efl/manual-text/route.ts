@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runEflPipeline } from "@/lib/efl/runEflPipeline";
+import { adminUsageAuditForHome } from "@/lib/usage/adminUsageAudit";
 
 const MAX_PREVIEW_CHARS = 20000;
 
@@ -35,12 +36,62 @@ export async function POST(req: NextRequest) {
     const headerToken = req.headers.get("x-admin-token");
     const canPersist = Boolean(persistRequested && adminToken && headerToken === adminToken);
 
+    const usageRequested = req.nextUrl.searchParams.get("usage") === "1";
+    const usageEmail = String(req.nextUrl.searchParams.get("usageEmail") ?? "").trim();
+    const usageMonths = Number(req.nextUrl.searchParams.get("usageMonths") ?? "12") || 12;
+    const canWriteUsage = Boolean(usageRequested && adminToken && headerToken === adminToken);
+
     const pipelineResult = await runEflPipeline({
       source: "manual_text",
       actor: "admin",
       dryRun: !canPersist,
       rawText: raw,
     });
+
+    let usageAudit: any | null = null;
+    if (usageRequested) {
+      if (!canWriteUsage) {
+        usageAudit = {
+          ok: false,
+          usageContext: {
+            email: String(usageEmail || "").trim().toLowerCase(),
+            homeId: null,
+            esiid: null,
+            months: Math.max(1, Math.min(24, usageMonths)),
+            bucketKeys: [],
+            computed: null,
+            errors: ["unauthorized_or_missing_token"],
+          },
+          usagePreview: null,
+          usageEstimate: null,
+        };
+      } else if (usageEmail) {
+        usageAudit = await adminUsageAuditForHome({
+          usageEmail,
+          usageMonths,
+          requiredBucketKeys: Array.isArray(pipelineResult.requiredBucketKeys)
+            ? pipelineResult.requiredBucketKeys
+            : [],
+          rateStructure: pipelineResult.rateStructure ?? null,
+          tdspSlug: null,
+        });
+      } else {
+        usageAudit = {
+          ok: false,
+          usageContext: {
+            email: "",
+            homeId: null,
+            esiid: null,
+            months: Math.max(1, Math.min(24, usageMonths)),
+            bucketKeys: [],
+            computed: null,
+            errors: ["missing_usageEmail"],
+          },
+          usagePreview: null,
+          usageEstimate: null,
+        };
+      }
+    }
 
     return NextResponse.json({
       ok: true,
@@ -72,6 +123,7 @@ export async function POST(req: NextRequest) {
       extractorMethod: pipelineResult.extractorMethod ?? "raw_text",
       dryRun: !canPersist,
       persistedRatePlanId: pipelineResult.ratePlanId ?? null,
+      usageAudit,
       pipelineResult,
     });
   } catch (error) {

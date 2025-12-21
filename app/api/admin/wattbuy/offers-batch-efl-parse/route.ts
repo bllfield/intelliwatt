@@ -12,6 +12,11 @@ import { upsertRatePlanFromEfl } from "@/lib/efl/planPersistence";
 import { validatePlanRules } from "@/lib/efl/planEngine";
 import { inferTdspTerritoryFromEflText } from "@/lib/efl/eflValidator";
 import { prisma } from "@/lib/db";
+import { ensureCoreMonthlyBuckets } from "@/lib/usage/aggregateMonthlyBuckets";
+import { bucketDefsFromBucketKeys } from "@/lib/plan-engine/usageBuckets";
+import { getTdspDeliveryRates } from "@/lib/plan-engine/getTdspDeliveryRates";
+import { calculatePlanCostForUsage } from "@/lib/plan-engine/calculatePlanCostForUsage";
+import { usagePrisma } from "@/lib/db/usageClient";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +31,13 @@ type BatchRequest = {
     state?: string | null;
     zip?: string | null;
   } | null;
+  /**
+   * Optional: compute monthly usage buckets (including TOU windows) for a specific home
+   * and attach usage/cost previews to batch results. This writes to usage tables.
+   */
+  usageEmail?: string | null;
+  computeUsageBuckets?: boolean | null;
+  usageMonths?: number | null; // default 12
   offerLimit?: number | null;
   /**
    * Start scanning the WattBuy offers list at this index.
@@ -65,6 +77,7 @@ type BatchResultRow = {
   planName: string | null;
   termMonths: number | null;
   tdspName: string | null;
+  tdspSlug?: string | null;
   eflUrl: string | null;
   eflPdfSha256: string | null;
   repPuctCertificate: string | null;
@@ -96,6 +109,17 @@ type BatchResultRow = {
   finalQueueReason?: string | null;
   solverApplied?: string[] | null;
   notes?: string | null;
+  planCalcStatus?: "COMPUTABLE" | "NOT_COMPUTABLE" | "UNKNOWN" | null;
+  planCalcReasonCode?: string | null;
+  requiredBucketKeys?: string[] | null;
+  usagePreview?: {
+    months: number;
+    annualKwh: number | null;
+    avgMonthlyKwhByKey: Record<string, number>;
+    latestMonthKwhByKey: Record<string, number>;
+    missingKeys: string[];
+  } | null;
+  usageEstimate?: any | null;
   diffs?: Array<{
     kwh: number;
     expected: number | null;
@@ -117,6 +141,21 @@ type BatchResponse =
       truncated: boolean;
       nextStartIndex: number | null;
       results: BatchResultRow[];
+      usageContext?: {
+        email: string;
+        homeId: string | null;
+        esiid: string | null;
+        months: number;
+        bucketKeys: string[];
+        computed?: {
+          monthsProcessed: number;
+          rowsUpserted: number;
+          intervalRowsRead: number;
+          kwhSummed: number;
+          notes: string[];
+        } | null;
+        errors?: string[];
+      } | null;
     }
   | {
       ok: false;
@@ -144,6 +183,43 @@ function normalizeQueueReason(reason: string | null | undefined): string | null 
 
 function sha256Hex(s: string): string {
   return crypto.createHash("sha256").update(s).digest("hex");
+}
+
+function normalizeEmailLoose(s: string | null | undefined): string {
+  return String(s ?? "").trim().toLowerCase();
+}
+
+function decimalToNumber(v: any): number | null {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (v && typeof v === "object" && typeof v.toString === "function") {
+    const n = Number(v.toString());
+    return Number.isFinite(n) ? n : null;
+  }
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function lastNYearMonthsChicago(n: number): string[] {
+  try {
+    const tz = "America/Chicago";
+    const fmt = new Intl.DateTimeFormat("en-US", { timeZone: tz, year: "numeric", month: "2-digit" });
+    const parts = fmt.formatToParts(new Date());
+    const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+    const year0 = Number(get("year"));
+    const month0 = Number(get("month"));
+    if (!Number.isFinite(year0) || !Number.isFinite(month0) || month0 < 1 || month0 > 12) return [];
+
+    const out: string[] = [];
+    for (let i = 0; i < n; i++) {
+      const idx = month0 - i;
+      const y = idx >= 1 ? year0 : year0 - Math.ceil((1 - idx) / 12);
+      const m0 = ((idx - 1) % 12 + 12) % 12 + 1;
+      out.push(`${String(y)}-${String(m0).padStart(2, "0")}`);
+    }
+    return out;
+  } catch {
+    return [];
+  }
 }
 
 function isUsableTemplate(p: any): boolean {
@@ -232,6 +308,13 @@ export async function POST(req: NextRequest) {
     const deadlineMs = startedAtMs + timeBudgetMs;
     const shouldStopForTimeBudget = () => Date.now() >= deadlineMs - 2_500;
 
+    const computeUsageBuckets = body.computeUsageBuckets === true;
+    const usageEmail = normalizeEmailLoose(body.usageEmail ?? null) || null;
+    const usageMonths = Math.max(
+      1,
+      Math.min(24, Number(body.usageMonths ?? 12) || 12),
+    );
+
     // 1) Fetch offers from WattBuy via the existing client + normalizer.
     const offersRes = await wbGetOffers(
       hasFullAddress
@@ -283,6 +366,9 @@ export async function POST(req: NextRequest) {
           eflVersionCode: true,
           eflRequiresManualReview: true,
           rateStructure: true,
+          planCalcStatus: true,
+          planCalcReasonCode: true,
+          requiredBucketKeys: true,
         },
       })) as any[];
 
@@ -298,6 +384,14 @@ export async function POST(req: NextRequest) {
     let truncated = false;
     let nextStartIndex: number | null = null;
 
+    // Optional: compute usage buckets for a specific home and attach previews.
+    // This is intentionally opt-in because it writes to usage tables.
+    let usageContext: BatchResponse extends { ok: true } ? any : any = null;
+    let homeIdForUsage: string | null = null;
+    let esiidForUsage: string | null = null;
+    const usageErrors: string[] = [];
+    const tdspRatesCache = new Map<string, Promise<any | null>>();
+
     for (const offer of sliced as OfferNormalized[]) {
       scannedCount++;
       const offerId = offer.offer_id ?? null;
@@ -309,6 +403,7 @@ export async function POST(req: NextRequest) {
         offer.distributor_name ??
         offer.tdsp ??
         null;
+      const tdspSlug: string | null = (offer as any)?.tdsp ? String((offer as any).tdsp) : null;
       const docsEflUrl: string | null = offer.docs?.efl ?? null;
       const enrollLink: string | null = (offer as any)?.enroll_link ?? null;
       const eflSeedUrl: string | null = docsEflUrl ?? enrollLink ?? null;
@@ -399,6 +494,7 @@ export async function POST(req: NextRequest) {
           planName,
           termMonths,
           tdspName,
+          tdspSlug,
           eflUrl: null,
           eflPdfSha256: null,
           repPuctCertificate: null,
@@ -465,6 +561,7 @@ export async function POST(req: NextRequest) {
             planName,
             termMonths,
             tdspName,
+            tdspSlug,
             eflUrl: existingUrlPlan.eflUrl ?? eflSeedUrl,
             eflPdfSha256: existingUrlPlan.eflPdfSha256 ?? null,
             repPuctCertificate: existingUrlPlan.repPuctCertificate ?? null,
@@ -477,6 +574,11 @@ export async function POST(req: NextRequest) {
             passStrength: null,
             passStrengthReasons: null,
             passStrengthOffPointDiffs: null,
+            planCalcStatus: (existingUrlPlan as any)?.planCalcStatus ?? null,
+            planCalcReasonCode: (existingUrlPlan as any)?.planCalcReasonCode ?? null,
+            requiredBucketKeys: Array.isArray((existingUrlPlan as any)?.requiredBucketKeys)
+              ? (((existingUrlPlan as any).requiredBucketKeys as string[]) ?? [])
+              : null,
             templateHit: true,
             templateAction: mode === "STORE_TEMPLATES_ON_PASS" ? "TEMPLATE" : "SKIPPED",
             queueReason: null,
@@ -748,6 +850,7 @@ export async function POST(req: NextRequest) {
           planName,
           termMonths,
           tdspName,
+          tdspSlug,
           eflUrl: resolvedPdfUrl,
           eflPdfSha256: pipelineResult.eflPdfSha256 ?? pdfSha256,
           repPuctCertificate: pipelineResult.repPuctCertificate ?? null,
@@ -760,6 +863,11 @@ export async function POST(req: NextRequest) {
           passStrength: pipelineResult.passStrength ?? null,
           passStrengthReasons: pipelineResult.passStrengthReasons ?? null,
           passStrengthOffPointDiffs: pipelineResult.passStrengthOffPointDiffs ?? null,
+          planCalcStatus: (pipelineResult as any)?.planCalcStatus ?? null,
+          planCalcReasonCode: (pipelineResult as any)?.planCalcReasonCode ?? null,
+          requiredBucketKeys: Array.isArray((pipelineResult as any)?.requiredBucketKeys)
+            ? ((pipelineResult as any).requiredBucketKeys as string[])
+            : null,
           templateHit: false,
           templateAction,
           queueReason: pipelineResult.queueReason ?? null,
@@ -1262,6 +1370,225 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Optional: compute monthly usage buckets for the requested home and attach usage previews + cost estimates.
+    if (mode !== "DRY_RUN" && computeUsageBuckets && usageEmail) {
+      usageContext = {
+        email: usageEmail,
+        homeId: null,
+        esiid: null,
+        months: usageMonths,
+        bucketKeys: [],
+        computed: null,
+        errors: [] as string[],
+      };
+
+      try {
+        const user = await prisma.user.findUnique({
+          where: { email: usageEmail },
+          select: { id: true, email: true },
+        });
+        if (!user) {
+          usageContext.errors.push("user_not_found");
+        } else {
+          const house =
+            (await prisma.houseAddress.findFirst({
+              where: { userId: user.id, archivedAt: null, isPrimary: true } as any,
+              orderBy: { createdAt: "desc" },
+              select: { id: true, esiid: true },
+            })) ||
+            (await prisma.houseAddress.findFirst({
+              where: { userId: user.id, archivedAt: null } as any,
+              orderBy: { createdAt: "desc" },
+              select: { id: true, esiid: true },
+            }));
+
+          homeIdForUsage = house?.id ? String(house.id) : null;
+          esiidForUsage = house?.esiid ? String(house.esiid) : null;
+          usageContext.homeId = homeIdForUsage;
+          usageContext.esiid = esiidForUsage;
+
+          if (!homeIdForUsage) {
+            usageContext.errors.push("missing_homeId");
+          } else if (!esiidForUsage) {
+            usageContext.errors.push("missing_esiid");
+          } else {
+            const wanted = Array.from(
+              new Set(
+                results
+                  .flatMap((r) =>
+                    Array.isArray((r as any)?.requiredBucketKeys)
+                      ? (((r as any).requiredBucketKeys as string[]) ?? [])
+                      : [],
+                  )
+                  .map((k) => String(k ?? "").trim())
+                  .filter(Boolean),
+              ),
+            );
+
+            // Always include total monthly kWh as the anchor for annual usage.
+            const unionKeys = Array.from(new Set(["kwh.m.all.total", ...wanted]));
+            usageContext.bucketKeys = unionKeys;
+
+            // Cap to avoid accidental explosions from malformed templates.
+            const cappedKeys = unionKeys.slice(0, 50);
+            if (unionKeys.length > cappedKeys.length) {
+              usageContext.errors.push(`bucketKey_cap_applied:${unionKeys.length}->${cappedKeys.length}`);
+            }
+
+            const bucketDefs = bucketDefsFromBucketKeys(cappedKeys);
+            const now = new Date();
+            const rangeEnd = now;
+            const rangeStart = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
+
+            const computed = await ensureCoreMonthlyBuckets({
+              homeId: homeIdForUsage,
+              esiid: esiidForUsage,
+              rangeStart,
+              rangeEnd,
+              source: "SMT",
+              intervalSource: "SMT",
+              bucketDefs,
+            });
+            usageContext.computed = computed;
+
+            const yearMonths = lastNYearMonthsChicago(usageMonths);
+            const bucketRows = await (usagePrisma as any).homeMonthlyUsageBucket.findMany({
+              where: {
+                homeId: homeIdForUsage,
+                yearMonth: { in: yearMonths },
+                bucketKey: { in: cappedKeys },
+              },
+              select: { yearMonth: true, bucketKey: true, kwhTotal: true },
+            });
+
+            const byMonth: Record<string, Record<string, number>> = {};
+            for (const r of bucketRows ?? []) {
+              const ym = String((r as any)?.yearMonth ?? "");
+              const key = String((r as any)?.bucketKey ?? "");
+              const kwh = decimalToNumber((r as any)?.kwhTotal);
+              if (!ym || !key || kwh == null) continue;
+              if (!byMonth[ym]) byMonth[ym] = {};
+              byMonth[ym][key] = kwh;
+            }
+
+            // Preload rateStructures for offers so we can compute cost previews.
+            const offerIds = results.map((r) => String((r as any)?.offerId ?? "").trim()).filter(Boolean);
+            const maps = await (prisma as any).offerIdRatePlanMap.findMany({
+              where: { offerId: { in: offerIds }, ratePlanId: { not: null } },
+              select: { offerId: true, ratePlanId: true },
+            });
+            const ratePlanIdByOfferId = new Map<string, string>();
+            for (const m of maps as any[]) {
+              const oid = String(m?.offerId ?? "").trim();
+              const pid = String(m?.ratePlanId ?? "").trim();
+              if (oid && pid) ratePlanIdByOfferId.set(oid, pid);
+            }
+            const ratePlanIds = Array.from(new Set(Array.from(ratePlanIdByOfferId.values())));
+            const plans = await (prisma as any).ratePlan.findMany({
+              where: { id: { in: ratePlanIds } },
+              select: { id: true, rateStructure: true },
+            });
+            const rateStructureByPlanId = new Map<string, any>();
+            for (const p of plans as any[]) {
+              const pid = String(p?.id ?? "").trim();
+              if (!pid) continue;
+              rateStructureByPlanId.set(pid, p?.rateStructure ?? null);
+            }
+
+            const latestYm = yearMonths[0] ?? null;
+
+            for (const r of results) {
+              const requiredKeys = Array.isArray((r as any)?.requiredBucketKeys)
+                ? (((r as any).requiredBucketKeys as string[]) ?? [])
+                : [];
+              const keysForRow = requiredKeys.length ? requiredKeys : ["kwh.m.all.total"];
+
+              const avgMonthlyKwhByKey: Record<string, number> = {};
+              const latestMonthKwhByKey: Record<string, number> = {};
+              const missingKeys: string[] = [];
+
+              for (const key of keysForRow) {
+                const vals: number[] = [];
+                for (const ym of yearMonths) {
+                  const v = byMonth?.[ym]?.[key];
+                  if (typeof v === "number" && Number.isFinite(v)) vals.push(v);
+                }
+                if (vals.length === 0) {
+                  missingKeys.push(key);
+                } else {
+                  const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+                  avgMonthlyKwhByKey[key] = Number(avg.toFixed(3));
+                }
+
+                if (latestYm && typeof byMonth?.[latestYm]?.[key] === "number") {
+                  latestMonthKwhByKey[key] = Number(byMonth[latestYm][key].toFixed(3));
+                }
+              }
+
+              const annualKwh = (() => {
+                const vals: number[] = [];
+                for (const ym of yearMonths) {
+                  const v = byMonth?.[ym]?.["kwh.m.all.total"];
+                  if (typeof v === "number" && Number.isFinite(v)) vals.push(v);
+                }
+                if (vals.length === 0) return null;
+                return Number(vals.reduce((a, b) => a + b, 0).toFixed(3));
+              })();
+
+              (r as any).usagePreview = {
+                months: yearMonths.length,
+                annualKwh,
+                avgMonthlyKwhByKey,
+                latestMonthKwhByKey,
+                missingKeys,
+              };
+
+              // Best-effort cost preview (does NOT change gating; admin-only diagnostics)
+              try {
+                const tdspSlug = String((r as any)?.tdspSlug ?? "").trim().toLowerCase();
+                const offerId = String((r as any)?.offerId ?? "").trim();
+                const planId = offerId ? ratePlanIdByOfferId.get(offerId) ?? null : null;
+                const rateStructure = planId ? rateStructureByPlanId.get(planId) ?? null : null;
+                if (!tdspSlug || !annualKwh || !rateStructure) {
+                  (r as any).usageEstimate = null;
+                  continue;
+                }
+
+                const tdspRatesP =
+                  tdspRatesCache.get(tdspSlug) ??
+                  (async () => await getTdspDeliveryRates({ tdspSlug, asOf: new Date() }))();
+                tdspRatesCache.set(tdspSlug, tdspRatesP);
+                const tdspRates = await tdspRatesP;
+                if (!tdspRates) {
+                  (r as any).usageEstimate = { status: "NOT_IMPLEMENTED", reason: "Missing TDSP rates" };
+                  continue;
+                }
+
+                const est = calculatePlanCostForUsage({
+                  annualKwh,
+                  monthsCount: yearMonths.length || usageMonths,
+                  tdsp: {
+                    perKwhDeliveryChargeCents: Number(tdspRates.perKwhDeliveryChargeCents ?? 0) || 0,
+                    monthlyCustomerChargeDollars: Number(tdspRates.monthlyCustomerChargeDollars ?? 0) || 0,
+                    effectiveDate: tdspRates.effectiveDate ?? undefined,
+                  },
+                  rateStructure,
+                  usageBucketsByMonth: byMonth,
+                });
+                (r as any).usageEstimate = est as any;
+              } catch (e: any) {
+                (r as any).usageEstimate = { status: "ERROR", reason: e?.message ?? String(e) };
+              }
+            }
+          }
+        }
+      } catch (e: any) {
+        usageErrors.push(e?.message ?? String(e));
+        usageContext = usageContext ?? { email: usageEmail, homeId: null, esiid: null, months: usageMonths, bucketKeys: [], computed: null, errors: [] };
+        usageContext.errors = [...(usageContext.errors ?? []), ...usageErrors];
+      }
+    }
+
     const bodyOut: BatchResponse = {
       ok: true,
       mode,
@@ -1273,6 +1600,7 @@ export async function POST(req: NextRequest) {
       truncated,
       nextStartIndex,
       results,
+      usageContext: usageContext ?? null,
     };
 
     return NextResponse.json(bodyOut);
