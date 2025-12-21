@@ -1148,16 +1148,21 @@ export async function GET(req: NextRequest) {
         // v1: mostly ["kwh.m.all.total"], but this makes TOU/tier expansion deterministic.
         missingBucketKeys = (requiredBucketKeys ?? []).filter((k) => !hasRecentBucket(String(k)));
 
-        // Quarantine best-effort when plan is not computable OR required buckets are missing.
+        // Quarantine best-effort ONLY for plan-defect reasons (unsupported/non-deterministic/etc.).
+        // Missing buckets is an availability/inputs issue and should NOT create review noise.
+        const quarantineReasonCode = String(
+          planCalcReasonCode ?? (planComputability as any)?.reasonCode ?? "",
+        ).trim();
         const shouldQuarantine =
-          (planCalcStatus === "NOT_COMPUTABLE" || planComputability?.status === "NOT_COMPUTABLE") ||
-          missingBucketKeys.length > 0;
+          (planCalcStatus === "NOT_COMPUTABLE" || planComputability?.status === "NOT_COMPUTABLE") &&
+          Boolean(quarantineReasonCode) &&
+          isPlanCalcQuarantineWorthyReasonCode(quarantineReasonCode);
 
         if (shouldQuarantine && offerId) {
           const queueReasonPayload = {
             type: "PLAN_CALC_QUARANTINE",
             planCalcStatus: planCalcStatus ?? null,
-            planCalcReasonCode: planCalcReasonCode ?? (planComputability?.reasonCode ?? null),
+            planCalcReasonCode: quarantineReasonCode || null,
             requiredBucketKeys: requiredBucketKeys ?? null,
             missingBucketKeys: missingBucketKeys.length > 0 ? missingBucketKeys : null,
             ratePlanId: effectiveRatePlanId,
@@ -1191,9 +1196,7 @@ export async function GET(req: NextRequest) {
                   resolvedAt: null,
                   resolvedBy: null,
                   resolutionNotes:
-                    missingBucketKeys.length > 0
-                      ? `Missing required buckets: ${missingBucketKeys.join(", ")}`
-                      : (planComputability?.reason ?? planCalcReasonCode ?? "Not computable"),
+                    (planComputability?.reason ?? planCalcReasonCode ?? quarantineReasonCode ?? "Not computable"),
                 },
                 update: {
                   supplier: (base as any)?.supplierName ?? null,
@@ -1206,9 +1209,7 @@ export async function GET(req: NextRequest) {
                   finalStatus: "OPEN",
                   queueReason: JSON.stringify(queueReasonPayload),
                   resolutionNotes:
-                    missingBucketKeys.length > 0
-                      ? `Missing required buckets: ${missingBucketKeys.join(", ")}`
-                      : (planComputability?.reason ?? planCalcReasonCode ?? "Not computable"),
+                    (planComputability?.reason ?? planCalcReasonCode ?? quarantineReasonCode ?? "Not computable"),
                 },
               })
               .catch(() => {});
