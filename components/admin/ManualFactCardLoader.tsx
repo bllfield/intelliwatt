@@ -82,6 +82,7 @@ export function ManualFactCardLoader(props: {
   const [offerId, setOfferId] = useState("");
   const [overridePdfUrl, setOverridePdfUrl] = useState("");
   const [forceReparse, setForceReparse] = useState(true);
+  const [persistTemplate, setPersistTemplate] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [result, setResult] = useState<UploadResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -104,6 +105,7 @@ export function ManualFactCardLoader(props: {
   }, [props.prefillEflUrl, props]);
 
   const headerToken = useMemo(() => (props.adminToken ?? "").trim(), [props.adminToken]);
+  const canPersist = Boolean(persistTemplate && headerToken);
 
   async function handleSubmitUrl(e: FormEvent) {
     e.preventDefault();
@@ -164,9 +166,15 @@ export function ManualFactCardLoader(props: {
       const formData = new FormData();
       formData.append("file", file);
 
-      const url = forceReparse ? "/api/admin/efl/manual-upload?force=1" : "/api/admin/efl/manual-upload";
+      const url =
+        "/api/admin/efl/manual-upload" +
+        (canPersist ? "?persist=1" : "") +
+        (forceReparse ? (canPersist ? "&force=1" : "?force=1") : "");
       const response = await fetch(url, {
         method: "POST",
+        headers: {
+          ...(headerToken ? { "x-admin-token": headerToken } : {}),
+        },
         body: formData,
       });
 
@@ -197,9 +205,12 @@ export function ManualFactCardLoader(props: {
     }
     setIsSubmitting(true);
     try {
-      const response = await fetch("/api/admin/efl/manual-text", {
+      const response = await fetch(`/api/admin/efl/manual-text${canPersist ? "?persist=1" : ""}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(headerToken ? { "x-admin-token": headerToken } : {}),
+        },
         body: JSON.stringify({ rawText: trimmed }),
       });
 
@@ -272,6 +283,15 @@ export function ManualFactCardLoader(props: {
             className="h-4 w-4 rounded border-brand-blue text-brand-blue focus:ring-brand-blue"
           />
           Force reparse (recommended)
+        </label>
+        <label className="flex items-center gap-2 text-xs text-brand-navy/70">
+          <input
+            type="checkbox"
+            checked={persistTemplate}
+            onChange={(e) => setPersistTemplate(e.target.checked)}
+            className="h-4 w-4 rounded border-brand-blue text-brand-blue focus:ring-brand-blue"
+          />
+          Persist template (requires admin token)
         </label>
         <label className="flex items-center gap-2 text-xs text-brand-navy/70">
           <span className="text-[11px]">
