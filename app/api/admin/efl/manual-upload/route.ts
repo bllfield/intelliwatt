@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Buffer } from "node:buffer";
 
-import { getOrCreateEflTemplate } from "@/lib/efl/getOrCreateEflTemplate";
-import { solveEflValidationGaps } from "@/lib/efl/validation/solveEflValidationGaps";
+import { runEflPipeline } from "@/lib/efl/runEflPipeline";
 
 const MAX_PREVIEW_CHARS = 20000;
 
@@ -27,93 +26,57 @@ export async function POST(req: NextRequest) {
     const arrayBuffer = await file.arrayBuffer();
     const pdfBuffer = Buffer.from(arrayBuffer);
 
+    // Canonical pipeline (single source of truth). This route defaults to preview-only unless
+    // explicitly requested with `persist=1` AND an admin token.
+    const persistRequested = req.nextUrl.searchParams.get("persist") === "1";
+    const adminToken = process.env.ADMIN_TOKEN ?? null;
+    const headerToken = req.headers.get("x-admin-token");
+    const canPersist = Boolean(persistRequested && adminToken && headerToken === adminToken);
+
+    const pipelineResult = await runEflPipeline({
+      source: "manual_upload",
+      actor: "admin",
+      dryRun: !canPersist,
+      pdfBytes: pdfBuffer,
+    });
+
+    const rawTextPreview = String(pipelineResult.rawTextPreview ?? "").slice(0, MAX_PREVIEW_CHARS);
+    const rawTextLength =
+      Number(pipelineResult.rawTextLen ?? rawTextPreview.length) || rawTextPreview.length;
+    const rawTextTruncated = Boolean(pipelineResult.rawTextTruncated ?? false);
+
     const aiEnabled = process.env.OPENAI_IntelliWatt_Fact_Card_Parser === "1";
     const hasKey =
       !!process.env.OPENAI_API_KEY &&
       process.env.OPENAI_API_KEY.trim().length > 0;
 
-    const { template, warnings: topWarnings } = await getOrCreateEflTemplate({
-      source: "manual_upload",
-      pdfBytes: pdfBuffer,
-      filename: (file as File).name ?? null,
-      forceReparse,
-    });
-
-    const rawText = template.rawText ?? "";
-    const rawTextTruncated = rawText.length > MAX_PREVIEW_CHARS;
-    const rawTextPreview = rawTextTruncated
-      ? rawText.slice(0, MAX_PREVIEW_CHARS)
-      : rawText;
-
-    const aiUsed =
-      aiEnabled &&
-      hasKey &&
-      !Array.isArray(template.parseWarnings) ? false :
-      !(
-        (template.parseWarnings ?? []).some((w: string) =>
-          w.includes("AI_DISABLED_OR_MISSING_KEY"),
-        )
-      );
-
-    const ai: {
-      enabled: boolean;
-      hasKey: boolean;
-      used: boolean;
-      reason?: string;
-    } = {
-      enabled: aiEnabled,
-      hasKey,
-      used: aiUsed,
-    };
-
-    if (!aiUsed) {
-      ai.reason = !aiEnabled
-        ? "AI disabled via OPENAI_IntelliWatt_Fact_Card_Parser flag."
-        : !hasKey
-          ? "OPENAI_API_KEY is missing or empty."
-          : "AI parser skipped; see parseWarnings for details.";
-    }
-
-    // Run a deterministic "gap solver" pass for avg-price validation. This does
-    // not change the authoritative extracted planRules/rateStructure; it only
-    // derives a copy for validation and re-runs the validator with any
-    // deterministic fills (e.g., usageTiers sync from RateStructure).
-    let derivedForValidation: any = null;
-    try {
-      const baseValidation =
-        (template.validation as any)?.eflAvgPriceValidation ?? null;
-      const solverResult = await solveEflValidationGaps({
-        rawText,
-        planRules: template.planRules ?? null,
-        rateStructure: template.rateStructure ?? null,
-        validation: baseValidation,
-      });
-      derivedForValidation = solverResult;
-    } catch (e) {
-      // Best-effort only; never fail the route because the solver had an issue.
-      derivedForValidation = null;
-    }
-
     return NextResponse.json({
       ok: true,
-      eflPdfSha256: template.eflPdfSha256,
-      repPuctCertificate: template.repPuctCertificate,
-      eflVersionCode: template.eflVersionCode,
-      warnings: topWarnings,
+      eflPdfSha256: pipelineResult.eflPdfSha256 ?? null,
+      repPuctCertificate: pipelineResult.repPuctCertificate ?? null,
+      eflVersionCode: pipelineResult.eflVersionCode ?? null,
+      warnings: pipelineResult.deterministicWarnings ?? [],
       // Prompt is now a simple descriptor since the AI runs directly on the EFL text.
       prompt:
         "EFL PDF parsed by OpenAI using the standard planRules/rateStructure contract.",
       rawTextPreview,
-      rawTextLength: rawText.length,
+      rawTextLength,
       rawTextTruncated,
-      planRules: template.planRules,
-      rateStructure: template.rateStructure,
-      parseConfidence: template.parseConfidence,
-      parseWarnings: template.parseWarnings,
-      validation: template.validation ?? null,
-      derivedForValidation,
-      extractorMethod: template.extractorMethod ?? "pdftotext",
-      ai,
+      planRules: pipelineResult.planRules ?? null,
+      rateStructure: pipelineResult.rateStructure ?? null,
+      parseConfidence: pipelineResult.parseConfidence ?? null,
+      parseWarnings: pipelineResult.parseWarnings ?? [],
+      validation: pipelineResult.validation ?? null,
+      derivedForValidation: pipelineResult.derivedForValidation ?? null,
+      extractorMethod: pipelineResult.extractorMethod ?? "pdftotext",
+      ai: {
+        enabled: aiEnabled,
+        hasKey,
+        used: aiEnabled && hasKey,
+      },
+      dryRun: !canPersist,
+      persistedRatePlanId: pipelineResult.ratePlanId ?? null,
+      pipelineResult,
     });
   } catch (error) {
     console.error("[EFL_MANUAL_UPLOAD] Failed to process fact card:", error);

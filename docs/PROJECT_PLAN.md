@@ -202,6 +202,17 @@ EFL parser model + extraction status:
   - `/admin/efl/fact-cards` includes an **Unmapped Templates** queue for `RatePlan` rows that have `rateStructure` but **no** `OfferIdRatePlanMap.ratePlanId` link (orphan templates). These won’t light up as “templateAvailable” for any WattBuy `offer_id` until the link exists.
   - Legacy `/admin/efl/manual-upload` redirects to `/admin/efl/fact-cards`.
   - Added **Backfill EFL Templates** button on `/admin/efl/fact-cards` that calls `POST /api/admin/efl/backfill` using `x-admin-token` (prefers `localStorage.intelliwatt_admin_token`, then `sessionStorage.ADMIN_TOKEN`, and also supports the page’s existing `localStorage.iw_admin_token`). The button sends `{zip}` (default `75201`); the route auto-fetches WattBuy offers for that ZIP when `offers[]` is omitted, then extracts EFL rawText and backfills templates. UI shows token diagnostics + last response.
+
+### Canonical EFL Pipeline (Dec 2025)
+- **Module**: `lib/efl/runEflPipeline.ts` (orchestrator) + `lib/efl/persistAndLinkFromPipeline.ts` (persistence/linking guardrails).
+- **Migrated entrypoints (Phase 1)**:
+  - `POST /api/admin/efl/manual-url`
+  - `POST /api/admin/efl/manual-upload` (preview by default; persist with `?persist=1` + `x-admin-token`)
+  - `POST /api/admin/efl/manual-text` (preview by default; persist with `?persist=1` + `x-admin-token`)
+  - `POST /api/admin/efl-review/process-open`
+  - `POST /api/admin/efl-review/process-quarantine`
+- **Queueing rule**: if a template is created but later stages fail (derive plan-calc, link offerId, etc.), the pipeline must enqueue an admin review row with a stable stage reason code (fail-closed).
+- **Dashboard semantics**: do not migrate or change `app/api/dashboard/plans/**` in this phase.
 - ✅ OpenAI PDF file upload path removed for the EFL parser (413 capacity issues avoided); AI now runs **only** on the `pdftotext` output text.
 - ✅ REP PUCT Certificate number and EFL Ver. # are extracted deterministically from the normalized text via regex helpers in `lib/efl/eflExtractor.ts`.
 - ✅ EFL AI normalizer now strips **Average Price** rows and **TDU passthrough** blocks from the AI input text only, dropping only the “Average Monthly Use / Average Price per kWh” lines and never the subsequent price components table; key component tables (e.g., “This price disclosure is based on the following components: …”) are explicitly pinned so their rows are never removed. The EFL parser output shape (`planRules`, `rateStructure`, `parseConfidence`, `parseWarnings`) and the “Parsed Plan Snapshot” rendering remain unchanged.

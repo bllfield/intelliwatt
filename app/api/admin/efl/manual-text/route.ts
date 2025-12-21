@@ -4,6 +4,7 @@ import { Buffer } from "node:buffer";
 import { deterministicEflExtract } from "@/lib/efl/eflExtractor";
 import { buildPlanRulesExtractionPrompt } from "@/lib/efl/aiExtraction";
 import { extractPlanRulesAndRateStructureFromEflText } from "@/lib/efl/planAiExtractor";
+import { runEflPipeline } from "@/lib/efl/runEflPipeline";
 
 const MAX_PREVIEW_CHARS = 20000;
 
@@ -32,6 +33,41 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       );
     }
+
+    // Canonical pipeline. Defaults to preview-only unless `persist=1` AND admin token.
+    const persistRequested = req.nextUrl.searchParams.get("persist") === "1";
+    const adminToken = process.env.ADMIN_TOKEN ?? null;
+    const headerToken = req.headers.get("x-admin-token");
+    const canPersist = Boolean(persistRequested && adminToken && headerToken === adminToken);
+
+    const pipelineResult = await runEflPipeline({
+      source: "manual_text",
+      actor: "admin",
+      dryRun: !canPersist,
+      rawText: raw,
+    });
+
+    return NextResponse.json({
+      ok: true,
+      eflPdfSha256: pipelineResult.eflPdfSha256 ?? null,
+      repPuctCertificate: pipelineResult.repPuctCertificate ?? null,
+      eflVersionCode: pipelineResult.eflVersionCode ?? null,
+      warnings: pipelineResult.deterministicWarnings ?? [],
+      prompt: "EFL text parsed by OpenAI using the standard planRules/rateStructure contract.",
+      rawTextPreview: String(pipelineResult.rawTextPreview ?? "").slice(0, MAX_PREVIEW_CHARS),
+      rawTextLength: Number(pipelineResult.rawTextLen ?? 0) || raw.length,
+      rawTextTruncated: Boolean(pipelineResult.rawTextTruncated ?? raw.length > MAX_PREVIEW_CHARS),
+      planRules: pipelineResult.planRules ?? null,
+      rateStructure: pipelineResult.rateStructure ?? null,
+      parseConfidence: pipelineResult.parseConfidence ?? null,
+      parseWarnings: pipelineResult.parseWarnings ?? [],
+      validation: pipelineResult.validation ?? null,
+      derivedForValidation: pipelineResult.derivedForValidation ?? null,
+      extractorMethod: pipelineResult.extractorMethod ?? "raw_text",
+      dryRun: !canPersist,
+      persistedRatePlanId: pipelineResult.ratePlanId ?? null,
+      pipelineResult,
+    });
 
     // For manual text, we treat the UTF-8 bytes of the text as the "PDF bytes"
     // for purposes of computing a stable fingerprint. No actual PDF parsing
@@ -81,17 +117,18 @@ export async function POST(req: NextRequest) {
       parseConfidence = aiResult.meta.parseConfidence;
       parseWarnings = aiResult.meta.parseWarnings;
       validation = aiResult.meta.validation ?? null;
-    } catch (err) {
+    } catch (err: unknown) {
       // eslint-disable-next-line no-console
       console.error(
         "[EFL_MANUAL_TEXT] AI PlanRules extraction failed; continuing with deterministic preview only",
         err,
       );
       if (Array.isArray(extract.warnings)) {
+        const e = err as any;
+        const msg =
+          e instanceof Error ? `AI PlanRules extract failed: ${String(e.message ?? "")}` : "AI PlanRules extract failed.";
         extract.warnings.push(
-          err instanceof Error
-            ? `AI PlanRules extract failed: ${err.message}`
-            : "AI PlanRules extract failed.",
+          msg,
         );
       }
     }

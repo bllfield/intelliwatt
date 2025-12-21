@@ -4,6 +4,7 @@ import { Buffer } from "node:buffer";
 import { fetchEflPdfFromUrl } from "@/lib/efl/fetchEflPdf";
 import { runEflPipelineFromRawTextNoStore } from "@/lib/efl/runEflPipelineFromRawTextNoStore";
 import { runEflPipelineNoStore } from "@/lib/efl/runEflPipelineNoStore";
+import { runEflPipeline } from "@/lib/efl/runEflPipeline";
 import { upsertRatePlanFromEfl } from "@/lib/efl/planPersistence";
 import { validatePlanRules } from "@/lib/efl/planEngine";
 import { inferTdspTerritoryFromEflText } from "@/lib/efl/eflValidator";
@@ -320,6 +321,103 @@ export async function POST(req: NextRequest) {
           const finalStatus = finalValidation?.status ?? null;
           const passStrength = (pipeline as any).passStrength ?? null;
 
+          {
+            // Canonical pipeline execution (single source of truth). We keep the legacy implementation
+            // below for now, but short-circuit here so production semantics converge on one module.
+            const canonical = await runEflPipeline({
+              source: "queue_quarantine",
+              actor: "system",
+              dryRun,
+              offerId: it?.offerId ? String(it.offerId) : null,
+              eflUrl: usedUrl ?? eflUrl,
+              ...(usedRawTextFallback
+                ? {
+                    rawText: String((it as any)?.rawText ?? ""),
+                    identity: {
+                      eflPdfSha256: String((it as any)?.eflPdfSha256 ?? "") || null,
+                      repPuctCertificate: (it as any)?.repPuctCertificate ?? null,
+                      eflVersionCode: (it as any)?.eflVersionCode ?? null,
+                    },
+                  }
+                : { pdfBytes: Buffer.from((fetched as any).pdfBytes) }),
+              offerMeta: {
+                supplier: it?.supplier ?? null,
+                planName: it?.planName ?? null,
+                termMonths: typeof it?.termMonths === "number" ? it.termMonths : null,
+                tdspName: it?.tdspName ?? null,
+              },
+            });
+
+            const templateAction: "CREATED" | "SKIPPED" =
+              canonical.ratePlanId && canonical.queued === false ? "CREATED" : "SKIPPED";
+            const persistedRatePlanId: string | null = canonical.ratePlanId ?? null;
+            const persistNotes: string | null = canonical.queued ? (canonical.queueReason ?? null) : null;
+
+            if (templateAction === "CREATED") {
+              persisted++;
+              if (!dryRun) {
+                try {
+                  const now = new Date();
+                  await (prisma as any).eflParseReviewQueue.update({
+                    where: { id },
+                    data: {
+                      resolvedAt: now,
+                      resolvedBy: "AUTO_FIXED",
+                      resolutionNotes: `AUTO_FIXED: canonical pipeline persisted template. ratePlanId=${persistedRatePlanId ?? "—"}`,
+                    },
+                  });
+                  resolved++;
+                } catch {
+                  // ignore
+                }
+              }
+            }
+
+            // Refresh snapshot for admin visibility (best-effort).
+            if (!dryRun) {
+              try {
+                await (prisma as any).eflParseReviewQueue.update({
+                  where: { id },
+                  data: {
+                    eflPdfSha256: canonical.eflPdfSha256 ?? (it as any).eflPdfSha256 ?? null,
+                    repPuctCertificate: canonical.repPuctCertificate ?? (it as any).repPuctCertificate ?? null,
+                    eflVersionCode: canonical.eflVersionCode ?? (it as any).eflVersionCode ?? null,
+                    rawText: String((it as any)?.rawText ?? "").trim() ? (it as any).rawText : null,
+                    planRules: canonical.planRules ?? null,
+                    rateStructure: canonical.rateStructure ?? null,
+                    validation: canonical.validation ?? null,
+                    derivedForValidation: canonical.derivedForValidation ?? null,
+                    finalStatus: String(canonical.finalValidation?.status ?? null),
+                    queueReason: canonical.queueReason ?? (it as any).queueReason ?? null,
+                    ratePlanId: persistedRatePlanId ?? (it as any).ratePlanId ?? null,
+                  },
+                });
+              } catch {
+                // ignore
+              }
+            }
+
+            if (!resultsTruncated && results.length < resultsLimit) {
+              results.push({
+                id,
+                offerId: it?.offerId ?? null,
+                supplier: it?.supplier ?? null,
+                planName: it?.planName ?? null,
+                eflUrl,
+                finalStatus: canonical.finalValidation?.status ?? finalStatus,
+                passStrength: canonical.passStrength ?? passStrength,
+                templateAction,
+                persistedRatePlanId,
+                resolvedNow: templateAction === "CREATED",
+                notes: persistNotes,
+              });
+            } else {
+              resultsTruncated = true;
+            }
+
+            continue;
+          }
+
           let templateAction: "CREATED" | "SKIPPED" = "SKIPPED";
           let persistedRatePlanId: string | null = null;
           let persistNotes: string | null = null;
@@ -379,7 +477,7 @@ export async function POST(req: NextRequest) {
                   eflSourceUrl: eflUrl,
                   repPuctCertificate: det.repPuctCertificate ?? null,
                   eflVersionCode: det.eflVersionCode ?? null,
-                  eflPdfSha256: det.eflPdfSha256,
+                  eflPdfSha256: det.eflPdfSha256 as string,
                   utilityId: tdspCandidate ?? "UNKNOWN",
                   state: "TX",
                   termMonths: typeof it?.termMonths === "number" ? it.termMonths : null,
