@@ -57,6 +57,20 @@
   - **Droplet env note**: Use a dedicated env file (e.g. `/home/deploy/.efl-pdftotext.env`) loaded via `EnvironmentFile=` in the `efl-pdftotext.service` systemd unit, and set `EFL_PDFTEXT_TOKEN=your-token` (and optional `EFL_PDFTEXT_PORT=8095`) **without quotes**.
   - **Normalization**: If some tools wrap the value in single or double quotes (e.g., `"token"` or `'token'`), the Node helper automatically trims whitespace and strips one pair of wrapping quotes before sending it upstream.
 
+## EFL Fetch Proxy (Droplet) — WAF/403 Fallback
+
+When some EFL hosts block Vercel/AWS IP ranges (common 403/406), the app can optionally route PDF fetching through a separate proxy service (droplet / VPS / vendor) that uses different egress.
+
+- `EFL_FETCH_PROXY_URL`
+  - **Purpose**: Full HTTPS URL of the proxy endpoint that returns raw bytes for a target EFL URL.
+  - **Recommended value**: `https://<your-proxy-host>/efl/fetch`
+  - **Used by**: `lib/efl/fetchEflPdf.ts` (only when direct fetch returns **403/406**).
+
+- `EFL_FETCH_PROXY_TOKEN`
+  - **Purpose**: Optional shared bearer token used to authenticate Vercel → proxy.
+  - **Sent as**: `Authorization: Bearer <EFL_FETCH_PROXY_TOKEN>`
+  - **Server-side**: The proxy should enforce this token when configured.
+
 ## Databases
 - `DATABASE_URL` — Primary IntelliWatt application database (master normalized dataset; used by `prisma/schema.prisma`). **Web app (Vercel) stays on this pooled URL (PgBouncer).**
 - `DIRECT_URL` — Direct Postgres connection for Prisma migrations and backend jobs that should avoid PgBouncer (e.g., SMT ingest/normalize on the droplet). **Do not repoint to the pool.**

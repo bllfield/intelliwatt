@@ -1,0 +1,21 @@
+[Unit]
+Description=IntelliWatt EFL Fetch Proxy (WAF fallback)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/intelliwatt/efl-fetch-proxy
+ExecStart=/usr/bin/node dist/server.js
+Restart=always
+RestartSec=2
+
+# Keep secrets out of repo; load from an OS-owned env file.
+EnvironmentFile=/etc/intelliwatt/efl-fetch-proxy.env
+
+# Hardening (minimal; adjust if needed).
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+

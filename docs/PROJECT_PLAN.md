@@ -186,6 +186,15 @@ Notes:
 - Note: after any `git pull` on the droplet repo, run `sudo bash deploy/droplet/post_pull.sh` to keep nginx/systemd and the EFL helper in sync with the repo.
 - ⬜ Keep DNS + droplet nginx/certbot changes in sync with these docs whenever the helper hostname or topology changes.
 
+### EFL Fetch Proxy (Droplet) — WAF/403 Fallback
+
+- ✅ Added an optional **EFL fetch proxy** integration for hosts that block Vercel/AWS IP ranges (403/406).
+  - App-side fallback is wired in `lib/efl/fetchEflPdf.ts` (only triggers on 403/406).
+  - Configure in Vercel via:
+    - `EFL_FETCH_PROXY_URL=https://<your-proxy-host>/efl/fetch`
+    - `EFL_FETCH_PROXY_TOKEN=<shared bearer token>` (optional but recommended)
+  - Proxy service lives in `deploy/efl-fetch-proxy/` and includes a systemd unit template + SSRF protections.
+
 EFL parser model + extraction status:
 - **Admin tooling (single-pane rule):**
   - All EFL admin tools (batch parsing, review queue, templates, manual runner) live on **`/admin/efl/fact-cards`**.
