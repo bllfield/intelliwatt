@@ -353,6 +353,21 @@ export async function upsertRatePlanFromEfl(
     });
   }
 
+  // 4) Collision guardrail:
+  // If we matched a RatePlan by REP+version (or other identity) but the incoming PDF SHA
+  // already belongs to a *different* RatePlan row, update the SHA-owned row instead.
+  //
+  // This prevents a hard failure when trying to set eflPdfSha256 on the "wrong" row,
+  // which would violate the unique constraint on RatePlan.eflPdfSha256.
+  if (existing && eflPdfSha256) {
+    const bySha = await prisma.ratePlan.findFirst({
+      where: { eflPdfSha256: eflPdfSha256 } as any,
+    });
+    if (bySha && String(bySha.id) !== String(existing.id)) {
+      existing = bySha;
+    }
+  }
+
   if (!existing) {
     const created = await prisma.ratePlan.create({
       data: {
@@ -370,14 +385,39 @@ export async function upsertRatePlanFromEfl(
     };
   }
 
-  const updated = await prisma.ratePlan.update({
-    where: { id: existing.id },
-    data: {
-      ...(utilityId && utilityId.trim() ? { utilityId } : {}),
-      ...(state && state.trim() ? { state } : {}),
-      ...dataCommon,
-    },
-  });
+  let updated: any;
+  try {
+    updated = await prisma.ratePlan.update({
+      where: { id: existing.id },
+      data: {
+        ...(utilityId && utilityId.trim() ? { utilityId } : {}),
+        ...(state && state.trim() ? { state } : {}),
+        ...dataCommon,
+      },
+    });
+  } catch (e: any) {
+    // Defensive recovery: if a concurrent write caused a SHA uniqueness conflict,
+    // resolve by updating the SHA-owned row instead of failing the request.
+    const isShaConflict =
+      String(e?.code ?? "") === "P2002" &&
+      Array.isArray(e?.meta?.target) &&
+      (e.meta.target as any[]).some((t) => String(t) === "eflPdfSha256");
+    if (!isShaConflict) throw e;
+
+    const bySha = await prisma.ratePlan.findFirst({
+      where: { eflPdfSha256: eflPdfSha256 } as any,
+    });
+    if (!bySha) throw e;
+
+    updated = await prisma.ratePlan.update({
+      where: { id: bySha.id },
+      data: {
+        ...(utilityId && utilityId.trim() ? { utilityId } : {}),
+        ...(state && state.trim() ? { state } : {}),
+        ...dataCommon,
+      },
+    });
+  }
   return {
     ratePlan: updated,
     templatePersisted: Boolean(!requiresManualReview && safeRateStructure),
