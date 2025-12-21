@@ -657,6 +657,10 @@ export default function FactCardOpsPage() {
   const [tplRows, setTplRows] = useState<TemplateRow[]>([]);
   const [tplTotalCount, setTplTotalCount] = useState<number | null>(null);
   const [tdspNote, setTdspNote] = useState<string | null>(null);
+  const [hygieneLoading, setHygieneLoading] = useState(false);
+  const [hygieneErr, setHygieneErr] = useState<string | null>(null);
+  const [hygieneRaw, setHygieneRaw] = useState<Json | null>(null);
+  const [hygieneLimit, setHygieneLimit] = useState(500);
   const [backfillIncludeNonStrong, setBackfillIncludeNonStrong] =
     useState(false);
   const [backfillOverwrite, setBackfillOverwrite] = useState(false);
@@ -967,6 +971,46 @@ export default function FactCardOpsPage() {
       setTplErr(e?.message || "Failed to revalidate templates.");
     } finally {
       setTplLoading(false);
+    }
+  }
+
+  async function runTemplateHygiene(apply: boolean) {
+    if (!token) {
+      setTplErr("Admin token required.");
+      return;
+    }
+    if (apply) {
+      const phrase = window.prompt(
+        'Invalidate ORPHAN junk templates only?\n\nThis will clear RatePlan.rateStructure for templates that are missing identity fields and have NO OfferIdRatePlanMap links.\n\nType INVALIDATE_ORPHAN_JUNK to proceed.',
+      );
+      if (!phrase) return;
+      if (phrase.trim() !== "INVALIDATE_ORPHAN_JUNK") {
+        setHygieneErr("Aborted (confirm phrase mismatch).");
+        return;
+      }
+    }
+    setHygieneLoading(true);
+    setHygieneErr(null);
+    try {
+      const res = await fetch("/api/admin/efl/templates/hygiene", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-admin-token": token },
+        body: JSON.stringify({ limit: hygieneLimit, apply }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      setHygieneRaw(data);
+      setTdspNote(
+        `Template hygiene: scanned=${data?.summary?.scannedCandidates ?? 0} orphanJunk=${data?.summary?.orphanJunk ?? 0} linkedNeedsReparse=${data?.summary?.linkedNeedsReparse ?? 0} applied=${data?.summary?.appliedInvalidations ?? 0}`,
+      );
+      // Keep tables fresh after apply.
+      if (apply) {
+        await Promise.all([loadTemplates(), loadUnmappedTemplates()]);
+      }
+    } catch (e: any) {
+      setHygieneErr(e?.message || "Failed to run template hygiene.");
+    } finally {
+      setHygieneLoading(false);
     }
   }
 
@@ -1953,11 +1997,52 @@ export default function FactCardOpsPage() {
             <button className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60" onClick={() => void cleanupInvalidTemplates()} disabled={!ready || tplLoading}>
               Cleanup missing fields
             </button>
+            <button
+              className="px-3 py-2 rounded-lg border border-blue-200 text-blue-800 hover:bg-blue-50 disabled:opacity-60"
+              onClick={() => void runTemplateHygiene(false)}
+              disabled={!ready || tplLoading || hygieneLoading}
+              title="Scan templates that look like legacy/junk (missing identity fields) and report which are orphaned vs linked to offers."
+            >
+              {hygieneLoading ? "Hygiene…" : "Hygiene scan"}
+            </button>
+            <button
+              className="px-3 py-2 rounded-lg border border-blue-200 text-blue-800 hover:bg-blue-50 disabled:opacity-60"
+              onClick={() => void runTemplateHygiene(true)}
+              disabled={!ready || tplLoading || hygieneLoading}
+              title="Invalidate ONLY orphan junk templates (no OfferIdRatePlanMap link). Safe alternative to 'Cleanup missing fields'."
+            >
+              Invalidate orphan junk
+            </button>
             <button className="px-3 py-2 rounded-lg border border-red-200 text-red-700 hover:bg-red-50 disabled:opacity-60" onClick={() => void invalidateAllTemplates()} disabled={!ready || tplLoading}>
               Invalidate ALL templates (danger)
             </button>
           </div>
         </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="text-xs text-gray-700">
+            Hygiene limit{" "}
+            <input
+              className="ml-2 w-24 rounded-lg border px-3 py-2 text-sm"
+              type="number"
+              min={1}
+              max={5000}
+              value={hygieneLimit}
+              onChange={(e) =>
+                setHygieneLimit(Math.max(1, Math.min(5000, numOrNull(e.target.value) ?? 500)))
+              }
+              disabled={!ready || hygieneLoading}
+            />
+          </label>
+          {hygieneErr ? <div className="text-sm text-red-700">{hygieneErr}</div> : null}
+        </div>
+        {hygieneRaw ? (
+          <details className="rounded-xl border bg-gray-50 p-3">
+            <summary className="cursor-pointer text-sm font-medium">
+              Hygiene report (click to expand)
+            </summary>
+            <pre className="mt-2 text-xs overflow-x-auto">{pretty(hygieneRaw)}</pre>
+          </details>
+        ) : null}
         <div className="flex flex-wrap items-center gap-3">
           <input className="flex-1 min-w-[220px] rounded-lg border px-3 py-2 text-sm" placeholder="Search supplier / plan / cert / version / sha…" value={tplQ} onChange={(e) => setTplQ(e.target.value)} />
           <input className="w-28 rounded-lg border px-3 py-2 text-sm" type="number" min={1} max={1000} value={tplLimit} onChange={(e) => setTplLimit(Math.max(1, Math.min(1000, numOrNull(e.target.value) ?? 200)))} />
