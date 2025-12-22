@@ -52,6 +52,7 @@ type UsageInsights = {
   fifteenMinuteAverages: FifteenMinuteAverage[];
   monthlyTotals?: MonthlyRow[];
   dailyTotals?: DailyRow[];
+  timeOfDayBuckets?: { key: string; label: string; kwh: number }[];
   peakDay: { date: string; kwh: number } | null;
   peakHour: { hour: number; kw: number } | null;
   baseload: number | null;
@@ -137,6 +138,12 @@ function formatTimeLabel(hhmm: string) {
 
 function sumKwh(rows: { kwh: number }[]) {
   return rows.reduce((sum, r) => sum + r.kwh, 0);
+}
+
+function pct(part: number, total: number): string {
+  const p = total > 0 ? (part / total) * 100 : 0;
+  if (!Number.isFinite(p)) return "0%";
+  return `${p.toFixed(0)}%`;
 }
 
 function deriveTotalsFromRows(rows: { kwh: number }[]): UsageTotals {
@@ -262,6 +269,12 @@ export const UsageDashboard: React.FC = () => {
     const peakHour = dataset?.insights?.peakHour ?? null;
     const baseload = dataset?.insights?.baseload ?? null;
 
+    const timeOfDayBuckets = (dataset?.insights?.timeOfDayBuckets ?? []).map((b) => ({
+      key: b.key,
+      label: b.label,
+      kwh: b.kwh,
+    }));
+
     const recentDaily = fallbackDaily
       .slice()
       .sort((a, b) => (a.date < b.date ? -1 : 1));
@@ -277,6 +290,7 @@ export const UsageDashboard: React.FC = () => {
       avgDailyKwh,
       weekdayKwh,
       weekendKwh,
+      timeOfDayBuckets,
       peakDay,
       peakHour,
       baseload,
@@ -410,14 +424,46 @@ export const UsageDashboard: React.FC = () => {
             <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm lg:col-span-1">
               <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Weekday vs Weekend</div>
               <div className="mt-3 flex flex-col gap-2 text-sm text-neutral-800">
-                <div className="flex items-center justify-between">
-                  <span>Weekdays</span>
-                  <span className="font-semibold">{derived.weekdayKwh.toFixed(1)} kWh</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span>Weekends</span>
-                  <span className="font-semibold">{derived.weekendKwh.toFixed(1)} kWh</span>
-                </div>
+                {(() => {
+                  const total = derived.weekdayKwh + derived.weekendKwh;
+                  return (
+                    <>
+                      <div className="flex items-center justify-between">
+                        <span>Weekdays</span>
+                        <span className="font-semibold">
+                          {derived.weekdayKwh.toFixed(1)} kWh{" "}
+                          <span className="text-neutral-500 font-normal">({pct(derived.weekdayKwh, total)})</span>
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>Weekends</span>
+                        <span className="font-semibold">
+                          {derived.weekendKwh.toFixed(1)} kWh{" "}
+                          <span className="text-neutral-500 font-normal">({pct(derived.weekendKwh, total)})</span>
+                        </span>
+                      </div>
+                    </>
+                  );
+                })()}
+
+                {derived.timeOfDayBuckets?.length ? (
+                  <>
+                    <div className="my-2 h-px w-full bg-neutral-200" />
+                    <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Time of day</div>
+                    {(() => {
+                      const total = derived.timeOfDayBuckets.reduce((s, b) => s + (Number(b.kwh) || 0), 0);
+                      return derived.timeOfDayBuckets.map((b) => (
+                        <div key={b.key} className="flex items-center justify-between">
+                          <span className="text-neutral-800">{b.label}</span>
+                          <span className="font-semibold">
+                            {Number(b.kwh).toFixed(1)} kWh{" "}
+                            <span className="text-neutral-500 font-normal">({pct(Number(b.kwh) || 0, total)})</span>
+                          </span>
+                        </div>
+                      ));
+                    })()}
+                  </>
+                ) : null}
               </div>
             </div>
 

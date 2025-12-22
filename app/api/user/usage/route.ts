@@ -146,6 +146,7 @@ async function computeInsightsFromDb(args: {
   dailyTotals: Array<{ date: string; kwh: number }>;
   monthlyTotals: Array<{ month: string; kwh: number }>;
   fifteenMinuteAverages: Array<{ hhmm: string; avgKw: number }>;
+  timeOfDayBuckets: Array<{ key: string; label: string; kwh: number }>;
   peakDay: { date: string; kwh: number } | null;
   peakHour: { hour: number; kw: number } | null;
   baseload: number | null;
@@ -155,6 +156,7 @@ async function computeInsightsFromDb(args: {
     dailyTotals: [] as Array<{ date: string; kwh: number }>,
     monthlyTotals: [] as Array<{ month: string; kwh: number }>,
     fifteenMinuteAverages: [] as Array<{ hhmm: string; avgKw: number }>,
+    timeOfDayBuckets: [] as Array<{ key: string; label: string; kwh: number }>,
     peakDay: null as { date: string; kwh: number } | null,
     peakHour: null as { hour: number; kw: number } | null,
     baseload: null as number | null,
@@ -203,6 +205,64 @@ async function computeInsightsFromDb(args: {
         ORDER BY 1 ASC
       `);
       const fifteenMinuteAverages = fifteenRows.map((r) => ({ hhmm: String(r.hhmm), avgKw: round2(r.avgkw) }));
+
+      const todRows = await prisma.$queryRaw<Array<{ key: string; label: string; sort: number; kwh: number }>>(Prisma.sql`
+        SELECT
+          key,
+          label,
+          sort,
+          SUM("kwh")::float AS kwh
+        FROM (
+          SELECT
+            CASE
+              WHEN EXTRACT(HOUR FROM ("ts" AT TIME ZONE 'America/Chicago')) >= 0
+               AND EXTRACT(HOUR FROM ("ts" AT TIME ZONE 'America/Chicago')) < 6
+                THEN 'overnight'
+              WHEN EXTRACT(HOUR FROM ("ts" AT TIME ZONE 'America/Chicago')) >= 6
+               AND EXTRACT(HOUR FROM ("ts" AT TIME ZONE 'America/Chicago')) < 12
+                THEN 'morning'
+              WHEN EXTRACT(HOUR FROM ("ts" AT TIME ZONE 'America/Chicago')) >= 12
+               AND EXTRACT(HOUR FROM ("ts" AT TIME ZONE 'America/Chicago')) < 18
+                THEN 'afternoon'
+              ELSE 'evening'
+            END AS key,
+            CASE
+              WHEN EXTRACT(HOUR FROM ("ts" AT TIME ZONE 'America/Chicago')) >= 0
+               AND EXTRACT(HOUR FROM ("ts" AT TIME ZONE 'America/Chicago')) < 6
+                THEN 'Overnight (12am–6am)'
+              WHEN EXTRACT(HOUR FROM ("ts" AT TIME ZONE 'America/Chicago')) >= 6
+               AND EXTRACT(HOUR FROM ("ts" AT TIME ZONE 'America/Chicago')) < 12
+                THEN 'Morning (6am–12pm)'
+              WHEN EXTRACT(HOUR FROM ("ts" AT TIME ZONE 'America/Chicago')) >= 12
+               AND EXTRACT(HOUR FROM ("ts" AT TIME ZONE 'America/Chicago')) < 18
+                THEN 'Afternoon (12pm–6pm)'
+              ELSE 'Evening (6pm–12am)'
+            END AS label,
+            CASE
+              WHEN EXTRACT(HOUR FROM ("ts" AT TIME ZONE 'America/Chicago')) >= 0
+               AND EXTRACT(HOUR FROM ("ts" AT TIME ZONE 'America/Chicago')) < 6
+                THEN 1
+              WHEN EXTRACT(HOUR FROM ("ts" AT TIME ZONE 'America/Chicago')) >= 6
+               AND EXTRACT(HOUR FROM ("ts" AT TIME ZONE 'America/Chicago')) < 12
+                THEN 2
+              WHEN EXTRACT(HOUR FROM ("ts" AT TIME ZONE 'America/Chicago')) >= 12
+               AND EXTRACT(HOUR FROM ("ts" AT TIME ZONE 'America/Chicago')) < 18
+                THEN 3
+              ELSE 4
+            END AS sort,
+            "kwh"
+          FROM "SmtInterval"
+          WHERE "esiid" = ${esiid}
+            AND "ts" >= ${args.cutoff}
+        ) t
+        GROUP BY key, label, sort
+        ORDER BY sort ASC
+      `);
+      const timeOfDayBuckets = todRows.map((r) => ({
+        key: String(r.key),
+        label: String(r.label),
+        kwh: round2(r.kwh),
+      }));
 
       const peakHourRows = await prisma.$queryRaw<Array<{ hour: number; sumkwh: number }>>(Prisma.sql`
         SELECT
@@ -253,6 +313,7 @@ async function computeInsightsFromDb(args: {
         dailyTotals,
         monthlyTotals,
         fifteenMinuteAverages,
+        timeOfDayBuckets,
         peakDay,
         peakHour,
         baseload,
@@ -306,6 +367,65 @@ async function computeInsightsFromDb(args: {
     `)) as Array<{ hhmm: string; avgkw: number }>;
     const fifteenMinuteAverages = fifteenRows.map((r) => ({ hhmm: String(r.hhmm), avgKw: round2(r.avgkw) }));
 
+    const todRows = (await usageClient.$queryRaw(Prisma.sql`
+      SELECT
+        key,
+        label,
+        sort,
+        SUM("consumptionKwh")::float AS kwh
+      FROM (
+        SELECT
+          CASE
+            WHEN EXTRACT(HOUR FROM ("timestamp" AT TIME ZONE 'America/Chicago')) >= 0
+             AND EXTRACT(HOUR FROM ("timestamp" AT TIME ZONE 'America/Chicago')) < 6
+              THEN 'overnight'
+            WHEN EXTRACT(HOUR FROM ("timestamp" AT TIME ZONE 'America/Chicago')) >= 6
+             AND EXTRACT(HOUR FROM ("timestamp" AT TIME ZONE 'America/Chicago')) < 12
+              THEN 'morning'
+            WHEN EXTRACT(HOUR FROM ("timestamp" AT TIME ZONE 'America/Chicago')) >= 12
+             AND EXTRACT(HOUR FROM ("timestamp" AT TIME ZONE 'America/Chicago')) < 18
+              THEN 'afternoon'
+            ELSE 'evening'
+          END AS key,
+          CASE
+            WHEN EXTRACT(HOUR FROM ("timestamp" AT TIME ZONE 'America/Chicago')) >= 0
+             AND EXTRACT(HOUR FROM ("timestamp" AT TIME ZONE 'America/Chicago')) < 6
+              THEN 'Overnight (12am–6am)'
+            WHEN EXTRACT(HOUR FROM ("timestamp" AT TIME ZONE 'America/Chicago')) >= 6
+             AND EXTRACT(HOUR FROM ("timestamp" AT TIME ZONE 'America/Chicago')) < 12
+              THEN 'Morning (6am–12pm)'
+            WHEN EXTRACT(HOUR FROM ("timestamp" AT TIME ZONE 'America/Chicago')) >= 12
+             AND EXTRACT(HOUR FROM ("timestamp" AT TIME ZONE 'America/Chicago')) < 18
+              THEN 'Afternoon (12pm–6pm)'
+            ELSE 'Evening (6pm–12am)'
+          END AS label,
+          CASE
+            WHEN EXTRACT(HOUR FROM ("timestamp" AT TIME ZONE 'America/Chicago')) >= 0
+             AND EXTRACT(HOUR FROM ("timestamp" AT TIME ZONE 'America/Chicago')) < 6
+              THEN 1
+            WHEN EXTRACT(HOUR FROM ("timestamp" AT TIME ZONE 'America/Chicago')) >= 6
+             AND EXTRACT(HOUR FROM ("timestamp" AT TIME ZONE 'America/Chicago')) < 12
+              THEN 2
+            WHEN EXTRACT(HOUR FROM ("timestamp" AT TIME ZONE 'America/Chicago')) >= 12
+             AND EXTRACT(HOUR FROM ("timestamp" AT TIME ZONE 'America/Chicago')) < 18
+              THEN 3
+            ELSE 4
+          END AS sort,
+          "consumptionKwh"
+        FROM "GreenButtonInterval"
+        WHERE "homeId" = ${houseId}
+          AND "rawId" = ${rawId}
+          AND "timestamp" >= ${args.cutoff}
+      ) t
+      GROUP BY key, label, sort
+      ORDER BY sort ASC
+    `)) as Array<{ key: string; label: string; sort: number; kwh: number }>;
+    const timeOfDayBuckets = todRows.map((r) => ({
+      key: String(r.key),
+      label: String(r.label),
+      kwh: round2(r.kwh),
+    }));
+
     const peakHourRows = (await usageClient.$queryRaw(Prisma.sql`
       SELECT
         EXTRACT(HOUR FROM "timestamp")::int AS hour,
@@ -358,6 +478,7 @@ async function computeInsightsFromDb(args: {
       dailyTotals,
       monthlyTotals,
       fifteenMinuteAverages,
+      timeOfDayBuckets,
       peakDay,
       peakHour,
       baseload,
