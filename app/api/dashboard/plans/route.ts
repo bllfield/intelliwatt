@@ -1718,7 +1718,14 @@ export async function GET(req: NextRequest) {
         total,
         totalPages,
       },
-      { status: 200 },
+      {
+        status: 200,
+        headers: {
+          // Customer-specific (cookie auth) but safe to cache in the browser.
+          // This allows dashboard-entry prefetch to populate the browser cache so /dashboard/plans loads instantly.
+          "Cache-Control": "private, max-age=900, stale-while-revalidate=86400",
+        },
+      },
     );
   } catch (e: any) {
     return NextResponse.json(
