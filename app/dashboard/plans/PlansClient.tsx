@@ -430,13 +430,40 @@ export default function PlansClient() {
   const showCalcBot =
     Boolean(hasUsage && sort === "best_for_you_proxy" && (isStillWorking || queuedCount > 0));
 
+  const defaultCalcMsg =
+    "I'm calculating all your options using your actual usage to determine which plan is best based on your energy usage habits.\n\nYour results will be available soon.";
+  const [calcBotMsg, setCalcBotMsg] = useState<string>(defaultCalcMsg);
+  const calcBotLoadedRef = useRef(false);
+
+  useEffect(() => {
+    if (!showCalcBot) return;
+    if (calcBotLoadedRef.current) return;
+    calcBotLoadedRef.current = true;
+    const controller = new AbortController();
+    async function run() {
+      try {
+        const r = await fetch(`/api/bot/message?path=${encodeURIComponent("/dashboard/plans")}&event=calculating_best`, {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const j = await r.json().catch(() => null);
+        const msg = j?.ok && typeof j?.message === "string" ? String(j.message).trim() : "";
+        if (msg) setCalcBotMsg(msg);
+      } catch {
+        // keep default
+      }
+    }
+    run();
+    return () => controller.abort();
+  }, [showCalcBot]);
+
   return (
     <div className="flex flex-col gap-6">
       <IntelliwattBotPopup
         visible={showCalcBot}
         storageKey="iw_bot_plans_calc_v1"
         ttlMs={15 * 60 * 1000}
-        message={`I'm calculating all your options using your actual usage to determine which plan is best based on your energy usage habits.\n\nYour results will be available soon.`}
+        message={calcBotMsg}
       />
       <div className="sticky top-0 z-20 -mx-4 px-4 pt-2 pb-3 bg-brand-white/90 backdrop-blur border-b border-brand-cyan/15">
         <div className="mx-auto max-w-5xl">

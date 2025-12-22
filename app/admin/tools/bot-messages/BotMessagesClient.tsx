@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 
 type PageRow = {
   pageKey: string;
+  baseKey?: string;
+  eventKey?: string | null;
   label: string;
   paths: string[];
   defaultMessage: string;
@@ -20,6 +22,7 @@ export default function BotMessagesClient() {
   const [error, setError] = useState<string | null>(null);
   const [pages, setPages] = useState<PageRow[]>([]);
   const [drafts, setDrafts] = useState<Record<string, { enabled: boolean; message: string }>>({});
+  const [newEventByBase, setNewEventByBase] = useState<Record<string, string>>({});
 
   useEffect(() => {
     try {
@@ -105,6 +108,40 @@ export default function BotMessagesClient() {
     }
   }
 
+  function addEventVariant(baseKey: string) {
+    const raw = String(newEventByBase[baseKey] ?? "").trim();
+    const eventKey = raw.toLowerCase().replace(/[^a-z0-9_.-]+/g, "_").replace(/^_+|_+$/g, "");
+    if (!eventKey) return;
+    const composite = `${baseKey}::${eventKey}`;
+
+    setDrafts((prev) => {
+      if (prev[composite]) return prev;
+      const baseRow = pages.find((p) => p.pageKey === baseKey) ?? null;
+      const fallback = baseRow?.defaultMessage ?? "";
+      return { ...prev, [composite]: { enabled: true, message: fallback } };
+    });
+    setPages((prev) => {
+      if (prev.some((p) => p.pageKey === composite)) return prev;
+      const baseRow = pages.find((p) => p.pageKey === baseKey) ?? null;
+      const label = baseRow ? `${baseRow.label} — event: ${eventKey}` : `${baseKey} — event: ${eventKey}`;
+      const paths = baseRow?.paths ?? [];
+      const defaultMessage = baseRow?.defaultMessage ?? "";
+      return [
+        ...prev,
+        {
+          pageKey: composite,
+          baseKey,
+          eventKey,
+          label,
+          paths,
+          defaultMessage,
+          current: { enabled: false, message: null, updatedAt: null },
+        },
+      ];
+    });
+    setNewEventByBase((prev) => ({ ...prev, [baseKey]: "" }));
+  }
+
   return (
     <div className="mx-auto w-full max-w-6xl p-6">
       <div className="rounded-3xl border border-brand-cyan/25 bg-brand-navy p-6 text-brand-cyan shadow-[0_18px_40px_rgba(10,20,60,0.35)]">
@@ -142,6 +179,7 @@ export default function BotMessagesClient() {
           {pages.map((p) => {
             const d = drafts[p.pageKey] ?? { enabled: p.current.enabled, message: p.current.message ?? p.defaultMessage };
             const isSaving = savingKey === p.pageKey;
+            const isBase = !p.pageKey.includes("::");
             return (
               <div key={p.pageKey} className="rounded-2xl border border-brand-cyan/20 bg-brand-white/5 p-4">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -157,6 +195,25 @@ export default function BotMessagesClient() {
                   </div>
 
                   <div className="flex items-center gap-3">
+                    {isBase ? (
+                      <div className="hidden sm:flex items-center gap-2">
+                        <input
+                          value={newEventByBase[p.pageKey] ?? ""}
+                          onChange={(e) =>
+                            setNewEventByBase((prev) => ({ ...prev, [p.pageKey]: e.target.value }))
+                          }
+                          placeholder="event key (e.g. calculating)"
+                          className="w-[220px] rounded-2xl border border-brand-cyan/25 bg-brand-white/5 px-3 py-2 text-xs text-brand-white placeholder:text-brand-cyan/40 outline-none focus:border-brand-blue/60"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => addEventVariant(p.pageKey)}
+                          className="rounded-full border border-brand-cyan/25 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-cyan hover:bg-brand-white/10"
+                        >
+                          Add event message
+                        </button>
+                      </div>
+                    ) : null}
                     <label className="flex items-center gap-2 text-xs text-brand-cyan/75 select-none">
                       <input
                         type="checkbox"
