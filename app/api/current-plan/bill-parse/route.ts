@@ -378,6 +378,7 @@ export async function POST(request: NextRequest) {
       providerName: record.providerName ?? null,
       planName: record.planName ?? null,
       rateType: record.rateType ?? null,
+      meterNumber: record.meterNumber ?? null,
       energyRateCents: decimalToNumber(record.energyRateCents),
       baseMonthlyFee: decimalToNumber(record.baseMonthlyFee),
       billCreditDollars: decimalToNumber(record.billCreditDollars),

@@ -108,6 +108,7 @@ const serializeParsedPlan = (entry: ParsedEntry | null) => {
     providerName: entry.providerName,
     planName: entry.planName,
     rateType: entry.rateType,
+    meterNumber: (entry as any).meterNumber ?? null,
     energyRateCents: decimalToNumber(entry.energyRateCents),
     baseMonthlyFee: decimalToNumber(entry.baseMonthlyFee),
     billCreditDollars: decimalToNumber(entry.billCreditDollars),

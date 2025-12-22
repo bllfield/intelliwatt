@@ -264,6 +264,7 @@ export function CurrentRateDetailsForm({
   const [termLengthMonths, setTermLengthMonths] = useState("");
   const [earlyTerminationFee, setEarlyTerminationFee] = useState("");
   const [contractExpiration, setContractExpiration] = useState("");
+  const [meterNumber, setMeterNumber] = useState("");
   const [esiId, setEsiId] = useState("");
   const [accountNumberLast4, setAccountNumberLast4] = useState("");
   const [notes, setNotes] = useState("");
@@ -273,6 +274,8 @@ export function CurrentRateDetailsForm({
   const [isParsingEfl, setIsParsingEfl] = useState(false);
   const [eflParseStatus, setEflParseStatus] = useState<string | null>(null);
   const [prefilledFromEfl, setPrefilledFromEfl] = useState(false);
+  const [isParsingBill, setIsParsingBill] = useState(false);
+  const [billParseStatus, setBillParseStatus] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [hasAwarded, setHasAwarded] = useState(false);
@@ -447,6 +450,11 @@ export function CurrentRateDetailsForm({
       setContractExpiration(pickedContractEnd.slice(0, 10));
     }
 
+    const pickedMeter = pickString((saved as any)?.meterNumber, (parsed as any)?.meterNumber);
+    if (!meterNumber && pickedMeter) {
+      setMeterNumber(pickedMeter);
+    }
+
     const pickedEarlyTermination = pickNumber(
       saved?.earlyTerminationFee,
       parsed?.earlyTerminationFee,
@@ -549,6 +557,7 @@ export function CurrentRateDetailsForm({
     baseFeeDollars,
     termLengthMonths,
     contractExpiration,
+    meterNumber,
     earlyTerminationFee,
     esiId,
     accountNumberLast4,
@@ -557,6 +566,30 @@ export function CurrentRateDetailsForm({
     variableIndexType,
     variableNotes,
   ]);
+
+  function applyParsedPlanToForm(p: any) {
+    if (!p || typeof p !== "object") return;
+    if (typeof p?.providerName === "string" && p.providerName.trim()) setElectricCompany(p.providerName);
+    if (typeof p?.planName === "string" && p.planName.trim()) setPlanName(p.planName);
+    if (typeof p?.rateType === "string" && ["FIXED", "VARIABLE", "TIME_OF_USE"].includes(p.rateType)) {
+      setRateType(p.rateType as any);
+    }
+    if (typeof p?.termLengthMonths === "number" && Number.isFinite(p.termLengthMonths)) {
+      setTermLengthMonths(String(p.termLengthMonths));
+    }
+    if (typeof p?.baseMonthlyFee === "number" && Number.isFinite(p.baseMonthlyFee) && baseFeeDollars.trim() === "") {
+      setBaseFeeDollars(String(p.baseMonthlyFee));
+    }
+    if (typeof p?.contractEndDate === "string" && p.contractEndDate) {
+      setContractExpiration(p.contractEndDate.slice(0, 10));
+    }
+    if (typeof p?.earlyTerminationFee === "number" && Number.isFinite(p.earlyTerminationFee)) {
+      setEarlyTerminationFee(String(p.earlyTerminationFee));
+    }
+    if (typeof p?.esiId === "string" && p.esiId.trim()) setEsiId(p.esiId);
+    if (typeof p?.accountNumberLast4 === "string" && p.accountNumberLast4.trim()) setAccountNumberLast4(p.accountNumberLast4);
+    if (typeof p?.meterNumber === "string" && p.meterNumber.trim()) setMeterNumber(p.meterNumber);
+  }
 
   useEffect(() => {
     if (rateType !== "VARIABLE") {
@@ -798,6 +831,10 @@ export function CurrentRateDetailsForm({
       files.forEach((bill) => {
         formData.append("billFile", bill);
       });
+      const houseId = parsedPlan?.houseId ?? savedPlan?.houseId ?? null;
+      if (houseId) {
+        formData.append("houseId", houseId);
+      }
 
       const response = await fetch("/api/current-plan/upload", {
         method: "POST",
@@ -838,15 +875,32 @@ export function CurrentRateDetailsForm({
       // After a successful upload, run the bill parser so parsedCurrentPlan is
       // populated for this user/house, then refresh the form from the result.
       try {
-        await fetch("/api/current-plan/bill-parse", {
+        setIsParsingBill(true);
+        setBillParseStatus("Parsing your bill…");
+        const uploadId = data?.latestUploadId ?? null;
+        const r2 = await fetch("/api/current-plan/bill-parse", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          // houseId is optional here; the API will fall back to the latest
-          // uploaded bill for this user when none is provided.
-          body: JSON.stringify({}),
+          body: JSON.stringify({
+            ...(houseId ? { houseId } : {}),
+            ...(uploadId ? { uploadId } : {}),
+          }),
         });
+        const j2 = await r2.json().catch(() => null);
+        if (r2.ok && j2?.ok) {
+          applyParsedPlanToForm(j2?.parsedPlan ?? null);
+          setBillParseStatus("Bill parsed. We pre-filled your fields—please double-check everything (especially meter # and contract date).");
+        } else {
+          setBillParseStatus(
+            j2?.error
+              ? `We uploaded your bill, but couldn't parse it automatically: ${String(j2.error)}`
+              : `We uploaded your bill, but couldn't parse it automatically (HTTP ${r2.status}).`,
+          );
+        }
       } catch {
-        // Best-effort; upload success is still valuable even if parsing fails.
+        setBillParseStatus("We uploaded your bill, but couldn't parse it automatically. Please enter the details manually below.");
+      } finally {
+        setIsParsingBill(false);
       }
 
       await refreshPlan();
@@ -882,7 +936,12 @@ export function CurrentRateDetailsForm({
       });
       const j = await r.json().catch(() => null);
       if (!r.ok || !j?.ok) {
-        setEflParseStatus(j?.error ? String(j.error) : `EFL parse failed (${r.status})`);
+        setPrefilledFromEfl(false);
+        setEflParseStatus(
+          `We couldn't extract enough from this EFL to prefill your plan details. ` +
+            `Please enter your info manually below (and double-check meter # and contract expiration). ` +
+            (j?.error ? `(${String(j.error)})` : `(HTTP ${r.status})`),
+        );
         return false;
       }
 
@@ -993,10 +1052,11 @@ export function CurrentRateDetailsForm({
         return;
       }
 
+      applyParsedPlanToForm(json?.parsedPlan ?? null);
       setShowPasteModal(false);
       setPastedBillText("");
 
-      setUploadStatus("Bill text parsed. Your current plan details below have been refreshed.");
+      setUploadStatus("Bill text parsed. Your current plan details below have been refreshed—please double-check meter # and contract expiration.");
       await refreshPlan();
     } catch (err: any) {
       setPasteError(
@@ -1019,7 +1079,13 @@ export function CurrentRateDetailsForm({
     const termLength = parseNumber(termLengthMonths);
     const earlyTermination = parseNumber(earlyTerminationFee);
     const contractDate = contractExpiration.trim().length > 0 ? new Date(contractExpiration) : null;
-    const formattedNotes = notes.trim().length > 0 ? notes.trim() : null;
+    const meterNumberValue = meterNumber.trim().length > 0 ? meterNumber.trim() : null;
+    let formattedNotes = notes.trim().length > 0 ? notes.trim() : null;
+    if (meterNumberValue) {
+      const tag = `Meter Number: ${meterNumberValue}`;
+      if (!formattedNotes) formattedNotes = tag;
+      else if (!formattedNotes.toLowerCase().includes("meter number:")) formattedNotes = `${formattedNotes}\n${tag}`;
+    }
     const esiIdValue = esiId.trim().length > 0 ? esiId.trim() : null;
     const accountLast4Value =
       accountNumberLast4.trim().length > 0 ? accountNumberLast4.trim() : null;
@@ -1833,6 +1899,14 @@ export function CurrentRateDetailsForm({
           >
             {isUploading ? "Uploading…" : billUploaded ? "Bill Uploaded ✓" : "Upload bill now"}
           </button>
+          {isParsingBill ? (
+            <p className="text-sm text-brand-blue">Parsing your bill…</p>
+          ) : null}
+          {billParseStatus ? (
+            <p className={`text-sm ${billParseStatus.toLowerCase().includes("parsed") ? "text-emerald-700" : "text-rose-700"}`}>
+              {billParseStatus}
+            </p>
+          ) : null}
           {uploadStatus ? (
             <p
               className={`text-sm ${
@@ -2451,6 +2525,20 @@ export function CurrentRateDetailsForm({
               className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm transition focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/40"
               placeholder="17- or 22-digit ID from your bill"
             />
+          </label>
+
+          <label className="block space-y-1 text-sm text-brand-navy">
+            <span className="font-semibold uppercase tracking-wide text-brand-navy/80">Meter number (optional)</span>
+            <input
+              type="text"
+              value={meterNumber}
+              onChange={(e) => setMeterNumber(e.target.value)}
+              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm transition focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/40"
+              placeholder="Meter number from your bill (if shown)"
+            />
+            <span className="block text-xs text-brand-slate">
+              If we parsed your bill, we’ll prefill this—please double-check it.
+            </span>
           </label>
 
           <label className="block space-y-1 text-sm text-brand-navy">

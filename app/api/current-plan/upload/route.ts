@@ -59,6 +59,7 @@ export async function POST(request: NextRequest) {
     }
 
     const currentPlanPrisma = getCurrentPlanPrisma();
+    const uploadIds: string[] = [];
 
     for (const billFile of billFiles) {
       const fileName = billFile.name?.toLowerCase?.() ?? '';
@@ -93,7 +94,7 @@ export async function POST(request: NextRequest) {
 
       const buffer = Buffer.from(arrayBuffer);
 
-      await currentPlanPrisma.currentPlanBillUpload.create({
+      const created = await currentPlanPrisma.currentPlanBillUpload.create({
         data: {
           userId: user.id,
           houseId,
@@ -102,7 +103,9 @@ export async function POST(request: NextRequest) {
           sizeBytes: buffer.length,
           billData: buffer,
         },
+        select: { id: true },
       });
+      if (created?.id) uploadIds.push(String(created.id));
     }
 
     const entryResult = await ensureCurrentPlanEntry(user.id, houseId);
@@ -111,6 +114,8 @@ export async function POST(request: NextRequest) {
       ok: true,
       entryAwarded: entryResult.entryAwarded,
       alreadyAwarded: entryResult.alreadyAwarded,
+      uploadIds,
+      latestUploadId: uploadIds.length > 0 ? uploadIds[uploadIds.length - 1] : null,
     });
   } catch (error) {
     console.error('[current-plan/upload] Failed to save bill upload', error);
