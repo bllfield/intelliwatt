@@ -100,6 +100,36 @@ function lastNYearMonthsChicagoFrom(date: Date, n: number): string[] {
   return out;
 }
 
+function prevYearMonth(ym: string): string | null {
+  const s = String(ym ?? "").trim();
+  const m = s.match(/^(\d{4})-(\d{2})$/);
+  if (!m?.[1] || !m?.[2]) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  if (!Number.isFinite(y) || !Number.isFinite(mo) || mo < 1 || mo > 12) return null;
+  const py = mo === 1 ? y - 1 : y;
+  const pm = mo === 1 ? 12 : mo - 1;
+  return `${String(py)}-${String(pm).padStart(2, "0")}`;
+}
+
+function chicagoYearMonthFromDate(d: Date): string | null {
+  try {
+    const fmt = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/Chicago",
+      year: "numeric",
+      month: "2-digit",
+    });
+    const parts = fmt.formatToParts(d);
+    const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+    const y = get("year");
+    const m = get("month");
+    if (!y || !m) return null;
+    return `${y}-${m}`;
+  } catch {
+    return null;
+  }
+}
+
 function chicagoParts(ts: Date): {
   yearMonth: string;
   month: number;
@@ -433,8 +463,14 @@ export async function GET(req: NextRequest) {
     });
 
     // Ensure + load the bucket totals REQUIRED by this plan (not just the 9-core bucket set).
+    // Use 12 FULL calendar months ending at the last completed month (Chicago-local),
+    // to avoid partial edge months causing "extra" monthly fixed fees.
     const endForMonths = windowEnd ?? new Date();
-    const yearMonths = lastNYearMonthsChicagoFrom(endForMonths, 13).slice().reverse(); // oldest -> newest
+    const endYmRaw = chicagoYearMonthFromDate(endForMonths);
+    const endYm = endYmRaw ? prevYearMonth(endYmRaw) : null;
+    const yearMonths = (endYm ? lastNYearMonthsChicagoFrom(new Date(`${endYm}-15T12:00:00Z`), 12) : lastNYearMonthsChicagoFrom(endForMonths, 12))
+      .slice()
+      .reverse(); // oldest -> newest
     const keysToLoad = Array.from(
       new Set(
         ["kwh.m.all.total", ...(requiredBucketKeys ?? [])]
@@ -488,6 +524,21 @@ export async function GET(req: NextRequest) {
       return row;
     });
 
+    // Prefer annual kWh from the same 12 full months used for the monthly table.
+    try {
+      const sum = yearMonths
+        .map((ym) => {
+          const v = usageBucketsByMonthForCalc?.[ym]?.["kwh.m.all.total"];
+          return typeof v === "number" && Number.isFinite(v) ? v : 0;
+        })
+        .reduce((a, b) => a + b, 0);
+      if (sum > 0) {
+        annualKwh = Number.isFinite(sum) ? sum : annualKwh;
+      }
+    } catch {
+      // ignore
+    }
+
     // Calc inputs / variables
     const repEnergyCentsPerKwh = rsPresent ? extractFixedRepEnergyCentsPerKwh(rateStructure) : null;
     const repFixedMonthlyChargeDollars = rsPresent ? extractRepFixedMonthlyChargeDollars(rateStructure) : null;
@@ -504,7 +555,7 @@ export async function GET(req: NextRequest) {
     const trueCostEstimate =
       annualKwh && rsPresent && (overriddenComputable || planComputability?.status !== "NOT_COMPUTABLE")
         ? calculatePlanCostForUsage({
-            annualKwh, // strict last-365-days total (matches /api/user/usage)
+            annualKwh, // 12 full months total (matches monthly table)
             monthsCount: 12,
             tdsp: {
               perKwhDeliveryChargeCents: tdspApplied?.perKwhDeliveryChargeCents ?? 0,
@@ -734,7 +785,7 @@ export async function GET(req: NextRequest) {
           bucketsMode: "required",
           yearMonths,
           avgMonthlyKwh,
-          annualKwh, // strict last-365-days total
+          annualKwh, // 12 full months total (sum of kwh.m.all.total over yearMonths)
           bucketDefs: bucketDefsForResponse,
           bucketTable,
         },
@@ -752,7 +803,7 @@ export async function GET(req: NextRequest) {
           effectiveCentsPerKwh,
         },
         notes: [
-          "Usage window matches /api/user/usage: strict last 365 days ending at your latest interval timestamp.",
+          "This page uses 12 full calendar months ending at the last completed month (America/Chicago) for totals and fixed monthly fees.",
           "Bucket totals are loaded from the usage DB (homeMonthlyUsageBucket) in America/Chicago local time.",
           "Missing required buckets are auto-created and computed on-demand (best-effort) for this plan.",
         ],
