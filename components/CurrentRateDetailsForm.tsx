@@ -150,6 +150,8 @@ type PlanVariablesUsed = {
     | null;
 };
 
+type VariablesListRow = { key: string; label: string; value: string };
+
 type CurrentRateDetailsFormProps = {
   onContinue?: (data: ManualEntryPayload) => void;
   onSkip?: () => void;
@@ -241,6 +243,7 @@ export function CurrentRateDetailsForm({
   const [savedPlan, setSavedPlan] = useState<SavedPlanDetails | null>(null);
   const [parsedPlan, setParsedPlan] = useState<ParsedPlanDetails | null>(null);
   const [planVariablesUsed, setPlanVariablesUsed] = useState<PlanVariablesUsed | null>(null);
+  const [planVariablesList, setPlanVariablesList] = useState<VariablesListRow[] | null>(null);
   const [planEntrySnapshot, setPlanEntrySnapshot] = useState<EntrySnapshot | null>(null);
   const [usageSnapshot, setUsageSnapshot] = useState<EntrySnapshot | null>(null);
   const [hasActiveUsage, setHasActiveUsage] = useState(false);
@@ -335,6 +338,7 @@ export function CurrentRateDetailsForm({
       setSavedPlan(payload?.savedCurrentPlan ?? null);
       setParsedPlan(payload?.parsedCurrentPlan ?? null);
       setPlanVariablesUsed(payload?.planVariablesUsed ?? null);
+      setPlanVariablesList(Array.isArray(payload?.planVariablesList) ? payload.planVariablesList : null);
       setPlanEntrySnapshot(nextPlanEntrySnapshot);
       setUsageSnapshot(payload?.usage ?? null);
 
@@ -357,7 +361,7 @@ export function CurrentRateDetailsForm({
       setSavedPlan(null);
       setParsedPlan(null);
       setPlanVariablesUsed(null);
-      setPlanVariablesUsed(null);
+      setPlanVariablesList(null);
       setPlanEntrySnapshot(null);
       setUsageSnapshot(null);
       setHasActiveUsage(false);
@@ -1563,47 +1567,58 @@ export function CurrentRateDetailsForm({
             <div className={`${snapshotCardClasses} mt-5`}>
               <p className={snapshotLabelClasses}>Plan variables used</p>
               <div className="mt-2 space-y-1 text-sm text-brand-cyan/85">
-                <div className="flex items-center justify-between gap-3">
-                  <span>REP energy</span>
-                  <span className="font-semibold text-brand-white/90">
-                    {planVariablesUsed?.rep?.energyCentsPerKwh != null
-                      ? `${Number(planVariablesUsed.rep.energyCentsPerKwh).toFixed(4)}¢/kWh`
-                      : "—"}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span>REP fixed</span>
-                  <span className="font-semibold text-brand-white/90">
-                    {planVariablesUsed?.rep?.fixedMonthlyChargeDollars != null
-                      ? `${formatCurrency(Number(planVariablesUsed.rep.fixedMonthlyChargeDollars))}/mo`
-                      : "—/mo"}
-                  </span>
-                </div>
-                <div className="my-2 h-px w-full bg-brand-cyan/15" />
-                <div className="flex items-center justify-between gap-3">
-                  <span>TDSP delivery</span>
-                  <span className="font-semibold text-brand-white/90">
-                    {planVariablesUsed?.tdsp?.perKwhDeliveryChargeCents != null
-                      ? `${Number(planVariablesUsed.tdsp.perKwhDeliveryChargeCents).toFixed(4)}¢/kWh`
-                      : "—"}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span>TDSP customer</span>
-                  <span className="font-semibold text-brand-white/90">
-                    {planVariablesUsed?.tdsp?.monthlyCustomerChargeDollars != null
-                      ? `${formatCurrency(Number(planVariablesUsed.tdsp.monthlyCustomerChargeDollars))}/mo`
-                      : "—/mo"}
-                  </span>
-                </div>
-                {planVariablesUsed?.tdsp?.effectiveDate ? (
-                  <div className="mt-1 text-xs text-brand-cyan/70">
-                    TDSP effective:{" "}
-                    <span className="font-mono text-brand-white/90">
-                      {String(planVariablesUsed.tdsp.effectiveDate).slice(0, 10)}
-                    </span>
-                  </div>
-                ) : null}
+                {Array.isArray(planVariablesList) && planVariablesList.length > 0 ? (
+                  planVariablesList.map((row) => (
+                    <div key={row.key} className="flex items-center justify-between gap-3">
+                      <span>{row.label}</span>
+                      <span className="font-semibold text-brand-white/90">{row.value}</span>
+                    </div>
+                  ))
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between gap-3">
+                      <span>REP energy</span>
+                      <span className="font-semibold text-brand-white/90">
+                        {planVariablesUsed?.rep?.energyCentsPerKwh != null
+                          ? `${Number(planVariablesUsed.rep.energyCentsPerKwh).toFixed(4)}¢/kWh`
+                          : "—"}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span>REP fixed</span>
+                      <span className="font-semibold text-brand-white/90">
+                        {planVariablesUsed?.rep?.fixedMonthlyChargeDollars != null
+                          ? `${formatCurrency(Number(planVariablesUsed.rep.fixedMonthlyChargeDollars))}/mo`
+                          : "—/mo"}
+                      </span>
+                    </div>
+                    <div className="my-2 h-px w-full bg-brand-cyan/15" />
+                    <div className="flex items-center justify-between gap-3">
+                      <span>TDSP delivery</span>
+                      <span className="font-semibold text-brand-white/90">
+                        {planVariablesUsed?.tdsp?.perKwhDeliveryChargeCents != null
+                          ? `${Number(planVariablesUsed.tdsp.perKwhDeliveryChargeCents).toFixed(4)}¢/kWh`
+                          : "—"}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span>TDSP customer</span>
+                      <span className="font-semibold text-brand-white/90">
+                        {planVariablesUsed?.tdsp?.monthlyCustomerChargeDollars != null
+                          ? `${formatCurrency(Number(planVariablesUsed.tdsp.monthlyCustomerChargeDollars))}/mo`
+                          : "—/mo"}
+                      </span>
+                    </div>
+                    {planVariablesUsed?.tdsp?.effectiveDate ? (
+                      <div className="mt-1 text-xs text-brand-cyan/70">
+                        TDSP effective:{" "}
+                        <span className="font-mono text-brand-white/90">
+                          {String(planVariablesUsed.tdsp.effectiveDate).slice(0, 10)}
+                        </span>
+                      </div>
+                    ) : null}
+                  </>
+                )}
               </div>
               <div className="mt-2 text-xs text-brand-cyan/60">
                 These are the exact variables IntelliWatt uses for comparisons. Please verify your current plan details above.

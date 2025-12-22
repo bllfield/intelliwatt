@@ -591,6 +591,73 @@ export async function GET(req: NextRequest) {
         }
       : null;
 
+    // Dynamic variable list for UI (future-proof as plan features expand).
+    const variablesList: Array<{ key: string; label: string; value: string }> = [];
+    if (rsPresent) {
+      const creditsMaybe = extractDeterministicBillCredits(rateStructure);
+      const minimumMaybe = extractDeterministicMinimumRules({ rateStructure });
+      const tieredMaybe = extractDeterministicTierSchedule(rateStructure);
+      const touMaybe = extractDeterministicTouSchedule(rateStructure);
+
+      if (touMaybe?.schedule?.periods?.length) {
+        variablesList.push({
+          key: "rep.tou_periods",
+          label: "REP time-of-use periods",
+          value: String(touMaybe.schedule.periods.length),
+        });
+      } else if (tieredMaybe?.ok) {
+        variablesList.push({ key: "rep.tiered", label: "REP tiered pricing", value: "Yes" });
+      } else if (typeof repEnergyCentsPerKwh === "number" && Number.isFinite(repEnergyCentsPerKwh)) {
+        variablesList.push({
+          key: "rep.energy",
+          label: "REP energy",
+          value: `${repEnergyCentsPerKwh.toFixed(4)}¢/kWh`,
+        });
+      } else {
+        variablesList.push({ key: "rep.energy", label: "REP energy", value: "—" });
+      }
+
+      variablesList.push({
+        key: "rep.fixed",
+        label: "REP fixed",
+        value:
+          typeof repFixedMonthlyChargeDollars === "number" && Number.isFinite(repFixedMonthlyChargeDollars)
+            ? `$${repFixedMonthlyChargeDollars.toFixed(2)}/mo`
+            : "—/mo",
+      });
+
+      if (creditsMaybe?.ok && Array.isArray((creditsMaybe as any).credits) && (creditsMaybe as any).credits.length > 0) {
+        variablesList.push({
+          key: "rep.credits",
+          label: "Bill credits",
+          value: `${(creditsMaybe as any).credits.length} rule(s)`,
+        });
+      }
+      if (minimumMaybe?.ok) {
+        variablesList.push({ key: "rep.minimums", label: "Minimum bill rules", value: "Yes" });
+      }
+    }
+
+    if (tdspApplied) {
+      variablesList.push({
+        key: "tdsp.delivery",
+        label: "TDSP delivery",
+        value: `${Number(tdspApplied.perKwhDeliveryChargeCents).toFixed(4)}¢/kWh`,
+      });
+      variablesList.push({
+        key: "tdsp.customer",
+        label: "TDSP customer",
+        value: `$${Number(tdspApplied.monthlyCustomerChargeDollars).toFixed(2)}/mo`,
+      });
+      if (tdspApplied.effectiveDate) {
+        variablesList.push({
+          key: "tdsp.effective",
+          label: "TDSP effective",
+          value: String(tdspApplied.effectiveDate).slice(0, 10),
+        });
+      }
+    }
+
     // True-cost estimate (if computable + inputs present)
     const overriddenComputable = isComputableOverride(planCalcStatus, planCalcReasonCode);
     const trueCostEstimate = await (async () => {
@@ -879,6 +946,7 @@ export async function GET(req: NextRequest) {
             fixedMonthlyChargeDollars: repFixedMonthlyChargeDollars,
           },
         },
+        variablesList,
         monthlyBreakdown,
         math,
         outputs: {

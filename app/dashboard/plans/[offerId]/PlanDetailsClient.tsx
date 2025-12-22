@@ -210,24 +210,35 @@ export default function PlanDetailsClient({ offerId }: { offerId: string }) {
             <div className="rounded-2xl border border-brand-cyan/20 bg-brand-navy p-4">
               <div className="text-[0.7rem] font-semibold uppercase tracking-[0.22em] text-brand-cyan/60">Plan variables used</div>
               <div className="mt-3 space-y-2 text-sm text-brand-cyan/75">
-                <div>
-                  REP energy: <span className="font-semibold text-brand-white/90">{fmtNum((data as any).variables?.rep?.energyCentsPerKwh, 4)}¢/kWh</span>
-                </div>
-                <div>
-                  REP fixed: <span className="font-semibold text-brand-white/90">{fmtDollars((data as any).variables?.rep?.fixedMonthlyChargeDollars)}</span>/mo
-                </div>
-                <div>
-                  TDSP delivery:{" "}
-                  <span className="font-semibold text-brand-white/90">{fmtNum((data as any).variables?.tdsp?.perKwhDeliveryChargeCents, 4)}¢/kWh</span>
-                </div>
-                <div>
-                  TDSP customer: <span className="font-semibold text-brand-white/90">{fmtDollars((data as any).variables?.tdsp?.monthlyCustomerChargeDollars)}</span>/mo
-                </div>
-                {(data as any).variables?.tdsp?.effectiveDate ? (
-                  <div className="text-xs text-brand-cyan/60">
-                    TDSP effective: <span className="font-mono">{String((data as any).variables.tdsp.effectiveDate).slice(0, 10)}</span>
-                  </div>
-                ) : null}
+                {Array.isArray((data as any).variablesList) && (data as any).variablesList.length > 0 ? (
+                  ((data as any).variablesList as any[]).map((row: any) => (
+                    <div key={String(row?.key ?? row?.label ?? Math.random())} className="flex items-center justify-between gap-3">
+                      <span>{String(row?.label ?? "—")}</span>
+                      <span className="font-semibold text-brand-white/90">{String(row?.value ?? "—")}</span>
+                    </div>
+                  ))
+                ) : (
+                  <>
+                    <div>
+                      REP energy: <span className="font-semibold text-brand-white/90">{fmtNum((data as any).variables?.rep?.energyCentsPerKwh, 4)}¢/kWh</span>
+                    </div>
+                    <div>
+                      REP fixed: <span className="font-semibold text-brand-white/90">{fmtDollars((data as any).variables?.rep?.fixedMonthlyChargeDollars)}</span>/mo
+                    </div>
+                    <div>
+                      TDSP delivery:{" "}
+                      <span className="font-semibold text-brand-white/90">{fmtNum((data as any).variables?.tdsp?.perKwhDeliveryChargeCents, 4)}¢/kWh</span>
+                    </div>
+                    <div>
+                      TDSP customer: <span className="font-semibold text-brand-white/90">{fmtDollars((data as any).variables?.tdsp?.monthlyCustomerChargeDollars)}</span>/mo
+                    </div>
+                    {(data as any).variables?.tdsp?.effectiveDate ? (
+                      <div className="text-xs text-brand-cyan/60">
+                        TDSP effective: <span className="font-mono">{String((data as any).variables.tdsp.effectiveDate).slice(0, 10)}</span>
+                      </div>
+                    ) : null}
+                  </>
+                )}
               </div>
             </div>
 

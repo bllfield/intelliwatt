@@ -348,6 +348,58 @@ export async function GET(request: NextRequest) {
       baseMonthlyFee: effectivePlan?.baseMonthlyFee ?? null,
     });
 
+    const planVariablesList: Array<{ key: string; label: string; value: string }> = [];
+    const rs: any = effectivePlan?.rateStructure ?? null;
+    const rt = String(rateType ?? '').toUpperCase();
+
+    if (rt === 'TIME_OF_USE') {
+      const tiers = Array.isArray(rs?.tiers) ? rs.tiers : [];
+      planVariablesList.push({ key: 'rep.tou_tiers', label: 'REP time-of-use tiers', value: String(tiers.length || 0) });
+    } else if (rt === 'VARIABLE') {
+      planVariablesList.push({
+        key: 'rep.energy',
+        label: 'REP energy (current bill)',
+        value: repEnergyCentsPerKwh != null ? `${Number(repEnergyCentsPerKwh).toFixed(4)}¢/kWh` : '—',
+      });
+      const indexType = String(rs?.indexType ?? rs?.variableIndexType ?? '').trim();
+      if (indexType) {
+        planVariablesList.push({ key: 'rep.index', label: 'Variable index', value: indexType });
+      }
+    } else {
+      planVariablesList.push({
+        key: 'rep.energy',
+        label: 'REP energy',
+        value: repEnergyCentsPerKwh != null ? `${Number(repEnergyCentsPerKwh).toFixed(4)}¢/kWh` : '—',
+      });
+    }
+
+    planVariablesList.push({
+      key: 'rep.fixed',
+      label: 'REP fixed',
+      value: repFixedMonthlyDollars != null ? `$${Number(repFixedMonthlyDollars).toFixed(2)}/mo` : '—/mo',
+    });
+
+    const creditsRules = rs?.billCredits?.hasBillCredit && Array.isArray(rs?.billCredits?.rules) ? rs.billCredits.rules : [];
+    if (creditsRules.length > 0) {
+      planVariablesList.push({ key: 'rep.credits', label: 'Bill credits', value: `${creditsRules.length} rule(s)` });
+    }
+
+    if (tdspApplied) {
+      planVariablesList.push({
+        key: 'tdsp.delivery',
+        label: 'TDSP delivery',
+        value: tdspApplied.perKwhDeliveryChargeCents != null ? `${Number(tdspApplied.perKwhDeliveryChargeCents).toFixed(4)}¢/kWh` : '—',
+      });
+      planVariablesList.push({
+        key: 'tdsp.customer',
+        label: 'TDSP customer',
+        value: tdspApplied.monthlyCustomerChargeDollars != null ? `$${Number(tdspApplied.monthlyCustomerChargeDollars).toFixed(2)}/mo` : '—/mo',
+      });
+      if (tdspApplied.effectiveDate) {
+        planVariablesList.push({ key: 'tdsp.effective', label: 'TDSP effective', value: String(tdspApplied.effectiveDate).slice(0, 10) });
+      }
+    }
+
     return NextResponse.json({
       ok: true,
       // Backwards-compatible fields used by existing UI:
@@ -360,6 +412,7 @@ export async function GET(request: NextRequest) {
         },
         tdsp: tdspApplied,
       },
+      planVariablesList,
       entry: serializeEntrySnapshot(entry),
       usage: serializeEntrySnapshot(usageEntry),
       hasActiveUsage,
