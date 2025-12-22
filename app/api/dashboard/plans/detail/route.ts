@@ -132,6 +132,8 @@ function chicagoYearMonthFromDate(d: Date): string | null {
 
 function chicagoParts(ts: Date): {
   yearMonth: string;
+  year: number;
+  day: number;
   month: number;
   weekdayIndex: number; // 0=Sun..6=Sat
   minutesOfDay: number;
@@ -142,6 +144,7 @@ function chicagoParts(ts: Date): {
       timeZone: "America/Chicago",
       year: "numeric",
       month: "2-digit",
+      day: "2-digit",
       weekday: "short",
       hour: "2-digit",
       minute: "2-digit",
@@ -151,16 +154,19 @@ function chicagoParts(ts: Date): {
     const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
     const y = Number(get("year"));
     const m = Number(get("month"));
+    const d = Number(get("day"));
     const hh = Number(get("hour"));
     const mm = Number(get("minute"));
     const wd = get("weekday");
-    if (![y, m, hh, mm].every((n) => Number.isFinite(n))) return null;
+    if (![y, m, d, hh, mm].every((n) => Number.isFinite(n))) return null;
     const weekdayIndex = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(wd);
     if (weekdayIndex < 0) return null;
     const minutesOfDay = hh * 60 + mm;
     const isWeekend = weekdayIndex === 0 || weekdayIndex === 6;
     return {
       yearMonth: `${String(y)}-${String(m).padStart(2, "0")}`,
+      year: y,
+      day: d,
       month: m,
       weekdayIndex,
       minutesOfDay,
@@ -169,6 +175,35 @@ function chicagoParts(ts: Date): {
   } catch {
     return null;
   }
+}
+
+function daysInMonth(year: number, month1: number): number {
+  // month1: 1-12
+  if (!Number.isFinite(year) || !Number.isFinite(month1) || month1 < 1 || month1 > 12) return 31;
+  return new Date(Date.UTC(year, month1, 0)).getUTCDate();
+}
+
+function lastCompleteChicagoDay(ts: Date, opts?: { minMinutesOfDay?: number; maxStepDays?: number }): {
+  year: number;
+  month: number;
+  yearMonth: string;
+  day: number;
+} | null {
+  const minMinutesOfDay = typeof opts?.minMinutesOfDay === "number" ? opts!.minMinutesOfDay : 23 * 60 + 45; // 23:45
+  const maxStepDays = typeof opts?.maxStepDays === "number" ? opts!.maxStepDays : 2; // allow "pull 2 days back" if SMT is late
+
+  let cur = ts;
+  for (let step = 0; step <= maxStepDays; step++) {
+    const p = chicagoParts(cur);
+    if (!p) return null;
+    const day = p.minutesOfDay >= minMinutesOfDay ? p.day : p.day - 1;
+    if (day >= 1) {
+      return { year: p.year, month: p.month, yearMonth: p.yearMonth, day };
+    }
+    // If we underflowed the 1st of the month, step back a day and retry (rare, but safe).
+    cur = new Date(cur.getTime() - 24 * 60 * 60 * 1000);
+  }
+  return null;
 }
 
 function hhmmToMinutes(hhmm: string): number | null {
@@ -463,12 +498,17 @@ export async function GET(req: NextRequest) {
     });
 
     // Ensure + load the bucket totals REQUIRED by this plan (not just the 9-core bucket set).
-    // Use 12 FULL calendar months ending at the last completed month (Chicago-local),
-    // to avoid partial edge months causing "extra" monthly fixed fees.
+    // Use a STITCHED 12-month window when usage is interval-based (SMT/Green Button):
+    // - Prior 11 full calendar months
+    // - Current month: "days we have" + prior-year tail days to make a full calendar month
+    // This keeps monthly fixed fees to exactly 12 and enables threshold credits that depend on full-month kWh.
     const endForMonths = windowEnd ?? new Date();
-    const endYmRaw = chicagoYearMonthFromDate(endForMonths);
-    const endYm = endYmRaw ? prevYearMonth(endYmRaw) : null;
-    const yearMonths = (endYm ? lastNYearMonthsChicagoFrom(new Date(`${endYm}-15T12:00:00Z`), 12) : lastNYearMonthsChicagoFrom(endForMonths, 12))
+    const completeDay = lastCompleteChicagoDay(endForMonths, { maxStepDays: 2 });
+    const stitchYm = completeDay?.yearMonth ?? chicagoYearMonthFromDate(endForMonths);
+    const yearMonths = (stitchYm
+      ? lastNYearMonthsChicagoFrom(new Date(`${stitchYm}-15T12:00:00Z`), 12)
+      : lastNYearMonthsChicagoFrom(endForMonths, 12)
+    )
       .slice()
       .reverse(); // oldest -> newest
     const keysToLoad = Array.from(
@@ -513,6 +553,144 @@ export async function GET(req: NextRequest) {
       }
     } catch {
       // keep empty
+    }
+
+    // Stitch the newest month to a full calendar month (using actual interval rows).
+    // We only do this when we have a "completeDay" (to avoid including an incomplete last day).
+    const stitchInfo =
+      completeDay && stitchYm && yearMonths.length && yearMonths[yearMonths.length - 1] === stitchYm
+        ? (() => {
+            const lastDay = completeDay.day;
+            const monthDays = daysInMonth(completeDay.year, completeDay.month);
+            const missingStartDay = lastDay + 1;
+            if (missingStartDay > monthDays) return null; // already full month
+            return {
+              year: completeDay.year,
+              month: completeDay.month,
+              yearMonth: stitchYm,
+              haveDaysThrough: lastDay,
+              missingDaysFrom: missingStartDay,
+              missingDaysTo: monthDays,
+              borrowedFromYearMonth: `${String(completeDay.year - 1)}-${String(completeDay.month).padStart(2, "0")}`,
+            };
+          })()
+        : null;
+
+    if (stitchInfo) {
+      const sumBucketsFromIntervals = (rows: Array<{ ts: Date; kwh: number }>, dayMin: number, dayMax: number): Record<string, number> => {
+        const totals: Record<string, number> = {};
+        for (const k of keysToLoad) totals[k] = 0;
+        for (const r of rows) {
+          const p = chicagoParts(r.ts);
+          if (!p) continue;
+          if (p.yearMonth !== stitchInfo.yearMonth) continue;
+          if (p.day < dayMin || p.day > dayMax) continue;
+          for (const def of bucketDefs) {
+            if (evalRule(def.rule, p)) {
+              totals[def.key] = (totals[def.key] ?? 0) + r.kwh;
+            }
+          }
+        }
+        return totals;
+      };
+
+      const addTotals = (a: Record<string, number>, b: Record<string, number>): Record<string, number> => {
+        const out: Record<string, number> = { ...a };
+        for (const k of keysToLoad) out[k] = (out[k] ?? 0) + (b[k] ?? 0);
+        return out;
+      };
+
+      const monthToUtcRange = (year: number, month1: number): { gte: Date; lt: Date } => {
+        // Wide UTC bounds; we filter by America/Chicago yearMonth/day in JS.
+        const start = new Date(Date.UTC(year, month1 - 1, 1, 0, 0, 0));
+        const end = new Date(Date.UTC(year, month1, 1, 0, 0, 0));
+        return { gte: new Date(start.getTime() - 36 * 60 * 60 * 1000), lt: new Date(end.getTime() + 36 * 60 * 60 * 1000) };
+      };
+
+      const currentRange = monthToUtcRange(stitchInfo.year, stitchInfo.month);
+      const priorRange = monthToUtcRange(stitchInfo.year - 1, stitchInfo.month);
+
+      // Fetch only 2 months of intervals (current month + same month last year).
+      const currentRows: Array<{ ts: Date; kwh: number }> = [];
+      const priorRows: Array<{ ts: Date; kwh: number }> = [];
+      try {
+        if (usageSource === "SMT") {
+          const esiid = house.esiid!;
+          const cur = await prisma.smtInterval.findMany({
+            where: { esiid, ts: { gte: currentRange.gte, lt: currentRange.lt } },
+            select: { ts: true, kwh: true },
+            orderBy: { ts: "asc" },
+          });
+          for (const r of cur ?? []) {
+            const kwh = decimalToNumber((r as any)?.kwh);
+            const ts = (r as any)?.ts ? new Date((r as any).ts) : null;
+            if (ts && kwh != null) currentRows.push({ ts, kwh });
+          }
+
+          const prior = await prisma.smtInterval.findMany({
+            where: { esiid, ts: { gte: priorRange.gte, lt: priorRange.lt } },
+            select: { ts: true, kwh: true },
+            orderBy: { ts: "asc" },
+          });
+          for (const r of prior ?? []) {
+            const kwh = decimalToNumber((r as any)?.kwh);
+            const ts = (r as any)?.ts ? new Date((r as any).ts) : null;
+            if (ts && kwh != null) priorRows.push({ ts, kwh });
+          }
+        } else if (usageSource === "GREEN_BUTTON") {
+          const usageClient = usagePrisma as any;
+          const rawId = (window as any).rawId;
+          const cur = await usageClient.greenButtonInterval.findMany({
+            where: { homeId: house.id, rawId, timestamp: { gte: currentRange.gte, lt: currentRange.lt } },
+            select: { timestamp: true, consumptionKwh: true },
+            orderBy: { timestamp: "asc" },
+          });
+          for (const r of cur ?? []) {
+            const kwh = decimalToNumber((r as any)?.consumptionKwh);
+            const ts = (r as any)?.timestamp ? new Date((r as any).timestamp) : null;
+            if (ts && kwh != null) currentRows.push({ ts, kwh });
+          }
+
+          const prior = await usageClient.greenButtonInterval.findMany({
+            where: { homeId: house.id, rawId, timestamp: { gte: priorRange.gte, lt: priorRange.lt } },
+            select: { timestamp: true, consumptionKwh: true },
+            orderBy: { timestamp: "asc" },
+          });
+          for (const r of prior ?? []) {
+            const kwh = decimalToNumber((r as any)?.consumptionKwh);
+            const ts = (r as any)?.timestamp ? new Date((r as any).timestamp) : null;
+            if (ts && kwh != null) priorRows.push({ ts, kwh });
+          }
+        }
+      } catch {
+        // best-effort only; if this fails we fall back to DB monthly buckets (partial month)
+      }
+
+      if (currentRows.length && priorRows.length) {
+        // Recompute the stitched month totals from intervals:
+        // - current month days 1..haveDaysThrough
+        // - prior year same month days missingDaysFrom..missingDaysTo
+        const currentTotals = sumBucketsFromIntervals(currentRows, 1, stitchInfo.haveDaysThrough);
+        const priorTailTotals = (() => {
+          const totals: Record<string, number> = {};
+          for (const k of keysToLoad) totals[k] = 0;
+          for (const r of priorRows) {
+            const p = chicagoParts(r.ts);
+            if (!p) continue;
+            if (p.yearMonth !== stitchInfo.borrowedFromYearMonth) continue;
+            if (p.day < stitchInfo.missingDaysFrom || p.day > stitchInfo.missingDaysTo) continue;
+            for (const def of bucketDefs) {
+              if (evalRule(def.rule, p)) {
+                totals[def.key] = (totals[def.key] ?? 0) + r.kwh;
+              }
+            }
+          }
+          return totals;
+        })();
+
+        const stitchedTotals = addTotals(currentTotals, priorTailTotals);
+        usageBucketsByMonthForCalc[stitchInfo.yearMonth] = stitchedTotals;
+      }
     }
 
     const bucketTable = yearMonths.map((ym) => {
@@ -786,6 +964,18 @@ export async function GET(req: NextRequest) {
           yearMonths,
           avgMonthlyKwh,
           annualKwh, // 12 full months total (sum of kwh.m.all.total over yearMonths)
+          stitchedMonth:
+            stitchInfo && usageBucketsByMonthForCalc?.[stitchInfo.yearMonth]
+              ? {
+                  mode: "PRIOR_YEAR_TAIL",
+                  yearMonth: stitchInfo.yearMonth,
+                  haveDaysThrough: stitchInfo.haveDaysThrough,
+                  missingDaysFrom: stitchInfo.missingDaysFrom,
+                  missingDaysTo: stitchInfo.missingDaysTo,
+                  borrowedFromYearMonth: stitchInfo.borrowedFromYearMonth,
+                  completenessRule: "Uses last complete local day (>=23:45) and may step back up to 2 days if SMT/GB is late.",
+                }
+              : null,
           bucketDefs: bucketDefsForResponse,
           bucketTable,
         },
@@ -803,7 +993,7 @@ export async function GET(req: NextRequest) {
           effectiveCentsPerKwh,
         },
         notes: [
-          "This page uses 12 full calendar months ending at the last completed month (America/Chicago) for totals and fixed monthly fees.",
+          "This page uses a stitched 12-month window (America/Chicago): prior 11 full months + current month filled using prior-year tail days, so monthly fixed fees are counted exactly 12 times.",
           "Bucket totals are loaded from the usage DB (homeMonthlyUsageBucket) in America/Chicago local time.",
           "Missing required buckets are auto-created and computed on-demand (best-effort) for this plan.",
         ],
