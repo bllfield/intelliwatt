@@ -192,6 +192,7 @@ export async function buildUsageBucketsForEstimate(args: {
   requiredBucketKeys: string[];
   monthsCount?: number;
   maxStepDays?: number;
+  stitchMode?: "DAILY_ONLY" | "DAILY_OR_INTERVAL" | "NONE";
 }): Promise<{
   yearMonths: string[];
   keysToLoad: string[];
@@ -210,6 +211,7 @@ export async function buildUsageBucketsForEstimate(args: {
     | null;
 }> {
   const monthsCount = Math.max(1, Math.floor(args.monthsCount ?? 12));
+  const stitchMode = args.stitchMode ?? "DAILY_OR_INTERVAL";
   const completeDay = lastCompleteChicagoDay(args.windowEnd, { maxStepDays: args.maxStepDays ?? 2 });
   const stitchYm = completeDay?.yearMonth ?? null;
 
@@ -263,7 +265,7 @@ export async function buildUsageBucketsForEstimate(args: {
     // ignore
   }
 
-  // Stitch newest month to full calendar month using interval rows when needed.
+  // Stitch newest month to full calendar month.
   const stitchedMonth =
     completeDay && stitchYm && yearMonths.length && yearMonths[yearMonths.length - 1] === stitchYm
       ? (() => {
@@ -283,92 +285,154 @@ export async function buildUsageBucketsForEstimate(args: {
         })()
       : null;
 
-  if (stitchedMonth) {
-    const currentRange = monthToUtcRange(completeDay!.year, completeDay!.month);
-    const priorRange = monthToUtcRange(completeDay!.year - 1, completeDay!.month);
-
-    const currentRows: Array<{ ts: Date; kwh: number }> = [];
-    const priorRows: Array<{ ts: Date; kwh: number }> = [];
-
+  if (stitchedMonth && stitchMode !== "NONE") {
+    // Preferred: stitch using DAILY buckets (fast, no interval scans).
     try {
-      if (args.usageSource === "SMT") {
-        const esiid = String(args.esiid ?? "");
-        if (esiid) {
-          const cur = await prisma.smtInterval.findMany({
-            where: { esiid, ts: { gte: currentRange.gte, lt: currentRange.lt } },
-            select: { ts: true, kwh: true },
-            orderBy: { ts: "asc" },
-          });
-          for (const r of cur ?? []) {
-            const kwh = decimalToNumber((r as any)?.kwh);
-            const ts = (r as any)?.ts ? new Date((r as any).ts) : null;
-            if (ts && kwh != null) currentRows.push({ ts, kwh });
-          }
+      const ym = stitchedMonth.yearMonth;
+      const byBucket: Record<string, number> = {};
+      for (const k of keysToLoad) byBucket[k] = 0;
 
-          const prior = await prisma.smtInterval.findMany({
-            where: { esiid, ts: { gte: priorRange.gte, lt: priorRange.lt } },
-            select: { ts: true, kwh: true },
-            orderBy: { ts: "asc" },
-          });
-          for (const r of prior ?? []) {
-            const kwh = decimalToNumber((r as any)?.kwh);
-            const ts = (r as any)?.ts ? new Date((r as any).ts) : null;
-            if (ts && kwh != null) priorRows.push({ ts, kwh });
-          }
-        }
-      } else {
-        const rawId = String(args.rawId ?? "");
-        if (rawId) {
-          const usageClient = usagePrisma as any;
-          const cur = await usageClient.greenButtonInterval.findMany({
-            where: { homeId: args.homeId, rawId, timestamp: { gte: currentRange.gte, lt: currentRange.lt } },
-            select: { timestamp: true, consumptionKwh: true },
-            orderBy: { timestamp: "asc" },
-          });
-          for (const r of cur ?? []) {
-            const kwh = decimalToNumber((r as any)?.consumptionKwh);
-            const ts = (r as any)?.timestamp ? new Date((r as any).timestamp) : null;
-            if (ts && kwh != null) currentRows.push({ ts, kwh });
-          }
+      const monthDays = daysInMonth(completeDay!.year, completeDay!.month);
+      const mkDay = (y: number, m: number, d: number) => `${String(y)}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 
-          const prior = await usageClient.greenButtonInterval.findMany({
-            where: { homeId: args.homeId, rawId, timestamp: { gte: priorRange.gte, lt: priorRange.lt } },
-            select: { timestamp: true, consumptionKwh: true },
-            orderBy: { timestamp: "asc" },
-          });
-          for (const r of prior ?? []) {
-            const kwh = decimalToNumber((r as any)?.consumptionKwh);
-            const ts = (r as any)?.timestamp ? new Date((r as any).timestamp) : null;
-            if (ts && kwh != null) priorRows.push({ ts, kwh });
-          }
-        }
+      const curDays: string[] = [];
+      for (let d = 1; d <= stitchedMonth.haveDaysThrough; d++) curDays.push(mkDay(completeDay!.year, completeDay!.month, d));
+      const priorDays: string[] = [];
+      for (let d = stitchedMonth.missingDaysFrom; d <= stitchedMonth.missingDaysTo; d++) {
+        priorDays.push(mkDay(completeDay!.year - 1, completeDay!.month, d));
       }
-    } catch {
-      // best-effort only
-    }
 
-    if (currentRows.length && priorRows.length) {
-      const totals: Record<string, number> = {};
-      for (const k of keysToLoad) totals[k] = 0;
-
-      const applyIntervals = (rows: Array<{ ts: Date; kwh: number }>, onlyYearMonth: string, dayMin: number, dayMax: number) => {
-        for (const r of rows) {
-          const p = chicagoParts(r.ts);
-          if (!p) continue;
-          if (p.yearMonth !== onlyYearMonth) continue;
-          if (p.day < dayMin || p.day > dayMax) continue;
-          for (const def of bucketDefs) {
-            const rule = def.rule as BucketRuleV1;
-            if (!evalRule(rule, { month: p.month, dayOfMonth: p.day, weekdayIndex: p.weekdayIndex, minutesOfDay: p.minutesOfDay })) continue;
-            totals[def.key] = (totals[def.key] ?? 0) + r.kwh;
-          }
-        }
+      const loadDays = async (days: string[]) => {
+        if (!days.length) return [];
+        return await (usagePrisma as any).homeDailyUsageBucket.findMany({
+          where: { homeId: args.homeId, day: { in: days }, bucketKey: { in: keysToLoad } },
+          select: { day: true, bucketKey: true, kwhTotal: true },
+        });
       };
 
-      applyIntervals(currentRows, stitchedMonth.yearMonth, 1, stitchedMonth.haveDaysThrough);
-      applyIntervals(priorRows, stitchedMonth.borrowedFromYearMonth, stitchedMonth.missingDaysFrom, stitchedMonth.missingDaysTo);
+      const curRows = await loadDays(curDays);
+      const priorRows = await loadDays(priorDays);
 
-      usageBucketsByMonth[stitchedMonth.yearMonth] = totals;
+      const addRows = (rows: any[]) => {
+        for (const r of rows ?? []) {
+          const key = canonicalizeMonthlyBucketKey(String((r as any)?.bucketKey ?? "").trim());
+          const kwh = decimalToNumber((r as any)?.kwhTotal);
+          if (!key || kwh == null) continue;
+          byBucket[key] = (byBucket[key] ?? 0) + kwh;
+        }
+      };
+      addRows(curRows);
+      addRows(priorRows);
+
+      // If we got any daily rows, apply stitched totals.
+      const hasAny = Object.values(byBucket).some((v) => typeof v === "number" && Number.isFinite(v) && v > 0);
+      if (hasAny) {
+        usageBucketsByMonth[ym] = byBucket;
+      } else if (stitchMode === "DAILY_ONLY") {
+        // do nothing (keep monthly buckets as-is)
+      }
+    } catch {
+      // If daily table isn't deployed yet, optionally fall back to interval stitching (detail page only).
+      if (stitchMode === "DAILY_OR_INTERVAL") {
+        try {
+          const currentRange = monthToUtcRange(completeDay!.year, completeDay!.month);
+          const priorRange = monthToUtcRange(completeDay!.year - 1, completeDay!.month);
+
+          const currentRows: Array<{ ts: Date; kwh: number }> = [];
+          const priorRows: Array<{ ts: Date; kwh: number }> = [];
+
+          if (args.usageSource === "SMT") {
+            const esiid = String(args.esiid ?? "");
+            if (esiid) {
+              const cur = await prisma.smtInterval.findMany({
+                where: { esiid, ts: { gte: currentRange.gte, lt: currentRange.lt } },
+                select: { ts: true, kwh: true },
+                orderBy: { ts: "asc" },
+              });
+              for (const r of cur ?? []) {
+                const kwh = decimalToNumber((r as any)?.kwh);
+                const ts = (r as any)?.ts ? new Date((r as any).ts) : null;
+                if (ts && kwh != null) currentRows.push({ ts, kwh });
+              }
+
+              const prior = await prisma.smtInterval.findMany({
+                where: { esiid, ts: { gte: priorRange.gte, lt: priorRange.lt } },
+                select: { ts: true, kwh: true },
+                orderBy: { ts: "asc" },
+              });
+              for (const r of prior ?? []) {
+                const kwh = decimalToNumber((r as any)?.kwh);
+                const ts = (r as any)?.ts ? new Date((r as any).ts) : null;
+                if (ts && kwh != null) priorRows.push({ ts, kwh });
+              }
+            }
+          } else {
+            const rawId = String(args.rawId ?? "");
+            if (rawId) {
+              const usageClient = usagePrisma as any;
+              const cur = await usageClient.greenButtonInterval.findMany({
+                where: { homeId: args.homeId, rawId, timestamp: { gte: currentRange.gte, lt: currentRange.lt } },
+                select: { timestamp: true, consumptionKwh: true },
+                orderBy: { timestamp: "asc" },
+              });
+              for (const r of cur ?? []) {
+                const kwh = decimalToNumber((r as any)?.consumptionKwh);
+                const ts = (r as any)?.timestamp ? new Date((r as any).timestamp) : null;
+                if (ts && kwh != null) currentRows.push({ ts, kwh });
+              }
+
+              const prior = await usageClient.greenButtonInterval.findMany({
+                where: { homeId: args.homeId, rawId, timestamp: { gte: priorRange.gte, lt: priorRange.lt } },
+                select: { timestamp: true, consumptionKwh: true },
+                orderBy: { timestamp: "asc" },
+              });
+              for (const r of prior ?? []) {
+                const kwh = decimalToNumber((r as any)?.consumptionKwh);
+                const ts = (r as any)?.timestamp ? new Date((r as any).timestamp) : null;
+                if (ts && kwh != null) priorRows.push({ ts, kwh });
+              }
+            }
+          }
+
+          if (currentRows.length && priorRows.length) {
+            const totals: Record<string, number> = {};
+            for (const k of keysToLoad) totals[k] = 0;
+
+            const applyIntervals = (
+              rows: Array<{ ts: Date; kwh: number }>,
+              onlyYearMonth: string,
+              dayMin: number,
+              dayMax: number,
+            ) => {
+              for (const r of rows) {
+                const p = chicagoParts(r.ts);
+                if (!p) continue;
+                if (p.yearMonth !== onlyYearMonth) continue;
+                if (p.day < dayMin || p.day > dayMax) continue;
+                for (const def of bucketDefs) {
+                  const rule = def.rule as BucketRuleV1;
+                  if (
+                    !evalRule(rule, {
+                      month: p.month,
+                      dayOfMonth: p.day,
+                      weekdayIndex: p.weekdayIndex,
+                      minutesOfDay: p.minutesOfDay,
+                    })
+                  )
+                    continue;
+                  totals[def.key] = (totals[def.key] ?? 0) + r.kwh;
+                }
+              }
+            };
+
+            applyIntervals(currentRows, stitchedMonth.yearMonth, 1, stitchedMonth.haveDaysThrough);
+            applyIntervals(priorRows, stitchedMonth.borrowedFromYearMonth, stitchedMonth.missingDaysFrom, stitchedMonth.missingDaysTo);
+            usageBucketsByMonth[stitchedMonth.yearMonth] = totals;
+          }
+        } catch {
+          // ignore
+        }
+      }
     }
   }
 

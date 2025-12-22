@@ -106,6 +106,7 @@ export type EnsureCoreMonthlyBucketsInput = {
 export type EnsureCoreMonthlyBucketsResult = {
   monthsProcessed: number;
   rowsUpserted: number;
+  dailyRowsUpserted?: number;
   intervalRowsRead: number;
   kwhSummed: number;
   notes: string[];
@@ -302,6 +303,7 @@ export async function ensureCoreMonthlyBuckets(
 
   const monthSet = new Set<string>();
   const sumByMonthBucket = new Map<string, number>(); // key = `${yearMonth}|${bucketKey}`
+  const sumByDayBucket = new Map<string, number>(); // key = `${YYYY-MM-DD}|${bucketKey}`
   let kwhSummed = 0;
   let sawStartDay = false;
 
@@ -312,6 +314,7 @@ export async function ensureCoreMonthlyBuckets(
 
     const p = toChicagoParts(row.ts);
     const yearMonth = `${p.year}-${p.month}`;
+    const dayKey = `${p.year}-${p.month}-${p.day}`;
     monthSet.add(yearMonth);
 
     const weekdayIndex = weekdayShortToIndex(p.weekday);
@@ -328,6 +331,8 @@ export async function ensureCoreMonthlyBuckets(
       if (!evalRule(rule, { month: localMonth, dayOfMonth: localDayOfMonth, weekdayIndex, minutesOfDay: localMinute })) continue;
       const mk = `${yearMonth}|${b.key}`;
       sumByMonthBucket.set(mk, (sumByMonthBucket.get(mk) ?? 0) + kwh);
+      const dk = `${dayKey}|${b.key}`;
+      sumByDayBucket.set(dk, (sumByDayBucket.get(dk) ?? 0) + kwh);
     }
   }
 
@@ -407,9 +412,52 @@ export async function ensureCoreMonthlyBuckets(
     rowsUpserted += chunk.length;
   }
 
+  // Upsert daily totals (bounded: days * buckets). Best-effort; if table isn't deployed yet, skip silently.
+  let dailyRowsUpserted = 0;
+  const dailyEntries = Array.from(sumByDayBucket.entries());
+  for (let i = 0; i < dailyEntries.length; i += chunkSize) {
+    const chunk = dailyEntries.slice(i, i + chunkSize);
+    try {
+      await (usagePrisma as any).$transaction(
+        chunk.map(([dk, total]) => {
+          const [day, bucketKey] = dk.split("|");
+          const kwhTotal = Number(total.toFixed(6)).toFixed(6);
+          return (usagePrisma as any).homeDailyUsageBucket.upsert({
+            where: {
+              homeId_day_bucketKey: {
+                homeId: input.homeId,
+                day,
+                bucketKey,
+              },
+            },
+            create: {
+              homeId: input.homeId,
+              day,
+              bucketKey,
+              kwhTotal,
+              source: input.source,
+              computedAt: now,
+            },
+            update: {
+              kwhTotal,
+              source: input.source,
+              computedAt: now,
+            },
+          });
+        }),
+      );
+      dailyRowsUpserted += chunk.length;
+    } catch {
+      // Likely the daily table doesn't exist yet in this environment; skip without breaking callers.
+      dailyRowsUpserted = dailyRowsUpserted; // no-op to keep variable referenced
+      break;
+    }
+  }
+
   return {
     monthsProcessed: monthSet.size,
     rowsUpserted,
+    dailyRowsUpserted,
     intervalRowsRead: intervals.length,
     kwhSummed: Number.isFinite(kwhSummed) ? Number(kwhSummed.toFixed(6)) : 0,
     notes: [

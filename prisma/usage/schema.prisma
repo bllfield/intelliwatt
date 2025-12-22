@@ -110,6 +110,7 @@ model UsageBucketDefinition {
   updatedAt DateTime @updatedAt
 
   monthly HomeMonthlyUsageBucket[]
+  daily   HomeDailyUsageBucket[]
 
   @@index([dayType])
 }
@@ -127,5 +128,21 @@ model HomeMonthlyUsageBucket {
 
   @@unique([homeId, yearMonth, bucketKey])
   @@index([homeId, yearMonth])
+  @@index([bucketKey])
+}
+
+model HomeDailyUsageBucket {
+  id        String   @id @default(cuid())
+  homeId    String
+  day       String // "YYYY-MM-DD" (America/Chicago local date)
+  bucketKey String // references UsageBucketDefinition.key
+  kwhTotal  Decimal  @usageDb.Decimal(12, 6)
+  source    String
+  computedAt DateTime @default(now())
+
+  bucket UsageBucketDefinition @relation(fields: [bucketKey], references: [key], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([homeId, day, bucketKey])
+  @@index([homeId, day])
   @@index([bucketKey])
 }
