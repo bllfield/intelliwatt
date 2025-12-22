@@ -723,81 +723,54 @@ export async function GET(req: NextRequest) {
       return true;
     });
 
-    // Sort
+    // Sort + paginate. For "Best for you" we sort by the SAME value we display on cards:
+    // intelliwatt.trueCostEstimate.monthlyCostDollars (OK only), lowest → highest.
+    // This removes any risk of the sort using different inputs from the rendered estimate.
+    let total = 0;
+    let totalPages = 0;
+    let safePage = 1;
+    let pageSlice: OfferNormalized[] = [];
+    let shaped: any[] = [];
+
     if (hasUsage && sort === "best_for_you_proxy") {
-      // Best-for-you: sort by the real monthly total estimate (lowest → highest).
-      // Fail-closed: plans that cannot compute for this home sort to the bottom.
-      const tdspCache = new Map<string, any | null>();
-      const scoreMonthly = async (o: OfferNormalized): Promise<number> => {
-        if (annualKwhForCalc == null) return Number.POSITIVE_INFINITY;
-        const offerId = String((o as any)?.offer_id ?? "");
-        if (!offerId) return Number.POSITIVE_INFINITY;
-
-        const ratePlanId = mapByOfferId.get(offerId) ?? null;
-        if (!ratePlanId) return Number.POSITIVE_INFINITY;
-
-        const calc = planCalcByRatePlanId.get(ratePlanId) ?? null;
-        if (!calc || calc.planCalcStatus !== "COMPUTABLE" || !calc.rateStructurePresent || !calc.rateStructure) {
-          return Number.POSITIVE_INFINITY;
-        }
-
-        const tdspSlug = String((o as any)?.tdsp ?? (house as any)?.tdspSlug ?? "")
-          .trim()
-          .toLowerCase();
-        let tdspRates: any | null = null;
-        if (tdspSlug) {
-          if (tdspCache.has(tdspSlug)) {
-            tdspRates = tdspCache.get(tdspSlug) ?? null;
-          } else {
-            try {
-              tdspRates = await getTdspDeliveryRates({ tdspSlug, asOf: new Date() });
-            } catch {
-              tdspRates = null;
-            }
-            tdspCache.set(tdspSlug, tdspRates);
-          }
-        }
-        if (!tdspRates) return Number.POSITIVE_INFINITY;
-
-        const est = calculatePlanCostForUsage({
-          annualKwh: annualKwhForCalc,
-          monthsCount: 12,
-          tdsp: {
-            perKwhDeliveryChargeCents: Number(tdspRates?.perKwhDeliveryChargeCents ?? 0) || 0,
-            monthlyCustomerChargeDollars: Number(tdspRates?.monthlyCustomerChargeDollars ?? 0) || 0,
-            effectiveDate: tdspRates?.effectiveDate ?? undefined,
-          },
-          rateStructure: calc.rateStructure,
-          usageBucketsByMonth: usageBucketsByMonthForCalc,
-        });
-
-        if (!est || (est as any).status !== "OK") return Number.POSITIVE_INFINITY;
-        const v = Number((est as any)?.monthlyCostDollars);
-        return Number.isFinite(v) ? v : Number.POSITIVE_INFINITY;
-      };
-
-      const withKey = await Promise.all(
-        offers.map(async (o, idx) => ({ o, idx, v: await scoreMonthly(o) })),
-      );
-      withKey.sort((a, b) => {
-        if (a.v < b.v) return -1;
-        if (a.v > b.v) return 1;
-        const pa = ((a.o as any)?.plan_name ?? "").toLowerCase();
-        const pb = ((b.o as any)?.plan_name ?? "").toLowerCase();
+      const indexed = offers.map((o, idx) => ({ o, idx }));
+      const shapedAll = await Promise.all(indexed.map(async (x) => ({ idx: x.idx, shaped: await shapeOffer(x.o) })));
+      shapedAll.sort((a, b) => {
+        const ta = (a.shaped as any)?.intelliwatt?.trueCostEstimate;
+        const tb = (b.shaped as any)?.intelliwatt?.trueCostEstimate;
+        const va =
+          ta?.status === "OK" && typeof ta?.monthlyCostDollars === "number" && Number.isFinite(ta.monthlyCostDollars)
+            ? (ta.monthlyCostDollars as number)
+            : Number.POSITIVE_INFINITY;
+        const vb =
+          tb?.status === "OK" && typeof tb?.monthlyCostDollars === "number" && Number.isFinite(tb.monthlyCostDollars)
+            ? (tb.monthlyCostDollars as number)
+            : Number.POSITIVE_INFINITY;
+        if (va < vb) return -1;
+        if (va > vb) return 1;
+        const pa = String((a.shaped as any)?.planName ?? "").toLowerCase();
+        const pb = String((b.shaped as any)?.planName ?? "").toLowerCase();
         if (pa < pb) return -1;
         if (pa > pb) return 1;
         return a.idx - b.idx;
       });
-      offers = withKey.map((x) => x.o);
+
+      total = shapedAll.length;
+      totalPages = total === 0 ? 0 : Math.ceil(total / pageSize);
+      safePage = totalPages === 0 ? 1 : clamp(page, 1, totalPages);
+      const startIdx = (safePage - 1) * pageSize;
+      shaped = shapedAll.slice(startIdx, startIdx + pageSize).map((x) => x.shaped);
+      // keep a consistent type/shape for downstream bestOffers code paths
+      pageSlice = offers;
     } else {
       offers = sortOffers(offers, sort);
+      total = offers.length;
+      totalPages = total === 0 ? 0 : Math.ceil(total / pageSize);
+      safePage = totalPages === 0 ? 1 : clamp(page, 1, totalPages);
+      const startIdx = (safePage - 1) * pageSize;
+      pageSlice = offers.slice(startIdx, startIdx + pageSize);
+      shaped = await Promise.all(pageSlice.map(shapeOffer));
     }
-
-    const total = offers.length;
-    const totalPages = total === 0 ? 0 : Math.ceil(total / pageSize);
-    const safePage = totalPages === 0 ? 1 : clamp(page, 1, totalPages);
-    const startIdx = (safePage - 1) * pageSize;
-    const pageSlice = offers.slice(startIdx, startIdx + pageSize);
 
     // Ensure that any offer we mark as "QUEUED" is actually present in the admin review queue.
     //
@@ -1501,7 +1474,7 @@ export async function GET(req: NextRequest) {
       };
     };
 
-    const shaped = await Promise.all(pageSlice.map(shapeOffer));
+    // NOTE: `shaped` is computed above to keep best-for-you sorting consistent with the displayed estimates.
 
     // Compute bestOffers (proxy ranking) server-side so the UI can render without an extra round-trip.
     // Must never throw; on any failure, fall back to [].
