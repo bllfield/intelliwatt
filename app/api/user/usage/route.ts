@@ -857,6 +857,7 @@ export async function GET(_request: NextRequest) {
 
           insights = {
             fifteenMinuteAverages: computed.fifteenMinuteAverages,
+            timeOfDayBuckets: computed.timeOfDayBuckets,
             ...(stitchedMonthMeta ? { stitchedMonth: stitchedMonthMeta } : {}),
             peakDay: computed.peakDay,
             peakHour: computed.peakHour,
