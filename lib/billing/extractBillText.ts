@@ -41,6 +41,17 @@ export async function extractBillTextFromUpload(
 
   // Treat unknowns as PDF by default since most real bills will be PDFs.
   if (fileType === 'pdf' || fileType === 'unknown') {
+    // Prefer the same canonical PDF→text extraction pipeline used by the EFL system (pdftotext service + fallbacks).
+    try {
+      const { deterministicEflExtract } = await import('@/lib/efl/eflExtractor');
+      const det = await deterministicEflExtract(billBuffer);
+      const t = String(det?.rawText ?? '').trim();
+      if (t) return t;
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[bill-text] PDF→text extraction failed, falling back to pdf-parse/UTF-8 decode', err);
+    }
+
     try {
       // Dynamic import to avoid pulling pdf-parse into client bundles.
       const pdfParseModule = await import('pdf-parse');
@@ -51,7 +62,7 @@ export async function extractBillTextFromUpload(
       }
     } catch (err) {
       // eslint-disable-next-line no-console
-      console.error('[bill-text] PDF parse failed, falling back to UTF-8 decode', err);
+      console.error('[bill-text] pdf-parse failed, falling back to UTF-8 decode', err);
     }
 
     return billBuffer.toString('utf8');

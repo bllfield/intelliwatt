@@ -251,6 +251,10 @@ export function CurrentRateDetailsForm({
   const [notes, setNotes] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [billUploaded, setBillUploaded] = useState(false);
+  const [eflFile, setEflFile] = useState<File | null>(null);
+  const [isParsingEfl, setIsParsingEfl] = useState(false);
+  const [eflParseStatus, setEflParseStatus] = useState<string | null>(null);
+  const [prefilledFromEfl, setPrefilledFromEfl] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [hasAwarded, setHasAwarded] = useState(false);
@@ -832,6 +836,98 @@ export function CurrentRateDetailsForm({
       return false;
     } finally {
       setIsUploading(false);
+    }
+  }
+
+  async function parseEflFactLabel(): Promise<boolean> {
+    if (!eflFile) {
+      setEflParseStatus("Select an EFL PDF first.");
+      return false;
+    }
+
+    try {
+      setIsParsingEfl(true);
+      setEflParseStatus(null);
+
+      const fd = new FormData();
+      fd.append("eflFile", eflFile);
+
+      const r = await fetch("/api/current-plan/efl-parse", {
+        method: "POST",
+        body: fd,
+      });
+      const j = await r.json().catch(() => null);
+      if (!r.ok || !j?.ok) {
+        setEflParseStatus(j?.error ? String(j.error) : `EFL parse failed (${r.status})`);
+        return false;
+      }
+
+      const p = j?.prefill ?? {};
+      if (typeof p?.providerName === "string") setElectricCompany(p.providerName);
+      if (typeof p?.planName === "string") setPlanName(p.planName);
+      if (typeof p?.rateType === "string" && ["FIXED", "VARIABLE", "TIME_OF_USE"].includes(p.rateType)) {
+        setRateType(p.rateType as any);
+      }
+      if (typeof p?.termLengthMonths === "number" && Number.isFinite(p.termLengthMonths)) {
+        setTermLengthMonths(String(p.termLengthMonths));
+      }
+      if (typeof p?.energyRateCentsPerKwh === "number" && Number.isFinite(p.energyRateCentsPerKwh)) {
+        setPrimaryRateCentsPerKwh(String(p.energyRateCentsPerKwh));
+      }
+      if (typeof p?.baseMonthlyFeeDollars === "number" && Number.isFinite(p.baseMonthlyFeeDollars)) {
+        setBaseFeeDollars(String(p.baseMonthlyFeeDollars.toFixed(2)));
+      }
+      if (typeof p?.earlyTerminationFeeDollars === "number" && Number.isFinite(p.earlyTerminationFeeDollars)) {
+        setEarlyTerminationFee(String(p.earlyTerminationFeeDollars.toFixed(2)));
+      }
+
+      const credits = Array.isArray(p?.billCredits) ? p.billCredits : [];
+      if (credits.length > 0) {
+        setIncludeBillCredits(true);
+        setBillCreditRules(() =>
+          credits.map((c: any) => ({
+            id:
+              typeof crypto !== "undefined" && "randomUUID" in crypto
+                ? (crypto as any).randomUUID()
+                : Math.random().toString(36).slice(2),
+            label: typeof c?.label === "string" ? c.label : "Bill credit",
+            creditAmount: typeof c?.creditCents === "number" ? String((c.creditCents / 100).toFixed(2)) : "",
+            minUsage: typeof c?.thresholdKwh === "number" ? String(c.thresholdKwh) : "",
+            maxUsage: "",
+            applyAllMonths: true,
+            selectedMonths: [],
+          })),
+        );
+      }
+
+      const tou = Array.isArray(p?.touWindows) ? p.touWindows : [];
+      if (tou.length > 0) {
+        setRateType("TIME_OF_USE");
+        setTouTiers(() =>
+          tou.map((t: any, idx: number) => ({
+            id:
+              typeof crypto !== "undefined" && "randomUUID" in crypto
+                ? (crypto as any).randomUUID()
+                : Math.random().toString(36).slice(2),
+            label: `Period ${idx + 1}`,
+            priceCents: typeof t?.cents === "number" ? String(t.cents) : "",
+            startTime: typeof t?.start === "string" ? t.start : "",
+            endTime: typeof t?.end === "string" ? t.end : "",
+            useAllDays: true,
+            selectedDays: [],
+            selectedMonths: [],
+          })),
+        );
+      }
+
+      setPrefilledFromEfl(true);
+      setEflParseStatus("EFL parsed. We pre-filled your fields—please double-check everything before saving.");
+      return true;
+    } catch (e: any) {
+      setEflParseStatus(e?.message ?? "EFL parse failed.");
+      return false;
+    } finally {
+      setIsParsingEfl(false);
     }
   }
 
@@ -1532,6 +1628,67 @@ export function CurrentRateDetailsForm({
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[0.95fr,1.05fr]">
+        <div className="space-y-4 rounded-3xl border-2 border-brand-navy bg-white p-6 shadow-sm sm:p-7">
+          <h2 className="text-base font-semibold text-brand-navy">Option 0 · Upload your plan’s Electricity Facts Label (EFL)</h2>
+          <p className="text-sm text-brand-slate">
+            Upload the EFL/fact label PDF for your current plan and we&apos;ll prefill the fields below using the same PDF-to-text
+            pipeline we use for offer EFL processing. Please <span className="font-semibold">double-check everything</span> and
+            override anything that looks off.
+          </p>
+
+          <label className="flex w-full cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-brand-blue/30 bg-brand-blue/5 p-6 text-center text-sm text-brand-navy transition hover:border-brand-blue/60 hover:bg-brand-blue/10">
+            <span className="font-semibold">Drag your EFL PDF here or click to browse</span>
+            <span className="mt-1 text-xs text-brand-slate">
+              Accepted file: <span className="font-semibold">PDF only</span>
+            </span>
+            <input
+              type="file"
+              accept=".pdf,application/pdf"
+              multiple={false}
+              onChange={(e) => {
+                const f = e.target.files && e.target.files[0] ? e.target.files[0] : null;
+                setEflFile(f);
+                setEflParseStatus(null);
+                setPrefilledFromEfl(false);
+              }}
+              className="hidden"
+            />
+          </label>
+
+          {eflFile ? (
+            <div className="rounded-lg border border-brand-blue/25 bg-brand-blue/5 px-3 py-3 text-xs text-brand-navy">
+              <div className="flex items-center justify-between gap-3">
+                <span className="font-semibold truncate">{eflFile.name}</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEflFile(null);
+                    setEflParseStatus(null);
+                    setPrefilledFromEfl(false);
+                  }}
+                  className="text-rose-600 hover:text-rose-700"
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          <button
+            type="button"
+            onClick={parseEflFactLabel}
+            disabled={!eflFile || isParsingEfl}
+            className="inline-flex items-center rounded-full bg-brand-navy px-5 py-2 text-sm font-semibold uppercase tracking-wide text-brand-cyan shadow-[0_8px_24px_rgba(16,46,90,0.25)] transition hover:bg-brand-navy/90 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isParsingEfl ? "Parsing…" : "Parse EFL and prefill"}
+          </button>
+
+          {eflParseStatus ? (
+            <p className={`text-sm ${prefilledFromEfl ? "text-emerald-700" : "text-rose-700"}`}>
+              {eflParseStatus}
+            </p>
+          ) : null}
+        </div>
         <div
           id="bill-upload"
           className="space-y-4 rounded-3xl border-2 border-brand-navy bg-white p-6 shadow-sm sm:p-7"
