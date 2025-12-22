@@ -131,6 +131,7 @@ export default function PlansClient() {
     return null;
   });
   const [sort, setSort] = useState<SortKey>("kwh1000_asc");
+  const userTouchedSortRef = useRef(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<10 | 20 | 50>(20);
   const [refreshNonce, setRefreshNonce] = useState(0);
@@ -346,6 +347,17 @@ export default function PlansClient() {
   const hasUnavailable = offers.some((o: any) => o?.intelliwatt?.statusLabel === "UNAVAILABLE");
   const availableFilterOn = template === "available";
 
+  // Default sort:
+  // - if usage is present: "Best for you"
+  // - if no usage: "Lowest @ 1000 kWh"
+  // Only auto-apply until the user manually changes the sort dropdown.
+  useEffect(() => {
+    if (userTouchedSortRef.current) return;
+    if (!resp?.ok) return;
+    const desired: SortKey = resp?.hasUsage ? "best_for_you_proxy" : "kwh1000_asc";
+    if (sort !== desired) setSort(desired);
+  }, [resp?.ok, resp?.hasUsage, sort]);
+
   // Default basis (only once per "hasUsage" session): if we already have OK all-in estimates, prefer them.
   useEffect(() => {
     if (!hasUsage) {
@@ -527,6 +539,7 @@ export default function PlansClient() {
                     <select
                       value={sort}
                       onChange={(e) => {
+                        userTouchedSortRef.current = true;
                         setSort(e.target.value as any);
                         setPage(1);
                       }}
@@ -710,6 +723,7 @@ export default function PlansClient() {
                   <select
                     value={sort}
                     onChange={(e) => {
+                      userTouchedSortRef.current = true;
                       setSort(e.target.value as any);
                       setPage(1);
                     }}
