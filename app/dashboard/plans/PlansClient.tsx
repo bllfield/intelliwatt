@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import OfferCard, { type OfferCardProps } from "./OfferCard";
+import IntelliwattBotPopup from "@/components/dashboard/IntelliwattBotPopup";
 
 type UsageSummary =
   | {
@@ -143,6 +144,7 @@ export default function PlansClient() {
   const [prefetchNote, setPrefetchNote] = useState<string | null>(null);
   const prefetchInFlightRef = useRef(false);
   const prefetchAttemptsRef = useRef(0);
+  const [autoPreparing, setAutoPreparing] = useState(false);
 
   const [mobilePanel, setMobilePanel] = useState<"none" | "search" | "filters">("none");
   const [headerCollapsed, setHeaderCollapsed] = useState(false);
@@ -324,13 +326,17 @@ export default function PlansClient() {
     if (loading) return;
     if (error) return;
     if (prefetchInFlightRef.current) return;
-    if (prefetchAttemptsRef.current >= 10) return; // safety cap per page load
     if (isRenter === null) return;
 
     const offersNow = Array.isArray(resp?.offers) ? (resp!.offers as OfferRow[]) : [];
     const queuedOffers = offersNow.filter((o) => o?.intelliwatt?.statusLabel === "QUEUED");
-    if (queuedOffers.length === 0) {
-      setPrefetchNote(null);
+    const attempts = prefetchAttemptsRef.current;
+    const shouldAutoPrepare = queuedOffers.length > 0 && attempts < 10;
+    setAutoPreparing(shouldAutoPrepare);
+
+    if (!shouldAutoPrepare) {
+      // Either everything is ready, or we hit our retry cap (remaining QUEUED are likely manual review).
+      setPrefetchNote(queuedOffers.length === 0 ? null : "Some plans are still pending manual review.");
       return;
     }
 
@@ -415,8 +421,23 @@ export default function PlansClient() {
     return String(first.offerId);
   }, [hasUsage, sort, page, offers]);
 
+  const queuedCount = useMemo(
+    () => offers.filter((o: any) => o?.intelliwatt?.statusLabel === "QUEUED").length,
+    [offers],
+  );
+  const isStillWorking = Boolean(loading || autoPreparing);
+  const showRecommendedBadge = Boolean(recommendedOfferId && !isStillWorking);
+  const showCalcBot =
+    Boolean(hasUsage && sort === "best_for_you_proxy" && (isStillWorking || queuedCount > 0));
+
   return (
     <div className="flex flex-col gap-6">
+      <IntelliwattBotPopup
+        visible={showCalcBot}
+        storageKey="iw_bot_plans_calc_v1"
+        ttlMs={15 * 60 * 1000}
+        message={`I'm calculating all your options using your actual usage to determine which plan is best based on your energy usage habits.\n\nYour results will be available soon.`}
+      />
       <div className="sticky top-0 z-20 -mx-4 px-4 pt-2 pb-3 bg-brand-white/90 backdrop-blur border-b border-brand-cyan/15">
         <div className="mx-auto max-w-5xl">
           <div className="rounded-3xl border border-brand-cyan/25 bg-brand-navy p-4 shadow-[0_18px_40px_rgba(10,20,60,0.35)]">
@@ -952,6 +973,22 @@ export default function PlansClient() {
       ) : null}
 
       <div className="mx-auto w-full max-w-5xl">
+        {isStillWorking ? (
+          <div className="mb-4 rounded-3xl border border-brand-cyan/20 bg-brand-navy px-5 py-4 text-brand-cyan/80 shadow-[0_18px_40px_rgba(10,20,60,0.22)]">
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 h-4 w-4 shrink-0 rounded-full border-2 border-brand-cyan/30 border-t-brand-blue animate-spin" />
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-brand-white">Calculating your best plan…</div>
+                <div className="mt-1 text-xs text-brand-cyan/75">
+                  We’re loading all plan options and applying IntelliWatt calculations using your usage.
+                  {queuedCount > 0 ? (
+                    <span className="ml-2 text-brand-cyan/60">({queuedCount} still processing)</span>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
         {resp == null || (resp?.ok !== true && loading) ? (
           <div className="rounded-3xl border border-brand-cyan/20 bg-brand-navy p-8 text-brand-cyan/75">
             Loading plans…
@@ -967,7 +1004,11 @@ export default function PlansClient() {
         ) : (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             {offers.map((o) => (
-              <OfferCard key={o.offerId} offer={o} recommended={o.offerId === recommendedOfferId} />
+              <OfferCard
+                key={o.offerId}
+                offer={o}
+                recommended={showRecommendedBadge ? o.offerId === recommendedOfferId : false}
+              />
             ))}
           </div>
         )}
