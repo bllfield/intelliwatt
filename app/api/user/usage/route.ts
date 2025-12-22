@@ -909,7 +909,8 @@ export async function GET(_request: NextRequest) {
       {
         headers: {
           // Browser/private caching only; user-specific (cookie auth). This just reduces repeated fetches.
-          'Cache-Control': 'private, max-age=60, stale-while-revalidate=600',
+          // Usage changes infrequently; keep this fairly "sticky" so re-entering the page doesn't feel like recomputation.
+          'Cache-Control': 'private, max-age=900, stale-while-revalidate=86400',
         },
       },
     );

@@ -96,15 +96,16 @@ type UsageApiResponse = { ok: true; houses: HouseUsage[] } | { ok: false; error:
 type SessionCacheValue = { savedAt: number; payload: UsageApiResponse };
 const SESSION_KEY = "usage_dashboard_v1";
 const SESSION_TTL_MS = 60 * 60 * 1000; // UX cache only (real data lives in DB)
+const SESSION_SOFT_TTL_MS = 15 * 60 * 1000; // avoid re-fetching on quick re-entry
 
-function readSessionCache(): UsageApiResponse | null {
+function readSessionCache(): SessionCacheValue | null {
   try {
     const raw = sessionStorage.getItem(SESSION_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as SessionCacheValue;
     if (!parsed?.savedAt || !parsed?.payload) return null;
     if (Date.now() - parsed.savedAt > SESSION_TTL_MS) return null;
-    return parsed.payload;
+    return parsed;
   } catch {
     return null;
   }
@@ -169,7 +170,6 @@ export const UsageDashboard: React.FC = () => {
   const [selectedHouseId, setSelectedHouseId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const didWarmPlansRef = React.useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -179,14 +179,20 @@ export const UsageDashboard: React.FC = () => {
 
         // Show cached payload instantly (back/forward nav), then refresh in the background.
         const cached = readSessionCache();
-        if (cached && (cached as any).ok !== false && (cached as any).houses) {
-          const c = cached as { ok: true; houses: HouseUsage[] };
+        const cachedPayload = cached?.payload ?? null;
+        if (cachedPayload && (cachedPayload as any).ok !== false && (cachedPayload as any).houses) {
+          const c = cachedPayload as { ok: true; houses: HouseUsage[] };
           setHouses(c.houses || []);
           const firstWithData = c.houses.find((h) => h.dataset);
           setSelectedHouseId(firstWithData?.houseId ?? c.houses[0]?.houseId ?? null);
           setLoading(false);
         } else {
           setLoading(true);
+        }
+
+        // If the cache is still "fresh enough", don't re-fetch on page re-entry.
+        if (cached && Date.now() - cached.savedAt <= SESSION_SOFT_TTL_MS) {
+          return;
         }
 
         const res = await fetch("/api/user/usage");
@@ -210,24 +216,6 @@ export const UsageDashboard: React.FC = () => {
       cancelled = true;
     };
   }, []);
-
-  // Best-effort: once usage is available, warm the plan estimate cache so /dashboard/plans is instant.
-  useEffect(() => {
-    if (didWarmPlansRef.current) return;
-    const firstWithUsage = houses.find((h) => Boolean(h.dataset?.summary?.latest));
-    if (!firstWithUsage) return;
-    didWarmPlansRef.current = true;
-
-    const qs = new URLSearchParams({
-      page: "1",
-      pageSize: "50",
-      sort: "best_for_you_proxy",
-      // NOTE: isRenter isn't known on this page; default false matches most cases.
-      isRenter: "false",
-    });
-    // Fire-and-forget (don’t block UI). This call writes plan-engine results into the WattBuy Offers DB cache.
-    fetch(`/api/dashboard/plans?${qs.toString()}`, { keepalive: true }).catch(() => null);
-  }, [houses]);
 
   const activeHouse = useMemo(() => {
     if (!selectedHouseId) return null;
