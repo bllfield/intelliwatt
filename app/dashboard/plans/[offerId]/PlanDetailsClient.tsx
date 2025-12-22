@@ -17,6 +17,31 @@ type ApiResp =
       notes?: string[];
     };
 
+type SessionCacheValue = { savedAt: number; payload: ApiResp };
+const SESSION_TTL_MS = 60 * 60 * 1000; // UX cache only (canonical estimate lives in DB)
+
+function readSessionCache(key: string): ApiResp | null {
+  try {
+    const raw = sessionStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as SessionCacheValue;
+    if (!parsed?.savedAt || !parsed?.payload) return null;
+    if (Date.now() - parsed.savedAt > SESSION_TTL_MS) return null;
+    return parsed.payload;
+  } catch {
+    return null;
+  }
+}
+
+function writeSessionCache(key: string, payload: ApiResp) {
+  try {
+    const v: SessionCacheValue = { savedAt: Date.now(), payload };
+    sessionStorage.setItem(key, JSON.stringify(v));
+  } catch {
+    // ignore
+  }
+}
+
 function fmtNum(n: any, digits = 2): string {
   if (n == null) return "—";
   const v = typeof n === "number" ? n : Number(n);
@@ -53,10 +78,18 @@ export default function PlanDetailsClient({ offerId }: { offerId: string }) {
 
   useEffect(() => {
     const controller = new AbortController();
+    const cacheKey = `plan_detail_v1:${offerId}`;
     async function run() {
-      setLoading(true);
       setError(null);
       try {
+        const cached = readSessionCache(cacheKey);
+        if (cached) {
+          setData(cached);
+          setLoading(false);
+        } else {
+          setLoading(true);
+        }
+
         const r = await fetch(
           `/api/dashboard/plans/detail?offerId=${encodeURIComponent(offerId)}`,
           {
@@ -70,6 +103,7 @@ export default function PlanDetailsClient({ offerId }: { offerId: string }) {
           setData(j);
           return;
         }
+        writeSessionCache(cacheKey, j);
         setData(j);
       } catch (e: any) {
         if (controller.signal.aborted) return;
@@ -106,23 +140,28 @@ export default function PlanDetailsClient({ offerId }: { offerId: string }) {
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 pb-16">
-      <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+      <div className="mt-6 flex flex-col gap-2 text-brand-navy sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <div className="text-xs text-brand-cyan/70">
-            <Link href="/dashboard/plans" className="text-brand-blue hover:underline">
+          <div className="text-xs text-brand-navy">
+            <Link href="/dashboard/plans" className="text-brand-navy hover:underline">
               ← Back to Plans
             </Link>
           </div>
-          <div className="mt-2 text-2xl font-semibold text-brand-white">
+          <div className="mt-2 text-2xl font-semibold text-brand-navy">
             {plan?.supplierName ?? "Plan"} — {plan?.planName ?? offerId}
           </div>
-          <div className="mt-1 text-sm text-brand-cyan/70">
-            OfferId: <span className="font-mono">{offerId}</span>
+          <div className="mt-1 text-sm text-brand-navy">
+            OfferId: <span className="font-mono text-brand-navy">{offerId}</span>
           </div>
         </div>
 
         {plan?.eflUrl ? (
-          <Link href={plan.eflUrl} target="_blank" rel="noreferrer" className="text-sm font-semibold text-brand-blue hover:underline">
+          <Link
+            href={plan.eflUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="text-sm font-semibold text-brand-navy hover:underline"
+          >
             View EFL
           </Link>
         ) : null}

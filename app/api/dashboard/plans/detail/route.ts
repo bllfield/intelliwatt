@@ -891,7 +891,14 @@ export async function GET(req: NextRequest) {
           "Missing required buckets are auto-created and computed on-demand (best-effort) for this plan.",
         ],
       },
-      { status: 200 },
+      {
+        status: 200,
+        headers: {
+          // User-specific (cookie auth). This reduces repeat loads/back-navigation delays without
+          // affecting the canonical plan-engine output cache (which lives in the WattBuy Offers DB).
+          "Cache-Control": "private, max-age=60, stale-while-revalidate=600",
+        },
+      },
     );
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message ?? String(e) }, { status: 500 });
