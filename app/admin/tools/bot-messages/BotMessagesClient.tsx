@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { eventsForPageKey } from "@/lib/intelliwattbot/events";
 
 type PageRow = {
   pageKey: string;
@@ -180,6 +181,8 @@ export default function BotMessagesClient() {
             const d = drafts[p.pageKey] ?? { enabled: p.current.enabled, message: p.current.message ?? p.defaultMessage };
             const isSaving = savingKey === p.pageKey;
             const isBase = !p.pageKey.includes("::");
+            const baseKey = isBase ? p.pageKey : (p.baseKey ?? p.pageKey.split("::")[0]);
+            const eventOptions = isBase ? eventsForPageKey(baseKey) : [];
             return (
               <div key={p.pageKey} className="rounded-2xl border border-brand-cyan/20 bg-brand-white/5 p-4">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -197,17 +200,45 @@ export default function BotMessagesClient() {
                   <div className="flex items-center gap-3">
                     {isBase ? (
                       <div className="hidden sm:flex items-center gap-2">
-                        <input
+                        <select
                           value={newEventByBase[p.pageKey] ?? ""}
-                          onChange={(e) =>
-                            setNewEventByBase((prev) => ({ ...prev, [p.pageKey]: e.target.value }))
-                          }
-                          placeholder="event key (e.g. calculating)"
-                          className="w-[220px] rounded-2xl border border-brand-cyan/25 bg-brand-white/5 px-3 py-2 text-xs text-brand-white placeholder:text-brand-cyan/40 outline-none focus:border-brand-blue/60"
-                        />
+                          onChange={(e) => setNewEventByBase((prev) => ({ ...prev, [p.pageKey]: e.target.value }))}
+                          className="w-[260px] rounded-2xl border border-brand-cyan/25 bg-brand-white/5 px-3 py-2 text-xs text-brand-white outline-none focus:border-brand-blue/60 focus:bg-white focus:text-brand-navy"
+                        >
+                          <option className="text-brand-navy" value="">
+                            Choose event…
+                          </option>
+                          {eventOptions.map((ev) => (
+                            <option key={ev.key} className="text-brand-navy" value={ev.key}>
+                              {ev.label}
+                            </option>
+                          ))}
+                          <option className="text-brand-navy" value="__custom__">
+                            Custom…
+                          </option>
+                        </select>
+                        {newEventByBase[p.pageKey] === "__custom__" ? (
+                          <input
+                            value={newEventByBase[`${p.pageKey}::__custom_value__`] ?? ""}
+                            onChange={(e) =>
+                              setNewEventByBase((prev) => ({ ...prev, [`${p.pageKey}::__custom_value__`]: e.target.value }))
+                            }
+                            placeholder="custom event key"
+                            className="w-[200px] rounded-2xl border border-brand-cyan/25 bg-brand-white/5 px-3 py-2 text-xs text-brand-white placeholder:text-brand-cyan/40 outline-none focus:border-brand-blue/60"
+                          />
+                        ) : null}
                         <button
                           type="button"
-                          onClick={() => addEventVariant(p.pageKey)}
+                          onClick={() => {
+                            const selected = newEventByBase[p.pageKey] ?? "";
+                            const custom = newEventByBase[`${p.pageKey}::__custom_value__`] ?? "";
+                            if (selected === "__custom__") {
+                              setNewEventByBase((prev) => ({ ...prev, [p.pageKey]: String(custom) }));
+                              window.setTimeout(() => addEventVariant(p.pageKey), 0);
+                            } else {
+                              addEventVariant(p.pageKey);
+                            }
+                          }}
                           className="rounded-full border border-brand-cyan/25 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-cyan hover:bg-brand-white/10"
                         >
                           Add event message
