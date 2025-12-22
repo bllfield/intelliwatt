@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 
 import { prisma } from "@/lib/db";
+import { usagePrisma } from "@/lib/db/usageClient";
 import { wattbuy } from "@/lib/wattbuy";
 import { normalizeOffers } from "@/lib/wattbuy/normalize";
 import { fetchEflPdfFromUrl } from "@/lib/efl/fetchEflPdf";
@@ -129,6 +130,8 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
   // "Any usage being present": if we have an SMT interval at all, we consider usage present.
   // (Cadence/lock will prevent thrash.)
   let usageWindowEnd: Date | null = null;
+  let usageSource: "SMT" | "GREEN_BUTTON" = "SMT";
+  let gbRawId: string | null = null;
   const esiid = typeof house.esiid === "string" && house.esiid.trim() ? house.esiid.trim() : null;
   if (esiid) {
     const latest = await prisma.smtInterval.findFirst({
@@ -137,6 +140,22 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
       select: { ts: true },
     });
     usageWindowEnd = latest?.ts ?? null;
+  }
+  if (!usageWindowEnd) {
+    try {
+      const latestGb = await (usagePrisma as any).greenButtonInterval.findFirst({
+        where: { homeId },
+        orderBy: { timestamp: "desc" },
+        select: { timestamp: true, rawId: true },
+      });
+      if (latestGb?.timestamp) {
+        usageWindowEnd = latestGb.timestamp as Date;
+        usageSource = "GREEN_BUTTON";
+        gbRawId = typeof latestGb?.rawId === "string" ? latestGb.rawId : null;
+      }
+    } catch {
+      // ignore: lack of GB tables/rows should not throw
+    }
   }
   if (!usageWindowEnd) return { ok: true, started: false, reason: "no_usage_yet" };
 
@@ -336,9 +355,9 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
   const usageCutoff = new Date(usageWindowEnd.getTime() - 365 * DAY_MS);
   const bucketBuild = await buildUsageBucketsForEstimate({
     homeId,
-    usageSource: "SMT",
-    esiid: house.esiid ?? null,
-    rawId: null,
+    usageSource,
+    esiid: usageSource === "SMT" ? esiid : null,
+    rawId: usageSource === "GREEN_BUTTON" ? gbRawId : null,
     windowEnd: usageWindowEnd,
     cutoff: usageCutoff,
     requiredBucketKeys: Array.from(unionKeys),

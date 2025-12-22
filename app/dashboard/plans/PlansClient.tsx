@@ -162,7 +162,6 @@ export default function PlansClient() {
 
   const [prefetchNote, setPrefetchNote] = useState<string | null>(null);
   const prefetchInFlightRef = useRef(false);
-  const pipelineKickoffRef = useRef(false);
   const [autoPreparing, setAutoPreparing] = useState(false);
 
   const [mobilePanel, setMobilePanel] = useState<"none" | "search" | "filters">("none");
@@ -206,7 +205,6 @@ export default function PlansClient() {
 
   useEffect(() => {
     prefetchInFlightRef.current = false;
-    pipelineKickoffRef.current = false;
     setPrefetchNote(null);
   }, [serverDatasetKey]);
 
@@ -322,75 +320,17 @@ export default function PlansClient() {
     return () => controller.abort();
   }, [plansQueryString, isRenter, refreshNonce, cacheKey, cacheTtlMs]);
 
-  // Fallback-only: if we still have QUEUED items (estimate_cache_miss / missing templates),
-  // kick off the background pipeline ONCE. The pipeline is responsible for mapping + caching estimates.
+  // IMPORTANT: /dashboard/plans must never trigger/retrigger the plan pipeline.
+  // Pipeline warm-up happens proactively (dashboard bootstrap + usage ingest).
+  // Here we only display a "preparing" UI if estimates are still QUEUED.
   useEffect(() => {
     if (!resp?.ok) return;
-    if (!resp?.hasUsage) return;
-    if (loading) return;
-    if (error) return;
-    if (prefetchInFlightRef.current) return;
-    if (isRenter === null) return;
-
     const offersNow = Array.isArray(resp?.offers) ? (resp!.offers as OfferRow[]) : [];
     const queuedOffers = offersNow.filter((o) => o?.intelliwatt?.statusLabel === "QUEUED");
-    const shouldKickoff = queuedOffers.length > 0 && !pipelineKickoffRef.current;
-    setAutoPreparing(shouldKickoff);
-
-    if (!shouldKickoff) {
-      setPrefetchNote(queuedOffers.length === 0 ? null : "Some plans are still pending manual review or processing.");
-      return;
-    }
-
-    pipelineKickoffRef.current = true;
-    prefetchInFlightRef.current = true;
-    setPrefetchNote(`Preparing IntelliWatt calculations… (${queuedOffers.length} pending)`);
-
-    const controller = new AbortController();
-    const timer = window.setTimeout(() => {
-      controller.abort();
-    }, 12_000);
-
-    async function runPrefetch() {
-      try {
-        const params = new URLSearchParams();
-        params.set("timeBudgetMs", "12000");
-        params.set("maxTemplateOffers", "6");
-        params.set("maxEstimatePlans", "25");
-        params.set("reason", "plans_fallback");
-        params.set("isRenter", String(isRenter));
-        const r = await fetch(`/api/dashboard/plans/pipeline?${params.toString()}`, {
-          method: "POST",
-          signal: controller.signal,
-        });
-        const j = await r.json().catch(() => null);
-        if (!r.ok || !j?.ok) {
-          setPrefetchNote("Preparing IntelliWatt calculations… (retrying)");
-          return;
-        }
-
-        const linked = Number(j?.templatesLinked ?? 0) || 0;
-        const est = Number(j?.estimatesComputed ?? 0) || 0;
-        const cached = Number(j?.estimatesAlreadyCached ?? 0) || 0;
-        setPrefetchNote(`Preparing IntelliWatt calculations… templates+${linked}, estimates+${est} (cached ${cached})`);
-      } catch (e: any) {
-        if (e?.name === "AbortError") return;
-        setPrefetchNote("Preparing IntelliWatt calculations… (retrying)");
-      } finally {
-        window.clearTimeout(timer);
-        prefetchInFlightRef.current = false;
-        // Refresh once so newly cached estimates show up; do not loop.
-        setRefreshNonce((n) => n + 1);
-      }
-    }
-
-    runPrefetch();
-    return () => {
-      window.clearTimeout(timer);
-      controller.abort();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resp?.ok, resp?.hasUsage, resp?.offers, isRenter, loading, error]);
+    const isQueued = queuedOffers.length > 0;
+    setAutoPreparing(isQueued);
+    setPrefetchNote(isQueued ? `Preparing IntelliWatt calculations… (${queuedOffers.length} pending)` : null);
+  }, [resp?.ok, resp?.offers]);
 
   const hasUsage = Boolean(resp?.ok && resp?.hasUsage);
   const datasetOffers = Array.isArray(resp?.offers) ? resp!.offers! : [];

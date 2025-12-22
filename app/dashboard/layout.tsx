@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 
 import IdleGuard from '@/components/IdleGuard';
 import EntriesChecklistSidebar from '@/components/dashboard/EntriesChecklistSidebar';
+import DashboardPlanPipelineBootstrapper from '@/components/dashboard/DashboardPlanPipelineBootstrapper';
 import { prisma } from '@/lib/db';
 import { normalizeEmail } from '@/lib/utils/email';
 
@@ -96,6 +97,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   return (
     <IdleGuard>
       <div className="min-h-screen bg-brand-white text-brand-navy">
+        <DashboardPlanPipelineBootstrapper />
         <EntriesChecklistSidebar />
         <div className="flex flex-col min-w-0">
           <main className="flex-1 p-6 max-w-6xl mx-auto w-full">{children}</main>
