@@ -90,6 +90,7 @@ export default function PlanDetailsClient({ offerId }: { offerId: string }) {
   const outputs = ok ? (data as any).outputs : null;
   const math = ok ? (data as any).math : null;
   const monthlyBreakdown = ok ? (data as any).monthlyBreakdown : null;
+  const hasCalc = Boolean(outputs?.trueCostEstimate?.status === "OK");
 
   const requiredBucketKeys = useMemo(
     () => (Array.isArray(template?.requiredBucketKeys) ? (template.requiredBucketKeys as any[]).map(String) : []),
@@ -132,12 +133,14 @@ export default function PlanDetailsClient({ offerId }: { offerId: string }) {
 
       {ok ? (
         <>
-          <div className="mt-6 text-xs text-brand-cyan/60">
+          <div className={`mt-6 text-xs ${hasCalc ? "text-brand-navy" : "text-brand-cyan/60"}`}>
             Buckets used by this plan:{" "}
             {requiredBucketKeys.length ? (
-              <span className="font-mono text-brand-white/80">{requiredBucketKeys.join(", ")}</span>
+              <span className={`font-mono ${hasCalc ? "text-brand-navy" : "text-brand-white/80"}`}>
+                {requiredBucketKeys.join(", ")}
+              </span>
             ) : (
-              <span className="font-mono text-brand-white/80">—</span>
+              <span className={`font-mono ${hasCalc ? "text-brand-navy" : "text-brand-white/80"}`}>—</span>
             )}
           </div>
 
