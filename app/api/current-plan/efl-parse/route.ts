@@ -5,7 +5,7 @@ import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
 import { getCurrentPlanPrisma } from "@/lib/prismaCurrentPlan";
 import { deterministicEflExtract, extractProviderAndPlanNameFromEflText } from "@/lib/efl/eflExtractor";
-import { parseEflText } from "@/lib/efl/parse";
+import { runEflPipelineFromRawTextNoStore } from "@/lib/efl/runEflPipelineFromRawTextNoStore";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -107,20 +107,84 @@ export async function POST(req: NextRequest) {
     }
 
     const labels = extractProviderAndPlanNameFromEflText(rawText);
-    const parsed = parseEflText(rawText, {
-      supplierName: labels.providerName,
-      planName: labels.planName,
-    } as any);
+    // Use the same EFL engine as offers (AI parse → avg-price validator → gap solver).
+    const pipeline = await runEflPipelineFromRawTextNoStore({
+      rawText,
+      eflPdfSha256: det.eflPdfSha256,
+      source: "queue_rawtext",
+      offerMeta: {
+        supplier: labels.providerName ?? null,
+        planName: labels.planName ?? null,
+        termMonths: null,
+        tdspName: null,
+        offerId: null,
+      },
+    });
 
-    const rateType = toRateType(parsed);
-    const centsBands = Array.isArray(parsed?.rate?.centsPerKwhJson) ? parsed.rate.centsPerKwhJson : [];
-    const flatEnergyRateCents =
-      centsBands.length === 1 && centsBands[0] && typeof centsBands[0].cents === "number"
-        ? centsBands[0].cents
-        : null;
+    const effectivePlanRules: any = pipeline.effectivePlanRules ?? pipeline.planRules ?? null;
+    const effectiveRateStructure: any = pipeline.effectiveRateStructure ?? pipeline.rateStructure ?? null;
 
-    const billCredits = Array.isArray(parsed?.rate?.billCreditsJson) ? parsed.rate.billCreditsJson : [];
-    const touWindows = Array.isArray(parsed?.rate?.touWindowsJson) ? parsed.rate.touWindowsJson : [];
+    const parsed = {
+      rate: {
+        supplierName: labels.providerName ?? null,
+        planName: labels.planName ?? null,
+        termMonths: typeof effectivePlanRules?.termMonths === "number" ? effectivePlanRules.termMonths : null,
+        baseMonthlyFeeCents:
+          typeof effectivePlanRules?.baseChargePerMonthCents === "number"
+            ? Math.round(effectivePlanRules.baseChargePerMonthCents)
+            : typeof effectiveRateStructure?.baseMonthlyFeeCents === "number"
+              ? Math.round(effectiveRateStructure.baseMonthlyFeeCents)
+              : null,
+        cancelFeeCents:
+          typeof effectivePlanRules?.cancelFeeCents === "number" ? Math.round(effectivePlanRules.cancelFeeCents) : null,
+      },
+      meta: {
+        warnings: pipeline.parseWarnings ?? [],
+        notes: [],
+      },
+    } as any;
+
+    const rateType: "FIXED" | "VARIABLE" | "TIME_OF_USE" = (() => {
+      const rt = String(effectivePlanRules?.rateType ?? effectiveRateStructure?.type ?? "").toUpperCase();
+      if (rt === "TIME_OF_USE") return "TIME_OF_USE";
+      if (rt === "VARIABLE") return "VARIABLE";
+      return "FIXED";
+    })();
+
+    const flatEnergyRateCents: number | null =
+      typeof effectiveRateStructure?.energyRateCents === "number" && Number.isFinite(effectiveRateStructure.energyRateCents)
+        ? Number(effectiveRateStructure.energyRateCents)
+        : typeof effectivePlanRules?.defaultRateCentsPerKwh === "number" && Number.isFinite(effectivePlanRules.defaultRateCentsPerKwh)
+          ? Number(effectivePlanRules.defaultRateCentsPerKwh)
+          : typeof effectivePlanRules?.currentBillEnergyRateCents === "number" && Number.isFinite(effectivePlanRules.currentBillEnergyRateCents)
+            ? Number(effectivePlanRules.currentBillEnergyRateCents)
+            : null;
+
+    const billCredits = (() => {
+      const rsCredits = (effectiveRateStructure as any)?.billCredits;
+      const rules = rsCredits && Array.isArray(rsCredits.rules) ? rsCredits.rules : [];
+      return rules
+        .map((r: any) => ({
+          label: typeof r?.label === "string" ? r.label : "Bill credit",
+          creditCents:
+            typeof r?.creditAmountCents === "number" && Number.isFinite(r.creditAmountCents) ? Math.round(r.creditAmountCents) : null,
+          thresholdKwh:
+            typeof r?.minUsageKWh === "number" && Number.isFinite(r.minUsageKWh) ? Math.round(r.minUsageKWh) : null,
+        }))
+        .filter((x: any) => typeof x.creditCents === "number" && x.creditCents > 0 && typeof x.thresholdKwh === "number" && x.thresholdKwh > 0);
+    })();
+
+    const touWindows = (() => {
+      const tiers = Array.isArray((effectiveRateStructure as any)?.tiers) ? (effectiveRateStructure as any).tiers : [];
+      return tiers
+        .map((t: any) => ({
+          label: typeof t?.label === "string" ? t.label : null,
+          start: typeof t?.startTime === "string" ? t.startTime : null,
+          end: typeof t?.endTime === "string" ? t.endTime : null,
+          cents: typeof t?.priceCents === "number" ? t.priceCents : null,
+        }))
+        .filter((x: any) => x.start && x.end && typeof x.cents === "number");
+    })();
 
     // Normalize TOU time strings to HH:MM so saving doesn't fail validation later.
     const touWindowsNormalized = touWindows
@@ -250,7 +314,7 @@ export async function POST(req: NextRequest) {
     // Quarantine into the shared EFL review queue when parsing is incomplete/unsupported.
     const warnings: string[] = [
       ...((det.warnings ?? []) as any[]).map((x) => String(x)),
-      ...(((parsed?.meta?.warnings ?? []) as any[]) ?? []).map((x) => String(x)),
+      ...(((pipeline?.parseWarnings ?? []) as any[]) ?? []).map((x) => String(x)),
     ].filter(Boolean);
 
     const reasonParts: string[] = [];
@@ -266,7 +330,7 @@ export async function POST(req: NextRequest) {
     if (needsReview) {
       const queueReason = `CURRENT_PLAN_EFL: ${reasonParts.join(", ")}${warnings.length ? `\nwarnings: ${warnings.join(" | ")}` : ""}`;
       try {
-        const rateAny = (parsed as any)?.rate ?? null;
+        const finalValidation = (pipeline as any)?.finalValidation ?? null;
         await (prisma as any).eflParseReviewQueue.upsert({
           where: { eflPdfSha256: det.eflPdfSha256 },
           create: {
@@ -274,8 +338,8 @@ export async function POST(req: NextRequest) {
             kind: "EFL_PARSE",
             dedupeKey: `current_plan:${det.eflPdfSha256}`,
             eflPdfSha256: det.eflPdfSha256,
-            repPuctCertificate: rateAny?.repPuctCertificate ?? rateAny?.rep_puct_certificate ?? null,
-            eflVersionCode: rateAny?.eflVersionCode ?? rateAny?.efl_version_code ?? null,
+            repPuctCertificate: pipeline?.deterministic?.repPuctCertificate ?? null,
+            eflVersionCode: pipeline?.deterministic?.eflVersionCode ?? null,
             offerId: null,
             supplier: entryData.providerName,
             planName: entryData.planName,
@@ -283,13 +347,13 @@ export async function POST(req: NextRequest) {
             tdspName: null,
             termMonths: entryData.termMonths,
             rawText: rawText.slice(0, 250_000),
-            planRules: rateAny?.planRulesJson ?? rateAny?.plan_rules_json ?? null,
-            rateStructure: rateAny?.rateStructureJson ?? rateAny?.rate_structure_json ?? null,
-            validation: null,
-            derivedForValidation: null,
+            planRules: pipeline?.effectivePlanRules ?? pipeline?.planRules ?? null,
+            rateStructure: pipeline?.effectiveRateStructure ?? pipeline?.rateStructure ?? null,
+            validation: pipeline?.validation ?? null,
+            derivedForValidation: pipeline?.derivedForValidation ?? null,
             finalStatus: "FAIL",
             queueReason,
-            solverApplied: null,
+            solverApplied: (pipeline as any)?.derivedForValidation?.solverApplied ?? null,
           },
           update: {
             updatedAt: new Date(),
@@ -300,9 +364,11 @@ export async function POST(req: NextRequest) {
             planName: entryData.planName,
             termMonths: entryData.termMonths,
             rawText: rawText.slice(0, 250_000),
-            planRules: rateAny?.planRulesJson ?? rateAny?.plan_rules_json ?? null,
-            rateStructure: rateAny?.rateStructureJson ?? rateAny?.rate_structure_json ?? null,
-            finalStatus: "FAIL",
+            planRules: pipeline?.effectivePlanRules ?? pipeline?.planRules ?? null,
+            rateStructure: pipeline?.effectiveRateStructure ?? pipeline?.rateStructure ?? null,
+            validation: pipeline?.validation ?? null,
+            derivedForValidation: pipeline?.derivedForValidation ?? null,
+            finalStatus: String(finalValidation?.status ?? "FAIL") === "PASS" ? "PASS" : "FAIL",
             queueReason,
             resolvedAt: null,
             resolvedBy: null,
@@ -321,25 +387,25 @@ export async function POST(req: NextRequest) {
         eflPdfSha256: det.eflPdfSha256,
         extractorMethod: (det as any)?.extractorMethod ?? null,
         warnings: det.warnings ?? [],
-        parsedWarnings: (parsed?.meta?.warnings ?? []) as string[],
-        notes: (parsed?.meta?.notes ?? []) as string[],
+        parsedWarnings: ((pipeline?.parseWarnings ?? []) as any[]) as string[],
+        notes: ((pipeline as any)?.parseWarnings ?? []) as string[],
         rawTextPreview: rawText.slice(0, 5000),
         savedParsedCurrentPlanId: record?.id ?? null,
         queuedForReview: needsReview,
         prefill: {
-          providerName: labels.providerName ?? parsed?.rate?.supplierName ?? null,
-          planName: labels.planName ?? parsed?.rate?.planName ?? null,
+          providerName: labels.providerName ?? null,
+          planName: labels.planName ?? null,
           rateType,
-          termLengthMonths: typeof parsed?.rate?.termMonths === "number" ? parsed.rate.termMonths : null,
+          termLengthMonths: typeof (parsed as any)?.rate?.termMonths === "number" ? (parsed as any).rate.termMonths : null,
           energyRateCentsPerKwh: flatEnergyRateCents,
           baseMonthlyFeeDollars:
-            typeof parsed?.rate?.baseMonthlyFeeCents === "number" ? parsed.rate.baseMonthlyFeeCents / 100 : null,
+            typeof (parsed as any)?.rate?.baseMonthlyFeeCents === "number" ? (parsed as any).rate.baseMonthlyFeeCents / 100 : null,
           earlyTerminationFeeDollars:
-            typeof parsed?.rate?.cancelFeeCents === "number" ? parsed.rate.cancelFeeCents / 100 : null,
+            typeof (parsed as any)?.rate?.cancelFeeCents === "number" ? (parsed as any).rate.cancelFeeCents / 100 : null,
           avgPricesCentsPerKwh: {
-            kwh500: typeof parsed?.rate?.avgPrice500 === "number" ? parsed.rate.avgPrice500 : null,
-            kwh1000: typeof parsed?.rate?.avgPrice1000 === "number" ? parsed.rate.avgPrice1000 : null,
-            kwh2000: typeof parsed?.rate?.avgPrice2000 === "number" ? parsed.rate.avgPrice2000 : null,
+            kwh500: null,
+            kwh1000: null,
+            kwh2000: null,
           },
           billCredits,
           touWindows: touWindowsNormalized.length ? touWindowsNormalized : touWindows,

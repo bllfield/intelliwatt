@@ -285,8 +285,12 @@ function pickBestTdspPerKwhLine(
 function pickBestTdspMonthlyLine(
   lines: string[],
 ): { dollars: number | null; line: string | null } {
+  const isBadUsageChargeLine = (l: string): boolean =>
+    /Usage\s*Charge/i.test(l) || /Energy\s*Charge/i.test(l);
+
   const best = lines.find(
     (l) =>
+      !isBadUsageChargeLine(l) &&
       /(TDU|TDSP)/i.test(l) &&
       /Delivery/i.test(l) &&
       /\$\s*[0-9]+(?:\.[0-9]+)?\s*per\s*(?:month|billing\s*cycle)/i.test(l),
@@ -296,6 +300,7 @@ function pickBestTdspMonthlyLine(
 
   const next = lines.find(
     (l) =>
+      !isBadUsageChargeLine(l) &&
       /Delivery/i.test(l) &&
       /\$\s*[0-9]+(?:\.[0-9]+)?\s*per\s*(?:month|billing\s*cycle)/i.test(l),
   );
@@ -306,6 +311,7 @@ function pickBestTdspMonthlyLine(
   // even if the word "Delivery" isn't repeated on that same line.
   const headerLike = lines.find(
     (l) =>
+      !isBadUsageChargeLine(l) &&
       /(TDU|TDSP|Delivery)/i.test(l) &&
       /per\s*(?:month|billing\s*cycle)/i.test(l) &&
       /\$\s*[0-9]+(?:\.[0-9]+)?/i.test(l),
@@ -383,6 +389,7 @@ export function extractEflTdspCharges(rawText: string): EflTdspCharges {
       for (let j = 1; j <= 6; j++) {
         const candidate = lines[perMonthIdx + j];
         if (!candidate) continue;
+        if (/Usage\s*Charge/i.test(candidate)) continue;
         if (!/\$/.test(candidate)) continue;
 
         // If the candidate also contains a ¢/kWh token, it's very likely the
