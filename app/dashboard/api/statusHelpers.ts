@@ -39,12 +39,13 @@ export function deriveSmtStatus(
     rawStatus === "already_active" ||
     (auth.smtStatusMessage ?? "").toLowerCase().includes("already active");
 
+  const lastUpdated =
+    smtLatestIntervalAt ??
+    auth.smtLastSyncAt ??
+    auth.updatedAt ??
+    auth.createdAt;
+
   if (alreadyActive || rawStatus === "active") {
-    const lastUpdated =
-      smtLatestIntervalAt ??
-      auth.smtLastSyncAt ??
-      auth.updatedAt ??
-      auth.createdAt;
     return {
       label: alreadyActive ? "Already active" : "Connected",
       tone: "success",
@@ -65,7 +66,7 @@ export function deriveSmtStatus(
         auth.smtStatusMessage && auth.smtStatusMessage.trim().length > 0
           ? auth.smtStatusMessage
           : "We’re finalizing your SMT agreement. This usually resolves within a minute.",
-      lastUpdated: auth.updatedAt ?? auth.createdAt,
+      lastUpdated,
     };
   }
 
@@ -77,7 +78,7 @@ export function deriveSmtStatus(
         auth.smtStatusMessage && auth.smtStatusMessage.trim().length > 0
           ? auth.smtStatusMessage
           : "We couldn’t complete your SMT authorization. Try again or contact support.",
-      lastUpdated: auth.updatedAt ?? auth.createdAt,
+      lastUpdated,
     };
   }
 
@@ -85,7 +86,7 @@ export function deriveSmtStatus(
     label: auth.smtStatus ? auth.smtStatus : "Status unknown",
     tone: "info",
     message: auth.smtStatusMessage,
-    lastUpdated: auth.updatedAt ?? auth.createdAt,
+    lastUpdated,
   };
 }
 
