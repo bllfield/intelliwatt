@@ -192,17 +192,32 @@ function lastCompleteChicagoDay(ts: Date, opts?: { minMinutesOfDay?: number; max
   const minMinutesOfDay = typeof opts?.minMinutesOfDay === "number" ? opts!.minMinutesOfDay : 23 * 60 + 45; // 23:45
   const maxStepDays = typeof opts?.maxStepDays === "number" ? opts!.maxStepDays : 2; // allow "pull 2 days back" if SMT is late
 
-  let cur = ts;
-  for (let step = 0; step <= maxStepDays; step++) {
-    const p = chicagoParts(cur);
-    if (!p) return null;
-    const day = p.minutesOfDay >= minMinutesOfDay ? p.day : p.day - 1;
-    if (day >= 1) {
-      return { year: p.year, month: p.month, yearMonth: p.yearMonth, day };
-    }
-    // If we underflowed the 1st of the month, step back a day and retry (rare, but safe).
-    cur = new Date(cur.getTime() - 24 * 60 * 60 * 1000);
+  const p0 = chicagoParts(ts);
+  if (!p0) return null;
+
+  // If the latest timestamp has reached the end-of-day threshold (Chicago-local),
+  // then that Chicago calendar day is "complete".
+  if (p0.minutesOfDay >= minMinutesOfDay) {
+    return { year: p0.year, month: p0.month, yearMonth: p0.yearMonth, day: p0.day };
   }
+
+  // Otherwise the "complete day" is the previous *calendar day in Chicago*.
+  // IMPORTANT: do not do p0.day - 1, because that can underflow on the 1st and
+  // accidentally skip an extra day when we step across a month boundary.
+  //
+  // Use a UTC noon-ish anchor for the Chicago day, then step back whole days.
+  // 18:00Z is always safely inside the America/Chicago local day (no midnight/DST edge).
+  const chicagoNoonAnchorUtc = (year: number, month1: number, day1: number) =>
+    new Date(Date.UTC(year, month1 - 1, day1, 18, 0, 0));
+
+  const anchor = chicagoNoonAnchorUtc(p0.year, p0.month, p0.day);
+  for (let step = 1; step <= Math.max(1, maxStepDays); step++) {
+    const prev = new Date(anchor.getTime() - step * 24 * 60 * 60 * 1000);
+    const p = chicagoParts(prev);
+    if (!p) continue;
+    return { year: p.year, month: p.month, yearMonth: p.yearMonth, day: p.day };
+  }
+
   return null;
 }
 
