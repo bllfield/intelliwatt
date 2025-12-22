@@ -160,6 +160,57 @@ function detectTdspPassThrough(rawText: string): boolean {
   );
 }
 
+function parseUsageChargeCutoff(rawText: string): { feeCents: number; thresholdKwh: number } | null {
+  const t = String(rawText ?? "");
+  // Example:
+  // "Usage Charge: $9.95 per billing cycle < 1,000 kWh"
+  const m = t.match(
+    /Usage\s+Charge\s*:\s*\$?\s*([0-9]+(?:\.[0-9]{1,2})?)\s*(?:per\s+billing\s*cycle|per\s+month|monthly)[\s\S]{0,80}?<\s*([0-9,]{1,6})\s*kwh/i,
+  );
+  if (!m?.[1] || !m?.[2]) return null;
+  const dollars = Number(m[1]);
+  const threshold = Number(String(m[2]).replace(/,/g, ""));
+  if (!Number.isFinite(dollars) || dollars <= 0) return null;
+  if (!Number.isFinite(threshold) || threshold < 2) return null;
+  return { feeCents: Math.round(dollars * 100), thresholdKwh: Math.round(threshold) };
+}
+
+function inferTdspFromAvgTable(args: {
+  points: EflAvgPricePoint[];
+  repEnergyRateCents: number;
+  usageChargeRule?: { feeCents: number; thresholdKwh: number } | null;
+}): { perKwhCents: number; monthlyCents: number } | null {
+  const { points, repEnergyRateCents } = args;
+  if (!Array.isArray(points) || points.length < 2) return null;
+  if (!Number.isFinite(repEnergyRateCents) || repEnergyRateCents <= 0) return null;
+
+  const p1000 = points.find((p) => p.kwh === 1000);
+  const p2000 = points.find((p) => p.kwh === 2000);
+  if (!p1000 || !p2000) return null;
+
+  // For >= threshold (1000 in our common pattern), the usage charge is waived, so TDSP can be solved from 1000/2000 points.
+  const total1000 = Math.round(p1000.eflAvgCentsPerKwh * 1000);
+  const total2000 = Math.round(p2000.eflAvgCentsPerKwh * 2000);
+  const rep1000 = Math.round(repEnergyRateCents * 1000);
+  const rep2000 = Math.round(repEnergyRateCents * 2000);
+  const tdsp1000 = total1000 - rep1000;
+  const tdsp2000 = total2000 - rep2000;
+  if (!Number.isFinite(tdsp1000) || !Number.isFinite(tdsp2000)) return null;
+
+  // Solve:
+  // tdsp1000 = per*1000 + monthly
+  // tdsp2000 = per*2000 + monthly
+  // => per = (tdsp2000 - tdsp1000)/1000; monthly = tdsp1000 - per*1000
+  const per = (tdsp2000 - tdsp1000) / 1000;
+  const monthly = tdsp1000 - per * 1000;
+  if (!Number.isFinite(per) || !Number.isFinite(monthly)) return null;
+  // Basic sanity bounds
+  if (per < 0.5 || per > 12) return null;
+  if (monthly < 0 || monthly > 2000) return null;
+
+  return { perKwhCents: per, monthlyCents: Math.round(monthly) };
+}
+
 // -------------------- TDSP helpers (validator-only) --------------------
 
 function cents(num: number): number {
@@ -1670,11 +1721,94 @@ export async function validateEflAvgPriceTable(args: {
     planRulesForValidation.baseChargePerMonthCents = validatorBaseCents;
   }
 
+  // Model a common "Usage Charge $X < N kWh; $0 >= N kWh" rule as:
+  //   baseChargePerMonthCents = X
+  //   plus an offsetting bill credit of X at minUsageKWh = N
+  // This makes the fee apply at 500 and net to $0 at 1000/2000, matching EFL avg tables.
+  const usageChargeRule = parseUsageChargeCutoff(rawText);
+  if (usageChargeRule && planRulesForValidation) {
+    const hasBase =
+      typeof planRulesForValidation.baseChargePerMonthCents === "number" &&
+      Number.isFinite(planRulesForValidation.baseChargePerMonthCents);
+
+    // Only apply if the parser didn't already set a base fee; we want to avoid double-counting.
+    if (!hasBase) {
+      planRulesForValidation.baseChargePerMonthCents = usageChargeRule.feeCents;
+      if (rateStructure && typeof (rateStructure as any).baseMonthlyFeeCents !== "number") {
+        (rateStructure as any).baseMonthlyFeeCents = usageChargeRule.feeCents;
+      }
+
+      // Add a credit at >= threshold to cancel the fee for 1000/2000.
+      const rsAny: any = rateStructure ?? (rateStructure as any);
+      const rsCredits = rsAny?.billCredits ?? null;
+      const rules: any[] = rsCredits && Array.isArray(rsCredits.rules) ? rsCredits.rules : [];
+      const hasSame = rules.some(
+        (r) =>
+          Number(r?.creditAmountCents) === usageChargeRule.feeCents &&
+          Number(r?.minUsageKWh) === usageChargeRule.thresholdKwh,
+      );
+      if (!hasSame) {
+        const nextRules = [
+          ...rules,
+          {
+            label: `Usage charge waived at >= ${usageChargeRule.thresholdKwh} kWh (derived from Usage Charge < ${usageChargeRule.thresholdKwh})`,
+            creditAmountCents: usageChargeRule.feeCents,
+            minUsageKWh: usageChargeRule.thresholdKwh,
+          },
+        ];
+        if (rateStructure) {
+          (rateStructure as any).billCredits = {
+            hasBillCredit: true,
+            rules: nextRules,
+          };
+        }
+      }
+    }
+  }
+
   const tdspIncludedFlag =
     (planRules as any).tdspDeliveryIncludedInEnergyCharge === true ||
     (rateStructure as any)?.tdspDeliveryIncludedInEnergyCharge === true
       ? true
       : undefined;
+
+  // If TDSP is pass-through/unknown and the utility-table fallback looks off, infer TDSP
+  // directly from the 1000/2000 avg-price points (deterministic), then validate.
+  // This is used for *validation math only* (not persisted as an actual tariff).
+  try {
+    const repEnergyRateCents = getEnergyRateCentsForUsage(planRulesForValidation, rateStructure, 1000);
+    if (
+      tdspPassThrough &&
+      repEnergyRateCents != null &&
+      tdspUnknownFromEfl &&
+      tdspFromUtilityTable != null &&
+      points.length >= 2
+    ) {
+      const inferred = inferTdspFromAvgTable({
+        points,
+        repEnergyRateCents,
+        usageChargeRule,
+      });
+      if (inferred) {
+        effectiveTdspForValidation = {
+          perKwhCents: inferred.perKwhCents,
+          monthlyCents: inferred.monthlyCents,
+          snippet:
+            "TDSP delivery inferred from EFL Average Price table (1000/2000 points) for validation.",
+          confidence: "LOW",
+        };
+        tdspFromUtilityTable = {
+          tdspCode: tdspFromUtilityTable.tdspCode,
+          effectiveDateUsed: "derived_from_avg_table",
+          perKwhCents: inferred.perKwhCents,
+          monthlyCents: inferred.monthlyCents,
+          confidence: "LOW",
+        };
+      }
+    }
+  } catch {
+    // ignore; best-effort only
+  }
 
   const modeledPoints: EflAvgPriceValidation["points"] = [];
   let tdspAppliedMode: EflAvgPriceValidation["assumptionsUsed"]["tdspAppliedMode"] =
