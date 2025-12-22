@@ -14,7 +14,6 @@ import crypto from "node:crypto";
 import { canComputePlanFromBuckets, derivePlanCalcRequirementsFromTemplate } from "@/lib/plan-engine/planComputability";
 import { isPlanCalcQuarantineWorthyReasonCode } from "@/lib/plan-engine/planCalcQuarantine";
 import { bucketDefsFromBucketKeys } from "@/lib/plan-engine/usageBuckets";
-import { buildUsageBucketsForEstimate } from "@/lib/usage/buildUsageBucketsForEstimate";
 import {
   extractFixedRepEnergyCentsPerKwh,
   extractRepFixedMonthlyChargeDollars,
@@ -560,32 +559,59 @@ export async function GET(req: NextRequest) {
           }
         });
 
-        // Canonical: build stitched 12-month buckets using the SAME logic as the Plan Details page.
+        // IMPORTANT: dashboard list must stay fast. Do NOT do interval-level stitching here.
+        // Instead, ensure + load pre-aggregated monthly buckets from the usage DB.
+        const rangeEnd = new Date();
+        const rangeStart = new Date(rangeEnd.getTime() - 365 * 24 * 60 * 60 * 1000);
         try {
-          // Align window to the same strict-last-365 behavior used above for SMT summary.
-          const latest = await prisma.smtInterval.findFirst({
-            where: { esiid: house.esiid },
-            orderBy: { ts: "desc" },
-            select: { ts: true },
-          });
-          const rangeEnd = latest?.ts ?? new Date();
-          const rangeStart = new Date(rangeEnd.getTime() - 365 * DAY_MS);
-
-          const built = await buildUsageBucketsForEstimate({
+          const defs = bucketDefsFromBucketKeys(Array.from(unionKeys));
+          await ensureCoreMonthlyBuckets({
             homeId: house.id,
-            usageSource: "SMT",
             esiid: house.esiid,
-            windowEnd: rangeEnd,
-            cutoff: rangeStart,
-            requiredBucketKeys: Array.from(unionKeys),
-            monthsCount: 12,
-            maxStepDays: 2,
+            rangeStart,
+            rangeEnd,
+            source: "SMT",
+            intervalSource: "SMT",
+            bucketDefs: defs,
           });
+        } catch {
+          // ignore (never break dashboard)
+        }
 
-          usageBucketsByMonthForCalc = built.usageBucketsByMonth;
-          if (typeof built.annualKwh === "number" && Number.isFinite(built.annualKwh) && built.annualKwh > 0) {
-            annualKwhForCalc = built.annualKwh;
-            avgMonthlyKwhForDisplay = built.annualKwh / 12;
+        try {
+          const yearMonths12 = lastNYearMonthsChicago(12);
+          const keysArr = Array.from(unionKeys);
+          if (yearMonths12.length > 0 && keysArr.length > 0) {
+            const rows12 = await (usagePrisma as any).homeMonthlyUsageBucket.findMany({
+              where: { homeId: house.id, yearMonth: { in: yearMonths12 }, bucketKey: { in: keysArr } },
+              select: { yearMonth: true, bucketKey: true, kwhTotal: true },
+            });
+            const byMonth: Record<string, Record<string, number>> = {};
+            for (const r of rows12 ?? []) {
+              const ym = String((r as any)?.yearMonth ?? "").trim();
+              const key = String((r as any)?.bucketKey ?? "").trim();
+              const kwh = decimalToNumber((r as any)?.kwhTotal);
+              if (!ym || !key || kwh == null) continue;
+              if (!byMonth[ym]) byMonth[ym] = {};
+              byMonth[ym][key] = kwh;
+            }
+            usageBucketsByMonthForCalc = byMonth;
+
+            // Prefer annualKwh from the same monthly-bucket data used for estimation when available.
+            try {
+              const sum = yearMonths12
+                .map((ym) => {
+                  const v = byMonth?.[ym]?.["kwh.m.all.total"];
+                  return typeof v === "number" && Number.isFinite(v) ? v : 0;
+                })
+                .reduce((a, b) => a + b, 0);
+              if (sum > 0) {
+                annualKwhForCalc = sum;
+                avgMonthlyKwhForDisplay = sum / 12;
+              }
+            } catch {
+              // ignore
+            }
           }
         } catch {
           // swallow
