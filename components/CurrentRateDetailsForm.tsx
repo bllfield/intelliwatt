@@ -136,6 +136,20 @@ type ParsedPlanDetails = {
   updatedAt: string;
 };
 
+type PlanVariablesUsed = {
+  rep: {
+    energyCentsPerKwh: number | null;
+    fixedMonthlyChargeDollars: number | null;
+  };
+  tdsp:
+    | {
+        perKwhDeliveryChargeCents: number | null;
+        monthlyCustomerChargeDollars: number | null;
+        effectiveDate: string | null;
+      }
+    | null;
+};
+
 type CurrentRateDetailsFormProps = {
   onContinue?: (data: ManualEntryPayload) => void;
   onSkip?: () => void;
@@ -226,6 +240,7 @@ export function CurrentRateDetailsForm({
 }: CurrentRateDetailsFormProps) {
   const [savedPlan, setSavedPlan] = useState<SavedPlanDetails | null>(null);
   const [parsedPlan, setParsedPlan] = useState<ParsedPlanDetails | null>(null);
+  const [planVariablesUsed, setPlanVariablesUsed] = useState<PlanVariablesUsed | null>(null);
   const [planEntrySnapshot, setPlanEntrySnapshot] = useState<EntrySnapshot | null>(null);
   const [usageSnapshot, setUsageSnapshot] = useState<EntrySnapshot | null>(null);
   const [hasActiveUsage, setHasActiveUsage] = useState(false);
@@ -319,6 +334,7 @@ export function CurrentRateDetailsForm({
       const nextPlanEntrySnapshot = payload?.entry ?? null;
       setSavedPlan(payload?.savedCurrentPlan ?? null);
       setParsedPlan(payload?.parsedCurrentPlan ?? null);
+      setPlanVariablesUsed(payload?.planVariablesUsed ?? null);
       setPlanEntrySnapshot(nextPlanEntrySnapshot);
       setUsageSnapshot(payload?.usage ?? null);
 
@@ -340,6 +356,8 @@ export function CurrentRateDetailsForm({
       setSavedPlanError(message);
       setSavedPlan(null);
       setParsedPlan(null);
+      setPlanVariablesUsed(null);
+      setPlanVariablesUsed(null);
       setPlanEntrySnapshot(null);
       setUsageSnapshot(null);
       setHasActiveUsage(false);
@@ -1541,6 +1559,56 @@ export function CurrentRateDetailsForm({
                 </ul>
               </div>
             ) : null}
+
+            <div className={`${snapshotCardClasses} mt-5`}>
+              <p className={snapshotLabelClasses}>Plan variables used</p>
+              <div className="mt-2 space-y-1 text-sm text-brand-cyan/85">
+                <div className="flex items-center justify-between gap-3">
+                  <span>REP energy</span>
+                  <span className="font-semibold text-brand-white/90">
+                    {planVariablesUsed?.rep?.energyCentsPerKwh != null
+                      ? `${Number(planVariablesUsed.rep.energyCentsPerKwh).toFixed(4)}¢/kWh`
+                      : "—"}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span>REP fixed</span>
+                  <span className="font-semibold text-brand-white/90">
+                    {planVariablesUsed?.rep?.fixedMonthlyChargeDollars != null
+                      ? `${formatCurrency(Number(planVariablesUsed.rep.fixedMonthlyChargeDollars))}/mo`
+                      : "—/mo"}
+                  </span>
+                </div>
+                <div className="my-2 h-px w-full bg-brand-cyan/15" />
+                <div className="flex items-center justify-between gap-3">
+                  <span>TDSP delivery</span>
+                  <span className="font-semibold text-brand-white/90">
+                    {planVariablesUsed?.tdsp?.perKwhDeliveryChargeCents != null
+                      ? `${Number(planVariablesUsed.tdsp.perKwhDeliveryChargeCents).toFixed(4)}¢/kWh`
+                      : "—"}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span>TDSP customer</span>
+                  <span className="font-semibold text-brand-white/90">
+                    {planVariablesUsed?.tdsp?.monthlyCustomerChargeDollars != null
+                      ? `${formatCurrency(Number(planVariablesUsed.tdsp.monthlyCustomerChargeDollars))}/mo`
+                      : "—/mo"}
+                  </span>
+                </div>
+                {planVariablesUsed?.tdsp?.effectiveDate ? (
+                  <div className="mt-1 text-xs text-brand-cyan/70">
+                    TDSP effective:{" "}
+                    <span className="font-mono text-brand-white/90">
+                      {String(planVariablesUsed.tdsp.effectiveDate).slice(0, 10)}
+                    </span>
+                  </div>
+                ) : null}
+              </div>
+              <div className="mt-2 text-xs text-brand-cyan/60">
+                These are the exact variables IntelliWatt uses for comparisons. Please verify your current plan details above.
+              </div>
+            </div>
 
             {savedPlan.notes ? (
               <div className={`${snapshotCardClasses} mt-5 text-sm`}>

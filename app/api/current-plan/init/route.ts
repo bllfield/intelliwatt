@@ -4,6 +4,7 @@ import { normalizeEmail } from '@/lib/utils/email';
 import { prisma } from '@/lib/db';
 import { getCurrentPlanPrisma, CurrentPlanPrisma } from '@/lib/prismaCurrentPlan';
 import { refreshUserEntryStatuses } from '@/lib/hitthejackwatt/entryLifecycle';
+import { getTdspDeliveryRates } from '@/lib/plan-engine/getTdspDeliveryRates';
 
 export const dynamic = 'force-dynamic';
 
@@ -126,6 +127,47 @@ const serializeParsedPlan = (entry: ParsedEntry | null) => {
     updatedAt: entry.updatedAt.toISOString(),
   };
 };
+
+function pickNumber(a: any, b: any): number | null {
+  const na = typeof a === 'number' ? a : a == null ? null : Number(a);
+  if (na != null && Number.isFinite(na)) return na;
+  const nb = typeof b === 'number' ? b : b == null ? null : Number(b);
+  if (nb != null && Number.isFinite(nb)) return nb;
+  return null;
+}
+
+function deriveRepEnergyCentsPerKwh(args: {
+  rateType: string | null | undefined;
+  rateStructure: any | null | undefined;
+  energyRateCents: number | null | undefined;
+}): number | null {
+  const rt = String(args.rateType ?? '').toUpperCase();
+  const rs: any = args.rateStructure ?? null;
+
+  // Fixed: prefer structured rate, then top-level value.
+  if (rt === 'FIXED') {
+    return pickNumber(rs?.energyRateCents, args.energyRateCents);
+  }
+
+  // Variable: prefer current bill rate field, then top-level value.
+  if (rt === 'VARIABLE') {
+    return pickNumber(rs?.currentBillEnergyRateCents, args.energyRateCents);
+  }
+
+  // TOU: no single REP energy rate.
+  return null;
+}
+
+function deriveRepFixedMonthlyDollars(args: {
+  rateStructure: any | null | undefined;
+  baseMonthlyFee: number | null | undefined;
+}): number | null {
+  const rs: any = args.rateStructure ?? null;
+  const cents = pickNumber(rs?.baseMonthlyFeeCents, null);
+  if (cents != null) return Math.round(cents) / 100;
+  const dollars = pickNumber(args.baseMonthlyFee, null);
+  return dollars != null ? dollars : null;
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -270,11 +312,54 @@ export async function GET(request: NextRequest) {
     const savedCurrentPlan = serializeManualPlan(latestManual);
     const parsedCurrentPlan = serializeParsedPlan(latestParsed);
 
+    // Plan variables used (for transparency, like offer detail).
+    let tdspApplied: any | null = null;
+    try {
+      if (effectiveHouseId) {
+        const house = await prisma.houseAddress.findFirst({
+          where: { id: effectiveHouseId, userId: user.id },
+          select: { tdspSlug: true },
+        });
+        const tdspSlug = String(house?.tdspSlug ?? '').trim().toLowerCase();
+        if (tdspSlug) {
+          const tdsp = await getTdspDeliveryRates({ tdspSlug, asOf: new Date() });
+          if (tdsp) {
+            tdspApplied = {
+              perKwhDeliveryChargeCents: typeof tdsp.perKwhDeliveryChargeCents === 'number' ? tdsp.perKwhDeliveryChargeCents : null,
+              monthlyCustomerChargeDollars: typeof tdsp.monthlyCustomerChargeDollars === 'number' ? tdsp.monthlyCustomerChargeDollars : null,
+              effectiveDate: tdsp.effectiveDate ?? null,
+            };
+          }
+        }
+      }
+    } catch {
+      tdspApplied = null;
+    }
+
+    const effectivePlan = savedCurrentPlan ?? parsedCurrentPlan ?? null;
+    const rateType = effectivePlan?.rateType ?? null;
+    const repEnergyCentsPerKwh = deriveRepEnergyCentsPerKwh({
+      rateType,
+      rateStructure: effectivePlan?.rateStructure ?? null,
+      energyRateCents: effectivePlan?.energyRateCents ?? null,
+    });
+    const repFixedMonthlyDollars = deriveRepFixedMonthlyDollars({
+      rateStructure: effectivePlan?.rateStructure ?? null,
+      baseMonthlyFee: effectivePlan?.baseMonthlyFee ?? null,
+    });
+
     return NextResponse.json({
       ok: true,
       // Backwards-compatible fields used by existing UI:
       savedCurrentPlan,
       parsedCurrentPlan,
+      planVariablesUsed: {
+        rep: {
+          energyCentsPerKwh: repEnergyCentsPerKwh,
+          fixedMonthlyChargeDollars: repFixedMonthlyDollars,
+        },
+        tdsp: tdspApplied,
+      },
       entry: serializeEntrySnapshot(entry),
       usage: serializeEntrySnapshot(usageEntry),
       hasActiveUsage,
