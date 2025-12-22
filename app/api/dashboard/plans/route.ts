@@ -781,34 +781,9 @@ export async function GET(req: NextRequest) {
           inputsSha256,
           monthsCount,
         });
-
-        const estFixed =
-          cached ??
-          estimateTrueCost({
-            annualKwh: annualKwhForCalc,
-            monthsCount,
-            tdspRates: {
-              perKwhDeliveryChargeCents: tdspPer,
-              monthlyCustomerChargeDollars: tdspMonthly,
-              effectiveDate: tdspEff,
-            },
-            rateStructure: calc.rateStructure,
-            usageBucketsByMonth: usageBucketsByMonthForCalc,
-          });
-
-        if (!cached) {
-          await putCachedPlanEstimate({
-            houseAddressId: house.id,
-            ratePlanId,
-            esiid: (house as any)?.esiid ?? null,
-            inputsSha256,
-            monthsCount,
-            payloadJson: estFixed,
-          });
-        }
-
-        if (!estFixed || (estFixed as any).status !== "OK") return Number.POSITIVE_INFINITY;
-        const v = Number((estFixed as any)?.monthlyCostDollars);
+        // IMPORTANT: plans list is cache-only; never compute inline (avoids "recalculation" on dropdown changes).
+        if (!cached || (cached as any).status !== "OK") return Number.POSITIVE_INFINITY;
+        const v = Number((cached as any)?.monthlyCostDollars);
         return Number.isFinite(v) ? v : Number.POSITIVE_INFINITY;
       };
 
@@ -1508,41 +1483,8 @@ export async function GET(req: NextRequest) {
           monthsCount,
         });
         if (cached) return cached;
-
-        const estFixed = estimateTrueCost({
-          annualKwh: annualKwhForCalc,
-          monthsCount,
-          tdspRates: { perKwhDeliveryChargeCents: tdspPer, monthlyCustomerChargeDollars: tdspMonthly, effectiveDate: tdspEff },
-          rateStructure: template.rateStructure,
-          usageBucketsByMonth: usageBucketsByMonthForCalc,
-        });
-
-        const out = (() => {
-          if (
-            estFixed &&
-            (estFixed as any).status === "OK" &&
-            typeof (estFixed as any).annualCostDollars === "number" &&
-            Number.isFinite((estFixed as any).annualCostDollars) &&
-            typeof annualKwhForCalc === "number" &&
-            Number.isFinite(annualKwhForCalc) &&
-            annualKwhForCalc > 0
-          ) {
-            const eff = (((estFixed as any).annualCostDollars as number) / annualKwhForCalc) * 100;
-            return { ...(estFixed as any), effectiveCentsPerKwh: eff };
-          }
-          return estFixed;
-        })();
-
-        await putCachedPlanEstimate({
-          houseAddressId: house.id,
-          ratePlanId: cacheRatePlanId,
-          esiid: (house as any)?.esiid ?? null,
-          inputsSha256,
-          monthsCount,
-          payloadJson: out,
-        });
-
-        return out;
+        // Cache-only mode: do not compute inline. Prefetch/other background processes will populate.
+        return { status: "QUEUED", reason: "estimate_cache_miss" };
       })();
 
       const statusLabelFinal = (() => {
@@ -1689,34 +1631,9 @@ export async function GET(req: NextRequest) {
             inputsSha256,
             monthsCount,
           });
-
-          const estFixed =
-            cached ??
-            estimateTrueCost({
-              annualKwh: annualKwhForCalc,
-              monthsCount,
-              tdspRates: {
-                perKwhDeliveryChargeCents: tdspPer,
-                monthlyCustomerChargeDollars: tdspMonthly,
-                effectiveDate: tdspEff,
-              },
-              rateStructure: calc.rateStructure,
-              usageBucketsByMonth: usageBucketsByMonthForCalc,
-            });
-
-          if (!cached) {
-            await putCachedPlanEstimate({
-              houseAddressId: house.id,
-              ratePlanId,
-              esiid: (house as any)?.esiid ?? null,
-              inputsSha256,
-              monthsCount,
-              payloadJson: estFixed,
-            });
-          }
-
-          if (estFixed?.status !== "OK") return Number.POSITIVE_INFINITY;
-          const v = Number((estFixed as any)?.monthlyCostDollars);
+          // Cache-only mode: never compute inline in plans list.
+          if (!cached || (cached as any).status !== "OK") return Number.POSITIVE_INFINITY;
+          const v = Number((cached as any)?.monthlyCostDollars);
           return Number.isFinite(v) ? v : Number.POSITIVE_INFINITY;
         };
 
