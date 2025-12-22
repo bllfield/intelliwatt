@@ -6,9 +6,6 @@ import EntriesChecklistSidebar from '@/components/dashboard/EntriesChecklistSide
 import { prisma } from '@/lib/db';
 import { normalizeEmail } from '@/lib/utils/email';
 
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
-
 async function isSmtConfirmationRequired(): Promise<boolean> {
   const cookieStore = cookies();
   const sessionEmail = cookieStore.get('intelliwatt_user')?.value ?? null;

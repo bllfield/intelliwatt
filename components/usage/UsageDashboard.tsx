@@ -162,6 +162,7 @@ export const UsageDashboard: React.FC = () => {
   const [selectedHouseId, setSelectedHouseId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const didWarmPlansRef = React.useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -202,6 +203,24 @@ export const UsageDashboard: React.FC = () => {
       cancelled = true;
     };
   }, []);
+
+  // Best-effort: once usage is available, warm the plan estimate cache so /dashboard/plans is instant.
+  useEffect(() => {
+    if (didWarmPlansRef.current) return;
+    const firstWithUsage = houses.find((h) => Boolean(h.dataset?.summary?.latest));
+    if (!firstWithUsage) return;
+    didWarmPlansRef.current = true;
+
+    const qs = new URLSearchParams({
+      page: "1",
+      pageSize: "50",
+      sort: "best_for_you_proxy",
+      // NOTE: isRenter isn't known on this page; default false matches most cases.
+      isRenter: "false",
+    });
+    // Fire-and-forget (don’t block UI). This call writes plan-engine results into the WattBuy Offers DB cache.
+    fetch(`/api/dashboard/plans?${qs.toString()}`, { keepalive: true }).catch(() => null);
+  }, [houses]);
 
   const activeHouse = useMemo(() => {
     if (!selectedHouseId) return null;
