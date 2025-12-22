@@ -13,6 +13,7 @@ import {
   extractFixedRepEnergyCentsPerKwh,
   extractRepFixedMonthlyChargeDollars,
 } from "@/lib/plan-engine/calculatePlanCostForUsage";
+import { estimateTrueCost } from "@/lib/plan-engine/estimateTrueCost";
 import { extractDeterministicTouSchedule } from "@/lib/plan-engine/touPeriods";
 import { extractDeterministicTierSchedule, computeRepEnergyCostForMonthlyKwhTiered } from "@/lib/plan-engine/tieredPricing";
 import { extractDeterministicBillCredits, applyBillCreditsToMonth } from "@/lib/plan-engine/billCredits";
@@ -746,14 +747,14 @@ export async function GET(req: NextRequest) {
     // True-cost estimate (if computable + inputs present)
     const overriddenComputable = isComputableOverride(planCalcStatus, planCalcReasonCode);
     const trueCostEstimate =
-      annualKwh && rsPresent && (overriddenComputable || planComputability?.status !== "NOT_COMPUTABLE")
-        ? calculatePlanCostForUsage({
+      annualKwh && rsPresent && tdspApplied && (overriddenComputable || planComputability?.status !== "NOT_COMPUTABLE")
+        ? estimateTrueCost({
             annualKwh, // 12 full months total (matches monthly table)
             monthsCount: 12,
-            tdsp: {
-              perKwhDeliveryChargeCents: tdspApplied?.perKwhDeliveryChargeCents ?? 0,
-              monthlyCustomerChargeDollars: tdspApplied?.monthlyCustomerChargeDollars ?? 0,
-              effectiveDate: tdspApplied?.effectiveDate ?? undefined,
+            tdspRates: {
+              perKwhDeliveryChargeCents: tdspApplied.perKwhDeliveryChargeCents ?? 0,
+              monthlyCustomerChargeDollars: tdspApplied.monthlyCustomerChargeDollars ?? 0,
+              effectiveDate: tdspApplied.effectiveDate ?? null,
             },
             rateStructure,
             usageBucketsByMonth: usageBucketsByMonthForCalc,
