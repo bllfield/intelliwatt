@@ -133,14 +133,12 @@ export default function PlanDetailsClient({ offerId }: { offerId: string }) {
 
       {ok ? (
         <>
-          <div className={`mt-6 text-xs ${hasCalc ? "text-brand-navy" : "text-brand-cyan/60"}`}>
+          <div className="mt-6 text-xs text-brand-navy">
             Buckets used by this plan:{" "}
             {requiredBucketKeys.length ? (
-              <span className={`font-mono ${hasCalc ? "text-brand-navy" : "text-brand-white/80"}`}>
-                {requiredBucketKeys.join(", ")}
-              </span>
+              <span className="font-mono text-brand-navy">{requiredBucketKeys.join(", ")}</span>
             ) : (
-              <span className={`font-mono ${hasCalc ? "text-brand-navy" : "text-brand-white/80"}`}>—</span>
+              <span className="font-mono text-brand-navy">—</span>
             )}
           </div>
 
