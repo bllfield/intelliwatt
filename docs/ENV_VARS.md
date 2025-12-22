@@ -76,6 +76,7 @@ When some EFL hosts block Vercel/AWS IP ranges (common 403/406), the app can opt
 - `DIRECT_URL` — Direct Postgres connection for Prisma migrations and backend jobs that should avoid PgBouncer (e.g., SMT ingest/normalize on the droplet). **Do not repoint to the pool.**
 - `CURRENT_PLAN_DATABASE_URL` — **Separate PostgreSQL database dedicated to the Current Plan / Current Rate module.** Must not reuse the primary `DATABASE_URL`. Point this to a distinct database instance (e.g., `intelliwatt_current_plan`) created just for manual plan entries and bill uploads.
 - `USAGE_DATABASE_URL` — Module DB for raw and processed usage data (SMT intervals, Green Button uploads, manual entries) before normalization into master usage tables.
+- `USAGE_DIRECT_URL` — Direct Postgres URL for the **Usage module DB** (used for Prisma migrations / introspection; avoids PgBouncer).
 - `HOME_DETAILS_DATABASE_URL` — Module DB for home characteristics and energy-impact factors (square footage, insulation, windows, thermostat habits, HVAC type, etc.).
 - `APPLIANCES_DATABASE_URL` — Module DB for appliance inventory, schedules, and per-appliance usage modeling (including future photo/label analysis).
 - `UPGRADES_DATABASE_URL` — Module DB for energy-efficiency upgrades, quotes, financing options, and scenario planning.

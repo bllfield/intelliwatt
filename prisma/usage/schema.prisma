@@ -14,6 +14,7 @@ generator usageClient {
 datasource usageDb {
   provider = "postgresql"
   url      = env("USAGE_DATABASE_URL")
+  directUrl = env("USAGE_DIRECT_URL")
 }
 
 enum DayType {
