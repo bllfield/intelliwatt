@@ -840,6 +840,7 @@ export async function GET(req: NextRequest) {
                     typeof p?.planCalcStatus === "string" ? (String(p.planCalcStatus) as any) : null;
                   const storedReason =
                     typeof p?.planCalcReasonCode === "string" ? String(p.planCalcReasonCode) : null;
+                  const storedKeys = Array.isArray((p as any)?.requiredBucketKeys) ? ((p as any).requiredBucketKeys as any[]).map((k) => String(k)) : null;
 
                   if (storedStatus === "COMPUTABLE" || storedStatus === "NOT_COMPUTABLE") {
                     planCalcByRatePlanId.set(ratePlanId, {
@@ -847,6 +848,7 @@ export async function GET(req: NextRequest) {
                       planCalcReasonCode: storedReason ?? "UNKNOWN",
                       rateStructurePresent: rsPresent,
                       rateStructure: rsPresent ? p.rateStructure : null,
+                      requiredBucketKeys: storedKeys,
                     });
                   } else {
                     const derived = derivePlanCalcRequirementsFromTemplate({
@@ -857,6 +859,7 @@ export async function GET(req: NextRequest) {
                       planCalcReasonCode: derived.planCalcReasonCode,
                       rateStructurePresent: rsPresent,
                       rateStructure: rsPresent ? p.rateStructure : null,
+                      requiredBucketKeys: derived.requiredBucketKeys,
                     });
                   }
                 }
@@ -1006,6 +1009,70 @@ export async function GET(req: NextRequest) {
                 });
               }),
           );
+        }
+
+        // Case C: queued because required usage buckets are still missing for this home (after auto-ensure).
+        // This must be visible in admin queue, otherwise the customer dashboard can show QUEUED with no ops surface.
+        if (hasUsage && ratePlanId && calc && calc.planCalcStatus === "COMPUTABLE") {
+          const req = Array.isArray((calc as any)?.requiredBucketKeys) ? ((calc as any).requiredBucketKeys as string[]) : [];
+          const missing = req.filter((k) => !hasRecentBucket(String(k)));
+          if (missing.length > 0) {
+            const reasonCode = "MISSING_REQUIRED_BUCKETS";
+            const queueReasonPayload = {
+              type: "PLAN_CALC_QUARANTINE",
+              planCalcStatus: "COMPUTABLE",
+              planCalcReasonCode: reasonCode,
+              requiredBucketKeys: req,
+              missingBucketKeys: missing,
+              ratePlanId,
+              offerId,
+            };
+            queuedWrites.push(
+              (prisma as any).eflParseReviewQueue
+                .upsert({
+                  where: { kind_dedupeKey: { kind: "PLAN_CALC_QUARANTINE", dedupeKey: offerId } },
+                  create: {
+                    source: "dashboard_plans",
+                    kind: "PLAN_CALC_QUARANTINE",
+                    dedupeKey: offerId,
+                    eflPdfSha256: sha256Hex(["dashboard_plans", "PLAN_CALC_QUARANTINE", offerId].join("|")),
+                    offerId,
+                    supplier,
+                    planName,
+                    eflUrl,
+                    tdspName,
+                    termMonths,
+                    ratePlanId,
+                    rawText: null,
+                    planRules: null,
+                    rateStructure: calc?.rateStructurePresent ? (calc.rateStructure ?? null) : null,
+                    validation: null,
+                    derivedForValidation: queueReasonPayload,
+                    finalStatus: "OPEN",
+                    queueReason: JSON.stringify(queueReasonPayload),
+                    solverApplied: [],
+                    resolvedAt: null,
+                    resolvedBy: null,
+                    resolutionNotes: `Missing required buckets: ${missing.join(", ")}`,
+                  },
+                  update: {
+                    supplier,
+                    planName,
+                    eflUrl,
+                    tdspName,
+                    termMonths,
+                    ratePlanId,
+                    derivedForValidation: queueReasonPayload,
+                    finalStatus: "OPEN",
+                    queueReason: JSON.stringify(queueReasonPayload),
+                    resolvedAt: null,
+                    resolvedBy: null,
+                    resolutionNotes: `Missing required buckets: ${missing.join(", ")}`,
+                  },
+                })
+                .catch(() => {}),
+            );
+          }
         }
       }
       if (queuedWrites.length) await Promise.all(queuedWrites);
