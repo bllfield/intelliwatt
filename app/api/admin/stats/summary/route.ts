@@ -24,6 +24,7 @@ export async function GET() {
       applianceCount,
       pendingSmtRevocations,
       eflQuarantineOpenCount,
+      currentPlanEflQuarantineOpenCount,
       smtUserResults,
       manualUserResults,
       referralPendingCountBase,
@@ -50,6 +51,9 @@ export async function GET() {
       // These require admin attention before becoming user-facing.
       prismaAny.eflParseReviewQueue.count({
         where: { resolvedAt: null },
+      }),
+      prismaAny.eflParseReviewQueue.count({
+        where: { resolvedAt: null, source: 'current_plan_efl' },
       }),
       prisma.smtAuthorization.findMany({
         where: { archivedAt: null },
@@ -122,6 +126,7 @@ export async function GET() {
       applianceCount,
       pendingSmtRevocations,
       eflQuarantineOpenCount,
+      currentPlanEflQuarantineOpenCount,
       totalUsageCustomers: usageUserSet.size,
       testimonialSubmissionCount: totalTestimonials,
       testimonialPendingCount: pendingTestimonials,

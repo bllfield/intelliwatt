@@ -30,6 +30,7 @@ export async function GET(req: NextRequest) {
     const { searchParams } = req.nextUrl;
     const statusParam = (searchParams.get("status") || "OPEN").toUpperCase();
     const q = (searchParams.get("q") || "").trim();
+    const source = (searchParams.get("source") || "").trim();
     const kindParamRaw = (searchParams.get("kind") || "").trim().toUpperCase();
     const kindParam =
       kindParamRaw === "EFL_PARSE" || kindParamRaw === "PLAN_CALC_QUARANTINE"
@@ -61,6 +62,10 @@ export async function GET(req: NextRequest) {
 
     if (kindParam) {
       where.kind = kindParam;
+    }
+
+    if (source) {
+      where.source = source;
     }
 
     let items = await (prisma as any).eflParseReviewQueue.findMany({

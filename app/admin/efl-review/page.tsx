@@ -46,6 +46,7 @@ export default function EflReviewPage() {
   const [items, setItems] = useState<QueueItem[]>([]);
   const [status, setStatus] = useState<'OPEN' | 'RESOLVED'>('OPEN');
   const [q, setQ] = useState('');
+  const [source, setSource] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
@@ -69,6 +70,9 @@ export default function EflReviewPage() {
       if (q.trim()) {
         params.set('q', q.trim());
       }
+      if (source.trim()) {
+        params.set('source', source.trim());
+      }
       const res = await fetch(`/api/admin/efl-review/list?${params.toString()}`, {
         headers: { 'x-admin-token': token },
       });
@@ -90,6 +94,17 @@ export default function EflReviewPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, status]);
+
+  useEffect(() => {
+    try {
+      const sp = new URLSearchParams(window.location.search);
+      const src = (sp.get('source') || '').trim();
+      if (src) setSource(src);
+    } catch {
+      // ignore
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function resolveItem(id: string) {
     if (!token) return;
@@ -176,6 +191,21 @@ export default function EflReviewPage() {
                   />
                   <span>Resolved</span>
                 </label>
+              </div>
+              <div className="min-w-[220px]">
+                <select
+                  className="w-full rounded-lg border px-3 py-2 text-sm"
+                  value={source}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setSource(v);
+                  }}
+                >
+                  <option value="">All sources</option>
+                  <option value="wattbuy_batch">Offers (wattbuy_batch)</option>
+                  <option value="manual_upload">Offers (manual_upload)</option>
+                  <option value="current_plan_efl">Current plan EFL</option>
+                </select>
               </div>
               <div className="flex-1 min-w-[160px]">
                 <input

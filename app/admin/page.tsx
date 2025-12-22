@@ -151,6 +151,7 @@ interface SummaryStats {
   applianceCount: number;
   pendingSmtRevocations: number;
   eflQuarantineOpenCount: number;
+  currentPlanEflQuarantineOpenCount?: number;
   testimonialSubmissionCount: number;
   testimonialPendingCount: number;
   referralPendingCount: number;
@@ -425,6 +426,7 @@ export default function AdminDashboard() {
   const applianceCount = summary?.applianceCount ?? 0;
   const pendingRevocationsCount = summary?.pendingSmtRevocations ?? 0;
   const eflQuarantineOpenCount = summary?.eflQuarantineOpenCount ?? 0;
+  const currentPlanEflQuarantineOpenCount = summary?.currentPlanEflQuarantineOpenCount ?? 0;
   const testimonialsTotal = summary?.testimonialSubmissionCount ?? testimonials.length;
   const testimonialsPendingCount = summary?.testimonialPendingCount ?? testimonials.filter((record) => record.status === 'PENDING').length;
   const pendingEmailConfirmationsCount =
@@ -476,6 +478,12 @@ export default function AdminDashboard() {
       value: eflQuarantineOpenCount.toLocaleString(),
       href: '/admin/efl/fact-cards',
       tone: eflQuarantineOpenCount > 0 ? 'danger' : 'default',
+    },
+    {
+      label: 'Current Plan EFL Quarantine (Open)',
+      value: currentPlanEflQuarantineOpenCount.toLocaleString(),
+      href: '/admin/efl-review?source=current_plan_efl',
+      tone: currentPlanEflQuarantineOpenCount > 0 ? 'danger' : 'default',
     },
     { label: 'Appliances #', value: applianceCount.toLocaleString() },
     { label: 'Testimonials', value: testimonialsTotal.toLocaleString() },
@@ -581,6 +589,15 @@ export default function AdminDashboard() {
               <div className="font-semibold text-brand-navy mb-1">🧾 Fact Card Parsing Ops</div>
               <div className="text-sm text-brand-navy/60">
                 Unified page: batch parse, review queue, templates, and manual loader (URL/upload/text)
+              </div>
+            </a>
+            <a
+              href="/admin/efl-review?source=current_plan_efl"
+              className="block p-4 border-2 border-brand-blue/20 rounded-lg hover:border-brand-blue hover:bg-brand-blue/5 transition-colors"
+            >
+              <div className="font-semibold text-brand-navy mb-1">🧾 Current Plan EFL Quarantine</div>
+              <div className="text-sm text-brand-navy/60">
+                Review & resolve customer-uploaded current-plan EFLs that didn’t parse cleanly (feeds parser improvements)
               </div>
             </a>
             <a

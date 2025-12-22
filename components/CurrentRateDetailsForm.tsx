@@ -873,6 +873,8 @@ export function CurrentRateDetailsForm({
 
       const fd = new FormData();
       fd.append("eflFile", eflFile);
+      const houseId = parsedPlan?.houseId ?? savedPlan?.houseId ?? null;
+      if (houseId) fd.append("houseId", houseId);
 
       const r = await fetch("/api/current-plan/efl-parse", {
         method: "POST",
