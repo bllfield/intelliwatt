@@ -11,6 +11,7 @@ import { estimateTrueCost } from "@/lib/plan-engine/estimateTrueCost";
 import { getCachedPlanEstimate, putCachedPlanEstimate, sha256Hex as sha256HexCache } from "@/lib/plan-engine/planEstimateCache";
 import { usagePrisma } from "@/lib/db/usageClient";
 import { ensureCoreMonthlyBuckets } from "@/lib/usage/aggregateMonthlyBuckets";
+import { buildUsageBucketsForEstimate } from "@/lib/usage/buildUsageBucketsForEstimate";
 import crypto from "node:crypto";
 import { canComputePlanFromBuckets, derivePlanCalcRequirementsFromTemplate } from "@/lib/plan-engine/planComputability";
 import { isPlanCalcQuarantineWorthyReasonCode } from "@/lib/plan-engine/planCalcQuarantine";
@@ -316,6 +317,11 @@ export async function GET(req: NextRequest) {
     // Usage summary: cheap aggregate over the last 12 months, best-effort.
     // Must never break offers response (wrap errors).
     let hasUsage = false;
+    // Canonical usage window anchor: latest SMT interval timestamp (not "now").
+    // This must match the detail route so plan engine inputs hash the same everywhere.
+    let usageWindowEnd: Date = new Date();
+    let usageCutoff: Date = new Date(usageWindowEnd.getTime() - 365 * DAY_MS);
+    let usageRowsForSummary = 0;
     let usageSummary:
       | {
           source: string;
@@ -334,8 +340,10 @@ export async function GET(req: NextRequest) {
           orderBy: { ts: "desc" },
           select: { ts: true },
         });
-        const rangeEnd = latest?.ts ?? new Date();
-        const rangeStart = new Date(rangeEnd.getTime() - 365 * DAY_MS);
+        usageWindowEnd = latest?.ts ?? new Date();
+        usageCutoff = new Date(usageWindowEnd.getTime() - 365 * DAY_MS);
+        const rangeEnd = usageWindowEnd;
+        const rangeStart = usageCutoff;
         const aggregates = await prisma.smtInterval.aggregate({
           where: { esiid: house.esiid, ts: { gte: rangeStart, lte: rangeEnd } },
           _count: { _all: true },
@@ -345,6 +353,7 @@ export async function GET(req: NextRequest) {
         });
 
         const rows = Number(aggregates?._count?._all ?? 0) || 0;
+        usageRowsForSummary = rows;
         const totalKwhRaw: any = aggregates?._sum?.kwh ?? 0;
         const totalKwh = (() => {
           if (typeof totalKwhRaw === "number") return totalKwhRaw;
@@ -593,66 +602,58 @@ export async function GET(req: NextRequest) {
           }
         });
 
-        // IMPORTANT: dashboard list must stay fast. Do NOT do interval-level stitching here.
-        // Instead, ensure + load pre-aggregated monthly buckets from the usage DB.
-        const rangeEnd = new Date();
-        const rangeStart = new Date(rangeEnd.getTime() - 365 * 24 * 60 * 60 * 1000);
+        // Canonical: use the exact same stitched 12-month usage buckets as the detail route.
+        // This ensures the engine input hash matches and the saved WattBuy DB estimate is reused everywhere.
         try {
-          const defs = bucketDefsFromBucketKeys(Array.from(unionKeys));
-          await ensureCoreMonthlyBuckets({
+          const bucketBuild = await buildUsageBucketsForEstimate({
             homeId: house.id,
+            usageSource: "SMT",
             esiid: house.esiid,
-            rangeStart,
-            rangeEnd,
-            source: "SMT",
-            intervalSource: "SMT",
-            bucketDefs: defs,
+            rawId: null,
+            windowEnd: usageWindowEnd,
+            cutoff: usageCutoff,
+            requiredBucketKeys: Array.from(unionKeys),
+            monthsCount: 12,
+            maxStepDays: 2,
+            stitchMode: "DAILY_OR_INTERVAL",
           });
+
+          yearMonthsForCalc = bucketBuild.yearMonths.slice();
+          usageBucketsByMonthForCalc = bucketBuild.usageBucketsByMonth;
+
+          if (
+            typeof bucketBuild.annualKwh === "number" &&
+            Number.isFinite(bucketBuild.annualKwh) &&
+            bucketBuild.annualKwh > 0
+          ) {
+            annualKwhForCalc = bucketBuild.annualKwh;
+            avgMonthlyKwhForDisplay = bucketBuild.annualKwh / 12;
+          }
+
+          // Keep the response usageSummary aligned with the same calc window we used for estimates.
+          if (hasUsage) {
+            usageSummary = {
+              source: "SMT",
+              rangeStart: usageCutoff.toISOString(),
+              rangeEnd: usageWindowEnd.toISOString(),
+              totalKwh:
+                typeof annualKwhForCalc === "number" && Number.isFinite(annualKwhForCalc)
+                  ? Number(annualKwhForCalc.toFixed(6))
+                  : undefined,
+              rows: usageRowsForSummary || undefined,
+            };
+          }
+
+          // For "missing buckets" checks, use the most recent two months in the calc window.
+          const ym = bucketBuild.yearMonths ?? [];
+          const last = ym.length ? ym[ym.length - 1] : null;
+          const prev = ym.length >= 2 ? ym[ym.length - 2] : null;
+          recentYearMonths = (prev ? [last!, prev] : last ? [last] : []).filter(Boolean) as string[];
         } catch {
           // ignore (never break dashboard)
         }
 
-        try {
-          const yearMonths12 = lastNYearMonthsChicago(12);
-          yearMonthsForCalc = yearMonths12.slice();
-          const keysArr = Array.from(unionKeys);
-          if (yearMonths12.length > 0 && keysArr.length > 0) {
-            const rows12 = await (usagePrisma as any).homeMonthlyUsageBucket.findMany({
-              where: { homeId: house.id, yearMonth: { in: yearMonths12 }, bucketKey: { in: keysArr } },
-              select: { yearMonth: true, bucketKey: true, kwhTotal: true },
-            });
-            const byMonth: Record<string, Record<string, number>> = {};
-            for (const r of rows12 ?? []) {
-              const ym = String((r as any)?.yearMonth ?? "").trim();
-              const key = String((r as any)?.bucketKey ?? "").trim();
-              const kwh = decimalToNumber((r as any)?.kwhTotal);
-              if (!ym || !key || kwh == null) continue;
-              if (!byMonth[ym]) byMonth[ym] = {};
-              byMonth[ym][key] = kwh;
-            }
-            usageBucketsByMonthForCalc = byMonth;
-
-            // Prefer annualKwh from the same monthly-bucket data used for estimation when available.
-            try {
-              const sum = yearMonths12
-                .map((ym) => {
-                  const v = byMonth?.[ym]?.["kwh.m.all.total"];
-                  return typeof v === "number" && Number.isFinite(v) ? v : 0;
-                })
-                .reduce((a, b) => a + b, 0);
-              if (sum > 0) {
-                annualKwhForCalc = sum;
-                avgMonthlyKwhForDisplay = sum / 12;
-              }
-            } catch {
-              // ignore
-            }
-          }
-        } catch {
-          // swallow
-        }
-
-        // IMPORTANT: refresh the bucket presence map AFTER ensureCoreMonthlyBuckets() ran.
+        // IMPORTANT: refresh the bucket presence map AFTER bucket auto-ensure ran.
         // Otherwise `hasRecentBucket()` (and therefore missingBucketKeys/statusLabel) can be computed
         // against a stale snapshot and incorrectly mark everything as missing/QUEUED.
         try {
