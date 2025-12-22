@@ -162,7 +162,7 @@ export default function PlansClient() {
 
   const [prefetchNote, setPrefetchNote] = useState<string | null>(null);
   const prefetchInFlightRef = useRef(false);
-  const prefetchAttemptsRef = useRef(0);
+  const pipelineKickoffRef = useRef(false);
   const [autoPreparing, setAutoPreparing] = useState(false);
 
   const [mobilePanel, setMobilePanel] = useState<"none" | "search" | "filters">("none");
@@ -205,8 +205,8 @@ export default function PlansClient() {
   }, [cacheKey, cacheTtlMs, isRenter]);
 
   useEffect(() => {
-    prefetchAttemptsRef.current = 0;
     prefetchInFlightRef.current = false;
+    pipelineKickoffRef.current = false;
     setPrefetchNote(null);
   }, [serverDatasetKey]);
 
@@ -322,8 +322,8 @@ export default function PlansClient() {
     return () => controller.abort();
   }, [plansQueryString, isRenter, refreshNonce, cacheKey, cacheTtlMs]);
 
-  // Auto-prefetch templates in the background so customer cards converge to "AVAILABLE".
-  // This will only leave "QUEUED" for genuine manual-review cases.
+  // Fallback-only: if we still have QUEUED items (estimate_cache_miss / missing templates),
+  // kick off the background pipeline ONCE. The pipeline is responsible for mapping + caching estimates.
   useEffect(() => {
     if (!resp?.ok) return;
     if (!resp?.hasUsage) return;
@@ -334,18 +334,16 @@ export default function PlansClient() {
 
     const offersNow = Array.isArray(resp?.offers) ? (resp!.offers as OfferRow[]) : [];
     const queuedOffers = offersNow.filter((o) => o?.intelliwatt?.statusLabel === "QUEUED");
-    const attempts = prefetchAttemptsRef.current;
-    const shouldAutoPrepare = queuedOffers.length > 0 && attempts < 10;
-    setAutoPreparing(shouldAutoPrepare);
+    const shouldKickoff = queuedOffers.length > 0 && !pipelineKickoffRef.current;
+    setAutoPreparing(shouldKickoff);
 
-    if (!shouldAutoPrepare) {
-      // Either everything is ready, or we hit our retry cap (remaining QUEUED are likely manual review).
-      setPrefetchNote(queuedOffers.length === 0 ? null : "Some plans are still pending manual review.");
+    if (!shouldKickoff) {
+      setPrefetchNote(queuedOffers.length === 0 ? null : "Some plans are still pending manual review or processing.");
       return;
     }
 
+    pipelineKickoffRef.current = true;
     prefetchInFlightRef.current = true;
-    prefetchAttemptsRef.current += 1;
     setPrefetchNote(`Preparing IntelliWatt calculations… (${queuedOffers.length} pending)`);
 
     const controller = new AbortController();
@@ -356,10 +354,12 @@ export default function PlansClient() {
     async function runPrefetch() {
       try {
         const params = new URLSearchParams();
-        params.set("timeBudgetMs", "9000");
-        params.set("maxOffers", "4");
+        params.set("timeBudgetMs", "12000");
+        params.set("maxTemplateOffers", "6");
+        params.set("maxEstimatePlans", "25");
+        params.set("reason", "plans_fallback");
         params.set("isRenter", String(isRenter));
-        const r = await fetch(`/api/dashboard/plans/prefetch?${params.toString()}`, {
+        const r = await fetch(`/api/dashboard/plans/pipeline?${params.toString()}`, {
           method: "POST",
           signal: controller.signal,
         });
@@ -369,17 +369,17 @@ export default function PlansClient() {
           return;
         }
 
-        const linked = Number(j?.linked ?? 0) || 0;
-        const qd = Number(j?.queued ?? 0) || 0;
-        const remaining = Number(j?.remaining ?? 0) || 0;
-        setPrefetchNote(`Preparing IntelliWatt calculations… linked=${linked} queued=${qd} remaining=${remaining}`);
+        const linked = Number(j?.templatesLinked ?? 0) || 0;
+        const est = Number(j?.estimatesComputed ?? 0) || 0;
+        const cached = Number(j?.estimatesAlreadyCached ?? 0) || 0;
+        setPrefetchNote(`Preparing IntelliWatt calculations… templates+${linked}, estimates+${est} (cached ${cached})`);
       } catch (e: any) {
         if (e?.name === "AbortError") return;
         setPrefetchNote("Preparing IntelliWatt calculations… (retrying)");
       } finally {
         window.clearTimeout(timer);
         prefetchInFlightRef.current = false;
-        // Trigger a refresh of the offers list after the prefetch attempt.
+        // Refresh once so newly cached estimates show up; do not loop.
         setRefreshNonce((n) => n + 1);
       }
     }
