@@ -7,8 +7,7 @@ import SmtAddressCaptureCard from "@/components/smt/SmtAddressCaptureCard";
 import GreenButtonHelpSection from "@/components/dashboard/GreenButtonUtilitiesCard";
 import LocalTime from "@/components/LocalTime";
 
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
+// User-specific (cookies) so dynamic, but allow router to cache for back/forward.
 
 export default async function UsageEntryGreenButtonPage() {
   const context = await loadUsageEntryContext();

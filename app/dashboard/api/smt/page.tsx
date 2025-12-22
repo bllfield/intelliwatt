@@ -13,8 +13,7 @@ const SmtBillUploadCard = nextDynamic(() => import("@/components/smt/SmtBillUplo
   ssr: false,
 });
 
-export const dynamic = "force-dynamic";
-export const revalidate = 0; 
+// User-specific (cookies) so dynamic, but allow router to cache for back/forward.
 
 function formatServiceAddress(context: Awaited<ReturnType<typeof loadUsageEntryContext>>) {
   const house = context.houseAddress;

@@ -7,8 +7,7 @@ import SmtAddressCaptureCard from "@/components/smt/SmtAddressCaptureCard";
 import SmtManualFallbackCard from "@/components/smt/SmtManualFallbackCard";
 import LocalTime from "@/components/LocalTime";
 
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
+// User-specific (cookies) so dynamic, but allow router to cache for back/forward.
 
 export default async function UsageEntryManualPage() {
   const context = await loadUsageEntryContext();

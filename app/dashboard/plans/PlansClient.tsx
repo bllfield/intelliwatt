@@ -168,6 +168,26 @@ export default function PlansClient() {
     [q, rateType, term, renewableMin, template, isRenter, sort, page, pageSize],
   );
 
+  // Lightweight client cache so back/forward navigation instantly shows the last processed results
+  // instead of refetching + re-triggering server-side scoring work.
+  const cacheKey = useMemo(() => `dashboard_plans_resp_v1:${datasetKey}`, [datasetKey]);
+  const cacheTtlMs = 5 * 60 * 1000;
+
+  useEffect(() => {
+    try {
+      const raw = window.sessionStorage.getItem(cacheKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as { t: number; resp: ApiResponse };
+      if (!parsed || typeof parsed.t !== "number" || !parsed.resp) return;
+      if (Date.now() - parsed.t > cacheTtlMs) return;
+      setResp(parsed.resp);
+      setError(null);
+      setLoading(false);
+    } catch {
+      // ignore cache failures
+    }
+  }, [cacheKey, cacheTtlMs]);
+
   useEffect(() => {
     prefetchAttemptsRef.current = 0;
     prefetchInFlightRef.current = false;
@@ -235,6 +255,26 @@ export default function PlansClient() {
 
   useEffect(() => {
     if (isRenter === null) return; // wait for stable renter value
+
+    // If we have a fresh cached response for this dataset and we're not forcing a refresh,
+    // skip the network call entirely. This prevents "recalculations" on back/forward navigation.
+    if (refreshNonce === 0) {
+      try {
+        const raw = window.sessionStorage.getItem(cacheKey);
+        if (raw) {
+          const parsed = JSON.parse(raw) as { t: number; resp: ApiResponse };
+          if (parsed && typeof parsed.t === "number" && parsed.resp && Date.now() - parsed.t <= cacheTtlMs) {
+            setResp(parsed.resp);
+            setError(null);
+            setLoading(false);
+            return;
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+
     const controller = new AbortController();
     const mySeq = ++reqSeqRef.current;
     setLoading(true);
@@ -252,6 +292,11 @@ export default function PlansClient() {
           return;
         }
         setResp(j);
+        try {
+          window.sessionStorage.setItem(cacheKey, JSON.stringify({ t: Date.now(), resp: j }));
+        } catch {
+          // ignore
+        }
       } catch (e: any) {
         if (controller.signal.aborted) return;
         if (mySeq !== reqSeqRef.current) return;
@@ -266,7 +311,7 @@ export default function PlansClient() {
 
     run();
     return () => controller.abort();
-  }, [plansQueryString, isRenter]);
+  }, [plansQueryString, isRenter, refreshNonce, cacheKey, cacheTtlMs]);
 
   // Auto-prefetch templates in the background so customer cards converge to "AVAILABLE".
   // This will only leave "QUEUED" for genuine manual-review cases.

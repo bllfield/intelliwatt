@@ -13,8 +13,9 @@ import DashboardHero from "@/components/dashboard/DashboardHero";
 import LocalTime from "@/components/LocalTime";
 import RefreshSmtButton from "@/components/smt/RefreshSmtButton";
 
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
+// Note: this page is user-specific (reads cookies) so it will remain dynamic,
+// but we avoid forcing re-render on every client navigation so Next can reuse
+// the router cache when going back/forward.
 
 function formatServiceAddress(house: UsageEntryContext["houseAddress"]) {
   if (!house) return null;
