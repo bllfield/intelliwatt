@@ -61,6 +61,11 @@ type OfferRow = {
   utility?: { tdspSlug?: string; utilityName?: string };
 };
 
+export type OfferCardProps = {
+  offer: OfferRow;
+  recommended?: boolean;
+};
+
 function fmtCents(v: number | undefined): string {
   if (typeof v !== "number" || !Number.isFinite(v)) return "—";
   return `${v.toFixed(2)}¢`;
@@ -77,7 +82,7 @@ function badgeClasses(status: OfferRow["intelliwatt"]["statusLabel"]): string {
   return "border-brand-cyan/20 bg-brand-white/5 text-brand-cyan/70";
 }
 
-export default function OfferCard({ offer }: { offer: OfferRow }) {
+export default function OfferCard({ offer, recommended }: OfferCardProps) {
   const router = useRouter();
   const supplier = offer.supplierName ?? "Unknown supplier";
   const plan = offer.planName ?? "Unknown plan";
@@ -139,6 +144,14 @@ export default function OfferCard({ offer }: { offer: OfferRow }) {
         </div>
 
         <div className="flex flex-col items-end gap-2">
+          {recommended ? (
+            <div
+              className="rounded-full border border-emerald-400/40 bg-emerald-500/10 px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.22em] text-emerald-200"
+              title="Lowest estimated monthly total"
+            >
+              RECOMMENDED
+            </div>
+          ) : null}
           <div
             className={`rounded-full border px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.22em] ${badgeClasses(
               status,

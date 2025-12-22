@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import OfferCard from "./OfferCard";
-import { EstimateBreakdownPopover } from "../../components/ui/EstimateBreakdownPopover";
+import OfferCard, { type OfferCardProps } from "./OfferCard";
 
 type UsageSummary =
   | {
@@ -17,7 +16,7 @@ type UsageSummary =
     }
   | null;
 
-type OfferRow = Parameters<typeof OfferCard>[0]["offer"];
+type OfferRow = OfferCardProps["offer"];
 
 type ApiResponse = {
   ok: boolean;
@@ -145,7 +144,6 @@ export default function PlansClient() {
   const prefetchInFlightRef = useRef(false);
   const prefetchAttemptsRef = useRef(0);
 
-  const [bestRankAllIn, setBestRankAllIn] = useState<boolean | null>(null);
   const [mobilePanel, setMobilePanel] = useState<"none" | "search" | "filters">("none");
   const [headerCollapsed, setHeaderCollapsed] = useState(false);
   const [approxKwhPerMonth, setApproxKwhPerMonth] = useState<500 | 750 | 1000 | 1250 | 2000>(1000);
@@ -358,76 +356,16 @@ export default function PlansClient() {
     if (sort !== desired) setSort(desired);
   }, [resp?.ok, resp?.hasUsage, sort]);
 
-  // Default basis (only once per "hasUsage" session): if we already have OK all-in estimates, prefer them.
-  useEffect(() => {
-    if (!hasUsage) {
-      setBestRankAllIn(null);
-      return;
-    }
-    if (bestRankAllIn !== null) return;
-    const serverAllIn = Array.isArray((resp as any)?.bestOffersAllIn) ? ((resp as any).bestOffersAllIn as OfferRow[]) : [];
-    const serverEfl = Array.isArray(resp?.bestOffers) ? (resp!.bestOffers as OfferRow[]) : [];
-    const pool = serverAllIn.length ? serverAllIn : serverEfl.length ? serverEfl : offers;
-    const anyOk = pool.some((o: any) => o?.intelliwatt?.trueCostEstimate?.status === "OK");
-    setBestRankAllIn(anyOk);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasUsage, bestRankAllIn, (resp as any)?.bestOffersAllIn, resp?.bestOffers, offers]);
-
-  const bestStripOffers = useMemo(() => {
-    if (!resp?.ok) return [];
-    const rankAllIn = hasUsage && bestRankAllIn === true;
-    const serverAllIn =
-      Array.isArray((resp as any)?.bestOffersAllIn) && ((resp as any).bestOffersAllIn as any[]).length > 0
-        ? ((resp as any).bestOffersAllIn as OfferRow[])
-        : null;
-    const serverEfl =
-      Array.isArray(resp?.bestOffers) && (resp!.bestOffers as any[]).length > 0 ? (resp!.bestOffers as OfferRow[]) : null;
-
-    if (rankAllIn) {
-      const pool = serverAllIn ?? offers;
-      const scored = pool.map((o: any) => {
-        const tce = o?.intelliwatt?.trueCostEstimate;
-        const ok = tce?.status === "OK";
-        const v = ok ? Number(tce?.monthlyCostDollars) : Number.POSITIVE_INFINITY;
-        return { o, v: Number.isFinite(v) ? v : Number.POSITIVE_INFINITY };
-      });
-      scored.sort((a, b) => a.v - b.v);
-      return scored.slice(0, 5).map((x) => x.o);
-    }
-
-    // Proxy basis: use server bestOffers when available.
-    if (serverEfl) return serverEfl.slice(0, 5);
-
-    // Fallback: compute client-side ranking from currently loaded offers (safe deploy).
-    const scored = offers
-      .map((o) => ({ o, metric: pickMetricCentsPerKwhForBucket(o, bestBucket) }))
-      .filter((x) => typeof x.metric === "number" && Number.isFinite(x.metric as number));
-    scored.sort((a, b) => (a.metric as number) - (b.metric as number));
-    return scored.slice(0, 5).map((x) => x.o);
-  }, [resp?.ok, hasUsage, (resp as any)?.bestOffersAllIn, resp?.bestOffers, offers, bestRankAllIn, bestBucket]);
-
-  const bestStripBasis = useMemo(() => {
-    if (!resp?.ok) return null;
-    const rankAllIn = bestRankAllIn === true;
-    const basis = rankAllIn ? (resp as any)?.bestOffersAllInBasis : resp?.bestOffersBasis;
-    return typeof basis === "string" && basis.trim() ? basis.trim() : null;
-  }, [resp?.ok, (resp as any)?.bestOffersAllInBasis, resp?.bestOffersBasis, bestRankAllIn]);
-
-  const bestStripDisclaimer = useMemo(() => {
-    if (!resp?.ok) return null;
-    const rankAllIn = bestRankAllIn === true;
-    const d = rankAllIn ? (resp as any)?.bestOffersAllInDisclaimer : resp?.bestOffersDisclaimer;
-    return typeof d === "string" && d.trim() ? d.trim() : null;
-  }, [resp?.ok, (resp as any)?.bestOffersAllInDisclaimer, resp?.bestOffersDisclaimer, bestRankAllIn]);
-
-  const bestStripDisclaimerWithAnchor = useMemo(() => {
-    const base = bestStripDisclaimer;
-    if (!base) return null;
-    // If the server already injected an anchor, keep it. Otherwise append a short hint
-    // so the user understands the mini-card kWh label/price matches their selected sort.
-    if (base.includes("500 kWh") || base.includes("1000 kWh") || base.includes("2000 kWh")) return base;
-    return `${base} (showing ${bestBucket} kWh EFL average)`;
-  }, [bestStripDisclaimer, bestBucket]);
+  const recommendedOfferId = useMemo(() => {
+    if (!hasUsage) return null;
+    if (sort !== "best_for_you_proxy") return null;
+    if (page !== 1) return null;
+    const first = offers?.[0] as any;
+    if (!first?.offerId) return null;
+    const tce = first?.intelliwatt?.trueCostEstimate;
+    if (!tce || tce.status !== "OK") return null;
+    return String(first.offerId);
+  }, [hasUsage, sort, page, offers]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -547,7 +485,7 @@ export default function PlansClient() {
                     >
                       {hasUsage ? (
                         <option className="text-brand-navy" value="best_for_you_proxy">
-                          Best for you (preview)
+                          Best for you
                         </option>
                       ) : null}
                       <option className="text-brand-navy" value="kwh1000_asc">
@@ -731,7 +669,7 @@ export default function PlansClient() {
                   >
                     {hasUsage ? (
                       <option className="text-brand-navy" value="best_for_you_proxy">
-                        Best for you (preview)
+                        Best for you
                       </option>
                     ) : null}
                     <option className="text-brand-navy" value="kwh1000_asc">
@@ -936,180 +874,7 @@ export default function PlansClient() {
         </div>
       </div>
 
-      {resp?.ok ? (
-        <div className="mx-auto w-full max-w-5xl">
-          <div className="rounded-3xl border border-brand-cyan/20 bg-brand-navy p-5 shadow-[0_18px_40px_rgba(10,20,60,0.35)]">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <div className="text-sm font-semibold text-brand-white">Best plans for you (estimate)</div>
-                {hasUsage ? (
-                  <label className="mt-2 flex items-center gap-2 text-xs text-brand-cyan/75 select-none">
-                    <input
-                      type="checkbox"
-                      checked={bestRankAllIn === true}
-                      onChange={(e) => {
-                        setBestRankAllIn(e.target.checked);
-                        // Force a refresh so we immediately pick up the preferred server-ranked list
-                        // (and matching basis/disclaimer) when the user toggles.
-                        setRefreshNonce((n) => n + 1);
-                      }}
-                      className="h-4 w-4 rounded border-brand-cyan/40 bg-brand-white/10"
-                    />
-                    Rank by all-in estimate (incl. TDSP)
-                  </label>
-                ) : (
-                  <label className="mt-2 flex flex-wrap items-center gap-2 text-xs text-brand-cyan/75 select-none">
-                    <span className="text-brand-cyan/70">Approx monthly usage:</span>
-                    <select
-                      value={approxKwhPerMonth}
-                      onChange={(e) => {
-                        const v = Number(e.target.value) as any;
-                        if (v === 500 || v === 750 || v === 1000 || v === 1250 || v === 2000) {
-                          setApproxKwhPerMonth(v);
-                          setRefreshNonce((n) => n + 1);
-                        }
-                      }}
-                      className="rounded-full border border-brand-cyan/25 bg-brand-white/5 px-3 py-2 text-xs text-brand-white outline-none focus:border-brand-blue/60 focus:bg-white focus:text-brand-navy"
-                    >
-                      <option className="text-brand-navy" value={500}>
-                        500
-                      </option>
-                      <option className="text-brand-navy" value={750}>
-                        750
-                      </option>
-                      <option className="text-brand-navy" value={1000}>
-                        1000
-                      </option>
-                      <option className="text-brand-navy" value={1250}>
-                        1250
-                      </option>
-                      <option className="text-brand-navy" value={2000}>
-                        2000
-                      </option>
-                    </select>
-                    <span className="text-brand-cyan/60">kWh/mo</span>
-                  </label>
-                )}
-                <div className="mt-1 text-xs text-brand-cyan/70">
-                  {hasUsage && avgMonthlyKwh ? (
-                    <div className="mb-1">
-                      Based on your historic usage of{" "}
-                      <span className="font-semibold text-brand-white/90">{fmtKwhPerMonth(avgMonthlyKwh)}</span>.
-                    </div>
-                  ) : null}
-                  {bestStripDisclaimerWithAnchor ??
-                    (hasUsage
-                      ? "Based on your last 12 months usage. Ranking uses provider estimates until IntelliWatt true-cost is enabled."
-                      : "Pick an approximate monthly usage to rank plans by EFL averages.")}
-                </div>
-                {bestStripBasis ? (
-                  <div className="mt-1 text-[0.7rem] text-brand-cyan/55 font-mono">
-                    {bestStripBasis}
-                  </div>
-                ) : null}
-              </div>
-              <div className="text-xs text-brand-cyan/60">
-                {bestStripOffers.length ? `Top ${bestStripOffers.length}` : "No results"}
-              </div>
-            </div>
-
-            {bestStripOffers.length > 0 ? (
-              <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-                {bestStripOffers.map((o) => {
-                  const tce = (o as any)?.intelliwatt?.trueCostEstimate;
-                  const effCents =
-                    tce?.status === "OK" &&
-                    typeof tce?.effectiveCentsPerKwh === "number" &&
-                    Number.isFinite(tce.effectiveCentsPerKwh)
-                      ? (tce.effectiveCentsPerKwh as number)
-                      : null;
-                  const metric = hasUsage && effCents != null ? effCents : pickMetricCentsPerKwhForBucket(o, bestBucket);
-                  const supplier = (o as any)?.supplierName ?? "Unknown supplier";
-                  const plan = (o as any)?.planName ?? "Unknown plan";
-                  const status = (o as any)?.intelliwatt?.statusLabel ?? "UNAVAILABLE";
-                  const statusClass =
-                    status === "AVAILABLE"
-                      ? "border-emerald-400/40 bg-emerald-500/10 text-emerald-200"
-                      : status === "QUEUED"
-                        ? "border-amber-400/40 bg-amber-500/10 text-amber-200"
-                        : "border-brand-cyan/20 bg-brand-white/5 text-brand-cyan/70";
-
-                  const tdspRatesApplied = (o as any)?.intelliwatt?.tdspRatesApplied ?? null;
-                  const showEst = tce?.status === "OK" && typeof tce?.monthlyCostDollars === "number";
-                  const estMonthly = showEst ? (tce.monthlyCostDollars as number) : null;
-                  const c2 = showEst ? tce?.componentsV2 : null;
-                  const repAnnual = c2?.rep?.energyDollars ?? tce?.annualCostDollars;
-                  const totalAnnual = c2?.totalDollars ?? tce?.annualCostDollars;
-                  const tdspDeliveryAnnual = c2?.tdsp?.deliveryDollars;
-                  const tdspFixedAnnual = c2?.tdsp?.fixedDollars;
-                  const inclTdsp = Boolean(tdspRatesApplied);
-
-                  return (
-                    <div
-                      key={`best-mini-${(o as any).offerId}`}
-                      className="rounded-2xl border border-brand-cyan/20 bg-brand-white/5 p-3 min-w-0 sm:w-[calc(50%-0.375rem)] md:w-[240px] md:flex-none"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <div className="text-[0.7rem] text-brand-cyan/70 truncate">{supplier}</div>
-                          <div className="mt-0.5 text-sm font-semibold text-brand-white truncate">{plan}</div>
-                        </div>
-                        <div
-                          className={`shrink-0 rounded-full border px-2 py-1 text-[0.62rem] font-semibold uppercase tracking-[0.18em] ${statusClass}`}
-                        >
-                          {status === "AVAILABLE" ? "Available" : status === "QUEUED" ? "Queued" : "—"}
-                        </div>
-                      </div>
-
-                      <div className="mt-3 flex items-end justify-between gap-3">
-                        <div>
-                          <div className="text-[0.65rem] uppercase tracking-[0.25em] text-brand-cyan/55">
-                            {hasUsage && avgMonthlyKwh ? `${Math.round(avgMonthlyKwh)} kWh/mo` : bestBucket}
-                          </div>
-                          <div className="mt-0.5 text-base font-semibold text-brand-white">
-                            {fmtCentsPerKwh(metric)}
-                          </div>
-                        </div>
-                        <div className="text-[0.7rem] text-brand-cyan/60 text-right">
-                          {(o as any)?.termMonths ? `${(o as any).termMonths} mo` : "Term —"}
-                        </div>
-                      </div>
-
-                      {showEst && typeof repAnnual === "number" && typeof totalAnnual === "number" ? (
-                        <div className="mt-2 text-xs text-brand-cyan/70">
-                          <EstimateBreakdownPopover
-                            side="top"
-                            align="right"
-                            trigger={
-                              <>
-                                Est. ${Number(estMonthly).toFixed(2)}/mo
-                                {inclTdsp ? <span className="text-brand-cyan/60"> · incl. TDSP</span> : null}
-                              </>
-                            }
-                            repAnnualDollars={repAnnual}
-                            tdspDeliveryAnnualDollars={
-                              typeof tdspDeliveryAnnual === "number" && Number.isFinite(tdspDeliveryAnnual)
-                                ? tdspDeliveryAnnual
-                                : undefined
-                            }
-                            tdspFixedAnnualDollars={
-                              typeof tdspFixedAnnual === "number" && Number.isFinite(tdspFixedAnnual)
-                                ? tdspFixedAnnual
-                                : undefined
-                            }
-                            totalAnnualDollars={totalAnnual}
-                            effectiveDate={tdspRatesApplied?.effectiveDate}
-                          />
-                        </div>
-                      ) : null}
-                    </div>
-                  );
-                })}
-              </div>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
+      {/* Removed the "Top 5" strip: sorting the main plan list is the source of truth. */}
 
       {hasUnavailable && !availableFilterOn ? (
         <div className="mx-auto w-full max-w-5xl">
@@ -1154,7 +919,7 @@ export default function PlansClient() {
         ) : (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             {offers.map((o) => (
-              <OfferCard key={o.offerId} offer={o} />
+              <OfferCard key={o.offerId} offer={o} recommended={o.offerId === recommendedOfferId} />
             ))}
           </div>
         )}

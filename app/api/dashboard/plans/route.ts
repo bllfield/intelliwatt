@@ -724,7 +724,74 @@ export async function GET(req: NextRequest) {
     });
 
     // Sort
-    offers = sortOffers(offers, sort);
+    if (hasUsage && sort === "best_for_you_proxy") {
+      // Best-for-you: sort by the real monthly total estimate (lowest → highest).
+      // Fail-closed: plans that cannot compute for this home sort to the bottom.
+      const tdspCache = new Map<string, any | null>();
+      const scoreMonthly = async (o: OfferNormalized): Promise<number> => {
+        if (annualKwhForCalc == null) return Number.POSITIVE_INFINITY;
+        const offerId = String((o as any)?.offer_id ?? "");
+        if (!offerId) return Number.POSITIVE_INFINITY;
+
+        const ratePlanId = mapByOfferId.get(offerId) ?? null;
+        if (!ratePlanId) return Number.POSITIVE_INFINITY;
+
+        const calc = planCalcByRatePlanId.get(ratePlanId) ?? null;
+        if (!calc || calc.planCalcStatus !== "COMPUTABLE" || !calc.rateStructurePresent || !calc.rateStructure) {
+          return Number.POSITIVE_INFINITY;
+        }
+
+        const tdspSlug = String((o as any)?.tdsp ?? (house as any)?.tdspSlug ?? "")
+          .trim()
+          .toLowerCase();
+        let tdspRates: any | null = null;
+        if (tdspSlug) {
+          if (tdspCache.has(tdspSlug)) {
+            tdspRates = tdspCache.get(tdspSlug) ?? null;
+          } else {
+            try {
+              tdspRates = await getTdspDeliveryRates({ tdspSlug, asOf: new Date() });
+            } catch {
+              tdspRates = null;
+            }
+            tdspCache.set(tdspSlug, tdspRates);
+          }
+        }
+        if (!tdspRates) return Number.POSITIVE_INFINITY;
+
+        const est = calculatePlanCostForUsage({
+          annualKwh: annualKwhForCalc,
+          monthsCount: 12,
+          tdsp: {
+            perKwhDeliveryChargeCents: Number(tdspRates?.perKwhDeliveryChargeCents ?? 0) || 0,
+            monthlyCustomerChargeDollars: Number(tdspRates?.monthlyCustomerChargeDollars ?? 0) || 0,
+            effectiveDate: tdspRates?.effectiveDate ?? undefined,
+          },
+          rateStructure: calc.rateStructure,
+          usageBucketsByMonth: usageBucketsByMonthForCalc,
+        });
+
+        if (!est || (est as any).status !== "OK") return Number.POSITIVE_INFINITY;
+        const v = Number((est as any)?.monthlyCostDollars);
+        return Number.isFinite(v) ? v : Number.POSITIVE_INFINITY;
+      };
+
+      const withKey = await Promise.all(
+        offers.map(async (o, idx) => ({ o, idx, v: await scoreMonthly(o) })),
+      );
+      withKey.sort((a, b) => {
+        if (a.v < b.v) return -1;
+        if (a.v > b.v) return 1;
+        const pa = ((a.o as any)?.plan_name ?? "").toLowerCase();
+        const pb = ((b.o as any)?.plan_name ?? "").toLowerCase();
+        if (pa < pb) return -1;
+        if (pa > pb) return 1;
+        return a.idx - b.idx;
+      });
+      offers = withKey.map((x) => x.o);
+    } else {
+      offers = sortOffers(offers, sort);
+    }
 
     const total = offers.length;
     const totalPages = total === 0 ? 0 : Math.ceil(total / pageSize);
