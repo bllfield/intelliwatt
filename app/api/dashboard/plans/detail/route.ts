@@ -8,12 +8,14 @@ import { normalizeOffers } from "@/lib/wattbuy/normalize";
 import { usagePrisma } from "@/lib/db/usageClient";
 import { bucketDefsFromBucketKeys, canonicalizeMonthlyBucketKey } from "@/lib/plan-engine/usageBuckets";
 import { getTdspDeliveryRates } from "@/lib/plan-engine/getTdspDeliveryRates";
+import crypto from "node:crypto";
 import {
   calculatePlanCostForUsage,
   extractFixedRepEnergyCentsPerKwh,
   extractRepFixedMonthlyChargeDollars,
 } from "@/lib/plan-engine/calculatePlanCostForUsage";
 import { estimateTrueCost } from "@/lib/plan-engine/estimateTrueCost";
+import { getCachedPlanEstimate, putCachedPlanEstimate, sha256Hex as sha256HexCache } from "@/lib/plan-engine/planEstimateCache";
 import { extractDeterministicTouSchedule } from "@/lib/plan-engine/touPeriods";
 import { extractDeterministicTierSchedule, computeRepEnergyCostForMonthlyKwhTiered } from "@/lib/plan-engine/tieredPricing";
 import { extractDeterministicBillCredits, applyBillCreditsToMonth } from "@/lib/plan-engine/billCredits";
@@ -26,6 +28,38 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const PLAN_ENGINE_ESTIMATE_VERSION = "estimateTrueCost_v1";
+
+function hashUsageInputs(args: {
+  yearMonths: string[];
+  bucketKeys: string[];
+  usageBucketsByMonth: Record<string, Record<string, number>>;
+}): string {
+  const h = crypto.createHash("sha256");
+  const yearMonths = Array.isArray(args.yearMonths) ? args.yearMonths : [];
+  const keys = Array.isArray(args.bucketKeys) ? args.bucketKeys.map(String).filter(Boolean).sort() : [];
+
+  h.update("ym:");
+  h.update(yearMonths.join(","));
+  h.update("|keys:");
+  h.update(keys.join(","));
+  h.update("|vals:");
+  for (const ym of yearMonths) {
+    h.update(ym);
+    h.update("{");
+    const m = args.usageBucketsByMonth?.[ym] ?? {};
+    for (const k of keys) {
+      const v = (m as any)[k];
+      const n = typeof v === "number" && Number.isFinite(v) ? v : null;
+      h.update(k);
+      h.update("=");
+      h.update(n == null ? "null" : n.toFixed(6));
+      h.update(";");
+    }
+    h.update("}");
+  }
+  return h.digest("hex");
+}
 
 function round2(n: number) {
   return Math.round((n + Number.EPSILON) * 100) / 100;
@@ -559,20 +593,61 @@ export async function GET(req: NextRequest) {
 
     // True-cost estimate (if computable + inputs present)
     const overriddenComputable = isComputableOverride(planCalcStatus, planCalcReasonCode);
-    const trueCostEstimate =
-      annualKwh && rsPresent && tdspApplied && (overriddenComputable || planComputability?.status !== "NOT_COMPUTABLE")
-        ? estimateTrueCost({
-            annualKwh, // 12 full months total (matches monthly table)
-            monthsCount: 12,
-            tdspRates: {
-              perKwhDeliveryChargeCents: tdspApplied.perKwhDeliveryChargeCents ?? 0,
-              monthlyCustomerChargeDollars: tdspApplied.monthlyCustomerChargeDollars ?? 0,
-              effectiveDate: tdspApplied.effectiveDate ?? null,
-            },
-            rateStructure,
-            usageBucketsByMonth: usageBucketsByMonthForCalc,
-          })
-        : { status: "NOT_IMPLEMENTED", reason: "Missing inputs or plan not computable" };
+    const trueCostEstimate = await (async () => {
+      if (!annualKwh || !rsPresent || !tdspApplied) return { status: "NOT_IMPLEMENTED", reason: "Missing inputs or plan not computable" };
+      if (!overriddenComputable && planComputability?.status === "NOT_COMPUTABLE") {
+        return { status: "NOT_COMPUTABLE", reason: planComputability?.reason ?? "Plan not computable" };
+      }
+
+      const monthsCount = 12;
+      const tdspPer = Number(tdspApplied.perKwhDeliveryChargeCents ?? 0) || 0;
+      const tdspMonthly = Number(tdspApplied.monthlyCustomerChargeDollars ?? 0) || 0;
+      const tdspEff = tdspApplied.effectiveDate ?? null;
+      const rsSha = sha256HexCache(JSON.stringify(rateStructure ?? null));
+      const usageSha = hashUsageInputs({
+        yearMonths,
+        bucketKeys: Array.from(new Set(["kwh.m.all.total", ...(requiredBucketKeys ?? [])])),
+        usageBucketsByMonth: usageBucketsByMonthForCalc,
+      });
+      const inputsSha256 = sha256HexCache(
+        JSON.stringify({
+          v: PLAN_ENGINE_ESTIMATE_VERSION,
+          monthsCount,
+          annualKwh: Number(annualKwh.toFixed(6)),
+          tdsp: { per: tdspPer, monthly: tdspMonthly, effectiveDate: tdspEff },
+          rsSha,
+          usageSha,
+        }),
+      );
+
+      const cacheRatePlanId = ratePlanId ?? "";
+      const cached = await getCachedPlanEstimate({
+        houseAddressId: house.id,
+        ratePlanId: cacheRatePlanId,
+        inputsSha256,
+        monthsCount,
+      });
+      if (cached) return cached;
+
+      const est = estimateTrueCost({
+        annualKwh, // 12 months total used by this endpoint
+        monthsCount,
+        tdspRates: { perKwhDeliveryChargeCents: tdspPer, monthlyCustomerChargeDollars: tdspMonthly, effectiveDate: tdspEff },
+        rateStructure,
+        usageBucketsByMonth: usageBucketsByMonthForCalc,
+      });
+
+      await putCachedPlanEstimate({
+        houseAddressId: house.id,
+        ratePlanId: cacheRatePlanId,
+        esiid: usageSource === "SMT" ? (house.esiid ?? null) : null,
+        inputsSha256,
+        monthsCount,
+        payloadJson: est,
+      });
+
+      return est;
+    })();
 
     const effectiveCentsPerKwh =
       (trueCostEstimate as any)?.status === "OK" &&

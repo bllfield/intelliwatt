@@ -8,6 +8,7 @@ import { getTrueCostStatus } from "@/lib/plan-engine/trueCostStatus";
 import { calculatePlanCostForUsage } from "@/lib/plan-engine/calculatePlanCostForUsage";
 import { getTdspDeliveryRates } from "@/lib/plan-engine/getTdspDeliveryRates";
 import { estimateTrueCost } from "@/lib/plan-engine/estimateTrueCost";
+import { getCachedPlanEstimate, putCachedPlanEstimate, sha256Hex as sha256HexCache } from "@/lib/plan-engine/planEstimateCache";
 import { usagePrisma } from "@/lib/db/usageClient";
 import { ensureCoreMonthlyBuckets } from "@/lib/usage/aggregateMonthlyBuckets";
 import crypto from "node:crypto";
@@ -57,9 +58,41 @@ function parseBoolParam(v: string | null, fallback: boolean): boolean {
 type EflBucket = 500 | 1000 | 2000;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const PLAN_ENGINE_ESTIMATE_VERSION = "estimateTrueCost_v1";
 
 function sha256Hex(s: string): string {
   return crypto.createHash("sha256").update(s).digest("hex");
+}
+
+function hashUsageInputs(args: {
+  yearMonths: string[];
+  bucketKeys: string[];
+  usageBucketsByMonth: Record<string, Record<string, number>>;
+}): string {
+  const h = crypto.createHash("sha256");
+  const yearMonths = Array.isArray(args.yearMonths) ? args.yearMonths : [];
+  const keys = Array.isArray(args.bucketKeys) ? args.bucketKeys.map(String).filter(Boolean).sort() : [];
+
+  h.update("ym:");
+  h.update(yearMonths.join(","));
+  h.update("|keys:");
+  h.update(keys.join(","));
+  h.update("|vals:");
+  for (const ym of yearMonths) {
+    h.update(ym);
+    h.update("{");
+    const m = args.usageBucketsByMonth?.[ym] ?? {};
+    for (const k of keys) {
+      const v = (m as any)[k];
+      const n = typeof v === "number" && Number.isFinite(v) ? v : null;
+      h.update(k);
+      h.update("=");
+      h.update(n == null ? "null" : n.toFixed(6));
+      h.update(";");
+    }
+    h.update("}");
+  }
+  return h.digest("hex");
 }
 
 function canonicalUrlKey(u: string): string | null {
@@ -423,6 +456,7 @@ export async function GET(req: NextRequest) {
     // NOTE: annualKwhForCalc will be overridden later after we build canonical stitched buckets.
     let annualKwhForCalc: number | null = annualKwhFromUsageSummary ?? null;
     let avgMonthlyKwhForDisplay: number | null = avgMonthlyKwhFromUsageSummary ?? null;
+    let yearMonthsForCalc: string[] = [];
 
     const hasRecentBucket = (bucketKey: string): boolean => {
       if (!bucketKey) return false;
@@ -580,6 +614,7 @@ export async function GET(req: NextRequest) {
 
         try {
           const yearMonths12 = lastNYearMonthsChicago(12);
+          yearMonthsForCalc = yearMonths12.slice();
           const keysArr = Array.from(unionKeys);
           if (yearMonths12.length > 0 && keysArr.length > 0) {
             const rows12 = await (usagePrisma as any).homeMonthlyUsageBucket.findMany({
@@ -1383,7 +1418,7 @@ export async function GET(req: NextRequest) {
         }
       }
 
-      const trueCostEstimate: any = (() => {
+      const trueCostEstimate: any = await (async () => {
         if (!hasUsage) return { status: "NOT_IMPLEMENTED", reason: "No usage available" };
         if (annualKwhForCalc == null) {
           return { status: "NOT_IMPLEMENTED", reason: "Missing usage totals for annual kWh" };
@@ -1398,35 +1433,73 @@ export async function GET(req: NextRequest) {
         if (!isComputableOverride() && planComputability && planComputability.status === "NOT_COMPUTABLE") {
           return { status: "NOT_COMPUTABLE", reason: planComputability.reason ?? "Plan not computable" };
         }
-        const tdspApplied = {
-          perKwhDeliveryChargeCents: Number(tdspRates?.perKwhDeliveryChargeCents ?? 0) || 0,
-          monthlyCustomerChargeDollars: Number(tdspRates?.monthlyCustomerChargeDollars ?? 0) || 0,
-          effectiveDate: tdspRates?.effectiveDate ?? undefined,
-        };
+        // Cache key: (home + ratePlan + engineVersion + tdsp + rateStructure + usageBucketsDigest)
+        // This makes the engine run once per unique input-set, then reused across pages.
+        // Best-effort: if cache read/write fails, fall back to computing inline.
+        const monthsCount = 12;
+        const tdspPer = Number(tdspRates?.perKwhDeliveryChargeCents ?? 0) || 0;
+        const tdspMonthly = Number(tdspRates?.monthlyCustomerChargeDollars ?? 0) || 0;
+        const tdspEff = tdspRates?.effectiveDate ?? null;
+        const rsSha = sha256HexCache(JSON.stringify(template.rateStructure ?? null));
+        const usageSha = hashUsageInputs({
+          yearMonths: yearMonthsForCalc.length ? yearMonthsForCalc : lastNYearMonthsChicago(12),
+          bucketKeys: Array.from(new Set(["kwh.m.all.total", ...(requiredBucketKeys ?? [])])),
+          usageBucketsByMonth: usageBucketsByMonthForCalc,
+        });
+        const inputsSha256 = sha256HexCache(
+          JSON.stringify({
+            v: PLAN_ENGINE_ESTIMATE_VERSION,
+            monthsCount,
+            annualKwh: Number(annualKwhForCalc.toFixed(6)),
+            tdsp: { per: tdspPer, monthly: tdspMonthly, effectiveDate: tdspEff },
+            rsSha,
+            usageSha,
+          }),
+        );
+
+        const cacheRatePlanId = ratePlanId ?? "";
+        const cached = await getCachedPlanEstimate({
+          houseAddressId: house.id,
+          ratePlanId: cacheRatePlanId,
+          inputsSha256,
+          monthsCount,
+        });
+        if (cached) return cached;
+
         const estFixed = estimateTrueCost({
           annualKwh: annualKwhForCalc,
-          monthsCount: 12,
-          tdspRates: {
-            perKwhDeliveryChargeCents: Number(tdspRates?.perKwhDeliveryChargeCents ?? 0) || 0,
-            monthlyCustomerChargeDollars: Number(tdspRates?.monthlyCustomerChargeDollars ?? 0) || 0,
-            effectiveDate: tdspRates?.effectiveDate ?? null,
-          },
+          monthsCount,
+          tdspRates: { perKwhDeliveryChargeCents: tdspPer, monthlyCustomerChargeDollars: tdspMonthly, effectiveDate: tdspEff },
           rateStructure: template.rateStructure,
           usageBucketsByMonth: usageBucketsByMonthForCalc,
         });
-        if (
-          estFixed &&
-          (estFixed as any).status === "OK" &&
-          typeof (estFixed as any).annualCostDollars === "number" &&
-          Number.isFinite((estFixed as any).annualCostDollars) &&
-          typeof annualKwhForCalc === "number" &&
-          Number.isFinite(annualKwhForCalc) &&
-          annualKwhForCalc > 0
-        ) {
-          const eff = (((estFixed as any).annualCostDollars as number) / annualKwhForCalc) * 100;
-          return { ...(estFixed as any), effectiveCentsPerKwh: eff };
-        }
-        return estFixed;
+
+        const out = (() => {
+          if (
+            estFixed &&
+            (estFixed as any).status === "OK" &&
+            typeof (estFixed as any).annualCostDollars === "number" &&
+            Number.isFinite((estFixed as any).annualCostDollars) &&
+            typeof annualKwhForCalc === "number" &&
+            Number.isFinite(annualKwhForCalc) &&
+            annualKwhForCalc > 0
+          ) {
+            const eff = (((estFixed as any).annualCostDollars as number) / annualKwhForCalc) * 100;
+            return { ...(estFixed as any), effectiveCentsPerKwh: eff };
+          }
+          return estFixed;
+        })();
+
+        await putCachedPlanEstimate({
+          houseAddressId: house.id,
+          ratePlanId: cacheRatePlanId,
+          esiid: (house as any)?.esiid ?? null,
+          inputsSha256,
+          monthsCount,
+          payloadJson: out,
+        });
+
+        return out;
       })();
 
       const statusLabelFinal = (() => {
