@@ -99,6 +99,83 @@ function pickNearestEflBucket(kwh: number): EflBucket {
   return best;
 }
 
+function round2(n: number): number {
+  if (!Number.isFinite(n)) return n;
+  return Math.round(n * 100) / 100;
+}
+
+function withTdspFixedSanity(
+  est: any,
+  tdspRates: any | null,
+  monthsCount: number,
+): any {
+  try {
+    if (!est || est.status !== "OK") return est;
+    const tdspMonthly = typeof tdspRates?.monthlyCustomerChargeDollars === "number" && Number.isFinite(tdspRates.monthlyCustomerChargeDollars)
+      ? (tdspRates.monthlyCustomerChargeDollars as number)
+      : null;
+    if (tdspMonthly == null || tdspMonthly <= 0) return est;
+    const mc = Math.max(1, Math.floor(monthsCount || 12));
+
+    const c2 = (est as any)?.componentsV2 ?? null;
+    const tdspFixedHas = typeof c2?.tdsp?.fixedDollars === "number" && Number.isFinite(c2.tdsp.fixedDollars)
+      ? (c2.tdsp.fixedDollars as number)
+      : 0;
+    const tdspFixedShould = round2(tdspMonthly * mc);
+    const delta = round2(tdspFixedShould - tdspFixedHas);
+    if (Math.abs(delta) < 0.01) return est;
+
+    const annualHas = typeof (est as any)?.annualCostDollars === "number" && Number.isFinite((est as any).annualCostDollars)
+      ? ((est as any).annualCostDollars as number)
+      : null;
+    if (annualHas == null) return est;
+
+    const annualNext = round2(annualHas + delta);
+    const monthlyNext = round2(annualNext / mc);
+
+    const tdspDeliveryHas = typeof c2?.tdsp?.deliveryDollars === "number" && Number.isFinite(c2.tdsp.deliveryDollars)
+      ? (c2.tdsp.deliveryDollars as number)
+      : null;
+
+    const next = { ...(est as any) };
+    next.annualCostDollars = annualNext;
+    next.monthlyCostDollars = monthlyNext;
+
+    if (c2 && c2.tdsp) {
+      next.componentsV2 = {
+        ...(c2 as any),
+        tdsp: {
+          ...(c2.tdsp as any),
+          fixedDollars: tdspFixedShould,
+          totalDollars:
+            tdspDeliveryHas != null ? round2(tdspDeliveryHas + tdspFixedShould) : round2((c2.tdsp.totalDollars ?? 0) + delta),
+        },
+        totalDollars: annualNext,
+      };
+    }
+
+    // Keep v1 components consistent when present.
+    if ((est as any)?.components && typeof (est as any).components === "object") {
+      const c1 = (est as any).components;
+      const baseFeesHas =
+        typeof c1?.baseFeesDollars === "number" && Number.isFinite(c1.baseFeesDollars) ? (c1.baseFeesDollars as number) : null;
+      next.components = {
+        ...(c1 as any),
+        ...(baseFeesHas != null ? { baseFeesDollars: round2(baseFeesHas + delta) } : {}),
+        totalDollars: annualNext,
+      };
+    }
+
+    next.notes = Array.isArray((est as any)?.notes)
+      ? Array.from(new Set([...(est as any).notes, "tdsp_fixed_sanity_applied"]))
+      : ["tdsp_fixed_sanity_applied"];
+
+    return next;
+  } catch {
+    return est;
+  }
+}
+
 function sortOffers(offers: OfferNormalized[], sort: SortKey): OfferNormalized[] {
   const withKey = offers.map((o, idx) => ({ o, idx }));
 
@@ -770,9 +847,10 @@ export async function GET(req: NextRequest) {
           rateStructure: calc.rateStructure,
           usageBucketsByMonth: usageBucketsByMonthForCalc,
         });
+        const estFixed = withTdspFixedSanity(est, tdspRates, 12);
 
-        if (!est || (est as any).status !== "OK") return Number.POSITIVE_INFINITY;
-        const v = Number((est as any)?.monthlyCostDollars);
+        if (!estFixed || (estFixed as any).status !== "OK") return Number.POSITIVE_INFINITY;
+        const v = Number((estFixed as any)?.monthlyCostDollars);
         return Number.isFinite(v) ? v : Number.POSITIVE_INFINITY;
       };
 
@@ -1452,19 +1530,20 @@ export async function GET(req: NextRequest) {
           rateStructure: template.rateStructure,
           usageBucketsByMonth: usageBucketsByMonthForCalc,
         });
+        const estFixed = withTdspFixedSanity(est, tdspRates, 12);
         if (
-          est &&
-          (est as any).status === "OK" &&
-          typeof (est as any).annualCostDollars === "number" &&
-          Number.isFinite((est as any).annualCostDollars) &&
+          estFixed &&
+          (estFixed as any).status === "OK" &&
+          typeof (estFixed as any).annualCostDollars === "number" &&
+          Number.isFinite((estFixed as any).annualCostDollars) &&
           typeof annualKwhForCalc === "number" &&
           Number.isFinite(annualKwhForCalc) &&
           annualKwhForCalc > 0
         ) {
-          const eff = (((est as any).annualCostDollars as number) / annualKwhForCalc) * 100;
-          return { ...(est as any), effectiveCentsPerKwh: eff };
+          const eff = (((estFixed as any).annualCostDollars as number) / annualKwhForCalc) * 100;
+          return { ...(estFixed as any), effectiveCentsPerKwh: eff };
         }
-        return est;
+        return estFixed;
       })();
 
       const statusLabelFinal = (() => {
@@ -1593,9 +1672,10 @@ export async function GET(req: NextRequest) {
             rateStructure: calc.rateStructure,
             usageBucketsByMonth: usageBucketsByMonthForCalc,
           });
+          const estFixed = withTdspFixedSanity(est, tdspRates, 12);
 
-          if (est?.status !== "OK") return Number.POSITIVE_INFINITY;
-          const v = Number((est as any)?.monthlyCostDollars);
+          if (estFixed?.status !== "OK") return Number.POSITIVE_INFINITY;
+          const v = Number((estFixed as any)?.monthlyCostDollars);
           return Number.isFinite(v) ? v : Number.POSITIVE_INFINITY;
         };
 
