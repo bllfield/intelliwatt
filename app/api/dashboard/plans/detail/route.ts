@@ -20,6 +20,7 @@ import { extractDeterministicBillCredits, applyBillCreditsToMonth } from "@/lib/
 import { extractDeterministicMinimumRules, applyMinimumRulesToMonth } from "@/lib/plan-engine/minimumRules";
 import { canComputePlanFromBuckets, derivePlanCalcRequirementsFromTemplate } from "@/lib/plan-engine/planComputability";
 import { ensureCoreMonthlyBuckets } from "@/lib/usage/aggregateMonthlyBuckets";
+import { buildUsageBucketsForEstimate } from "@/lib/usage/buildUsageBucketsForEstimate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -513,201 +514,23 @@ export async function GET(req: NextRequest) {
       template: ratePlanId && rsPresent ? { rateStructure } : null,
     });
 
-    // Ensure + load the bucket totals REQUIRED by this plan (not just the 9-core bucket set).
-    // Use a STITCHED 12-month window when usage is interval-based (SMT/Green Button):
-    // - Prior 11 full calendar months
-    // - Current month: "days we have" + prior-year tail days to make a full calendar month
-    // This keeps monthly fixed fees to exactly 12 and enables threshold credits that depend on full-month kWh.
-    const endForMonths = windowEnd ?? new Date();
-    const completeDay = lastCompleteChicagoDay(endForMonths, { maxStepDays: 2 });
-    const stitchYm = completeDay?.yearMonth ?? chicagoYearMonthFromDate(endForMonths);
-    const yearMonths = (stitchYm
-      ? lastNYearMonthsChicagoFrom(new Date(`${stitchYm}-15T12:00:00Z`), 12)
-      : lastNYearMonthsChicagoFrom(endForMonths, 12)
-    )
-      .slice()
-      .reverse(); // oldest -> newest
-    const keysToLoad = Array.from(
-      new Set(
-        ["kwh.m.all.total", ...(requiredBucketKeys ?? [])]
-          .map((k) => canonicalizeMonthlyBucketKey(String(k ?? "").trim()))
-          .filter(Boolean),
-      ),
-    );
-    const bucketDefs = bucketDefsFromBucketKeys(keysToLoad);
-    const bucketDefsForResponse = bucketDefs.map((b) => ({ key: b.key, label: b.label }));
+    // Canonical: build the exact same stitched 12-month buckets used across the site.
+    const bucketBuild = await buildUsageBucketsForEstimate({
+      homeId: house.id,
+      usageSource,
+      esiid: usageSource === "SMT" ? (house.esiid ?? null) : null,
+      rawId: usageSource === "GREEN_BUTTON" ? ((window as any)?.rawId ?? null) : null,
+      windowEnd: windowEnd ?? new Date(),
+      cutoff: window.cutoff,
+      requiredBucketKeys: requiredBucketKeys ?? [],
+      monthsCount: 12,
+      maxStepDays: 2,
+    });
 
-    try {
-      const rangeEnd = endForMonths;
-      const rangeStart = window.cutoff;
-      await ensureCoreMonthlyBuckets({
-        homeId: house.id,
-        esiid: usageSource === "SMT" ? (house.esiid ?? null) : null,
-        rangeStart,
-        rangeEnd,
-        source: usageSource === "SMT" ? "SMT" : "GREENBUTTON",
-        intervalSource: usageSource === "SMT" ? "SMT" : "GREENBUTTON",
-        bucketDefs,
-      });
-    } catch {
-      // best-effort only; failures should not break the detail page
-    }
-
-    const usageBucketsByMonthForCalc: Record<string, Record<string, number>> = {};
-    try {
-      const rows = await (usagePrisma as any).homeMonthlyUsageBucket.findMany({
-        where: { homeId: house.id, yearMonth: { in: yearMonths }, bucketKey: { in: keysToLoad } },
-        select: { yearMonth: true, bucketKey: true, kwhTotal: true },
-      });
-      for (const r of rows ?? []) {
-        const ym = String((r as any)?.yearMonth ?? "").trim();
-        const key = canonicalizeMonthlyBucketKey(String((r as any)?.bucketKey ?? "").trim());
-        const kwh = decimalToNumber((r as any)?.kwhTotal);
-        if (!ym || !key || kwh == null) continue;
-        if (!usageBucketsByMonthForCalc[ym]) usageBucketsByMonthForCalc[ym] = {};
-        usageBucketsByMonthForCalc[ym][key] = kwh;
-      }
-    } catch {
-      // keep empty
-    }
-
-    // Stitch the newest month to a full calendar month (using actual interval rows).
-    // We only do this when we have a "completeDay" (to avoid including an incomplete last day).
-    const stitchInfo =
-      completeDay && stitchYm && yearMonths.length && yearMonths[yearMonths.length - 1] === stitchYm
-        ? (() => {
-            const lastDay = completeDay.day;
-            const monthDays = daysInMonth(completeDay.year, completeDay.month);
-            const missingStartDay = lastDay + 1;
-            if (missingStartDay > monthDays) return null; // already full month
-            return {
-              year: completeDay.year,
-              month: completeDay.month,
-              yearMonth: stitchYm,
-              haveDaysThrough: lastDay,
-              missingDaysFrom: missingStartDay,
-              missingDaysTo: monthDays,
-              borrowedFromYearMonth: `${String(completeDay.year - 1)}-${String(completeDay.month).padStart(2, "0")}`,
-            };
-          })()
-        : null;
-
-    if (stitchInfo) {
-      const sumBucketsFromIntervals = (rows: Array<{ ts: Date; kwh: number }>, dayMin: number, dayMax: number): Record<string, number> => {
-        const totals: Record<string, number> = {};
-        for (const k of keysToLoad) totals[k] = 0;
-        for (const r of rows) {
-          const p = chicagoParts(r.ts);
-          if (!p) continue;
-          if (p.yearMonth !== stitchInfo.yearMonth) continue;
-          if (p.day < dayMin || p.day > dayMax) continue;
-          for (const def of bucketDefs) {
-            if (evalRule(def.rule, p)) {
-              totals[def.key] = (totals[def.key] ?? 0) + r.kwh;
-            }
-          }
-        }
-        return totals;
-      };
-
-      const addTotals = (a: Record<string, number>, b: Record<string, number>): Record<string, number> => {
-        const out: Record<string, number> = { ...a };
-        for (const k of keysToLoad) out[k] = (out[k] ?? 0) + (b[k] ?? 0);
-        return out;
-      };
-
-      const monthToUtcRange = (year: number, month1: number): { gte: Date; lt: Date } => {
-        // Wide UTC bounds; we filter by America/Chicago yearMonth/day in JS.
-        const start = new Date(Date.UTC(year, month1 - 1, 1, 0, 0, 0));
-        const end = new Date(Date.UTC(year, month1, 1, 0, 0, 0));
-        return { gte: new Date(start.getTime() - 36 * 60 * 60 * 1000), lt: new Date(end.getTime() + 36 * 60 * 60 * 1000) };
-      };
-
-      const currentRange = monthToUtcRange(stitchInfo.year, stitchInfo.month);
-      const priorRange = monthToUtcRange(stitchInfo.year - 1, stitchInfo.month);
-
-      // Fetch only 2 months of intervals (current month + same month last year).
-      const currentRows: Array<{ ts: Date; kwh: number }> = [];
-      const priorRows: Array<{ ts: Date; kwh: number }> = [];
-      try {
-        if (usageSource === "SMT") {
-          const esiid = house.esiid!;
-          const cur = await prisma.smtInterval.findMany({
-            where: { esiid, ts: { gte: currentRange.gte, lt: currentRange.lt } },
-            select: { ts: true, kwh: true },
-            orderBy: { ts: "asc" },
-          });
-          for (const r of cur ?? []) {
-            const kwh = decimalToNumber((r as any)?.kwh);
-            const ts = (r as any)?.ts ? new Date((r as any).ts) : null;
-            if (ts && kwh != null) currentRows.push({ ts, kwh });
-          }
-
-          const prior = await prisma.smtInterval.findMany({
-            where: { esiid, ts: { gte: priorRange.gte, lt: priorRange.lt } },
-            select: { ts: true, kwh: true },
-            orderBy: { ts: "asc" },
-          });
-          for (const r of prior ?? []) {
-            const kwh = decimalToNumber((r as any)?.kwh);
-            const ts = (r as any)?.ts ? new Date((r as any).ts) : null;
-            if (ts && kwh != null) priorRows.push({ ts, kwh });
-          }
-        } else if (usageSource === "GREEN_BUTTON") {
-          const usageClient = usagePrisma as any;
-          const rawId = (window as any).rawId;
-          const cur = await usageClient.greenButtonInterval.findMany({
-            where: { homeId: house.id, rawId, timestamp: { gte: currentRange.gte, lt: currentRange.lt } },
-            select: { timestamp: true, consumptionKwh: true },
-            orderBy: { timestamp: "asc" },
-          });
-          for (const r of cur ?? []) {
-            const kwh = decimalToNumber((r as any)?.consumptionKwh);
-            const ts = (r as any)?.timestamp ? new Date((r as any).timestamp) : null;
-            if (ts && kwh != null) currentRows.push({ ts, kwh });
-          }
-
-          const prior = await usageClient.greenButtonInterval.findMany({
-            where: { homeId: house.id, rawId, timestamp: { gte: priorRange.gte, lt: priorRange.lt } },
-            select: { timestamp: true, consumptionKwh: true },
-            orderBy: { timestamp: "asc" },
-          });
-          for (const r of prior ?? []) {
-            const kwh = decimalToNumber((r as any)?.consumptionKwh);
-            const ts = (r as any)?.timestamp ? new Date((r as any).timestamp) : null;
-            if (ts && kwh != null) priorRows.push({ ts, kwh });
-          }
-        }
-      } catch {
-        // best-effort only; if this fails we fall back to DB monthly buckets (partial month)
-      }
-
-      if (currentRows.length && priorRows.length) {
-        // Recompute the stitched month totals from intervals:
-        // - current month days 1..haveDaysThrough
-        // - prior year same month days missingDaysFrom..missingDaysTo
-        const currentTotals = sumBucketsFromIntervals(currentRows, 1, stitchInfo.haveDaysThrough);
-        const priorTailTotals = (() => {
-          const totals: Record<string, number> = {};
-          for (const k of keysToLoad) totals[k] = 0;
-          for (const r of priorRows) {
-            const p = chicagoParts(r.ts);
-            if (!p) continue;
-            if (p.yearMonth !== stitchInfo.borrowedFromYearMonth) continue;
-            if (p.day < stitchInfo.missingDaysFrom || p.day > stitchInfo.missingDaysTo) continue;
-            for (const def of bucketDefs) {
-              if (evalRule(def.rule, p)) {
-                totals[def.key] = (totals[def.key] ?? 0) + r.kwh;
-              }
-            }
-          }
-          return totals;
-        })();
-
-        const stitchedTotals = addTotals(currentTotals, priorTailTotals);
-        usageBucketsByMonthForCalc[stitchInfo.yearMonth] = stitchedTotals;
-      }
-    }
+    const yearMonths = bucketBuild.yearMonths;
+    const keysToLoad = bucketBuild.keysToLoad;
+    const usageBucketsByMonthForCalc = bucketBuild.usageBucketsByMonth;
+    const bucketDefsForResponse = bucketDefsFromBucketKeys(keysToLoad).map((b) => ({ key: b.key, label: b.label }));
 
     const bucketTable = yearMonths.map((ym) => {
       const m = usageBucketsByMonthForCalc[ym] ?? {};
@@ -718,19 +541,9 @@ export async function GET(req: NextRequest) {
       return row;
     });
 
-    // Prefer annual kWh from the same 12 full months used for the monthly table.
-    try {
-      const sum = yearMonths
-        .map((ym) => {
-          const v = usageBucketsByMonthForCalc?.[ym]?.["kwh.m.all.total"];
-          return typeof v === "number" && Number.isFinite(v) ? v : 0;
-        })
-        .reduce((a, b) => a + b, 0);
-      if (sum > 0) {
-        annualKwh = Number.isFinite(sum) ? sum : annualKwh;
-      }
-    } catch {
-      // ignore
+    // Prefer annual kWh from the same stitched 12 months used for the monthly table.
+    if (typeof bucketBuild.annualKwh === "number" && Number.isFinite(bucketBuild.annualKwh) && bucketBuild.annualKwh > 0) {
+      annualKwh = bucketBuild.annualKwh;
     }
 
     // Calc inputs / variables
@@ -980,18 +793,7 @@ export async function GET(req: NextRequest) {
           yearMonths,
           avgMonthlyKwh,
           annualKwh, // 12 full months total (sum of kwh.m.all.total over yearMonths)
-          stitchedMonth:
-            stitchInfo && usageBucketsByMonthForCalc?.[stitchInfo.yearMonth]
-              ? {
-                  mode: "PRIOR_YEAR_TAIL",
-                  yearMonth: stitchInfo.yearMonth,
-                  haveDaysThrough: stitchInfo.haveDaysThrough,
-                  missingDaysFrom: stitchInfo.missingDaysFrom,
-                  missingDaysTo: stitchInfo.missingDaysTo,
-                  borrowedFromYearMonth: stitchInfo.borrowedFromYearMonth,
-                  completenessRule: "Uses last complete local day (>=23:45) and may step back up to 2 days if SMT/GB is late.",
-                }
-              : null,
+          stitchedMonth: bucketBuild.stitchedMonth,
           bucketDefs: bucketDefsForResponse,
           bucketTable,
         },

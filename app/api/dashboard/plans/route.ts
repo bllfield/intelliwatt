@@ -14,6 +14,7 @@ import crypto from "node:crypto";
 import { canComputePlanFromBuckets, derivePlanCalcRequirementsFromTemplate } from "@/lib/plan-engine/planComputability";
 import { isPlanCalcQuarantineWorthyReasonCode } from "@/lib/plan-engine/planCalcQuarantine";
 import { bucketDefsFromBucketKeys } from "@/lib/plan-engine/usageBuckets";
+import { buildUsageBucketsForEstimate } from "@/lib/usage/buildUsageBucketsForEstimate";
 import {
   extractFixedRepEnergyCentsPerKwh,
   extractRepFixedMonthlyChargeDollars,
@@ -341,8 +342,7 @@ export async function GET(req: NextRequest) {
     // Must be declared before any downstream usage-window / display logic uses it.
     const usageSummaryTotalKwh = numOrNull((usageSummary as any)?.totalKwh);
 
-    // Best-effort: on-demand ensure CORE bucket totals exist for recent months (never break offers).
-    // This is a lazy backfill path in case ingest hooks were skipped or buckets were never computed.
+    // Canonical calc buckets (stitched 12 months). We'll fill after we know requiredBucketKeys.
     let recentYearMonths: string[] = [];
     let bucketPresenceByKey: Map<string, Set<string>> = new Map();
     let usageBucketsByMonthForCalc: Record<string, Record<string, number>> = {};
@@ -405,71 +405,12 @@ export async function GET(req: NextRequest) {
           bucketPresenceByKey = new Map();
         }
 
-        // Load last-12-months bucket totals by month for calculation (TOU needs this).
-        try {
-          const yearMonths12 = lastNYearMonthsChicago(12);
-          const keysArr = ["kwh.m.all.total"];
-          if (yearMonths12.length > 0 && keysArr.length > 0) {
-            const rows12 = await (usagePrisma as any).homeMonthlyUsageBucket.findMany({
-              where: { homeId: house.id, yearMonth: { in: yearMonths12 }, bucketKey: { in: keysArr } },
-              select: { yearMonth: true, bucketKey: true, kwhTotal: true },
-            });
-            const byMonth: Record<string, Record<string, number>> = {};
-            for (const r of rows12 ?? []) {
-              const ym = String((r as any)?.yearMonth ?? "").trim();
-              const key = String((r as any)?.bucketKey ?? "").trim();
-              const kwh = decimalToNumber((r as any)?.kwhTotal);
-              if (!ym || !key || kwh == null) continue;
-              if (!byMonth[ym]) byMonth[ym] = {};
-              byMonth[ym][key] = kwh;
-            }
-            usageBucketsByMonthForCalc = byMonth;
-          }
-        } catch {
-          usageBucketsByMonthForCalc = {};
-        }
+        // Leave usageBucketsByMonthForCalc empty here; we will build the stitched-month map later
+        // once we know union requiredBucketKeys across mapped plans.
       }
     } catch (err) {
       console.error("[dashboard/plans] CORE bucket on-demand backfill failed (best-effort)", err);
     }
-
-    // Load kwh.m.all.total monthly buckets (usage DB) and annualize to 12 months, best-effort.
-    let annualKwhFromBuckets: number | null = null;
-    let bucketMonthsCount: number = 0;
-    try {
-      if (hasUsage && house.id) {
-        const yearMonths = lastNYearMonthsChicago(12);
-        if (yearMonths.length > 0) {
-          const rows = await (usagePrisma as any).homeMonthlyUsageBucket.findMany({
-            where: { homeId: house.id, bucketKey: "kwh.m.all.total", yearMonth: { in: yearMonths } },
-            select: { yearMonth: true, kwhTotal: true },
-          });
-          const byYm = new Map<string, number>();
-          for (const r of rows ?? []) {
-            const ym = String((r as any)?.yearMonth ?? "");
-            const kwh = decimalToNumber((r as any)?.kwhTotal);
-            if (!ym || kwh == null || kwh <= 0) continue;
-            byYm.set(ym, (byYm.get(ym) ?? 0) + kwh);
-          }
-          bucketMonthsCount = byYm.size;
-          if (bucketMonthsCount > 0) {
-            const sumKwh = Array.from(byYm.values()).reduce((a, b) => a + b, 0);
-            // Annualize to 12 months if fewer months are present.
-            annualKwhFromBuckets = (sumKwh * 12) / bucketMonthsCount;
-          }
-        }
-      }
-    } catch (err) {
-      console.error("[dashboard/plans] failed to load kwh.m.all.total buckets (best-effort)", err);
-      annualKwhFromBuckets = null;
-      bucketMonthsCount = 0;
-    }
-
-    // Average monthly usage (kWh/mo) based on the same bucket data used for true-cost.
-    const avgMonthlyKwhFromBuckets: number | null =
-      typeof annualKwhFromBuckets === "number" && Number.isFinite(annualKwhFromBuckets) && annualKwhFromBuckets > 0
-        ? annualKwhFromBuckets / 12
-        : null;
 
     // Prefer usageSummary totals for display + math consistency (matches Usage page and Plan Details page),
     // but keep bucket-derived values as best-effort fallback.
@@ -480,9 +421,9 @@ export async function GET(req: NextRequest) {
     const avgMonthlyKwhFromUsageSummary: number | null =
       annualKwhFromUsageSummary != null ? annualKwhFromUsageSummary / 12 : null;
 
-    const annualKwhForCalc: number | null = annualKwhFromUsageSummary ?? annualKwhFromBuckets ?? null;
-    const avgMonthlyKwhForDisplay: number | null =
-      avgMonthlyKwhFromUsageSummary ?? (typeof avgMonthlyKwhFromBuckets === "number" ? avgMonthlyKwhFromBuckets : null);
+    // NOTE: annualKwhForCalc will be overridden later after we build canonical stitched buckets.
+    let annualKwhForCalc: number | null = annualKwhFromUsageSummary ?? null;
+    let avgMonthlyKwhForDisplay: number | null = avgMonthlyKwhFromUsageSummary ?? null;
 
     const hasRecentBucket = (bucketKey: string): boolean => {
       if (!bucketKey) return false;
@@ -619,45 +560,35 @@ export async function GET(req: NextRequest) {
           }
         });
 
-        // Ensure buckets exist (bounded) and then reload the last-12-months bucket totals map.
-        const rangeEnd = new Date();
-        const rangeStart = new Date(rangeEnd.getTime() - 365 * 24 * 60 * 60 * 1000);
+        // Canonical: build stitched 12-month buckets using the SAME logic as the Plan Details page.
         try {
-          const defs = bucketDefsFromBucketKeys(Array.from(unionKeys));
-          await ensureCoreMonthlyBuckets({
-            homeId: house.id,
-            esiid: house.esiid,
-            rangeStart,
-            rangeEnd,
-            source: "SMT",
-            intervalSource: "SMT",
-            bucketDefs: defs,
+          // Align window to the same strict-last-365 behavior used above for SMT summary.
+          const latest = await prisma.smtInterval.findFirst({
+            where: { esiid: house.esiid },
+            orderBy: { ts: "desc" },
+            select: { ts: true },
           });
-        } catch {
-          // ignore (never break dashboard)
-        }
+          const rangeEnd = latest?.ts ?? new Date();
+          const rangeStart = new Date(rangeEnd.getTime() - 365 * DAY_MS);
 
-        try {
-          const yearMonths12 = lastNYearMonthsChicago(12);
-          const keysArr = Array.from(unionKeys);
-          if (yearMonths12.length > 0 && keysArr.length > 0) {
-            const rows12 = await (usagePrisma as any).homeMonthlyUsageBucket.findMany({
-              where: { homeId: house.id, yearMonth: { in: yearMonths12 }, bucketKey: { in: keysArr } },
-              select: { yearMonth: true, bucketKey: true, kwhTotal: true },
-            });
-            const byMonth: Record<string, Record<string, number>> = {};
-            for (const r of rows12 ?? []) {
-              const ym = String((r as any)?.yearMonth ?? "").trim();
-              const key = String((r as any)?.bucketKey ?? "").trim();
-              const kwh = decimalToNumber((r as any)?.kwhTotal);
-              if (!ym || !key || kwh == null) continue;
-              if (!byMonth[ym]) byMonth[ym] = {};
-              byMonth[ym][key] = kwh;
-            }
-            usageBucketsByMonthForCalc = byMonth;
+          const built = await buildUsageBucketsForEstimate({
+            homeId: house.id,
+            usageSource: "SMT",
+            esiid: house.esiid,
+            windowEnd: rangeEnd,
+            cutoff: rangeStart,
+            requiredBucketKeys: Array.from(unionKeys),
+            monthsCount: 12,
+            maxStepDays: 2,
+          });
+
+          usageBucketsByMonthForCalc = built.usageBucketsByMonth;
+          if (typeof built.annualKwh === "number" && Number.isFinite(built.annualKwh) && built.annualKwh > 0) {
+            annualKwhForCalc = built.annualKwh;
+            avgMonthlyKwhForDisplay = built.annualKwh / 12;
           }
         } catch {
-          // keep previous best-effort map
+          // swallow
         }
 
         // IMPORTANT: refresh the bucket presence map AFTER ensureCoreMonthlyBuckets() ran.
