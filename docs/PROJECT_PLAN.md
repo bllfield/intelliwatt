@@ -1553,6 +1553,10 @@ Follow this section instead.
 
 - Added `/api/user/usage` (GET) which aggregates 15-minute, hourly, daily, monthly, and annual buckets for each house. The handler inspects master `SmtInterval` rows and usage-db `GreenButtonInterval` rows, automatically selecting the source with the freshest timestamp so the dashboard always reflects the most recent upload.
 - `/dashboard/usage` is now live; the page fetches the endpoint above, surfaces coverage/total summaries, renders a 14-day daily table, and highlights recent peak intervals. Locked homes guide customers back to SMT reconnect or Green Button upload workflows while keeping referrals unlocked.
+- Performance guardrails (do not regress):
+  - `/api/user/usage` should **not** stream a full year of 15-minute intervals to the browser. Prefer DB-side aggregations for insights.
+  - Time-series insights are computed via SQL aggregations (daily/monthly totals, weekday/weekend, time-of-day buckets, baseload/peak) so the page loads quickly even with large datasets.
+  - Usage UI uses a lightweight `sessionStorage` cache (UX-only) and the API may return `Cache-Control: private` headers to reduce repeat load time.
 - Manual usage normalization remains queued; once implemented it will plug into the same endpoint so the promotion logic (latest source wins) continues to hold.
 - Added `/admin/usage` Usage Test Console so Ops can run SMT + Green Button upload tests, monitor latest intervals/raw files, and review consolidated debugging output (leverages `/api/admin/usage/debug` + existing Green Button records endpoint).
 - Added customer-facing refresh actions: `/dashboard/api` now exposes a `Refresh SMT Data` control (POST `/api/smt/authorization/status` + `/api/user/usage/refresh`) and `/dashboard/usage` includes `Update usage data`, wiring both pages into the on-demand normalization pipeline so stale SMT intervals can be rehydrated instantly.
@@ -2397,9 +2401,15 @@ Guardrails
   - UX: bot image is **2× larger** and typing speed is **half-speed** vs initial implementation.
 - Added per-page IntelliWattBot message overrides in DB (`IntelliwattBotPageMessage`) + public fetch API (`GET /api/bot/message`).
 - Added admin editor: `/admin/tools/bot-messages` to update IntelliWattBot messages per dashboard page.
+- **Event/trigger messages (no new DB columns):**
+  - Store additional “vertical” messages as extra rows keyed by `pageKey::eventKey` (example: `dashboard_plans::calculating_best`).
+  - Public API supports `GET /api/bot/message?path=/dashboard/plans&event=calculating_best`.
+  - **Important**: event messages do not auto-trigger by DB entry alone; the page must request the event key when the condition occurs.
+  - Admin tool supports an **event dropdown** (plus Custom) when adding event messages for a page.
 - Dashboard Plans header: search/filter section is now globally **collapsible** (both mobile + desktop) so plan cards stay visible.
 - PlansClient: prevent double-fetch by gating `/api/dashboard/plans` until `isRenter` is resolved from localStorage, and use AbortController + request sequencing to cancel/ignore stale responses when params change.
 - True-cost: `/api/dashboard/plans` computes home-scoped costs from canonical usage buckets + TDSP (fail-closed). Unsupported/non-deterministic templates remain quarantined as `PLAN_CALC_QUARANTINE`.
+- Plans UX: **RECOMMENDED** badge is shown only after the list finishes loading/auto-prefetching; a prominent “Calculating…” banner + IntelliWattBot typing popup appears while results are still populating.
 
 Canonical home-scoped usage window (Dashboard + Plan Details)
 
@@ -2416,15 +2426,17 @@ Plan engine output cache (single source of truth)
 - **Storage**: WattBuy Offers module DB table `WattBuyApiSnapshot`.
 - **Endpoint marker**: `endpoint="PLAN_ENGINE_ESTIMATE_V1"`.
 - **Keying**: hash of canonical inputs (`estimateTrueCost_v1` + monthsCount + annualKwh + TDSP rates + rateStructure hash + usage buckets hash).
-- **Rule**: Any route that needs `trueCostEstimate` must:
-  - attempt `getCachedPlanEstimate()` first
-  - only run the engine on cache-miss
-  - write via `putCachedPlanEstimate()` after compute
+- **Rule** (source of truth): any place that displays a true-cost estimate must use the DB-cached plan-engine output.
+  - **Plans list (`GET /api/dashboard/plans`) is cache-only**: never run the engine inline (prevents “recalculation” when changing sort/filter dropdowns).
+  - **Plan detail (`GET /api/dashboard/plans/detail`) may compute on cache-miss** (bounded) and then persists to the cache.
+  - Background/template prefetch (or explicit warm calls) are responsible for filling cache for list views.
 - **Correctness invariant**: Card and detail must match; if they diverge, it means inputs (usage window/buckets/TDSP) were not canonicalized or the cache key was unstable.
 
 Client-side UX caching (not a source of truth)
 
-- The Plans UI also keeps a short-lived `sessionStorage` cache so back/forward navigation can instantly show the last response without refetching.
+- The Plans UI keeps a `sessionStorage` cache (UX-only) so back/forward navigation can instantly show the last response without refetching.
+- The Plan detail UI keeps a `sessionStorage` cache (UX-only) to avoid waiting on re-fetch when returning to a previously viewed offer.
+- Usage dashboard also uses client UX caching and server-side aggregation (see “Usage Dashboard Activation”); avoid returning full-year interval payloads to the browser.
 - Persisted plan calc requirements on `RatePlan`: `planCalcStatus`, `planCalcReasonCode`, `requiredBucketKeys`, and `supportedFeatures` are stored when EFL templates are upserted (best-effort).
 - Added **local admin scripts** to report + backfill `RatePlan.planCalc*` without relying on HTTP admin auth or `prisma db execute` output (safe/idempotent):
   - PowerShell:
