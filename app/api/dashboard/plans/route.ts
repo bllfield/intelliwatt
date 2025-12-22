@@ -1205,6 +1205,9 @@ export async function GET(req: NextRequest) {
       let planCalcReasonCode: string | null = null;
       let planCalcInputs: any | null = null;
       let missingBucketKeys: string[] = [];
+      const isComputableOverride = () =>
+        String(planCalcReasonCode ?? "").trim() === "ADMIN_OVERRIDE_COMPUTABLE" &&
+        String(planCalcStatus ?? "").trim() === "COMPUTABLE";
 
       if (hasUsage && (base as any)?.intelliwatt?.templateAvailable && templateOk) {
         const offerId = String((base as any).offerId ?? "");
@@ -1366,7 +1369,8 @@ export async function GET(req: NextRequest) {
         if (!tdspRates) {
           return { status: "NOT_IMPLEMENTED", reason: "Missing TDSP delivery rates" };
         }
-        if (planComputability && planComputability.status === "NOT_COMPUTABLE") {
+        // Manual override: when ops explicitly forces COMPUTABLE, do not block on template-derived planComputability.
+        if (!isComputableOverride() && planComputability && planComputability.status === "NOT_COMPUTABLE") {
           return { status: "NOT_COMPUTABLE", reason: planComputability.reason ?? "Plan not computable" };
         }
         const tdspApplied = {
@@ -1403,7 +1407,7 @@ export async function GET(req: NextRequest) {
         if (current !== "AVAILABLE") return current;
         // Fail-closed: if required buckets are missing, or estimator can't compute, treat as QUEUED.
         if (missingBucketKeys.length > 0) return "QUEUED";
-        if (planComputability && planComputability.status === "NOT_COMPUTABLE") return "QUEUED";
+        if (!isComputableOverride() && planComputability && planComputability.status === "NOT_COMPUTABLE") return "QUEUED";
         const s = String(trueCostEstimate?.status ?? "").toUpperCase();
         if (s && s !== "OK" && s !== "APPROXIMATE") return "QUEUED";
         return current;
@@ -1520,6 +1524,7 @@ export async function GET(req: NextRequest) {
               effectiveDate: tdspRates?.effectiveDate ?? undefined,
             },
             rateStructure: calc.rateStructure,
+            usageBucketsByMonth: usageBucketsByMonthForCalc,
           });
 
           if (est?.status !== "OK") return Number.POSITIVE_INFINITY;
@@ -1541,7 +1546,7 @@ export async function GET(req: NextRequest) {
         if (bestOffersAllIn.length > 0) {
           bestOffersAllInBasis = "proxy_allin_monthly_trueCostEstimate";
           bestOffersAllInDisclaimer =
-            "Includes TDSP delivery. Ranked by IntelliWatt all-in estimate (fixed-rate-only; TOU/variable plans excluded).";
+            "Includes TDSP delivery. Ranked by IntelliWatt all-in estimate using your usage buckets (excludes non-deterministic/indexed/unsupported plans).";
         }
       } else {
         // No-usage mode: rank bestOffers by selected approximate monthly usage, mapped to nearest EFL bucket.
