@@ -7,6 +7,7 @@ import { usagePrisma } from '@/lib/db/usageClient';
 import { normalizeEmail } from '@/lib/utils/email';
 import { computeInsights } from '@/lib/usage/computeInsights';
 import { NormalizedUsageRow } from '@/lib/usage/normalize';
+import { buildUsageBucketsForEstimate } from '@/lib/usage/buildUsageBucketsForEstimate';
 
 export const dynamic = 'force-dynamic';
 
@@ -494,16 +495,52 @@ export async function GET(_request: NextRequest) {
         rawSourceId: row.rawSourceId,
       }));
 
+      // Canonical monthly totals (stitched 12-month billing window) for SMT homes.
+      // This MUST match the plan engine's stitched window so month totals (e.g., Dec) are identical everywhere.
+      let stitchedMonthlyTotals: Array<{ month: string; kwh: number }> | null = null;
+      let stitchedMonthMeta: any | null = null;
+      try {
+        if (selected?.summary?.source === 'SMT' && house.esiid && selected.summary.latest) {
+          const latest = new Date(selected.summary.latest);
+          if (Number.isFinite(latest.getTime())) {
+            const cutoff = new Date(latest.getTime() - 365 * DAY_MS);
+            const bucketBuild = await buildUsageBucketsForEstimate({
+              homeId: house.id,
+              usageSource: 'SMT',
+              esiid: house.esiid,
+              rawId: null,
+              windowEnd: latest,
+              cutoff,
+              requiredBucketKeys: ['kwh.m.all.total'],
+              monthsCount: 12,
+              maxStepDays: 2,
+              stitchMode: 'DAILY_OR_INTERVAL',
+            });
+
+            stitchedMonthlyTotals = bucketBuild.yearMonths.map((ym) => ({
+              month: ym,
+              kwh: Number(bucketBuild.usageBucketsByMonth?.[ym]?.['kwh.m.all.total'] ?? 0) || 0,
+            }));
+            stitchedMonthMeta = bucketBuild.stitchedMonth ?? null;
+          }
+        }
+      } catch {
+        stitchedMonthlyTotals = null;
+        stitchedMonthMeta = null;
+      }
+
       const dataset = selected
         ? {
             summary: selected.summary,
             series: selected.series,
             intervals: intervalsPayload,
             daily: insights?.dailyTotals ?? [],
-            monthly: insights?.monthlyTotals ?? [],
+            // Prefer stitched 12-month totals (plan-engine canonical); fall back to strict interval-derived totals.
+            monthly: stitchedMonthlyTotals ?? insights?.monthlyTotals ?? [],
             insights: insights
               ? {
                   fifteenMinuteAverages: insights.fifteenMinuteAverages,
+                  ...(stitchedMonthMeta ? { stitchedMonth: stitchedMonthMeta } : {}),
                   peakDay: insights.peakDay,
                   peakHour: insights.peakHour,
                   baseload: insights.baseload,
