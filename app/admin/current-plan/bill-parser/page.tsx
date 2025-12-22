@@ -47,6 +47,8 @@ type TemplatesResponse = {
   error?: string;
 };
 
+type BillQueueItem = any;
+
 function useAdminToken() {
   const [token, setToken] = useState('');
 
@@ -76,6 +78,15 @@ function prettyJson(value: unknown): string {
     return JSON.stringify(value, null, 2);
   } catch {
     return String(value);
+  }
+}
+
+async function copyToClipboard(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -377,7 +388,70 @@ export default function CurrentPlanBillParserAdmin() {
   const [templatesError, setTemplatesError] = useState<string | null>(null);
   const [templates, setTemplates] = useState<TemplateRow[]>([]);
 
+  // Bill parse review queue (DB-backed; uses the same table as EFL review queue)
+  const [queueStatus, setQueueStatus] = useState<'OPEN' | 'RESOLVED'>('OPEN');
+  const [queueQ, setQueueQ] = useState('');
+  const [queueLoading, setQueueLoading] = useState(false);
+  const [queueError, setQueueError] = useState<string | null>(null);
+  const [queueItems, setQueueItems] = useState<BillQueueItem[]>([]);
+  const [queueResolvingId, setQueueResolvingId] = useState<string | null>(null);
+  const [queueCopiedAt, setQueueCopiedAt] = useState<number | null>(null);
+
   const ready = useMemo(() => Boolean(token.trim()), [token]);
+
+  async function loadQueue() {
+    if (!token.trim()) {
+      setQueueError('Admin token is required to load the bill parse queue.');
+      return;
+    }
+    setQueueLoading(true);
+    setQueueError(null);
+    try {
+      const params = new URLSearchParams({
+        status: queueStatus,
+        limit: '100',
+        source: 'current_plan_bill',
+        kind: 'EFL_PARSE',
+      });
+      if (queueQ.trim()) params.set('q', queueQ.trim());
+      const res = await fetch(`/api/admin/efl-review/list?${params.toString()}`, {
+        headers: { 'x-admin-token': token.trim() },
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok || !body?.ok) {
+        throw new Error(body?.error || `Request failed with status ${res.status}`);
+      }
+      setQueueItems(Array.isArray(body.items) ? body.items : []);
+    } catch (err: any) {
+      setQueueError(err?.message ?? 'Failed to load bill parse queue.');
+    } finally {
+      setQueueLoading(false);
+    }
+  }
+
+  async function resolveQueueItem(id: string) {
+    if (!token.trim()) return;
+    setQueueResolvingId(id);
+    try {
+      const res = await fetch('/api/admin/efl-review/resolve', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-token': token.trim(),
+        },
+        body: JSON.stringify({ id }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok || !body?.ok) {
+        throw new Error(body?.error || `Request failed with status ${res.status}`);
+      }
+      await loadQueue();
+    } catch (err: any) {
+      setQueueError(err?.message ?? 'Failed to resolve queue item.');
+    } finally {
+      setQueueResolvingId(null);
+    }
+  }
 
   async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -548,6 +622,7 @@ export default function CurrentPlanBillParserAdmin() {
   useEffect(() => {
     if (token.trim()) {
       loadTemplates();
+      loadQueue();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
@@ -618,6 +693,185 @@ export default function CurrentPlanBillParserAdmin() {
             to rely solely on the bill text.
           </p>
         </div>
+      </section>
+
+      <section id="queue" className="p-4 rounded-2xl border space-y-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 className="font-medium">Bill Parse Review Queue</h2>
+            <p className="text-sm text-gray-600">
+              These are customer bill parses that did not extract the required fields. Use this queue to copy
+              the raw text + parser outputs for debugging, load the bill into the runner above, and mark items
+              resolved once fixed.
+            </p>
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <select
+              value={queueStatus}
+              onChange={(e) => setQueueStatus(e.target.value as any)}
+              className="rounded-lg border px-3 py-2 text-sm"
+            >
+              <option value="OPEN">Open</option>
+              <option value="RESOLVED">Resolved</option>
+            </select>
+            <input
+              value={queueQ}
+              onChange={(e) => setQueueQ(e.target.value)}
+              placeholder="Search provider / plan / sha / reason…"
+              className="rounded-lg border px-3 py-2 text-sm w-full sm:w-[320px]"
+            />
+            <button
+              type="button"
+              onClick={loadQueue}
+              disabled={queueLoading || !ready}
+              className="px-4 py-2 rounded-lg border bg-white text-sm hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {queueLoading ? 'Refreshing…' : 'Refresh'}
+            </button>
+          </div>
+        </div>
+
+        {queueError ? (
+          <div className="mt-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            Error loading queue: {queueError}
+          </div>
+        ) : null}
+
+        {queueCopiedAt ? (
+          <div className="mt-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+            Copied debug bundle to clipboard ({new Date(queueCopiedAt).toLocaleTimeString()}).
+          </div>
+        ) : null}
+
+        {queueItems.length === 0 ? (
+          <div className="rounded-md border border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-600">
+            No items in the bill parse queue.
+          </div>
+        ) : (
+          <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
+            <table className="min-w-full text-xs">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-3 py-2 text-left font-medium text-gray-600">Created</th>
+                  <th className="px-3 py-2 text-left font-medium text-gray-600">Provider</th>
+                  <th className="px-3 py-2 text-left font-medium text-gray-600">Plan</th>
+                  <th className="px-3 py-2 text-left font-medium text-gray-600">Reason</th>
+                  <th className="px-3 py-2 text-left font-medium text-gray-600">SHA</th>
+                  <th className="px-3 py-2 text-left font-medium text-gray-600">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {queueItems.map((it: any) => {
+                  const id = String(it.id);
+                  const sha = String(it.eflPdfSha256 ?? '');
+                  const provider = it.supplier ?? '—';
+                  const plan = it.planName ?? '—';
+                  const reason = it.queueReason ?? '—';
+                  const createdAt = it.createdAt ? new Date(it.createdAt).toLocaleString() : '—';
+                  const raw = typeof it.rawText === 'string' ? it.rawText : '';
+                  const derived = it.derivedForValidation ?? null;
+                  const solverApplied = it.solverApplied ?? null;
+
+                  const debugBundle = {
+                    source: it.source ?? null,
+                    kind: it.kind ?? null,
+                    createdAt: it.createdAt ?? null,
+                    updatedAt: it.updatedAt ?? null,
+                    queueReason: it.queueReason ?? null,
+                    sha256: sha,
+                    solverApplied,
+                    derivedForValidation: derived,
+                    rawText: raw,
+                  };
+
+                  return (
+                    <tr key={id} className="border-t border-gray-100 align-top hover:bg-gray-50">
+                      <td className="px-3 py-2 text-gray-700 whitespace-nowrap">{createdAt}</td>
+                      <td className="px-3 py-2 text-gray-800">{provider}</td>
+                      <td className="px-3 py-2 text-gray-800">{plan}</td>
+                      <td className="px-3 py-2 text-gray-700 max-w-[320px]">
+                        <div className="break-words">{String(reason)}</div>
+                      </td>
+                      <td className="px-3 py-2 text-gray-700 font-mono max-w-[220px]">
+                        <div className="break-all">{sha.slice(0, 12)}…</div>
+                      </td>
+                      <td className="px-3 py-2">
+                        <div className="flex flex-col gap-2">
+                          <button
+                            type="button"
+                            className="px-2 py-1 rounded border bg-white text-[11px] font-medium hover:bg-gray-50"
+                            onClick={async () => {
+                              const ok = await copyToClipboard(prettyJson(debugBundle));
+                              if (ok) {
+                                setQueueCopiedAt(Date.now());
+                                window.setTimeout(() => setQueueCopiedAt(null), 5000);
+                              } else {
+                                alert('Copy failed (clipboard permission).');
+                              }
+                            }}
+                          >
+                            Copy debug bundle
+                          </button>
+                          <button
+                            type="button"
+                            className="px-2 py-1 rounded border bg-white text-[11px] font-medium hover:bg-gray-50"
+                            disabled={!raw}
+                            onClick={() => {
+                              if (!raw) return;
+                              setRawText(raw);
+                              // Best-effort: prefill hints if present in derivedForValidation.
+                              try {
+                                const baseline = (derived as any)?.baseline ?? null;
+                                if (baseline?.esiid && typeof baseline.esiid === 'string') setEsiidHint(baseline.esiid);
+                                if (baseline?.serviceAddressLine1 && typeof baseline.serviceAddressLine1 === 'string') setAddressHint(baseline.serviceAddressLine1);
+                                if (baseline?.serviceAddressCity && typeof baseline.serviceAddressCity === 'string') setCityHint(baseline.serviceAddressCity);
+                                if (baseline?.serviceAddressState && typeof baseline.serviceAddressState === 'string') setStateHint(baseline.serviceAddressState);
+                              } catch {
+                                // ignore
+                              }
+                              window.scrollTo({ top: 0, behavior: 'smooth' });
+                            }}
+                          >
+                            Load into parser
+                          </button>
+                          {queueStatus === 'OPEN' ? (
+                            <button
+                              type="button"
+                              className="px-2 py-1 rounded border border-emerald-500 bg-emerald-50 text-[11px] font-medium text-emerald-800 hover:bg-emerald-100 disabled:opacity-60"
+                              disabled={queueResolvingId === id || !ready}
+                              onClick={() => resolveQueueItem(id)}
+                            >
+                              {queueResolvingId === id ? 'Resolving…' : 'Mark resolved'}
+                            </button>
+                          ) : null}
+                          <details className="rounded border bg-white px-2 py-1">
+                            <summary className="cursor-pointer text-[11px] font-medium text-gray-700">
+                              View raw text + outputs
+                            </summary>
+                            <div className="mt-2 space-y-2">
+                              <div className="text-[11px] font-semibold text-gray-600">Raw text</div>
+                              <pre className="max-h-[240px] overflow-auto rounded bg-gray-50 p-2 text-[11px] whitespace-pre-wrap">
+{raw || '—'}
+                              </pre>
+                              <div className="text-[11px] font-semibold text-gray-600">derivedForValidation</div>
+                              <pre className="max-h-[240px] overflow-auto rounded bg-gray-50 p-2 text-[11px]">
+{prettyJson(derived)}
+                              </pre>
+                              <div className="text-[11px] font-semibold text-gray-600">solverApplied</div>
+                              <pre className="max-h-[200px] overflow-auto rounded bg-gray-50 p-2 text-[11px]">
+{prettyJson(solverApplied)}
+                              </pre>
+                            </div>
+                          </details>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
 
       <section className="p-4 rounded-2xl border space-y-3">

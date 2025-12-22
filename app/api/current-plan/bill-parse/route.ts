@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { normalizeEmail } from '@/lib/utils/email';
 import { prisma } from '@/lib/db';
 import { getCurrentPlanPrisma, CurrentPlanPrisma } from '@/lib/prismaCurrentPlan';
+import crypto from 'node:crypto';
 import {
   extractCurrentPlanFromBillText,
   extractCurrentPlanFromBillTextWithOpenAI,
@@ -13,6 +14,10 @@ import { extractBillTextFromUpload } from '@/lib/billing/extractBillText';
 export const dynamic = 'force-dynamic';
 // Bill parsing can be slow (pdf-to-text + optional AI). Allow long-running serverless execution.
 export const maxDuration = 300;
+
+function sha256Hex(s: string | Buffer): string {
+  return crypto.createHash('sha256').update(s).digest('hex');
+}
 
 const decimalFromNumber = (
   value: number,
@@ -59,6 +64,13 @@ function applyTemplateToParsed(
 }
 
 export async function POST(request: NextRequest) {
+  let debugUploadId: string | null = null;
+  let debugHouseId: string | null = null;
+  let debugRawText: string | null = null;
+  let debugBillSha: string | null = null;
+  let debugParsed: any = null;
+  let debugBaseline: any = null;
+  let debugUsedAi = false;
   try {
     if (!process.env.CURRENT_PLAN_DATABASE_URL) {
       return NextResponse.json(
@@ -180,8 +192,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    debugHouseId = houseId ?? null;
+    debugUploadId = uploadRecord?.id ?? null;
+    debugRawText = text;
+    debugBillSha = uploadRecord?.billData ? sha256Hex(uploadRecord.billData) : sha256Hex(`text:${text}`);
+
     // 1) Baseline parse (regex-only)
     const baseline = extractCurrentPlanFromBillText(text, {});
+    debugBaseline = baseline;
 
     // 2) Try to find a template based on providerName + planName from baseline
     let providerNameKey = normalizeKey(baseline.providerName);
@@ -207,6 +225,7 @@ export async function POST(request: NextRequest) {
       parsed = applyTemplateToParsed(baseline, existingTemplate);
     } else {
       const aiParsed = await extractCurrentPlanFromBillTextWithOpenAI(text, {});
+      debugUsedAi = true;
       parsed = aiParsed;
 
       providerNameKey = normalizeKey(parsed.providerName ?? baseline.providerName);
@@ -272,6 +291,8 @@ export async function POST(request: NextRequest) {
         }
       }
     }
+
+    debugParsed = parsed;
 
     const decimalOrNull = (value: number | null | undefined, scale: number) => {
       if (value === null || value === undefined) return null;
@@ -352,6 +373,94 @@ export async function POST(request: NextRequest) {
 
     const record = (saved ?? created) as any;
 
+    // Queue if we failed to extract key fields (so admin can iterate on regex/templates).
+    const reasonParts: string[] = [];
+    const providerOk = typeof parsed?.providerName === 'string' && parsed.providerName.trim().length > 0;
+    const planOk = typeof parsed?.planName === 'string' && parsed.planName.trim().length > 0;
+    const rateTypeOk = typeof parsed?.rateType === 'string' && parsed.rateType.trim().length > 0;
+    const esiidOk = typeof parsed?.esiid === 'string' && parsed.esiid.trim().length > 0;
+    const meterOk = typeof parsed?.meterNumber === 'string' && parsed.meterNumber.trim().length > 0;
+
+    if (!providerOk) reasonParts.push('missing_provider');
+    if (!planOk) reasonParts.push('missing_plan_name');
+    if (!rateTypeOk) reasonParts.push('missing_rate_type');
+    if (!esiidOk && !meterOk) reasonParts.push('missing_esiid_or_meter');
+
+    // Fixed/Variable plans usually need a usable energy rate signal.
+    const rt = String(parsed?.rateType ?? '').toUpperCase();
+    const hasEnergyTiers = Array.isArray(parsed?.energyRateTiers) && parsed.energyRateTiers.length > 0;
+    const hasTou = Array.isArray(parsed?.timeOfUse) && parsed.timeOfUse.length > 0;
+    if ((rt === 'FIXED' || rt === 'VARIABLE') && !hasEnergyTiers && !hasTou) {
+      reasonParts.push('missing_energy_pricing');
+    }
+
+    const queuedForReview = reasonParts.length > 0;
+    let queueId: string | null = null;
+    if (queuedForReview) {
+      const queueReason = `CURRENT_PLAN_BILL: ${reasonParts.join(', ')}`;
+      try {
+        const sha = debugBillSha ?? sha256Hex(`text:${String(text ?? '')}`);
+        const upserted = await (prisma as any).eflParseReviewQueue.upsert({
+          where: { eflPdfSha256: sha },
+          create: {
+            source: 'current_plan_bill',
+            kind: 'EFL_PARSE',
+            dedupeKey: `current_plan_bill:${sha}`,
+            eflPdfSha256: sha,
+            supplier: parsed?.providerName ?? baseline?.providerName ?? null,
+            planName: parsed?.planName ?? baseline?.planName ?? null,
+            eflUrl: null,
+            tdspName: parsed?.tdspName ?? null,
+            termMonths: typeof parsed?.termMonths === 'number' ? parsed.termMonths : null,
+            rawText: String(text ?? '').slice(0, 250_000),
+            planRules: null,
+            rateStructure: null,
+            validation: null,
+            derivedForValidation: {
+              uploadId: debugUploadId,
+              houseId: debugHouseId,
+              usedAi: debugUsedAi,
+              baseline,
+              parsed,
+            },
+            finalStatus: 'FAIL',
+            queueReason,
+            solverApplied: {
+              parserVersion: entryData.parserVersion ?? null,
+              source: 'api/current-plan/bill-parse',
+            },
+          },
+          update: {
+            updatedAt: new Date(),
+            source: 'current_plan_bill',
+            kind: 'EFL_PARSE',
+            dedupeKey: `current_plan_bill:${sha}`,
+            supplier: parsed?.providerName ?? baseline?.providerName ?? null,
+            planName: parsed?.planName ?? baseline?.planName ?? null,
+            tdspName: parsed?.tdspName ?? null,
+            termMonths: typeof parsed?.termMonths === 'number' ? parsed.termMonths : null,
+            rawText: String(text ?? '').slice(0, 250_000),
+            derivedForValidation: {
+              uploadId: debugUploadId,
+              houseId: debugHouseId,
+              usedAi: debugUsedAi,
+              baseline,
+              parsed,
+            },
+            finalStatus: 'FAIL',
+            queueReason,
+            resolvedAt: null,
+            resolvedBy: null,
+            resolutionNotes: null,
+          },
+          select: { id: true },
+        });
+        queueId = upserted?.id ? String(upserted.id) : null;
+      } catch (e) {
+        console.error('[current-plan/bill-parse] failed to enqueue bill parse review item', e);
+      }
+    }
+
     const decimalToNumber = (value: unknown): number | null => {
       if (value === null || value === undefined) return null;
       if (typeof value === 'number') return Number.isFinite(value) ? value : null;
@@ -401,10 +510,66 @@ export async function POST(request: NextRequest) {
       ok: true,
       parsedPlan: serializedParsedPlan,
       eflVersionCode: parsed.eflVersionCode ?? null,
-      warnings: [],
+      warnings: queuedForReview ? reasonParts : [],
+      queuedForReview,
+      queueId,
     });
   } catch (error) {
     console.error('[current-plan/bill-parse] Failed to parse bill', error);
+
+    // Best-effort: enqueue exception cases too, so admin can iterate on extraction.
+    try {
+      const sha = debugBillSha ?? (debugRawText ? sha256Hex(`text:${debugRawText}`) : null);
+      if (sha && debugRawText) {
+        const queueReason = `CURRENT_PLAN_BILL: exception ${error instanceof Error ? error.message : String(error)}`;
+        await (prisma as any).eflParseReviewQueue.upsert({
+          where: { eflPdfSha256: sha },
+          create: {
+            source: 'current_plan_bill',
+            kind: 'EFL_PARSE',
+            dedupeKey: `current_plan_bill:${sha}`,
+            eflPdfSha256: sha,
+            supplier: (debugParsed as any)?.providerName ?? (debugBaseline as any)?.providerName ?? null,
+            planName: (debugParsed as any)?.planName ?? (debugBaseline as any)?.planName ?? null,
+            rawText: String(debugRawText).slice(0, 250_000),
+            derivedForValidation: {
+              uploadId: debugUploadId,
+              houseId: debugHouseId,
+              usedAi: debugUsedAi,
+              baseline: debugBaseline,
+              parsed: debugParsed,
+              error: error instanceof Error ? { message: error.message, stack: error.stack } : String(error),
+            },
+            finalStatus: 'FAIL',
+            queueReason,
+            solverApplied: { parserVersion: process.env.OPENAI_IntelliWatt_Bill_Parcer ? 'bill-text-v3-json' : 'bill-text-v1-regex' },
+          },
+          update: {
+            updatedAt: new Date(),
+            source: 'current_plan_bill',
+            kind: 'EFL_PARSE',
+            dedupeKey: `current_plan_bill:${sha}`,
+            rawText: String(debugRawText).slice(0, 250_000),
+            derivedForValidation: {
+              uploadId: debugUploadId,
+              houseId: debugHouseId,
+              usedAi: debugUsedAi,
+              baseline: debugBaseline,
+              parsed: debugParsed,
+              error: error instanceof Error ? { message: error.message, stack: error.stack } : String(error),
+            },
+            finalStatus: 'FAIL',
+            queueReason,
+            resolvedAt: null,
+            resolvedBy: null,
+            resolutionNotes: null,
+          },
+        });
+      }
+    } catch (e) {
+      console.error('[current-plan/bill-parse] failed to enqueue exception case', e);
+    }
+
     return NextResponse.json({ error: 'Failed to parse bill' }, { status: 500 });
   }
 }

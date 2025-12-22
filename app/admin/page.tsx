@@ -152,6 +152,7 @@ interface SummaryStats {
   pendingSmtRevocations: number;
   eflQuarantineOpenCount: number;
   currentPlanEflQuarantineOpenCount?: number;
+  currentPlanBillQuarantineOpenCount?: number;
   testimonialSubmissionCount: number;
   testimonialPendingCount: number;
   referralPendingCount: number;
@@ -427,6 +428,7 @@ export default function AdminDashboard() {
   const pendingRevocationsCount = summary?.pendingSmtRevocations ?? 0;
   const eflQuarantineOpenCount = summary?.eflQuarantineOpenCount ?? 0;
   const currentPlanEflQuarantineOpenCount = summary?.currentPlanEflQuarantineOpenCount ?? 0;
+  const currentPlanBillQuarantineOpenCount = summary?.currentPlanBillQuarantineOpenCount ?? 0;
   const testimonialsTotal = summary?.testimonialSubmissionCount ?? testimonials.length;
   const testimonialsPendingCount = summary?.testimonialPendingCount ?? testimonials.filter((record) => record.status === 'PENDING').length;
   const pendingEmailConfirmationsCount =
@@ -484,6 +486,12 @@ export default function AdminDashboard() {
       value: currentPlanEflQuarantineOpenCount.toLocaleString(),
       href: '/admin/efl-review?source=current_plan_efl',
       tone: currentPlanEflQuarantineOpenCount > 0 ? 'danger' : 'default',
+    },
+    {
+      label: 'Current Plan Bill Parse Queue (Open)',
+      value: currentPlanBillQuarantineOpenCount.toLocaleString(),
+      href: '/admin/current-plan/bill-parser#queue',
+      tone: currentPlanBillQuarantineOpenCount > 0 ? 'danger' : 'default',
     },
     { label: 'Appliances #', value: applianceCount.toLocaleString() },
     { label: 'Testimonials', value: testimonialsTotal.toLocaleString() },

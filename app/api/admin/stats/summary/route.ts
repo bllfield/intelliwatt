@@ -25,6 +25,7 @@ export async function GET() {
       pendingSmtRevocations,
       eflQuarantineOpenCount,
       currentPlanEflQuarantineOpenCount,
+      currentPlanBillQuarantineOpenCount,
       smtUserResults,
       manualUserResults,
       referralPendingCountBase,
@@ -50,10 +51,14 @@ export async function GET() {
       // EFL "quarantine" = items in the parse review queue that are still OPEN.
       // These require admin attention before becoming user-facing.
       prismaAny.eflParseReviewQueue.count({
-        where: { resolvedAt: null },
+        // Keep "offers" count separate from current-plan queues.
+        where: { resolvedAt: null, source: { notIn: ['current_plan_efl', 'current_plan_bill'] } },
       }),
       prismaAny.eflParseReviewQueue.count({
         where: { resolvedAt: null, source: 'current_plan_efl' },
+      }),
+      prismaAny.eflParseReviewQueue.count({
+        where: { resolvedAt: null, source: 'current_plan_bill' },
       }),
       prisma.smtAuthorization.findMany({
         where: { archivedAt: null },
@@ -127,6 +132,7 @@ export async function GET() {
       pendingSmtRevocations,
       eflQuarantineOpenCount,
       currentPlanEflQuarantineOpenCount,
+      currentPlanBillQuarantineOpenCount,
       totalUsageCustomers: usageUserSet.size,
       testimonialSubmissionCount: totalTestimonials,
       testimonialPendingCount: pendingTestimonials,
