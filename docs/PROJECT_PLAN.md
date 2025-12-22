@@ -2339,18 +2339,15 @@ Guardrails
 
 ✅ Done (Dashboard): `/dashboard/plans` now consumes a customer-facing API (`GET /api/dashboard/plans`) that:
 - Displays WattBuy EFL average prices (500/1000/2000 kWh) for the user’s saved home.
-- Returns `hasUsage` + a lightweight `usageSummary` (last-12-month window; rows + kWh total) so the UI can conditionally show “Best for you” sections without new ingestion.
-- Returns `bestOffers` (same offer card shape as `offers`) when `hasUsage=true`, using a temporary proxy metric (EFL average price at the currently selected kWh anchor: 500/1000/2000) for ranking.
-- Returns `bestOffersBasis` + `bestOffersDisclaimer` so the “Best plans for you” strip has consistent messaging from the API (and can be swapped later when true-cost goes live).
+- Returns `hasUsage` + `usageSummary` **derived from the canonical calc window** (see “Canonical home-scoped usage window” below). This prevents “card vs detail” mismatches.
 - Wires `OfferIdRatePlanMap` into each offer card to show **IntelliWatt calculation available** when `ratePlanId` exists.
-- `/api/dashboard/plans` now returns `intelliwatt.ratePlanId` per offer (from `OfferIdRatePlanMap`) so true-cost can use `RatePlan` templates directly when wired.
-- `/api/dashboard/plans` now returns `intelliwatt.trueCost` status scaffolding per offer.
-- True-cost wiring (production):
-  - `intelliwatt.trueCostEstimate` is computed from:
+- Returns `intelliwatt.ratePlanId` per offer (from `OfferIdRatePlanMap`) so the plan engine can use `RatePlan` templates directly.
+- **True-cost wiring (production, single source of truth):**
+  - `intelliwatt.trueCostEstimate` is always the output of the plan engine (`estimateTrueCost`) using:
     - `RatePlan.rateStructure` (template)
     - TDSP delivery rates (`getTdspDeliveryRates`)
-    - Home monthly usage buckets (`HomeMonthlyUsageBucket`) including any required TOU/weekday/weekend windows
-  - Endpoint best-effort **auto-ensures** required monthly buckets (bounded) when usage intervals exist.
+    - Home monthly usage buckets (including any required bucket keys)
+  - **One stored result**: every home-scoped plan-engine output is cached into the **WattBuy Offers module DB** (`WattBuyApiSnapshot`) and then reused everywhere (list + detail).
   - **Fail-closed availability**:
     - **AVAILABLE** only when the template is mapped *and* the true-cost estimate for this home is `OK`/`APPROXIMATE`
     - Otherwise the plan is shown as **QUEUED** (even if a template exists)
@@ -2369,7 +2366,7 @@ Guardrails
   - Validator supports `--overnight=start_day` to sanity-check START_DAY attribution on the 20:00-07:00 buckets
 - CORE bucket aggregation now correctly attributes overnight dayType (post-midnight counts toward prior local dayType) for the WEEKDAY/WEEKEND 20:00-07:00 buckets.
 - Added pure plan “bucket requirements + computability” helpers (`requiredBucketsForPlan`, `canComputePlanFromBuckets`) as the gating layer for true-cost.
-- `/api/dashboard/plans` now returns `intelliwatt.planComputability` per offer (when usage exists and a template is mapped).
+- `/api/dashboard/plans` returns `intelliwatt.planComputability` per offer (when usage exists and a template is mapped).
 - Plans that are NOT computable due to **true template defects** (unsupported/non-deterministic/suspect evidence) are queued as `PLAN_CALC_QUARANTINE` via `EflParseReviewQueue` (best-effort; no UI changes):
   - Dedupe identity: `(kind="PLAN_CALC_QUARANTINE", dedupeKey=offerId)`
   - `eflPdfSha256` is **not** used as identity for quarantine items (it is set to `offerId` only to satisfy the legacy NOT NULL unique column).
@@ -2377,27 +2374,23 @@ Guardrails
   - Availability gates (missing intervals/buckets) do **not** create review noise (do not enqueue quarantine for missing buckets).
 - Added `lib/plan-engine/getRatePlanTemplate.ts` (master DB read helper for `RatePlan` templates; no throwing; returns only fields needed for later true-cost calculations).
 - Fixed `RatePlan` template lookup for `ratePlanId` so `trueCostEstimate` doesn’t incorrectly show `MISSING_TEMPLATE` on transient lookup errors.
-- Added `lib/plan-engine/getTdspDeliveryRates.ts` (stub TDSP delivery rates contract; returns null for now).
-- `intelliwatt.trueCostEstimate` now returns `OK` using annual kWh (`usageSummary.totalKwh`) + `efl.avgPriceCentsPerKwh1000` proxy (still not true-cost).
-- `intelliwatt.trueCostEstimate.OK` now includes `monthlyCostDollars` (proxy: `annualCostDollars / 12`).
-- `intelliwatt.trueCostEstimate.OK` now includes `confidence` (currently `"MEDIUM"` for the proxy path).
-- `intelliwatt.trueCostEstimate.OK` now includes a stable `components` breakdown contract (`energyOnlyDollars` and `totalDollars` now; delivery/base fees later).
-- `intelliwatt.trueCostEstimate.OK` now includes `componentsV2` (REP vs TDSP breakdown; proxy-filled initially). Next: implement TDSP lookup to populate `componentsV2.tdsp`.
-- Proxy basis standardized: `offer.efl.avgPriceCentsPerKwh1000` is the single source for proxy ranking + proxy cost estimate.
-- `getTdspDeliveryRates` is now implemented via `TdspTariffVersion`/`TdspTariffComponent` (pick latest effectiveStart <= asOf, effectiveEnd null or >= asOf) and `trueCostEstimate.OK` populates `componentsV2.tdsp` when TDSP rates are available.
+- `getTdspDeliveryRates` is implemented via `TdspTariffVersion`/`TdspTariffComponent` (pick latest effectiveStart <= asOf, effectiveEnd null or >= asOf).
+- `intelliwatt.trueCostEstimate.OK` includes:
+  - `annualCostDollars`, `monthlyCostDollars`, and `effectiveCentsPerKwh`
+  - `componentsV2` (REP vs TDSP breakdown)
+  - `tdspRatesApplied` (effective date + per‑kWh + monthly customer charge)
 - `/api/dashboard/plans` now returns `intelliwatt.tdspRatesApplied` when TDSP rates were applied (effectiveDate, per-kWh cents, monthly dollars).
 - Shows **Queued / calculations not available** messaging when an EFL exists but no template mapping exists yet.
 - Uses a sticky filter/sort bar + pagination to avoid an infinite scroll plan list.
-- When `hasUsage=true`, shows a compact **“Best plans for you (estimate)”** strip at the top using the offer’s 1000kWh EFL average price (field: `efl.avgPriceCentsPerKwh1000`) as a temporary proxy ranking.
+- When `hasUsage=true`, default UI sort is **Best for you** (lowest `trueCostEstimate.monthlyCostDollars` first).
+- The UI marks the cheapest visible plan with a **RECOMMENDED** badge (no separate “Top 5” strip).
 - Plan cards show a template status badge: **AVAILABLE / QUEUED / NOT AVAILABLE**, plus a filter toggle **“Show only AVAILABLE templates”**.
-- Plan cards show a proxy monthly estimate when usage exists and `intelliwatt.trueCostEstimate.status === "OK"` (with an **“incl. TDSP”** tag when `intelliwatt.tdspRatesApplied` is present).
+- Plan cards show the true-cost monthly estimate when `intelliwatt.trueCostEstimate.status === "OK"` (with an **“incl. TDSP”** tag when `intelliwatt.tdspRatesApplied` is present).
 - Added a breakdown popover on the plan card monthly estimate (REP vs TDSP split + TDSP effective date when available).
 - Estimate breakdown popover now shows monthly + annual for REP/TDSP/Total.
 - Extracted `EstimateBreakdownPopover` into a reusable component (used by `OfferCard`).
 - Best plans strip now uses `EstimateBreakdownPopover` for the estimate breakdown (same as plan cards).
-- Best plans strip supports ranking by all-in proxy (monthlyCostDollars) vs EFL 1000kWh proxy.
-- `/api/dashboard/plans` now returns `bestOffersAllIn` (+ basis/disclaimer) using `trueCostEstimate.monthlyCostDollars` (OK-only).
-- Best Plans strip now prefers server-ranked lists (`bestOffers` / `bestOffersAllIn`) with client fallback.
+- (Removed) Best Plans “Top 5” server-ranked strips. Sorting is applied directly to the full offer list.
 - Best plans (no-usage) ranking now uses an `approxKwhPerMonth` selector (mapped to nearest EFL bucket 500/1000/2000).
 - Added IntelliWattBot dashboard hero (typed speech bubble) on all `/dashboard/*` pages.
   - Placement: shown **below** each dashboard page title/description section (`DashboardHero`), not above it.
@@ -2406,7 +2399,32 @@ Guardrails
 - Added admin editor: `/admin/tools/bot-messages` to update IntelliWattBot messages per dashboard page.
 - Dashboard Plans header: search/filter section is now globally **collapsible** (both mobile + desktop) so plan cards stay visible.
 - PlansClient: prevent double-fetch by gating `/api/dashboard/plans` until `isRenter` is resolved from localStorage, and use AbortController + request sequencing to cancel/ignore stale responses when params change.
-- True-cost v1: `/api/dashboard/plans` now computes fixed-rate-only costs from `kwh.m.all.total` monthly buckets + TDSP delivery (fail-closed); unsupported rateStructure is quarantined as `PLAN_CALC_QUARANTINE`.
+- True-cost: `/api/dashboard/plans` computes home-scoped costs from canonical usage buckets + TDSP (fail-closed). Unsupported/non-deterministic templates remain quarantined as `PLAN_CALC_QUARANTINE`.
+
+Canonical home-scoped usage window (Dashboard + Plan Details)
+
+- **Anchor (`windowEnd`)**: latest ingested usage interval timestamp for the home (SMT `MAX(SmtInterval.ts)`), *not* `new Date()`.
+- **Cutoff (`cutoff`)**: `windowEnd - 365 days` (used to bound which intervals are eligible for bucket computation).
+- **Months used for billing math**: 12 months, America/Chicago local time.
+- **Stitching rule (newest month)**: build a full calendar month by taking:
+  - the available days in the newest month up through the **last complete Chicago-local day** (>= 23:45; may step back up to 2 days if SMT is late),
+  - plus the missing tail days borrowed from the same calendar month in the prior year.
+- **Implementation (shared helper)**: `lib/usage/buildUsageBucketsForEstimate.ts` → `buildUsageBucketsForEstimate()`.
+
+Plan engine output cache (single source of truth)
+
+- **Storage**: WattBuy Offers module DB table `WattBuyApiSnapshot`.
+- **Endpoint marker**: `endpoint="PLAN_ENGINE_ESTIMATE_V1"`.
+- **Keying**: hash of canonical inputs (`estimateTrueCost_v1` + monthsCount + annualKwh + TDSP rates + rateStructure hash + usage buckets hash).
+- **Rule**: Any route that needs `trueCostEstimate` must:
+  - attempt `getCachedPlanEstimate()` first
+  - only run the engine on cache-miss
+  - write via `putCachedPlanEstimate()` after compute
+- **Correctness invariant**: Card and detail must match; if they diverge, it means inputs (usage window/buckets/TDSP) were not canonicalized or the cache key was unstable.
+
+Client-side UX caching (not a source of truth)
+
+- The Plans UI also keeps a short-lived `sessionStorage` cache so back/forward navigation can instantly show the last response without refetching.
 - Persisted plan calc requirements on `RatePlan`: `planCalcStatus`, `planCalcReasonCode`, `requiredBucketKeys`, and `supportedFeatures` are stored when EFL templates are upserted (best-effort).
 - Added **local admin scripts** to report + backfill `RatePlan.planCalc*` without relying on HTTP admin auth or `prisma db execute` output (safe/idempotent):
   - PowerShell:
