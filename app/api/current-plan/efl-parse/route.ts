@@ -9,6 +9,8 @@ import { parseEflText } from "@/lib/efl/parse";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// EFL extraction can be slow (pdftotext service + fallbacks). Allow long-running serverless execution.
+export const maxDuration = 300;
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB
 

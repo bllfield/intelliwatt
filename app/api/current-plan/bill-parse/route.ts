@@ -11,6 +11,8 @@ import {
 import { extractBillTextFromUpload } from '@/lib/billing/extractBillText';
 
 export const dynamic = 'force-dynamic';
+// Bill parsing can be slow (pdf-to-text + optional AI). Allow long-running serverless execution.
+export const maxDuration = 300;
 
 const decimalFromNumber = (
   value: number,
