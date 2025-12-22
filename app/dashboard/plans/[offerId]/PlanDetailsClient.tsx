@@ -18,6 +18,7 @@ type ApiResp =
     };
 
 function fmtNum(n: any, digits = 2): string {
+  if (n == null) return "—";
   const v = typeof n === "number" ? n : Number(n);
   if (!Number.isFinite(v)) return "—";
   return v.toFixed(digits);
@@ -39,6 +40,7 @@ function fmtKwh(n: any): string {
 }
 
 function fmtDollars(n: any): string {
+  if (n == null) return "—";
   const v = typeof n === "number" ? n : Number(n);
   if (!Number.isFinite(v)) return "—";
   return `$${v.toFixed(2)}`;
@@ -48,7 +50,6 @@ export default function PlanDetailsClient({ offerId }: { offerId: string }) {
   const [data, setData] = useState<ApiResp | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [bucketsMode, setBucketsMode] = useState<"core" | "all">("core");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -57,7 +58,7 @@ export default function PlanDetailsClient({ offerId }: { offerId: string }) {
       setError(null);
       try {
         const r = await fetch(
-          `/api/dashboard/plans/detail?offerId=${encodeURIComponent(offerId)}&buckets=${encodeURIComponent(bucketsMode)}`,
+          `/api/dashboard/plans/detail?offerId=${encodeURIComponent(offerId)}`,
           {
           signal: controller.signal,
           },
@@ -80,7 +81,7 @@ export default function PlanDetailsClient({ offerId }: { offerId: string }) {
     }
     run();
     return () => controller.abort();
-  }, [offerId, bucketsMode]);
+  }, [offerId]);
 
   const ok = Boolean((data as any)?.ok);
   const plan = ok ? (data as any).plan : null;
@@ -89,7 +90,16 @@ export default function PlanDetailsClient({ offerId }: { offerId: string }) {
   const outputs = ok ? (data as any).outputs : null;
   const math = ok ? (data as any).math : null;
 
+  const requiredBucketKeys = useMemo(
+    () => (Array.isArray(template?.requiredBucketKeys) ? (template.requiredBucketKeys as any[]).map(String) : []),
+    [template],
+  );
   const bucketDefs = useMemo(() => (usage?.bucketDefs ?? []) as Array<{ key: string; label: string }>, [usage]);
+  const shownBucketDefs = useMemo(() => {
+    if (!requiredBucketKeys.length) return bucketDefs;
+    const wanted = new Set(requiredBucketKeys);
+    return bucketDefs.filter((b) => wanted.has(String((b as any)?.key ?? "")));
+  }, [bucketDefs, requiredBucketKeys]);
   const bucketTable = useMemo(() => (usage?.bucketTable ?? []) as any[], [usage]);
 
   return (
@@ -121,21 +131,13 @@ export default function PlanDetailsClient({ offerId }: { offerId: string }) {
 
       {ok ? (
         <>
-          <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div className="text-xs text-brand-cyan/60">
-              Buckets shown control the table below (Core is fast + readable; All shows every UsageBucketDefinition bucket).
-            </div>
-            <label className="text-xs text-brand-cyan/70">
-              <span className="mr-2 font-semibold">Buckets:</span>
-              <select
-                className="rounded-lg border border-brand-cyan/20 bg-brand-navy px-2 py-1 text-brand-white/90"
-                value={bucketsMode}
-                onChange={(e) => setBucketsMode(e.target.value === "all" ? "all" : "core")}
-              >
-                <option value="core">Core (9)</option>
-                <option value="all">All</option>
-              </select>
-            </label>
+          <div className="mt-6 text-xs text-brand-cyan/60">
+            Buckets used by this plan:{" "}
+            {requiredBucketKeys.length ? (
+              <span className="font-mono text-brand-white/80">{requiredBucketKeys.join(", ")}</span>
+            ) : (
+              <span className="font-mono text-brand-white/80">—</span>
+            )}
           </div>
 
           <div className="mt-8 grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -214,7 +216,7 @@ export default function PlanDetailsClient({ offerId }: { offerId: string }) {
                   Calculation attribution (kWh applied per variable)
                 </div>
                 <div className="mt-1 text-xs text-brand-cyan/60">
-                  v1 fixed-rate only. Variable/TOU plans will show as not-computable until v2.
+                  Shows the same engine components used for IntelliWatt ranking (REP + TDSP + credits/minimums when present).
                 </div>
               </div>
               {template ? (
@@ -226,43 +228,78 @@ export default function PlanDetailsClient({ offerId }: { offerId: string }) {
               )}
             </div>
 
-            {math ? (
-              <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
-                <div className="rounded-xl border border-brand-cyan/15 bg-brand-white/5 p-3">
-                  <div className="text-xs font-semibold text-brand-white/90">REP</div>
-                  <div className="mt-2 text-xs text-brand-cyan/75">
-                    <div>Energy rate: {fmtNum(math.rep.energyCentsPerKwh, 4)}¢/kWh</div>
-                    <div>kWh applied: {fmtKwh(math.rep.energyKwhApplied)}</div>
-                    <div>Fixed monthly: {fmtDollars(math.rep.fixedMonthlyChargeDollars)}/mo × {math.rep.fixedMonthsApplied}</div>
+            <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+              <div className="rounded-xl border border-brand-cyan/15 bg-brand-white/5 p-3">
+                <div className="text-xs font-semibold text-brand-white/90">Status + totals</div>
+                <div className="mt-2 text-xs text-brand-cyan/75">
+                  <div>
+                    Status:{" "}
+                    <span className="font-mono text-brand-white/90">
+                      {String(outputs?.trueCostEstimate?.status ?? math?.status ?? "—")}
+                    </span>
                   </div>
-                </div>
-                <div className="rounded-xl border border-brand-cyan/15 bg-brand-white/5 p-3">
-                  <div className="text-xs font-semibold text-brand-white/90">TDSP</div>
-                  <div className="mt-2 text-xs text-brand-cyan/75">
-                    <div>Delivery: {fmtNum(math.tdsp.deliveryCentsPerKwh, 4)}¢/kWh</div>
-                    <div>kWh applied: {fmtKwh(math.tdsp.deliveryKwhApplied)}</div>
-                    <div>Customer: {fmtDollars(math.tdsp.monthlyCustomerChargeDollars)}/mo × {math.tdsp.fixedMonthsApplied}</div>
-                    {math.tdsp.effectiveDate ? (
-                      <div>Effective: {String(math.tdsp.effectiveDate).slice(0, 10)}</div>
-                    ) : null}
+                  {(outputs?.trueCostEstimate?.reason ?? math?.reason) ? (
+                    <div>
+                      Reason: <span className="font-mono">{String(outputs?.trueCostEstimate?.reason ?? math?.reason)}</span>
+                    </div>
+                  ) : null}
+                  <div className="mt-1">
+                    Annual: <span className="font-semibold text-brand-white/90">{fmtDollars(outputs?.trueCostEstimate?.annualCostDollars)}</span>
+                  </div>
+                  <div>
+                    Monthly: <span className="font-semibold text-brand-white/90">{fmtDollars(outputs?.trueCostEstimate?.monthlyCostDollars)}</span>
                   </div>
                 </div>
               </div>
-            ) : (
-              <div className="mt-4 text-sm text-brand-cyan/70">Math breakdown not available for this plan yet.</div>
-            )}
+
+              <div className="rounded-xl border border-brand-cyan/15 bg-brand-white/5 p-3">
+                <div className="text-xs font-semibold text-brand-white/90">Components</div>
+                <div className="mt-2 text-xs text-brand-cyan/75">
+                  {math?.componentsV2 ? (
+                    <>
+                      <div>REP energy: {fmtDollars(math.componentsV2?.rep?.energyDollars)}</div>
+                      <div>REP fixed: {fmtDollars(math.componentsV2?.rep?.fixedDollars)}</div>
+                      <div>TDSP delivery: {fmtDollars(math.componentsV2?.tdsp?.deliveryDollars)}</div>
+                      <div>TDSP fixed: {fmtDollars(math.componentsV2?.tdsp?.fixedDollars)}</div>
+                      {"creditsDollars" in (math.componentsV2 ?? {}) ? (
+                        <div>Credits: {fmtDollars((math.componentsV2 as any).creditsDollars)}</div>
+                      ) : null}
+                      {"minimumUsageFeeDollars" in (math.componentsV2 ?? {}) ? (
+                        <div>Minimum usage fee: {fmtDollars((math.componentsV2 as any).minimumUsageFeeDollars)}</div>
+                      ) : null}
+                      {"minimumBillTopUpDollars" in (math.componentsV2 ?? {}) ? (
+                        <div>Minimum bill top-up: {fmtDollars((math.componentsV2 as any).minimumBillTopUpDollars)}</div>
+                      ) : null}
+                      <div className="mt-1">Total: {fmtDollars(math.componentsV2?.totalDollars)}</div>
+                    </>
+                  ) : math?.components ? (
+                    <>
+                      <div>Energy: {fmtDollars(math.components?.energyOnlyDollars)}</div>
+                      <div>Delivery: {fmtDollars(math.components?.deliveryDollars)}</div>
+                      <div>Base fees: {fmtDollars(math.components?.baseFeesDollars)}</div>
+                      {"creditsDollars" in (math.components ?? {}) ? (
+                        <div>Credits: {fmtDollars((math.components as any).creditsDollars)}</div>
+                      ) : null}
+                      <div className="mt-1">Total: {fmtDollars(math.components?.totalDollars)}</div>
+                    </>
+                  ) : (
+                    <div className="text-brand-cyan/70">Math breakdown not available for this plan yet.</div>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
 
           <div className="mt-8 rounded-2xl border border-brand-cyan/20 bg-brand-navy p-4">
             <div className="text-[0.7rem] font-semibold uppercase tracking-[0.22em] text-brand-cyan/60">
-              Bucket totals ({bucketsMode === "all" ? "all defined buckets" : "core buckets"}; months overlapping the last-365-days window)
+              Bucket totals (buckets required by this plan; months overlapping the last-365-days window)
             </div>
             <div className="mt-3 overflow-auto rounded-xl border border-brand-cyan/15">
               <table className="min-w-[900px] w-full text-xs">
                 <thead className="bg-brand-white/5 text-brand-cyan/70">
                   <tr>
                     <th className="px-3 py-2 text-left">Year-Month</th>
-                    {bucketDefs.map((b) => (
+                    {shownBucketDefs.map((b) => (
                       <th key={b.key} className="px-3 py-2 text-left whitespace-nowrap" title={b.key}>
                         {b.label}
                       </th>
@@ -273,7 +310,7 @@ export default function PlanDetailsClient({ offerId }: { offerId: string }) {
                   {bucketTable.map((r) => (
                     <tr key={r.yearMonth} className="border-t border-brand-cyan/10">
                       <td className="px-3 py-2 font-mono text-brand-white/90">{r.yearMonth}</td>
-                      {bucketDefs.map((b) => (
+                      {shownBucketDefs.map((b) => (
                         <td key={b.key} className="px-3 py-2 whitespace-nowrap">
                           {r[b.key] == null ? "—" : fmtKwh0(r[b.key])}
                         </td>

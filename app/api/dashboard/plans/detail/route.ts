@@ -210,6 +210,13 @@ function isRateStructurePresent(v: any): boolean {
   }
 }
 
+function isComputableOverride(planCalcStatus: string | null | undefined, planCalcReasonCode: string | null | undefined) {
+  return (
+    String(planCalcStatus ?? "").trim() === "COMPUTABLE" &&
+    String(planCalcReasonCode ?? "").trim() === "ADMIN_OVERRIDE_COMPUTABLE"
+  );
+}
+
 export async function GET(req: NextRequest) {
   try {
     const url = new URL(req.url);
@@ -465,6 +472,23 @@ export async function GET(req: NextRequest) {
       template: ratePlanId && rsPresent ? { rateStructure } : null,
     });
 
+    // Build usageBucketsByMonth for the calculator from our bucket table.
+    // The calculator fails-closed when required keys are missing.
+    const usageBucketsByMonthForCalc: Record<string, Record<string, number>> = {};
+    for (const r of bucketTable) {
+      const ym = typeof (r as any)?.yearMonth === "string" ? String((r as any).yearMonth) : null;
+      if (!ym) continue;
+      const month: Record<string, number> = {};
+      for (const b of bucketDefsForResponse) {
+        const key = String((b as any)?.key ?? "").trim();
+        if (!key) continue;
+        const v = (r as any)[key];
+        const n = typeof v === "number" ? v : Number(v);
+        if (Number.isFinite(n)) month[key] = n;
+      }
+      usageBucketsByMonthForCalc[ym] = month;
+    }
+
     // Calc inputs / variables
     const repEnergyCentsPerKwh = rsPresent ? extractFixedRepEnergyCentsPerKwh(rateStructure) : null;
     const repFixedMonthlyChargeDollars = rsPresent ? extractRepFixedMonthlyChargeDollars(rateStructure) : null;
@@ -477,8 +501,9 @@ export async function GET(req: NextRequest) {
       : null;
 
     // True-cost estimate (if computable + inputs present)
+    const overriddenComputable = isComputableOverride(planCalcStatus, planCalcReasonCode);
     const trueCostEstimate =
-      annualKwh && rsPresent && planComputability?.status !== "NOT_COMPUTABLE"
+      annualKwh && rsPresent && (overriddenComputable || planComputability?.status !== "NOT_COMPUTABLE")
         ? calculatePlanCostForUsage({
             annualKwh, // strict last-365-days total (matches /api/user/usage)
             monthsCount: 12,
@@ -488,6 +513,7 @@ export async function GET(req: NextRequest) {
               effectiveDate: tdspApplied?.effectiveDate ?? undefined,
             },
             rateStructure,
+            usageBucketsByMonth: usageBucketsByMonthForCalc,
           })
         : { status: "NOT_IMPLEMENTED", reason: "Missing inputs or plan not computable" };
 
@@ -499,25 +525,13 @@ export async function GET(req: NextRequest) {
         ? (((trueCostEstimate as any).annualCostDollars as number) / annualKwh) * 100
         : null;
 
-    const math =
-      annualKwh && tdspApplied && typeof repEnergyCentsPerKwh === "number"
-        ? {
-            annualKwh,
-            rep: {
-              energyCentsPerKwh: repEnergyCentsPerKwh,
-              energyKwhApplied: annualKwh,
-              fixedMonthlyChargeDollars: repFixedMonthlyChargeDollars,
-              fixedMonthsApplied: 12,
-            },
-            tdsp: {
-              deliveryCentsPerKwh: tdspApplied.perKwhDeliveryChargeCents,
-              deliveryKwhApplied: annualKwh,
-              monthlyCustomerChargeDollars: tdspApplied.monthlyCustomerChargeDollars,
-              fixedMonthsApplied: 12,
-              effectiveDate: tdspApplied.effectiveDate,
-            },
-          }
-        : null;
+    const math = {
+      status: String((trueCostEstimate as any)?.status ?? ""),
+      reason: (trueCostEstimate as any)?.reason ?? null,
+      requiredBucketKeys,
+      componentsV2: (trueCostEstimate as any)?.componentsV2 ?? null,
+      components: (trueCostEstimate as any)?.components ?? null,
+    };
 
     return NextResponse.json(
       {
