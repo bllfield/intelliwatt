@@ -159,13 +159,16 @@ export default function FactCardOpsPage() {
   // Manual loader is rendered at the bottom; we prefill it from Queue/Templates/Batch via this state.
   const [manualPrefillUrl, setManualPrefillUrl] = useState("");
   const [manualPrefillOfferId, setManualPrefillOfferId] = useState<string>("");
+  const [manualPrefillRawText, setManualPrefillRawText] = useState<string>("");
   const manualRef = useRef<HTMLDivElement | null>(null);
 
-  function loadIntoManual(args: { eflUrl?: string | null; offerId?: string | null }) {
+  function loadIntoManual(args: { eflUrl?: string | null; offerId?: string | null; rawText?: string | null }) {
     const u = (args.eflUrl ?? "").trim();
-    if (!u) return;
+    const rawText = String(args.rawText ?? "");
+    if (!u && !rawText.trim()) return;
     setManualPrefillUrl(u);
     setManualPrefillOfferId((args.offerId ?? "").trim());
+    setManualPrefillRawText(rawText);
     setTimeout(() => {
       manualRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 50);
@@ -1861,8 +1864,21 @@ export default function FactCardOpsPage() {
                       <div className="flex flex-wrap gap-2">
                         <button
                           className="px-2 py-1 rounded border hover:bg-gray-50 disabled:opacity-60"
-                          disabled={!eflUrl}
-                          onClick={() => loadIntoManual({ eflUrl, offerId: it.offerId ?? null })}
+                          disabled={!eflUrl && !String(it?.rawText ?? "").trim()}
+                          onClick={() =>
+                            loadIntoManual({
+                              eflUrl,
+                              offerId: it.offerId ?? null,
+                              rawText: !eflUrl ? (it?.rawText ?? null) : null,
+                            })
+                          }
+                          title={
+                            eflUrl
+                              ? "Load into manual runner (URL)"
+                              : String(it?.rawText ?? "").trim()
+                                ? "Load into manual runner (raw text)"
+                                : "No EFL URL or raw text available"
+                          }
                         >
                           Load
                         </button>
@@ -2581,7 +2597,12 @@ export default function FactCardOpsPage() {
 
       {/* Manual loader lives at the bottom (per ops workflow) */}
       <section ref={manualRef} className="rounded-2xl border bg-white p-4">
-        <ManualFactCardLoader adminToken={token} prefillEflUrl={manualPrefillUrl} prefillOfferId={manualPrefillOfferId} />
+        <ManualFactCardLoader
+          adminToken={token}
+          prefillEflUrl={manualPrefillUrl}
+          prefillOfferId={manualPrefillOfferId}
+          prefillRawText={manualPrefillRawText}
+        />
       </section>
     </div>
   );

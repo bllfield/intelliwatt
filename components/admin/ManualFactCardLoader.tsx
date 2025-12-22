@@ -166,6 +166,7 @@ export function ManualFactCardLoader(props: {
   adminToken?: string;
   prefillEflUrl?: string;
   prefillOfferId?: string;
+  prefillRawText?: string;
   onPrefillConsumed?: () => void;
 }) {
   const [activeTab, setActiveTab] = useState<"url" | "upload" | "text">("url");
@@ -186,6 +187,7 @@ export function ManualFactCardLoader(props: {
   const [showRawPreview, setShowRawPreview] = useState(true);
 
   const lastPrefillRef = useRef<string>("");
+  const lastPrefillTextRef = useRef<string>("");
   useEffect(() => {
     const next = (props.prefillEflUrl ?? "").trim();
     if (!next) return;
@@ -197,6 +199,20 @@ export function ManualFactCardLoader(props: {
     setOfferId((props.prefillOfferId ?? "").trim());
     props.onPrefillConsumed?.();
   }, [props.prefillEflUrl, props]);
+
+  useEffect(() => {
+    const nextText = String(props.prefillRawText ?? "");
+    if (!nextText.trim()) return;
+    if (nextText === lastPrefillTextRef.current) return;
+    lastPrefillTextRef.current = nextText;
+    setActiveTab("text");
+    setPastedText(nextText);
+    // Clear URL tab state so admins don't accidentally run the wrong entrypoint.
+    setEflUrl("");
+    setOverridePdfUrl("");
+    // OfferId is optional; keep whatever was already set.
+    props.onPrefillConsumed?.();
+  }, [props.prefillRawText, props]);
 
   const headerToken = useMemo(() => (props.adminToken ?? "").trim(), [props.adminToken]);
   const canPersist = Boolean(persistTemplate && headerToken);
