@@ -605,14 +605,30 @@ function extractMonthlyServiceFeeCutoff(rawText: string): { feeCents: number; ma
   const t = rawText || "";
   // Example:
   // "Monthly Service Fee                                      $8.00 per billing cycle for usage ( <=1999) kWh"
-  const re =
+  const reMonthlyServiceFee =
     /Monthly\s+Service\s+Fee[\s\S]{0,120}?\$?\s*([0-9]+(?:\.[0-9]{1,2})?)\s*(?:per\s+billing\s*cycle|per\s+month|monthly)[\s\S]{0,160}?\(\s*<=\s*([0-9]{1,6})\s*\)\s*kwh/i;
-  const m = t.match(re);
-  if (!m?.[1] || !m?.[2]) return null;
-  const dollars = Number(m[1]);
-  const maxKwh = Number(String(m[2]).replace(/,/g, ""));
-  if (!Number.isFinite(dollars) || !Number.isFinite(maxKwh) || maxKwh <= 0) return null;
-  return { feeCents: Math.round(dollars * 100), maxUsageKwh: Math.round(maxKwh) };
+  const m1 = t.match(reMonthlyServiceFee);
+  if (m1?.[1] && m1?.[2]) {
+    const dollars = Number(m1[1]);
+    const maxKwh = Number(String(m1[2]).replace(/,/g, ""));
+    if (!Number.isFinite(dollars) || !Number.isFinite(maxKwh) || maxKwh <= 0) return null;
+    return { feeCents: Math.round(dollars * 100), maxUsageKwh: Math.round(maxKwh) };
+  }
+
+  // Common variant in some EFLs:
+  // "Usage Charge: $9.95 per billing cycle < 1,000 kWh"
+  const reUsageChargeLt =
+    /Usage\s+Charge\s*:\s*\$?\s*([0-9]+(?:\.[0-9]{1,2})?)\s*(?:per\s+billing\s*cycle|per\s+month|monthly)[\s\S]{0,80}?<\s*([0-9,]{1,6})\s*kwh/i;
+  const m2 = t.match(reUsageChargeLt);
+  if (m2?.[1] && m2?.[2]) {
+    const dollars = Number(m2[1]);
+    const ltKwh = Number(String(m2[2]).replace(/,/g, ""));
+    if (!Number.isFinite(dollars) || !Number.isFinite(ltKwh) || ltKwh <= 1) return null;
+    // "< 1000 kWh" means the fee applies at most up to 999 kWh.
+    return { feeCents: Math.round(dollars * 100), maxUsageKwh: Math.round(ltKwh - 1) };
+  }
+
+  return null;
 }
 
 function baseFeeInferredFromValidation(args: {

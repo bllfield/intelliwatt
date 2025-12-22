@@ -149,6 +149,17 @@ export function isAssumptionBasedAvgPriceTable(rawText: string): {
   return { isAssumptionBased: false };
 }
 
+function detectTdspPassThrough(rawText: string): boolean {
+  const t = String(rawText ?? "");
+  if (!t) return false;
+  return (
+    /TDSP[\s\S]{0,80}Delivery[\s\S]{0,120}passed\s*through/i.test(t) ||
+    /TDU[\s\S]{0,80}Delivery[\s\S]{0,120}passed\s*through/i.test(t) ||
+    /passed\s*through[\s\S]{0,60}without\s*mark-?\s*up/i.test(t) ||
+    /without\s*mark-?\s*up[\s\S]{0,60}passed\s*through/i.test(t)
+  );
+}
+
 // -------------------- TDSP helpers (validator-only) --------------------
 
 function cents(num: number): number {
@@ -291,15 +302,11 @@ function pickBestTdspMonthlyLine(
   if (next)
     return { dollars: parseMonthlyDollarsFromLine(next), line: next };
 
-  const any = lines.find((l) =>
-    /\$\s*[0-9]+(?:\.[0-9]+)?\s*per\s*(?:month|billing\s*cycle)/i.test(l),
-  );
-  if (any) return { dollars: parseMonthlyDollarsFromLine(any), line: any };
-
   // Table/header fallback: allow "$4.23" on a line that contains "per month"
   // even if the word "Delivery" isn't repeated on that same line.
   const headerLike = lines.find(
     (l) =>
+      /(TDU|TDSP|Delivery)/i.test(l) &&
       /per\s*(?:month|billing\s*cycle)/i.test(l) &&
       /\$\s*[0-9]+(?:\.[0-9]+)?/i.test(l),
   );
@@ -1585,15 +1592,21 @@ export async function validateEflAvgPriceTable(args: {
   const tdspUnknownFromEfl =
     eflTdsp.perKwhCents == null && eflTdsp.monthlyCents == null;
   const maskedTdsp = avgTableFound && isTdspMasked(rawText, eflTdsp);
+  const tdspPassThrough = avgTableFound && detectTdspPassThrough(rawText);
   let maskedTdspLookupFailedReason: string | null = null;
 
-  if (maskedTdsp) {
+  const shouldUseUtilityTdspFallback =
+    (maskedTdsp || (tdspPassThrough && tdspUnknownFromEfl)) && avgTableFound;
+
+  if (shouldUseUtilityTdspFallback) {
     const territory = inferTdspTerritoryFromEflText(rawText);
     const eflDateIso = inferEflDateISO(rawText);
 
     if (!territory || !eflDateIso) {
       maskedTdspLookupFailedReason =
-        "TDSP masked with ** but TDSP service territory or effective date could not be inferred from EFL text.";
+        maskedTdsp
+          ? "TDSP masked with ** but TDSP service territory or effective date could not be inferred from EFL text."
+          : "TDSP passed-through but TDSP service territory or effective date could not be inferred from EFL text.";
     } else {
       try {
         const tdsp = await lookupTdspCharges({
@@ -1624,12 +1637,16 @@ export async function validateEflAvgPriceTable(args: {
           };
         } else {
           maskedTdspLookupFailedReason =
-            `TDSP masked with ** and no numeric TDSP tariff components found for ${territory} as of ${eflDateIso}.`;
+            maskedTdsp
+              ? `TDSP masked with ** and no numeric TDSP tariff components found for ${territory} as of ${eflDateIso}.`
+              : `TDSP passed-through but no numeric TDSP tariff components found for ${territory} as of ${eflDateIso}.`;
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err ?? "unknown error");
         maskedTdspLookupFailedReason =
-          `TDSP masked with ** but utility tariff lookup failed: ${msg}`;
+          maskedTdsp
+            ? `TDSP masked with ** but utility tariff lookup failed: ${msg}`
+            : `TDSP passed-through but utility tariff lookup failed: ${msg}`;
       }
     }
   }
