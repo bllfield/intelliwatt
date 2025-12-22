@@ -83,7 +83,7 @@ export async function POST(req: NextRequest) {
 
     const form = await req.formData();
     const houseIdRaw = form.get("houseId");
-    const houseId =
+    let houseId =
       typeof houseIdRaw === "string" && houseIdRaw.trim().length > 0 ? houseIdRaw.trim() : null;
 
     if (houseId) {
@@ -94,6 +94,16 @@ export async function POST(req: NextRequest) {
       if (!ownsHouse) {
         return NextResponse.json({ ok: false, error: "houseId does not belong to the current user" }, { status: 403 });
       }
+    } else {
+      // Best-effort: attach to the user's primary (or most recent) house so
+      // downstream screens can show TDSP variables and avoid "houseId=null"
+      // fragments when users upload current plan EFLs before explicitly selecting a house.
+      const bestHouse = await prisma.houseAddress.findFirst({
+        where: { userId: user.id, archivedAt: null },
+        orderBy: [{ isPrimary: "desc" }, { createdAt: "desc" }],
+        select: { id: true },
+      });
+      houseId = bestHouse?.id ?? null;
     }
 
     const f = form.get("eflFile");

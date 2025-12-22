@@ -253,6 +253,19 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  // If we still don't have a house context (common when users upload a current-plan EFL
+  // before selecting a specific house), fall back to the user's primary/recent house.
+  if (!effectiveHouseId) {
+    const bestHouse = await prisma.houseAddress.findFirst({
+      where: { userId: user.id, archivedAt: null },
+      orderBy: [{ isPrimary: 'desc' }, { createdAt: 'desc' }],
+      select: { id: true },
+    });
+    if (bestHouse?.id) {
+      effectiveHouseId = bestHouse.id;
+    }
+  }
+
     const entry = await prisma.entry.findFirst({
       where: {
         userId: user.id,
