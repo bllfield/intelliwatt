@@ -23,9 +23,11 @@ type HouseSummary = {
 export type UsageEntryContext = {
   user: UserSummary | null;
   houseAddress: HouseSummary | null;
+  smtLatestIntervalAt?: Date | null;
   existingAuthorization: {
     id: string;
     createdAt: Date;
+    updatedAt: Date;
     smtStatus: string | null;
     smtStatusMessage: string | null;
     smtAgreementId: string | null;
@@ -33,6 +35,7 @@ export type UsageEntryContext = {
     meterNumber: string | null;
     authorizationStartDate: Date | null;
     authorizationEndDate: Date | null;
+    smtLastSyncAt?: Date | null;
     archivedAt: Date | null;
   } | null;
   displacedAttention: boolean;
@@ -115,6 +118,7 @@ export async function loadUsageEntryContext(): Promise<UsageEntryContext> {
       select: {
         id: true,
         createdAt: true,
+        updatedAt: true,
         smtStatus: true,
         smtStatusMessage: true,
         smtAgreementId: true,
@@ -122,9 +126,26 @@ export async function loadUsageEntryContext(): Promise<UsageEntryContext> {
         meterNumber: true,
         authorizationStartDate: true,
         authorizationEndDate: true,
+        smtLastSyncAt: true,
         archivedAt: true,
       },
     });
+  }
+
+  // SMT "Updated" should reflect the latest ingested interval timestamp when available.
+  // This is the most user-meaningful "last updated" signal (versus auth.createdAt).
+  let smtLatestIntervalAt: Date | null = null;
+  try {
+    if (houseAddress?.esiid) {
+      const latest = await prismaAny.smtInterval.findFirst({
+        where: { esiid: houseAddress.esiid },
+        orderBy: { ts: "desc" },
+        select: { ts: true },
+      });
+      smtLatestIntervalAt = latest?.ts ?? null;
+    }
+  } catch {
+    smtLatestIntervalAt = null;
   }
 
   let userProfile = null;
@@ -221,6 +242,7 @@ export async function loadUsageEntryContext(): Promise<UsageEntryContext> {
     user,
     houseAddress,
     existingAuthorization,
+    smtLatestIntervalAt,
     displacedAttention,
     greenButtonUpload: resolvedGreenButtonUpload,
     manualUsageUpload,

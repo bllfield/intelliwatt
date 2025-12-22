@@ -91,7 +91,7 @@ export default async function UsageEntrySmartMeterPage() {
   const serviceState = houseAddress.addressState ?? "";
   const serviceZip = houseAddress.addressZip5 ?? "";
 
-  const smtStatus = deriveSmtStatus(existingAuthorization);
+  const smtStatus = deriveSmtStatus(existingAuthorization, context.smtLatestIntervalAt);
 
   return (
     <div className="min-h-screen bg-brand-white">
@@ -136,11 +136,11 @@ export default async function UsageEntrySmartMeterPage() {
               </div>
               <div className="flex flex-col items-start gap-2 text-left md:items-end md:text-right">
                 <span className={statusBadgeStyles[smtStatus.tone]}>{smtStatus.label}</span>
-                {existingAuthorization?.createdAt ? (
+                {smtStatus.lastUpdated ? (
                   <span className="text-xs text-brand-cyan/60">
                     Last updated{" "}
                     <LocalTime
-                      value={existingAuthorization.createdAt.toISOString()}
+                      value={smtStatus.lastUpdated.toISOString()}
                       options={{ month: "short", day: "numeric", year: "numeric" }}
                       fallback="—"
                     />

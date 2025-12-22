@@ -153,7 +153,7 @@ export default async function UsageEntryHub() {
   const { user, houseAddress, existingAuthorization, displacedAttention } = context;
 
   const serviceAddressDisplay = formatServiceAddress(houseAddress);
-  const smtStatus = deriveSmtStatus(existingAuthorization);
+  const smtStatus = deriveSmtStatus(existingAuthorization, context.smtLatestIntervalAt);
   const greenStatus = deriveGreenButtonStatus(context.greenButtonUpload);
   const manualStatus = deriveManualStatus(context.manualUsageUpload);
 
@@ -207,11 +207,11 @@ export default async function UsageEntryHub() {
                 </div>
                 <div className="flex min-w-[220px] flex-col items-start gap-2 text-left text-xs md:items-end md:text-right">
                   <span className={statusBadgeStyles[smtStatus.tone]}>{smtStatus.label}</span>
-                  {existingAuthorization?.createdAt ? (
+                  {smtStatus.lastUpdated ? (
                     <span className="text-brand-cyan/60">
                       Updated{" "}
                       <LocalTime
-                        value={existingAuthorization.createdAt.toISOString()}
+                        value={smtStatus.lastUpdated.toISOString()}
                         options={{ month: "short", day: "numeric", year: "numeric" }}
                         fallback="—"
                       />

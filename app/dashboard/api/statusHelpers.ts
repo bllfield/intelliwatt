@@ -24,6 +24,7 @@ export const statusBadgeStyles: Record<StatusTone, string> = {
 
 export function deriveSmtStatus(
   auth: UsageEntryContext["existingAuthorization"],
+  smtLatestIntervalAt?: Date | null,
 ): EntryStatus {
   if (!auth) {
     return {
@@ -39,6 +40,11 @@ export function deriveSmtStatus(
     (auth.smtStatusMessage ?? "").toLowerCase().includes("already active");
 
   if (alreadyActive || rawStatus === "active") {
+    const lastUpdated =
+      smtLatestIntervalAt ??
+      auth.smtLastSyncAt ??
+      auth.updatedAt ??
+      auth.createdAt;
     return {
       label: alreadyActive ? "Already active" : "Connected",
       tone: "success",
@@ -46,7 +52,7 @@ export function deriveSmtStatus(
         auth.smtStatusMessage && auth.smtStatusMessage.trim().length > 0
           ? auth.smtStatusMessage
           : "SMT usage will refresh automatically.",
-      lastUpdated: auth.createdAt,
+      lastUpdated,
       expiresAt: auth.authorizationEndDate ?? null,
     };
   }
@@ -59,7 +65,7 @@ export function deriveSmtStatus(
         auth.smtStatusMessage && auth.smtStatusMessage.trim().length > 0
           ? auth.smtStatusMessage
           : "We’re finalizing your SMT agreement. This usually resolves within a minute.",
-      lastUpdated: auth.createdAt,
+      lastUpdated: auth.updatedAt ?? auth.createdAt,
     };
   }
 
@@ -71,7 +77,7 @@ export function deriveSmtStatus(
         auth.smtStatusMessage && auth.smtStatusMessage.trim().length > 0
           ? auth.smtStatusMessage
           : "We couldn’t complete your SMT authorization. Try again or contact support.",
-      lastUpdated: auth.createdAt,
+      lastUpdated: auth.updatedAt ?? auth.createdAt,
     };
   }
 
@@ -79,7 +85,7 @@ export function deriveSmtStatus(
     label: auth.smtStatus ? auth.smtStatus : "Status unknown",
     tone: "info",
     message: auth.smtStatusMessage,
-    lastUpdated: auth.createdAt,
+    lastUpdated: auth.updatedAt ?? auth.createdAt,
   };
 }
 
