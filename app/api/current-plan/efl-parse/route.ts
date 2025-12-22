@@ -43,6 +43,28 @@ function toRateType(parsed: any): "FIXED" | "VARIABLE" | "TIME_OF_USE" {
   return "FIXED";
 }
 
+function extractCancelFeeCentsFromEflText(rawText: string): number | null {
+  const t = String(rawText ?? "");
+  if (!t.trim()) return null;
+
+  // Common EFL phrasing:
+  // "Do I have a termination fee... Yes. $150."
+  const m1 = t.match(/termination\s+fee[\s\S]{0,140}?\$\s*([0-9]{1,5}(?:\.[0-9]{1,2})?)/i);
+  if (m1?.[1]) {
+    const dollars = Number(m1[1]);
+    if (Number.isFinite(dollars) && dollars >= 0) return Math.round(dollars * 100);
+  }
+
+  // Alternate: "cancellation fee $150"
+  const m2 = t.match(/cancell(?:ation|ing)\s+fee[\s\S]{0,140}?\$\s*([0-9]{1,5}(?:\.[0-9]{1,2})?)/i);
+  if (m2?.[1]) {
+    const dollars = Number(m2[1]);
+    if (Number.isFinite(dollars) && dollars >= 0) return Math.round(dollars * 100);
+  }
+
+  return null;
+}
+
 export async function POST(req: NextRequest) {
   try {
     if (!process.env.CURRENT_PLAN_DATABASE_URL) {
@@ -124,6 +146,11 @@ export async function POST(req: NextRequest) {
     const effectivePlanRules: any = pipeline.effectivePlanRules ?? pipeline.planRules ?? null;
     const effectiveRateStructure: any = pipeline.effectiveRateStructure ?? pipeline.rateStructure ?? null;
 
+    const cancelFeeCentsDerived =
+      typeof effectivePlanRules?.cancelFeeCents === "number" && Number.isFinite(effectivePlanRules.cancelFeeCents)
+        ? Math.round(effectivePlanRules.cancelFeeCents)
+        : extractCancelFeeCentsFromEflText(rawText);
+
     const parsed = {
       rate: {
         supplierName: labels.providerName ?? null,
@@ -135,8 +162,7 @@ export async function POST(req: NextRequest) {
             : typeof effectiveRateStructure?.baseMonthlyFeeCents === "number"
               ? Math.round(effectiveRateStructure.baseMonthlyFeeCents)
               : null,
-        cancelFeeCents:
-          typeof effectivePlanRules?.cancelFeeCents === "number" ? Math.round(effectivePlanRules.cancelFeeCents) : null,
+        cancelFeeCents: cancelFeeCentsDerived,
       },
       meta: {
         warnings: pipeline.parseWarnings ?? [],
@@ -298,6 +324,14 @@ export async function POST(req: NextRequest) {
       rateType,
       termMonths: typeof parsed?.rate?.termMonths === "number" ? parsed.rate.termMonths : null,
       termLengthMonths: typeof parsed?.rate?.termMonths === "number" ? parsed.rate.termMonths : null,
+      earlyTerminationFeeCents:
+        typeof parsed?.rate?.cancelFeeCents === "number" && Number.isFinite(parsed.rate.cancelFeeCents)
+          ? Math.round(parsed.rate.cancelFeeCents)
+          : null,
+      earlyTerminationFee:
+        typeof parsed?.rate?.cancelFeeCents === "number" && Number.isFinite(parsed.rate.cancelFeeCents)
+          ? parsed.rate.cancelFeeCents / 100
+          : null,
       energyRateTiersJson: null,
       timeOfUseConfigJson: touWindowsNormalized.length ? touWindowsNormalized : touWindows,
       billCreditsJson: billCredits,

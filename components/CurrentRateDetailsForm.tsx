@@ -2019,6 +2019,28 @@ export function CurrentRateDetailsForm({
             Most bills list these near the header or inside the Electricity Facts Label (EFL) section.
           </p>
 
+          {/* Always show plan variables used on the manual entry form too (not only in the saved snapshot). */}
+          <div className="rounded-2xl border border-brand-blue/30 bg-brand-blue/5 p-4">
+            <div className="text-xs font-semibold uppercase tracking-wide text-brand-navy/80">Plan variables used</div>
+            <div className="mt-2 space-y-1 text-sm text-brand-navy">
+              {Array.isArray(planVariablesList) && planVariablesList.length > 0 ? (
+                planVariablesList.map((row) => (
+                  <div key={row.key} className="flex items-center justify-between gap-3">
+                    <span>{row.label}</span>
+                    <span className="font-semibold">{row.value}</span>
+                  </div>
+                ))
+              ) : (
+                <div className="text-sm text-brand-slate">
+                  Variables will appear after we have enough plan details (or after you upload a bill/EFL).
+                </div>
+              )}
+            </div>
+            <div className="mt-2 text-xs text-brand-navy/70">
+              These are the exact variables IntelliWatt uses for comparisons.
+            </div>
+          </div>
+
           <label className="block space-y-1 text-sm text-brand-navy">
             <span className="font-semibold uppercase tracking-wide text-brand-navy/80">Electric company name</span>
             <input
