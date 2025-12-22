@@ -13,12 +13,37 @@ import {
   extractFixedRepEnergyCentsPerKwh,
   extractRepFixedMonthlyChargeDollars,
 } from "@/lib/plan-engine/calculatePlanCostForUsage";
+import { extractDeterministicTouSchedule } from "@/lib/plan-engine/touPeriods";
+import { extractDeterministicTierSchedule, computeRepEnergyCostForMonthlyKwhTiered } from "@/lib/plan-engine/tieredPricing";
+import { extractDeterministicBillCredits, applyBillCreditsToMonth } from "@/lib/plan-engine/billCredits";
+import { extractDeterministicMinimumRules, applyMinimumRulesToMonth } from "@/lib/plan-engine/minimumRules";
 import { canComputePlanFromBuckets, derivePlanCalcRequirementsFromTemplate } from "@/lib/plan-engine/planComputability";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+function round2(n: number) {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+
+function roundCents(n: number): number {
+  return Math.round(n);
+}
+
+function clampNonNegative(n: number): number {
+  return n < 0 ? 0 : n;
+}
+
+function monthKwh(m: Record<string, number> | null | undefined, key: string): number | null {
+  if (!m) return null;
+  const v = (m as any)[key];
+  if (v == null) return null;
+  if (typeof v === "string" && v.trim() === "") return null;
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? n : null;
+}
 
 function decimalToNumber(v: any): number | null {
   if (typeof v === "number" && Number.isFinite(v)) return v;
@@ -533,6 +558,174 @@ export async function GET(req: NextRequest) {
       components: (trueCostEstimate as any)?.components ?? null,
     };
 
+    // Monthly breakdown table (for Plan Details UI).
+    // This is a transparent rendering of the same engine math, but expanded by month so totals sum to annual.
+    const monthlyBreakdown = (() => {
+      if (!rsPresent || !tdspApplied) return null;
+      if (String((trueCostEstimate as any)?.status ?? "") !== "OK") return null;
+      const byMonth = usageBucketsByMonthForCalc ?? {};
+      const monthsAll = Object.keys(byMonth).sort();
+      if (monthsAll.length === 0) return null;
+      const months = monthsAll.slice(-12);
+
+      const tdspPerKwhCents = Number(tdspApplied.perKwhDeliveryChargeCents ?? 0) || 0;
+      const tdspMonthly = Number(tdspApplied.monthlyCustomerChargeDollars ?? 0) || 0;
+      const repFixedMonthly = extractRepFixedMonthlyChargeDollars(rateStructure) ?? 0;
+
+      const creditsMaybe = extractDeterministicBillCredits(rateStructure);
+      const minimumMaybe = extractDeterministicMinimumRules({ rateStructure });
+      const tieredMaybe = extractDeterministicTierSchedule(rateStructure);
+      const touMaybe = extractDeterministicTouSchedule(rateStructure);
+      const repFixedEnergyCents = extractFixedRepEnergyCentsPerKwh(rateStructure);
+
+      // Determine REP bucket columns (for TOU schedule, we show each period; otherwise just total).
+      const repBuckets: Array<{ bucketKey: string; label: string }> = (() => {
+        if (touMaybe?.schedule?.periods?.length) {
+          const uniq = new Map<string, { bucketKey: string; label: string }>();
+          for (const p of touMaybe.schedule.periods) {
+            const dayType = String((p as any)?.dayType ?? "").trim();
+            const startHHMM = String((p as any)?.startHHMM ?? "").trim();
+            const endHHMM = String((p as any)?.endHHMM ?? "").trim();
+            if (!dayType || !startHHMM || !endHHMM) continue;
+            const bucketKey =
+              startHHMM === "0000" && endHHMM === "2400"
+                ? `kwh.m.${dayType}.total`
+                : `kwh.m.${dayType}.${startHHMM}-${endHHMM}`;
+            const labelRaw = (p as any)?.label ?? null;
+            const label =
+              typeof labelRaw === "string" && labelRaw.trim()
+                ? labelRaw.trim()
+                : `${dayType.toUpperCase()} ${startHHMM}-${endHHMM}`;
+            if (!uniq.has(bucketKey)) uniq.set(bucketKey, { bucketKey, label });
+          }
+          return Array.from(uniq.values());
+        }
+        return [{ bucketKey: "kwh.m.all.total", label: "ALL 00:00-24:00" }];
+      })();
+
+      const rows = months.map((ym) => {
+        const m = byMonth[ym] ?? null;
+        const totalKwh = monthKwh(m, "kwh.m.all.total");
+        const repFixedCents = repFixedMonthly * 100;
+        const tdspFixedCents = tdspMonthly * 100;
+        const tdspDeliveryCents = totalKwh != null ? totalKwh * tdspPerKwhCents : null;
+
+        // REP energy by bucket
+        const repBucketLines = repBuckets.map((b) => {
+          const kwh = monthKwh(m, b.bucketKey);
+          let repCentsPerKwh: number | null = null;
+          let repCostCents: number | null = null;
+          let repCostDollars: number | null = null;
+          let notes: string[] = [];
+
+          if (kwh != null) {
+            if (touMaybe?.schedule?.periods?.length) {
+              const p = touMaybe.schedule.periods.find((pp: any) => {
+                const dayType = String(pp?.dayType ?? "").trim();
+                const startHHMM = String(pp?.startHHMM ?? "").trim();
+                const endHHMM = String(pp?.endHHMM ?? "").trim();
+                const key =
+                  startHHMM === "0000" && endHHMM === "2400"
+                    ? `kwh.m.${dayType}.total`
+                    : `kwh.m.${dayType}.${startHHMM}-${endHHMM}`;
+                return key === b.bucketKey;
+              });
+              repCentsPerKwh =
+                p && typeof (p as any)?.repEnergyCentsPerKwh === "number" ? (p as any).repEnergyCentsPerKwh : null;
+              if (repCentsPerKwh != null) {
+                repCostCents = kwh * repCentsPerKwh;
+              }
+            } else if (tieredMaybe?.ok && totalKwh != null) {
+              // Tiered: no single cents/kWh. We show an effective cents/kWh for the month.
+              const tiered = computeRepEnergyCostForMonthlyKwhTiered({
+                monthlyKwh: totalKwh,
+                schedule: tieredMaybe.schedule,
+              });
+              repCostCents = tiered.repEnergyCentsTotal;
+              repCentsPerKwh = totalKwh > 0 ? repCostCents / totalKwh : null;
+              notes = ["tiered"];
+            } else if (typeof repFixedEnergyCents === "number") {
+              repCentsPerKwh = repFixedEnergyCents;
+              repCostCents = kwh * repFixedEnergyCents;
+            }
+          }
+
+          if (repCostCents != null) repCostDollars = round2(repCostCents / 100);
+
+          return {
+            bucketKey: b.bucketKey,
+            label: b.label,
+            kwh,
+            repCentsPerKwh,
+            repCostDollars,
+            notes: notes.length ? notes : null,
+          };
+        });
+
+        const repEnergyCents = repBucketLines.reduce((acc, x: any) => acc + (typeof x?.repCostDollars === "number" ? x.repCostDollars * 100 : 0), 0);
+
+        // Credits (negative cents)
+        const creditsApplied =
+          creditsMaybe?.ok && totalKwh != null ? applyBillCreditsToMonth({ monthlyKwh: totalKwh, credits: creditsMaybe.credits }) : null;
+        const creditsCents = creditsApplied ? creditsApplied.creditCentsTotal : 0;
+
+        const subtotalCentsRaw =
+          (repEnergyCents || 0) +
+          repFixedCents +
+          tdspFixedCents +
+          (tdspDeliveryCents ?? 0) +
+          creditsCents;
+
+        let minUsageFeeCents = 0;
+        let minBillTopUpCents = 0;
+        let finalCents = clampNonNegative(roundCents(subtotalCentsRaw));
+        if (minimumMaybe?.ok && totalKwh != null) {
+          const appliedMin = applyMinimumRulesToMonth({
+            monthlyKwh: totalKwh,
+            minimum: minimumMaybe.minimum,
+            subtotalCents: roundCents(subtotalCentsRaw),
+          });
+          minUsageFeeCents = appliedMin.minUsageFeeCents;
+          minBillTopUpCents = appliedMin.minimumBillTopUpCents;
+          finalCents = appliedMin.totalCentsAfter;
+        }
+
+        return {
+          yearMonth: ym,
+          bucketTotalKwh: totalKwh,
+          repBuckets: repBucketLines,
+          tdsp: {
+            perKwhDeliveryChargeCents: tdspPerKwhCents,
+            deliveryDollars: tdspDeliveryCents != null ? round2(tdspDeliveryCents / 100) : null,
+            monthlyCustomerChargeDollars: round2(tdspMonthly),
+          },
+          repFixedMonthlyChargeDollars: round2(repFixedMonthly),
+          creditsDollars: creditsApplied ? round2(creditsCents / 100) : null,
+          minimumUsageFeeDollars: minimumMaybe?.ok ? round2(minUsageFeeCents / 100) : null,
+          minimumBillTopUpDollars: minimumMaybe?.ok ? round2(minBillTopUpCents / 100) : null,
+          totalDollars: round2(finalCents / 100),
+        };
+      });
+
+      const totals = (() => {
+        const annualCents = rows.reduce((acc: number, r: any) => acc + (typeof r?.totalDollars === "number" ? roundCents(r.totalDollars * 100) : 0), 0);
+        const annualFromRows = round2(annualCents / 100);
+        const expectedAnnual = typeof (trueCostEstimate as any)?.annualCostDollars === "number" ? (trueCostEstimate as any).annualCostDollars : null;
+        const expectedAnnualCents =
+          typeof expectedAnnual === "number" && Number.isFinite(expectedAnnual) ? roundCents(expectedAnnual * 100) : null;
+        const deltaCents =
+          expectedAnnualCents != null ? (annualCents - expectedAnnualCents) : null;
+        return { annualFromRows, expectedAnnual, deltaCents };
+      })();
+
+      return {
+        monthsCount: rows.length,
+        repBuckets,
+        rows,
+        totals,
+      };
+    })();
+
     return NextResponse.json(
       {
         ok: true,
@@ -578,6 +771,7 @@ export async function GET(req: NextRequest) {
             fixedMonthlyChargeDollars: repFixedMonthlyChargeDollars,
           },
         },
+        monthlyBreakdown,
         math,
         outputs: {
           trueCostEstimate,

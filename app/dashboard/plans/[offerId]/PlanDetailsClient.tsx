@@ -89,6 +89,7 @@ export default function PlanDetailsClient({ offerId }: { offerId: string }) {
   const usage = ok ? (data as any).usage : null;
   const outputs = ok ? (data as any).outputs : null;
   const math = ok ? (data as any).math : null;
+  const monthlyBreakdown = ok ? (data as any).monthlyBreakdown : null;
 
   const requiredBucketKeys = useMemo(
     () => (Array.isArray(template?.requiredBucketKeys) ? (template.requiredBucketKeys as any[]).map(String) : []),
@@ -292,34 +293,114 @@ export default function PlanDetailsClient({ offerId }: { offerId: string }) {
 
           <div className="mt-8 rounded-2xl border border-brand-cyan/20 bg-brand-navy p-4">
             <div className="text-[0.7rem] font-semibold uppercase tracking-[0.22em] text-brand-cyan/60">
-              Bucket totals (buckets required by this plan; months overlapping the last-365-days window)
+              Monthly bill math (each month sums to the annual total)
             </div>
-            <div className="mt-3 overflow-auto rounded-xl border border-brand-cyan/15">
-              <table className="min-w-[900px] w-full text-xs">
-                <thead className="bg-brand-white/5 text-brand-cyan/70">
-                  <tr>
-                    <th className="px-3 py-2 text-left">Year-Month</th>
-                    {shownBucketDefs.map((b) => (
-                      <th key={b.key} className="px-3 py-2 text-left whitespace-nowrap" title={b.key}>
-                        {b.label}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="text-brand-cyan/80">
-                  {bucketTable.map((r) => (
-                    <tr key={r.yearMonth} className="border-t border-brand-cyan/10">
-                      <td className="px-3 py-2 font-mono text-brand-white/90">{r.yearMonth}</td>
-                      {shownBucketDefs.map((b) => (
-                        <td key={b.key} className="px-3 py-2 whitespace-nowrap">
-                          {r[b.key] == null ? "—" : fmtKwh0(r[b.key])}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+
+            {!monthlyBreakdown ? (
+              <div className="mt-3 text-sm text-brand-cyan/70">
+                Monthly breakdown unavailable (needs an OK estimate and required usage buckets).
+              </div>
+            ) : (
+              <>
+                <div className="mt-2 text-xs text-brand-cyan/60">
+                  Totals check:{" "}
+                  <span className="font-mono">
+                    rows={String(monthlyBreakdown?.monthsCount ?? "—")} annualFromRows=${fmtNum(monthlyBreakdown?.totals?.annualFromRows, 2)}
+                    {typeof monthlyBreakdown?.totals?.deltaCents === "number"
+                      ? ` deltaCents=${String(monthlyBreakdown.totals.deltaCents)}`
+                      : ""}
+                  </span>
+                </div>
+
+                <div className="mt-3 overflow-auto rounded-xl border border-brand-cyan/15">
+                  <table className="min-w-[1200px] w-full text-xs">
+                    <thead className="bg-brand-white/5 text-brand-cyan/70">
+                      <tr>
+                        <th className="px-3 py-2 text-left">Year-Month</th>
+                        <th className="px-3 py-2 text-left whitespace-nowrap">Total kWh</th>
+
+                        {(monthlyBreakdown?.repBuckets ?? []).map((b: any) => (
+                          <th key={`${b.bucketKey}-kwh`} className="px-3 py-2 text-left whitespace-nowrap" title={b.bucketKey}>
+                            {b.label} kWh
+                          </th>
+                        ))}
+                        {(monthlyBreakdown?.repBuckets ?? []).map((b: any) => (
+                          <th key={`${b.bucketKey}-rate`} className="px-3 py-2 text-left whitespace-nowrap" title={b.bucketKey}>
+                            {b.label} ¢/kWh
+                          </th>
+                        ))}
+                        {(monthlyBreakdown?.repBuckets ?? []).map((b: any) => (
+                          <th key={`${b.bucketKey}-cost`} className="px-3 py-2 text-left whitespace-nowrap" title={b.bucketKey}>
+                            {b.label} $
+                          </th>
+                        ))}
+
+                        <th className="px-3 py-2 text-left whitespace-nowrap">TDSP ¢/kWh</th>
+                        <th className="px-3 py-2 text-left whitespace-nowrap">TDSP delivery $</th>
+                        <th className="px-3 py-2 text-left whitespace-nowrap">REP fixed $</th>
+                        <th className="px-3 py-2 text-left whitespace-nowrap">TDSP fixed $</th>
+                        <th className="px-3 py-2 text-left whitespace-nowrap">Credits $</th>
+                        <th className="px-3 py-2 text-left whitespace-nowrap">Min usage fee $</th>
+                        <th className="px-3 py-2 text-left whitespace-nowrap">Min bill top-up $</th>
+                        <th className="px-3 py-2 text-left whitespace-nowrap">Month total $</th>
+                      </tr>
+                    </thead>
+
+                    <tbody className="text-brand-cyan/80">
+                      {(monthlyBreakdown?.rows ?? []).map((r: any) => {
+                        const repLines = Array.isArray(r?.repBuckets) ? (r.repBuckets as any[]) : [];
+                        const byKey = new Map(repLines.map((x) => [String(x.bucketKey), x]));
+                        return (
+                          <tr key={r.yearMonth} className="border-t border-brand-cyan/10">
+                            <td className="px-3 py-2 font-mono text-brand-white/90">{r.yearMonth}</td>
+                            <td className="px-3 py-2 whitespace-nowrap">{r.bucketTotalKwh == null ? "—" : fmtKwh0(r.bucketTotalKwh)}</td>
+
+                            {(monthlyBreakdown?.repBuckets ?? []).map((b: any) => {
+                              const x = byKey.get(String(b.bucketKey));
+                              return (
+                                <td key={`${r.yearMonth}-${b.bucketKey}-kwh`} className="px-3 py-2 whitespace-nowrap">
+                                  {x?.kwh == null ? "—" : fmtKwh0(x.kwh)}
+                                </td>
+                              );
+                            })}
+                            {(monthlyBreakdown?.repBuckets ?? []).map((b: any) => {
+                              const x = byKey.get(String(b.bucketKey));
+                              return (
+                                <td key={`${r.yearMonth}-${b.bucketKey}-rate`} className="px-3 py-2 whitespace-nowrap">
+                                  {x?.repCentsPerKwh == null ? "—" : `${fmtNum(x.repCentsPerKwh, 4)}¢`}
+                                </td>
+                              );
+                            })}
+                            {(monthlyBreakdown?.repBuckets ?? []).map((b: any) => {
+                              const x = byKey.get(String(b.bucketKey));
+                              return (
+                                <td key={`${r.yearMonth}-${b.bucketKey}-cost`} className="px-3 py-2 whitespace-nowrap">
+                                  {x?.repCostDollars == null ? "—" : fmtDollars(x.repCostDollars)}
+                                </td>
+                              );
+                            })}
+
+                            <td className="px-3 py-2 whitespace-nowrap">
+                              {r?.tdsp?.perKwhDeliveryChargeCents == null ? "—" : `${fmtNum(r.tdsp.perKwhDeliveryChargeCents, 4)}¢`}
+                            </td>
+                            <td className="px-3 py-2 whitespace-nowrap">{fmtDollars(r?.tdsp?.deliveryDollars)}</td>
+                            <td className="px-3 py-2 whitespace-nowrap">{fmtDollars(r?.repFixedMonthlyChargeDollars)}</td>
+                            <td className="px-3 py-2 whitespace-nowrap">{fmtDollars(r?.tdsp?.monthlyCustomerChargeDollars)}</td>
+                            <td className="px-3 py-2 whitespace-nowrap">{fmtDollars(r?.creditsDollars)}</td>
+                            <td className="px-3 py-2 whitespace-nowrap">{fmtDollars(r?.minimumUsageFeeDollars)}</td>
+                            <td className="px-3 py-2 whitespace-nowrap">{fmtDollars(r?.minimumBillTopUpDollars)}</td>
+                            <td className="px-3 py-2 whitespace-nowrap font-semibold text-brand-white/90">
+                              {fmtDollars(r?.totalDollars)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+
             <div className="mt-2 text-xs text-brand-cyan/60">
               {Array.isArray((data as any).notes) ? (data as any).notes.join(" ") : null}
             </div>
