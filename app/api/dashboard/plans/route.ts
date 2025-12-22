@@ -303,8 +303,13 @@ export async function GET(req: NextRequest) {
     }
 
     const url = new URL(req.url);
+    const datasetMode = parseBoolParam(url.searchParams.get("dataset"), false);
     const page = Math.max(1, toInt(url.searchParams.get("page"), 1));
-    const pageSize = clamp(toInt(url.searchParams.get("pageSize"), 20), 10, 50);
+    // Default UI paging is 10-50, but the PlansClient can request a full dataset (no refetch on sort/filter)
+    // by passing dataset=1 and a larger pageSize.
+    const pageSize = datasetMode
+      ? clamp(toInt(url.searchParams.get("pageSize"), 2000), 50, 2000)
+      : clamp(toInt(url.searchParams.get("pageSize"), 20), 10, 50);
     const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
     const rateType = (url.searchParams.get("rateType") ?? "all").trim().toLowerCase();
     const term = (url.searchParams.get("term") ?? "all").trim().toLowerCase();
@@ -805,10 +810,10 @@ export async function GET(req: NextRequest) {
     }
 
     const total = offers.length;
-    const totalPages = total === 0 ? 0 : Math.ceil(total / pageSize);
-    const safePage = totalPages === 0 ? 1 : clamp(page, 1, totalPages);
-    const startIdx = (safePage - 1) * pageSize;
-    const pageSlice = offers.slice(startIdx, startIdx + pageSize);
+    const totalPages = datasetMode ? (total === 0 ? 0 : 1) : total === 0 ? 0 : Math.ceil(total / pageSize);
+    const safePage = datasetMode ? 1 : totalPages === 0 ? 1 : clamp(page, 1, totalPages);
+    const startIdx = datasetMode ? 0 : (safePage - 1) * pageSize;
+    const pageSlice = datasetMode ? offers.slice(0, pageSize) : offers.slice(startIdx, startIdx + pageSize);
 
     // Ensure that any offer we mark as "QUEUED" is actually present in the admin review queue.
     //
@@ -822,7 +827,9 @@ export async function GET(req: NextRequest) {
     // - If an offer is mapped to a non-computable template, create/refresh a PLAN_CALC_QUARANTINE row.
     //
     // Best-effort: failures must never break dashboard.
-    try {
+    // NOTE: datasetMode returns a large list used for client-side sort/filter; avoid doing side-effectful
+    // admin-queue writes across hundreds of offers.
+    if (!datasetMode) try {
       // (1) If a template already exists for this EFL URL, auto-link offerId -> RatePlan
       // so the dashboard stops showing "QUEUED" purely due to missing OfferIdRatePlanMap rows.
       const unmappedWithEfl = (pageSlice as any[])

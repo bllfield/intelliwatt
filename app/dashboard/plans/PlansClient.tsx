@@ -63,6 +63,25 @@ function selectedBestBucket(sort: SortKey): EflBucket {
   return 1000;
 }
 
+function pickNearestEflBucket(kwh: number): EflBucket {
+  // Nearest among 500/1000/2000; ties prefer 1000.
+  const buckets: EflBucket[] = [500, 1000, 2000];
+  let best: EflBucket = 1000;
+  let bestDist = Number.POSITIVE_INFINITY;
+  for (const b of buckets) {
+    const dist = Math.abs(kwh - b);
+    if (dist < bestDist) {
+      best = b;
+      bestDist = dist;
+      continue;
+    }
+    if (dist === bestDist && b === 1000) {
+      best = b;
+    }
+  }
+  return best;
+}
+
 function pickMetricCentsPerKwhForBucket(offer: any, bucket: EflBucket): number | null {
   const pick500 = () =>
     firstFiniteNumber([offer?.efl?.avgPriceCentsPerKwh500, offer?.avgPriceCentsPerKwh500, offer?.kwh500_cents]);
@@ -151,34 +170,26 @@ export default function PlansClient() {
   const [approxKwhPerMonth, setApproxKwhPerMonth] = useState<500 | 750 | 1000 | 1250 | 2000>(1000);
   const bestBucket = useMemo(() => selectedBestBucket(sort), [sort]);
 
-  // Reset prefetch attempts when the *user-visible dataset* changes (filters/pagination),
-  // but do NOT reset on our internal refresh nonce (otherwise we could loop forever
-  // on truly manual-review items that remain QUEUED).
-  const datasetKey = useMemo(
+  // Server dataset identity: only changes when inputs that affect the actual offer dataset changes.
+  // Sort/filter/pagination should be client-only (no fetch).
+  const serverDatasetKey = useMemo(
     () =>
       JSON.stringify({
-        q,
-        rateType,
-        term,
-        renewableMin,
-        template,
         isRenter,
-        sort,
-        page,
-        pageSize,
       }),
-    [q, rateType, term, renewableMin, template, isRenter, sort, page, pageSize],
+    [isRenter],
   );
 
-  // Lightweight client cache so back/forward navigation instantly shows the last processed results
-  // instead of refetching + re-triggering server-side scoring work.
-  const cacheKey = useMemo(() => `dashboard_plans_resp_v1:${datasetKey}`, [datasetKey]);
+  // Lightweight client cache so back/forward navigation instantly shows the last processed dataset
+  // instead of refetching.
+  const cacheKey = useMemo(() => `dashboard_plans_dataset_v1:${serverDatasetKey}`, [serverDatasetKey]);
   // This is NOT the plan-engine cache (engine outputs are persisted in the WattBuy Offers DB).
   // This is only a UX cache for the API response to avoid flashing loading states on navigation.
   // Keep it long-lived; correctness still comes from server-side canonical inputs + DB-stored estimates.
   const cacheTtlMs = 60 * 60 * 1000;
 
   useEffect(() => {
+    if (isRenter === null) return; // wait for stable dataset identity
     try {
       const raw = window.sessionStorage.getItem(cacheKey);
       if (!raw) return;
@@ -191,13 +202,13 @@ export default function PlansClient() {
     } catch {
       // ignore cache failures
     }
-  }, [cacheKey, cacheTtlMs]);
+  }, [cacheKey, cacheTtlMs, isRenter]);
 
   useEffect(() => {
     prefetchAttemptsRef.current = 0;
     prefetchInFlightRef.current = false;
     setPrefetchNote(null);
-  }, [datasetKey]);
+  }, [serverDatasetKey]);
 
   useEffect(() => {
     if (isRenter !== null) return;
@@ -236,25 +247,18 @@ export default function PlansClient() {
     if (panel) setMobilePanel(panel);
   };
 
+  // Fetch a single large dataset once; all sort/filter/paging happens client-side.
   const baseParams = useMemo(() => {
     const params: Record<string, string> = {
-      q,
-      rateType,
-      term,
-      renewableMin: String(renewableMin),
-      template,
-      sort,
-      page: String(page),
-      pageSize: String(pageSize),
-      approxKwhPerMonth: String(approxKwhPerMonth),
+      dataset: "1",
+      pageSize: "2000",
+      sort: "kwh1000_asc",
       // Used only to force a reload after background prefetch runs.
       _r: String(refreshNonce),
     };
-    if (isRenter !== null) {
-      params.isRenter = String(isRenter);
-    }
+    if (isRenter !== null) params.isRenter = String(isRenter);
     return params;
-  }, [q, rateType, term, renewableMin, template, sort, page, pageSize, approxKwhPerMonth, refreshNonce, isRenter]);
+  }, [refreshNonce, isRenter]);
 
   const plansQueryString = useMemo(() => buildQuery(baseParams as any), [baseParams]);
 
@@ -389,14 +393,140 @@ export default function PlansClient() {
   }, [resp?.ok, resp?.hasUsage, resp?.offers, isRenter, loading, error]);
 
   const hasUsage = Boolean(resp?.ok && resp?.hasUsage);
-  const offers = Array.isArray(resp?.offers) ? resp!.offers! : [];
+  const datasetOffers = Array.isArray(resp?.offers) ? resp!.offers! : [];
   const avgMonthlyKwh =
     resp?.ok && typeof (resp as any)?.avgMonthlyKwh === "number" && Number.isFinite((resp as any).avgMonthlyKwh)
       ? ((resp as any).avgMonthlyKwh as number)
       : null;
-  const total = typeof resp?.total === "number" ? resp.total : 0;
-  const totalPages = typeof resp?.totalPages === "number" ? resp.totalPages : 0;
-  const hasUnavailable = offers.some((o: any) => o?.intelliwatt?.statusLabel === "UNAVAILABLE");
+
+  const normalizedQ = q.trim().toLowerCase();
+
+  const filteredSortedAll = useMemo(() => {
+    let out = datasetOffers.slice();
+
+    // Search
+    if (normalizedQ) {
+      out = out.filter((o: any) => {
+        const supplier = String(o?.supplierName ?? "").toLowerCase();
+        const plan = String(o?.planName ?? "").toLowerCase();
+        return supplier.includes(normalizedQ) || plan.includes(normalizedQ);
+      });
+    }
+
+    // Filters
+    if (rateType !== "all") {
+      out = out.filter((o: any) => {
+        const rt = String(o?.rateType ?? "").toUpperCase();
+        const renewablePct = typeof o?.renewablePercent === "number" && Number.isFinite(o.renewablePercent) ? (o.renewablePercent as number) : null;
+        if (rateType === "fixed") return rt === "FIXED";
+        if (rateType === "variable") return rt === "VARIABLE";
+        if (rateType === "renewable") return renewablePct != null && renewablePct >= 100;
+        if (rateType === "unknown") return !rt;
+        return true;
+      });
+    }
+
+    if (term !== "all") {
+      out = out.filter((o: any) => {
+        const m = typeof o?.termMonths === "number" && Number.isFinite(o.termMonths) ? (o.termMonths as number) : null;
+        if (m == null) return false;
+        if (term === "0-6") return m >= 0 && m <= 6;
+        if (term === "7-12") return m >= 7 && m <= 12;
+        if (term === "13-24") return m >= 13 && m <= 24;
+        if (term === "25+") return m >= 25;
+        return true;
+      });
+    }
+
+    if (renewableMin > 0) {
+      out = out.filter((o: any) => {
+        const p = typeof o?.renewablePercent === "number" && Number.isFinite(o.renewablePercent) ? (o.renewablePercent as number) : null;
+        return p != null && p >= renewableMin;
+      });
+    }
+
+    if (template === "available") {
+      out = out.filter((o: any) => String(o?.intelliwatt?.statusLabel ?? "") === "AVAILABLE");
+    }
+
+    // Sort
+    const withIdx = out.map((o, idx) => ({ o, idx }));
+
+    const numOrInf = (n: any) => {
+      const v = typeof n === "number" ? n : Number(n);
+      return Number.isFinite(v) ? v : Number.POSITIVE_INFINITY;
+    };
+
+    const numOrNegInf = (n: any) => {
+      const v = typeof n === "number" ? n : Number(n);
+      return Number.isFinite(v) ? v : Number.NEGATIVE_INFINITY;
+    };
+
+    const keyFn = (o: any) => {
+      if (sort === "term_asc") return numOrInf(o?.termMonths);
+      if (sort === "renewable_desc") return numOrNegInf(o?.renewablePercent);
+
+      if (sort === "best_for_you_proxy") {
+        if (hasUsage) {
+          const tce = o?.intelliwatt?.trueCostEstimate;
+          if (tce?.status !== "OK") return Number.POSITIVE_INFINITY;
+          return numOrInf(tce?.monthlyCostDollars);
+        }
+        const bucket = pickNearestEflBucket(approxKwhPerMonth ?? 1000);
+        return numOrInf(pickMetricCentsPerKwhForBucket(o, bucket as any));
+      }
+
+      if (sort === "kwh500_asc") return numOrInf(pickMetricCentsPerKwhForBucket(o, 500));
+      if (sort === "kwh2000_asc") return numOrInf(pickMetricCentsPerKwhForBucket(o, 2000));
+      // Default: 1000
+      return numOrInf(pickMetricCentsPerKwhForBucket(o, 1000));
+    };
+
+    withIdx.sort((a, b) => {
+      const ka = keyFn(a.o);
+      const kb = keyFn(b.o);
+      if (ka < kb) return -1;
+      if (ka > kb) return 1;
+      const pa = String(a.o?.planName ?? "").toLowerCase();
+      const pb = String(b.o?.planName ?? "").toLowerCase();
+      if (pa < pb) return -1;
+      if (pa > pb) return 1;
+      return a.idx - b.idx;
+    });
+
+    if (sort === "renewable_desc") {
+      withIdx.sort((a, b) => {
+        const ka = numOrNegInf(a.o?.renewablePercent);
+        const kb = numOrNegInf(b.o?.renewablePercent);
+        if (ka > kb) return -1;
+        if (ka < kb) return 1;
+        const pa = String(a.o?.planName ?? "").toLowerCase();
+        const pb = String(b.o?.planName ?? "").toLowerCase();
+        if (pa < pb) return -1;
+        if (pa > pb) return 1;
+        return a.idx - b.idx;
+      });
+    }
+
+    return withIdx.map((x) => x.o) as OfferRow[];
+  }, [datasetOffers, normalizedQ, rateType, term, renewableMin, template, sort, hasUsage, approxKwhPerMonth]);
+
+  const total = filteredSortedAll.length;
+  const totalPages = total === 0 ? 0 : Math.ceil(total / pageSize);
+  const safePage = totalPages === 0 ? 1 : Math.min(page, totalPages);
+
+  useEffect(() => {
+    if (totalPages === 0) return;
+    if (page > totalPages) setPage(totalPages);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [totalPages]);
+
+  const offers = useMemo(() => {
+    const startIdx = (safePage - 1) * pageSize;
+    return filteredSortedAll.slice(startIdx, startIdx + pageSize);
+  }, [filteredSortedAll, safePage, pageSize]);
+
+  const hasUnavailable = filteredSortedAll.some((o: any) => o?.intelliwatt?.statusLabel === "UNAVAILABLE");
   const availableFilterOn = template === "available";
 
   // Default sort:
@@ -413,17 +543,17 @@ export default function PlansClient() {
   const recommendedOfferId = useMemo(() => {
     if (!hasUsage) return null;
     if (sort !== "best_for_you_proxy") return null;
-    if (page !== 1) return null;
+    if (safePage !== 1) return null;
     const first = offers?.[0] as any;
     if (!first?.offerId) return null;
     const tce = first?.intelliwatt?.trueCostEstimate;
     if (!tce || tce.status !== "OK") return null;
     return String(first.offerId);
-  }, [hasUsage, sort, page, offers]);
+  }, [hasUsage, sort, safePage, offers]);
 
   const queuedCount = useMemo(
-    () => offers.filter((o: any) => o?.intelliwatt?.statusLabel === "QUEUED").length,
-    [offers],
+    () => filteredSortedAll.filter((o: any) => o?.intelliwatt?.statusLabel === "QUEUED").length,
+    [filteredSortedAll],
   );
   const isStillWorking = Boolean(loading || autoPreparing);
   const showRecommendedBadge = Boolean(recommendedOfferId && !isStillWorking);
@@ -1042,14 +1172,14 @@ export default function PlansClient() {
 
         <div className="mt-6 flex items-center justify-between gap-3">
           <button
-            disabled={loading || page <= 1 || totalPages <= 1}
+            disabled={loading || safePage <= 1 || totalPages <= 1}
             onClick={() => setPage((p) => Math.max(1, p - 1))}
             className="rounded-full border border-brand-cyan/25 bg-brand-navy px-4 py-2 text-sm font-semibold text-brand-cyan disabled:opacity-40"
           >
             Prev
           </button>
           <div className="text-sm text-brand-navy/70">
-            Page <span className="font-semibold text-brand-navy">{page}</span>
+            Page <span className="font-semibold text-brand-navy">{safePage}</span>
             {totalPages ? (
               <>
                 {" "}
@@ -1058,7 +1188,7 @@ export default function PlansClient() {
             ) : null}
           </div>
           <button
-            disabled={loading || totalPages === 0 || page >= totalPages}
+            disabled={loading || totalPages === 0 || safePage >= totalPages}
             onClick={() => setPage((p) => p + 1)}
             className="rounded-full border border-brand-cyan/25 bg-brand-navy px-4 py-2 text-sm font-semibold text-brand-cyan disabled:opacity-40"
           >
