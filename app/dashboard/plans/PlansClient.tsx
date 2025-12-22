@@ -171,7 +171,10 @@ export default function PlansClient() {
   // Lightweight client cache so back/forward navigation instantly shows the last processed results
   // instead of refetching + re-triggering server-side scoring work.
   const cacheKey = useMemo(() => `dashboard_plans_resp_v1:${datasetKey}`, [datasetKey]);
-  const cacheTtlMs = 5 * 60 * 1000;
+  // This is NOT the plan-engine cache (engine outputs are persisted in the WattBuy Offers DB).
+  // This is only a UX cache for the API response to avoid flashing loading states on navigation.
+  // Keep it long-lived; correctness still comes from server-side canonical inputs + DB-stored estimates.
+  const cacheTtlMs = 60 * 60 * 1000;
 
   useEffect(() => {
     try {
