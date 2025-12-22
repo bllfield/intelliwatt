@@ -92,6 +92,32 @@ type HouseUsage = {
 
 type UsageApiResponse = { ok: true; houses: HouseUsage[] } | { ok: false; error: string };
 
+type SessionCacheValue = { savedAt: number; payload: UsageApiResponse };
+const SESSION_KEY = "usage_dashboard_v1";
+const SESSION_TTL_MS = 60 * 60 * 1000; // UX cache only (real data lives in DB)
+
+function readSessionCache(): UsageApiResponse | null {
+  try {
+    const raw = sessionStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as SessionCacheValue;
+    if (!parsed?.savedAt || !parsed?.payload) return null;
+    if (Date.now() - parsed.savedAt > SESSION_TTL_MS) return null;
+    return parsed.payload;
+  } catch {
+    return null;
+  }
+}
+
+function writeSessionCache(payload: UsageApiResponse) {
+  try {
+    const v: SessionCacheValue = { savedAt: Date.now(), payload };
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify(v));
+  } catch {
+    // ignore
+  }
+}
+
 function formatMonthLabel(month: string) {
   const [y, m] = month.split("-");
   return `${m}/${y.slice(2)}`;
@@ -141,14 +167,27 @@ export const UsageDashboard: React.FC = () => {
     let cancelled = false;
     const load = async () => {
       try {
-        setLoading(true);
         setError(null);
-        const res = await fetch("/api/user/usage", { cache: "no-store" });
+
+        // Show cached payload instantly (back/forward nav), then refresh in the background.
+        const cached = readSessionCache();
+        if (cached && (cached as any).ok !== false && (cached as any).houses) {
+          const c = cached as { ok: true; houses: HouseUsage[] };
+          setHouses(c.houses || []);
+          const firstWithData = c.houses.find((h) => h.dataset);
+          setSelectedHouseId(firstWithData?.houseId ?? c.houses[0]?.houseId ?? null);
+          setLoading(false);
+        } else {
+          setLoading(true);
+        }
+
+        const res = await fetch("/api/user/usage");
         const json = (await res.json()) as UsageApiResponse;
         if (!res.ok || json.ok === false) {
           throw new Error((json as any).error || `Failed with status ${res.status}`);
         }
         if (cancelled) return;
+        writeSessionCache(json);
         setHouses(json.houses || []);
         const firstWithData = json.houses.find((h) => h.dataset);
         setSelectedHouseId(firstWithData?.houseId ?? json.houses[0]?.houseId ?? null);

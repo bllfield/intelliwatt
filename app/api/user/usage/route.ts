@@ -5,11 +5,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import { usagePrisma } from '@/lib/db/usageClient';
 import { normalizeEmail } from '@/lib/utils/email';
-import { computeInsights } from '@/lib/usage/computeInsights';
-import { NormalizedUsageRow } from '@/lib/usage/normalize';
 import { buildUsageBucketsForEstimate } from '@/lib/usage/buildUsageBucketsForEstimate';
-
-export const dynamic = 'force-dynamic';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -50,18 +46,8 @@ function decimalToNumber(value: Prisma.Decimal | number | null | undefined): num
   return Number(value);
 }
 
-function computeImportExportTotals(rows: Array<{ kwh: number }>): ImportExportTotals {
-  let importKwh = 0;
-  let exportKwh = 0;
-  for (const row of rows) {
-    if (row.kwh >= 0) importKwh += row.kwh;
-    else exportKwh += Math.abs(row.kwh);
-  }
-  return {
-    importKwh,
-    exportKwh,
-    netKwh: importKwh - exportKwh,
-  };
+function round2(n: number): number {
+  return Math.round((Number(n) || 0) * 100) / 100;
 }
 
 function toSeriesPoint(rows: Array<{ bucket: Date; kwh: number }>): UsageSeriesPoint[] {
@@ -103,6 +89,285 @@ function fillDailyGaps(points: UsageSeriesPoint[], startIso?: string | null, end
   return out;
 }
 
+async function computeImportExportTotalsFromDb(args: {
+  source: 'SMT' | 'GREEN_BUTTON';
+  esiid?: string | null;
+  houseId?: string | null;
+  rawId?: string | null;
+  cutoff: Date;
+}): Promise<ImportExportTotals> {
+  try {
+    if (args.source === 'SMT') {
+      const esiid = String(args.esiid ?? '').trim();
+      if (!esiid) return { importKwh: 0, exportKwh: 0, netKwh: 0 };
+
+      const rows = await prisma.$queryRaw<Array<{ importkwh: number; exportkwh: number }>>(Prisma.sql`
+        SELECT
+          COALESCE(SUM(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float, 0) AS importkwh,
+          COALESCE(SUM(CASE WHEN "kwh" < 0 THEN ABS("kwh") ELSE 0 END)::float, 0) AS exportkwh
+        FROM "SmtInterval"
+        WHERE "esiid" = ${esiid}
+          AND "ts" >= ${args.cutoff}
+      `);
+      const importKwh = round2(rows?.[0]?.importkwh ?? 0);
+      const exportKwh = round2(rows?.[0]?.exportkwh ?? 0);
+      return { importKwh, exportKwh, netKwh: round2(importKwh - exportKwh) };
+    }
+
+    const usageClient = usagePrisma as any;
+    const houseId = String(args.houseId ?? '').trim();
+    const rawId = String(args.rawId ?? '').trim();
+    if (!houseId || !rawId) return { importKwh: 0, exportKwh: 0, netKwh: 0 };
+
+    const rows = (await usageClient.$queryRaw(Prisma.sql`
+      SELECT
+        COALESCE(SUM(CASE WHEN "consumptionKwh" >= 0 THEN "consumptionKwh" ELSE 0 END)::float, 0) AS importkwh,
+        COALESCE(SUM(CASE WHEN "consumptionKwh" < 0 THEN ABS("consumptionKwh") ELSE 0 END)::float, 0) AS exportkwh
+      FROM "GreenButtonInterval"
+      WHERE "homeId" = ${houseId}
+        AND "rawId" = ${rawId}
+        AND "timestamp" >= ${args.cutoff}
+    `)) as Array<{ importkwh: number; exportkwh: number }>;
+    const importKwh = round2(rows?.[0]?.importkwh ?? 0);
+    const exportKwh = round2(rows?.[0]?.exportkwh ?? 0);
+    return { importKwh, exportKwh, netKwh: round2(importKwh - exportKwh) };
+  } catch {
+    return { importKwh: 0, exportKwh: 0, netKwh: 0 };
+  }
+}
+
+async function computeInsightsFromDb(args: {
+  source: 'SMT' | 'GREEN_BUTTON';
+  esiid?: string | null;
+  houseId?: string | null;
+  rawId?: string | null;
+  cutoff: Date;
+}): Promise<{
+  dailyTotals: Array<{ date: string; kwh: number }>;
+  monthlyTotals: Array<{ month: string; kwh: number }>;
+  fifteenMinuteAverages: Array<{ hhmm: string; avgKw: number }>;
+  peakDay: { date: string; kwh: number } | null;
+  peakHour: { hour: number; kw: number } | null;
+  baseload: number | null;
+  weekdayVsWeekend: { weekday: number; weekend: number };
+}> {
+  const empty = {
+    dailyTotals: [] as Array<{ date: string; kwh: number }>,
+    monthlyTotals: [] as Array<{ month: string; kwh: number }>,
+    fifteenMinuteAverages: [] as Array<{ hhmm: string; avgKw: number }>,
+    peakDay: null as { date: string; kwh: number } | null,
+    peakHour: null as { hour: number; kw: number } | null,
+    baseload: null as number | null,
+    weekdayVsWeekend: { weekday: 0, weekend: 0 },
+  };
+
+  try {
+    if (args.source === 'SMT') {
+      const esiid = String(args.esiid ?? '').trim();
+      if (!esiid) return empty;
+
+      const dailyRows = await prisma.$queryRaw<Array<{ date: string; kwh: number }>>(Prisma.sql`
+        SELECT
+          to_char(("ts" AT TIME ZONE 'America/Chicago')::date, 'YYYY-MM-DD') AS date,
+          SUM("kwh")::float AS kwh
+        FROM "SmtInterval"
+        WHERE "esiid" = ${esiid}
+          AND "ts" >= ${args.cutoff}
+        GROUP BY 1
+        ORDER BY 1 ASC
+      `);
+      const dailyTotals = dailyRows.map((r) => ({ date: String(r.date), kwh: round2(r.kwh) }));
+      const peakDay =
+        dailyTotals.length > 0 ? dailyTotals.reduce((a, b) => (b.kwh > a.kwh ? b : a)) : null;
+
+      const monthlyRows = await prisma.$queryRaw<Array<{ month: string; kwh: number }>>(Prisma.sql`
+        SELECT
+          to_char(date_trunc('month', "ts")::date, 'YYYY-MM') AS month,
+          SUM("kwh")::float AS kwh
+        FROM "SmtInterval"
+        WHERE "esiid" = ${esiid}
+          AND "ts" >= ${args.cutoff}
+        GROUP BY 1
+        ORDER BY 1 ASC
+      `);
+      const monthlyTotals = monthlyRows.map((r) => ({ month: String(r.month), kwh: round2(r.kwh) }));
+
+      const fifteenRows = await prisma.$queryRaw<Array<{ hhmm: string; avgkw: number }>>(Prisma.sql`
+        SELECT
+          to_char("ts", 'HH24:MI') AS hhmm,
+          AVG(("kwh" * 4))::float AS avgkw
+        FROM "SmtInterval"
+        WHERE "esiid" = ${esiid}
+          AND "ts" >= ${args.cutoff}
+        GROUP BY 1
+        ORDER BY 1 ASC
+      `);
+      const fifteenMinuteAverages = fifteenRows.map((r) => ({ hhmm: String(r.hhmm), avgKw: round2(r.avgkw) }));
+
+      const peakHourRows = await prisma.$queryRaw<Array<{ hour: number; sumkwh: number }>>(Prisma.sql`
+        SELECT
+          EXTRACT(HOUR FROM "ts")::int AS hour,
+          SUM("kwh")::float AS sumkwh
+        FROM "SmtInterval"
+        WHERE "esiid" = ${esiid}
+          AND "ts" >= ${args.cutoff}
+        GROUP BY 1
+        ORDER BY sumkwh DESC
+        LIMIT 1
+      `);
+      const peakHour = peakHourRows?.[0]
+        ? { hour: Number(peakHourRows[0].hour), kw: round2(Number(peakHourRows[0].sumkwh) * 4) }
+        : null;
+
+      const baseloadRows = await prisma.$queryRaw<Array<{ baseload: number | null }>>(Prisma.sql`
+        WITH t AS (
+          SELECT ("kwh" * 4)::float AS kw
+          FROM "SmtInterval"
+          WHERE "esiid" = ${esiid}
+            AND "ts" >= ${args.cutoff}
+        ),
+        p AS (
+          SELECT percentile_cont(0.10) WITHIN GROUP (ORDER BY kw) AS p10
+          FROM t
+        )
+        SELECT AVG(t.kw)::float AS baseload
+        FROM t, p
+        WHERE t.kw <= p.p10
+      `);
+      const baseload = baseloadRows?.[0]?.baseload === null || baseloadRows?.[0]?.baseload === undefined
+        ? null
+        : round2(Number(baseloadRows[0].baseload));
+
+      const dowRows = await prisma.$queryRaw<Array<{ weekdaykwh: number; weekendkwh: number }>>(Prisma.sql`
+        SELECT
+          COALESCE(SUM(CASE WHEN EXTRACT(DOW FROM "ts") IN (0,6) THEN 0 ELSE "kwh" END)::float, 0) AS weekdaykwh,
+          COALESCE(SUM(CASE WHEN EXTRACT(DOW FROM "ts") IN (0,6) THEN "kwh" ELSE 0 END)::float, 0) AS weekendkwh
+        FROM "SmtInterval"
+        WHERE "esiid" = ${esiid}
+          AND "ts" >= ${args.cutoff}
+      `);
+      const weekday = round2(dowRows?.[0]?.weekdaykwh ?? 0);
+      const weekend = round2(dowRows?.[0]?.weekendkwh ?? 0);
+
+      return {
+        dailyTotals,
+        monthlyTotals,
+        fifteenMinuteAverages,
+        peakDay,
+        peakHour,
+        baseload,
+        weekdayVsWeekend: { weekday, weekend },
+      };
+    }
+
+    const usageClient = usagePrisma as any;
+    const houseId = String(args.houseId ?? '').trim();
+    const rawId = String(args.rawId ?? '').trim();
+    if (!houseId || !rawId) return empty;
+
+    const dailyRows = (await usageClient.$queryRaw(Prisma.sql`
+      SELECT
+        to_char(("timestamp" AT TIME ZONE 'America/Chicago')::date, 'YYYY-MM-DD') AS date,
+        SUM("consumptionKwh")::float AS kwh
+      FROM "GreenButtonInterval"
+      WHERE "homeId" = ${houseId}
+        AND "rawId" = ${rawId}
+        AND "timestamp" >= ${args.cutoff}
+      GROUP BY 1
+      ORDER BY 1 ASC
+    `)) as Array<{ date: string; kwh: number }>;
+    const dailyTotals = dailyRows.map((r) => ({ date: String(r.date), kwh: round2(r.kwh) }));
+    const peakDay =
+      dailyTotals.length > 0 ? dailyTotals.reduce((a, b) => (b.kwh > a.kwh ? b : a)) : null;
+
+    const monthlyRows = (await usageClient.$queryRaw(Prisma.sql`
+      SELECT
+        to_char(date_trunc('month', "timestamp")::date, 'YYYY-MM') AS month,
+        SUM("consumptionKwh")::float AS kwh
+      FROM "GreenButtonInterval"
+      WHERE "homeId" = ${houseId}
+        AND "rawId" = ${rawId}
+        AND "timestamp" >= ${args.cutoff}
+      GROUP BY 1
+      ORDER BY 1 ASC
+    `)) as Array<{ month: string; kwh: number }>;
+    const monthlyTotals = monthlyRows.map((r) => ({ month: String(r.month), kwh: round2(r.kwh) }));
+
+    const fifteenRows = (await usageClient.$queryRaw(Prisma.sql`
+      SELECT
+        to_char("timestamp", 'HH24:MI') AS hhmm,
+        AVG(("consumptionKwh" * 4))::float AS avgkw
+      FROM "GreenButtonInterval"
+      WHERE "homeId" = ${houseId}
+        AND "rawId" = ${rawId}
+        AND "timestamp" >= ${args.cutoff}
+      GROUP BY 1
+      ORDER BY 1 ASC
+    `)) as Array<{ hhmm: string; avgkw: number }>;
+    const fifteenMinuteAverages = fifteenRows.map((r) => ({ hhmm: String(r.hhmm), avgKw: round2(r.avgkw) }));
+
+    const peakHourRows = (await usageClient.$queryRaw(Prisma.sql`
+      SELECT
+        EXTRACT(HOUR FROM "timestamp")::int AS hour,
+        SUM("consumptionKwh")::float AS sumkwh
+      FROM "GreenButtonInterval"
+      WHERE "homeId" = ${houseId}
+        AND "rawId" = ${rawId}
+        AND "timestamp" >= ${args.cutoff}
+      GROUP BY 1
+      ORDER BY sumkwh DESC
+      LIMIT 1
+    `)) as Array<{ hour: number; sumkwh: number }>;
+    const peakHour = peakHourRows?.[0]
+      ? { hour: Number(peakHourRows[0].hour), kw: round2(Number(peakHourRows[0].sumkwh) * 4) }
+      : null;
+
+    const baseloadRows = (await usageClient.$queryRaw(Prisma.sql`
+      WITH t AS (
+        SELECT ("consumptionKwh" * 4)::float AS kw
+        FROM "GreenButtonInterval"
+        WHERE "homeId" = ${houseId}
+          AND "rawId" = ${rawId}
+          AND "timestamp" >= ${args.cutoff}
+      ),
+      p AS (
+        SELECT percentile_cont(0.10) WITHIN GROUP (ORDER BY kw) AS p10
+        FROM t
+      )
+      SELECT AVG(t.kw)::float AS baseload
+      FROM t, p
+      WHERE t.kw <= p.p10
+    `)) as Array<{ baseload: number | null }>;
+    const baseload = baseloadRows?.[0]?.baseload === null || baseloadRows?.[0]?.baseload === undefined
+      ? null
+      : round2(Number(baseloadRows[0].baseload));
+
+    const dowRows = (await usageClient.$queryRaw(Prisma.sql`
+      SELECT
+        COALESCE(SUM(CASE WHEN EXTRACT(DOW FROM "timestamp") IN (0,6) THEN 0 ELSE "consumptionKwh" END)::float, 0) AS weekdaykwh,
+        COALESCE(SUM(CASE WHEN EXTRACT(DOW FROM "timestamp") IN (0,6) THEN "consumptionKwh" ELSE 0 END)::float, 0) AS weekendkwh
+      FROM "GreenButtonInterval"
+      WHERE "homeId" = ${houseId}
+        AND "rawId" = ${rawId}
+        AND "timestamp" >= ${args.cutoff}
+    `)) as Array<{ weekdaykwh: number; weekendkwh: number }>;
+    const weekday = round2(dowRows?.[0]?.weekdaykwh ?? 0);
+    const weekend = round2(dowRows?.[0]?.weekendkwh ?? 0);
+
+    return {
+      dailyTotals,
+      monthlyTotals,
+      fifteenMinuteAverages,
+      peakDay,
+      peakHour,
+      baseload,
+      weekdayVsWeekend: { weekday, weekend },
+    };
+  } catch {
+    return empty;
+  }
+}
+
 async function getGreenButtonWindow(usageClient: any, houseId: string, rawId: string) {
   const latest = await usageClient.greenButtonInterval.findFirst({
     where: { homeId: houseId, rawId },
@@ -128,89 +393,6 @@ async function getSmtWindow(esiid: string) {
   // Align SMT display window to the last 12 months (match Green Button behavior)
   const cutoff = new Date(latest.ts.getTime() - 365 * DAY_MS);
   return { latest: latest.ts, cutoff };
-}
-
-async function fetchNormalizedIntervals(
-  source: 'SMT' | 'GREEN_BUTTON',
-  houseId: string,
-  esiid: string | null,
-): Promise<NormalizedUsageRow[]> {
-  if (source === 'SMT') {
-    if (!esiid) return [];
-
-    const window = await getSmtWindow(esiid);
-    if (!window) return [];
-
-    const rows = await prisma.smtInterval.findMany({
-      where: {
-        esiid,
-        ts: { gte: window.cutoff },
-      },
-      orderBy: { ts: 'asc' },
-      select: {
-        id: true,
-        esiid: true,
-        meter: true,
-        ts: true,
-        kwh: true,
-        source: true,
-      },
-    });
-
-    return rows.map((row) => ({
-      houseId,
-      esiid: row.esiid,
-      meter: row.meter,
-      timestamp: row.ts,
-      kwh: decimalToNumber(row.kwh),
-      source: row.source ?? 'smt',
-      rawSourceId: row.id,
-    }));
-  }
-
-  const usageClient = usagePrisma as any;
-  const latestRaw = await usageClient.rawGreenButton.findFirst({
-    where: { homeId: houseId },
-    orderBy: { createdAt: 'desc' },
-    select: { id: true },
-  });
-
-  if (!latestRaw) {
-    return [];
-  }
-
-  const window = await getGreenButtonWindow(usageClient, houseId, latestRaw.id);
-  if (!window) return [];
-
-  const rows = (await usageClient.greenButtonInterval.findMany({
-    where: { homeId: houseId, rawId: latestRaw.id, timestamp: { gte: window.cutoff } },
-    orderBy: { timestamp: 'asc' },
-    select: {
-      id: true,
-      rawId: true,
-      homeId: true,
-      timestamp: true,
-      consumptionKwh: true,
-      userId: true,
-    },
-  })) as Array<{
-    id: string;
-    rawId: string | null;
-    homeId: string | null;
-    timestamp: Date;
-    consumptionKwh: Prisma.Decimal | number;
-    userId: string | null;
-  }>;
-
-  return rows.map((row) => ({
-    houseId: row.homeId ?? houseId,
-    esiid: null,
-    meter: 'green_button',
-    timestamp: row.timestamp,
-    kwh: decimalToNumber(row.consumptionKwh),
-    source: 'green_button',
-    rawSourceId: row.rawId ?? row.id,
-  }));
 }
 
 async function fetchSmtDataset(esiid: string | null): Promise<UsageDatasetResult | null> {
@@ -479,22 +661,6 @@ export async function GET(_request: NextRequest) {
       const greenDataset = await fetchGreenButtonDataset(house.id);
       const selected = chooseDataset(smtDataset, greenDataset);
 
-      let intervals: NormalizedUsageRow[] = [];
-      if (selected?.summary?.source) {
-        intervals = await fetchNormalizedIntervals(selected.summary.source, house.id, house.esiid ?? null);
-      }
-
-      const insights = intervals.length > 0 ? computeInsights(intervals) : null;
-      const intervalsPayload = (insights?.intervals ?? intervals).map((row) => ({
-        houseId: row.houseId,
-        esiid: row.esiid,
-        meter: row.meter,
-        timestamp: row.timestamp.toISOString(),
-        kwh: row.kwh,
-        source: row.source,
-        rawSourceId: row.rawSourceId,
-      }));
-
       // Canonical monthly totals (stitched 12-month billing window) for SMT homes.
       // This MUST match the plan engine's stitched window so month totals (e.g., Dec) are identical everywhere.
       let stitchedMonthlyTotals: Array<{ month: string; kwh: number }> | null = null;
@@ -529,25 +695,70 @@ export async function GET(_request: NextRequest) {
         stitchedMonthMeta = null;
       }
 
+      // Insights: compute using DB-side aggregations (avoid pulling 365 days of 15-minute intervals into JS).
+      let insights: any | null = null;
+      let dailyTotals: Array<{ date: string; kwh: number }> = [];
+      let monthlyTotals: Array<{ month: string; kwh: number }> = [];
+      let totals: ImportExportTotals = { importKwh: 0, exportKwh: 0, netKwh: 0 };
+      try {
+        const latestIso = selected?.summary?.latest ?? null;
+        const latest = latestIso ? new Date(latestIso) : null;
+        if (selected?.summary?.source && latest && Number.isFinite(latest.getTime())) {
+          const cutoff = new Date(latest.getTime() - 365 * DAY_MS);
+
+          let rawId: string | null = null;
+          if (selected.summary.source === 'GREEN_BUTTON') {
+            const usageClient = usagePrisma as any;
+            const latestRaw = await usageClient.rawGreenButton.findFirst({
+              where: { homeId: house.id },
+              orderBy: { createdAt: 'desc' },
+              select: { id: true },
+            });
+            rawId = latestRaw?.id ?? null;
+          }
+
+          const computed = await computeInsightsFromDb({
+            source: selected.summary.source,
+            esiid: house.esiid ?? null,
+            houseId: house.id,
+            rawId,
+            cutoff,
+          });
+          dailyTotals = computed.dailyTotals;
+          monthlyTotals = computed.monthlyTotals;
+          totals = await computeImportExportTotalsFromDb({
+            source: selected.summary.source,
+            esiid: house.esiid ?? null,
+            houseId: house.id,
+            rawId,
+            cutoff,
+          });
+
+          insights = {
+            fifteenMinuteAverages: computed.fifteenMinuteAverages,
+            ...(stitchedMonthMeta ? { stitchedMonth: stitchedMonthMeta } : {}),
+            peakDay: computed.peakDay,
+            peakHour: computed.peakHour,
+            baseload: computed.baseload,
+            weekdayVsWeekend: computed.weekdayVsWeekend,
+          };
+        }
+      } catch {
+        insights = null;
+        dailyTotals = [];
+        monthlyTotals = [];
+        totals = { importKwh: 0, exportKwh: 0, netKwh: 0 };
+      }
+
       const dataset = selected
         ? {
             summary: selected.summary,
             series: selected.series,
-            intervals: intervalsPayload,
-            daily: insights?.dailyTotals ?? [],
+            daily: dailyTotals ?? [],
             // Prefer stitched 12-month totals (plan-engine canonical); fall back to strict interval-derived totals.
-            monthly: stitchedMonthlyTotals ?? insights?.monthlyTotals ?? [],
-            insights: insights
-              ? {
-                  fifteenMinuteAverages: insights.fifteenMinuteAverages,
-                  ...(stitchedMonthMeta ? { stitchedMonth: stitchedMonthMeta } : {}),
-                  peakDay: insights.peakDay,
-                  peakHour: insights.peakHour,
-                  baseload: insights.baseload,
-                  weekdayVsWeekend: insights.weekdayVsWeekend,
-                }
-              : null,
-            totals: computeImportExportTotals(insights?.intervals ?? intervals),
+            monthly: stitchedMonthlyTotals ?? monthlyTotals ?? [],
+            insights,
+            totals,
           }
         : null;
 
@@ -568,10 +779,18 @@ export async function GET(_request: NextRequest) {
       });
     }
 
-    return NextResponse.json({
-      ok: true,
-      houses: results,
-    });
+    return NextResponse.json(
+      {
+        ok: true,
+        houses: results,
+      },
+      {
+        headers: {
+          // Browser/private caching only; user-specific (cookie auth). This just reduces repeated fetches.
+          'Cache-Control': 'private, max-age=60, stale-while-revalidate=600',
+        },
+      },
+    );
   } catch (error) {
     console.error('[user/usage] failed to fetch usage dataset', error);
     return NextResponse.json({ ok: false, error: 'Internal error' }, { status: 500 });
