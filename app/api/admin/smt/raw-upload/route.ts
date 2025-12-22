@@ -5,6 +5,7 @@ import { usagePrisma } from '@/lib/db/usageClient';
 import { ensureCoreMonthlyBuckets } from '@/lib/usage/aggregateMonthlyBuckets';
 import { normalizeSmtIntervals } from '@/app/lib/smt/normalize';
 import { requireAdmin } from '@/lib/auth/admin';
+import { runPlanPipelineForHome } from '@/lib/plan-engine/runPlanPipelineForHome';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300; // allow large SMT raw uploads
@@ -320,6 +321,26 @@ export async function POST(req: NextRequest) {
                 }
               } catch (bucketErr) {
                 console.error('[raw-upload:inline] CORE bucket aggregation failed (best-effort)', bucketErr);
+              }
+
+              // Proactive: any usage being present should trigger the plans pipeline (best-effort, bounded).
+              // This fills template mappings + plan-engine estimate cache so /dashboard/plans is instant later.
+              try {
+                for (const h of houses) {
+                  if (!h?.id) continue;
+                  await runPlanPipelineForHome({
+                    homeId: h.id,
+                    reason: 'usage_present',
+                    isRenter: false,
+                    timeBudgetMs: 7000,
+                    maxTemplateOffers: 2,
+                    maxEstimatePlans: 12,
+                    monthlyCadenceDays: 30,
+                    proactiveCooldownMs: 10 * 60 * 1000,
+                  });
+                }
+              } catch (pipelineErr) {
+                console.error('[raw-upload:inline] plan pipeline failed (best-effort)', pipelineErr);
               }
             } catch (err) {
               console.error('[raw-upload:inline] failed to cleanup green-button/manual data for ESIID(s)', {

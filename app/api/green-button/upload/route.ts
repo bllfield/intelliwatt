@@ -10,6 +10,7 @@ import { normalizeEmail } from "@/lib/utils/email";
 import { parseGreenButtonBuffer } from "@/lib/usage/greenButtonParser";
 import { normalizeGreenButtonReadingsTo15Min } from "@/lib/usage/greenButtonNormalize";
 import { ensureCoreMonthlyBuckets } from "@/lib/usage/aggregateMonthlyBuckets";
+import { runPlanPipelineForHome } from "@/lib/plan-engine/runPlanPipelineForHome";
 
 // No explicit upload cap; rely on platform limits. Large files are allowed to ensure full 12-month coverage.
 const MANUAL_USAGE_LIFETIME_DAYS = 365;
@@ -246,6 +247,23 @@ export async function POST(request: Request) {
         }
       } catch (bucketErr) {
         console.error("[green-button/upload] CORE bucket aggregation failed (best-effort)", bucketErr);
+      }
+
+      // Proactive: any usage being present should trigger the plans pipeline (best-effort, bounded).
+      // This fills template mappings + plan-engine estimate cache so /dashboard/plans is instant later.
+      try {
+        await runPlanPipelineForHome({
+          homeId: house.id,
+          reason: "usage_present",
+          isRenter: false,
+          timeBudgetMs: 7000,
+          maxTemplateOffers: 2,
+          maxEstimatePlans: 12,
+          monthlyCadenceDays: 30,
+          proactiveCooldownMs: 10 * 60 * 1000,
+        });
+      } catch (pipelineErr) {
+        console.error("[green-button/upload] plan pipeline failed (best-effort)", pipelineErr);
       }
 
       const totalKwh = trimmed.reduce((sum, row) => sum + row.consumptionKwh, 0);

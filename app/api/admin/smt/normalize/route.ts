@@ -6,6 +6,7 @@ import { prisma } from '@/lib/db';
 import { usagePrisma } from '@/lib/db/usageClient';
 import { ensureCoreMonthlyBuckets } from '@/lib/usage/aggregateMonthlyBuckets';
 import { normalizeSmtIntervals, type NormalizeStats } from '@/app/lib/smt/normalize';
+import { runPlanPipelineForHome } from '@/lib/plan-engine/runPlanPipelineForHome';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -459,6 +460,26 @@ export async function POST(req: NextRequest) {
               source: "SMT",
               intervalSource: "SMT",
             });
+          }
+
+          // Proactive: any usage being present should trigger the plans pipeline (best-effort, bounded).
+          // This fills template mappings + plan-engine estimate cache so /dashboard/plans is instant later.
+          try {
+            for (const h of houses) {
+              if (!h?.id) continue;
+              await runPlanPipelineForHome({
+                homeId: h.id,
+                reason: 'usage_present',
+                isRenter: false,
+                timeBudgetMs: 7000,
+                maxTemplateOffers: 2,
+                maxEstimatePlans: 12,
+                monthlyCadenceDays: 30,
+                proactiveCooldownMs: 10 * 60 * 1000,
+              });
+            }
+          } catch (pipelineErr) {
+            console.error('[smt/normalize] plan pipeline failed (best-effort)', pipelineErr);
           }
         } catch (bucketErr) {
           console.error('[smt/normalize] CORE bucket aggregation failed (best-effort)', bucketErr);

@@ -8,6 +8,7 @@ import { parseGreenButtonBuffer } from "@/lib/usage/greenButtonParser";
 import { normalizeGreenButtonReadingsTo15Min } from "@/lib/usage/greenButtonNormalize";
 import { usagePrisma } from "@/lib/db/usageClient";
 import { ensureCoreMonthlyBuckets } from "@/lib/usage/aggregateMonthlyBuckets";
+import { runPlanPipelineForHome } from "@/lib/plan-engine/runPlanPipelineForHome";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs"; // ensure Node runtime so Buffer/crypto and larger payloads work
@@ -197,6 +198,22 @@ export async function POST(request: NextRequest) {
     } catch (bucketErr) {
       console.error("[admin/green-button/upload] CORE bucket aggregation failed (best-effort)", bucketErr);
     }
+
+      // Proactive: any usage being present should trigger the plans pipeline (best-effort, bounded).
+      try {
+        await runPlanPipelineForHome({
+          homeId: houseId,
+          reason: "usage_present",
+          isRenter: false,
+          timeBudgetMs: 7000,
+          maxTemplateOffers: 2,
+          maxEstimatePlans: 12,
+          monthlyCadenceDays: 30,
+          proactiveCooldownMs: 10 * 60 * 1000,
+        });
+      } catch (pipelineErr) {
+        console.error("[admin/green-button/upload] plan pipeline failed (best-effort)", pipelineErr);
+      }
 
     const totalKwh = trimmed.reduce((sum, row) => sum + row.consumptionKwh, 0);
     const earliest = trimmed[0]?.timestamp ?? null;
