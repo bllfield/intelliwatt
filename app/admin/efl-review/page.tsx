@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from 'react';
 
 type QueueItem = any;
 
+const FACTCARDS_PREFILL_KEY = 'iw_factcards_prefill_v1';
+
 function useLocalToken(key = 'iw_admin_token') {
   const [token, setToken] = useState('');
   useEffect(() => {
@@ -38,6 +40,36 @@ async function copyToClipboard(text: string) {
     return true;
   } catch {
     return false;
+  }
+}
+
+function openInFactCards(args: { eflUrl?: string | null; offerId?: string | null; rawText?: string | null }) {
+  const eflUrl = String(args.eflUrl ?? '').trim();
+  const offerId = String(args.offerId ?? '').trim();
+  const rawText = String(args.rawText ?? '');
+
+  // Preferred path: URL deep-link (small + shareable).
+  if (eflUrl) {
+    const sp = new URLSearchParams({ eflUrl });
+    if (offerId) sp.set('offerId', offerId);
+    window.location.href = `/admin/efl/fact-cards?${sp.toString()}`;
+    return;
+  }
+
+  // Fallback: store rawText locally and open fact-cards. This lets current-plan queue items (often missing eflUrl)
+  // be resolved using the exact same engine, without copying any solver logic.
+  if (rawText.trim()) {
+    try {
+      const payload = {
+        t: Date.now(),
+        rawText,
+        offerId: offerId || null,
+      };
+      window.localStorage.setItem(FACTCARDS_PREFILL_KEY, JSON.stringify(payload));
+    } catch {
+      // ignore storage failures
+    }
+    window.location.href = `/admin/efl/fact-cards?prefill=local`;
   }
 }
 
@@ -339,6 +371,7 @@ export default function EflReviewPage() {
                     const queueReason: string | undefined = item.queueReason ?? undefined;
                     const isResolved = Boolean(item.resolvedAt);
                     const eflUrl: string = typeof item.eflUrl === 'string' ? item.eflUrl : '';
+                    const canOpenFactCards = Boolean(eflUrl || String(item?.rawText ?? '').trim());
                     return (
                       <tr key={id} className="border-t align-top">
                         <td className="px-2 py-1">{item.supplier ?? '—'}</td>
@@ -423,6 +456,27 @@ export default function EflReviewPage() {
                         </td>
                         <td className="px-2 py-1">
                           <div className="flex flex-col gap-1">
+                            <button
+                              type="button"
+                              disabled={!canOpenFactCards}
+                              onClick={() =>
+                                openInFactCards({
+                                  eflUrl: eflUrl || null,
+                                  offerId: item.offerId ?? null,
+                                  rawText: !eflUrl ? (item?.rawText ?? null) : null,
+                                })
+                              }
+                              className="rounded border bg-white px-2 py-0.5 text-[11px] font-medium hover:bg-gray-50 disabled:opacity-60"
+                              title={
+                                eflUrl
+                                  ? 'Open in /admin/efl/fact-cards (URL runner)'
+                                  : canOpenFactCards
+                                    ? 'Open in /admin/efl/fact-cards (raw-text runner)'
+                                    : 'No EFL URL or raw text available to open'
+                              }
+                            >
+                              Open in Fact Cards
+                            </button>
                             <details className="rounded border bg-white px-2 py-1">
                               <summary className="cursor-pointer text-[11px] font-medium">
                                 View details

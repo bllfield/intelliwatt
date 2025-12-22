@@ -181,8 +181,30 @@ export default function FactCardOpsPage() {
     try {
       const sp = new URLSearchParams(window.location.search);
       const u = (sp.get("eflUrl") ?? "").trim();
-      if (!u) return;
       const oid = (sp.get("offerId") ?? "").trim();
+
+      // LocalStorage prefill: used by /admin/efl-review when queue items don't have an eflUrl (common for current-plan uploads).
+      // This avoids passing long rawText through query params and still reuses the exact same manual runner/engine.
+      const prefillLocal = (sp.get("prefill") ?? "").trim().toLowerCase() === "local";
+      if (prefillLocal) {
+        try {
+          const raw = window.localStorage.getItem("iw_factcards_prefill_v1");
+          if (raw) {
+            const parsed = JSON.parse(raw) as any;
+            const rawText = typeof parsed?.rawText === "string" ? parsed.rawText : "";
+            const offerId = typeof parsed?.offerId === "string" ? parsed.offerId : (oid || null);
+            if (rawText.trim()) {
+              loadIntoManual({ rawText, offerId });
+              window.localStorage.removeItem("iw_factcards_prefill_v1");
+              return;
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      if (!u) return;
       loadIntoManual({ eflUrl: u, offerId: oid || null });
     } catch {
       // ignore
