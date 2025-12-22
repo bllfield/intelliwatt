@@ -302,14 +302,69 @@ export default function PlanDetailsClient({ offerId }: { offerId: string }) {
               </div>
             ) : (
               <>
+                {(() => {
+                  const rows = Array.isArray(monthlyBreakdown?.rows) ? (monthlyBreakdown.rows as any[]) : [];
+                  const repBuckets = Array.isArray(monthlyBreakdown?.repBuckets) ? (monthlyBreakdown.repBuckets as any[]) : [];
+                  const sumNum = (v: any) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+                  const byBucket = new Map<string, { kwh: number; dollars: number }>();
+                  for (const b of repBuckets) {
+                    const key = String((b as any)?.bucketKey ?? "");
+                    if (!key) continue;
+                    byBucket.set(key, { kwh: 0, dollars: 0 });
+                  }
+
+                  let totalKwh = 0;
+                  let tdspDelivery = 0;
+                  let repFixed = 0;
+                  let tdspFixed = 0;
+                  let credits = 0;
+                  let minUsageFee = 0;
+                  let minBillTopUp = 0;
+                  let monthTotals = 0;
+                  let tdspPerKwh: number | null = null;
+
+                  for (const r of rows) {
+                    totalKwh += sumNum(r?.bucketTotalKwh);
+                    tdspDelivery += sumNum(r?.tdsp?.deliveryDollars);
+                    repFixed += sumNum(r?.repFixedMonthlyChargeDollars);
+                    tdspFixed += sumNum(r?.tdsp?.monthlyCustomerChargeDollars);
+                    credits += sumNum(r?.creditsDollars);
+                    minUsageFee += sumNum(r?.minimumUsageFeeDollars);
+                    minBillTopUp += sumNum(r?.minimumBillTopUpDollars);
+                    monthTotals += sumNum(r?.totalDollars);
+                    if (tdspPerKwh == null && typeof r?.tdsp?.perKwhDeliveryChargeCents === "number" && Number.isFinite(r.tdsp.perKwhDeliveryChargeCents)) {
+                      tdspPerKwh = r.tdsp.perKwhDeliveryChargeCents as number;
+                    }
+
+                    const repLines = Array.isArray(r?.repBuckets) ? (r.repBuckets as any[]) : [];
+                    for (const x of repLines) {
+                      const key = String(x?.bucketKey ?? "");
+                      if (!key || !byBucket.has(key)) continue;
+                      const agg = byBucket.get(key)!;
+                      agg.kwh += sumNum(x?.kwh);
+                      agg.dollars += sumNum(x?.repCostDollars);
+                    }
+                  }
+
+                  const annualFromRows = sumNum(monthlyBreakdown?.totals?.annualFromRows);
+                  const expectedAnnual = sumNum(outputs?.trueCostEstimate?.annualCostDollars);
+                  const monthlyFromRows = annualFromRows ? annualFromRows / 12 : 0;
+                  const expectedMonthly = expectedAnnual ? expectedAnnual / 12 : 0;
+
+                  return (
+                    <>
                 <div className="mt-2 text-xs text-brand-cyan/60">
-                  Totals check:{" "}
-                  <span className="font-mono">
-                    rows={String(monthlyBreakdown?.monthsCount ?? "—")} annualFromRows=${fmtNum(monthlyBreakdown?.totals?.annualFromRows, 2)}
-                    {typeof monthlyBreakdown?.totals?.deltaCents === "number"
-                      ? ` deltaCents=${String(monthlyBreakdown.totals.deltaCents)}`
-                      : ""}
-                  </span>
+                  <div className="font-mono">
+                    rows={String(monthlyBreakdown?.monthsCount ?? "—")}
+                    {" · "}sum(month totals)=${fmtNum(monthTotals, 2)}
+                    {" · "}annualFromRows=${fmtNum(annualFromRows, 2)}
+                    {" · "}expectedAnnual=${fmtNum(expectedAnnual, 2)}
+                    {typeof monthlyBreakdown?.totals?.deltaCents === "number" ? ` · deltaCents=${String(monthlyBreakdown.totals.deltaCents)}` : ""}
+                  </div>
+                  <div className="font-mono mt-1">
+                    monthlyFromRows=${fmtNum(monthlyFromRows, 2)} (annualFromRows/12)
+                    {" · "}expectedMonthly=${fmtNum(expectedMonthly, 2)} (expectedAnnual/12)
+                  </div>
                 </div>
 
                 <div className="mt-3 overflow-auto rounded-xl border border-brand-cyan/15">
@@ -396,8 +451,57 @@ export default function PlanDetailsClient({ offerId }: { offerId: string }) {
                         );
                       })}
                     </tbody>
+                    <tfoot className="bg-brand-white/5 text-brand-cyan/70">
+                      <tr className="border-t border-brand-cyan/20">
+                        <th className="px-3 py-2 text-left font-semibold">TOTAL</th>
+                        <th className="px-3 py-2 text-left whitespace-nowrap font-semibold">{fmtKwh0(totalKwh)}</th>
+
+                        {(monthlyBreakdown?.repBuckets ?? []).map((b: any) => {
+                          const key = String((b as any)?.bucketKey ?? "");
+                          const agg = key ? byBucket.get(key) : null;
+                          return (
+                            <th key={`total-${key}-kwh`} className="px-3 py-2 text-left whitespace-nowrap font-semibold">
+                              {agg ? fmtKwh0(agg.kwh) : "—"}
+                            </th>
+                          );
+                        })}
+                        {(monthlyBreakdown?.repBuckets ?? []).map((b: any) => {
+                          const key = String((b as any)?.bucketKey ?? "");
+                          return (
+                            <th key={`total-${key}-rate`} className="px-3 py-2 text-left whitespace-nowrap font-semibold">
+                              —
+                            </th>
+                          );
+                        })}
+                        {(monthlyBreakdown?.repBuckets ?? []).map((b: any) => {
+                          const key = String((b as any)?.bucketKey ?? "");
+                          const agg = key ? byBucket.get(key) : null;
+                          return (
+                            <th key={`total-${key}-cost`} className="px-3 py-2 text-left whitespace-nowrap font-semibold">
+                              {agg ? fmtDollars(agg.dollars) : "—"}
+                            </th>
+                          );
+                        })}
+
+                        <th className="px-3 py-2 text-left whitespace-nowrap font-semibold">
+                          {tdspPerKwh == null ? "—" : `${fmtNum(tdspPerKwh, 4)}¢`}
+                        </th>
+                        <th className="px-3 py-2 text-left whitespace-nowrap font-semibold">{fmtDollars(tdspDelivery)}</th>
+                        <th className="px-3 py-2 text-left whitespace-nowrap font-semibold">{fmtDollars(repFixed)}</th>
+                        <th className="px-3 py-2 text-left whitespace-nowrap font-semibold">{fmtDollars(tdspFixed)}</th>
+                        <th className="px-3 py-2 text-left whitespace-nowrap font-semibold">{fmtDollars(credits)}</th>
+                        <th className="px-3 py-2 text-left whitespace-nowrap font-semibold">{fmtDollars(minUsageFee)}</th>
+                        <th className="px-3 py-2 text-left whitespace-nowrap font-semibold">{fmtDollars(minBillTopUp)}</th>
+                        <th className="px-3 py-2 text-left whitespace-nowrap font-semibold text-brand-white/90">
+                          {fmtDollars(monthTotals)}
+                        </th>
+                      </tr>
+                    </tfoot>
                   </table>
                 </div>
+                    </>
+                  );
+                })()}
               </>
             )}
 
