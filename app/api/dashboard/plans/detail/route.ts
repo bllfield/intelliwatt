@@ -6,7 +6,7 @@ import { normalizeEmail } from "@/lib/utils/email";
 import { wattbuy } from "@/lib/wattbuy";
 import { normalizeOffers } from "@/lib/wattbuy/normalize";
 import { usagePrisma } from "@/lib/db/usageClient";
-import { CORE_MONTHLY_BUCKETS } from "@/lib/plan-engine/usageBuckets";
+import { bucketDefsFromBucketKeys, canonicalizeMonthlyBucketKey } from "@/lib/plan-engine/usageBuckets";
 import { getTdspDeliveryRates } from "@/lib/plan-engine/getTdspDeliveryRates";
 import {
   calculatePlanCostForUsage,
@@ -18,6 +18,7 @@ import { extractDeterministicTierSchedule, computeRepEnergyCostForMonthlyKwhTier
 import { extractDeterministicBillCredits, applyBillCreditsToMonth } from "@/lib/plan-engine/billCredits";
 import { extractDeterministicMinimumRules, applyMinimumRulesToMonth } from "@/lib/plan-engine/minimumRules";
 import { canComputePlanFromBuckets, derivePlanCalcRequirementsFromTemplate } from "@/lib/plan-engine/planComputability";
+import { ensureCoreMonthlyBuckets } from "@/lib/usage/aggregateMonthlyBuckets";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -84,6 +85,19 @@ function chicagoYearMonthParts(now: Date): { year: number; month: number } | nul
   } catch {
     return null;
   }
+}
+
+function lastNYearMonthsChicagoFrom(date: Date, n: number): string[] {
+  const base = chicagoYearMonthParts(date);
+  if (!base) return [];
+  const out: string[] = [];
+  for (let i = 0; i < n; i++) {
+    const idx = base.month - i;
+    const y = idx >= 1 ? base.year : base.year - Math.ceil((1 - idx) / 12);
+    const m0 = ((idx - 1) % 12 + 12) % 12 + 1;
+    out.push(`${String(y)}-${String(m0).padStart(2, "0")}`);
+  }
+  return out;
 }
 
 function chicagoParts(ts: Date): {
@@ -247,8 +261,6 @@ export async function GET(req: NextRequest) {
     const url = new URL(req.url);
     const offerId = String(url.searchParams.get("offerId") ?? "").trim();
     const isRenter = parseBool(url.searchParams.get("isRenter"), false);
-    const bucketsMode = String(url.searchParams.get("buckets") ?? "core").trim().toLowerCase();
-    const includeAllBuckets = bucketsMode === "all";
     if (!offerId) {
       return NextResponse.json({ ok: false, error: "missing_offerId" }, { status: 400 });
     }
@@ -320,7 +332,6 @@ export async function GET(req: NextRequest) {
     let intervalsCount = 0;
     let windowStart: Date | null = null;
     let windowEnd: Date | null = null;
-    let intervalRows: Array<{ ts: Date; kwh: number }> = [];
 
     if (usageSource === "SMT") {
       const esiid = house.esiid!;
@@ -335,16 +346,6 @@ export async function GET(req: NextRequest) {
       annualKwh = decimalToNumber(aggregates._sum?.kwh ?? 0);
       windowStart = aggregates._min?.ts ?? null;
       windowEnd = aggregates._max?.ts ?? null;
-
-      // Fetch intervals for bucket attribution table (last 365 days).
-      const rows = await prisma.smtInterval.findMany({
-        where: { esiid, ts: { gte: window.cutoff } },
-        orderBy: { ts: "asc" },
-        select: { ts: true, kwh: true },
-      });
-      intervalRows = rows
-        .map((r) => ({ ts: r.ts, kwh: decimalToNumber((r as any).kwh) ?? 0 }))
-        .filter((r) => Number.isFinite(r.kwh) && r.kwh > 0);
     } else {
       const usageClient = usagePrisma as any;
       const rawId = (window as any).rawId;
@@ -359,73 +360,7 @@ export async function GET(req: NextRequest) {
       annualKwh = decimalToNumber(aggregates._sum?.consumptionKwh ?? 0);
       windowStart = aggregates._min?.timestamp ?? null;
       windowEnd = aggregates._max?.timestamp ?? null;
-
-      const rows = await usageClient.greenButtonInterval.findMany({
-        where: { homeId: house.id, rawId, timestamp: { gte: window.cutoff } },
-        orderBy: { timestamp: "asc" },
-        select: { timestamp: true, consumptionKwh: true },
-      });
-      intervalRows = rows
-        .map((r: any) => ({ ts: r.timestamp as Date, kwh: decimalToNumber(r.consumptionKwh) ?? 0 }))
-        .filter((r: any) => Number.isFinite(r.kwh) && r.kwh > 0);
     }
-
-    // Choose which bucket definitions to render:
-    // - core: lightweight, predictable 9 buckets
-    // - all: every UsageBucketDefinition row in the usage DB (can be wider)
-    const allBucketDefsRaw = includeAllBuckets
-      ? await (usagePrisma as any).usageBucketDefinition
-          .findMany({
-            select: {
-              key: true,
-              label: true,
-              dayType: true,
-              season: true,
-              startHHMM: true,
-              endHHMM: true,
-              tz: true,
-              overnightAttribution: true,
-              ruleJson: true,
-            },
-            orderBy: { key: "asc" },
-            take: 200,
-          })
-          .catch(() => [])
-      : [];
-
-    const bucketDefs: Array<{ key: string; label: string; rule: any }> = includeAllBuckets
-      ? (allBucketDefsRaw ?? [])
-          .map((d: any) => {
-            const key = typeof d?.key === "string" ? d.key : null;
-            const label = typeof d?.label === "string" ? d.label : key;
-            const rule = usageDefToRule(d);
-            if (!key || !label || !rule) return null;
-            return { key, label, rule };
-          })
-          .filter(Boolean)
-      : CORE_MONTHLY_BUCKETS.map((b) => ({ key: b.key, label: b.label, rule: b.rule }));
-
-    const bucketDefsForResponse = bucketDefs.map((b) => ({ key: b.key, label: b.label }));
-    const byYmKey = new Map<string, number>();
-    const yearMonthSet = new Set<string>();
-    for (const row of intervalRows) {
-      const parts = chicagoParts(row.ts);
-      if (!parts) continue;
-      yearMonthSet.add(parts.yearMonth);
-      for (const b of bucketDefs) {
-        if (!evalRule(b.rule, parts)) continue;
-        const key = `${parts.yearMonth}||${b.key}`;
-        byYmKey.set(key, (byYmKey.get(key) ?? 0) + row.kwh);
-      }
-    }
-    const yearMonths = Array.from(yearMonthSet).sort((a, b) => (a < b ? -1 : 1));
-    const bucketTable = yearMonths.map((ym) => {
-      const r: any = { yearMonth: ym };
-      for (const b of bucketDefs) {
-        r[b.key] = byYmKey.get(`${ym}||${b.key}`) ?? null;
-      }
-      return r;
-    });
 
     const avgMonthlyKwh = typeof annualKwh === "number" && Number.isFinite(annualKwh) ? annualKwh / 12 : null;
 
@@ -497,22 +432,61 @@ export async function GET(req: NextRequest) {
       template: ratePlanId && rsPresent ? { rateStructure } : null,
     });
 
-    // Build usageBucketsByMonth for the calculator from our bucket table.
-    // The calculator fails-closed when required keys are missing.
-    const usageBucketsByMonthForCalc: Record<string, Record<string, number>> = {};
-    for (const r of bucketTable) {
-      const ym = typeof (r as any)?.yearMonth === "string" ? String((r as any).yearMonth) : null;
-      if (!ym) continue;
-      const month: Record<string, number> = {};
-      for (const b of bucketDefsForResponse) {
-        const key = String((b as any)?.key ?? "").trim();
-        if (!key) continue;
-        const v = (r as any)[key];
-        const n = typeof v === "number" ? v : Number(v);
-        if (Number.isFinite(n)) month[key] = n;
-      }
-      usageBucketsByMonthForCalc[ym] = month;
+    // Ensure + load the bucket totals REQUIRED by this plan (not just the 9-core bucket set).
+    const endForMonths = windowEnd ?? new Date();
+    const yearMonths = lastNYearMonthsChicagoFrom(endForMonths, 13).slice().reverse(); // oldest -> newest
+    const keysToLoad = Array.from(
+      new Set(
+        ["kwh.m.all.total", ...(requiredBucketKeys ?? [])]
+          .map((k) => canonicalizeMonthlyBucketKey(String(k ?? "").trim()))
+          .filter(Boolean),
+      ),
+    );
+    const bucketDefs = bucketDefsFromBucketKeys(keysToLoad);
+    const bucketDefsForResponse = bucketDefs.map((b) => ({ key: b.key, label: b.label }));
+
+    try {
+      const rangeEnd = endForMonths;
+      const rangeStart = window.cutoff;
+      await ensureCoreMonthlyBuckets({
+        homeId: house.id,
+        esiid: usageSource === "SMT" ? (house.esiid ?? null) : null,
+        rangeStart,
+        rangeEnd,
+        source: usageSource === "SMT" ? "SMT" : "GREENBUTTON",
+        intervalSource: usageSource === "SMT" ? "SMT" : "GREENBUTTON",
+        bucketDefs,
+      });
+    } catch {
+      // best-effort only; failures should not break the detail page
     }
+
+    const usageBucketsByMonthForCalc: Record<string, Record<string, number>> = {};
+    try {
+      const rows = await (usagePrisma as any).homeMonthlyUsageBucket.findMany({
+        where: { homeId: house.id, yearMonth: { in: yearMonths }, bucketKey: { in: keysToLoad } },
+        select: { yearMonth: true, bucketKey: true, kwhTotal: true },
+      });
+      for (const r of rows ?? []) {
+        const ym = String((r as any)?.yearMonth ?? "").trim();
+        const key = canonicalizeMonthlyBucketKey(String((r as any)?.bucketKey ?? "").trim());
+        const kwh = decimalToNumber((r as any)?.kwhTotal);
+        if (!ym || !key || kwh == null) continue;
+        if (!usageBucketsByMonthForCalc[ym]) usageBucketsByMonthForCalc[ym] = {};
+        usageBucketsByMonthForCalc[ym][key] = kwh;
+      }
+    } catch {
+      // keep empty
+    }
+
+    const bucketTable = yearMonths.map((ym) => {
+      const m = usageBucketsByMonthForCalc[ym] ?? {};
+      const row: any = { yearMonth: ym };
+      for (const k of keysToLoad) {
+        row[k] = typeof (m as any)[k] === "number" ? (m as any)[k] : null;
+      }
+      return row;
+    });
 
     // Calc inputs / variables
     const repEnergyCentsPerKwh = rsPresent ? extractFixedRepEnergyCentsPerKwh(rateStructure) : null;
@@ -757,7 +731,7 @@ export async function GET(req: NextRequest) {
           windowStart: windowStart ? windowStart.toISOString() : null,
           windowEnd: windowEnd ? windowEnd.toISOString() : null,
           cutoff: window.cutoff.toISOString(),
-          bucketsMode: includeAllBuckets ? "all" : "core",
+          bucketsMode: "required",
           yearMonths,
           avgMonthlyKwh,
           annualKwh, // strict last-365-days total
@@ -779,10 +753,8 @@ export async function GET(req: NextRequest) {
         },
         notes: [
           "Usage window matches /api/user/usage: strict last 365 days ending at your latest interval timestamp.",
-          "Bucket totals are computed from those same intervals in America/Chicago local time.",
-          includeAllBuckets
-            ? "All UsageBucketDefinition buckets shown (usage DB)."
-            : "CORE_MONTHLY_BUCKETS shown (9). More buckets will appear as plan engine v2 expands.",
+          "Bucket totals are loaded from the usage DB (homeMonthlyUsageBucket) in America/Chicago local time.",
+          "Missing required buckets are auto-created and computed on-demand (best-effort) for this plan.",
         ],
       },
       { status: 200 },
