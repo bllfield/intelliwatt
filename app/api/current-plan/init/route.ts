@@ -315,12 +315,44 @@ export async function GET(request: NextRequest) {
 
     // Plan variables used (for transparency, like offer detail).
     let tdspApplied: any | null = null;
+    let prefillSignals: { esiId: string | null; meterNumber: string | null; sources: string[] } = {
+      esiId: null,
+      meterNumber: null,
+      sources: [],
+    };
     try {
       if (effectiveHouseId) {
         const house = await prisma.houseAddress.findFirst({
           where: { id: effectiveHouseId, userId: user.id },
-          select: { tdspSlug: true },
+          select: { tdspSlug: true, esiid: true },
         });
+        const houseEsiid = typeof house?.esiid === 'string' && house.esiid.trim().length > 0 ? house.esiid.trim() : null;
+        if (houseEsiid) {
+          prefillSignals.esiId = houseEsiid;
+          prefillSignals.sources.push('houseAddress.esiid');
+        }
+
+        // SMT authorization (if any) can provide meter number (and a canonical ESIID).
+        try {
+          const auth = await prisma.smtAuthorization.findFirst({
+            where: { houseAddressId: effectiveHouseId, archivedAt: null },
+            orderBy: { createdAt: 'desc' },
+            select: { esiid: true, meterNumber: true },
+          });
+          const authEsiid = typeof auth?.esiid === 'string' && auth.esiid.trim().length > 0 ? auth.esiid.trim() : null;
+          const authMeter = typeof auth?.meterNumber === 'string' && auth.meterNumber.trim().length > 0 ? auth.meterNumber.trim() : null;
+          if (authEsiid && !prefillSignals.esiId) {
+            prefillSignals.esiId = authEsiid;
+            prefillSignals.sources.push('smtAuthorization.esiid');
+          }
+          if (authMeter) {
+            prefillSignals.meterNumber = authMeter;
+            prefillSignals.sources.push('smtAuthorization.meterNumber');
+          }
+        } catch {
+          // ignore
+        }
+
         const tdspSlug = String(house?.tdspSlug ?? '').trim().toLowerCase();
         if (tdspSlug) {
           const tdsp = await getTdspDeliveryRates({ tdspSlug, asOf: new Date() });
@@ -406,6 +438,7 @@ export async function GET(request: NextRequest) {
       // Backwards-compatible fields used by existing UI:
       savedCurrentPlan,
       parsedCurrentPlan,
+      prefillSignals,
       planVariablesUsed: {
         rep: {
           energyCentsPerKwh: repEnergyCentsPerKwh,

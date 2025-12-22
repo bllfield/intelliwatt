@@ -242,6 +242,7 @@ export function CurrentRateDetailsForm({
 }: CurrentRateDetailsFormProps) {
   const [savedPlan, setSavedPlan] = useState<SavedPlanDetails | null>(null);
   const [parsedPlan, setParsedPlan] = useState<ParsedPlanDetails | null>(null);
+  const [prefillSignals, setPrefillSignals] = useState<{ esiId?: string | null; meterNumber?: string | null } | null>(null);
   const [planVariablesUsed, setPlanVariablesUsed] = useState<PlanVariablesUsed | null>(null);
   const [planVariablesList, setPlanVariablesList] = useState<VariablesListRow[] | null>(null);
   const [planEntrySnapshot, setPlanEntrySnapshot] = useState<EntrySnapshot | null>(null);
@@ -340,6 +341,7 @@ export function CurrentRateDetailsForm({
       const nextPlanEntrySnapshot = payload?.entry ?? null;
       setSavedPlan(payload?.savedCurrentPlan ?? null);
       setParsedPlan(payload?.parsedCurrentPlan ?? null);
+      setPrefillSignals(payload?.prefillSignals ?? null);
       setPlanVariablesUsed(payload?.planVariablesUsed ?? null);
       setPlanVariablesList(Array.isArray(payload?.planVariablesList) ? payload.planVariablesList : null);
       setPlanEntrySnapshot(nextPlanEntrySnapshot);
@@ -468,6 +470,17 @@ export function CurrentRateDetailsForm({
       setEsiId(pickedEsiId);
     }
 
+    // Fallback: pull ESIID/meter from other known sources on the account (houseAddress / SMT auth),
+    // even if the user hasn't uploaded a bill or EFL yet.
+    const signalEsiid = typeof prefillSignals?.esiId === "string" && prefillSignals.esiId.trim().length > 0 ? prefillSignals.esiId.trim() : null;
+    if (!esiId && signalEsiid) {
+      setEsiId(signalEsiid);
+    }
+    const signalMeter = typeof prefillSignals?.meterNumber === "string" && prefillSignals.meterNumber.trim().length > 0 ? prefillSignals.meterNumber.trim() : null;
+    if (!meterNumber && signalMeter) {
+      setMeterNumber(signalMeter);
+    }
+
     const pickedAccountLast = pickString(
       saved?.accountNumberLast4,
       parsed?.accountNumberLast4,
@@ -551,6 +564,7 @@ export function CurrentRateDetailsForm({
   }, [
     parsedPlan,
     savedPlan,
+    prefillSignals,
     electricCompany,
     planName,
     rateType,
@@ -2517,7 +2531,7 @@ export function CurrentRateDetailsForm({
           </label>
 
           <label className="block space-y-1 text-sm text-brand-navy">
-            <span className="font-semibold uppercase tracking-wide text-brand-navy/80">ESIID (optional)</span>
+            <span className="font-semibold uppercase tracking-wide text-brand-navy/80">ESIID</span>
             <input
               type="text"
               value={esiId}
@@ -2525,10 +2539,13 @@ export function CurrentRateDetailsForm({
               className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-brand-navy shadow-sm transition focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/40"
               placeholder="17- or 22-digit ID from your bill"
             />
+            <span className="block text-xs text-brand-slate">
+              Optional for plan entry, but required for Smart Meter Texas syncing.
+            </span>
           </label>
 
           <label className="block space-y-1 text-sm text-brand-navy">
-            <span className="font-semibold uppercase tracking-wide text-brand-navy/80">Meter number (optional)</span>
+            <span className="font-semibold uppercase tracking-wide text-brand-navy/80">Meter number</span>
             <input
               type="text"
               value={meterNumber}
@@ -2537,7 +2554,7 @@ export function CurrentRateDetailsForm({
               placeholder="Meter number from your bill (if shown)"
             />
             <span className="block text-xs text-brand-slate">
-              If we parsed your bill, we’ll prefill this—please double-check it.
+              Optional for plan entry, but required for Smart Meter Texas syncing. If we parsed your bill, we’ll prefill this—please double-check it.
             </span>
           </label>
 
