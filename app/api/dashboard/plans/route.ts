@@ -1548,8 +1548,33 @@ export async function GET(req: NextRequest) {
           monthsCount,
         });
         if (cached) return cached;
-        // Cache-only mode: do not compute inline. Prefetch/other background processes will populate.
-        return { status: "QUEUED", reason: "estimate_cache_miss" };
+
+        // Compute inline as a safe fallback (fast: uses prebuilt monthly/daily buckets already loaded above),
+        // then persist so every surface reads the same plan-engine output.
+        const computed = estimateTrueCost({
+          annualKwh: annualKwhForCalc,
+          monthsCount,
+          rateStructure: template.rateStructure,
+          usageBucketsByMonth: usageBucketsByMonthForCalc,
+          tdspRates: {
+            perKwhDeliveryChargeCents: tdspPer,
+            monthlyCustomerChargeDollars: tdspMonthly,
+            effectiveDate: tdspEff,
+          },
+        });
+        try {
+          await putCachedPlanEstimate({
+            houseAddressId: house.id,
+            ratePlanId: cacheRatePlanId,
+            esiid: (house as any)?.esiid ?? null,
+            inputsSha256,
+            monthsCount,
+            payloadJson: computed,
+          });
+        } catch {
+          // ignore cache write failures; still return computed
+        }
+        return computed;
       })();
 
       const statusLabelFinal = (() => {
