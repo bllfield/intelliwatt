@@ -19,7 +19,7 @@ import { isPlanCalcQuarantineWorthyReasonCode } from "@/lib/plan-engine/planCalc
 import { getLatestPlanPipelineJob, shouldStartPlanPipelineJob, writePlanPipelineJobSnapshot } from "@/lib/plan-engine/planPipelineJob";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const PLAN_ENGINE_ESTIMATE_VERSION = "estimateTrueCost_v2";
+const PLAN_ENGINE_ESTIMATE_VERSION = "estimateTrueCost_v3";
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n));
@@ -617,6 +617,34 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
     const cached = await getCachedPlanEstimate({ houseAddressId: homeId, ratePlanId, inputsSha256, monthsCount: 12 });
     if (cached) {
       estimatesAlreadyCached++;
+
+      // If we previously quarantined this offer due to a transient estimate issue (e.g. bucket sum drift),
+      // and the cached estimate is now OK/APPROX, auto-resolve the OPEN quarantine row so it doesn't "stick"
+      // after the system self-heals.
+      try {
+        const estStatus = String((cached as any)?.status ?? "").trim().toUpperCase();
+        if (estStatus === "OK" || estStatus === "APPROXIMATE") {
+          const offerIdsForPlan = Array.from(new Set(offerIdsByRatePlanId.get(ratePlanId) ?? []));
+          if (offerIdsForPlan.length > 0) {
+            await (prisma as any).eflParseReviewQueue
+              .updateMany({
+                where: {
+                  kind: "PLAN_CALC_QUARANTINE",
+                  resolvedAt: null,
+                  dedupeKey: { in: offerIdsForPlan },
+                },
+                data: {
+                  resolvedAt: new Date(),
+                  resolvedBy: "auto_estimate_ok_cached",
+                  resolutionNotes: "AUTO_RESOLVED: estimate is OK/APPROX (cached)",
+                },
+              })
+              .catch(() => null);
+          }
+        }
+      } catch {
+        // best-effort only
+      }
       continue;
     }
 
@@ -636,6 +664,28 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
     try {
       const estStatus = String((est as any)?.status ?? "").trim().toUpperCase();
       const estReason = String((est as any)?.reason ?? "").trim();
+
+      // If we fixed or avoided a prior quarantine-worthy issue, auto-resolve the OPEN queue row.
+      if (estStatus === "OK" || estStatus === "APPROXIMATE") {
+        const offerIdsForPlan = Array.from(new Set(offerIdsByRatePlanId.get(ratePlanId) ?? []));
+        if (offerIdsForPlan.length > 0) {
+          await (prisma as any).eflParseReviewQueue
+            .updateMany({
+              where: {
+                kind: "PLAN_CALC_QUARANTINE",
+                resolvedAt: null,
+                dedupeKey: { in: offerIdsForPlan },
+              },
+              data: {
+                resolvedAt: new Date(),
+                resolvedBy: "auto_estimate_ok",
+                resolutionNotes: "AUTO_RESOLVED: estimate is OK/APPROX",
+              },
+            })
+            .catch(() => null);
+        }
+      }
+
       if (estStatus === "NOT_COMPUTABLE" && isPlanCalcQuarantineWorthyReasonCode(estReason || estStatus)) {
         const offerIdsForPlan = Array.from(new Set(offerIdsByRatePlanId.get(ratePlanId) ?? []));
         await Promise.all(
