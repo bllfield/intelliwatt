@@ -13,8 +13,11 @@ export function isPlanCalcQuarantineWorthyReasonCode(reasonCode: string | null |
   const rc = String(reasonCode ?? "").trim();
   if (!rc) return false;
 
+  // Some reason codes come with details appended (e.g. "USAGE_BUCKET_SUM_MISMATCH: 2025-12:...").
+  const prefix = rc.split(":")[0]?.trim() || rc;
+
   // Common non-defect / housekeeping statuses.
-  if (rc === "FIXED_RATE_OK" || rc === "MISSING_TEMPLATE" || rc === "UNKNOWN") return false;
+  if (prefix === "FIXED_RATE_OK" || prefix === "MISSING_TEMPLATE" || prefix === "UNKNOWN") return false;
 
   // Dashboard-safe gating reasons (supported in non-dashboard flows when usage buckets exist).
   // Keep this list explicit and conservative to avoid review-noise and accidental template quarantine.
@@ -28,17 +31,20 @@ export function isPlanCalcQuarantineWorthyReasonCode(reasonCode: string | null |
     // Some callers may still use earlier/non-canonical names; treat them as gating.
     "TOU_REQUIRES_USAGE_BUCKETS",
   ]);
-  if (bucketGating.has(rc)) return false;
+  if (bucketGating.has(prefix)) return false;
 
-  // Indexed/variable pricing is intentionally fail-closed by default but can be estimated in APPROX mode.
-  if (rc === "NON_DETERMINISTIC_PRICING_INDEXED") return false;
+  // Bucket integrity failures: this indicates a bug/definition mismatch and needs admin visibility.
+  if (prefix === "USAGE_BUCKET_SUM_MISMATCH") return true;
+
+  // Indexed/variable pricing is intentionally fail-closed; it should be visible to ops/admin review.
+  if (prefix === "NON_DETERMINISTIC_PRICING_INDEXED") return true;
 
   // True-defect buckets: unsupported shapes, non-deterministic (other than indexed default),
   // suspicious evidence, and hard unsupported structures.
-  if (rc === "UNSUPPORTED_RATE_STRUCTURE") return true;
-  if (rc.startsWith("UNSUPPORTED_")) return true;
-  if (rc.startsWith("SUSPECT_")) return true;
-  if (rc.startsWith("NON_DETERMINISTIC_")) return true;
+  if (prefix === "UNSUPPORTED_RATE_STRUCTURE") return true;
+  if (prefix.startsWith("UNSUPPORTED_")) return true;
+  if (prefix.startsWith("SUSPECT_")) return true;
+  if (prefix.startsWith("NON_DETERMINISTIC_")) return true;
 
   // Default: do not quarantine unknown reason codes (avoid destructive/noisy behavior).
   return false;

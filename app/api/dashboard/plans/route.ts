@@ -1459,7 +1459,7 @@ export async function GET(req: NextRequest) {
                   kind: "PLAN_CALC_QUARANTINE",
                   dedupeKey: offerId,
                   // Legacy NOT NULL unique field (EFL queue origin). For quarantine we do not use it as identity.
-                  eflPdfSha256: offerId,
+                  eflPdfSha256: sha256Hex(["dashboard_plans", "PLAN_CALC_QUARANTINE", offerId].join("|")),
                   offerId,
                   supplier: (base as any)?.supplierName ?? null,
                   planName: (base as any)?.planName ?? null,
@@ -1576,6 +1576,79 @@ export async function GET(req: NextRequest) {
         }
         return computed;
       })();
+
+      // If an offer is template-mapped but the engine returns NOT_COMPUTABLE, it MUST be visible in admin review.
+      // Examples: USAGE_BUCKET_SUM_MISMATCH (bucket defs/aggregation mismatch) and NON_DETERMINISTIC_PRICING_INDEXED.
+      try {
+        const offerIdForQueue = String((base as any)?.offerId ?? "").trim();
+        const effectiveRatePlanIdForQueue = ratePlanId ?? null;
+        const estStatus = String(trueCostEstimate?.status ?? "").trim();
+        const estReason = String(trueCostEstimate?.reason ?? "").trim();
+        const quarantineReasonCode = estReason || estStatus;
+
+        if (
+          offerIdForQueue &&
+          effectiveRatePlanIdForQueue &&
+          estStatus === "NOT_COMPUTABLE" &&
+          isPlanCalcQuarantineWorthyReasonCode(quarantineReasonCode)
+        ) {
+          const queueReasonPayload = {
+            type: "PLAN_CALC_QUARANTINE",
+            source: "dashboard_plans_trueCostEstimate",
+            estimateStatus: estStatus,
+            estimateReason: estReason || null,
+            requiredBucketKeys: requiredBucketKeys ?? null,
+            missingBucketKeys: missingBucketKeys.length > 0 ? missingBucketKeys : null,
+            ratePlanId: effectiveRatePlanIdForQueue,
+            offerId: offerIdForQueue,
+          };
+
+          (prisma as any).eflParseReviewQueue
+            .upsert({
+              where: { kind_dedupeKey: { kind: "PLAN_CALC_QUARANTINE", dedupeKey: offerIdForQueue } },
+              create: {
+                source: "dashboard_plans",
+                kind: "PLAN_CALC_QUARANTINE",
+                dedupeKey: offerIdForQueue,
+                // Legacy NOT NULL unique field (EFL queue origin). For quarantine we do not use it as identity.
+                eflPdfSha256: sha256Hex(["dashboard_plans", "PLAN_CALC_QUARANTINE", offerIdForQueue].join("|")),
+                offerId: offerIdForQueue,
+                supplier: (base as any)?.supplierName ?? null,
+                planName: (base as any)?.planName ?? null,
+                eflUrl: (base as any)?.efl?.eflUrl ?? null,
+                tdspName: (base as any)?.utility?.utilityName ?? null,
+                termMonths: (base as any)?.termMonths ?? null,
+                ratePlanId: effectiveRatePlanIdForQueue,
+                rawText: null,
+                planRules: null,
+                rateStructure: null,
+                validation: null,
+                derivedForValidation: { ...(planComputability as any)?.details, missingBucketKeys, trueCostEstimate },
+                finalStatus: "OPEN",
+                queueReason: JSON.stringify(queueReasonPayload),
+                solverApplied: [],
+                resolvedAt: null,
+                resolvedBy: null,
+                resolutionNotes: estReason || "NOT_COMPUTABLE",
+              },
+              update: {
+                supplier: (base as any)?.supplierName ?? null,
+                planName: (base as any)?.planName ?? null,
+                eflUrl: (base as any)?.efl?.eflUrl ?? null,
+                tdspName: (base as any)?.utility?.utilityName ?? null,
+                termMonths: (base as any)?.termMonths ?? null,
+                ratePlanId: effectiveRatePlanIdForQueue,
+                derivedForValidation: { ...(planComputability as any)?.details, missingBucketKeys, trueCostEstimate },
+                finalStatus: "OPEN",
+                queueReason: JSON.stringify(queueReasonPayload),
+                resolutionNotes: estReason || "NOT_COMPUTABLE",
+              },
+            })
+            .catch(() => {});
+        }
+      } catch {
+        // best-effort only; never block plans API
+      }
 
       const statusLabelFinal = (() => {
         const current = String((base as any)?.intelliwatt?.statusLabel ?? "").trim() || "UNAVAILABLE";
