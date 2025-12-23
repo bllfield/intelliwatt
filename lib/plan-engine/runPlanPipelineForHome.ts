@@ -160,12 +160,16 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
   if (!usageWindowEnd) return { ok: true, started: false, reason: "no_usage_yet" };
 
   const latestJob = await getLatestPlanPipelineJob(homeId);
+  // Only enforce the 30-day cadence for explicit monthly refresh runs.
+  // For user-facing triggers (dashboard bootstrap / plans fallback), allow repeated runs to finish mapping + cache fill.
+  const enforceCadence = reason === "monthly_refresh";
   const gate = shouldStartPlanPipelineJob({
     latest: latestJob,
     now: new Date(),
     monthlyCadenceDays,
     maxRunningMinutes: 20,
     requiredCalcVersion: PLAN_ENGINE_ESTIMATE_VERSION,
+    enforceCadence,
   });
   if (!gate.okToStart) return { ok: true, started: false, reason: gate.reason, latestJob };
 

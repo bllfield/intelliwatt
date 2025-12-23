@@ -58,27 +58,16 @@ export function shouldStartPlanPipelineJob(args: {
   monthlyCadenceDays?: number; // default 30
   maxRunningMinutes?: number; // default 20
   requiredCalcVersion?: string | null;
+  enforceCadence?: boolean; // default true
 }): { okToStart: boolean; reason: string } {
   const now = args.now ?? new Date();
   const latest = args.latest;
   const cadenceDays = Number.isFinite(args.monthlyCadenceDays ?? NaN) ? (args.monthlyCadenceDays as number) : 30;
   const maxRunningMin = Number.isFinite(args.maxRunningMinutes ?? NaN) ? (args.maxRunningMinutes as number) : 20;
   const requiredCalcVersion = typeof args.requiredCalcVersion === "string" ? args.requiredCalcVersion.trim() : "";
+  const enforceCadence = args.enforceCadence !== false;
 
   if (!latest) return { okToStart: true, reason: "no_prior_job" };
-
-  // If the engine/estimate version changed, we must refill caches immediately even if cadence hasn't elapsed.
-  // Otherwise a version bump would brick the site for up to cadenceDays.
-  if (requiredCalcVersion) {
-    const latestVersion = typeof latest.calcVersion === "string" ? latest.calcVersion.trim() : "";
-    if (latestVersion && latestVersion !== requiredCalcVersion) {
-      return { okToStart: true, reason: "calc_version_changed" };
-    }
-    if (!latestVersion) {
-      // Older snapshots didn't record calcVersion; treat as needing a refresh once.
-      return { okToStart: true, reason: "calc_version_missing" };
-    }
-  }
 
   const cooldownUntil = parseIsoDate(latest.cooldownUntil ?? null);
   if (cooldownUntil && cooldownUntil.getTime() > now.getTime()) {
@@ -95,12 +84,27 @@ export function shouldStartPlanPipelineJob(args: {
     }
   }
 
+  // If the engine/estimate version changed, we must refill caches immediately even if cadence hasn't elapsed.
+  // Otherwise a version bump would brick the site for up to cadenceDays.
+  if (requiredCalcVersion) {
+    const latestVersion = typeof latest.calcVersion === "string" ? latest.calcVersion.trim() : "";
+    if (latestVersion && latestVersion !== requiredCalcVersion) {
+      return { okToStart: true, reason: "calc_version_changed" };
+    }
+    if (!latestVersion) {
+      // Older snapshots didn't record calcVersion; treat as needing a refresh once.
+      return { okToStart: true, reason: "calc_version_missing" };
+    }
+  }
+
   // Monthly cadence gate: only advance plan-calc window once per N days.
-  const lastWindowEnd = parseIsoDate(latest.lastCalcWindowEnd ?? null);
-  if (lastWindowEnd) {
-    const ageDays = (now.getTime() - lastWindowEnd.getTime()) / (24 * 60 * 60 * 1000);
-    if (ageDays < cadenceDays) {
-      return { okToStart: false, reason: "monthly_cadence_not_elapsed" };
+  if (enforceCadence) {
+    const lastWindowEnd = parseIsoDate(latest.lastCalcWindowEnd ?? null);
+    if (lastWindowEnd) {
+      const ageDays = (now.getTime() - lastWindowEnd.getTime()) / (24 * 60 * 60 * 1000);
+      if (ageDays < cadenceDays) {
+        return { okToStart: false, reason: "monthly_cadence_not_elapsed" };
+      }
     }
   }
 
