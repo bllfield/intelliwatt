@@ -195,6 +195,52 @@ export function derivePlanCalcRequirementsFromTemplate(args: {
   const minimum = extractDeterministicMinimumRules({ rateStructure: rs });
 
   const out = (() => {
+    // IMPORTANT: Determine deterministic TOU schedules BEFORE considering "fixed rate" extraction.
+    // Many TOU templates also have an `energyRateCents` field populated (often off-peak), which can cause
+    // extractFixedRepEnergyCentsPerKwh() to return a value and incorrectly route TOU plans through the FIXED branch.
+    // That is what produced SUSPECT_TOU_EVIDENCE_IN_VALIDATION for otherwise-valid EVConnect-like plans.
+    const tou2 = extractDeterministicTouSchedule(rs);
+    if (tou2.schedule) {
+      if (!credits.ok && credits.reason !== "NO_CREDITS") {
+        const reqs = requiredBucketsForRateStructure({ rateStructure: rs });
+        return {
+          planCalcVersion,
+          planCalcStatus: "NOT_COMPUTABLE" as const,
+          planCalcReasonCode: credits.reason,
+          requiredBucketKeys: reqs.map((r) => r.key),
+          supportedFeatures: {
+            ...inferred.features,
+            supportsTouEnergy: true,
+            supportsCredits: true,
+            notes: [...(inferred.notes ?? []), ...(tou2.notes ?? []), ...(credits.notes ?? [])],
+          },
+        };
+      }
+
+      const reqs = requiredBucketsForRateStructure({ rateStructure: rs });
+      if (credits.ok && Array.isArray(credits.credits?.rules) && credits.credits.rules.length > 0) {
+        return {
+          planCalcVersion,
+          planCalcStatus: "COMPUTABLE" as const,
+          planCalcReasonCode: "TOU_PLUS_CREDITS_OK",
+          requiredBucketKeys: reqs.map((r) => r.key),
+          supportedFeatures: {
+            ...inferred.features,
+            supportsTouEnergy: true,
+            supportsCredits: true,
+            notes: [...(inferred.notes ?? []), ...(tou2.notes ?? []), ...(credits.credits?.notes ?? [])],
+          },
+        };
+      }
+      return {
+        planCalcVersion,
+        planCalcStatus: "COMPUTABLE" as const,
+        planCalcReasonCode: "TOU_OK",
+        requiredBucketKeys: reqs.map((r) => r.key),
+        supportedFeatures: { ...inferred.features, supportsTouEnergy: true, notes: [...inferred.notes, ...(tou2.notes ?? [])] },
+      };
+    }
+
     if (fixed != null) {
       if (minimum.ok) {
         return {
@@ -275,48 +321,6 @@ export function derivePlanCalcRequirementsFromTemplate(args: {
         planCalcReasonCode: "FIXED_RATE_OK",
         requiredBucketKeys: ["kwh.m.all.total"],
         supportedFeatures: { ...inferred.features, notes: inferred.notes },
-      };
-    }
-
-    const tou2 = extractDeterministicTouSchedule(rs);
-    if (tou2.schedule) {
-      if (!credits.ok && credits.reason !== "NO_CREDITS") {
-        const reqs = requiredBucketsForRateStructure({ rateStructure: rs });
-        return {
-          planCalcVersion,
-          planCalcStatus: "NOT_COMPUTABLE" as const,
-          planCalcReasonCode: credits.reason,
-          requiredBucketKeys: reqs.map((r) => r.key),
-          supportedFeatures: {
-            ...inferred.features,
-            supportsTouEnergy: true,
-            supportsCredits: true,
-            notes: [...(inferred.notes ?? []), ...(tou2.notes ?? []), ...(credits.notes ?? [])],
-          },
-        };
-      }
-
-      const reqs = requiredBucketsForRateStructure({ rateStructure: rs });
-      if (credits.ok && Array.isArray(credits.credits?.rules) && credits.credits.rules.length > 0) {
-        return {
-          planCalcVersion,
-          planCalcStatus: "COMPUTABLE" as const,
-          planCalcReasonCode: "TOU_PLUS_CREDITS_OK",
-          requiredBucketKeys: reqs.map((r) => r.key),
-          supportedFeatures: {
-            ...inferred.features,
-            supportsTouEnergy: true,
-            supportsCredits: true,
-            notes: [...(inferred.notes ?? []), ...(tou2.notes ?? []), ...(credits.credits?.notes ?? [])],
-          },
-        };
-      }
-      return {
-        planCalcVersion,
-        planCalcStatus: "COMPUTABLE" as const,
-        planCalcReasonCode: "TOU_OK",
-        requiredBucketKeys: reqs.map((r) => r.key),
-        supportedFeatures: { ...inferred.features, supportsTouEnergy: true, notes: [...inferred.notes, ...(tou2.notes ?? [])] },
       };
     }
 

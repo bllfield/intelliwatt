@@ -494,6 +494,35 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
       // Derive computability from the template rateStructure (authoritative).
       // IMPORTANT: Do NOT call canComputePlanFromBuckets() here; that helper is for dashboard UI and expects a different input shape.
       const derived = derivePlanCalcRequirementsFromTemplate({ rateStructure });
+
+      // Keep the persisted planCalcStatus/Reason in sync with the authoritative derivation.
+      // This prevents stale NOT_COMPUTABLE reason codes (like SUSPECT_TOU_EVIDENCE_IN_VALIDATION) from lingering after rule fixes,
+      // and ensures admin tooling + pipeline agree without manual intervention.
+      try {
+        const curStatus = String(rp?.planCalcStatus ?? "").trim();
+        const curReason = String(rp?.planCalcReasonCode ?? "").trim();
+        const nextStatus = String((derived as any)?.planCalcStatus ?? "").trim();
+        const nextReason = String((derived as any)?.planCalcReasonCode ?? "").trim();
+        if (nextStatus && (curStatus !== nextStatus || curReason !== nextReason)) {
+          await (prisma as any).ratePlan
+            .update({
+              where: { id: ratePlanId },
+              data: {
+                planCalcVersion: (derived as any)?.planCalcVersion ?? 1,
+                planCalcStatus: nextStatus,
+                planCalcReasonCode: nextReason || "UNKNOWN",
+                requiredBucketKeys: Array.isArray((derived as any)?.requiredBucketKeys) ? (derived as any).requiredBucketKeys : [],
+                supportedFeatures: (derived as any)?.supportedFeatures ?? {},
+                planCalcDerivedAt: new Date(),
+              },
+              select: { id: true },
+            })
+            .catch(() => null);
+        }
+      } catch {
+        // best-effort only
+      }
+
       if (derived?.planCalcStatus !== "COMPUTABLE") {
         ratePlansDerivedNotComputable++;
         // Auto-enqueue true template defects / non-deterministic pricing for admin review (system-caught).
