@@ -33,6 +33,8 @@ export async function POST(req: NextRequest) {
   const maxTemplateOffers = clamp(toInt(url.searchParams.get("maxTemplateOffers"), 6), 0, 10);
   const maxEstimatePlans = clamp(toInt(url.searchParams.get("maxEstimatePlans"), 20), 0, 50);
   const isRenter = parseBool(url.searchParams.get("isRenter"), false);
+  const proactiveCooldownMs = clamp(toInt(url.searchParams.get("proactiveCooldownMs"), 5 * 60 * 1000), 60_000, 24 * 60 * 60 * 1000);
+  const fallbackCooldownMs = clamp(toInt(url.searchParams.get("fallbackCooldownMs"), 15 * 60 * 1000), 60_000, 24 * 60 * 60 * 1000);
 
   try {
     const cookieStore = cookies();
@@ -65,6 +67,8 @@ export async function POST(req: NextRequest) {
       maxTemplateOffers,
       maxEstimatePlans,
       monthlyCadenceDays: 30,
+      proactiveCooldownMs,
+      fallbackCooldownMs,
     });
 
     return NextResponse.json(result, { status: 200 });

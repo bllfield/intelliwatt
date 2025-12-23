@@ -1,4 +1,5 @@
 import { calculatePlanCostForUsage } from "@/lib/plan-engine/calculatePlanCostForUsage";
+import { detectIndexedOrVariable } from "@/lib/plan-engine/indexedPricing";
 
 function round2(n: number): number {
   if (!Number.isFinite(n)) return n;
@@ -21,6 +22,7 @@ export function estimateTrueCost(args: {
     monthlyCustomerChargeDollars: number;
     effectiveDate?: string | null;
   };
+  estimateMode?: "DEFAULT" | "INDEXED_EFL_ANCHOR_APPROX";
 }): any {
   // If the REP rate already includes TDSP/TDU delivery, do NOT add utility delivery again.
   // This flag can be set by the EFL pipeline or by the Current Rate manual-entry form.
@@ -39,6 +41,20 @@ export function estimateTrueCost(args: {
         effectiveDate: args.tdspRates?.effectiveDate ?? undefined,
       };
 
+  const effectiveEstimateMode = (() => {
+    const requested = String(args.estimateMode ?? "DEFAULT").trim().toUpperCase();
+    if (requested === "INDEXED_EFL_ANCHOR_APPROX") return "INDEXED_EFL_ANCHOR_APPROX" as const;
+    // Auto-enable APPROX mode for indexed/variable templates so these plans still produce a result,
+    // matching previous dashboard behavior.
+    try {
+      const idx = detectIndexedOrVariable(args.rateStructure);
+      if (idx?.isIndexed) return "INDEXED_EFL_ANCHOR_APPROX" as const;
+    } catch {
+      // ignore
+    }
+    return "DEFAULT" as const;
+  })();
+
   const est = calculatePlanCostForUsage({
     annualKwh: args.annualKwh,
     monthsCount: args.monthsCount,
@@ -49,6 +65,7 @@ export function estimateTrueCost(args: {
     },
     rateStructure: args.rateStructure,
     usageBucketsByMonth: args.usageBucketsByMonth,
+    estimateMode: effectiveEstimateMode,
   });
 
   if (tdspIncluded && est && (est as any).status === "OK") {

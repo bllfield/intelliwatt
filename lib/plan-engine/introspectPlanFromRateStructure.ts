@@ -248,8 +248,8 @@ export function introspectPlanFromRateStructure(input: { rateStructure: any }): 
       if (minimumRules.ok) {
         return {
           planCalcVersion: 1,
-          planCalcStatus: "NOT_COMPUTABLE" as const,
-          planCalcReasonCode: "MINIMUM_RULES_REQUIRES_USAGE_BUCKETS",
+          planCalcStatus: "COMPUTABLE" as const,
+          planCalcReasonCode: "FIXED_PLUS_MINIMUM_RULES_OK",
           requiredBucketKeys: ["kwh.m.all.total"],
           supportedFeatures: { ...inferred.features, supportsMinimumRules: true, notes: [...inferred.notes, ...(minimumRules.minimum?.notes ?? [])] },
         };
@@ -266,8 +266,8 @@ export function introspectPlanFromRateStructure(input: { rateStructure: any }): 
       if (billCredits.ok) {
         return {
           planCalcVersion: 1,
-          planCalcStatus: "NOT_COMPUTABLE" as const,
-          planCalcReasonCode: "BILL_CREDITS_REQUIRES_USAGE_BUCKETS",
+          planCalcStatus: "COMPUTABLE" as const,
+          planCalcReasonCode: "FIXED_PLUS_BILL_CREDITS_OK",
           requiredBucketKeys: ["kwh.m.all.total"],
           supportedFeatures: { ...inferred.features, supportsCredits: true, notes: [...inferred.notes, ...(billCredits.credits?.notes ?? [])] },
         };
@@ -295,9 +295,8 @@ export function introspectPlanFromRateStructure(input: { rateStructure: any }): 
       if (billCredits.ok && Array.isArray(billCredits.credits?.rules) && billCredits.credits.rules.length > 0) {
         return {
           planCalcVersion: 1,
-          // IMPORTANT: keep dashboard gating unchanged (TOU stays NOT_COMPUTABLE at plan-level).
-          planCalcStatus: "NOT_COMPUTABLE" as const,
-          planCalcReasonCode: "TOU_PLUS_CREDITS_REQUIRES_USAGE_BUCKETS",
+          planCalcStatus: "COMPUTABLE" as const,
+          planCalcReasonCode: "TOU_PLUS_CREDITS_OK",
           requiredBucketKeys,
           supportedFeatures: {
             ...inferred.features,
@@ -323,9 +322,8 @@ export function introspectPlanFromRateStructure(input: { rateStructure: any }): 
       }
       return {
         planCalcVersion: 1,
-        // IMPORTANT: keep dashboard gating unchanged (TOU stays NOT_COMPUTABLE at plan-level).
-        planCalcStatus: "NOT_COMPUTABLE" as const,
-        planCalcReasonCode: "TOU_REQUIRES_USAGE_BUCKETS_PHASE2",
+        planCalcStatus: "COMPUTABLE" as const,
+        planCalcReasonCode: "TOU_OK",
         requiredBucketKeys,
         supportedFeatures: { ...inferred.features, supportsTouEnergy: true, notes: [...inferred.notes, ...(tou.notes ?? [])] },
       };
@@ -337,8 +335,8 @@ export function introspectPlanFromRateStructure(input: { rateStructure: any }): 
       if (billCredits.ok && Array.isArray(billCredits.credits?.rules) && billCredits.credits.rules.length > 0) {
         return {
           planCalcVersion: 1,
-          planCalcStatus: "NOT_COMPUTABLE" as const,
-          planCalcReasonCode: "TIERED_PLUS_CREDITS_REQUIRES_USAGE_BUCKETS",
+          planCalcStatus: "COMPUTABLE" as const,
+          planCalcReasonCode: "TIERED_PLUS_CREDITS_OK",
           requiredBucketKeys: ["kwh.m.all.total"],
           supportedFeatures: {
             ...inferred.features,
@@ -364,8 +362,8 @@ export function introspectPlanFromRateStructure(input: { rateStructure: any }): 
       }
       return {
         planCalcVersion: 1,
-        planCalcStatus: "NOT_COMPUTABLE" as const,
-        planCalcReasonCode: "TIERED_REQUIRES_USAGE_BUCKETS",
+        planCalcStatus: "COMPUTABLE" as const,
+        planCalcReasonCode: "TIERED_OK",
         requiredBucketKeys: ["kwh.m.all.total"],
         supportedFeatures: { ...inferred.features, supportsTieredEnergy: true, notes: [...inferred.notes, ...(tiered.schedule?.notes ?? [])] },
       };
@@ -383,18 +381,18 @@ export function introspectPlanFromRateStructure(input: { rateStructure: any }): 
     if (indexed.isIndexed) {
       return {
         planCalcVersion: 1,
-        planCalcStatus: "NOT_COMPUTABLE" as const,
-        planCalcReasonCode: "NON_DETERMINISTIC_PRICING_INDEXED",
+        planCalcStatus: "COMPUTABLE" as const,
+        planCalcReasonCode: "INDEXED_APPROXIMATE_OK",
         requiredBucketKeys: ["kwh.m.all.total"],
-        supportedFeatures: { ...inferred.features, notes: [...inferred.notes, ...(indexed.notes ?? [])] },
+        supportedFeatures: { ...inferred.features, notes: [...inferred.notes, ...(indexed.notes ?? []), "Indexed/variable pricing is computed in APPROX mode using EFL modeled anchors when available."] },
       };
     }
 
     if (minimumRules.ok) {
       return {
         planCalcVersion: 1,
-        planCalcStatus: "NOT_COMPUTABLE" as const,
-        planCalcReasonCode: "MINIMUM_RULES_REQUIRES_USAGE_BUCKETS",
+        planCalcStatus: "COMPUTABLE" as const,
+        planCalcReasonCode: "MINIMUM_RULES_OK",
         requiredBucketKeys: ["kwh.m.all.total"],
         supportedFeatures: { ...inferred.features, supportsMinimumRules: true, notes: [...inferred.notes, ...(minimumRules.minimum?.notes ?? [])] },
       };
@@ -412,8 +410,8 @@ export function introspectPlanFromRateStructure(input: { rateStructure: any }): 
     if (billCredits.ok) {
       return {
         planCalcVersion: 1,
-        planCalcStatus: "NOT_COMPUTABLE" as const,
-        planCalcReasonCode: "BILL_CREDITS_REQUIRES_USAGE_BUCKETS",
+        planCalcStatus: "COMPUTABLE" as const,
+        planCalcReasonCode: "BILL_CREDITS_OK",
         requiredBucketKeys: ["kwh.m.all.total"],
         supportedFeatures: { ...inferred.features, supportsCredits: true, notes: [...inferred.notes, ...(billCredits.credits?.notes ?? [])] },
       };

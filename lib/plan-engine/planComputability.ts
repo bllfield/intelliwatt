@@ -199,8 +199,8 @@ export function derivePlanCalcRequirementsFromTemplate(args: {
       if (minimum.ok) {
         return {
           planCalcVersion,
-          planCalcStatus: "NOT_COMPUTABLE" as const,
-          planCalcReasonCode: "MINIMUM_RULES_REQUIRES_USAGE_BUCKETS",
+          planCalcStatus: "COMPUTABLE" as const,
+          planCalcReasonCode: "FIXED_PLUS_MINIMUM_RULES_OK",
           requiredBucketKeys: ["kwh.m.all.total"],
           supportedFeatures: {
             ...inferred.features,
@@ -226,8 +226,8 @@ export function derivePlanCalcRequirementsFromTemplate(args: {
       if (credits.ok) {
         return {
           planCalcVersion,
-          planCalcStatus: "NOT_COMPUTABLE" as const,
-          planCalcReasonCode: "BILL_CREDITS_REQUIRES_USAGE_BUCKETS",
+          planCalcStatus: "COMPUTABLE" as const,
+          planCalcReasonCode: "FIXED_PLUS_BILL_CREDITS_OK",
           requiredBucketKeys: ["kwh.m.all.total"],
           supportedFeatures: {
             ...inferred.features,
@@ -300,9 +300,8 @@ export function derivePlanCalcRequirementsFromTemplate(args: {
       if (credits.ok && Array.isArray(credits.credits?.rules) && credits.credits.rules.length > 0) {
         return {
           planCalcVersion,
-          // IMPORTANT: do NOT mark TOU computable at plan-level (dashboard gating must remain unchanged).
-          planCalcStatus: "NOT_COMPUTABLE" as const,
-          planCalcReasonCode: "TOU_PLUS_CREDITS_REQUIRES_USAGE_BUCKETS",
+          planCalcStatus: "COMPUTABLE" as const,
+          planCalcReasonCode: "TOU_PLUS_CREDITS_OK",
           requiredBucketKeys: reqs.map((r) => r.key),
           supportedFeatures: {
             ...inferred.features,
@@ -314,9 +313,8 @@ export function derivePlanCalcRequirementsFromTemplate(args: {
       }
       return {
         planCalcVersion,
-        // IMPORTANT: do NOT mark TOU computable at plan-level (dashboard gating must remain unchanged).
-        planCalcStatus: "NOT_COMPUTABLE" as const,
-        planCalcReasonCode: "TOU_REQUIRES_USAGE_BUCKETS_PHASE2",
+        planCalcStatus: "COMPUTABLE" as const,
+        planCalcReasonCode: "TOU_OK",
         requiredBucketKeys: reqs.map((r) => r.key),
         supportedFeatures: { ...inferred.features, supportsTouEnergy: true, notes: [...inferred.notes, ...(tou2.notes ?? [])] },
       };
@@ -326,8 +324,9 @@ export function derivePlanCalcRequirementsFromTemplate(args: {
     if (indexed.isIndexed) {
       return {
         planCalcVersion,
-        planCalcStatus: "NOT_COMPUTABLE" as const,
-        planCalcReasonCode: "NON_DETERMINISTIC_PRICING_INDEXED",
+        // Indexed/variable pricing is supported in APPROX mode using EFL anchors (engine handles this).
+        planCalcStatus: "COMPUTABLE" as const,
+        planCalcReasonCode: "INDEXED_APPROXIMATE_OK",
         requiredBucketKeys: ["kwh.m.all.total"],
         supportedFeatures: {
           ...inferred.features,
@@ -349,9 +348,8 @@ export function derivePlanCalcRequirementsFromTemplate(args: {
       if (credits.ok && Array.isArray(credits.credits?.rules) && credits.credits.rules.length > 0) {
         return {
           planCalcVersion,
-          // IMPORTANT: do NOT mark tiered computable at plan-level (dashboard gating must remain unchanged).
-          planCalcStatus: "NOT_COMPUTABLE" as const,
-          planCalcReasonCode: "TIERED_PLUS_CREDITS_REQUIRES_USAGE_BUCKETS",
+          planCalcStatus: "COMPUTABLE" as const,
+          planCalcReasonCode: "TIERED_PLUS_CREDITS_OK",
           requiredBucketKeys: ["kwh.m.all.total"],
           supportedFeatures: {
             ...inferred.features,
@@ -377,9 +375,8 @@ export function derivePlanCalcRequirementsFromTemplate(args: {
       }
       return {
         planCalcVersion,
-        // IMPORTANT: do NOT mark tiered computable at plan-level (dashboard gating must remain unchanged).
-        planCalcStatus: "NOT_COMPUTABLE" as const,
-        planCalcReasonCode: "TIERED_REQUIRES_USAGE_BUCKETS",
+        planCalcStatus: "COMPUTABLE" as const,
+        planCalcReasonCode: "TIERED_OK",
         requiredBucketKeys: ["kwh.m.all.total"],
         supportedFeatures: {
           ...inferred.features,
@@ -507,12 +504,11 @@ export function canComputePlanFromBuckets(input: {
   const inferred = inferSupportedFeaturesFromTemplate({ rateStructure: input.template.rateStructure });
   const derived = derivePlanCalcRequirementsFromTemplate({ rateStructure: input.template.rateStructure });
 
-  // v1 strictness: we only consider fixed-rate energy computable from buckets (fail-closed).
   if (derived.planCalcStatus !== "COMPUTABLE") {
     return {
       status: "NOT_COMPUTABLE",
       reasonCode: derived.planCalcReasonCode,
-      reason: "Rate structure is not supported by the bucket-based calculator v1 (fixed-rate-only).",
+      reason: "Rate structure is not supported by the plan engine.",
       details: {
         offerId: input.offerId,
         ratePlanId: input.ratePlanId,
@@ -522,8 +518,8 @@ export function canComputePlanFromBuckets(input: {
     };
   }
 
-  const reqs = requiredBucketsForPlan({ features: inferred.features });
-  const requiredBucketKeys = reqs.map((r) => r.key);
+  // Use authoritative required buckets derived from the rateStructure.
+  const requiredBucketKeys = Array.isArray(derived.requiredBucketKeys) ? derived.requiredBucketKeys : ["kwh.m.all.total"];
 
   return {
     status: "COMPUTABLE",
