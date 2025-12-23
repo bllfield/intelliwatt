@@ -63,11 +63,21 @@ function extractCancelFeeCentsFromEflText(rawText: string): number | null {
     if (Number.isFinite(dollars) && dollars >= 0) return Math.round(dollars * 100);
   }
 
+  // Also handle the common layout where the "$150" appears on the line ABOVE the question block.
+  const m1b = t.match(/\$\s*([0-9]{1,5}(?:\.[0-9]{1,2})?)[\s\S]{0,600}?termination\s+fee/i);
+  if (m1b?.[1]) {
+    const dollars = Number(m1b[1]);
+    if (Number.isFinite(dollars) && dollars >= 0) return Math.round(dollars * 100);
+  }
+
   // Line-based scan: find the "termination fee" question and look a few lines forward.
   const lines = t.split(/\r?\n/);
   const idx = lines.findIndex((l) => /termination\s+fee/i.test(l));
   if (idx >= 0) {
-    for (let i = idx; i <= Math.min(lines.length - 1, idx + 6); i++) {
+    // Search both before + after because many EFLs put "Yes. $150." on a line above the question.
+    const start = Math.max(0, idx - 6);
+    const end = Math.min(lines.length - 1, idx + 6);
+    for (let i = start; i <= end; i++) {
       const dollars = parseDollars(lines[i] ?? "");
       if (dollars != null) return Math.round(dollars * 100);
     }
