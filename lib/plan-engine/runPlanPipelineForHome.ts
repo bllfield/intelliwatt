@@ -168,7 +168,9 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
     latest: latestJob,
     now: new Date(),
     monthlyCadenceDays,
-    maxRunningMinutes: 20,
+    // Vercel maxDuration is 5 minutes for our pipeline routes. If a job stays RUNNING longer than a few minutes,
+    // it is almost certainly stale (killed/timeout) and should not block auto-recovery/auto-queueing.
+    maxRunningMinutes: 3,
     requiredCalcVersion: PLAN_ENGINE_ESTIMATE_VERSION,
     enforceCadence,
   });
