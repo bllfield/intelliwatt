@@ -21,6 +21,7 @@ import { extractDeterministicTouSchedule } from "@/lib/plan-engine/touPeriods";
 import { extractDeterministicTierSchedule, computeRepEnergyCostForMonthlyKwhTiered } from "@/lib/plan-engine/tieredPricing";
 import { extractDeterministicBillCredits, applyBillCreditsToMonth } from "@/lib/plan-engine/billCredits";
 import { extractDeterministicMinimumRules, applyMinimumRulesToMonth } from "@/lib/plan-engine/minimumRules";
+import { computeMonthsRemainingOnContract } from "@/lib/current-plan/contractTerm";
 import crypto from "node:crypto";
 
 export const runtime = "nodejs";
@@ -276,7 +277,20 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "no_current_plan" }, { status: 400 });
     }
 
-    const currentRateStructure = (currentEntry as any)?.rateStructure ?? null;
+    // Merge manual + parsed so we don't lose contract end date (or other details) when the user has both.
+    const mergedCurrent: any = {
+      ...(latestParsed ?? {}),
+      ...(latestManual ?? {}),
+      // Explicit picks: prefer manual overrides, but fall back to parsed if manual is blank.
+      contractEndDate: (latestManual as any)?.contractEndDate ?? (latestParsed as any)?.contractEndDate ?? null,
+      earlyTerminationFee: (latestManual as any)?.earlyTerminationFee ?? (latestParsed as any)?.earlyTerminationFee ?? null,
+      earlyTerminationFeeCents: (latestManual as any)?.earlyTerminationFeeCents ?? (latestParsed as any)?.earlyTerminationFeeCents ?? null,
+      rateStructure: (latestManual as any)?.rateStructure ?? (latestParsed as any)?.rateStructure ?? null,
+      providerName: (latestManual as any)?.providerName ?? (latestParsed as any)?.providerName ?? null,
+      planName: (latestManual as any)?.planName ?? (latestParsed as any)?.planName ?? null,
+    };
+
+    const currentRateStructure = mergedCurrent?.rateStructure ?? null;
     const currentRsPresent = isRateStructurePresent(currentRateStructure);
 
     // Derive required bucket keys from BOTH rate structures (authoritative).
@@ -342,13 +356,13 @@ export async function GET(req: NextRequest) {
       bucketTable,
     };
 
-    const contractEndDateIso = (currentEntry as any)?.contractEndDate
-      ? new Date((currentEntry as any).contractEndDate).toISOString()
+    const contractEndDateIso = mergedCurrent?.contractEndDate
+      ? new Date(mergedCurrent.contractEndDate).toISOString()
       : null;
     const etfDollars =
-      decimalToNumber((currentEntry as any)?.earlyTerminationFee) ??
-      (typeof (currentEntry as any)?.earlyTerminationFeeCents === "number"
-        ? Number((currentEntry as any).earlyTerminationFeeCents) / 100
+      decimalToNumber(mergedCurrent?.earlyTerminationFee) ??
+      (typeof mergedCurrent?.earlyTerminationFeeCents === "number"
+        ? Number(mergedCurrent.earlyTerminationFeeCents) / 100
         : null);
     const etfCents = typeof etfDollars === "number" && Number.isFinite(etfDollars) ? Math.round(etfDollars * 100) : 0;
 
@@ -356,6 +370,12 @@ export async function GET(req: NextRequest) {
       contractEndDateIso && Number.isFinite(new Date(contractEndDateIso).getTime())
         ? new Date(contractEndDateIso).getTime() > now.getTime()
         : null;
+
+    const contractAsOfIso = windowEnd ? windowEnd.toISOString() : now.toISOString();
+    const monthsRemainingOnContract = computeMonthsRemainingOnContract({
+      contractEndDate: contractEndDateIso,
+      asOf: windowEnd ?? now,
+    });
 
     // Offer estimate (from cache or compute).
     const offerEstimate = await (async () => {
@@ -819,11 +839,13 @@ export async function GET(req: NextRequest) {
         currentPlan: {
           source: currentSource,
           id: String((currentEntry as any)?.id ?? ""),
-          providerName: (currentEntry as any)?.providerName ?? (currentEntry as any)?.supplierName ?? null,
-          planName: (currentEntry as any)?.planName ?? null,
+          providerName: mergedCurrent?.providerName ?? (currentEntry as any)?.providerName ?? (currentEntry as any)?.supplierName ?? null,
+          planName: mergedCurrent?.planName ?? (currentEntry as any)?.planName ?? null,
           contractEndDate: contractEndDateIso,
           earlyTerminationFeeCents: etfCents,
           isInContract,
+          contractAsOf: contractAsOfIso,
+          monthsRemainingOnContract,
         },
         tdspApplied,
         usage: {

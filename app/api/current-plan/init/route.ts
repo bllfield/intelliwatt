@@ -6,6 +6,7 @@ import { getCurrentPlanPrisma, CurrentPlanPrisma } from '@/lib/prismaCurrentPlan
 import { refreshUserEntryStatuses } from '@/lib/hitthejackwatt/entryLifecycle';
 import { getTdspDeliveryRates } from '@/lib/plan-engine/getTdspDeliveryRates';
 import { requiredBucketsForRateStructure } from '@/lib/plan-engine/requiredBucketsForPlan';
+import { computeMonthsRemainingOnContract } from '@/lib/current-plan/contractTerm';
 
 export const dynamic = 'force-dynamic';
 
@@ -430,6 +431,12 @@ export async function GET(request: NextRequest) {
     const rs: any = effectivePlan?.rateStructure ?? null;
     const rt = String(rateType ?? '').toUpperCase();
 
+    const contractEndDateIso = effectivePlan?.contractEndDate ?? null;
+    const monthsRemainingOnContract = computeMonthsRemainingOnContract({
+      contractEndDate: contractEndDateIso,
+      asOf: new Date(),
+    });
+
     // Buckets used by this plan (authoritative from rateStructure).
     const requiredBuckets = requiredBucketsForRateStructure({ rateStructure: rs ?? null });
     const requiredBucketKeys = requiredBuckets.map((b) => b.key);
@@ -512,6 +519,11 @@ export async function GET(request: NextRequest) {
       savedCurrentPlan,
       parsedCurrentPlan,
       prefillSignals,
+      contract: {
+        contractEndDate: contractEndDateIso,
+        monthsRemainingOnContract,
+        asOf: new Date().toISOString(),
+      },
       requiredBuckets,
       requiredBucketKeys,
       planVariablesUsed: {
