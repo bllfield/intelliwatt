@@ -731,6 +731,8 @@ export default function FactCardOpsPage() {
   const [tplHomeId, setTplHomeId] = useState("");
   const [tplUsageNote, setTplUsageNote] = useState<string | null>(null);
   const [tplAutoSort, setTplAutoSort] = useState(true);
+  const [tplSimTdspSlug, setTplSimTdspSlug] = useState<string>("");
+  const [tplSimAvgMonthlyKwh, setTplSimAvgMonthlyKwh] = useState<string>("1512");
   const [backfillIncludeNonStrong, setBackfillIncludeNonStrong] =
     useState(false);
   const [backfillOverwrite, setBackfillOverwrite] = useState(false);
@@ -805,7 +807,12 @@ export default function FactCardOpsPage() {
       params.set("limit", String(tplLimit));
       if (tplQ.trim()) params.set("q", tplQ.trim());
       if (tplIncludeLegacy) params.set("includeLegacy", "1");
-      if (tplHomeId.trim()) {
+      if (tplSimTdspSlug.trim()) {
+        params.set("simulateTdspSlug", tplSimTdspSlug.trim());
+        const kwh = Number(tplSimAvgMonthlyKwh);
+        if (Number.isFinite(kwh) && kwh > 0) params.set("simulateAvgMonthlyKwh", String(Math.floor(kwh)));
+        params.set("usageMonths", "12");
+      } else if (tplHomeId.trim()) {
         params.set("homeId", tplHomeId.trim());
         params.set("usageMonths", "12");
       } else {
@@ -830,11 +837,15 @@ export default function FactCardOpsPage() {
       if (uc && typeof uc === "object") {
         const monthsFound = typeof uc.monthsFound === "number" ? uc.monthsFound : null;
         const avgMonthlyKwh = typeof uc.avgMonthlyKwh === "number" ? uc.avgMonthlyKwh : null;
-        setTplUsageNote(
+        const ctxHomeId = String(uc.homeId ?? "—");
+        const base =
           monthsFound != null
-            ? `Usage context: homeId=${String(uc.homeId ?? "—")} monthsFound=${monthsFound}${avgMonthlyKwh != null ? ` avgMonthly=${avgMonthlyKwh.toFixed(0)} kWh` : ""}`
-            : `Usage context: homeId=${String(uc.homeId ?? "—")}`,
-        );
+            ? `Usage context: homeId=${ctxHomeId} monthsFound=${monthsFound}${avgMonthlyKwh != null ? ` avgMonthly=${avgMonthlyKwh.toFixed(0)} kWh` : ""}`
+            : `Usage context: homeId=${ctxHomeId}`;
+        const sim = tplSimTdspSlug.trim()
+          ? ` (SIM: tdsp=${tplSimTdspSlug.trim()} avgMonthly=${Number(tplSimAvgMonthlyKwh || "0") || 0} kWh)`
+          : "";
+        setTplUsageNote(`${base}${sim}`);
 
         if (tplAutoSort) {
           if (monthsFound != null && monthsFound > 0) {
@@ -2285,12 +2296,34 @@ export default function FactCardOpsPage() {
         <div className="flex flex-wrap items-center gap-3">
           <input className="flex-1 min-w-[220px] rounded-lg border px-3 py-2 text-sm" placeholder="Search supplier / plan / cert / version / sha…" value={tplQ} onChange={(e) => setTplQ(e.target.value)} />
           <input className="w-28 rounded-lg border px-3 py-2 text-sm" type="number" min={1} max={1000} value={tplLimit} onChange={(e) => setTplLimit(Math.max(1, Math.min(1000, numOrNull(e.target.value) ?? 200)))} />
+          <select
+            className="w-[160px] rounded-lg border px-3 py-2 text-sm"
+            value={tplSimTdspSlug}
+            onChange={(e) => setTplSimTdspSlug(e.target.value)}
+            title="Simulate a TDSP territory without needing a real home"
+          >
+            <option value="">Sim TDSP (off)</option>
+            <option value="oncor">ONCOR</option>
+            <option value="centerpoint">CENTERPOINT</option>
+            <option value="aep_north">AEP_NORTH</option>
+            <option value="aep_central">AEP_CENTRAL</option>
+            <option value="tnmp">TNMP</option>
+          </select>
+          <input
+            className="w-[180px] rounded-lg border px-3 py-2 text-sm"
+            placeholder="Sim avg kWh/mo"
+            value={tplSimAvgMonthlyKwh}
+            onChange={(e) => setTplSimAvgMonthlyKwh(e.target.value)}
+            disabled={!tplSimTdspSlug.trim()}
+            title="Used only when Sim TDSP is set"
+          />
           <input
             className="w-[260px] rounded-lg border px-3 py-2 text-sm font-mono"
             placeholder="homeId (usage context)"
             value={tplHomeId}
             onChange={(e) => setTplHomeId(e.target.value)}
             title="Optional: attach usage-based monthly estimates using this homeId (reads usage bucket tables)."
+            disabled={tplSimTdspSlug.trim().length > 0}
           />
           <select
             className="rounded-lg border px-3 py-2 text-sm"

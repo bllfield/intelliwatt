@@ -31,6 +31,53 @@ const BUCKET_GATING_REASON_CODES = new Set<string>([
 type TdspDelivery = { monthlyFeeCents: number; deliveryCentsPerKwh: number };
 type TdspSnapshotMeta = TdspDelivery & { tdspCode: string; snapshotAt: string };
 
+function normalizeTdspSlug(v: string | null | undefined): string | null {
+  const s = String(v ?? "").trim().toLowerCase();
+  if (!s) return null;
+  // Accept either slug or code-style values.
+  if (s === "oncor") return "oncor";
+  if (s === "centerpoint" || s === "center_point") return "centerpoint";
+  if (s === "aep_north" || s === "aepnorth" || s === "aep-north") return "aep_north";
+  if (s === "aep_central" || s === "aepcentral" || s === "aep-central") return "aep_central";
+  if (s === "tnmp") return "tnmp";
+  return s;
+}
+
+function safePositiveNum(v: string | null | undefined): number | null {
+  const n = Number(String(v ?? "").trim());
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function buildSimUsageByMonth(args: { yearMonths: string[]; annualKwh: number; bucketKeys: string[] }): Record<string, Record<string, number>> {
+  const byMonth: Record<string, Record<string, number>> = {};
+  const months = Math.max(1, args.yearMonths.length);
+  const monthlyTotal = args.annualKwh / months;
+  const bucketKeys = Array.from(new Set(args.bucketKeys.map((k) => String(k ?? "").trim()).filter(Boolean)));
+  for (const ym of args.yearMonths) {
+    const row: Record<string, number> = {};
+    row["kwh.m.all.total"] = Number(monthlyTotal.toFixed(6));
+
+    const extras = bucketKeys.filter((k) => k !== "kwh.m.all.total");
+    if (extras.length > 0) {
+      const hasWeekday = extras.includes("kwh.m.weekday.total");
+      const hasWeekend = extras.includes("kwh.m.weekend.total");
+      if (hasWeekday && hasWeekend) {
+        row["kwh.m.weekday.total"] = Number((monthlyTotal * (5 / 7)).toFixed(6));
+        row["kwh.m.weekend.total"] = Number((monthlyTotal * (2 / 7)).toFixed(6));
+        for (const k of extras) {
+          if (k === "kwh.m.weekday.total" || k === "kwh.m.weekend.total") continue;
+          row[k] = 0;
+        }
+      } else {
+        const per = monthlyTotal / extras.length;
+        for (const k of extras) row[k] = Number(per.toFixed(6));
+      }
+    }
+    byMonth[ym] = row;
+  }
+  return byMonth;
+}
+
 function decimalToNumber(v: any): number | null {
   if (typeof v === "number" && Number.isFinite(v)) return v;
   if (v && typeof v === "object" && typeof v.toString === "function") {
@@ -427,6 +474,10 @@ export async function GET(req: NextRequest) {
     const usageMonthsRaw = Number(req.nextUrl.searchParams.get("usageMonths") ?? "12");
     const usageMonths = Math.max(1, Math.min(12, Number.isFinite(usageMonthsRaw) ? Math.floor(usageMonthsRaw) : 12));
 
+    const simulateTdspSlug = normalizeTdspSlug(req.nextUrl.searchParams.get("simulateTdspSlug"));
+    const simulateAvgMonthlyKwh = safePositiveNum(req.nextUrl.searchParams.get("simulateAvgMonthlyKwh"));
+    const simulateAnnualKwh = safePositiveNum(req.nextUrl.searchParams.get("simulateAnnualKwh"));
+
     const hasAddressFilter = Boolean(address && city && state && zip);
 
     const normalizedQ = (() => {
@@ -657,7 +708,7 @@ export async function GET(req: NextRequest) {
     let autoHomeId: string | null = null;
     let resolvedHomeIdSource: "EXPLICIT" | "AUTO" | null = resolvedHomeId ? "EXPLICIT" : null;
 
-    if (!resolvedHomeId && useDefaultHome) {
+    if (!resolvedHomeId && useDefaultHome && !simulateTdspSlug) {
       // Pick a "best available" homeId for usage-based previews:
       // newest home with any kwh.m.all.total monthly bucket. Admin-only convenience.
       try {
@@ -685,7 +736,36 @@ export async function GET(req: NextRequest) {
     const effectiveHomeId = resolvedHomeId ?? autoHomeId;
     let homeTdspSlug: string | null = null;
 
-    if (effectiveHomeId) {
+    if (simulateTdspSlug) {
+      homeTdspSlug = simulateTdspSlug;
+      const yearMonths = lastNYearMonthsChicago(usageMonths);
+      const keys = new Set<string>(["kwh.m.all.total"]);
+      for (const m of planMeta) {
+        for (const k of m.requiredBucketKeys ?? []) {
+          const kk = String(k ?? "").trim();
+          if (kk) keys.add(kk);
+        }
+      }
+      const bucketKeysUsed = Array.from(keys);
+      const annualKwh =
+        simulateAnnualKwh ??
+        (simulateAvgMonthlyKwh != null ? simulateAvgMonthlyKwh * yearMonths.length : null);
+      const byMonth =
+        annualKwh != null
+          ? buildSimUsageByMonth({ yearMonths, annualKwh, bucketKeys: bucketKeysUsed })
+          : {};
+      usageByMonth = byMonth;
+      usageEnv = {
+        homeId: "SIMULATED",
+        monthsRequested: usageMonths,
+        monthsFound: annualKwh != null ? yearMonths.length : 0,
+        annualKwh: annualKwh != null ? Number(annualKwh.toFixed(3)) : null,
+        avgMonthlyKwh: annualKwh != null ? Number((annualKwh / yearMonths.length).toFixed(3)) : null,
+        bucketKeysUsed,
+        byMonth,
+        yearMonths,
+      };
+    } else if (effectiveHomeId) {
       const house = await prisma.houseAddress.findUnique({
         where: { id: effectiveHomeId } as any,
         select: { id: true, archivedAt: true, tdspSlug: true },
@@ -879,6 +959,10 @@ export async function GET(req: NextRequest) {
             } else if (!tdsp) {
               usageEstimate = { status: "NOT_IMPLEMENTED", reason: "Missing TDSP snapshot for utility" };
             } else {
+              const estimateMode =
+                String(p?.planCalcReasonCode ?? "").trim() === "INDEXED_APPROXIMATE_OK"
+                  ? ("INDEXED_EFL_ANCHOR_APPROX" as const)
+                  : ("DEFAULT" as const);
               usageEstimate = calculatePlanCostForUsage({
                 annualKwh: usageEnv.annualKwh,
                 monthsCount: usageEnv.monthsFound,
@@ -889,6 +973,7 @@ export async function GET(req: NextRequest) {
                 },
                 rateStructure: p.rateStructure,
                 usageBucketsByMonth: usageByMonth ?? undefined,
+                estimateMode,
               });
             }
           } catch (e: any) {
