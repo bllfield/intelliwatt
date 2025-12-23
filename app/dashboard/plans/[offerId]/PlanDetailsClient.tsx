@@ -134,7 +134,10 @@ export default function PlanDetailsClient({ offerId }: { offerId: string }) {
   const outputs = ok ? (data as any).outputs : null;
   const math = ok ? (data as any).math : null;
   const monthlyBreakdown = ok ? (data as any).monthlyBreakdown : null;
-  const hasCalc = Boolean(outputs?.trueCostEstimate?.status === "OK");
+  const hasCalc = Boolean(
+    outputs?.trueCostEstimate?.status === "OK" ||
+      outputs?.trueCostEstimate?.status === "APPROXIMATE",
+  );
 
   const requiredBucketKeys = useMemo(
     () => (Array.isArray(template?.requiredBucketKeys) ? (template.requiredBucketKeys as any[]).map(String) : []),

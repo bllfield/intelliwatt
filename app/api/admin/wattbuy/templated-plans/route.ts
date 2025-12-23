@@ -15,7 +15,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
-const PLAN_ENGINE_ESTIMATE_VERSION = "estimateTrueCost_v3";
+const PLAN_ENGINE_ESTIMATE_VERSION = "estimateTrueCost_v4";
 const PLAN_ENGINE_ESTIMATE_ENDPOINTS = ["PLAN_ENGINE_ESTIMATE_V1", "PLAN_ENGINE_ESTIMATE_V2"];
 const PLAN_ENGINE_ESTIMATE_MONTHS = 12;
 const BUCKET_GATING_REASON_CODES = new Set<string>([

@@ -59,7 +59,7 @@ function parseBoolParam(v: string | null, fallback: boolean): boolean {
 type EflBucket = 500 | 1000 | 2000;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const PLAN_ENGINE_ESTIMATE_VERSION = "estimateTrueCost_v3";
+const PLAN_ENGINE_ESTIMATE_VERSION = "estimateTrueCost_v4";
 
 function sha256Hex(s: string): string {
   return crypto.createHash("sha256").update(s).digest("hex");

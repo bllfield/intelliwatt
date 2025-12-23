@@ -104,7 +104,26 @@ export function extractEflAveragePriceAnchors(rateStructure: any): EflAveragePri
   const points: any[] = Array.isArray(rs?.__eflAvgPriceValidation?.points) ? rs.__eflAvgPriceValidation.points : [];
   const modeledPick = (kwh: number): number | null => {
     const hit = points.find((p) => Number(p?.usageKwh ?? p?.kwh ?? p?.usage) === kwh);
-    const v = safeNum(hit?.modeledAvgCentsPerKwh ?? hit?.modeledAvgPriceCentsPerKwh ?? hit?.modeledCentsPerKwh);
+    // IMPORTANT: Prefer supply-only anchors when available so we can apply the *home’s* TDSP charges
+    // without double-counting TDSP included in the EFL avg-price table.
+    //
+    // The validator proof often contains:
+    // - modeled.supplyOnlyTotalCents (REP only)
+    // - modeled.tdspTotalCentsUsed / modeled.totalCentsUsed (all-in)
+    //
+    // For indexed/variable APPROX mode we need REP cents/kWh, not all-in cents/kWh.
+    const usageKwh = safeNum(hit?.usageKwh ?? hit?.kwh ?? hit?.usage);
+    const supplyOnlyTotalCents = safeNum(hit?.modeled?.supplyOnlyTotalCents);
+    if (usageKwh != null && usageKwh > 0 && supplyOnlyTotalCents != null && supplyOnlyTotalCents > 0) {
+      const repCentsPerKwh = supplyOnlyTotalCents / usageKwh;
+      return clampCents(repCentsPerKwh);
+    }
+
+    const v = safeNum(
+      hit?.modeledAvgCentsPerKwh ??
+        hit?.modeledAvgPriceCentsPerKwh ??
+        hit?.modeledCentsPerKwh,
+    );
     return clampCents(v);
   };
 
