@@ -160,6 +160,38 @@ export async function POST(req: NextRequest) {
         ? { status: "NOT_COMPUTABLE", reason: "NON_DETERMINISTIC_PRICING_INDEXED", notes: [`rateStructure.type=${rsType || "UNKNOWN"}`] }
         : null;
 
+    // Independently detect "bucket sum mismatch" without relying on engine internals:
+    // if sub-buckets do not add up to total for any month, the plan should be queued for review.
+    let bucketMismatch: { yearMonth: string; totalKwh: number; sumSubKwh: number; deltaKwh: number } | null = null;
+    try {
+      const subKeys = requiredBucketKeys.filter((k) => String(k) !== "kwh.m.all.total");
+      if (subKeys.length > 0) {
+        for (const ym of bucketBuild.yearMonths) {
+          const row = bucketBuild.usageBucketsByMonth?.[ym] ?? null;
+          if (!row) continue;
+          const total = Number(row["kwh.m.all.total"]);
+          if (!Number.isFinite(total)) continue;
+          const sum = subKeys.reduce((acc, k) => acc + (Number(row[k]) || 0), 0);
+          if (!Number.isFinite(sum)) continue;
+          const delta = sum - total;
+          if (Math.abs(delta) > 0.5) {
+            bucketMismatch = { yearMonth: ym, totalKwh: total, sumSubKwh: sum, deltaKwh: delta };
+            break;
+          }
+        }
+      }
+    } catch {
+      bucketMismatch = null;
+    }
+
+    if (bucketMismatch) {
+      est = {
+        status: "NOT_COMPUTABLE",
+        reason: `USAGE_BUCKET_SUM_MISMATCH: ${bucketMismatch.yearMonth}:sum(periods)=${bucketMismatch.sumSubKwh.toFixed(3)} total=${bucketMismatch.totalKwh.toFixed(3)}`,
+        details: bucketMismatch,
+      };
+    }
+
     if (!est) {
       // If TDSP rates are missing, we can still run estimateTrueCost; it will include TDSP=0 and may not match dashboard,
       // but for bucket-sum mismatch detection it's sufficient.
@@ -237,6 +269,7 @@ export async function POST(req: NextRequest) {
       ratePlanId,
       requiredBucketKeys,
       queued: shouldQueue,
+      bucketMismatch,
       estimate: est,
     });
   }
