@@ -5,6 +5,8 @@ import { requireAdmin } from "@/lib/auth/admin";
 import { getLatestPlanPipelineJob } from "@/lib/plan-engine/planPipelineJob";
 import { runPlanPipelineForHome } from "@/lib/plan-engine/runPlanPipelineForHome";
 import { normalizeEmail } from "@/lib/utils/email";
+import { wattbuy } from "@/lib/wattbuy";
+import { normalizeOffers } from "@/lib/wattbuy/normalize";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -66,9 +68,56 @@ export async function POST(req: NextRequest) {
   const maxTemplateOffers = clamp(toInt(url.searchParams.get("maxTemplateOffers"), 6), 0, 10);
   const maxEstimatePlans = clamp(toInt(url.searchParams.get("maxEstimatePlans"), 50), 0, 50);
   const fallbackCooldownMs = clamp(toInt(url.searchParams.get("fallbackCooldownMs"), 15_000), 5_000, 24 * 60 * 60 * 1000);
+  const debug = String(url.searchParams.get("debug") ?? "").trim() === "1";
 
   const homeId = homeIdFromQuery || (email ? await resolveHomeIdFromEmail(email) : null);
   if (!homeId) return NextResponse.json({ ok: false, error: "missing_homeId_or_email" }, { status: 400 });
+
+  let debugInfo: any = null;
+  if (debug) {
+    try {
+      const house = await prisma.houseAddress.findUnique({
+        where: { id: homeId } as any,
+        select: {
+          id: true,
+          addressLine1: true,
+          addressCity: true,
+          addressState: true,
+          addressZip5: true,
+        },
+      });
+      if (house?.addressLine1 && house.addressCity && house.addressState && house.addressZip5) {
+        const raw = await wattbuy.offers({
+          address: house.addressLine1,
+          city: house.addressCity,
+          state: house.addressState,
+          zip: house.addressZip5,
+          isRenter: false,
+        });
+        const normalized = normalizeOffers(raw ?? {});
+        const offers = Array.isArray((normalized as any)?.offers) ? ((normalized as any).offers as any[]) : [];
+        const offerIds = offers.map((o) => String(o?.offer_id ?? "").trim()).filter(Boolean);
+
+        const mapCount = await (prisma as any).offerIdRatePlanMap.count({
+          where: { offerId: { in: offerIds }, ratePlanId: { not: null } },
+        });
+        const ratePlanCount = await (prisma as any).ratePlan.count({
+          where: { offerId: { in: offerIds } },
+        });
+
+        debugInfo = {
+          offersTotal: offers.length,
+          sampleOfferIds: offerIds.slice(0, 8),
+          offerIdRatePlanMapCount: mapCount,
+          ratePlanOfferIdMatchCount: ratePlanCount,
+        };
+      } else {
+        debugInfo = { error: "missing_house_address_fields_for_wattbuy_call" };
+      }
+    } catch (e: any) {
+      debugInfo = { error: "debug_failed", detail: e?.message ?? String(e) };
+    }
+  }
 
   const before = await getLatestPlanPipelineJob(homeId);
   const result = await runPlanPipelineForHome({
@@ -83,7 +132,7 @@ export async function POST(req: NextRequest) {
   });
   const after = await getLatestPlanPipelineJob(homeId);
 
-  return NextResponse.json({ ok: true, homeId, before, result, after }, { status: 200 });
+  return NextResponse.json({ ok: true, homeId, ...(debugInfo ? { debug: debugInfo } : {}), before, result, after }, { status: 200 });
 }
 
 
