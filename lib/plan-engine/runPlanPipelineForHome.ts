@@ -18,7 +18,7 @@ import { canComputePlanFromBuckets, derivePlanCalcRequirementsFromTemplate } fro
 import { getLatestPlanPipelineJob, shouldStartPlanPipelineJob, writePlanPipelineJobSnapshot } from "@/lib/plan-engine/planPipelineJob";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const PLAN_ENGINE_ESTIMATE_VERSION = "estimateTrueCost_v1";
+const PLAN_ENGINE_ESTIMATE_VERSION = "estimateTrueCost_v2";
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n));

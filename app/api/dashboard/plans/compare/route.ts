@@ -17,7 +17,7 @@ import crypto from "node:crypto";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const PLAN_ENGINE_ESTIMATE_VERSION = "estimateTrueCost_v1";
+const PLAN_ENGINE_ESTIMATE_VERSION = "estimateTrueCost_v2";
 const CURRENT_PLAN_ESTIMATE_ENDPOINT = "CURRENT_PLAN_ENGINE_ESTIMATE_V1";
 
 function parseBool(v: string | null, fallback: boolean): boolean {

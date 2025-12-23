@@ -28,7 +28,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const PLAN_ENGINE_ESTIMATE_VERSION = "estimateTrueCost_v1";
+const PLAN_ENGINE_ESTIMATE_VERSION = "estimateTrueCost_v2";
 
 function hashUsageInputs(args: {
   yearMonths: string[];
