@@ -443,6 +443,10 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
   let estimatesComputed = 0;
   let estimatesAlreadyCached = 0;
   let estimatesConsidered = 0;
+  let ratePlansLoaded = Array.isArray(ratePlans) ? (ratePlans as any[]).length : 0;
+  let ratePlansMissingRateStructure = 0;
+  let ratePlansDerivedNotComputable = 0;
+  let ratePlansMissingRequiredKeys = 0;
 
   if (!annualKwhForCalc || !tdspRates) {
     const finished = new Date();
@@ -475,7 +479,10 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
     const ratePlanId = String(rp?.id ?? "").trim();
     if (!ratePlanId) continue;
     const rateStructure = rp?.rateStructure ?? null;
-    if (!rateStructure) continue;
+    if (!rateStructure) {
+      ratePlansMissingRateStructure++;
+      continue;
+    }
 
     const overridden = isComputableOverride(rp?.planCalcStatus, rp?.planCalcReasonCode);
     if (!overridden) {
@@ -483,6 +490,7 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
       // IMPORTANT: Do NOT call canComputePlanFromBuckets() here; that helper is for dashboard UI and expects a different input shape.
       const derived = derivePlanCalcRequirementsFromTemplate({ rateStructure });
       if (derived?.planCalcStatus !== "COMPUTABLE") {
+        ratePlansDerivedNotComputable++;
         // Auto-enqueue true template defects / non-deterministic pricing for admin review (system-caught).
         const rc = String(derived?.planCalcReasonCode ?? "").trim();
         if (rc && isPlanCalcQuarantineWorthyReasonCode(rc)) {
@@ -553,7 +561,10 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
       // Ensure required buckets are present in the stitched bucket union we built above.
       const requiredKeys = Array.isArray(derived?.requiredBucketKeys) ? (derived.requiredBucketKeys as string[]) : [];
       const missing = requiredKeys.filter((k) => !unionKeys.has(String(k ?? "").trim()));
-      if (missing.length > 0) continue;
+      if (missing.length > 0) {
+        ratePlansMissingRequiredKeys++;
+        continue;
+      }
     }
 
     const rsSha = sha256HexCache(JSON.stringify(rateStructure ?? null));
@@ -670,7 +681,20 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
     finishedAt: finished.toISOString(),
     cooldownUntil: new Date(Date.now() + cooldownMs).toISOString(),
     lastCalcWindowEnd: usageWindowEnd.toISOString(),
-    counts: { offersTotal: offers.length, templatesProcessed, templatesLinked, templatesQueued, estimatesConsidered, estimatesComputed, estimatesAlreadyCached },
+    counts: {
+      offersTotal: offers.length,
+      templatesProcessed,
+      templatesLinked,
+      templatesQueued,
+      ratePlanIdsCount: ratePlanIds.length,
+      ratePlansLoaded,
+      ratePlansMissingRateStructure,
+      ratePlansDerivedNotComputable,
+      ratePlansMissingRequiredKeys,
+      estimatesConsidered,
+      estimatesComputed,
+      estimatesAlreadyCached,
+    },
   });
 
   return {
