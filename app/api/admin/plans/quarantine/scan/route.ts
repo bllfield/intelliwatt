@@ -260,6 +260,8 @@ export async function POST(req: NextRequest) {
           finalStatus: "OPEN",
           queueReason: JSON.stringify(queueReasonPayload),
           resolutionNotes: estReason || "NOT_COMPUTABLE",
+          resolvedAt: null,
+          resolvedBy: null,
         },
       });
     }

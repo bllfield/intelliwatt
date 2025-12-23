@@ -1492,6 +1492,8 @@ export async function GET(req: NextRequest) {
                   queueReason: JSON.stringify(queueReasonPayload),
                   resolutionNotes:
                     (planComputability?.reason ?? planCalcReasonCode ?? quarantineReasonCode ?? "Not computable"),
+                  resolvedAt: null,
+                  resolvedBy: null,
                 },
               })
               .catch(() => {});
@@ -1642,6 +1644,8 @@ export async function GET(req: NextRequest) {
                 finalStatus: "OPEN",
                 queueReason: JSON.stringify(queueReasonPayload),
                 resolutionNotes: estReason || "NOT_COMPUTABLE",
+                resolvedAt: null,
+                resolvedBy: null,
               },
             })
             .catch(() => {});
