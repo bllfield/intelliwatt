@@ -92,7 +92,7 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
   const reason = String(args.reason ?? "").trim() || "usage_present";
   const timeBudgetMs = clamp(Number(args.timeBudgetMs ?? 12_000) || 12_000, 1500, 25_000);
   const maxTemplateOffers = clamp(Number(args.maxTemplateOffers ?? 4) || 4, 0, 10);
-  const maxEstimatePlans = clamp(Number(args.maxEstimatePlans ?? 20) || 20, 0, 50);
+  const maxEstimatePlans = clamp(Number(args.maxEstimatePlans ?? 20) || 20, 0, 200);
   const isRenter = Boolean(args.isRenter ?? false);
   const monthlyCadenceDays = clamp(Number(args.monthlyCadenceDays ?? 30) || 30, 1, 365);
   const cooldownMs =

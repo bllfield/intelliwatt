@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
   const reason = (url.searchParams.get("reason") ?? "plans_fallback").trim() || "plans_fallback";
   const timeBudgetMs = clamp(toInt(url.searchParams.get("timeBudgetMs"), 12_000), 1500, 25_000);
   const maxTemplateOffers = clamp(toInt(url.searchParams.get("maxTemplateOffers"), 6), 0, 10);
-  const maxEstimatePlans = clamp(toInt(url.searchParams.get("maxEstimatePlans"), 50), 0, 50);
+  const maxEstimatePlans = clamp(toInt(url.searchParams.get("maxEstimatePlans"), 50), 0, 200);
   const isRenter = parseBool(url.searchParams.get("isRenter"), false);
   const proactiveCooldownMs = clamp(toInt(url.searchParams.get("proactiveCooldownMs"), 5 * 60 * 1000), 60_000, 24 * 60 * 60 * 1000);
   // Plans page needs to be able to re-kick the pipeline quickly if a first run times out / cold-starts.

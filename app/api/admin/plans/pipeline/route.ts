@@ -66,7 +66,7 @@ export async function POST(req: NextRequest) {
 
   const timeBudgetMs = clamp(toInt(url.searchParams.get("timeBudgetMs"), 25_000), 1500, 25_000);
   const maxTemplateOffers = clamp(toInt(url.searchParams.get("maxTemplateOffers"), 6), 0, 10);
-  const maxEstimatePlans = clamp(toInt(url.searchParams.get("maxEstimatePlans"), 50), 0, 50);
+  const maxEstimatePlans = clamp(toInt(url.searchParams.get("maxEstimatePlans"), 50), 0, 200);
   const fallbackCooldownMs = clamp(toInt(url.searchParams.get("fallbackCooldownMs"), 15_000), 5_000, 24 * 60 * 60 * 1000);
   const debug = String(url.searchParams.get("debug") ?? "").trim() === "1";
 
