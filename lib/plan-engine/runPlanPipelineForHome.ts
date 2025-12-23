@@ -14,7 +14,7 @@ import { getTdspDeliveryRates } from "@/lib/plan-engine/getTdspDeliveryRates";
 import { estimateTrueCost } from "@/lib/plan-engine/estimateTrueCost";
 import { getCachedPlanEstimate, putCachedPlanEstimate, sha256Hex as sha256HexCache } from "@/lib/plan-engine/planEstimateCache";
 import { isComputableOverride } from "@/lib/plan-engine/planCalcOverrides";
-import { canComputePlanFromBuckets, derivePlanCalcRequirementsFromTemplate } from "@/lib/plan-engine/planComputability";
+import { derivePlanCalcRequirementsFromTemplate } from "@/lib/plan-engine/planComputability";
 import { getLatestPlanPipelineJob, shouldStartPlanPipelineJob, writePlanPipelineJobSnapshot } from "@/lib/plan-engine/planPipelineJob";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -436,12 +436,15 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
 
     const overridden = isComputableOverride(rp?.planCalcStatus, rp?.planCalcReasonCode);
     if (!overridden) {
-      const comp = canComputePlanFromBuckets({
-        rateStructure,
-        requiredBucketKeys: Array.isArray(rp?.requiredBucketKeys) ? rp.requiredBucketKeys : null,
-        presentBucketKeys: Array.from(unionKeys),
-      } as any);
-      if (comp?.status === "NOT_COMPUTABLE") continue;
+      // Derive computability from the template rateStructure (authoritative).
+      // IMPORTANT: Do NOT call canComputePlanFromBuckets() here; that helper is for dashboard UI and expects a different input shape.
+      const derived = derivePlanCalcRequirementsFromTemplate({ rateStructure });
+      if (derived?.planCalcStatus !== "COMPUTABLE") continue;
+
+      // Ensure required buckets are present in the stitched bucket union we built above.
+      const requiredKeys = Array.isArray(derived?.requiredBucketKeys) ? (derived.requiredBucketKeys as string[]) : [];
+      const missing = requiredKeys.filter((k) => !unionKeys.has(String(k ?? "").trim()));
+      if (missing.length > 0) continue;
     }
 
     const rsSha = sha256HexCache(JSON.stringify(rateStructure ?? null));
