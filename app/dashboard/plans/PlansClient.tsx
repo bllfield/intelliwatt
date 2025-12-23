@@ -388,12 +388,13 @@ export default function PlansClient() {
       setPrefetchNote(`Preparing IntelliWatt calculations… (${queuedCountNow} pending)`);
       try {
         const params = new URLSearchParams();
-        params.set("reason", "plans_page_fallback");
+        params.set("reason", "plans_fallback");
         params.set("timeBudgetMs", "25000");
         params.set("maxTemplateOffers", "6");
         params.set("maxEstimatePlans", "50");
         // Allow repeated short runs; server still enforces lock + cooldown.
         params.set("proactiveCooldownMs", "60000");
+        params.set("fallbackCooldownMs", "15000");
         params.set("isRenter", String(isRenter));
         fetch(`/api/dashboard/plans/pipeline?${params.toString()}`, { method: "POST" })
           .catch(() => null)
