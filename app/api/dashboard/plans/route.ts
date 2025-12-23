@@ -1173,7 +1173,9 @@ export async function GET(req: NextRequest) {
         if (!ratePlanId) return eflUrl ? "QUEUED" : "UNAVAILABLE";
         const calc = planCalcByRatePlanId.get(ratePlanId) ?? null;
         if (calc && calc.planCalcStatus === "COMPUTABLE") return "AVAILABLE";
-        // Mapped but not computable (yet) => queued for calc review / next engine version.
+        // Terminal: template is not computable by the current engine => NOT AVAILABLE (do not show as "still processing").
+        if (calc && calc.planCalcStatus === "NOT_COMPUTABLE") return "UNAVAILABLE";
+        // Mapped but unknown/missing calc metadata => QUEUED (pipeline will try, or future engine versions may unlock it).
         return "QUEUED";
       })();
 
@@ -1501,7 +1503,8 @@ export async function GET(req: NextRequest) {
         if (current !== "AVAILABLE") return current;
         // Fail-closed: if required buckets are missing, or estimator can't compute, treat as QUEUED.
         if (missingBucketKeys.length > 0) return "QUEUED";
-        if (!isComputableOverride() && planComputability && planComputability.status === "NOT_COMPUTABLE") return "QUEUED";
+        // Terminal: if the engine declares this template NOT_COMPUTABLE, do not keep showing it as "queued".
+        if (!isComputableOverride() && planComputability && planComputability.status === "NOT_COMPUTABLE") return "UNAVAILABLE";
         const s = String(trueCostEstimate?.status ?? "").toUpperCase();
         if (s && s !== "OK" && s !== "APPROXIMATE") return "QUEUED";
         return current;
