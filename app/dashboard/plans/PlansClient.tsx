@@ -166,6 +166,7 @@ export default function PlansClient() {
   const pipelineKickRef = useRef(false);
   const pollTimerRef = useRef<number | null>(null);
   const pollStopTimerRef = useRef<number | null>(null);
+  const pollInFlightRef = useRef(false);
 
   const [mobilePanel, setMobilePanel] = useState<"none" | "search" | "filters">("none");
   const [headerCollapsed, setHeaderCollapsed] = useState(false);
@@ -393,17 +394,28 @@ export default function PlansClient() {
       }
     }
 
-    // Poll the offers dataset until queued clears (or timeout).
+    // Poll until queued clears (or timeout), but NEVER overlap requests.
     if (pollTimerRef.current == null) {
-      pollTimerRef.current = window.setInterval(() => {
+      const startedAt = Date.now();
+      const tick = () => {
+        if (pollInFlightRef.current) return;
         if (document.visibilityState === "hidden") return;
+        if (Date.now() - startedAt > 120_000) {
+          // Stop after 2 minutes.
+          if (pollTimerRef.current) window.clearInterval(pollTimerRef.current);
+          pollTimerRef.current = null;
+          prefetchInFlightRef.current = false;
+          return;
+        }
+
+        pollInFlightRef.current = true;
         try {
           const usp = new URLSearchParams();
           usp.set("dataset", "1");
           usp.set("pageSize", "2000");
           usp.set("sort", "kwh1000_asc");
           usp.set("isRenter", String(isRenter));
-          usp.set("_r", String(Date.now())); // bypass browser cache; sessionStorage will still store latest
+          // Do NOT add _r here; allow browser caching + server Cache-Control to work.
           fetch(`/api/dashboard/plans?${usp.toString()}`)
             .then((r) => r.json().catch(() => null))
             .then((j) => {
@@ -415,18 +427,19 @@ export default function PlansClient() {
                 // ignore
               }
             })
-            .catch(() => null);
+            .catch(() => null)
+            .finally(() => {
+              pollInFlightRef.current = false;
+            });
         } catch {
-          // ignore
+          pollInFlightRef.current = false;
         }
-      }, 8000);
+      };
 
-      // Hard stop after 2 minutes so we never spin forever.
-      pollStopTimerRef.current = window.setTimeout(() => {
-        if (pollTimerRef.current) window.clearInterval(pollTimerRef.current);
-        pollTimerRef.current = null;
-        prefetchInFlightRef.current = false;
-      }, 120_000);
+      // Use interval scheduler, but tick() enforces inFlight + timeout.
+      pollTimerRef.current = window.setInterval(tick, 15_000);
+      // Kick once immediately.
+      tick();
     }
 
     return () => {

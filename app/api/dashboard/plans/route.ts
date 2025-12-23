@@ -480,20 +480,70 @@ export async function GET(req: NextRequest) {
       return recentYearMonths.every((ym) => s.has(ym));
     };
 
-    // Prefer live offers. If the call fails (transient upstream), fall back to the last stored snapshot.
+    // Prefer cached offers first; WattBuy upstream can be slow (cold starts / retry backoffs).
+    // Keep a short TTL and fall back to the last cached payload on upstream failures.
     let rawOffersResp: any = null;
     let usedFallbackSnapshot = false;
+    let usedOffersCache = false;
     try {
-      rawOffersResp = await wattbuy.offers({
-        address: house.addressLine1,
-        city: house.addressCity,
-        state: house.addressState,
-        zip: house.addressZip5,
+      const { wattbuyOffersPrisma } = await import("@/lib/db/wattbuyOffersClient");
+      const OFFERS_ENDPOINT = "DASHBOARD_WATTBUY_OFFERS_V1";
+      const OFFERS_TTL_MS = 15 * 60 * 1000; // 15 min
+      const requestKey = `offers_by_address|line1=${house.addressLine1}|city=${house.addressCity}|state=${house.addressState}|zip=${house.addressZip5}|isRenter=${String(
         isRenter,
+      )}`;
+
+      const cached = await (wattbuyOffersPrisma as any).wattBuyApiSnapshot.findFirst({
+        where: { endpoint: OFFERS_ENDPOINT, houseAddressId: house.id, requestKey },
+        orderBy: { createdAt: "desc" },
+        select: { payloadJson: true, fetchedAt: true },
       });
-    } catch (e) {
-      rawOffersResp = house.rawWattbuyJson ?? null;
-      usedFallbackSnapshot = true;
+
+      const cachedAt = cached?.fetchedAt instanceof Date ? cached.fetchedAt : null;
+      const cachedFresh =
+        cachedAt != null && Date.now() - cachedAt.getTime() <= OFFERS_TTL_MS && cached?.payloadJson != null;
+
+      if (cachedFresh) {
+        rawOffersResp = (cached as any)?.payloadJson ?? null;
+        usedOffersCache = true;
+      } else {
+        rawOffersResp = await wattbuy.offers({
+          address: house.addressLine1,
+          city: house.addressCity,
+          state: house.addressState,
+          zip: house.addressZip5,
+          isRenter,
+        });
+        // Best-effort cache write (never block dashboard on DB errors).
+        try {
+          await (wattbuyOffersPrisma as any).wattBuyApiSnapshot.create({
+            data: {
+              fetchedAt: new Date(),
+              endpoint: OFFERS_ENDPOINT,
+              houseAddressId: house.id,
+              requestKey,
+              payloadJson: rawOffersResp ?? { __emptyPayload: true },
+              payloadSha256: sha256HexCache(JSON.stringify({ v: 1, requestKey })),
+            },
+          });
+        } catch {
+          // ignore
+        }
+      }
+    } catch {
+      // If anything goes wrong with the cache path, fall back to live call and then to the stored house snapshot.
+      try {
+        rawOffersResp = await wattbuy.offers({
+          address: house.addressLine1,
+          city: house.addressCity,
+          state: house.addressState,
+          zip: house.addressZip5,
+          isRenter,
+        });
+      } catch {
+        rawOffersResp = house.rawWattbuyJson ?? null;
+        usedFallbackSnapshot = true;
+      }
     }
 
     const normalized = normalizeOffers(rawOffersResp ?? {});
@@ -599,7 +649,10 @@ export async function GET(req: NextRequest) {
     try {
       if (hasUsage && house.id && house.esiid && mappedRatePlanIds.length > 0) {
         const unionKeys = new Set<string>(["kwh.m.all.total"]);
+        // Only load bucket keys for plans that are actually COMPUTABLE by the current engine.
+        // Unavailable plans (TOU/indexed/unsupported) often explode the keyset and make this endpoint slow.
         planCalcByRatePlanId.forEach((v: any) => {
+          if (String(v?.planCalcStatus ?? "") !== "COMPUTABLE") return;
           const keys = Array.isArray(v?.requiredBucketKeys) ? (v.requiredBucketKeys as string[]) : [];
           for (const k of keys) {
             const kk = String(k ?? "").trim();
@@ -620,7 +673,9 @@ export async function GET(req: NextRequest) {
             requiredBucketKeys: Array.from(unionKeys),
             monthsCount: 12,
             maxStepDays: 2,
-            stitchMode: "DAILY_OR_INTERVAL",
+            // Plans list must NEVER fall back to scanning raw intervals (it can take minutes).
+            // Detail/compare routes can opt into interval fallback when needed.
+            stitchMode: "DAILY_ONLY",
           });
 
           yearMonthsForCalc = bucketBuild.yearMonths.slice();
