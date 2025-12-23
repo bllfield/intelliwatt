@@ -207,8 +207,15 @@ export async function GET(req: NextRequest) {
     const offerRsPresent = isRateStructurePresent(offerRateStructure);
 
     // TDSP for this home (current tariffs).
-    const tdspSlug = String(house.tdspSlug ?? "").trim().toLowerCase();
-    const tdspRates = tdspSlug ? await getTdspDeliveryRates({ tdspSlug, asOf: now }).catch(() => null) : null;
+    // IMPORTANT: Some early onboarding flows can have usage but a missing tdspSlug on the home row.
+    // Fall back to the WattBuy offer payload (it includes tdsp for the address).
+    const tdspSlug =
+      String(house.tdspSlug ?? "").trim().toLowerCase() ||
+      String((offer as any)?.tdsp ?? "").trim().toLowerCase();
+
+    // Use the usage window end as the "as of" date so we align with the user's most recent tariff context.
+    const tdspAsOf = windowEnd ?? now;
+    const tdspRates = tdspSlug ? await getTdspDeliveryRates({ tdspSlug, asOf: tdspAsOf }).catch(() => null) : null;
     const tdspApplied = tdspRates
       ? {
           perKwhDeliveryChargeCents: Number(tdspRates?.perKwhDeliveryChargeCents ?? 0) || 0,
