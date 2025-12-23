@@ -95,10 +95,14 @@ export default function OfferCard({ offer, recommended }: OfferCardProps) {
 
   const eflUrl = offer.efl?.eflUrl;
   const status = offer.intelliwatt.statusLabel;
-  const statusText =
-    status === "AVAILABLE" ? "AVAILABLE" : status === "QUEUED" ? "QUEUED" : "NOT AVAILABLE";
+  const tce = offer.intelliwatt?.trueCostEstimate as any;
+  const isCalculating =
+    status === "AVAILABLE" && String(tce?.status ?? "").toUpperCase() === "QUEUED";
 
-  const tce = offer.intelliwatt?.trueCostEstimate;
+  const statusText =
+    status === "AVAILABLE" ? "AVAILABLE" : status === "QUEUED" ? "QUEUED" : "UNAVAILABLE";
+
+  // tce already read above
   const showEstimateLine = tce?.status === "OK";
   const estimateMonthly = showEstimateLine ? fmtDollars2((tce as any)?.monthlyCostDollars) : null;
   const tdspTag = offer.intelliwatt?.tdspRatesApplied ? "incl. TDSP" : null;
@@ -160,6 +164,12 @@ export default function OfferCard({ offer, recommended }: OfferCardProps) {
           >
             {statusText}
           </div>
+
+          {isCalculating ? (
+            <div className="rounded-full border border-brand-blue/30 bg-brand-blue/10 px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.22em] text-brand-blue">
+              CALCULATING
+            </div>
+          ) : null}
 
           <div className="flex items-center gap-3">
             {eflUrl ? (

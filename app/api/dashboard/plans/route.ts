@@ -1498,16 +1498,24 @@ export async function GET(req: NextRequest) {
 
       const statusLabelFinal = (() => {
         const current = String((base as any)?.intelliwatt?.statusLabel ?? "").trim() || "UNAVAILABLE";
-        if (!hasUsage) return current;
-        // If the template isn't even computable/mapped, keep the existing label.
-        if (current !== "AVAILABLE") return current;
+
         // IMPORTANT SEMANTICS:
-        // - statusLabel=AVAILABLE means "this plan is computable by the current engine/template".
-        // - statusLabel must NOT flip to QUEUED just because the estimate cache is still warming.
+        // - AVAILABLE means "computable by the current engine/template" (even if estimate still warming).
+        // - QUEUED means "not currently computable because the template/mapping isn't ready yet".
+        // - UNAVAILABLE means "not computable by the engine (unsupported rate structure)".
         //
-        // "Calculating..." is represented separately via trueCostEstimate.status (e.g. QUEUED/OK/APPROXIMATE).
-        if (!isComputableOverride() && planComputability && planComputability.status === "NOT_COMPUTABLE") return "UNAVAILABLE";
-        return "AVAILABLE";
+        // Therefore: prefer planComputability (freshly derived) over stored template metadata.
+        if (!hasUsage) return current;
+
+        if (planComputability && typeof planComputability === "object") {
+          const s = String((planComputability as any)?.status ?? "").toUpperCase();
+          if (s === "NOT_COMPUTABLE") return "UNAVAILABLE";
+          if (s === "COMPUTABLE") return "AVAILABLE";
+        }
+
+        // Fall back to base label if we couldn't derive.
+        if (current === "AVAILABLE" || current === "UNAVAILABLE" || current === "QUEUED") return current;
+        return "UNAVAILABLE";
       })();
 
       return {
