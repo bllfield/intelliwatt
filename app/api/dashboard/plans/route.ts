@@ -1225,13 +1225,14 @@ export async function GET(req: NextRequest) {
       const templateAvailable = ratePlanId != null;
       const eflUrl = o.docs?.efl ?? null;
       const statusLabel = (() => {
+        // Dashboard semantics (restore):
+        // - AVAILABLE means "a template exists for this offer" (we can attempt to calculate).
+        // - QUEUED means "no template yet but we have an EFL URL (can be parsed)".
+        // - UNAVAILABLE means "no template and no EFL URL".
+        //
+        // Engine support/unsupported is expressed separately via planComputability + trueCostEstimate.status.
         if (!ratePlanId) return eflUrl ? "QUEUED" : "UNAVAILABLE";
-        const calc = planCalcByRatePlanId.get(ratePlanId) ?? null;
-        if (calc && calc.planCalcStatus === "COMPUTABLE") return "AVAILABLE";
-        // Terminal: template is not computable by the current engine => NOT AVAILABLE (do not show as "still processing").
-        if (calc && calc.planCalcStatus === "NOT_COMPUTABLE") return "UNAVAILABLE";
-        // Mapped but unknown/missing calc metadata => QUEUED (pipeline will try, or future engine versions may unlock it).
-        return "QUEUED";
+        return "AVAILABLE";
       })();
 
       // Normalize proxy pricing fields once, under offer.efl.* (single source of truth).
@@ -1554,21 +1555,9 @@ export async function GET(req: NextRequest) {
       const statusLabelFinal = (() => {
         const current = String((base as any)?.intelliwatt?.statusLabel ?? "").trim() || "UNAVAILABLE";
 
-        // IMPORTANT SEMANTICS:
-        // - AVAILABLE means "computable by the current engine/template" (even if estimate still warming).
-        // - QUEUED means "not currently computable because the template/mapping isn't ready yet".
-        // - UNAVAILABLE means "not computable by the engine (unsupported rate structure)".
-        //
-        // Therefore: prefer planComputability (freshly derived) over stored template metadata.
-        if (!hasUsage) return current;
-
-        if (planComputability && typeof planComputability === "object") {
-          const s = String((planComputability as any)?.status ?? "").toUpperCase();
-          if (s === "NOT_COMPUTABLE") return "UNAVAILABLE";
-          if (s === "COMPUTABLE") return "AVAILABLE";
-        }
-
-        // Fall back to base label if we couldn't derive.
+        // Keep statusLabel tied to template availability (not engine support).
+        // This avoids labeling a plan "UNAVAILABLE" when it was previously shown as calculating.
+        // Unsupported/limited plans are conveyed via planComputability + trueCostEstimate.status.
         if (current === "AVAILABLE" || current === "UNAVAILABLE" || current === "QUEUED") return current;
         return "UNAVAILABLE";
       })();

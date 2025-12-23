@@ -98,6 +98,9 @@ export default function OfferCard({ offer, recommended }: OfferCardProps) {
   const tce = offer.intelliwatt?.trueCostEstimate as any;
   const isCalculating =
     status === "AVAILABLE" && String(tce?.status ?? "").toUpperCase() === "QUEUED";
+  const isUnsupported =
+    String((offer as any)?.intelliwatt?.planComputability?.status ?? "").toUpperCase() === "NOT_COMPUTABLE" ||
+    String(tce?.status ?? "").toUpperCase() === "NOT_COMPUTABLE";
 
   const statusText =
     status === "AVAILABLE" ? "AVAILABLE" : status === "QUEUED" ? "QUEUED" : "UNAVAILABLE";
@@ -168,6 +171,12 @@ export default function OfferCard({ offer, recommended }: OfferCardProps) {
           {isCalculating ? (
             <div className="rounded-full border border-brand-blue/30 bg-brand-blue/10 px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.22em] text-brand-blue">
               CALCULATING
+            </div>
+          ) : null}
+
+          {isUnsupported ? (
+            <div className="rounded-full border border-amber-400/40 bg-amber-500/10 px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.22em] text-amber-200">
+              UNSUPPORTED
             </div>
           ) : null}
 

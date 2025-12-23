@@ -164,6 +164,7 @@ export default function PlansClient() {
   const prefetchInFlightRef = useRef(false);
   const [autoPreparing, setAutoPreparing] = useState(false);
   const pipelineKickRef = useRef(false);
+  const lastPipelineKickAtRef = useRef<number>(0);
   const pollTimerRef = useRef<number | null>(null);
   const pollStopTimerRef = useRef<number | null>(null);
   const pollInFlightRef = useRef(false);
@@ -360,25 +361,29 @@ export default function PlansClient() {
     ).length;
     if (queuedCountNow <= 0) return;
 
-    const sessionKey = `plans_pipeline_kick_v3:${serverDatasetKey}`;
+    const sessionKey = `plans_pipeline_kick_v4:${serverDatasetKey}`;
+    const now = Date.now();
+    let lastKickAt: number | null = null;
     try {
       const raw = window.sessionStorage.getItem(sessionKey);
-      if (raw) {
-        pipelineKickRef.current = true;
-      }
+      const n = raw ? Number(raw) : Number.NaN;
+      if (Number.isFinite(n)) lastKickAt = n;
     } catch {
       // ignore
     }
 
-    if (!pipelineKickRef.current) {
+    // Re-kick at most once per ~75s while there are pending estimates.
+    // The pipeline is bounded (timeBudget + maxEstimatePlans) so it typically needs multiple runs.
+    const kickEligible = lastKickAt == null || now - lastKickAt >= 75_000;
+    if (kickEligible && !prefetchInFlightRef.current && now - lastPipelineKickAtRef.current >= 30_000) {
       pipelineKickRef.current = true;
+      lastPipelineKickAtRef.current = now;
       try {
-        window.sessionStorage.setItem(sessionKey, String(Date.now()));
+        window.sessionStorage.setItem(sessionKey, String(now));
       } catch {
         // ignore
       }
 
-      // Kick pipeline in the background (best-effort).
       prefetchInFlightRef.current = true;
       setPrefetchNote(`Preparing IntelliWatt calculations… (${queuedCountNow} pending)`);
       try {
@@ -387,10 +392,16 @@ export default function PlansClient() {
         params.set("timeBudgetMs", "25000");
         params.set("maxTemplateOffers", "6");
         params.set("maxEstimatePlans", "50");
+        // Allow repeated short runs; server still enforces lock + cooldown.
+        params.set("proactiveCooldownMs", "60000");
         params.set("isRenter", String(isRenter));
-        fetch(`/api/dashboard/plans/pipeline?${params.toString()}`, { method: "POST" }).catch(() => null);
+        fetch(`/api/dashboard/plans/pipeline?${params.toString()}`, { method: "POST" })
+          .catch(() => null)
+          .finally(() => {
+            prefetchInFlightRef.current = false;
+          });
       } catch {
-        // ignore
+        prefetchInFlightRef.current = false;
       }
     }
 
