@@ -6,6 +6,11 @@ import { normalizeEmail } from "@/lib/utils/email";
 import { getCurrentPlanPrisma } from "@/lib/prismaCurrentPlan";
 import { deterministicEflExtract, extractProviderAndPlanNameFromEflText } from "@/lib/efl/eflExtractor";
 import { runEflPipelineFromRawTextNoStore } from "@/lib/efl/runEflPipelineFromRawTextNoStore";
+import { extractUsageChargeThresholdRule } from "@/lib/current-plan/factLabelUsageCharge";
+import { usagePrisma } from "@/lib/db/usageClient";
+import { getTdspDeliveryRates } from "@/lib/plan-engine/getTdspDeliveryRates";
+import { estimateTrueCost } from "@/lib/plan-engine/estimateTrueCost";
+import { ensureCurrentPlanEntry } from "@/lib/current-plan/ensureEntry";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -91,6 +96,29 @@ function extractCancelFeeCentsFromEflText(rawText: string): number | null {
   }
 
   return null;
+}
+
+function lastNYearMonthsChicago(n: number): string[] {
+  try {
+    const tz = "America/Chicago";
+    const fmt = new Intl.DateTimeFormat("en-US", { timeZone: tz, year: "numeric", month: "2-digit" });
+    const parts = fmt.formatToParts(new Date());
+    const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+    const year0 = Number(get("year"));
+    const month0 = Number(get("month"));
+    if (!Number.isFinite(year0) || !Number.isFinite(month0) || month0 < 1 || month0 > 12) return [];
+
+    const out: string[] = [];
+    for (let i = 0; i < n; i++) {
+      const idx = month0 - i;
+      const y = idx >= 1 ? year0 : year0 - Math.ceil((1 - idx) / 12);
+      const m0 = ((idx - 1) % 12 + 12) % 12 + 1;
+      out.push(`${String(y)}-${String(m0).padStart(2, "0")}`);
+    }
+    return out;
+  } catch {
+    return [];
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -308,6 +336,32 @@ export async function POST(req: NextRequest) {
             }
           : { hasBillCredit: false, rules: [] };
 
+      // Current-plan FACT LABEL fix:
+      // Many EFLs have a "Usage Charge: $X per billing cycle < N kWh; $0 otherwise" line.
+      // This is NOT a flat base fee; it's a minimum-usage fee. Encode it in the engine's supported minimum-rule format:
+      // a negative bill-credit rule with label "Minimum Usage Fee" (engine interprets it as a fee when usage < threshold).
+      const usageChargeRule = extractUsageChargeThresholdRule(rawText);
+      const billCreditsWithMinFee = (() => {
+        if (!usageChargeRule?.ok) return billCreditsObj;
+        const next = {
+          hasBillCredit: true,
+          rules: Array.isArray(billCreditsObj?.rules) ? [...(billCreditsObj.rules as any[])] : [],
+        };
+        next.rules.push({
+          label: "Minimum Usage Fee",
+          creditAmountCents: -Math.abs(Math.round(usageChargeRule.feeCents)),
+          minUsageKWh: Math.round(usageChargeRule.thresholdKwhExclusive),
+          maxUsageKWh: null,
+          monthsOfYear: null,
+        });
+        return next;
+      })();
+
+      const effectiveBaseMonthlyFeeCents =
+        usageChargeRule?.ok && baseMonthlyFeeCents != null && Math.abs(baseMonthlyFeeCents - usageChargeRule.feeCents) <= 1
+          ? null
+          : baseMonthlyFeeCents;
+
       if (rateType === "TIME_OF_USE") {
         const tiers = (touWindowsNormalized.length ? touWindowsNormalized : touWindows)
           .map((t: any, idx: number) => {
@@ -327,9 +381,9 @@ export async function POST(req: NextRequest) {
 
         return {
           type: "TIME_OF_USE",
-          ...(baseMonthlyFeeCents != null && baseMonthlyFeeCents >= 0 ? { baseMonthlyFeeCents } : {}),
+          ...(effectiveBaseMonthlyFeeCents != null && effectiveBaseMonthlyFeeCents >= 0 ? { baseMonthlyFeeCents: effectiveBaseMonthlyFeeCents } : {}),
           tiers,
-          billCredits: billCreditsObj,
+          billCredits: billCreditsWithMinFee,
           ...(tdspDeliveryIncludedInEnergyCharge ? { tdspDeliveryIncludedInEnergyCharge: true } : {}),
         };
       }
@@ -338,8 +392,8 @@ export async function POST(req: NextRequest) {
         return {
           type: "VARIABLE",
           currentBillEnergyRateCents: flatEnergyRateCents != null ? Number(flatEnergyRateCents.toFixed(4)) : null,
-          ...(baseMonthlyFeeCents != null && baseMonthlyFeeCents >= 0 ? { baseMonthlyFeeCents } : {}),
-          billCredits: billCreditsObj,
+          ...(effectiveBaseMonthlyFeeCents != null && effectiveBaseMonthlyFeeCents >= 0 ? { baseMonthlyFeeCents: effectiveBaseMonthlyFeeCents } : {}),
+          billCredits: billCreditsWithMinFee,
           ...(tdspDeliveryIncludedInEnergyCharge ? { tdspDeliveryIncludedInEnergyCharge: true } : {}),
         };
       }
@@ -347,8 +401,8 @@ export async function POST(req: NextRequest) {
       return {
         type: "FIXED",
         ...(flatEnergyRateCents != null ? { energyRateCents: Number(flatEnergyRateCents.toFixed(4)) } : {}),
-        ...(baseMonthlyFeeCents != null && baseMonthlyFeeCents >= 0 ? { baseMonthlyFeeCents } : {}),
-        billCredits: billCreditsObj,
+        ...(effectiveBaseMonthlyFeeCents != null && effectiveBaseMonthlyFeeCents >= 0 ? { baseMonthlyFeeCents: effectiveBaseMonthlyFeeCents } : {}),
+        billCredits: billCreditsWithMinFee,
         ...(tdspDeliveryIncludedInEnergyCharge ? { tdspDeliveryIncludedInEnergyCharge: true } : {}),
       };
     })();
@@ -391,6 +445,95 @@ export async function POST(req: NextRequest) {
       existing
         ? await parsedDelegate.update({ where: { id: existing.id }, data: entryData })
         : await parsedDelegate.create({ data: entryData });
+
+    // Also upsert into CurrentPlanManualEntry so the customer-facing current-plan flow sees it immediately.
+    try {
+      const manualDelegate = (currentPlanPrisma as any).currentPlanManualEntry as any;
+      const existingManual = await manualDelegate.findFirst({
+        where: { userId: user.id, ...(houseId ? { houseId } : {}) },
+        orderBy: { updatedAt: "desc" },
+        select: { id: true },
+      });
+
+      const manualData = {
+        userId: user.id,
+        houseId,
+        providerName: entryData.providerName ?? "Unknown provider",
+        planName: entryData.planName ?? "Unknown plan",
+        rateType: rateType,
+        energyRateCents: flatEnergyRateCents != null ? flatEnergyRateCents : null,
+        // Do NOT store the usage-charge threshold as a flat base fee; the engine encodes it as a minimum rule in rateStructure.
+        baseMonthlyFee: null,
+        billCreditDollars: null,
+        termLengthMonths: entryData.termLengthMonths ?? null,
+        contractEndDate: null,
+        earlyTerminationFee: typeof entryData.earlyTerminationFee === "number" ? entryData.earlyTerminationFee : null,
+        esiId: null,
+        accountNumberLast4: null,
+        notes: "Imported from current plan EFL (fact label).",
+        rateStructure,
+        normalizedAt: new Date(),
+        lastConfirmedAt: null,
+      };
+
+      if (existingManual?.id) {
+        await manualDelegate.update({ where: { id: existingManual.id }, data: manualData });
+      } else {
+        await manualDelegate.create({ data: manualData });
+      }
+
+      await ensureCurrentPlanEntry(user.id, houseId);
+    } catch {
+      // Best-effort only; never block customer flow.
+    }
+
+    // Compute and store (homeId-scoped) current-plan estimate totals for transparency and compare UX.
+    // This is NOT an offers template; it is only for the current home.
+    let currentPlanEstimate: any | null = null;
+    try {
+      if (houseId) {
+        const house = await prisma.houseAddress.findUnique({
+          where: { id: houseId } as any,
+          select: { id: true, tdspSlug: true },
+        });
+        const tdspSlug = String((house as any)?.tdspSlug ?? "").trim().toLowerCase() || null;
+        if (tdspSlug) {
+          const yearMonths = lastNYearMonthsChicago(12);
+          const rows = await (usagePrisma as any).homeMonthlyUsageBucket.findMany({
+            where: { homeId: houseId, yearMonth: { in: yearMonths }, bucketKey: { in: ["kwh.m.all.total"] } },
+            select: { yearMonth: true, bucketKey: true, kwhTotal: true },
+          });
+          const byMonth: Record<string, Record<string, number>> = {};
+          for (const r of rows ?? []) {
+            const ym = String((r as any)?.yearMonth ?? "").trim();
+            const kwh = Number((r as any)?.kwhTotal?.toString?.() ?? (r as any)?.kwhTotal);
+            if (!ym || !Number.isFinite(kwh)) continue;
+            if (!byMonth[ym]) byMonth[ym] = {};
+            byMonth[ym]["kwh.m.all.total"] = kwh;
+          }
+          const totals = yearMonths.map((ym) => byMonth?.[ym]?.["kwh.m.all.total"]).filter((v) => typeof v === "number" && Number.isFinite(v)) as number[];
+          const annualKwh = totals.length ? totals.reduce((a, b) => a + b, 0) : null;
+          if (annualKwh != null && annualKwh > 0) {
+            const tdspRates = await getTdspDeliveryRates({ tdspSlug, asOf: new Date() }).catch(() => null);
+            if (tdspRates) {
+              currentPlanEstimate = estimateTrueCost({
+                annualKwh,
+                monthsCount: 12,
+                rateStructure,
+                usageBucketsByMonth: byMonth,
+                tdspRates: {
+                  perKwhDeliveryChargeCents: Number(tdspRates.perKwhDeliveryChargeCents ?? 0) || 0,
+                  monthlyCustomerChargeDollars: Number(tdspRates.monthlyCustomerChargeDollars ?? 0) || 0,
+                  effectiveDate: tdspRates.effectiveDate ?? null,
+                },
+              });
+            }
+          }
+        }
+      }
+    } catch {
+      currentPlanEstimate = null;
+    }
 
     // Quarantine into the shared EFL review queue when parsing is incomplete/unsupported.
     const warnings: string[] = [
@@ -473,6 +616,7 @@ export async function POST(req: NextRequest) {
         rawTextPreview: rawText.slice(0, 5000),
         savedParsedCurrentPlanId: record?.id ?? null,
         queuedForReview: needsReview,
+        currentPlanEstimate,
         prefill: {
           providerName: labels.providerName ?? null,
           planName: labels.planName ?? null,
