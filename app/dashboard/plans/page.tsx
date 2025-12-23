@@ -7,7 +7,7 @@ export default function PlansPage() {
       <DashboardHero
         title="Energy"
         highlight="Plans"
-        description="See current WattBuy EFL averages and whether IntelliWatt calculations are available for each offer."
+        description="See current EFL averages and whether IntelliWatt calculations are available for each offer."
       />
 
       <section className="bg-brand-white pt-2 pb-10 px-4">
