@@ -266,6 +266,18 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    let queuedRow: any = null;
+    if (shouldQueue) {
+      try {
+        queuedRow = await (prisma as any).eflParseReviewQueue.findUnique({
+          where: { kind_dedupeKey: { kind: "PLAN_CALC_QUARANTINE", dedupeKey: offerId } },
+          select: { id: true, createdAt: true, updatedAt: true, resolvedAt: true, source: true, offerId: true, kind: true },
+        });
+      } catch {
+        queuedRow = null;
+      }
+    }
+
     results.push({
       offerId,
       ratePlanId,
@@ -273,6 +285,7 @@ export async function POST(req: NextRequest) {
       queued: shouldQueue,
       bucketMismatch,
       estimate: est,
+      queuedRow,
     });
   }
 
