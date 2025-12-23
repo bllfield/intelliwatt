@@ -483,10 +483,12 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Delivery included flag (prevents double-counting TDSP).
-    if (rs?.tdspDeliveryIncludedInEnergyCharge === true) {
-      planVariablesList.push({ key: 'tdsp.included', label: 'TDSP delivery included in REP rate', value: 'Yes' });
-    }
+    // Delivery included flag (prevents double-counting TDSP). Always show as a variable (Yes/No).
+    planVariablesList.push({
+      key: 'tdsp.included',
+      label: 'TDSP delivery included in REP rate',
+      value: rs?.tdspDeliveryIncludedInEnergyCharge === true ? 'Yes' : 'No',
+    });
 
     if (tdspApplied) {
       planVariablesList.push({
