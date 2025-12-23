@@ -295,6 +295,11 @@ export function CurrentRateDetailsForm({
   const isMountedRef = useRef(true);
   const hasInitializedFromPlanRef = useRef(false);
 
+  // Snapshot display should show the fullest known value (saved > parsed > prefill signals).
+  const snapshotContractEndDate = savedPlan?.contractEndDate ?? parsedPlan?.contractEndDate ?? null;
+  const snapshotEsiid = savedPlan?.esiId ?? parsedPlan?.esiId ?? prefillSignals?.esiId ?? null;
+  const snapshotAccountLast = savedPlan?.accountNumberLast4 ?? parsedPlan?.accountNumberLast4 ?? null;
+
   useEffect(() => {
     return () => {
       isMountedRef.current = false;
@@ -1424,9 +1429,9 @@ export function CurrentRateDetailsForm({
         : baseMessage;
 
       setStatusMessage(finalMessage);
-      if (!manualPayload.billUploaded) {
-        await refreshPlan();
-      }
+      // Always refresh the saved snapshot after a successful save so contract dates/ESIID/etc
+      // immediately reflect in the "Saved Plan Snapshot" (regardless of whether a bill was uploaded).
+      await refreshPlan();
       onContinue?.(manualPayload);
     } catch (error) {
       const message =
@@ -1588,8 +1593,8 @@ export function CurrentRateDetailsForm({
                   Contract end
                 </p>
                 <p className="mt-1 font-semibold">
-                  {savedPlan.contractEndDate ? (
-                    <LocalTime value={savedPlan.contractEndDate} />
+                  {snapshotContractEndDate ? (
+                    <LocalTime value={snapshotContractEndDate} />
                   ) : (
                     "—"
                   )}
@@ -1607,13 +1612,13 @@ export function CurrentRateDetailsForm({
                 <p className={snapshotLabelClasses}>
                   ESIID
                 </p>
-                <p className="mt-1 font-semibold">{savedPlan.esiId ?? "—"}</p>
+                <p className="mt-1 font-semibold">{snapshotEsiid ?? "—"}</p>
               </div>
               <div className={snapshotCardClasses}>
                 <p className={snapshotLabelClasses}>
                   Account (last digits)
                 </p>
-                <p className="mt-1 font-semibold">{savedPlan.accountNumberLast4 ?? "—"}</p>
+                <p className="mt-1 font-semibold">{snapshotAccountLast ?? "—"}</p>
               </div>
               <div className={snapshotCardClasses}>
                 <p className={snapshotLabelClasses}>
