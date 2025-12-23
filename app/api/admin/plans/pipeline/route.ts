@@ -101,15 +101,11 @@ export async function POST(req: NextRequest) {
         const mapCount = await (prisma as any).offerIdRatePlanMap.count({
           where: { offerId: { in: offerIds }, ratePlanId: { not: null } },
         });
-        const ratePlanCount = await (prisma as any).ratePlan.count({
-          where: { offerId: { in: offerIds } },
-        });
 
         debugInfo = {
           offersTotal: offers.length,
           sampleOfferIds: offerIds.slice(0, 8),
           offerIdRatePlanMapCount: mapCount,
-          ratePlanOfferIdMatchCount: ratePlanCount,
         };
       } else {
         debugInfo = { error: "missing_house_address_fields_for_wattbuy_call" };

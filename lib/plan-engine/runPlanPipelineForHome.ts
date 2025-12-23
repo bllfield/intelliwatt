@@ -359,24 +359,10 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
     where: { offerId: { in: offerIds }, ratePlanId: { not: null } },
     select: { offerId: true, ratePlanId: true },
   });
-  // Some deployments store the canonical offerId directly on RatePlan (authoritative for templated offers).
-  // Use it when available so the pipeline can compute/queue even if OfferIdRatePlanMap is empty.
-  const ratePlansByOfferId = await (prisma as any).ratePlan.findMany({
-    where: { offerId: { in: offerIds } },
-    select: { id: true, offerId: true },
-  });
   const offerIdsByRatePlanId = new Map<string, string[]>();
   for (const m of maps2 as any[]) {
     const oid = String(m?.offerId ?? "").trim();
     const rpid = String(m?.ratePlanId ?? "").trim();
-    if (!oid || !rpid) continue;
-    const arr = offerIdsByRatePlanId.get(rpid) ?? [];
-    arr.push(oid);
-    offerIdsByRatePlanId.set(rpid, arr);
-  }
-  for (const r of ratePlansByOfferId as any[]) {
-    const oid = String((r as any)?.offerId ?? "").trim();
-    const rpid = String((r as any)?.id ?? "").trim();
     if (!oid || !rpid) continue;
     const arr = offerIdsByRatePlanId.get(rpid) ?? [];
     arr.push(oid);
@@ -387,7 +373,6 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
     new Set(
       [
         ...(maps2 as any[]).map((m) => String(m?.ratePlanId ?? "")).filter(Boolean),
-        ...(ratePlansByOfferId as any[]).map((r) => String((r as any)?.id ?? "")).filter(Boolean),
       ],
     ),
   );
