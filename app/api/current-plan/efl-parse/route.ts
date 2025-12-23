@@ -47,16 +47,34 @@ function extractCancelFeeCentsFromEflText(rawText: string): number | null {
   const t = String(rawText ?? "");
   if (!t.trim()) return null;
 
+  const parseDollars = (s: string): number | null => {
+    const m = s.match(/\$\s*([0-9]{1,5}(?:\.[0-9]{1,2})?)/);
+    if (!m?.[1]) return null;
+    const dollars = Number(m[1]);
+    return Number.isFinite(dollars) && dollars >= 0 ? dollars : null;
+  };
+
   // Common EFL phrasing:
   // "Do I have a termination fee... Yes. $150."
-  const m1 = t.match(/termination\s+fee[\s\S]{0,140}?\$\s*([0-9]{1,5}(?:\.[0-9]{1,2})?)/i);
+  // Allow a wide window because the "$150" is often on the next wrapped line.
+  const m1 = t.match(/termination\s+fee[\s\S]{0,600}?\$\s*([0-9]{1,5}(?:\.[0-9]{1,2})?)/i);
   if (m1?.[1]) {
     const dollars = Number(m1[1]);
     if (Number.isFinite(dollars) && dollars >= 0) return Math.round(dollars * 100);
   }
 
+  // Line-based scan: find the "termination fee" question and look a few lines forward.
+  const lines = t.split(/\r?\n/);
+  const idx = lines.findIndex((l) => /termination\s+fee/i.test(l));
+  if (idx >= 0) {
+    for (let i = idx; i <= Math.min(lines.length - 1, idx + 6); i++) {
+      const dollars = parseDollars(lines[i] ?? "");
+      if (dollars != null) return Math.round(dollars * 100);
+    }
+  }
+
   // Alternate: "cancellation fee $150"
-  const m2 = t.match(/cancell(?:ation|ing)\s+fee[\s\S]{0,140}?\$\s*([0-9]{1,5}(?:\.[0-9]{1,2})?)/i);
+  const m2 = t.match(/cancell(?:ation|ing)\s+fee[\s\S]{0,600}?\$\s*([0-9]{1,5}(?:\.[0-9]{1,2})?)/i);
   if (m2?.[1]) {
     const dollars = Number(m2[1]);
     if (Number.isFinite(dollars) && dollars >= 0) return Math.round(dollars * 100);

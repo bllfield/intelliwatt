@@ -337,6 +337,12 @@ export async function GET(request: NextRequest) {
       usageEntries[0] ??
       null;
 
+    // If we still don't have a house context, prefer the active usage entry's houseId.
+    // This aligns TDSP variables + comparisons with the home that actually has usage.
+    if (!effectiveHouseId && usageEntry?.houseId) {
+      effectiveHouseId = usageEntry.houseId as string;
+    }
+
     const hasActiveUsage = usageEntries.some((u) => isLiveStatus(u.status));
 
     const serializeEntrySnapshot = (snap: any | null) =>
