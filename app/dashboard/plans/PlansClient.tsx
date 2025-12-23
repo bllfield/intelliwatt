@@ -334,10 +334,14 @@ export default function PlansClient() {
   useEffect(() => {
     if (!resp?.ok) return;
     const offersNow = Array.isArray(resp?.offers) ? (resp!.offers as OfferRow[]) : [];
-    const queuedOffers = offersNow.filter((o) => o?.intelliwatt?.statusLabel === "QUEUED");
-    const isQueued = queuedOffers.length > 0;
-    setAutoPreparing(isQueued);
-    setPrefetchNote(isQueued ? `Preparing IntelliWatt calculations… (${queuedOffers.length} pending)` : null);
+    const queuedEstimates = offersNow.filter(
+      (o) =>
+        o?.intelliwatt?.statusLabel === "AVAILABLE" &&
+        String((o as any)?.intelliwatt?.trueCostEstimate?.status ?? "").toUpperCase() === "QUEUED",
+    );
+    const isCalculating = queuedEstimates.length > 0;
+    setAutoPreparing(isCalculating);
+    setPrefetchNote(isCalculating ? `Preparing IntelliWatt calculations… (${queuedEstimates.length} pending)` : null);
   }, [resp?.ok, resp?.offers]);
 
   // Fallback warm-up: if the user lands on /dashboard/plans before background warm-up ran,
@@ -347,7 +351,11 @@ export default function PlansClient() {
     if (!resp?.ok) return;
     if (!resp?.hasUsage) return;
     const offersNow = Array.isArray(resp?.offers) ? (resp!.offers as OfferRow[]) : [];
-    const queuedCountNow = offersNow.filter((o) => o?.intelliwatt?.statusLabel === "QUEUED").length;
+    const queuedCountNow = offersNow.filter(
+      (o) =>
+        o?.intelliwatt?.statusLabel === "AVAILABLE" &&
+        String((o as any)?.intelliwatt?.trueCostEstimate?.status ?? "").toUpperCase() === "QUEUED",
+    ).length;
     if (queuedCountNow <= 0) return;
 
     const sessionKey = `plans_pipeline_kick_v2:${serverDatasetKey}`;
@@ -387,6 +395,7 @@ export default function PlansClient() {
     // Poll the offers dataset until queued clears (or timeout).
     if (pollTimerRef.current == null) {
       pollTimerRef.current = window.setInterval(() => {
+        if (document.visibilityState === "hidden") return;
         try {
           const usp = new URLSearchParams();
           usp.set("dataset", "1");
@@ -423,6 +432,16 @@ export default function PlansClient() {
       // keep timers running across renders; cleaned up in serverDatasetKey effect
     };
   }, [resp?.ok, resp?.hasUsage, resp?.offers, isRenter, serverDatasetKey, cacheKey]);
+
+  // Cleanup on unmount (defensive: prevents polling leaks if the component tree changes).
+  useEffect(() => {
+    return () => {
+      if (pollTimerRef.current) window.clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+      if (pollStopTimerRef.current) window.clearTimeout(pollStopTimerRef.current);
+      pollStopTimerRef.current = null;
+    };
+  }, []);
 
   const hasUsage = Boolean(resp?.ok && resp?.hasUsage);
   const datasetOffers = Array.isArray(resp?.offers) ? resp!.offers! : [];

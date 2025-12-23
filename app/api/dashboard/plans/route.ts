@@ -1501,13 +1501,13 @@ export async function GET(req: NextRequest) {
         if (!hasUsage) return current;
         // If the template isn't even computable/mapped, keep the existing label.
         if (current !== "AVAILABLE") return current;
-        // Terminal: if the engine declares this template NOT_COMPUTABLE, do not keep showing it as "queued".
+        // IMPORTANT SEMANTICS:
+        // - statusLabel=AVAILABLE means "this plan is computable by the current engine/template".
+        // - statusLabel must NOT flip to QUEUED just because the estimate cache is still warming.
+        //
+        // "Calculating..." is represented separately via trueCostEstimate.status (e.g. QUEUED/OK/APPROXIMATE).
         if (!isComputableOverride() && planComputability && planComputability.status === "NOT_COMPUTABLE") return "UNAVAILABLE";
-        // Fail-closed: if required buckets are missing, or estimator can't compute, treat as QUEUED.
-        if (missingBucketKeys.length > 0) return "QUEUED";
-        const s = String(trueCostEstimate?.status ?? "").toUpperCase();
-        if (s && s !== "OK" && s !== "APPROXIMATE") return "QUEUED";
-        return current;
+        return "AVAILABLE";
       })();
 
       return {
