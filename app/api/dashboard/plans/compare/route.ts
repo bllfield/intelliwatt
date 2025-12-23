@@ -12,6 +12,15 @@ import { buildUsageBucketsForEstimate } from "@/lib/usage/buildUsageBucketsForEs
 import { estimateTrueCost } from "@/lib/plan-engine/estimateTrueCost";
 import { getCachedPlanEstimate, putCachedPlanEstimate, sha256Hex as sha256HexCache } from "@/lib/plan-engine/planEstimateCache";
 import { requiredBucketsForRateStructure } from "@/lib/plan-engine/requiredBucketsForPlan";
+import { bucketDefsFromBucketKeys } from "@/lib/plan-engine/usageBuckets";
+import {
+  extractFixedRepEnergyCentsPerKwh,
+  extractRepFixedMonthlyChargeDollars,
+} from "@/lib/plan-engine/calculatePlanCostForUsage";
+import { extractDeterministicTouSchedule } from "@/lib/plan-engine/touPeriods";
+import { extractDeterministicTierSchedule, computeRepEnergyCostForMonthlyKwhTiered } from "@/lib/plan-engine/tieredPricing";
+import { extractDeterministicBillCredits, applyBillCreditsToMonth } from "@/lib/plan-engine/billCredits";
+import { extractDeterministicMinimumRules, applyMinimumRulesToMonth } from "@/lib/plan-engine/minimumRules";
 import crypto from "node:crypto";
 
 export const runtime = "nodejs";
@@ -82,6 +91,20 @@ function isRateStructurePresent(rs: any): boolean {
 function chicagoNow(): Date {
   // Best-effort "now" used only for in-contract heuristic; contractEndDate comes from DB (UTC).
   return new Date();
+}
+
+function round2(n: number): number {
+  if (!Number.isFinite(n)) return n;
+  return Math.round(n * 100) / 100;
+}
+
+function monthKwh(m: Record<string, number> | null | undefined, key: string): number | null {
+  if (!m) return null;
+  const v = (m as any)[key];
+  if (v == null) return null;
+  if (typeof v === "string" && v.trim() === "") return null;
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? n : null;
 }
 
 export async function GET(req: NextRequest) {
@@ -200,7 +223,16 @@ export async function GET(req: NextRequest) {
     const ratePlanRow = ratePlanId
       ? await (prisma as any).ratePlan.findUnique({
           where: { id: ratePlanId },
-          select: { id: true, rateStructure: true, planName: true, supplier: true, termMonths: true },
+          select: {
+            id: true,
+            rateStructure: true,
+            planName: true,
+            supplier: true,
+            termMonths: true,
+            planCalcStatus: true,
+            planCalcReasonCode: true,
+            requiredBucketKeys: true,
+          },
         })
       : null;
     const offerRateStructure = ratePlanRow?.rateStructure ?? null;
@@ -282,9 +314,33 @@ export async function GET(req: NextRequest) {
       maxStepDays: 2,
     });
     const yearMonths = bucketBuild.yearMonths;
+    const keysToLoad = Array.isArray((bucketBuild as any).keysToLoad) ? ((bucketBuild as any).keysToLoad as string[]) : requiredKeys;
     const usageBucketsByMonth = bucketBuild.usageBucketsByMonth;
     const annualKwh =
       typeof bucketBuild.annualKwh === "number" && Number.isFinite(bucketBuild.annualKwh) ? bucketBuild.annualKwh : null;
+    const avgMonthlyKwh = typeof annualKwh === "number" && Number.isFinite(annualKwh) ? annualKwh / 12 : null;
+
+    const bucketDefs = bucketDefsFromBucketKeys(keysToLoad).map((b) => ({ key: b.key, label: b.label }));
+    const bucketTable = yearMonths.map((ym) => {
+      const m = usageBucketsByMonth?.[ym] ?? {};
+      const row: any = { yearMonth: ym };
+      for (const k of keysToLoad) {
+        row[k] = typeof (m as any)[k] === "number" ? (m as any)[k] : null;
+      }
+      return row;
+    });
+
+    const usageSnapshot = {
+      source: usageSource,
+      annualKwh,
+      avgMonthlyKwh,
+      windowEnd: windowEnd.toISOString(),
+      cutoff: cutoff.toISOString(),
+      yearMonths,
+      requiredBucketKeys: requiredKeys,
+      bucketDefs,
+      bucketTable,
+    };
 
     const contractEndDateIso = (currentEntry as any)?.contractEndDate
       ? new Date((currentEntry as any).contractEndDate).toISOString()
@@ -422,6 +478,334 @@ export async function GET(req: NextRequest) {
       return est;
     })();
 
+    const buildVariablesList = (args: {
+      rateStructure: any;
+      tdspApplied: any | null;
+    }): Array<{ key: string; label: string; value: string }> => {
+      const out: Array<{ key: string; label: string; value: string }> = [];
+      const rs = args.rateStructure;
+      const rsPresent = isRateStructurePresent(rs);
+
+      const rt = String(rs?.type ?? "").trim().toUpperCase();
+      const repEnergyFixed = rsPresent ? extractFixedRepEnergyCentsPerKwh(rs) : null;
+      const repFixedMonthly = rsPresent ? extractRepFixedMonthlyChargeDollars(rs) : null;
+
+      if (rsPresent) {
+        const creditsMaybe = extractDeterministicBillCredits(rs);
+        const minimumMaybe = extractDeterministicMinimumRules({ rateStructure: rs });
+        const tieredMaybe = extractDeterministicTierSchedule(rs);
+        const touMaybe = extractDeterministicTouSchedule(rs);
+
+        if (touMaybe?.schedule?.periods?.length) {
+          out.push({ key: "rep.tou_periods", label: "REP time-of-use periods", value: String(touMaybe.schedule.periods.length) });
+        } else if (rt === "TIME_OF_USE" && Array.isArray(rs?.tiers)) {
+          out.push({ key: "rep.tou_tiers", label: "REP time-of-use tiers", value: String(rs.tiers.length) });
+        } else if (tieredMaybe?.ok) {
+          out.push({ key: "rep.tiered", label: "REP tiered pricing", value: "Yes" });
+        } else if (rt === "VARIABLE") {
+          const cents = typeof rs?.currentBillEnergyRateCents === "number" ? rs.currentBillEnergyRateCents : null;
+          out.push({ key: "rep.energy", label: "REP energy (current bill)", value: cents != null ? `${Number(cents).toFixed(4)}¢/kWh` : "—" });
+        } else if (typeof repEnergyFixed === "number" && Number.isFinite(repEnergyFixed)) {
+          out.push({ key: "rep.energy", label: "REP energy", value: `${repEnergyFixed.toFixed(4)}¢/kWh` });
+        } else {
+          out.push({ key: "rep.energy", label: "REP energy", value: "—" });
+        }
+
+        out.push({
+          key: "rep.fixed",
+          label: "REP fixed",
+          value: typeof repFixedMonthly === "number" && Number.isFinite(repFixedMonthly) ? `$${repFixedMonthly.toFixed(2)}/mo` : "—/mo",
+        });
+
+        if (creditsMaybe?.ok && Array.isArray((creditsMaybe as any).credits) && (creditsMaybe as any).credits.length > 0) {
+          out.push({ key: "rep.credits", label: "Bill credits", value: `${(creditsMaybe as any).credits.length} rule(s)` });
+        }
+        if (minimumMaybe?.ok) {
+          out.push({ key: "rep.minimums", label: "Minimum bill rules", value: "Yes" });
+        }
+      }
+
+      // TDSP variables (or delivery included flag).
+      out.push({
+        key: "tdsp.included",
+        label: "TDSP delivery included in REP rate",
+        value: rs?.tdspDeliveryIncludedInEnergyCharge === true ? "Yes" : "No",
+      });
+
+      if (args.tdspApplied && rs?.tdspDeliveryIncludedInEnergyCharge !== true) {
+        out.push({
+          key: "tdsp.delivery",
+          label: "TDSP delivery",
+          value: `${Number(args.tdspApplied.perKwhDeliveryChargeCents ?? 0).toFixed(4)}¢/kWh`,
+        });
+        out.push({
+          key: "tdsp.customer",
+          label: "TDSP customer",
+          value: `$${Number(args.tdspApplied.monthlyCustomerChargeDollars ?? 0).toFixed(2)}/mo`,
+        });
+        if (args.tdspApplied.effectiveDate) {
+          out.push({ key: "tdsp.effective", label: "TDSP effective", value: String(args.tdspApplied.effectiveDate).slice(0, 10) });
+        }
+      }
+
+      return out;
+    };
+
+    const buildMonthlyBreakdown = (args: {
+      rateStructure: any;
+      tdspApplied: any | null;
+      usageBucketsByMonth: Record<string, Record<string, number>>;
+      yearMonths: string[];
+      trueCostEstimate: any;
+    }): any | null => {
+      const rs = args.rateStructure;
+      const rsPresent = isRateStructurePresent(rs);
+      if (!rsPresent || !args.tdspApplied) return null;
+      if (String(args.trueCostEstimate?.status ?? "") !== "OK") return null;
+
+      const byMonth = args.usageBucketsByMonth ?? {};
+      const monthsAll = args.yearMonths?.slice?.() ?? Object.keys(byMonth).sort();
+      const months = monthsAll.slice(-12);
+      if (months.length <= 0) return null;
+
+      const tdspPerKwhCents = Number(args.tdspApplied.perKwhDeliveryChargeCents ?? 0) || 0;
+      const tdspMonthly = Number(args.tdspApplied.monthlyCustomerChargeDollars ?? 0) || 0;
+      const repFixedMonthly = extractRepFixedMonthlyChargeDollars(rs) ?? 0;
+
+      const creditsMaybe = extractDeterministicBillCredits(rs);
+      const minimumMaybe = extractDeterministicMinimumRules({ rateStructure: rs });
+      const tieredMaybe = extractDeterministicTierSchedule(rs);
+      const touMaybe = extractDeterministicTouSchedule(rs);
+      const repFixedEnergyCents = extractFixedRepEnergyCentsPerKwh(rs);
+
+      const repBuckets: Array<{ bucketKey: string; label: string }> = (() => {
+        if (touMaybe?.schedule?.periods?.length) {
+          const uniq = new Map<string, { bucketKey: string; label: string }>();
+          for (const p of touMaybe.schedule.periods) {
+            const dayType = String((p as any)?.dayType ?? "").trim();
+            const startHHMM = String((p as any)?.startHHMM ?? "").trim();
+            const endHHMM = String((p as any)?.endHHMM ?? "").trim();
+            if (!dayType || !startHHMM || !endHHMM) continue;
+            const bucketKey =
+              startHHMM === "0000" && endHHMM === "2400"
+                ? `kwh.m.${dayType}.total`
+                : `kwh.m.${dayType}.${startHHMM}-${endHHMM}`;
+            const labelRaw = (p as any)?.label ?? null;
+            const label =
+              typeof labelRaw === "string" && labelRaw.trim()
+                ? labelRaw.trim()
+                : `${dayType.toUpperCase()} ${startHHMM}-${endHHMM}`;
+            if (!uniq.has(bucketKey)) uniq.set(bucketKey, { bucketKey, label });
+          }
+          return Array.from(uniq.values());
+        }
+        return [{ bucketKey: "kwh.m.all.total", label: "ALL 00:00-24:00" }];
+      })();
+
+      const rows: any[] = months.map((ym) => {
+        const m = byMonth[ym] ?? {};
+        const totalKwh = monthKwh(m, "kwh.m.all.total") ?? 0;
+
+        const tdspDeliveryCents =
+          rs?.tdspDeliveryIncludedInEnergyCharge === true ? 0 : totalKwh * tdspPerKwhCents;
+        const tdspFixedCents = rs?.tdspDeliveryIncludedInEnergyCharge === true ? 0 : tdspMonthly * 100;
+        const repFixedCents = repFixedMonthly * 100;
+
+        const repBucketLines = repBuckets.map((b) => {
+          const kwh = monthKwh(m, b.bucketKey) ?? 0;
+          let repCentsPerKwh: number | null = null;
+          let repCostCents: number | null = null;
+          let notes: string[] = [];
+
+          if (tieredMaybe?.ok) {
+            const tiered = computeRepEnergyCostForMonthlyKwhTiered({
+              monthlyKwh: totalKwh,
+              schedule: tieredMaybe.schedule,
+            });
+            repCostCents = tiered.repEnergyCentsTotal;
+            repCentsPerKwh = totalKwh > 0 ? repCostCents / totalKwh : null;
+            notes = ["tiered"];
+          } else if (touMaybe?.schedule?.periods?.length) {
+            const p = (touMaybe as any).schedule.periods.find((pp: any) => {
+              const dayType = String(pp?.dayType ?? "").trim();
+              const startHHMM = String(pp?.startHHMM ?? "").trim();
+              const endHHMM = String(pp?.endHHMM ?? "").trim();
+              const key =
+                startHHMM === "0000" && endHHMM === "2400"
+                  ? `kwh.m.${dayType}.total`
+                  : `kwh.m.${dayType}.${startHHMM}-${endHHMM}`;
+              return key === b.bucketKey;
+            });
+            const cents =
+              typeof p?.repEnergyCentsPerKwh === "number" ? p.repEnergyCentsPerKwh : null;
+            repCentsPerKwh = cents;
+            repCostCents = kwh * (cents ?? 0);
+          } else if (typeof repFixedEnergyCents === "number") {
+            repCentsPerKwh = repFixedEnergyCents;
+            repCostCents = kwh * repFixedEnergyCents;
+          }
+
+          const repCostDollars = repCostCents != null ? round2(repCostCents / 100) : null;
+
+          return {
+            bucketKey: b.bucketKey,
+            label: b.label,
+            kwh,
+            repCentsPerKwh,
+            repCostDollars,
+            notes: notes.length ? notes : null,
+          };
+        });
+
+        const repEnergyCents = repBucketLines.reduce(
+          (acc, x: any) => acc + (typeof x?.repCostDollars === "number" ? x.repCostDollars * 100 : 0),
+          0,
+        );
+
+        const creditsApplied =
+          creditsMaybe?.ok && totalKwh != null ? applyBillCreditsToMonth({ monthlyKwh: totalKwh, credits: creditsMaybe.credits }) : null;
+        const creditsCents = creditsApplied ? creditsApplied.creditCentsTotal : 0;
+
+        const subtotalCentsRaw =
+          (repEnergyCents || 0) +
+          repFixedCents +
+          tdspFixedCents +
+          (tdspDeliveryCents ?? 0) +
+          creditsCents;
+
+        let minUsageFeeCents = 0;
+        let minBillTopUpCents = 0;
+        let finalCents = Math.max(0, Math.round(subtotalCentsRaw));
+        if (minimumMaybe?.ok && totalKwh != null) {
+          const appliedMin = applyMinimumRulesToMonth({
+            monthlyKwh: totalKwh,
+            minimum: minimumMaybe.minimum,
+            subtotalCents: Math.round(subtotalCentsRaw),
+          });
+          minUsageFeeCents = appliedMin.minUsageFeeCents;
+          minBillTopUpCents = appliedMin.minimumBillTopUpCents;
+          finalCents = appliedMin.totalCentsAfter;
+        }
+
+        return {
+          yearMonth: ym,
+          bucketTotalKwh: totalKwh,
+          repBuckets: repBucketLines,
+          tdsp: {
+            perKwhDeliveryChargeCents: rs?.tdspDeliveryIncludedInEnergyCharge === true ? 0 : tdspPerKwhCents,
+            deliveryDollars: tdspDeliveryCents != null ? round2(tdspDeliveryCents / 100) : null,
+            monthlyCustomerChargeDollars: round2(tdspMonthly),
+          },
+          repFixedMonthlyChargeDollars: round2(repFixedMonthly),
+          creditsDollars: creditsApplied ? round2(creditsCents / 100) : null,
+          minimumUsageFeeDollars: minimumMaybe?.ok ? round2(minUsageFeeCents / 100) : null,
+          minimumBillTopUpDollars: minimumMaybe?.ok ? round2(minBillTopUpCents / 100) : null,
+          totalDollars: round2(finalCents / 100),
+        };
+      });
+
+      const totals = (() => {
+        const annualCents = rows.reduce((acc: number, r: any) => acc + (typeof r?.totalDollars === "number" ? Math.round(r.totalDollars * 100) : 0), 0);
+        const annualFromRows = round2(annualCents / 100);
+        const expectedAnnual = typeof (args.trueCostEstimate as any)?.annualCostDollars === "number" ? (args.trueCostEstimate as any).annualCostDollars : null;
+        const expectedAnnualCents =
+          typeof expectedAnnual === "number" && Number.isFinite(expectedAnnual) ? Math.round(expectedAnnual * 100) : null;
+        const deltaCents =
+          expectedAnnualCents != null ? (annualCents - expectedAnnualCents) : null;
+        return { annualFromRows, expectedAnnual, deltaCents };
+      })();
+
+      return {
+        monthsCount: months.length,
+        repBuckets,
+        rows,
+        totals,
+      };
+    };
+
+    const buildDetailForPlan = (args: {
+      label: "current" | "offer";
+      rateStructure: any;
+      trueCostEstimate: any;
+      requiredBucketKeys: string[];
+      template: any | null;
+    }) => {
+      const variablesList = buildVariablesList({ rateStructure: args.rateStructure, tdspApplied });
+      const effectiveCentsPerKwh =
+        (String(args.trueCostEstimate?.status ?? "") === "OK" || String(args.trueCostEstimate?.status ?? "") === "APPROXIMATE") &&
+        typeof args.trueCostEstimate?.annualCostDollars === "number" &&
+        annualKwh &&
+        annualKwh > 0
+          ? (Number(args.trueCostEstimate.annualCostDollars) / annualKwh) * 100
+          : null;
+
+      const math = {
+        status: String(args.trueCostEstimate?.status ?? ""),
+        reason: (args.trueCostEstimate as any)?.reason ?? null,
+        requiredBucketKeys: args.requiredBucketKeys,
+        componentsV2: (args.trueCostEstimate as any)?.componentsV2 ?? null,
+        components: (args.trueCostEstimate as any)?.components ?? null,
+      };
+
+      const monthlyBreakdown = buildMonthlyBreakdown({
+        rateStructure: args.rateStructure,
+        tdspApplied,
+        usageBucketsByMonth,
+        yearMonths,
+        trueCostEstimate: args.trueCostEstimate,
+      });
+
+      return {
+        template: args.template,
+        variablesList,
+        variables: {
+          rep: {
+            energyCentsPerKwh: extractFixedRepEnergyCentsPerKwh(args.rateStructure),
+            fixedMonthlyChargeDollars: extractRepFixedMonthlyChargeDollars(args.rateStructure),
+          },
+          tdsp: tdspApplied,
+        },
+        outputs: {
+          trueCostEstimate: args.trueCostEstimate,
+          effectiveCentsPerKwh,
+        },
+        math,
+        monthlyBreakdown,
+      };
+    };
+
+    const offerRequiredBucketKeys =
+      Array.isArray((ratePlanRow as any)?.requiredBucketKeys) && (ratePlanRow as any).requiredBucketKeys.length
+        ? ((ratePlanRow as any).requiredBucketKeys as any[]).map(String)
+        : (requiredBucketsForRateStructure({ rateStructure: offerRateStructure }) ?? []).map((r: any) => String(r?.key ?? "")).filter(Boolean);
+    const currentRequiredBucketKeys =
+      (requiredBucketsForRateStructure({ rateStructure: currentRateStructure }) ?? []).map((r: any) => String(r?.key ?? "")).filter(Boolean);
+
+    const offerDetail = buildDetailForPlan({
+      label: "offer",
+      rateStructure: offerRateStructure,
+      trueCostEstimate: offerEstimate,
+      requiredBucketKeys: offerRequiredBucketKeys,
+      template: ratePlanRow
+        ? {
+            ratePlanId: String(ratePlanRow.id),
+            planCalcStatus: String((ratePlanRow as any)?.planCalcStatus ?? ""),
+            planCalcReasonCode: String((ratePlanRow as any)?.planCalcReasonCode ?? ""),
+          }
+        : null,
+    });
+    const currentDetail = buildDetailForPlan({
+      label: "current",
+      rateStructure: currentRateStructure,
+      trueCostEstimate: currentEstimate,
+      requiredBucketKeys: currentRequiredBucketKeys,
+      template: {
+        ratePlanId: `current_plan:${String((currentEntry as any)?.id ?? "latest")}`,
+        planCalcStatus: "CURRENT_PLAN",
+        planCalcReasonCode: currentSource ?? null,
+      },
+    });
+
     return NextResponse.json(
       {
         ok: true,
@@ -451,6 +835,11 @@ export async function GET(req: NextRequest) {
         estimates: {
           current: currentEstimate,
           offer: offerEstimate,
+        },
+        detail: {
+          usage: usageSnapshot,
+          current: currentDetail,
+          offer: offerDetail,
         },
       },
       {
