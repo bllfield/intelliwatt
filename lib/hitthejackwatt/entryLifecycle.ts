@@ -60,6 +60,46 @@ export type EntryExpiryDigestRecord = {
   email: string | null;
 };
 
+// These entry types are binary (0/1) per user and must never stack.
+// If duplicates exist (e.g., houseId=null vs houseId=<homeId>), we keep the newest and expire the rest.
+const NON_STACKABLE_ENTRY_TYPES = new Set([
+  'smart_meter_connect',
+  'home_details_complete',
+  'appliance_details_complete',
+  'current_plan_details',
+  'testimonial',
+]);
+
+async function dedupeNonStackableEntries(userId: string): Promise<void> {
+  const now = new Date();
+  const client = prisma as any;
+
+  const types = Array.from(NON_STACKABLE_ENTRY_TYPES);
+  for (let i = 0; i < types.length; i++) {
+    const t = types[i];
+    const rows = await client.entry.findMany({
+      where: { userId, type: t },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
+    });
+    if (!Array.isArray(rows) || rows.length <= 1) continue;
+
+    const expireIds = rows.slice(1).map((r: any) => r.id);
+    if (expireIds.length <= 0) continue;
+
+    await client.entry.updateMany({
+      where: { id: { in: expireIds } },
+      data: {
+        amount: 0,
+        status: 'EXPIRED',
+        expiresAt: now,
+        expirationReason: 'Deduped non-stackable entry',
+        lastValidated: now,
+      },
+    });
+  }
+}
+
 async function buildUsageContext(userId: string): Promise<UsageContext> {
   const now = new Date();
   const expiringSoonThreshold = new Date(now.getTime() + EXPIRING_SOON_WINDOW_DAYS * 24 * 60 * 60 * 1000);
@@ -180,6 +220,8 @@ function computeEntryStatus(entry: EntryRecord, ctx: UsageContext) {
 }
 
 export async function refreshUserEntryStatuses(userId: string): Promise<RefreshResult> {
+  // Ensure 0/1 entry types don't accidentally stack (Current Plan Details must never show "2").
+  await dedupeNonStackableEntries(userId);
   const ctx = await buildUsageContext(userId);
 
   const client = prisma as any;
