@@ -1002,6 +1002,10 @@ export async function GET(req: NextRequest) {
           estimateTdsp
         ) {
           try {
+            const estimateMode =
+              String((p as any)?.planCalcReasonCode ?? "").trim() === "INDEXED_APPROXIMATE_OK"
+                ? ("INDEXED_EFL_ANCHOR_APPROX" as const)
+                : ("DEFAULT" as const);
             const rsSha = sha256HexCache(JSON.stringify(p.rateStructure ?? null));
             const inputsSha256 = sha256HexCache(
               JSON.stringify({
@@ -1011,6 +1015,7 @@ export async function GET(req: NextRequest) {
                 tdsp: { per: estimateTdsp.per, monthly: estimateTdsp.monthly, effectiveDate: estimateTdsp.effectiveDate },
                 rsSha,
                 usageSha: estimateUsageSha,
+                estimateMode,
               }),
             );
 

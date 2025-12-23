@@ -15,6 +15,7 @@ import { buildUsageBucketsForEstimate } from "@/lib/usage/buildUsageBucketsForEs
 import crypto from "node:crypto";
 import { canComputePlanFromBuckets, derivePlanCalcRequirementsFromTemplate } from "@/lib/plan-engine/planComputability";
 import { isPlanCalcQuarantineWorthyReasonCode } from "@/lib/plan-engine/planCalcQuarantine";
+import { deriveUniversalAvailability } from "@/lib/plan-engine/universalStatus";
 import { bucketDefsFromBucketKeys } from "@/lib/plan-engine/usageBuckets";
 import {
   extractFixedRepEnergyCentsPerKwh,
@@ -1228,10 +1229,11 @@ export async function GET(req: NextRequest) {
         // Dashboard semantics (restore):
         // - AVAILABLE means "a template exists for this offer" (we can attempt to calculate).
         // - QUEUED means "no template yet but we have an EFL URL (can be parsed)".
-        // - UNAVAILABLE means "no template and no EFL URL".
+        // - (legacy) UNAVAILABLE previously meant "no template and no EFL URL", but we now expose a 2-state truth
+        //   to customers: AVAILABLE vs QUEUED. Missing template is therefore always QUEUED.
         //
         // Engine support/unsupported is expressed separately via planComputability + trueCostEstimate.status.
-        if (!ratePlanId) return eflUrl ? "QUEUED" : "UNAVAILABLE";
+        if (!ratePlanId) return "QUEUED";
         return "AVAILABLE";
       })();
 
@@ -1660,21 +1662,17 @@ export async function GET(req: NextRequest) {
         // best-effort only; never block plans API
       }
 
-      const statusLabelFinal = (() => {
-        const current = String((base as any)?.intelliwatt?.statusLabel ?? "").trim() || "UNAVAILABLE";
-
-        // Keep statusLabel tied to template availability (not engine support).
-        // This avoids labeling a plan "UNAVAILABLE" when it was previously shown as calculating.
-        // Unsupported/limited plans are conveyed via planComputability + trueCostEstimate.status.
-        if (current === "AVAILABLE" || current === "UNAVAILABLE" || current === "QUEUED") return current;
-        return "UNAVAILABLE";
-      })();
+      const universal = deriveUniversalAvailability(trueCostEstimate);
 
       return {
         ...base,
         intelliwatt: {
           ...(base as any).intelliwatt,
-          statusLabel: statusLabelFinal,
+          // UNIVERSAL TRUTH:
+          // - AVAILABLE iff plan engine produced OK/APPROXIMATE for this home+inputs
+          // - QUEUED otherwise (with stable statusReason for ops/debug)
+          statusLabel: universal.status,
+          statusReason: universal.reason,
           ...(tdspRates
             ? {
                 tdspRatesApplied: {

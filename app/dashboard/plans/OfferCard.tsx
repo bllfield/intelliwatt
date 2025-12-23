@@ -23,7 +23,8 @@ type OfferRow = {
   intelliwatt: {
     templateAvailable: boolean;
     ratePlanId?: string;
-    statusLabel: "AVAILABLE" | "QUEUED" | "UNAVAILABLE";
+    statusLabel: "AVAILABLE" | "QUEUED";
+    statusReason?: string | null;
     usageKwhPerMonth?: number;
     trueCostEstimate?:
       | {
@@ -79,7 +80,7 @@ function fmtDollars2(v: number | undefined): string | null {
 function badgeClasses(status: OfferRow["intelliwatt"]["statusLabel"]): string {
   if (status === "AVAILABLE") return "border-emerald-400/40 bg-emerald-500/10 text-emerald-200";
   if (status === "QUEUED") return "border-amber-400/40 bg-amber-500/10 text-amber-200";
-  return "border-brand-cyan/20 bg-brand-white/5 text-brand-cyan/70";
+  return "border-amber-400/40 bg-amber-500/10 text-amber-200";
 }
 
 export default function OfferCard({ offer, recommended }: OfferCardProps) {
@@ -96,17 +97,15 @@ export default function OfferCard({ offer, recommended }: OfferCardProps) {
   const eflUrl = offer.efl?.eflUrl;
   const status = offer.intelliwatt.statusLabel;
   const tce = offer.intelliwatt?.trueCostEstimate as any;
-  const isCalculating =
-    status === "AVAILABLE" && String(tce?.status ?? "").toUpperCase() === "QUEUED";
+  const isCalculating = String(tce?.status ?? "").toUpperCase() === "QUEUED";
   const isUnsupported =
     String((offer as any)?.intelliwatt?.planComputability?.status ?? "").toUpperCase() === "NOT_COMPUTABLE" ||
     String(tce?.status ?? "").toUpperCase() === "NOT_COMPUTABLE";
 
-  const statusText =
-    status === "AVAILABLE" ? "AVAILABLE" : status === "QUEUED" ? "QUEUED" : "UNAVAILABLE";
+  const statusText = status;
 
   // tce already read above
-  const showEstimateLine = tce?.status === "OK";
+  const showEstimateLine = tce?.status === "OK" || tce?.status === "APPROXIMATE";
   const estimateMonthly = showEstimateLine ? fmtDollars2((tce as any)?.monthlyCostDollars) : null;
   const tdspTag = offer.intelliwatt?.tdspRatesApplied ? "incl. TDSP" : null;
   const usageTag =

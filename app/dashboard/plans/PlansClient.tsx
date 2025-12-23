@@ -339,8 +339,7 @@ export default function PlansClient() {
     const offersNow = Array.isArray(resp?.offers) ? (resp!.offers as OfferRow[]) : [];
     const queuedEstimates = offersNow.filter(
       (o) =>
-        o?.intelliwatt?.statusLabel === "AVAILABLE" &&
-        String((o as any)?.intelliwatt?.trueCostEstimate?.status ?? "").toUpperCase() === "QUEUED",
+        String(o?.intelliwatt?.statusLabel ?? "") === "QUEUED",
     );
     const isCalculating = queuedEstimates.length > 0;
     setAutoPreparing(isCalculating);
@@ -356,8 +355,7 @@ export default function PlansClient() {
     const offersNow = Array.isArray(resp?.offers) ? (resp!.offers as OfferRow[]) : [];
     const queuedCountNow = offersNow.filter(
       (o) =>
-        o?.intelliwatt?.statusLabel === "AVAILABLE" &&
-        String((o as any)?.intelliwatt?.trueCostEstimate?.status ?? "").toUpperCase() === "QUEUED",
+        String(o?.intelliwatt?.statusLabel ?? "") === "QUEUED",
     ).length;
     if (queuedCountNow <= 0) return;
 
@@ -603,7 +601,8 @@ export default function PlansClient() {
     return filteredSortedAll.slice(startIdx, startIdx + pageSize);
   }, [filteredSortedAll, safePage, pageSize]);
 
-  const hasUnavailable = filteredSortedAll.some((o: any) => o?.intelliwatt?.statusLabel === "UNAVAILABLE");
+  // Universal truth: we only expose AVAILABLE vs QUEUED (no UNAVAILABLE state in the dashboard UI).
+  const hasUnavailable = false;
   const availableFilterOn = template === "available";
 
   // Default sort:
