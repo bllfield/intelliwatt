@@ -143,25 +143,35 @@ Notes:
     - ✅ Implement testimonial eligibility guard that requires an IntelliWatt plan switch or upgrade (both API and UI).
     - ✅ Clarify testimonial availability copy on `/dashboard/entries` and remove duplicate testimonial card; center the jackpot total callout.
 
-### Current Plan Module Progress (Updated 2025-11-27)
+### Current Plan Module Progress (Updated 2025-12-23)
 
 - **Dedicated Current Plan datastore**
-  - ✅ Added `prisma/current-plan.schema.prisma` with its own datasource (`CURRENT_PLAN_DATABASE_URL`) so manual entries and bill uploads never touch the master Prisma schema.
+  - ✅ Added `prisma/current-plan/schema.prisma` with its own datasource (`CURRENT_PLAN_DATABASE_URL`) so manual entries and bill uploads never touch the master Prisma schema.
   - ✅ Introduced `lib/prismaCurrentPlan.ts` plus `/api/current-plan/manual` and `/api/current-plan/upload` to persist structured plan data and raw bill bytes into the standalone database.
-  - ⬜ NEXT: Pull the Current Plan database into the master normalization pipeline so the rate analyzer can consume these entries.
+  - ✅ Added customer parsing endpoints:
+    - `POST /api/current-plan/efl-parse` (PDF EFL → `ParsedCurrentPlan.rateStructure`, contract fields, ETF; best-effort + queues for admin review when incomplete)
+    - `POST /api/current-plan/bill-parse` (bill upload/text → `ParsedCurrentPlan` + queues for admin review when incomplete)
+  - ✅ Added Current Plan estimate wiring for customer comparison:
+    - Compare page: `/dashboard/plans/compare/[offerId]` + `GET /api/dashboard/plans/compare?offerId=...`
+    - Uses the **canonical stitched 12‑month usage window** (same helper as offers) and **the plan engine** to compute:
+      - Current Plan estimate (from latest current-plan manual entry or parsed EFL/bill for the active home)
+      - Selected Offer estimate (from offer template `RatePlan.rateStructure`)
+    - **Termination fee toggle**: UI can include/exclude ETF in “switch now” first-year cost (defaults to include only when in-contract).
+    - **Signup step**: uses WattBuy `enroll_link` as the outbound enrollment CTA.
+  - ⬜ NEXT: Normalize ParsedCurrentPlan (EFL/bill parsed) into master/current-plan normalization tables (manual entries already normalize) so other site experiences can consume it without reading the module DB.
 
 - **Developer notes**
   - Local (PowerShell):
     ```
-    npx prisma generate --schema=prisma/current-plan.schema.prisma
-    npx prisma migrate dev --schema=prisma/current-plan.schema.prisma --name init_current_plan_db
+    npx prisma generate --schema=prisma/current-plan/schema.prisma
+    npx prisma migrate dev --schema=prisma/current-plan/schema.prisma --name init_current_plan_db
     ```
   - Production rollout:
     - Create a separate PostgreSQL database (e.g., `intelliwatt_current_plan`) via DigitalOcean.
     - Set `CURRENT_PLAN_DATABASE_URL` in Vercel and droplet environments before deploying.
     - After deploy, run:
       ```
-      npx prisma migrate deploy --schema=prisma/current-plan.schema.prisma
+      npx prisma migrate deploy --schema=prisma/current-plan/schema.prisma
       ```
 - [x] Design a unified `RateStructure` contract for manual Current Plan entries (supports FIXED, VARIABLE, TIME_OF_USE) so the rate comparison engine can use the same logic on user-entered plans and vendor offers.
 - [x] Wire the Current Plan UI + DB to capture `RateStructure` for variable and TOU plans (additional form fields + DB storage) after the initial fixed-rate wiring and entry counter integration are stable.
@@ -2430,10 +2440,12 @@ Plan engine output cache (single source of truth)
 
 - **Storage**: WattBuy Offers module DB table `WattBuyApiSnapshot`.
 - **Endpoint marker**: `endpoint="PLAN_ENGINE_ESTIMATE_V1"`.
+- **Current Plan endpoint marker**: `endpoint="CURRENT_PLAN_ENGINE_ESTIMATE_V1"` (same storage table; synthetic `ratePlanId=current_plan:<currentPlanEntryId>`).
 - **Keying**: hash of canonical inputs (`estimateTrueCost_v1` + monthsCount + annualKwh + TDSP rates + rateStructure hash + usage buckets hash).
 - **Rule** (source of truth): any place that displays a true-cost estimate must use the DB-cached plan-engine output.
   - **Plans list (`GET /api/dashboard/plans`) is cache-only**: never run the engine inline (prevents “recalculation” when changing sort/filter dropdowns).
   - **Plan detail (`GET /api/dashboard/plans/detail`) may compute on cache-miss** (bounded) and then persists to the cache.
+  - **Compare (`GET /api/dashboard/plans/compare`) may compute on cache-miss** (bounded) and persists **both** offer and current-plan estimates to the cache.
   - Background/template prefetch (or explicit warm calls) are responsible for filling cache for list views.
 - **Correctness invariant**: Card and detail must match; if they diverge, it means inputs (usage window/buckets/TDSP) were not canonicalized or the cache key was unstable.
 

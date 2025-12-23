@@ -140,7 +140,6 @@ export async function GET(req: NextRequest) {
     // Determine usage source + window (SMT or Green Button).
     const esiid = typeof house.esiid === "string" && house.esiid.trim() ? house.esiid.trim() : null;
     const now = chicagoNow();
-    const cutoff = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
 
     let usageSource: "SMT" | "GREEN_BUTTON" | null = null;
     let windowEnd: Date | null = null;
@@ -173,6 +172,9 @@ export async function GET(req: NextRequest) {
     if (!usageSource || !windowEnd) {
       return NextResponse.json({ ok: false, error: "no_usage_window" }, { status: 400 });
     }
+
+    // Canonical cutoff for stitched usage window: windowEnd - 365d (not "now - 365d").
+    const cutoff = new Date(windowEnd.getTime() - 365 * 24 * 60 * 60 * 1000);
 
     // Canonical stitched buckets (same as offers).
     const bucketBuild = await buildUsageBucketsForEstimate({
