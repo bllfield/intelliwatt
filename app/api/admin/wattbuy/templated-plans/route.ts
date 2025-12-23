@@ -735,7 +735,7 @@ export async function GET(req: NextRequest) {
 
         const pcStatus = (derivedCalc as any)?.planCalcStatus ?? null;
         const pcReason = String((derivedCalc as any)?.planCalcReasonCode ?? "UNKNOWN");
-        const queued = pcStatus !== "COMPUTABLE";
+        const queuedByCalc = pcStatus !== "COMPUTABLE";
 
         // Optional: usage-based monthly estimate (for admin ranking / preview)
         let usagePreview: Row["usagePreview"] = null;
@@ -793,6 +793,18 @@ export async function GET(req: NextRequest) {
           }
         }
 
+        const estStatus = String((usageEstimate as any)?.status ?? "").trim().toUpperCase();
+        const estReason = String((usageEstimate as any)?.reason ?? "").trim();
+        // In the Templates admin view, "queued" should mean "blocked / needs action to compute/verify",
+        // not just "planCalcStatus is NOT_COMPUTABLE". If we cannot even run an estimate preview due to
+        // missing TDSP snapshots / missing usage buckets, surface that as QUEUED too.
+        const queuedByEstimate =
+          estStatus === "NOT_IMPLEMENTED" ||
+          estStatus === "ERROR";
+
+        const queued = queuedByCalc || queuedByEstimate;
+        const queuedReason = queuedByCalc ? pcReason : queuedByEstimate ? (estReason || estStatus || "ESTIMATE_BLOCKED") : null;
+
         return {
           id: p.id,
           offerId: offerIdByPlanId.get(String(p.id)) ?? null,
@@ -808,7 +820,7 @@ export async function GET(req: NextRequest) {
           planCalcReasonCode: pcReason,
           requiredBucketKeys: requiredKeys.length ? requiredKeys : null,
           queued,
-          queuedReason: queued ? pcReason : null,
+          queuedReason,
           rate500:
             typeof p.rate500 === "number"
               ? p.rate500
