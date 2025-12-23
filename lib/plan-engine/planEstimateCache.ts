@@ -12,18 +12,20 @@ export async function getCachedPlanEstimate(args: {
   ratePlanId: string;
   inputsSha256: string;
   monthsCount: number;
+  endpoint?: string;
 }): Promise<any | null> {
   const houseAddressId = String(args.houseAddressId ?? "").trim();
   const ratePlanId = String(args.ratePlanId ?? "").trim();
   const inputsSha256 = String(args.inputsSha256 ?? "").trim();
   const monthsCount = Math.max(1, Math.floor(Number(args.monthsCount ?? 12) || 12));
+  const endpoint = String(args.endpoint ?? ENDPOINT).trim() || ENDPOINT;
   if (!houseAddressId || !ratePlanId || !inputsSha256) return null;
 
   const requestKey = `plan_estimate|ratePlanId=${ratePlanId}|months=${monthsCount}`;
   try {
     const row = await (wattbuyOffersPrisma as any).wattBuyApiSnapshot.findFirst({
       where: {
-        endpoint: ENDPOINT,
+        endpoint,
         houseAddressId,
         requestKey,
         payloadSha256: inputsSha256,
@@ -44,18 +46,20 @@ export async function putCachedPlanEstimate(args: {
   inputsSha256: string;
   monthsCount: number;
   payloadJson: any;
+  endpoint?: string;
 }): Promise<void> {
   const houseAddressId = String(args.houseAddressId ?? "").trim();
   const ratePlanId = String(args.ratePlanId ?? "").trim();
   const inputsSha256 = String(args.inputsSha256 ?? "").trim();
   const monthsCount = Math.max(1, Math.floor(Number(args.monthsCount ?? 12) || 12));
+  const endpoint = String(args.endpoint ?? ENDPOINT).trim() || ENDPOINT;
   if (!houseAddressId || !ratePlanId || !inputsSha256) return;
 
   const requestKey = `plan_estimate|ratePlanId=${ratePlanId}|months=${monthsCount}`;
   try {
     await (wattbuyOffersPrisma as any).wattBuyApiSnapshot.create({
       data: {
-        endpoint: ENDPOINT,
+        endpoint,
         houseAddressId,
         esiid: args.esiid ? String(args.esiid) : null,
         requestKey,

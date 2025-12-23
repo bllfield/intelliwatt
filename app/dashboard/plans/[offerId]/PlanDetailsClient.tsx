@@ -155,16 +155,24 @@ export default function PlanDetailsClient({ offerId }: { offerId: string }) {
           </div>
         </div>
 
-        {plan?.eflUrl ? (
+        <div className="flex flex-col items-start gap-2 sm:items-end">
           <Link
-            href={plan.eflUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="text-sm font-semibold text-brand-navy hover:underline"
+            href={`/dashboard/plans/compare/${encodeURIComponent(offerId)}`}
+            className="text-sm font-semibold text-brand-blue hover:underline"
           >
-            View EFL
+            Compare vs your current plan
           </Link>
-        ) : null}
+          {plan?.eflUrl ? (
+            <Link
+              href={plan.eflUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="text-sm font-semibold text-brand-navy hover:underline"
+            >
+              View EFL
+            </Link>
+          ) : null}
+        </div>
       </div>
 
       {loading ? <div className="mt-8 text-brand-cyan/70">Loading…</div> : null}

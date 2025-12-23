@@ -2344,6 +2344,11 @@ Guardrails
 ✅ Done (Dashboard): `/dashboard/plans` now consumes a customer-facing API (`GET /api/dashboard/plans`) that:
 - Displays WattBuy EFL average prices (500/1000/2000 kWh) for the user’s saved home.
 - Returns `hasUsage` + `usageSummary` **derived from the canonical calc window** (see “Canonical home-scoped usage window” below). This prevents “card vs detail” mismatches.
+- ✅ Added **Compare page**: `/dashboard/plans/compare/[offerId]` (backed by `GET /api/dashboard/plans/compare`) that:
+  - Computes **Current Plan** and **Selected Offer** estimates using the **same plan engine** + **same stitched 12‑month usage window**
+  - Caches Current Plan estimates into the Offers module DB (`WattBuyApiSnapshot`) under `endpoint=CURRENT_PLAN_ENGINE_ESTIMATE_V1` (synthetic `ratePlanId=current_plan:<entryId>`)
+  - Shows side-by-side annual/monthly cost, REP vs TDSP breakdown (via `componentsV2`), and a **Termination Fee (ETF) include/exclude toggle** for “switch now vs after contract expiration”
+  - Provides a **WattBuy signup CTA** using the offer’s `enroll_link`
 - Wires `OfferIdRatePlanMap` into each offer card to show **IntelliWatt calculation available** when `ratePlanId` exists.
 - Returns `intelliwatt.ratePlanId` per offer (from `OfferIdRatePlanMap`) so the plan engine can use `RatePlan` templates directly.
 - **True-cost wiring (production, single source of truth):**
