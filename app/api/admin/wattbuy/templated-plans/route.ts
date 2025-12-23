@@ -793,17 +793,10 @@ export async function GET(req: NextRequest) {
           }
         }
 
-        const estStatus = String((usageEstimate as any)?.status ?? "").trim().toUpperCase();
-        const estReason = String((usageEstimate as any)?.reason ?? "").trim();
-        // In the Templates admin view, "queued" should mean "blocked / needs action to compute/verify",
-        // not just "planCalcStatus is NOT_COMPUTABLE". If we cannot even run an estimate preview due to
-        // missing TDSP snapshots / missing usage buckets, surface that as QUEUED too.
-        const queuedByEstimate =
-          estStatus === "NOT_IMPLEMENTED" ||
-          estStatus === "ERROR";
-
-        const queued = queuedByCalc || queuedByEstimate;
-        const queuedReason = queuedByCalc ? pcReason : queuedByEstimate ? (estReason || estStatus || "ESTIMATE_BLOCKED") : null;
+        // Binary semantics: either the plan is computable, or it is queued.
+        // Admin preview failures (e.g. missing TDSP snapshot) must NOT flip a COMPUTABLE template into queued.
+        const queued = queuedByCalc;
+        const queuedReason = queuedByCalc ? pcReason : null;
 
         return {
           id: p.id,
