@@ -1241,6 +1241,7 @@ export function CurrentRateDetailsForm({
           energyRateCents: withCentsPrecision(fixedRate) ?? fixedRate,
           ...(baseMonthlyFeeCents !== undefined ? { baseMonthlyFeeCents } : {}),
           billCredits: billCreditsStructure,
+          ...(deliveryIncluded === true ? { tdspDeliveryIncludedInEnergyCharge: true } : {}),
         };
       }
     } else if (rateType === "VARIABLE") {
@@ -1260,6 +1261,7 @@ export function CurrentRateDetailsForm({
           billCredits: billCreditsStructure,
           ...(variableIndexType ? { indexType: variableIndexType } : {}),
           ...(trimmedVariableNotes ? { variableNotes: trimmedVariableNotes } : {}),
+          ...(deliveryIncluded === true ? { tdspDeliveryIncludedInEnergyCharge: true } : {}),
         };
       }
     } else if (rateType === "TIME_OF_USE") {
@@ -1334,6 +1336,7 @@ export function CurrentRateDetailsForm({
           tiers: sanitizedTiers,
           ...(baseMonthlyFeeCents !== undefined ? { baseMonthlyFeeCents } : {}),
           billCredits: billCreditsStructure,
+          ...(deliveryIncluded === true ? { tdspDeliveryIncludedInEnergyCharge: true } : {}),
         };
       }
       energyRateForPayload = null;

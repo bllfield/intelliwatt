@@ -31,6 +31,7 @@ type ApiResp = {
     source: string | null;
     annualKwh: number | null;
     yearMonths: string[];
+    requiredBucketKeys?: string[];
   };
   estimates?: {
     current: any;
@@ -63,6 +64,7 @@ export default function PlanCompareClient(props: { offerId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<ApiResp | null>(null);
   const [includeEtf, setIncludeEtf] = useState<boolean>(true);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   // Persist the last compared offer so the Dashboard "Compare" nav can jump straight here.
   useEffect(() => {
@@ -162,6 +164,7 @@ export default function PlanCompareClient(props: { offerId: string }) {
       : null;
 
   const canSignup = Boolean(data?.offer?.enrollLink);
+  const enrollLink = (data?.offer?.enrollLink ?? "").trim();
 
   return (
     <div className="mx-auto w-full max-w-5xl">
@@ -184,9 +187,24 @@ export default function PlanCompareClient(props: { offerId: string }) {
         <div className="mt-8 rounded-2xl border border-red-300 bg-red-50 p-6 text-red-900">
           <div className="font-semibold">Failed to load comparison</div>
           <div className="mt-1 text-sm">{error}</div>
-          <div className="mt-3 text-sm">
-            <Link href="/dashboard/current-rate" className="underline">
-              Check current plan details
+          <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+            <Link
+              href="/dashboard/api"
+              className="inline-flex items-center justify-center rounded-full bg-brand-blue px-5 py-3 text-sm font-semibold text-white hover:bg-brand-blue/90"
+            >
+              Connect usage
+            </Link>
+            <Link
+              href="/dashboard/current-rate"
+              className="inline-flex items-center justify-center rounded-full border border-brand-blue/30 bg-white px-5 py-3 text-sm font-semibold text-brand-blue hover:bg-brand-blue/5"
+            >
+              Add current plan details
+            </Link>
+            <Link
+              href="/dashboard/plans"
+              className="inline-flex items-center justify-center rounded-full border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              Back to plans
             </Link>
           </div>
         </div>
@@ -194,6 +212,37 @@ export default function PlanCompareClient(props: { offerId: string }) {
         <div className="mt-8 rounded-2xl border border-red-300 bg-red-50 p-6 text-red-900">
           <div className="font-semibold">Failed to load</div>
           <div className="mt-1 text-sm">{String((data as any)?.error ?? "Unknown error")}</div>
+          {String((data as any)?.error ?? "").trim() === "no_usage_window" ? (
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+              <Link
+                href="/dashboard/api"
+                className="inline-flex items-center justify-center rounded-full bg-brand-blue px-5 py-3 text-sm font-semibold text-white hover:bg-brand-blue/90"
+              >
+                Connect usage to see comparison
+              </Link>
+              <Link
+                href="/dashboard/plans"
+                className="inline-flex items-center justify-center rounded-full border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Back to plans
+              </Link>
+            </div>
+          ) : String((data as any)?.error ?? "").trim() === "no_current_plan" ? (
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+              <Link
+                href="/dashboard/current-rate"
+                className="inline-flex items-center justify-center rounded-full bg-brand-blue px-5 py-3 text-sm font-semibold text-white hover:bg-brand-blue/90"
+              >
+                Add current plan details to compare
+              </Link>
+              <Link
+                href="/dashboard/plans"
+                className="inline-flex items-center justify-center rounded-full border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Back to plans
+              </Link>
+            </div>
+          ) : null}
         </div>
       ) : (
         <>
@@ -265,14 +314,13 @@ export default function PlanCompareClient(props: { offerId: string }) {
 
               <div className="mt-5 flex flex-col gap-2 sm:flex-row">
                 {canSignup ? (
-                  <a
-                    href={String(data.offer?.enrollLink)}
-                    target="_blank"
-                    rel="noreferrer"
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirm(true)}
                     className="inline-flex items-center justify-center rounded-full bg-brand-blue px-5 py-3 text-sm font-semibold text-white hover:bg-brand-blue/90"
                   >
                     Choose this plan (WattBuy signup)
-                  </a>
+                  </button>
                 ) : (
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
                     Signup link not available for this offer.
@@ -312,6 +360,48 @@ export default function PlanCompareClient(props: { offerId: string }) {
           <div className="mt-6 text-xs text-brand-navy/60">
             Estimates are generated by the IntelliWatt plan engine using your stitched 12‑month usage window and current TDSP tariffs.
           </div>
+
+          {showConfirm ? (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+              <div className="w-full max-w-lg rounded-3xl border border-brand-blue/25 bg-white p-6 text-brand-navy shadow-xl">
+                <div className="text-lg font-semibold">You’re about to leave IntelliWatt to sign up</div>
+                <div className="mt-2 text-sm text-brand-navy/70">
+                  We’ll open WattBuy in a new tab for the plan enrollment flow. Here’s what to expect:
+                </div>
+                <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-brand-navy/80">
+                  <li>You’ll complete enrollment details with the provider (address, contact info, etc.).</li>
+                  <li>After enrollment, you may receive confirmation emails from the provider and/or WattBuy.</li>
+                  <li>
+                    Your comparison here assumes{" "}
+                    <span className="font-semibold">{includeEtf ? "switching now (ETF included)" : "switching after contract expiration (ETF excluded)"}</span>.
+                  </li>
+                </ul>
+                <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirm(false)}
+                    className="rounded-full border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowConfirm(false);
+                      try {
+                        if (enrollLink) window.open(enrollLink, "_blank", "noopener,noreferrer");
+                      } catch {
+                        // ignore
+                      }
+                    }}
+                    className="rounded-full bg-brand-blue px-5 py-3 text-sm font-semibold text-white hover:bg-brand-blue/90"
+                  >
+                    Continue to signup
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
         </>
       )}
     </div>

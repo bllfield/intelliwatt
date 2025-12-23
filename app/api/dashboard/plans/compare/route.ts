@@ -11,6 +11,7 @@ import { getTdspDeliveryRates } from "@/lib/plan-engine/getTdspDeliveryRates";
 import { buildUsageBucketsForEstimate } from "@/lib/usage/buildUsageBucketsForEstimate";
 import { estimateTrueCost } from "@/lib/plan-engine/estimateTrueCost";
 import { getCachedPlanEstimate, putCachedPlanEstimate, sha256Hex as sha256HexCache } from "@/lib/plan-engine/planEstimateCache";
+import { requiredBucketsForRateStructure } from "@/lib/plan-engine/requiredBucketsForPlan";
 import crypto from "node:crypto";
 
 export const runtime = "nodejs";
@@ -176,22 +177,6 @@ export async function GET(req: NextRequest) {
     // Canonical cutoff for stitched usage window: windowEnd - 365d (not "now - 365d").
     const cutoff = new Date(windowEnd.getTime() - 365 * 24 * 60 * 60 * 1000);
 
-    // Canonical stitched buckets (same as offers).
-    const bucketBuild = await buildUsageBucketsForEstimate({
-      homeId: house.id,
-      usageSource,
-      esiid: usageSource === "SMT" ? esiid : null,
-      rawId: usageSource === "GREEN_BUTTON" ? gbRawId : null,
-      windowEnd,
-      cutoff,
-      requiredBucketKeys: ["kwh.m.all.total"],
-      monthsCount: 12,
-      maxStepDays: 2,
-    });
-    const yearMonths = bucketBuild.yearMonths;
-    const usageBucketsByMonth = bucketBuild.usageBucketsByMonth;
-    const annualKwh = typeof bucketBuild.annualKwh === "number" && Number.isFinite(bucketBuild.annualKwh) ? bucketBuild.annualKwh : null;
-
     // Load the offer (for enroll link + RatePlan mapping).
     const rawOffers = await wattbuy.offers({
       address: house.addressLine1,
@@ -255,6 +240,45 @@ export async function GET(req: NextRequest) {
     const currentRateStructure = (currentEntry as any)?.rateStructure ?? null;
     const currentRsPresent = isRateStructurePresent(currentRateStructure);
 
+    // Derive required bucket keys from BOTH rate structures (authoritative).
+    // This is what enables accurate FIXED + tiered + credits + TOU comparisons.
+    const requiredKeys = (() => {
+      const keys = new Set<string>();
+      const addFrom = (rs: any) => {
+        try {
+          if (!rs) return;
+          const reqs = requiredBucketsForRateStructure({ rateStructure: rs }) ?? [];
+          for (const r of reqs) {
+            const k = String((r as any)?.key ?? "").trim();
+            if (k) keys.add(k);
+          }
+        } catch {
+          // ignore
+        }
+      };
+      addFrom(offerRateStructure);
+      addFrom(currentRateStructure);
+      keys.add("kwh.m.all.total");
+      return Array.from(keys);
+    })();
+
+    // Canonical stitched buckets using the union keys.
+    const bucketBuild = await buildUsageBucketsForEstimate({
+      homeId: house.id,
+      usageSource,
+      esiid: usageSource === "SMT" ? esiid : null,
+      rawId: usageSource === "GREEN_BUTTON" ? gbRawId : null,
+      windowEnd,
+      cutoff,
+      requiredBucketKeys: requiredKeys,
+      monthsCount: 12,
+      maxStepDays: 2,
+    });
+    const yearMonths = bucketBuild.yearMonths;
+    const usageBucketsByMonth = bucketBuild.usageBucketsByMonth;
+    const annualKwh =
+      typeof bucketBuild.annualKwh === "number" && Number.isFinite(bucketBuild.annualKwh) ? bucketBuild.annualKwh : null;
+
     const contractEndDateIso = (currentEntry as any)?.contractEndDate
       ? new Date((currentEntry as any).contractEndDate).toISOString()
       : null;
@@ -282,7 +306,7 @@ export async function GET(req: NextRequest) {
       const rsSha = sha256HexCache(JSON.stringify(offerRateStructure ?? null));
       const usageSha = hashUsageInputs({
         yearMonths,
-        bucketKeys: ["kwh.m.all.total"],
+        bucketKeys: requiredKeys,
         usageBucketsByMonth,
       });
       const inputsSha256 = sha256HexCache(
@@ -334,7 +358,7 @@ export async function GET(req: NextRequest) {
       const rsSha = sha256HexCache(JSON.stringify(currentRateStructure ?? null));
       const usageSha = hashUsageInputs({
         yearMonths,
-        bucketKeys: ["kwh.m.all.total"],
+        bucketKeys: requiredKeys,
         usageBucketsByMonth,
       });
       const inputsSha256 = sha256HexCache(
@@ -402,6 +426,7 @@ export async function GET(req: NextRequest) {
           source: usageSource,
           annualKwh,
           yearMonths,
+          requiredBucketKeys: requiredKeys,
         },
         estimates: {
           current: currentEstimate,

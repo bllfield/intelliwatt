@@ -278,6 +278,12 @@ export async function POST(req: NextRequest) {
     // Build a CurrentPlan-style rateStructure for transparency + later calculations.
     // (Matches the shape validated by /api/current-plan/manual.)
     const rateStructure: any = (() => {
+      const tdspDeliveryIncludedInEnergyCharge =
+        effectivePlanRules?.tdspDeliveryIncludedInEnergyCharge === true ||
+        effectiveRateStructure?.tdspDeliveryIncludedInEnergyCharge === true
+          ? true
+          : undefined;
+
       const baseMonthlyFeeCents =
         typeof parsed?.rate?.baseMonthlyFeeCents === "number" && Number.isFinite(parsed.rate.baseMonthlyFeeCents)
           ? Math.round(parsed.rate.baseMonthlyFeeCents)
@@ -324,6 +330,7 @@ export async function POST(req: NextRequest) {
           ...(baseMonthlyFeeCents != null && baseMonthlyFeeCents >= 0 ? { baseMonthlyFeeCents } : {}),
           tiers,
           billCredits: billCreditsObj,
+          ...(tdspDeliveryIncludedInEnergyCharge ? { tdspDeliveryIncludedInEnergyCharge: true } : {}),
         };
       }
 
@@ -333,6 +340,7 @@ export async function POST(req: NextRequest) {
           currentBillEnergyRateCents: flatEnergyRateCents != null ? Number(flatEnergyRateCents.toFixed(4)) : null,
           ...(baseMonthlyFeeCents != null && baseMonthlyFeeCents >= 0 ? { baseMonthlyFeeCents } : {}),
           billCredits: billCreditsObj,
+          ...(tdspDeliveryIncludedInEnergyCharge ? { tdspDeliveryIncludedInEnergyCharge: true } : {}),
         };
       }
 
@@ -341,6 +349,7 @@ export async function POST(req: NextRequest) {
         ...(flatEnergyRateCents != null ? { energyRateCents: Number(flatEnergyRateCents.toFixed(4)) } : {}),
         ...(baseMonthlyFeeCents != null && baseMonthlyFeeCents >= 0 ? { baseMonthlyFeeCents } : {}),
         billCredits: billCreditsObj,
+        ...(tdspDeliveryIncludedInEnergyCharge ? { tdspDeliveryIncludedInEnergyCharge: true } : {}),
       };
     })();
 

@@ -22,17 +22,46 @@ export function estimateTrueCost(args: {
     effectiveDate?: string | null;
   };
 }): any {
+  // If the REP rate already includes TDSP/TDU delivery, do NOT add utility delivery again.
+  // This flag can be set by the EFL pipeline or by the Current Rate manual-entry form.
+  const tdspIncluded =
+    (args.rateStructure as any)?.tdspDeliveryIncludedInEnergyCharge === true;
+
+  const effectiveTdspRates = tdspIncluded
+    ? {
+        perKwhDeliveryChargeCents: 0,
+        monthlyCustomerChargeDollars: 0,
+        effectiveDate: undefined,
+      }
+    : {
+        perKwhDeliveryChargeCents: Number(args.tdspRates?.perKwhDeliveryChargeCents ?? 0) || 0,
+        monthlyCustomerChargeDollars: Number(args.tdspRates?.monthlyCustomerChargeDollars ?? 0) || 0,
+        effectiveDate: args.tdspRates?.effectiveDate ?? undefined,
+      };
+
   const est = calculatePlanCostForUsage({
     annualKwh: args.annualKwh,
     monthsCount: args.monthsCount,
     tdsp: {
-      perKwhDeliveryChargeCents: Number(args.tdspRates?.perKwhDeliveryChargeCents ?? 0) || 0,
-      monthlyCustomerChargeDollars: Number(args.tdspRates?.monthlyCustomerChargeDollars ?? 0) || 0,
-      effectiveDate: args.tdspRates?.effectiveDate ?? undefined,
+      perKwhDeliveryChargeCents: effectiveTdspRates.perKwhDeliveryChargeCents,
+      monthlyCustomerChargeDollars: effectiveTdspRates.monthlyCustomerChargeDollars,
+      effectiveDate: effectiveTdspRates.effectiveDate,
     },
     rateStructure: args.rateStructure,
     usageBucketsByMonth: args.usageBucketsByMonth,
   });
+
+  if (tdspIncluded && est && (est as any).status === "OK") {
+    try {
+      const next = { ...(est as any) };
+      next.notes = Array.isArray(next.notes)
+        ? Array.from(new Set([...(next.notes as any[]), "tdsp_delivery_included_in_rep_rate"]))
+        : ["tdsp_delivery_included_in_rep_rate"];
+      return next;
+    } catch {
+      // ignore
+    }
+  }
 
   // Sanity: ensure TDSP fixed fee is reflected in the output payload when provided.
   // This keeps list cards and detail page aligned even if upstream changes cause tdsp.fixedDollars
