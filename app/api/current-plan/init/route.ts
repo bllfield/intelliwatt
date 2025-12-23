@@ -253,6 +253,31 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  // If the parsed payload includes an ESIID, prefer resolving the house by ESIID
+  // (this is more reliable than "primary" when users have multiple homes).
+  if (!effectiveHouseId) {
+    const esiidCandidate =
+      (typeof (latestManual as any)?.esiId === 'string' && (latestManual as any).esiId.trim().length > 0
+        ? (latestManual as any).esiId.trim()
+        : null) ??
+      (typeof (latestParsed as any)?.esiId === 'string' && (latestParsed as any).esiId.trim().length > 0
+        ? (latestParsed as any).esiId.trim()
+        : null) ??
+      (typeof (latestParsed as any)?.esiid === 'string' && (latestParsed as any).esiid.trim().length > 0
+        ? (latestParsed as any).esiid.trim()
+        : null);
+
+    if (esiidCandidate) {
+      const houseByEsiid = await prisma.houseAddress.findFirst({
+        where: { userId: user.id, archivedAt: null, esiid: esiidCandidate },
+        select: { id: true },
+      });
+      if (houseByEsiid?.id) {
+        effectiveHouseId = houseByEsiid.id;
+      }
+    }
+  }
+
   // If we still don't have a house context (common when users upload a current-plan EFL
   // before selecting a specific house), fall back to the user's primary/recent house.
   if (!effectiveHouseId) {

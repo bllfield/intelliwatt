@@ -581,6 +581,36 @@ export function CurrentRateDetailsForm({
     variableNotes,
   ]);
 
+  // Second-pass fill: after bill/EFL parsing completes, we may receive new parsed fields.
+  // Fill only *missing* fields, and never overwrite user-entered values.
+  useEffect(() => {
+    if (!isMountedRef.current) return;
+    const parsed = parsedPlan;
+    const saved = savedPlan;
+    if (!parsed && !saved) return;
+
+    // Early termination fee
+    if (earlyTerminationFee.trim() === "") {
+      const v =
+        typeof saved?.earlyTerminationFee === "number"
+          ? saved.earlyTerminationFee
+          : typeof parsed?.earlyTerminationFee === "number"
+            ? parsed.earlyTerminationFee
+            : null;
+      if (v != null && Number.isFinite(v)) {
+        setEarlyTerminationFee(String(v));
+      }
+    }
+
+    // Contract expiration date
+    if (contractExpiration.trim() === "") {
+      const d = saved?.contractEndDate ?? parsed?.contractEndDate ?? null;
+      if (typeof d === "string" && d.trim()) {
+        setContractExpiration(d.slice(0, 10));
+      }
+    }
+  }, [parsedPlan, savedPlan, earlyTerminationFee, contractExpiration]);
+
   function applyParsedPlanToForm(p: any) {
     if (!p || typeof p !== "object") return;
     if (typeof p?.providerName === "string" && p.providerName.trim()) setElectricCompany(p.providerName);
