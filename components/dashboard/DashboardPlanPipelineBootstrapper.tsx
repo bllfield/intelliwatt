@@ -11,16 +11,16 @@ export default function DashboardPlanPipelineBootstrapper() {
     if (startedRef.current) return;
     if (!pathname) return;
 
-    // Never trigger from the plans pages (per product requirement).
-    if (pathname.startsWith("/dashboard/plans")) return;
+    // IMPORTANT: We DO allow triggering from /dashboard/plans as a fallback (once per short TTL).
+    // This prevents the "all queued forever" experience when a user lands on Plans first after login.
 
     // Run once per browser session (with a short TTL so logout/login or long idle can re-trigger).
-    const key = "plan_pipeline_bootstrap_v1";
+    const key = "plan_pipeline_bootstrap_v2";
     try {
       const alreadyRaw = window.sessionStorage.getItem(key);
       const alreadyAt = alreadyRaw ? Number(alreadyRaw) : Number.NaN;
-      // 5 minutes: rely on server-side lock/cooldown; this is just to avoid spammy calls.
-      if (Number.isFinite(alreadyAt) && Date.now() - alreadyAt < 5 * 60 * 1000) return;
+      // 2 minutes: rely on server-side lock/cooldown; this is just to avoid spammy calls.
+      if (Number.isFinite(alreadyAt) && Date.now() - alreadyAt < 2 * 60 * 1000) return;
       window.sessionStorage.setItem(key, String(Date.now()));
     } catch {
       // ignore storage failures; we'll still try once per mount

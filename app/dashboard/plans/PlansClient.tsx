@@ -163,6 +163,9 @@ export default function PlansClient() {
   const [prefetchNote, setPrefetchNote] = useState<string | null>(null);
   const prefetchInFlightRef = useRef(false);
   const [autoPreparing, setAutoPreparing] = useState(false);
+  const pipelineKickRef = useRef(false);
+  const pollTimerRef = useRef<number | null>(null);
+  const pollStopTimerRef = useRef<number | null>(null);
 
   const [mobilePanel, setMobilePanel] = useState<"none" | "search" | "filters">("none");
   const [headerCollapsed, setHeaderCollapsed] = useState(false);
@@ -206,6 +209,11 @@ export default function PlansClient() {
   useEffect(() => {
     prefetchInFlightRef.current = false;
     setPrefetchNote(null);
+    pipelineKickRef.current = false;
+    if (pollTimerRef.current) window.clearInterval(pollTimerRef.current);
+    pollTimerRef.current = null;
+    if (pollStopTimerRef.current) window.clearTimeout(pollStopTimerRef.current);
+    pollStopTimerRef.current = null;
   }, [serverDatasetKey]);
 
   useEffect(() => {
@@ -331,6 +339,90 @@ export default function PlansClient() {
     setAutoPreparing(isQueued);
     setPrefetchNote(isQueued ? `Preparing IntelliWatt calculations… (${queuedOffers.length} pending)` : null);
   }, [resp?.ok, resp?.offers]);
+
+  // Fallback warm-up: if the user lands on /dashboard/plans before background warm-up ran,
+  // kick the plan pipeline once per session and poll until queued clears (or timeout).
+  useEffect(() => {
+    if (isRenter === null) return;
+    if (!resp?.ok) return;
+    if (!resp?.hasUsage) return;
+    const offersNow = Array.isArray(resp?.offers) ? (resp!.offers as OfferRow[]) : [];
+    const queuedCountNow = offersNow.filter((o) => o?.intelliwatt?.statusLabel === "QUEUED").length;
+    if (queuedCountNow <= 0) return;
+
+    const sessionKey = `plans_pipeline_kick_v2:${serverDatasetKey}`;
+    try {
+      const raw = window.sessionStorage.getItem(sessionKey);
+      if (raw) {
+        pipelineKickRef.current = true;
+      }
+    } catch {
+      // ignore
+    }
+
+    if (!pipelineKickRef.current) {
+      pipelineKickRef.current = true;
+      try {
+        window.sessionStorage.setItem(sessionKey, String(Date.now()));
+      } catch {
+        // ignore
+      }
+
+      // Kick pipeline in the background (best-effort).
+      prefetchInFlightRef.current = true;
+      setPrefetchNote(`Preparing IntelliWatt calculations… (${queuedCountNow} pending)`);
+      try {
+        const params = new URLSearchParams();
+        params.set("reason", "plans_page_fallback");
+        params.set("timeBudgetMs", "25000");
+        params.set("maxTemplateOffers", "6");
+        params.set("maxEstimatePlans", "50");
+        params.set("isRenter", String(isRenter));
+        fetch(`/api/dashboard/plans/pipeline?${params.toString()}`, { method: "POST" }).catch(() => null);
+      } catch {
+        // ignore
+      }
+    }
+
+    // Poll the offers dataset until queued clears (or timeout).
+    if (pollTimerRef.current == null) {
+      pollTimerRef.current = window.setInterval(() => {
+        try {
+          const usp = new URLSearchParams();
+          usp.set("dataset", "1");
+          usp.set("pageSize", "2000");
+          usp.set("sort", "kwh1000_asc");
+          usp.set("isRenter", String(isRenter));
+          usp.set("_r", String(Date.now())); // bypass browser cache; sessionStorage will still store latest
+          fetch(`/api/dashboard/plans?${usp.toString()}`)
+            .then((r) => r.json().catch(() => null))
+            .then((j) => {
+              if (!j || j.ok !== true) return;
+              setResp(j);
+              try {
+                window.sessionStorage.setItem(cacheKey, JSON.stringify({ t: Date.now(), resp: j }));
+              } catch {
+                // ignore
+              }
+            })
+            .catch(() => null);
+        } catch {
+          // ignore
+        }
+      }, 8000);
+
+      // Hard stop after 2 minutes so we never spin forever.
+      pollStopTimerRef.current = window.setTimeout(() => {
+        if (pollTimerRef.current) window.clearInterval(pollTimerRef.current);
+        pollTimerRef.current = null;
+        prefetchInFlightRef.current = false;
+      }, 120_000);
+    }
+
+    return () => {
+      // keep timers running across renders; cleaned up in serverDatasetKey effect
+    };
+  }, [resp?.ok, resp?.hasUsage, resp?.offers, isRenter, serverDatasetKey, cacheKey]);
 
   const hasUsage = Boolean(resp?.ok && resp?.hasUsage);
   const datasetOffers = Array.isArray(resp?.offers) ? resp!.offers! : [];
