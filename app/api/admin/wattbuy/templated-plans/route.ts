@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import crypto from "node:crypto";
 
 import { prisma } from "@/lib/db";
 import { usagePrisma } from "@/lib/db/usageClient";
+import { wattbuyOffersPrisma } from "@/lib/db/wattbuyOffersClient";
 import { calculatePlanCostForUsage } from "@/lib/plan-engine/calculatePlanCostForUsage";
 import { derivePlanCalcRequirementsFromTemplate } from "@/lib/plan-engine/planComputability";
+import { getTdspDeliveryRates } from "@/lib/plan-engine/getTdspDeliveryRates";
+import { sha256Hex as sha256HexCache } from "@/lib/plan-engine/planEstimateCache";
 import { wattbuy } from "@/lib/wattbuy";
 import { normalizeOffers } from "@/lib/wattbuy/normalize";
 
@@ -11,6 +15,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
+const PLAN_ENGINE_ESTIMATE_VERSION = "estimateTrueCost_v2";
+const PLAN_ENGINE_ESTIMATE_ENDPOINTS = ["PLAN_ENGINE_ESTIMATE_V1", "PLAN_ENGINE_ESTIMATE_V2"];
+const PLAN_ENGINE_ESTIMATE_MONTHS = 12;
 
 type TdspDelivery = { monthlyFeeCents: number; deliveryCentsPerKwh: number };
 type TdspSnapshotMeta = TdspDelivery & { tdspCode: string; snapshotAt: string };
@@ -140,6 +147,38 @@ function inferTermMonths(planName: string | null | undefined): number | null {
 function toNum(x: any): number | null {
   const n = Number(x);
   return Number.isFinite(n) ? n : null;
+}
+
+function hashUsageInputs(args: {
+  yearMonths: string[];
+  bucketKeys: string[];
+  usageBucketsByMonth: Record<string, Record<string, number>>;
+}): string {
+  // Must be stable across callers (pipeline + dashboard). Mirrors lib/plan-engine/runPlanPipelineForHome.ts.
+  const h = crypto.createHash("sha256");
+  const yearMonths = Array.isArray(args.yearMonths) ? args.yearMonths : [];
+  const keys = Array.isArray(args.bucketKeys) ? args.bucketKeys.map(String).filter(Boolean).sort() : [];
+
+  h.update("ym:");
+  h.update(yearMonths.join(","));
+  h.update("|keys:");
+  h.update(keys.join(","));
+  h.update("|vals:");
+  for (const ym of yearMonths) {
+    h.update(ym);
+    h.update("{");
+    const m = args.usageBucketsByMonth?.[ym] ?? {};
+    for (const k of keys) {
+      const v = (m as any)[k];
+      const n = typeof v === "number" && Number.isFinite(v) ? v : null;
+      h.update(k);
+      h.update("=");
+      h.update(n == null ? "null" : n.toFixed(6));
+      h.update(";");
+    }
+    h.update("}");
+  }
+  return h.digest("hex");
 }
 
 function computeAvgCentsPerKwhFromRateStructure(
@@ -635,13 +674,16 @@ export async function GET(req: NextRequest) {
     }
 
     const effectiveHomeId = resolvedHomeId ?? autoHomeId;
+    let homeTdspSlug: string | null = null;
 
     if (effectiveHomeId) {
       const house = await prisma.houseAddress.findUnique({
         where: { id: effectiveHomeId } as any,
-        select: { id: true },
+        select: { id: true, archivedAt: true, tdspSlug: true },
       });
       if (!house) return jsonError(404, "home_not_found", { homeId: effectiveHomeId });
+      if ((house as any)?.archivedAt) return jsonError(404, "home_archived", { homeId: effectiveHomeId });
+      homeTdspSlug = String((house as any)?.tdspSlug ?? "").trim().toLowerCase() || null;
 
       const yearMonths = lastNYearMonthsChicago(usageMonths);
       const keys = new Set<string>(["kwh.m.all.total"]);
@@ -688,6 +730,55 @@ export async function GET(req: NextRequest) {
         byMonth,
         yearMonths,
       };
+    }
+
+    // Align admin "Queued" with the *site* queued state when a home context is provided:
+    // - Template computability (planCalcStatus != COMPUTABLE) => queued
+    // - Otherwise, queued if the plan-engine estimate cache does not yet have the computed estimate for this home
+    //   (same inputs as the plan pipeline uses).
+    let estimateCacheByInputsSha: Map<string, any> | null = null;
+    let estimateUsageSha: string | null = null;
+    let estimateTdsp: { per: number; monthly: number; effectiveDate: string | null } | null = null;
+
+    if (effectiveHomeId && usageEnv && usageByMonth && typeof usageEnv.annualKwh === "number" && homeTdspSlug) {
+      try {
+        estimateUsageSha = hashUsageInputs({
+          yearMonths: usageEnv.yearMonths,
+          bucketKeys: usageEnv.bucketKeysUsed,
+          usageBucketsByMonth: usageByMonth,
+        });
+
+        const tdspRates = await getTdspDeliveryRates({ tdspSlug: homeTdspSlug, asOf: new Date() }).catch(() => null);
+        estimateTdsp = tdspRates
+          ? {
+              per: Number(tdspRates?.perKwhDeliveryChargeCents ?? 0) || 0,
+              monthly: Number(tdspRates?.monthlyCustomerChargeDollars ?? 0) || 0,
+              effectiveDate: (tdspRates?.effectiveDate ?? null) as any,
+            }
+          : null;
+
+        const snapRows = await (wattbuyOffersPrisma as any).wattBuyApiSnapshot.findMany({
+          where: {
+            endpoint: { in: PLAN_ENGINE_ESTIMATE_ENDPOINTS },
+            houseAddressId: effectiveHomeId,
+            requestKey: { contains: `|months=${PLAN_ENGINE_ESTIMATE_MONTHS}` },
+          },
+          orderBy: { createdAt: "desc" },
+          take: 10_000,
+          select: { payloadSha256: true, payloadJson: true },
+        });
+        const m = new Map<string, any>();
+        for (const r of snapRows ?? []) {
+          const sha = String((r as any)?.payloadSha256 ?? "").trim();
+          if (!sha) continue;
+          if (!m.has(sha)) m.set(sha, (r as any)?.payloadJson ?? null);
+        }
+        estimateCacheByInputsSha = m;
+      } catch {
+        estimateCacheByInputsSha = null;
+        estimateUsageSha = null;
+        estimateTdsp = null;
+      }
     }
 
     const rows: Row[] = await Promise.all(
@@ -793,10 +884,53 @@ export async function GET(req: NextRequest) {
           }
         }
 
-        // Binary semantics: either the plan is computable, or it is queued.
-        // Admin preview failures (e.g. missing TDSP snapshot) must NOT flip a COMPUTABLE template into queued.
-        const queued = queuedByCalc;
-        const queuedReason = queuedByCalc ? pcReason : null;
+        // Single source of truth for queued (must match what the site surfaces):
+        // - If plan isn't computable from the template => queued
+        // - Else if we have a home context, queued until the plan-engine estimate cache has a computed estimate
+        //   for this home+plan+inputs.
+        let queued = queuedByCalc;
+        let queuedReason: string | null = queuedByCalc ? pcReason : null;
+
+        if (
+          !queued &&
+          effectiveHomeId &&
+          usageEnv &&
+          typeof usageEnv.annualKwh === "number" &&
+          estimateCacheByInputsSha &&
+          estimateUsageSha &&
+          estimateTdsp
+        ) {
+          try {
+            const rsSha = sha256HexCache(JSON.stringify(p.rateStructure ?? null));
+            const inputsSha256 = sha256HexCache(
+              JSON.stringify({
+                v: PLAN_ENGINE_ESTIMATE_VERSION,
+                monthsCount: PLAN_ENGINE_ESTIMATE_MONTHS,
+                annualKwh: Number(Number(usageEnv.annualKwh).toFixed(6)),
+                tdsp: { per: estimateTdsp.per, monthly: estimateTdsp.monthly, effectiveDate: estimateTdsp.effectiveDate },
+                rsSha,
+                usageSha: estimateUsageSha,
+              }),
+            );
+
+            const cached = estimateCacheByInputsSha.get(inputsSha256) ?? null;
+            if (!cached) {
+              queued = true;
+              queuedReason = "estimate_cache_miss";
+            } else {
+              const st = String((cached as any)?.status ?? "").trim().toUpperCase();
+              if (st && st !== "OK" && st !== "APPROXIMATE") {
+                queued = true;
+                queuedReason = String((cached as any)?.reason ?? st ?? "QUEUED");
+              } else {
+                queued = false;
+                queuedReason = null;
+              }
+            }
+          } catch {
+            // best-effort only
+          }
+        }
 
         return {
           id: p.id,
