@@ -8,6 +8,7 @@ const dashboardLinks = [
   { href: '/dashboard/usage', label: 'Usage' },
   { href: '/dashboard/current-rate', label: 'Current Rate' },
   { href: '/dashboard/plans', label: 'Plans' },
+  { href: '/dashboard/plans/compare', label: 'Compare' },
   { href: '/dashboard/home', label: 'Home Info' },
   { href: '/dashboard/appliances', label: 'Appliances' },
   { href: '/dashboard/upgrades', label: 'Upgrades' },

@@ -76,6 +76,16 @@ export default function PlanDetailsClient({ offerId }: { offerId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Persist the last viewed offer so the Dashboard "Compare" nav can jump straight to compare.
+  useEffect(() => {
+    try {
+      const id = String(offerId ?? "").trim();
+      if (id) window.localStorage.setItem("dashboard_compare_last_offer_id_v1", id);
+    } catch {
+      // ignore
+    }
+  }, [offerId]);
+
   useEffect(() => {
     const controller = new AbortController();
     const cacheKey = `plan_detail_v1:${offerId}`;

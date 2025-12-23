@@ -64,6 +64,15 @@ export default function PlanCompareClient(props: { offerId: string }) {
   const [data, setData] = useState<ApiResp | null>(null);
   const [includeEtf, setIncludeEtf] = useState<boolean>(true);
 
+  // Persist the last compared offer so the Dashboard "Compare" nav can jump straight here.
+  useEffect(() => {
+    try {
+      if (offerId) window.localStorage.setItem("dashboard_compare_last_offer_id_v1", offerId);
+    } catch {
+      // ignore
+    }
+  }, [offerId]);
+
   const cacheKey = useMemo(() => `dashboard_plans_compare_resp_v1:${offerId}`, [offerId]);
   const cacheTtlMs = 15 * 60 * 1000; // 15 minutes
 
