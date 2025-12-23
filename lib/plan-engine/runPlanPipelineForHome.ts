@@ -15,6 +15,7 @@ import { estimateTrueCost } from "@/lib/plan-engine/estimateTrueCost";
 import { getCachedPlanEstimate, putCachedPlanEstimate, sha256Hex as sha256HexCache } from "@/lib/plan-engine/planEstimateCache";
 import { isComputableOverride } from "@/lib/plan-engine/planCalcOverrides";
 import { derivePlanCalcRequirementsFromTemplate } from "@/lib/plan-engine/planComputability";
+import { isPlanCalcQuarantineWorthyReasonCode } from "@/lib/plan-engine/planCalcQuarantine";
 import { getLatestPlanPipelineJob, shouldStartPlanPipelineJob, writePlanPipelineJobSnapshot } from "@/lib/plan-engine/planPipelineJob";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -198,6 +199,29 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
   const normalized = normalizeOffers(raw ?? {});
   const offers = Array.isArray((normalized as any)?.offers) ? ((normalized as any).offers as any[]) : [];
   const offerIds = offers.map((o) => String(o?.offer_id ?? "")).filter(Boolean);
+  const offerMetaById = new Map<
+    string,
+    {
+      supplier: string | null;
+      planName: string | null;
+      eflUrl: string | null;
+      tdspName: string | null;
+      termMonths: number | null;
+      utilityId: string | null;
+    }
+  >();
+  for (const o of offers) {
+    const oid = String(o?.offer_id ?? "").trim();
+    if (!oid) continue;
+    offerMetaById.set(oid, {
+      supplier: o?.supplier_name != null ? String(o.supplier_name) : null,
+      planName: o?.plan_name != null ? String(o.plan_name) : null,
+      eflUrl: o?.docs?.efl != null ? String(o.docs.efl) : null,
+      tdspName: o?.distributor_name != null ? String(o.distributor_name) : null,
+      termMonths: typeof o?.term_months === "number" && Number.isFinite(o.term_months) ? o.term_months : null,
+      utilityId: o?.utility_id != null ? String(o.utility_id) : null,
+    });
+  }
 
   const existingMaps = await (prisma as any).offerIdRatePlanMap.findMany({
     where: { offerId: { in: offerIds }, ratePlanId: { not: null } },
@@ -333,16 +357,20 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
     where: { offerId: { in: offerIds }, ratePlanId: { not: null } },
     select: { offerId: true, ratePlanId: true },
   });
-  const ratePlansByOfferId = await (prisma as any).ratePlan.findMany({
-    where: { offerId: { in: offerIds } },
-    select: { id: true },
-  });
+  const offerIdsByRatePlanId = new Map<string, string[]>();
+  for (const m of maps2 as any[]) {
+    const oid = String(m?.offerId ?? "").trim();
+    const rpid = String(m?.ratePlanId ?? "").trim();
+    if (!oid || !rpid) continue;
+    const arr = offerIdsByRatePlanId.get(rpid) ?? [];
+    arr.push(oid);
+    offerIdsByRatePlanId.set(rpid, arr);
+  }
 
   const ratePlanIds = Array.from(
     new Set(
       [
         ...(maps2 as any[]).map((m) => String(m?.ratePlanId ?? "")).filter(Boolean),
-        ...(ratePlansByOfferId as any[]).map((r) => String(r?.id ?? "")).filter(Boolean),
       ],
     ),
   );
@@ -452,7 +480,73 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
       // Derive computability from the template rateStructure (authoritative).
       // IMPORTANT: Do NOT call canComputePlanFromBuckets() here; that helper is for dashboard UI and expects a different input shape.
       const derived = derivePlanCalcRequirementsFromTemplate({ rateStructure });
-      if (derived?.planCalcStatus !== "COMPUTABLE") continue;
+      if (derived?.planCalcStatus !== "COMPUTABLE") {
+        // Auto-enqueue true template defects / non-deterministic pricing for admin review (system-caught).
+        const rc = String(derived?.planCalcReasonCode ?? "").trim();
+        if (rc && isPlanCalcQuarantineWorthyReasonCode(rc)) {
+          const offerIdsForPlan = Array.from(new Set(offerIdsByRatePlanId.get(ratePlanId) ?? []));
+          await Promise.all(
+            offerIdsForPlan.map(async (offerId) => {
+              const meta = offerMetaById.get(offerId) ?? null;
+              const queueReasonPayload = {
+                type: "PLAN_CALC_QUARANTINE",
+                source: "plan_pipeline",
+                planCalcStatus: derived?.planCalcStatus ?? "NOT_COMPUTABLE",
+                planCalcReasonCode: rc,
+                ratePlanId,
+                offerId,
+                utilityId: meta?.utilityId ?? null,
+              };
+              try {
+                await (prisma as any).eflParseReviewQueue.upsert({
+                  where: { kind_dedupeKey: { kind: "PLAN_CALC_QUARANTINE", dedupeKey: offerId } },
+                  create: {
+                    source: "plan_pipeline",
+                    kind: "PLAN_CALC_QUARANTINE",
+                    dedupeKey: offerId,
+                    eflPdfSha256: sha256HexCache(["plan_pipeline", "PLAN_CALC_QUARANTINE", offerId].join("|")),
+                    offerId,
+                    supplier: meta?.supplier ?? null,
+                    planName: meta?.planName ?? null,
+                    eflUrl: meta?.eflUrl ?? null,
+                    tdspName: meta?.tdspName ?? null,
+                    termMonths: meta?.termMonths ?? null,
+                    ratePlanId,
+                    rawText: null,
+                    planRules: null,
+                    rateStructure: null,
+                    validation: null,
+                    derivedForValidation: { derived, queueReasonPayload },
+                    finalStatus: "OPEN",
+                    queueReason: JSON.stringify(queueReasonPayload),
+                    solverApplied: [],
+                    resolvedAt: null,
+                    resolvedBy: null,
+                    resolutionNotes: rc,
+                  },
+                  update: {
+                    supplier: meta?.supplier ?? null,
+                    planName: meta?.planName ?? null,
+                    eflUrl: meta?.eflUrl ?? null,
+                    tdspName: meta?.tdspName ?? null,
+                    termMonths: meta?.termMonths ?? null,
+                    ratePlanId,
+                    derivedForValidation: { derived, queueReasonPayload },
+                    finalStatus: "OPEN",
+                    queueReason: JSON.stringify(queueReasonPayload),
+                    resolvedAt: null,
+                    resolvedBy: null,
+                    resolutionNotes: rc,
+                  },
+                });
+              } catch {
+                // best-effort only
+              }
+            }),
+          );
+        }
+        continue;
+      }
 
       // Ensure required buckets are present in the stitched bucket union we built above.
       const requiredKeys = Array.isArray(derived?.requiredBucketKeys) ? (derived.requiredBucketKeys as string[]) : [];
@@ -489,6 +583,77 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
 
     await putCachedPlanEstimate({ houseAddressId: homeId, ratePlanId, esiid: house.esiid ?? null, inputsSha256, monthsCount: 12, payloadJson: est });
     estimatesComputed++;
+
+    // System-caught quarantines: if the engine returns NOT_COMPUTABLE for a plan we tried to compute,
+    // auto-upsert into admin queue (deduped by offerId).
+    try {
+      const estStatus = String((est as any)?.status ?? "").trim().toUpperCase();
+      const estReason = String((est as any)?.reason ?? "").trim();
+      if (estStatus === "NOT_COMPUTABLE" && isPlanCalcQuarantineWorthyReasonCode(estReason || estStatus)) {
+        const offerIdsForPlan = Array.from(new Set(offerIdsByRatePlanId.get(ratePlanId) ?? []));
+        await Promise.all(
+          offerIdsForPlan.map(async (offerId) => {
+            const meta = offerMetaById.get(offerId) ?? null;
+            const queueReasonPayload = {
+              type: "PLAN_CALC_QUARANTINE",
+              source: "plan_pipeline_trueCostEstimate",
+              estimateStatus: estStatus,
+              estimateReason: estReason || null,
+              ratePlanId,
+              offerId,
+              utilityId: meta?.utilityId ?? null,
+            };
+            try {
+              await (prisma as any).eflParseReviewQueue.upsert({
+                where: { kind_dedupeKey: { kind: "PLAN_CALC_QUARANTINE", dedupeKey: offerId } },
+                create: {
+                  source: "plan_pipeline",
+                  kind: "PLAN_CALC_QUARANTINE",
+                  dedupeKey: offerId,
+                  eflPdfSha256: sha256HexCache(["plan_pipeline", "PLAN_CALC_QUARANTINE", offerId].join("|")),
+                  offerId,
+                  supplier: meta?.supplier ?? null,
+                  planName: meta?.planName ?? null,
+                  eflUrl: meta?.eflUrl ?? null,
+                  tdspName: meta?.tdspName ?? null,
+                  termMonths: meta?.termMonths ?? null,
+                  ratePlanId,
+                  rawText: null,
+                  planRules: null,
+                  rateStructure: null,
+                  validation: null,
+                  derivedForValidation: { trueCostEstimate: est, queueReasonPayload },
+                  finalStatus: "OPEN",
+                  queueReason: JSON.stringify(queueReasonPayload),
+                  solverApplied: [],
+                  resolvedAt: null,
+                  resolvedBy: null,
+                  resolutionNotes: estReason || "NOT_COMPUTABLE",
+                },
+                update: {
+                  supplier: meta?.supplier ?? null,
+                  planName: meta?.planName ?? null,
+                  eflUrl: meta?.eflUrl ?? null,
+                  tdspName: meta?.tdspName ?? null,
+                  termMonths: meta?.termMonths ?? null,
+                  ratePlanId,
+                  derivedForValidation: { trueCostEstimate: est, queueReasonPayload },
+                  finalStatus: "OPEN",
+                  queueReason: JSON.stringify(queueReasonPayload),
+                  resolvedAt: null,
+                  resolvedBy: null,
+                  resolutionNotes: estReason || "NOT_COMPUTABLE",
+                },
+              });
+            } catch {
+              // ignore
+            }
+          }),
+        );
+      }
+    } catch {
+      // ignore
+    }
   }
 
   const finished = new Date();
