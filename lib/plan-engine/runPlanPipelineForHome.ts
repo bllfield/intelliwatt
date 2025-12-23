@@ -371,7 +371,14 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
   const annualKwhForCalc =
     typeof bucketBuild.annualKwh === "number" && Number.isFinite(bucketBuild.annualKwh) ? bucketBuild.annualKwh : null;
 
-  const tdspSlug = String(house.tdspSlug ?? "").trim().toLowerCase();
+  // TDSP can be missing on the home row (especially early in onboarding).
+  // Fall back to the offers payload, since WattBuy already knows the TDSP for the address.
+  const tdspSlug =
+    String(house.tdspSlug ?? "").trim().toLowerCase() ||
+    String(offers.find((o: any) => String(o?.tdsp ?? "").trim())?.tdsp ?? "")
+      .trim()
+      .toLowerCase();
+
   const tdspRates = tdspSlug ? await getTdspDeliveryRates({ tdspSlug, asOf: new Date() }).catch(() => null) : null;
 
   const tdspPer = Number(tdspRates?.perKwhDeliveryChargeCents ?? 0) || 0;
@@ -394,12 +401,18 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
       v: 1,
       homeId,
       runId,
-      status: "DONE",
+      status: "ERROR",
       reason,
       startedAt: new Date(startedAt).toISOString(),
       finishedAt: finished.toISOString(),
       cooldownUntil: new Date(Date.now() + cooldownMs).toISOString(),
-      lastCalcWindowEnd: usageWindowEnd.toISOString(),
+      // Do NOT advance cadence window if we couldn't compute any estimates (prevents "stuck for 30 days").
+      lastCalcWindowEnd: latestJob?.lastCalcWindowEnd ?? null,
+      lastError: !annualKwhForCalc
+        ? "missing_annual_kwh_from_usage_buckets"
+        : !tdspRates
+          ? `missing_tdsp_rates_for_slug:${tdspSlug || "unknown"}`
+          : "unknown_error",
       counts: { offersTotal: offers.length, templatesProcessed, templatesLinked, templatesQueued, estimatesComputed, estimatesAlreadyCached },
     });
     return { ok: true, started: true, runId, durationMs: Date.now() - startedAt, templatesProcessed, templatesLinked, templatesQueued, estimatesConsidered: 0, estimatesComputed: 0, estimatesAlreadyCached: 0 };
