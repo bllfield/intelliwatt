@@ -328,11 +328,24 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
   }
 
   // ---------------- Step 2: Estimate cache fill (bounded) ----------------
+  // Prefer direct RatePlan.offerId linkage (authoritative for templated plans), but also support OfferIdRatePlanMap.
   const maps2 = await (prisma as any).offerIdRatePlanMap.findMany({
     where: { offerId: { in: offerIds }, ratePlanId: { not: null } },
     select: { offerId: true, ratePlanId: true },
   });
-  const ratePlanIds = Array.from(new Set((maps2 as any[]).map((m) => String(m.ratePlanId ?? "")).filter(Boolean)));
+  const ratePlansByOfferId = await (prisma as any).ratePlan.findMany({
+    where: { offerId: { in: offerIds } },
+    select: { id: true },
+  });
+
+  const ratePlanIds = Array.from(
+    new Set(
+      [
+        ...(maps2 as any[]).map((m) => String(m?.ratePlanId ?? "")).filter(Boolean),
+        ...(ratePlansByOfferId as any[]).map((r) => String(r?.id ?? "")).filter(Boolean),
+      ],
+    ),
+  );
 
   const ratePlans =
     ratePlanIds.length > 0
