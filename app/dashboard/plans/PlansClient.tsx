@@ -184,7 +184,8 @@ export default function PlansClient() {
 
   // Lightweight client cache so back/forward navigation instantly shows the last processed dataset
   // instead of refetching.
-  const cacheKey = useMemo(() => `dashboard_plans_dataset_v1:${serverDatasetKey}`, [serverDatasetKey]);
+  // Bump when API semantics change so we don't pin users to stale session-cached payloads.
+  const cacheKey = useMemo(() => `dashboard_plans_dataset_v2:${serverDatasetKey}`, [serverDatasetKey]);
   // This is NOT the plan-engine cache (engine outputs are persisted in the WattBuy Offers DB).
   // This is only a UX cache for the API response to avoid flashing loading states on navigation.
   // Keep it long-lived; correctness still comes from server-side canonical inputs + DB-stored estimates.
@@ -358,7 +359,7 @@ export default function PlansClient() {
     ).length;
     if (queuedCountNow <= 0) return;
 
-    const sessionKey = `plans_pipeline_kick_v2:${serverDatasetKey}`;
+    const sessionKey = `plans_pipeline_kick_v3:${serverDatasetKey}`;
     try {
       const raw = window.sessionStorage.getItem(sessionKey);
       if (raw) {

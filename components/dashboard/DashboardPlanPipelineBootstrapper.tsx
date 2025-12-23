@@ -28,9 +28,6 @@ export default function DashboardPlanPipelineBootstrapper() {
 
     startedRef.current = true;
 
-    const controller = new AbortController();
-    const timer = window.setTimeout(() => controller.abort(), 10_000);
-
     async function kick() {
       try {
         // Match the Plans page dataset identity so the browser can reuse the cached response.
@@ -49,9 +46,12 @@ export default function DashboardPlanPipelineBootstrapper() {
         params.set("maxEstimatePlans", "25");
         params.set("isRenter", isRenter);
 
+        // IMPORTANT: do not abort this request early.
+        // Vercel can terminate the serverless function when the client disconnects/aborts,
+        // which would prevent cache warm-up from ever finishing.
         await fetch(`/api/dashboard/plans/pipeline?${params.toString()}`, {
           method: "POST",
-          signal: controller.signal,
+          keepalive: true,
         }).catch(() => null);
 
         // Also prefetch the Plans dataset response so /dashboard/plans doesn't need to be the first request.
@@ -62,16 +62,13 @@ export default function DashboardPlanPipelineBootstrapper() {
         qs.set("sort", "kwh1000_asc");
         qs.set("_r", "0");
         qs.set("isRenter", isRenter);
-        fetch(`/api/dashboard/plans?${qs.toString()}`, { signal: controller.signal }).catch(() => null);
+        fetch(`/api/dashboard/plans?${qs.toString()}`).catch(() => null);
       } finally {
-        window.clearTimeout(timer);
       }
     }
 
     kick();
     return () => {
-      window.clearTimeout(timer);
-      controller.abort();
     };
   }, [pathname]);
 
