@@ -639,6 +639,35 @@ export default function FactCardOpsPage() {
     }
   }
 
+  async function clearPlanCalcQuarantine() {
+    if (!token) {
+      setQueueErr("Admin token required.");
+      return;
+    }
+    const ok = window.prompt(
+      'Clear ALL OPEN PLAN_CALC_QUARANTINE items?\n\nThis marks them RESOLVED in the admin queue (it does NOT change engine estimates).\n\nType CLEAR_PLAN_CALC_QUARANTINE to proceed.',
+      "",
+    );
+    if (ok !== "CLEAR_PLAN_CALC_QUARANTINE") return;
+
+    setQueueLoading(true);
+    setQueueErr(null);
+    try {
+      const res = await fetch("/api/admin/efl-review/clear-plan-calc-quarantine", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-admin-token": token },
+        body: JSON.stringify({ confirm: "CLEAR_PLAN_CALC_QUARANTINE" }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      await loadQueue();
+    } catch (e: any) {
+      setQueueErr(e?.message || "Failed to clear PLAN_CALC_QUARANTINE.");
+    } finally {
+      setQueueLoading(false);
+    }
+  }
+
   async function enqueueUnknownUtilityTemplates() {
     if (!token) {
       setQueueErr("Admin token required.");
@@ -1803,9 +1832,19 @@ export default function FactCardOpsPage() {
                 {queueProcessLoading ? "Processing…" : "Process OPEN parse queue (auto)"}
               </button>
             ) : queueKind === "PLAN_CALC_QUARANTINE" ? (
-              <button className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60" onClick={() => void processOpenQuarantineQueue()} disabled={!ready || queueLoading || queueProcessLoading || queueStatus !== "OPEN"}>
-                {queueProcessLoading ? "Processing…" : "Process OPEN quarantines (auto-fix)"}
-              </button>
+              <>
+                <button className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60" onClick={() => void processOpenQuarantineQueue()} disabled={!ready || queueLoading || queueProcessLoading || queueStatus !== "OPEN"}>
+                  {queueProcessLoading ? "Processing…" : "Process OPEN quarantines (auto-fix)"}
+                </button>
+                <button
+                  className="px-3 py-2 rounded-lg border border-red-200 text-red-700 hover:bg-red-50 disabled:opacity-60"
+                  onClick={() => void clearPlanCalcQuarantine()}
+                  disabled={!ready || queueLoading || queueStatus !== "OPEN"}
+                  title="Marks ALL OPEN PLAN_CALC_QUARANTINE items as RESOLVED (admin queue only)."
+                >
+                  Clear quarantines
+                </button>
+              </>
             ) : (
               <button
                 className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60"
