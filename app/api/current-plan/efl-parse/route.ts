@@ -357,8 +357,18 @@ export async function POST(req: NextRequest) {
         return next;
       })();
 
+      // If the document explicitly lists a Base Charge / Base Monthly Charge, do NOT auto-null it even if
+      // it happens to match the usage-charge fee amount. (Some EFLs can contain both.)
+      const hasExplicitBaseCharge =
+        /\bBase\s+(?:Monthly\s+)?Charge\b/i.test(rawText) ||
+        /\bBase\s+Charge\b/i.test(rawText) ||
+        /\bMonthly\s+Base\s+Charge\b/i.test(rawText);
+
       const effectiveBaseMonthlyFeeCents =
-        usageChargeRule?.ok && baseMonthlyFeeCents != null && Math.abs(baseMonthlyFeeCents - usageChargeRule.feeCents) <= 1
+        usageChargeRule?.ok &&
+        !hasExplicitBaseCharge &&
+        baseMonthlyFeeCents != null &&
+        Math.abs(baseMonthlyFeeCents - usageChargeRule.feeCents) <= 1
           ? null
           : baseMonthlyFeeCents;
 
