@@ -73,10 +73,22 @@ function openInFactCards(args: { eflUrl?: string | null; offerId?: string | null
   }
 }
 
+function parseQueueReason(s: unknown): any | null {
+  const raw = String(s ?? '').trim();
+  if (!raw) return null;
+  if (!raw.startsWith('{')) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
 export default function EflReviewPage() {
   const { token, setToken } = useLocalToken();
   const [items, setItems] = useState<QueueItem[]>([]);
   const [status, setStatus] = useState<'OPEN' | 'RESOLVED'>('OPEN');
+  const [kind, setKind] = useState<'ALL' | 'EFL_PARSE' | 'PLAN_CALC_QUARANTINE'>('ALL');
   const [q, setQ] = useState('');
   const [source, setSource] = useState<string>('');
   const [loading, setLoading] = useState(false);
@@ -99,6 +111,9 @@ export default function EflReviewPage() {
         status,
         limit: '100',
       });
+      if (kind !== 'ALL') {
+        params.set('kind', kind);
+      }
       if (q.trim()) {
         params.set('q', q.trim());
       }
@@ -125,13 +140,15 @@ export default function EflReviewPage() {
       void load();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, status]);
+  }, [ready, status, kind]);
 
   useEffect(() => {
     try {
       const sp = new URLSearchParams(window.location.search);
       const src = (sp.get('source') || '').trim();
       if (src) setSource(src);
+      const k = (sp.get('kind') || '').trim().toUpperCase();
+      if (k === 'EFL_PARSE' || k === 'PLAN_CALC_QUARANTINE') setKind(k as any);
     } catch {
       // ignore
     }
@@ -179,10 +196,10 @@ export default function EflReviewPage() {
 
         <header className="flex items-baseline justify-between gap-3">
           <div>
-            <h1 className="text-2xl md:text-3xl font-bold">EFL Parse Review Queue</h1>
+            <h1 className="text-2xl md:text-3xl font-bold">Review Queue</h1>
             <p className="text-sm text-gray-600 mt-1">
-              EFLs whose avg-price validation FAILED after solver passes. Use this to review
-              and resolve problematic templates before they are surfaced to customers.
+              Unified queue for template issues: EFL parsing/validation failures and plan-calc quarantines
+              (NOT_COMPUTABLE / bucket mismatches / non-deterministic pricing).
             </p>
           </div>
         </header>
@@ -227,6 +244,17 @@ export default function EflReviewPage() {
               <div className="min-w-[220px]">
                 <select
                   className="w-full rounded-lg border px-3 py-2 text-sm"
+                  value={kind}
+                  onChange={(e) => setKind(e.target.value as any)}
+                >
+                  <option value="ALL">All kinds</option>
+                  <option value="EFL_PARSE">EFL Parse</option>
+                  <option value="PLAN_CALC_QUARANTINE">Plan Calc Quarantine</option>
+                </select>
+              </div>
+              <div className="min-w-[220px]">
+                <select
+                  className="w-full rounded-lg border px-3 py-2 text-sm"
                   value={source}
                   onChange={(e) => {
                     const v = e.target.value;
@@ -237,12 +265,14 @@ export default function EflReviewPage() {
                   <option value="wattbuy_batch">Offers (wattbuy_batch)</option>
                   <option value="manual_upload">Offers (manual_upload)</option>
                   <option value="current_plan_efl">Current plan EFL</option>
+                  <option value="dashboard_plans">Dashboard plans (auto)</option>
+                  <option value="admin_plans_quarantine_scan">Admin quarantine scan</option>
                 </select>
               </div>
               <div className="flex-1 min-w-[160px]">
                 <input
                   className="w-full rounded-lg border px-3 py-2 text-sm"
-                  placeholder="Search supplier / plan / offer / sha"
+                  placeholder="Search supplier / plan / offerId / sha"
                   value={q}
                   onChange={(e) => setQ(e.target.value)}
                 />
@@ -263,6 +293,14 @@ export default function EflReviewPage() {
             )}
           </div>
         </section>
+
+        <div className="rounded-2xl border bg-white p-3 text-xs text-gray-600">
+          Tip: to jump straight to plan-calc quarantines, open{' '}
+          <a className="text-blue-700 underline" href="/admin/efl-review?kind=PLAN_CALC_QUARANTINE">
+            /admin/efl-review?kind=PLAN_CALC_QUARANTINE
+          </a>
+          .
+        </div>
 
         <section className="rounded-2xl border bg-white p-4 space-y-3">
           <div className="flex items-center justify-between gap-3">
@@ -344,13 +382,14 @@ export default function EflReviewPage() {
 
           {items.length === 0 ? (
             <p className="text-sm text-gray-500">
-              No {status === 'OPEN' ? 'open' : 'resolved'} EFL parse review items.
+              No {status === 'OPEN' ? 'open' : 'resolved'} items.
             </p>
           ) : (
             <div className="overflow-x-auto rounded-xl border bg-gray-50">
               <table className="min-w-full text-xs">
                 <thead className="bg-gray-100 text-gray-700">
                   <tr>
+                    <th className="px-2 py-1 text-left">Kind</th>
                     <th className="px-2 py-1 text-left">Supplier</th>
                     <th className="px-2 py-1 text-left">Plan</th>
                     <th className="px-2 py-1 text-left">OfferId</th>
@@ -369,11 +408,39 @@ export default function EflReviewPage() {
                       ? (item.solverApplied as string[])
                       : [];
                     const queueReason: string | undefined = item.queueReason ?? undefined;
+                    const parsedQueueReason = parseQueueReason(queueReason);
+                    const kindLabel = String(item?.kind ?? '—');
                     const isResolved = Boolean(item.resolvedAt);
                     const eflUrl: string = typeof item.eflUrl === 'string' ? item.eflUrl : '';
                     const canOpenFactCards = Boolean(eflUrl || String(item?.rawText ?? '').trim());
+
+                    const shortQueueReason = (() => {
+                      if (!parsedQueueReason) return queueReason ?? '—';
+                      // PLAN_CALC_QUARANTINE
+                      if (String(parsedQueueReason?.type ?? '') === 'PLAN_CALC_QUARANTINE') {
+                        return (
+                          parsedQueueReason?.estimateReason ||
+                          parsedQueueReason?.planCalcReasonCode ||
+                          parsedQueueReason?.planCalcStatus ||
+                          'PLAN_CALC_QUARANTINE'
+                        );
+                      }
+                      return queueReason ?? '—';
+                    })();
                     return (
                       <tr key={id} className="border-t align-top">
+                        <td className="px-2 py-1">
+                          <span
+                            className={`inline-flex items-center rounded-full border px-2 py-0.5 font-mono ${
+                              kindLabel === 'PLAN_CALC_QUARANTINE'
+                                ? 'border-amber-300 bg-amber-50 text-amber-900'
+                                : 'border-slate-200 bg-white text-slate-700'
+                            }`}
+                            title={kindLabel}
+                          >
+                            {kindLabel}
+                          </span>
+                        </td>
                         <td className="px-2 py-1">{item.supplier ?? '—'}</td>
                         <td className="px-2 py-1">
                           <div className="max-w-[180px] truncate" title={item.planName ?? undefined}>
@@ -442,7 +509,7 @@ export default function EflReviewPage() {
                         </td>
                         <td className="px-2 py-1">
                           <div className="max-w-[220px] truncate" title={queueReason}>
-                            {queueReason ?? '—'}
+                            {shortQueueReason}
                           </div>
                         </td>
                         <td className="px-2 py-1">
