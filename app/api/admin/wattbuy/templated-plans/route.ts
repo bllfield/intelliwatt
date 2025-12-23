@@ -18,6 +18,15 @@ const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 const PLAN_ENGINE_ESTIMATE_VERSION = "estimateTrueCost_v2";
 const PLAN_ENGINE_ESTIMATE_ENDPOINTS = ["PLAN_ENGINE_ESTIMATE_V1", "PLAN_ENGINE_ESTIMATE_V2"];
 const PLAN_ENGINE_ESTIMATE_MONTHS = 12;
+const BUCKET_GATING_REASON_CODES = new Set<string>([
+  "BILL_CREDITS_REQUIRES_USAGE_BUCKETS",
+  "MINIMUM_RULES_REQUIRES_USAGE_BUCKETS",
+  "TIERED_REQUIRES_USAGE_BUCKETS",
+  "TIERED_PLUS_CREDITS_REQUIRES_USAGE_BUCKETS",
+  "TOU_REQUIRES_USAGE_BUCKETS_PHASE2",
+  "TOU_PLUS_CREDITS_REQUIRES_USAGE_BUCKETS",
+  "TOU_REQUIRES_USAGE_BUCKETS",
+]);
 
 type TdspDelivery = { monthlyFeeCents: number; deliveryCentsPerKwh: number };
 type TdspSnapshotMeta = TdspDelivery & { tdspCode: string; snapshotAt: string };
@@ -827,10 +836,12 @@ export async function GET(req: NextRequest) {
         const pcStatus = (derivedCalc as any)?.planCalcStatus ?? null;
         const pcReason = String((derivedCalc as any)?.planCalcReasonCode ?? "UNKNOWN");
         const queuedByCalc = pcStatus !== "COMPUTABLE";
+        const bucketGated = queuedByCalc && BUCKET_GATING_REASON_CODES.has(pcReason);
 
         // Optional: usage-based monthly estimate (for admin ranking / preview)
         let usagePreview: Row["usagePreview"] = null;
         let usageEstimate: Row["usageEstimate"] = null;
+        let missingBucketKeys: string[] = [];
         const requiredKeys =
           Array.isArray((derivedCalc as any)?.requiredBucketKeys)
             ? ((derivedCalc as any).requiredBucketKeys as string[])
@@ -852,6 +863,7 @@ export async function GET(req: NextRequest) {
             if (vals.length === 0) missingKeys.push(kk);
             else avgMonthlyKwhByKey[kk] = Number((vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(3));
           }
+          missingBucketKeys = missingKeys.slice();
           usagePreview = {
             months: usageEnv.monthsFound,
             annualKwh: usageEnv.annualKwh,
@@ -888,8 +900,12 @@ export async function GET(req: NextRequest) {
         // - If plan isn't computable from the template => queued
         // - Else if we have a home context, queued until the plan-engine estimate cache has a computed estimate
         //   for this home+plan+inputs.
-        let queued = queuedByCalc;
-        let queuedReason: string | null = queuedByCalc ? pcReason : null;
+        // If template is only "queued" because it needs usage buckets, and we have those buckets for this home,
+        // treat it as computable for this home (then defer to estimate-cache state).
+        const bucketGateSatisfied = bucketGated && usageEnv && missingBucketKeys.length === 0;
+
+        let queued = queuedByCalc && !bucketGateSatisfied;
+        let queuedReason: string | null = queued ? pcReason : null;
 
         if (
           !queued &&
