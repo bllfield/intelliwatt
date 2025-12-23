@@ -472,9 +472,14 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
     return { ok: true, started: true, runId, durationMs: Date.now() - startedAt, templatesProcessed, templatesLinked, templatesQueued, estimatesConsidered: 0, estimatesComputed: 0, estimatesAlreadyCached: 0 };
   }
 
+  // IMPORTANT: The usage bucket build step can take significant time (especially on cold starts).
+  // The estimate-fill loop should get its own time budget window, otherwise we can end up doing
+  // all the prep work but computing 0 estimates.
+  const estimatePhaseStartedAt = Date.now();
+
   for (const rp of ratePlans as any[]) {
     if (estimatesComputed >= maxEstimatePlans) break;
-    if (Date.now() - startedAt > timeBudgetMs) break;
+    if (Date.now() - estimatePhaseStartedAt > timeBudgetMs) break;
 
     const ratePlanId = String(rp?.id ?? "").trim();
     if (!ratePlanId) continue;
