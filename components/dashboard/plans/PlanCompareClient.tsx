@@ -349,7 +349,7 @@ export default function PlanCompareClient(props: { offerId: string }) {
                     onClick={() => setShowConfirm(true)}
                     className="inline-flex items-center justify-center rounded-full bg-brand-blue px-5 py-3 text-sm font-semibold text-white hover:bg-brand-blue/90"
                   >
-                    Choose this plan (WattBuy signup)
+                    Choose this plan (Sign up)
                   </button>
                 ) : (
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
@@ -649,11 +649,11 @@ export default function PlanCompareClient(props: { offerId: string }) {
               <div className="w-full max-w-lg rounded-3xl border border-brand-blue/25 bg-white p-6 text-brand-navy shadow-xl">
                 <div className="text-lg font-semibold">You’re about to leave IntelliWatt to sign up</div>
                 <div className="mt-2 text-sm text-brand-navy/70">
-                  We’ll open WattBuy in a new tab for the plan enrollment flow. Here’s what to expect:
+                  We’ll open the provider enrollment flow in a new tab. Here’s what to expect:
                 </div>
                 <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-brand-navy/80">
                   <li>You’ll complete enrollment details with the provider (address, contact info, etc.).</li>
-                  <li>After enrollment, you may receive confirmation emails from the provider and/or WattBuy.</li>
+                  <li>After enrollment, you may receive confirmation emails from the provider.</li>
                   <li>
                     Your comparison here assumes{" "}
                     <span className="font-semibold">{includeEtf ? "switching now (ETF included)" : "switching after contract expiration (ETF excluded)"}</span>.
