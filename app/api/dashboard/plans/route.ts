@@ -1526,6 +1526,10 @@ export async function GET(req: NextRequest) {
         const tdspMonthly = Number(tdspRates?.monthlyCustomerChargeDollars ?? 0) || 0;
         const tdspEff = tdspRates?.effectiveDate ?? null;
         const rsSha = sha256HexCache(JSON.stringify(template.rateStructure ?? null));
+        const estimateMode =
+          String((planComputability as any)?.reasonCode ?? (template as any)?.planCalcReasonCode ?? "").trim() === "INDEXED_APPROXIMATE_OK"
+            ? ("INDEXED_EFL_ANCHOR_APPROX" as const)
+            : ("DEFAULT" as const);
         const usageSha = hashUsageInputs({
           yearMonths: yearMonthsForCalc.length ? yearMonthsForCalc : lastNYearMonthsChicago(12),
           bucketKeys: Array.from(new Set(["kwh.m.all.total", ...(requiredBucketKeys ?? [])])),
@@ -1539,6 +1543,7 @@ export async function GET(req: NextRequest) {
             tdsp: { per: tdspPer, monthly: tdspMonthly, effectiveDate: tdspEff },
             rsSha,
             usageSha,
+            estimateMode,
           }),
         );
 
@@ -1563,6 +1568,7 @@ export async function GET(req: NextRequest) {
             monthlyCustomerChargeDollars: tdspMonthly,
             effectiveDate: tdspEff,
           },
+          estimateMode,
         });
         try {
           await putCachedPlanEstimate({

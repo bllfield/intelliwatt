@@ -309,6 +309,10 @@ export async function GET(req: NextRequest) {
         bucketKeys: requiredKeys,
         usageBucketsByMonth,
       });
+      const estimateMode =
+        String((ratePlanRow as any)?.planCalcReasonCode ?? "").trim() === "INDEXED_APPROXIMATE_OK"
+          ? ("INDEXED_EFL_ANCHOR_APPROX" as const)
+          : ("DEFAULT" as const);
       const inputsSha256 = sha256HexCache(
         JSON.stringify({
           v: PLAN_ENGINE_ESTIMATE_VERSION,
@@ -317,6 +321,7 @@ export async function GET(req: NextRequest) {
           tdsp: { per: tdspPer, monthly: tdspMonthly, effectiveDate: tdspEff },
           rsSha,
           usageSha,
+          estimateMode,
         }),
       );
       const cached = await getCachedPlanEstimate({
@@ -333,6 +338,7 @@ export async function GET(req: NextRequest) {
         tdspRates: { perKwhDeliveryChargeCents: tdspPer, monthlyCustomerChargeDollars: tdspMonthly, effectiveDate: tdspEff },
         rateStructure: offerRateStructure,
         usageBucketsByMonth,
+        estimateMode,
       });
 
       await putCachedPlanEstimate({
@@ -361,6 +367,11 @@ export async function GET(req: NextRequest) {
         bucketKeys: requiredKeys,
         usageBucketsByMonth,
       });
+      const estimateMode =
+        String((currentRateStructure as any)?.type ?? "").trim().toUpperCase() === "VARIABLE" ||
+        String((currentRateStructure as any)?.type ?? "").trim().toUpperCase() === "INDEXED"
+          ? ("INDEXED_EFL_ANCHOR_APPROX" as const)
+          : ("DEFAULT" as const);
       const inputsSha256 = sha256HexCache(
         JSON.stringify({
           v: PLAN_ENGINE_ESTIMATE_VERSION,
@@ -369,6 +380,7 @@ export async function GET(req: NextRequest) {
           tdsp: { per: tdspPer, monthly: tdspMonthly, effectiveDate: tdspEff },
           rsSha,
           usageSha,
+          estimateMode,
         }),
       );
 
@@ -388,6 +400,7 @@ export async function GET(req: NextRequest) {
         tdspRates: { perKwhDeliveryChargeCents: tdspPer, monthlyCustomerChargeDollars: tdspMonthly, effectiveDate: tdspEff },
         rateStructure: currentRateStructure,
         usageBucketsByMonth,
+        estimateMode,
       });
 
       await putCachedPlanEstimate({
