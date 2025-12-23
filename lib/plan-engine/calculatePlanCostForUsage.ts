@@ -79,6 +79,20 @@ function roundCents(n: number): number {
   return Math.round(n);
 }
 
+function isUsageBucketSumMismatchTolerable(args: { totalKwh: number; sumKwh: number }): boolean {
+  const total = args.totalKwh;
+  const sum = args.sumKwh;
+  if (!Number.isFinite(total) || !Number.isFinite(sum)) return false;
+  if (total <= 0 || sum <= 0) return false;
+  const diff = Math.abs(sum - total);
+  // Guardrail: allow small drift caused by stitching/aggregation edge cases (partial months, TZ cutovers),
+  // but fail-closed for large inconsistencies that indicate overlapping windows or data corruption.
+  //
+  // Empirically, a <=3% drift covers current-month stitching without masking real defects.
+  const tol = Math.max(2, total * 0.03); // kWh
+  return diff <= tol;
+}
+
 function parseHHMMishToHHMM(v: unknown): HHMM | null {
   const s = String(v ?? "").trim();
   if (!s) return null;
@@ -642,6 +656,8 @@ export function calculatePlanCostForUsage(args: {
       let totalCentsTotal = 0;
       const missing: string[] = [];
       const mismatched: string[] = [];
+      let mismatchAdjusted = false;
+      const mismatchAdjustedExamples: string[] = [];
       const debugPeriodsByMonth: any[] = [];
       const creditsDebug: any[] = [];
       const minRulesDebug: any[] = [];
@@ -650,7 +666,7 @@ export function calculatePlanCostForUsage(args: {
         const m = byMonth[ym];
         if (!m || typeof m !== "object") continue;
 
-        const monthTotalKwh = sumMonthBucketKwh(m, "kwh.m.all.total");
+        let monthTotalKwh = sumMonthBucketKwh(m, "kwh.m.all.total");
         if (monthTotalKwh == null) missing.push(`${ym}:kwh.m.all.total`);
 
         let sumPeriodsKwh = 0;
@@ -678,8 +694,17 @@ export function calculatePlanCostForUsage(args: {
 
         if (monthTotalKwh != null) {
           if (Math.abs(sumPeriodsKwh - monthTotalKwh) > 0.001) {
-            mismatched.push(`${ym}:sum(periods)=${sumPeriodsKwh.toFixed(3)} total=${monthTotalKwh.toFixed(3)}`);
-            continue;
+            if (isUsageBucketSumMismatchTolerable({ totalKwh: monthTotalKwh, sumKwh: sumPeriodsKwh })) {
+              mismatchAdjusted = true;
+              mismatchAdjustedExamples.push(
+                `${ym}:sum(periods)=${sumPeriodsKwh.toFixed(3)} total=${monthTotalKwh.toFixed(3)}`,
+              );
+              // Use the sum of the period buckets as the effective total so we can compute TDSP and credits consistently.
+              monthTotalKwh = sumPeriodsKwh;
+            } else {
+              mismatched.push(`${ym}:sum(periods)=${sumPeriodsKwh.toFixed(3)} total=${monthTotalKwh.toFixed(3)}`);
+              continue;
+            }
           }
 
           const monthRepFixedCents = repFixedMonthly * 100;
@@ -750,6 +775,11 @@ export function calculatePlanCostForUsage(args: {
       const total = totalCentsTotal / 100;
 
       notes.push(`TOU Phase-2 (windows): months=${months.length} periods=${schedule.periods.length}`);
+      if (mismatchAdjusted) {
+        notes.push(
+          `Usage buckets: small sum mismatch adjusted (tolerated) e.g. ${mismatchAdjustedExamples.slice(0, 2).join(", ")}${mismatchAdjustedExamples.length > 2 ? "…" : ""}`,
+        );
+      }
       if (repFixedMonthly > 0) notes.push("Includes REP fixed monthly charge (from template)");
       else notes.push("REP fixed monthly charge not found (assumed $0)");
       if (tdspPerKwhCents > 0 || tdspMonthly > 0) notes.push("Includes TDSP delivery (total-based)");
@@ -820,6 +850,8 @@ export function calculatePlanCostForUsage(args: {
     let totalCentsTotal = 0;
     const missing: string[] = [];
     const mismatched: string[] = [];
+    let mismatchAdjusted = false;
+    const mismatchAdjustedExamples: string[] = [];
     const creditsDebug: any[] = [];
     const minRulesDebug: any[] = [];
 
@@ -828,7 +860,7 @@ export function calculatePlanCostForUsage(args: {
       if (!m || typeof m !== "object") continue;
 
       const totalKey = "kwh.m.all.total";
-      const monthTotalKwh = sumMonthBucketKwh(m, totalKey);
+      let monthTotalKwh = sumMonthBucketKwh(m, totalKey);
       if (monthTotalKwh == null) {
         missing.push(`${ym}:${totalKey}`);
         continue;
@@ -846,10 +878,15 @@ export function calculatePlanCostForUsage(args: {
         if (nightKwh == null || dayKwh == null) continue;
 
         const sum = nightKwh + dayKwh;
-        // Safety: if buckets disagree, do NOT attempt to normalize/adjust.
         if (Math.abs(sum - monthTotalKwh) > 0.01) {
-          mismatched.push(`${ym}:sum(day+night)=${sum.toFixed(3)} total=${monthTotalKwh.toFixed(3)}`);
-          continue;
+          if (isUsageBucketSumMismatchTolerable({ totalKwh: monthTotalKwh, sumKwh: sum })) {
+            mismatchAdjusted = true;
+            mismatchAdjustedExamples.push(`${ym}:sum(day+night)=${sum.toFixed(3)} total=${monthTotalKwh.toFixed(3)}`);
+            monthTotalKwh = sum;
+          } else {
+            mismatched.push(`${ym}:sum(day+night)=${sum.toFixed(3)} total=${monthTotalKwh.toFixed(3)}`);
+            continue;
+          }
         }
 
         monthRepEnergyCents =
@@ -866,10 +903,15 @@ export function calculatePlanCostForUsage(args: {
         if (weekdayKwh == null || weekendKwh == null) continue;
 
         const sum = weekdayKwh + weekendKwh;
-        // Enforce strict equality with total.
         if (Math.abs(sum - monthTotalKwh) > 0.01) {
-          mismatched.push(`${ym}:sum(weekday+weekend)=${sum.toFixed(3)} total=${monthTotalKwh.toFixed(3)}`);
-          continue;
+          if (isUsageBucketSumMismatchTolerable({ totalKwh: monthTotalKwh, sumKwh: sum })) {
+            mismatchAdjusted = true;
+            mismatchAdjustedExamples.push(`${ym}:sum(weekday+weekend)=${sum.toFixed(3)} total=${monthTotalKwh.toFixed(3)}`);
+            monthTotalKwh = sum;
+          } else {
+            mismatched.push(`${ym}:sum(weekday+weekend)=${sum.toFixed(3)} total=${monthTotalKwh.toFixed(3)}`);
+            continue;
+          }
         }
 
         monthRepEnergyCents =
@@ -934,6 +976,11 @@ export function calculatePlanCostForUsage(args: {
     } else {
       notes.push(`Free Weekends (weekday/weekend): months=${months.length}`);
       notes.push("Buckets: kwh.m.weekday.total + kwh.m.weekend.total (+ optional kwh.m.all.total sanity)");
+    }
+    if (mismatchAdjusted) {
+      notes.push(
+        `Usage buckets: small sum mismatch adjusted (tolerated) e.g. ${mismatchAdjustedExamples.slice(0, 2).join(", ")}${mismatchAdjustedExamples.length > 2 ? "…" : ""}`,
+      );
     }
     if (repFixedMonthly > 0) notes.push("Includes REP fixed monthly charge (from template)");
     else notes.push("REP fixed monthly charge not found (assumed $0)");
