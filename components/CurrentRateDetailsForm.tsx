@@ -151,6 +151,7 @@ type PlanVariablesUsed = {
 };
 
 type VariablesListRow = { key: string; label: string; value: string };
+type BucketRequirementRow = { key: string; description: string; optional?: boolean };
 
 type CurrentRateDetailsFormProps = {
   onContinue?: (data: ManualEntryPayload) => void;
@@ -245,6 +246,8 @@ export function CurrentRateDetailsForm({
   const [prefillSignals, setPrefillSignals] = useState<{ esiId?: string | null; meterNumber?: string | null } | null>(null);
   const [planVariablesUsed, setPlanVariablesUsed] = useState<PlanVariablesUsed | null>(null);
   const [planVariablesList, setPlanVariablesList] = useState<VariablesListRow[] | null>(null);
+  const [requiredBuckets, setRequiredBuckets] = useState<BucketRequirementRow[] | null>(null);
+  const [requiredBucketKeys, setRequiredBucketKeys] = useState<string[] | null>(null);
   const [planEntrySnapshot, setPlanEntrySnapshot] = useState<EntrySnapshot | null>(null);
   const [usageSnapshot, setUsageSnapshot] = useState<EntrySnapshot | null>(null);
   const [hasActiveUsage, setHasActiveUsage] = useState(false);
@@ -344,6 +347,8 @@ export function CurrentRateDetailsForm({
       setPrefillSignals(payload?.prefillSignals ?? null);
       setPlanVariablesUsed(payload?.planVariablesUsed ?? null);
       setPlanVariablesList(Array.isArray(payload?.planVariablesList) ? payload.planVariablesList : null);
+      setRequiredBuckets(Array.isArray(payload?.requiredBuckets) ? payload.requiredBuckets : null);
+      setRequiredBucketKeys(Array.isArray(payload?.requiredBucketKeys) ? payload.requiredBucketKeys : null);
       setPlanEntrySnapshot(nextPlanEntrySnapshot);
       setUsageSnapshot(payload?.usage ?? null);
 
@@ -367,6 +372,8 @@ export function CurrentRateDetailsForm({
       setParsedPlan(null);
       setPlanVariablesUsed(null);
       setPlanVariablesList(null);
+      setRequiredBuckets(null);
+      setRequiredBucketKeys(null);
       setPlanEntrySnapshot(null);
       setUsageSnapshot(null);
       setHasActiveUsage(false);
@@ -1737,6 +1744,31 @@ export function CurrentRateDetailsForm({
               </div>
               <div className="mt-2 text-xs text-brand-cyan/60">
                 These are the exact variables IntelliWatt uses for comparisons. Please verify your current plan details above.
+              </div>
+            </div>
+
+            <div className={`${snapshotCardClasses} mt-5`}>
+              <p className={snapshotLabelClasses}>Buckets used by this plan</p>
+              <div className="mt-2 space-y-1 text-sm text-brand-cyan/85">
+                {Array.isArray(requiredBucketKeys) && requiredBucketKeys.length > 0 ? (
+                  <div className="flex flex-col gap-1">
+                    {requiredBucketKeys.map((k) => (
+                      <div key={k} className="flex items-center justify-between gap-3">
+                        <span className="font-mono text-brand-cyan/80">{k}</span>
+                        <span className="text-xs text-brand-cyan/60">
+                          {Array.isArray(requiredBuckets)
+                            ? (requiredBuckets.find((b) => b.key === k)?.description ?? "")
+                            : ""}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-brand-cyan/70">—</div>
+                )}
+              </div>
+              <div className="mt-2 text-xs text-brand-cyan/60">
+                These determine which usage buckets IntelliWatt loads for accurate monthly math.
               </div>
             </div>
 

@@ -5,6 +5,7 @@ import { prisma } from '@/lib/db';
 import { getCurrentPlanPrisma, CurrentPlanPrisma } from '@/lib/prismaCurrentPlan';
 import { refreshUserEntryStatuses } from '@/lib/hitthejackwatt/entryLifecycle';
 import { getTdspDeliveryRates } from '@/lib/plan-engine/getTdspDeliveryRates';
+import { requiredBucketsForRateStructure } from '@/lib/plan-engine/requiredBucketsForPlan';
 
 export const dynamic = 'force-dynamic';
 
@@ -429,6 +430,10 @@ export async function GET(request: NextRequest) {
     const rs: any = effectivePlan?.rateStructure ?? null;
     const rt = String(rateType ?? '').toUpperCase();
 
+    // Buckets used by this plan (authoritative from rateStructure).
+    const requiredBuckets = requiredBucketsForRateStructure({ rateStructure: rs ?? null });
+    const requiredBucketKeys = requiredBuckets.map((b) => b.key);
+
     if (rt === 'TIME_OF_USE') {
       const tiers = Array.isArray(rs?.tiers) ? rs.tiers : [];
       planVariablesList.push({ key: 'rep.tou_tiers', label: 'REP time-of-use tiers', value: String(tiers.length || 0) });
@@ -461,6 +466,28 @@ export async function GET(request: NextRequest) {
       planVariablesList.push({ key: 'rep.credits', label: 'Bill credits', value: `${creditsRules.length} rule(s)` });
     }
 
+    // Minimum usage fee (encoded as a negative bill credit rule).
+    const minFeeRule = creditsRules.find((r: any) => {
+      const label = String(r?.label ?? '');
+      const cents = typeof r?.creditAmountCents === 'number' ? r.creditAmountCents : Number(r?.creditAmountCents);
+      const minUsage = typeof r?.minUsageKWh === 'number' ? r.minUsageKWh : Number(r?.minUsageKWh);
+      return /minimum\s*usage\s*fee/i.test(label) && Number.isFinite(cents) && cents < 0 && Number.isFinite(minUsage) && minUsage > 0;
+    });
+    if (minFeeRule) {
+      const feeCentsAbs = Math.abs(Number(minFeeRule.creditAmountCents));
+      const threshold = Number(minFeeRule.minUsageKWh);
+      planVariablesList.push({
+        key: 'rep.minimum_usage_fee',
+        label: 'Minimum usage fee',
+        value: feeCentsAbs > 0 && threshold > 0 ? `$${(feeCentsAbs / 100).toFixed(2)} when < ${threshold} kWh` : '—',
+      });
+    }
+
+    // Delivery included flag (prevents double-counting TDSP).
+    if (rs?.tdspDeliveryIncludedInEnergyCharge === true) {
+      planVariablesList.push({ key: 'tdsp.included', label: 'TDSP delivery included in REP rate', value: 'Yes' });
+    }
+
     if (tdspApplied) {
       planVariablesList.push({
         key: 'tdsp.delivery',
@@ -483,6 +510,8 @@ export async function GET(request: NextRequest) {
       savedCurrentPlan,
       parsedCurrentPlan,
       prefillSignals,
+      requiredBuckets,
+      requiredBucketKeys,
       planVariablesUsed: {
         rep: {
           energyCentsPerKwh: repEnergyCentsPerKwh,
