@@ -1021,6 +1021,40 @@ export default function FactCardOpsPage() {
     }
   }
 
+  async function invalidateUnmappedTemplatesBulk() {
+    if (!token) {
+      setUnmappedTplErr("Admin token required.");
+      return;
+    }
+    const ok = window.prompt(
+      `Invalidate ALL UNMAPPED templates matching the current filter?\n\nThis will clear RatePlan.rateStructure so they disappear from Unmapped Templates.\n\nIt does NOT delete RatePlan rows.\n\nType INVALIDATE_UNMAPPED_TEMPLATES to proceed.`,
+      "",
+    );
+    if (ok !== "INVALIDATE_UNMAPPED_TEMPLATES") return;
+
+    setUnmappedTplLoading(true);
+    setUnmappedTplErr(null);
+    try {
+      const res = await fetch("/api/admin/efl/templates/unmapped/invalidate-bulk", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-admin-token": token },
+        body: JSON.stringify({
+          q: unmappedTplQ.trim() || null,
+          limit: unmappedTplLimit,
+          apply: true,
+          confirm: "INVALIDATE_UNMAPPED_TEMPLATES",
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      await loadUnmappedTemplates();
+    } catch (e: any) {
+      setUnmappedTplErr(e?.message || "Failed to bulk invalidate unmapped templates.");
+    } finally {
+      setUnmappedTplLoading(false);
+    }
+  }
+
   async function cleanupInvalidTemplates() {
     if (!token) {
       setTplErr("Admin token required.");
@@ -1999,6 +2033,14 @@ export default function FactCardOpsPage() {
               title='RatePlan rows with stored rateStructure but no OfferIdRatePlanMap.ratePlanId link'
             >
               {unmappedTplLoading ? "Loading…" : "Refresh"}
+            </button>
+            <button
+              className="px-3 py-2 rounded-lg border border-red-200 text-red-700 hover:bg-red-50 disabled:opacity-60"
+              onClick={() => void invalidateUnmappedTemplatesBulk()}
+              disabled={!ready || unmappedTplLoading}
+              title="Bulk clear: invalidate all currently listed unmapped templates (clears rateStructure)."
+            >
+              Clear list
             </button>
           </div>
         </div>
