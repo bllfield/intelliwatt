@@ -22,8 +22,13 @@ export async function solveEflValidationGaps(args: {
 }): Promise<EflValidationGapSolveResult> {
   const { rawText, planRules, rateStructure, validation } = args;
 
-  // Clone planRules shallowly so we can add usageTiers without mutating callers.
-  const derivedPlanRules: any = planRules ? { ...(planRules as any) } : null;
+  // Clone planRules shallowly so we can add derived fields without mutating callers.
+  //
+  // IMPORTANT: Some parses can return null/empty planRules even when rawText contains enough
+  // deterministic structure (e.g. TOU peak/off-peak blocks). We still want the solver to be able
+  // to construct a minimal PlanRules envelope so templates can be computed consistently.
+  const derivedPlanRules: any =
+    planRules && typeof planRules === "object" ? { ...(planRules as any) } : {};
   let derivedRateStructure: any = rateStructure ?? null;
 
   const solverApplied: string[] = [];
