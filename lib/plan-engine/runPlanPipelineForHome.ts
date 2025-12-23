@@ -165,6 +165,7 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
     now: new Date(),
     monthlyCadenceDays,
     maxRunningMinutes: 20,
+    requiredCalcVersion: PLAN_ENGINE_ESTIMATE_VERSION,
   });
   if (!gate.okToStart) return { ok: true, started: false, reason: gate.reason, latestJob };
 
@@ -175,6 +176,7 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
     runId,
     status: "RUNNING",
     reason,
+    calcVersion: PLAN_ENGINE_ESTIMATE_VERSION,
     startedAt: new Date().toISOString(),
     cooldownUntil: new Date(Date.now() + cooldownMs).toISOString(),
     lastCalcWindowEnd: latestJob?.lastCalcWindowEnd ?? null,
@@ -403,6 +405,7 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
       runId,
       status: "ERROR",
       reason,
+      calcVersion: PLAN_ENGINE_ESTIMATE_VERSION,
       startedAt: new Date(startedAt).toISOString(),
       finishedAt: finished.toISOString(),
       cooldownUntil: new Date(Date.now() + cooldownMs).toISOString(),
@@ -475,6 +478,7 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
     runId,
     status: "DONE",
     reason,
+    calcVersion: PLAN_ENGINE_ESTIMATE_VERSION,
     startedAt: new Date(startedAt).toISOString(),
     finishedAt: finished.toISOString(),
     cooldownUntil: new Date(Date.now() + cooldownMs).toISOString(),

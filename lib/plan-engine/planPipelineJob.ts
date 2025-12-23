@@ -11,6 +11,9 @@ export type PlanPipelineJobPayload = {
   runId: string;
   status: PlanPipelineJobStatus;
   reason: string;
+  // Plan-engine estimate version used by the pipeline when it ran.
+  // This is stored inside payloadJson (no schema migration) so we can force reruns on version bumps.
+  calcVersion?: string | null;
   startedAt: string;
   finishedAt?: string | null;
   cooldownUntil?: string | null;
@@ -54,13 +57,28 @@ export function shouldStartPlanPipelineJob(args: {
   now?: Date;
   monthlyCadenceDays?: number; // default 30
   maxRunningMinutes?: number; // default 20
+  requiredCalcVersion?: string | null;
 }): { okToStart: boolean; reason: string } {
   const now = args.now ?? new Date();
   const latest = args.latest;
   const cadenceDays = Number.isFinite(args.monthlyCadenceDays ?? NaN) ? (args.monthlyCadenceDays as number) : 30;
   const maxRunningMin = Number.isFinite(args.maxRunningMinutes ?? NaN) ? (args.maxRunningMinutes as number) : 20;
+  const requiredCalcVersion = typeof args.requiredCalcVersion === "string" ? args.requiredCalcVersion.trim() : "";
 
   if (!latest) return { okToStart: true, reason: "no_prior_job" };
+
+  // If the engine/estimate version changed, we must refill caches immediately even if cadence hasn't elapsed.
+  // Otherwise a version bump would brick the site for up to cadenceDays.
+  if (requiredCalcVersion) {
+    const latestVersion = typeof latest.calcVersion === "string" ? latest.calcVersion.trim() : "";
+    if (latestVersion && latestVersion !== requiredCalcVersion) {
+      return { okToStart: true, reason: "calc_version_changed" };
+    }
+    if (!latestVersion) {
+      // Older snapshots didn't record calcVersion; treat as needing a refresh once.
+      return { okToStart: true, reason: "calc_version_missing" };
+    }
+  }
 
   const cooldownUntil = parseIsoDate(latest.cooldownUntil ?? null);
   if (cooldownUntil && cooldownUntil.getTime() > now.getTime()) {
