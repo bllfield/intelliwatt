@@ -1025,17 +1025,23 @@ export async function GET(req: NextRequest) {
         const ratePlanId = mapByOfferId.get(offerId) ?? null;
         const calc = ratePlanId ? (planCalcByRatePlanId.get(ratePlanId) ?? null) : null;
 
-        // Case A: queued because we have an EFL URL but no template mapping yet.
-        if (!ratePlanId && eflUrl) {
-          const syntheticSha = sha256Hex(["dashboard_plans", "EFL_PARSE", offerId, eflUrl].join("|"));
+        // Case A: queued because there is no template mapping yet.
+        // If we have an EFL URL, ops can parse it immediately.
+        // If we DON'T have an EFL URL, we still queue the offer so ops can investigate why docs are missing.
+        if (!ratePlanId) {
+          const identity = eflUrl || "MISSING_EFL_URL";
+          const syntheticSha = sha256Hex(["dashboard_plans", "EFL_PARSE", offerId, identity].join("|"));
+          const reason = eflUrl
+            ? "DASHBOARD_QUEUED: offer has EFL URL but no template mapping yet."
+            : "DASHBOARD_QUEUED: offer is missing EFL URL and has no template mapping yet.";
           queuedWrites.push(
             (prisma as any).eflParseReviewQueue
               .upsert({
-                where: { eflPdfSha256: syntheticSha },
+                where: { kind_dedupeKey: { kind: "EFL_PARSE", dedupeKey: offerId } },
                 create: {
                   source: "dashboard_plans",
                   kind: "EFL_PARSE",
-                  dedupeKey: syntheticSha,
+                  dedupeKey: offerId,
                   eflPdfSha256: syntheticSha,
                   offerId,
                   supplier,
@@ -1044,7 +1050,7 @@ export async function GET(req: NextRequest) {
                   tdspName,
                   termMonths,
                   finalStatus: "NEEDS_REVIEW",
-                  queueReason: "DASHBOARD_QUEUED: offer has EFL URL but no template mapping yet.",
+                  queueReason: reason,
                   resolvedAt: null,
                   resolvedBy: null,
                   resolutionNotes: null,
@@ -1052,7 +1058,7 @@ export async function GET(req: NextRequest) {
                 update: {
                   updatedAt: new Date(),
                   kind: "EFL_PARSE",
-                  dedupeKey: syntheticSha,
+                  dedupeKey: offerId,
                   offerId,
                   supplier,
                   planName,
@@ -1060,7 +1066,7 @@ export async function GET(req: NextRequest) {
                   tdspName,
                   termMonths,
                   finalStatus: "NEEDS_REVIEW",
-                  queueReason: "DASHBOARD_QUEUED: offer has EFL URL but no template mapping yet.",
+                  queueReason: reason,
                   resolvedAt: null,
                   resolvedBy: null,
                   resolutionNotes: null,
