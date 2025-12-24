@@ -34,13 +34,14 @@ export default function Header() {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const pathname = usePathname() || '';
   const isAdminPath = pathname.startsWith('/admin');
+  const isPreviewPath = pathname.startsWith('/preview/');
 
   useEffect(() => {
     let cancelled = false;
     const checkStatus = async () => {
       // Admin pages are token-gated and do not require (or guarantee) a user session.
       // Avoid spamming 401s from /api/user/status while browsing Admin Tools.
-      if (isAdminPath) {
+      if (isAdminPath || isPreviewPath) {
         if (!cancelled) {
           setIsAuthenticated(false);
           setAuthChecked(true);
@@ -68,7 +69,7 @@ export default function Header() {
     return () => {
       cancelled = true;
     };
-  }, [isAdminPath]);
+  }, [isAdminPath, isPreviewPath]);
 
   const handleToggle = () => setIsOpen((prev) => !prev);
   const handleClose = () => setIsOpen(false);
@@ -89,6 +90,10 @@ export default function Header() {
       setIsLoggingOut(false);
     }
   };
+
+  // Preview pages are public, token-gated, and should look like a standalone rate-plan site.
+  // Do not render the global marketing/dashboard header chrome there.
+  if (isPreviewPath) return null;
 
   return (
     <>

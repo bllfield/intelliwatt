@@ -1,8 +1,15 @@
 'use client';
 
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 
 export default function Footer() {
+  const pathname = usePathname() || '';
+  const isPreviewPath = pathname.startsWith('/preview/');
+
+  // Preview pages are public, token-gated, and should not show the global site footer.
+  if (isPreviewPath) return null;
+
   return (
     <footer className="bg-brand-navy text-brand-blue py-8 px-4">
       <div className="max-w-6xl mx-auto">
