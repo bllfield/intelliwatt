@@ -54,11 +54,11 @@ export default function DashboardPlanPipelineBootstrapper() {
           keepalive: true,
         }).catch(() => null);
 
-        // Also prefetch the Plans dataset response so /dashboard/plans doesn't need to be the first request.
-        // This triggers the WattBuy offers fetch early and lets the browser reuse the cached JSON.
+        // Also prefetch the first page of Plans so /dashboard/plans doesn't need to be the first request.
+        // (Do NOT prefetch 2000 rows; that makes the server do too much work and can lead to multi-minute requests.)
         const qs = new URLSearchParams();
-        qs.set("dataset", "1");
-        qs.set("pageSize", "2000");
+        qs.set("page", "1");
+        qs.set("pageSize", "50");
         qs.set("sort", "kwh1000_asc");
         qs.set("_r", "0");
         qs.set("isRenter", isRenter);
