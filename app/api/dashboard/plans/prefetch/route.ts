@@ -108,7 +108,7 @@ export async function POST(req: NextRequest) {
         isRenter,
       });
     } catch (e: any) {
-      const msg = e?.message ? String(e.message) : String(e);
+      const msg = (e?.message ?? String(e)) as string;
       console.error("[dashboard_prefetch] wattbuy.offers failed", { message: msg });
       // Fail-soft: this route is called from the customer dashboard; do not return 500.
       return NextResponse.json(
@@ -583,7 +583,7 @@ export async function POST(req: NextRequest) {
       results,
     });
   } catch (e: any) {
-    const msg = e?.message ? String(e.message) : String(e);
+    const msg = (e?.message ?? String(e)) as string;
     console.error("[dashboard_prefetch] fatal error", { message: msg });
     // Fail-soft: this route is called from the customer dashboard; do not return 500.
     return NextResponse.json({ ok: false, error: msg, stage: "fatal" }, { status: 200 });

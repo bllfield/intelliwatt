@@ -76,7 +76,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(result, { status: 200 });
   } catch (e: any) {
-    const msg = e?.message ? String(e.message) : String(e);
+    const msg = (e?.message ?? String(e)) as string;
     console.error("[dashboard_plans_pipeline] fatal error", { message: msg });
     // Fail-soft: this endpoint is triggered by customer dashboard flows; do not return 500.
     return NextResponse.json({ ok: false, error: msg }, { status: 200 });
