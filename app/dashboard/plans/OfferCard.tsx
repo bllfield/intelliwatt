@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { EstimateBreakdownPopover } from "../../components/ui/EstimateBreakdownPopover";
-import { PlanDetailsPopover } from "@/app/components/ui/PlanDetailsPopover";
+import { PlanDisclosuresPopover } from "@/app/components/ui/PlanDisclosuresPopover";
 
 type OfferRow = {
   offerId: string;
@@ -19,6 +19,16 @@ type OfferRow = {
     avgPriceCentsPerKwh1000?: number;
     avgPriceCentsPerKwh2000?: number;
     eflUrl?: string;
+    tosUrl?: string;
+    yracUrl?: string;
+  };
+  disclosures?: {
+    supplierPuctRegistration?: string | null;
+    supplierContactEmail?: string | null;
+    supplierContactPhone?: string | null;
+    cancellationFeeText?: string | null;
+    tosUrl?: string | null;
+    yracUrl?: string | null;
   };
   intelliwatt: {
     templateAvailable: boolean;
@@ -95,6 +105,8 @@ export default function OfferCard({ offer, recommended }: OfferCardProps) {
   const rateType = offer.rateType ? offer.rateType.toUpperCase() : null;
 
   const eflUrl = offer.efl?.eflUrl;
+  const tosUrl = offer.efl?.tosUrl ?? (offer as any)?.disclosures?.tosUrl ?? null;
+  const yracUrl = offer.efl?.yracUrl ?? (offer as any)?.disclosures?.yracUrl ?? null;
   const status = offer.intelliwatt.statusLabel;
   const tce = offer.intelliwatt?.trueCostEstimate as any;
   const isCalculating = String(tce?.status ?? "").toUpperCase() === "QUEUED";
@@ -116,6 +128,11 @@ export default function OfferCard({ offer, recommended }: OfferCardProps) {
   const tdspEffective = offer.intelliwatt?.tdspRatesApplied?.effectiveDate ?? null;
   const repAnnualDollarsRaw = c2?.rep?.energyDollars ?? (tce as any)?.annualCostDollars;
   const totalAnnualDollarsRaw = c2?.totalDollars ?? (tce as any)?.annualCostDollars;
+  const distributorName = offer.utility?.utilityName ?? (offer.utility?.tdspSlug ? offer.utility.tdspSlug.toUpperCase() : null);
+  const cancellationFeeText =
+    typeof (offer as any)?.disclosures?.cancellationFeeText === "string" && (offer as any).disclosures.cancellationFeeText.trim()
+      ? (offer as any).disclosures.cancellationFeeText.trim()
+      : null;
 
   return (
     <div
@@ -194,8 +211,38 @@ export default function OfferCard({ offer, recommended }: OfferCardProps) {
               <div className="text-xs text-brand-cyan/60">No EFL link</div>
             )}
 
+            {tosUrl ? (
+              <Link
+                href={tosUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs font-semibold text-brand-blue hover:underline"
+                onClick={(e) => e.stopPropagation()}
+              >
+                Terms
+              </Link>
+            ) : null}
+            {yracUrl ? (
+              <Link
+                href={yracUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs font-semibold text-brand-blue hover:underline"
+                onClick={(e) => e.stopPropagation()}
+              >
+                YRAC
+              </Link>
+            ) : null}
+
             <span onClick={(e) => e.stopPropagation()}>
-              <PlanDetailsPopover trigger="Plan Details" title="Plan Details" offer={offer as any} />
+              <PlanDisclosuresPopover
+                trigger="Disclosures"
+                supplierName={offer.supplierName ?? null}
+                planName={offer.planName ?? null}
+                distributorName={distributorName}
+                disclosures={(offer as any)?.disclosures ?? null}
+                eflUrl={eflUrl ?? null}
+              />
             </span>
           </div>
         </div>
@@ -263,18 +310,25 @@ export default function OfferCard({ offer, recommended }: OfferCardProps) {
         </div>
       ) : null}
 
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-xs text-brand-cyan/65">
-        <div className="truncate">
-          {offer.utility?.utilityName ? (
-            <span className="truncate">{offer.utility.utilityName}</span>
-          ) : offer.utility?.tdspSlug ? (
-            <span className="uppercase">{offer.utility.tdspSlug}</span>
-          ) : (
-            <span>Utility —</span>
-          )}
+      <div className="mt-4 flex flex-col gap-1 text-xs text-brand-cyan/65 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap items-center gap-2 min-w-0">
+          <span className="truncate">
+            {offer.utility?.utilityName ? (
+              <span className="truncate">{offer.utility.utilityName}</span>
+            ) : offer.utility?.tdspSlug ? (
+              <span className="uppercase">{offer.utility.tdspSlug}</span>
+            ) : (
+              <span>Utility —</span>
+            )}
+          </span>
+          {cancellationFeeText ? (
+            <span className="text-brand-cyan/55">
+              · Cancellation fee: <span className="text-brand-cyan/75">{cancellationFeeText}</span>
+            </span>
+          ) : null}
         </div>
         <div className="text-brand-cyan/55">
-          EFL averages shown at 500/1000/2000 kWh. IntelliWatt ranking is a preview.
+          EFL averages shown at 500/1000/2000 kWh.
         </div>
       </div>
     </div>

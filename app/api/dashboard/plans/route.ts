@@ -1225,6 +1225,8 @@ export async function GET(req: NextRequest) {
       const ratePlanId = mapByOfferId.get(o.offer_id) ?? null;
       const templateAvailable = ratePlanId != null;
       const eflUrl = o.docs?.efl ?? null;
+      const tosUrl = o.docs?.tos ?? null;
+      const yracUrl = o.docs?.yrac ?? null;
       const statusLabel = (() => {
         // Dashboard semantics (restore):
         // - AVAILABLE means "a template exists for this offer" (we can attempt to calculate).
@@ -1241,6 +1243,8 @@ export async function GET(req: NextRequest) {
       const eflAvg1000 = numOrNull(o?.kwh1000_cents);
       const eflAvg500 = numOrNull(o?.kwh500_cents);
       const eflAvg2000 = numOrNull(o?.kwh2000_cents);
+
+      const cancellationFeeText = strOrNull(o?.cancel_fee_text);
 
       const earlyTerminationFeeDollars = (() => {
         const t = strOrNull(o.cancel_fee_text);
@@ -1265,10 +1269,20 @@ export async function GET(req: NextRequest) {
           avgPriceCentsPerKwh1000: eflAvg1000 ?? undefined,
           avgPriceCentsPerKwh2000: eflAvg2000 ?? undefined,
           eflUrl: eflUrl ?? undefined,
+          tosUrl: tosUrl ?? undefined,
+          yracUrl: yracUrl ?? undefined,
           eflPdfSha256: undefined,
           repPuctCertificate: undefined,
           eflVersionCode: undefined,
           lastSeenAt: usedFallbackSnapshot ? house.updatedAt.toISOString() : undefined,
+        },
+        disclosures: {
+          supplierPuctRegistration: strOrNull(o?.supplier_puct_registration) ?? undefined,
+          supplierContactEmail: strOrNull(o?.supplier_contact_email) ?? undefined,
+          supplierContactPhone: strOrNull(o?.supplier_contact_phone) ?? undefined,
+          cancellationFeeText: cancellationFeeText ?? undefined,
+          tosUrl: tosUrl ?? undefined,
+          yracUrl: yracUrl ?? undefined,
         },
         intelliwatt: {
           templateAvailable,
