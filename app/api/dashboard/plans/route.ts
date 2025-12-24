@@ -1226,16 +1226,36 @@ export async function GET(req: NextRequest) {
     // Best-effort only; never block the plans page.
     const puctRepByNumber = new Map<string, { email: string | null; phone: string | null }>();
     try {
-      const puctNumbers = Array.from(
-        new Set(
-          offers
-            .map((o: any) => strOrNull((o as any)?.supplier_puct_registration))
-            .filter((v): v is string => typeof v === "string" && v.length > 0),
-        ),
-      );
-      if (puctNumbers.length > 0) {
+      const puctNumbers = new Set<string>();
+
+      // 1) PUCT numbers present directly on the offer payload.
+      for (const o of offers as any[]) {
+        const p = strOrNull((o as any)?.supplier_puct_registration);
+        if (p) puctNumbers.add(p);
+      }
+
+      // 2) PUCT numbers present on mapped templates (RatePlan.repPuctCertificate / supplierPUCT).
+      if (mappedRatePlanIds.length > 0) {
+        try {
+          const rows = await (prisma as any).ratePlan.findMany({
+            where: { id: { in: mappedRatePlanIds } },
+            select: { repPuctCertificate: true, supplierPUCT: true },
+          });
+          for (const rp of rows ?? []) {
+            const a = strOrNull((rp as any)?.repPuctCertificate);
+            const b = strOrNull((rp as any)?.supplierPUCT);
+            if (a) puctNumbers.add(a);
+            if (b) puctNumbers.add(b);
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      const list = Array.from(puctNumbers);
+      if (list.length > 0) {
         const reps = await (prisma as any).puctRep.findMany({
-          where: { puctNumber: { in: puctNumbers } },
+          where: { puctNumber: { in: list } },
           select: { puctNumber: true, email: true, phone: true },
         });
         for (const r of reps ?? []) {
@@ -1399,7 +1419,20 @@ export async function GET(req: NextRequest) {
         ...(dbTosUrl ? { tosUrl: dbTosUrl } : {}),
         ...(dbYracUrl ? { yracUrl: dbYracUrl } : {}),
       };
-      const mergedBase = { ...(base as any), efl: mergedEfl, disclosures: mergedDisclosures };
+      // Fill supplier contact from the PUCT REP catalog when we have a PUCT number but missing contact fields.
+      const mergedPuct = strOrNull((mergedDisclosures as any)?.supplierPuctRegistration);
+      const puctContact = mergedPuct ? puctRepByNumber.get(mergedPuct) ?? null : null;
+      const mergedDisclosuresFinal = {
+        ...mergedDisclosures,
+        ...(puctContact?.email && !(mergedDisclosures as any)?.supplierContactEmail
+          ? { supplierContactEmail: puctContact.email }
+          : {}),
+        ...(puctContact?.phone && !(mergedDisclosures as any)?.supplierContactPhone
+          ? { supplierContactPhone: puctContact.phone }
+          : {}),
+      };
+
+      const mergedBase = { ...(base as any), efl: mergedEfl, disclosures: mergedDisclosuresFinal };
 
       const avgPriceCentsPerKwh1000 = numOrNull((base as any)?.efl?.avgPriceCentsPerKwh1000);
       const tdspSlug = (base as any)?.utility?.tdspSlug ?? null;
