@@ -39,22 +39,22 @@ export default function PreviewPlansClient(props: { plans: Plan[] }) {
   return (
     <div className="mx-auto w-full max-w-6xl px-4 pb-16">
       <div className="pt-10">
-        <div className="text-3xl font-semibold text-slate-900">Energy Plans</div>
-        <div className="mt-2 text-sm text-slate-600">
+        <div className="text-3xl font-semibold text-brand-navy">Energy Plans</div>
+        <div className="mt-2 text-sm text-brand-navy/70">
           Example presentation of plan cards (static snapshot) with required disclosures.
         </div>
 
         <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="text-sm text-slate-600">
+          <div className="text-sm text-brand-navy/70">
             Sorted by lowest average price at{" "}
-            <span className="font-semibold text-slate-900">{basisKwh} kWh</span>.
+            <span className="font-semibold text-brand-navy">{basisKwh} kWh</span>.
           </div>
-          <label className="flex items-center gap-2 text-sm text-slate-700">
+          <label className="flex items-center gap-2 text-sm text-brand-navy">
             <span className="font-medium">Usage basis</span>
             <select
               value={basisKwh}
               onChange={(e) => setBasisKwh(Number(e.target.value) as any)}
-              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+              className="rounded-lg border border-brand-blue/20 bg-white px-3 py-2 text-sm"
             >
               <option value={500}>500 kWh</option>
               <option value={1000}>1000 kWh</option>

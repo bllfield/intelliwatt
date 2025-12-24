@@ -11,7 +11,7 @@ export default function PreviewPlansPage({ params }: { params: { token: string }
 
   const plans = Array.isArray((snapshot as any)?.plans) ? ((snapshot as any).plans as any[]) : [];
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-brand-white">
       <PreviewPlansClient plans={plans as any} />
     </div>
   );
