@@ -352,6 +352,7 @@ Next step: Step 5 — Admin list/view/approve templates + collision detection
     - `POST /api/admin/wattbuy/templated-plans/override-computable` (requires `x-admin-token`)
       - Forces `planCalcStatus=COMPUTABLE` with `planCalcReasonCode=ADMIN_OVERRIDE_COMPUTABLE` or resets to derived.
       - **Must run on Node.js runtime** (Prisma): `export const runtime = "nodejs";`
+      - Customer UI behavior: when `planCalcStatus=COMPUTABLE` is persisted on the `RatePlan` (including via override), `/api/dashboard/plans` treats the offer as computable for badge/status purposes (no customer-facing `UNSUPPORTED` badge due to derived checks).
     - UI: override controls are visible on both:
       - `/admin/wattbuy/templates`
       - `/admin/efl/fact-cards` (Templates table)

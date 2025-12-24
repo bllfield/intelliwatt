@@ -1519,6 +1519,18 @@ export async function GET(req: NextRequest) {
           template: templateOk ? (template ? { rateStructure: template.rateStructure } : null) : null,
         });
 
+        // IMPORTANT: Honor persisted plan-calc status (including admin overrides).
+        // `planComputability` is a best-effort derived check; if the RatePlan has been marked COMPUTABLE,
+        // we must not show customer-facing "UNSUPPORTED" for the offer.
+        // (Estimates already honor ADMIN_OVERRIDE_COMPUTABLE via `isComputableOverride()` below.)
+        if (String(planCalcStatus ?? "").trim() === "COMPUTABLE" && String(planComputability?.status ?? "") === "NOT_COMPUTABLE") {
+          planComputability = {
+            status: "COMPUTABLE",
+            requiredBucketKeys: Array.isArray(requiredBucketKeys) ? requiredBucketKeys : ["kwh.m.all.total"],
+            notes: Array.isArray((planComputability as any)?.notes) ? (planComputability as any).notes : [],
+          };
+        }
+
         // Expose the actual variables we used (or would use) for plan-cost calcs.
         // Keep it minimal and only populate when we have the template.
         try {
