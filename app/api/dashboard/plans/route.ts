@@ -1221,6 +1221,36 @@ export async function GET(req: NextRequest) {
       // Best-effort only.
     }
 
+    // Compliance / disclosures: map supplier contact info from our PUCT REP catalog (DB),
+    // so we don't depend on WattBuy providing email/phone in every offer payload.
+    // Best-effort only; never block the plans page.
+    const puctRepByNumber = new Map<string, { email: string | null; phone: string | null }>();
+    try {
+      const puctNumbers = Array.from(
+        new Set(
+          offers
+            .map((o: any) => strOrNull((o as any)?.supplier_puct_registration))
+            .filter((v): v is string => typeof v === "string" && v.length > 0),
+        ),
+      );
+      if (puctNumbers.length > 0) {
+        const reps = await (prisma as any).puctRep.findMany({
+          where: { puctNumber: { in: puctNumbers } },
+          select: { puctNumber: true, email: true, phone: true },
+        });
+        for (const r of reps ?? []) {
+          const p = strOrNull((r as any)?.puctNumber);
+          if (!p) continue;
+          puctRepByNumber.set(p, {
+            email: strOrNull((r as any)?.email),
+            phone: strOrNull((r as any)?.phone),
+          });
+        }
+      }
+    } catch {
+      // ignore
+    }
+
     const shapeOfferBase = (o: any) => {
       const ratePlanId = mapByOfferId.get(o.offer_id) ?? null;
       const templateAvailable = ratePlanId != null;
@@ -1245,6 +1275,8 @@ export async function GET(req: NextRequest) {
       const eflAvg2000 = numOrNull(o?.kwh2000_cents);
 
       const cancellationFeeText = strOrNull(o?.cancel_fee_text);
+      const supplierPuctRegistration = strOrNull(o?.supplier_puct_registration);
+      const repFromDb = supplierPuctRegistration ? puctRepByNumber.get(supplierPuctRegistration) ?? null : null;
 
       const earlyTerminationFeeDollars = (() => {
         const t = strOrNull(o.cancel_fee_text);
@@ -1277,9 +1309,11 @@ export async function GET(req: NextRequest) {
           lastSeenAt: usedFallbackSnapshot ? house.updatedAt.toISOString() : undefined,
         },
         disclosures: {
-          supplierPuctRegistration: strOrNull(o?.supplier_puct_registration) ?? undefined,
-          supplierContactEmail: strOrNull(o?.supplier_contact_email) ?? undefined,
-          supplierContactPhone: strOrNull(o?.supplier_contact_phone) ?? undefined,
+          supplierPuctRegistration: supplierPuctRegistration ?? undefined,
+          supplierContactEmail:
+            strOrNull(o?.supplier_contact_email) ?? repFromDb?.email ?? undefined,
+          supplierContactPhone:
+            strOrNull(o?.supplier_contact_phone) ?? repFromDb?.phone ?? undefined,
           cancellationFeeText: cancellationFeeText ?? undefined,
           tosUrl: tosUrl ?? undefined,
           yracUrl: yracUrl ?? undefined,
@@ -1319,6 +1353,12 @@ export async function GET(req: NextRequest) {
             where: { id: ratePlanId },
             select: {
               id: true,
+              cancelFee: true,
+              eflUrl: true,
+              tosUrl: true,
+              yracUrl: true,
+              repPuctCertificate: true,
+              supplierPUCT: true,
               rateStructure: true,
               planCalcVersion: true,
               planCalcStatus: true,
@@ -1337,6 +1377,30 @@ export async function GET(req: NextRequest) {
       }
 
       const template = ratePlanRow ? { rateStructure: ratePlanRow.rateStructure ?? null } : null;
+
+      // Prefer DB-backed template docs + cancellation fee + PUCT certificate when available.
+      // This avoids confusing supplier "schedule" strings like "$15/month remaining" when the EFL fact card stores "$150".
+      const dbCancelFeeText = strOrNull(ratePlanRow?.cancelFee);
+      const dbEflUrl = strOrNull(ratePlanRow?.eflUrl);
+      const dbTosUrl = strOrNull(ratePlanRow?.tosUrl);
+      const dbYracUrl = strOrNull(ratePlanRow?.yracUrl);
+      const dbPuct =
+        strOrNull(ratePlanRow?.repPuctCertificate) ?? strOrNull(ratePlanRow?.supplierPUCT);
+
+      const mergedEfl = {
+        ...(base as any).efl,
+        ...(dbEflUrl ? { eflUrl: dbEflUrl } : {}),
+        ...(dbTosUrl ? { tosUrl: dbTosUrl } : {}),
+        ...(dbYracUrl ? { yracUrl: dbYracUrl } : {}),
+      };
+      const mergedDisclosures = {
+        ...((base as any).disclosures ?? {}),
+        ...(dbPuct ? { supplierPuctRegistration: dbPuct } : {}),
+        ...(dbCancelFeeText ? { cancellationFeeText: dbCancelFeeText } : {}),
+        ...(dbTosUrl ? { tosUrl: dbTosUrl } : {}),
+        ...(dbYracUrl ? { yracUrl: dbYracUrl } : {}),
+      };
+      const mergedBase = { ...(base as any), efl: mergedEfl, disclosures: mergedDisclosures };
 
       const avgPriceCentsPerKwh1000 = numOrNull((base as any)?.efl?.avgPriceCentsPerKwh1000);
       const tdspSlug = (base as any)?.utility?.tdspSlug ?? null;
@@ -1679,7 +1743,7 @@ export async function GET(req: NextRequest) {
       const universal = deriveUniversalAvailability(trueCostEstimate);
 
       return {
-        ...base,
+        ...mergedBase,
         intelliwatt: {
           ...(base as any).intelliwatt,
           // UNIVERSAL TRUTH:

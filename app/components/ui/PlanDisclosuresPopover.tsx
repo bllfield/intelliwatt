@@ -50,7 +50,7 @@ export function PlanDisclosuresPopover(props: Props) {
       { label: "Supplier email", ...displayOrFallback(d.supplierContactEmail) },
       { label: "Supplier phone", ...displayOrFallback(d.supplierContactPhone) },
       { label: "Distributor (TDSP)", ...displayOrFallback(props.distributorName) },
-      { label: "Cancellation fee", ...displayOrFallback(d.cancellationFeeText) },
+      { label: "Cancellation fee (from plan docs)", ...displayOrFallback(d.cancellationFeeText) },
     ];
   }, [props.disclosures, props.distributorName]);
 
