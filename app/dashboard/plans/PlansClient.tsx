@@ -352,10 +352,12 @@ export default function PlansClient() {
   useEffect(() => {
     if (!resp?.ok) return;
     const offersNow = Array.isArray(resp?.offers) ? (resp!.offers as OfferRow[]) : [];
-    const queuedEstimates = offersNow.filter(
-      (o) =>
-        String(o?.intelliwatt?.statusLabel ?? "") === "QUEUED",
-    );
+    const queuedEstimates = offersNow.filter((o: any) => {
+      if (String(o?.intelliwatt?.statusLabel ?? "") !== "QUEUED") return false;
+      const tceStatus = String((o as any)?.intelliwatt?.trueCostEstimate?.status ?? "").toUpperCase();
+      // Only treat as "calculating" when it's actually pending (not UNSUPPORTED / NOT_COMPUTABLE).
+      return !tceStatus || tceStatus === "QUEUED" || tceStatus === "MISSING_TEMPLATE";
+    });
     const isCalculating = queuedEstimates.length > 0;
     setAutoPreparing(isCalculating);
     setPrefetchNote(isCalculating ? `Preparing IntelliWatt calculations… (${queuedEstimates.length} pending)` : null);
@@ -438,11 +440,12 @@ export default function PlansClient() {
     if (!resp?.ok) return;
     if (!resp?.hasUsage) return;
     const offersNow = Array.isArray(resp?.offers) ? (resp!.offers as OfferRow[]) : [];
-    const queuedCountNow = offersNow.filter(
-      (o) =>
-        String(o?.intelliwatt?.statusLabel ?? "") === "QUEUED",
-    ).length;
-    if (queuedCountNow <= 0) return;
+    const pendingCountNow = offersNow.filter((o: any) => {
+      if (String(o?.intelliwatt?.statusLabel ?? "") !== "QUEUED") return false;
+      const tceStatus = String((o as any)?.intelliwatt?.trueCostEstimate?.status ?? "").toUpperCase();
+      return !tceStatus || tceStatus === "QUEUED" || tceStatus === "MISSING_TEMPLATE";
+    }).length;
+    if (pendingCountNow <= 0) return;
 
     const sessionKey = `plans_pipeline_kick_v4:${serverDatasetKey}`;
     const now = Date.now();
@@ -468,7 +471,7 @@ export default function PlansClient() {
       }
 
       prefetchInFlightRef.current = true;
-      setPrefetchNote(`Preparing IntelliWatt calculations… (${queuedCountNow} pending)`);
+      setPrefetchNote(`Preparing IntelliWatt calculations… (${pendingCountNow} pending)`);
       try {
         const params = new URLSearchParams();
         params.set("reason", "plans_fallback");
@@ -505,13 +508,9 @@ export default function PlansClient() {
 
         pollInFlightRef.current = true;
         try {
-          const usp = new URLSearchParams();
-          usp.set("dataset", "1");
-          usp.set("pageSize", "2000");
-          usp.set("sort", "kwh1000_asc");
-          usp.set("isRenter", String(isRenter));
-          // Do NOT add _r here; allow browser caching + server Cache-Control to work.
-          fetch(`/api/dashboard/plans?${usp.toString()}`)
+          // Poll the same query the user is currently viewing (server-side paging/filtering).
+          // This avoids the legacy dataset=1/pageSize=2000 call pattern which can take minutes.
+          fetch(`/api/dashboard/plans?${plansQueryString}`)
             .then((r) => r.json().catch(() => null))
             .then((j) => {
               if (!j || j.ok !== true) return;
@@ -540,7 +539,7 @@ export default function PlansClient() {
     return () => {
       // keep timers running across renders; cleaned up in serverDatasetKey effect
     };
-  }, [resp?.ok, resp?.hasUsage, resp?.offers, isRenter, serverDatasetKey, cacheKey]);
+  }, [resp?.ok, resp?.hasUsage, resp?.offers, isRenter, serverDatasetKey, cacheKey, plansQueryString]);
 
   // Cleanup on unmount (defensive: prevents polling leaks if the component tree changes).
   useEffect(() => {
@@ -606,10 +605,18 @@ export default function PlansClient() {
     () => offers.filter((o: any) => o?.intelliwatt?.statusLabel === "QUEUED").length,
     [offers],
   );
+  const pendingCount = useMemo(() => {
+    // Pending = expected to eventually compute (not UNSUPPORTED/NOT_COMPUTABLE).
+    return offers.filter((o: any) => {
+      if (String(o?.intelliwatt?.statusLabel ?? "") !== "QUEUED") return false;
+      const tceStatus = String((o as any)?.intelliwatt?.trueCostEstimate?.status ?? "").toUpperCase();
+      return !tceStatus || tceStatus === "QUEUED" || tceStatus === "MISSING_TEMPLATE";
+    }).length;
+  }, [offers]);
   const isStillWorking = Boolean(loading || autoPreparing);
   const showRecommendedBadge = Boolean(recommendedOfferId && !isStillWorking);
   const showCalcBot =
-    Boolean(hasUsage && sort === "best_for_you_proxy" && (isStillWorking || queuedCount > 0));
+    Boolean(hasUsage && sort === "best_for_you_proxy" && (isStillWorking || pendingCount > 0));
 
   const defaultCalcMsg =
     "I'm calculating all your options using your actual usage to determine which plan is best based on your energy usage habits.\n\nYour results will be available soon.";
@@ -1189,8 +1196,8 @@ export default function PlansClient() {
                 <div className="text-sm font-semibold text-brand-white">Calculating your best plan…</div>
                 <div className="mt-1 text-xs text-brand-cyan/75">
                   We’re loading all plan options and applying IntelliWatt calculations using your usage.
-                  {queuedCount > 0 ? (
-                    <span className="ml-2 text-brand-cyan/60">({queuedCount} still processing)</span>
+                  {pendingCount > 0 ? (
+                    <span className="ml-2 text-brand-cyan/60">({pendingCount} still processing)</span>
                   ) : null}
                 </div>
               </div>
