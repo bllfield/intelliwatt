@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "generatedAt": "2025-12-24",
+  "notes": "Static snapshot for WattBuy preview page. No user data. Replace this dataset as needed.",
+  "plans": [
+    {
+      "supplierName": "Chariot Energy",
+      "planName": "Solarize 18",
+      "termMonths": 18,
+      "rateType": "FIXED",
+      "renewablePercent": 100,
+      "tdspName": "Oncor",
+      "pricing": {
+        "avgPriceCentsPerKwh500": 16.4,
+        "avgPriceCentsPerKwh1000": 14.9,
+        "avgPriceCentsPerKwh2000": 13.8
+      },
+      "documents": {
+        "eflUrl": "https://example.com/efl.pdf",
+        "tosUrl": "https://example.com/tos.pdf",
+        "yracUrl": "https://example.com/yrac.pdf"
+      },
+      "disclosures": {
+        "supplierPuctRegistration": "10000",
+        "supplierContactEmail": "support@example.com",
+        "supplierContactPhone": "(800) 000-0000",
+        "cancellationFeeText": "$15/month remaining"
+      }
+    },
+    {
+      "supplierName": "Discount Power",
+      "planName": "Wise Buy 12",
+      "termMonths": 12,
+      "rateType": "FIXED",
+      "renewablePercent": 0,
+      "tdspName": "Oncor",
+      "pricing": {
+        "avgPriceCentsPerKwh500": 18.2,
+        "avgPriceCentsPerKwh1000": 15.7,
+        "avgPriceCentsPerKwh2000": 14.6
+      },
+      "documents": {
+        "eflUrl": "https://example.com/efl2.pdf",
+        "tosUrl": "https://example.com/tos2.pdf",
+        "yracUrl": "https://example.com/yrac2.pdf"
+      },
+      "disclosures": {
+        "supplierPuctRegistration": "10052",
+        "supplierContactEmail": null,
+        "supplierContactPhone": null,
+        "cancellationFeeText": "$150"
+      }
+    }
+  ]
+}
+
+

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { CopyInline } from '@/app/components/ui/CopyInline';
 
 interface User {
   id: string;
@@ -192,6 +193,10 @@ export default function AdminDashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [recalculatingReferrals, setRecalculatingReferrals] = useState(false);
   const [recalculatingEntries, setRecalculatingEntries] = useState(false);
+  const [previewPlansShare, setPreviewPlansShare] = useState<{ url: string | null; token: string | null }>({
+    url: null,
+    token: null,
+  });
   useEffect(() => {
     if (typeof window === 'undefined') {
       return;
@@ -239,6 +244,21 @@ export default function AdminDashboard() {
     (input: RequestInfo | URL, init?: RequestInit) => fetch(input, withAdminHeaders(init)),
     [withAdminHeaders],
   );
+
+  const fetchPreviewPlansShare = useCallback(async () => {
+    try {
+      const res = await fetchWithAdmin('/api/admin/preview/plans-token');
+      if (!res.ok) return;
+      const json = await res.json().catch(() => null);
+      if (!json || json.ok !== true) return;
+      setPreviewPlansShare({
+        url: typeof json.url === 'string' ? json.url : null,
+        token: typeof json.token === 'string' ? json.token : null,
+      });
+    } catch {
+      // ignore
+    }
+  }, [fetchWithAdmin]);
 
   // Fetch real data from API
   const fetchData = useCallback(async () => {
@@ -400,7 +420,8 @@ export default function AdminDashboard() {
     document.title = 'Admin Dashboard - IntelliWatt™';
 
     fetchData();
-  }, [fetchData]);
+    fetchPreviewPlansShare();
+  }, [fetchData, fetchPreviewPlansShare]);
 
   // Prevent hydration mismatch by not rendering until mounted
   if (!mounted) {
@@ -589,6 +610,42 @@ export default function AdminDashboard() {
         {/* Quick Links / Tools Section */}
         <section className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
           <h2 className="text-2xl font-bold text-brand-navy mb-4">🔧 Admin Tools</h2>
+
+          {/* WattBuy preview share link (token-gated public page) */}
+          <div className="mb-6 rounded-lg border border-brand-blue/20 bg-brand-blue/5 p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
+                <div className="font-semibold text-brand-navy">WattBuy plan cards preview link</div>
+                <div className="mt-1 text-sm text-brand-navy/70">
+                  Public, token-gated, static snapshot page for sharing plan card presentation (no dashboard access).
+                </div>
+              </div>
+              {previewPlansShare.url ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <CopyInline value={previewPlansShare.url} label="Copy link" />
+                  {previewPlansShare.token ? <CopyInline value={previewPlansShare.token} label="Copy token" /> : null}
+                </div>
+              ) : (
+                <div className="text-xs text-brand-navy/60">
+                  Set <span className="font-mono">PREVIEW_PLANS_TOKEN</span> in Vercel env vars to enable.
+                </div>
+              )}
+            </div>
+
+            {previewPlansShare.url ? (
+              <div className="mt-3 rounded-lg border border-brand-blue/15 bg-brand-white p-3 text-sm">
+                <div className="text-xs font-semibold uppercase tracking-wide text-brand-navy/60">Share URL</div>
+                <div className="mt-1 break-all font-mono text-[12px] text-brand-navy">{previewPlansShare.url}</div>
+                {previewPlansShare.token ? (
+                  <>
+                    <div className="mt-3 text-xs font-semibold uppercase tracking-wide text-brand-navy/60">Token</div>
+                    <div className="mt-1 break-all font-mono text-[12px] text-brand-navy">{previewPlansShare.token}</div>
+                  </>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
             <a
               href="/admin/efl/fact-cards"
