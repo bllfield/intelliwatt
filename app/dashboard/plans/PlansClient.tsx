@@ -346,6 +346,75 @@ export default function PlansClient() {
     setPrefetchNote(isCalculating ? `Preparing IntelliWatt calculations… (${queuedEstimates.length} pending)` : null);
   }, [resp?.ok, resp?.offers]);
 
+  // Targeted template warm-up: if offers are QUEUED specifically because their template mapping is missing,
+  // kick the lightweight EFL-prefetch endpoint to auto-parse and create/link templates (best-effort).
+  // This is safe even when usage is missing (templating does not require SMT/GreenButton usage).
+  useEffect(() => {
+    if (isRenter === null) return;
+    if (!resp?.ok) return;
+    const offersNow = Array.isArray(resp?.offers) ? (resp!.offers as OfferRow[]) : [];
+    const missingTemplate = offersNow
+      .filter((o) => String(o?.intelliwatt?.statusLabel ?? "") === "QUEUED")
+      .filter((o) => {
+        const tceStatus = String((o as any)?.intelliwatt?.trueCostEstimate?.status ?? "").toUpperCase();
+        const templateAvailable = Boolean((o as any)?.intelliwatt?.templateAvailable);
+        // Target only "missing template" queueing, not "missing usage" queueing.
+        return tceStatus === "MISSING_TEMPLATE" || templateAvailable === false;
+      })
+      .filter((o) => Boolean((o as any)?.offerId))
+      .slice(0, 6);
+
+    if (missingTemplate.length <= 0) return;
+
+    const sessionKey = `plans_template_prefetch_v1:${serverDatasetKey}`;
+    const now = Date.now();
+    let lastKickAt: number | null = null;
+    try {
+      const raw = window.sessionStorage.getItem(sessionKey);
+      const n = raw ? Number(raw) : Number.NaN;
+      if (Number.isFinite(n)) lastKickAt = n;
+    } catch {
+      // ignore
+    }
+
+    // Avoid thrash: run at most once per ~75s while templates are missing.
+    const kickEligible = lastKickAt == null || now - lastKickAt >= 75_000;
+    if (!kickEligible) return;
+    if (prefetchInFlightRef.current) return;
+
+    try {
+      window.sessionStorage.setItem(sessionKey, String(now));
+    } catch {
+      // ignore
+    }
+
+    prefetchInFlightRef.current = true;
+    setPrefetchNote(`Parsing plan fact labels… (${missingTemplate.length} queued)`);
+
+    const controller = new AbortController();
+    const run = async () => {
+      try {
+        const params = new URLSearchParams();
+        params.set("isRenter", String(isRenter));
+        params.set("timeBudgetMs", "12000");
+        params.set("maxOffers", String(Math.min(6, Math.max(1, missingTemplate.length))));
+        await fetch(`/api/dashboard/plans/prefetch?${params.toString()}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ focusOfferIds: missingTemplate.map((o) => String((o as any).offerId)) }),
+          signal: controller.signal,
+        }).catch(() => null);
+      } finally {
+        prefetchInFlightRef.current = false;
+        // Force a refresh so the UI can pick up newly linked templates.
+        setRefreshNonce((n) => n + 1);
+      }
+    };
+
+    run();
+    return () => controller.abort();
+  }, [resp?.ok, resp?.offers, isRenter, serverDatasetKey]);
+
   // Fallback warm-up: if the user lands on /dashboard/plans before background warm-up ran,
   // kick the plan pipeline once per session and poll until queued clears (or timeout).
   useEffect(() => {

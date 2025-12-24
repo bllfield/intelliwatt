@@ -15,6 +15,10 @@ import { inferTdspTerritoryFromEflText } from "@/lib/efl/eflValidator";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+type PrefetchBody = {
+  focusOfferIds?: string[] | null;
+};
+
 function parseBool(v: string | null, fallback: boolean): boolean {
   if (v == null) return fallback;
   const s = v.trim().toLowerCase();
@@ -30,6 +34,16 @@ function sha256Hex(s: string): string {
 
 export async function POST(req: NextRequest) {
   try {
+    let body: PrefetchBody | null = null;
+    try {
+      body = (await req.json().catch(() => null)) as any;
+    } catch {
+      body = null;
+    }
+    const focusOfferIdsRaw = Array.isArray(body?.focusOfferIds) ? body!.focusOfferIds : [];
+    const focusOfferIds = focusOfferIdsRaw.map((x) => String(x ?? "").trim()).filter(Boolean);
+    const focusSet = new Set<string>(focusOfferIds);
+
     const cookieStore = cookies();
     const sessionEmail = cookieStore.get("intelliwatt_user")?.value ?? null;
     if (!sessionEmail) {
@@ -110,12 +124,24 @@ export async function POST(req: NextRequest) {
       return true;
     });
 
+    // If the caller provided focusOfferIds (e.g. offers currently shown as QUEUED in the UI),
+    // process those first so "user-triggered" visits attempt templating for the exact offers the user sees.
+    const orderedCandidates =
+      focusSet.size > 0
+        ? [...candidates].sort((a, b) => {
+            const aFocus = focusSet.has(String((a as any)?.offer_id ?? ""));
+            const bFocus = focusSet.has(String((b as any)?.offer_id ?? ""));
+            if (aFocus === bFocus) return 0;
+            return aFocus ? -1 : 1;
+          })
+        : candidates;
+
     let processed = 0;
     let createdOrLinked = 0;
     let queued = 0;
     const results: any[] = [];
 
-    for (const o of candidates) {
+    for (const o of orderedCandidates) {
       if (processed >= maxOffers) break;
       if (Date.now() - startedAt > timeBudgetMs) break;
 
@@ -130,11 +156,14 @@ export async function POST(req: NextRequest) {
       if (!eflUrl) {
         // Queue for manual review (missing EFL URL).
         try {
-          const syntheticSha = sha256Hex(["dashboard_prefetch", "MISSING_EFL_URL", offerId, supplier ?? "", planName ?? ""].join("|"));
+          const identity = "MISSING_EFL_URL";
+          const syntheticSha = sha256Hex(["dashboard_prefetch", "EFL_PARSE", offerId, identity].join("|"));
           await (prisma as any).eflParseReviewQueue.upsert({
-            where: { eflPdfSha256: syntheticSha },
+            where: { kind_dedupeKey: { kind: "EFL_PARSE", dedupeKey: offerId } },
             create: {
               source: "dashboard_prefetch",
+              kind: "EFL_PARSE",
+              dedupeKey: offerId,
               eflPdfSha256: syntheticSha,
               offerId,
               supplier,
@@ -147,6 +176,9 @@ export async function POST(req: NextRequest) {
             },
             update: {
               updatedAt: new Date(),
+              kind: "EFL_PARSE",
+              dedupeKey: offerId,
+              eflPdfSha256: syntheticSha,
               offerId,
               supplier,
               planName,
@@ -172,11 +204,14 @@ export async function POST(req: NextRequest) {
       const pdf = await fetchEflPdfFromUrl(eflUrl, { timeoutMs: 20_000 });
       if (!pdf.ok) {
         try {
-          const syntheticSha = sha256Hex(["dashboard_prefetch", "FETCH_FAIL", offerId, eflUrl].join("|"));
+          const identity = eflUrl || "MISSING_EFL_URL";
+          const syntheticSha = sha256Hex(["dashboard_prefetch", "EFL_PARSE", offerId, identity].join("|"));
           await (prisma as any).eflParseReviewQueue.upsert({
-            where: { eflPdfSha256: syntheticSha },
+            where: { kind_dedupeKey: { kind: "EFL_PARSE", dedupeKey: offerId } },
             create: {
               source: "dashboard_prefetch",
+              kind: "EFL_PARSE",
+              dedupeKey: offerId,
               eflPdfSha256: syntheticSha,
               offerId,
               supplier,
@@ -189,6 +224,9 @@ export async function POST(req: NextRequest) {
             },
             update: {
               updatedAt: new Date(),
+              kind: "EFL_PARSE",
+              dedupeKey: offerId,
+              eflPdfSha256: syntheticSha,
               offerId,
               supplier,
               planName,
@@ -236,9 +274,11 @@ export async function POST(req: NextRequest) {
             det.eflPdfSha256 ??
             sha256Hex(["dashboard_prefetch", "PIPELINE_NO_TEMPLATE", offerId, pdf.pdfUrl].join("|"));
           await (prisma as any).eflParseReviewQueue.upsert({
-            where: { eflPdfSha256: queueSha },
+            where: { kind_dedupeKey: { kind: "EFL_PARSE", dedupeKey: offerId } },
             create: {
               source: "dashboard_prefetch",
+              kind: "EFL_PARSE",
+              dedupeKey: offerId,
               eflPdfSha256: queueSha,
               repPuctCertificate: det.repPuctCertificate ?? null,
               eflVersionCode: det.eflVersionCode ?? null,
@@ -259,6 +299,9 @@ export async function POST(req: NextRequest) {
             },
             update: {
               updatedAt: new Date(),
+              kind: "EFL_PARSE",
+              dedupeKey: offerId,
+              eflPdfSha256: queueSha,
               repPuctCertificate: det.repPuctCertificate ?? null,
               eflVersionCode: det.eflVersionCode ?? null,
               offerId,
