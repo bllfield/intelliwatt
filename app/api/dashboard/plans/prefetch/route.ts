@@ -19,6 +19,16 @@ type PrefetchBody = {
   focusOfferIds?: string[] | null;
 };
 
+function toErrorMessage(e: any): string {
+  // Keep empty string, stringify non-string primitives (0/false), and fall back to String(e).
+  if (e && typeof e === "object" && "message" in e) {
+    const m = (e as any).message;
+    if (typeof m === "string") return m;
+    if (m != null) return String(m);
+  }
+  return String(e);
+}
+
 function parseBool(v: string | null, fallback: boolean): boolean {
   if (v == null) return fallback;
   const s = v.trim().toLowerCase();
@@ -108,7 +118,7 @@ export async function POST(req: NextRequest) {
         isRenter,
       });
     } catch (e: any) {
-      const msg = (e?.message ?? String(e)) as string;
+      const msg = toErrorMessage(e);
       console.error("[dashboard_prefetch] wattbuy.offers failed", { message: msg });
       // Fail-soft: this route is called from the customer dashboard; do not return 500.
       return NextResponse.json(
@@ -583,7 +593,7 @@ export async function POST(req: NextRequest) {
       results,
     });
   } catch (e: any) {
-    const msg = (e?.message ?? String(e)) as string;
+    const msg = toErrorMessage(e);
     console.error("[dashboard_prefetch] fatal error", { message: msg });
     // Fail-soft: this route is called from the customer dashboard; do not return 500.
     return NextResponse.json({ ok: false, error: msg, stage: "fatal" }, { status: 200 });

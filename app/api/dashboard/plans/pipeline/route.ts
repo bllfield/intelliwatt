@@ -10,6 +10,16 @@ export const dynamic = "force-dynamic";
 // Pipeline can do usage-bucket loads + cache writes; allow enough time on Vercel.
 export const maxDuration = 300;
 
+function toErrorMessage(e: any): string {
+  // Keep empty string, stringify non-string primitives (0/false), and fall back to String(e).
+  if (e && typeof e === "object" && "message" in e) {
+    const m = (e as any).message;
+    if (typeof m === "string") return m;
+    if (m != null) return String(m);
+  }
+  return String(e);
+}
+
 function parseBool(v: string | null, fallback: boolean): boolean {
   if (v == null) return fallback;
   const s = v.trim().toLowerCase();
@@ -76,7 +86,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(result, { status: 200 });
   } catch (e: any) {
-    const msg = (e?.message ?? String(e)) as string;
+    const msg = toErrorMessage(e);
     console.error("[dashboard_plans_pipeline] fatal error", { message: msg });
     // Fail-soft: this endpoint is triggered by customer dashboard flows; do not return 500.
     return NextResponse.json({ ok: false, error: msg }, { status: 200 });
