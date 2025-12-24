@@ -286,6 +286,17 @@ export default function PlansClient() {
 
   const plansQueryString = useMemo(() => buildQuery(baseParams as any), [baseParams]);
 
+  // Polling uses an interval closure; keep the latest query string in a ref to avoid stale polling
+  // when inputs (e.g. refreshNonce) change.
+  const plansQueryStringRef = useRef<string>("");
+  const cacheKeyRef = useRef<string>("");
+  useEffect(() => {
+    plansQueryStringRef.current = plansQueryString;
+  }, [plansQueryString]);
+  useEffect(() => {
+    cacheKeyRef.current = cacheKey;
+  }, [cacheKey]);
+
   useEffect(() => {
     if (isRenter === null) return; // wait for stable renter value
 
@@ -510,13 +521,15 @@ export default function PlansClient() {
         try {
           // Poll the same query the user is currently viewing (server-side paging/filtering).
           // This avoids the legacy dataset=1/pageSize=2000 call pattern which can take minutes.
-          fetch(`/api/dashboard/plans?${plansQueryString}`)
+          const qs = plansQueryStringRef.current || plansQueryString;
+          fetch(`/api/dashboard/plans?${qs}`)
             .then((r) => r.json().catch(() => null))
             .then((j) => {
               if (!j || j.ok !== true) return;
               setResp(j);
               try {
-                window.sessionStorage.setItem(cacheKey, JSON.stringify({ t: Date.now(), resp: j }));
+                const ck = cacheKeyRef.current || cacheKey;
+                window.sessionStorage.setItem(ck, JSON.stringify({ t: Date.now(), resp: j }));
               } catch {
                 // ignore
               }
@@ -539,7 +552,7 @@ export default function PlansClient() {
     return () => {
       // keep timers running across renders; cleaned up in serverDatasetKey effect
     };
-  }, [resp?.ok, resp?.hasUsage, resp?.offers, isRenter, serverDatasetKey, cacheKey, plansQueryString]);
+  }, [resp?.ok, resp?.hasUsage, resp?.offers, isRenter, serverDatasetKey]);
 
   // Cleanup on unmount (defensive: prevents polling leaks if the component tree changes).
   useEffect(() => {
