@@ -174,6 +174,10 @@ export default function PlansClient() {
   const [approxKwhPerMonth, setApproxKwhPerMonth] = useState<500 | 750 | 1000 | 1250 | 2000>(1000);
   const bestBucket = useMemo(() => selectedBestBucket(sort), [sort]);
 
+  // Stable per-session dataset identity for background warmups.
+  // Keep this minimal so browsing/sorting doesn't retrigger pipeline/prefetch during a session.
+  const warmupKey = useMemo(() => JSON.stringify({ isRenter }), [isRenter]);
+
   // Server dataset identity: include all inputs that change the server response.
   const serverDatasetKey = useMemo(
     () =>
@@ -226,7 +230,7 @@ export default function PlansClient() {
     pollTimerRef.current = null;
     if (pollStopTimerRef.current) window.clearTimeout(pollStopTimerRef.current);
     pollStopTimerRef.current = null;
-  }, [serverDatasetKey]);
+  }, [warmupKey]);
 
   useEffect(() => {
     if (isRenter !== null) return;
@@ -395,7 +399,7 @@ export default function PlansClient() {
 
     if (missingTemplate.length <= 0) return;
 
-    const sessionKey = `plans_template_prefetch_v1:${serverDatasetKey}`;
+    const sessionKey = `plans_template_prefetch_v1:${warmupKey}`;
     const now = Date.now();
     let lastKickAt: number | null = null;
     try {
@@ -442,7 +446,7 @@ export default function PlansClient() {
 
     run();
     return () => controller.abort();
-  }, [resp?.ok, resp?.offers, isRenter, serverDatasetKey]);
+  }, [resp?.ok, resp?.offers, isRenter, warmupKey]);
 
   // Fallback warm-up: if the user lands on /dashboard/plans before background warm-up ran,
   // kick the plan pipeline once per session and poll until queued clears (or timeout).
@@ -458,7 +462,7 @@ export default function PlansClient() {
     }).length;
     if (pendingCountNow <= 0) return;
 
-    const sessionKey = `plans_pipeline_kick_v4:${serverDatasetKey}`;
+    const sessionKey = `plans_pipeline_kick_v4:${warmupKey}`;
     const now = Date.now();
     let lastKickAt: number | null = null;
     try {
@@ -552,7 +556,7 @@ export default function PlansClient() {
     return () => {
       // keep timers running across renders; cleaned up in serverDatasetKey effect
     };
-  }, [resp?.ok, resp?.hasUsage, resp?.offers, isRenter, serverDatasetKey]);
+  }, [resp?.ok, resp?.hasUsage, resp?.offers, isRenter, warmupKey]);
 
   // Cleanup on unmount (defensive: prevents polling leaks if the component tree changes).
   useEffect(() => {
