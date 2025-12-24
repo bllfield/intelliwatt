@@ -1,54 +1,102 @@
 {
   "version": 1,
   "generatedAt": "2025-12-24",
-  "notes": "Static snapshot for WattBuy preview page. No user data. Replace this dataset as needed.",
+  "notes": "Static snapshot for WattBuy preview page. No user data. URLs + disclosures are hardcoded from repo sources (data/rates/** + docs/PUCT NUMBER LISTS/rep.csv). Replace this dataset as needed.",
   "plans": [
     {
       "supplierName": "Chariot Energy",
-      "planName": "Solarize 18",
-      "termMonths": 18,
-      "rateType": "FIXED",
+      "planName": "Solarize 12",
+      "termMonths": 12,
+      "rateType": "RENEWABLE",
       "renewablePercent": 100,
       "tdspName": "Oncor",
       "pricing": {
-        "avgPriceCentsPerKwh500": 16.4,
-        "avgPriceCentsPerKwh1000": 14.9,
-        "avgPriceCentsPerKwh2000": 13.8
+        "avgPriceCentsPerKwh500": 16.0,
+        "avgPriceCentsPerKwh1000": 15.5,
+        "avgPriceCentsPerKwh2000": 15.3
       },
       "documents": {
-        "eflUrl": "https://example.com/efl.pdf",
-        "tosUrl": "https://example.com/tos.pdf",
-        "yracUrl": "https://example.com/yrac.pdf"
+        "eflUrl": "https://signup.chariotenergy.com//Home/EFl?productId=39904&promo=14346",
+        "tosUrl": "https://signup.chariotenergy.com//Home/TOS?productId=39904&promo=14346",
+        "yracUrl": "https://signup.chariotenergy.com//Home/YRAC?productId=39904&promo=14346"
       },
       "disclosures": {
-        "supplierPuctRegistration": "10000",
-        "supplierContactEmail": "support@example.com",
-        "supplierContactPhone": "(800) 000-0000",
+        "supplierPuctRegistration": "10260",
+        "supplierContactEmail": "retail@174powerglobal.com",
+        "supplierContactPhone": "8555242746",
         "cancellationFeeText": "$15/month remaining"
       }
     },
     {
-      "supplierName": "Discount Power",
-      "planName": "Wise Buy 12",
+      "supplierName": "Gexa Energy",
+      "planName": "Eco Saver 12",
       "termMonths": 12,
       "rateType": "FIXED",
-      "renewablePercent": 0,
+      "renewablePercent": 100,
       "tdspName": "Oncor",
       "pricing": {
-        "avgPriceCentsPerKwh500": 18.2,
-        "avgPriceCentsPerKwh1000": 15.7,
-        "avgPriceCentsPerKwh2000": 14.6
+        "avgPriceCentsPerKwh500": 12.3,
+        "avgPriceCentsPerKwh1000": 11.8,
+        "avgPriceCentsPerKwh2000": 11.2
       },
       "documents": {
-        "eflUrl": "https://example.com/efl2.pdf",
-        "tosUrl": "https://example.com/tos2.pdf",
-        "yracUrl": "https://example.com/yrac2.pdf"
+        "eflUrl": "https://www.gexaenergy.com/efl/eco-saver-12",
+        "tosUrl": "https://www.gexaenergy.com/terms/eco-saver-12",
+        "yracUrl": "https://www.gexaenergy.com/yrac/eco-saver-12"
       },
       "disclosures": {
-        "supplierPuctRegistration": "10052",
-        "supplierContactEmail": null,
-        "supplierContactPhone": null,
+        "supplierPuctRegistration": "10027",
+        "supplierContactEmail": "PUCcomplaints@GexaEnergy.com",
+        "supplierContactPhone": "8669619399",
         "cancellationFeeText": "$150"
+      }
+    },
+    {
+      "supplierName": "Frontier Utilities",
+      "planName": "Frontier Saver Plus 8",
+      "termMonths": 8,
+      "rateType": "FIXED",
+      "renewablePercent": 30,
+      "tdspName": "Oncor",
+      "pricing": {
+        "avgPriceCentsPerKwh500": 22.2,
+        "avgPriceCentsPerKwh1000": 9.2,
+        "avgPriceCentsPerKwh2000": 15.3
+      },
+      "documents": {
+        "eflUrl": "https://eflviewer.frontierutilities.com/eflviewer.aspx?lang=EN&prodcode=FSVRPLS8&tdspcode=ONCOR_ELEC",
+        "tosUrl": "https://eflviewer.frontierutilities.com/eflviewer.aspx?lang=EN&prodcode=TOS",
+        "yracUrl": "https://eflviewer.frontierutilities.com/eflviewer.aspx?lang=EN&prodcode=YRAC"
+      },
+      "disclosures": {
+        "supplierPuctRegistration": "10169",
+        "supplierContactEmail": "FrontierComplaintsTX@gexaenergy.com",
+        "supplierContactPhone": "8669268192",
+        "cancellationFeeText": "$150"
+      }
+    },
+    {
+      "supplierName": "Champion Energy Services",
+      "planName": "Champ Saver-18",
+      "termMonths": 18,
+      "rateType": "FIXED",
+      "renewablePercent": 26,
+      "tdspName": "Oncor",
+      "pricing": {
+        "avgPriceCentsPerKwh500": 15.6,
+        "avgPriceCentsPerKwh1000": 15.2,
+        "avgPriceCentsPerKwh2000": 15.0
+      },
+      "documents": {
+        "eflUrl": "https://docs.championenergyservices.com/ExternalDocs?planName=PN1348&state=TX&language=EN",
+        "tosUrl": "https://docs.championenergyservices.com/fulfillment/byversion?version=TX-TOS-All-0-EN-20240624",
+        "yracUrl": "https://docs.championenergyservices.com/fulfillment/byversion?version=TX-YRAC-All-0-EN-20231031"
+      },
+      "disclosures": {
+        "supplierPuctRegistration": "10098",
+        "supplierContactEmail": "puccomplaints@championenergyservices.com",
+        "supplierContactPhone": "8776535090",
+        "cancellationFeeText": "$250"
       }
     }
   ]
