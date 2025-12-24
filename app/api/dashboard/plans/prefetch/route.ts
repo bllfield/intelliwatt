@@ -98,13 +98,30 @@ export async function POST(req: NextRequest) {
     const startedAt = Date.now();
 
     // Fetch offers (live).
-    const raw = await wattbuy.offers({
-      address: house.addressLine1,
-      city: house.addressCity,
-      state: house.addressState,
-      zip: house.addressZip5,
-      isRenter,
-    });
+    let raw: any = null;
+    try {
+      raw = await wattbuy.offers({
+        address: house.addressLine1,
+        city: house.addressCity,
+        state: house.addressState,
+        zip: house.addressZip5,
+        isRenter,
+      });
+    } catch (e: any) {
+      const msg = e?.message ? String(e.message) : String(e);
+      console.error("[dashboard_prefetch] wattbuy.offers failed", { message: msg });
+      // Fail-soft: this route is called from the customer dashboard; do not return 500.
+      return NextResponse.json(
+        {
+          ok: false,
+          error: `wattbuy_offers_failed: ${msg}`,
+          stage: "wattbuy_offers",
+          focusOfferIds,
+          durationMs: Date.now() - startedAt,
+        },
+        { status: 200 },
+      );
+    }
     const normalized = normalizeOffers(raw ?? {});
 
     // Which offers are already mapped?
@@ -566,7 +583,10 @@ export async function POST(req: NextRequest) {
       results,
     });
   } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message ?? String(e) }, { status: 500 });
+    const msg = e?.message ? String(e.message) : String(e);
+    console.error("[dashboard_prefetch] fatal error", { message: msg });
+    // Fail-soft: this route is called from the customer dashboard; do not return 500.
+    return NextResponse.json({ ok: false, error: msg, stage: "fatal" }, { status: 200 });
   }
 }
 
