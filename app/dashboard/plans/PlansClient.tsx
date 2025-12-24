@@ -187,7 +187,8 @@ export default function PlansClient() {
   // Lightweight client cache so back/forward navigation instantly shows the last processed dataset
   // instead of refetching.
   // Bump when API semantics change so we don't pin users to stale session-cached payloads.
-  const cacheKey = useMemo(() => `dashboard_plans_dataset_v2:${serverDatasetKey}`, [serverDatasetKey]);
+  // Bump when API semantics change so we don't pin users to stale session-cached payloads.
+  const cacheKey = useMemo(() => `dashboard_plans_dataset_v3:${serverDatasetKey}`, [serverDatasetKey]);
   // This is NOT the plan-engine cache (engine outputs are persisted in the WattBuy Offers DB).
   // This is only a UX cache for the API response to avoid flashing loading states on navigation.
   // Keep it long-lived; correctness still comes from server-side canonical inputs + DB-stored estimates.
@@ -359,6 +360,7 @@ export default function PlansClient() {
         const tceStatus = String((o as any)?.intelliwatt?.trueCostEstimate?.status ?? "").toUpperCase();
         const templateAvailableRaw = (o as any)?.intelliwatt?.templateAvailable;
         // Target only "missing template" queueing, not "missing usage" queueing.
+        // NOTE: do not coerce: Boolean(undefined) === false would incorrectly match legacy/partial payloads.
         return tceStatus === "MISSING_TEMPLATE" || templateAvailableRaw === false;
       })
       .filter((o) => Boolean((o as any)?.offerId))
