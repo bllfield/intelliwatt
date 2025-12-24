@@ -2496,10 +2496,25 @@ Client-side UX caching (not a source of truth)
     - `npm run admin:rateplan:link-offers`
     - Note: if this script prints “No DB-backed offers found”, the dashboard is pulling live offers (not stored). Use dashboard prefetch to populate mappings:
       - In browser DevTools (while logged in): `await fetch('/api/dashboard/plans/prefetch?maxOffers=10&timeBudgetMs=25000', { method: 'POST' }).then(r => r.json())`
+      - **Targeted prefetch (preferred when debugging specific QUEUED offers)**:
+        - The endpoint supports a JSON body with `focusOfferIds` so it can prioritize specific WattBuy offers first:
+          - `await fetch('/api/dashboard/plans/prefetch?maxOffers=6&timeBudgetMs=12000', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ focusOfferIds: ['<offerId1>','<offerId2>'] }) }).then(r => r.json())`
+        - This is the same mechanism the customer Plans page uses for on-demand templating (see below).
 - `/api/dashboard/plans` now prefers stored `requiredBucketKeys` and lazily backfills older RatePlans by deriving requirements from `rateStructure` (best-effort; never breaks offers).
 - `PLAN_CALC_QUARANTINE` queue items now include `missingBucketKeys` + `planCalcReasonCode` in `queueReason` JSON for reliable debugging/auditing.
 - Shows a compact banner when **NOT AVAILABLE** plans are present, with a one-click action to enable **“Show only AVAILABLE templates”**.
 - Status semantics: **AVAILABLE** now means "template is mapped *and* computable by the current plan-cost engine". Mapped-but-unsupported templates (e.g. TOU / variable until v2) show as **QUEUED** for calculation review.
+
+#### Dashboard: customer-triggered on-demand templating (QUEUED → attempt auto-parse)
+
+- **Goal**: When a customer triggers a plan search and the UI shows offers as **QUEUED because of `MISSING_TEMPLATE`**, we should automatically attempt to fetch + parse the offer’s EFL and create/link a template (bounded + fail-closed), instead of waiting for manual ops.
+- **Mechanism**:
+  - `app/dashboard/plans/PlansClient.tsx` detects offers whose `intelliwatt.statusLabel="QUEUED"` and `trueCostEstimate.status="MISSING_TEMPLATE"` (or `templateAvailable=false`) and then calls:
+    - `POST /api/dashboard/plans/prefetch` with body `{ focusOfferIds: string[] }`
+  - `app/api/dashboard/plans/prefetch/route.ts` prioritizes `focusOfferIds` first (still bounded by `maxOffers` + `timeBudgetMs`).
+- **Admin visibility / consistency**:
+  - When an offer cannot be auto-templated (missing EFL URL, fetch fails, PASS but not STRONG, etc.), it must show up in admin review as an OPEN `EflParseReviewQueue` row.
+  - Dedupe key must be stable per offer: `@@unique([kind, dedupeKey])` with `kind="EFL_PARSE"` and `dedupeKey=<offerId>` so repeated customer visits refresh the same queue row (no duplicates).
 
 ### Rate Engine Inventory (2025-12-19)
 

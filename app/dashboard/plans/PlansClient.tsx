@@ -357,9 +357,9 @@ export default function PlansClient() {
       .filter((o) => String(o?.intelliwatt?.statusLabel ?? "") === "QUEUED")
       .filter((o) => {
         const tceStatus = String((o as any)?.intelliwatt?.trueCostEstimate?.status ?? "").toUpperCase();
-        const templateAvailable = Boolean((o as any)?.intelliwatt?.templateAvailable);
+        const templateAvailableRaw = (o as any)?.intelliwatt?.templateAvailable;
         // Target only "missing template" queueing, not "missing usage" queueing.
-        return tceStatus === "MISSING_TEMPLATE" || templateAvailable === false;
+        return tceStatus === "MISSING_TEMPLATE" || templateAvailableRaw === false;
       })
       .filter((o) => Boolean((o as any)?.offerId))
       .slice(0, 6);
