@@ -1378,9 +1378,9 @@ export async function GET(req: NextRequest) {
 
       const template = ratePlanRow ? { rateStructure: ratePlanRow.rateStructure ?? null } : null;
 
-      // Prefer DB-backed template docs + cancellation fee + PUCT certificate when available.
-      // This avoids confusing supplier "schedule" strings like "$15/month remaining" when the EFL fact card stores "$150".
-      const dbCancelFeeText = strOrNull(ratePlanRow?.cancelFee);
+      // Prefer DB-backed template docs + PUCT certificate when available.
+      // Cancellation fee should follow WattBuy's presentation (can be a schedule like "$15/month remaining"),
+      // so we do NOT override offer-provided cancel_fee_text with RatePlan.cancelFee.
       const dbEflUrl = strOrNull(ratePlanRow?.eflUrl);
       const dbTosUrl = strOrNull(ratePlanRow?.tosUrl);
       const dbYracUrl = strOrNull(ratePlanRow?.yracUrl);
@@ -1396,7 +1396,6 @@ export async function GET(req: NextRequest) {
       const mergedDisclosures = {
         ...((base as any).disclosures ?? {}),
         ...(dbPuct ? { supplierPuctRegistration: dbPuct } : {}),
-        ...(dbCancelFeeText ? { cancellationFeeText: dbCancelFeeText } : {}),
         ...(dbTosUrl ? { tosUrl: dbTosUrl } : {}),
         ...(dbYracUrl ? { yracUrl: dbYracUrl } : {}),
       };
