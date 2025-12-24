@@ -249,11 +249,65 @@ export async function POST(req: NextRequest) {
       }
 
       // Run full pipeline (deterministic extract -> AI parse -> validate -> solver -> pass strength)
-      const pipeline = await runEflPipelineNoStore({
-        pdfBytes: pdf.pdfBytes,
-        source: "wattbuy",
-        offerMeta: { supplier, planName, termMonths, tdspName, offerId },
-      });
+      let pipeline: any = null;
+      try {
+        pipeline = await runEflPipelineNoStore({
+          pdfBytes: pdf.pdfBytes,
+          source: "wattbuy",
+          offerMeta: { supplier, planName, termMonths, tdspName, offerId },
+        });
+      } catch (e: any) {
+        // Fail-soft: one bad EFL should not 500 the entire endpoint (this route is called from the customer dashboard).
+        try {
+          const msg = e?.message ? String(e.message) : String(e);
+          const identity = eflUrl || "MISSING_EFL_URL";
+          const syntheticSha = sha256Hex(["dashboard_prefetch", "EFL_PARSE_EXCEPTION", offerId, identity].join("|"));
+          await (prisma as any).eflParseReviewQueue
+            .upsert({
+              where: { kind_dedupeKey: { kind: "EFL_PARSE", dedupeKey: offerId } },
+              create: {
+                source: "dashboard_prefetch",
+                kind: "EFL_PARSE",
+                dedupeKey: offerId,
+                eflPdfSha256: syntheticSha,
+                offerId,
+                supplier,
+                planName,
+                eflUrl,
+                tdspName,
+                termMonths,
+                finalStatus: "FAIL",
+                queueReason: `EFL pipeline exception: ${msg}`,
+                resolvedAt: null,
+                resolvedBy: null,
+                resolutionNotes: null,
+              },
+              update: {
+                updatedAt: new Date(),
+                kind: "EFL_PARSE",
+                dedupeKey: offerId,
+                eflPdfSha256: syntheticSha,
+                offerId,
+                supplier,
+                planName,
+                eflUrl,
+                tdspName,
+                termMonths,
+                finalStatus: "FAIL",
+                queueReason: `EFL pipeline exception: ${msg}`,
+                resolvedAt: null,
+                resolvedBy: null,
+                resolutionNotes: null,
+              },
+            })
+            .catch(() => null);
+          queued++;
+        } catch {
+          // ignore
+        }
+        results.push({ offerId, action: "QUEUED", reason: "EFL_PIPELINE_EXCEPTION" });
+        continue;
+      }
 
       const det = pipeline.deterministic;
       const finalValidation = pipeline.finalValidation ?? null;

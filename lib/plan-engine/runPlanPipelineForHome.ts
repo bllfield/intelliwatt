@@ -256,17 +256,70 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
       continue;
     }
 
-    const pipeline = await runEflPipelineNoStore({
-      pdfBytes: pdf.pdfBytes,
-      source: "wattbuy",
-      offerMeta: {
-        supplier: o?.supplier_name ?? null,
-        planName: o?.plan_name ?? null,
-        termMonths: typeof o?.term_months === "number" ? o.term_months : null,
-        tdspName: o?.distributor_name ?? null,
-        offerId,
-      },
-    });
+    let pipeline: any = null;
+    try {
+      pipeline = await runEflPipelineNoStore({
+        pdfBytes: pdf.pdfBytes,
+        source: "wattbuy",
+        offerMeta: {
+          supplier: o?.supplier_name ?? null,
+          planName: o?.plan_name ?? null,
+          termMonths: typeof o?.term_months === "number" ? o.term_months : null,
+          tdspName: o?.distributor_name ?? null,
+          offerId,
+        },
+      });
+    } catch (e: any) {
+      // Fail-soft: one bad/unparseable EFL should not crash the whole plan pipeline run.
+      templatesQueued++;
+      try {
+        const supplier = o?.supplier_name ?? null;
+        const planName = o?.plan_name ?? null;
+        const termMonths = typeof o?.term_months === "number" ? o.term_months : null;
+        const tdspName = o?.distributor_name ?? null;
+        const msg = e?.message ? String(e.message) : String(e);
+        const syntheticSha = sha256HexCache(["plan_pipeline", "EFL_PARSE_EXCEPTION", offerId, eflUrl].join("|"));
+        await (prisma as any).eflParseReviewQueue
+          .upsert({
+            where: { kind_dedupeKey: { kind: "EFL_PARSE", dedupeKey: offerId } },
+            create: {
+              source: "plan_pipeline",
+              kind: "EFL_PARSE",
+              dedupeKey: offerId,
+              eflPdfSha256: syntheticSha,
+              offerId,
+              supplier,
+              planName,
+              eflUrl,
+              tdspName,
+              termMonths,
+              finalStatus: "FAIL",
+              queueReason: `EFL pipeline exception: ${msg}`,
+              resolvedAt: null,
+              resolvedBy: null,
+              resolutionNotes: null,
+            },
+            update: {
+              updatedAt: new Date(),
+              eflPdfSha256: syntheticSha,
+              supplier,
+              planName,
+              eflUrl,
+              tdspName,
+              termMonths,
+              finalStatus: "FAIL",
+              queueReason: `EFL pipeline exception: ${msg}`,
+              resolvedAt: null,
+              resolvedBy: null,
+              resolutionNotes: null,
+            },
+          })
+          .catch(() => null);
+      } catch {
+        // ignore
+      }
+      continue;
+    }
 
     const det = pipeline.deterministic;
     const finalValidation = pipeline.finalValidation ?? null;
