@@ -1710,8 +1710,10 @@ export async function GET(req: NextRequest) {
         const tdspMonthly = Number(tdspRates?.monthlyCustomerChargeDollars ?? 0) || 0;
         const tdspEff = tdspRates?.effectiveDate ?? null;
         const rsSha = sha256HexCache(JSON.stringify(template.rateStructure ?? null));
+        // IMPORTANT: estimateMode must match the pipeline's cache keying to avoid "sorted by X but cards show Y".
+        // Pipeline keys by RatePlan.planCalcReasonCode (template-level), not the per-home derived planComputability.
         const estimateMode =
-          String((planComputability as any)?.reasonCode ?? (template as any)?.planCalcReasonCode ?? "").trim() === "INDEXED_APPROXIMATE_OK"
+          String((template as any)?.planCalcReasonCode ?? "").trim() === "INDEXED_APPROXIMATE_OK"
             ? ("INDEXED_EFL_ANCHOR_APPROX" as const)
             : ("DEFAULT" as const);
         const usageSha = hashUsageInputs({
