@@ -244,8 +244,6 @@ export default function PlansClient() {
     }
   }, [cacheKey, cacheTtlMs, isRenter]);
 
-  // Reset warmup/polling state when the result-set identity changes (filters/search/renter),
-  // so we don't keep polling with an old lifecycle window.
   useEffect(() => {
     prefetchInFlightRef.current = false;
     setPrefetchNote(null);
@@ -254,7 +252,7 @@ export default function PlansClient() {
     pollTimerRef.current = null;
     if (pollStopTimerRef.current) window.clearTimeout(pollStopTimerRef.current);
     pollStopTimerRef.current = null;
-  }, [filterKey]);
+  }, [warmupKey]);
 
   useEffect(() => {
     if (isRenter !== null) return;
@@ -1304,5 +1302,4 @@ export default function PlansClient() {
     </div>
   );
 }
-
 
