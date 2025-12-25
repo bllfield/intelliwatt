@@ -796,9 +796,8 @@ export async function GET(req: NextRequest) {
           return Number.POSITIVE_INFINITY;
         }
 
-        const tdspSlug = String((o as any)?.tdsp ?? (house as any)?.tdspSlug ?? "")
-          .trim()
-          .toLowerCase();
+        const tdspSlugRaw = (shapeOfferBase(o) as any)?.utility?.tdspSlug ?? null;
+        const tdspSlug = typeof tdspSlugRaw === "string" ? tdspSlugRaw.trim().toLowerCase() : "";
         let tdspRates: any | null = null;
         if (tdspSlug) {
           if (tdspCache.has(tdspSlug)) {
@@ -820,6 +819,10 @@ export async function GET(req: NextRequest) {
         const tdspMonthly = Number(tdspRates?.monthlyCustomerChargeDollars ?? 0) || 0;
         const tdspEff = tdspRates?.effectiveDate ?? null;
         const rsSha = sha256HexCache(JSON.stringify(calc.rateStructure ?? null));
+        const estimateMode =
+          String((calc as any)?.planCalcReasonCode ?? "").trim() === "INDEXED_APPROXIMATE_OK"
+            ? ("INDEXED_EFL_ANCHOR_APPROX" as const)
+            : ("DEFAULT" as const);
         const usageSha = hashUsageInputs({
           yearMonths: yearMonthsForCalc.length ? yearMonthsForCalc : lastNYearMonthsChicago(12),
           bucketKeys: Array.from(new Set(["kwh.m.all.total", ...((calc as any)?.requiredBucketKeys ?? [])])),
@@ -833,6 +836,7 @@ export async function GET(req: NextRequest) {
             tdsp: { per: tdspPer, monthly: tdspMonthly, effectiveDate: tdspEff },
             rsSha,
             usageSha,
+            estimateMode,
           }),
         );
 
@@ -1905,6 +1909,10 @@ export async function GET(req: NextRequest) {
           const tdspMonthly = Number(tdspRates?.monthlyCustomerChargeDollars ?? 0) || 0;
           const tdspEff = tdspRates?.effectiveDate ?? null;
           const rsSha = sha256HexCache(JSON.stringify(calc.rateStructure ?? null));
+          const estimateMode =
+            String((calc as any)?.planCalcReasonCode ?? "").trim() === "INDEXED_APPROXIMATE_OK"
+              ? ("INDEXED_EFL_ANCHOR_APPROX" as const)
+              : ("DEFAULT" as const);
           const usageSha = hashUsageInputs({
             yearMonths: yearMonthsForCalc.length ? yearMonthsForCalc : lastNYearMonthsChicago(12),
             bucketKeys: Array.from(new Set(["kwh.m.all.total", ...((calc as any)?.requiredBucketKeys ?? [])])),
@@ -1918,6 +1926,7 @@ export async function GET(req: NextRequest) {
               tdsp: { per: tdspPer, monthly: tdspMonthly, effectiveDate: tdspEff },
               rsSha,
               usageSha,
+              estimateMode,
             }),
           );
 
