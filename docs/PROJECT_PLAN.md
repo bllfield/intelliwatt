@@ -2425,7 +2425,7 @@ Guardrails
 - Dashboard Plans header: search/filter section is now globally **collapsible** (both mobile + desktop) so plan cards stay visible.
 - PlansClient: prevent double-fetch by gating `/api/dashboard/plans` until `isRenter` is resolved from localStorage, and use AbortController + request sequencing to cancel/ignore stale responses when params change.
 - True-cost: `/api/dashboard/plans` computes home-scoped costs from canonical usage buckets + TDSP (fail-closed). Unsupported/non-deterministic templates remain quarantined as `PLAN_CALC_QUARANTINE`.
-- Plans UX: **RECOMMENDED** badge is shown only after the list finishes loading/auto-prefetching; a prominent “Calculating…” banner + IntelliWattBot typing popup appears while results are still populating.
+- Plans UX: **RECOMMENDED** badge is shown only after the list finishes loading; a prominent “Calculating…” banner + IntelliWattBot typing popup appears while results are still populating (i.e., offers remain `QUEUED` because background jobs haven’t finished yet).
 
 Canonical home-scoped usage window (Dashboard + Plan Details)
 
@@ -2447,7 +2447,7 @@ Plan engine output cache (single source of truth)
   - **Plans list (`GET /api/dashboard/plans`) is cache-only**: never run the engine inline (prevents “recalculation” when changing sort/filter dropdowns).
   - **Plan detail (`GET /api/dashboard/plans/detail`) may compute on cache-miss** (bounded) and then persists to the cache.
   - **Compare (`GET /api/dashboard/plans/compare`) may compute on cache-miss** (bounded) and persists **both** offer and current-plan estimates to the cache.
-  - Background/template prefetch (or explicit warm calls) are responsible for filling cache for list views.
+  - Background/template prefetch (or explicit warm calls) are responsible for filling cache for list views. The customer `/dashboard/plans` page does **not** kick off pipeline/prefetch runs from UI interactions (sort/filter/pagination are display-only).
 - **Correctness invariant**: Card and detail must match; if they diverge, it means inputs (usage window/buckets/TDSP) were not canonicalized or the cache key was unstable.
 
 Client-side UX caching (not a source of truth)

@@ -131,6 +131,12 @@ function buildQuery(params: Record<string, string>) {
 }
 
 export default function PlansClient() {
+  // Customer UX guardrail:
+  // Sorting/filtering/pagination should only change the list being displayed and should NOT kick off
+  // background plan pipeline runs or EFL template prefetching from this page.
+  // Those warmups happen via the dashboard bootstrapper and admin tooling.
+  const ENABLE_PLANS_AUTO_WARMUPS = false;
+
   const [q, setQ] = useState("");
   const [rateType, setRateType] = useState<"all" | "fixed" | "variable" | "renewable" | "unknown">("all");
   const [term, setTerm] = useState<"all" | "0-6" | "7-12" | "13-24" | "25+">("all");
@@ -179,7 +185,7 @@ export default function PlansClient() {
   const warmupKey = useMemo(() => JSON.stringify({ isRenter }), [isRenter]);
   // Filter identity for throttling background warmups.
   // IMPORTANT: exclude pagination + refreshNonce so clicking "Next" doesn't retrigger,
-  // but DO include filters/sort/search so a new result set can still warm up.
+  // but DO include filters/search so a new result set can still warm up.
   const filterKey = useMemo(
     () =>
       JSON.stringify({
@@ -189,10 +195,9 @@ export default function PlansClient() {
         term,
         renewableMin,
         template,
-        sort,
         approxKwhPerMonth,
       }),
-    [isRenter, q, rateType, term, renewableMin, template, sort, approxKwhPerMonth],
+    [isRenter, q, rateType, term, renewableMin, template, approxKwhPerMonth],
   );
 
   // Server dataset identity: include all inputs that change the server response.
@@ -399,6 +404,7 @@ export default function PlansClient() {
   // kick the lightweight EFL-prefetch endpoint to auto-parse and create/link templates (best-effort).
   // This is safe even when usage is missing (templating does not require SMT/GreenButton usage).
   useEffect(() => {
+    if (!ENABLE_PLANS_AUTO_WARMUPS) return;
     if (isRenter === null) return;
     if (!resp?.ok) return;
     const offersNow = Array.isArray(resp?.offers) ? (resp!.offers as OfferRow[]) : [];
@@ -416,7 +422,7 @@ export default function PlansClient() {
 
     if (missingTemplate.length <= 0) return;
 
-    const sessionKey = `plans_template_prefetch_v2:${filterKey}`;
+    const sessionKey = `plans_template_prefetch_v3:${warmupKey}`;
     const now = Date.now();
     let lastKickAt: number | null = null;
     try {
@@ -463,11 +469,12 @@ export default function PlansClient() {
 
     run();
     return () => controller.abort();
-  }, [resp?.ok, resp?.offers, isRenter, filterKey]);
+  }, [resp?.ok, resp?.offers, isRenter, warmupKey, ENABLE_PLANS_AUTO_WARMUPS]);
 
   // Fallback warm-up: if the user lands on /dashboard/plans before background warm-up ran,
   // kick the plan pipeline once per session and poll until queued clears (or timeout).
   useEffect(() => {
+    if (!ENABLE_PLANS_AUTO_WARMUPS) return;
     if (isRenter === null) return;
     if (!resp?.ok) return;
     if (!resp?.hasUsage) return;
@@ -479,7 +486,7 @@ export default function PlansClient() {
     }).length;
     if (pendingCountNow <= 0) return;
 
-    const sessionKey = `plans_pipeline_kick_v5:${filterKey}`;
+    const sessionKey = `plans_pipeline_kick_v6:${warmupKey}`;
     const now = Date.now();
     let lastKickAt: number | null = null;
     try {
@@ -573,7 +580,7 @@ export default function PlansClient() {
     return () => {
       // keep timers running across renders; cleaned up in serverDatasetKey effect
     };
-  }, [resp?.ok, resp?.hasUsage, resp?.offers, isRenter, filterKey]);
+  }, [resp?.ok, resp?.hasUsage, resp?.offers, isRenter, warmupKey, ENABLE_PLANS_AUTO_WARMUPS]);
 
   // Cleanup on unmount (defensive: prevents polling leaks if the component tree changes).
   useEffect(() => {
