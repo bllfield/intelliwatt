@@ -892,7 +892,8 @@ export async function GET(req: NextRequest) {
               const c = candidateByIdx.get(idx) ?? null;
               if (c) {
                 const cached = cacheMap.get(keyOf(c.requestKey, c.inputsSha256)) ?? null;
-                if (cached && (cached as any).status === "OK") {
+                const st = String((cached as any)?.status ?? "").trim().toUpperCase();
+                if (cached && (st === "OK" || st === "APPROXIMATE")) {
                   const vv = Number((cached as any)?.monthlyCostDollars);
                   v = Number.isFinite(vv) ? vv : Number.POSITIVE_INFINITY;
                 }
@@ -1971,7 +1972,8 @@ export async function GET(req: NextRequest) {
             monthsCount,
           });
           // Cache-only mode: never compute inline in plans list.
-          if (!cached || (cached as any).status !== "OK") return Number.POSITIVE_INFINITY;
+          const st = String((cached as any)?.status ?? "").trim().toUpperCase();
+          if (!cached || !(st === "OK" || st === "APPROXIMATE")) return Number.POSITIVE_INFINITY;
           const v = Number((cached as any)?.monthlyCostDollars);
           return Number.isFinite(v) ? v : Number.POSITIVE_INFINITY;
         };
