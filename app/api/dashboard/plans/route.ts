@@ -1690,33 +1690,9 @@ export async function GET(req: NextRequest) {
         });
         if (cached) return cached;
 
-        // Compute inline as a safe fallback (fast: uses prebuilt monthly/daily buckets already loaded above),
-        // then persist so every surface reads the same plan-engine output.
-        const computed = estimateTrueCost({
-          annualKwh: annualKwhForCalc,
-          monthsCount,
-          rateStructure: template.rateStructure,
-          usageBucketsByMonth: usageBucketsByMonthForCalc,
-          tdspRates: {
-            perKwhDeliveryChargeCents: tdspPer,
-            monthlyCustomerChargeDollars: tdspMonthly,
-            effectiveDate: tdspEff,
-          },
-          estimateMode,
-        });
-        try {
-          await putCachedPlanEstimate({
-            houseAddressId: house.id,
-            ratePlanId: cacheRatePlanId,
-            esiid: (house as any)?.esiid ?? null,
-            inputsSha256,
-            monthsCount,
-            payloadJson: computed,
-          });
-        } catch {
-          // ignore cache write failures; still return computed
-        }
-        return computed;
+        // IMPORTANT: Plans list must be cache-only so sort/filter/pagination never triggers engine work.
+        // Cache warm-up happens via `/api/dashboard/plans/pipeline` (dashboard bootstrap) or admin tooling.
+        return { status: "NOT_IMPLEMENTED", reason: "CACHE_MISS" };
       })();
 
       // If an offer is template-mapped but the engine returns NOT_COMPUTABLE, it MUST be visible in admin review.
