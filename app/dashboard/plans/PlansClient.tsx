@@ -422,7 +422,9 @@ export default function PlansClient() {
 
     if (missingTemplate.length <= 0) return;
 
-    const sessionKey = `plans_template_prefetch_v3:${warmupKey}`;
+    // Throttle is per-filter result set (not just per-session) so different searches/filters
+    // can warm up independently if auto-warmups are re-enabled.
+    const sessionKey = `plans_template_prefetch_v3:${filterKey}`;
     const now = Date.now();
     let lastKickAt: number | null = null;
     try {
@@ -469,7 +471,7 @@ export default function PlansClient() {
 
     run();
     return () => controller.abort();
-  }, [resp?.ok, resp?.offers, isRenter, warmupKey, ENABLE_PLANS_AUTO_WARMUPS]);
+  }, [resp?.ok, resp?.offers, isRenter, filterKey, ENABLE_PLANS_AUTO_WARMUPS]);
 
   // Fallback warm-up: if the user lands on /dashboard/plans before background warm-up ran,
   // kick the plan pipeline once per session and poll until queued clears (or timeout).
@@ -486,7 +488,9 @@ export default function PlansClient() {
     }).length;
     if (pendingCountNow <= 0) return;
 
-    const sessionKey = `plans_pipeline_kick_v6:${warmupKey}`;
+    // Throttle is per-filter result set (not just per-session) so different searches/filters
+    // can warm up independently if auto-warmups are re-enabled.
+    const sessionKey = `plans_pipeline_kick_v6:${filterKey}`;
     const now = Date.now();
     let lastKickAt: number | null = null;
     try {
@@ -580,7 +584,7 @@ export default function PlansClient() {
     return () => {
       // keep timers running across renders; cleaned up in serverDatasetKey effect
     };
-  }, [resp?.ok, resp?.hasUsage, resp?.offers, isRenter, warmupKey, ENABLE_PLANS_AUTO_WARMUPS]);
+  }, [resp?.ok, resp?.hasUsage, resp?.offers, isRenter, filterKey, ENABLE_PLANS_AUTO_WARMUPS]);
 
   // Cleanup on unmount (defensive: prevents polling leaks if the component tree changes).
   useEffect(() => {
