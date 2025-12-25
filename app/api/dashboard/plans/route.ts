@@ -9,6 +9,7 @@ import { calculatePlanCostForUsage } from "@/lib/plan-engine/calculatePlanCostFo
 import { getTdspDeliveryRates } from "@/lib/plan-engine/getTdspDeliveryRates";
 import { estimateTrueCost } from "@/lib/plan-engine/estimateTrueCost";
 import { getCachedPlanEstimate, putCachedPlanEstimate, sha256Hex as sha256HexCache } from "@/lib/plan-engine/planEstimateCache";
+import { wattbuyOffersPrisma } from "@/lib/db/wattbuyOffersClient";
 import { usagePrisma } from "@/lib/db/usageClient";
 import { ensureCoreMonthlyBuckets } from "@/lib/usage/aggregateMonthlyBuckets";
 import { buildUsageBucketsForEstimate } from "@/lib/usage/buildUsageBucketsForEstimate";
@@ -783,38 +784,48 @@ export async function GET(req: NextRequest) {
       // Best-for-you: sort by the real monthly total estimate (lowest → highest).
       // Fail-closed: plans that cannot compute for this home sort to the bottom.
       const tdspCache = new Map<string, any | null>();
-      const scoreMonthly = async (o: OfferNormalized): Promise<number> => {
-        if (annualKwhForCalc == null) return Number.POSITIVE_INFINITY;
-        const offerId = String((o as any)?.offer_id ?? "");
-        if (!offerId) return Number.POSITIVE_INFINITY;
+
+      const getTdsp = async (tdspSlug: string): Promise<any | null> => {
+        const key = String(tdspSlug ?? "").trim().toLowerCase();
+        if (!key) return null;
+        if (tdspCache.has(key)) return tdspCache.get(key) ?? null;
+        let tdspRates: any | null = null;
+        try {
+          tdspRates = await getTdspDeliveryRates({ tdspSlug: key, asOf: new Date() });
+        } catch {
+          tdspRates = null;
+        }
+        tdspCache.set(key, tdspRates);
+        return tdspRates;
+      };
+
+      // Batch-read cached estimates to avoid N-per-offer DB queries (which can timeout on Vercel).
+      const ENDPOINT = "PLAN_ENGINE_ESTIMATE_V1";
+      const monthsCount = 12;
+      const buildRequestKey = (ratePlanId: string) => `plan_estimate|ratePlanId=${ratePlanId}|months=${monthsCount}`;
+      const keyOf = (requestKey: string, payloadSha256: string) => `${requestKey}|${payloadSha256}`;
+
+      const candidates: Array<{ idx: number; requestKey: string; inputsSha256: string }> = [];
+      const candidateByIdx = new Map<number, { requestKey: string; inputsSha256: string }>();
+      for (let idx = 0; idx < offers.length; idx++) {
+        const o = offers[idx] as any;
+        if (annualKwhForCalc == null) continue;
+        const offerId = String(o?.offer_id ?? "");
+        if (!offerId) continue;
 
         const ratePlanId = mapByOfferId.get(offerId) ?? null;
-        if (!ratePlanId) return Number.POSITIVE_INFINITY;
+        if (!ratePlanId) continue;
 
         const calc = planCalcByRatePlanId.get(ratePlanId) ?? null;
-        if (!calc || calc.planCalcStatus !== "COMPUTABLE" || !calc.rateStructurePresent || !calc.rateStructure) {
-          return Number.POSITIVE_INFINITY;
-        }
+        if (!calc || calc.planCalcStatus !== "COMPUTABLE" || !calc.rateStructurePresent || !calc.rateStructure) continue;
 
-        const tdspSlugRaw = (shapeOfferBase(o) as any)?.utility?.tdspSlug ?? null;
-        const tdspSlug = typeof tdspSlugRaw === "string" ? tdspSlugRaw.trim().toLowerCase() : "";
-        let tdspRates: any | null = null;
-        if (tdspSlug) {
-          if (tdspCache.has(tdspSlug)) {
-            tdspRates = tdspCache.get(tdspSlug) ?? null;
-          } else {
-            try {
-              tdspRates = await getTdspDeliveryRates({ tdspSlug, asOf: new Date() });
-            } catch {
-              tdspRates = null;
-            }
-            tdspCache.set(tdspSlug, tdspRates);
-          }
-        }
-        if (!tdspRates) return Number.POSITIVE_INFINITY;
+        // OfferNormalized already includes a normalized TDSP slug (oncor/centerpoint/tnmp/aep_n/aep_c).
+        const tdspSlug = String((o as any)?.tdsp ?? "").trim().toLowerCase();
+        if (!tdspSlug) continue;
 
-        // IMPORTANT: use the same DB cache as the card payload (compute once → reuse).
-        const monthsCount = 12;
+        const tdspRates = await getTdsp(tdspSlug);
+        if (!tdspRates) continue;
+
         const tdspPer = Number(tdspRates?.perKwhDeliveryChargeCents ?? 0) || 0;
         const tdspMonthly = Number(tdspRates?.monthlyCustomerChargeDollars ?? 0) || 0;
         const tdspEff = tdspRates?.effectiveDate ?? null;
@@ -840,21 +851,59 @@ export async function GET(req: NextRequest) {
           }),
         );
 
-        const cached = await getCachedPlanEstimate({
-          houseAddressId: house.id,
-          ratePlanId,
-          inputsSha256,
-          monthsCount,
-        });
-        // IMPORTANT: plans list is cache-only; never compute inline (avoids "recalculation" on dropdown changes).
-        if (!cached || (cached as any).status !== "OK") return Number.POSITIVE_INFINITY;
-        const v = Number((cached as any)?.monthlyCostDollars);
-        return Number.isFinite(v) ? v : Number.POSITIVE_INFINITY;
-      };
+        const requestKey = buildRequestKey(ratePlanId);
+        const row = { idx, requestKey, inputsSha256 };
+        candidates.push(row);
+        candidateByIdx.set(idx, { requestKey, inputsSha256 });
+      }
 
-      const withKey = await Promise.all(
-        offers.map(async (o, idx) => ({ o, idx, v: await scoreMonthly(o) })),
-      );
+      const cacheMap = new Map<string, any>();
+      try {
+        const requestKeys = Array.from(new Set(candidates.map((c) => c.requestKey)));
+        const payloadShas = Array.from(new Set(candidates.map((c) => c.inputsSha256)));
+        // NOTE: this may return extra rows (cross-product); we de-dupe to newest by ordering desc.
+        const rows = await (wattbuyOffersPrisma as any).wattBuyApiSnapshot.findMany({
+          where: {
+            endpoint: ENDPOINT,
+            houseAddressId: house.id,
+            requestKey: { in: requestKeys },
+            payloadSha256: { in: payloadShas },
+          },
+          orderBy: { createdAt: "desc" },
+          select: { requestKey: true, payloadSha256: true, payloadJson: true },
+        });
+        for (const r of rows ?? []) {
+          const k = keyOf(String(r?.requestKey ?? ""), String(r?.payloadSha256 ?? ""));
+          if (!cacheMap.has(k)) cacheMap.set(k, r?.payloadJson ?? null);
+        }
+      } catch {
+        // ignore; fall through with empty cacheMap
+      }
+
+      const withKey = offers.map((o, idx) => {
+        // Default: fail-closed to bottom.
+        let v = Number.POSITIVE_INFINITY;
+        try {
+          const offerId = String((o as any)?.offer_id ?? "");
+          const ratePlanId = offerId ? (mapByOfferId.get(offerId) ?? null) : null;
+          if (ratePlanId) {
+            const calc = planCalcByRatePlanId.get(ratePlanId) ?? null;
+            if (calc && calc.planCalcStatus === "COMPUTABLE" && calc.rateStructurePresent && calc.rateStructure) {
+              const c = candidateByIdx.get(idx) ?? null;
+              if (c) {
+                const cached = cacheMap.get(keyOf(c.requestKey, c.inputsSha256)) ?? null;
+                if (cached && (cached as any).status === "OK") {
+                  const vv = Number((cached as any)?.monthlyCostDollars);
+                  v = Number.isFinite(vv) ? vv : Number.POSITIVE_INFINITY;
+                }
+              }
+            }
+          }
+        } catch {
+          v = Number.POSITIVE_INFINITY;
+        }
+        return { o, idx, v };
+      });
       withKey.sort((a, b) => {
         if (a.v < b.v) return -1;
         if (a.v > b.v) return 1;
@@ -1809,6 +1858,15 @@ export async function GET(req: NextRequest) {
     let bestOffersAllInDisclaimer: string | null = null;
     try {
       if (hasUsage) {
+        // Only compute strips on page 1. They are not used on later pages and can be expensive.
+        if (safePage !== 1) {
+          bestOffers = [];
+          bestOffersBasis = null;
+          bestOffersDisclaimer = null;
+          bestOffersAllIn = [];
+          bestOffersAllInBasis = null;
+          bestOffersAllInDisclaimer = null;
+        } else {
         // Respect the UI's kWh sort selection when computing the proxy-ranked Best Plans strip.
         // If the user is sorting by 500/2000, bestOffers should match that anchor (not hardcode 1000).
         const bestBucket: EflBucket = (() => {
@@ -1862,8 +1920,8 @@ export async function GET(req: NextRequest) {
             return Number.POSITIVE_INFINITY;
           }
 
-          const tdspSlugRaw = (shapeOfferBase(o) as any)?.utility?.tdspSlug ?? null;
-          const tdspSlug = typeof tdspSlugRaw === "string" ? tdspSlugRaw.trim().toLowerCase() : "";
+          // OfferNormalized already includes a normalized TDSP slug (oncor/centerpoint/tnmp/aep_n/aep_c).
+          const tdspSlug = String(o?.tdsp ?? "").trim().toLowerCase();
           let tdspRates: any | null = null;
           if (tdspSlug) {
             if (allInTdspCache.has(tdspSlug)) {
@@ -1933,6 +1991,7 @@ export async function GET(req: NextRequest) {
           bestOffersAllInBasis = "proxy_allin_monthly_trueCostEstimate";
           bestOffersAllInDisclaimer =
             "Includes TDSP delivery. Ranked by IntelliWatt all-in estimate using your usage buckets (excludes non-deterministic/indexed/unsupported plans).";
+        }
         }
       } else {
         // No-usage mode: rank bestOffers by selected approximate monthly usage, mapped to nearest EFL bucket.
