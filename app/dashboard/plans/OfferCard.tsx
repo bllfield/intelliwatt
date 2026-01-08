@@ -33,6 +33,7 @@ type OfferRow = {
   intelliwatt: {
     templateAvailable: boolean;
     ratePlanId?: string;
+    // Internal server status; customer UI maps this to friendly language.
     statusLabel: "AVAILABLE" | "QUEUED";
     statusReason?: string | null;
     usageKwhPerMonth?: number;
@@ -58,8 +59,17 @@ type OfferRow = {
             totalDollars?: number;
           };
         }
+      | {
+          status: "APPROXIMATE";
+          annualCostDollars: number;
+          monthlyCostDollars: number;
+          effectiveCentsPerKwh?: number;
+          confidence?: "LOW" | "MEDIUM";
+          componentsV2?: any;
+        }
       | { status: "MISSING_USAGE" }
       | { status: "MISSING_TEMPLATE" }
+      | { status: "NOT_COMPUTABLE"; reason?: string }
       | { status: "NOT_IMPLEMENTED" };
     tdspRatesApplied?:
       | {
@@ -87,9 +97,9 @@ function fmtDollars2(v: number | undefined): string | null {
   return v.toFixed(2);
 }
 
-function badgeClasses(status: OfferRow["intelliwatt"]["statusLabel"]): string {
-  if (status === "AVAILABLE") return "border-emerald-400/40 bg-emerald-500/10 text-emerald-200";
-  if (status === "QUEUED") return "border-amber-400/40 bg-amber-500/10 text-amber-200";
+function badgeClasses(kind: "AVAILABLE" | "NEED_USAGE" | "NOT_COMPUTABLE_YET"): string {
+  if (kind === "AVAILABLE") return "border-emerald-400/40 bg-emerald-500/10 text-emerald-200";
+  if (kind === "NEED_USAGE") return "border-brand-blue/30 bg-brand-blue/10 text-brand-blue";
   return "border-amber-400/40 bg-amber-500/10 text-amber-200";
 }
 
@@ -109,12 +119,15 @@ export default function OfferCard({ offer, recommended }: OfferCardProps) {
   const yracUrl = offer.efl?.yracUrl ?? (offer as any)?.disclosures?.yracUrl ?? null;
   const status = offer.intelliwatt.statusLabel;
   const tce = offer.intelliwatt?.trueCostEstimate as any;
-  const isCalculating = String(tce?.status ?? "").toUpperCase() === "QUEUED";
   const isUnsupported =
     String((offer as any)?.intelliwatt?.planComputability?.status ?? "").toUpperCase() === "NOT_COMPUTABLE" ||
     String(tce?.status ?? "").toUpperCase() === "NOT_COMPUTABLE";
 
-  const statusText = status;
+  // Customer-facing status language (never show "QUEUED").
+  const tceStatus = String(tce?.status ?? "").toUpperCase();
+  const statusKind: "AVAILABLE" | "NEED_USAGE" | "NOT_COMPUTABLE_YET" =
+    tceStatus === "MISSING_USAGE" ? "NEED_USAGE" : status === "AVAILABLE" ? "AVAILABLE" : "NOT_COMPUTABLE_YET";
+  const statusText = statusKind === "NEED_USAGE" ? "NEED USAGE" : statusKind === "AVAILABLE" ? "AVAILABLE" : "NOT COMPUTABLE YET";
 
   // tce already read above
   const showEstimateLine = tce?.status === "OK" || tce?.status === "APPROXIMATE";
@@ -177,18 +190,12 @@ export default function OfferCard({ offer, recommended }: OfferCardProps) {
           ) : null}
           <div
             className={`rounded-full border px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.22em] ${badgeClasses(
-              status,
+              statusKind,
             )}`}
             title={offer.intelliwatt.ratePlanId ? `RatePlan: ${offer.intelliwatt.ratePlanId}` : undefined}
           >
             {statusText}
           </div>
-
-          {isCalculating ? (
-            <div className="rounded-full border border-brand-blue/30 bg-brand-blue/10 px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.22em] text-brand-blue">
-              CALCULATING
-            </div>
-          ) : null}
 
           {isUnsupported ? (
             <div className="rounded-full border border-amber-400/40 bg-amber-500/10 px-3 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.22em] text-amber-200">

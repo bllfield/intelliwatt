@@ -516,10 +516,10 @@ model EflParseReviewQueue {
   /// Source of this record, e.g. "wattbuy_batch", "manual_upload".
   source String
 
-  kind      QueueKind @default(EFL_PARSE)
+  kind       QueueKind @default(EFL_PARSE)
   /// Cross-kind dedupe key used for schema-level de-duplication.
   /// Note: kept default/triggered for EFL_PARSE so existing writers don't need code changes.
-  dedupeKey String    @default("")
+  dedupeKey  String    @default("")
   /// Optional but helpful for PLAN_CALC_QUARANTINE items.
   ratePlanId String?
 
@@ -553,8 +553,8 @@ model EflParseReviewQueue {
   resolvedBy      String?
   resolutionNotes String?   @db.Text
 
-  @@index([finalStatus, createdAt])
   @@unique([kind, dedupeKey])
+  @@index([finalStatus, createdAt])
 }
 
 model OfferAudit {
@@ -980,12 +980,12 @@ model RatePlan {
   rateStructure           Json?
 
   // IntelliWatt plan-calc persistence (derived from template; stable for auditing)
-  planCalcVersion     Int      @default(1)
-  planCalcStatus      String?  // "COMPUTABLE" | "NOT_COMPUTABLE" | "UNKNOWN"
-  planCalcReasonCode  String?  // e.g. "FIXED_RATE_OK", "UNSUPPORTED_RATE_STRUCTURE", "MISSING_TEMPLATE"
-  requiredBucketKeys  String[] @default([])
-  supportedFeatures   Json?
-  planCalcDerivedAt   DateTime?
+  planCalcVersion    Int       @default(1)
+  planCalcStatus     String? // "COMPUTABLE" | "NOT_COMPUTABLE" | "UNKNOWN"
+  planCalcReasonCode String? // e.g. "FIXED_RATE_OK", "UNSUPPORTED_RATE_STRUCTURE", "MISSING_TEMPLATE"
+  requiredBucketKeys String[]  @default([])
+  supportedFeatures  Json?
+  planCalcDerivedAt  DateTime?
 
   isUtilityTariff Boolean   @default(false)
   tariffStructure Json?
@@ -1000,6 +1000,46 @@ model RatePlan {
 
   @@unique([utilityId, state, supplier, planName, termMonths, isUtilityTariff])
   @@index([utilityId, state, termMonths])
+}
+
+/// Materialized, home-scoped plan estimates (single source of truth for customer/admin UI).
+/// Keying is engine-pure so every call site reads the same row for the same inputs.
+model PlanEstimateMaterialized {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// Home identity (HouseAddress.id)
+  houseAddressId String
+  /// Template identity (RatePlan.id)
+  ratePlanId     String
+
+  /// Canonical engine input fingerprint (includes engine version, TDSP, usage digest, rateStructure hash, estimateMode, etc.)
+  inputsSha256 String
+  monthsCount  Int    @default(12)
+
+  /// Engine output status (e.g. "OK", "APPROXIMATE", "MISSING_USAGE", "MISSING_TEMPLATE", "NOT_COMPUTABLE", "NOT_IMPLEMENTED")
+  status String
+  /// Optional human/debug reason (stable codes preferred)
+  reason String?
+
+  annualCostDollars    Float?
+  monthlyCostDollars   Float?
+  effectiveCentsPerKwh Float?
+
+  confidence       String? // e.g. "LOW" | "MEDIUM"
+  componentsV2     Json?
+  tdspRatesApplied Json?
+
+  computedAt DateTime?
+  /// Refresh cadence (default policy: 30 days, or earlier when inputs change which yields a new inputsSha256 anyway)
+  expiresAt  DateTime?
+
+  @@unique([houseAddressId, ratePlanId, inputsSha256])
+  @@index([houseAddressId])
+  @@index([ratePlanId])
+  @@index([houseAddressId, ratePlanId])
+  @@index([computedAt])
 }
 
 /// IntelliWattBot - per-page guidance messages shown across customer dashboard pages.

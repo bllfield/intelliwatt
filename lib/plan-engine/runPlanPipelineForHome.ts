@@ -1,5 +1,3 @@
-import crypto from "node:crypto";
-
 import { prisma } from "@/lib/db";
 import { usagePrisma } from "@/lib/db/usageClient";
 import { wattbuy } from "@/lib/wattbuy";
@@ -13,48 +11,19 @@ import { buildUsageBucketsForEstimate } from "@/lib/usage/buildUsageBucketsForEs
 import { getTdspDeliveryRates } from "@/lib/plan-engine/getTdspDeliveryRates";
 import { estimateTrueCost } from "@/lib/plan-engine/estimateTrueCost";
 import { getCachedPlanEstimate, putCachedPlanEstimate, sha256Hex as sha256HexCache } from "@/lib/plan-engine/planEstimateCache";
+import { PLAN_ENGINE_ESTIMATE_VERSION, makePlanEstimateInputsSha256 } from "@/lib/plan-engine/estimateInputsKey";
+import { upsertMaterializedPlanEstimate } from "@/lib/plan-engine/materializedEstimateStore";
 import { isComputableOverride } from "@/lib/plan-engine/planCalcOverrides";
 import { derivePlanCalcRequirementsFromTemplate } from "@/lib/plan-engine/planComputability";
 import { isPlanCalcQuarantineWorthyReasonCode } from "@/lib/plan-engine/planCalcQuarantine";
 import { getLatestPlanPipelineJob, shouldStartPlanPipelineJob, writePlanPipelineJobSnapshot } from "@/lib/plan-engine/planPipelineJob";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const PLAN_ENGINE_ESTIMATE_VERSION = "estimateTrueCost_v4";
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n));
 }
 
-function hashUsageInputs(args: {
-  yearMonths: string[];
-  bucketKeys: string[];
-  usageBucketsByMonth: Record<string, Record<string, number>>;
-}): string {
-  const h = crypto.createHash("sha256");
-  const yearMonths = Array.isArray(args.yearMonths) ? args.yearMonths : [];
-  const keys = Array.isArray(args.bucketKeys) ? args.bucketKeys.map(String).filter(Boolean).sort() : [];
-
-  h.update("ym:");
-  h.update(yearMonths.join(","));
-  h.update("|keys:");
-  h.update(keys.join(","));
-  h.update("|vals:");
-  for (const ym of yearMonths) {
-    h.update(ym);
-    h.update("{");
-    const m = args.usageBucketsByMonth?.[ym] ?? {};
-    for (const k of keys) {
-      const v = (m as any)[k];
-      const n = typeof v === "number" && Number.isFinite(v) ? v : null;
-      h.update(k);
-      h.update("=");
-      h.update(n == null ? "null" : n.toFixed(6));
-      h.update(";");
-    }
-    h.update("}");
-  }
-  return h.digest("hex");
-}
 
 export type RunPlanPipelineForHomeArgs = {
   homeId: string;
@@ -487,12 +456,6 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
   const tdspMonthly = Number(tdspRates?.monthlyCustomerChargeDollars ?? 0) || 0;
   const tdspEff = tdspRates?.effectiveDate ?? null;
 
-  const usageSha = hashUsageInputs({
-    yearMonths: yearMonthsForCalc,
-    bucketKeys: Array.from(unionKeys),
-    usageBucketsByMonth: usageBucketsByMonthForCalc,
-  });
-
   let estimatesComputed = 0;
   let estimatesAlreadyCached = 0;
   let estimatesConsidered = 0;
@@ -541,6 +504,11 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
       ratePlansMissingRateStructure++;
       continue;
     }
+
+    // For estimate keying we need the per-plan required bucket keys; keep it stable regardless of which branch we take.
+    let requiredBucketKeysForKey: string[] = Array.isArray((rp as any)?.requiredBucketKeys)
+      ? ((rp as any).requiredBucketKeys as any[]).map((k) => String(k))
+      : [];
 
     const overridden = isComputableOverride(rp?.planCalcStatus, rp?.planCalcReasonCode);
     if (!overridden) {
@@ -647,6 +615,7 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
 
       // Ensure required buckets are present in the stitched bucket union we built above.
       const requiredKeys = Array.isArray(derived?.requiredBucketKeys) ? (derived.requiredBucketKeys as string[]) : [];
+      requiredBucketKeysForKey = requiredKeys.map((k) => String(k));
       const missing = requiredKeys.filter((k) => !unionKeys.has(String(k ?? "").trim()));
       if (missing.length > 0) {
         ratePlansMissingRequiredKeys++;
@@ -654,27 +623,51 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
       }
     }
 
-    const rsSha = sha256HexCache(JSON.stringify(rateStructure ?? null));
     const estimateMode =
       String((rp as any)?.planCalcReasonCode ?? "").trim() === "INDEXED_APPROXIMATE_OK"
         ? ("INDEXED_EFL_ANCHOR_APPROX" as const)
         : ("DEFAULT" as const);
-    const inputsSha256 = sha256HexCache(
-      JSON.stringify({
-        v: PLAN_ENGINE_ESTIMATE_VERSION,
-        monthsCount: 12,
-        annualKwh: Number(annualKwhForCalc.toFixed(6)),
-        tdsp: { per: tdspPer, monthly: tdspMonthly, effectiveDate: tdspEff },
-        rsSha,
-        usageSha,
-        estimateMode,
-      }),
-    );
+    const { inputsSha256 } = makePlanEstimateInputsSha256({
+      monthsCount: 12,
+      annualKwh: annualKwhForCalc,
+      tdsp: { perKwhDeliveryChargeCents: tdspPer, monthlyCustomerChargeDollars: tdspMonthly, effectiveDate: tdspEff },
+      rateStructure,
+      yearMonths: yearMonthsForCalc,
+      requiredBucketKeys: requiredBucketKeysForKey,
+      usageBucketsByMonth: usageBucketsByMonthForCalc,
+      estimateMode,
+    });
 
     estimatesConsidered++;
     const cached = await getCachedPlanEstimate({ houseAddressId: homeId, ratePlanId, inputsSha256, monthsCount: 12 });
     if (cached) {
       estimatesAlreadyCached++;
+
+      // Migration: also ensure the new materialized store is populated (best-effort).
+      try {
+        const computedAt = new Date();
+        await upsertMaterializedPlanEstimate({
+          houseAddressId: homeId,
+          ratePlanId,
+          inputsSha256,
+          monthsCount: 12,
+          computedAt,
+          expiresAt: new Date(computedAt.getTime() + monthlyCadenceDays * DAY_MS),
+          payload: {
+            status: String((cached as any)?.status ?? "NOT_IMPLEMENTED") as any,
+            reason: typeof (cached as any)?.reason === "string" ? (cached as any).reason : null,
+            annualCostDollars: typeof (cached as any)?.annualCostDollars === "number" ? (cached as any).annualCostDollars : null,
+            monthlyCostDollars: typeof (cached as any)?.monthlyCostDollars === "number" ? (cached as any).monthlyCostDollars : null,
+            effectiveCentsPerKwh:
+              typeof (cached as any)?.effectiveCentsPerKwh === "number" ? (cached as any).effectiveCentsPerKwh : null,
+            confidence: ((cached as any)?.confidence as any) ?? null,
+            componentsV2: (cached as any)?.componentsV2 ?? null,
+            tdspRatesApplied: (cached as any)?.tdspRatesApplied ?? null,
+          },
+        });
+      } catch {
+        // ignore
+      }
 
       // If we previously quarantined this offer due to a transient estimate issue (e.g. bucket sum drift),
       // and the cached estimate is now OK/APPROX, auto-resolve the OPEN quarantine row so it doesn't "stick"
@@ -716,6 +709,32 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
     });
 
     await putCachedPlanEstimate({ houseAddressId: homeId, ratePlanId, esiid: house.esiid ?? null, inputsSha256, monthsCount: 12, payloadJson: est });
+
+    // vNext single source of truth: write to materialized store (best-effort).
+    try {
+      const computedAt = new Date();
+      await upsertMaterializedPlanEstimate({
+        houseAddressId: homeId,
+        ratePlanId,
+        inputsSha256,
+        monthsCount: 12,
+        computedAt,
+        expiresAt: new Date(computedAt.getTime() + monthlyCadenceDays * DAY_MS),
+        payload: {
+          status: String((est as any)?.status ?? "NOT_IMPLEMENTED") as any,
+          reason: typeof (est as any)?.reason === "string" ? (est as any).reason : null,
+          annualCostDollars: typeof (est as any)?.annualCostDollars === "number" ? (est as any).annualCostDollars : null,
+          monthlyCostDollars: typeof (est as any)?.monthlyCostDollars === "number" ? (est as any).monthlyCostDollars : null,
+          effectiveCentsPerKwh:
+            typeof (est as any)?.effectiveCentsPerKwh === "number" ? (est as any).effectiveCentsPerKwh : null,
+          confidence: ((est as any)?.confidence as any) ?? null,
+          componentsV2: (est as any)?.componentsV2 ?? null,
+          tdspRatesApplied: (est as any)?.tdspRatesApplied ?? null,
+        },
+      });
+    } catch {
+      // ignore
+    }
     estimatesComputed++;
 
     // System-caught quarantines: if the engine returns NOT_COMPUTABLE for a plan we tried to compute,

@@ -9,11 +9,12 @@ import { calculatePlanCostForUsage } from "@/lib/plan-engine/calculatePlanCostFo
 import { getTdspDeliveryRates } from "@/lib/plan-engine/getTdspDeliveryRates";
 import { estimateTrueCost } from "@/lib/plan-engine/estimateTrueCost";
 import { getCachedPlanEstimate, putCachedPlanEstimate, sha256Hex as sha256HexCache } from "@/lib/plan-engine/planEstimateCache";
+import { PLAN_ENGINE_ESTIMATE_VERSION, makePlanEstimateInputsSha256 } from "@/lib/plan-engine/estimateInputsKey";
+import { getMaterializedPlanEstimate } from "@/lib/plan-engine/materializedEstimateStore";
 import { wattbuyOffersPrisma } from "@/lib/db/wattbuyOffersClient";
 import { usagePrisma } from "@/lib/db/usageClient";
 import { ensureCoreMonthlyBuckets } from "@/lib/usage/aggregateMonthlyBuckets";
 import { buildUsageBucketsForEstimate } from "@/lib/usage/buildUsageBucketsForEstimate";
-import crypto from "node:crypto";
 import { canComputePlanFromBuckets, derivePlanCalcRequirementsFromTemplate } from "@/lib/plan-engine/planComputability";
 import { isPlanCalcQuarantineWorthyReasonCode } from "@/lib/plan-engine/planCalcQuarantine";
 import { deriveUniversalAvailability } from "@/lib/plan-engine/universalStatus";
@@ -61,42 +62,6 @@ function parseBoolParam(v: string | null, fallback: boolean): boolean {
 type EflBucket = 500 | 1000 | 2000;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const PLAN_ENGINE_ESTIMATE_VERSION = "estimateTrueCost_v4";
-
-function sha256Hex(s: string): string {
-  return crypto.createHash("sha256").update(s).digest("hex");
-}
-
-function hashUsageInputs(args: {
-  yearMonths: string[];
-  bucketKeys: string[];
-  usageBucketsByMonth: Record<string, Record<string, number>>;
-}): string {
-  const h = crypto.createHash("sha256");
-  const yearMonths = Array.isArray(args.yearMonths) ? args.yearMonths : [];
-  const keys = Array.isArray(args.bucketKeys) ? args.bucketKeys.map(String).filter(Boolean).sort() : [];
-
-  h.update("ym:");
-  h.update(yearMonths.join(","));
-  h.update("|keys:");
-  h.update(keys.join(","));
-  h.update("|vals:");
-  for (const ym of yearMonths) {
-    h.update(ym);
-    h.update("{");
-    const m = args.usageBucketsByMonth?.[ym] ?? {};
-    for (const k of keys) {
-      const v = (m as any)[k];
-      const n = typeof v === "number" && Number.isFinite(v) ? v : null;
-      h.update(k);
-      h.update("=");
-      h.update(n == null ? "null" : n.toFixed(6));
-      h.update(";");
-    }
-    h.update("}");
-  }
-  return h.digest("hex");
-}
 
 function canonicalUrlKey(u: string): string | null {
   try {
@@ -829,27 +794,22 @@ export async function GET(req: NextRequest) {
         const tdspPer = Number(tdspRates?.perKwhDeliveryChargeCents ?? 0) || 0;
         const tdspMonthly = Number(tdspRates?.monthlyCustomerChargeDollars ?? 0) || 0;
         const tdspEff = tdspRates?.effectiveDate ?? null;
-        const rsSha = sha256HexCache(JSON.stringify(calc.rateStructure ?? null));
         const estimateMode =
           String((calc as any)?.planCalcReasonCode ?? "").trim() === "INDEXED_APPROXIMATE_OK"
             ? ("INDEXED_EFL_ANCHOR_APPROX" as const)
             : ("DEFAULT" as const);
-        const usageSha = hashUsageInputs({
+        const { inputsSha256 } = makePlanEstimateInputsSha256({
+          monthsCount,
+          annualKwh: annualKwhForCalc,
+          tdsp: { perKwhDeliveryChargeCents: tdspPer, monthlyCustomerChargeDollars: tdspMonthly, effectiveDate: tdspEff },
+          rateStructure: calc.rateStructure,
           yearMonths: yearMonthsForCalc.length ? yearMonthsForCalc : lastNYearMonthsChicago(12),
-          bucketKeys: Array.from(new Set(["kwh.m.all.total", ...((calc as any)?.requiredBucketKeys ?? [])])),
+          requiredBucketKeys: Array.isArray((calc as any)?.requiredBucketKeys)
+            ? ((calc as any).requiredBucketKeys as any[]).map((k) => String(k))
+            : [],
           usageBucketsByMonth: usageBucketsByMonthForCalc,
+          estimateMode,
         });
-        const inputsSha256 = sha256HexCache(
-          JSON.stringify({
-            v: PLAN_ENGINE_ESTIMATE_VERSION,
-            monthsCount,
-            annualKwh: Number(annualKwhForCalc.toFixed(6)),
-            tdsp: { per: tdspPer, monthly: tdspMonthly, effectiveDate: tdspEff },
-            rsSha,
-            usageSha,
-            estimateMode,
-          }),
-        );
 
         const requestKey = buildRequestKey(ratePlanId);
         const row = { idx, requestKey, inputsSha256 };
@@ -1084,7 +1044,7 @@ export async function GET(req: NextRequest) {
         // If we DON'T have an EFL URL, we still queue the offer so ops can investigate why docs are missing.
         if (!ratePlanId) {
           const identity = eflUrl || "MISSING_EFL_URL";
-          const syntheticSha = sha256Hex(["dashboard_plans", "EFL_PARSE", offerId, identity].join("|"));
+          const syntheticSha = sha256HexCache(["dashboard_plans", "EFL_PARSE", offerId, identity].join("|"));
           const reason = eflUrl
             ? "DASHBOARD_QUEUED: offer has EFL URL but no template mapping yet."
             : "DASHBOARD_QUEUED: offer is missing EFL URL and has no template mapping yet.";
@@ -1166,7 +1126,7 @@ export async function GET(req: NextRequest) {
                   kind: "PLAN_CALC_QUARANTINE",
                   dedupeKey: offerId,
                   // Required NOT NULL unique field; for quarantines we use a synthetic stable value.
-                  eflPdfSha256: sha256Hex(["dashboard_plans", "PLAN_CALC_QUARANTINE", offerId].join("|")),
+                  eflPdfSha256: sha256HexCache(["dashboard_plans", "PLAN_CALC_QUARANTINE", offerId].join("|")),
                   offerId,
                   supplier,
                   planName,
@@ -1236,7 +1196,7 @@ export async function GET(req: NextRequest) {
                     source: "dashboard_plans",
                     kind: "PLAN_CALC_QUARANTINE",
                     dedupeKey: offerId,
-                    eflPdfSha256: sha256Hex(["dashboard_plans", "PLAN_CALC_QUARANTINE", offerId].join("|")),
+                    eflPdfSha256: sha256HexCache(["dashboard_plans", "PLAN_CALC_QUARANTINE", offerId].join("|")),
                     offerId,
                     supplier,
                     planName,
@@ -1643,7 +1603,7 @@ export async function GET(req: NextRequest) {
                   kind: "PLAN_CALC_QUARANTINE",
                   dedupeKey: offerId,
                   // Legacy NOT NULL unique field (EFL queue origin). For quarantine we do not use it as identity.
-                  eflPdfSha256: sha256Hex(["dashboard_plans", "PLAN_CALC_QUARANTINE", offerId].join("|")),
+                  eflPdfSha256: sha256HexCache(["dashboard_plans", "PLAN_CALC_QUARANTINE", offerId].join("|")),
                   offerId,
                   supplier: (base as any)?.supplierName ?? null,
                   planName: (base as any)?.planName ?? null,
@@ -1709,31 +1669,33 @@ export async function GET(req: NextRequest) {
         const tdspPer = Number(tdspRates?.perKwhDeliveryChargeCents ?? 0) || 0;
         const tdspMonthly = Number(tdspRates?.monthlyCustomerChargeDollars ?? 0) || 0;
         const tdspEff = tdspRates?.effectiveDate ?? null;
-        const rsSha = sha256HexCache(JSON.stringify(template.rateStructure ?? null));
         // IMPORTANT: estimateMode must match the pipeline's cache keying to avoid "sorted by X but cards show Y".
         // Pipeline keys by RatePlan.planCalcReasonCode (template-level), not the per-home derived planComputability.
         const estimateMode =
           String((template as any)?.planCalcReasonCode ?? "").trim() === "INDEXED_APPROXIMATE_OK"
             ? ("INDEXED_EFL_ANCHOR_APPROX" as const)
             : ("DEFAULT" as const);
-        const usageSha = hashUsageInputs({
+        const { inputsSha256 } = makePlanEstimateInputsSha256({
+          monthsCount,
+          annualKwh: annualKwhForCalc,
+          tdsp: { perKwhDeliveryChargeCents: tdspPer, monthlyCustomerChargeDollars: tdspMonthly, effectiveDate: tdspEff },
+          rateStructure: template.rateStructure,
           yearMonths: yearMonthsForCalc.length ? yearMonthsForCalc : lastNYearMonthsChicago(12),
-          bucketKeys: Array.from(new Set(["kwh.m.all.total", ...(requiredBucketKeys ?? [])])),
+          requiredBucketKeys: Array.isArray(requiredBucketKeys) ? requiredBucketKeys : [],
           usageBucketsByMonth: usageBucketsByMonthForCalc,
+          estimateMode,
         });
-        const inputsSha256 = sha256HexCache(
-          JSON.stringify({
-            v: PLAN_ENGINE_ESTIMATE_VERSION,
-            monthsCount,
-            annualKwh: Number(annualKwhForCalc.toFixed(6)),
-            tdsp: { per: tdspPer, monthly: tdspMonthly, effectiveDate: tdspEff },
-            rsSha,
-            usageSha,
-            estimateMode,
-          }),
-        );
 
         const cacheRatePlanId = ratePlanId ?? "";
+        // vNext: prefer the canonical materialized estimate table (single source of truth).
+        const materialized = await getMaterializedPlanEstimate({
+          houseAddressId: house.id,
+          ratePlanId: cacheRatePlanId,
+          inputsSha256,
+        });
+        if (materialized) return materialized as any;
+
+        // Migration fallback: legacy snapshot cache (will be removed after backfill completes).
         const cached = await getCachedPlanEstimate({
           houseAddressId: house.id,
           ratePlanId: cacheRatePlanId,
@@ -1781,7 +1743,7 @@ export async function GET(req: NextRequest) {
                 kind: "PLAN_CALC_QUARANTINE",
                 dedupeKey: offerIdForQueue,
                 // Legacy NOT NULL unique field (EFL queue origin). For quarantine we do not use it as identity.
-                eflPdfSha256: sha256Hex(["dashboard_plans", "PLAN_CALC_QUARANTINE", offerIdForQueue].join("|")),
+                eflPdfSha256: sha256HexCache(["dashboard_plans", "PLAN_CALC_QUARANTINE", offerIdForQueue].join("|")),
                 offerId: offerIdForQueue,
                 supplier: (base as any)?.supplierName ?? null,
                 planName: (base as any)?.planName ?? null,
@@ -1945,27 +1907,22 @@ export async function GET(req: NextRequest) {
           const tdspPer = Number(tdspRates?.perKwhDeliveryChargeCents ?? 0) || 0;
           const tdspMonthly = Number(tdspRates?.monthlyCustomerChargeDollars ?? 0) || 0;
           const tdspEff = tdspRates?.effectiveDate ?? null;
-          const rsSha = sha256HexCache(JSON.stringify(calc.rateStructure ?? null));
           const estimateMode =
             String((calc as any)?.planCalcReasonCode ?? "").trim() === "INDEXED_APPROXIMATE_OK"
               ? ("INDEXED_EFL_ANCHOR_APPROX" as const)
               : ("DEFAULT" as const);
-          const usageSha = hashUsageInputs({
+          const { inputsSha256 } = makePlanEstimateInputsSha256({
+            monthsCount,
+            annualKwh: annualKwhForCalc,
+            tdsp: { perKwhDeliveryChargeCents: tdspPer, monthlyCustomerChargeDollars: tdspMonthly, effectiveDate: tdspEff },
+            rateStructure: calc.rateStructure,
             yearMonths: yearMonthsForCalc.length ? yearMonthsForCalc : lastNYearMonthsChicago(12),
-            bucketKeys: Array.from(new Set(["kwh.m.all.total", ...((calc as any)?.requiredBucketKeys ?? [])])),
+            requiredBucketKeys: Array.isArray((calc as any)?.requiredBucketKeys)
+              ? ((calc as any).requiredBucketKeys as any[]).map((k) => String(k))
+              : [],
             usageBucketsByMonth: usageBucketsByMonthForCalc,
+            estimateMode,
           });
-          const inputsSha256 = sha256HexCache(
-            JSON.stringify({
-              v: PLAN_ENGINE_ESTIMATE_VERSION,
-              monthsCount,
-              annualKwh: Number(annualKwhForCalc.toFixed(6)),
-              tdsp: { per: tdspPer, monthly: tdspMonthly, effectiveDate: tdspEff },
-              rsSha,
-              usageSha,
-              estimateMode,
-            }),
-          );
 
           const cached = await getCachedPlanEstimate({
             houseAddressId: house.id,
@@ -1973,10 +1930,12 @@ export async function GET(req: NextRequest) {
             inputsSha256,
             monthsCount,
           });
+          const materialized = await getMaterializedPlanEstimate({ houseAddressId: house.id, ratePlanId, inputsSha256 });
+          const row = materialized ?? (cached as any);
           // Cache-only mode: never compute inline in plans list.
-          const st = String((cached as any)?.status ?? "").trim().toUpperCase();
-          if (!cached || !(st === "OK" || st === "APPROXIMATE")) return Number.POSITIVE_INFINITY;
-          const v = Number((cached as any)?.monthlyCostDollars);
+          const st = String((row as any)?.status ?? "").trim().toUpperCase();
+          if (!row || !(st === "OK" || st === "APPROXIMATE")) return Number.POSITIVE_INFINITY;
+          const v = Number((row as any)?.monthlyCostDollars);
           return Number.isFinite(v) ? v : Number.POSITIVE_INFINITY;
         };
 

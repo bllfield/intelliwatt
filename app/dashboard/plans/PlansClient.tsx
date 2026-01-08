@@ -368,20 +368,23 @@ export default function PlansClient() {
   }, [plansQueryString, isRenter, refreshNonce, cacheKey, cacheTtlMs]);
 
   // IMPORTANT: /dashboard/plans must never trigger/retrigger the plan pipeline.
-  // Pipeline warm-up happens proactively (dashboard bootstrap + usage ingest).
-  // Here we only display a "preparing" UI if estimates are still QUEUED.
+  // This page is display-only; background warm-ups happen elsewhere.
   useEffect(() => {
     if (!resp?.ok) return;
     const offersNow = Array.isArray(resp?.offers) ? (resp!.offers as OfferRow[]) : [];
-    const queuedEstimates = offersNow.filter((o: any) => {
-      if (String(o?.intelliwatt?.statusLabel ?? "") !== "QUEUED") return false;
-      const tceStatus = String((o as any)?.intelliwatt?.trueCostEstimate?.status ?? "").toUpperCase();
-      // Only treat as "calculating" when it's actually pending (not UNSUPPORTED / NOT_COMPUTABLE).
-      return !tceStatus || tceStatus === "QUEUED" || tceStatus === "MISSING_TEMPLATE";
-    });
-    const isCalculating = queuedEstimates.length > 0;
-    setAutoPreparing(isCalculating);
-    setPrefetchNote(isCalculating ? `Preparing IntelliWatt calculations… (${queuedEstimates.length} pending)` : null);
+    const needsUsage = offersNow.filter(
+      (o: any) => String((o as any)?.intelliwatt?.trueCostEstimate?.status ?? "").toUpperCase() === "MISSING_USAGE",
+    ).length;
+    const notComputableYet = offersNow.filter((o: any) => {
+      const st = String((o as any)?.intelliwatt?.trueCostEstimate?.status ?? "").toUpperCase();
+      if (st === "OK" || st === "APPROXIMATE") return false;
+      if (st === "MISSING_USAGE") return false;
+      return true;
+    }).length;
+    setAutoPreparing(false);
+    if (needsUsage > 0) setPrefetchNote("Need usage to estimate some plans.");
+    else if (notComputableYet > 0) setPrefetchNote("Some plans are not computable yet.");
+    else setPrefetchNote(null);
   }, [resp?.ok, resp?.offers]);
 
   // Targeted template warm-up: if offers are QUEUED specifically because their template mapping is missing,
@@ -604,7 +607,7 @@ export default function PlansClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [totalPages]);
 
-  // Universal truth: we only expose AVAILABLE vs QUEUED (no UNAVAILABLE state in the dashboard UI).
+  // Universal truth: the customer UI never shows internal queue jargon (no "QUEUED").
   const hasUnavailable = false;
   const availableFilterOn = template === "available";
 

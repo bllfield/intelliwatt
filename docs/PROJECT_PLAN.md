@@ -2400,11 +2400,13 @@ Guardrails
   - `componentsV2` (REP vs TDSP breakdown)
   - `tdspRatesApplied` (effective date + per‑kWh + monthly customer charge)
 - `/api/dashboard/plans` now returns `intelliwatt.tdspRatesApplied` when TDSP rates were applied (effectiveDate, per-kWh cents, monthly dollars).
-- Shows **Queued / calculations not available** messaging when an EFL exists but no template mapping exists yet.
+- Customer-facing status messaging is intentionally simple and never shows internal queue jargon:
+  - When we cannot compute an estimate for any reason other than missing usage, we show **“Not Computable Yet”**.
+  - When usage is missing, we show **“Need usage to estimate”** (with a clear CTA to connect usage).
 - Uses a sticky filter/sort bar + pagination to avoid an infinite scroll plan list.
 - When `hasUsage=true`, default UI sort is **Best for you** (lowest `trueCostEstimate.monthlyCostDollars` first).
 - The UI marks the cheapest visible plan with a **RECOMMENDED** badge (no separate “Top 5” strip).
-- Plan cards show a template status badge: **AVAILABLE / QUEUED / NOT AVAILABLE**, plus a filter toggle **“Show only AVAILABLE templates”**.
+- Plan cards show a template status badge: **AVAILABLE / NOT COMPUTABLE YET / NOT AVAILABLE**, plus a filter toggle **“Show only AVAILABLE templates”**.
 - Plan cards show the true-cost monthly estimate when `intelliwatt.trueCostEstimate.status === "OK"` (with an **“incl. TDSP”** tag when `intelliwatt.tdspRatesApplied` is present).
 - Added a breakdown popover on the plan card monthly estimate (REP vs TDSP split + TDSP effective date when available).
 - Estimate breakdown popover now shows monthly + annual for REP/TDSP/Total.
@@ -2425,7 +2427,7 @@ Guardrails
 - Dashboard Plans header: search/filter section is now globally **collapsible** (both mobile + desktop) so plan cards stay visible.
 - PlansClient: prevent double-fetch by gating `/api/dashboard/plans` until `isRenter` is resolved from localStorage, and use AbortController + request sequencing to cancel/ignore stale responses when params change.
 - True-cost: `/api/dashboard/plans` computes home-scoped costs from canonical usage buckets + TDSP (fail-closed). Unsupported/non-deterministic templates remain quarantined as `PLAN_CALC_QUARANTINE`.
-- Plans UX: **RECOMMENDED** badge is shown only after the list finishes loading; a prominent “Calculating…” banner + IntelliWattBot typing popup appears while results are still populating (i.e., offers remain `QUEUED` because background jobs haven’t finished yet).
+- Plans UX: avoid indefinite “Calculating…” loops. If an estimate is not ready, show **Not Computable Yet** unless a background job is actively running and expected to complete soon.
 
 Canonical home-scoped usage window (Dashboard + Plan Details)
 
@@ -2437,18 +2439,16 @@ Canonical home-scoped usage window (Dashboard + Plan Details)
   - plus the missing tail days borrowed from the same calendar month in the prior year.
 - **Implementation (shared helper)**: `lib/usage/buildUsageBucketsForEstimate.ts` → `buildUsageBucketsForEstimate()`.
 
-Plan engine output cache (single source of truth)
+Materialized plan estimates (single source of truth — vNext)
 
-- **Storage**: WattBuy Offers module DB table `WattBuyApiSnapshot`.
-- **Endpoint marker**: `endpoint="PLAN_ENGINE_ESTIMATE_V1"`.
-- **Current Plan endpoint marker**: `endpoint="CURRENT_PLAN_ENGINE_ESTIMATE_V1"` (same storage table; synthetic `ratePlanId=current_plan:<currentPlanEntryId>`).
-- **Keying**: hash of canonical inputs (`estimateTrueCost_v1` + monthsCount + annualKwh + TDSP rates + rateStructure hash + usage buckets hash).
-- **Rule** (source of truth): any place that displays a true-cost estimate must use the DB-cached plan-engine output.
-  - **Plans list (`GET /api/dashboard/plans`) is cache-only**: never run the engine inline (prevents “recalculation” when changing sort/filter dropdowns).
-  - **Plan detail (`GET /api/dashboard/plans/detail`) may compute on cache-miss** (bounded) and then persists to the cache.
-  - **Compare (`GET /api/dashboard/plans/compare`) may compute on cache-miss** (bounded) and persists **both** offer and current-plan estimates to the cache.
-  - Background/template prefetch (or explicit warm calls) are responsible for filling cache for list views. The customer `/dashboard/plans` page does **not** kick off pipeline/prefetch runs from UI interactions (sort/filter/pagination are display-only).
-- **Correctness invariant**: Card and detail must match; if they diverge, it means inputs (usage window/buckets/TDSP) were not canonicalized or the cache key was unstable.
+- **Goal**: One engine, one set of semantics, and instant UI loads.
+- **Storage**: a dedicated master-DB table for materialized plan estimates (home-scoped), keyed by:
+  - `(houseAddressId, ratePlanId, inputsSha256)`
+- **Keying (`inputsSha256`)**: hash of canonical inputs (engine version + monthsCount + TDSP rates + rateStructure hash + usage buckets digest + estimateMode).
+- **Rule (source of truth)**: Any place that displays a home-scoped true-cost estimate must read from this materialized table.
+- **Compute is never triggered by UI interactions** (sort/filter/pagination are display-only).
+- **Correctness invariant**: Card, detail, compare, and admin must match because they read the same persisted estimate row for the same `(houseAddressId, ratePlanId, inputsSha256)`.
+- **Transition note**: `WattBuyApiSnapshot endpoint=PLAN_ENGINE_ESTIMATE_V1` remains as a legacy cache during migration, but the target architecture is the dedicated materialized table.
 
 Client-side UX caching (not a source of truth)
 
