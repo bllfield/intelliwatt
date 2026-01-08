@@ -59,19 +59,24 @@ export async function POST(req: NextRequest) {
   const gate = requireAdmin(req);
   if (!gate.ok) return NextResponse.json(gate.body, { status: gate.status });
 
-  const url = new URL(req.url);
-  const homeIdFromQuery = String(url.searchParams.get("homeId") ?? "").trim();
-  const email = String(url.searchParams.get("email") ?? "").trim();
-  const reason = String(url.searchParams.get("reason") ?? "admin_manual").trim() || "admin_manual";
+  try {
+    const url = new URL(req.url);
+    const homeIdFromQuery = String(url.searchParams.get("homeId") ?? "").trim();
+    const email = String(url.searchParams.get("email") ?? "").trim();
+    const reason = String(url.searchParams.get("reason") ?? "admin_manual").trim() || "admin_manual";
 
-  const timeBudgetMs = clamp(toInt(url.searchParams.get("timeBudgetMs"), 25_000), 1500, 25_000);
-  const maxTemplateOffers = clamp(toInt(url.searchParams.get("maxTemplateOffers"), 6), 0, 10);
-  const maxEstimatePlans = clamp(toInt(url.searchParams.get("maxEstimatePlans"), 50), 0, 200);
-  const fallbackCooldownMs = clamp(toInt(url.searchParams.get("fallbackCooldownMs"), 15_000), 5_000, 24 * 60 * 60 * 1000);
-  const debug = String(url.searchParams.get("debug") ?? "").trim() === "1";
+    const timeBudgetMs = clamp(toInt(url.searchParams.get("timeBudgetMs"), 25_000), 1500, 25_000);
+    const maxTemplateOffers = clamp(toInt(url.searchParams.get("maxTemplateOffers"), 6), 0, 10);
+    const maxEstimatePlans = clamp(toInt(url.searchParams.get("maxEstimatePlans"), 50), 0, 200);
+    const fallbackCooldownMs = clamp(
+      toInt(url.searchParams.get("fallbackCooldownMs"), 15_000),
+      5_000,
+      24 * 60 * 60 * 1000,
+    );
+    const debug = String(url.searchParams.get("debug") ?? "").trim() === "1";
 
-  const homeId = homeIdFromQuery || (email ? await resolveHomeIdFromEmail(email) : null);
-  if (!homeId) return NextResponse.json({ ok: false, error: "missing_homeId_or_email" }, { status: 400 });
+    const homeId = homeIdFromQuery || (email ? await resolveHomeIdFromEmail(email) : null);
+    if (!homeId) return NextResponse.json({ ok: false, error: "missing_homeId_or_email" }, { status: 400 });
 
   let debugInfo: any = null;
   if (debug) {
@@ -115,20 +120,50 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const before = await getLatestPlanPipelineJob(homeId);
-  const result = await runPlanPipelineForHome({
-    homeId,
-    reason,
-    timeBudgetMs,
-    maxTemplateOffers,
-    maxEstimatePlans,
-    monthlyCadenceDays: 30,
-    proactiveCooldownMs: 60_000,
-    fallbackCooldownMs,
-  });
-  const after = await getLatestPlanPipelineJob(homeId);
+    const before = await getLatestPlanPipelineJob(homeId);
+    const result = await runPlanPipelineForHome({
+      homeId,
+      reason,
+      timeBudgetMs,
+      maxTemplateOffers,
+      maxEstimatePlans,
+      monthlyCadenceDays: 30,
+      proactiveCooldownMs: 60_000,
+      fallbackCooldownMs,
+    });
+    const after = await getLatestPlanPipelineJob(homeId);
 
-  return NextResponse.json({ ok: true, homeId, ...(debugInfo ? { debug: debugInfo } : {}), before, result, after }, { status: 200 });
+    return NextResponse.json(
+      {
+        ok: true,
+        homeId,
+        vercel: {
+          gitCommitSha: process.env.VERCEL_GIT_COMMIT_SHA ?? null,
+          gitCommitRef: process.env.VERCEL_GIT_COMMIT_REF ?? null,
+          env: process.env.VERCEL_ENV ?? null,
+        },
+        ...(debugInfo ? { debug: debugInfo } : {}),
+        before,
+        result,
+        after,
+      },
+      { status: 200 },
+    );
+  } catch (e: any) {
+    const msg = e?.message ? String(e.message) : String(e);
+    return NextResponse.json(
+      {
+        ok: false,
+        error: msg,
+        vercel: {
+          gitCommitSha: process.env.VERCEL_GIT_COMMIT_SHA ?? null,
+          gitCommitRef: process.env.VERCEL_GIT_COMMIT_REF ?? null,
+          env: process.env.VERCEL_ENV ?? null,
+        },
+      },
+      { status: 200 },
+    );
+  }
 }
 
 

@@ -70,6 +70,11 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       now: new Date().toISOString(),
+      vercel: {
+        gitCommitSha: process.env.VERCEL_GIT_COMMIT_SHA ?? null,
+        gitCommitRef: process.env.VERCEL_GIT_COMMIT_REF ?? null,
+        env: process.env.VERCEL_ENV ?? null,
+      },
       master,
       offersModule,
     });
