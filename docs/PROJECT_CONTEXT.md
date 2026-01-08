@@ -405,33 +405,28 @@ Invoke-RestMethod -Headers $headers -Uri "https://intelliwatt.com/api/admin/env-
 
 ---
 
-## Database Connection
+## Database Connection (DO NOT COMMIT SECRETS)
 
-- **Primary Runtime URL (`DATABASE_URL`)**
-  - Must point at the DigitalOcean PgBouncer pool on port `25061`.
-  - Example (replace the password with the current value from DO):
-    ```
-    postgresql://doadmin:AVNS_lUXcN2ftFFu6XUIc5G0@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25061/app-pool?sslmode=require&pgbouncer=true
-    ```
-  - This URL is required in **all** environments: local `.env`, `.env.production.local`, Vercel env vars, and the droplet.
+- All DB URLs must be stored only in:
+  - **Vercel Environment Variables** (Preview + Production)
+  - local `.env.local` (gitignored) or PowerShell session env vars
 
-- **Direct URL for Prisma (`DIRECT_URL`)**
-  - Used only by `prisma migrate` / `prisma db execute`.
-  - Same credentials, but port `25060` and no `pgbouncer=true`:
-    ```
-    postgresql://doadmin:AVNS_lUXcN2ftFFu6XUIc5G0@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25060/defaultdb?sslmode=require
-    ```
-  - Keep this alongside `DATABASE_URL` in every `.env` so Prisma can read both.
+**Dev master DB (requested)**
+```
+DATABASE_URL="postgresql://doadmin:<PASSWORD>@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25060/intelliwatt_dev?sslmode=require"
+```
+
+**WattBuy Offers module DB (Production / Vercel env vars)**
+```
+INTELLIWATT_WATTBUY_OFFERS_DATABASE_URL="postgresql://doadmin:<PASSWORD>@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25061/intelliwatt_wattbuy_offers?sslmode=require"
+INTELLIWATT_WATTBUY_OFFERS_DIRECT_URL="postgresql://doadmin:<PASSWORD>@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25060/intelliwatt_wattbuy_offers?sslmode=require"
+```
 
 - **Droplet update (run exactly as written when connected as `root`)**
   ```bash
   sudo nano /etc/environment
   ```
-  Paste the two lines below at the end of the file, then save (`Ctrl+O`, Enter) and exit (`Ctrl+X`):
-  ```dotenv
-  DATABASE_URL="postgresql://doadmin:AVNS_lUXcN2ftFFu6XUIc5G0@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25061/app-pool?sslmode=require&pgbouncer=true"
-  DIRECT_URL="postgresql://doadmin:AVNS_lUXcN2ftFFu6XUIc5G0@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25060/defaultdb?sslmode=require"
-  ```
+  Paste your environment lines at the end of the file (do not commit them to git), then save (`Ctrl+O`, Enter) and exit (`Ctrl+X`).
   Reload the session so the env vars are active:
   ```bash
   source /etc/environment

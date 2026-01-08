@@ -14,18 +14,19 @@ Follow docs/CHATGPT_HOUSE_RULES.md:
 - If a command needs root (or deploy), spell out the transition steps every time (e.g., `exit` back to root, or `sudo -iu deploy` from root) before giving the command—never assume the user is already at the right prompt.
 
 ========================================
-DATABASE CONNECTION (ALL ENVIRONMENTS)
+DATABASE CONNECTION (DO NOT COMMIT SECRETS)
 ========================================
 
-Use the pooled URL (port 25061) everywhere; keep the direct URL (25060) only for Prisma migrate:
+Do not paste real DB passwords into this file. Use placeholders in docs, and store real values only in:
+- Vercel Environment Variables (Preview + Production)
+- Local `.env.local` (gitignored) or PowerShell session env vars
 
 ```
-DATABASE_URL="postgresql://doadmin:AVNS_lUXcN2ftFFu6XUIc5G0@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25061/app-pool?sslmode=require&pgbouncer=true"
-DIRECT_URL="postgresql://doadmin:AVNS_lUXcN2ftFFu6XUIc5G0@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25060/defaultdb?sslmode=require"
+DATABASE_URL="postgresql://doadmin:<PASSWORD>@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25060/intelliwatt_dev?sslmode=require"
 ```
 
-- Add both lines to local `.env`, `.env.production.local`, Vercel env vars, and the droplet.
-- Droplet command:
+- Store real values in Vercel / `.env.local` (gitignored).
+- Droplet command (if applicable):
   ```bash
   sudo nano /etc/environment    # append the two lines
   source /etc/environment

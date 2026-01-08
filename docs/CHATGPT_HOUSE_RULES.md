@@ -50,15 +50,20 @@ Every step **must begin** with:
 - Never promise background/async work; deliver now.
 - If long, ship a **working partial** instead of stopping for clarification.
 
-## 6a) Database URLs (always enforce)
+## 6a) Database URLs (never commit secrets)
 
-- Every answer that touches database connections must assume these exact env values:
-  ```
-  DATABASE_URL="postgresql://doadmin:AVNS_lUXcN2ftFFu6XUIc5G0@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25061/app-pool?sslmode=require&pgbouncer=true"
-  DIRECT_URL="postgresql://doadmin:AVNS_lUXcN2ftFFu6XUIc5G0@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25060/defaultdb?sslmode=require"
-  ```
-- `DATABASE_URL` (pool, port 25061) is mandatory for runtime, Prisma Studio, scripts, Vercel, and droplet env files.
-- `DIRECT_URL` (port 25060) is used only by Prisma migrate (schema already wired with `directUrl = env("DIRECT_URL")`).
+- Never include real DB passwords/URLs in committed docs. Use placeholders and refer to Vercel env vars or local `.env.local` (gitignored).
+
+**Dev master DB**
+```
+DATABASE_URL="postgresql://doadmin:<PASSWORD>@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25060/intelliwatt_dev?sslmode=require"
+```
+
+**WattBuy Offers module DB (Vercel env vars)**
+```
+INTELLIWATT_WATTBUY_OFFERS_DATABASE_URL="postgresql://doadmin:<PASSWORD>@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25061/intelliwatt_wattbuy_offers?sslmode=require"
+INTELLIWATT_WATTBUY_OFFERS_DIRECT_URL="postgresql://doadmin:<PASSWORD>@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25060/intelliwatt_wattbuy_offers?sslmode=require"
+```
 - Droplet instructions must include:
   ```bash
   sudo nano /etc/environment

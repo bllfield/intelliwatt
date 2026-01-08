@@ -1726,39 +1726,44 @@ This applies to every custom generator (Current Plan, Usage, etc.) and prevents 
 
 ---
 
-### PC-2025-11-25-L — Database Connection Pool Standard
+### PC-2025-11-25-L — Database Connection Standard (never commit secrets)
 
 **Rationale**
-- Runtime traffic, Prisma Studio, and droplet jobs must share the DigitalOcean PgBouncer pool (port `25061`). The raw port `25060` remains reserved for Prisma migrations only.
+- Never commit DB passwords/URLs into the repo. Store real values only in Vercel env vars and local `.env.local` (gitignored).
+- The master DB and module DBs are configured via environment variables.
 
-**Exact environment values (copy/paste everywhere)**
+**Dev master DB (requested)**
 ```
-DATABASE_URL="postgresql://doadmin:AVNS_lUXcN2ftFFu6XUIc5G0@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25061/app-pool?sslmode=require&pgbouncer=true"
-DIRECT_URL="postgresql://doadmin:AVNS_lUXcN2ftFFu6XUIc5G0@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25060/defaultdb?sslmode=require"
+DATABASE_URL="postgresql://doadmin:<PASSWORD>@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25060/intelliwatt_dev?sslmode=require"
 ```
-- **Vercel env vars:** Set both `DATABASE_URL` and `DIRECT_URL` exactly as above.
-- **Local `.env` / `.env.production.local**:** Include the same two lines so Prisma CLI and Studio use the pool.
-- **Droplet (`intelliwatt-smt-proxy`):**
+
+**WattBuy Offers module DB (Production / Vercel env vars)**
+```
+INTELLIWATT_WATTBUY_OFFERS_DATABASE_URL="postgresql://doadmin:<PASSWORD>@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25061/intelliwatt_wattbuy_offers?sslmode=require"
+INTELLIWATT_WATTBUY_OFFERS_DIRECT_URL="postgresql://doadmin:<PASSWORD>@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25060/intelliwatt_wattbuy_offers?sslmode=require"
+```
+
+**Droplet (`intelliwatt-smt-proxy`):**
   ```bash
   sudo nano /etc/environment
   ```
-  Append the two lines, save (`Ctrl+O`, Enter), exit (`Ctrl+X`), then reload:
+  Append your environment lines, save (`Ctrl+O`, Enter), exit (`Ctrl+X`), then reload:
   ```bash
   source /etc/environment
   ```
   Restart any systemd units (`sudo systemctl restart <service>`).
 
 **Guardrails**
-- Prisma schema must keep:
+- Master Prisma schema uses:
   ```prisma
   datasource db {
-    provider  = "postgresql"
-    url       = env("DATABASE_URL")
-    directUrl = env("DIRECT_URL")
+    provider = "postgresql"
+    url      = env("DATABASE_URL")
   }
   ```
-- Prisma Studio, scripts, and serverless calls now run through the pool. Close Studio when finished to release pooled slots.
-- Do **not** revert to the direct URL for runtime usage; Prisma automatically uses `DIRECT_URL` for migrations.
+- WattBuy Offers module DB is configured by `prisma/wattbuy-offers/schema.prisma` via:
+  - `INTELLIWATT_WATTBUY_OFFERS_DATABASE_URL`
+  - `INTELLIWATT_WATTBUY_OFFERS_DIRECT_URL`
 - When documenting droplet work, never assume the user is already `root` or `deploy`. Always show the exact steps (`ssh …`, `sudo -iu deploy`, `cd /home/deploy/...`) before issuing commands.
 - If an instruction requires switching users mid-session, include the transition explicitly (e.g., `exit` to return from `deploy` to `root`, or `sudo -iu deploy` before commands that must run as `deploy`).
 - Chat assistants must locate existing values and scripts in the repo and quote them directly—never instruct the user to add something that already exists.

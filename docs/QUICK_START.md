@@ -47,14 +47,23 @@ If verification does not return `5`, stop and investigate before loading any add
 - **Production**: Read-only for verified flows and data queries only
 - **Safety**: Avoid modifying production data during development
 
-### Database URLs (copy/paste everywhere)
+### Database URLs (DO NOT COMMIT SECRETS)
+This repo must never contain real DB passwords/tokens. Configure DB URLs via:
+- **Local**: `.env.local` (gitignored) or PowerShell session env vars
+- **Vercel**: Environment Variables (Preview + Production)
+
+**Dev (master DB)**
+Set `DATABASE_URL` to your dev database (requested: `intelliwatt_dev`):
 ```
-DATABASE_URL="postgresql://doadmin:AVNS_lUXcN2ftFFu6XUIc5G0@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25061/app-pool?sslmode=require&pgbouncer=true"
-DIRECT_URL="postgresql://doadmin:AVNS_lUXcN2ftFFu6XUIc5G0@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25060/defaultdb?sslmode=require"
+DATABASE_URL="postgresql://doadmin:<PASSWORD>@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25060/intelliwatt_dev?sslmode=require"
 ```
-- Add both lines to local `.env`, `.env.production.local`, Vercel env vars, and the droplet (`sudo nano /etc/environment`; `source /etc/environment`; restart services).
-- Prisma schema already uses `url` + `directUrl`; leave them.
-- Prisma Studio uses `DATABASE_URL`, so it now hits PgBouncer—close Studio when finished.
+
+**WattBuy Offers module DB (Production)**
+Set these in Vercel (do not commit):
+```
+INTELLIWATT_WATTBUY_OFFERS_DATABASE_URL="postgresql://doadmin:<PASSWORD>@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25061/intelliwatt_wattbuy_offers?sslmode=require"
+INTELLIWATT_WATTBUY_OFFERS_DIRECT_URL="postgresql://doadmin:<PASSWORD>@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25060/intelliwatt_wattbuy_offers?sslmode=require"
+```
 - When providing droplet instructions, always include the login and directory steps first, e.g.:
   ```
   ssh root@<droplet-ip>
