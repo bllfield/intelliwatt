@@ -60,9 +60,12 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
   if (!homeId) return { ok: false, error: "missing_homeId" };
 
   const reason = String(args.reason ?? "").trim() || "usage_present";
-  const timeBudgetMs = clamp(Number(args.timeBudgetMs ?? 12_000) || 12_000, 1500, 25_000);
-  const maxTemplateOffers = clamp(Number(args.maxTemplateOffers ?? 4) || 4, 0, 10);
-  const maxEstimatePlans = clamp(Number(args.maxEstimatePlans ?? 20) || 20, 0, 200);
+  const timeBudgetMsRaw = Number(args.timeBudgetMs ?? 12_000);
+  const timeBudgetMs = clamp(Number.isFinite(timeBudgetMsRaw) ? timeBudgetMsRaw : 12_000, 1500, 25_000);
+  const maxTemplateOffersRaw = Number(args.maxTemplateOffers ?? 4);
+  const maxTemplateOffers = clamp(Number.isFinite(maxTemplateOffersRaw) ? Math.trunc(maxTemplateOffersRaw) : 4, 0, 10);
+  const maxEstimatePlansRaw = Number(args.maxEstimatePlans ?? 20);
+  const maxEstimatePlans = clamp(Number.isFinite(maxEstimatePlansRaw) ? Math.trunc(maxEstimatePlansRaw) : 20, 0, 200);
   const isRenter = Boolean(args.isRenter ?? false);
   const monthlyCadenceDays = clamp(Number(args.monthlyCadenceDays ?? 30) || 30, 1, 365);
   const cooldownMs =
@@ -377,31 +380,37 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
           } as any)
         : (pipeline.rateStructure as any);
 
-    const saved = await upsertRatePlanFromEfl({
-      mode: "live",
-      eflUrl: pdf.pdfUrl,
-      eflSourceUrl: eflUrl,
-      repPuctCertificate: det.repPuctCertificate ?? null,
-      eflVersionCode: det.eflVersionCode ?? null,
-      eflPdfSha256: String(det.eflPdfSha256),
-      utilityId: inferTdspTerritoryFromEflText(det.rawText) ?? null,
-      state: "TX",
-      termMonths: typeof o?.term_months === "number" ? o.term_months : null,
-      rate500: typeof o?.kwh500_cents === "number" ? o.kwh500_cents : null,
-      rate1000: typeof o?.kwh1000_cents === "number" ? o.kwh1000_cents : null,
-      rate2000: typeof o?.kwh2000_cents === "number" ? o.kwh2000_cents : null,
-      modeledRate500: null,
-      modeledRate1000: null,
-      modeledRate2000: null,
-      modeledEflAvgPriceValidation: finalValidation ?? null,
-      modeledComputedAt: modeledAt,
-      cancelFee: o?.cancel_fee_text ?? null,
-      providerName: o?.supplier_name ?? null,
-      planName: o?.plan_name ?? null,
-      planRules: pipeline.planRules as any,
-      rateStructure: rsWithEvidence as any,
-      validation: planRulesValidation as any,
-    });
+    let saved: any = null;
+    try {
+      saved = await upsertRatePlanFromEfl({
+        mode: "live",
+        eflUrl: pdf.pdfUrl,
+        eflSourceUrl: eflUrl,
+        repPuctCertificate: det.repPuctCertificate ?? null,
+        eflVersionCode: det.eflVersionCode ?? null,
+        eflPdfSha256: String(det.eflPdfSha256),
+        utilityId: inferTdspTerritoryFromEflText(det.rawText) ?? null,
+        state: "TX",
+        termMonths: typeof o?.term_months === "number" ? o.term_months : null,
+        rate500: typeof o?.kwh500_cents === "number" ? o.kwh500_cents : null,
+        rate1000: typeof o?.kwh1000_cents === "number" ? o.kwh1000_cents : null,
+        rate2000: typeof o?.kwh2000_cents === "number" ? o.kwh2000_cents : null,
+        modeledRate500: null,
+        modeledRate1000: null,
+        modeledRate2000: null,
+        modeledEflAvgPriceValidation: finalValidation ?? null,
+        modeledComputedAt: modeledAt,
+        cancelFee: o?.cancel_fee_text ?? null,
+        providerName: o?.supplier_name ?? null,
+        planName: o?.plan_name ?? null,
+        planRules: pipeline.planRules as any,
+        rateStructure: rsWithEvidence as any,
+        validation: planRulesValidation as any,
+      });
+    } catch {
+      templatesQueued++;
+      continue;
+    }
 
     const ratePlanId = (saved as any)?.ratePlan?.id ? String((saved as any).ratePlan.id) : null;
     const templatePersisted = Boolean((saved as any)?.templatePersisted);
