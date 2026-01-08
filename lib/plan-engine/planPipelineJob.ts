@@ -56,14 +56,14 @@ export function shouldStartPlanPipelineJob(args: {
   latest: PlanPipelineJobPayload | null;
   now?: Date;
   monthlyCadenceDays?: number; // default 30
-  maxRunningMinutes?: number; // default 20
+  maxRunningMinutes?: number; // default 3 (pipeline runs are time-budgeted; stale RUNNING jobs must not block)
   requiredCalcVersion?: string | null;
   enforceCadence?: boolean; // default true
 }): { okToStart: boolean; reason: string } {
   const now = args.now ?? new Date();
   const latest = args.latest;
   const cadenceDays = Number.isFinite(args.monthlyCadenceDays ?? NaN) ? (args.monthlyCadenceDays as number) : 30;
-  const maxRunningMin = Number.isFinite(args.maxRunningMinutes ?? NaN) ? (args.maxRunningMinutes as number) : 20;
+  const maxRunningMin = Number.isFinite(args.maxRunningMinutes ?? NaN) ? (args.maxRunningMinutes as number) : 3;
   const requiredCalcVersion = typeof args.requiredCalcVersion === "string" ? args.requiredCalcVersion.trim() : "";
   const enforceCadence = args.enforceCadence !== false;
 
@@ -79,6 +79,8 @@ export function shouldStartPlanPipelineJob(args: {
     if (startedAt) {
       const ageMin = (now.getTime() - startedAt.getTime()) / 60000;
       if (ageMin <= maxRunningMin) return { okToStart: false, reason: "already_running" };
+      // Stale RUNNING job: allow a new run. This prevents a single crashed invocation from blocking forever.
+      return { okToStart: true, reason: "stale_running_job" };
     } else {
       return { okToStart: false, reason: "already_running" };
     }
