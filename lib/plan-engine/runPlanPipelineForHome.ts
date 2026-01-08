@@ -146,18 +146,21 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
   if (!gate.okToStart) return { ok: true, started: false, reason: gate.reason, latestJob };
 
   const runId = crypto.randomUUID();
-  await writePlanPipelineJobSnapshot({
-    v: 1,
-    homeId,
-    runId,
-    status: "RUNNING",
-    reason,
-    calcVersion: PLAN_ENGINE_ESTIMATE_VERSION,
-    startedAt: new Date().toISOString(),
-    cooldownUntil: new Date(Date.now() + cooldownMs).toISOString(),
-    lastCalcWindowEnd: latestJob?.lastCalcWindowEnd ?? null,
-    counts: {},
-  });
+  const runningStartedAtIso = new Date().toISOString();
+
+  try {
+    await writePlanPipelineJobSnapshot({
+      v: 1,
+      homeId,
+      runId,
+      status: "RUNNING",
+      reason,
+      calcVersion: PLAN_ENGINE_ESTIMATE_VERSION,
+      startedAt: runningStartedAtIso,
+      cooldownUntil: new Date(Date.now() + cooldownMs).toISOString(),
+      lastCalcWindowEnd: latestJob?.lastCalcWindowEnd ?? null,
+      counts: {},
+    });
 
   // ---------------- Step 1: Template mapping (bounded) ----------------
   const raw = await wattbuy.offers({
@@ -874,6 +877,29 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
     estimatesComputed,
     estimatesAlreadyCached,
   };
+  } catch (e: any) {
+    const msg = e?.message ? String(e.message) : String(e);
+    try {
+      await writePlanPipelineJobSnapshot({
+        v: 1,
+        homeId,
+        runId,
+        status: "ERROR",
+        reason,
+        calcVersion: PLAN_ENGINE_ESTIMATE_VERSION,
+        startedAt: runningStartedAtIso,
+        finishedAt: new Date().toISOString(),
+        cooldownUntil: new Date(Date.now() + cooldownMs).toISOString(),
+        // Do NOT advance cadence window on errors.
+        lastCalcWindowEnd: latestJob?.lastCalcWindowEnd ?? null,
+        lastError: msg,
+        counts: {},
+      });
+    } catch {
+      // ignore
+    }
+    return { ok: false, error: msg };
+  }
 }
 
 
