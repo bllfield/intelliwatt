@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { runEflPipeline } from "@/lib/efl/runEflPipeline";
+import { runEflPipeline } from "@/lib/plan-engine-next/efl/runEflPipeline";
 import { adminUsageAuditForHome } from "@/lib/usage/adminUsageAudit";
 
 const MAX_PREVIEW_CHARS = 20000;

@@ -6,7 +6,7 @@ import { normalizeOffers } from "@/lib/wattbuy/normalize";
 import { computePdfSha256, deterministicEflExtract } from "@/lib/efl/eflExtractor";
 import { fetchEflPdfFromUrl } from "@/lib/efl/fetchEflPdf";
 import { extractPlanRulesAndRateStructureFromEflText } from "@/lib/efl/planAiExtractor";
-import { upsertRatePlanFromEfl } from "@/lib/efl/planPersistence";
+import { upsertRatePlanFromEfl } from "@/lib/plan-engine-next/efl/planPersistence";
 import { prisma } from "@/lib/db";
 
 export const dynamic = "force-dynamic";

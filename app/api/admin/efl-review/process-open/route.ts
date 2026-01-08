@@ -2,11 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { Buffer } from "node:buffer";
 
 import { fetchEflPdfFromUrl } from "@/lib/efl/fetchEflPdf";
-import { runEflPipelineFromRawTextNoStore } from "@/lib/efl/runEflPipelineFromRawTextNoStore";
-import { runEflPipelineNoStore } from "@/lib/efl/runEflPipelineNoStore";
-import { runEflPipeline } from "@/lib/efl/runEflPipeline";
-import { upsertRatePlanFromEfl } from "@/lib/efl/planPersistence";
-import { validatePlanRules } from "@/lib/efl/planEngine";
+import { runEflPipelineFromRawTextNoStore } from "@/lib/plan-engine-next/efl/runEflPipelineFromRawTextNoStore";
+import { runEflPipelineNoStore } from "@/lib/plan-engine-next/efl/runEflPipelineNoStore";
+import { runEflPipeline } from "@/lib/plan-engine-next/efl/runEflPipeline";
+import { upsertRatePlanFromEfl } from "@/lib/plan-engine-next/efl/planPersistence";
+import { validatePlanRules } from "@/lib/plan-engine-next/efl/planEngine";
 import { inferTdspTerritoryFromEflText } from "@/lib/efl/eflValidator";
 import { normalizeTdspCode } from "@/lib/utility/tdspCode";
 import { prisma } from "@/lib/db";

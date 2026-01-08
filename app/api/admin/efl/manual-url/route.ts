@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { Buffer } from "node:buffer";
 
 import { fetchEflPdfFromUrl } from "@/lib/efl/fetchEflPdf";
-import { runEflPipeline } from "@/lib/efl/runEflPipeline";
+import { runEflPipeline } from "@/lib/plan-engine-next/efl/runEflPipeline";
+import { upsertRatePlanFromEfl } from "@/lib/plan-engine-next/efl/planPersistence";
 import { prisma } from "@/lib/db";
 import { adminUsageAuditForHome } from "@/lib/usage/adminUsageAudit";
 

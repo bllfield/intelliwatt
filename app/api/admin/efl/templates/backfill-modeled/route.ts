@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { prisma } from "@/lib/db";
 import { fetchEflPdfFromUrl } from "@/lib/efl/fetchEflPdf";
-import { runEflPipelineNoStore } from "@/lib/efl/runEflPipelineNoStore";
+import { runEflPipelineNoStore } from "@/lib/plan-engine-next/efl/runEflPipelineNoStore";
 
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 

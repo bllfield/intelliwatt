@@ -4,7 +4,7 @@ import { Buffer } from "node:buffer";
 import { prisma } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth/admin";
 import { fetchEflPdfFromUrl } from "@/lib/efl/fetchEflPdf";
-import { runEflPipelineNoStore } from "@/lib/efl/runEflPipelineNoStore";
+import { runEflPipelineNoStore } from "@/lib/plan-engine-next/efl/runEflPipelineNoStore";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

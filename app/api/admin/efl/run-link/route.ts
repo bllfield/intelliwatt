@@ -7,7 +7,7 @@ import {
   extractPlanRulesAndRateStructureFromEflText,
   extractPlanRulesAndRateStructureFromEflUrlVision,
 } from "@/lib/efl/planAiExtractor";
-import { upsertRatePlanFromEfl } from "@/lib/efl/planPersistence";
+import { upsertRatePlanFromEfl } from "@/lib/plan-engine-next/efl/planPersistence";
 
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 

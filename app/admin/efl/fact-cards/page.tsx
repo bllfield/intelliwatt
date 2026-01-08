@@ -155,12 +155,85 @@ export default function FactCardOpsPage() {
   const [buildInfo, setBuildInfo] = useState<{ sha: string | null; ref: string | null } | null>(
     null,
   );
+  const [apiLog, setApiLog] = useState<
+    Array<{
+      t: number;
+      method: string;
+      url: string;
+      ok: boolean;
+      status: number;
+      durationMs: number;
+      err?: string | null;
+    }>
+  >([]);
 
   // Manual loader is rendered at the bottom; we prefill it from Queue/Templates/Batch via this state.
   const [manualPrefillUrl, setManualPrefillUrl] = useState("");
   const [manualPrefillOfferId, setManualPrefillOfferId] = useState<string>("");
   const [manualPrefillRawText, setManualPrefillRawText] = useState<string>("");
   const manualRef = useRef<HTMLDivElement | null>(null);
+
+  // Global fetch logger for this page (captures ALL tool calls, including nested components).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const w = window as any;
+    if (w.__iw_factcards_fetchPatched) return;
+    w.__iw_factcards_fetchPatched = true;
+
+    const orig = window.fetch.bind(window);
+    window.fetch = async (input: any, init?: any) => {
+      const startedAt = Date.now();
+      const method = String(init?.method ?? "GET").toUpperCase();
+      const url = typeof input === "string" ? input : input?.url ?? String(input);
+      try {
+        const res = await orig(input, init);
+        const durationMs = Date.now() - startedAt;
+
+        let err: string | null = null;
+        if (!res.ok) {
+          try {
+            const text = await res.clone().text();
+            err = text ? text.slice(0, 500) : `HTTP ${res.status}`;
+          } catch {
+            err = `HTTP ${res.status}`;
+          }
+        }
+
+        setApiLog((prev) => {
+          const next = [
+            { t: Date.now(), method, url, ok: res.ok, status: res.status, durationMs, ...(err ? { err } : {}) },
+            ...prev,
+          ];
+          return next.slice(0, 80);
+        });
+
+        if (!res.ok) {
+          // eslint-disable-next-line no-console
+          console.error("[fact_cards] api error", { method, url, status: res.status, durationMs, err });
+        }
+
+        return res;
+      } catch (e: any) {
+        const durationMs = Date.now() - startedAt;
+        const msg = e?.message ? String(e.message) : String(e);
+        setApiLog((prev) => {
+          const next = [{ t: Date.now(), method, url, ok: false, status: 0, durationMs, err: msg }, ...prev];
+          return next.slice(0, 80);
+        });
+        // eslint-disable-next-line no-console
+        console.error("[fact_cards] api exception", { method, url, durationMs, error: msg });
+        throw e;
+      }
+    };
+
+    return () => {
+      try {
+        window.fetch = orig;
+      } catch {
+        // ignore
+      }
+    };
+  }, []);
 
   function loadIntoManual(args: { eflUrl?: string | null; offerId?: string | null; rawText?: string | null }) {
     const u = (args.eflUrl ?? "").trim();
@@ -1484,6 +1557,36 @@ export default function FactCardOpsPage() {
           One page for: provider batch parsing → review queue → templates → manual loader (URL / upload / text).
         </div>
       </header>
+
+      <section className="rounded-2xl border bg-white p-4 space-y-2">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-sm font-semibold">Diagnostics</div>
+            <div className="text-xs text-gray-600">
+              Captures the last 80 API calls from this page (including nested tools). Errors are also printed to the browser console.
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setApiLog([])}
+            className="rounded-lg border px-3 py-2 text-sm hover:bg-gray-50"
+          >
+            Clear
+          </button>
+        </div>
+        <div className="max-h-48 overflow-auto rounded-lg bg-gray-50 p-3 text-xs font-mono whitespace-pre-wrap">
+          {apiLog.length === 0
+            ? "No calls yet."
+            : apiLog
+                .slice(0, 40)
+                .map((x) => {
+                  const stamp = new Date(x.t).toISOString();
+                  const head = `${x.ok ? "OK " : "ERR"} ${stamp} ${x.method} ${x.url} (${x.status}; ${x.durationMs}ms)`;
+                  return x.err ? `${head}\n  ${x.err}` : head;
+                })
+                .join("\n")}
+        </div>
+      </section>
 
       <div className="mb-6">
         <BackfillButton />
