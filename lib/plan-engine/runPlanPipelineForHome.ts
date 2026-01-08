@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { usagePrisma } from "@/lib/db/usageClient";
+import { wattbuyOffersPrisma } from "@/lib/db/wattbuyOffersClient";
 import { wattbuy } from "@/lib/wattbuy";
 import { normalizeOffers } from "@/lib/wattbuy/normalize";
 import { fetchEflPdfFromUrl } from "@/lib/efl/fetchEflPdf";
@@ -163,13 +164,58 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
     });
 
   // ---------------- Step 1: Template mapping (bounded) ----------------
-  const raw = await wattbuy.offers({
-    address: house.addressLine1,
-    city: house.addressCity,
-    state: house.addressState,
-    zip: house.addressZip5,
-    isRenter,
-  });
+  // Prefer cached offers payload in the WattBuy offers module DB; live calls can hang on cold starts.
+  const raw = await (async () => {
+    const OFFERS_ENDPOINT = "PLAN_PIPELINE_WATTBUY_OFFERS_V1";
+    const OFFERS_TTL_MS = 15 * 60 * 1000;
+    const requestKey = `offers_by_address|line1=${house.addressLine1}|city=${house.addressCity}|state=${house.addressState}|zip=${house.addressZip5}|isRenter=${String(
+      isRenter,
+    )}`;
+
+    try {
+      const cached = await (wattbuyOffersPrisma as any).wattBuyApiSnapshot.findFirst({
+        where: { endpoint: OFFERS_ENDPOINT, houseAddressId: house.id, requestKey },
+        orderBy: { createdAt: "desc" },
+        select: { payloadJson: true, fetchedAt: true },
+      });
+      const cachedAt = cached?.fetchedAt instanceof Date ? cached.fetchedAt : null;
+      const cachedFresh =
+        cachedAt != null && Date.now() - cachedAt.getTime() <= OFFERS_TTL_MS && cached?.payloadJson != null;
+      if (cachedFresh) return (cached as any)?.payloadJson ?? null;
+    } catch {
+      // ignore cache read errors
+    }
+
+    // Live call with a hard timeout so we don't leave the job stuck RUNNING.
+    const live = await Promise.race([
+      wattbuy.offers({
+        address: house.addressLine1,
+        city: house.addressCity,
+        state: house.addressState,
+        zip: house.addressZip5,
+        isRenter,
+      }),
+      new Promise((_, rej) => setTimeout(() => rej(new Error("wattbuy_offers_timeout")), 12_000)),
+    ]);
+
+    // Best-effort cache write.
+    try {
+      await (wattbuyOffersPrisma as any).wattBuyApiSnapshot.create({
+        data: {
+          fetchedAt: new Date(),
+          endpoint: OFFERS_ENDPOINT,
+          houseAddressId: house.id,
+          requestKey,
+          payloadJson: (live as any) ?? { __emptyPayload: true },
+          payloadSha256: sha256HexCache(JSON.stringify({ v: 1, requestKey })),
+        },
+      });
+    } catch {
+      // ignore
+    }
+
+    return live as any;
+  })();
   const normalized = normalizeOffers(raw ?? {});
   const offers = Array.isArray((normalized as any)?.offers) ? ((normalized as any).offers as any[]) : [];
   const offerIds = offers.map((o) => String(o?.offer_id ?? "")).filter(Boolean);
