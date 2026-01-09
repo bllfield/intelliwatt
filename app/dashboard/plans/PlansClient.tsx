@@ -471,7 +471,11 @@ export default function PlansClient() {
     const pendingCountNow = offersNow.filter((o: any) => {
       if (String(o?.intelliwatt?.statusLabel ?? "") !== "QUEUED") return false;
       const tceStatus = String((o as any)?.intelliwatt?.trueCostEstimate?.status ?? "").toUpperCase();
-      return !tceStatus || tceStatus === "QUEUED" || tceStatus === "MISSING_TEMPLATE";
+      const tceReason = String((o as any)?.intelliwatt?.trueCostEstimate?.reason ?? "").toUpperCase();
+      // Treat CACHE_MISS as pending: the plans list endpoint is cache-only and will emit NOT_IMPLEMENTED/CACHE_MISS
+      // until the background pipeline warms the materialized estimates.
+      const isCacheMiss = tceStatus === "NOT_IMPLEMENTED" && tceReason === "CACHE_MISS";
+      return !tceStatus || tceStatus === "QUEUED" || tceStatus === "MISSING_TEMPLATE" || isCacheMiss;
     }).length;
     if (pendingCountNow <= 0) return;
 
@@ -642,7 +646,9 @@ export default function PlansClient() {
     return offers.filter((o: any) => {
       if (String(o?.intelliwatt?.statusLabel ?? "") !== "QUEUED") return false;
       const tceStatus = String((o as any)?.intelliwatt?.trueCostEstimate?.status ?? "").toUpperCase();
-      return !tceStatus || tceStatus === "QUEUED" || tceStatus === "MISSING_TEMPLATE";
+      const tceReason = String((o as any)?.intelliwatt?.trueCostEstimate?.reason ?? "").toUpperCase();
+      const isCacheMiss = tceStatus === "NOT_IMPLEMENTED" && tceReason === "CACHE_MISS";
+      return !tceStatus || tceStatus === "QUEUED" || tceStatus === "MISSING_TEMPLATE" || isCacheMiss;
     }).length;
   }, [offers]);
   const isStillWorking = Boolean(loading || autoPreparing);
