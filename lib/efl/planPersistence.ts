@@ -437,17 +437,10 @@ export async function upsertRatePlanFromEfl(
       });
     } catch (e: any) {
       // Defensive recovery: handle composite unique collisions by updating the already-existing row.
-      const isCompositeConflict =
-        String(e?.code ?? "") === "P2002" &&
-        Array.isArray(e?.meta?.target) &&
-        (e.meta.target as any[]).some((t) => String(t) === "utilityId") &&
-        (e.meta.target as any[]).some((t) => String(t) === "state") &&
-        (e.meta.target as any[]).some((t) => String(t) === "supplier") &&
-        (e.meta.target as any[]).some((t) => String(t) === "planName") &&
-        (e.meta.target as any[]).some((t) => String(t) === "termMonths") &&
-        (e.meta.target as any[]).some((t) => String(t) === "isUtilityTariff");
-
-      if (!isCompositeConflict) throw e;
+      // Prisma's P2002 meta.target is not always reliable across drivers/builds, so treat any P2002 here
+      // as "the row already exists" and attempt to resolve by composite unique key.
+      const isP2002 = String(e?.code ?? "") === "P2002";
+      if (!isP2002) throw e;
 
       const supplier = String(providerName ?? "").trim();
       const pn = String(planName ?? "").trim();
