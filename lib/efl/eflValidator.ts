@@ -1723,45 +1723,75 @@ export async function validateEflAvgPriceTable(args: {
 
   // Model a common "Usage Charge $X < N kWh; $0 >= N kWh" rule as:
   //   baseChargePerMonthCents = X
-  //   plus an offsetting bill credit of X at minUsageKWh = N
+  //   plus an offsetting bill credit of X at usage >= N
+  // IMPORTANT: our planCostEngine adapter currently does not model bill credits, so we also
+  // force the validator to prefer deterministic math (computeValidatorModeledBreakdown)
+  // when any bill credits are present.
+  //
   // This makes the fee apply at 500 and net to $0 at 1000/2000, matching EFL avg tables.
   const usageChargeRule = parseUsageChargeCutoff(rawText);
   if (usageChargeRule && planRulesForValidation) {
-    const hasBase =
-      typeof planRulesForValidation.baseChargePerMonthCents === "number" &&
-      Number.isFinite(planRulesForValidation.baseChargePerMonthCents);
+    const baseRaw = (planRulesForValidation as any).baseChargePerMonthCents;
+    const baseCents =
+      typeof baseRaw === "number" && Number.isFinite(baseRaw) ? Number(baseRaw) : null;
 
-    // Only apply if the parser didn't already set a base fee; we want to avoid double-counting.
-    if (!hasBase) {
-      planRulesForValidation.baseChargePerMonthCents = usageChargeRule.feeCents;
+    // Only set the base fee if it's missing/zero (avoid clobbering explicit Base Charge).
+    // Many EFLs omit Base Charge but include a conditional "Usage Charge" waiver block.
+    if (baseCents == null || baseCents === 0) {
+      (planRulesForValidation as any).baseChargePerMonthCents = usageChargeRule.feeCents;
       if (rateStructure && typeof (rateStructure as any).baseMonthlyFeeCents !== "number") {
         (rateStructure as any).baseMonthlyFeeCents = usageChargeRule.feeCents;
       }
+    }
 
-      // Add a credit at >= threshold to cancel the fee for 1000/2000.
-      const rsAny: any = rateStructure ?? (rateStructure as any);
+    // Add an offsetting credit at usage >= threshold to cancel the fee for 1000/2000.
+    // NOTE: validator math uses PlanRules.billCredits (not RateStructure billCredits),
+    // so we write both shapes for maximum compatibility.
+    const feeDollars = usageChargeRule.feeCents / 100;
+    const prCredits: any[] = Array.isArray((planRulesForValidation as any).billCredits)
+      ? (planRulesForValidation as any).billCredits
+      : [];
+    const label = `Usage charge waived at >= ${usageChargeRule.thresholdKwh} kWh (derived from Usage Charge < ${usageChargeRule.thresholdKwh})`;
+    const hasPrSame = prCredits.some((c: any) => {
+      const t = String(c?.type ?? "").toUpperCase();
+      const thr = Number(c?.thresholdKwh);
+      const cd = Number(c?.creditDollars);
+      return t === "THRESHOLD_MIN" && thr === usageChargeRule.thresholdKwh && Math.abs(cd - feeDollars) < 1e-9;
+    });
+    if (!hasPrSame) {
+      (planRulesForValidation as any).billCredits = [
+        ...prCredits,
+        {
+          type: "THRESHOLD_MIN",
+          thresholdKwh: usageChargeRule.thresholdKwh,
+          creditDollars: feeDollars,
+          label,
+        },
+      ];
+    }
+
+    if (rateStructure) {
+      const rsAny: any = rateStructure as any;
       const rsCredits = rsAny?.billCredits ?? null;
-      const rules: any[] = rsCredits && Array.isArray(rsCredits.rules) ? rsCredits.rules : [];
-      const hasSame = rules.some(
+      const rsRules: any[] = rsCredits && Array.isArray(rsCredits.rules) ? rsCredits.rules : [];
+      const hasRsSame = rsRules.some(
         (r) =>
           Number(r?.creditAmountCents) === usageChargeRule.feeCents &&
-          Number(r?.minUsageKWh) === usageChargeRule.thresholdKwh,
+          Number(r?.minUsageKWh) === usageChargeRule.thresholdKwh &&
+          (r?.maxUsageKWh == null || Number(r?.maxUsageKWh) === Number.POSITIVE_INFINITY),
       );
-      if (!hasSame) {
-        const nextRules = [
-          ...rules,
-          {
-            label: `Usage charge waived at >= ${usageChargeRule.thresholdKwh} kWh (derived from Usage Charge < ${usageChargeRule.thresholdKwh})`,
-            creditAmountCents: usageChargeRule.feeCents,
-            minUsageKWh: usageChargeRule.thresholdKwh,
-          },
-        ];
-        if (rateStructure) {
-          (rateStructure as any).billCredits = {
-            hasBillCredit: true,
-            rules: nextRules,
-          };
-        }
+      if (!hasRsSame) {
+        rsAny.billCredits = {
+          hasBillCredit: true,
+          rules: [
+            ...rsRules,
+            {
+              label,
+              creditAmountCents: usageChargeRule.feeCents,
+              minUsageKWh: usageChargeRule.thresholdKwh,
+            },
+          ],
+        };
       }
     }
   }
@@ -1828,6 +1858,16 @@ export async function validateEflAvgPriceTable(args: {
     });
 
     let components = engineResult.components;
+
+    // The planCostEngine adapter currently does not apply bill credit rules.
+    // When bill credits are present (including our Usage Charge waiver modeling),
+    // prefer deterministic validator math so avg-table validation is correct.
+    const hasBillCreditsInPlanRules =
+      Array.isArray((planRulesForValidation as any)?.billCredits) &&
+      (planRulesForValidation as any).billCredits.length > 0;
+    if (hasBillCreditsInPlanRules) {
+      components = null;
+    }
 
     // For simple weekday/weekend TOU, the canonical engine path does not model
     // the EFL's stated weekend/weekday usage split reliably. Prefer deterministic
