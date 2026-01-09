@@ -456,6 +456,49 @@ export async function POST(req: NextRequest) {
         ? await parsedDelegate.update({ where: { id: existing.id }, data: entryData })
         : await parsedDelegate.create({ data: entryData });
 
+    // Persist a cross-bill "plan template" for current plans (current-plan module DB).
+    // This is the canonical "current plan template" analogue to offer RatePlan templates:
+    // it stores the plan-level structure so future bills/users can reuse it without re-parsing.
+    try {
+      const providerKey = String(entryData.providerName ?? "").trim().toUpperCase();
+      const planKey = String(entryData.planName ?? "").trim().toUpperCase();
+      if (providerKey && planKey) {
+        const billPlanTemplateDelegate = (currentPlanPrisma as any).billPlanTemplate as any;
+        await billPlanTemplateDelegate.upsert({
+          where: { providerNameKey_planNameKey: { providerNameKey: providerKey, planNameKey: planKey } },
+          create: {
+            providerNameKey: providerKey,
+            planNameKey: planKey,
+            providerName: entryData.providerName,
+            planName: entryData.planName,
+            rateType: rateType,
+            variableIndexType: null,
+            termMonths: entryData.termMonths ?? null,
+            contractEndDate: null,
+            earlyTerminationFeeCents: entryData.earlyTerminationFeeCents ?? null,
+            baseChargeCentsPerMonth: entryData.baseChargeCentsPerMonth ?? null,
+            energyRateTiersJson: entryData.energyRateTiersJson ?? null,
+            timeOfUseConfigJson: entryData.timeOfUseConfigJson ?? null,
+            billCreditsJson: entryData.billCreditsJson ?? null,
+          },
+          update: {
+            providerName: entryData.providerName,
+            planName: entryData.planName,
+            rateType: rateType,
+            termMonths: entryData.termMonths ?? null,
+            earlyTerminationFeeCents: entryData.earlyTerminationFeeCents ?? null,
+            baseChargeCentsPerMonth: entryData.baseChargeCentsPerMonth ?? null,
+            energyRateTiersJson: entryData.energyRateTiersJson ?? null,
+            timeOfUseConfigJson: entryData.timeOfUseConfigJson ?? null,
+            billCreditsJson: entryData.billCreditsJson ?? null,
+          },
+        });
+      }
+    } catch (e) {
+      console.error("[current-plan/efl-parse] Failed to upsert BillPlanTemplate", e);
+      // best-effort only
+    }
+
     // Also upsert into CurrentPlanManualEntry so the customer-facing current-plan flow sees it immediately.
     try {
       const manualDelegate = (currentPlanPrisma as any).currentPlanManualEntry as any;
@@ -558,13 +601,25 @@ export async function POST(req: NextRequest) {
     if (rateType === "TIME_OF_USE" && (!Array.isArray((rateStructure as any)?.tiers) || (rateStructure as any).tiers.length === 0)) {
       reasonParts.push("missing_tou_tiers");
     }
-    if (warnings.length) reasonParts.push("warnings_present");
+
+    const finalValidation = (pipeline as any)?.finalValidation ?? null;
+    const finalValidationStatus = String(finalValidation?.status ?? "").toUpperCase();
+    // For current plan templates: warnings are common and should not automatically quarantine.
+    // We quarantine only when:
+    // - Identity/required pricing fields are missing, OR
+    // - Avg-table validation explicitly FAILs (manual review needed), OR
+    // - Plan is not computable.
+    const planCalcStatus = String((pipeline as any)?.planCalcStatus ?? "").toUpperCase();
+    if (finalValidationStatus && finalValidationStatus !== "PASS") reasonParts.push(`validation_${finalValidationStatus}`);
+    if (planCalcStatus && planCalcStatus !== "COMPUTABLE") reasonParts.push(`planCalc_${planCalcStatus}`);
 
     const needsReview = reasonParts.length > 0;
     if (needsReview) {
-      const queueReason = `CURRENT_PLAN_EFL: ${reasonParts.join(", ")}${warnings.length ? `\nwarnings: ${warnings.join(" | ")}` : ""}`;
+      const queueReasonFromValidation = typeof finalValidation?.queueReason === "string" ? finalValidation.queueReason : null;
+      const queueReason = `CURRENT_PLAN_EFL: ${reasonParts.join(", ")}`
+        + (queueReasonFromValidation ? `\nvalidation: ${queueReasonFromValidation}` : "")
+        + (warnings.length ? `\nwarnings: ${warnings.join(" | ")}` : "");
       try {
-        const finalValidation = (pipeline as any)?.finalValidation ?? null;
         await (prisma as any).eflParseReviewQueue.upsert({
           where: { eflPdfSha256: det.eflPdfSha256 },
           create: {
@@ -585,7 +640,7 @@ export async function POST(req: NextRequest) {
             rateStructure: pipeline?.effectiveRateStructure ?? pipeline?.rateStructure ?? null,
             validation: pipeline?.validation ?? null,
             derivedForValidation: pipeline?.derivedForValidation ?? null,
-            finalStatus: "FAIL",
+            finalStatus: finalValidationStatus === "PASS" ? "PASS" : (finalValidationStatus || "FAIL"),
             queueReason,
             solverApplied: (pipeline as any)?.derivedForValidation?.solverApplied ?? null,
           },
@@ -602,7 +657,7 @@ export async function POST(req: NextRequest) {
             rateStructure: pipeline?.effectiveRateStructure ?? pipeline?.rateStructure ?? null,
             validation: pipeline?.validation ?? null,
             derivedForValidation: pipeline?.derivedForValidation ?? null,
-            finalStatus: String(finalValidation?.status ?? "FAIL") === "PASS" ? "PASS" : "FAIL",
+            finalStatus: finalValidationStatus === "PASS" ? "PASS" : (finalValidationStatus || "FAIL"),
             queueReason,
             resolvedAt: null,
             resolvedBy: null,

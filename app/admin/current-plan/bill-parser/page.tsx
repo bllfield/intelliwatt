@@ -48,6 +48,19 @@ type TemplatesResponse = {
 };
 
 type BillQueueItem = any;
+type BillPlanTemplateRow = {
+  id: string;
+  providerName: string | null;
+  planName: string | null;
+  rateType: string | null;
+  termMonths: number | null;
+  earlyTerminationFeeCents: number | null;
+  baseChargeCentsPerMonth: number | null;
+  hasTimeOfUse: boolean;
+  hasBillCredits: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
 
 function useAdminToken() {
   const [token, setToken] = useState('');
@@ -388,6 +401,10 @@ export default function CurrentPlanBillParserAdmin() {
   const [templatesError, setTemplatesError] = useState<string | null>(null);
   const [templates, setTemplates] = useState<TemplateRow[]>([]);
 
+  const [billPlanTemplatesLoading, setBillPlanTemplatesLoading] = useState(false);
+  const [billPlanTemplatesError, setBillPlanTemplatesError] = useState<string | null>(null);
+  const [billPlanTemplates, setBillPlanTemplates] = useState<BillPlanTemplateRow[]>([]);
+
   // Bill parse review queue (DB-backed; uses the same table as EFL review queue)
   const [queueStatus, setQueueStatus] = useState<'OPEN' | 'RESOLVED'>('OPEN');
   const [queueQ, setQueueQ] = useState('');
@@ -410,7 +427,8 @@ export default function CurrentPlanBillParserAdmin() {
       const params = new URLSearchParams({
         status: queueStatus,
         limit: '100',
-        source: 'current_plan_bill',
+        // Include all current-plan sources (bill parsing + current plan EFL parsing).
+        sourcePrefix: 'current_plan_',
         kind: 'EFL_PARSE',
       });
       if (queueQ.trim()) params.set('q', queueQ.trim());
@@ -619,9 +637,34 @@ export default function CurrentPlanBillParserAdmin() {
     }
   }
 
+  async function loadBillPlanTemplates() {
+    if (!token.trim()) {
+      setBillPlanTemplatesError("Admin token is required to load current plan templates.");
+      return;
+    }
+    setBillPlanTemplatesLoading(true);
+    setBillPlanTemplatesError(null);
+    try {
+      const res = await fetch("/api/admin/current-plan/bill-plan-templates?limit=200", {
+        headers: { "x-admin-token": token.trim() },
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok || !body?.ok) {
+        throw new Error(body?.error || `Request failed with status ${res.status}`);
+      }
+      setBillPlanTemplates(Array.isArray(body.templates) ? body.templates : []);
+    } catch (err: any) {
+      console.error("[admin/bill-parser] bill plan templates load failed", err);
+      setBillPlanTemplatesError(err?.message ?? "Unknown error while loading current plan templates.");
+    } finally {
+      setBillPlanTemplatesLoading(false);
+    }
+  }
+
   useEffect(() => {
     if (token.trim()) {
       loadTemplates();
+      loadBillPlanTemplates();
       loadQueue();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1060,6 +1103,69 @@ export default function CurrentPlanBillParserAdmin() {
                         ? t.confidenceScore.toFixed(3)
                         : '—'}
                     </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <section className="p-4 rounded-2xl border space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="font-medium">Current Plan Templates (BillPlanTemplate)</h2>
+          <button
+            type="button"
+            onClick={loadBillPlanTemplates}
+            disabled={billPlanTemplatesLoading || !ready}
+            className="px-4 py-2 rounded-lg border bg-white text-sm hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {billPlanTemplatesLoading ? "Refreshing…" : "Refresh list"}
+          </button>
+        </div>
+        <p className="text-sm text-gray-600">
+          These are plan-level templates (provider + plan name) derived from customer uploads (including current-plan EFL PDFs).
+          When a current plan EFL is corrected and passes validation, it should auto-resolve out of the queue and land here.
+        </p>
+        {billPlanTemplatesError && (
+          <div className="mt-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            Error loading current plan templates: {billPlanTemplatesError}
+          </div>
+        )}
+        {billPlanTemplates.length === 0 ? (
+          <div className="rounded-md border border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-600">
+            No current plan templates found yet.
+          </div>
+        ) : (
+          <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
+            <table className="min-w-full text-xs">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-3 py-2 text-left font-medium text-gray-600">Updated</th>
+                  <th className="px-3 py-2 text-left font-medium text-gray-600">Provider</th>
+                  <th className="px-3 py-2 text-left font-medium text-gray-600">Plan</th>
+                  <th className="px-3 py-2 text-left font-medium text-gray-600">Rate type</th>
+                  <th className="px-3 py-2 text-left font-medium text-gray-600">Term</th>
+                  <th className="px-3 py-2 text-left font-medium text-gray-600">Base (¢/mo)</th>
+                  <th className="px-3 py-2 text-left font-medium text-gray-600">ETF (¢)</th>
+                  <th className="px-3 py-2 text-left font-medium text-gray-600">TOU</th>
+                  <th className="px-3 py-2 text-left font-medium text-gray-600">Credits</th>
+                </tr>
+              </thead>
+              <tbody>
+                {billPlanTemplates.map((t) => (
+                  <tr key={t.id} className="border-t border-gray-100 hover:bg-gray-50">
+                    <td className="px-3 py-2 text-gray-700 whitespace-nowrap">
+                      {t.updatedAt ? new Date(t.updatedAt).toLocaleString() : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-gray-800">{t.providerName ?? "—"}</td>
+                    <td className="px-3 py-2 text-gray-800">{t.planName ?? "—"}</td>
+                    <td className="px-3 py-2 text-gray-700">{t.rateType ?? "—"}</td>
+                    <td className="px-3 py-2 text-gray-700">{typeof t.termMonths === "number" ? `${t.termMonths} mo` : "—"}</td>
+                    <td className="px-3 py-2 text-gray-700">{typeof t.baseChargeCentsPerMonth === "number" ? t.baseChargeCentsPerMonth : "—"}</td>
+                    <td className="px-3 py-2 text-gray-700">{typeof t.earlyTerminationFeeCents === "number" ? t.earlyTerminationFeeCents : "—"}</td>
+                    <td className="px-3 py-2 text-gray-700">{t.hasTimeOfUse ? "yes" : "no"}</td>
+                    <td className="px-3 py-2 text-gray-700">{t.hasBillCredits ? "yes" : "no"}</td>
                   </tr>
                 ))}
               </tbody>

@@ -158,6 +158,18 @@ Notes:
       - Selected Offer estimate (from offer template `RatePlan.rateStructure`)
     - **Termination fee toggle**: UI can include/exclude ETF in “switch now” first-year cost (defaults to include only when in-contract).
     - **Signup step**: uses WattBuy `enroll_link` as the outbound enrollment CTA.
+
+- **Current plan “templates” + queue behavior (Updated 2026-01-09)**
+  - **Plan-level templates**: Current-plan EFL parsing now also upserts `BillPlanTemplate` (current-plan module DB) keyed by `(providerNameKey, planNameKey)` so we keep a reusable, plan-level template (analogous to offer `RatePlan` templates).
+  - **Queue separation**:
+    - Current-plan EFL/Bill review items use `EflParseReviewQueue.source` prefixed with `current_plan_`.
+    - Admin list endpoint supports `?sourcePrefix=current_plan_` to view all current-plan queue items together.
+  - **Auto-resolve semantics**:
+    - For current-plan EFL items, `finalStatus=PASS` is sufficient to auto-resolve the queue row (these do not persist to `RatePlan`).
+  - **Admin UI**:
+    - `/admin/current-plan/bill-parser` shows both:
+      - Parsed bill/EFL templates (`ParsedCurrentPlan`)
+      - Plan-level current plan templates (`BillPlanTemplate`)
   - ⬜ NEXT: Normalize ParsedCurrentPlan (EFL/bill parsed) into master/current-plan normalization tables (manual entries already normalize) so other site experiences can consume it without reading the module DB.
 
 - **Developer notes**

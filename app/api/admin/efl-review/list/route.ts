@@ -31,6 +31,7 @@ export async function GET(req: NextRequest) {
     const statusParam = (searchParams.get("status") || "OPEN").toUpperCase();
     const q = (searchParams.get("q") || "").trim();
     const source = (searchParams.get("source") || "").trim();
+    const sourcePrefix = (searchParams.get("sourcePrefix") || searchParams.get("source_prefix") || "").trim();
     const kindParamRaw = (searchParams.get("kind") || "").trim().toUpperCase();
     const kindParam =
       kindParamRaw === "EFL_PARSE" || kindParamRaw === "PLAN_CALC_QUARANTINE"
@@ -67,6 +68,11 @@ export async function GET(req: NextRequest) {
     if (source) {
       where.source = source;
     }
+    if (sourcePrefix) {
+      // Allow callers (e.g. current-plan admin UI) to fetch multiple related sources without
+      // needing a bespoke endpoint per module.
+      where.source = { startsWith: sourcePrefix };
+    }
 
     let items = await (prisma as any).eflParseReviewQueue.findMany({
       where,
@@ -76,6 +82,45 @@ export async function GET(req: NextRequest) {
 
     let autoResolvedCount = 0;
     let autoDedupedCount = 0;
+    if (autoResolve && where.resolvedAt === null) {
+      // Auto-resolve OPEN current-plan EFL queue items once they are PASS.
+      // Unlike offer templates, current-plan templates are not persisted into RatePlan,
+      // so the older "match RatePlan by sha/url/cert+ver" auto-resolve doesn't apply.
+      //
+      // For current-plan EFL items, PASS means the avg table matches and plan-calc is computable,
+      // so manual review is no longer required.
+      const openItems = (Array.isArray(items) ? items : []).filter(
+        (it: any) => String(it?.kind ?? "") !== "PLAN_CALC_QUARANTINE",
+      );
+      const currentPlanPassIds = openItems
+        .filter((it: any) => {
+          const src = String(it?.source ?? "");
+          if (!src.startsWith("current_plan_")) return false;
+          const fs = String(it?.finalStatus ?? "").toUpperCase();
+          return fs === "PASS";
+        })
+        .map((it: any) => String(it?.id))
+        .filter(Boolean);
+
+      if (currentPlanPassIds.length) {
+        const now = new Date();
+        const r = await (prisma as any).eflParseReviewQueue.updateMany({
+          where: { id: { in: currentPlanPassIds }, resolvedAt: null },
+          data: {
+            resolvedAt: now,
+            resolvedBy: "AUTO_PASS_CURRENT_PLAN",
+            resolutionNotes: "Auto-resolved: current plan EFL validation is PASS.",
+          },
+        });
+        const resolvedNow = Number(r?.count) || 0;
+        autoResolvedCount += resolvedNow;
+        if (resolvedNow > 0) {
+          const resolvedSet = new Set(currentPlanPassIds);
+          items = openItems.filter((it: any) => !resolvedSet.has(String(it?.id)));
+        }
+      }
+    }
+
     if (autoResolve && where.resolvedAt === null) {
       // Auto-resolve OPEN queue items that already have a persisted template.
       //
