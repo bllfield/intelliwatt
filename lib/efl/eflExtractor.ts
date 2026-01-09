@@ -102,7 +102,8 @@ async function runPdftotext(pdfBytes: Uint8Array | Buffer): Promise<string> {
   // present in Vercel. If that fails (e.g., droplet unreachable in local dev),
   // fall back to a local `pdftotext` CLI if available.
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 25_000);
+  // Allow more time because the droplet helper may fall back to OCR for scanned PDFs.
+  const timeout = setTimeout(() => controller.abort(), 90_000);
 
   try {
     const resp = await fetch(serviceUrl, {

@@ -40,9 +40,10 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
 
-        proxy_read_timeout  60s;
+        # OCR fallback for scanned PDFs can take longer than pdftotext.
+        proxy_read_timeout  180s;
         proxy_connect_timeout 30s;
-        proxy_send_timeout 60s;
+        proxy_send_timeout 180s;
     }
 
     # Optional: EFL fetch proxy endpoint (used when some hosts block Vercel/AWS IP ranges)

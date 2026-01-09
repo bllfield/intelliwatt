@@ -3,6 +3,7 @@ import base64
 import json
 import os
 import secrets
+import shutil
 import subprocess
 import tempfile
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -11,6 +12,92 @@ from typing import Any, Dict
 
 EFL_PDFTEXT_TOKEN = os.environ.get("EFL_PDFTEXT_TOKEN", "").strip()
 EFL_PDFTEXT_PORT = int(os.environ.get("EFL_PDFTEXT_PORT", "8095"))
+EFL_PDFTEXT_OCR_MAX_PAGES = int(os.environ.get("EFL_PDFTEXT_OCR_MAX_PAGES", "10"))
+EFL_PDFTEXT_OCR_DPI = int(os.environ.get("EFL_PDFTEXT_OCR_DPI", "200"))
+EFL_PDFTEXT_OCR_LANG = os.environ.get("EFL_PDFTEXT_OCR_LANG", "eng").strip() or "eng"
+
+
+def _maybe_run_ocr(tmp_pdf_path: str) -> Dict[str, Any]:
+    """
+    Best-effort OCR fallback for scanned PDFs where pdftotext returns empty.
+
+    Strategy (simple + robust):
+      - Render PDF pages to PNG with pdftoppm (Poppler)
+      - OCR each page with tesseract to stdout
+
+    Returns:
+      { "ok": True, "text": "...", "method": "ocr_tesseract", "notes": [...] }
+      or { "ok": False, "error": "...", "notes": [...] }
+    """
+    notes = []
+
+    # Prefer tesseract pipeline if available (most controllable).
+    pdftoppm = shutil.which("pdftoppm")
+    tesseract = shutil.which("tesseract")
+    if not pdftoppm or not tesseract:
+        return {
+            "ok": False,
+            "error": "ocr_tools_missing",
+            "notes": [
+                f"pdftoppm={'present' if pdftoppm else 'missing'}",
+                f"tesseract={'present' if tesseract else 'missing'}",
+            ],
+        }
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="efl-ocr-") as tmpdir:
+            prefix = os.path.join(tmpdir, "page")
+            # Render pages. We cap pages by letting tesseract cap, but pdftoppm doesn't have a universal
+            # max-pages flag across distros; rendering usually remains fast for typical EFL PDFs.
+            notes.append(f"ocr_dpi={EFL_PDFTEXT_OCR_DPI}")
+            notes.append(f"ocr_lang={EFL_PDFTEXT_OCR_LANG}")
+            subprocess.run(
+                [pdftoppm, "-r", str(EFL_PDFTEXT_OCR_DPI), "-png", tmp_pdf_path, prefix],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+
+            # Collect rendered pages.
+            pages = sorted(
+                [
+                    os.path.join(tmpdir, f)
+                    for f in os.listdir(tmpdir)
+                    if f.startswith("page-") and f.endswith(".png")
+                ]
+            )
+            if not pages:
+                return {"ok": False, "error": "ocr_no_pages_rendered", "notes": notes}
+
+            if EFL_PDFTEXT_OCR_MAX_PAGES > 0 and len(pages) > EFL_PDFTEXT_OCR_MAX_PAGES:
+                notes.append(f"ocr_page_cap_applied:{len(pages)}->{EFL_PDFTEXT_OCR_MAX_PAGES}")
+                pages = pages[: EFL_PDFTEXT_OCR_MAX_PAGES]
+
+            out_chunks = []
+            for p in pages:
+                try:
+                    proc = subprocess.run(
+                        [tesseract, p, "stdout", "-l", EFL_PDFTEXT_OCR_LANG],
+                        capture_output=True,
+                        text=True,
+                        timeout=90,
+                    )
+                    if proc.returncode != 0:
+                        notes.append(f"tesseract_non_zero_exit:{os.path.basename(p)}")
+                        continue
+                    txt = (proc.stdout or "").strip("\ufeff")
+                    if txt.strip():
+                        out_chunks.append(txt)
+                except Exception as exc:
+                    notes.append(f"tesseract_error:{os.path.basename(p)}:{exc}")
+
+            text = "\n\n".join(out_chunks).strip()
+            if not text:
+                return {"ok": False, "error": "ocr_empty_text", "notes": notes}
+
+            return {"ok": True, "text": text, "method": "ocr_tesseract", "notes": notes}
+    except Exception as exc:
+        return {"ok": False, "error": f"ocr_exception:{exc}", "notes": notes}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -210,12 +297,7 @@ class Handler(BaseHTTPRequestHandler):
                 },
             )
             return
-        finally:
-            try:
-                if tmp_path:
-                    os.unlink(tmp_path)
-            except Exception:
-                pass
+        # Cleanup happens after optional OCR fallback (below).
 
         if proc.returncode != 0:
             self._write_json(
@@ -229,13 +311,33 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         text = (proc.stdout or "").strip("\ufeff")  # strip BOM if present
-        self._write_json(
-            200,
-            {
-                "ok": True,
-                "text": text,
-            },
-        )
+
+        # If pdftotext returns empty (common for scanned PDFs), attempt OCR fallback.
+        if not text.strip() and tmp_path:
+            ocr = _maybe_run_ocr(tmp_path)
+            if ocr.get("ok") is True:
+                # Include method + notes (clients ignore extra fields, but logs/debug can use them).
+                self._write_json(200, {"ok": True, "text": ocr.get("text", ""), "method": ocr.get("method"), "notes": ocr.get("notes", [])})
+                try:
+                    os.unlink(tmp_path)
+                except Exception:
+                    pass
+                return
+            # Fall through and return empty text (old behavior), but include OCR notes for debugging.
+            self._write_json(200, {"ok": True, "text": text, "method": "pdftotext", "ocr": ocr})
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+            return
+
+        # Normal pdftotext success path.
+        self._write_json(200, {"ok": True, "text": text, "method": "pdftotext"})
+        try:
+            if tmp_path:
+                os.unlink(tmp_path)
+        except Exception:
+            pass
 
 
 def main() -> None:
