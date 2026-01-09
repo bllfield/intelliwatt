@@ -98,6 +98,27 @@ export async function solveEflValidationGaps(args: {
         if (mapped.length > 0) {
           derivedPlanRules.usageTiers = mapped;
 
+          // If this is effectively a flat plan encoded as a single open-ended tier,
+          // also populate defaultRateCentsPerKwh so PlanRules validation passes and
+          // downstream engines can treat it as a standard FIXED plan.
+          const t0: any = mapped.length === 1 ? mapped[0] : null;
+          if (
+            t0 &&
+            Number(t0?.minKwh) === 0 &&
+            (t0?.maxKwh == null || t0?.maxKwh === null) &&
+            (typeof (derivedPlanRules as any).defaultRateCentsPerKwh !== "number" ||
+              !Number.isFinite((derivedPlanRules as any).defaultRateCentsPerKwh))
+          ) {
+            (derivedPlanRules as any).defaultRateCentsPerKwh = t0.rateCentsPerKwh;
+            if (!String((derivedPlanRules as any).rateType ?? "").trim()) {
+              (derivedPlanRules as any).rateType = "FIXED";
+            }
+            if (!String((derivedPlanRules as any).planType ?? "").trim()) {
+              (derivedPlanRules as any).planType = "flat";
+            }
+            solverApplied.push("FLAT_TIER_TO_DEFAULT_RATE");
+          }
+
           // Normalize legacy "array-of-tier-rows" RateStructure into the canonical RateStructure shape
           // so downstream validator/plan-engine can run deterministically.
           if (Array.isArray(derivedRateStructure)) {
@@ -110,9 +131,14 @@ export async function solveEflValidationGaps(args: {
               typeof (derivedPlanRules as any).baseChargePerMonthCents === "number"
                 ? (derivedPlanRules as any).baseChargePerMonthCents
                 : undefined;
+            const energyRateCents =
+              t0 && Number(t0?.minKwh) === 0 && t0?.maxKwh == null
+                ? t0.rateCentsPerKwh
+                : undefined;
             derivedRateStructure = {
               type: "FIXED",
               baseMonthlyFeeCents,
+              ...(typeof energyRateCents === "number" ? { energyRateCents } : {}),
               usageTiers: rsTiers,
             };
           }

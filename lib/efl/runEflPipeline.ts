@@ -515,7 +515,40 @@ export async function runEflPipeline(input: RunEflPipelineInput): Promise<RunEfl
         finalStatus: "FAIL",
         queueReason: `PIPELINE_STAGE_FAILED_PERSIST: ${reason}`,
       });
-      return err("PERSIST", "PIPELINE_STAGE_FAILED_PERSIST", reason, true);
+      // IMPORTANT: return a failure object BUT keep the parsed context attached.
+      // This is critical for admin tooling and audit bundles; otherwise they show rawTextLength=0
+      // even though we did parse successfully and only persistence failed.
+      return {
+        ok: false,
+        stage: "PERSIST",
+        offerId,
+        eflUrlCanonical: fetchedUrl ?? eflUrlCanonical,
+        ratePlanId: null,
+        rawTextLen: rawText.length,
+        rawTextPreview: det?.rawTextPreview ?? rawText.slice(0, 20000),
+        rawTextTruncated: Boolean(det?.rawTextTruncated ?? rawText.length > 20000),
+        extractorMethod: extractorMethod ?? undefined,
+        parseConfidence,
+        parseWarnings,
+        deterministicWarnings,
+        eflPdfSha256,
+        repPuctCertificate,
+        eflVersionCode,
+        planRules,
+        rateStructure,
+        validation: pipeline?.validation ?? null,
+        derivedForValidation: pipeline?.derivedForValidation ?? null,
+        finalValidation,
+        passStrength,
+        passStrengthReasons,
+        passStrengthOffPointDiffs,
+        planCalcStatus: templateCalc.planCalcStatus,
+        planCalcReasonCode: "PIPELINE_STAGE_FAILED_PERSIST",
+        requiredBucketKeys: templateCalc.requiredBucketKeys,
+        queued: true,
+        queueReason: reason,
+        errors: [{ code: "PIPELINE_STAGE_FAILED_PERSIST", message: reason }],
+      };
     }
 
     // If we *did* persist, but couldn't link a provided offerId, fail closed and queue.
