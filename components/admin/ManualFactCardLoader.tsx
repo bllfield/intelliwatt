@@ -80,6 +80,7 @@ function buildManualAuditBundle(args: {
   const fv: any = r?.finalValidation ?? null;
   const v: any = r?.validation ?? null;
   const derived: any = r?.derivedForValidation ?? null;
+  const pr: any = r?.pipelineResult ?? null;
 
   const header = [
     "IntelliWatt — Manual Plan Audit Bundle",
@@ -95,6 +96,12 @@ function buildManualAuditBundle(args: {
     repPuctCertificate: r?.repPuctCertificate ?? null,
     eflVersionCode: r?.eflVersionCode ?? null,
     extractorMethod: r?.extractorMethod ?? null,
+
+    // Pipeline outcome (canonical, high-signal)
+    pipelineOk: typeof pr?.ok === "boolean" ? pr.ok : null,
+    pipelineStage: pr?.stage ?? null,
+    pipelineQueueReason: pr?.queueReason ?? null,
+    pipelineErrors: Array.isArray(pr?.errors) ? pr.errors : null,
 
     // Status / gating
     passStrength: r?.passStrength ?? null,
