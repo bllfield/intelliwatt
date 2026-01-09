@@ -501,6 +501,23 @@ function extractEflVersionCode(text: string): string | null {
     }
   }
 
+  // A3) Many EFLs include an explicit "Version Number" line (often near PUCT Certificate #).
+  // Example (Spark):
+  //   "Version Number                   REFE_Opendoor Select_Centerpoint Energy_06162025"
+  // Spanish variants also appear in bilingual PDFs, but English is usually present too.
+  for (const line of lines) {
+    const m =
+      line.match(/\bVersion\s*Number\s+(.+)$/i) ??
+      line.match(/\bVersi[oó]n\s*n[uú]mero\s+(.+)$/i);
+    if (!m?.[1]) continue;
+    const raw = m[1].trim();
+    const val = normalizeToken(raw);
+    if (val && val.length >= 6 && !isWeakVersionCandidate(val)) return val;
+    // If normalization stripped too much (e.g., due to spacing), keep a cleaned version.
+    const cleaned = raw.replace(/\s+/g, " ").trim();
+    if (cleaned && cleaned.length >= 8 && !isWeakVersionCandidate(cleaned)) return cleaned;
+  }
+
   // D) Bottom-of-doc version token (e.g., TX_JE_NF_EFL_ENG_V1.5_SEP_01_25).
   const tail = lines.filter(Boolean).slice(-20);
   for (const l of tail) {

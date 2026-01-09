@@ -144,6 +144,18 @@ export async function persistAndLinkFromPipeline(
   const prValidation = effectivePlanRules ? validatePlanRules(effectivePlanRules as any) : null;
   const requiresManualReview = prValidation?.requiresManualReview === true;
 
+  // Align with upsertRatePlanFromEfl guardrails: never persist a template unless
+  // we have enough identity/display fields to avoid collisions/mystery rows.
+  const missingTemplateFields: string[] = [];
+  if (!(args.offerMeta?.planName ?? "").trim()) missingTemplateFields.push("planName");
+  if (typeof args.offerMeta?.termMonths !== "number") missingTemplateFields.push("termMonths");
+  if (!(eflVersionCode ?? "").trim()) missingTemplateFields.push("eflVersionCode");
+  if (!(args.offerMeta?.supplier ?? "").trim()) missingTemplateFields.push("providerName");
+
+  if (missingTemplateFields.length > 0) {
+    notes.push(`not_persisted:missing_fields=${missingTemplateFields.join(",")}`);
+  }
+
   const eligibleForTemplatePersist =
     finalStatus === "PASS" &&
     passStrength === "STRONG" &&
@@ -151,7 +163,8 @@ export async function persistAndLinkFromPipeline(
     Boolean(sha) &&
     Boolean(eflUrl) &&
     Boolean(effectivePlanRules) &&
-    Boolean(effectiveRateStructure);
+    Boolean(effectiveRateStructure) &&
+    missingTemplateFields.length === 0;
 
   if (!eligibleForTemplatePersist) {
     notes.push(
