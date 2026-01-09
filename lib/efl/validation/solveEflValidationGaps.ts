@@ -75,8 +75,12 @@ export async function solveEflValidationGaps(args: {
               typeof t?.energyCharge === "number" &&
               Number.isFinite(t.energyCharge)
             ) {
-              // Convert USD/kWh -> cents/kWh for older tier rows.
-              rate = t.energyCharge * 100;
+              // Older tier rows sometimes use `energyCharge` but the unit is ambiguous across callers:
+              // - Some sources store dollars/kWh (e.g. 0.2299) → needs *100 to get cents/kWh
+              // - Others store cents/kWh (e.g. 22.99) → should be used as-is
+              //
+              // Heuristic: if value is <= 2, treat as dollars/kWh; otherwise treat as cents/kWh.
+              rate = t.energyCharge <= 2 ? t.energyCharge * 100 : t.energyCharge;
             }
             const rateNum = Number(rate);
             if (!Number.isFinite(rateNum)) return null;
@@ -93,6 +97,26 @@ export async function solveEflValidationGaps(args: {
 
         if (mapped.length > 0) {
           derivedPlanRules.usageTiers = mapped;
+
+          // Normalize legacy "array-of-tier-rows" RateStructure into the canonical RateStructure shape
+          // so downstream validator/plan-engine can run deterministically.
+          if (Array.isArray(derivedRateStructure)) {
+            const rsTiers = mapped.map((x: any) => ({
+              minKWh: x.minKwh,
+              maxKWh: x.maxKwh ?? null,
+              centsPerKWh: x.rateCentsPerKwh,
+            }));
+            const baseMonthlyFeeCents =
+              typeof (derivedPlanRules as any).baseChargePerMonthCents === "number"
+                ? (derivedPlanRules as any).baseChargePerMonthCents
+                : undefined;
+            derivedRateStructure = {
+              type: "FIXED",
+              baseMonthlyFeeCents,
+              usageTiers: rsTiers,
+            };
+          }
+
           solverApplied.push("TIER_SYNC_FROM_RATE_STRUCTURE");
         }
       }
