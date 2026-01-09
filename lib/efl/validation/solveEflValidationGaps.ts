@@ -151,6 +151,50 @@ export async function solveEflValidationGaps(args: {
     }
   }
 
+  // ---------------- Single fixed "Energy Charge" fallback ----------------
+  // Some EFLs clearly disclose a single REP energy charge like:
+  //   "Energy Charge 22.99¢ per kWh"
+  // but our AI parse can still fail-closed and omit defaultRateCentsPerKwh, causing
+  // UNSUPPORTED_RATE_STRUCTURE even though the plan is computable (with TDSP added separately).
+  if (derivedPlanRules) {
+    const hasTou =
+      Array.isArray((derivedPlanRules as any).timeOfUsePeriods) &&
+      (derivedPlanRules as any).timeOfUsePeriods.length > 0;
+    const hasTiers =
+      Array.isArray((derivedPlanRules as any).usageTiers) &&
+      (derivedPlanRules as any).usageTiers.length > 0;
+
+    const needsDefault =
+      typeof (derivedPlanRules as any).defaultRateCentsPerKwh !== "number" ||
+      !Number.isFinite((derivedPlanRules as any).defaultRateCentsPerKwh);
+
+    if (!hasTou && !hasTiers && needsDefault) {
+      const cents = extractSingleEnergyChargeCentsPerKwhFromEflText(rawText);
+      if (typeof cents === "number" && Number.isFinite(cents) && cents >= 0) {
+        (derivedPlanRules as any).defaultRateCentsPerKwh = cents;
+        // Best-effort normalization: mark as FIXED/flat when we infer a single rate.
+        if (!String((derivedPlanRules as any).rateType ?? "").trim()) {
+          (derivedPlanRules as any).rateType = "FIXED";
+        }
+        if (!String((derivedPlanRules as any).planType ?? "").trim()) {
+          (derivedPlanRules as any).planType = "flat";
+        }
+
+        if (!derivedRateStructure || typeof derivedRateStructure !== "object") {
+          derivedRateStructure = {};
+        }
+        if (String((derivedRateStructure as any).type ?? "") !== "FIXED") {
+          (derivedRateStructure as any).type = "FIXED";
+        }
+        if (typeof (derivedRateStructure as any).energyRateCents !== "number") {
+          (derivedRateStructure as any).energyRateCents = cents;
+        }
+
+        solverApplied.push("FALLBACK_FIXED_ENERGY_CHARGE_FROM_EFL_TEXT");
+      }
+    }
+  }
+
   // ---------------- Conditional service fee cutoff (<= N kWh) ----------------
   // Some EFLs describe a monthly/service fee that only applies up to a maximum usage,
   // e.g., "Monthly Service Fee $8.00 per billing cycle for usage (<=1999) kWh".
@@ -446,6 +490,33 @@ export async function solveEflValidationGaps(args: {
     solveMode,
     queueReason: validationAfter.queueReason,
   };
+}
+
+function extractSingleEnergyChargeCentsPerKwhFromEflText(rawText: string): number | null {
+  try {
+    const t = String(rawText ?? "");
+    if (!t.trim()) return null;
+
+    // Prefer matching near the explicit "Energy Charge" disclosure section.
+    // Examples seen:
+    //   "Energy Charge 22.99¢ ¢ per kWh"
+    //   "Energy Charge 9.87¢ per kWh"
+    //   "Energy Charge: 10.9852¢ per kWh"
+    //
+    // We intentionally accept both "¢" and a plain "c" suffix because some PDF extracts lose the symbol.
+    const re =
+      /\bEnergy\s*Charge\b[\s:]*([0-9]{1,3}(?:\.[0-9]{1,6})?)\s*(?:¢|c)\b/i;
+    const m = t.match(re);
+    if (!m) return null;
+
+    const n = Number(m[1]);
+    if (!Number.isFinite(n) || n < 0) return null;
+
+    // Keep cents/kWh as-is (can be fractional cents).
+    return n;
+  } catch {
+    return null;
+  }
 }
 
 // Simple masked-TDSP detector used only for solverApplied/debugging.
