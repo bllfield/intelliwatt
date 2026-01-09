@@ -219,7 +219,10 @@ export async function solveEflValidationGaps(args: {
       !Number.isFinite((derivedPlanRules as any).defaultRateCentsPerKwh);
 
     if (!hasTou && !hasTiers && needsDefault) {
-      const cents = extractSingleEnergyChargeCentsPerKwhFromEflText(rawText);
+      // Prefer extracting from (sometimes non-canonical) AI rateStructure objects first.
+      const cents =
+        extractSingleEnergyChargeCentsPerKwhFromRateStructure(derivedRateStructure) ??
+        extractSingleEnergyChargeCentsPerKwhFromEflText(rawText);
       if (typeof cents === "number" && Number.isFinite(cents) && cents >= 0) {
         (derivedPlanRules as any).defaultRateCentsPerKwh = cents;
         // Best-effort normalization: mark as FIXED/flat when we infer a single rate.
@@ -547,23 +550,46 @@ function extractSingleEnergyChargeCentsPerKwhFromEflText(rawText: string): numbe
     const t = String(rawText ?? "");
     if (!t.trim()) return null;
 
-    // Prefer matching near the explicit "Energy Charge" disclosure section.
-    // Examples seen:
-    //   "Energy Charge 22.99¢ ¢ per kWh"
-    //   "Energy Charge 9.87¢ per kWh"
-    //   "Energy Charge: 10.9852¢ per kWh"
-    //
-    // We intentionally accept both "¢" and a plain "c" suffix because some PDF extracts lose the symbol.
-    const re =
-      /\bEnergy\s*Charge\b[\s:]*([0-9]{1,3}(?:\.[0-9]{1,6})?)\s*(?:¢|c)\b/i;
-    const m = t.match(re);
-    if (!m) return null;
+    // Scan line-by-line for the disclosure "Energy Charge" row.
+    // This is more robust than relying on the ¢ symbol, which can be mojibake'd (e.g. "Â¢" / "A�").
+    const lines = t.split(/\r?\n/);
+    for (const lineRaw of lines) {
+      const line = String(lineRaw ?? "").trim();
+      if (!line) continue;
+      if (!/Energy\s*Charge/i.test(line)) continue;
+      // Avoid TOU peak/off-peak variants.
+      if (/\bpeak\b|\boff[-\s]?peak\b/i.test(line)) continue;
 
-    const n = Number(m[1]);
-    if (!Number.isFinite(n) || n < 0) return null;
+      const m = line.match(/([0-9]{1,3}(?:\.[0-9]{1,6})?)/);
+      if (!m) continue;
+      const n = Number(m[1]);
+      if (!Number.isFinite(n) || n < 0) continue;
+      return n;
+    }
 
-    // Keep cents/kWh as-is (can be fractional cents).
-    return n;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function extractSingleEnergyChargeCentsPerKwhFromRateStructure(rs: any): number | null {
+  try {
+    if (!rs || typeof rs !== "object") return null;
+
+    // Some AI parses return a non-canonical shape like:
+    //   { energyCharges: [{ rate: 22.99, unit: "¢/kWh", ... }], ... }
+    const energyCharges: any[] = Array.isArray((rs as any).energyCharges)
+      ? (rs as any).energyCharges
+      : [];
+    if (!energyCharges.length) return null;
+
+    const first = energyCharges[0];
+    const rateRaw = Number(first?.rate);
+    if (!Number.isFinite(rateRaw) || rateRaw < 0) return null;
+
+    // Heuristic: <=2 is likely $/kWh, otherwise cents/kWh.
+    return rateRaw <= 2 ? rateRaw * 100 : rateRaw;
   } catch {
     return null;
   }
