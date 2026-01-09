@@ -424,8 +424,8 @@ export async function upsertRatePlanFromEfl(
 
   if (!existing) {
     let created: any;
-    const createUtil = (utilityId ?? "").trim() ? String(utilityId) : "UNKNOWN";
-    const createState = (state ?? "").trim() ? String(state) : "TX";
+    const createUtil = (utilityId ?? "").trim() ? String(utilityId).trim().toUpperCase() : "UNKNOWN";
+    const createState = (state ?? "").trim() ? String(state).trim().toUpperCase() : "TX";
     try {
       created = await prisma.ratePlan.create({
         data: {
@@ -453,10 +453,10 @@ export async function upsertRatePlanFromEfl(
 
       const collided = await prisma.ratePlan.findFirst({
         where: {
-          utilityId: createUtil,
-          state: createState,
-          supplier,
-          planName: pn,
+          utilityId: { equals: createUtil, mode: "insensitive" },
+          state: { equals: createState, mode: "insensitive" },
+          supplier: { equals: supplier, mode: "insensitive" },
+          planName: { equals: pn, mode: "insensitive" },
           termMonths: tm,
           isUtilityTariff: false,
         },
