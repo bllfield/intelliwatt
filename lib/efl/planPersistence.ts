@@ -439,8 +439,12 @@ export async function upsertRatePlanFromEfl(
       // Defensive recovery: handle composite unique collisions by updating the already-existing row.
       // Prisma's P2002 meta.target is not always reliable across drivers/builds, so treat any P2002 here
       // as "the row already exists" and attempt to resolve by composite unique key.
-      const isP2002 = String(e?.code ?? "") === "P2002";
-      if (!isP2002) throw e;
+      const msgRaw = e?.message ? String(e.message) : "";
+      const isUnique =
+        String(e?.code ?? "") === "P2002" ||
+        /Unique constraint failed on the fields:/i.test(msgRaw) ||
+        /P2002/i.test(msgRaw);
+      if (!isUnique) throw e;
 
       const supplier = String(providerName ?? "").trim();
       const pn = String(planName ?? "").trim();
