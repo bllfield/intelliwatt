@@ -17,7 +17,8 @@ function mapTdspSlugToTdspCode(
     .replace(/-+/g, "_");
 
   if (s === "oncor") return "ONCOR";
-  if (s === "centerpoint" || s === "cnp") return "CENTERPOINT";
+  // CenterPoint aliases observed across sources (WattBuy/TDSP tables/etc.)
+  if (s === "centerpoint" || s === "cnp" || s === "cenpnt" || s === "center_point") return "CENTERPOINT";
   if (s === "tnmp") return "TNMP";
 
   // Accept common aliases for AEP territories.

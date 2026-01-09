@@ -89,6 +89,14 @@ export async function lookupTdspCharges(args: {
     }
   }
 
+  // Defensive normalization:
+  // Some ingests have historically stored PER_KWH component rates in "cents" vs "mills" (or dollars),
+  // resulting in values 100x too large (e.g., 498 instead of 4.98).
+  // Delivery charges in TX should never be anywhere near $1/kWh, so fail-safe scale down when clearly wrong.
+  if (typeof perKwhCents === "number" && Number.isFinite(perKwhCents) && perKwhCents > 50) {
+    perKwhCents = perKwhCents / 100;
+  }
+
   return {
     tdspCode,
     asOfDate,
