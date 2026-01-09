@@ -9,10 +9,9 @@ import { wattbuy } from "@/lib/wattbuy";
 import { normalizeOffers } from "@/lib/wattbuy/normalize";
 import { getTdspDeliveryRates } from "@/lib/plan-engine/getTdspDeliveryRates";
 import { buildUsageBucketsForEstimate } from "@/lib/usage/buildUsageBucketsForEstimate";
-import { estimateTrueCost } from "@/lib/plan-engine/estimateTrueCost";
-import { getCachedPlanEstimate, putCachedPlanEstimate, sha256Hex as sha256HexCache } from "@/lib/plan-engine/planEstimateCache";
 import { requiredBucketsForRateStructure } from "@/lib/plan-engine/requiredBucketsForPlan";
 import { bucketDefsFromBucketKeys } from "@/lib/plan-engine/usageBuckets";
+import { getOrComputeMaterializedPlanEstimate } from "@/lib/plan-engine/getOrComputeMaterializedPlanEstimate";
 import {
   extractFixedRepEnergyCentsPerKwh,
   extractRepFixedMonthlyChargeDollars,
@@ -22,13 +21,9 @@ import { extractDeterministicTierSchedule, computeRepEnergyCostForMonthlyKwhTier
 import { extractDeterministicBillCredits, applyBillCreditsToMonth } from "@/lib/plan-engine/billCredits";
 import { extractDeterministicMinimumRules, applyMinimumRulesToMonth } from "@/lib/plan-engine/minimumRules";
 import { computeMonthsRemainingOnContract } from "@/lib/current-plan/contractTerm";
-import crypto from "node:crypto";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const PLAN_ENGINE_ESTIMATE_VERSION = "estimateTrueCost_v4";
-const CURRENT_PLAN_ESTIMATE_ENDPOINT = "CURRENT_PLAN_ENGINE_ESTIMATE_V1";
 
 function parseBool(v: string | null, fallback: boolean): boolean {
   if (v == null) return fallback;
@@ -49,36 +44,7 @@ function decimalToNumber(v: any): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function hashUsageInputs(args: {
-  yearMonths: string[];
-  bucketKeys: string[];
-  usageBucketsByMonth: Record<string, Record<string, number>>;
-}): string {
-  const h = crypto.createHash("sha256");
-  const yearMonths = Array.isArray(args.yearMonths) ? args.yearMonths : [];
-  const keys = Array.isArray(args.bucketKeys) ? args.bucketKeys.map(String).filter(Boolean).sort() : [];
-
-  h.update("ym:");
-  h.update(yearMonths.join(","));
-  h.update("|keys:");
-  h.update(keys.join(","));
-  h.update("|vals:");
-  for (const ym of yearMonths) {
-    h.update(ym);
-    h.update("{");
-    const m = args.usageBucketsByMonth?.[ym] ?? {};
-    for (const k of keys) {
-      const v = (m as any)[k];
-      const n = typeof v === "number" && Number.isFinite(v) ? v : null;
-      h.update(k);
-      h.update("=");
-      h.update(n == null ? "null" : n.toFixed(6));
-      h.update(";");
-    }
-    h.update("}");
-  }
-  return h.digest("hex");
-}
+const MATERIALIZED_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 function isRateStructurePresent(rs: any): boolean {
   if (!rs || typeof rs !== "object") return false;
@@ -383,56 +349,28 @@ export async function GET(req: NextRequest) {
         return { status: "NOT_IMPLEMENTED", reason: "Missing inputs or offer template unavailable" };
       }
       const monthsCount = 12;
-      const tdspPer = Number(tdspApplied.perKwhDeliveryChargeCents ?? 0) || 0;
-      const tdspMonthly = Number(tdspApplied.monthlyCustomerChargeDollars ?? 0) || 0;
-      const tdspEff = tdspApplied.effectiveDate ?? null;
-      const rsSha = sha256HexCache(JSON.stringify(offerRateStructure ?? null));
-      const usageSha = hashUsageInputs({
-        yearMonths,
-        bucketKeys: requiredKeys,
-        usageBucketsByMonth,
-      });
       const estimateMode =
         String((ratePlanRow as any)?.planCalcReasonCode ?? "").trim() === "INDEXED_APPROXIMATE_OK"
           ? ("INDEXED_EFL_ANCHOR_APPROX" as const)
           : ("DEFAULT" as const);
-      const inputsSha256 = sha256HexCache(
-        JSON.stringify({
-          v: PLAN_ENGINE_ESTIMATE_VERSION,
-          monthsCount,
-          annualKwh: Number(annualKwh.toFixed(6)),
-          tdsp: { per: tdspPer, monthly: tdspMonthly, effectiveDate: tdspEff },
-          rsSha,
-          usageSha,
-          estimateMode,
-        }),
-      );
-      const cached = await getCachedPlanEstimate({
+      const tdspPer = Number(tdspApplied.perKwhDeliveryChargeCents ?? 0) || 0;
+      const tdspMonthly = Number(tdspApplied.monthlyCustomerChargeDollars ?? 0) || 0;
+      const tdspEff = tdspApplied.effectiveDate ?? null;
+
+      const { payload } = await getOrComputeMaterializedPlanEstimate({
         houseAddressId: house.id,
         ratePlanId: String(ratePlanId),
-        inputsSha256,
         monthsCount,
-      });
-      if (cached) return cached;
-
-      const est = estimateTrueCost({
         annualKwh,
-        monthsCount,
-        tdspRates: { perKwhDeliveryChargeCents: tdspPer, monthlyCustomerChargeDollars: tdspMonthly, effectiveDate: tdspEff },
+        tdsp: { perKwhDeliveryChargeCents: tdspPer, monthlyCustomerChargeDollars: tdspMonthly, effectiveDate: tdspEff },
         rateStructure: offerRateStructure,
+        yearMonths,
+        requiredBucketKeys: requiredKeys,
         usageBucketsByMonth,
         estimateMode,
+        expiresAt: new Date(Date.now() + MATERIALIZED_TTL_MS),
       });
-
-      await putCachedPlanEstimate({
-        houseAddressId: house.id,
-        ratePlanId: String(ratePlanId),
-        esiid: usageSource === "SMT" ? esiid : null,
-        inputsSha256,
-        monthsCount,
-        payloadJson: est,
-      });
-      return est;
+      return payload as any;
     })();
 
     // Current-plan estimate (cache + compute).
@@ -441,61 +379,30 @@ export async function GET(req: NextRequest) {
         return { status: "NOT_IMPLEMENTED", reason: "Missing inputs or current plan not computable" };
       }
       const monthsCount = 12;
-      const tdspPer = Number(tdspApplied.perKwhDeliveryChargeCents ?? 0) || 0;
-      const tdspMonthly = Number(tdspApplied.monthlyCustomerChargeDollars ?? 0) || 0;
-      const tdspEff = tdspApplied.effectiveDate ?? null;
-      const rsSha = sha256HexCache(JSON.stringify(currentRateStructure ?? null));
-      const usageSha = hashUsageInputs({
-        yearMonths,
-        bucketKeys: requiredKeys,
-        usageBucketsByMonth,
-      });
       const estimateMode =
         String((currentRateStructure as any)?.type ?? "").trim().toUpperCase() === "VARIABLE" ||
         String((currentRateStructure as any)?.type ?? "").trim().toUpperCase() === "INDEXED"
           ? ("INDEXED_EFL_ANCHOR_APPROX" as const)
           : ("DEFAULT" as const);
-      const inputsSha256 = sha256HexCache(
-        JSON.stringify({
-          v: PLAN_ENGINE_ESTIMATE_VERSION,
-          monthsCount,
-          annualKwh: Number(annualKwh.toFixed(6)),
-          tdsp: { per: tdspPer, monthly: tdspMonthly, effectiveDate: tdspEff },
-          rsSha,
-          usageSha,
-          estimateMode,
-        }),
-      );
-
       const syntheticRatePlanId = `current_plan:${String((currentEntry as any)?.id ?? "latest")}`;
-      const cached = await getCachedPlanEstimate({
+      const tdspPer = Number(tdspApplied.perKwhDeliveryChargeCents ?? 0) || 0;
+      const tdspMonthly = Number(tdspApplied.monthlyCustomerChargeDollars ?? 0) || 0;
+      const tdspEff = tdspApplied.effectiveDate ?? null;
+
+      const { payload } = await getOrComputeMaterializedPlanEstimate({
         houseAddressId: house.id,
         ratePlanId: syntheticRatePlanId,
-        inputsSha256,
         monthsCount,
-        endpoint: CURRENT_PLAN_ESTIMATE_ENDPOINT,
-      });
-      if (cached) return cached;
-
-      const est = estimateTrueCost({
         annualKwh,
-        monthsCount,
-        tdspRates: { perKwhDeliveryChargeCents: tdspPer, monthlyCustomerChargeDollars: tdspMonthly, effectiveDate: tdspEff },
+        tdsp: { perKwhDeliveryChargeCents: tdspPer, monthlyCustomerChargeDollars: tdspMonthly, effectiveDate: tdspEff },
         rateStructure: currentRateStructure,
+        yearMonths,
+        requiredBucketKeys: requiredKeys,
         usageBucketsByMonth,
         estimateMode,
+        expiresAt: new Date(Date.now() + MATERIALIZED_TTL_MS),
       });
-
-      await putCachedPlanEstimate({
-        houseAddressId: house.id,
-        ratePlanId: syntheticRatePlanId,
-        esiid: usageSource === "SMT" ? esiid : null,
-        inputsSha256,
-        monthsCount,
-        payloadJson: est,
-        endpoint: CURRENT_PLAN_ESTIMATE_ENDPOINT,
-      });
-      return est;
+      return payload as any;
     })();
 
     const buildVariablesList = (args: {
