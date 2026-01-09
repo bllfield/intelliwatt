@@ -212,6 +212,7 @@ EFL parser model + extraction status:
   - `/admin/efl/fact-cards` includes an **Unmapped Templates** queue for `RatePlan` rows that have `rateStructure` but **no** `OfferIdRatePlanMap.ratePlanId` link (orphan templates). These won’t light up as “templateAvailable” for any WattBuy `offer_id` until the link exists.
   - Legacy `/admin/efl/manual-upload` redirects to `/admin/efl/fact-cards`.
   - Added **Backfill EFL Templates** button on `/admin/efl/fact-cards` that calls `POST /api/admin/efl/backfill` using `x-admin-token` (prefers `localStorage.intelliwatt_admin_token`, then `sessionStorage.ADMIN_TOKEN`, and also supports the page’s existing `localStorage.iw_admin_token`). The button sends `{zip}` (default `75201`); the route auto-fetches WattBuy offers for that ZIP when `offers[]` is omitted, then extracts EFL rawText and backfills templates. UI shows token diagnostics + last response.
+  - Added an on-page **Diagnostics panel** that logs the last ~80 API calls made by `/admin/efl/fact-cards` (including nested tools), and prints failures to the browser console with a `[fact_cards]` prefix. This is the first place to look when something “didn’t process”.
 
 ### Canonical EFL Pipeline (Dec 2025)
 - **Module**: `lib/efl/runEflPipeline.ts` (orchestrator) + `lib/efl/persistAndLinkFromPipeline.ts` (persistence/linking guardrails).
@@ -2454,6 +2455,7 @@ Materialized plan estimates (single source of truth — vNext)
 - **Compute is never triggered by UI interactions** (sort/filter/pagination are display-only).
 - **Correctness invariant**: Card, detail, compare, and admin must match because they read the same persisted estimate row for the same `(houseAddressId, ratePlanId, inputsSha256)`.
 - **Transition note**: `WattBuyApiSnapshot endpoint=PLAN_ENGINE_ESTIMATE_V1` remains as a legacy cache during migration, but the target architecture is the dedicated materialized table.
+  - **Normal entrypoint**: customer requests start **mid-engine** (template + usage buckets + TDSP → materialized row). Admin tooling may start upstream (Offer → EFL parse), but once a template exists, the estimate path must not re-run parsing.
 
 Client-side UX caching (not a source of truth)
 

@@ -42,6 +42,10 @@ If verification does not return `5`, stop and investigate before loading any add
 - **API**: Prefer **Preview** deployments for testing; treat **Production** as read-only for verified flows
 - **No local dev server** needed for data queries
 
+### Plan engine migration (one engine)
+- **Canonical home-scoped estimates** should come from `PlanEstimateMaterialized` (master DB), keyed by `(houseAddressId, ratePlanId, inputsSha256)`.
+- **Admin verification UI**: use `/admin/efl/fact-cards` and its Diagnostics panel to validate template creation + estimate behavior without guessing which endpoint failed.
+
 ### Environment Strategy
 - **Preview**: Use for all testing, development, and experimental changes
 - **Production**: Read-only for verified flows and data queries only

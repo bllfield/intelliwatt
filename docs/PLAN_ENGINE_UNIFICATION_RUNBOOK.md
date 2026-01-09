@@ -23,6 +23,14 @@ The customer UI must be **fast** and must not trigger recalculation via sort/fil
 - Templates are linked by `OfferIdRatePlanMap (offerId -> ratePlanId)` into `RatePlan` templates.
 - Estimates for the plans list are cache-only (no inline compute), but are currently stored in `WattBuyApiSnapshot` (legacy cache-style).
 
+### Reality check (important nuance)
+Admin tooling can start “upstream” (Offer → EFL → Template). Customer requests usually start **mid-engine**:
+- `HouseAddress` + usage buckets (`usagePrisma.homeMonthlyUsageBucket`)
+- `RatePlan.rateStructure` (template)
+- TDSP delivery rates
+- `inputsSha256` (canonical key)
+- Read `PlanEstimateMaterialized` first; compute only via bounded pipeline when missing.
+
 ## Target Architecture
 ### Data flow (high level)
 1) **Offers ingestion** (snapshot + diff) identifies new/changed offers.
@@ -68,6 +76,12 @@ Update the pipeline job/route to:
 
 **Result after Phase 3**: background jobs populate the new table.
 
+Operational reliability requirements (must hold in production):
+- A stuck `RUNNING` job must not block forever (stale lock timeout).
+- Any thrown error after marking `RUNNING` must be finalized to `ERROR` (no infinite RUNNING jobs).
+- External offer fetch must be bounded (timeouts) and preferably cached (avoid cold-start hangs).
+- Template persistence must be idempotent (no P2002 unique crashes; dedupe/update instead).
+
 ### Phase 4 — Dashboard reads materialized estimates (no inline compute)
 Update `GET /api/dashboard/plans` to:
 - keep fetching the current offers list (snapshot/live)
@@ -77,6 +91,13 @@ Update `GET /api/dashboard/plans` to:
 - return a stable `trueCostEstimate` derived from the materialized row
 
 **Result after Phase 4**: plans page becomes fast and consistent; no compute happens from UI calls.
+
+### Admin verification loop (recommended workflow)
+Use `/admin/efl/fact-cards` as the single-pane ops UI:
+- Batch parse/backfill templates
+- Verify template computability + required buckets
+- Provide a homeId usage context and verify usage-based estimates
+- Use the built-in Diagnostics panel (API call log) to spot failing endpoints quickly
 
 ### Phase 5 — Customer UI copy (remove “QUEUED”)
 Update `/dashboard/plans` UI to:
