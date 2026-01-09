@@ -353,12 +353,18 @@ export default function FactCardOpsPage() {
     setBatchNote(null);
     setBatchRows(null);
     setBatchRaw(null);
+    // Prevent stale UI counts (e.g. old queue items) from being mistaken as results of this run.
+    // The queue/templates will be refreshed after a successful batch.
+    setQueueErr(null);
+    setQueueItems([]);
+    setQueueTotalCount(null);
 
     const all: BatchRow[] = [];
     // Always start from the beginning. Chunking/continuation is handled automatically
     // via nextStartIndex returned from the API when runAll=true.
     let next = 0;
 
+    let completedOk = false;
     try {
       while (true) {
           const body = {
@@ -419,10 +425,24 @@ export default function FactCardOpsPage() {
         if (!data.truncated) break;
         await new Promise((r) => setTimeout(r, 150));
       }
+      completedOk = true;
     } catch (e: any) {
       setBatchNote(e?.message || "Batch failed.");
     } finally {
       setBatchLoading(false);
+      // After a successful run, refresh dependent panels so admins don't see stale queue/template state.
+      // This also ensures any auto-resolved queue rows disappear immediately without requiring a manual Refresh click.
+      if (completedOk) {
+        try {
+          setBatchNote((prev) => {
+            const base = prev ? String(prev) : "";
+            return base ? `${base} Refreshing queue + templates…` : "Refreshing queue + templates…";
+          });
+          await Promise.allSettled([loadQueue(), loadTemplates(), loadUnmappedTemplates()]);
+        } catch {
+          // ignore
+        }
+      }
     }
   }
 
