@@ -394,15 +394,92 @@ export async function upsertRatePlanFromEfl(
     }
   }
 
-  if (!existing) {
-    const created = await prisma.ratePlan.create({
-      data: {
-        // utilityId/state are required; use provided context if available.
-        utilityId: (utilityId ?? "").trim() ? String(utilityId) : "UNKNOWN",
-        state: (state ?? "").trim() ? String(state) : "TX",
-        ...dataCommon,
+  // 5) Final safety: if we have the full composite identity used by the DB unique constraint,
+  // prefer deduping on it before attempting create. This prevents P2002 crashes during batch ops.
+  if (
+    !existing &&
+    String((utilityId ?? "").trim() || "UNKNOWN") &&
+    String((state ?? "").trim() || "TX") &&
+    String((providerName ?? "").trim()) &&
+    String((planName ?? "").trim()) &&
+    typeof termMonths === "number" &&
+    Number.isFinite(termMonths)
+  ) {
+    const util = (utilityId ?? "").trim() ? String(utilityId) : "UNKNOWN";
+    const st = (state ?? "").trim() ? String(state) : "TX";
+    const supplier = String(providerName ?? "").trim();
+    const pn = String(planName ?? "").trim();
+    const tm = Math.trunc(termMonths);
+    existing = await prisma.ratePlan.findFirst({
+      where: {
+        utilityId: util,
+        state: st,
+        supplier: supplier,
+        planName: pn,
+        termMonths: tm,
+        isUtilityTariff: false,
       },
     });
+  }
+
+  if (!existing) {
+    let created: any;
+    const createUtil = (utilityId ?? "").trim() ? String(utilityId) : "UNKNOWN";
+    const createState = (state ?? "").trim() ? String(state) : "TX";
+    try {
+      created = await prisma.ratePlan.create({
+        data: {
+          // utilityId/state are required; use provided context if available.
+          utilityId: createUtil,
+          state: createState,
+          ...dataCommon,
+        },
+      });
+    } catch (e: any) {
+      // Defensive recovery: handle composite unique collisions by updating the already-existing row.
+      const isCompositeConflict =
+        String(e?.code ?? "") === "P2002" &&
+        Array.isArray(e?.meta?.target) &&
+        (e.meta.target as any[]).some((t) => String(t) === "utilityId") &&
+        (e.meta.target as any[]).some((t) => String(t) === "state") &&
+        (e.meta.target as any[]).some((t) => String(t) === "supplier") &&
+        (e.meta.target as any[]).some((t) => String(t) === "planName") &&
+        (e.meta.target as any[]).some((t) => String(t) === "termMonths") &&
+        (e.meta.target as any[]).some((t) => String(t) === "isUtilityTariff");
+
+      if (!isCompositeConflict) throw e;
+
+      const supplier = String(providerName ?? "").trim();
+      const pn = String(planName ?? "").trim();
+      const tm = typeof termMonths === "number" && Number.isFinite(termMonths) ? Math.trunc(termMonths) : null;
+      if (!supplier || !pn || tm == null) throw e;
+
+      const collided = await prisma.ratePlan.findFirst({
+        where: {
+          utilityId: createUtil,
+          state: createState,
+          supplier,
+          planName: pn,
+          termMonths: tm,
+          isUtilityTariff: false,
+        },
+      });
+      if (!collided) throw e;
+
+      const updated = await prisma.ratePlan.update({
+        where: { id: collided.id },
+        data: {
+          ...dataCommon,
+        },
+      });
+
+      return {
+        ratePlan: updated,
+        templatePersisted: Boolean(!requiresManualReview && safeRateStructure),
+        forcedManualReviewForMissingFields,
+        missingTemplateFields,
+      };
+    }
     return {
       ratePlan: created,
       templatePersisted: Boolean(!requiresManualReview && safeRateStructure),

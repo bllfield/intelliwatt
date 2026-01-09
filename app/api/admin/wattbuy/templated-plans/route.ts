@@ -32,13 +32,21 @@ type TdspDelivery = { monthlyFeeCents: number; deliveryCentsPerKwh: number };
 type TdspSnapshotMeta = TdspDelivery & { tdspCode: string; snapshotAt: string };
 
 function normalizeTdspSlug(v: string | null | undefined): string | null {
-  const s = String(v ?? "").trim().toLowerCase();
+  const s0 = String(v ?? "").trim().toLowerCase();
+  const s = s0
+    .replace(/[\s]+/g, "_")
+    .replace(/-+/g, "_")
+    .replace(/[^a-z0-9_]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
   if (!s) return null;
-  // Accept either slug or code-style values.
-  if (s === "oncor") return "oncor";
+
+  // Accept common WattBuy / EFL variants (e.g. ONCOR_ELEC).
+  if (s.startsWith("oncor")) return "oncor";
   if (s === "centerpoint" || s === "center_point") return "centerpoint";
-  if (s === "aep_north" || s === "aepnorth" || s === "aep-north") return "aep_north";
-  if (s === "aep_central" || s === "aepcentral" || s === "aep-central") return "aep_central";
+  if (s.includes("centerpoint") || s === "cnp" || s.startsWith("centerpoint")) return "centerpoint";
+  if (s.includes("aep") && s.includes("north")) return "aep_north";
+  if (s.includes("aep") && (s.includes("central") || s.includes("cnt"))) return "aep_central";
   if (s === "tnmp") return "tnmp";
   return s;
 }
@@ -635,33 +643,24 @@ export async function GET(req: NextRequest) {
     }
 
     const tdspCache = new Map<string, Promise<TdspSnapshotMeta | null>>();
-    const getTdsp = async (utilId: string): Promise<TdspSnapshotMeta | null> => {
-      const code = mapUtilityIdToTdspCode(utilId);
-      if (!code) return null;
-      const cached = tdspCache.get(code);
+    // Canonical TDSP source (same as dashboard engine): lookup via plan-engine tariffs.
+    // We still return the legacy TdspSnapshotMeta shape because the rest of this file expects it.
+    const getTdsp = async (tdspSlugRaw: string): Promise<TdspSnapshotMeta | null> => {
+      const slug = normalizeTdspSlug(tdspSlugRaw);
+      if (!slug) return null;
+      const cached = tdspCache.get(slug);
       if (cached) return cached;
       const p = (async () => {
-        const at = new Date();
-        const row =
-          (await (prisma as any).tdspRateSnapshot.findFirst({
-            where: { tdsp: code, effectiveAt: { lte: at } },
-            orderBy: { effectiveAt: "desc" },
-          })) ||
-          (await (prisma as any).tdspRateSnapshot.findFirst({
-            where: { tdsp: code },
-            orderBy: { createdAt: "desc" },
-          }));
-        if (!row) return null;
-        const payload: any = row.payload ?? {};
-        const snapAt = (row.effectiveAt ?? row.createdAt) as Date;
+        const rates = await getTdspDeliveryRates({ tdspSlug: slug, asOf: new Date() }).catch(() => null);
+        if (!rates) return null;
         return {
-          tdspCode: code,
-          snapshotAt: new Date(snapAt).toISOString(),
-          monthlyFeeCents: Number(payload?.monthlyFeeCents || 0),
-          deliveryCentsPerKwh: Number(payload?.deliveryCentsPerKwh || 0),
+          tdspCode: slug.toUpperCase(),
+          snapshotAt: rates.effectiveDate,
+          monthlyFeeCents: Math.round(Number(rates.monthlyCustomerChargeDollars) * 100),
+          deliveryCentsPerKwh: Number(rates.perKwhDeliveryChargeCents),
         } satisfies TdspSnapshotMeta;
       })();
-      tdspCache.set(code, p);
+      tdspCache.set(slug, p);
       return p;
     };
 
@@ -772,9 +771,20 @@ export async function GET(req: NextRequest) {
       });
       if (!house) return jsonError(404, "home_not_found", { homeId: effectiveHomeId });
       if ((house as any)?.archivedAt) return jsonError(404, "home_archived", { homeId: effectiveHomeId });
-      homeTdspSlug = String((house as any)?.tdspSlug ?? "").trim().toLowerCase() || null;
+      homeTdspSlug = normalizeTdspSlug(String((house as any)?.tdspSlug ?? "")) || null;
 
-      const yearMonths = lastNYearMonthsChicago(usageMonths);
+      // IMPORTANT: use the months we actually *have* in the bucket table (avoids "need 12 months, have 11"
+      // when the current calendar month is incomplete / not written yet).
+      const newestMonths = await (usagePrisma as any).homeMonthlyUsageBucket.findMany({
+        where: { homeId: effectiveHomeId, bucketKey: "kwh.m.all.total" },
+        select: { yearMonth: true },
+        orderBy: [{ yearMonth: "desc" }],
+        take: usageMonths,
+      });
+      const monthsDesc = Array.isArray(newestMonths)
+        ? newestMonths.map((r: any) => String(r?.yearMonth ?? "").trim()).filter(Boolean)
+        : [];
+      const yearMonths = monthsDesc.slice().reverse();
       const keys = new Set<string>(["kwh.m.all.total"]);
       for (const m of planMeta) {
         for (const k of m.requiredBucketKeys ?? []) {
@@ -905,7 +915,7 @@ export async function GET(req: NextRequest) {
         const effectiveDb1000 = modeledCol1000 ?? modeledDb1000;
         const effectiveDb2000 = modeledCol2000 ?? modeledDb2000;
 
-        const tdsp = await getTdsp(p.utilityId);
+        const tdsp = await getTdsp(homeTdspSlug ?? p.utilityId);
         const modeledSource: Row["modeledSource"] =
           typeof effectiveDb500 === "number" || typeof effectiveDb1000 === "number" || typeof effectiveDb2000 === "number"
             ? "DB_VALIDATION"
@@ -957,7 +967,10 @@ export async function GET(req: NextRequest) {
             } else if (!p.rateStructure) {
               usageEstimate = { status: "NOT_IMPLEMENTED", reason: "Missing rateStructure" };
             } else if (!tdsp) {
-              usageEstimate = { status: "NOT_IMPLEMENTED", reason: "Missing TDSP snapshot for utility" };
+              usageEstimate = {
+                status: "NOT_IMPLEMENTED",
+                reason: `Missing TDSP tariff mapping (tdspSlug=${homeTdspSlug ?? "null"})`,
+              };
             } else {
               const estimateMode =
                 String(p?.planCalcReasonCode ?? "").trim() === "INDEXED_APPROXIMATE_OK"
