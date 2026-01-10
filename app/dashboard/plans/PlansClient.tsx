@@ -135,7 +135,9 @@ export default function PlansClient() {
   // Sorting/filtering/pagination should only change the list being displayed and should NOT kick off
   // background plan pipeline runs or EFL template prefetching from this page.
   // Those warmups happen via the dashboard bootstrapper and admin tooling.
-  const ENABLE_PLANS_AUTO_WARMUPS = false;
+  // NOTE: We intentionally keep the warmups bounded + throttled; this flips cards from
+  // CALCULATING → AVAILABLE as soon as the background pipeline materializes estimates.
+  const ENABLE_PLANS_AUTO_WARMUPS = true;
 
   const [q, setQ] = useState("");
   const [rateType, setRateType] = useState<"all" | "fixed" | "variable" | "renewable" | "unknown">("all");
@@ -212,6 +214,20 @@ export default function PlansClient() {
   // Keep it long-lived; correctness still comes from server-side canonical inputs + DB-stored estimates.
   const cacheTtlMs = 60 * 60 * 1000;
 
+  const responseHasPending = (r: ApiResponse | null): boolean => {
+    if (!r?.ok) return false;
+    if (!r?.hasUsage) return false;
+    const offersNow = Array.isArray(r?.offers) ? (r!.offers as OfferRow[]) : [];
+    return offersNow.some((o: any) => {
+      // Pending = expected to eventually compute (not UNSUPPORTED/NOT_COMPUTABLE).
+      if (String(o?.intelliwatt?.statusLabel ?? "") !== "QUEUED") return false;
+      const tceStatus = String((o as any)?.intelliwatt?.trueCostEstimate?.status ?? "").toUpperCase();
+      const tceReason = String((o as any)?.intelliwatt?.trueCostEstimate?.reason ?? "").toUpperCase();
+      const isCacheMiss = tceStatus === "NOT_IMPLEMENTED" && tceReason === "CACHE_MISS";
+      return !tceStatus || tceStatus === "QUEUED" || tceStatus === "MISSING_TEMPLATE" || isCacheMiss;
+    });
+  };
+
   useEffect(() => {
     if (isRenter === null) return; // wait for stable dataset identity
     try {
@@ -220,6 +236,10 @@ export default function PlansClient() {
       const parsed = JSON.parse(raw) as { t: number; resp: ApiResponse };
       if (!parsed || typeof parsed.t !== "number" || !parsed.resp) return;
       if (Date.now() - parsed.t > cacheTtlMs) return;
+      // If the cached payload still has pending calculations, don't "pin" the UI to it.
+      // We want the next render to fetch fresh so cards can flip to AVAILABLE quickly after
+      // the pipeline finishes.
+      if (responseHasPending(parsed.resp)) return;
       setResp(parsed.resp);
       setError(null);
       setLoading(false);
@@ -318,10 +338,12 @@ export default function PlansClient() {
         if (raw) {
           const parsed = JSON.parse(raw) as { t: number; resp: ApiResponse };
           if (parsed && typeof parsed.t === "number" && parsed.resp && Date.now() - parsed.t <= cacheTtlMs) {
+            if (!responseHasPending(parsed.resp)) {
             setResp(parsed.resp);
             setError(null);
             setLoading(false);
             return;
+            }
           }
         }
       } catch {
