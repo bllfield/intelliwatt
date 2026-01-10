@@ -224,8 +224,6 @@ export default function PlansClient() {
     return defaultFilters && !userHasSorted && !userChangedPageSize && !userTouchedSearchOrFilters;
   }, [q, rateType, term, renewableMin, template, page, pageSize, userTouchedSearchOrFilters]);
 
-  const allowWarmupInBackground = allowWarmupKicksFromThisView || warmupSessionActive;
-
   // Server dataset identity: include all inputs that change the server response.
   const serverDatasetKey = useMemo(
     () =>
@@ -282,6 +280,17 @@ export default function PlansClient() {
       return !tceStatus || tceStatus === "QUEUED" || tceStatus === "MISSING_TEMPLATE" || isCacheMiss;
     }).length;
   };
+
+  // IMPORTANT:
+  // Warmups should NOT be *caused* by sort/filter changes, but they also must not get "stuck off"
+  // if a user changes the view and the newly-fetched response reveals pending CACHE_MISS items.
+  //
+  // We therefore allow warmups to run whenever either:
+  // - we're on the default view (allowWarmupKicksFromThisView), or
+  // - a warmup session is already active, or
+  // - the current response contains pending items (so we can start a warmup even after a sort change).
+  const allowWarmupInBackground =
+    allowWarmupKicksFromThisView || warmupSessionActive || pendingCountFromResponse(resp) > 0;
 
   useEffect(() => {
     if (isRenter === null) return; // wait for stable dataset identity
