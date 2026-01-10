@@ -248,6 +248,20 @@ export default function PlansClient() {
     });
   };
 
+  const pendingCountFromResponse = (r: ApiResponse | null): number => {
+    if (!r?.ok) return 0;
+    if (!r?.hasUsage) return 0;
+    const offersNow = Array.isArray(r?.offers) ? (r!.offers as OfferRow[]) : [];
+    return offersNow.filter((o: any) => {
+      // Pending = expected to eventually compute (not UNSUPPORTED/NOT_COMPUTABLE).
+      if (String(o?.intelliwatt?.statusLabel ?? "") !== "QUEUED") return false;
+      const tceStatus = String((o as any)?.intelliwatt?.trueCostEstimate?.status ?? "").toUpperCase();
+      const tceReason = String((o as any)?.intelliwatt?.trueCostEstimate?.reason ?? "").toUpperCase();
+      const isCacheMiss = tceStatus === "NOT_IMPLEMENTED" && tceReason === "CACHE_MISS";
+      return !tceStatus || tceStatus === "QUEUED" || tceStatus === "MISSING_TEMPLATE" || isCacheMiss;
+    }).length;
+  };
+
   useEffect(() => {
     if (isRenter === null) return; // wait for stable dataset identity
     try {
@@ -415,6 +429,7 @@ export default function PlansClient() {
   useEffect(() => {
     if (!resp?.ok) return;
     const offersNow = Array.isArray(resp?.offers) ? (resp!.offers as OfferRow[]) : [];
+    const pending = pendingCountFromResponse(resp);
     const needsUsage = offersNow.filter(
       (o: any) => String((o as any)?.intelliwatt?.trueCostEstimate?.status ?? "").toUpperCase() === "MISSING_USAGE",
     ).length;
@@ -425,10 +440,11 @@ export default function PlansClient() {
       return true;
     }).length;
     setAutoPreparing(false);
-    if (needsUsage > 0) setPrefetchNote("Need usage to estimate some plans.");
+    if (allowWarmupKicksFromThisView && pending > 0) setPrefetchNote(`Preparing IntelliWatt calculations… (${pending} pending)`);
+    else if (needsUsage > 0) setPrefetchNote("Need usage to estimate some plans.");
     else if (notComputableYet > 0) setPrefetchNote("Some plans are not computable yet.");
     else setPrefetchNote(null);
-  }, [resp?.ok, resp?.offers]);
+  }, [resp?.ok, resp?.offers, allowWarmupKicksFromThisView]);
 
   // Targeted template warm-up: if offers are QUEUED specifically because their template mapping is missing,
   // kick the lightweight EFL-prefetch endpoint to auto-parse and create/link templates (best-effort).
@@ -513,15 +529,7 @@ export default function PlansClient() {
     if (!resp?.ok) return;
     if (!resp?.hasUsage) return;
     const offersNow = Array.isArray(resp?.offers) ? (resp!.offers as OfferRow[]) : [];
-    const pendingCountNow = offersNow.filter((o: any) => {
-      if (String(o?.intelliwatt?.statusLabel ?? "") !== "QUEUED") return false;
-      const tceStatus = String((o as any)?.intelliwatt?.trueCostEstimate?.status ?? "").toUpperCase();
-      const tceReason = String((o as any)?.intelliwatt?.trueCostEstimate?.reason ?? "").toUpperCase();
-      // Treat CACHE_MISS as pending: the plans list endpoint is cache-only and will emit NOT_IMPLEMENTED/CACHE_MISS
-      // until the background pipeline warms the materialized estimates.
-      const isCacheMiss = tceStatus === "NOT_IMPLEMENTED" && tceReason === "CACHE_MISS";
-      return !tceStatus || tceStatus === "QUEUED" || tceStatus === "MISSING_TEMPLATE" || isCacheMiss;
-    }).length;
+    const pendingCountNow = pendingCountFromResponse(resp);
     if (pendingCountNow <= 0) return;
 
     // Throttle is per-session warmup cycle (warmupKey), not per-filter:
@@ -554,9 +562,11 @@ export default function PlansClient() {
       try {
         const params = new URLSearchParams();
         params.set("reason", "plans_fallback");
-        params.set("timeBudgetMs", "25000");
+        // Keep each pipeline run short to avoid serverless timeouts; repeated runs are expected.
+        params.set("timeBudgetMs", "12000");
         params.set("maxTemplateOffers", "6");
-        params.set("maxEstimatePlans", "50");
+        // When showing ALL plans, allow the pipeline to consider more per run (still bounded server-side).
+        params.set("maxEstimatePlans", datasetMode ? "120" : "50");
         // Allow repeated short runs; server still enforces lock + cooldown.
         params.set("proactiveCooldownMs", "60000");
         params.set("fallbackCooldownMs", "15000");
@@ -577,8 +587,8 @@ export default function PlansClient() {
       const tick = () => {
         if (pollInFlightRef.current) return;
         if (document.visibilityState === "hidden") return;
-        if (Date.now() - startedAt > 120_000) {
-          // Stop after 2 minutes.
+        if (Date.now() - startedAt > 10 * 60_000) {
+          // Stop after 10 minutes (pipeline runs are bounded and may require multiple kicks).
           if (pollTimerRef.current) window.clearInterval(pollTimerRef.current);
           pollTimerRef.current = null;
           prefetchInFlightRef.current = false;
@@ -620,7 +630,7 @@ export default function PlansClient() {
     return () => {
       // keep timers running across renders; cleaned up in serverDatasetKey effect
     };
-  }, [resp?.ok, resp?.hasUsage, resp?.offers, isRenter, warmupKey, ENABLE_PLANS_AUTO_WARMUPS, allowWarmupKicksFromThisView]);
+  }, [resp?.ok, resp?.hasUsage, resp?.offers, isRenter, warmupKey, ENABLE_PLANS_AUTO_WARMUPS, allowWarmupKicksFromThisView, datasetMode]);
 
   // Cleanup on unmount (defensive: prevents polling leaks if the component tree changes).
   useEffect(() => {
