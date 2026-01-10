@@ -1558,40 +1558,50 @@ export async function GET(req: NextRequest) {
         const templateAvailable = Boolean((base as any)?.intelliwatt?.templateAvailable);
         const effectiveRatePlanId = templateOk ? ratePlanId : null;
 
-        // Prefer stored fields on RatePlan when present.
-        const storedKeys = Array.isArray(ratePlanRow?.requiredBucketKeys) ? (ratePlanRow.requiredBucketKeys as any[]) : [];
+        // IMPORTANT:
+        // Prefer derived plan-calc requirements (status + requiredBucketKeys) from the current engine whenever we have
+        // a rateStructure. Stored fields can be stale after engine upgrades and cause:
+        // - offers to incorrectly show as UNSUPPORTED
+        // - inputsSha256 mismatches (pipeline computes, dashboard reads different key) → stuck CACHE_MISS / pending
+        //
+        // The only exception is an explicit admin override to COMPUTABLE.
+        const storedKeys = Array.isArray(ratePlanRow?.requiredBucketKeys)
+          ? (ratePlanRow.requiredBucketKeys as any[]).map((k) => String(k))
+          : [];
         const storedStatus = typeof ratePlanRow?.planCalcStatus === "string" ? String(ratePlanRow.planCalcStatus) : null;
-        const storedReason = typeof ratePlanRow?.planCalcReasonCode === "string" ? String(ratePlanRow.planCalcReasonCode) : null;
+        const storedReason =
+          typeof ratePlanRow?.planCalcReasonCode === "string" ? String(ratePlanRow.planCalcReasonCode) : null;
 
-        if (storedKeys.length > 0 && storedStatus) {
-          requiredBucketKeys = storedKeys.map((k) => String(k));
-          planCalcStatus = storedStatus;
-          planCalcReasonCode = storedReason ?? "UNKNOWN";
-        } else {
-          const derived = derivePlanCalcRequirementsFromTemplate({ rateStructure: template?.rateStructure });
-          requiredBucketKeys = derived.requiredBucketKeys;
-          planCalcStatus = derived.planCalcStatus;
-          planCalcReasonCode = derived.planCalcReasonCode;
+        const derived = derivePlanCalcRequirementsFromTemplate({ rateStructure: template?.rateStructure });
+        const derivedKeys = Array.isArray(derived?.requiredBucketKeys) ? derived.requiredBucketKeys.map((k) => String(k)) : [];
 
-          // Lazy backfill so older RatePlans self-heal (best-effort; never breaks offers).
-          if (effectiveRatePlanId) {
-            try {
-              (prisma as any).ratePlan
-                .update({
-                  where: { id: effectiveRatePlanId },
-                  data: {
-                    planCalcVersion: derived.planCalcVersion,
-                    planCalcStatus: derived.planCalcStatus,
-                    planCalcReasonCode: derived.planCalcReasonCode,
-                    requiredBucketKeys: derived.requiredBucketKeys,
-                    supportedFeatures: derived.supportedFeatures as any,
-                    planCalcDerivedAt: new Date(),
-                  },
-                })
-                .catch(() => {});
-            } catch {
-              // swallow
-            }
+        const isAdminOverride =
+          String(storedStatus ?? "").trim() === "COMPUTABLE" &&
+          String(storedReason ?? "").trim() === "ADMIN_OVERRIDE_COMPUTABLE";
+
+        const shouldPreferDerived = Boolean(template?.rateStructure) && !isAdminOverride;
+        requiredBucketKeys = shouldPreferDerived ? derivedKeys : (storedKeys.length ? storedKeys : derivedKeys);
+        planCalcStatus = shouldPreferDerived ? derived.planCalcStatus : storedStatus;
+        planCalcReasonCode = shouldPreferDerived ? derived.planCalcReasonCode : (storedReason ?? "UNKNOWN");
+
+        // Lazy backfill so older/stale RatePlans self-heal (best-effort; never breaks offers).
+        if (effectiveRatePlanId && shouldPreferDerived) {
+          try {
+            (prisma as any).ratePlan
+              .update({
+                where: { id: effectiveRatePlanId },
+                data: {
+                  planCalcVersion: derived.planCalcVersion,
+                  planCalcStatus: derived.planCalcStatus,
+                  planCalcReasonCode: derived.planCalcReasonCode,
+                  requiredBucketKeys: derivedKeys,
+                  supportedFeatures: derived.supportedFeatures as any,
+                  planCalcDerivedAt: new Date(),
+                },
+              })
+              .catch(() => {});
+          } catch {
+            // swallow
           }
         }
 
@@ -1738,10 +1748,12 @@ export async function GET(req: NextRequest) {
         const tdspPer = Number(tdspRates?.perKwhDeliveryChargeCents ?? 0) || 0;
         const tdspMonthly = Number(tdspRates?.monthlyCustomerChargeDollars ?? 0) || 0;
         const tdspEff = tdspRates?.effectiveDate ?? null;
-        // IMPORTANT: estimateMode must match the pipeline's cache keying to avoid "sorted by X but cards show Y".
-        // Pipeline keys by RatePlan.planCalcReasonCode (template-level), not the per-home derived planComputability.
+        // IMPORTANT: estimateMode must match the pipeline's cache keying.
+        // Use the effective planCalcReasonCode (template-level) rather than per-home derived planComputability.
+        // BUGFIX: previously read from `template.planCalcReasonCode` (not present), forcing DEFAULT and causing
+        // indexed plans (e.g. Champ Saver-1) to get stuck as CACHE_MISS forever.
         const estimateMode =
-          String((template as any)?.planCalcReasonCode ?? "").trim() === "INDEXED_APPROXIMATE_OK"
+          String(planCalcReasonCode ?? "").trim() === "INDEXED_APPROXIMATE_OK"
             ? ("INDEXED_EFL_ANCHOR_APPROX" as const)
             : ("DEFAULT" as const);
         const { inputsSha256 } = makePlanEstimateInputsSha256({
