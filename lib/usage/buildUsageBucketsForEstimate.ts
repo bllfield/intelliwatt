@@ -6,6 +6,36 @@ import { ensureCoreMonthlyBuckets } from "@/lib/usage/aggregateMonthlyBuckets";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+function uniq<T>(arr: T[]): T[] {
+  const out: T[] = [];
+  const seen = new Set<T>();
+  for (const x of arr) {
+    if (seen.has(x)) continue;
+    seen.add(x);
+    out.push(x);
+  }
+  return out;
+}
+
+function aliasesForCanonicalMonthlyBucketKey(key: string): string[] {
+  const s = canonicalizeMonthlyBucketKey(String(key ?? "").trim());
+  if (!s) return [];
+  const m = s.match(/^kwh\.m\.(all|weekday|weekend)\.(.+)$/);
+  if (!m) return [s];
+  const day = m[1];
+  const suffix = m[2];
+
+  const out: string[] = [];
+  out.push(`kwh.m.${day}.${suffix}`);
+  out.push(`kwh.m.${day.toUpperCase()}.${suffix}`);
+  if (suffix === "total") {
+    out.push(`kwh.m.${day}.0000-2400`);
+    out.push(`kwh.m.${day.toUpperCase()}.0000-2400`);
+    out.push(`kwh.m.${day.toUpperCase()}.total`);
+  }
+  return uniq(out);
+}
+
 function daysInMonth(year: number, month1: number): number {
   if (!Number.isFinite(year) || !Number.isFinite(month1) || month1 < 1 || month1 > 12) return 31;
   return new Date(Date.UTC(year, month1, 0)).getUTCDate();
@@ -231,19 +261,72 @@ export async function buildUsageBucketsForEstimate(args: {
   );
   const bucketDefs = bucketDefsFromBucketKeys(keysToLoad);
 
-  // Ensure buckets exist for these keys/range (best-effort).
+  // Check bucket coverage first; compute only when missing so plan cost never "stalls"
+  // on missing TOU buckets while keeping fast paths cheap.
+  let shouldCompute = true;
   try {
-    await ensureCoreMonthlyBuckets({
-      homeId: args.homeId,
-      esiid: args.usageSource === "SMT" ? (args.esiid ?? null) : null,
-      rangeStart: args.cutoff,
-      rangeEnd: args.windowEnd,
-      source: args.usageSource === "SMT" ? "SMT" : "GREENBUTTON",
-      intervalSource: args.usageSource === "SMT" ? "SMT" : "GREENBUTTON",
-      bucketDefs,
+    const aliasesByCanonical: Record<string, string[]> = {};
+    const allQueryKeys: string[] = [];
+    for (const k of keysToLoad) {
+      const aliases = aliasesForCanonicalMonthlyBucketKey(k);
+      if (aliases.length === 0) continue;
+      aliasesByCanonical[k] = aliases;
+      allQueryKeys.push(...aliases);
+    }
+
+    const rows = await (usagePrisma as any).homeMonthlyUsageBucket.findMany({
+      where: {
+        homeId: args.homeId,
+        yearMonth: { in: yearMonths },
+        bucketKey: { in: uniq(allQueryKeys) },
+      },
+      select: { yearMonth: true, bucketKey: true },
     });
+
+    const presentByMonth: Record<string, Set<string>> = {};
+    for (const r of rows ?? []) {
+      const ym = String((r as any)?.yearMonth ?? "").trim();
+      const bk = String((r as any)?.bucketKey ?? "").trim();
+      if (!ym || !bk) continue;
+      if (!presentByMonth[ym]) presentByMonth[ym] = new Set<string>();
+      presentByMonth[ym].add(bk);
+    }
+
+    let missingAny = false;
+    for (const ym of yearMonths) {
+      const set = presentByMonth[ym] ?? new Set<string>();
+      for (const canonical of keysToLoad) {
+        const aliases = aliasesByCanonical[canonical] ?? [canonical];
+        const found = aliases.some((k) => set.has(k));
+        if (!found) {
+          missingAny = true;
+          break;
+        }
+      }
+      if (missingAny) break;
+    }
+
+    shouldCompute = missingAny;
   } catch {
-    // ignore
+    // If coverage check fails, default to computing (best-effort) to avoid false "missing buckets" stalls.
+    shouldCompute = true;
+  }
+
+  if (shouldCompute) {
+    // Ensure buckets exist for these keys/range (best-effort).
+    try {
+      await ensureCoreMonthlyBuckets({
+        homeId: args.homeId,
+        esiid: args.usageSource === "SMT" ? (args.esiid ?? null) : null,
+        rangeStart: args.cutoff,
+        rangeEnd: args.windowEnd,
+        source: args.usageSource === "SMT" ? "SMT" : "GREENBUTTON",
+        intervalSource: args.usageSource === "SMT" ? "SMT" : "GREENBUTTON",
+        bucketDefs,
+      });
+    } catch {
+      // ignore
+    }
   }
 
   // Load monthly buckets from usage DB.

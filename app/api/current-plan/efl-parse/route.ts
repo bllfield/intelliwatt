@@ -12,6 +12,8 @@ import { getTdspDeliveryRates } from "@/lib/plan-engine/getTdspDeliveryRates";
 import { estimateTrueCost } from "@/lib/plan-engine/estimateTrueCost";
 import { ensureCurrentPlanEntry } from "@/lib/current-plan/ensureEntry";
 import { validateEflAvgPriceTable } from "@/lib/efl/eflValidator";
+import { requiredBucketsForRateStructure } from "@/lib/plan-engine/requiredBucketsForPlan";
+import { buildUsageBucketsForEstimate } from "@/lib/usage/buildUsageBucketsForEstimate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -635,25 +637,28 @@ export async function POST(req: NextRequest) {
       if (houseId) {
         const house = await prisma.houseAddress.findUnique({
           where: { id: houseId } as any,
-          select: { id: true, tdspSlug: true },
+          select: { id: true, tdspSlug: true, esiid: true },
         });
         const tdspSlug = String((house as any)?.tdspSlug ?? "").trim().toLowerCase() || null;
+        const esiid = String((house as any)?.esiid ?? "").trim() || null;
         if (tdspSlug) {
-          const yearMonths = lastNYearMonthsChicago(12);
-          const rows = await (usagePrisma as any).homeMonthlyUsageBucket.findMany({
-            where: { homeId: houseId, yearMonth: { in: yearMonths }, bucketKey: { in: ["kwh.m.all.total"] } },
-            select: { yearMonth: true, bucketKey: true, kwhTotal: true },
+          const requiredKeys = requiredBucketsForRateStructure({ rateStructure }).map((b) => b.key);
+
+          // This call checks bucket coverage and triggers computation only when missing.
+          // (Implemented in buildUsageBucketsForEstimate so it also applies to offer estimate endpoints.)
+          const now = new Date();
+          const cutoff = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
+          const bucketBuild = await buildUsageBucketsForEstimate({
+            homeId: houseId,
+            usageSource: "SMT",
+            esiid,
+            windowEnd: now,
+            cutoff,
+            requiredBucketKeys: requiredKeys,
+            monthsCount: 12,
           });
-          const byMonth: Record<string, Record<string, number>> = {};
-          for (const r of rows ?? []) {
-            const ym = String((r as any)?.yearMonth ?? "").trim();
-            const kwh = Number((r as any)?.kwhTotal?.toString?.() ?? (r as any)?.kwhTotal);
-            if (!ym || !Number.isFinite(kwh)) continue;
-            if (!byMonth[ym]) byMonth[ym] = {};
-            byMonth[ym]["kwh.m.all.total"] = kwh;
-          }
-          const totals = yearMonths.map((ym) => byMonth?.[ym]?.["kwh.m.all.total"]).filter((v) => typeof v === "number" && Number.isFinite(v)) as number[];
-          const annualKwh = totals.length ? totals.reduce((a, b) => a + b, 0) : null;
+
+          const annualKwh = bucketBuild.annualKwh;
           if (annualKwh != null && annualKwh > 0) {
             const tdspRates = await getTdspDeliveryRates({ tdspSlug, asOf: new Date() }).catch(() => null);
             if (tdspRates) {
@@ -661,7 +666,7 @@ export async function POST(req: NextRequest) {
                 annualKwh,
                 monthsCount: 12,
                 rateStructure,
-                usageBucketsByMonth: byMonth,
+                usageBucketsByMonth: bucketBuild.usageBucketsByMonth,
                 tdspRates: {
                   perKwhDeliveryChargeCents: Number(tdspRates.perKwhDeliveryChargeCents ?? 0) || 0,
                   monthlyCustomerChargeDollars: Number(tdspRates.monthlyCustomerChargeDollars ?? 0) || 0,
