@@ -580,6 +580,28 @@ export async function GET(req: NextRequest) {
             typeof rp?.planCalcStatus === "string" ? (String(rp.planCalcStatus) as any) : null;
           const storedReason =
             typeof rp?.planCalcReasonCode === "string" ? String(rp.planCalcReasonCode) : null;
+          const storedKeys = Array.isArray((rp as any)?.requiredBucketKeys)
+            ? ((rp as any).requiredBucketKeys as any[]).map((k) => String(k))
+            : [];
+
+          // Always compute derived requirements when rateStructure is present. We use this as the canonical
+          // requiredBucketKeys for hashing (inputsSha256) so the dashboard and pipeline agree, even if the stored
+          // requiredBucketKeys are stale.
+          const derived = derivePlanCalcRequirementsFromTemplate({
+            rateStructure: rsPresent ? rp.rateStructure : null,
+          });
+
+          const derivedKeys = Array.isArray((derived as any)?.requiredBucketKeys)
+            ? ((derived as any).requiredBucketKeys as any[]).map((k) => String(k))
+            : [];
+
+          const keysEqual = (() => {
+            if (storedKeys.length !== derivedKeys.length) return false;
+            for (let i = 0; i < storedKeys.length; i++) {
+              if (String(storedKeys[i] ?? "") !== String(derivedKeys[i] ?? "")) return false;
+            }
+            return true;
+          })();
 
           if (storedStatus === "COMPUTABLE" || storedStatus === "NOT_COMPUTABLE") {
             planCalcByRatePlanId.set(id, {
@@ -587,17 +609,13 @@ export async function GET(req: NextRequest) {
               planCalcReasonCode: storedReason ?? "UNKNOWN",
               rateStructurePresent: rsPresent,
               rateStructure: rsPresent ? rp.rateStructure : null,
-              requiredBucketKeys: Array.isArray((rp as any)?.requiredBucketKeys)
-                ? ((rp as any).requiredBucketKeys as any[]).map((k) => String(k))
-                : null,
+              // Prefer derived keys if stored keys are missing/stale; this keeps inputsSha consistent with pipeline.
+              requiredBucketKeys: (derivedKeys.length > 0 && !keysEqual) ? derivedKeys : (storedKeys.length ? storedKeys : null),
             });
             continue;
           }
 
           // Fall back to deriving from rateStructure (if present); otherwise treat as unknown.
-          const derived = derivePlanCalcRequirementsFromTemplate({
-            rateStructure: rsPresent ? rp.rateStructure : null,
-          });
           planCalcByRatePlanId.set(id, {
             planCalcStatus: derived.planCalcStatus,
             planCalcReasonCode: derived.planCalcReasonCode,

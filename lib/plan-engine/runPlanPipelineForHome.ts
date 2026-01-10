@@ -472,8 +472,16 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
       const kk = String(k ?? "").trim();
       if (kk) unionKeys.add(kk);
     }
-    if (!Array.isArray(rp?.requiredBucketKeys) && rp?.rateStructure) {
-      const derived = derivePlanCalcRequirementsFromTemplate(rp).requiredBucketKeys ?? [];
+
+    // IMPORTANT:
+    // Always include *derived* required bucket keys from the template rateStructure, even if the RatePlan already
+    // has stored `requiredBucketKeys`.
+    //
+    // Why: stored keys can be stale (or too minimal) after engine upgrades. If unionKeys is built only from the stored
+    // keys, the later per-plan derivation can require additional keys, causing this pipeline run to skip computing the
+    // estimate for that plan (and the dashboard can get stuck at "CACHE_MISS / 1 pending").
+    if (rp?.rateStructure) {
+      const derived = derivePlanCalcRequirementsFromTemplate({ rateStructure: rp.rateStructure }).requiredBucketKeys ?? [];
       for (const k of derived) {
         const kk = String(k ?? "").trim();
         if (kk) unionKeys.add(kk);
