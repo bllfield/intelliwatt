@@ -97,8 +97,9 @@ function fmtDollars2(v: number | undefined): string | null {
   return v.toFixed(2);
 }
 
-function badgeClasses(kind: "AVAILABLE" | "NEED_USAGE" | "NOT_COMPUTABLE_YET"): string {
+function badgeClasses(kind: "AVAILABLE" | "CALCULATING" | "NEED_USAGE" | "NOT_COMPUTABLE_YET"): string {
   if (kind === "AVAILABLE") return "border-emerald-400/40 bg-emerald-500/10 text-emerald-200";
+  if (kind === "CALCULATING") return "border-brand-cyan/30 bg-brand-cyan/10 text-brand-cyan";
   if (kind === "NEED_USAGE") return "border-brand-blue/30 bg-brand-blue/10 text-brand-blue";
   return "border-amber-400/40 bg-amber-500/10 text-amber-200";
 }
@@ -125,9 +126,29 @@ export default function OfferCard({ offer, recommended }: OfferCardProps) {
 
   // Customer-facing status language (never show "QUEUED").
   const tceStatus = String(tce?.status ?? "").toUpperCase();
-  const statusKind: "AVAILABLE" | "NEED_USAGE" | "NOT_COMPUTABLE_YET" =
-    tceStatus === "MISSING_USAGE" ? "NEED_USAGE" : status === "AVAILABLE" ? "AVAILABLE" : "NOT_COMPUTABLE_YET";
-  const statusText = statusKind === "NEED_USAGE" ? "NEED USAGE" : statusKind === "AVAILABLE" ? "AVAILABLE" : "NOT COMPUTABLE YET";
+  const tceReason = String(tce?.reason ?? offer.intelliwatt?.statusReason ?? "").toUpperCase();
+  const isCalculating =
+    // Plans list is read-only: a CACHE_MISS means "pipeline hasn't materialized this input-set yet".
+    (tceStatus === "NOT_IMPLEMENTED" && tceReason === "CACHE_MISS") ||
+    // Template missing can be transient (prefetch/pipeline may be building it); treat as calculating on the card.
+    tceStatus === "MISSING_TEMPLATE";
+
+  const statusKind: "AVAILABLE" | "CALCULATING" | "NEED_USAGE" | "NOT_COMPUTABLE_YET" =
+    tceStatus === "MISSING_USAGE"
+      ? "NEED_USAGE"
+      : status === "AVAILABLE"
+        ? "AVAILABLE"
+        : isCalculating
+          ? "CALCULATING"
+          : "NOT_COMPUTABLE_YET";
+  const statusText =
+    statusKind === "NEED_USAGE"
+      ? "NEED USAGE"
+      : statusKind === "AVAILABLE"
+        ? "AVAILABLE"
+        : statusKind === "CALCULATING"
+          ? "CALCULATING"
+          : "NOT COMPUTABLE YET";
 
   // tce already read above
   const showEstimateLine = tce?.status === "OK" || tce?.status === "APPROXIMATE";
