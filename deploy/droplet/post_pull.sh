@@ -55,7 +55,13 @@ fi
 # 2) Safe service restarts (ONLY if the unit exists on this droplet)
 restart_if_exists() {
   local unit="$1"
-  if systemctl list-unit-files | awk '{print $1}' | grep -qx "${unit}"; then
+  # NOTE: On some droplets, non-root `systemctl` calls can fail to connect to the system bus,
+  # which makes list-unit-files appear empty and causes false "not installed" skips.
+  # Use sudo and also fall back to checking common unit file paths.
+  if [[ -f "/etc/systemd/system/${unit}" || -f "/lib/systemd/system/${unit}" || -f "/usr/lib/systemd/system/${unit}" ]]; then
+    log "Restarting ${unit}"
+    sudo systemctl restart "${unit}"
+  elif sudo systemctl list-unit-files --no-pager 2>/dev/null | awk '{print $1}' | grep -qx "${unit}"; then
     log "Restarting ${unit}"
     sudo systemctl restart "${unit}"
   else

@@ -5,7 +5,12 @@ log() { echo "[intelliwatt-ensure-services] $*"; }
 
 is_installed_unit() {
   local unit="$1"
-  systemctl list-unit-files | awk '{print $1}' | grep -qx "${unit}"
+  # See note in post_pull.sh: use sudo to avoid false negatives when non-root systemctl
+  # cannot connect to the system bus on some hosts.
+  if [[ -f "/etc/systemd/system/${unit}" || -f "/lib/systemd/system/${unit}" || -f "/usr/lib/systemd/system/${unit}" ]]; then
+    return 0
+  fi
+  sudo systemctl list-unit-files --no-pager 2>/dev/null | awk '{print $1}' | grep -qx "${unit}"
 }
 
 ensure_enabled_active() {
