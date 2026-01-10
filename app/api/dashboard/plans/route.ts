@@ -604,14 +604,65 @@ export async function GET(req: NextRequest) {
           })();
 
           if (storedStatus === "COMPUTABLE" || storedStatus === "NOT_COMPUTABLE") {
+            // IMPORTANT:
+            // Prefer the derived planCalc status from the current engine when we have a rateStructure,
+            // otherwise a stale stored NOT_COMPUTABLE can block bucket loading and leave offers stuck as
+            // "UNSUPPORTED" / pending forever even though the engine is now able to compute them.
+            //
+            // The only exception is an explicit admin override to COMPUTABLE.
+            const isAdminOverride =
+              storedStatus === "COMPUTABLE" && String(storedReason ?? "").trim() === "ADMIN_OVERRIDE_COMPUTABLE";
+
+            const shouldPreferDerived = rsPresent && !isAdminOverride;
+            const effectiveStatus = shouldPreferDerived ? derived.planCalcStatus : storedStatus;
+            const effectiveReason =
+              shouldPreferDerived ? (derived.planCalcReasonCode || "UNKNOWN") : (storedReason ?? "UNKNOWN");
+            const effectiveKeys =
+              shouldPreferDerived
+                ? derivedKeys
+                : (storedKeys.length ? storedKeys : derivedKeys.length ? derivedKeys : []);
+
             planCalcByRatePlanId.set(id, {
-              planCalcStatus: storedStatus,
-              planCalcReasonCode: storedReason ?? "UNKNOWN",
+              planCalcStatus: effectiveStatus,
+              planCalcReasonCode: effectiveReason,
               rateStructurePresent: rsPresent,
               rateStructure: rsPresent ? rp.rateStructure : null,
-              // Prefer derived keys if stored keys are missing/stale; this keeps inputsSha consistent with pipeline.
-              requiredBucketKeys: (derivedKeys.length > 0 && !keysEqual) ? derivedKeys : (storedKeys.length ? storedKeys : null),
+              requiredBucketKeys: effectiveKeys.length ? effectiveKeys : null,
             });
+
+            // Best-effort self-heal: if stored differs from derived (and not admin override), update the RatePlan row.
+            // This helps the pipeline, admin views, and future requests converge.
+            if (shouldPreferDerived) {
+              try {
+                const storedStatusNorm = String(storedStatus ?? "").trim();
+                const storedReasonNorm = String(storedReason ?? "").trim();
+                const nextStatusNorm = String(derived.planCalcStatus ?? "").trim();
+                const nextReasonNorm = String(derived.planCalcReasonCode ?? "").trim();
+                const nextKeysNorm = derivedKeys;
+                const differs =
+                  (nextStatusNorm && storedStatusNorm !== nextStatusNorm) ||
+                  (nextReasonNorm && storedReasonNorm !== nextReasonNorm) ||
+                  (derivedKeys.length > 0 && !keysEqual);
+                if (differs) {
+                  (prisma as any).ratePlan
+                    .update({
+                      where: { id },
+                      data: {
+                        planCalcVersion: (derived as any)?.planCalcVersion ?? 1,
+                        planCalcStatus: nextStatusNorm || storedStatusNorm || "UNKNOWN",
+                        planCalcReasonCode: nextReasonNorm || storedReasonNorm || "UNKNOWN",
+                        requiredBucketKeys: nextKeysNorm,
+                        supportedFeatures: (derived as any)?.supportedFeatures ?? {},
+                        planCalcDerivedAt: new Date(),
+                      },
+                      select: { id: true },
+                    })
+                    .catch(() => {});
+                }
+              } catch {
+                // ignore
+              }
+            }
             continue;
           }
 
