@@ -11,6 +11,7 @@ import { usagePrisma } from "@/lib/db/usageClient";
 import { getTdspDeliveryRates } from "@/lib/plan-engine/getTdspDeliveryRates";
 import { estimateTrueCost } from "@/lib/plan-engine/estimateTrueCost";
 import { ensureCurrentPlanEntry } from "@/lib/current-plan/ensureEntry";
+import { validateEflAvgPriceTable } from "@/lib/efl/eflValidator";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -96,6 +97,22 @@ function extractCancelFeeCentsFromEflText(rawText: string): number | null {
   }
 
   return null;
+}
+
+function extractEnergyChargeCentsPerKwhFromEflText(rawText: string): number | null {
+  const t = String(rawText ?? "");
+  if (!t.trim()) return null;
+
+  // Common EFL phrasing:
+  // "Energy Charge: 9.6136¢ per kWh"
+  // "Energy Charge 22.99¢ ¢ per kWh" (table-style)
+  const m = t.match(/Energy\s+Charge\s*:?\s*([0-9]{1,5}(?:\.[0-9]{1,6})?)\s*¢/i);
+  if (!m?.[1]) return null;
+  const cents = Number(m[1]);
+  if (!Number.isFinite(cents) || cents < 0) return null;
+  // Sanity bounds: current-plan REP energy rates in TX are typically < 150 ¢/kWh
+  if (cents > 500) return null;
+  return cents;
 }
 
 function lastNYearMonthsChicago(n: number): string[] {
@@ -195,22 +212,44 @@ export async function POST(req: NextRequest) {
     }
 
     const labels = extractProviderAndPlanNameFromEflText(rawText);
-    // Use the same EFL engine as offers (AI parse → avg-price validator → gap solver).
-    const pipeline = await runEflPipelineFromRawTextNoStore({
-      rawText,
-      eflPdfSha256: det.eflPdfSha256,
-      source: "queue_rawtext",
-      offerMeta: {
-        supplier: labels.providerName ?? null,
-        planName: labels.planName ?? null,
-        termMonths: null,
-        tdspName: null,
-        offerId: null,
-      },
-    });
 
-    const effectivePlanRules: any = pipeline.effectivePlanRules ?? pipeline.planRules ?? null;
-    const effectiveRateStructure: any = pipeline.effectiveRateStructure ?? pipeline.rateStructure ?? null;
+    // Try to reuse an existing current-plan template before running the full EFL pipeline again.
+    // We still do deterministic PDF->text extraction (required), but we can skip the AI pipeline
+    // and avoid storing duplicate PDFs when a plan-level template already exists.
+    const currentPlanPrisma = getCurrentPlanPrisma();
+    const providerKey = String(labels.providerName ?? "").trim().toUpperCase();
+    const planKey = String(labels.planName ?? "").trim().toUpperCase();
+    const billPlanTemplateDelegate = (currentPlanPrisma as any).billPlanTemplate as any;
+    const existingBillPlanTemplate =
+      providerKey && planKey
+        ? await billPlanTemplateDelegate
+            .findUnique({
+              where: { providerNameKey_planNameKey: { providerNameKey: providerKey, planNameKey: planKey } },
+            })
+            .catch(() => null)
+        : null;
+
+    const templateUsed = Boolean(existingBillPlanTemplate?.id);
+    const templateId: string | null = existingBillPlanTemplate?.id ? String(existingBillPlanTemplate.id) : null;
+
+    // Use the same EFL engine as offers (AI parse → avg-price validator → gap solver) only when needed.
+    const pipeline = templateUsed
+      ? null
+      : await runEflPipelineFromRawTextNoStore({
+          rawText,
+          eflPdfSha256: det.eflPdfSha256,
+          source: "queue_rawtext",
+          offerMeta: {
+            supplier: labels.providerName ?? null,
+            planName: labels.planName ?? null,
+            termMonths: null,
+            tdspName: null,
+            offerId: null,
+          },
+        });
+
+    const effectivePlanRules: any = pipeline ? (pipeline.effectivePlanRules ?? pipeline.planRules ?? null) : null;
+    const effectiveRateStructure: any = pipeline ? (pipeline.effectiveRateStructure ?? pipeline.rateStructure ?? null) : null;
 
     const cancelFeeCentsDerived =
       typeof effectivePlanRules?.cancelFeeCents === "number" && Number.isFinite(effectivePlanRules.cancelFeeCents)
@@ -231,12 +270,18 @@ export async function POST(req: NextRequest) {
         cancelFeeCents: cancelFeeCentsDerived,
       },
       meta: {
-        warnings: pipeline.parseWarnings ?? [],
+        warnings: (pipeline as any)?.parseWarnings ?? [],
         notes: [],
       },
     } as any;
 
     const rateType: "FIXED" | "VARIABLE" | "TIME_OF_USE" = (() => {
+      if (templateUsed) {
+        const rt = String(existingBillPlanTemplate?.rateType ?? "").toUpperCase();
+        if (rt === "TIME_OF_USE") return "TIME_OF_USE";
+        if (rt === "VARIABLE") return "VARIABLE";
+        return "FIXED";
+      }
       const rt = String(effectivePlanRules?.rateType ?? effectiveRateStructure?.type ?? "").toUpperCase();
       if (rt === "TIME_OF_USE") return "TIME_OF_USE";
       if (rt === "VARIABLE") return "VARIABLE";
@@ -244,15 +289,34 @@ export async function POST(req: NextRequest) {
     })();
 
     const flatEnergyRateCents: number | null =
-      typeof effectiveRateStructure?.energyRateCents === "number" && Number.isFinite(effectiveRateStructure.energyRateCents)
-        ? Number(effectiveRateStructure.energyRateCents)
-        : typeof effectivePlanRules?.defaultRateCentsPerKwh === "number" && Number.isFinite(effectivePlanRules.defaultRateCentsPerKwh)
-          ? Number(effectivePlanRules.defaultRateCentsPerKwh)
-          : typeof effectivePlanRules?.currentBillEnergyRateCents === "number" && Number.isFinite(effectivePlanRules.currentBillEnergyRateCents)
-            ? Number(effectivePlanRules.currentBillEnergyRateCents)
-            : null;
+      templateUsed
+        ? extractEnergyChargeCentsPerKwhFromEflText(rawText)
+        : typeof effectiveRateStructure?.energyRateCents === "number" && Number.isFinite(effectiveRateStructure.energyRateCents)
+          ? Number(effectiveRateStructure.energyRateCents)
+          : typeof effectivePlanRules?.defaultRateCentsPerKwh === "number" && Number.isFinite(effectivePlanRules.defaultRateCentsPerKwh)
+            ? Number(effectivePlanRules.defaultRateCentsPerKwh)
+            : typeof effectivePlanRules?.currentBillEnergyRateCents === "number" && Number.isFinite(effectivePlanRules.currentBillEnergyRateCents)
+              ? Number(effectivePlanRules.currentBillEnergyRateCents)
+              : null;
 
     const billCredits = (() => {
+      if (templateUsed) {
+        const raw = existingBillPlanTemplate?.billCreditsJson;
+        const arr = Array.isArray(raw) ? raw : [];
+        return arr
+          .map((r: any) => ({
+            label: typeof r?.label === "string" ? r.label : "Bill credit",
+            creditCents: typeof r?.creditCents === "number" && Number.isFinite(r.creditCents) ? Math.round(r.creditCents) : null,
+            thresholdKwh: typeof r?.thresholdKwh === "number" && Number.isFinite(r.thresholdKwh) ? Math.round(r.thresholdKwh) : null,
+          }))
+          .filter(
+            (x: any) =>
+              typeof x.creditCents === "number" &&
+              x.creditCents > 0 &&
+              typeof x.thresholdKwh === "number" &&
+              x.thresholdKwh > 0,
+          );
+      }
       const rsCredits = (effectiveRateStructure as any)?.billCredits;
       const rules = rsCredits && Array.isArray(rsCredits.rules) ? rsCredits.rules : [];
       return rules
@@ -267,6 +331,19 @@ export async function POST(req: NextRequest) {
     })();
 
     const touWindows = (() => {
+      if (templateUsed) {
+        const tiers = Array.isArray(existingBillPlanTemplate?.timeOfUseConfigJson)
+          ? existingBillPlanTemplate.timeOfUseConfigJson
+          : [];
+        return tiers
+          .map((t: any) => ({
+            label: typeof t?.label === "string" ? t.label : null,
+            start: typeof t?.start === "string" ? t.start : null,
+            end: typeof t?.end === "string" ? t.end : null,
+            cents: typeof t?.cents === "number" ? t.cents : null,
+          }))
+          .filter((x: any) => x.start && x.end && typeof x.cents === "number");
+      }
       const tiers = Array.isArray((effectiveRateStructure as any)?.tiers) ? (effectiveRateStructure as any).tiers : [];
       return tiers
         .map((t: any) => ({
@@ -290,18 +367,22 @@ export async function POST(req: NextRequest) {
       .filter(Boolean) as any[];
 
     // Persist in current-plan module DB so it shows up in /api/current-plan/init and can be reviewed later.
-    const currentPlanPrisma = getCurrentPlanPrisma();
-    const uploadRow = await (currentPlanPrisma as any).currentPlanBillUpload.create({
-      data: {
-        userId: user.id,
-        houseId,
-        filename: `EFL:${String(f.name ?? "efl.pdf").slice(0, 240)}`,
-        mimeType: "application/pdf",
-        sizeBytes: pdfBytes.length,
-        billData: pdfBytes,
-      },
-      select: { id: true },
-    });
+    // If we already have a plan-level BillPlanTemplate for this provider+plan, avoid storing duplicate PDFs.
+    const uploadRowId: string | null = templateUsed
+      ? null
+      : (
+          await (currentPlanPrisma as any).currentPlanBillUpload.create({
+            data: {
+              userId: user.id,
+              houseId,
+              filename: `EFL:${String(f.name ?? "efl.pdf").slice(0, 240)}`,
+              mimeType: "application/pdf",
+              sizeBytes: pdfBytes.length,
+              billData: pdfBytes,
+            },
+            select: { id: true },
+          })
+        )?.id ?? null;
 
     // Build a CurrentPlan-style rateStructure for transparency + later calculations.
     // (Matches the shape validated by /api/current-plan/manual.)
@@ -414,6 +495,7 @@ export async function POST(req: NextRequest) {
         ...(effectiveBaseMonthlyFeeCents != null && effectiveBaseMonthlyFeeCents >= 0 ? { baseMonthlyFeeCents: effectiveBaseMonthlyFeeCents } : {}),
         billCredits: billCreditsWithMinFee,
         ...(tdspDeliveryIncludedInEnergyCharge ? { tdspDeliveryIncludedInEnergyCharge: true } : {}),
+        ...(templateUsed && providerKey && planKey ? { templateRef: { templateId, providerNameKey: providerKey, planNameKey: planKey } } : {}),
       };
     })();
 
@@ -427,7 +509,7 @@ export async function POST(req: NextRequest) {
     const entryData = {
       userId: user.id,
       houseId,
-      uploadId: uploadRow.id,
+      uploadId: uploadRowId,
       rawText: rawText.slice(0, 250_000),
       rawTextSnippet: rawText.slice(0, 5000),
       providerName: labels.providerName ?? parsed?.rate?.supplierName ?? null,
@@ -460,6 +542,12 @@ export async function POST(req: NextRequest) {
     // This is the canonical "current plan template" analogue to offer RatePlan templates:
     // it stores the plan-level structure so future bills/users can reuse it without re-parsing.
     try {
+      const baseChargeCentsPerMonth =
+        typeof (parsed as any)?.rate?.baseMonthlyFeeCents === "number" &&
+        Number.isFinite((parsed as any).rate.baseMonthlyFeeCents)
+          ? Math.round((parsed as any).rate.baseMonthlyFeeCents)
+          : null;
+
       const providerKey = String(entryData.providerName ?? "").trim().toUpperCase();
       const planKey = String(entryData.planName ?? "").trim().toUpperCase();
       if (providerKey && planKey) {
@@ -476,7 +564,7 @@ export async function POST(req: NextRequest) {
             termMonths: entryData.termMonths ?? null,
             contractEndDate: null,
             earlyTerminationFeeCents: entryData.earlyTerminationFeeCents ?? null,
-            baseChargeCentsPerMonth: entryData.baseChargeCentsPerMonth ?? null,
+            baseChargeCentsPerMonth,
             energyRateTiersJson: entryData.energyRateTiersJson ?? null,
             timeOfUseConfigJson: entryData.timeOfUseConfigJson ?? null,
             billCreditsJson: entryData.billCreditsJson ?? null,
@@ -487,7 +575,7 @@ export async function POST(req: NextRequest) {
             rateType: rateType,
             termMonths: entryData.termMonths ?? null,
             earlyTerminationFeeCents: entryData.earlyTerminationFeeCents ?? null,
-            baseChargeCentsPerMonth: entryData.baseChargeCentsPerMonth ?? null,
+            baseChargeCentsPerMonth,
             energyRateTiersJson: entryData.energyRateTiersJson ?? null,
             timeOfUseConfigJson: entryData.timeOfUseConfigJson ?? null,
             billCreditsJson: entryData.billCreditsJson ?? null,
@@ -591,6 +679,7 @@ export async function POST(req: NextRequest) {
     // Quarantine into the shared EFL review queue when parsing is incomplete/unsupported.
     const warnings: string[] = [
       ...((det.warnings ?? []) as any[]).map((x) => String(x)),
+      ...(templateUsed ? ["Template reused: BillPlanTemplate matched by provider+plan; skipped full EFL pipeline."] : []),
       ...(((pipeline?.parseWarnings ?? []) as any[]) ?? []).map((x) => String(x)),
     ].filter(Boolean);
 
@@ -602,20 +691,51 @@ export async function POST(req: NextRequest) {
       reasonParts.push("missing_tou_tiers");
     }
 
-    const finalValidation = (pipeline as any)?.finalValidation ?? null;
-    const finalValidationStatus = String(finalValidation?.status ?? "").toUpperCase();
+    // When we skipped the full pipeline, still run avg-table validation deterministically so the queue
+    // can auto-resolve when the EFL is accurate.
+    const validationForQueue = templateUsed
+      ? await (async () => {
+          try {
+            const pr: any = {
+              rateType,
+              planType: "flat",
+              termMonths: typeof entryData.termMonths === "number" ? entryData.termMonths : null,
+              ...(typeof flatEnergyRateCents === "number" ? { defaultRateCentsPerKwh: flatEnergyRateCents } : {}),
+              ...(typeof (rateStructure as any)?.baseMonthlyFeeCents === "number"
+                ? { baseChargePerMonthCents: (rateStructure as any).baseMonthlyFeeCents }
+                : {}),
+            };
+            return await validateEflAvgPriceTable({ rawText, planRules: pr, rateStructure });
+          } catch {
+            return null;
+          }
+        })()
+      : ((pipeline as any)?.finalValidation ?? null);
+
+    const finalValidationStatus = String(validationForQueue?.status ?? "").toUpperCase();
     // For current plan templates: warnings are common and should not automatically quarantine.
     // We quarantine only when:
     // - Identity/required pricing fields are missing, OR
     // - Avg-table validation explicitly FAILs (manual review needed), OR
     // - Plan is not computable.
-    const planCalcStatus = String((pipeline as any)?.planCalcStatus ?? "").toUpperCase();
+    const planCalcStatus = templateUsed
+      ? (() => {
+          if (rateType === "TIME_OF_USE") {
+            const tiers = Array.isArray((rateStructure as any)?.tiers) ? (rateStructure as any).tiers : [];
+            return tiers.length > 0 ? "COMPUTABLE" : "UNKNOWN";
+          }
+          if (rateType === "VARIABLE") {
+            return typeof flatEnergyRateCents === "number" ? "COMPUTABLE" : "UNKNOWN";
+          }
+          return typeof flatEnergyRateCents === "number" ? "COMPUTABLE" : "UNKNOWN";
+        })()
+      : String((pipeline as any)?.planCalcStatus ?? "").toUpperCase();
     if (finalValidationStatus && finalValidationStatus !== "PASS") reasonParts.push(`validation_${finalValidationStatus}`);
     if (planCalcStatus && planCalcStatus !== "COMPUTABLE") reasonParts.push(`planCalc_${planCalcStatus}`);
 
     const needsReview = reasonParts.length > 0;
     if (needsReview) {
-      const queueReasonFromValidation = typeof finalValidation?.queueReason === "string" ? finalValidation.queueReason : null;
+      const queueReasonFromValidation = typeof validationForQueue?.queueReason === "string" ? validationForQueue.queueReason : null;
       const queueReason = `CURRENT_PLAN_EFL: ${reasonParts.join(", ")}`
         + (queueReasonFromValidation ? `\nvalidation: ${queueReasonFromValidation}` : "")
         + (warnings.length ? `\nwarnings: ${warnings.join(" | ")}` : "");
@@ -627,8 +747,8 @@ export async function POST(req: NextRequest) {
             kind: "EFL_PARSE",
             dedupeKey: `current_plan:${det.eflPdfSha256}`,
             eflPdfSha256: det.eflPdfSha256,
-            repPuctCertificate: pipeline?.deterministic?.repPuctCertificate ?? null,
-            eflVersionCode: pipeline?.deterministic?.eflVersionCode ?? null,
+            repPuctCertificate: (pipeline as any)?.deterministic?.repPuctCertificate ?? null,
+            eflVersionCode: (pipeline as any)?.deterministic?.eflVersionCode ?? null,
             offerId: null,
             supplier: entryData.providerName,
             planName: entryData.planName,
@@ -637,7 +757,7 @@ export async function POST(req: NextRequest) {
             termMonths: entryData.termMonths,
             rawText: rawText.slice(0, 250_000),
             planRules: pipeline?.effectivePlanRules ?? pipeline?.planRules ?? null,
-            rateStructure: pipeline?.effectiveRateStructure ?? pipeline?.rateStructure ?? null,
+            rateStructure: pipeline?.effectiveRateStructure ?? pipeline?.rateStructure ?? rateStructure ?? null,
             validation: pipeline?.validation ?? null,
             derivedForValidation: pipeline?.derivedForValidation ?? null,
             finalStatus: finalValidationStatus === "PASS" ? "PASS" : (finalValidationStatus || "FAIL"),
@@ -654,7 +774,7 @@ export async function POST(req: NextRequest) {
             termMonths: entryData.termMonths,
             rawText: rawText.slice(0, 250_000),
             planRules: pipeline?.effectivePlanRules ?? pipeline?.planRules ?? null,
-            rateStructure: pipeline?.effectiveRateStructure ?? pipeline?.rateStructure ?? null,
+            rateStructure: pipeline?.effectiveRateStructure ?? pipeline?.rateStructure ?? rateStructure ?? null,
             validation: pipeline?.validation ?? null,
             derivedForValidation: pipeline?.derivedForValidation ?? null,
             finalStatus: finalValidationStatus === "PASS" ? "PASS" : (finalValidationStatus || "FAIL"),
@@ -675,6 +795,9 @@ export async function POST(req: NextRequest) {
         extractedFrom: "EFL_PDF",
         eflPdfSha256: det.eflPdfSha256,
         extractorMethod: (det as any)?.extractorMethod ?? null,
+        templateUsed,
+        templateId,
+        templateKey: templateUsed && providerKey && planKey ? `${providerKey}::${planKey}` : null,
         warnings: det.warnings ?? [],
         parsedWarnings: ((pipeline?.parseWarnings ?? []) as any[]) as string[],
         notes: ((pipeline as any)?.parseWarnings ?? []) as string[],
