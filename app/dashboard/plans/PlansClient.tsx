@@ -720,6 +720,14 @@ export default function PlansClient() {
   }, []);
 
   const hasUsage = Boolean(resp?.ok && resp?.hasUsage);
+  // Keep "has usage" sticky across refetches so the Sort dropdown doesn't temporarily lose
+  // the "Best for you" option while a request is in-flight (e.g. switching sort to 1000 kWh).
+  // If the home truly has no usage, this stays false.
+  const hasUsageEverRef = useRef(false);
+  useEffect(() => {
+    if (hasUsage) hasUsageEverRef.current = true;
+  }, [hasUsage]);
+  const hasUsageForUi = hasUsage || hasUsageEverRef.current;
   const offers = Array.isArray(resp?.offers) ? (resp!.offers as OfferRow[]) : [];
   const total =
     resp?.ok && typeof (resp as any)?.total === "number" && Number.isFinite((resp as any).total)
@@ -939,7 +947,7 @@ export default function PlansClient() {
                       }}
                       className="mt-2 w-full rounded-2xl border border-brand-cyan/25 bg-brand-white/5 px-3 py-2 text-xs text-brand-white outline-none focus:border-brand-blue/60 focus:bg-white focus:text-brand-navy"
                     >
-                      {hasUsage ? (
+                      {hasUsageForUi ? (
                         <option className="text-brand-navy" value="best_for_you_proxy">
                           Best for you
                         </option>
@@ -1130,7 +1138,7 @@ export default function PlansClient() {
                     }}
                     className="mt-2 w-full rounded-2xl border border-brand-cyan/25 bg-brand-white/5 px-3 py-2 text-xs text-brand-white outline-none focus:border-brand-blue/60 focus:bg-white focus:text-brand-navy"
                   >
-                    {hasUsage ? (
+                    {hasUsageForUi ? (
                       <option className="text-brand-navy" value="best_for_you_proxy">
                         Best for you
                       </option>
