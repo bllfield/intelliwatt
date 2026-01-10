@@ -180,6 +180,7 @@ export default function PlansClient() {
   const [autoPreparing, setAutoPreparing] = useState(false);
   const pipelineKickRef = useRef(false);
   const lastPipelineKickAtRef = useRef<number>(0);
+  const [lastPipelineKickResult, setLastPipelineKickResult] = useState<any | null>(null);
   const pollTimerRef = useRef<number | null>(null);
   const pollStopTimerRef = useRef<number | null>(null);
   const pollInFlightRef = useRef(false);
@@ -556,11 +557,6 @@ export default function PlansClient() {
     if (kickEligible && !prefetchInFlightRef.current && now - lastPipelineKickAtRef.current >= 30_000) {
       pipelineKickRef.current = true;
       lastPipelineKickAtRef.current = now;
-      try {
-        window.sessionStorage.setItem(sessionKey, String(now));
-      } catch {
-        // ignore
-      }
 
       prefetchInFlightRef.current = true;
       setPrefetchNote(`Preparing IntelliWatt calculations… (${pendingCountNow} pending)`);
@@ -568,19 +564,38 @@ export default function PlansClient() {
         const params = new URLSearchParams();
         params.set("reason", "plans_fallback");
         // Keep each pipeline run short to avoid serverless timeouts; repeated runs are expected.
-        params.set("timeBudgetMs", "12000");
+        params.set("timeBudgetMs", datasetMode ? "25000" : "12000");
         params.set("maxTemplateOffers", "6");
         // When showing ALL plans, allow the pipeline to consider more per run (still bounded server-side).
-        params.set("maxEstimatePlans", datasetMode ? "120" : "50");
+        params.set("maxEstimatePlans", datasetMode ? "200" : "50");
         // Allow repeated short runs; server still enforces lock + cooldown.
         params.set("proactiveCooldownMs", "60000");
         params.set("fallbackCooldownMs", "15000");
         params.set("isRenter", String(isRenter));
-        fetch(`/api/dashboard/plans/pipeline?${params.toString()}`, { method: "POST" })
-          .catch(() => null)
-          .finally(() => {
+        (async () => {
+          try {
+            const r = await fetch(`/api/dashboard/plans/pipeline?${params.toString()}`, { method: "POST" });
+            const j = await r.json().catch(() => null);
+            setLastPipelineKickResult(j);
+            const started = Boolean(j?.ok === true && j?.started === true);
+            // Only throttle on a successful "started" run. If the call was blocked (cooldown/already_running)
+            // or failed, allow a prompt retry in the next effect tick.
+            if (started) {
+              try {
+                window.sessionStorage.setItem(sessionKey, String(now));
+              } catch {
+                // ignore
+              }
+            } else {
+              const why = typeof j?.reason === "string" && j.reason ? j.reason : typeof j?.error === "string" ? j.error : null;
+              if (why) setPrefetchNote(`Preparing IntelliWatt calculations… (${pendingCountNow} pending) · ${why}`);
+            }
+          } catch (e: any) {
+            setLastPipelineKickResult({ ok: false, error: e?.message ?? String(e) });
+          } finally {
             prefetchInFlightRef.current = false;
-          });
+          }
+        })();
       } catch {
         prefetchInFlightRef.current = false;
       }
@@ -1224,7 +1239,20 @@ export default function PlansClient() {
                 ) : resp?.message ? (
                   <span>{resp.message}</span>
                 ) : prefetchNote ? (
-                  <span className="text-brand-cyan/80">{prefetchNote}</span>
+                  <span className="text-brand-cyan/80">
+                    {prefetchNote}
+                    {lastPipelineKickResult ? (
+                      <span className="ml-2 text-brand-cyan/55">
+                        (pipeline:{" "}
+                        {lastPipelineKickResult?.ok === true
+                          ? lastPipelineKickResult?.started === true
+                            ? "started"
+                            : String(lastPipelineKickResult?.reason ?? "not_started")
+                          : String(lastPipelineKickResult?.error ?? "error")}
+                        )
+                      </span>
+                    ) : null}
+                  </span>
                 ) : (
                   <span>
                     Showing <span className="text-brand-white font-semibold">{offers.length}</span> of{" "}
