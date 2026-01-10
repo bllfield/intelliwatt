@@ -7,9 +7,9 @@ import { normalizeEmail } from "@/lib/utils/email";
 import { wattbuy } from "@/lib/wattbuy";
 import { normalizeOffers } from "@/lib/wattbuy/normalize";
 import { fetchEflPdfFromUrl } from "@/lib/efl/fetchEflPdf";
-import { runEflPipelineNoStore } from "@/lib/efl/runEflPipelineNoStore";
-import { validatePlanRules } from "@/lib/efl/planEngine";
-import { upsertRatePlanFromEfl } from "@/lib/efl/planPersistence";
+import { runEflPipelineNoStore } from "@/lib/plan-engine-next/efl/runEflPipelineNoStore";
+import { validatePlanRules } from "@/lib/plan-engine-next/efl/planEngine";
+import { upsertRatePlanFromEfl } from "@/lib/plan-engine-next/efl/planPersistence";
 import { inferTdspTerritoryFromEflText } from "@/lib/efl/eflValidator";
 
 export const runtime = "nodejs";
