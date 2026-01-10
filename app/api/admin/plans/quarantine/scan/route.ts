@@ -121,7 +121,10 @@ export async function POST(req: NextRequest) {
     cutoff,
     requiredBucketKeys: unionKeys,
     monthsCount: 12,
-    stitchMode: "DAILY_ONLY",
+    // Keep admin scan semantics aligned with the customer dashboard:
+    // prefer DAILY stitching but fall back to interval stitching when daily coverage is incomplete,
+    // so TOU period buckets remain consistent with kwh.m.all.total.
+    stitchMode: "DAILY_OR_INTERVAL",
     maxStepDays: 2,
   });
 

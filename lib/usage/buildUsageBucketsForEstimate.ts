@@ -396,6 +396,39 @@ export async function buildUsageBucketsForEstimate(args: {
       const curRows = await loadDays(curDays);
       const priorRows = await loadDays(priorDays);
 
+      // IMPORTANT:
+      // Only apply DAILY stitching if we have DAILY coverage for *all* requested bucket keys
+      // across both the "current" and "borrowed" day ranges.
+      //
+      // Otherwise, we can accidentally stitch `kwh.m.all.total` (which is usually available)
+      // while leaving TOU/window buckets missing/partial for the borrowed segment, which then
+      // triggers `USAGE_BUCKET_SUM_MISMATCH` (period buckets don't sum to total).
+      //
+      // When DAILY coverage is incomplete:
+      // - DAILY_ONLY: keep the monthly buckets as-is (no stitching)
+      // - DAILY_OR_INTERVAL: fall back to interval stitching so all keys are computed consistently
+      const curKeySet = new Set<string>();
+      const priorKeySet = new Set<string>();
+      for (const r of curRows ?? []) {
+        const key = canonicalizeMonthlyBucketKey(String((r as any)?.bucketKey ?? "").trim());
+        if (key) curKeySet.add(key);
+      }
+      for (const r of priorRows ?? []) {
+        const key = canonicalizeMonthlyBucketKey(String((r as any)?.bucketKey ?? "").trim());
+        if (key) priorKeySet.add(key);
+      }
+      const needCur = curDays.length > 0;
+      const needPrior = priorDays.length > 0;
+      const dailyCoverageOk =
+        keysToLoad.length > 0 &&
+        keysToLoad.every((k) => {
+          const kk = canonicalizeMonthlyBucketKey(String(k ?? "").trim());
+          if (!kk) return false;
+          if (needCur && !curKeySet.has(kk)) return false;
+          if (needPrior && !priorKeySet.has(kk)) return false;
+          return true;
+        });
+
       const addRows = (rows: any[]) => {
         for (const r of rows ?? []) {
           const key = canonicalizeMonthlyBucketKey(String((r as any)?.bucketKey ?? "").trim());
@@ -404,15 +437,117 @@ export async function buildUsageBucketsForEstimate(args: {
           byBucket[key] = (byBucket[key] ?? 0) + kwh;
         }
       };
-      addRows(curRows);
-      addRows(priorRows);
+      if (dailyCoverageOk) {
+        addRows(curRows);
+        addRows(priorRows);
+      }
 
       // If we got any daily rows, apply stitched totals.
       const hasAny = Object.values(byBucket).some((v) => typeof v === "number" && Number.isFinite(v) && v > 0);
-      if (hasAny) {
+      if (dailyCoverageOk && hasAny) {
         usageBucketsByMonth[ym] = byBucket;
       } else if (stitchMode === "DAILY_ONLY") {
         // do nothing (keep monthly buckets as-is)
+      } else if (stitchMode === "DAILY_OR_INTERVAL") {
+        // Fall back to interval stitching when DAILY coverage is incomplete.
+        try {
+          const currentRange = monthToUtcRange(completeDay!.year, completeDay!.month);
+          const priorRange = monthToUtcRange(completeDay!.year - 1, completeDay!.month);
+
+          const currentRows: Array<{ ts: Date; kwh: number }> = [];
+          const priorRows2: Array<{ ts: Date; kwh: number }> = [];
+
+          if (args.usageSource === "SMT") {
+            const esiid = String(args.esiid ?? "");
+            if (esiid) {
+              const cur = await prisma.smtInterval.findMany({
+                where: { esiid, ts: { gte: currentRange.gte, lt: currentRange.lt } },
+                select: { ts: true, kwh: true },
+                orderBy: { ts: "asc" },
+              });
+              for (const r of cur ?? []) {
+                const kwh = decimalToNumber((r as any)?.kwh);
+                const ts = (r as any)?.ts ? new Date((r as any).ts) : null;
+                if (ts && kwh != null) currentRows.push({ ts, kwh });
+              }
+
+              const prior = await prisma.smtInterval.findMany({
+                where: { esiid, ts: { gte: priorRange.gte, lt: priorRange.lt } },
+                select: { ts: true, kwh: true },
+                orderBy: { ts: "asc" },
+              });
+              for (const r of prior ?? []) {
+                const kwh = decimalToNumber((r as any)?.kwh);
+                const ts = (r as any)?.ts ? new Date((r as any).ts) : null;
+                if (ts && kwh != null) priorRows2.push({ ts, kwh });
+              }
+            }
+          } else {
+            const rawId = String(args.rawId ?? "");
+            if (rawId) {
+              const usageClient = usagePrisma as any;
+              const cur = await usageClient.greenButtonInterval.findMany({
+                where: { homeId: args.homeId, rawId, timestamp: { gte: currentRange.gte, lt: currentRange.lt } },
+                select: { timestamp: true, consumptionKwh: true },
+                orderBy: { timestamp: "asc" },
+              });
+              for (const r of cur ?? []) {
+                const kwh = decimalToNumber((r as any)?.consumptionKwh);
+                const ts = (r as any)?.timestamp ? new Date((r as any).timestamp) : null;
+                if (ts && kwh != null) currentRows.push({ ts, kwh });
+              }
+
+              const prior = await usageClient.greenButtonInterval.findMany({
+                where: { homeId: args.homeId, rawId, timestamp: { gte: priorRange.gte, lt: priorRange.lt } },
+                select: { timestamp: true, consumptionKwh: true },
+                orderBy: { timestamp: "asc" },
+              });
+              for (const r of prior ?? []) {
+                const kwh = decimalToNumber((r as any)?.consumptionKwh);
+                const ts = (r as any)?.timestamp ? new Date((r as any).timestamp) : null;
+                if (ts && kwh != null) priorRows2.push({ ts, kwh });
+              }
+            }
+          }
+
+          if (currentRows.length && priorRows2.length) {
+            const totals: Record<string, number> = {};
+            for (const k of keysToLoad) totals[k] = 0;
+
+            const applyIntervals = (
+              rows: Array<{ ts: Date; kwh: number }>,
+              onlyYearMonth: string,
+              dayMin: number,
+              dayMax: number,
+            ) => {
+              for (const r of rows) {
+                const p = chicagoParts(r.ts);
+                if (!p) continue;
+                if (p.yearMonth !== onlyYearMonth) continue;
+                if (p.day < dayMin || p.day > dayMax) continue;
+                for (const def of bucketDefs) {
+                  const rule = def.rule as BucketRuleV1;
+                  if (
+                    !evalRule(rule, {
+                      month: p.month,
+                      dayOfMonth: p.day,
+                      weekdayIndex: p.weekdayIndex,
+                      minutesOfDay: p.minutesOfDay,
+                    })
+                  )
+                    continue;
+                  totals[def.key] = (totals[def.key] ?? 0) + r.kwh;
+                }
+              }
+            };
+
+            applyIntervals(currentRows, stitchedMonth.yearMonth, 1, stitchedMonth.haveDaysThrough);
+            applyIntervals(priorRows2, stitchedMonth.borrowedFromYearMonth, stitchedMonth.missingDaysFrom, stitchedMonth.missingDaysTo);
+            usageBucketsByMonth[stitchedMonth.yearMonth] = totals;
+          }
+        } catch {
+          // ignore
+        }
       }
     } catch {
       // If daily table isn't deployed yet, optionally fall back to interval stitching (detail page only).

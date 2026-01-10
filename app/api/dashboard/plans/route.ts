@@ -709,9 +709,16 @@ export async function GET(req: NextRequest) {
             requiredBucketKeys: Array.from(unionKeys),
             monthsCount: 12,
             maxStepDays: 2,
-            // Plans list must NEVER fall back to scanning raw intervals (it can take minutes).
-            // Detail/compare routes can opt into interval fallback when needed.
-            stitchMode: "DAILY_ONLY",
+            // IMPORTANT:
+            // The plans list must use the same *semantic* bucket-building behavior as the engine
+            // and admin tooling: period buckets must be consistent with kwh.m.all.total.
+            //
+            // We prefer DAILY stitching when daily buckets exist, but fall back to interval stitching
+            // when DAILY coverage is incomplete (common early on, or if only totals were computed).
+            //
+            // This avoids false `USAGE_BUCKET_SUM_MISMATCH` failures that block TOU plans that are
+            // otherwise computable (e.g. Half-price Nights).
+            stitchMode: "DAILY_OR_INTERVAL",
           });
 
           yearMonthsForCalc = bucketBuild.yearMonths.slice();
