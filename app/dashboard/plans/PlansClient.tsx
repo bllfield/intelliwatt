@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import OfferCard, { type OfferCardProps } from "./OfferCard";
 import IntelliwattBotPopup from "@/components/dashboard/IntelliwattBotPopup";
 
@@ -163,6 +163,11 @@ export default function PlansClient() {
   // Default to ALL plans (API uses dataset=1 with pageSize up to 2000).
   const [pageSize, setPageSize] = useState<10 | 20 | 50 | 2000>(2000);
   const userTouchedPageSizeRef = useRef(false);
+  // Once the user touches ANY control in the Search/Sort/Filter section, this page must remain
+  // display-only: never kick any background warmups (template prefetch or pipeline).
+  // This prevents "changing filters triggers calculations" regressions.
+  const [userTouchedSearchOrFilters, setUserTouchedSearchOrFilters] = useState(false);
+  const markUserTouchedSearchOrFilters = useCallback(() => setUserTouchedSearchOrFilters(true), []);
   const [refreshNonce, setRefreshNonce] = useState(0);
 
   const [loading, setLoading] = useState(false);
@@ -198,8 +203,8 @@ export default function PlansClient() {
     // If the user explicitly changes sort, do not kick background work from this page.
     const userHasSorted = Boolean(userTouchedSortRef.current);
     const userChangedPageSize = Boolean(userTouchedPageSizeRef.current);
-    return defaultFilters && !userHasSorted && !userChangedPageSize;
-  }, [q, rateType, term, renewableMin, template, page, pageSize]);
+    return defaultFilters && !userHasSorted && !userChangedPageSize && !userTouchedSearchOrFilters;
+  }, [q, rateType, term, renewableMin, template, page, pageSize, userTouchedSearchOrFilters]);
 
   // Stable per-session dataset identity for background warmups.
   // Keep this minimal so browsing/sorting doesn't retrigger pipeline/prefetch during a session.
@@ -836,6 +841,7 @@ export default function PlansClient() {
                   <input
                     value={q}
                     onChange={(e) => {
+                      markUserTouchedSearchOrFilters();
                       setQ(e.target.value);
                       setPage(1);
                     }}
@@ -854,6 +860,7 @@ export default function PlansClient() {
                     <select
                       value={sort}
                       onChange={(e) => {
+                        markUserTouchedSearchOrFilters();
                         userTouchedSortRef.current = true;
                         setSort(e.target.value as any);
                         setPage(1);
@@ -891,6 +898,7 @@ export default function PlansClient() {
                       <select
                         value={rateType}
                         onChange={(e) => {
+                          markUserTouchedSearchOrFilters();
                           setRateType(e.target.value as any);
                           setPage(1);
                         }}
@@ -921,6 +929,7 @@ export default function PlansClient() {
                       <select
                         value={term}
                         onChange={(e) => {
+                          markUserTouchedSearchOrFilters();
                           setTerm(e.target.value as any);
                           setPage(1);
                         }}
@@ -951,6 +960,7 @@ export default function PlansClient() {
                       <select
                         value={renewableMin}
                         onChange={(e) => {
+                          markUserTouchedSearchOrFilters();
                           setRenewableMin(Number(e.target.value) as any);
                           setPage(1);
                         }}
@@ -978,6 +988,7 @@ export default function PlansClient() {
                             type="checkbox"
                             checked={template === "available"}
                             onChange={(e) => {
+                              markUserTouchedSearchOrFilters();
                               setTemplate(e.target.checked ? "available" : "all");
                               setPage(1);
                             }}
@@ -994,6 +1005,7 @@ export default function PlansClient() {
                           type="checkbox"
                           checked={isRenter === true}
                           onChange={(e) => {
+                            markUserTouchedSearchOrFilters();
                             const next = e.target.checked;
                             setIsRenter(next);
                             setPage(1);
@@ -1023,6 +1035,7 @@ export default function PlansClient() {
                   <input
                     value={q}
                     onChange={(e) => {
+                      markUserTouchedSearchOrFilters();
                       setQ(e.target.value);
                       setPage(1);
                     }}
@@ -1038,6 +1051,7 @@ export default function PlansClient() {
                   <select
                     value={sort}
                     onChange={(e) => {
+                      markUserTouchedSearchOrFilters();
                       userTouchedSortRef.current = true;
                       setSort(e.target.value as any);
                       setPage(1);
@@ -1076,6 +1090,7 @@ export default function PlansClient() {
                   <select
                     value={rateType}
                     onChange={(e) => {
+                      markUserTouchedSearchOrFilters();
                       setRateType(e.target.value as any);
                       setPage(1);
                     }}
@@ -1106,6 +1121,7 @@ export default function PlansClient() {
                   <select
                     value={term}
                     onChange={(e) => {
+                      markUserTouchedSearchOrFilters();
                       setTerm(e.target.value as any);
                       setPage(1);
                     }}
@@ -1136,6 +1152,7 @@ export default function PlansClient() {
                   <select
                     value={renewableMin}
                     onChange={(e) => {
+                      markUserTouchedSearchOrFilters();
                       setRenewableMin(Number(e.target.value) as any);
                       setPage(1);
                     }}
@@ -1163,6 +1180,7 @@ export default function PlansClient() {
                         type="checkbox"
                         checked={template === "available"}
                         onChange={(e) => {
+                          markUserTouchedSearchOrFilters();
                           setTemplate(e.target.checked ? "available" : "all");
                           setPage(1);
                         }}
@@ -1179,6 +1197,7 @@ export default function PlansClient() {
                       type="checkbox"
                       checked={isRenter === true}
                       onChange={(e) => {
+                        markUserTouchedSearchOrFilters();
                         const next = e.target.checked;
                         setIsRenter(next);
                         setPage(1);
@@ -1227,6 +1246,7 @@ export default function PlansClient() {
                   <select
                     value={pageSize}
                     onChange={(e) => {
+                      markUserTouchedSearchOrFilters();
                       userTouchedPageSizeRef.current = true;
                       setPageSize(Number(e.target.value) as any);
                       setPage(1);
@@ -1273,6 +1293,7 @@ export default function PlansClient() {
               <button
                 className="shrink-0 rounded-full border border-brand-cyan/25 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-cyan hover:bg-brand-white/10"
                 onClick={() => {
+                  markUserTouchedSearchOrFilters();
                   setTemplate("available");
                   setPage(1);
                 }}
