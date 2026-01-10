@@ -161,11 +161,15 @@ Notes:
 
 - **Current plan “templates” + queue behavior (Updated 2026-01-09)**
   - **Plan-level templates**: Current-plan EFL parsing now also upserts `BillPlanTemplate` (current-plan module DB) keyed by `(providerNameKey, planNameKey)` so we keep a reusable, plan-level template (analogous to offer `RatePlan` templates).
+  - **Template reuse**: `POST /api/current-plan/efl-parse` attempts to reuse an existing `BillPlanTemplate` (matched by provider+plan extracted from the EFL text) before running the full EFL pipeline again. Response includes `templateUsed`, `templateId`, and `templateKey` for UI prefill.
   - **Queue separation**:
     - Current-plan EFL/Bill review items use `EflParseReviewQueue.source` prefixed with `current_plan_`.
     - Admin list endpoint supports `?sourcePrefix=current_plan_` to view all current-plan queue items together.
   - **Auto-resolve semantics**:
     - For current-plan EFL items, `finalStatus=PASS` is sufficient to auto-resolve the queue row (these do not persist to `RatePlan`).
+  - **Auto-build missing usage buckets (Updated 2026-01-10)**:
+    - On current-plan cost calculation (and on offer estimate paths), we now check bucket coverage for `requiredBucketKeys` and trigger bucket computation only when missing (prevents TOU plans from stalling on missing buckets).
+    - Implementation: `lib/usage/buildUsageBucketsForEstimate.ts` performs coverage check + best-effort bucket build.
   - **Admin UI**:
     - `/admin/current-plan/bill-parser` shows both:
       - Parsed bill/EFL templates (`ParsedCurrentPlan`)
