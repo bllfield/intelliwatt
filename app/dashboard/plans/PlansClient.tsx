@@ -182,6 +182,21 @@ export default function PlansClient() {
   const [approxKwhPerMonth, setApproxKwhPerMonth] = useState<500 | 750 | 1000 | 1250 | 2000>(1000);
   const bestBucket = useMemo(() => selectedBestBucket(sort), [sort]);
 
+  // Only allow the Plans page to *kick* background warmups in the default landing view.
+  // Any sort/filter/pagination interaction should be read-only: fetch + display DB state, never restart warmups.
+  const allowWarmupKicksFromThisView = useMemo(() => {
+    const defaultFilters =
+      q.trim() === "" &&
+      rateType === "all" &&
+      term === "all" &&
+      renewableMin === 0 &&
+      template === "all" &&
+      page === 1;
+    // If the user explicitly changes sort, do not kick background work from this page.
+    const userHasSorted = Boolean(userTouchedSortRef.current);
+    return defaultFilters && !userHasSorted;
+  }, [q, rateType, term, renewableMin, template, page]);
+
   // Stable per-session dataset identity for background warmups.
   // Keep this minimal so browsing/sorting doesn't retrigger pipeline/prefetch during a session.
   const warmupKey = useMemo(() => JSON.stringify({ isRenter }), [isRenter]);
@@ -414,6 +429,7 @@ export default function PlansClient() {
   // This is safe even when usage is missing (templating does not require SMT/GreenButton usage).
   useEffect(() => {
     if (!ENABLE_PLANS_AUTO_WARMUPS) return;
+    if (!allowWarmupKicksFromThisView) return;
     if (isRenter === null) return;
     if (!resp?.ok) return;
     const offersNow = Array.isArray(resp?.offers) ? (resp!.offers as OfferRow[]) : [];
@@ -480,12 +496,13 @@ export default function PlansClient() {
 
     run();
     return () => controller.abort();
-  }, [resp?.ok, resp?.offers, isRenter, warmupKey, ENABLE_PLANS_AUTO_WARMUPS]);
+  }, [resp?.ok, resp?.offers, isRenter, warmupKey, ENABLE_PLANS_AUTO_WARMUPS, allowWarmupKicksFromThisView]);
 
   // Fallback warm-up: if the user lands on /dashboard/plans before background warm-up ran,
   // kick the plan pipeline once per session and poll until queued clears (or timeout).
   useEffect(() => {
     if (!ENABLE_PLANS_AUTO_WARMUPS) return;
+    if (!allowWarmupKicksFromThisView) return;
     if (isRenter === null) return;
     if (!resp?.ok) return;
     if (!resp?.hasUsage) return;
@@ -597,7 +614,7 @@ export default function PlansClient() {
     return () => {
       // keep timers running across renders; cleaned up in serverDatasetKey effect
     };
-  }, [resp?.ok, resp?.hasUsage, resp?.offers, isRenter, warmupKey, ENABLE_PLANS_AUTO_WARMUPS]);
+  }, [resp?.ok, resp?.hasUsage, resp?.offers, isRenter, warmupKey, ENABLE_PLANS_AUTO_WARMUPS, allowWarmupKicksFromThisView]);
 
   // Cleanup on unmount (defensive: prevents polling leaks if the component tree changes).
   useEffect(() => {
