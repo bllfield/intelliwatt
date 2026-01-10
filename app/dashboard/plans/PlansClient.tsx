@@ -190,6 +190,23 @@ export default function PlansClient() {
   const [approxKwhPerMonth, setApproxKwhPerMonth] = useState<500 | 750 | 1000 | 1250 | 2000>(1000);
   const bestBucket = useMemo(() => selectedBestBucket(sort), [sort]);
   const datasetMode = pageSize === 2000;
+  // Stable per-session dataset identity for background warmups.
+  // Keep this minimal so browsing/sorting doesn't retrigger pipeline/prefetch during a session.
+  const warmupKey = useMemo(() => JSON.stringify({ isRenter }), [isRenter]);
+  const [warmupSessionActive, setWarmupSessionActive] = useState(false);
+
+  // Once we start a warmup session for this renter-mode dataset, keep it running even if the user
+  // touches filters/sort/search. Those interactions must not *start* warmups, but they also must not
+  // accidentally stop an in-progress warmup that is trying to drain pending cards to 0.
+  useEffect(() => {
+    try {
+      const raw = window.sessionStorage.getItem(`plans_warmup_active_v1:${warmupKey}`);
+      if (raw === "1") setWarmupSessionActive(true);
+    } catch {
+      // ignore
+    }
+    // Only depends on warmupKey so a renter toggle resets the warmup session.
+  }, [warmupKey]);
 
   // Only allow the Plans page to *kick* background warmups in the default landing view.
   // Any sort/filter/pagination interaction should be read-only: fetch + display DB state, never restart warmups.
@@ -207,9 +224,7 @@ export default function PlansClient() {
     return defaultFilters && !userHasSorted && !userChangedPageSize && !userTouchedSearchOrFilters;
   }, [q, rateType, term, renewableMin, template, page, pageSize, userTouchedSearchOrFilters]);
 
-  // Stable per-session dataset identity for background warmups.
-  // Keep this minimal so browsing/sorting doesn't retrigger pipeline/prefetch during a session.
-  const warmupKey = useMemo(() => JSON.stringify({ isRenter }), [isRenter]);
+  const allowWarmupInBackground = allowWarmupKicksFromThisView || warmupSessionActive;
 
   // Server dataset identity: include all inputs that change the server response.
   const serverDatasetKey = useMemo(
@@ -446,18 +461,31 @@ export default function PlansClient() {
       return true;
     }).length;
     setAutoPreparing(false);
-    if (allowWarmupKicksFromThisView && pending > 0) setPrefetchNote(`Preparing IntelliWatt calculations… (${pending} pending)`);
+    if (allowWarmupInBackground && pending > 0) setPrefetchNote(`Preparing IntelliWatt calculations… (${pending} pending)`);
     else if (needsUsage > 0) setPrefetchNote("Need usage to estimate some plans.");
     else if (notComputableYet > 0) setPrefetchNote("Some plans are not computable yet.");
     else setPrefetchNote(null);
-  }, [resp?.ok, resp?.offers, allowWarmupKicksFromThisView]);
+  }, [resp?.ok, resp?.offers, allowWarmupInBackground]);
+
+  // When pending reaches 0, end the warmup session so future browsing doesn't keep background-kicking.
+  useEffect(() => {
+    if (!warmupSessionActive) return;
+    const pendingNow = pendingCountFromResponse(resp);
+    if (pendingNow > 0) return;
+    setWarmupSessionActive(false);
+    try {
+      window.sessionStorage.removeItem(`plans_warmup_active_v1:${warmupKey}`);
+    } catch {
+      // ignore
+    }
+  }, [resp, warmupKey, warmupSessionActive]);
 
   // Targeted template warm-up: if offers are QUEUED specifically because their template mapping is missing,
   // kick the lightweight EFL-prefetch endpoint to auto-parse and create/link templates (best-effort).
   // This is safe even when usage is missing (templating does not require SMT/GreenButton usage).
   useEffect(() => {
     if (!ENABLE_PLANS_AUTO_WARMUPS) return;
-    if (!allowWarmupKicksFromThisView) return;
+    if (!allowWarmupInBackground) return;
     if (isRenter === null) return;
     if (!resp?.ok) return;
     const offersNow = Array.isArray(resp?.offers) ? (resp!.offers as OfferRow[]) : [];
@@ -474,6 +502,16 @@ export default function PlansClient() {
       .slice(0, 6);
 
     if (missingTemplate.length <= 0) return;
+
+    // Start the warmup session as soon as we know we need it.
+    if (!warmupSessionActive) {
+      setWarmupSessionActive(true);
+      try {
+        window.sessionStorage.setItem(`plans_warmup_active_v1:${warmupKey}`, "1");
+      } catch {
+        // ignore
+      }
+    }
 
     // Throttle is per-session warmup cycle (warmupKey), not per-filter:
     // changing search/filters should never reset or restart background warmups from this page.
@@ -524,19 +562,29 @@ export default function PlansClient() {
 
     run();
     return () => controller.abort();
-  }, [resp?.ok, resp?.offers, isRenter, warmupKey, ENABLE_PLANS_AUTO_WARMUPS, allowWarmupKicksFromThisView]);
+  }, [resp?.ok, resp?.offers, isRenter, warmupKey, ENABLE_PLANS_AUTO_WARMUPS, allowWarmupInBackground, warmupSessionActive]);
 
   // Fallback warm-up: if the user lands on /dashboard/plans before background warm-up ran,
   // kick the plan pipeline once per session and poll until queued clears (or timeout).
   useEffect(() => {
     if (!ENABLE_PLANS_AUTO_WARMUPS) return;
-    if (!allowWarmupKicksFromThisView) return;
+    if (!allowWarmupInBackground) return;
     if (isRenter === null) return;
     if (!resp?.ok) return;
     if (!resp?.hasUsage) return;
     const offersNow = Array.isArray(resp?.offers) ? (resp!.offers as OfferRow[]) : [];
     const pendingCountNow = pendingCountFromResponse(resp);
     if (pendingCountNow <= 0) return;
+
+    // Start the warmup session once we detect pending estimates.
+    if (!warmupSessionActive) {
+      setWarmupSessionActive(true);
+      try {
+        window.sessionStorage.setItem(`plans_warmup_active_v1:${warmupKey}`, "1");
+      } catch {
+        // ignore
+      }
+    }
 
     // Throttle is per-session warmup cycle (warmupKey), not per-filter:
     // changing search/filters should never reset or restart background warmups from this page.
@@ -650,7 +698,7 @@ export default function PlansClient() {
     return () => {
       // keep timers running across renders; cleaned up in serverDatasetKey effect
     };
-  }, [resp?.ok, resp?.hasUsage, resp?.offers, isRenter, warmupKey, ENABLE_PLANS_AUTO_WARMUPS, allowWarmupKicksFromThisView, datasetMode]);
+  }, [resp?.ok, resp?.hasUsage, resp?.offers, isRenter, warmupKey, ENABLE_PLANS_AUTO_WARMUPS, allowWarmupInBackground, datasetMode, warmupSessionActive]);
 
   // Cleanup on unmount (defensive: prevents polling leaks if the component tree changes).
   useEffect(() => {
