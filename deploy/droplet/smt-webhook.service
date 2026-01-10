@@ -1,0 +1,26 @@
+[Unit]
+Description=IntelliWatt SMT Webhook Server (Python on 8787)
+After=network.target
+
+[Service]
+Type=simple
+User=deploy
+WorkingDirectory=/home/deploy/apps/intelliwatt
+
+# Shared SMT env (contains ADMIN_TOKEN and ingest config; do not commit secrets)
+EnvironmentFile=/etc/default/intelliwatt-smt
+# Optional shared app env (may include APP_BASE_URL, etc.)
+EnvironmentFile=-/home/deploy/.intelliwatt.env
+
+# Webhook server port (default 8787 inside webhook_server.py)
+Environment=PORT=8787
+
+ExecStart=/usr/bin/env python3 /home/deploy/apps/intelliwatt/deploy/droplet/webhook_server.py
+
+# Always restart this service - it's a critical long-running daemon
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+

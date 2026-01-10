@@ -916,6 +916,20 @@ def _normalize_subscription_response(status: int, payload: Optional[Dict[str, An
 
 
 class H(BaseHTTPRequestHandler):
+    def do_GET(self) -> None:
+        # Lightweight health endpoint so systemd/ops can confirm the webhook server is alive.
+        if getattr(self, "path", "/") in ("/health", "/healthz", "/"):
+            body = b"ok"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        self.send_response(404)
+        self.end_headers()
+
     def _read_body_bytes(self) -> bytes:
         length_str = self.headers.get("Content-Length")
         if not length_str:

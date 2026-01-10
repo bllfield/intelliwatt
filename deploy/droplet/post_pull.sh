@@ -35,6 +35,14 @@ else
   exit 1
 fi
 
+# 1c) Re-apply droplet systemd units (upload servers + webhook + watchdog)
+if [[ -f "deploy/droplet/apply_droplet_services.sh" ]]; then
+  log "Running apply_droplet_services.sh"
+  sudo bash "deploy/droplet/apply_droplet_services.sh"
+else
+  log "Skipping apply_droplet_services.sh (not present)"
+fi
+
 # 1b) Re-apply EFL fetch proxy systemd config (optional)
 # Use -f (exists) rather than -x (executable) because git/filemode can differ across hosts.
 if [[ -f "deploy/droplet/apply_efl_fetch_proxy.sh" ]]; then
@@ -58,8 +66,11 @@ restart_if_exists() {
 # Keep this conservative: only the droplet services we already run here.
 restart_if_exists "smt-webhook.service"
 restart_if_exists "smt-ingest.service"
+restart_if_exists "smt-upload-server.service"
 restart_if_exists "green-button-upload.service"
+restart_if_exists "green-button-upload-server.service"
 restart_if_exists "efl-pdftotext.service"
+restart_if_exists "intelliwatt-ensure-services.timer"
 restart_if_exists "efl-fetch-proxy.service"
 restart_if_exists "nginx.service"
 

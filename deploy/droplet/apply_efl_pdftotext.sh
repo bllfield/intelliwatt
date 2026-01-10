@@ -29,11 +29,13 @@ log "repo_root=${repo_root}"
 NGINX_SRC="deploy/droplet/nginx/efl-pdftotext.intelliwatt.com"
 SYSTEMD_OVERRIDE_SRC="deploy/droplet/systemd/efl-pdftotext.override.conf"
 ENV_EXAMPLE_SRC="deploy/droplet/env/.efl-pdftotext.env.example"
+SERVICE_SRC="deploy/droplet/efl-pdftotext.service"
 
 NGINX_DST="/etc/nginx/sites-available/efl-pdftotext.intelliwatt.com"
 NGINX_LINK="/etc/nginx/sites-enabled/efl-pdftotext.intelliwatt.com"
 SYSTEMD_OVERRIDE_DIR="/etc/systemd/system/efl-pdftotext.service.d"
 SYSTEMD_OVERRIDE_DST="${SYSTEMD_OVERRIDE_DIR}/override.conf"
+SERVICE_DST="/etc/systemd/system/efl-pdftotext.service"
 
 LIVE_ENV_DST="/home/deploy/.efl-pdftotext.env"
 
@@ -47,6 +49,11 @@ if [[ ! -f "${SYSTEMD_OVERRIDE_SRC}" ]]; then
   exit 1
 fi
 
+if [[ ! -f "${SERVICE_SRC}" ]]; then
+  echo "[apply_efl_pdftotext] ERROR: Missing ${SERVICE_SRC}" >&2
+  exit 1
+fi
+
 log "Installing nginx site → ${NGINX_DST}"
 sudo cp "${NGINX_SRC}" "${NGINX_DST}"
 
@@ -56,6 +63,9 @@ sudo ln -sf "${NGINX_DST}" "${NGINX_LINK}"
 log "Installing systemd override → ${SYSTEMD_OVERRIDE_DST}"
 sudo mkdir -p "${SYSTEMD_OVERRIDE_DIR}"
 sudo cp "${SYSTEMD_OVERRIDE_SRC}" "${SYSTEMD_OVERRIDE_DST}"
+
+log "Installing systemd unit → ${SERVICE_DST}"
+sudo cp "${SERVICE_SRC}" "${SERVICE_DST}"
 
 # Only create the live env file if it does not exist (never overwrite secrets)
 if [[ ! -f "${LIVE_ENV_DST}" ]]; then
@@ -77,6 +87,7 @@ sudo nginx -t
 log "Reloading systemd + nginx and restarting efl-pdftotext"
 sudo systemctl daemon-reload
 sudo systemctl reload nginx
+sudo systemctl enable efl-pdftotext.service || true
 sudo systemctl restart efl-pdftotext.service
 
 log "Done."
