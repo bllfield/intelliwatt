@@ -160,7 +160,9 @@ export default function PlansClient() {
   const [sort, setSort] = useState<SortKey>("kwh1000_asc");
   const userTouchedSortRef = useRef(false);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState<10 | 20 | 50>(20);
+  // Default to ALL plans (API uses dataset=1 with pageSize up to 2000).
+  const [pageSize, setPageSize] = useState<10 | 20 | 50 | 2000>(2000);
+  const userTouchedPageSizeRef = useRef(false);
   const [refreshNonce, setRefreshNonce] = useState(0);
 
   const [loading, setLoading] = useState(false);
@@ -181,6 +183,7 @@ export default function PlansClient() {
   const [headerCollapsed, setHeaderCollapsed] = useState(false);
   const [approxKwhPerMonth, setApproxKwhPerMonth] = useState<500 | 750 | 1000 | 1250 | 2000>(1000);
   const bestBucket = useMemo(() => selectedBestBucket(sort), [sort]);
+  const datasetMode = pageSize === 2000;
 
   // Only allow the Plans page to *kick* background warmups in the default landing view.
   // Any sort/filter/pagination interaction should be read-only: fetch + display DB state, never restart warmups.
@@ -194,8 +197,9 @@ export default function PlansClient() {
       page === 1;
     // If the user explicitly changes sort, do not kick background work from this page.
     const userHasSorted = Boolean(userTouchedSortRef.current);
-    return defaultFilters && !userHasSorted;
-  }, [q, rateType, term, renewableMin, template, page]);
+    const userChangedPageSize = Boolean(userTouchedPageSizeRef.current);
+    return defaultFilters && !userHasSorted && !userChangedPageSize;
+  }, [q, rateType, term, renewableMin, template, page, pageSize]);
 
   // Stable per-session dataset identity for background warmups.
   // Keep this minimal so browsing/sorting doesn't retrigger pipeline/prefetch during a session.
@@ -205,6 +209,7 @@ export default function PlansClient() {
   const serverDatasetKey = useMemo(
     () =>
       JSON.stringify({
+        datasetMode,
         isRenter,
         q: q.trim().toLowerCase(),
         rateType,
@@ -216,7 +221,7 @@ export default function PlansClient() {
         pageSize,
         approxKwhPerMonth,
       }),
-    [isRenter, q, rateType, term, renewableMin, template, sort, page, pageSize, approxKwhPerMonth],
+    [datasetMode, isRenter, q, rateType, term, renewableMin, template, sort, page, pageSize, approxKwhPerMonth],
   );
 
   // Lightweight client cache so back/forward navigation instantly shows the last processed dataset
@@ -315,7 +320,7 @@ export default function PlansClient() {
     const params: Record<string, string> = {
       // Used only to force a reload after background prefetch runs.
       _r: String(refreshNonce),
-      page: String(page),
+      page: String(datasetMode ? 1 : page),
       pageSize: String(pageSize),
       sort: String(sort),
       q: q.trim(),
@@ -326,8 +331,9 @@ export default function PlansClient() {
     };
     if (typeof approxKwhPerMonth === "number") params.approxKwhPerMonth = String(approxKwhPerMonth);
     if (isRenter !== null) params.isRenter = String(isRenter);
+    if (datasetMode) params.dataset = "1";
     return params;
-  }, [refreshNonce, page, pageSize, sort, q, rateType, term, renewableMin, template, approxKwhPerMonth, isRenter]);
+  }, [refreshNonce, page, pageSize, sort, q, rateType, term, renewableMin, template, approxKwhPerMonth, isRenter, datasetMode]);
 
   const plansQueryString = useMemo(() => buildQuery(baseParams as any), [baseParams]);
 
@@ -1211,11 +1217,15 @@ export default function PlansClient() {
                   <select
                     value={pageSize}
                     onChange={(e) => {
+                      userTouchedPageSizeRef.current = true;
                       setPageSize(Number(e.target.value) as any);
                       setPage(1);
                     }}
                     className="rounded-full border border-brand-cyan/25 bg-brand-white/5 px-2 py-1 text-xs text-brand-white outline-none focus:border-brand-blue/60 focus:bg-white focus:text-brand-navy"
                   >
+                    <option className="text-brand-navy" value={2000}>
+                      All
+                    </option>
                     <option className="text-brand-navy" value={10}>
                       10
                     </option>
