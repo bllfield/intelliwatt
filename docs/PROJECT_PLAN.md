@@ -2384,15 +2384,21 @@ Guardrails
   - Provides a **WattBuy signup CTA** using the offer’s `enroll_link`
 - Wires `OfferIdRatePlanMap` into each offer card to show **IntelliWatt calculation available** when `ratePlanId` exists.
 - Returns `intelliwatt.ratePlanId` per offer (from `OfferIdRatePlanMap`) so the plan engine can use `RatePlan` templates directly.
-- **True-cost wiring (production, single source of truth):**
-  - `intelliwatt.trueCostEstimate` is always the output of the plan engine (`estimateTrueCost`) using:
+- **True-cost wiring (production, read-only list semantics):**
+  - `GET /api/dashboard/plans` is **display-only**:
+    - It **must not** trigger plan computations (sort/filter/pagination are fetch + render only).
+    - If an estimate is not already present in the persisted store, the API returns a cache-miss marker and the UI shows **CALCULATING** until the pipeline materializes it.
+  - `intelliwatt.trueCostEstimate` is the plan engine output using:
     - `RatePlan.rateStructure` (template)
     - TDSP delivery rates (`getTdspDeliveryRates`)
-    - Home monthly usage buckets (including any required bucket keys)
-  - **One stored result**: every home-scoped plan-engine output is cached into the **WattBuy Offers module DB** (`WattBuyApiSnapshot`) and then reused everywhere (list + detail).
-  - **Fail-closed availability**:
-    - **AVAILABLE** only when the template is mapped *and* the true-cost estimate for this home is `OK`/`APPROXIMATE`
-    - Otherwise the plan is shown as **QUEUED** (even if a template exists)
+    - Canonical stitched 12-month usage buckets (including any required bucket keys)
+  - **Single source of truth (canonical)**: `PlanEstimateMaterialized` (master DB), keyed by `(houseAddressId, ratePlanId, inputsSha256)`.
+    - Transition support: dashboard may fall back to legacy snapshot cache during migration, but customer UI semantics must stay “DB-saved or pending”.
+  - **Fail-closed availability (customer-facing)**:
+    - **AVAILABLE** only when `trueCostEstimate.status` is `OK`/`APPROXIMATE`
+    - **CALCULATING** when `trueCostEstimate` is a cache miss / missing template / missing buckets (expected to resolve after pipeline warmup)
+    - **NEED USAGE** when usage is missing
+    - **NOT COMPUTABLE YET** only for true template defects / unsupported structures
 - Added `lib/plan-engine/calculatePlanCostForIntervals.ts` + `lib/plan-engine/types.ts`: **pure 15‑minute interval true‑cost core** (fixed-rate-only v1; fail-closed; REP vs TDSP split; no API/UI wiring yet).
 - Added `lib/plan-engine/usageBuckets.ts`: canonical monthly usage bucket spec (`CORE_MONTHLY_BUCKETS` + `declareMonthlyBuckets`) as the foundation for auto-aggregation when new plan variables appear (no DB wiring yet).
 - Added **Usage module DB** tall-table storage for bucket totals:
@@ -2401,7 +2407,7 @@ Guardrails
 - Added `aggregateMonthlyBuckets()` + manual script (`scripts/usage/rebuild-core-buckets-for-home.ts`) to populate `CORE_MONTHLY_BUCKETS` into the **usage module DB** from interval data (best-effort; now wired):
   - After SMT ingest/normalize completes (`/api/admin/smt/normalize` and inline `/api/admin/smt/raw-upload` paths)
   - After Green Button upload completes (`/api/green-button/upload` and `/api/admin/green-button/upload`)
-  - On-demand inside `GET /api/dashboard/plans` when recent bucket rows are missing (lazy backfill; never breaks offers)
+  - Bucket computation is performed by ingestion + background pipeline runs (customer plans list is read-only; never computes buckets inline)
 - Usage buckets are now **future-proof**:
   - `UsageBucketDefinition` stores `ruleJson` (canonical bucket matching rule) + `overnightAttribution` (ACTUAL_DAY default)
   - Aggregator supports overnight attribution modes: ACTUAL_DAY (default) and START_DAY ("night belongs to previous day" for day filters)
@@ -2448,8 +2454,17 @@ Guardrails
   - Admin tool supports an **event dropdown** (plus Custom) when adding event messages for a page.
 - Dashboard Plans header: search/filter section is now globally **collapsible** (both mobile + desktop) so plan cards stay visible.
 - PlansClient: prevent double-fetch by gating `/api/dashboard/plans` until `isRenter` is resolved from localStorage, and use AbortController + request sequencing to cancel/ignore stale responses when params change.
-- True-cost: `/api/dashboard/plans` computes home-scoped costs from canonical usage buckets + TDSP (fail-closed). Unsupported/non-deterministic templates remain quarantined as `PLAN_CALC_QUARANTINE`.
-- Plans UX: avoid indefinite “Calculating…” loops. If an estimate is not ready, show **Not Computable Yet** unless a background job is actively running and expected to complete soon.
+- Plans UX (guardrails, do not regress):
+  - **No engine work on sort/filter/pagination** (those are UX-only).
+  - When usage exists, missing estimates must show as **CALCULATING** (not “unsupported”) and resolve once the background pipeline finishes.
+  - API responses for `/api/dashboard/plans` must be **non-cacheable** (avoid browser “disk cache” pinning stale pending results).
+  - Missing buckets is an “availability/pipeline” condition (not a plan defect); do not spam review queues for missing buckets.
+
+Plans page performance + semantics (Added 2026-01)
+- Default page size is **All** (dataset mode) so sort/filter are client-side and do not trigger refetch storms.
+- Background warmups (templating + pipeline kicks) are **strictly gated** to start only from the default landing view; once started they may continue in the background until pending hits 0.
+- `GET /api/dashboard/plans` is read-only and returns persisted estimates (or a cache-miss marker). It never computes.
+- `POST /api/dashboard/plans/pipeline` is bounded (time budget clamped) to avoid Vercel 504s; repeated kicks are throttled by job cooldown.
 
 Canonical home-scoped usage window (Dashboard + Plan Details)
 
@@ -2461,7 +2476,7 @@ Canonical home-scoped usage window (Dashboard + Plan Details)
   - plus the missing tail days borrowed from the same calendar month in the prior year.
 - **Implementation (shared helper)**: `lib/usage/buildUsageBucketsForEstimate.ts` → `buildUsageBucketsForEstimate()`.
 
-Materialized plan estimates (single source of truth — vNext)
+Materialized plan estimates (single source of truth — production)
 
 - **Goal**: One engine, one set of semantics, and instant UI loads.
 - **Storage**: a dedicated master-DB table for materialized plan estimates (home-scoped), keyed by:
