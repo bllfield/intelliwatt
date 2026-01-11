@@ -2123,9 +2123,11 @@ export async function GET(req: NextRequest) {
       {
         status: 200,
         headers: {
-          // Customer-specific (cookie auth) but safe to cache in the browser.
-          // This allows dashboard-entry prefetch to populate the browser cache so /dashboard/plans loads instantly.
-          "Cache-Control": "private, max-age=900, stale-while-revalidate=86400",
+          // IMPORTANT:
+          // This endpoint is used for live polling while the background plan pipeline materializes estimates.
+          // It must NEVER be served from browser disk cache, otherwise the UI can get stuck showing
+          // "CALCULATING" even after the pipeline completes.
+          "Cache-Control": "no-store, max-age=0",
         },
       },
     );

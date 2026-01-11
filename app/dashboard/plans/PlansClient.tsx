@@ -423,7 +423,10 @@ export default function PlansClient() {
 
     async function run() {
       try {
-        const r = await fetch(`/api/dashboard/plans?${plansQueryString}`, { signal: controller.signal });
+        const r = await fetch(`/api/dashboard/plans?${plansQueryString}`, {
+          signal: controller.signal,
+          cache: "no-store",
+        });
         const j = (await r.json().catch(() => null)) as ApiResponse | null;
         if (controller.signal.aborted) return;
         if (mySeq !== reqSeqRef.current) return; // stale response
@@ -677,7 +680,10 @@ export default function PlansClient() {
           // Poll the same query the user is currently viewing (server-side paging/filtering).
           // This avoids the legacy dataset=1/pageSize=2000 call pattern which can take minutes.
           const qs = plansQueryStringRef.current || plansQueryString;
-          fetch(`/api/dashboard/plans?${qs}`)
+          // Poll must bypass any HTTP/disk caches; otherwise the UI can get stuck on stale responses.
+          // Add a tiny cache-bust param that is NOT part of serverDatasetKey.
+          const cacheBust = String(Date.now());
+          fetch(`/api/dashboard/plans?${qs}&_poll=${encodeURIComponent(cacheBust)}`, { cache: "no-store" })
             .then((r) => r.json().catch(() => null))
             .then((j) => {
               if (!j || j.ok !== true) return;
