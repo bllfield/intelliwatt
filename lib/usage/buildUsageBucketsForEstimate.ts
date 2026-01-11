@@ -41,6 +41,17 @@ function daysInMonth(year: number, month1: number): number {
   return new Date(Date.UTC(year, month1, 0)).getUTCDate();
 }
 
+function isBucketSumMismatchTolerable(args: { totalKwh: number; sumKwh: number }): boolean {
+  const total = args.totalKwh;
+  const sum = args.sumKwh;
+  if (!Number.isFinite(total) || !Number.isFinite(sum)) return false;
+  if (total <= 0 || sum <= 0) return false;
+  const diff = Math.abs(sum - total);
+  // Keep this aligned with plan-cost mismatch tolerance (<=3% or 2 kWh).
+  const tol = Math.max(2, total * 0.03); // kWh
+  return diff <= tol;
+}
+
 function chicagoYearMonthParts(now: Date): { year: number; month: number } | null {
   try {
     const fmt = new Intl.DateTimeFormat("en-US", {
@@ -284,16 +295,25 @@ export async function buildUsageBucketsForEstimate(args: {
         yearMonth: { in: yearMonths },
         bucketKey: { in: uniq(allQueryKeys) },
       },
-      select: { yearMonth: true, bucketKey: true },
+      select: { yearMonth: true, bucketKey: true, kwhTotal: true },
     });
 
     const presentByMonth: Record<string, Set<string>> = {};
+    const valuesByMonth: Record<string, Record<string, number>> = {};
     for (const r of rows ?? []) {
       const ym = String((r as any)?.yearMonth ?? "").trim();
       const bk = String((r as any)?.bucketKey ?? "").trim();
+      const kwh = decimalToNumber((r as any)?.kwhTotal);
       if (!ym || !bk) continue;
       if (!presentByMonth[ym]) presentByMonth[ym] = new Set<string>();
       presentByMonth[ym].add(bk);
+      const canonical = canonicalizeMonthlyBucketKey(bk);
+      if (canonical && typeof kwh === "number" && Number.isFinite(kwh)) {
+        if (!valuesByMonth[ym]) valuesByMonth[ym] = {};
+        const prev = valuesByMonth[ym][canonical];
+        // If multiple aliases exist for the same canonical key, keep the larger magnitude to avoid false zeros.
+        valuesByMonth[ym][canonical] = typeof prev === "number" && Number.isFinite(prev) ? Math.max(prev, kwh) : kwh;
+      }
     }
 
     let missingAny = false;
@@ -310,7 +330,45 @@ export async function buildUsageBucketsForEstimate(args: {
       if (missingAny) break;
     }
 
-    shouldCompute = missingAny;
+    // If the required buckets are present but internally inconsistent (period buckets don't sum to totals),
+    // we must recompute from intervals to self-heal. Otherwise the plan engine fail-closes with
+    // USAGE_BUCKET_SUM_MISMATCH and the user UI shows "not computable" even though the plan is valid.
+    let mismatchAny = false;
+    if (!missingAny) {
+      const canonicalKeys = keysToLoad.map((k) => canonicalizeMonthlyBucketKey(String(k ?? "").trim())).filter(Boolean) as string[];
+      const byDayKind: Record<"all" | "weekday" | "weekend", string[]> = { all: [], weekday: [], weekend: [] };
+      for (const k of canonicalKeys) {
+        const m = k.match(/^kwh\.m\.(all|weekday|weekend)\.(.+)$/);
+        if (!m) continue;
+        const kind = m[1] as "all" | "weekday" | "weekend";
+        const suffix = m[2];
+        if (suffix === "total") continue;
+        // Only treat HHMM-HHMM buckets as summable parts of a day partition.
+        if (!/^\d{4}-\d{4}$/.test(suffix)) continue;
+        byDayKind[kind].push(k);
+      }
+
+      for (const ym of yearMonths) {
+        const vals = valuesByMonth[ym] ?? {};
+        for (const kind of ["all", "weekday", "weekend"] as const) {
+          const totalKey = `kwh.m.${kind}.total`;
+          const total = vals[totalKey];
+          if (!(typeof total === "number" && Number.isFinite(total) && total > 0)) continue;
+          const parts = byDayKind[kind];
+          if (!parts || parts.length < 2) continue;
+          const partVals = parts.map((k) => vals[k]).filter((v) => typeof v === "number" && Number.isFinite(v) && v >= 0) as number[];
+          if (partVals.length < 2) continue;
+          const sum = partVals.reduce((a, b) => a + b, 0);
+          if (Math.abs(sum - total) > 0.01 && !isBucketSumMismatchTolerable({ totalKwh: total, sumKwh: sum })) {
+            mismatchAny = true;
+            break;
+          }
+        }
+        if (mismatchAny) break;
+      }
+    }
+
+    shouldCompute = missingAny || mismatchAny;
   } catch {
     // If coverage check fails, default to computing (best-effort) to avoid false "missing buckets" stalls.
     shouldCompute = true;

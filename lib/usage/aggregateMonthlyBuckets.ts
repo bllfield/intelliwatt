@@ -172,7 +172,21 @@ export async function ensureCoreMonthlyBuckets(
     const seen = new Set<string>();
     let deduped = 0;
 
-    for (const b of bucketDefsRaw) {
+    // Guardrail:
+    // Always compute the canonical total bucket alongside any window buckets.
+    // If callers request only TOU keys and we don't recompute `kwh.m.all.total`, we can end up with
+    // inconsistent month totals (written by older/legacy jobs) that cause USAGE_BUCKET_SUM_MISMATCH.
+    const mustHaveTotalKey = "kwh.m.all.total";
+    const hasTotalAlready = bucketDefsRaw.some((b: any) => canonicalizeMonthlyBucketKey(b?.key) === mustHaveTotalKey);
+    const withTotal = hasTotalAlready
+      ? bucketDefsRaw
+      : [
+          ...bucketDefsRaw,
+          // Prefer the canonical core definition when available; otherwise synthesize a minimal one.
+          ...(CORE_MONTHLY_BUCKETS.filter((b) => canonicalizeMonthlyBucketKey(b?.key) === mustHaveTotalKey).slice(0, 1) as any[]),
+        ];
+
+    for (const b of withTotal) {
       const canonicalKey = canonicalizeMonthlyBucketKey(b?.key);
       if (!canonicalKey) continue;
       if (seen.has(canonicalKey)) {
