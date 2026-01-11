@@ -247,7 +247,7 @@ export default function PlansClient() {
   // instead of refetching.
   // Bump when API semantics change so we don't pin users to stale session-cached payloads.
   // Bump when API semantics change so we don't pin users to stale session-cached payloads.
-  const cacheKey = useMemo(() => `dashboard_plans_dataset_v4:${serverDatasetKey}`, [serverDatasetKey]);
+  const cacheKey = useMemo(() => `dashboard_plans_dataset_v5:${serverDatasetKey}`, [serverDatasetKey]);
   // This is NOT the plan-engine cache (engine outputs are persisted in the WattBuy Offers DB).
   // This is only a UX cache for the API response to avoid flashing loading states on navigation.
   // Keep it long-lived; correctness still comes from server-side canonical inputs + DB-stored estimates.
