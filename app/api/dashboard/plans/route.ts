@@ -467,20 +467,27 @@ export async function GET(req: NextRequest) {
       });
 
       const cachedAt = cached?.fetchedAt instanceof Date ? cached.fetchedAt : null;
+      const cachedPayload = (cached as any)?.payloadJson ?? null;
       const cachedFresh =
-        cachedAt != null && Date.now() - cachedAt.getTime() <= OFFERS_TTL_MS && cached?.payloadJson != null;
+        cachedAt != null && Date.now() - cachedAt.getTime() <= OFFERS_TTL_MS && cachedPayload != null;
 
       if (cachedFresh) {
-        rawOffersResp = (cached as any)?.payloadJson ?? null;
+        rawOffersResp = cachedPayload;
         usedOffersCache = true;
       } else {
-        rawOffersResp = await wattbuy.offers({
-          address: house.addressLine1,
-          city: house.addressCity,
-          state: house.addressState,
-          zip: house.addressZip5,
-          isRenter,
-        });
+        try {
+          // Live refresh (bounded by WattBuy client timeout). If it fails, fall back to stale cache.
+          rawOffersResp = await wattbuy.offers({
+            address: house.addressLine1,
+            city: house.addressCity,
+            state: house.addressState,
+            zip: house.addressZip5,
+            isRenter,
+          });
+        } catch {
+          rawOffersResp = cachedPayload;
+          usedOffersCache = Boolean(cachedPayload);
+        }
         // Best-effort cache write (never block dashboard on DB errors).
         try {
           await (wattbuyOffersPrisma as any).wattBuyApiSnapshot.create({

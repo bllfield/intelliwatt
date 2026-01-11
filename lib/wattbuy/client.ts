@@ -56,20 +56,41 @@ async function parseBody<T>(res: Response): Promise<{ data: T | null; text: stri
 }
 
 async function doFetch<T>(url: string, init?: RequestInit): Promise<WbResponse<T>> {
-  const res = await fetch(url, {
-    method: 'GET',
-    headers: { 'x-api-key': apiKey(), 'Accept': 'application/json' },
-    cache: 'no-store',
-    ...init,
-  });
+  // WattBuy upstream can occasionally stall (cold starts / transient network issues).
+  // IMPORTANT: never allow a single request to hang for minutes; callers often have their own
+  // fallback caches and need a timely failure to proceed.
+  const timeoutMs = 12_000;
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    // If the caller supplied a signal, forward aborts to our controller.
+    if (init?.signal) {
+      try {
+        if (init.signal.aborted) ctrl.abort();
+        else init.signal.addEventListener("abort", () => ctrl.abort(), { once: true });
+      } catch {
+        // ignore
+      }
+    }
 
-  const headers = pickHeaders(res);
-  const { data, text } = await parseBody<T>(res);
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: { 'x-api-key': apiKey(), 'Accept': 'application/json' },
+      cache: 'no-store',
+      ...init,
+      signal: ctrl.signal,
+    });
 
-  if (!res.ok) {
-    return { ok: false, status: res.status, data, text, headers };
+    const headers = pickHeaders(res);
+    const { data, text } = await parseBody<T>(res);
+
+    if (!res.ok) {
+      return { ok: false, status: res.status, data, text, headers };
+    }
+    return { ok: true, status: res.status, data, text, headers };
+  } finally {
+    clearTimeout(t);
   }
-  return { ok: true, status: res.status, data, text, headers };
 }
 
 export async function wbGet<T = any>(
