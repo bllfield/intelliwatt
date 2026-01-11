@@ -41,7 +41,9 @@ function clamp(n: number, lo: number, hi: number): number {
 export async function POST(req: NextRequest) {
   const url = new URL(req.url);
   const reason = (url.searchParams.get("reason") ?? "plans_fallback").trim() || "plans_fallback";
-  const timeBudgetMs = clamp(toInt(url.searchParams.get("timeBudgetMs"), 12_000), 1500, 25_000);
+  // IMPORTANT: This endpoint is called from the browser and must return reliably.
+  // We've seen gateway timeouts around ~25s in production; keep a conservative cap and rely on multiple short runs.
+  const timeBudgetMs = clamp(toInt(url.searchParams.get("timeBudgetMs"), 12_000), 1500, 12_000);
   const maxTemplateOffers = clamp(toInt(url.searchParams.get("maxTemplateOffers"), 6), 0, 10);
   const maxEstimatePlans = clamp(toInt(url.searchParams.get("maxEstimatePlans"), 50), 0, 200);
   const isRenter = parseBool(url.searchParams.get("isRenter"), false);

@@ -623,18 +623,23 @@ export default function PlansClient() {
       try {
         const params = new URLSearchParams();
         params.set("reason", "plans_fallback");
-        // Keep each pipeline run short to avoid serverless timeouts; repeated runs are expected.
-        params.set("timeBudgetMs", datasetMode ? "25000" : "12000");
+        // Keep each pipeline run short to avoid gateway/serverless timeouts; repeated runs are expected.
+        // IMPORTANT: Vercel can 504 long-running pipeline kicks (we've seen ~25s do this in prod).
+        params.set("timeBudgetMs", "12000");
         params.set("maxTemplateOffers", "6");
-        // When showing ALL plans, allow the pipeline to consider more per run (still bounded server-side).
-        params.set("maxEstimatePlans", datasetMode ? "200" : "50");
+        // When showing ALL plans, allow a bit more per run, but stay conservative to keep runtime bounded.
+        params.set("maxEstimatePlans", datasetMode ? "80" : "50");
         // Allow repeated short runs; server still enforces lock + cooldown.
         params.set("proactiveCooldownMs", "60000");
         params.set("fallbackCooldownMs", "15000");
         params.set("isRenter", String(isRenter));
         (async () => {
           try {
-            const r = await fetch(`/api/dashboard/plans/pipeline?${params.toString()}`, { method: "POST" });
+            const r = await fetch(`/api/dashboard/plans/pipeline?${params.toString()}`, {
+              method: "POST",
+              // Best-effort: avoid client disconnects aborting the request mid-flight.
+              keepalive: true,
+            });
             const j = await r.json().catch(() => null);
             setLastPipelineKickResult(j);
             const started = Boolean(j?.ok === true && j?.started === true);
