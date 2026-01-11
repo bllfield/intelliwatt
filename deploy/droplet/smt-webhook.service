@@ -9,8 +9,9 @@ WorkingDirectory=/home/deploy/apps/intelliwatt
 
 # Shared SMT env (contains ADMIN_TOKEN and ingest config; do not commit secrets)
 EnvironmentFile=/etc/default/intelliwatt-smt
-# Optional shared app env (may include APP_BASE_URL, etc.)
-EnvironmentFile=-/home/deploy/.intelliwatt.env
+# IMPORTANT:
+# systemd EnvironmentFile expects plain KEY=VALUE lines (NOT `export KEY=VALUE`).
+# Keep all required vars in /etc/default/intelliwatt-smt to avoid silent misconfiguration.
 
 # Webhook server port (default 8787 inside webhook_server.py)
 Environment=PORT=8787
