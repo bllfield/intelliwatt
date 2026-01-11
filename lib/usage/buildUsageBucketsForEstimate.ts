@@ -469,16 +469,32 @@ export async function buildUsageBucketsForEstimate(args: {
       // When DAILY coverage is incomplete:
       // - DAILY_ONLY: keep the monthly buckets as-is (no stitching)
       // - DAILY_OR_INTERVAL: fall back to interval stitching so all keys are computed consistently
-      const curKeySet = new Set<string>();
-      const priorKeySet = new Set<string>();
+      // NOTE:
+      // Previously we only checked that each key existed at least once in each segment. That’s not enough:
+      // if `kwh.m.all.total` is missing for even a single day but period buckets are present, we can get:
+      //   sum(periods) > total  → USAGE_BUCKET_SUM_MISMATCH
+      // So we require per-day coverage for each key (for the days we’re stitching).
+      const curDaysSet = new Set(curDays);
+      const priorDaysSet = new Set(priorDays);
+
+      const curKeyDays = new Map<string, Set<string>>();
+      const priorKeyDays = new Map<string, Set<string>>();
+
       for (const r of curRows ?? []) {
+        const day = String((r as any)?.day ?? "").trim();
         const key = canonicalizeMonthlyBucketKey(String((r as any)?.bucketKey ?? "").trim());
-        if (key) curKeySet.add(key);
+        if (!day || !key || !curDaysSet.has(day)) continue;
+        if (!curKeyDays.has(key)) curKeyDays.set(key, new Set<string>());
+        curKeyDays.get(key)!.add(day);
       }
       for (const r of priorRows ?? []) {
+        const day = String((r as any)?.day ?? "").trim();
         const key = canonicalizeMonthlyBucketKey(String((r as any)?.bucketKey ?? "").trim());
-        if (key) priorKeySet.add(key);
+        if (!day || !key || !priorDaysSet.has(day)) continue;
+        if (!priorKeyDays.has(key)) priorKeyDays.set(key, new Set<string>());
+        priorKeyDays.get(key)!.add(day);
       }
+
       const needCur = curDays.length > 0;
       const needPrior = priorDays.length > 0;
       const dailyCoverageOk =
@@ -486,8 +502,14 @@ export async function buildUsageBucketsForEstimate(args: {
         keysToLoad.every((k) => {
           const kk = canonicalizeMonthlyBucketKey(String(k ?? "").trim());
           if (!kk) return false;
-          if (needCur && !curKeySet.has(kk)) return false;
-          if (needPrior && !priorKeySet.has(kk)) return false;
+          if (needCur) {
+            const days = curKeyDays.get(kk);
+            if (!days || days.size !== curDays.length) return false;
+          }
+          if (needPrior) {
+            const days = priorKeyDays.get(kk);
+            if (!days || days.size !== priorDays.length) return false;
+          }
           return true;
         });
 
