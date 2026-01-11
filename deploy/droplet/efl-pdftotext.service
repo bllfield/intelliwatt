@@ -7,10 +7,10 @@ Type=simple
 User=deploy
 WorkingDirectory=/home/deploy/apps/intelliwatt
 
-# Load shared IntelliWatt env (including DATABASE_URL, etc.) if present
-EnvironmentFile=-/home/deploy/.intelliwatt.env
+# EFL pdftotext specific environment (do not use /home/deploy/.intelliwatt.env; it may contain `export` lines,
+# which systemd will ignore and spam logs).
+EnvironmentFile=-/home/deploy/.efl-pdftotext.env
 
-# EFL pdftotext specific environment
 Environment=EFL_PDFTEXT_PORT=8095
 
 # Start the helper
