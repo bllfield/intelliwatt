@@ -724,7 +724,25 @@ export async function GET(req: NextRequest) {
           yearMonthsForCalc = bucketBuild.yearMonths.slice();
           usageBucketsByMonthForCalc = bucketBuild.usageBucketsByMonth;
 
+          // Guardrail:
+          // Only trust bucket-derived annual kWh when we have complete month coverage for kwh.m.all.total.
+          //
+          // Otherwise (e.g. if bucket computation failed silently and only a couple months exist),
+          // `bucketBuild.annualKwh` can be wildly low (because missing months are treated as 0),
+          // which then changes the cache key + makes sorting appear to "trigger recalculation" and
+          // can even show absurdly low "$/mo" based on ~1-2 months of data.
+          const bucketAnnualOk = (() => {
+            const months = Array.isArray(bucketBuild.yearMonths) ? bucketBuild.yearMonths : [];
+            if (months.length !== 12) return false;
+            for (const ym of months) {
+              const v = bucketBuild.usageBucketsByMonth?.[ym]?.["kwh.m.all.total"];
+              if (typeof v !== "number" || !Number.isFinite(v)) return false;
+            }
+            return true;
+          })();
+
           if (
+            bucketAnnualOk &&
             typeof bucketBuild.annualKwh === "number" &&
             Number.isFinite(bucketBuild.annualKwh) &&
             bucketBuild.annualKwh > 0
