@@ -83,7 +83,22 @@ restart_if_exists "nginx.service"
 # 3) Quick health checks (do not fail the script if curl isn't installed)
 log "Health checks (best-effort)"
 if command -v curl >/dev/null 2>&1; then
-  curl -fsS "https://efl-pdftotext.intelliwatt.com/health" || true
+  # Nginx and upstream services may be restarting; retry briefly to avoid false 502s during deploy.
+  url="https://efl-pdftotext.intelliwatt.com/health"
+  ok=0
+  for i in 1 2 3 4 5 6; do
+    if curl -fsS "${url}" >/dev/null 2>&1; then
+      ok=1
+      break
+    fi
+    log "Health check retry ${i}/6 failed (${url})"
+    sleep 1
+  done
+  if [[ "${ok}" == "1" ]]; then
+    log "Health check OK (${url})"
+  else
+    log "Health check FAILED (${url})"
+  fi
 else
   log "curl not found; skipping HTTP health checks"
 fi
