@@ -198,19 +198,22 @@ export default function PlanCompareClient(props: { offerId: string }) {
 
   return (
     <div className="mx-auto w-full max-w-5xl">
-      <div className="mt-2 text-xs text-brand-navy">
-        <Link href={`/dashboard/plans/${encodeURIComponent(offerId)}`} className="text-brand-navy hover:underline">
+      <div className="mt-2 text-xs text-brand-cyan/70">
+        <Link
+          href={`/dashboard/plans/${encodeURIComponent(offerId)}`}
+          className="text-brand-cyan/80 hover:text-brand-white hover:underline"
+        >
           ← Back to Plan Details
         </Link>
       </div>
 
-      <div className="mt-3 text-2xl font-semibold text-brand-navy">Compare: Current Plan vs New Plan</div>
-      <div className="mt-1 text-sm text-brand-navy/70">
-        OfferId: <span className="font-mono">{offerId}</span>
+      <div className="mt-3 text-2xl font-semibold text-brand-white">Compare: Current Plan vs New Plan</div>
+      <div className="mt-1 text-sm text-brand-cyan/70">
+        OfferId: <span className="font-mono text-brand-white/90">{offerId}</span>
       </div>
 
       {loading ? (
-        <div className="mt-8 rounded-2xl border border-brand-blue/20 bg-brand-blue/5 p-6 text-brand-navy">
+        <div className="mt-8 rounded-3xl border border-brand-cyan/20 bg-brand-navy p-6 text-brand-cyan/80">
           Loading comparison…
         </div>
       ) : error ? (
@@ -226,13 +229,13 @@ export default function PlanCompareClient(props: { offerId: string }) {
             </Link>
             <Link
               href="/dashboard/current-rate"
-              className="inline-flex items-center justify-center rounded-full border border-brand-blue/30 bg-white px-5 py-3 text-sm font-semibold text-brand-blue hover:bg-brand-blue/5"
+              className="inline-flex items-center justify-center rounded-full border border-brand-cyan/25 bg-brand-white/5 px-5 py-3 text-sm font-semibold text-brand-cyan hover:bg-brand-white/10"
             >
               Add current plan details
             </Link>
             <Link
               href="/dashboard/plans"
-              className="inline-flex items-center justify-center rounded-full border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              className="inline-flex items-center justify-center rounded-full border border-brand-cyan/25 bg-brand-white/5 px-5 py-3 text-sm font-semibold text-brand-cyan hover:bg-brand-white/10"
             >
               Back to plans
             </Link>
@@ -252,7 +255,7 @@ export default function PlanCompareClient(props: { offerId: string }) {
               </Link>
               <Link
                 href="/dashboard/plans"
-                className="inline-flex items-center justify-center rounded-full border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                className="inline-flex items-center justify-center rounded-full border border-brand-cyan/25 bg-brand-white/5 px-5 py-3 text-sm font-semibold text-brand-cyan hover:bg-brand-white/10"
               >
                 Back to plans
               </Link>
@@ -267,7 +270,7 @@ export default function PlanCompareClient(props: { offerId: string }) {
               </Link>
               <Link
                 href="/dashboard/plans"
-                className="inline-flex items-center justify-center rounded-full border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                className="inline-flex items-center justify-center rounded-full border border-brand-cyan/25 bg-brand-white/5 px-5 py-3 text-sm font-semibold text-brand-cyan hover:bg-brand-white/10"
               >
                 Back to plans
               </Link>
@@ -277,66 +280,66 @@ export default function PlanCompareClient(props: { offerId: string }) {
       ) : (
         <>
           <div className="mt-8 grid grid-cols-1 gap-4 md:grid-cols-2">
-            <div className="rounded-3xl border border-brand-blue/20 bg-white p-6 text-brand-navy">
-              <div className="text-xs font-semibold uppercase tracking-wide text-brand-navy/60">Current plan</div>
-              <div className="mt-2 text-lg font-semibold">
+            <div className="rounded-3xl border border-brand-cyan/20 bg-brand-navy p-6 text-brand-white shadow-[0_18px_40px_rgba(10,20,60,0.22)]">
+              <div className="text-xs font-semibold uppercase tracking-wide text-brand-cyan/60">Current plan</div>
+              <div className="mt-2 text-lg font-semibold text-brand-white/90">
                 {data.currentPlan?.providerName ?? "Current provider"} — {data.currentPlan?.planName ?? "Current plan"}
               </div>
-              <div className="mt-1 text-sm text-brand-navy/70">Source: {data.currentPlan?.source ?? "—"}</div>
+              <div className="mt-1 text-sm text-brand-cyan/70">Source: {data.currentPlan?.source ?? "—"}</div>
               <div className="mt-4 grid grid-cols-2 gap-3">
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                  <div className="text-xs text-slate-600">Estimate</div>
-                  <div className="mt-1 text-xl font-semibold">
+                <div className="rounded-2xl border border-brand-cyan/15 bg-brand-white/5 p-4">
+                  <div className="text-xs text-brand-cyan/70">Estimate</div>
+                  <div className="mt-1 text-xl font-semibold text-brand-white/90">
                     {currentMonthly != null ? `${fmtDollars2(currentMonthly)}/mo` : "—"}
                   </div>
-                  <div className="mt-1 text-sm text-slate-600">
+                  <div className="mt-1 text-sm text-brand-cyan/70">
                     {currentAnnual != null ? `${fmtDollars2(currentAnnual)}/yr` : "—"}
                   </div>
                 </div>
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                  <div className="text-xs text-slate-600">Contract</div>
-                  <div className="mt-1 text-sm font-medium">
+                <div className="rounded-2xl border border-brand-cyan/15 bg-brand-white/5 p-4">
+                  <div className="text-xs text-brand-cyan/70">Contract</div>
+                  <div className="mt-1 text-sm font-medium text-brand-white/90">
                     {data.currentPlan?.contractEndDate ? data.currentPlan.contractEndDate.slice(0, 10) : "—"}
                   </div>
-                  <div className="mt-1 text-sm text-slate-600">
+                  <div className="mt-1 text-sm text-brand-cyan/70">
                     ETF: {data.currentPlan?.earlyTerminationFeeCents ? fmtDollars2(etfDollars) : "—"}
                   </div>
                 </div>
               </div>
             </div>
 
-            <div className="rounded-3xl border border-brand-blue/20 bg-white p-6 text-brand-navy">
-              <div className="text-xs font-semibold uppercase tracking-wide text-brand-navy/60">New plan (selected)</div>
-              <div className="mt-2 text-lg font-semibold">
+            <div className="rounded-3xl border border-brand-cyan/20 bg-brand-navy p-6 text-brand-white shadow-[0_18px_40px_rgba(10,20,60,0.22)]">
+              <div className="text-xs font-semibold uppercase tracking-wide text-brand-cyan/60">New plan (selected)</div>
+              <div className="mt-2 text-lg font-semibold text-brand-white/90">
                 {data.offer?.supplierName ?? "Provider"} — {data.offer?.planName ?? "Plan"}
               </div>
-              <div className="mt-1 text-sm text-brand-navy/70">
+              <div className="mt-1 text-sm text-brand-cyan/70">
                 Term: {typeof data.offer?.termMonths === "number" ? `${data.offer?.termMonths} months` : "—"}
               </div>
 
               <div className="mt-4 grid grid-cols-2 gap-3">
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                  <div className="text-xs text-slate-600">Estimate</div>
-                  <div className="mt-1 text-xl font-semibold">
+                <div className="rounded-2xl border border-brand-cyan/15 bg-brand-white/5 p-4">
+                  <div className="text-xs text-brand-cyan/70">Estimate</div>
+                  <div className="mt-1 text-xl font-semibold text-brand-white/90">
                     {offerMonthly != null ? `${fmtDollars2(offerMonthly)}/mo` : "—"}
                   </div>
-                  <div className="mt-1 text-sm text-slate-600">
+                  <div className="mt-1 text-sm text-brand-cyan/70">
                     {offerAnnual != null ? `${fmtDollars2(offerAnnual)}/yr` : "—"}
                   </div>
                 </div>
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                  <div className="text-xs text-slate-600">Termination fee toggle</div>
-                  <label className="mt-2 flex items-center gap-2 text-sm">
+                <div className="rounded-2xl border border-brand-cyan/15 bg-brand-white/5 p-4">
+                  <div className="text-xs text-brand-cyan/70">Termination fee toggle</div>
+                  <label className="mt-2 flex items-center gap-2 text-sm text-brand-white/90">
                     <input
                       type="checkbox"
                       checked={includeEtf}
                       disabled={(data.currentPlan?.earlyTerminationFeeCents ?? 0) <= 0}
                       onChange={(e) => setIncludeEtf(e.target.checked)}
-                      className="h-4 w-4"
+                      className="h-4 w-4 rounded border-brand-cyan/40 bg-brand-white/10"
                     />
                     Include ETF in “switch now” cost
                   </label>
-                  <div className="mt-1 text-xs text-slate-600">
+                  <div className="mt-1 text-xs text-brand-cyan/70">
                     Toggle off to see the savings if you switch after your contract expires.
                   </div>
                 </div>
@@ -352,13 +355,13 @@ export default function PlanCompareClient(props: { offerId: string }) {
                     Choose this plan (Sign up)
                   </button>
                 ) : (
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                  <div className="rounded-2xl border border-brand-cyan/15 bg-brand-white/5 px-4 py-3 text-sm text-brand-cyan/70">
                     Signup link not available for this offer.
                   </div>
                 )}
                 <Link
                   href="/dashboard/plans"
-                  className="inline-flex items-center justify-center rounded-full border border-brand-blue/30 bg-white px-5 py-3 text-sm font-semibold text-brand-blue hover:bg-brand-blue/5"
+                  className="inline-flex items-center justify-center rounded-full border border-brand-cyan/25 bg-brand-white/5 px-5 py-3 text-sm font-semibold text-brand-cyan hover:bg-brand-white/10"
                 >
                   Pick a different plan
                 </Link>
@@ -366,28 +369,32 @@ export default function PlanCompareClient(props: { offerId: string }) {
             </div>
           </div>
 
-          <div className="mt-6 rounded-3xl border border-brand-blue/20 bg-brand-blue/5 p-6 text-brand-navy">
-            <div className="text-xs font-semibold uppercase tracking-wide text-brand-navy/60">Difference</div>
+          <div className="mt-6 rounded-3xl border border-brand-cyan/20 bg-brand-navy p-6 text-brand-white shadow-[0_18px_40px_rgba(10,20,60,0.22)]">
+            <div className="text-xs font-semibold uppercase tracking-wide text-brand-cyan/60">Difference</div>
             <div className="mt-2 grid grid-cols-1 gap-4 md:grid-cols-3">
-              <div className="rounded-2xl border border-brand-blue/20 bg-white p-4">
-                <div className="text-xs text-brand-navy/60">Monthly delta</div>
-                <div className="mt-1 text-xl font-semibold">{monthlyDelta != null ? `${fmtDollars2(monthlyDelta)}/mo` : "—"}</div>
+              <div className="rounded-2xl border border-brand-cyan/15 bg-brand-white/5 p-4">
+                <div className="text-xs text-brand-cyan/70">Monthly delta</div>
+                <div className="mt-1 text-xl font-semibold text-brand-white/90">
+                  {monthlyDelta != null ? `${fmtDollars2(monthlyDelta)}/mo` : "—"}
+                </div>
               </div>
-              <div className="rounded-2xl border border-brand-blue/20 bg-white p-4">
-                <div className="text-xs text-brand-navy/60">First-year delta (includes ETF if toggled)</div>
-                <div className="mt-1 text-xl font-semibold">{firstYearDelta != null ? fmtDollars2(firstYearDelta) : "—"}</div>
+              <div className="rounded-2xl border border-brand-cyan/15 bg-brand-white/5 p-4">
+                <div className="text-xs text-brand-cyan/70">First-year delta (includes ETF if toggled)</div>
+                <div className="mt-1 text-xl font-semibold text-brand-white/90">
+                  {firstYearDelta != null ? fmtDollars2(firstYearDelta) : "—"}
+                </div>
               </div>
-              <div className="rounded-2xl border border-brand-blue/20 bg-white p-4">
-                <div className="text-xs text-brand-navy/60">Usage basis</div>
-                <div className="mt-1 text-sm">
+              <div className="rounded-2xl border border-brand-cyan/15 bg-brand-white/5 p-4">
+                <div className="text-xs text-brand-cyan/70">Usage basis</div>
+                <div className="mt-1 text-sm text-brand-white/90">
                   {data.usage?.annualKwh != null ? `${Math.round(data.usage.annualKwh)} kWh/yr` : "—"}
                 </div>
-                <div className="mt-1 text-xs text-brand-navy/60">Source: {data.usage?.source ?? "—"}</div>
+                <div className="mt-1 text-xs text-brand-cyan/70">Source: {data.usage?.source ?? "—"}</div>
               </div>
             </div>
           </div>
 
-          <div className="mt-6 text-xs text-brand-navy/60">
+          <div className="mt-6 text-xs text-brand-cyan/60">
             Estimates are generated by the IntelliWatt plan engine using your stitched 12‑month usage window and current TDSP tariffs.
           </div>
 
@@ -646,24 +653,27 @@ export default function PlanCompareClient(props: { offerId: string }) {
 
           {showConfirm ? (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-              <div className="w-full max-w-lg rounded-3xl border border-brand-blue/25 bg-white p-6 text-brand-navy shadow-xl">
-                <div className="text-lg font-semibold">You’re about to leave IntelliWatt to sign up</div>
-                <div className="mt-2 text-sm text-brand-navy/70">
+              <div className="w-full max-w-lg rounded-3xl border border-brand-cyan/25 bg-brand-navy p-6 text-brand-white shadow-xl">
+                <div className="text-lg font-semibold text-brand-white/90">You’re about to leave IntelliWatt to sign up</div>
+                <div className="mt-2 text-sm text-brand-cyan/70">
                   We’ll open the provider enrollment flow in a new tab. Here’s what to expect:
                 </div>
-                <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-brand-navy/80">
+                <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-brand-cyan/80">
                   <li>You’ll complete enrollment details with the provider (address, contact info, etc.).</li>
                   <li>After enrollment, you may receive confirmation emails from the provider.</li>
                   <li>
                     Your comparison here assumes{" "}
-                    <span className="font-semibold">{includeEtf ? "switching now (ETF included)" : "switching after contract expiration (ETF excluded)"}</span>.
+                    <span className="font-semibold text-brand-white/90">
+                      {includeEtf ? "switching now (ETF included)" : "switching after contract expiration (ETF excluded)"}
+                    </span>
+                    .
                   </li>
                 </ul>
                 <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-end">
                   <button
                     type="button"
                     onClick={() => setShowConfirm(false)}
-                    className="rounded-full border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                    className="rounded-full border border-brand-cyan/25 bg-brand-white/5 px-5 py-3 text-sm font-semibold text-brand-cyan hover:bg-brand-white/10"
                   >
                     Cancel
                   </button>
