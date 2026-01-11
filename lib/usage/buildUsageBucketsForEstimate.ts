@@ -223,6 +223,9 @@ export async function buildUsageBucketsForEstimate(args: {
   monthsCount?: number;
   maxStepDays?: number;
   stitchMode?: "DAILY_ONLY" | "DAILY_OR_INTERVAL" | "NONE";
+  // If false, this function becomes READ-ONLY: it will not attempt to compute/ensure missing buckets.
+  // Callers like the customer Plans list must be display-only and should rely on the pipeline to populate buckets.
+  computeMissing?: boolean;
 }): Promise<{
   yearMonths: string[];
   keysToLoad: string[];
@@ -242,6 +245,7 @@ export async function buildUsageBucketsForEstimate(args: {
 }> {
   const monthsCount = Math.max(1, Math.floor(args.monthsCount ?? 12));
   const stitchMode = args.stitchMode ?? "DAILY_OR_INTERVAL";
+  const computeMissing = args.computeMissing !== false;
   const completeDay = lastCompleteChicagoDay(args.windowEnd, { maxStepDays: args.maxStepDays ?? 2 });
   const stitchYm = completeDay?.yearMonth ?? null;
 
@@ -312,7 +316,7 @@ export async function buildUsageBucketsForEstimate(args: {
     shouldCompute = true;
   }
 
-  if (shouldCompute) {
+  if (computeMissing && shouldCompute) {
     // Ensure buckets exist for these keys/range (best-effort).
     try {
       await ensureCoreMonthlyBuckets({

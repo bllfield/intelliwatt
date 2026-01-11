@@ -13,7 +13,6 @@ import { PLAN_ENGINE_ESTIMATE_VERSION, makePlanEstimateInputsSha256 } from "@/li
 import { getMaterializedPlanEstimate } from "@/lib/plan-engine/materializedEstimateStore";
 import { wattbuyOffersPrisma } from "@/lib/db/wattbuyOffersClient";
 import { usagePrisma } from "@/lib/db/usageClient";
-import { ensureCoreMonthlyBuckets } from "@/lib/usage/aggregateMonthlyBuckets";
 import { buildUsageBucketsForEstimate } from "@/lib/usage/buildUsageBucketsForEstimate";
 import { canComputePlanFromBuckets, derivePlanCalcRequirementsFromTemplate } from "@/lib/plan-engine/planComputability";
 import { isPlanCalcQuarantineWorthyReasonCode } from "@/lib/plan-engine/planCalcQuarantine";
@@ -380,24 +379,6 @@ export async function GET(req: NextRequest) {
         const yearMonths = prev ? [ym0, prev] : [ym0];
         recentYearMonths = yearMonths.slice();
 
-        // Ensure CORE bucket totals exist (best-effort) for recent months.
-        // NOTE: plan-specific requiredBucketKeys are derived later after OfferIdRatePlanMap + RatePlan lookups.
-        // This early backfill keeps fixed-rate costs working even before we know plan-specific keys.
-        try {
-          const rangeEnd = new Date();
-          const rangeStart = new Date(rangeEnd.getTime() - 365 * 24 * 60 * 60 * 1000);
-          await ensureCoreMonthlyBuckets({
-            homeId: house.id,
-            esiid: house.esiid,
-            rangeStart,
-            rangeEnd,
-            source: "SMT",
-            intervalSource: "SMT",
-          });
-        } catch {
-          // ignore (never break dashboard)
-        }
-
         // Build a small "presence map" for recent months so we can check requiredBucketKeys per plan
         // without doing per-offer DB queries.
         try {
@@ -726,6 +707,9 @@ export async function GET(req: NextRequest) {
             // This avoids false `USAGE_BUCKET_SUM_MISMATCH` failures that block TOU plans that are
             // otherwise computable (e.g. Half-price Nights).
             stitchMode: "DAILY_OR_INTERVAL",
+            // Plans list must be display-only: do not compute buckets here.
+            // The pipeline (or usage ingestion) is responsible for populating buckets.
+            computeMissing: false,
           });
 
           yearMonthsForCalc = bucketBuild.yearMonths.slice();
@@ -1936,6 +1920,9 @@ export async function GET(req: NextRequest) {
     let bestOffersAllInDisclaimer: string | null = null;
     try {
       if (hasUsage) {
+        // datasetMode (pageSize=2000) is used for client-side browsing/sort/filter.
+        // Keep this route fast: do not run expensive "score the entire offer set" work.
+        const allowComputeBestAllIn = Boolean(!datasetMode);
         // Only compute strips on page 1. They are not used on later pages and can be expensive.
         if (safePage !== 1) {
           bestOffers = [];
@@ -1981,92 +1968,91 @@ export async function GET(req: NextRequest) {
             `Based on your last 12 months usage. Ranking uses provider EFL average price at ${bestBucket} kWh until IntelliWatt true-cost is enabled.`;
         }
 
-        // Compute "all-in" best offers by scoring the ENTIRE offer set (not the proxy bestOffers or current page slice).
-        // Score = trueCostEstimate.monthlyCostDollars for computable plans only (fail-closed).
-        // Then shape only the top 5 to keep response bounded.
-        const allInTdspCache = new Map<string, any | null>();
-        const scoreOfferAllIn = async (o: any): Promise<number> => {
-          if (annualKwhForCalc == null) return Number.POSITIVE_INFINITY;
-          const offerId = String(o?.offer_id ?? "");
-          if (!offerId) return Number.POSITIVE_INFINITY;
+        if (allowComputeBestAllIn) {
+          // Compute "all-in" best offers by scoring the ENTIRE offer set (not the proxy bestOffers or current page slice).
+          // Score = trueCostEstimate.monthlyCostDollars for computable plans only (fail-closed).
+          // Then shape only the top 5 to keep response bounded.
+          const allInTdspCache = new Map<string, any | null>();
+          const scoreOfferAllIn = async (o: any): Promise<number> => {
+            if (annualKwhForCalc == null) return Number.POSITIVE_INFINITY;
+            const offerId = String(o?.offer_id ?? "");
+            if (!offerId) return Number.POSITIVE_INFINITY;
 
-          const ratePlanId = mapByOfferId.get(offerId) ?? null;
-          if (!ratePlanId) return Number.POSITIVE_INFINITY;
+            const ratePlanId = mapByOfferId.get(offerId) ?? null;
+            if (!ratePlanId) return Number.POSITIVE_INFINITY;
 
-          const calc = planCalcByRatePlanId.get(ratePlanId) ?? null;
-          if (!calc || calc.planCalcStatus !== "COMPUTABLE" || !calc.rateStructurePresent || !calc.rateStructure) {
-            return Number.POSITIVE_INFINITY;
-          }
-
-          // OfferNormalized already includes a normalized TDSP slug (oncor/centerpoint/tnmp/aep_n/aep_c).
-          const tdspSlug = String(o?.tdsp ?? "").trim().toLowerCase();
-          let tdspRates: any | null = null;
-          if (tdspSlug) {
-            if (allInTdspCache.has(tdspSlug)) {
-              tdspRates = allInTdspCache.get(tdspSlug) ?? null;
-            } else {
-              try {
-                tdspRates = await getTdspDeliveryRates({ tdspSlug: tdspSlug, asOf: new Date() });
-              } catch {
-                tdspRates = null;
-              }
-              allInTdspCache.set(tdspSlug, tdspRates);
+            const calc = planCalcByRatePlanId.get(ratePlanId) ?? null;
+            if (!calc || calc.planCalcStatus !== "COMPUTABLE" || !calc.rateStructurePresent || !calc.rateStructure) {
+              return Number.POSITIVE_INFINITY;
             }
+
+            // OfferNormalized already includes a normalized TDSP slug (oncor/centerpoint/tnmp/aep_n/aep_c).
+            const tdspSlug = String(o?.tdsp ?? "").trim().toLowerCase();
+            let tdspRates: any | null = null;
+            if (tdspSlug) {
+              if (allInTdspCache.has(tdspSlug)) {
+                tdspRates = allInTdspCache.get(tdspSlug) ?? null;
+              } else {
+                try {
+                  tdspRates = await getTdspDeliveryRates({ tdspSlug: tdspSlug, asOf: new Date() });
+                } catch {
+                  tdspRates = null;
+                }
+                allInTdspCache.set(tdspSlug, tdspRates);
+              }
+            }
+
+            if (!tdspRates) return Number.POSITIVE_INFINITY;
+
+            const monthsCount = 12;
+            const tdspPer = Number(tdspRates?.perKwhDeliveryChargeCents ?? 0) || 0;
+            const tdspMonthly = Number(tdspRates?.monthlyCustomerChargeDollars ?? 0) || 0;
+            const tdspEff = tdspRates?.effectiveDate ?? null;
+            const estimateMode =
+              String((calc as any)?.planCalcReasonCode ?? "").trim() === "INDEXED_APPROXIMATE_OK"
+                ? ("INDEXED_EFL_ANCHOR_APPROX" as const)
+                : ("DEFAULT" as const);
+            const { inputsSha256 } = makePlanEstimateInputsSha256({
+              monthsCount,
+              annualKwh: annualKwhForCalc,
+              tdsp: { perKwhDeliveryChargeCents: tdspPer, monthlyCustomerChargeDollars: tdspMonthly, effectiveDate: tdspEff },
+              rateStructure: calc.rateStructure,
+              yearMonths: yearMonthsForCalc.length ? yearMonthsForCalc : lastNYearMonthsChicago(12),
+              requiredBucketKeys: Array.isArray((calc as any)?.requiredBucketKeys)
+                ? ((calc as any).requiredBucketKeys as any[]).map((k) => String(k))
+                : [],
+              usageBucketsByMonth: usageBucketsByMonthForCalc,
+              estimateMode,
+            });
+
+            const cached = await getCachedPlanEstimate({
+              houseAddressId: house.id,
+              ratePlanId,
+              inputsSha256,
+              monthsCount,
+            });
+            const materialized = await getMaterializedPlanEstimate({ houseAddressId: house.id, ratePlanId, inputsSha256 });
+            const row = materialized ?? (cached as any);
+            // Cache-only mode: never compute inline in plans list.
+            const st = String((row as any)?.status ?? "").trim().toUpperCase();
+            if (!row || !(st === "OK" || st === "APPROXIMATE")) return Number.POSITIVE_INFINITY;
+            const v = Number((row as any)?.monthlyCostDollars);
+            return Number.isFinite(v) ? v : Number.POSITIVE_INFINITY;
+          };
+
+          const scored = await Promise.all(offers.map(async (o: any) => ({ o, v: await scoreOfferAllIn(o) })));
+          const topAllInRaw = scored
+            .filter((x) => x.v !== Number.POSITIVE_INFINITY)
+            .sort((a, b) => a.v - b.v)
+            .slice(0, 5)
+            .map((x) => x.o);
+
+          bestOffersAllIn = await Promise.all(topAllInRaw.map(shapeOffer));
+          if (bestOffersAllIn.length > 0) {
+            bestOffersAllInBasis = "proxy_allin_monthly_trueCostEstimate";
+            bestOffersAllInDisclaimer =
+              "Includes TDSP delivery. Ranked by IntelliWatt all-in estimate using your usage buckets (excludes non-deterministic/indexed/unsupported plans).";
           }
-
-          if (!tdspRates) return Number.POSITIVE_INFINITY;
-
-          const monthsCount = 12;
-          const tdspPer = Number(tdspRates?.perKwhDeliveryChargeCents ?? 0) || 0;
-          const tdspMonthly = Number(tdspRates?.monthlyCustomerChargeDollars ?? 0) || 0;
-          const tdspEff = tdspRates?.effectiveDate ?? null;
-          const estimateMode =
-            String((calc as any)?.planCalcReasonCode ?? "").trim() === "INDEXED_APPROXIMATE_OK"
-              ? ("INDEXED_EFL_ANCHOR_APPROX" as const)
-              : ("DEFAULT" as const);
-          const { inputsSha256 } = makePlanEstimateInputsSha256({
-            monthsCount,
-            annualKwh: annualKwhForCalc,
-            tdsp: { perKwhDeliveryChargeCents: tdspPer, monthlyCustomerChargeDollars: tdspMonthly, effectiveDate: tdspEff },
-            rateStructure: calc.rateStructure,
-            yearMonths: yearMonthsForCalc.length ? yearMonthsForCalc : lastNYearMonthsChicago(12),
-            requiredBucketKeys: Array.isArray((calc as any)?.requiredBucketKeys)
-              ? ((calc as any).requiredBucketKeys as any[]).map((k) => String(k))
-              : [],
-            usageBucketsByMonth: usageBucketsByMonthForCalc,
-            estimateMode,
-          });
-
-          const cached = await getCachedPlanEstimate({
-            houseAddressId: house.id,
-            ratePlanId,
-            inputsSha256,
-            monthsCount,
-          });
-          const materialized = await getMaterializedPlanEstimate({ houseAddressId: house.id, ratePlanId, inputsSha256 });
-          const row = materialized ?? (cached as any);
-          // Cache-only mode: never compute inline in plans list.
-          const st = String((row as any)?.status ?? "").trim().toUpperCase();
-          if (!row || !(st === "OK" || st === "APPROXIMATE")) return Number.POSITIVE_INFINITY;
-          const v = Number((row as any)?.monthlyCostDollars);
-          return Number.isFinite(v) ? v : Number.POSITIVE_INFINITY;
-        };
-
-        const scored = await Promise.all(
-          offers.map(async (o: any) => ({ o, v: await scoreOfferAllIn(o) })),
-        );
-
-        const topAllInRaw = scored
-          .filter((x) => x.v !== Number.POSITIVE_INFINITY)
-          .sort((a, b) => a.v - b.v)
-          .slice(0, 5)
-          .map((x) => x.o);
-
-        bestOffersAllIn = await Promise.all(topAllInRaw.map(shapeOffer));
-        if (bestOffersAllIn.length > 0) {
-          bestOffersAllInBasis = "proxy_allin_monthly_trueCostEstimate";
-          bestOffersAllInDisclaimer =
-            "Includes TDSP delivery. Ranked by IntelliWatt all-in estimate using your usage buckets (excludes non-deterministic/indexed/unsupported plans).";
         }
         }
       } else {

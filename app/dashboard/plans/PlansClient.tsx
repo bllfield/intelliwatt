@@ -282,15 +282,10 @@ export default function PlansClient() {
   };
 
   // IMPORTANT:
-  // Warmups should NOT be *caused* by sort/filter changes, but they also must not get "stuck off"
-  // if a user changes the view and the newly-fetched response reveals pending CACHE_MISS items.
-  //
-  // We therefore allow warmups to run whenever either:
-  // - we're on the default view (allowWarmupKicksFromThisView), or
-  // - a warmup session is already active, or
-  // - the current response contains pending items (so we can start a warmup even after a sort change).
-  const allowWarmupInBackground =
-    allowWarmupKicksFromThisView || warmupSessionActive || pendingCountFromResponse(resp) > 0;
+  // Sort/filter must be display-only: it must never *start* any background warmups.
+  // Warmups may only start from the default landing view, and may continue only if a warmup session
+  // was already started from that default view.
+  const allowWarmupInBackground = allowWarmupKicksFromThisView || warmupSessionActive;
 
   useEffect(() => {
     if (isRenter === null) return; // wait for stable dataset identity
@@ -515,7 +510,11 @@ export default function PlansClient() {
 
     if (missingTemplate.length <= 0) return;
 
-    // Start the warmup session as soon as we know we need it.
+    // Warmups may only START from the default landing view.
+    // If the user has interacted with sort/filter/search, we must not start any background work.
+    if (!warmupSessionActive && !allowWarmupKicksFromThisView) return;
+
+    // Start the warmup session as soon as we know we need it (default landing view only).
     if (!warmupSessionActive) {
       setWarmupSessionActive(true);
       try {
@@ -588,7 +587,11 @@ export default function PlansClient() {
     const pendingCountNow = pendingCountFromResponse(resp);
     if (pendingCountNow <= 0) return;
 
-    // Start the warmup session once we detect pending estimates.
+    // Warmups may only START from the default landing view.
+    // If the user has interacted with sort/filter/search, we must not start any background work.
+    if (!warmupSessionActive && !allowWarmupKicksFromThisView) return;
+
+    // Start the warmup session once we detect pending estimates (default landing view only).
     if (!warmupSessionActive) {
       setWarmupSessionActive(true);
       try {
