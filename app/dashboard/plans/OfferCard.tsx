@@ -120,16 +120,28 @@ export default function OfferCard({ offer, recommended }: OfferCardProps) {
   const yracUrl = offer.efl?.yracUrl ?? (offer as any)?.disclosures?.yracUrl ?? null;
   const status = offer.intelliwatt.statusLabel;
   const tce = offer.intelliwatt?.trueCostEstimate as any;
-  const isUnsupported =
-    String((offer as any)?.intelliwatt?.planComputability?.status ?? "").toUpperCase() === "NOT_COMPUTABLE" ||
-    String(tce?.status ?? "").toUpperCase() === "NOT_COMPUTABLE";
-
-  // Customer-facing status language (never show "QUEUED").
+  const planCompStatus = String((offer as any)?.intelliwatt?.planComputability?.status ?? "").toUpperCase();
+  const planCompReason = String((offer as any)?.intelliwatt?.planComputability?.reasonCode ?? "").toUpperCase();
   const tceStatus = String(tce?.status ?? "").toUpperCase();
   const tceReason = String(tce?.reason ?? offer.intelliwatt?.statusReason ?? "").toUpperCase();
+
+  // Only show the scary UNSUPPORTED tag for true template/engine limitations.
+  // Missing templates / cache misses / missing buckets should read as CALCULATING, not UNSUPPORTED.
+  const isUnsupported =
+    (planCompStatus === "NOT_COMPUTABLE" &&
+      (planCompReason.startsWith("UNSUPPORTED") ||
+        planCompReason.startsWith("NON_DETERMINISTIC") ||
+        planCompReason.includes("UNSUPPORTED"))) ||
+    tceStatus === "NOT_COMPUTABLE";
+
+  // Customer-facing status language (never show "QUEUED").
   const isCalculating =
     // Plans list is read-only: a CACHE_MISS means "pipeline hasn't materialized this input-set yet".
-    (tceStatus === "NOT_IMPLEMENTED" && tceReason === "CACHE_MISS") ||
+    (tceStatus === "NOT_IMPLEMENTED" &&
+      (tceReason === "CACHE_MISS" ||
+        tceReason === "MISSING_BUCKETS" ||
+        tceReason.includes("MISSING TEMPLATE") ||
+        tceReason.includes("MISSING BUCKET"))) ||
     // Template missing can be transient (prefetch/pipeline may be building it); treat as calculating on the card.
     tceStatus === "MISSING_TEMPLATE";
 

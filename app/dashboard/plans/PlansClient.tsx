@@ -224,24 +224,32 @@ export default function PlansClient() {
     return defaultFilters && !userHasSorted && !userChangedPageSize && !userTouchedSearchOrFilters;
   }, [q, rateType, term, renewableMin, template, page, pageSize, userTouchedSearchOrFilters]);
 
-  // Server dataset identity: include all inputs that change the server response.
-  const serverDatasetKey = useMemo(
-    () =>
-      JSON.stringify({
-        datasetMode,
+  // Server dataset identity: include only inputs that actually change the SERVER response.
+  // In datasetMode (pageSize=2000), the server returns a single large dataset and ALL filtering/sorting is client-side.
+  const serverDatasetKey = useMemo(() => {
+    if (datasetMode) {
+      return JSON.stringify({
+        datasetMode: true,
         isRenter,
-        q: q.trim().toLowerCase(),
-        rateType,
-        term,
-        renewableMin,
-        template,
-        sort,
-        page,
         pageSize,
+        // Keep approxKwhPerMonth in the key only for no-usage cases (server can use it for proxy strips).
         approxKwhPerMonth,
-      }),
-    [datasetMode, isRenter, q, rateType, term, renewableMin, template, sort, page, pageSize, approxKwhPerMonth],
-  );
+      });
+    }
+    return JSON.stringify({
+      datasetMode: false,
+      isRenter,
+      q: q.trim().toLowerCase(),
+      rateType,
+      term,
+      renewableMin,
+      template,
+      sort,
+      page,
+      pageSize,
+      approxKwhPerMonth,
+    });
+  }, [datasetMode, isRenter, pageSize, approxKwhPerMonth, q, rateType, term, renewableMin, template, sort, page]);
 
   // Lightweight client cache so back/forward navigation instantly shows the last processed dataset
   // instead of refetching.
@@ -255,16 +263,11 @@ export default function PlansClient() {
 
   const responseHasPending = (r: ApiResponse | null): boolean => {
     if (!r?.ok) return false;
-    if (!r?.hasUsage) return false;
     const offersNow = Array.isArray(r?.offers) ? (r!.offers as OfferRow[]) : [];
-    return offersNow.some((o: any) => {
-      // Pending = expected to eventually compute (not UNSUPPORTED/NOT_COMPUTABLE).
-      if (String(o?.intelliwatt?.statusLabel ?? "") !== "QUEUED") return false;
-      const tceStatus = String((o as any)?.intelliwatt?.trueCostEstimate?.status ?? "").toUpperCase();
-      const tceReason = String((o as any)?.intelliwatt?.trueCostEstimate?.reason ?? "").toUpperCase();
-      const isCacheMiss = tceStatus === "NOT_IMPLEMENTED" && tceReason === "CACHE_MISS";
-      return !tceStatus || tceStatus === "QUEUED" || tceStatus === "MISSING_TEMPLATE" || isCacheMiss;
-    });
+    // IMPORTANT:
+    // Do not pin the UI to a cached response when ANY offers are QUEUED.
+    // Admin actions (manual EFL processing, pipeline runs) can flip QUEUED → AVAILABLE and the user must see it.
+    return offersNow.some((o: any) => String(o?.intelliwatt?.statusLabel ?? "") === "QUEUED");
   };
 
   const pendingCountFromResponse = (r: ApiResponse | null): number => {
@@ -354,19 +357,24 @@ export default function PlansClient() {
     if (panel) setMobilePanel(panel);
   };
 
-  // Fetch a single large dataset once; all sort/filter/paging happens client-side.
+  // Fetch a single large dataset once; all sort/filter/paging happens client-side in datasetMode.
   const baseParams = useMemo(() => {
     const params: Record<string, string> = {
       // Used only to force a reload after background prefetch runs.
       _r: String(refreshNonce),
       page: String(datasetMode ? 1 : page),
       pageSize: String(pageSize),
-      sort: String(sort),
-      q: q.trim(),
-      rateType: String(rateType),
-      term: String(term),
-      renewableMin: String(renewableMin),
-      template: String(template),
+      // In datasetMode, keep the SERVER request stable so sort/filter changes do not refetch or trigger any work.
+      sort: String(datasetMode ? "kwh1000_asc" : sort),
+      ...(datasetMode
+        ? {}
+        : {
+            q: q.trim(),
+            rateType: String(rateType),
+            term: String(term),
+            renewableMin: String(renewableMin),
+            template: String(template),
+          }),
     };
     if (typeof approxKwhPerMonth === "number") params.approxKwhPerMonth = String(approxKwhPerMonth);
     if (isRenter !== null) params.isRenter = String(isRenter);
@@ -742,18 +750,82 @@ export default function PlansClient() {
     if (hasUsage) hasUsageEverRef.current = true;
   }, [hasUsage]);
   const hasUsageForUi = hasUsage || hasUsageEverRef.current;
-  const offers = Array.isArray(resp?.offers) ? (resp!.offers as OfferRow[]) : [];
-  const total =
-    resp?.ok && typeof (resp as any)?.total === "number" && Number.isFinite((resp as any).total)
-      ? ((resp as any).total as number)
-      : offers.length;
-  const totalPages =
-    resp?.ok && typeof (resp as any)?.totalPages === "number" && Number.isFinite((resp as any).totalPages)
-      ? ((resp as any).totalPages as number)
-      : total === 0
-        ? 0
-        : 1;
-  const safePage = totalPages === 0 ? 1 : Math.min(page, totalPages);
+  const offersRaw = Array.isArray(resp?.offers) ? (resp!.offers as OfferRow[]) : [];
+  // In datasetMode, the server returns the full dataset and we apply all sort/filter/paging client-side.
+  const offers = useMemo(() => {
+    if (!datasetMode) return offersRaw;
+    let xs = offersRaw.slice();
+
+    const qNorm = q.trim().toLowerCase();
+    if (qNorm) {
+      xs = xs.filter((o: any) => {
+        const s = `${String(o?.supplierName ?? "")} ${String(o?.planName ?? "")}`.toLowerCase();
+        return s.includes(qNorm);
+      });
+    }
+
+    if (rateType !== "all") {
+      xs = xs.filter((o: any) => {
+        const rt = String(o?.rateType ?? "").trim().toLowerCase();
+        if (!rt) return rateType === "unknown";
+        if (rateType === "fixed") return rt.includes("fixed");
+        if (rateType === "variable") return rt.includes("variable") || rt.includes("indexed");
+        if (rateType === "renewable") return true; // renewable is a separate filter below
+        if (rateType === "unknown") return false;
+        return true;
+      });
+    }
+
+    if (renewableMin > 0) {
+      xs = xs.filter((o: any) => {
+        const r = Number(o?.renewablePercent);
+        return Number.isFinite(r) && r >= renewableMin;
+      });
+    }
+
+    if (term !== "all") {
+      xs = xs.filter((o: any) => {
+        const m = Number(o?.termMonths);
+        if (!Number.isFinite(m)) return false;
+        if (term === "0-6") return m >= 0 && m <= 6;
+        if (term === "7-12") return m >= 7 && m <= 12;
+        if (term === "13-24") return m >= 13 && m <= 24;
+        if (term === "25+") return m >= 25;
+        return true;
+      });
+    }
+
+    if (template === "available") {
+      xs = xs.filter((o: any) => String(o?.intelliwatt?.statusLabel ?? "") === "AVAILABLE");
+    }
+
+    // Sorting (client-side)
+    const num = (v: any) => (typeof v === "number" && Number.isFinite(v) ? v : Number.POSITIVE_INFINITY);
+    const efl = (o: any, k: "avgPriceCentsPerKwh500" | "avgPriceCentsPerKwh1000" | "avgPriceCentsPerKwh2000") =>
+      num(o?.efl?.[k]);
+    const tce = (o: any) => o?.intelliwatt?.trueCostEstimate;
+    const tceMonthly = (o: any) => {
+      const est = tce(o);
+      const st = String(est?.status ?? "").toUpperCase();
+      if (st === "OK" || st === "APPROXIMATE") return num(est?.monthlyCostDollars);
+      return Number.POSITIVE_INFINITY;
+    };
+
+    xs.sort((a: any, b: any) => {
+      if (sort === "kwh500_asc") return efl(a, "avgPriceCentsPerKwh500") - efl(b, "avgPriceCentsPerKwh500");
+      if (sort === "kwh2000_asc") return efl(a, "avgPriceCentsPerKwh2000") - efl(b, "avgPriceCentsPerKwh2000");
+      if (sort === "term_asc") return num(a?.termMonths) - num(b?.termMonths);
+      if (sort === "renewable_desc") return num(b?.renewablePercent) - num(a?.renewablePercent);
+      if (sort === "best_for_you_proxy") return tceMonthly(a) - tceMonthly(b);
+      return efl(a, "avgPriceCentsPerKwh1000") - efl(b, "avgPriceCentsPerKwh1000");
+    });
+
+    return xs;
+  }, [datasetMode, offersRaw, q, rateType, term, renewableMin, template, sort]);
+
+  const total = offers.length;
+  const totalPages = datasetMode ? (total === 0 ? 0 : 1) : Math.max(0, Math.ceil(total / Math.max(1, pageSize)));
+  const safePage = datasetMode ? 1 : totalPages === 0 ? 1 : Math.min(page, totalPages);
   const avgMonthlyKwh =
     resp?.ok && typeof (resp as any)?.avgMonthlyKwh === "number" && Number.isFinite((resp as any).avgMonthlyKwh)
       ? ((resp as any).avgMonthlyKwh as number)

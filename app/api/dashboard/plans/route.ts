@@ -1743,19 +1743,24 @@ export async function GET(req: NextRequest) {
       }
 
       const trueCostEstimate: any = await (async () => {
-        if (!hasUsage) return { status: "NOT_IMPLEMENTED", reason: "No usage available" };
+        if (!hasUsage) return { status: "MISSING_USAGE" };
         if (annualKwhForCalc == null) {
-          return { status: "NOT_IMPLEMENTED", reason: "Missing usage totals for annual kWh" };
+          return { status: "NOT_IMPLEMENTED", reason: "MISSING_USAGE_TOTALS" };
         }
         if (!templateOk || !template?.rateStructure) {
-          return { status: "NOT_IMPLEMENTED", reason: "Missing template rateStructure" };
+          return { status: "MISSING_TEMPLATE" };
         }
         if (!tdspRates) {
-          return { status: "NOT_IMPLEMENTED", reason: "Missing TDSP delivery rates" };
+          return { status: "NOT_IMPLEMENTED", reason: "MISSING_TDSP_RATES" };
         }
         // Manual override: when ops explicitly forces COMPUTABLE, do not block on template-derived planComputability.
         if (!isComputableOverride() && planComputability && planComputability.status === "NOT_COMPUTABLE") {
           return { status: "NOT_COMPUTABLE", reason: planComputability.reason ?? "Plan not computable" };
+        }
+        // If required usage buckets are missing, this is not "unsupported"—it means the pipeline hasn't populated
+        // the required bucket keys for the home yet.
+        if (missingBucketKeys.length > 0) {
+          return { status: "NOT_IMPLEMENTED", reason: "MISSING_BUCKETS" };
         }
         // Cache key: (home + ratePlan + engineVersion + tdsp + rateStructure + usageBucketsDigest)
         // This makes the engine run once per unique input-set, then reused across pages.
