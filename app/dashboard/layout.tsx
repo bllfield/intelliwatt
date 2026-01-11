@@ -8,68 +8,74 @@ import { prisma } from '@/lib/db';
 import { normalizeEmail } from '@/lib/utils/email';
 
 async function isSmtConfirmationRequired(): Promise<boolean> {
-  const cookieStore = cookies();
-  const sessionEmail = cookieStore.get('intelliwatt_user')?.value ?? null;
+  try {
+    const cookieStore = cookies();
+    const sessionEmail = cookieStore.get('intelliwatt_user')?.value ?? null;
 
-  if (!sessionEmail) {
-    return false;
-  }
+    if (!sessionEmail) {
+      return false;
+    }
 
-  const normalizedEmail = normalizeEmail(sessionEmail);
-  const user = await prisma.user.findUnique({
-    where: { email: normalizedEmail },
-    select: { id: true },
-  });
+    const normalizedEmail = normalizeEmail(sessionEmail);
+    const user = await prisma.user.findUnique({
+      where: { email: normalizedEmail },
+      select: { id: true },
+    });
 
-  if (!user) {
-    return false;
-  }
+    if (!user) {
+      return false;
+    }
 
-  let house = await prisma.houseAddress.findFirst({
-    where: { userId: user.id, archivedAt: null, isPrimary: true } as any,
-    orderBy: { createdAt: 'desc' },
-    select: { id: true },
-  });
-
-  if (!house) {
-    house = await prisma.houseAddress.findFirst({
-      where: { userId: user.id } as any,
+    let house = await prisma.houseAddress.findFirst({
+      where: { userId: user.id, archivedAt: null, isPrimary: true } as any,
       orderBy: { createdAt: 'desc' },
       select: { id: true },
     });
-  }
 
-  const targetHouseId = house?.id;
+    if (!house) {
+      house = await prisma.houseAddress.findFirst({
+        where: { userId: user.id } as any,
+        orderBy: { createdAt: 'desc' },
+        select: { id: true },
+      });
+    }
 
-  if (!targetHouseId) {
+    const targetHouseId = house?.id;
+
+    if (!targetHouseId) {
+      return false;
+    }
+
+    const authorization = await prisma.smtAuthorization.findFirst({
+      where: {
+        userId: user.id,
+        houseAddressId: targetHouseId,
+        archivedAt: null,
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { smtStatus: true, smtStatusMessage: true },
+    });
+
+    if (!authorization) {
+      return false;
+    }
+
+    const normalizedStatus = (authorization.smtStatus ?? '').toLowerCase();
+    const normalizedMessage = (authorization.smtStatusMessage ?? '').toLowerCase();
+
+    const isExplicitPending = normalizedStatus === 'pending' || normalizedStatus === '';
+    const messageImpliesPending =
+      normalizedMessage.includes('waiting on customer') ||
+      normalizedMessage.includes('waiting for customer') ||
+      normalizedMessage.includes('email sent') ||
+      normalizedMessage.includes('pending approval');
+
+    return isExplicitPending || messageImpliesPending;
+  } catch (e: any) {
+    // Fail-open: dashboard should never hard-crash due to transient DB issues.
+    console.error("[dashboard/layout] isSmtConfirmationRequired failed", { message: e?.message ?? String(e) });
     return false;
   }
-
-  const authorization = await prisma.smtAuthorization.findFirst({
-    where: {
-      userId: user.id,
-      houseAddressId: targetHouseId,
-      archivedAt: null,
-    },
-    orderBy: { createdAt: 'desc' },
-    select: { smtStatus: true, smtStatusMessage: true },
-  });
-
-  if (!authorization) {
-    return false;
-  }
-
-  const normalizedStatus = (authorization.smtStatus ?? '').toLowerCase();
-  const normalizedMessage = (authorization.smtStatusMessage ?? '').toLowerCase();
-
-  const isExplicitPending = normalizedStatus === 'pending' || normalizedStatus === '';
-  const messageImpliesPending =
-    normalizedMessage.includes('waiting on customer') ||
-    normalizedMessage.includes('waiting for customer') ||
-    normalizedMessage.includes('email sent') ||
-    normalizedMessage.includes('pending approval');
-
-  return isExplicitPending || messageImpliesPending;
 }
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
