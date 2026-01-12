@@ -11,6 +11,7 @@ import { archiveAuthorizationsForHouse, setPrimaryHouse } from "@/lib/house/prom
 
 let userProfileAttentionColumnsAvailable: boolean | null = null;
 let houseAddressUserEmailColumnAvailable: boolean | null = null;
+let houseAddressIsRenterColumnAvailable: boolean | null = null;
 
 async function ensureUserProfileAttentionColumns(): Promise<boolean> {
   if (userProfileAttentionColumnsAvailable !== null) {
@@ -73,6 +74,36 @@ async function ensureHouseAddressUserEmailColumn(): Promise<boolean> {
   return houseAddressUserEmailColumnAvailable;
 }
 
+async function ensureHouseAddressIsRenterColumn(): Promise<boolean> {
+  if (houseAddressIsRenterColumnAvailable !== null) {
+    return houseAddressIsRenterColumnAvailable;
+  }
+
+  try {
+    const result = await prisma.$queryRaw<{ exists: boolean }[]>`
+      SELECT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'HouseAddress'
+          AND column_name = 'isRenter'
+      ) AS "exists"
+    `;
+    houseAddressIsRenterColumnAvailable = Boolean(result[0]?.exists);
+  } catch (err) {
+    console.warn("[address/save] isRenter column probe failed", err);
+    houseAddressIsRenterColumnAvailable = false;
+  }
+
+  if (!houseAddressIsRenterColumnAvailable) {
+    console.warn(
+      "[address/save] HouseAddress.isRenter column missing; run prisma migrate deploy for 20260112200000_add_houseaddress_isrenter.",
+    );
+  }
+
+  return houseAddressIsRenterColumnAvailable;
+}
+
 export const dynamic = "force-dynamic";
 
 type SaveAddressBody = {
@@ -82,6 +113,7 @@ type SaveAddressBody = {
   unitNumber?: string;
   wattbuyJson?: unknown;
   keepOtherHouses?: boolean;
+  isRenter?: boolean | null;
   utilityHints?: {
     esiid?: string | null;
     tdspSlug?: string | null;
@@ -149,6 +181,7 @@ export async function POST(req: NextRequest) {
     }
 
     const houseAddressEmailAvailable = await ensureHouseAddressUserEmailColumn();
+    const houseAddressIsRenterAvailable = await ensureHouseAddressIsRenterColumn();
     const keepOtherHouses = body.keepOtherHouses === true;
 
     const selectFields: any = {
@@ -175,6 +208,7 @@ export async function POST(req: NextRequest) {
   isPrimary: true,
   archivedAt: true,
       ...(houseAddressEmailAvailable ? { userEmail: true } : {}),
+      ...(houseAddressIsRenterAvailable ? { isRenter: true } : {}),
     };
 
     console.log("Google Place Details:", JSON.stringify(body.googlePlaceDetails, null, 2));
@@ -290,6 +324,17 @@ export async function POST(req: NextRequest) {
       isPrimary: true,
       archivedAt: null,
     };
+
+    // Persist renter flag only if column exists. If caller omitted isRenter, keep existing value.
+    if (houseAddressIsRenterAvailable) {
+      if (typeof body.isRenter === "boolean") {
+        addressData.isRenter = body.isRenter;
+      } else if (existingAddress && typeof (existingAddress as any).isRenter === "boolean") {
+        addressData.isRenter = (existingAddress as any).isRenter;
+      } else {
+        addressData.isRenter = false;
+      }
+    }
 
     let record: any = existingAddress
       ? await prisma.houseAddress.update({

@@ -661,6 +661,9 @@ model HouseAddress {
   userId                String
   userEmail             String?
   houseId               String?
+  /// Whether the customer is a renter (affects WattBuy offer eligibility set).
+  /// IMPORTANT: this is an input to the offers dataset, not a dashboard "filter".
+  isRenter              Boolean          @default(false)
   addressLine1          String
   addressLine2          String?
   addressCity           String

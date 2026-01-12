@@ -46,7 +46,8 @@ export async function POST(req: NextRequest) {
   const timeBudgetMs = clamp(toInt(url.searchParams.get("timeBudgetMs"), 12_000), 1500, 12_000);
   const maxTemplateOffers = clamp(toInt(url.searchParams.get("maxTemplateOffers"), 6), 0, 10);
   const maxEstimatePlans = clamp(toInt(url.searchParams.get("maxEstimatePlans"), 50), 0, 200);
-  const isRenter = parseBool(url.searchParams.get("isRenter"), false);
+  // Renter is a persisted home attribute (address-level), not a plans-page filter.
+  // We intentionally do NOT trust a query param here.
   const proactiveCooldownMs = clamp(toInt(url.searchParams.get("proactiveCooldownMs"), 5 * 60 * 1000), 60_000, 24 * 60 * 60 * 1000);
   // Plans page needs to be able to re-kick the pipeline quickly if a first run times out / cold-starts.
   const fallbackCooldownMs = clamp(toInt(url.searchParams.get("fallbackCooldownMs"), 15 * 1000), 5_000, 24 * 60 * 60 * 1000);
@@ -61,19 +62,21 @@ export async function POST(req: NextRequest) {
     if (!user) return NextResponse.json({ ok: false, error: "user_not_found" }, { status: 404 });
 
     // Primary home.
-    let house = await prisma.houseAddress.findFirst({
+    let house: any = await (prisma as any).houseAddress.findFirst({
       where: { userId: user.id, archivedAt: null, isPrimary: true } as any,
       orderBy: { createdAt: "desc" },
-      select: { id: true, addressLine1: true, addressCity: true, addressState: true, addressZip5: true, esiid: true, tdspSlug: true, utilityName: true },
+      // NOTE: Prisma client types may lag behind schema deploys; keep select typed as any.
+      select: { id: true, isRenter: true, addressLine1: true, addressCity: true, addressState: true, addressZip5: true, esiid: true, tdspSlug: true, utilityName: true } as any,
     });
     if (!house) {
-      house = await prisma.houseAddress.findFirst({
+      house = await (prisma as any).houseAddress.findFirst({
         where: { userId: user.id, archivedAt: null } as any,
         orderBy: { createdAt: "desc" },
-        select: { id: true, addressLine1: true, addressCity: true, addressState: true, addressZip5: true, esiid: true, tdspSlug: true, utilityName: true },
+        select: { id: true, isRenter: true, addressLine1: true, addressCity: true, addressState: true, addressZip5: true, esiid: true, tdspSlug: true, utilityName: true } as any,
       });
     }
     if (!house) return NextResponse.json({ ok: false, error: "no_home" }, { status: 400 });
+    const isRenter = Boolean((house as any)?.isRenter === true);
     const result = await runPlanPipelineForHome({
       homeId: house.id,
       reason,

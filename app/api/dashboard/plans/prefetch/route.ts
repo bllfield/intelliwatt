@@ -70,28 +70,31 @@ export async function POST(req: NextRequest) {
     }
 
     // Primary (or most recent) home.
-    let house = await prisma.houseAddress.findFirst({
+    let house: any = await (prisma as any).houseAddress.findFirst({
       where: { userId: user.id, archivedAt: null, isPrimary: true } as any,
       orderBy: { createdAt: "desc" },
+      // NOTE: Prisma client types may lag behind schema deploys; keep select typed as any.
       select: {
         id: true,
+        isRenter: true,
         addressLine1: true,
         addressCity: true,
         addressState: true,
         addressZip5: true,
-      },
+      } as any,
     });
     if (!house) {
-      house = await prisma.houseAddress.findFirst({
+      house = await (prisma as any).houseAddress.findFirst({
         where: { userId: user.id, archivedAt: null } as any,
         orderBy: { createdAt: "desc" },
         select: {
           id: true,
+          isRenter: true,
           addressLine1: true,
           addressCity: true,
           addressState: true,
           addressZip5: true,
-        },
+        } as any,
       });
     }
     if (!house) {
@@ -99,11 +102,13 @@ export async function POST(req: NextRequest) {
     }
 
     const url = new URL(req.url);
-    const isRenter = parseBool(url.searchParams.get("isRenter"), false);
+    // Renter is a persisted home attribute (address-level), not a plans-page filter.
+    // We intentionally do NOT trust a query param here.
     const timeBudgetMsRaw = Number(url.searchParams.get("timeBudgetMs") ?? "8000");
     const timeBudgetMs = Number.isFinite(timeBudgetMsRaw) ? Math.max(1500, Math.min(25000, timeBudgetMsRaw)) : 8000;
     const maxOffersRaw = Number(url.searchParams.get("maxOffers") ?? "4");
     const maxOffers = Number.isFinite(maxOffersRaw) ? Math.max(1, Math.min(10, Math.floor(maxOffersRaw))) : 4;
+    const isRenter = Boolean((house as any)?.isRenter === true);
 
     const startedAt = Date.now();
 

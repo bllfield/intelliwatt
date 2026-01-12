@@ -215,11 +215,13 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "user_not_found" }, { status: 404 });
     }
 
-    let house = await prisma.houseAddress.findFirst({
+    let house: any = await (prisma as any).houseAddress.findFirst({
       where: { userId: user.id, archivedAt: null, isPrimary: true } as any,
       orderBy: { createdAt: "desc" },
+      // NOTE: Prisma client types may lag behind schema deploys; keep select typed as any.
       select: {
         id: true,
+        isRenter: true,
         addressLine1: true,
         addressCity: true,
         addressState: true,
@@ -229,15 +231,16 @@ export async function GET(req: NextRequest) {
         utilityName: true,
         rawWattbuyJson: true,
         updatedAt: true,
-      },
+      } as any,
     });
 
     if (!house) {
-      house = await prisma.houseAddress.findFirst({
+      house = await (prisma as any).houseAddress.findFirst({
         where: { userId: user.id, archivedAt: null } as any,
         orderBy: { createdAt: "desc" },
         select: {
           id: true,
+          isRenter: true,
           addressLine1: true,
           addressCity: true,
           addressState: true,
@@ -247,7 +250,7 @@ export async function GET(req: NextRequest) {
           utilityName: true,
           rawWattbuyJson: true,
           updatedAt: true,
-        },
+        } as any,
       });
     }
 
@@ -282,7 +285,9 @@ export async function GET(req: NextRequest) {
     const renewableMin = clamp(toInt(url.searchParams.get("renewableMin"), 0), 0, 100);
     const template = (url.searchParams.get("template") ?? "all").trim().toLowerCase();
     const sort = (url.searchParams.get("sort") ?? "kwh1000_asc") as SortKey;
-    const isRenter = parseBoolParam(url.searchParams.get("isRenter"), false);
+    // Renter is a persisted home attribute (address-level), not a dashboard filter.
+    // We intentionally do NOT trust a query param here.
+    const isRenter = Boolean((house as any)?.isRenter === true);
     const approxKwhPerMonth = parseApproxKwhPerMonth(url.searchParams.get("approxKwhPerMonth"));
 
     // Usage summary: cheap aggregate over the last 12 months, best-effort.

@@ -38,6 +38,7 @@ export default function QuickAddressEntry({
   const [mounted, setMounted] = useState(false);
   const [address, setAddress] = useState(userAddress || '');
   const [unitNumber, setUnitNumber] = useState('');
+  const [isRenter, setIsRenter] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(!userAddress);
@@ -54,6 +55,19 @@ export default function QuickAddressEntry({
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  // Renter is an input to WattBuy offer eligibility (not a dashboard filter).
+  // Default OFF unless the user explicitly opts in.
+  useEffect(() => {
+    if (!mounted || typeof window === 'undefined') return;
+    try {
+      const raw = window.localStorage.getItem('intelliwatt_house_is_renter');
+      if (raw === 'true') setIsRenter(true);
+      if (raw === 'false') setIsRenter(false);
+    } catch {
+      // ignore
+    }
+  }, [mounted]);
 
   useEffect(() => {
     if (!mounted || typeof window === 'undefined') {
@@ -368,6 +382,7 @@ export default function QuickAddressEntry({
           houseId: houseIdForSave ?? null,
           googlePlaceDetails: legacyPlace,
           unitNumber: unitNumber.trim() || undefined,
+          isRenter,
           keepOtherHouses,
         }),
       });
@@ -385,6 +400,11 @@ export default function QuickAddressEntry({
       
       // Store the address in localStorage for persistence
       localStorage.setItem('intelliwatt_user_address', normalizedAddress);
+      try {
+        localStorage.setItem('intelliwatt_house_is_renter', String(isRenter));
+      } catch {
+        // ignore
+      }
       
       // Call the parent callback
       onAddressSubmitted(normalizedAddress);
@@ -532,6 +552,17 @@ export default function QuickAddressEntry({
                 />
               </div>
             </div>
+
+            <label className="flex items-center gap-2 text-xs text-[#9DFBFF]/75 select-none">
+              <input
+                type="checkbox"
+                checked={isRenter}
+                onChange={(e) => setIsRenter(e.target.checked)}
+                className="h-4 w-4 rounded border-[#00F0FF]/40 bg-white/95"
+                disabled={isSubmitting}
+              />
+              I’m a renter (show renter-eligible plans)
+            </label>
 
             <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-[11px] uppercase tracking-wide text-[#9DFBFF]/60">

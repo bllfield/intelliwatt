@@ -144,19 +144,9 @@ export default function PlansClient() {
   const [term, setTerm] = useState<"all" | "0-6" | "7-12" | "13-24" | "25+">("all");
   const [renewableMin, setRenewableMin] = useState<0 | 50 | 100>(0);
   const [template, setTemplate] = useState<"all" | "available">("all");
-  // Tri-state: don't fetch until we have a stable value (prevents double-fetch on initial localStorage hydrate).
-  const [isRenter, setIsRenter] = useState<boolean | null>(() => {
-    if (typeof window === "undefined") return null;
-    try {
-      const raw = window.localStorage.getItem("dashboard_plans_is_renter");
-      if (raw === "true") return true;
-      if (raw === "false") return false;
-    } catch {
-      // Some mobile browsers (or private mode) can block localStorage.
-      // Keep tri-state behavior: return null and let the effect below choose a stable default.
-    }
-    return null;
-  });
+  // NOTE:
+  // Renter is captured during address save (QuickAddressEntry) and persisted on HouseAddress.
+  // /dashboard/plans should not own it as a filter.
   const [sort, setSort] = useState<SortKey>("kwh1000_asc");
   const userTouchedSortRef = useRef(false);
   const [page, setPage] = useState(1);
@@ -192,7 +182,7 @@ export default function PlansClient() {
   const datasetMode = pageSize === 2000;
   // Stable per-session dataset identity for background warmups.
   // Keep this minimal so browsing/sorting doesn't retrigger pipeline/prefetch during a session.
-  const warmupKey = useMemo(() => JSON.stringify({ isRenter }), [isRenter]);
+  const warmupKey = useMemo(() => "default", []);
   const [warmupSessionActive, setWarmupSessionActive] = useState(false);
 
   // Once we start a warmup session for this renter-mode dataset, keep it running even if the user
@@ -230,7 +220,6 @@ export default function PlansClient() {
     if (datasetMode) {
       return JSON.stringify({
         datasetMode: true,
-        isRenter,
         pageSize,
         // Keep approxKwhPerMonth in the key only for no-usage cases (server can use it for proxy strips).
         approxKwhPerMonth,
@@ -238,7 +227,6 @@ export default function PlansClient() {
     }
     return JSON.stringify({
       datasetMode: false,
-      isRenter,
       q: q.trim().toLowerCase(),
       rateType,
       term,
@@ -249,7 +237,7 @@ export default function PlansClient() {
       pageSize,
       approxKwhPerMonth,
     });
-  }, [datasetMode, isRenter, pageSize, approxKwhPerMonth, q, rateType, term, renewableMin, template, sort, page]);
+  }, [datasetMode, pageSize, approxKwhPerMonth, q, rateType, term, renewableMin, template, sort, page]);
 
   // Lightweight client cache so back/forward navigation instantly shows the last processed dataset
   // instead of refetching.
@@ -291,7 +279,6 @@ export default function PlansClient() {
   const allowWarmupInBackground = allowWarmupKicksFromThisView || warmupSessionActive;
 
   useEffect(() => {
-    if (isRenter === null) return; // wait for stable dataset identity
     try {
       const raw = window.sessionStorage.getItem(cacheKey);
       if (!raw) return;
@@ -308,7 +295,7 @@ export default function PlansClient() {
     } catch {
       // ignore cache failures
     }
-  }, [cacheKey, cacheTtlMs, isRenter]);
+  }, [cacheKey, cacheTtlMs]);
 
   useEffect(() => {
     prefetchInFlightRef.current = false;
@@ -319,18 +306,6 @@ export default function PlansClient() {
     if (pollStopTimerRef.current) window.clearTimeout(pollStopTimerRef.current);
     pollStopTimerRef.current = null;
   }, [warmupKey]);
-
-  useEffect(() => {
-    if (isRenter !== null) return;
-    try {
-      const raw = window.localStorage.getItem("dashboard_plans_is_renter");
-      if (raw === "true") setIsRenter(true);
-      else setIsRenter(false); // default when unset or explicitly "false"
-    } catch {
-      // localStorage not accessible (mobile/private mode). Proceed with default.
-      setIsRenter(false);
-    }
-  }, [isRenter]);
 
   useEffect(() => {
     try {
@@ -377,10 +352,9 @@ export default function PlansClient() {
           }),
     };
     if (typeof approxKwhPerMonth === "number") params.approxKwhPerMonth = String(approxKwhPerMonth);
-    if (isRenter !== null) params.isRenter = String(isRenter);
     if (datasetMode) params.dataset = "1";
     return params;
-  }, [refreshNonce, page, pageSize, sort, q, rateType, term, renewableMin, template, approxKwhPerMonth, isRenter, datasetMode]);
+  }, [refreshNonce, page, pageSize, sort, q, rateType, term, renewableMin, template, approxKwhPerMonth, datasetMode]);
 
   const plansQueryString = useMemo(() => buildQuery(baseParams as any), [baseParams]);
 
@@ -396,8 +370,6 @@ export default function PlansClient() {
   }, [cacheKey]);
 
   useEffect(() => {
-    if (isRenter === null) return; // wait for stable renter value
-
     // If we have a fresh cached response for this dataset and we're not forcing a refresh,
     // skip the network call entirely. This prevents "recalculations" on back/forward navigation.
     if (refreshNonce === 0) {
@@ -458,7 +430,7 @@ export default function PlansClient() {
 
     run();
     return () => controller.abort();
-  }, [plansQueryString, isRenter, refreshNonce, cacheKey, cacheTtlMs]);
+  }, [plansQueryString, refreshNonce, cacheKey, cacheTtlMs]);
 
   // IMPORTANT: /dashboard/plans must never trigger/retrigger the plan pipeline.
   // This page is display-only; background warm-ups happen elsewhere.
@@ -501,7 +473,6 @@ export default function PlansClient() {
   useEffect(() => {
     if (!ENABLE_PLANS_AUTO_WARMUPS) return;
     if (!allowWarmupInBackground) return;
-    if (isRenter === null) return;
     if (!resp?.ok) return;
     const offersNow = Array.isArray(resp?.offers) ? (resp!.offers as OfferRow[]) : [];
     const missingTemplate = offersNow
@@ -563,7 +534,6 @@ export default function PlansClient() {
     const run = async () => {
       try {
         const params = new URLSearchParams();
-        params.set("isRenter", String(isRenter));
         params.set("timeBudgetMs", "12000");
         params.set("maxOffers", String(Math.min(6, Math.max(1, missingTemplate.length))));
         await fetch(`/api/dashboard/plans/prefetch?${params.toString()}`, {
@@ -581,14 +551,13 @@ export default function PlansClient() {
 
     run();
     return () => controller.abort();
-  }, [resp?.ok, resp?.offers, isRenter, warmupKey, ENABLE_PLANS_AUTO_WARMUPS, allowWarmupInBackground, warmupSessionActive]);
+  }, [resp?.ok, resp?.offers, warmupKey, ENABLE_PLANS_AUTO_WARMUPS, allowWarmupInBackground, warmupSessionActive]);
 
   // Fallback warm-up: if the user lands on /dashboard/plans before background warm-up ran,
   // kick the plan pipeline once per session and poll until queued clears (or timeout).
   useEffect(() => {
     if (!ENABLE_PLANS_AUTO_WARMUPS) return;
     if (!allowWarmupInBackground) return;
-    if (isRenter === null) return;
     if (!resp?.ok) return;
     if (!resp?.hasUsage) return;
     const offersNow = Array.isArray(resp?.offers) ? (resp!.offers as OfferRow[]) : [];
@@ -643,7 +612,6 @@ export default function PlansClient() {
         // Allow repeated short runs; server still enforces lock + cooldown.
         params.set("proactiveCooldownMs", "60000");
         params.set("fallbackCooldownMs", "15000");
-        params.set("isRenter", String(isRenter));
         (async () => {
           try {
             const r = await fetch(`/api/dashboard/plans/pipeline?${params.toString()}`, {
@@ -729,7 +697,7 @@ export default function PlansClient() {
     return () => {
       // keep timers running across renders; cleaned up in serverDatasetKey effect
     };
-  }, [resp?.ok, resp?.hasUsage, resp?.offers, isRenter, warmupKey, ENABLE_PLANS_AUTO_WARMUPS, allowWarmupInBackground, datasetMode, warmupSessionActive]);
+  }, [resp?.ok, resp?.hasUsage, resp?.offers, warmupKey, ENABLE_PLANS_AUTO_WARMUPS, allowWarmupInBackground, datasetMode, warmupSessionActive]);
 
   // Cleanup on unmount (defensive: prevents polling leaks if the component tree changes).
   useEffect(() => {
@@ -1165,30 +1133,7 @@ export default function PlansClient() {
                       </div>
                     </div>
 
-                    <div className="flex items-end">
-                      <label className="flex items-center gap-2 text-xs text-brand-cyan/75 select-none">
-                        <input
-                          type="checkbox"
-                          checked={isRenter === true}
-                          onChange={(e) => {
-                            // IMPORTANT:
-                            // Renter is a dataset switch (it changes the upstream WattBuy offer set),
-                            // not a local display-only filter. Do NOT mark "user touched filters" here,
-                            // otherwise we would block the warmup/pipeline kicks for the new dataset.
-                            const next = e.target.checked;
-                            setIsRenter(next);
-                            setPage(1);
-                            try {
-                              window.localStorage.setItem("dashboard_plans_is_renter", String(next));
-                            } catch {
-                              // ignore
-                            }
-                          }}
-                          className="h-4 w-4 rounded border-brand-cyan/40 bg-brand-white/10"
-                        />
-                        Renter (fetch renter-eligible plans)
-                      </label>
-                    </div>
+                    {/* Renter selection moved to Address save (QuickAddressEntry). */}
                   </div>
                 </div>
               ) : null}
@@ -1360,30 +1305,8 @@ export default function PlansClient() {
                   </div>
                 </div>
 
-                <div className="flex items-end">
-                  <label className="flex items-center gap-2 text-xs text-brand-cyan/75 select-none">
-                    <input
-                      type="checkbox"
-                      checked={isRenter === true}
-                      onChange={(e) => {
-                        // IMPORTANT:
-                        // Renter is a dataset switch (it changes the upstream WattBuy offer set),
-                        // not a local display-only filter. Do NOT mark "user touched filters" here,
-                        // otherwise we would block the warmup/pipeline kicks for the new dataset.
-                        const next = e.target.checked;
-                        setIsRenter(next);
-                        setPage(1);
-                        try {
-                          window.localStorage.setItem("dashboard_plans_is_renter", String(next));
-                        } catch {
-                          // ignore
-                        }
-                      }}
-                      className="h-4 w-4 rounded border-brand-cyan/40 bg-brand-white/10"
-                    />
-                    Renter (fetch renter-eligible plans)
-                  </label>
-                </div>
+                {/* Renter selection moved to Address save (QuickAddressEntry). */}
+                {/* Renter selection moved to Address save (QuickAddressEntry). */}
               </div>
             </div>
 
