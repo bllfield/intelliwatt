@@ -7,7 +7,28 @@ import { refreshSmtAuthorizationStatus, getRollingBackfillRange, requestSmtBackf
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs"; // ensure Node runtime for longer executions
-export const maxDuration = 300; // allow ample time for pull + normalize + backfill
+// IMPORTANT: This endpoint is user-clicked from the browser, and Vercel may enforce
+// strict request timeouts. Keep it fast: trigger work, don't block on long ingest/normalize.
+export const maxDuration = 30;
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  const ctrl = new AbortController();
+  const id = setTimeout(() => ctrl.abort(`${label}:timeout`), timeoutMs);
+  try {
+    // If the underlying promise doesn't support AbortController, this still enforces
+    // a timeout for our handler by racing.
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) =>
+        setTimeout(() => reject(new Error(`${label}:timeout_after_${timeoutMs}ms`)), timeoutMs),
+      ),
+    ]);
+  } finally {
+    clearTimeout(id);
+    // ctrl is intentionally unused by default; kept for future fetch wiring.
+    void ctrl;
+  }
+}
 
 function resolveBaseUrl(): URL {
   const explicit =
@@ -129,7 +150,11 @@ export async function POST(req: NextRequest) {
 
     if (latestAuth) {
       try {
-        await refreshSmtAuthorizationStatus(latestAuth.id);
+        await withTimeout(
+          refreshSmtAuthorizationStatus(latestAuth.id),
+          2500,
+          "refreshSmtAuthorizationStatus",
+        );
         result.authorizationRefreshed = true;
       } catch (error) {
         result.authorizationMessage =
@@ -146,6 +171,8 @@ export async function POST(req: NextRequest) {
       try {
         const baseUrl = resolveBaseUrl();
         const pullUrl = new URL("/api/admin/smt/pull", baseUrl);
+        // NOTE: /api/admin/smt/pull will call the droplet webhook. The droplet now starts
+        // ingest in the background and returns quickly, so this should not block long.
         const pullResponse = await fetch(pullUrl, {
           method: "POST",
           headers: {
@@ -187,6 +214,7 @@ export async function POST(req: NextRequest) {
 
     // Request 12-month backfill to ensure full coverage.
     // IMPORTANT: only do this once SMT confirms the authorization is ACTIVE.
+    // Also keep this best-effort (timeboxed) to avoid user-facing timeouts.
     let backfillOutcome: { homeId: string; ok: boolean; message?: string } | null = null;
     try {
       const auth = await prisma.smtAuthorization.findFirst({
@@ -208,13 +236,17 @@ export async function POST(req: NextRequest) {
       // Only trigger backfill once ACTIVE (customer approved SMT email).
       // Also avoid duplicate requests if we've already recorded a request time.
       if (auth?.id && auth.esiid && isActive && !(auth as any)?.smtBackfillRequestedAt) {
-        const res = await requestSmtBackfillForAuthorization({
-          authorizationId: auth.id,
-          esiid: auth.esiid,
-          meterNumber: auth.meterNumber,
-          startDate: backfillRange.startDate,
-          endDate: backfillRange.endDate,
-        });
+        const res = await withTimeout(
+          requestSmtBackfillForAuthorization({
+            authorizationId: auth.id,
+            esiid: auth.esiid,
+            meterNumber: auth.meterNumber,
+            startDate: backfillRange.startDate,
+            endDate: backfillRange.endDate,
+          }),
+          2500,
+          "requestSmtBackfillForAuthorization",
+        );
 
         if (res.ok) {
           await prisma.smtAuthorization.update({
@@ -253,62 +285,12 @@ export async function POST(req: NextRequest) {
     .map((hr) => hr.backfillOutcome)
     .filter((x): x is { homeId: string; ok: boolean; message?: string } => Boolean(x));
   refreshed.push(...houseResults.map((hr) => hr.result));
-  let normalization = {
-    attempted: Boolean(adminToken),
-    ok: false,
-    status: undefined as number | undefined,
-    message: undefined as string | undefined,
-  };
-
-  if (adminToken) {
-    try {
-      const baseUrl = resolveBaseUrl();
-      const normalizeUrl = new URL("/api/admin/smt/normalize", baseUrl);
-      // For usage refresh we want the full 12‑month window for the target home,
-      // so normalize all raw files for its ESIID rather than only the latest one.
-      if (targetHouse.esiid) {
-        normalizeUrl.searchParams.set("esiid", targetHouse.esiid);
-      }
-      normalizeUrl.searchParams.set("limit", "100000");
-      const normalizeRes = await fetch(normalizeUrl, {
-        method: "POST",
-        headers: {
-          "x-admin-token": adminToken,
-          "content-type": "application/json",
-        },
-        cache: "no-store",
-      });
-      normalization.status = normalizeRes.status;
-      let normalizePayload: any = null;
-      try {
-        normalizePayload = await normalizeRes.json();
-      } catch {
-        normalizePayload = null;
-      }
-
-      if (normalizeRes.ok && normalizePayload?.ok !== false) {
-        normalization.ok = true;
-        normalization.message = normalizePayload?.filesProcessed
-          ? `Normalized ${normalizePayload.filesProcessed} file(s).`
-          : normalizePayload?.message ?? "Normalization triggered.";
-      } else {
-        normalization.ok = false;
-        normalization.message =
-          normalizePayload?.error ?? normalizePayload?.detail ?? "Normalization failed.";
-      }
-    } catch (error) {
-      normalization.ok = false;
-      normalization.message =
-        error instanceof Error ? error.message : "Failed to invoke SMT normalization.";
-    }
-  } else {
-    normalization.message = "ADMIN_TOKEN not configured; normalization not attempted.";
-  }
 
   return NextResponse.json({
     ok: true,
     homes: refreshed,
-    normalization,
+    // Normalization is handled by the SMT ingest pipeline (droplet upload/inline normalize).
+    // Keeping refresh fast avoids Vercel invocation timeouts.
     backfill: backfillResults,
   });
 }

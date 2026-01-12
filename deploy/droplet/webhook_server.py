@@ -5,6 +5,8 @@ import logging
 import secrets
 import time
 import hashlib
+import hmac
+import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -549,38 +551,62 @@ def handle_smt_authorized(payload: dict) -> bytes:
 
     print(f"[INFO] Starting SMT ingest via: {ingest_cmd}", flush=True)
 
-    p = subprocess.run(
-        ["/bin/bash", "-lc", ingest_cmd],
-        capture_output=True,
-        text=True,
-    )
+    # IMPORTANT:
+    # This handler is invoked by Vercel /api/admin/smt/pull. Vercel may enforce
+    # strict request timeouts, so we must not block for the full ingest run.
+    # We start ingest in the background and return immediately, while still
+    # logging completion to journal via a daemon thread.
 
-    status_line = (
-        f"[INFO] SMT ingest finished for ESIID={esiid!r} "
-        f"rc={p.returncode} "
-        f"stdout_len={len(p.stdout or '')} stderr_len={len(p.stderr or '')}"
-    )
-    print(status_line, flush=True)
+    logs_dir = "/home/deploy/smt_ingest/logs"
+    try:
+        os.makedirs(logs_dir, exist_ok=True)
+    except Exception as e:
+        print(f"[WARN] Could not create logs dir {logs_dir!r}: {e!r}", flush=True)
 
-    body_parts = [log_line, status_line]
+    ts = int(time.time())
+    log_path = os.path.join(logs_dir, f"ingest_{esiid}_{ts}.log")
 
-    if p.stdout:
-        # Trim very long output to avoid huge responses
-        trimmed_out = p.stdout.strip()
-        if len(trimmed_out) > 2000:
-            trimmed_out = trimmed_out[:2000] + "\n...[truncated]..."
-        body_parts.append("--- stdout ---")
-        body_parts.append(trimmed_out)
+    def _wait_and_log(proc: subprocess.Popen, esiid_for_log: str, path_for_log: str) -> None:
+        try:
+            rc = proc.wait()
+            print(
+                f"[INFO] SMT ingest finished for ESIID={esiid_for_log!r} rc={rc} log={path_for_log}",
+                flush=True,
+            )
+        except Exception as e2:
+            print(
+                f"[ERROR] SMT ingest wait/log failed for ESIID={esiid_for_log!r}: {e2!r}",
+                flush=True,
+            )
 
-    if p.stderr:
-        trimmed_err = p.stderr.strip()
-        if len(trimmed_err) > 2000:
-            trimmed_err = trimmed_err[:2000] + "\n...[truncated]..."
-        body_parts.append("--- stderr ---")
-        body_parts.append(trimmed_err)
+    try:
+        with open(log_path, "a", encoding="utf-8") as lf:
+            lf.write(log_line + "\n")
+            lf.write(f"[INFO] Starting SMT ingest via: {ingest_cmd}\n")
+            lf.flush()
 
-    body = "\n".join(body_parts) + "\n"
-    return body.encode()
+            proc = subprocess.Popen(
+                ["/bin/bash", "-lc", ingest_cmd],
+                stdout=lf,
+                stderr=lf,
+                text=True,
+                start_new_session=True,
+            )
+
+        print(f"[INFO] SMT ingest started for ESIID={esiid!r} pid={proc.pid} log={log_path}", flush=True)
+        threading.Thread(target=_wait_and_log, args=(proc, esiid, log_path), daemon=True).start()
+
+        body = "\n".join(
+            [
+                log_line,
+                f"[INFO] SMT ingest started for ESIID={esiid!r} pid={proc.pid} log={log_path}",
+            ]
+        ) + "\n"
+        return body.encode()
+    except Exception as e:
+        msg = f"[ERROR] Failed to start SMT ingest for ESIID={esiid!r}: {e!r}"
+        print(msg, flush=True)
+        return (log_line + "\n" + msg + "\n").encode()
 
 
 def handle_smt_meter_info(payload: dict) -> bytes:
@@ -1940,7 +1966,13 @@ class H(BaseHTTPRequestHandler):
             self.wfile.write(b'{"ok": false, "error": "unauthorized"}')
             return
 
-        # Header present and secrets configured; treat as authorized for now.
+        # Validate shared-secret against configured secrets (constant-time compare).
+        if not any(hmac.compare_digest(got, s) for s in SECRETS):
+            self.send_response(401)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"ok": false, "error": "unauthorized"}')
+            return
 
         body_bytes = self._read_body_bytes()
         payload = None
