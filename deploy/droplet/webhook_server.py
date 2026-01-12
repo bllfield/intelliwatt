@@ -4,6 +4,7 @@ import subprocess
 import logging
 import secrets
 import time
+import hashlib
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -86,7 +87,7 @@ SMT_API_BASE_URL = (
 )
 SMT_USERNAME = os.getenv("SMT_USERNAME", "INTELLIPATH")
 SMT_PASSWORD = os.getenv("SMT_PASSWORD")
-SMT_PROXY_TOKEN = os.getenv("SMT_PROXY_TOKEN")
+SMT_PROXY_TOKEN = (os.getenv("SMT_PROXY_TOKEN") or "").strip() or None
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "").strip()
 SMT_SERVICE_ID = os.getenv("SMT_SERVICE_ID", SMT_USERNAME)
 SMT_REQUESTOR_AUTH_ID = os.getenv("SMT_REQUESTOR_AUTH_ID", "").strip()
@@ -950,6 +951,12 @@ class H(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _sha256_hex(self, value: str) -> str:
+        try:
+            return hashlib.sha256(value.encode("utf-8")).hexdigest()
+        except Exception:
+            return "sha256_error"
+
     def _ensure_proxy_auth(self) -> bool:
         if not SMT_PROXY_TOKEN:
             print(
@@ -972,9 +979,16 @@ class H(BaseHTTPRequestHandler):
             return False
 
         incoming_token = auth_header.split(" ", 1)[1].strip()
-        if incoming_token != SMT_PROXY_TOKEN:
+        if not secrets.compare_digest(incoming_token, SMT_PROXY_TOKEN):
             print(
-                "[SMT_DEBUG] proxy_auth path=%s error=token_mismatch" % (getattr(self, "path", "?"),),
+                "[SMT_DEBUG] proxy_auth path=%s error=token_mismatch incoming_len=%s incoming_sha256=%s expected_len=%s expected_sha256=%s"
+                % (
+                    getattr(self, "path", "?"),
+                    len(incoming_token),
+                    self._sha256_hex(incoming_token),
+                    len(SMT_PROXY_TOKEN),
+                    self._sha256_hex(SMT_PROXY_TOKEN),
+                ),
                 flush=True,
             )
             self._write_json(401, {"ok": False, "error": "unauthorized"})
