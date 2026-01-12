@@ -62,7 +62,15 @@ export async function GET(req: NextRequest) {
     }>
   >(Prisma.sql`
     SELECT
-      to_char(date_trunc('month', ("ts" AT TIME ZONE 'America/Chicago'))::date, 'YYYY-MM') AS month,
+      -- SmtInterval.ts is stored as TIMESTAMP (no tz) but represents UTC instants.
+      -- Convert UTC->America/Chicago *explicitly* before month bucketing.
+      to_char(
+        date_trunc(
+          'month',
+          (("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago')
+        )::date,
+        'YYYY-MM'
+      ) AS month,
       COUNT(*)::int AS intervals,
       MIN("ts") AS "minTs",
       MAX("ts") AS "maxTs",

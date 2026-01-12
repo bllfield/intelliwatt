@@ -170,7 +170,9 @@ async function computeInsightsFromDb(args: {
 
       const dailyRows = await prisma.$queryRaw<Array<{ date: string; kwh: number }>>(Prisma.sql`
         SELECT
-          to_char(("ts" AT TIME ZONE 'America/Chicago')::date, 'YYYY-MM-DD') AS date,
+          -- SmtInterval.ts is TIMESTAMP (no tz) but represents UTC instants.
+          -- Convert UTC->America/Chicago explicitly before day bucketing.
+          to_char((("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago')::date, 'YYYY-MM-DD') AS date,
           -- IMPORTANT: SMT can include signed kWh (export negative). For "usage" charts, show import kWh.
           COALESCE(SUM(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END), 0)::float AS kwh
         FROM "SmtInterval"
@@ -186,7 +188,10 @@ async function computeInsightsFromDb(args: {
       const monthlyRows = await prisma.$queryRaw<Array<{ month: string; kwh: number }>>(Prisma.sql`
         SELECT
           -- Bucket by America/Chicago local month (SMT semantics) and sum import kWh only.
-          to_char(date_trunc('month', ("ts" AT TIME ZONE 'America/Chicago'))::date, 'YYYY-MM') AS month,
+          to_char(
+            date_trunc('month', (("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago'))::date,
+            'YYYY-MM'
+          ) AS month,
           COALESCE(SUM(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END), 0)::float AS kwh
         FROM "SmtInterval"
         WHERE "esiid" = ${esiid}
@@ -198,7 +203,7 @@ async function computeInsightsFromDb(args: {
 
       const fifteenRows = await prisma.$queryRaw<Array<{ hhmm: string; avgkw: number }>>(Prisma.sql`
         SELECT
-          to_char("ts", 'HH24:MI') AS hhmm,
+          to_char((("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago'), 'HH24:MI') AS hhmm,
           AVG(("kwh" * 4))::float AS avgkw
         FROM "SmtInterval"
         WHERE "esiid" = ${esiid}
@@ -217,38 +222,38 @@ async function computeInsightsFromDb(args: {
         FROM (
           SELECT
             CASE
-              WHEN EXTRACT(HOUR FROM ("ts" AT TIME ZONE 'America/Chicago')) >= 0
-               AND EXTRACT(HOUR FROM ("ts" AT TIME ZONE 'America/Chicago')) < 6
+              WHEN EXTRACT(HOUR FROM (("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago')) >= 0
+               AND EXTRACT(HOUR FROM (("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago')) < 6
                 THEN 'overnight'
-              WHEN EXTRACT(HOUR FROM ("ts" AT TIME ZONE 'America/Chicago')) >= 6
-               AND EXTRACT(HOUR FROM ("ts" AT TIME ZONE 'America/Chicago')) < 12
+              WHEN EXTRACT(HOUR FROM (("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago')) >= 6
+               AND EXTRACT(HOUR FROM (("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago')) < 12
                 THEN 'morning'
-              WHEN EXTRACT(HOUR FROM ("ts" AT TIME ZONE 'America/Chicago')) >= 12
-               AND EXTRACT(HOUR FROM ("ts" AT TIME ZONE 'America/Chicago')) < 18
+              WHEN EXTRACT(HOUR FROM (("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago')) >= 12
+               AND EXTRACT(HOUR FROM (("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago')) < 18
                 THEN 'afternoon'
               ELSE 'evening'
             END AS key,
             CASE
-              WHEN EXTRACT(HOUR FROM ("ts" AT TIME ZONE 'America/Chicago')) >= 0
-               AND EXTRACT(HOUR FROM ("ts" AT TIME ZONE 'America/Chicago')) < 6
+              WHEN EXTRACT(HOUR FROM (("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago')) >= 0
+               AND EXTRACT(HOUR FROM (("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago')) < 6
                 THEN 'Overnight (12am–6am)'
-              WHEN EXTRACT(HOUR FROM ("ts" AT TIME ZONE 'America/Chicago')) >= 6
-               AND EXTRACT(HOUR FROM ("ts" AT TIME ZONE 'America/Chicago')) < 12
+              WHEN EXTRACT(HOUR FROM (("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago')) >= 6
+               AND EXTRACT(HOUR FROM (("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago')) < 12
                 THEN 'Morning (6am–12pm)'
-              WHEN EXTRACT(HOUR FROM ("ts" AT TIME ZONE 'America/Chicago')) >= 12
-               AND EXTRACT(HOUR FROM ("ts" AT TIME ZONE 'America/Chicago')) < 18
+              WHEN EXTRACT(HOUR FROM (("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago')) >= 12
+               AND EXTRACT(HOUR FROM (("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago')) < 18
                 THEN 'Afternoon (12pm–6pm)'
               ELSE 'Evening (6pm–12am)'
             END AS label,
             CASE
-              WHEN EXTRACT(HOUR FROM ("ts" AT TIME ZONE 'America/Chicago')) >= 0
-               AND EXTRACT(HOUR FROM ("ts" AT TIME ZONE 'America/Chicago')) < 6
+              WHEN EXTRACT(HOUR FROM (("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago')) >= 0
+               AND EXTRACT(HOUR FROM (("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago')) < 6
                 THEN 1
-              WHEN EXTRACT(HOUR FROM ("ts" AT TIME ZONE 'America/Chicago')) >= 6
-               AND EXTRACT(HOUR FROM ("ts" AT TIME ZONE 'America/Chicago')) < 12
+              WHEN EXTRACT(HOUR FROM (("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago')) >= 6
+               AND EXTRACT(HOUR FROM (("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago')) < 12
                 THEN 2
-              WHEN EXTRACT(HOUR FROM ("ts" AT TIME ZONE 'America/Chicago')) >= 12
-               AND EXTRACT(HOUR FROM ("ts" AT TIME ZONE 'America/Chicago')) < 18
+              WHEN EXTRACT(HOUR FROM (("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago')) >= 12
+               AND EXTRACT(HOUR FROM (("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago')) < 18
                 THEN 3
               ELSE 4
             END AS sort,
@@ -268,7 +273,7 @@ async function computeInsightsFromDb(args: {
 
       const peakHourRows = await prisma.$queryRaw<Array<{ hour: number; sumkwh: number }>>(Prisma.sql`
         SELECT
-          EXTRACT(HOUR FROM "ts")::int AS hour,
+          EXTRACT(HOUR FROM (("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago'))::int AS hour,
           SUM("kwh")::float AS sumkwh
         FROM "SmtInterval"
         WHERE "esiid" = ${esiid}
@@ -570,7 +575,9 @@ async function fetchSmtDataset(esiid: string | null): Promise<UsageDatasetResult
   `);
 
   const dailyRows = await prisma.$queryRaw<Array<{ bucket: Date; kwh: number }>>(Prisma.sql`
-    SELECT date_trunc('day', "ts" AT TIME ZONE 'America/Chicago') AT TIME ZONE 'UTC' AS bucket,
+    SELECT
+      -- SmtInterval.ts is UTC stored as TIMESTAMP (no tz). Convert to local time first for day bucketing.
+      date_trunc('day', (("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago')) AT TIME ZONE 'America/Chicago' AS bucket,
            COALESCE(SUM(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END), 0)::float AS kwh
     FROM "SmtInterval"
     WHERE "esiid" = ${esiid}
@@ -582,7 +589,7 @@ async function fetchSmtDataset(esiid: string | null): Promise<UsageDatasetResult
 
   const monthlyRows = await prisma.$queryRaw<Array<{ bucket: Date; kwh: number }>>(Prisma.sql`
     SELECT
-      date_trunc('month', "ts" AT TIME ZONE 'America/Chicago') AT TIME ZONE 'UTC' AS bucket,
+      date_trunc('month', (("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago')) AT TIME ZONE 'America/Chicago' AS bucket,
       COALESCE(SUM(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END), 0)::float AS kwh
     FROM "SmtInterval"
     WHERE "esiid" = ${esiid}
