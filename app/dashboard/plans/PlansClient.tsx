@@ -1171,7 +1171,10 @@ export default function PlansClient() {
                           type="checkbox"
                           checked={isRenter === true}
                           onChange={(e) => {
-                            markUserTouchedSearchOrFilters();
+                            // IMPORTANT:
+                            // Renter is a dataset switch (it changes the upstream WattBuy offer set),
+                            // not a local display-only filter. Do NOT mark "user touched filters" here,
+                            // otherwise we would block the warmup/pipeline kicks for the new dataset.
                             const next = e.target.checked;
                             setIsRenter(next);
                             setPage(1);
@@ -1183,7 +1186,7 @@ export default function PlansClient() {
                           }}
                           className="h-4 w-4 rounded border-brand-cyan/40 bg-brand-white/10"
                         />
-                        Renter (filters eligible plans)
+                        Renter (fetch renter-eligible plans)
                       </label>
                     </div>
                   </div>
@@ -1363,7 +1366,10 @@ export default function PlansClient() {
                       type="checkbox"
                       checked={isRenter === true}
                       onChange={(e) => {
-                        markUserTouchedSearchOrFilters();
+                        // IMPORTANT:
+                        // Renter is a dataset switch (it changes the upstream WattBuy offer set),
+                        // not a local display-only filter. Do NOT mark "user touched filters" here,
+                        // otherwise we would block the warmup/pipeline kicks for the new dataset.
                         const next = e.target.checked;
                         setIsRenter(next);
                         setPage(1);
@@ -1375,7 +1381,7 @@ export default function PlansClient() {
                       }}
                       className="h-4 w-4 rounded border-brand-cyan/40 bg-brand-white/10"
                     />
-                    Renter (filters eligible plans)
+                    Renter (fetch renter-eligible plans)
                   </label>
                 </div>
               </div>
