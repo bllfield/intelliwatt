@@ -53,6 +53,15 @@ type UsageInsights = {
   monthlyTotals?: MonthlyRow[];
   dailyTotals?: DailyRow[];
   timeOfDayBuckets?: { key: string; label: string; kwh: number }[];
+  stitchedMonth?: {
+    mode: "PRIOR_YEAR_TAIL";
+    yearMonth: string;
+    haveDaysThrough: number;
+    missingDaysFrom: number;
+    missingDaysTo: number;
+    borrowedFromYearMonth: string;
+    completenessRule: string;
+  } | null;
   peakDay: { date: string; kwh: number } | null;
   peakHour: { hour: number; kw: number } | null;
   baseload: number | null;
@@ -271,6 +280,7 @@ export const UsageDashboard: React.FC = () => {
 
     return {
       monthly: monthlySorted,
+      stitchedMonth: dataset?.insights?.stitchedMonth ?? null,
       daily: recentDaily,
       fifteenCurve,
       totalKwh,
@@ -460,33 +470,42 @@ export const UsageDashboard: React.FC = () => {
                 <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Monthly usage</div>
               </div>
               {derived.monthly.length ? (
-                <div className="h-64">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      data={derived.monthly.map((m) => ({
-                        ...m,
-                        label: formatMonthLabel(m.month),
-                        consumed: Math.max(m.kwh, 0),
-                        // Recharts stacked bars do not reliably render negative values in a stack.
-                        // Represent exports as positive magnitude.
-                        exported: Math.max(-m.kwh, 0),
-                      }))}
-                      margin={{ top: 10, right: 16, bottom: 8, left: 0 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                      <XAxis dataKey="label" />
-                      <YAxis />
-                      <Tooltip
-                        formatter={(value: number, key) => {
-                          const label = key === 'consumed' ? 'Imported' : 'Exported';
-                          return `${(value as number).toFixed(1)} kWh (${label})`;
-                        }}
-                      />
-                      <Legend />
-                      <Bar dataKey="consumed" stackId="a" fill="#0EA5E9" radius={[6, 6, 0, 0]} name="Imported" />
-                      <Bar dataKey="exported" stackId="a" fill="#F59E0B" radius={[6, 6, 0, 0]} name="Exported" />
-                    </BarChart>
-                  </ResponsiveContainer>
+                <div>
+                  <div className="h-64">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart
+                        data={derived.monthly.map((m) => ({
+                          ...m,
+                          label: formatMonthLabel(m.month),
+                          consumed: Math.max(m.kwh, 0),
+                          // Recharts stacked bars do not reliably render negative values in a stack.
+                          // Represent exports as positive magnitude.
+                          exported: Math.max(-m.kwh, 0),
+                        }))}
+                        margin={{ top: 10, right: 16, bottom: 8, left: 0 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                        <XAxis dataKey="label" />
+                        <YAxis />
+                        <Tooltip
+                          formatter={(value: number, key) => {
+                            const label = key === 'consumed' ? 'Imported' : 'Exported';
+                            return `${(value as number).toFixed(1)} kWh (${label})`;
+                          }}
+                        />
+                        <Legend />
+                        <Bar dataKey="consumed" stackId="a" fill="#0EA5E9" radius={[6, 6, 0, 0]} name="Imported" />
+                        <Bar dataKey="exported" stackId="a" fill="#F59E0B" radius={[6, 6, 0, 0]} name="Exported" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                  {derived.stitchedMonth ? (
+                    <p className="mt-2 text-xs text-neutral-500">
+                      Note: The latest month may be <span className="font-medium text-neutral-700">stitched</span> to
+                      show a full month total—days after the last complete day are filled using the same day-range from{" "}
+                      {derived.stitchedMonth.borrowedFromYearMonth}.
+                    </p>
+                  ) : null}
                 </div>
               ) : (
                 <p className="text-xs text-neutral-500">No monthly rollup available yet.</p>
