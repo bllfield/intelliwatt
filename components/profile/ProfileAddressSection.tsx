@@ -10,6 +10,7 @@ type HouseSummary = {
   formattedAddress: string;
   hasSmt: boolean;
   entries: number;
+  isRenter?: boolean | null;
 };
 
 type ActiveHouse = {
@@ -118,6 +119,13 @@ export function ProfileAddressSection({
     });
   }, [houses, activeHouseId]);
 
+  const activeHouseRenterLabel =
+    activeHouse?.isRenter === true
+      ? "Rental"
+      : activeHouse?.isRenter === false
+      ? "Owner"
+      : "Renter status: Unknown";
+
   return (
     <section className="rounded-3xl border border-brand-cyan/30 bg-brand-navy p-6 text-brand-cyan shadow-[0_0_35px_rgba(56,189,248,0.28)]">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -149,10 +157,10 @@ export function ProfileAddressSection({
           <p className="text-xs font-semibold uppercase tracking-wide text-brand-cyan/70">
             Active home
           </p>
-          {typeof activeHouse?.isRenter === "boolean" ? (
+          {activeHouse ? (
             <div className="mt-2">
               <span className="inline-flex items-center rounded-full border border-brand-cyan/30 bg-brand-cyan/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-brand-cyan">
-                {activeHouse.isRenter ? "Rental" : "Owner"}
+                {activeHouseRenterLabel}
               </span>
             </div>
           ) : null}
@@ -215,6 +223,13 @@ export function ProfileAddressSection({
                   <div className="mt-2 whitespace-pre-line text-xs text-brand-cyan/70">
                     {house.formattedAddress}
                   </div>
+                  {house.isRenter === true ? (
+                    <div className="mt-2">
+                      <span className="inline-flex items-center rounded-full border border-brand-cyan/30 bg-brand-cyan/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-brand-cyan">
+                        Rental
+                      </span>
+                    </div>
+                  ) : null}
                   <div className="mt-3 flex items-center justify-between text-[11px] uppercase tracking-wide">
                     <span>{house.hasSmt ? "SMT connected" : "SMT pending"}</span>
                     {isActive ? (

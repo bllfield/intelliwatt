@@ -239,6 +239,7 @@ export default async function ProfilePage() {
     formattedAddress: house.formattedAddress,
     hasSmt: house.hasSmt,
     entries: house.entries,
+    isRenter: house.isRenter ?? null,
   }));
 
   const qualifyingCommission = await prismaAny.commissionRecord.findFirst({
