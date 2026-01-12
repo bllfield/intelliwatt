@@ -17,6 +17,7 @@ type ActiveHouse = {
   formattedAddress: string;
   esiid?: string | null;
   utilityName?: string | null;
+  isRenter?: boolean | null;
 };
 
 type Props = {
@@ -148,6 +149,13 @@ export function ProfileAddressSection({
           <p className="text-xs font-semibold uppercase tracking-wide text-brand-cyan/70">
             Active home
           </p>
+          {typeof activeHouse?.isRenter === "boolean" ? (
+            <div className="mt-2">
+              <span className="inline-flex items-center rounded-full border border-brand-cyan/30 bg-brand-cyan/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-brand-cyan">
+                {activeHouse.isRenter ? "Rental" : "Owner"}
+              </span>
+            </div>
+          ) : null}
           <pre className="mt-2 whitespace-pre-line text-sm text-brand-cyan/90">
             {addressDisplay || "No address on file"}
           </pre>

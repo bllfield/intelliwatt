@@ -49,6 +49,7 @@ type DbHouseRecord = {
   addressZip5: string | null;
   esiid: string | null;
   utilityName: string | null;
+  isRenter?: boolean | null;
   isPrimary: boolean;
   archivedAt: Date | null;
   label: string | null;
@@ -71,6 +72,7 @@ type HouseSummary = {
   esiid: string | null;
   utilityName: string | null;
   isPrimary: boolean;
+  isRenter?: boolean | null;
 };
 
 export default async function ProfilePage() {
@@ -129,6 +131,7 @@ export default async function ProfilePage() {
     orderBy: { createdAt: "asc" },
     select: {
       id: true,
+      isRenter: true,
       addressLine1: true,
       addressLine2: true,
       addressCity: true,
@@ -176,6 +179,7 @@ export default async function ProfilePage() {
       esiid: house.esiid,
       utilityName: house.utilityName,
       isPrimary: Boolean(house.isPrimary),
+      isRenter: (house as any)?.isRenter ?? null,
     };
   });
 
@@ -188,6 +192,7 @@ export default async function ProfilePage() {
         formattedAddress: activeHouseSummary.formattedAddress,
         esiid: activeHouseSummary.esiid,
         utilityName: activeHouseSummary.utilityName,
+        isRenter: activeHouseSummary.isRenter ?? null,
       }
     : null;
 
