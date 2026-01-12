@@ -45,6 +45,24 @@ install_unit_if_present "deploy/droplet/smt-webhook.service"
 install_unit_if_present "deploy/droplet/intelliwatt-ensure-services.service"
 install_unit_if_present "deploy/droplet/intelliwatt-ensure-services.timer"
 
+log "Installing systemd drop-in overrides (best-effort)"
+install_override_if_present() {
+  local unit="$1"
+  local src="$2"
+  local dir="/etc/systemd/system/${unit}.d"
+  local dst="${dir}/override.conf"
+  if [[ -f "${src}" ]]; then
+    log "Installing override → ${dst}"
+    sudo mkdir -p "${dir}"
+    sudo cp "${src}" "${dst}"
+  else
+    log "Skipping missing override (not in repo): ${src}"
+  fi
+}
+
+install_override_if_present "efl-pdftotext.service" "deploy/droplet/systemd/efl-pdftotext.override.conf"
+install_override_if_present "smt-webhook.service" "deploy/droplet/systemd/smt-webhook.override.conf"
+
 log "Reloading systemd"
 sudo systemctl daemon-reload
 
