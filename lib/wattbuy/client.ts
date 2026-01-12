@@ -635,11 +635,16 @@ export async function wbGetOffers(params: {
     ...rest
   } = params ?? {};
 
+  // WattBuy expects query params; be explicit + stable in how we serialize booleans.
+  // Some upstream paths accept true/false, others expect 1/0. Use 1/0 for booleans.
+  const boolTo01 = (v: boolean): string => (v ? '1' : '0');
+  const normalizeBoolish = (v: boolean | string): string => (typeof v === 'boolean' ? boolTo01(v) : String(v));
+
   // Build params object for wbGet
   const queryParams: Record<string, unknown> = {
     language: String(language),
-    is_renter: String(is_renter),
-    all: String(all), // force full plan list by default
+    is_renter: normalizeBoolish(is_renter),
+    all: normalizeBoolish(all), // force full plan list by default
   };
 
   // Add rest of params (wattkey, address, city, state, zip, utility_eid, category)
