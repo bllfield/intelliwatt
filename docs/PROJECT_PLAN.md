@@ -5524,7 +5524,8 @@ SMT returns an HTTP 400 when a subscription already exists for the DUNS (e.g., `
     - `deliveryMode: "FTP"`, `reportFormat: "CSV"`, `version: "A"` (all versions), `readingType: "C"` (consumption).
     - `esiid: [ "<ESIID>" ]` (array of strings) per SMT’s schema and example payloads.
     - `SMTTermsandConditions: "Y"`.
-  - This endpoint is invoked from the app when `SMT_INTERVAL_BACKFILL_ENABLED=true` so that new SMT authorizations kick off an automated 365‑day 15‑minute interval backfill to SFTP.
+  - This endpoint is **not** invoked during the initial `/api/smt/authorization` submission. SMT will not deliver interval data until the customer approves the SMT email and the authorization becomes **ACTIVE**.
+  - When `SMT_INTERVAL_BACKFILL_ENABLED=true`, backfill is triggered after SMT approval (e.g., via the customer email-confirmation flow or an explicit refresh once ACTIVE), which then requests a 365‑day 15‑minute interval backfill to SFTP.
 - `app/api/admin/smt/billing/fetch/route.ts`:
   - Interval‑capable billing fetches via `/v2/energydata/` now use `version: "A"` (all) instead of `"L"` (latest) to prevent silent data truncation by SMT.
 - New admin harness for FTP backfill:

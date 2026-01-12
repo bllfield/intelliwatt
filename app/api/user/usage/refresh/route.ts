@@ -185,15 +185,29 @@ export async function POST(req: NextRequest) {
       result.pull.message = "House is missing an ESIID; SMT pull not attempted.";
     }
 
-    // Request 12-month backfill to ensure full coverage
+    // Request 12-month backfill to ensure full coverage.
+    // IMPORTANT: only do this once SMT confirms the authorization is ACTIVE.
     let backfillOutcome: { homeId: string; ok: boolean; message?: string } | null = null;
     try {
       const auth = await prisma.smtAuthorization.findFirst({
         where: { houseAddressId: house.id, archivedAt: null },
-        select: { id: true, esiid: true, meterNumber: true },
+        select: {
+          id: true,
+          esiid: true,
+          meterNumber: true,
+          smtStatus: true,
+          smtBackfillRequestedAt: true,
+        },
       });
 
-      if (auth?.id && auth.esiid) {
+      const statusNorm = String((auth as any)?.smtStatus ?? "")
+        .trim()
+        .toLowerCase();
+      const isActive = statusNorm === "active" || statusNorm === "already_active";
+
+      // Only trigger backfill once ACTIVE (customer approved SMT email).
+      // Also avoid duplicate requests if we've already recorded a request time.
+      if (auth?.id && auth.esiid && isActive && !(auth as any)?.smtBackfillRequestedAt) {
         const res = await requestSmtBackfillForAuthorization({
           authorizationId: auth.id,
           esiid: auth.esiid,
@@ -210,6 +224,18 @@ export async function POST(req: NextRequest) {
         }
 
         backfillOutcome = { homeId: house.id, ok: res.ok, message: res.message };
+      } else if (auth?.id && auth.esiid && !isActive) {
+        backfillOutcome = {
+          homeId: house.id,
+          ok: false,
+          message: "backfill_skipped:not_active",
+        };
+      } else if (auth?.id && auth.esiid && (auth as any)?.smtBackfillRequestedAt) {
+        backfillOutcome = {
+          homeId: house.id,
+          ok: true,
+          message: "backfill_skipped:already_requested",
+        };
       }
     } catch (backfillError) {
       backfillOutcome = {

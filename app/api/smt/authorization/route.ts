@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
 import { cleanEsiid } from "@/lib/smt/esiid";
-import { createAgreementAndSubscription, getRollingBackfillRange, requestSmtBackfillForAuthorization } from "@/lib/smt/agreements";
+import { createAgreementAndSubscription } from "@/lib/smt/agreements";
 import { waitForMeterInfo } from "@/lib/smt/meterInfo";
 import { archiveConflictingAuthorizations, setPrimaryHouse } from "@/lib/house/promote";
 import { syncHouseIdentifiersFromAuthorization } from "@/lib/house/syncIdentifiers";
@@ -309,26 +309,9 @@ export async function POST(req: NextRequest) {
       meterNumber,
     });
 
-    // Immediately request a 12-month backfill so we do not start with a short window.
-    try {
-      const range = getRollingBackfillRange(12);
-      const backfillRes = await requestSmtBackfillForAuthorization({
-        authorizationId: created.id,
-        esiid: created.esiid,
-        meterNumber,
-        startDate: range.startDate,
-        endDate: range.endDate,
-      });
-
-      if (backfillRes.ok) {
-        await (prisma as any).smtAuthorization.update({
-          where: { id: created.id },
-          data: { smtBackfillRequestedAt: new Date() },
-        });
-      }
-    } catch (backfillErr) {
-      console.error("[smt/authorization] backfill request failed", backfillErr);
-    }
+    // NOTE: Do NOT request 15-min interval backfill here.
+    // SMT will not deliver interval data until the customer approves the SMT email and the auth becomes ACTIVE.
+    // Backfill is triggered later (e.g., via the customer email-confirmation flow or explicit refresh once ACTIVE).
 
     let smtUpdateData: Record<string, any> = {};
 
