@@ -171,7 +171,8 @@ async function computeInsightsFromDb(args: {
       const dailyRows = await prisma.$queryRaw<Array<{ date: string; kwh: number }>>(Prisma.sql`
         SELECT
           to_char(("ts" AT TIME ZONE 'America/Chicago')::date, 'YYYY-MM-DD') AS date,
-          SUM("kwh")::float AS kwh
+          -- IMPORTANT: SMT can include signed kWh (export negative). For "usage" charts, show import kWh.
+          COALESCE(SUM(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END), 0)::float AS kwh
         FROM "SmtInterval"
         WHERE "esiid" = ${esiid}
           AND "ts" >= ${args.cutoff}
@@ -184,8 +185,9 @@ async function computeInsightsFromDb(args: {
 
       const monthlyRows = await prisma.$queryRaw<Array<{ month: string; kwh: number }>>(Prisma.sql`
         SELECT
-          to_char(date_trunc('month', "ts")::date, 'YYYY-MM') AS month,
-          SUM("kwh")::float AS kwh
+          -- Bucket by America/Chicago local month (SMT semantics) and sum import kWh only.
+          to_char(date_trunc('month', ("ts" AT TIME ZONE 'America/Chicago'))::date, 'YYYY-MM') AS month,
+          COALESCE(SUM(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END), 0)::float AS kwh
         FROM "SmtInterval"
         WHERE "esiid" = ${esiid}
           AND "ts" >= ${args.cutoff}
@@ -556,7 +558,9 @@ async function fetchSmtDataset(esiid: string | null): Promise<UsageDatasetResult
     .reverse();
 
   const hourlyRows = await prisma.$queryRaw<Array<{ bucket: Date; kwh: number }>>(Prisma.sql`
-    SELECT date_trunc('hour', "ts") AS bucket, SUM("kwh")::float AS kwh
+    SELECT
+      date_trunc('hour', "ts") AS bucket,
+      COALESCE(SUM(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END), 0)::float AS kwh
     FROM "SmtInterval"
     WHERE "esiid" = ${esiid}
       AND "ts" >= ${window.cutoff}
@@ -567,7 +571,7 @@ async function fetchSmtDataset(esiid: string | null): Promise<UsageDatasetResult
 
   const dailyRows = await prisma.$queryRaw<Array<{ bucket: Date; kwh: number }>>(Prisma.sql`
     SELECT date_trunc('day', "ts" AT TIME ZONE 'America/Chicago') AT TIME ZONE 'UTC' AS bucket,
-           SUM("kwh")::float AS kwh
+           COALESCE(SUM(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END), 0)::float AS kwh
     FROM "SmtInterval"
     WHERE "esiid" = ${esiid}
       AND "ts" >= ${window.cutoff}
@@ -577,7 +581,9 @@ async function fetchSmtDataset(esiid: string | null): Promise<UsageDatasetResult
   `);
 
   const monthlyRows = await prisma.$queryRaw<Array<{ bucket: Date; kwh: number }>>(Prisma.sql`
-    SELECT date_trunc('month', "ts") AS bucket, SUM("kwh")::float AS kwh
+    SELECT
+      date_trunc('month', "ts" AT TIME ZONE 'America/Chicago') AT TIME ZONE 'UTC' AS bucket,
+      COALESCE(SUM(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END), 0)::float AS kwh
     FROM "SmtInterval"
     WHERE "esiid" = ${esiid}
       AND "ts" >= ${window.cutoff}
@@ -587,7 +593,9 @@ async function fetchSmtDataset(esiid: string | null): Promise<UsageDatasetResult
   `);
 
   const annualRows = await prisma.$queryRaw<Array<{ bucket: Date; kwh: number }>>(Prisma.sql`
-    SELECT date_trunc('year', "ts") AS bucket, SUM("kwh")::float AS kwh
+    SELECT
+      date_trunc('year', "ts") AS bucket,
+      COALESCE(SUM(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END), 0)::float AS kwh
     FROM "SmtInterval"
     WHERE "esiid" = ${esiid}
       AND "ts" >= ${window.cutoff}
