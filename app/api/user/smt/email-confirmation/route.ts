@@ -6,7 +6,7 @@ import { prisma } from '@/lib/db';
 import { normalizeEmail } from '@/lib/utils/email';
 import { qualifyReferralsForUser } from '@/lib/referral/qualify';
 import { refreshUserEntryStatuses } from '@/lib/hitthejackwatt/entryLifecycle';
-import { getBackfillRangeForAuth, refreshSmtAuthorizationStatus, requestSmtBackfillForAuthorization } from '@/lib/smt/agreements';
+import { getRollingBackfillRange, refreshSmtAuthorizationStatus, requestSmtBackfillForAuthorization } from '@/lib/smt/agreements';
 import { ensureSmartMeterEntry } from '@/lib/smt/ensureSmartMeterEntry';
 
 export const dynamic = 'force-dynamic';
@@ -217,6 +217,7 @@ export async function POST(request: Request) {
       });
 
       // Trigger rolling 12-month backfill after SMT email approval, if possible.
+      // IMPORTANT: SMT guidance is a 365-day window ending "yesterday" (not "now").
       try {
         const latestAuth = await prisma.smtAuthorization.findUnique({
           where: { id: authorization.id },
@@ -224,18 +225,27 @@ export async function POST(request: Request) {
             id: true,
             esiid: true,
             meterNumber: true,
+            smtBackfillRequestedAt: true,
           },
         });
 
-        if (latestAuth?.esiid) {
-          const range = getBackfillRangeForAuth(now);
-          await requestSmtBackfillForAuthorization({
+        // Avoid duplicate backfill requests.
+        if (latestAuth?.esiid && !latestAuth.smtBackfillRequestedAt) {
+          const range = getRollingBackfillRange(12);
+          const res = await requestSmtBackfillForAuthorization({
             authorizationId: latestAuth.id,
             esiid: latestAuth.esiid,
             meterNumber: latestAuth.meterNumber,
-            startDate: range.start,
-            endDate: range.end,
+            startDate: range.startDate,
+            endDate: range.endDate,
           });
+
+          if (res.ok) {
+            await prisma.smtAuthorization.update({
+              where: { id: latestAuth.id },
+              data: { smtBackfillRequestedAt: new Date() },
+            });
+          }
         }
       } catch (error) {
         console.error('[user/smt/email-confirmation] Failed to request SMT backfill', error);

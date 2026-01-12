@@ -37,6 +37,7 @@ export async function POST(req: NextRequest) {
         id: true,
         esiid: true,
         meterNumber: true,
+        smtBackfillRequestedAt: true,
       },
     });
 
@@ -52,6 +53,14 @@ export async function POST(req: NextRequest) {
     const results: Array<{ id: string; ok: boolean; message?: string }> = [];
 
     for (const auth of auths) {
+      if (auth.smtBackfillRequestedAt) {
+        results.push({
+          id: auth.id,
+          ok: true,
+          message: "backfill_skipped:already_requested",
+        });
+        continue;
+      }
       const res = await requestSmtBackfillForAuthorization({
         authorizationId: auth.id,
         esiid: auth.esiid,
