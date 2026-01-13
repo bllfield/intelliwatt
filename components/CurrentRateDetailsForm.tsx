@@ -554,6 +554,7 @@ export function CurrentRateDetailsForm({
         }
       }
       if (structure.type === "TIME_OF_USE" && Array.isArray((structure as any).tiers)) {
+        const ALL_MONTHS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
         const tiersSource = (structure as any).tiers as TimeOfUseTier[];
         const mapped: TimeOfUseTierForm[] = tiersSource.map((tier, idx) => ({
           id:
@@ -566,7 +567,12 @@ export function CurrentRateDetailsForm({
           endTime: tier.endTime ?? "",
           useAllDays: tier.daysOfWeek === "ALL",
           selectedDays: Array.isArray(tier.daysOfWeek) ? tier.daysOfWeek : [],
-          selectedMonths: tier.monthsOfYear ?? [],
+          // UX: months are "optional" but a blank UI looks broken.
+          // If the structure doesn't scope months, treat it as "all months" and check them all.
+          selectedMonths:
+            Array.isArray(tier.monthsOfYear) && tier.monthsOfYear.length > 0
+              ? tier.monthsOfYear
+              : ALL_MONTHS,
         }));
         if (mapped.length > 0) {
           setTouTiers(mapped);
@@ -1037,8 +1043,13 @@ export function CurrentRateDetailsForm({
             creditAmount: typeof c?.creditCents === "number" ? String((c.creditCents / 100).toFixed(2)) : "",
             minUsage: typeof c?.thresholdKwh === "number" ? String(c.thresholdKwh) : "",
             maxUsage: "",
-            applyAllMonths: true,
-            selectedMonths: [],
+            applyAllMonths: !Array.isArray(c?.monthsOfYear) || c.monthsOfYear.length === 0,
+            selectedMonths: Array.isArray(c?.monthsOfYear)
+              ? c.monthsOfYear
+                  .map((m: any) => Number(m))
+                  .filter((m: number) => Number.isFinite(m) && m >= 1 && m <= 12)
+                  .sort((a: number, b: number) => a - b)
+              : [],
           })),
         );
       }
@@ -1057,8 +1068,12 @@ export function CurrentRateDetailsForm({
             priceCents: typeof t?.cents === "number" ? String(t.cents) : "",
             startTime: typeof t?.start === "string" ? t.start : "",
             endTime: typeof t?.end === "string" ? t.end : "",
-            useAllDays: true,
-            selectedDays: [],
+            useAllDays: !Array.isArray(t?.daysOfWeek) || t.daysOfWeek.length === 0,
+            selectedDays: Array.isArray(t?.daysOfWeek)
+              ? t.daysOfWeek
+                  .map((d: any) => String(d).toUpperCase())
+                  .filter((d: string) => DAY_OPTIONS.some((opt) => opt.value === d))
+              : [],
             selectedMonths: (() => {
               const raw = Array.isArray(t?.monthsOfYear) ? (t.monthsOfYear as any[]) : null;
               const cleaned = raw
