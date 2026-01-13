@@ -139,6 +139,12 @@ function formatDateShort(date: string) {
   return `${m}/${d}`;
 }
 
+function formatDateLong(date: string) {
+  const [y, m, d] = date.split("-");
+  if (!y || !m || !d) return date;
+  return `${m}/${d}/${y}`;
+}
+
 function formatTimeLabel(hhmm: string) {
   const [hh, mm] = hhmm.split(":").map(Number);
   const ampm = hh >= 12 ? "pm" : "am";
@@ -179,6 +185,7 @@ export const UsageDashboard: React.FC = () => {
   const [selectedHouseId, setSelectedHouseId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [monthlyView, setMonthlyView] = useState<"chart" | "table">("chart");
 
   useEffect(() => {
     let cancelled = false;
@@ -230,6 +237,21 @@ export const UsageDashboard: React.FC = () => {
     if (!selectedHouseId) return null;
     return houses.find((h) => h.houseId === selectedHouseId) || null;
   }, [houses, selectedHouseId]);
+
+  const coverage = useMemo(() => {
+    const ds = activeHouse?.dataset;
+    const startIso = ds?.summary?.start ?? null;
+    // Prefer "end" if present; otherwise use "latest" (the last timestamp we saw in DB).
+    const endIso = ds?.summary?.end ?? ds?.summary?.latest ?? null;
+    const start = startIso ? String(startIso).slice(0, 10) : null;
+    const end = endIso ? String(endIso).slice(0, 10) : null;
+    return {
+      source: ds?.summary?.source ?? null,
+      start,
+      end,
+      intervalsCount: ds?.summary?.intervalsCount ?? null,
+    };
+  }, [activeHouse]);
 
   const derived = useMemo(() => {
     const dataset = activeHouse?.dataset;
@@ -329,6 +351,16 @@ export const UsageDashboard: React.FC = () => {
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Usage dashboard</p>
           <h2 className="text-xl font-semibold text-neutral-900">Household energy insights</h2>
           <p className="text-sm text-neutral-600">Based on normalized 15-minute interval data from your connected sources.</p>
+          {coverage?.start && coverage?.end ? (
+            <p className="mt-1 text-xs text-neutral-500">
+              Data coverage:{" "}
+              <span className="font-medium text-neutral-700">
+                {formatDateLong(coverage.start)} – {formatDateLong(coverage.end)}
+              </span>
+              {coverage.source ? <span> · Source: {coverage.source}</span> : null}
+              {typeof coverage.intervalsCount === "number" ? <span> · {coverage.intervalsCount.toLocaleString()} intervals</span> : null}
+            </p>
+          ) : null}
         </div>
         {houses.length > 1 ? (
           <label className="text-sm text-neutral-700">
@@ -468,37 +500,105 @@ export const UsageDashboard: React.FC = () => {
             <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm lg:col-span-2">
               <div className="mb-2 flex items-center justify-between">
                 <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Monthly usage</div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setMonthlyView("chart")}
+                    className={`rounded-full px-3 py-1 text-xs font-semibold border ${
+                      monthlyView === "chart"
+                        ? "border-sky-300 bg-sky-50 text-sky-700"
+                        : "border-neutral-200 bg-white text-neutral-600 hover:bg-neutral-50"
+                    }`}
+                  >
+                    Chart
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMonthlyView("table")}
+                    className={`rounded-full px-3 py-1 text-xs font-semibold border ${
+                      monthlyView === "table"
+                        ? "border-sky-300 bg-sky-50 text-sky-700"
+                        : "border-neutral-200 bg-white text-neutral-600 hover:bg-neutral-50"
+                    }`}
+                  >
+                    Table
+                  </button>
+                </div>
               </div>
               {derived.monthly.length ? (
                 <div>
-                  <div className="h-64">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart
-                        data={derived.monthly.map((m) => ({
-                          ...m,
-                          label: formatMonthLabel(m.month),
-                          consumed: Math.max(m.kwh, 0),
-                          // Recharts stacked bars do not reliably render negative values in a stack.
-                          // Represent exports as positive magnitude.
-                          exported: Math.max(-m.kwh, 0),
-                        }))}
-                        margin={{ top: 10, right: 16, bottom: 8, left: 0 }}
-                      >
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                        <XAxis dataKey="label" />
-                        <YAxis />
-                        <Tooltip
-                          formatter={(value: number, key) => {
-                            const label = key === 'consumed' ? 'Imported' : 'Exported';
-                            return `${(value as number).toFixed(1)} kWh (${label})`;
-                          }}
-                        />
-                        <Legend />
-                        <Bar dataKey="consumed" stackId="a" fill="#0EA5E9" radius={[6, 6, 0, 0]} name="Imported" />
-                        <Bar dataKey="exported" stackId="a" fill="#F59E0B" radius={[6, 6, 0, 0]} name="Exported" />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
+                  {monthlyView === "chart" ? (
+                    <div className="h-64">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart
+                          data={derived.monthly.map((m) => ({
+                            ...m,
+                            label: formatMonthLabel(m.month),
+                            consumed: Math.max(m.kwh, 0),
+                            // Recharts stacked bars do not reliably render negative values in a stack.
+                            // Represent exports as positive magnitude.
+                            exported: Math.max(-m.kwh, 0),
+                          }))}
+                          margin={{ top: 10, right: 16, bottom: 8, left: 0 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                          <XAxis dataKey="label" />
+                          <YAxis />
+                          <Tooltip
+                            formatter={(value: number, key) => {
+                              const label = key === 'consumed' ? 'Imported' : 'Exported';
+                              return `${(value as number).toFixed(1)} kWh (${label})`;
+                            }}
+                          />
+                          <Legend />
+                          <Bar dataKey="consumed" stackId="a" fill="#0EA5E9" radius={[6, 6, 0, 0]} name="Imported" />
+                          <Bar dataKey="exported" stackId="a" fill="#F59E0B" radius={[6, 6, 0, 0]} name="Exported" />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  ) : (
+                    <div className="overflow-auto rounded-lg border border-neutral-200">
+                      <table className="min-w-[520px] w-full text-sm">
+                        <thead className="bg-neutral-50 text-neutral-600">
+                          <tr>
+                            <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide">Month</th>
+                            <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide">Imported</th>
+                            <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide">Exported</th>
+                            <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide">Net</th>
+                          </tr>
+                        </thead>
+                        <tbody className="text-neutral-800">
+                          {derived.monthly.map((m) => {
+                            const imported = Math.max(m.kwh, 0);
+                            const exported = Math.max(-m.kwh, 0);
+                            return (
+                              <tr key={m.month} className="border-t border-neutral-200">
+                                <td className="px-3 py-2 font-medium">{formatMonthLabel(m.month)}</td>
+                                <td className="px-3 py-2 text-right">{imported.toFixed(1)} kWh</td>
+                                <td className="px-3 py-2 text-right">{exported.toFixed(1)} kWh</td>
+                                <td className="px-3 py-2 text-right font-semibold">{m.kwh.toFixed(1)} kWh</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                        <tfoot className="bg-neutral-50 text-neutral-800">
+                          {(() => {
+                            const imported = sumKwh(derived.monthly.map((m) => ({ kwh: Math.max(m.kwh, 0) })));
+                            const exported = sumKwh(derived.monthly.map((m) => ({ kwh: Math.max(-m.kwh, 0) })));
+                            const net = sumKwh(derived.monthly.map((m) => ({ kwh: m.kwh })));
+                            return (
+                              <tr className="border-t border-neutral-200">
+                                <td className="px-3 py-2 font-semibold">Total</td>
+                                <td className="px-3 py-2 text-right font-semibold">{imported.toFixed(1)} kWh</td>
+                                <td className="px-3 py-2 text-right font-semibold">{exported.toFixed(1)} kWh</td>
+                                <td className="px-3 py-2 text-right font-semibold">{net.toFixed(1)} kWh</td>
+                              </tr>
+                            );
+                          })()}
+                        </tfoot>
+                      </table>
+                    </div>
+                  )}
                   {derived.stitchedMonth ? (
                     <p className="mt-2 text-xs text-neutral-500">
                       Note: The latest month may be <span className="font-medium text-neutral-700">stitched</span> to
