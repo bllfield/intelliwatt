@@ -103,6 +103,8 @@ type BatchRow = {
 type QueueItem = any;
 type TemplateRow = any;
 type UnmappedTemplateRow = any;
+type CurrentPlanTemplateRow = any;
+type CurrentPlanBillPlanTemplateRow = any;
 
 function normStr(x: any): string {
   return String(x ?? "").trim();
@@ -887,6 +889,73 @@ export default function FactCardOpsPage() {
   >("updatedAt");
   const [unmappedTplSortDir, setUnmappedTplSortDir] = useState<SortDir>("desc");
 
+  // ---------------- Current plan templates (CURRENT_PLAN_DATABASE_URL) ----------------
+  const [cpTemplatesLoading, setCpTemplatesLoading] = useState(false);
+  const [cpTemplatesErr, setCpTemplatesErr] = useState<string | null>(null);
+  const [cpParsedTemplates, setCpParsedTemplates] = useState<CurrentPlanTemplateRow[]>([]);
+
+  const [cpBillPlanLoading, setCpBillPlanLoading] = useState(false);
+  const [cpBillPlanErr, setCpBillPlanErr] = useState<string | null>(null);
+  const [cpBillPlanTemplates, setCpBillPlanTemplates] = useState<CurrentPlanBillPlanTemplateRow[]>([]);
+  const [cpBillPlanQ, setCpBillPlanQ] = useState<string>("");
+
+  async function loadCurrentPlanParsedTemplates() {
+    if (!token) {
+      setCpTemplatesErr("Admin token required.");
+      return;
+    }
+    setCpTemplatesLoading(true);
+    setCpTemplatesErr(null);
+    try {
+      const res = await fetch(`/api/admin/current-plan/templates?limit=100`, {
+        headers: { "x-admin-token": token },
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) {
+        const msg =
+          data?.error ||
+          res.statusText ||
+          "Failed to load current-plan ParsedCurrentPlan templates.";
+        throw new Error(msg);
+      }
+      setCpParsedTemplates(Array.isArray(data.templates) ? data.templates : []);
+    } catch (e: any) {
+      setCpTemplatesErr(
+        e?.message ?? "Failed to load current-plan ParsedCurrentPlan templates.",
+      );
+    } finally {
+      setCpTemplatesLoading(false);
+    }
+  }
+
+  async function loadCurrentPlanBillPlanTemplates() {
+    if (!token) {
+      setCpBillPlanErr("Admin token required.");
+      return;
+    }
+    setCpBillPlanLoading(true);
+    setCpBillPlanErr(null);
+    try {
+      const qs = new URLSearchParams({ limit: "200" });
+      if (cpBillPlanQ.trim()) qs.set("q", cpBillPlanQ.trim());
+      const res = await fetch(
+        `/api/admin/current-plan/bill-plan-templates?${qs.toString()}`,
+        { headers: { "x-admin-token": token } },
+      );
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) {
+        const msg =
+          data?.error || res.statusText || "Failed to load BillPlanTemplate rows.";
+        throw new Error(msg);
+      }
+      setCpBillPlanTemplates(Array.isArray(data.templates) ? data.templates : []);
+    } catch (e: any) {
+      setCpBillPlanErr(e?.message ?? "Failed to load BillPlanTemplate rows.");
+    } finally {
+      setCpBillPlanLoading(false);
+    }
+  }
+
   async function loadUnmappedTemplates() {
     if (!token) {
       setUnmappedTplErr("Admin token required.");
@@ -1337,6 +1406,11 @@ export default function FactCardOpsPage() {
 
   useEffect(() => {
     if (ready) void loadUnmappedTemplates();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready]);
+
+  useEffect(() => {
+    if (ready) void loadCurrentPlanBillPlanTemplates();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready]);
 
@@ -2176,6 +2250,149 @@ export default function FactCardOpsPage() {
               ) : null}
             </tbody>
           </table>
+        </div>
+      </section>
+
+      <section className="rounded-2xl border bg-white p-4 space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="font-medium">Current Plan Templates (current-plan module)</h2>
+          <div className="flex items-center gap-2">
+            <a
+              className="px-3 py-2 rounded-lg border hover:bg-gray-50 text-sm"
+              href="/admin/current-plan/bill-parser"
+            >
+              Open current-plan bill parser
+            </a>
+            <button
+              className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60 text-sm"
+              onClick={() => void loadCurrentPlanBillPlanTemplates()}
+              disabled={!ready || cpBillPlanLoading}
+              title="Loads BillPlanTemplate rows (provider+plan templates) from current-plan DB"
+            >
+              {cpBillPlanLoading ? "Refreshing…" : "Refresh BillPlanTemplate"}
+            </button>
+            <button
+              className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60 text-sm"
+              onClick={() => void loadCurrentPlanParsedTemplates()}
+              disabled={!ready || cpTemplatesLoading}
+              title="Loads ParsedCurrentPlan rows (bill parses) from current-plan DB"
+            >
+              {cpTemplatesLoading ? "Refreshing…" : "Refresh ParsedCurrentPlan"}
+            </button>
+          </div>
+        </div>
+
+        <p className="text-sm text-gray-600">
+          This is the <span className="font-mono">CURRENT_PLAN_DATABASE_URL</span> world (what the customer “current plan” flow uses).
+          It is separate from the EFL <span className="font-mono">RatePlan</span> templates below (offers pipeline).
+        </p>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <input
+            className="w-[360px] rounded-lg border px-3 py-2 text-sm"
+            placeholder="Search BillPlanTemplate (provider or plan)…"
+            value={cpBillPlanQ}
+            onChange={(e) => setCpBillPlanQ(e.target.value)}
+          />
+          <button
+            className="px-3 py-2 rounded-lg border hover:bg-gray-50 disabled:opacity-60 text-sm"
+            onClick={() => void loadCurrentPlanBillPlanTemplates()}
+            disabled={!ready || cpBillPlanLoading}
+          >
+            Apply
+          </button>
+          {cpBillPlanErr ? <div className="text-sm text-red-700">{cpBillPlanErr}</div> : null}
+          {cpTemplatesErr ? <div className="text-sm text-red-700">{cpTemplatesErr}</div> : null}
+        </div>
+
+        <div className="grid md:grid-cols-2 gap-4">
+          <div className="rounded-xl border p-3">
+            <div className="text-xs font-semibold uppercase tracking-wide text-gray-600 mb-2">
+              BillPlanTemplate ({cpBillPlanTemplates.length})
+            </div>
+            <div className="overflow-x-auto max-h-[260px] overflow-y-auto rounded-lg border">
+              <table className="min-w-full text-xs">
+                <thead className="sticky top-0 bg-gray-50 text-gray-700">
+                  <tr>
+                    <th className="px-2 py-2 text-left">Updated</th>
+                    <th className="px-2 py-2 text-left">Provider</th>
+                    <th className="px-2 py-2 text-left">Plan</th>
+                    <th className="px-2 py-2 text-left">Type</th>
+                    <th className="px-2 py-2 text-right">Term</th>
+                    <th className="px-2 py-2 text-right">Base</th>
+                    <th className="px-2 py-2 text-right">ETF</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {cpBillPlanTemplates.map((t: any) => (
+                    <tr key={String(t.id)} className="border-t hover:bg-gray-50">
+                      <td className="px-2 py-2 whitespace-nowrap text-gray-700">
+                        {t.updatedAt ? new Date(String(t.updatedAt)).toLocaleString() : "—"}
+                      </td>
+                      <td className="px-2 py-2 text-gray-800">{t.providerName ?? "—"}</td>
+                      <td className="px-2 py-2 text-gray-800">{t.planName ?? "—"}</td>
+                      <td className="px-2 py-2 text-gray-700">{t.rateType ?? "—"}</td>
+                      <td className="px-2 py-2 text-right text-gray-700">
+                        {typeof t.termMonths === "number" ? `${t.termMonths} mo` : "—"}
+                      </td>
+                      <td className="px-2 py-2 text-right text-gray-700">
+                        {typeof t.baseChargeCentsPerMonth === "number" ? t.baseChargeCentsPerMonth : "—"}
+                      </td>
+                      <td className="px-2 py-2 text-right text-gray-700">
+                        {typeof t.earlyTerminationFeeCents === "number" ? t.earlyTerminationFeeCents : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                  {cpBillPlanTemplates.length === 0 ? (
+                    <tr>
+                      <td className="px-2 py-3 text-gray-500" colSpan={7}>
+                        No items.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="rounded-xl border p-3">
+            <div className="text-xs font-semibold uppercase tracking-wide text-gray-600 mb-2">
+              ParsedCurrentPlan ({cpParsedTemplates.length})
+            </div>
+            <div className="overflow-x-auto max-h-[260px] overflow-y-auto rounded-lg border">
+              <table className="min-w-full text-xs">
+                <thead className="sticky top-0 bg-gray-50 text-gray-700">
+                  <tr>
+                    <th className="px-2 py-2 text-left">Created</th>
+                    <th className="px-2 py-2 text-left">Provider</th>
+                    <th className="px-2 py-2 text-left">Plan</th>
+                    <th className="px-2 py-2 text-left">Type</th>
+                    <th className="px-2 py-2 text-left">ESIID</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {cpParsedTemplates.map((t: any) => (
+                    <tr key={String(t.id)} className="border-t hover:bg-gray-50">
+                      <td className="px-2 py-2 whitespace-nowrap text-gray-700">
+                        {t.createdAt ? new Date(String(t.createdAt)).toLocaleString() : "—"}
+                      </td>
+                      <td className="px-2 py-2 text-gray-800">{t.providerName ?? "—"}</td>
+                      <td className="px-2 py-2 text-gray-800">{t.planName ?? "—"}</td>
+                      <td className="px-2 py-2 text-gray-700">{t.rateType ?? "—"}</td>
+                      <td className="px-2 py-2 text-gray-700">{t.esiid ?? "—"}</td>
+                    </tr>
+                  ))}
+                  {cpParsedTemplates.length === 0 ? (
+                    <tr>
+                      <td className="px-2 py-3 text-gray-500" colSpan={5}>
+                        No items (click “Refresh ParsedCurrentPlan”).
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </section>
 
