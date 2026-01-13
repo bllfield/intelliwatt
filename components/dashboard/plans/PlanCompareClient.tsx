@@ -638,12 +638,12 @@ export default function PlanCompareClient(props: { offerId: string }) {
                                   <th className="px-3 py-2 text-left whitespace-nowrap">Credits $</th>
                                   <th className="px-3 py-2 text-left whitespace-nowrap">Min usage fee $</th>
                                   <th className="px-3 py-2 text-left whitespace-nowrap">Min bill top-up $</th>
+                                  <th className="px-3 py-2 text-left whitespace-nowrap">Month total $</th>
                                   {side === "offer" ? (
                                     <th className="px-3 py-2 text-left whitespace-nowrap" title="New - Current">
                                       Δ vs current $
                                     </th>
                                   ) : null}
-                                  <th className="px-3 py-2 text-left whitespace-nowrap">Month total $</th>
                                 </tr>
                               </thead>
 
@@ -691,6 +691,12 @@ export default function PlanCompareClient(props: { offerId: string }) {
                                       <td className="px-3 py-2">{fmtDollars(r?.creditsDollars)}</td>
                                       <td className="px-3 py-2">{fmtDollars(r?.minimumUsageFeeDollars)}</td>
                                       <td className="px-3 py-2">{fmtDollars(r?.minimumBillTopUpDollars)}</td>
+                                      <td
+                                        className="px-3 py-2 font-semibold text-brand-white/90"
+                                        title={includeEtf && etfThisMonth > 0 ? `Includes ETF in first month: ${fmtDollars(etfThisMonth)}` : undefined}
+                                      >
+                                        {fmtDollars(monthTotalAdjusted)}
+                                      </td>
                                       {side === "offer" ? (
                                         <td
                                           className={`px-3 py-2 font-semibold ${
@@ -705,12 +711,6 @@ export default function PlanCompareClient(props: { offerId: string }) {
                                           {deltaVsCurrent == null ? "—" : fmtDollars(deltaVsCurrent)}
                                         </td>
                                       ) : null}
-                                      <td
-                                        className="px-3 py-2 font-semibold text-brand-white/90"
-                                        title={includeEtf && etfThisMonth > 0 ? `Includes ETF in first month: ${fmtDollars(etfThisMonth)}` : undefined}
-                                      >
-                                        {fmtDollars(monthTotalAdjusted)}
-                                      </td>
                                     </tr>
                                   );
                                 })}
@@ -799,6 +799,12 @@ export default function PlanCompareClient(props: { offerId: string }) {
                                       <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(credits)}</td>
                                       <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(minUsage)}</td>
                                       <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(minBill)}</td>
+                                      <td
+                                        className="px-3 py-2 font-semibold text-brand-white/90"
+                                        title={includeEtf && totalEtf > 0 ? `Total includes ETF once: ${fmtDollars(totalEtf)}` : undefined}
+                                      >
+                                        {fmtDollars(totalMonthTotal)}
+                                      </td>
                                       {side === "offer" ? (
                                         <td
                                           className={`px-3 py-2 font-semibold ${
@@ -813,12 +819,6 @@ export default function PlanCompareClient(props: { offerId: string }) {
                                           {totalDelta == null ? "—" : fmtDollars(totalDelta)}
                                         </td>
                                       ) : null}
-                                      <td
-                                        className="px-3 py-2 font-semibold text-brand-white/90"
-                                        title={includeEtf && totalEtf > 0 ? `Total includes ETF once: ${fmtDollars(totalEtf)}` : undefined}
-                                      >
-                                        {fmtDollars(totalMonthTotal)}
-                                      </td>
                                     </tr>
                                   );
                                 })()}
