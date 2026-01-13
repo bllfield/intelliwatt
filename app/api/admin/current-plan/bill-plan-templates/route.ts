@@ -108,7 +108,7 @@ export async function GET(req: NextRequest) {
       /table\s+`?BillPlanTemplate`?\s+does\s+not\s+exist/i.test(msg);
 
     const hint = looksLikeMissingTable
-      ? "Current-plan DB schema missing tables. Apply SQL migrations in prisma/current-plan/migrations/*/migration.sql using: npx prisma db execute --schema prisma/current-plan/schema.prisma --file <migration.sql>"
+      ? "Current-plan DB schema missing tables. Run: npx prisma db execute --schema prisma/current-plan/schema.prisma --file scripts/sql/current-plan/ensure_bill_plan_template.sql"
       : null;
 
     return NextResponse.json(
