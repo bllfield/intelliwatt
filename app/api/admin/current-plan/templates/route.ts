@@ -3,6 +3,18 @@ import { getCurrentPlanPrisma } from '@/lib/prismaCurrentPlan';
 
 export const dynamic = 'force-dynamic';
 
+function errDetails(err: unknown): { message: string; code?: string | null } {
+  const anyErr = err as any;
+  const msg =
+    err instanceof Error
+      ? err.message
+      : typeof anyErr?.message === 'string'
+        ? anyErr.message
+        : String(err ?? 'unknown error');
+  const code = typeof anyErr?.code === 'string' ? (anyErr.code as string) : null;
+  return { message: msg, ...(code ? { code } : {}) };
+}
+
 export async function GET(request: NextRequest) {
   try {
     const adminToken = process.env.ADMIN_TOKEN;
@@ -16,6 +28,13 @@ export async function GET(request: NextRequest) {
     const headerToken = request.headers.get('x-admin-token');
     if (!headerToken || headerToken !== adminToken) {
       return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
+    }
+
+    if (!process.env.CURRENT_PLAN_DATABASE_URL) {
+      return NextResponse.json(
+        { ok: false, error: 'CURRENT_PLAN_DATABASE_URL is not configured' },
+        { status: 500 },
+      );
     }
 
     const url = new URL(request.url);
@@ -63,10 +82,32 @@ export async function GET(request: NextRequest) {
       templates: serialized,
     });
   } catch (error) {
+    const d = errDetails(error);
     // eslint-disable-next-line no-console
-    console.error('[admin/current-plan/templates] Failed to load templates', error);
+    console.error('[admin/current-plan/templates] Failed to load templates', {
+      code: (d as any).code ?? null,
+      message: d.message,
+    });
+
+    const msg = String(d.message || '');
+    const code = (d as any).code ?? null;
+    const looksLikeMissingTable =
+      code === 'P2021' ||
+      /relation\s+"?ParsedCurrentPlan"?\s+does\s+not\s+exist/i.test(msg) ||
+      /table\s+`?ParsedCurrentPlan`?\s+does\s+not\s+exist/i.test(msg);
+
+    const hint = looksLikeMissingTable
+      ? 'Current-plan DB schema likely not migrated. Run: npx prisma migrate deploy --schema prisma/current-plan/schema.prisma'
+      : null;
+
     return NextResponse.json(
-      { ok: false, error: 'Failed to load parsed bill templates' },
+      {
+        ok: false,
+        error: 'Failed to load parsed bill templates',
+        ...(code ? { code } : {}),
+        details: msg.slice(0, 600),
+        ...(hint ? { hint } : {}),
+      },
       { status: 500 },
     );
   }

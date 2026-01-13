@@ -7,6 +7,19 @@ function jsonError(status: number, error: string) {
   return NextResponse.json({ ok: false, error }, { status });
 }
 
+function errDetails(err: unknown): { message: string; code?: string | null } {
+  const anyErr = err as any;
+  const msg =
+    err instanceof Error
+      ? err.message
+      : typeof anyErr?.message === "string"
+        ? anyErr.message
+        : String(err ?? "unknown error");
+  const code =
+    typeof anyErr?.code === "string" ? (anyErr.code as string) : null;
+  return { message: msg, ...(code ? { code } : {}) };
+}
+
 export async function GET(req: NextRequest) {
   try {
     const adminToken = process.env.ADMIN_TOKEN;
@@ -62,8 +75,34 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ ok: true, limit, count: templates.length, templates });
   } catch (e) {
-    console.error("[admin/current-plan/bill-plan-templates] Failed to load templates", e);
-    return jsonError(500, "Failed to load bill plan templates");
+    const d = errDetails(e);
+    // eslint-disable-next-line no-console
+    console.error("[admin/current-plan/bill-plan-templates] Failed to load templates", {
+      code: (d as any).code ?? null,
+      message: d.message,
+    });
+
+    const msg = String(d.message || "");
+    const code = (d as any).code ?? null;
+    const looksLikeMissingTable =
+      code === "P2021" ||
+      /relation\s+"?BillPlanTemplate"?\s+does\s+not\s+exist/i.test(msg) ||
+      /table\s+`?BillPlanTemplate`?\s+does\s+not\s+exist/i.test(msg);
+
+    const hint = looksLikeMissingTable
+      ? "Current-plan DB schema likely not migrated. Run: npx prisma migrate deploy --schema prisma/current-plan/schema.prisma"
+      : null;
+
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "Failed to load bill plan templates",
+        ...(code ? { code } : {}),
+        details: msg.slice(0, 600),
+        ...(hint ? { hint } : {}),
+      },
+      { status: 500 },
+    );
   }
 }
 
