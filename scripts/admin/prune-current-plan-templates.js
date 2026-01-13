@@ -39,6 +39,7 @@ function isValidEnergyTier(t) {
 
 async function main() {
   const apply = argHas("--apply");
+  const all = argHas("--all");
   const limitRaw = Number(argValue("--limit", "2000"));
   const limit = Math.max(1, Math.min(5000, Number.isFinite(limitRaw) ? limitRaw : 2000));
 
@@ -58,7 +59,9 @@ async function main() {
       orderBy: { updatedAt: "desc" },
     });
 
-    const bad = (rows ?? []).filter((t) => {
+    const bad = all
+      ? (rows ?? [])
+      : (rows ?? []).filter((t) => {
       const providerKey = String(t?.providerNameKey ?? "").trim();
       const planKey = String(t?.planNameKey ?? "").trim();
       if (!providerKey || !planKey) return true;
@@ -87,6 +90,7 @@ async function main() {
     console.log(JSON.stringify({
       ok: true,
       dryRun: !apply,
+      mode: all ? "ALL" : "BAD_ONLY",
       scanned: (rows ?? []).length,
       wouldDelete: ids.length,
       preview: bad.slice(0, 25).map((t) => ({
@@ -101,6 +105,14 @@ async function main() {
     }, null, 2));
 
     if (apply && ids.length > 0) {
+      if (all !== true) {
+        // Guardrail: deleting ALL templates is destructive; require explicit --all.
+        // (This avoids accidental nukes if someone runs `--apply` by habit.)
+        // eslint-disable-next-line no-console
+        console.error("Refusing to delete without --all. Re-run with: --apply --all (or omit --apply for dry-run).");
+        process.exitCode = 2;
+        return;
+      }
       const r = await db.billPlanTemplate.deleteMany({ where: { id: { in: ids } } });
       console.log(JSON.stringify({ deleted: r?.count ?? null }, null, 2));
     }
