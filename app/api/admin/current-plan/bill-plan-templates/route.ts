@@ -21,6 +21,8 @@ function errDetails(err: unknown): { message: string; code?: string | null } {
 }
 
 export async function GET(req: NextRequest) {
+  // Debug: confirm which DB Vercel is connected to (safe to return; no secrets).
+  let dbInfo: { db: string | null; schema: string | null } | null = null;
   try {
     const adminToken = process.env.ADMIN_TOKEN;
     if (!adminToken) return jsonError(500, "ADMIN_TOKEN not configured");
@@ -38,9 +40,6 @@ export async function GET(req: NextRequest) {
     const q = (url.searchParams.get("q") || "").trim();
 
     const currentPlanPrisma = getCurrentPlanPrisma() as any;
-
-    // Debug: confirm which DB Vercel is connected to (safe to return; no secrets).
-    let dbInfo: { db: string | null; schema: string | null } | null = null;
     try {
       const r = (await currentPlanPrisma.$queryRaw`SELECT current_database()::text AS db, current_schema()::text AS schema`) as any;
       const row = Array.isArray(r) ? r[0] : r;
@@ -86,7 +85,13 @@ export async function GET(req: NextRequest) {
       createdAt: (t.createdAt as Date).toISOString(),
     }));
 
-    return NextResponse.json({ ok: true, limit, count: templates.length, templates, ...(dbInfo ? { dbInfo } : {}) });
+    return NextResponse.json({
+      ok: true,
+      limit,
+      count: templates.length,
+      templates,
+      ...(dbInfo ? { dbInfo } : {}),
+    });
   } catch (e) {
     const d = errDetails(e);
     // eslint-disable-next-line no-console
@@ -103,7 +108,7 @@ export async function GET(req: NextRequest) {
       /table\s+`?BillPlanTemplate`?\s+does\s+not\s+exist/i.test(msg);
 
     const hint = looksLikeMissingTable
-      ? "Current-plan DB schema likely not migrated. Run: npx prisma migrate deploy --schema prisma/current-plan/schema.prisma"
+      ? "Current-plan DB schema missing tables. Apply SQL migrations in prisma/current-plan/migrations/*/migration.sql using: npx prisma db execute --schema prisma/current-plan/schema.prisma --file <migration.sql>"
       : null;
 
     return NextResponse.json(
@@ -113,6 +118,7 @@ export async function GET(req: NextRequest) {
         ...(code ? { code } : {}),
         details: msg.slice(0, 600),
         ...(hint ? { hint } : {}),
+        ...(dbInfo ? { dbInfo } : {}),
       },
       { status: 500 },
     );
