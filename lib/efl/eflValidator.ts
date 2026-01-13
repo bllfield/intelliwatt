@@ -232,18 +232,42 @@ function parseMoneyDollars(s: string): number | null {
 // TDSP-specific parsers (line-based)
 function parseCentsPerKwhFromLine(line: string): number | null {
   const cleaned = line.replace(/,/g, "");
-  const matches = Array.from(
+  const centsMatches = Array.from(
     // Handle both "/" and the unicode fraction slash "⁄" that sometimes appears in pdftotext output.
     cleaned.matchAll(/(\d+(?:\.\d+)?)\s*¢\s*(?:[\/⁄]\s*kWh|per\s*kWh)/gi),
   );
-  if (matches.length === 0) return null;
+  if (centsMatches.length > 0) {
+    // When a line contains both REP energy charges and TDSP delivery charges
+    // (common in side-by-side tables), picking the *last* ¢/kWh token is a
+    // pragmatic heuristic that tends to select the delivery column.
+    const last = centsMatches[centsMatches.length - 1];
+    const v = Number(last?.[1]);
+    return Number.isFinite(v) ? v : null;
+  }
 
-  // When a line contains both REP energy charges and TDSP delivery charges
-  // (common in side-by-side tables), picking the *last* ¢/kWh token is a
-  // pragmatic heuristic that tends to select the delivery column.
-  const last = matches[matches.length - 1];
-  const v = Number(last?.[1]);
-  return Number.isFinite(v) ? v : null;
+  // Some EFLs express delivery/energy rates as dollars per kWh:
+  //   "per kWh $0.051248"
+  //   "$0.051248 per kWh"
+  // Convert to cents/kWh.
+  const dollarAll = Array.from(
+    cleaned.matchAll(/\$\s*([0-9]+(?:\.[0-9]+)?)\s*(?:[\/⁄]\s*kWh|per\s*kWh)/gi),
+  );
+  if (dollarAll.length > 0) {
+    const last = dollarAll[dollarAll.length - 1];
+    const dollars = Number(last?.[1]);
+    if (!Number.isFinite(dollars)) return null;
+    return dollars * 100;
+  }
+  const dollarAfterHeader = cleaned.match(
+    /per\s*kWh[^0-9$]{0,20}\$?\s*([0-9]+(?:\.[0-9]+)?)/i,
+  );
+  if (dollarAfterHeader?.[1]) {
+    const dollars = Number(dollarAfterHeader[1]);
+    if (!Number.isFinite(dollars)) return null;
+    return dollars * 100;
+  }
+
+  return null;
 }
 
 function parseMonthlyDollarsFromLine(line: string): number | null {
@@ -281,13 +305,38 @@ function parseMonthlyDollarsFromLine(line: string): number | null {
 
 function parseCentsPerKwhToken(s: string): number | null {
   const cleaned = s.replace(/,/g, "");
-  const m = cleaned.match(
-    // Handle both "/" and the unicode fraction slash "⁄" that sometimes appears in pdftotext output.
-    /(\d+(?:\.\d+)?)\s*¢\s*(?:[\/⁄]\s*kwh|per\s*kwh)/i,
-  );
-  if (!m?.[1]) return null;
-  const n = Number(m[1]);
-  return Number.isFinite(n) ? n : null;
+  {
+    const m = cleaned.match(
+      // Handle both "/" and the unicode fraction slash "⁄" that sometimes appears in pdftotext output.
+      /(\d+(?:\.\d+)?)\s*¢\s*(?:[\/⁄]\s*kwh|per\s*kwh)/i,
+    );
+    if (m?.[1]) {
+      const n = Number(m[1]);
+      return Number.isFinite(n) ? n : null;
+    }
+  }
+
+  // Dollar-form token: "$0.051248 per kWh" / "per kWh $0.051248"
+  {
+    const m = cleaned.match(
+      /\$\s*([0-9]+(?:\.[0-9]+)?)\s*(?:[\/⁄]\s*kwh|per\s*kwh)/i,
+    );
+    if (m?.[1]) {
+      const dollars = Number(m[1]);
+      return Number.isFinite(dollars) ? dollars * 100 : null;
+    }
+  }
+  {
+    const m = cleaned.match(
+      /per\s*kwh[^0-9$]{0,20}\$?\s*([0-9]+(?:\.[0-9]+)?)/i,
+    );
+    if (m?.[1]) {
+      const dollars = Number(m[1]);
+      return Number.isFinite(dollars) ? dollars * 100 : null;
+    }
+  }
+
+  return null;
 }
 
 function pickBestTdspPerKwhLine(
@@ -296,7 +345,12 @@ function pickBestTdspPerKwhLine(
   const isTdspTokenLine = (l: string): boolean => {
     if (!/(TDU|TDSP)/i.test(l)) return false;
     if (!/Delivery/i.test(l)) return false;
-    if (!/(¢\s*(?:[\/⁄]\s*kWh|per\s*kWh))/i.test(l)) return false;
+    // Accept either cents-form or dollars-form per-kWh tokens.
+    const hasToken =
+      /(¢\s*(?:[\/⁄]\s*kWh|per\s*kWh))/i.test(l) ||
+      /\$\s*[0-9]+(?:\.[0-9]+)?\s*(?:[\/⁄]\s*kWh|per\s*kWh)/i.test(l) ||
+      /per\s*kWh[^0-9$]{0,20}\$?\s*[0-9]+(?:\.[0-9]+)?/i.test(l);
+    if (!hasToken) return false;
 
     // Avoid false positives where our joined-line window contains "TDU Delivery Charges"
     // but the only ¢/kWh token is actually the REP "Energy Charge".
@@ -1016,6 +1070,51 @@ function computeValidatorModeledBreakdown(
     }
   }
 
+  // Special-case: seasonal discount expressed as full-day TOU periods scoped to monthsOfYear.
+  // Example: "50 percent discount off the Energy Charge ... from June 1 through September 30".
+  // The EFL avg price table often reflects an annualized average across the contract year:
+  // compute a blended effective energy rate by averaging month rates across all 12 months.
+  if (repEnergyDollars == null && isTou && touPeriods.length > 0) {
+    const allDayPeriods = touPeriods
+      .map((p: any) => ({
+        p,
+        rate: Number(p?.rateCentsPerKwh),
+        start: Number(p?.startHour),
+        end: Number(p?.endHour),
+        days: Array.isArray(p?.daysOfWeek) ? p.daysOfWeek.map((d: any) => Number(d)).filter((d: number) => Number.isFinite(d)) : [],
+        months: Array.isArray(p?.months) ? p.months.map((m: any) => Number(m)).filter((m: number) => Number.isFinite(m)) : [],
+      }))
+      .filter((x: any) => Number.isFinite(x.rate) && x.start === 0 && Number.isFinite(x.end) && x.end >= 23);
+
+    const hasMonthScoped = allDayPeriods.some((x: any) => Array.isArray(x.months) && x.months.length > 0);
+    const hasAllDays = (days: number[]) => {
+      const uniq = Array.from(new Set(days.map((d) => Math.floor(d)))).sort((a, b) => a - b);
+      return uniq.length === 7 && uniq.every((d, i) => d === i);
+    };
+    const onlyAllDays = allDayPeriods.length > 0 && allDayPeriods.every((x: any) => x.days.length === 0 || hasAllDays(x.days));
+
+    if (hasMonthScoped && onlyAllDays) {
+      const monthRate = (m: number): number | null => {
+        for (const x of allDayPeriods) {
+          if (Array.isArray(x.months) && x.months.length > 0 && x.months.includes(m)) return x.rate;
+        }
+        // If no month-specific period matches, fall back to default rate if present.
+        const fallback =
+          planRules?.currentBillEnergyRateCents ?? planRules?.defaultRateCentsPerKwh ?? null;
+        return typeof fallback === "number" && Number.isFinite(fallback) ? fallback : null;
+      };
+
+      const rates: number[] = [];
+      for (let m = 1; m <= 12; m++) {
+        const r = monthRate(m);
+        if (r == null) return null;
+        rates.push(r);
+      }
+      const blendedCents = rates.reduce((s, r) => s + r, 0) / rates.length;
+      repEnergyDollars = (usageKwh * blendedCents) / 100;
+    }
+  }
+
   if (repEnergyDollars == null) {
     repEnergyDollars = computeEnergyDollarsFromPlanRules(
       planRules,
@@ -1211,6 +1310,18 @@ function extractBaseChargePerMonthCentsFromRawText(
   // Treat explicit N/A as "not present".
   if (/Base\s*Charge[^.\n]*\bN\/A\b/i.test(rawText)) {
     return null;
+  }
+
+  // Variant ordering seen in some EFL tables:
+  //   "Base Charge: per month $9.95"
+  {
+    const m = rawText.match(
+      /\bBase\s*Charge\b\s*:\s*(?:per\s+(?:billing\s*cycle|month)|monthly)[^0-9$]{0,20}\$?\s*([0-9]+(?:\.[0-9]{1,2})?)\b/i,
+    );
+    if (m?.[1]) {
+      const dollars = Number(m[1]);
+      if (Number.isFinite(dollars)) return Math.round(dollars * 100);
+    }
   }
 
   // Table-style base charge (no "per billing cycle" phrase), e.g. "Base Charge $0.00".

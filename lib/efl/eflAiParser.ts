@@ -613,6 +613,50 @@ OUTPUT CONTRACT:
     deterministicSingleEnergy ??
     fallbackExtractSingleEnergyChargeCents(fallbackSourceText);
 
+  // Seasonal percentage discount off Energy Charge (month-scoped).
+  // Represent as deterministic all-day TOU periods split by months so the plan engine can price it
+  // using only monthly total kWh buckets (no time-of-day split required).
+  if (
+    Array.isArray(planRules.timeOfUsePeriods) === false ||
+    (Array.isArray(planRules.timeOfUsePeriods) && planRules.timeOfUsePeriods.length === 0)
+  ) {
+    const seasonal = extractSeasonalEnergyDiscount(fallbackSourceText);
+    if (seasonal && singleEnergy != null && Number.isFinite(singleEnergy)) {
+      const discMonths = seasonal.months;
+      const otherMonths = Array.from({ length: 12 }, (_, i) => i + 1).filter((m) => !discMonths.includes(m));
+      const fullDays = [0, 1, 2, 3, 4, 5, 6];
+      const discountedRate = Number(singleEnergy) * (1 - seasonal.discountPct);
+      if (Number.isFinite(discountedRate) && discountedRate >= 0) {
+        planRules.rateType = "TIME_OF_USE";
+        (planRules as any).planType = (planRules as any).planType ?? "tou";
+        planRules.defaultRateCentsPerKwh = Number(singleEnergy);
+        planRules.timeOfUsePeriods = [
+          {
+            label: `Seasonal energy discount (${Math.round(seasonal.discountPct * 100)}% off)`,
+            startHour: 0,
+            endHour: 24,
+            daysOfWeek: fullDays,
+            months: otherMonths,
+            rateCentsPerKwh: Number(singleEnergy),
+            isFree: false,
+          },
+          {
+            label: `Seasonal energy discount (${Math.round(seasonal.discountPct * 100)}% off)`,
+            startHour: 0,
+            endHour: 24,
+            daysOfWeek: fullDays,
+            months: discMonths,
+            rateCentsPerKwh: discountedRate,
+            isFree: false,
+          },
+        ];
+        warnings.push(
+          "Deterministic extract detected a seasonal % Energy Charge discount and mapped it to month-scoped TOU periods.",
+        );
+      }
+    }
+  }
+
   // Last-resort inference: if we have strong evidence of a single/tiered energy
   // charge but the Disclosure Chart didn't provide a rate type, treat as FIXED.
   if (
@@ -1329,6 +1373,18 @@ function extractBaseChargeCents(text: string): number | null {
     return null;
   }
 
+  // Variant ordering seen in some EFL tables:
+  //   "Base Charge: per month $9.95"
+  {
+    const m = text.match(
+      /\bBase\s*(?:Monthly\s+)?Charge\b\s*:\s*(?:per\s+(?:billing\s*cycle|month)|monthly)[^0-9$]{0,20}\$?\s*([0-9]+(?:\.[0-9]{1,2})?)\b/i,
+    );
+    if (m?.[1]) {
+      const dollars = Number(m[1]);
+      if (Number.isFinite(dollars)) return dollarsToCents(String(dollars));
+    }
+  }
+
   // Table-style base charge (no "per billing cycle" phrase), e.g. "Base Charge $0.00".
   {
     const m = text.match(
@@ -1431,6 +1487,57 @@ function extractLineAfterLabel(text: string, labelRegex: RegExp): string | null 
     }
   }
   return null;
+}
+
+function monthNameToNumber(s: string): number | null {
+  const t = String(s ?? "").trim().toLowerCase();
+  const map: Record<string, number> = {
+    january: 1,
+    february: 2,
+    march: 3,
+    april: 4,
+    may: 5,
+    june: 6,
+    july: 7,
+    august: 8,
+    september: 9,
+    october: 10,
+    november: 11,
+    december: 12,
+  };
+  return map[t] ?? null;
+}
+
+function extractSeasonalEnergyDiscount(text: string): { discountPct: number; months: number[] } | null {
+  const raw = String(text ?? "");
+  if (!raw.trim()) return null;
+
+  // Example:
+  // "You will receive a 50 percent discount off the Energy Charge ... from June 1 ... through September 30 ..."
+  const pctMatch = raw.match(/([0-9]{1,3})\s*(?:percent|%)\s*discount\s*off\s*the\s*Energy\s*Charge/i);
+  if (!pctMatch?.[1]) return null;
+  const pct = Number(pctMatch[1]);
+  if (!Number.isFinite(pct) || pct <= 0 || pct >= 100) return null;
+
+  const fromMatch = raw.match(/\bfrom\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+([0-9]{1,2})/i);
+  const throughMatch = raw.match(/\bthrough\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+([0-9]{1,2})/i);
+  if (!fromMatch?.[1] || !throughMatch?.[1]) return null;
+
+  const startMonth = monthNameToNumber(fromMatch[1]);
+  const endMonth = monthNameToNumber(throughMatch[1]);
+  if (!startMonth || !endMonth) return null;
+
+  // Month-level approximation: include all months touched by the disclosed date range.
+  // This keeps the model deterministic and works for most seasonal promotions.
+  const months: number[] = [];
+  if (startMonth <= endMonth) {
+    for (let m = startMonth; m <= endMonth; m++) months.push(m);
+  } else {
+    for (let m = startMonth; m <= 12; m++) months.push(m);
+    for (let m = 1; m <= endMonth; m++) months.push(m);
+  }
+
+  return { discountPct: pct / 100, months };
 }
 
 function extractWeekdayWeekendTou(text: string): null | {
