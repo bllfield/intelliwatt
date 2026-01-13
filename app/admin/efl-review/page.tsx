@@ -99,6 +99,19 @@ export default function EflReviewPage() {
 
   const ready = useMemo(() => Boolean(token), [token]);
 
+  // Legacy deep links: push current-plan queue viewers into the unified Fact Cards ops page.
+  useEffect(() => {
+    try {
+      const sp = new URLSearchParams(window.location.search);
+      const src = String(sp.get('source') ?? '').trim();
+      if (src === 'current_plan_efl' || src.startsWith('current_plan')) {
+        window.location.href = '/admin/efl/fact-cards';
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
   async function load() {
     if (!token) {
       setError('Admin token required.');

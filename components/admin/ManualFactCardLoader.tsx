@@ -176,6 +176,7 @@ export function ManualFactCardLoader(props: {
   prefillRawText?: string;
   onPrefillConsumed?: () => void;
 }) {
+  const [target, setTarget] = useState<"offers" | "current_plan">("offers");
   const [activeTab, setActiveTab] = useState<"url" | "upload" | "text">("url");
   const [eflUrl, setEflUrl] = useState("");
   const [offerId, setOfferId] = useState("");
@@ -225,6 +226,13 @@ export function ManualFactCardLoader(props: {
   const canPersist = Boolean(persistTemplate && headerToken);
   const canWriteUsage = Boolean(computeUsageBuckets && headerToken);
 
+  // Current-plan mode is home-scoped and should always compute usage buckets (to validate full plan-cost math).
+  useEffect(() => {
+    if (target !== "current_plan") return;
+    if (!computeUsageBuckets) setComputeUsageBuckets(true);
+    if (offerId.trim()) setOfferId("");
+  }, [target, computeUsageBuckets, offerId]);
+
   async function handleSubmitUrl(e: FormEvent) {
     e.preventDefault();
     setError(null);
@@ -245,7 +253,9 @@ export function ManualFactCardLoader(props: {
         body: JSON.stringify({
           eflUrl: u,
           forceReparse,
-          offerId: offerId.trim() || undefined,
+          persistTemplate,
+          target,
+          offerId: target === "offers" ? (offerId.trim() || undefined) : undefined,
           overridePdfUrl: overridePdfUrl.trim() || undefined,
           computeUsageBuckets: Boolean(canWriteUsage),
           usageEmail: canWriteUsage ? usageEmail.trim() || undefined : undefined,
@@ -287,13 +297,16 @@ export function ManualFactCardLoader(props: {
       const formData = new FormData();
       formData.append("file", file);
 
-      const url =
-        "/api/admin/efl/manual-upload" +
-        (canPersist ? "?persist=1" : "") +
-        (forceReparse ? (canPersist ? "&force=1" : "?force=1") : "") +
-        (canWriteUsage
-          ? `${canPersist || forceReparse ? "&" : "?"}usage=1&usageEmail=${encodeURIComponent(usageEmail.trim())}&usageMonths=${encodeURIComponent(String(usageMonths))}`
-          : "");
+      const qs = new URLSearchParams();
+      qs.set("target", target);
+      if (canPersist) qs.set("persist", "1");
+      if (forceReparse) qs.set("force", "1");
+      if (canWriteUsage) {
+        qs.set("usage", "1");
+        qs.set("usageEmail", usageEmail.trim());
+        qs.set("usageMonths", String(usageMonths));
+      }
+      const url = "/api/admin/efl/manual-upload" + (qs.toString() ? `?${qs.toString()}` : "");
       const response = await fetch(url, {
         method: "POST",
         headers: {
@@ -329,11 +342,15 @@ export function ManualFactCardLoader(props: {
     }
     setIsSubmitting(true);
     try {
-      const textUrl =
-        `/api/admin/efl/manual-text${canPersist ? "?persist=1" : ""}` +
-        (canWriteUsage
-          ? `${canPersist ? "&" : "?"}usage=1&usageEmail=${encodeURIComponent(usageEmail.trim())}&usageMonths=${encodeURIComponent(String(usageMonths))}`
-          : "");
+      const qs = new URLSearchParams();
+      qs.set("target", target);
+      if (canPersist) qs.set("persist", "1");
+      if (canWriteUsage) {
+        qs.set("usage", "1");
+        qs.set("usageEmail", usageEmail.trim());
+        qs.set("usageMonths", String(usageMonths));
+      }
+      const textUrl = `/api/admin/efl/manual-text${qs.toString() ? `?${qs.toString()}` : ""}`;
 
       const response = await fetch(textUrl, {
         method: "POST",
@@ -392,6 +409,17 @@ export function ManualFactCardLoader(props: {
       </header>
 
       <div className="flex flex-wrap gap-2">
+        <label className="flex items-center gap-2 text-sm text-brand-navy/80">
+          <span className="font-medium">Target</span>
+          <select
+            className="rounded-lg border px-2 py-1 text-sm"
+            value={target}
+            onChange={(e) => setTarget(e.target.value as any)}
+          >
+            <option value="offers">Offers templates (RatePlan)</option>
+            <option value="current_plan">Current plan templates (module)</option>
+          </select>
+        </label>
         <button
           type="button"
           className={`px-3 py-1.5 rounded-lg border text-sm ${activeTab === "url" ? "bg-brand-blue/10 border-brand-blue/40" : "bg-white"}`}
@@ -438,10 +466,15 @@ export function ManualFactCardLoader(props: {
         <div className="mt-3 flex flex-wrap items-center gap-4 text-sm">
           <label className="flex items-center gap-2">
             <input type="checkbox" checked={persistTemplate} onChange={(e) => setPersistTemplate(e.target.checked)} />
-            Persist template (requires token)
+            {target === "current_plan" ? "Persist current-plan template (requires token)" : "Persist template (requires token)"}
           </label>
           <label className="flex items-center gap-2">
-            <input type="checkbox" checked={computeUsageBuckets} onChange={(e) => setComputeUsageBuckets(e.target.checked)} />
+            <input
+              type="checkbox"
+              checked={computeUsageBuckets}
+              onChange={(e) => setComputeUsageBuckets(e.target.checked)}
+              disabled={target === "current_plan"}
+            />
             Compute usage buckets for home (Phase 2 audit)
           </label>
         </div>
@@ -451,7 +484,9 @@ export function ManualFactCardLoader(props: {
               <label className="block text-sm mb-1">Home email (usage source)</label>
               <input className="w-full rounded-lg border px-3 py-2" value={usageEmail} onChange={(e) => setUsageEmail(e.target.value)} />
               <div className="text-xs text-brand-navy/60 mt-1">
-                This writes monthly kWh bucket totals (kwh.m.*) so you can verify TOU math end-to-end while plans stay gated.
+                {target === "current_plan"
+                  ? "Required for current-plan templates: selects the home + writes monthly kWh buckets so we can run full plan-cost math and move the item out of the queue."
+                  : "This writes monthly kWh bucket totals (kwh.m.*) so you can verify TOU math end-to-end while plans stay gated."}
               </div>
             </div>
             <div>
@@ -482,16 +517,24 @@ export function ManualFactCardLoader(props: {
           </div>
           <div className="grid gap-3 md:grid-cols-2">
             <div>
-              <label className="block text-sm font-medium text-brand-navy mb-1">offerId (optional)</label>
-              <input
-                className="w-full rounded-lg border px-3 py-2 text-sm font-mono"
-                value={offerId}
-                onChange={(e) => setOfferId(e.target.value)}
-                placeholder="wbdb-..."
-              />
-              <div className="mt-1 text-[11px] text-brand-navy/60">
-                If provided, successful template persistence will auto-resolve matching OPEN quarantine rows by offerId.
-              </div>
+              {target === "offers" ? (
+                <>
+                  <label className="block text-sm font-medium text-brand-navy mb-1">offerId (optional)</label>
+                  <input
+                    className="w-full rounded-lg border px-3 py-2 text-sm font-mono"
+                    value={offerId}
+                    onChange={(e) => setOfferId(e.target.value)}
+                    placeholder="wbdb-..."
+                  />
+                  <div className="mt-1 text-[11px] text-brand-navy/60">
+                    If provided, successful template persistence will auto-resolve matching OPEN quarantine rows by offerId.
+                  </div>
+                </>
+              ) : (
+                <div className="rounded-lg border border-brand-blue/20 bg-white px-3 py-2 text-xs text-brand-navy/70">
+                  offerId is not used for current-plan templates.
+                </div>
+              )}
             </div>
             <div>
               <label className="block text-sm font-medium text-brand-navy mb-1">Override EFL PDF URL (optional)</label>

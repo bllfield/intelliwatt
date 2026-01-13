@@ -6,6 +6,7 @@ import { runEflPipeline } from "@/lib/plan-engine-next/efl/runEflPipeline";
 import { upsertRatePlanFromEfl } from "@/lib/plan-engine-next/efl/planPersistence";
 import { prisma } from "@/lib/db";
 import { adminUsageAuditForHome } from "@/lib/usage/adminUsageAudit";
+import { adminPersistCurrentPlanFromEflPipeline } from "@/lib/current-plan/adminPersistCurrentPlanFromEflPipeline";
 
 const MAX_PREVIEW_CHARS = 20000;
 
@@ -16,6 +17,8 @@ type ManualUrlBody = {
   forceReparse?: boolean;
   overridePdfUrl?: string;
   offerId?: string;
+  target?: "offers" | "current_plan";
+  persistTemplate?: boolean;
   computeUsageBuckets?: boolean;
   usageEmail?: string;
   usageMonths?: number;
@@ -44,6 +47,8 @@ export async function POST(req: NextRequest) {
     }
 
     const forceReparse = body.forceReparse === true;
+
+    const target: "offers" | "current_plan" = body.target === "current_plan" ? "current_plan" : "offers";
 
     const offerId = (body.offerId ?? "").trim() || null;
     const overridePdfUrlRaw = (body.overridePdfUrl ?? "").trim();
@@ -87,51 +92,31 @@ export async function POST(req: NextRequest) {
     const pipelineResult = await runEflPipeline({
       source: "manual_url",
       actor: "admin",
-      dryRun: false,
-      offerId,
+      // For offers: persist only when requested AND authorized.
+      // For current_plan: never persist RatePlan templates; we'll persist into the module DB separately.
+      dryRun: target === "current_plan",
+      offerId: target === "offers" ? offerId : null,
       eflUrl: effectiveEflUrl,
       eflSourceUrl,
       pdfBytes: pdfBuffer,
     });
 
-    // Auto-resolve matching OPEN queue rows when we successfully persisted a template.
-    let autoResolvedQueueCount = 0;
-    if (pipelineResult.ratePlanId && !pipelineResult.queued) {
-      try {
-        const now = new Date();
-        const sha = String(pipelineResult.eflPdfSha256 ?? "").trim();
-        const rep = String(pipelineResult.repPuctCertificate ?? "").trim();
-        const ver = String(pipelineResult.eflVersionCode ?? "").trim();
-        const whereOr = [
-          sha ? { eflPdfSha256: sha } : undefined,
-          offerId ? { offerId: String(offerId) } : undefined,
-          rep && ver ? { repPuctCertificate: rep, eflVersionCode: ver } : undefined,
-        ].filter(Boolean);
-        if (whereOr.length > 0) {
-          const upd = await (prisma as any).eflParseReviewQueue.updateMany({
-            where: { resolvedAt: null, OR: whereOr },
-            data: {
-              resolvedAt: now,
-              resolvedBy: "manual_url",
-              resolutionNotes: `AUTO_RESOLVED: template persisted via manual-url. ratePlanId=${pipelineResult.ratePlanId ?? "—"}`,
-            },
-          });
-          autoResolvedQueueCount = Number(upd?.count ?? 0) || 0;
-        }
-      } catch {
-        autoResolvedQueueCount = 0;
-      }
-    }
+    // Persist gating (admin-only). We do NOT allow writes without a valid admin token.
+    const adminToken = process.env.ADMIN_TOKEN ?? null;
+    const headerToken = req.headers.get("x-admin-token");
+    const canAdminWrite = Boolean(adminToken && headerToken === adminToken);
+
+    const persistRequested = body.persistTemplate === true;
+    const canPersistOffers = Boolean(persistRequested && canAdminWrite && target === "offers");
+    const canPersistCurrentPlan = Boolean(persistRequested && canAdminWrite && target === "current_plan");
 
     const aiEnabled = process.env.OPENAI_IntelliWatt_Fact_Card_Parser === "1";
     const hasKey = Boolean(process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.trim().length > 0);
 
-    const adminToken = process.env.ADMIN_TOKEN ?? null;
-    const headerToken = req.headers.get("x-admin-token");
     const usageRequested = body.computeUsageBuckets === true;
     const usageEmail = String(body.usageEmail ?? "").trim();
     const usageMonths = Number(body.usageMonths ?? 12) || 12;
-    const canWriteUsage = Boolean(usageRequested && adminToken && headerToken === adminToken);
+    const canWriteUsage = Boolean(usageRequested && canAdminWrite);
 
     let usageAudit: any | null = null;
     if (usageRequested) {
@@ -179,6 +164,86 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // If we're in offers mode AND authorized, persist the RatePlan template now.
+    // (runEflPipeline was run in dryRun mode; we explicitly persist here so this endpoint is token-gated.)
+    let persistedRatePlanId: string | null = null;
+    if (canPersistOffers && !pipelineResult.queued) {
+      try {
+        const upserted = await upsertRatePlanFromEfl({
+          offerId,
+          eflUrl: effectiveEflUrl,
+          eflSourceUrl,
+          eflPdfSha256: pipelineResult.eflPdfSha256 ?? null,
+          repPuctCertificate: pipelineResult.repPuctCertificate ?? null,
+          eflVersionCode: pipelineResult.eflVersionCode ?? null,
+          planRules: pipelineResult.planRules ?? null,
+          rateStructure: pipelineResult.rateStructure ?? null,
+          validation: pipelineResult.validation ?? null,
+          derivedForValidation: pipelineResult.derivedForValidation ?? null,
+          finalValidation: pipelineResult.finalValidation ?? null,
+          passStrength: pipelineResult.passStrength ?? null,
+          passStrengthReasons: pipelineResult.passStrengthReasons ?? null,
+        } as any);
+        persistedRatePlanId = upserted?.ratePlanId ? String(upserted.ratePlanId) : null;
+      } catch {
+        persistedRatePlanId = null;
+      }
+    }
+
+    // Current-plan persistence (module DB). Requires usageEmail to select the home.
+    let currentPlanPersist: any | null = null;
+    if (canPersistCurrentPlan) {
+      if (!usageEmail) {
+        currentPlanPersist = { ok: false, error: "missing_usageEmail" };
+      } else {
+        const usageHomeId = (usageAudit as any)?.usageContext?.homeId ?? null;
+        currentPlanPersist = await adminPersistCurrentPlanFromEflPipeline({
+          usageEmail,
+          usageHomeId,
+          pipelineResult,
+        });
+      }
+    }
+
+    // Auto-resolve matching OPEN queue rows when we successfully persisted a template.
+    let autoResolvedQueueCount = 0;
+    const shouldAutoResolve =
+      (target === "offers" && persistedRatePlanId && !pipelineResult.queued) ||
+      (target === "current_plan" && currentPlanPersist?.ok);
+    if (shouldAutoResolve) {
+      try {
+        const now = new Date();
+        const sha = String(pipelineResult.eflPdfSha256 ?? "").trim();
+        const rep = String(pipelineResult.repPuctCertificate ?? "").trim();
+        const ver = String(pipelineResult.eflVersionCode ?? "").trim();
+        const whereOr = [
+          sha ? { eflPdfSha256: sha } : undefined,
+          target === "offers" && offerId ? { offerId: String(offerId) } : undefined,
+          rep && ver ? { repPuctCertificate: rep, eflVersionCode: ver } : undefined,
+        ].filter(Boolean);
+        if (whereOr.length > 0) {
+          const upd = await (prisma as any).eflParseReviewQueue.updateMany({
+            where: {
+              resolvedAt: null,
+              ...(target === "current_plan" ? { source: { startsWith: "current_plan" } } : {}),
+              OR: whereOr,
+            },
+            data: {
+              resolvedAt: now,
+              resolvedBy: target === "current_plan" ? "fact_cards_current_plan" : "manual_url",
+              resolutionNotes:
+                target === "current_plan"
+                  ? `AUTO_RESOLVED: current-plan template persisted via Fact Cards. parsedCurrentPlanId=${currentPlanPersist?.parsedCurrentPlanId ?? "—"}`
+                  : `AUTO_RESOLVED: template persisted via Fact Cards. ratePlanId=${persistedRatePlanId ?? "—"}`,
+            },
+          });
+          autoResolvedQueueCount = Number(upd?.count ?? 0) || 0;
+        }
+      } catch {
+        autoResolvedQueueCount = 0;
+      }
+    }
+
     return NextResponse.json({
       ok: true,
       build: {
@@ -213,8 +278,9 @@ export async function POST(req: NextRequest) {
       requiredBucketKeys: Array.isArray(pipelineResult.requiredBucketKeys)
         ? pipelineResult.requiredBucketKeys
         : [],
-      templatePersisted: Boolean(pipelineResult.ratePlanId),
-      persistedRatePlanId: pipelineResult.ratePlanId ?? null,
+      templatePersisted: target === "offers" ? Boolean(persistedRatePlanId) : Boolean(currentPlanPersist?.ok),
+      persistedRatePlanId: target === "offers" ? (persistedRatePlanId ?? null) : null,
+      currentPlanPersist,
       autoResolvedQueueCount,
       persistAttempted: true,
       persistUsedDerived: true,

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runEflPipeline } from "@/lib/plan-engine-next/efl/runEflPipeline";
 import { adminUsageAuditForHome } from "@/lib/usage/adminUsageAudit";
+import { adminPersistCurrentPlanFromEflPipeline } from "@/lib/current-plan/adminPersistCurrentPlanFromEflPipeline";
+import { prisma } from "@/lib/db";
 
 const MAX_PREVIEW_CHARS = 20000;
 
@@ -32,6 +34,8 @@ export async function POST(req: NextRequest) {
 
     // Canonical pipeline. Defaults to preview-only unless `persist=1` AND admin token.
     const persistRequested = req.nextUrl.searchParams.get("persist") === "1";
+    const targetParam = String(req.nextUrl.searchParams.get("target") ?? "").trim();
+    const target: "offers" | "current_plan" = targetParam === "current_plan" ? "current_plan" : "offers";
     const adminToken = process.env.ADMIN_TOKEN ?? null;
     const headerToken = req.headers.get("x-admin-token");
     const canPersist = Boolean(persistRequested && adminToken && headerToken === adminToken);
@@ -44,7 +48,8 @@ export async function POST(req: NextRequest) {
     const pipelineResult = await runEflPipeline({
       source: "manual_text",
       actor: "admin",
-      dryRun: !canPersist,
+      // For current_plan target: never persist RatePlan templates from this endpoint.
+      dryRun: target === "current_plan" ? true : !canPersist,
       rawText: raw,
     });
 
@@ -94,6 +99,49 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Current-plan persistence (module DB).
+    let currentPlanPersist: any | null = null;
+    if (target === "current_plan" && canPersist) {
+      if (!usageEmail) {
+        currentPlanPersist = { ok: false, error: "missing_usageEmail" };
+      } else {
+        const usageHomeId = (usageAudit as any)?.usageContext?.homeId ?? null;
+        currentPlanPersist = await adminPersistCurrentPlanFromEflPipeline({
+          usageEmail,
+          usageHomeId,
+          pipelineResult,
+        });
+      }
+    }
+
+    // Auto-resolve current-plan queue items when we successfully persisted.
+    let autoResolvedQueueCount = 0;
+    if (target === "current_plan" && currentPlanPersist?.ok) {
+      try {
+        const now = new Date();
+        const sha = String(pipelineResult.eflPdfSha256 ?? "").trim();
+        const rep = String(pipelineResult.repPuctCertificate ?? "").trim();
+        const ver = String(pipelineResult.eflVersionCode ?? "").trim();
+        const whereOr = [
+          sha ? { eflPdfSha256: sha } : undefined,
+          rep && ver ? { repPuctCertificate: rep, eflVersionCode: ver } : undefined,
+        ].filter(Boolean);
+        if (whereOr.length) {
+          const upd = await (prisma as any).eflParseReviewQueue.updateMany({
+            where: { resolvedAt: null, source: { startsWith: "current_plan" }, OR: whereOr },
+            data: {
+              resolvedAt: now,
+              resolvedBy: "fact_cards_current_plan",
+              resolutionNotes: `AUTO_RESOLVED: current-plan template persisted via Fact Cards. parsedCurrentPlanId=${currentPlanPersist?.parsedCurrentPlanId ?? "—"}`,
+            },
+          });
+          autoResolvedQueueCount = Number(upd?.count ?? 0) || 0;
+        }
+      } catch {
+        autoResolvedQueueCount = 0;
+      }
+    }
+
     return NextResponse.json({
       ok: true,
       eflPdfSha256: pipelineResult.eflPdfSha256 ?? null,
@@ -123,7 +171,9 @@ export async function POST(req: NextRequest) {
         : [],
       extractorMethod: pipelineResult.extractorMethod ?? "raw_text",
       dryRun: !canPersist,
-      persistedRatePlanId: pipelineResult.ratePlanId ?? null,
+      persistedRatePlanId: target === "offers" ? (pipelineResult.ratePlanId ?? null) : null,
+      currentPlanPersist,
+      autoResolvedQueueCount,
       usageAudit,
       pipelineResult,
     });
