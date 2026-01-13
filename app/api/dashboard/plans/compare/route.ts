@@ -239,6 +239,27 @@ export async function GET(req: NextRequest) {
     }
 
     // Merge manual + parsed so we don't lose contract end date (or other details) when the user has both.
+    // IMPORTANT: Treat rateStructure as a *single canonical object* (like RatePlan.rateStructure).
+    // Manual entries are allowed to override, but should not silently override a newer/valid parsed
+    // structure (this caused confusing "different current rates" across dashboards).
+    const manualRs = (latestManual as any)?.rateStructure ?? null;
+    const parsedRs = (latestParsed as any)?.rateStructure ?? null;
+    const manualRsPresent = isRateStructurePresent(manualRs);
+    const parsedRsPresent = isRateStructurePresent(parsedRs);
+
+    const manualUpdatedAtMs =
+      (latestManual as any)?.updatedAt instanceof Date ? (latestManual as any).updatedAt.getTime() : null;
+    const parsedUpdatedAtMs =
+      (latestParsed as any)?.updatedAt instanceof Date ? (latestParsed as any).updatedAt.getTime() : null;
+
+    const effectiveRateStructure =
+      // Prefer a present manual structure only when it's at least as new as parsed (or parsed missing).
+      manualRsPresent && (!parsedRsPresent || (manualUpdatedAtMs != null && parsedUpdatedAtMs != null && manualUpdatedAtMs >= parsedUpdatedAtMs))
+        ? manualRs
+        : parsedRsPresent
+          ? parsedRs
+          : manualRs ?? parsedRs ?? null;
+
     const mergedCurrent: any = {
       ...(latestParsed ?? {}),
       ...(latestManual ?? {}),
@@ -246,7 +267,7 @@ export async function GET(req: NextRequest) {
       contractEndDate: (latestManual as any)?.contractEndDate ?? (latestParsed as any)?.contractEndDate ?? null,
       earlyTerminationFee: (latestManual as any)?.earlyTerminationFee ?? (latestParsed as any)?.earlyTerminationFee ?? null,
       earlyTerminationFeeCents: (latestManual as any)?.earlyTerminationFeeCents ?? (latestParsed as any)?.earlyTerminationFeeCents ?? null,
-      rateStructure: (latestManual as any)?.rateStructure ?? (latestParsed as any)?.rateStructure ?? null,
+      rateStructure: effectiveRateStructure,
       providerName: (latestManual as any)?.providerName ?? (latestParsed as any)?.providerName ?? null,
       planName: (latestManual as any)?.planName ?? (latestParsed as any)?.planName ?? null,
     };
