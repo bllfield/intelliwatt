@@ -404,6 +404,8 @@ export default function CurrentPlanBillParserAdmin() {
   const [billPlanTemplatesLoading, setBillPlanTemplatesLoading] = useState(false);
   const [billPlanTemplatesError, setBillPlanTemplatesError] = useState<string | null>(null);
   const [billPlanTemplates, setBillPlanTemplates] = useState<BillPlanTemplateRow[]>([]);
+  const [billPlanBackfillLoading, setBillPlanBackfillLoading] = useState(false);
+  const [billPlanBackfillNote, setBillPlanBackfillNote] = useState<string | null>(null);
 
   // Bill parse review queue (DB-backed; uses the same table as EFL review queue)
   const [queueStatus, setQueueStatus] = useState<'OPEN' | 'RESOLVED'>('OPEN');
@@ -658,6 +660,35 @@ export default function CurrentPlanBillParserAdmin() {
       setBillPlanTemplatesError(err?.message ?? "Unknown error while loading current plan templates.");
     } finally {
       setBillPlanTemplatesLoading(false);
+    }
+  }
+
+  async function backfillBillPlanTemplates() {
+    if (!token.trim()) {
+      setBillPlanBackfillNote("Admin token is required.");
+      return;
+    }
+    setBillPlanBackfillLoading(true);
+    setBillPlanBackfillNote(null);
+    setBillPlanTemplatesError(null);
+    try {
+      const res = await fetch("/api/admin/current-plan/bill-plan-templates/backfill?limit=500", {
+        method: "POST",
+        headers: { "x-admin-token": token.trim() },
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok || !body?.ok) {
+        throw new Error(body?.error || `Request failed with status ${res.status}`);
+      }
+      setBillPlanBackfillNote(
+        `Backfill: scanned=${body.scanned ?? 0} unique=${body.uniqueCandidates ?? 0} upserted=${body.upserted ?? 0} errors=${body.errors ?? 0}`,
+      );
+      await loadBillPlanTemplates();
+    } catch (err: any) {
+      console.error("[admin/bill-parser] bill plan templates backfill failed", err);
+      setBillPlanTemplatesError(err?.message ?? "Unknown error while backfilling current plan templates.");
+    } finally {
+      setBillPlanBackfillLoading(false);
     }
   }
 
@@ -1114,19 +1145,33 @@ export default function CurrentPlanBillParserAdmin() {
       <section className="p-4 rounded-2xl border space-y-3">
         <div className="flex items-center justify-between gap-3">
           <h2 className="font-medium">Current Plan Templates (BillPlanTemplate)</h2>
-          <button
-            type="button"
-            onClick={loadBillPlanTemplates}
-            disabled={billPlanTemplatesLoading || !ready}
-            className="px-4 py-2 rounded-lg border bg-white text-sm hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
-          >
-            {billPlanTemplatesLoading ? "Refreshing…" : "Refresh list"}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={loadBillPlanTemplates}
+              disabled={billPlanTemplatesLoading || !ready}
+              className="px-4 py-2 rounded-lg border bg-white text-sm hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {billPlanTemplatesLoading ? "Refreshing…" : "Refresh list"}
+            </button>
+            <button
+              type="button"
+              onClick={backfillBillPlanTemplates}
+              disabled={billPlanBackfillLoading || !ready}
+              className="px-4 py-2 rounded-lg border border-blue-200 bg-blue-50 text-blue-900 text-sm hover:bg-blue-100 disabled:opacity-60 disabled:cursor-not-allowed"
+              title="Promote the most recent ParsedCurrentPlan rows into plan-level templates (provider+plan)."
+            >
+              {billPlanBackfillLoading ? "Backfilling…" : "Backfill from ParsedCurrentPlan"}
+            </button>
+          </div>
         </div>
         <p className="text-sm text-gray-600">
           These are plan-level templates (provider + plan name) derived from customer uploads (including current-plan EFL PDFs).
           When a current plan EFL is corrected and passes validation, it should auto-resolve out of the queue and land here.
         </p>
+        {billPlanBackfillNote ? (
+          <div className="text-xs text-gray-600">{billPlanBackfillNote}</div>
+        ) : null}
         {billPlanTemplatesError && (
           <div className="mt-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
             Error loading current plan templates: {billPlanTemplatesError}
