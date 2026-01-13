@@ -150,8 +150,9 @@ export async function POST(req: NextRequest) {
     const rawEmail = cookieStore.get("intelliwatt_user")?.value ?? null;
     if (!rawEmail) return NextResponse.json({ ok: false, error: "not_authenticated" }, { status: 401 });
 
+    const userEmail = normalizeEmail(rawEmail);
     const user = await prisma.user.findUnique({
-      where: { email: normalizeEmail(rawEmail) },
+      where: { email: userEmail },
       select: { id: true },
     });
     if (!user) return NextResponse.json({ ok: false, error: "user_not_found" }, { status: 404 });
@@ -777,7 +778,10 @@ export async function POST(req: NextRequest) {
             planRules: pipeline?.effectivePlanRules ?? pipeline?.planRules ?? null,
             rateStructure: pipeline?.effectiveRateStructure ?? pipeline?.rateStructure ?? rateStructure ?? null,
             validation: pipeline?.validation ?? null,
-            derivedForValidation: pipeline?.derivedForValidation ?? null,
+            derivedForValidation: {
+              ...(pipeline?.derivedForValidation ?? {}),
+              userEmail,
+            },
             finalStatus: finalValidationStatus === "PASS" ? "PASS" : (finalValidationStatus || "FAIL"),
             queueReason,
             solverApplied: (pipeline as any)?.derivedForValidation?.solverApplied ?? null,
@@ -794,7 +798,10 @@ export async function POST(req: NextRequest) {
             planRules: pipeline?.effectivePlanRules ?? pipeline?.planRules ?? null,
             rateStructure: pipeline?.effectiveRateStructure ?? pipeline?.rateStructure ?? rateStructure ?? null,
             validation: pipeline?.validation ?? null,
-            derivedForValidation: pipeline?.derivedForValidation ?? null,
+            derivedForValidation: {
+              ...(pipeline?.derivedForValidation ?? {}),
+              userEmail,
+            },
             finalStatus: finalValidationStatus === "PASS" ? "PASS" : (finalValidationStatus || "FAIL"),
             queueReason,
             resolvedAt: null,

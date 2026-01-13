@@ -174,6 +174,7 @@ export function ManualFactCardLoader(props: {
   prefillEflUrl?: string;
   prefillOfferId?: string;
   prefillRawText?: string;
+  prefillUsageEmail?: string;
   onPrefillConsumed?: () => void;
 }) {
   const [target, setTarget] = useState<"offers" | "current_plan">("offers");
@@ -196,6 +197,7 @@ export function ManualFactCardLoader(props: {
 
   const lastPrefillRef = useRef<string>("");
   const lastPrefillTextRef = useRef<string>("");
+  const lastPrefillEmailRef = useRef<string>("");
   useEffect(() => {
     const next = (props.prefillEflUrl ?? "").trim();
     if (!next) return;
@@ -207,6 +209,17 @@ export function ManualFactCardLoader(props: {
     setOfferId((props.prefillOfferId ?? "").trim());
     props.onPrefillConsumed?.();
   }, [props.prefillEflUrl, props]);
+
+  useEffect(() => {
+    const nextEmail = String(props.prefillUsageEmail ?? "").trim();
+    if (!nextEmail) return;
+    if (nextEmail === lastPrefillEmailRef.current) return;
+    lastPrefillEmailRef.current = nextEmail;
+    setUsageEmail(nextEmail);
+    // If we're targeting current_plan, ensure the required audit inputs are ON.
+    // (This doesn't run the pipeline automatically; it just pre-fills the form.)
+    setComputeUsageBuckets(true);
+  }, [props.prefillUsageEmail]);
 
   useEffect(() => {
     const nextText = String(props.prefillRawText ?? "");

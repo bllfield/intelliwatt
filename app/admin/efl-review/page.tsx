@@ -43,15 +43,17 @@ async function copyToClipboard(text: string) {
   }
 }
 
-function openInFactCards(args: { eflUrl?: string | null; offerId?: string | null; rawText?: string | null }) {
+function openInFactCards(args: { eflUrl?: string | null; offerId?: string | null; rawText?: string | null; usageEmail?: string | null }) {
   const eflUrl = String(args.eflUrl ?? '').trim();
   const offerId = String(args.offerId ?? '').trim();
   const rawText = String(args.rawText ?? '');
+  const usageEmail = String(args.usageEmail ?? '').trim();
 
   // Preferred path: URL deep-link (small + shareable).
   if (eflUrl) {
     const sp = new URLSearchParams({ eflUrl });
     if (offerId) sp.set('offerId', offerId);
+    if (usageEmail) sp.set('usageEmail', usageEmail);
     window.location.href = `/admin/efl/fact-cards?${sp.toString()}`;
     return;
   }
@@ -64,6 +66,7 @@ function openInFactCards(args: { eflUrl?: string | null; offerId?: string | null
         t: Date.now(),
         rawText,
         offerId: offerId || null,
+        usageEmail: usageEmail || null,
       };
       window.localStorage.setItem(FACTCARDS_PREFILL_KEY, JSON.stringify(payload));
     } catch {
@@ -544,6 +547,13 @@ export default function EflReviewPage() {
                                   eflUrl: eflUrl || null,
                                   offerId: item.offerId ?? null,
                                   rawText: !eflUrl ? (item?.rawText ?? null) : null,
+                                  usageEmail:
+                                    (typeof (item?.derivedForValidation as any)?.userEmail === 'string'
+                                      ? (item.derivedForValidation as any).userEmail
+                                      : null) ??
+                                    (typeof (item?.derivedForValidation as any)?.usageContext?.email === 'string'
+                                      ? (item.derivedForValidation as any).usageContext.email
+                                      : null),
                                 })
                               }
                               className="rounded border bg-white px-2 py-0.5 text-[11px] font-medium hover:bg-gray-50 disabled:opacity-60"

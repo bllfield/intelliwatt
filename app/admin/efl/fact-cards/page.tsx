@@ -173,6 +173,7 @@ export default function FactCardOpsPage() {
   const [manualPrefillUrl, setManualPrefillUrl] = useState("");
   const [manualPrefillOfferId, setManualPrefillOfferId] = useState<string>("");
   const [manualPrefillRawText, setManualPrefillRawText] = useState<string>("");
+  const [manualPrefillUsageEmail, setManualPrefillUsageEmail] = useState<string>("");
   const manualRef = useRef<HTMLDivElement | null>(null);
 
   // Global fetch logger for this page (captures ALL tool calls, including nested components).
@@ -237,13 +238,14 @@ export default function FactCardOpsPage() {
     };
   }, []);
 
-  function loadIntoManual(args: { eflUrl?: string | null; offerId?: string | null; rawText?: string | null }) {
+  function loadIntoManual(args: { eflUrl?: string | null; offerId?: string | null; rawText?: string | null; usageEmail?: string | null }) {
     const u = (args.eflUrl ?? "").trim();
     const rawText = String(args.rawText ?? "");
     if (!u && !rawText.trim()) return;
     setManualPrefillUrl(u);
     setManualPrefillOfferId((args.offerId ?? "").trim());
     setManualPrefillRawText(rawText);
+    setManualPrefillUsageEmail(String(args.usageEmail ?? "").trim());
     setTimeout(() => {
       manualRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 50);
@@ -257,6 +259,7 @@ export default function FactCardOpsPage() {
       const sp = new URLSearchParams(window.location.search);
       const u = (sp.get("eflUrl") ?? "").trim();
       const oid = (sp.get("offerId") ?? "").trim();
+      const usageEmail = (sp.get("usageEmail") ?? "").trim();
 
       // LocalStorage prefill: used by /admin/efl-review when queue items don't have an eflUrl (common for current-plan uploads).
       // This avoids passing long rawText through query params and still reuses the exact same manual runner/engine.
@@ -268,8 +271,9 @@ export default function FactCardOpsPage() {
             const parsed = JSON.parse(raw) as any;
             const rawText = typeof parsed?.rawText === "string" ? parsed.rawText : "";
             const offerId = typeof parsed?.offerId === "string" ? parsed.offerId : (oid || null);
+            const ue = typeof parsed?.usageEmail === "string" ? parsed.usageEmail : (usageEmail || null);
             if (rawText.trim()) {
-              loadIntoManual({ rawText, offerId });
+              loadIntoManual({ rawText, offerId, usageEmail: ue });
               window.localStorage.removeItem("iw_factcards_prefill_v1");
               return;
             }
@@ -280,7 +284,7 @@ export default function FactCardOpsPage() {
       }
 
       if (!u) return;
-      loadIntoManual({ eflUrl: u, offerId: oid || null });
+      loadIntoManual({ eflUrl: u, offerId: oid || null, usageEmail: usageEmail || null });
     } catch {
       // ignore
     }
@@ -3078,6 +3082,7 @@ export default function FactCardOpsPage() {
           prefillEflUrl={manualPrefillUrl}
           prefillOfferId={manualPrefillOfferId}
           prefillRawText={manualPrefillRawText}
+          prefillUsageEmail={manualPrefillUsageEmail}
         />
       </section>
     </div>

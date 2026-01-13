@@ -602,6 +602,7 @@ export async function POST(request: NextRequest) {
             rateStructure: null,
             validation: null,
             derivedForValidation: {
+              userEmail,
               uploadId: debugUploadId,
               houseId: debugHouseId,
               usedAi: debugUsedAi,
@@ -626,6 +627,7 @@ export async function POST(request: NextRequest) {
             termMonths: typeof parsed?.termMonths === 'number' ? parsed.termMonths : null,
             rawText: String(text ?? '').slice(0, 250_000),
             derivedForValidation: {
+              userEmail,
               uploadId: debugUploadId,
               houseId: debugHouseId,
               usedAi: debugUsedAi,
