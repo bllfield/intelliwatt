@@ -184,7 +184,7 @@ export async function POST(req: NextRequest) {
           passStrength: pipelineResult.passStrength ?? null,
           passStrengthReasons: pipelineResult.passStrengthReasons ?? null,
         } as any);
-        persistedRatePlanId = upserted?.ratePlanId ? String(upserted.ratePlanId) : null;
+        persistedRatePlanId = upserted?.ratePlan?.id ? String(upserted.ratePlan.id) : null;
       } catch {
         persistedRatePlanId = null;
       }
