@@ -102,7 +102,7 @@ export async function GET(req: NextRequest) {
     }
     if (!houseId) return NextResponse.json({ ok: false, error: "no_house_context" }, { status: 400 });
 
-    const house = await prisma.houseAddress.findUnique({
+    const house = await (prisma as any).houseAddress.findUnique({
       where: { id: houseId },
       select: {
         id: true,
