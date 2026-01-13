@@ -171,9 +171,12 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
   const raw = await (async () => {
     const OFFERS_ENDPOINT = "PLAN_PIPELINE_WATTBUY_OFFERS_V1";
     const OFFERS_TTL_MS = 15 * 60 * 1000;
-    const requestKey = `offers_by_address|line1=${house.addressLine1}|city=${house.addressCity}|state=${house.addressState}|zip=${house.addressZip5}|isRenter=${String(
+    // IMPORTANT: this cache key must include any upstream flags that change the offers set.
+    // We historically expect the "full" set (all=true). If the key omits that, we can
+    // accidentally pin a small default subset (e.g. 7 offers) until TTL expires.
+    const requestKey = `offers_by_address_v2|line1=${house.addressLine1}|city=${house.addressCity}|state=${house.addressState}|zip=${house.addressZip5}|isRenter=${String(
       isRenter,
-    )}`;
+    )}|all=true`;
 
     try {
       const cached = await (wattbuyOffersPrisma as any).wattBuyApiSnapshot.findFirst({

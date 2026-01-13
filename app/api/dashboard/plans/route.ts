@@ -442,9 +442,11 @@ export async function GET(req: NextRequest) {
       const { wattbuyOffersPrisma } = await import("@/lib/db/wattbuyOffersClient");
       const OFFERS_ENDPOINT = "DASHBOARD_WATTBUY_OFFERS_V1";
       const OFFERS_TTL_MS = 15 * 60 * 1000; // 15 min
-      const requestKey = `offers_by_address|line1=${house.addressLine1}|city=${house.addressCity}|state=${house.addressState}|zip=${house.addressZip5}|isRenter=${String(
+      // IMPORTANT: keep this key in sync with the pipeline's offer snapshot key.
+      // It must reflect "all=true" so we don't pin a small default subset in cache.
+      const requestKey = `offers_by_address_v2|line1=${house.addressLine1}|city=${house.addressCity}|state=${house.addressState}|zip=${house.addressZip5}|isRenter=${String(
         isRenter,
-      )}`;
+      )}|all=true`;
 
       const cached = await (wattbuyOffersPrisma as any).wattBuyApiSnapshot.findFirst({
         where: { endpoint: OFFERS_ENDPOINT, houseAddressId: house.id, requestKey },
