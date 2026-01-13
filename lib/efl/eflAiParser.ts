@@ -243,6 +243,61 @@ export async function parseEflTextWithAi(opts: {
       (planRules as any).currentBillEnergyRateCents = deterministicSingleEnergy;
     }
 
+    // Seasonal percent discount (month-scoped all-day TOU), e.g. Summer Break plans.
+    // Apply this in deterministic-only mode too so validation can match EFL avg-price tables
+    // even when AI is disabled/missing.
+    if (
+      (!Array.isArray(planRules.timeOfUsePeriods) ||
+        planRules.timeOfUsePeriods.length === 0) &&
+      (!Array.isArray(planRules.usageTiers) || planRules.usageTiers.length === 0)
+    ) {
+      const seasonal = extractSeasonalEnergyDiscount(rawText);
+      const baseRate =
+        typeof planRules.defaultRateCentsPerKwh === "number" &&
+        Number.isFinite(planRules.defaultRateCentsPerKwh)
+          ? Number(planRules.defaultRateCentsPerKwh)
+          : null;
+
+      if (seasonal && baseRate != null && baseRate > 0) {
+        const discMonths = seasonal.months;
+        const otherMonths = Array.from({ length: 12 }, (_, i) => i + 1).filter(
+          (m) => !discMonths.includes(m),
+        );
+        const discountedRate = baseRate * (1 - seasonal.discountPct);
+        if (Number.isFinite(discountedRate) && discountedRate >= 0) {
+          planRules.rateType = "TIME_OF_USE";
+          (planRules as any).planType = (planRules as any).planType ?? "tou";
+          planRules.timeOfUsePeriods = [
+            {
+              label: `Seasonal energy discount (${Math.round(
+                seasonal.discountPct * 100,
+              )}% off)`,
+              startHour: 0,
+              endHour: 24,
+              daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
+              months: otherMonths,
+              rateCentsPerKwh: baseRate,
+              isFree: false,
+            },
+            {
+              label: `Seasonal energy discount (${Math.round(
+                seasonal.discountPct * 100,
+              )}% off)`,
+              startHour: 0,
+              endHour: 24,
+              daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
+              months: discMonths,
+              rateCentsPerKwh: discountedRate,
+              isFree: false,
+            },
+          ];
+          warnings.push(
+            "Deterministic extract detected a seasonal % Energy Charge discount and mapped it to month-scoped TOU periods.",
+          );
+        }
+      }
+    }
+
     // Even in deterministic-only mode, prefer the Disclosure Chart metadata when present.
     // Many EFLs are column-aligned ("Type of Product   Variable Rate") with no colon.
     const { rateType: fallbackRateType, termMonths: fallbackTerm } =
@@ -269,12 +324,24 @@ export async function parseEflTextWithAi(opts: {
       planRules.tdspDeliveryIncludedInEnergyCharge = deterministicTdspIncluded;
     }
 
+    // Build a canonical RateStructure when we can, so validator + plan engine can run
+    // even without AI output.
+    let rateStructure: any = null;
+    try {
+      const prValidation = validatePlanRules(planRules as any);
+      if (prValidation?.requiresManualReview !== true) {
+        rateStructure = planRulesToRateStructure(planRules as any) as any;
+      }
+    } catch {
+      rateStructure = null;
+    }
+
     let eflAvgPriceValidation: EflAvgPriceValidation | null = null;
     try {
       eflAvgPriceValidation = await validateEflAvgPriceTable({
         rawText,
         planRules,
-        rateStructure: null,
+        rateStructure,
       });
     } catch (err) {
       const msg =
@@ -292,7 +359,7 @@ export async function parseEflTextWithAi(opts: {
 
     return {
       planRules: Object.keys(planRules).length > 0 ? planRules : null,
-      rateStructure: null,
+      rateStructure,
       parseConfidence: 0,
       parseWarnings: warnings,
       validation: eflAvgPriceValidation
@@ -1208,12 +1275,42 @@ function centsStringToNumber(cents: string): number | null {
 // Fallback: Single, non-tiered energy charge (e.g. "Energy Charge 16.3500 ¢ per kWh")
 // ----------------------------------------------------------------------
 function fallbackExtractSingleEnergyChargeCents(text: string): number | null {
-  const re =
-    /Energy\s*Charge[\s:]*([0-9]+(?:\.[0-9]+)?)\s*¢?\s*(?:\/|per)\s*kwh/i;
-  const m = text.match(re);
-  if (m?.[1]) {
-    const v = centsStringToNumber(`${m[1]}¢`);
-    if (v != null) return v;
+  // Avoid parsing narrative discount lines like:
+  // "50 percent discount off the Energy Charge..."
+  const looksLikeDiscountLine = (s: string): boolean =>
+    /\b(discount|percent|%)\b/i.test(s) && /Energy\s*Charge/i.test(s);
+
+  // Cents-form single rate: "Energy Charge 16.3500 ¢ per kWh"
+  {
+    const re =
+      /Energy\s*Charge[\s:]*([0-9]+(?:\.[0-9]+)?)\s*¢\s*(?:\/|per)\s*kwh/i;
+    const m = text.match(re);
+    if (m?.[1]) {
+      const v = centsStringToNumber(`${m[1]}¢`);
+      if (v != null) return v;
+    }
+  }
+
+  // Dollar-form single rate: "Energy Charge ... $0.1706 per kWh" or "per kWh $0.1706"
+  {
+    const re =
+      /Energy\s*Charge[\s\S]{0,120}?\$\s*([0-9]+(?:\.[0-9]+)?)\s*(?:\/|per)\s*kwh/i;
+    const m = text.match(re);
+    if (m?.[1]) {
+      const dollars = Number(m[1]);
+      if (Number.isFinite(dollars)) return dollars * 100;
+    }
+  }
+  {
+    const re =
+      /Energy\s*Charge[\s\S]{0,120}?(?:\/|per)\s*kwh[^0-9$]{0,30}\$?\s*([0-9]+(?:\.[0-9]+)?)/i;
+    const m = text.match(re);
+    if (m?.[1]) {
+      const n = Number(m[1]);
+      if (!Number.isFinite(n)) return null;
+      // Heuristic: <=2 is likely $/kWh, otherwise cents/kWh.
+      return n <= 2 ? n * 100 : n;
+    }
   }
 
   // Table-style fallback: in many EFLs, "Energy Charge (per kWh)" is a header row
@@ -1224,6 +1321,10 @@ function fallbackExtractSingleEnergyChargeCents(text: string): number | null {
     .filter((l) => l.length > 0);
 
   const centsTokenRe = /(\d+(?:\.\d+)?)\s*¢\s*(?:\/\s*kwh|per\s*kwh)/i;
+  const dollarTokenRe =
+    /\$\s*([0-9]+(?:\.[0-9]+)?)\s*(?:\/\s*kwh|per\s*kwh)/i;
+  const dollarAfterHeaderRe =
+    /per\s*kwh[^0-9$]{0,30}\$?\s*([0-9]+(?:\.[0-9]+)?)/i;
   const parseAllCentsTokens = (line: string): number[] => {
     const cleaned = line.replace(/,/g, "");
     const hits = Array.from(
@@ -1233,6 +1334,25 @@ function fallbackExtractSingleEnergyChargeCents(text: string): number | null {
       .map((h) => (h?.[1] ? Number(h[1]) : NaN))
       .filter((n) => Number.isFinite(n));
   };
+  const parseAllDollarTokensToCents = (line: string): number[] => {
+    const cleaned = line.replace(/,/g, "");
+    const out: number[] = [];
+    const hits = Array.from(
+      cleaned.matchAll(
+        /\$\s*([0-9]+(?:\.[0-9]+)?)\s*(?:\/\s*kwh|per\s*kwh)/gi,
+      ),
+    );
+    for (const h of hits) {
+      const dollars = h?.[1] ? Number(h[1]) : NaN;
+      if (Number.isFinite(dollars)) out.push(dollars * 100);
+    }
+    const m2 = cleaned.match(dollarAfterHeaderRe);
+    if (m2?.[1]) {
+      const n = Number(m2[1]);
+      if (Number.isFinite(n)) out.push(n <= 2 ? n * 100 : n);
+    }
+    return out;
+  };
 
   const energyHeaderIdx = lines.findIndex((l) => /Energy\s*Charge/i.test(l));
   if (energyHeaderIdx >= 0) {
@@ -1240,10 +1360,17 @@ function fallbackExtractSingleEnergyChargeCents(text: string): number | null {
     for (let j = 1; j <= 10; j++) {
       const candidate = lines[energyHeaderIdx + j];
       if (!candidate) continue;
+      if (looksLikeDiscountLine(candidate)) continue;
       // Skip obvious TDSP delivery rows.
       if (/Delivery/i.test(candidate) || /TDSP/i.test(candidate) || /TDU/i.test(candidate)) continue;
-      if (!centsTokenRe.test(candidate)) continue;
-      candidates.push(...parseAllCentsTokens(candidate));
+      if (centsTokenRe.test(candidate)) {
+        candidates.push(...parseAllCentsTokens(candidate));
+        continue;
+      }
+      if (dollarTokenRe.test(candidate) || dollarAfterHeaderRe.test(candidate)) {
+        candidates.push(...parseAllDollarTokensToCents(candidate));
+        continue;
+      }
     }
     if (candidates.length > 0) {
       // Heuristic: REP energy charge is usually >= TDSP ¢/kWh and appears as the larger token.

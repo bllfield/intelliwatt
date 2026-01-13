@@ -248,6 +248,64 @@ export async function solveEflValidationGaps(args: {
     }
   }
 
+  // ---------------- Seasonal % discount off Energy Charge (month-scoped TOU) ----------------
+  // Some EFLs disclose a flat energy charge plus a seasonal discount period, e.g.:
+  //   "50 percent discount off the Energy Charge ... from June 1 ... through September 30 ..."
+  //
+  // The EFL's avg-price table often reflects an annualized average across the contract year,
+  // so for deterministic validation we model this as 2 all-day TOU periods split by months.
+  //
+  // This keeps the plan computable with only kwh.m.all.total buckets (all-day windows).
+  if (derivedPlanRules) {
+    const hasTou =
+      Array.isArray((derivedPlanRules as any).timeOfUsePeriods) &&
+      (derivedPlanRules as any).timeOfUsePeriods.length > 0;
+    const hasTiers =
+      Array.isArray((derivedPlanRules as any).usageTiers) &&
+      (derivedPlanRules as any).usageTiers.length > 0;
+
+    if (!hasTou && !hasTiers) {
+      const baseRate =
+        typeof (derivedPlanRules as any).defaultRateCentsPerKwh === "number" &&
+        Number.isFinite((derivedPlanRules as any).defaultRateCentsPerKwh)
+          ? Number((derivedPlanRules as any).defaultRateCentsPerKwh)
+          : null;
+
+      const seasonal = extractSeasonalEnergyDiscount(rawText);
+      if (seasonal && baseRate != null && baseRate > 0) {
+        const discMonths = seasonal.months;
+        const otherMonths = Array.from({ length: 12 }, (_, i) => i + 1).filter((m) => !discMonths.includes(m));
+        const discountedRate = baseRate * (1 - seasonal.discountPct);
+
+        if (Number.isFinite(discountedRate) && discountedRate >= 0) {
+          (derivedPlanRules as any).rateType = "TIME_OF_USE";
+          (derivedPlanRules as any).planType = (derivedPlanRules as any).planType ?? "tou";
+          (derivedPlanRules as any).timeOfUsePeriods = [
+            {
+              label: `Seasonal energy discount (${Math.round(seasonal.discountPct * 100)}% off)`,
+              startHour: 0,
+              endHour: 24,
+              daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
+              months: otherMonths,
+              rateCentsPerKwh: baseRate,
+              isFree: false,
+            },
+            {
+              label: `Seasonal energy discount (${Math.round(seasonal.discountPct * 100)}% off)`,
+              startHour: 0,
+              endHour: 24,
+              daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
+              months: discMonths,
+              rateCentsPerKwh: discountedRate,
+              isFree: false,
+            },
+          ];
+          solverApplied.push("SEASONAL_ENERGY_DISCOUNT_TO_MONTHLY_TOU");
+        }
+      }
+    }
+  }
+
   // ---------------- Conditional service fee cutoff (<= N kWh) ----------------
   // Some EFLs describe a monthly/service fee that only applies up to a maximum usage,
   // e.g., "Monthly Service Fee $8.00 per billing cycle for usage (<=1999) kWh".
@@ -550,21 +608,64 @@ function extractSingleEnergyChargeCentsPerKwhFromEflText(rawText: string): numbe
     const t = String(rawText ?? "");
     if (!t.trim()) return null;
 
-    // Scan line-by-line for the disclosure "Energy Charge" row.
-    // This is more robust than relying on the ¢ symbol, which can be mojibake'd (e.g. "Â¢" / "A�").
-    const lines = t.split(/\r?\n/);
-    for (const lineRaw of lines) {
-      const line = String(lineRaw ?? "").trim();
+    // Scan line-by-line for a real "Energy Charge" *rate* row.
+    // IMPORTANT: many EFLs mention "Energy Charge discount" (e.g. "50 percent discount off the Energy Charge"),
+    // which must NOT be parsed as the ¢/kWh rate.
+    const lines = t.split(/\r?\n/).map((l) => String(l ?? "").trim());
+
+    const looksLikeDiscountLine = (s: string): boolean =>
+      /\b(discount|percent|%)\b/i.test(s) && /Energy\s*Charge/i.test(s);
+
+    const parsePerKwhRate = (s: string): number | null => {
+      const line = String(s ?? "");
+      if (!/per\s*kwh|\/\s*kwh/i.test(line)) return null;
+      if (looksLikeDiscountLine(line)) return null;
+      if (/Delivery/i.test(line) || /TDSP/i.test(line) || /TDU/i.test(line)) return null;
+
+      // Cents form: "17.06¢ per kWh" / "17.06 ¢/kWh"
+      const cm = line.match(/([0-9]{1,3}(?:\.[0-9]{1,6})?)\s*¢\s*(?:\/\s*kwh|per\s*kwh)/i);
+      if (cm?.[1]) {
+        const v = Number(cm[1]);
+        return Number.isFinite(v) ? v : null;
+      }
+
+      // Dollar form: "$0.1706 per kWh" / "per kWh $0.1706"
+      const dm1 = line.match(/\$\s*([0-9]{1,3}(?:\.[0-9]{1,6})?)\s*(?:\/\s*kwh|per\s*kwh)/i);
+      if (dm1?.[1]) {
+        const dollars = Number(dm1[1]);
+        return Number.isFinite(dollars) ? dollars * 100 : null;
+      }
+      const dm2 = line.match(/per\s*kwh[^0-9$]{0,30}\$?\s*([0-9]{1,3}(?:\.[0-9]{1,6})?)/i);
+      if (dm2?.[1]) {
+        const dollars = Number(dm2[1]);
+        // Heuristic: values <= 2 are $/kWh; values > 2 are almost certainly ¢/kWh.
+        if (!Number.isFinite(dollars)) return null;
+        return dollars <= 2 ? dollars * 100 : dollars;
+      }
+
+      return null;
+    };
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i] ?? "";
       if (!line) continue;
       if (!/Energy\s*Charge/i.test(line)) continue;
       // Avoid TOU peak/off-peak variants.
       if (/\bpeak\b|\boff[-\s]?peak\b/i.test(line)) continue;
+      // Skip "discount" narrative lines that mention Energy Charge but are not rate rows.
+      if (looksLikeDiscountLine(line)) continue;
 
-      const m = line.match(/([0-9]{1,3}(?:\.[0-9]{1,6})?)/);
-      if (!m) continue;
-      const n = Number(m[1]);
-      if (!Number.isFinite(n) || n < 0) continue;
-      return n;
+      // Try the line itself first.
+      const direct = parsePerKwhRate(line);
+      if (direct != null) return direct;
+
+      // Table-style: the numeric token can be on a subsequent line near the Energy Charge header.
+      for (let j = 1; j <= 6; j++) {
+        const next = lines[i + j] ?? "";
+        if (!next) continue;
+        const v = parsePerKwhRate(`${line} ${next}`);
+        if (v != null) return v;
+      }
     }
 
     return null;
@@ -593,6 +694,55 @@ function extractSingleEnergyChargeCentsPerKwhFromRateStructure(rs: any): number 
   } catch {
     return null;
   }
+}
+
+function monthNameToNumber(s: string): number | null {
+  const t = String(s ?? "").trim().toLowerCase();
+  const map: Record<string, number> = {
+    january: 1,
+    february: 2,
+    march: 3,
+    april: 4,
+    may: 5,
+    june: 6,
+    july: 7,
+    august: 8,
+    september: 9,
+    october: 10,
+    november: 11,
+    december: 12,
+  };
+  return map[t] ?? null;
+}
+
+function extractSeasonalEnergyDiscount(text: string): { discountPct: number; months: number[] } | null {
+  const raw = String(text ?? "");
+  if (!raw.trim()) return null;
+
+  // Example:
+  // "You will receive a 50 percent discount off the Energy Charge ... from June 1 ... through September 30 ..."
+  const pctMatch = raw.match(/([0-9]{1,3})\s*(?:percent|%)\s*discount\s*off\s*the\s*Energy\s*Charge/i);
+  if (!pctMatch?.[1]) return null;
+  const pct = Number(pctMatch[1]);
+  if (!Number.isFinite(pct) || pct <= 0 || pct >= 100) return null;
+
+  const fromMatch = raw.match(/\bfrom\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+([0-9]{1,2})/i);
+  const throughMatch = raw.match(/\bthrough\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+([0-9]{1,2})/i);
+  if (!fromMatch?.[1] || !throughMatch?.[1]) return null;
+
+  const startMonth = monthNameToNumber(fromMatch[1]);
+  const endMonth = monthNameToNumber(throughMatch[1]);
+  if (!startMonth || !endMonth) return null;
+
+  const months: number[] = [];
+  if (startMonth <= endMonth) {
+    for (let m = startMonth; m <= endMonth; m++) months.push(m);
+  } else {
+    for (let m = startMonth; m <= 12; m++) months.push(m);
+    for (let m = 1; m <= endMonth; m++) months.push(m);
+  }
+
+  return { discountPct: pct / 100, months };
 }
 
 // Simple masked-TDSP detector used only for solverApplied/debugging.

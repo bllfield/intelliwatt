@@ -1245,16 +1245,30 @@ export async function modelAvgCentsPerKwhAtUsage(args: {
       ? assumptions.weekendUsagePercent
       : undefined;
 
-  const engineResult = await computeModeledComponentsOrNull({
-    planRules: planRules as PlanRules,
-    rateStructure: (rateStructure as RateStructure | null) ?? null,
-    kwh: usageKwh,
-    eflTdsp: effectiveTdsp,
-    tdspIncludedInEnergyCharge: tdspIncludedFlag,
-    nightUsagePercent,
-    nightStartHour,
-    nightEndHour,
-  });
+  // If TOU periods are scoped to specific months, the canonical engine adapter uses a
+  // fixed base date and cannot reflect seasonal month-based pricing. For avg-price
+  // table validation, prefer deterministic validator math (which blends across months).
+  const hasMonthScopedTou =
+    Array.isArray((planRules as any)?.timeOfUsePeriods) &&
+    (planRules as any).timeOfUsePeriods.some(
+      (p: any) => Array.isArray(p?.months) && p.months.length > 0,
+    );
+
+  const engineResult = hasMonthScopedTou
+    ? { components: null, usedEngineTdspFallback: false }
+    : await computeModeledComponentsOrNull({
+        planRules: planRules as PlanRules,
+        rateStructure: (rateStructure as RateStructure | null) ?? null,
+        kwh: usageKwh,
+        eflTdsp: effectiveTdsp,
+        tdspIncludedInEnergyCharge: tdspIncludedFlag,
+        nightUsagePercent,
+        nightStartHour,
+        nightEndHour,
+      });
+  if (hasMonthScopedTou) {
+    notes.push("FORCED_VALIDATOR_MATH:MONTH_SCOPED_TOU");
+  }
 
   let components = engineResult.components;
 
@@ -1989,6 +2003,18 @@ export async function validateEflAvgPriceTable(args: {
       Array.isArray((planRulesForValidation as any).timeOfUsePeriods) &&
       (planRulesForValidation as any).timeOfUsePeriods.length > 0
     ) {
+      components = null;
+    }
+
+    // For seasonal month-scoped TOU (e.g., "X% discount off Energy Charge from June–Sep"),
+    // the canonical engine adapter uses a fixed base date and cannot reflect month-based
+    // pricing. Prefer deterministic validator math which blends across months.
+    const hasMonthScopedTou =
+      Array.isArray((planRulesForValidation as any).timeOfUsePeriods) &&
+      (planRulesForValidation as any).timeOfUsePeriods.some(
+        (p: any) => Array.isArray(p?.months) && p.months.length > 0,
+      );
+    if (hasMonthScopedTou) {
       components = null;
     }
 
