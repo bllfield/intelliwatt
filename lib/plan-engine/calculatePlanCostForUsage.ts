@@ -62,6 +62,14 @@ function safeNum(n: unknown): number | null {
 type UsageBucketsByMonth = Record<string /* YYYY-MM */, Record<string /* bucketKey */, number /* kWh */>>;
 type HHMM = string; // "0000".."2400" (validated at runtime in callers/parsers)
 
+function monthNumberFromYearMonth(ym: string): number | null {
+  // ym = "YYYY-MM"
+  const m = String(ym ?? "").match(/^(\d{4})-(\d{2})$/);
+  if (!m?.[2]) return null;
+  const n = Number(m[2]);
+  return Number.isFinite(n) && n >= 1 && n <= 12 ? n : null;
+}
+
 function isObject(v: unknown): v is Record<string, any> {
   return typeof v === "object" && v !== null;
 }
@@ -666,13 +674,24 @@ export function calculatePlanCostForUsage(args: {
         const m = byMonth[ym];
         if (!m || typeof m !== "object") continue;
 
+        const monthNum = monthNumberFromYearMonth(ym);
         let monthTotalKwh = sumMonthBucketKwh(m, "kwh.m.all.total");
         if (monthTotalKwh == null) missing.push(`${ym}:kwh.m.all.total`);
 
         let sumPeriodsKwh = 0;
         let monthRepEnergyCents = 0;
         const dbg: any[] = [];
-        for (const p of schedule.periods) {
+        const applicablePeriods = schedule.periods.filter((p: any) => {
+          const months = Array.isArray(p?.months) ? (p.months as number[]) : null;
+          if (!months || months.length === 0) return true; // applies all months
+          if (monthNum == null) return false; // can't determine applicability
+          return months.includes(monthNum);
+        });
+        if (applicablePeriods.length === 0) {
+          missing.push(`${ym}:tou_period_missing_for_month`);
+        }
+
+        for (const p of applicablePeriods) {
           const k = p.startHHMM === "0000" && p.endHHMM === "2400"
             ? `kwh.m.${p.dayType}.total`
             : `kwh.m.${p.dayType}.${p.startHHMM}-${p.endHHMM}`;
