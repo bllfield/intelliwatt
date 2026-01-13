@@ -292,7 +292,7 @@ export async function POST(req: NextRequest) {
             .catch(() => null)
         : null;
 
-    const templateUsed = Boolean(existingBillPlanTemplate?.id);
+    const templateMatched = Boolean(existingBillPlanTemplate?.id);
     const templateId: string | null = existingBillPlanTemplate?.id ? String(existingBillPlanTemplate.id) : null;
 
     // IMPORTANT:
@@ -305,7 +305,7 @@ export async function POST(req: NextRequest) {
       /\bfrom\s+(?:June|July|August|September|October|November|December|January|February|March|April|May)\b[\s\S]{0,60}\bthrough\s+(?:June|July|August|September|October|November|December|January|February|March|April|May)\b/i.test(rawText);
 
     const templateHasUsablePricing = (() => {
-      if (!templateUsed) return false;
+      if (!templateMatched) return false;
       const rt = String(existingBillPlanTemplate?.rateType ?? "").toUpperCase();
       if (rt === "TIME_OF_USE") {
         const tiers = Array.isArray(existingBillPlanTemplate?.timeOfUseConfigJson)
@@ -324,7 +324,7 @@ export async function POST(req: NextRequest) {
     })();
 
     const templateHasSeasonalPeriods = (() => {
-      if (!templateUsed) return false;
+      if (!templateMatched) return false;
       const rt = String(existingBillPlanTemplate?.rateType ?? "").toUpperCase();
       if (rt !== "TIME_OF_USE") return false;
       const tiers = Array.isArray(existingBillPlanTemplate?.timeOfUseConfigJson)
@@ -335,7 +335,7 @@ export async function POST(req: NextRequest) {
     })();
 
     const shouldRunPipeline =
-      !templateUsed || !templateHasUsablePricing || (seasonalDiscountLike && !templateHasSeasonalPeriods);
+      !templateMatched || !templateHasUsablePricing || (seasonalDiscountLike && !templateHasSeasonalPeriods);
 
     // Use the same EFL engine as Fact Cards (AI parse → avg-price validator → gap solver) when needed.
     const pipeline = shouldRunPipeline
@@ -353,6 +353,11 @@ export async function POST(req: NextRequest) {
         })
       : null;
 
+    // Key distinction:
+    // - templateMatched: we found a BillPlanTemplate by provider+plan
+    // - templateUsed: we actually used it as the pricing source (i.e., we did NOT run the full pipeline)
+    const templateUsed = templateMatched && !pipeline;
+
     const effectivePlanRules: any = pipeline ? (pipeline.effectivePlanRules ?? pipeline.planRules ?? null) : null;
     const effectiveRateStructure: any = pipeline ? (pipeline.effectiveRateStructure ?? pipeline.rateStructure ?? null) : null;
 
@@ -367,7 +372,7 @@ export async function POST(req: NextRequest) {
         planName: labels.planName ?? null,
         termMonths: (() => {
           if (typeof effectivePlanRules?.termMonths === "number") return effectivePlanRules.termMonths;
-          if (templateUsed && typeof existingBillPlanTemplate?.termMonths === "number") return existingBillPlanTemplate.termMonths;
+          if (templateMatched && typeof existingBillPlanTemplate?.termMonths === "number") return existingBillPlanTemplate.termMonths;
           return null;
         })(),
         baseMonthlyFeeCents:
@@ -375,7 +380,7 @@ export async function POST(req: NextRequest) {
             ? Math.round(effectivePlanRules.baseChargePerMonthCents)
             : typeof effectiveRateStructure?.baseMonthlyFeeCents === "number"
               ? Math.round(effectiveRateStructure.baseMonthlyFeeCents)
-              : templateUsed && typeof existingBillPlanTemplate?.baseChargeCentsPerMonth === "number"
+              : templateMatched && typeof existingBillPlanTemplate?.baseChargeCentsPerMonth === "number"
                 ? Math.round(existingBillPlanTemplate.baseChargeCentsPerMonth)
               : null,
         cancelFeeCents: cancelFeeCentsDerived,
@@ -821,6 +826,7 @@ export async function POST(req: NextRequest) {
     const warnings: string[] = [
       ...((det.warnings ?? []) as any[]).map((x) => String(x)),
       ...(templateUsed ? ["Template reused: BillPlanTemplate matched by provider+plan; skipped full EFL pipeline."] : []),
+      ...(templateMatched && !templateUsed ? ["Template matched, but full EFL pipeline ran (template missing required seasonal/price fields)."] : []),
       ...(((pipeline?.parseWarnings ?? []) as any[]) ?? []).map((x) => String(x)),
     ].filter(Boolean);
 
@@ -936,9 +942,10 @@ export async function POST(req: NextRequest) {
         extractedFrom: "EFL_PDF",
         eflPdfSha256: det.eflPdfSha256,
         extractorMethod: (det as any)?.extractorMethod ?? null,
+        templateMatched,
         templateUsed,
         templateId,
-        templateKey: templateUsed && providerKey && planKey ? `${providerKey}::${planKey}` : null,
+        templateKey: templateMatched && providerKey && planKey ? `${providerKey}::${planKey}` : null,
         warnings: det.warnings ?? [],
         parsedWarnings: ((pipeline?.parseWarnings ?? []) as any[]) as string[],
         notes: ((pipeline as any)?.parseWarnings ?? []) as string[],
