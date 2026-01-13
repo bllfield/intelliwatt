@@ -1,10 +1,12 @@
 const { Client } = require("pg");
 
 async function ensureDatabase() {
-  const defaultUrl =
-    process.env.DIRECT_URL ||
-    process.env.DEFAULT_DB_URL ||
-    "postgresql://doadmin:AVNS_lUXcN2ftFFu6XUIc5G0@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25060/defaultdb?sslmode=require";
+  const defaultUrl = process.env.DIRECT_URL || process.env.DEFAULT_DB_URL;
+  if (!defaultUrl) {
+    throw new Error(
+      "Missing DIRECT_URL/DEFAULT_DB_URL. Refusing to run without an explicit database URL in environment variables.",
+    );
+  }
 
   const url = new URL(defaultUrl);
 
@@ -18,7 +20,7 @@ async function ensureDatabase() {
   });
 
   try {
-    console.log("Connecting to", defaultUrl);
+    console.log("Connecting to DEFAULT_DB_URL/DIRECT_URL (redacted)");
     await client.connect();
     await client.query('CREATE DATABASE "intelliwatt_current_plan"');
     console.log("intelliwatt_current_plan database created");
