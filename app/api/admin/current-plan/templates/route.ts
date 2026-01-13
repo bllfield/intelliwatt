@@ -42,6 +42,19 @@ export async function GET(request: NextRequest) {
     const limit = Math.max(1, Math.min(200, Number(limitParam) || 50));
 
     const currentPlanPrisma = getCurrentPlanPrisma() as any;
+
+    // Debug: confirm which DB Vercel is connected to (safe to return; no secrets).
+    let dbInfo: { db: string | null; schema: string | null } | null = null;
+    try {
+      const r = (await currentPlanPrisma.$queryRaw`SELECT current_database()::text AS db, current_schema()::text AS schema`) as any;
+      const row = Array.isArray(r) ? r[0] : r;
+      dbInfo = {
+        db: typeof row?.db === 'string' ? row.db : null,
+        schema: typeof row?.schema === 'string' ? row.schema : null,
+      };
+    } catch {
+      // ignore (best-effort only)
+    }
     const parsedDelegate = currentPlanPrisma.parsedCurrentPlan as any;
 
     const templates = await parsedDelegate.findMany({
@@ -80,6 +93,7 @@ export async function GET(request: NextRequest) {
       limit,
       count: serialized.length,
       templates: serialized,
+      ...(dbInfo ? { dbInfo } : {}),
     });
   } catch (error) {
     const d = errDetails(error);
