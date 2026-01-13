@@ -441,6 +441,57 @@ export async function GET(req: NextRequest) {
 
         if (touMaybe?.schedule?.periods?.length) {
           out.push({ key: "rep.tou_periods", label: "REP time-of-use periods", value: String(touMaybe.schedule.periods.length) });
+
+          // Helpful UI summary for common "seasonal discount" current plans, where the discount is modeled
+          // as month-scoped all-day TOU periods (e.g., Jun–Sep lower rate).
+          try {
+            const monthRanges = (months: number[]): string => {
+              const uniq = Array.from(new Set(months.filter((m) => Number.isFinite(m) && m >= 1 && m <= 12))).sort((a, b) => a - b);
+              if (uniq.length === 0) return "—";
+              const out: string[] = [];
+              let start = uniq[0];
+              let prev = uniq[0];
+              for (let i = 1; i < uniq.length; i++) {
+                const m = uniq[i];
+                if (m === prev + 1) {
+                  prev = m;
+                  continue;
+                }
+                out.push(start === prev ? String(start) : `${start}-${prev}`);
+                start = m;
+                prev = m;
+              }
+              out.push(start === prev ? String(start) : `${start}-${prev}`);
+              // Map month numbers to short names for readability (1=Jan).
+              const names = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+              return out
+                .map((r) => {
+                  const parts = r.split("-").map((x) => Number(x));
+                  if (parts.length === 1) return names[(parts[0] ?? 1) - 1] ?? r;
+                  return `${names[(parts[0] ?? 1) - 1] ?? parts[0]}–${names[(parts[1] ?? 1) - 1] ?? parts[1]}`;
+                })
+                .join(", ");
+            };
+
+            const periods = touMaybe.schedule.periods as any[];
+            const allDay = periods.filter((p) => String(p?.dayType ?? "").toLowerCase() === "all" && String(p?.startHHMM ?? "") === "0000" && String(p?.endHHMM ?? "") === "2400");
+            const parts = allDay.slice(0, 4).map((p) => {
+              const months = Array.isArray(p?.months) ? (p.months as number[]) : [];
+              const rate = typeof p?.repEnergyCentsPerKwh === "number" ? p.repEnergyCentsPerKwh : null;
+              const mLabel = months.length ? monthRanges(months) : "All months";
+              const rLabel = rate != null && Number.isFinite(rate) ? `${Number(rate).toFixed(4)}¢` : "—";
+              return `${mLabel}: ${rLabel}`;
+            });
+            if (parts.length > 0) {
+              out.push({
+                key: "rep.tou_summary",
+                label: "Seasonal / TOU energy rates",
+                value: parts.join(" · "),
+              });
+            }
+          } catch {
+            // ignore; best-effort UI sugar
+          }
         } else if (rt === "TIME_OF_USE" && Array.isArray(rs?.tiers)) {
           out.push({ key: "rep.tou_tiers", label: "REP time-of-use tiers", value: String(rs.tiers.length) });
         } else if (tieredMaybe?.ok) {
