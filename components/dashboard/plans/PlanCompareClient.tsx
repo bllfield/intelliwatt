@@ -116,7 +116,8 @@ export default function PlanCompareClient(props: { offerId: string }) {
     }
   }, [offerId]);
 
-  const cacheKey = useMemo(() => `dashboard_plans_compare_resp_v1:${offerId}`, [offerId]);
+  // Bump when response semantics change so we don't pin users to stale/partial cached payloads.
+  const cacheKey = useMemo(() => `dashboard_plans_compare_resp_v2:${offerId}`, [offerId]);
   const cacheTtlMs = 15 * 60 * 1000; // 15 minutes
 
   useEffect(() => {
@@ -125,15 +126,17 @@ export default function PlanCompareClient(props: { offerId: string }) {
     setLoading(true);
     setError(null);
 
-    // session cache first
+    // Session cache: hydrate fast, but NEVER skip revalidation.
+    // This prevents cases where a partial cached response makes "current plan" look missing.
+    let hydratedFromCache = false;
     try {
       const raw = window.sessionStorage.getItem(cacheKey);
       if (raw) {
         const parsed = JSON.parse(raw) as { t: number; resp: ApiResp };
         if (parsed?.resp && typeof parsed.t === "number" && Date.now() - parsed.t <= cacheTtlMs) {
           setData(parsed.resp);
+          hydratedFromCache = true;
           setLoading(false);
-          return () => controller.abort();
         }
       }
     } catch {
@@ -144,12 +147,13 @@ export default function PlanCompareClient(props: { offerId: string }) {
       try {
         const r = await fetch(`/api/dashboard/plans/compare?offerId=${encodeURIComponent(offerId)}`, {
           signal: controller.signal,
+          cache: "no-store",
         });
         const j = (await r.json().catch(() => null)) as ApiResp | null;
         if (controller.signal.aborted) return;
         if (!r.ok || !j || !(j as any).ok) {
           setError((j as any)?.error ?? `Request failed (${r.status})`);
-          setData(j);
+          if (!hydratedFromCache) setData(j);
           return;
         }
         setData(j);
@@ -161,6 +165,7 @@ export default function PlanCompareClient(props: { offerId: string }) {
       } catch (e: any) {
         if (controller.signal.aborted) return;
         setError(e?.message ?? String(e));
+        if (!hydratedFromCache) setData(null);
       } finally {
         if (controller.signal.aborted) return;
         setLoading(false);
