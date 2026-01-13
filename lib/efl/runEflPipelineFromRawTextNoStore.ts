@@ -40,6 +40,18 @@ export async function runEflPipelineFromRawTextNoStore(
     throw new Error("Missing eflPdfSha256; cannot run raw-text EFL pipeline.");
   }
 
+  // In raw-text-only mode we may not have deterministic PDF extract metadata (PUCT cert / Ver. #)
+  // available from upstream. These identifiers are commonly present in the EFL text itself,
+  // so we best-effort extract them here to avoid "PASS but not persisted" failures.
+  const repPuctCertificate =
+    String(args.repPuctCertificate ?? "").trim() ||
+    extractRepPuctCertificateFromEflText(rawText) ||
+    null;
+  const eflVersionCode =
+    String(args.eflVersionCode ?? "").trim() ||
+    extractEflVersionCodeFromEflText(rawText) ||
+    null;
+
   const aiResult = await parseEflTextWithAi({
     rawText,
     eflPdfSha256,
@@ -129,8 +141,8 @@ export async function runEflPipelineFromRawTextNoStore(
   return {
     deterministic: {
       eflPdfSha256,
-      repPuctCertificate: args.repPuctCertificate ?? null,
-      eflVersionCode: args.eflVersionCode ?? null,
+      repPuctCertificate,
+      eflVersionCode,
       extractorMethod: "raw_text_queue",
       warnings: ["Pipeline used stored rawText (PDF fetch unavailable)."],
       rawText,
@@ -154,3 +166,57 @@ export async function runEflPipelineFromRawTextNoStore(
   };
 }
 
+function extractRepPuctCertificateFromEflText(text: string): string | null {
+  const t = String(text ?? "");
+  if (!t.trim()) return null;
+  const m =
+    t.match(
+      /\b(?:PUCT\s*(?:Certificate\s*(?:No\.?|Number)?|Cert\.?|License)|REP\s*No\.)\s*[#:.\s]*([0-9]{4,6})\b/i,
+    ) ??
+    t.match(/\bPUC\s*license\s*#\s*([0-9]{4,6})\b/i);
+  return m?.[1] ?? null;
+}
+
+function extractEflVersionCodeFromEflText(text: string): string | null {
+  const raw = String(text ?? "");
+  if (!raw.trim()) return null;
+
+  const lines = raw.split(/\r?\n/).map((l) => l.trim());
+
+  const normalizeToken = (s: string): string => {
+    // Keep characters commonly seen in EFL version codes.
+    return s
+      .replace(/\s+/g, " ")
+      .replace(/[^\w+\-./]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  };
+
+  // Common forms:
+  // - "Version # TXSUMBRK24ENRL_..."
+  // - "Ver. #: SOME_CODE"
+  // - "Version #:" on one line, code on the next.
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    if (!line) continue;
+
+    const mInline =
+      line.match(/\b(?:Version|Ver\.?)\s*#\s*:?\s*(.+)$/i) ??
+      line.match(/\bEFL\s*Ver\.?\s*#\s*:?\s*(.+)$/i);
+    if (mInline?.[1]) {
+      const token = normalizeToken(mInline[1]);
+      if (token) return token;
+    }
+
+    const isHeaderOnly =
+      /\b(?:Version|Ver\.?)\s*#\s*:?\s*$/i.test(line) ||
+      /\bEFL\s*Ver\.?\s*#\s*:?\s*$/i.test(line);
+    if (isHeaderOnly) {
+      const next = lines[i + 1] ?? "";
+      const token = normalizeToken(next);
+      if (token) return token;
+    }
+  }
+
+  return null;
+}

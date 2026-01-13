@@ -106,6 +106,15 @@ function normalizeUrl(u: string | null | undefined): string | null {
   }
 }
 
+function fallbackEflUrlForSha(sha256: string | null | undefined): string | null {
+  const sha = String(sha256 ?? "").trim();
+  if (!sha) return null;
+  // This is a stable, valid URL used as an identity/reference when upstream EFL URLs are unavailable
+  // (e.g., WAF blocks PDF fetch but we have stored rawText + sha in the review queue).
+  // It does not need to be a publicly browsable page; it is primarily an identifier.
+  return `https://intelliwatt.com/api/admin/efl/raw-text/fetch?sha256=${encodeURIComponent(sha)}`;
+}
+
 function toBuffer(x: Buffer | Uint8Array): Buffer {
   return Buffer.isBuffer(x) ? x : Buffer.from(x);
 }
@@ -357,6 +366,13 @@ export async function runEflPipeline(input: RunEflPipelineInput): Promise<RunEfl
     return err("VALIDATE", "PIPELINE_VALIDATE_FAIL", msg);
   }
 
+  // If we don't have a resolvable upstream EFL URL (common in rawText-only queue runs),
+  // synthesize a stable, valid URL so persistence guardrails can succeed.
+  const eflUrlForStorage =
+    fetchedUrl ?? eflUrlCanonical ?? fallbackEflUrlForSha(eflPdfSha256);
+  const eflSourceUrlForStorage =
+    eflSourceUrlCanonical ?? eflUrlForStorage;
+
   // Default outcome: if we can't (or shouldn't) persist, we queue.
   const persistEligible =
     finalStatus === "PASS" && passStrength === "STRONG" && planRules && rateStructure;
@@ -395,7 +411,7 @@ export async function runEflPipeline(input: RunEflPipelineInput): Promise<RunEfl
         offerId,
         supplier: offerMetaResolved.supplier ?? null,
         planName: offerMetaResolved.planName ?? null,
-        eflUrl: fetchedUrl ?? eflUrlCanonical,
+        eflUrl: eflUrlForStorage,
         tdspName: offerMetaResolved.tdspName ?? null,
         termMonths: offerMetaResolved.termMonths ?? null,
         rawText,
@@ -412,7 +428,7 @@ export async function runEflPipeline(input: RunEflPipelineInput): Promise<RunEfl
       ok: true,
       stage: "QUEUE_UPDATE",
       offerId,
-      eflUrlCanonical: fetchedUrl ?? eflUrlCanonical,
+      eflUrlCanonical: eflUrlForStorage,
       ratePlanId: null,
       rawTextLen: rawText.length,
       rawTextPreview: det?.rawTextPreview ?? rawText.slice(0, 20000),
@@ -445,7 +461,7 @@ export async function runEflPipeline(input: RunEflPipelineInput): Promise<RunEfl
         ok: true,
         stage: "PERSIST",
         offerId,
-        eflUrlCanonical: fetchedUrl ?? eflUrlCanonical,
+        eflUrlCanonical: eflUrlForStorage,
         ratePlanId: null,
         rawTextLen: rawText.length,
         eflPdfSha256,
@@ -476,8 +492,8 @@ export async function runEflPipeline(input: RunEflPipelineInput): Promise<RunEfl
               : input.source === "manual_text"
                 ? "manual_text"
                 : "manual_url",
-      eflUrl: fetchedUrl ?? eflUrlCanonical,
-      eflSourceUrl: eflSourceUrlCanonical,
+      eflUrl: eflUrlForStorage,
+      eflSourceUrl: eflSourceUrlForStorage,
       offerId,
       offerMeta: offerMetaResolved,
       deterministic: {
