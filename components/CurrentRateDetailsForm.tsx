@@ -1045,6 +1045,7 @@ export function CurrentRateDetailsForm({
 
       const tou = Array.isArray(p?.touWindows) ? p.touWindows : [];
       if (tou.length > 0) {
+        const ALL_MONTHS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
         setRateType("TIME_OF_USE");
         setTouTiers(() =>
           tou.map((t: any, idx: number) => ({
@@ -1058,7 +1059,16 @@ export function CurrentRateDetailsForm({
             endTime: typeof t?.end === "string" ? t.end : "",
             useAllDays: true,
             selectedDays: [],
-            selectedMonths: [],
+            selectedMonths: (() => {
+              const raw = Array.isArray(t?.monthsOfYear) ? (t.monthsOfYear as any[]) : null;
+              const cleaned = raw
+                ? raw
+                    .map((m) => Number(m))
+                    .filter((m) => Number.isFinite(m) && m >= 1 && m <= 12)
+                : [];
+              // UX: if no month-scoping provided, treat as "all months" and check them all.
+              return cleaned.length ? Array.from(new Set(cleaned)).sort((a, b) => a - b) : ALL_MONTHS;
+            })(),
           })),
         );
       }
