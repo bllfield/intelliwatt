@@ -238,7 +238,9 @@ export function extractDeterministicTouSchedule(rateStructure: any): ExtractTouR
       const dayType = daysToDayTypeKey(t?.daysOfWeek);
       if (!dayType) return { schedule: null, reasonCode: "UNSUPPORTED_SCHEDULE", notes: ["daysOfWeek not reducible to weekday/weekend/all"] };
 
-      const months = normalizeMonths(t?.months ?? t?.monthNumbers);
+      // Current-plan templates often store seasonality as `monthsOfYear` on tiers.
+      // The canonical TOU schedule uses `months` (1-12), so include all known aliases.
+      const months = normalizeMonths(t?.months ?? t?.monthNumbers ?? t?.monthsOfYear);
       periods.push({
         dayType,
         startHHMM,
