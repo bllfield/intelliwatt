@@ -635,10 +635,10 @@ export async function wbGetOffers(params: {
     ...rest
   } = params ?? {};
 
-  // WattBuy expects query params; be explicit + stable in how we serialize booleans.
-  // Some upstream paths accept true/false, others expect 1/0. Use 1/0 for booleans.
-  const boolTo01 = (v: boolean): string => (v ? '1' : '0');
-  const normalizeBoolish = (v: boolean | string): string => (typeof v === 'boolean' ? boolTo01(v) : String(v));
+  // WattBuy expects boolean-ish query params and (currently) rejects "1"/"0" for is_renter.
+  // Use stable string booleans so upstream parses consistently.
+  const boolToTF = (v: boolean): string => (v ? 'true' : 'false');
+  const normalizeBoolish = (v: boolean | string): string => (typeof v === 'boolean' ? boolToTF(v) : String(v));
 
   // Build params object for wbGet
   const queryParams: Record<string, unknown> = {
