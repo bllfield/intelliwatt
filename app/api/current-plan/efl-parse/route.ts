@@ -108,10 +108,22 @@ function extractEnergyChargeCentsPerKwhFromEflText(rawText: string): number | nu
   // Common EFL phrasing:
   // "Energy Charge: 9.6136¢ per kWh"
   // "Energy Charge 22.99¢ ¢ per kWh" (table-style)
-  const m = t.match(/Energy\s+Charge\s*:?\s*([0-9]{1,5}(?:\.[0-9]{1,6})?)\s*¢/i);
-  if (!m?.[1]) return null;
-  const cents = Number(m[1]);
-  if (!Number.isFinite(cents) || cents < 0) return null;
+  const mCents = t.match(/Energy\s+Charge[\s\S]{0,80}?([0-9]{1,5}(?:\.[0-9]{1,6})?)\s*¢/i);
+  if (mCents?.[1]) {
+    const cents = Number(mCents[1]);
+    if (Number.isFinite(cents) && cents >= 0) {
+      if (cents > 500) return null;
+      return cents;
+    }
+  }
+
+  // Also support $/kWh formats (common on some EFLs):
+  // "Energy Charge per kWh $0.1626"
+  const mDollars = t.match(/Energy\s+Charge[\s\S]{0,80}?per\s+kWh[\s]*\$?\s*([0-9]{1,2}(?:\.[0-9]{1,6})?)/i);
+  if (!mDollars?.[1]) return null;
+  const dollars = Number(mDollars[1]);
+  if (!Number.isFinite(dollars) || dollars < 0) return null;
+  const cents = dollars * 100;
   // Sanity bounds: current-plan REP energy rates in TX are typically < 150 ¢/kWh
   if (cents > 500) return null;
   return cents;
@@ -235,13 +247,42 @@ export async function POST(req: NextRequest) {
     const templateUsed = Boolean(existingBillPlanTemplate?.id);
     const templateId: string | null = existingBillPlanTemplate?.id ? String(existingBillPlanTemplate.id) : null;
 
-    // Use the same EFL engine as offers (AI parse → avg-price validator → gap solver) only when needed.
-    const pipeline = templateUsed
-      ? null
-      : await runEflPipelineFromRawTextNoStore({
+    // IMPORTANT:
+    // Some "discount period" EFLs (like Summer Break) require the full EFL engine to model the discount
+    // and produce a computable RateStructure (month-scoped all-day TOU periods).
+    // A cached BillPlanTemplate may not contain enough fields to reproduce this deterministically.
+    const seasonalDiscountLike =
+      /\bdiscount\s+off\s+the\s+Energy\s+Charge\b/i.test(rawText) ||
+      /\bDiscount\s+Period\b/i.test(rawText) ||
+      /\bfrom\s+(?:June|July|August|September|October|November|December|January|February|March|April|May)\b[\s\S]{0,60}\bthrough\s+(?:June|July|August|September|October|November|December|January|February|March|April|May)\b/i.test(rawText);
+
+    const templateHasUsablePricing = (() => {
+      if (!templateUsed) return false;
+      const rt = String(existingBillPlanTemplate?.rateType ?? "").toUpperCase();
+      if (rt === "TIME_OF_USE") {
+        const tiers = Array.isArray(existingBillPlanTemplate?.timeOfUseConfigJson)
+          ? existingBillPlanTemplate.timeOfUseConfigJson
+          : [];
+        return tiers.length > 0;
+      }
+      // Fixed/Variable: expect at least one energy tier AND a base charge.
+      const energy = Array.isArray(existingBillPlanTemplate?.energyRateTiersJson)
+        ? existingBillPlanTemplate.energyRateTiersJson
+        : [];
+      const hasEnergy = energy.length > 0;
+      const base = existingBillPlanTemplate?.baseChargeCentsPerMonth;
+      const hasBase = typeof base === "number" && Number.isFinite(base) && base >= 0;
+      return hasEnergy && hasBase;
+    })();
+
+    const shouldRunPipeline = !templateUsed || seasonalDiscountLike || !templateHasUsablePricing;
+
+    // Use the same EFL engine as Fact Cards (AI parse → avg-price validator → gap solver) when needed.
+    const pipeline = shouldRunPipeline
+      ? await runEflPipelineFromRawTextNoStore({
           rawText,
           eflPdfSha256: det.eflPdfSha256,
-          source: "queue_rawtext",
+          source: "manual",
           offerMeta: {
             supplier: labels.providerName ?? null,
             planName: labels.planName ?? null,
@@ -249,7 +290,8 @@ export async function POST(req: NextRequest) {
             tdspName: null,
             offerId: null,
           },
-        });
+        })
+      : null;
 
     const effectivePlanRules: any = pipeline ? (pipeline.effectivePlanRules ?? pipeline.planRules ?? null) : null;
     const effectiveRateStructure: any = pipeline ? (pipeline.effectiveRateStructure ?? pipeline.rateStructure ?? null) : null;
@@ -292,7 +334,7 @@ export async function POST(req: NextRequest) {
     })();
 
     const flatEnergyRateCents: number | null =
-      templateUsed
+      templateUsed && !pipeline
         ? extractEnergyChargeCentsPerKwhFromEflText(rawText)
         : typeof effectiveRateStructure?.energyRateCents === "number" && Number.isFinite(effectiveRateStructure.energyRateCents)
           ? Number(effectiveRateStructure.energyRateCents)
