@@ -93,6 +93,41 @@ async function doFetch<T>(url: string, init?: RequestInit): Promise<WbResponse<T
   }
 }
 
+async function doPostJson<T>(url: string, body: unknown, init?: RequestInit): Promise<WbResponse<T>> {
+  const timeoutMs = 12_000;
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    if (init?.signal) {
+      try {
+        if (init.signal.aborted) ctrl.abort();
+        else init.signal.addEventListener("abort", () => ctrl.abort(), { once: true });
+      } catch {
+        // ignore
+      }
+    }
+
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "x-api-key": apiKey(), Accept: "application/json", "content-type": "application/json" },
+      cache: "no-store",
+      ...init,
+      body: JSON.stringify(body ?? {}),
+      signal: ctrl.signal,
+    });
+
+    const headers = pickHeaders(res);
+    const { data, text } = await parseBody<T>(res);
+
+    if (!res.ok) {
+      return { ok: false, status: res.status, data, text, headers };
+    }
+    return { ok: true, status: res.status, data, text, headers };
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 export async function wbGet<T = any>(
   path: string,
   params?: Record<string, unknown>,
@@ -623,8 +658,8 @@ export async function wbGetOffers(params: {
   address?: string; city?: string; state?: string; zip?: string;
   wattkey?: string;
   language?: 'en' | 'es';
-  is_renter?: boolean | string;
-  all?: boolean | string;
+  is_renter?: boolean;
+  all?: boolean;
   utility_eid?: number;
   category?: string;
 }) {
@@ -635,27 +670,47 @@ export async function wbGetOffers(params: {
     ...rest
   } = params ?? {};
 
-  // WattBuy expects boolean-ish query params and (currently) rejects "1"/"0" for is_renter.
-  // Use stable string booleans so upstream parses consistently.
-  const boolToTF = (v: boolean): string => (v ? 'true' : 'false');
-  const normalizeBoolish = (v: boolean | string): string => (typeof v === 'boolean' ? boolToTF(v) : String(v));
-
-  // Build params object for wbGet
-  const queryParams: Record<string, unknown> = {
+  // WattBuy /v3/offers rejects boolean flags passed as query params (strings).
+  // Use POST JSON so is_renter/all are real booleans.
+  const url = buildUrl("offers");
+  const body: Record<string, unknown> = {
     language: String(language),
-    is_renter: normalizeBoolish(is_renter),
-    all: normalizeBoolish(all), // force full plan list by default
+    is_renter: Boolean(is_renter),
+    all: Boolean(all),
   };
-
-  // Add rest of params (wattkey, address, city, state, zip, utility_eid, category)
   for (const [k, v] of Object.entries(rest)) {
     if (v !== undefined && v !== null && String(v).length > 0) {
-      queryParams[k] = v;
+      body[k] = v;
     }
   }
 
-  // Use wbGet for consistency with other endpoints (retry logic, diagnostic headers)
-  return await wbGet<any>('offers', queryParams, undefined, 1);
+  const out = await doPostJson<any>(url, body, undefined);
+
+  // Best-effort auditing for inspector
+  try {
+    void persistWattBuySnapshot({
+      endpoint: "OFFERS",
+      payload:
+        out.data ??
+        ({
+          __wattbuyNonJsonOrEmpty: true,
+          ok: out.ok,
+          status: out.status,
+          headers: out.headers ?? null,
+          text: out.text ?? null,
+          path: "offers",
+          body,
+        } as any),
+      houseAddressId: null,
+      esiid: null,
+      wattkey: typeof (body as any)?.wattkey === "string" ? String((body as any).wattkey) : null,
+      requestKey: `offers:POST:${JSON.stringify(body)}`,
+    });
+  } catch {
+    // ignore
+  }
+
+  return out;
 }
 
 // Utility helper to extract useful bits from electricity payload
