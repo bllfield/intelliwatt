@@ -1,8 +1,12 @@
 /// NOTE: This schema uses its own migrations directory:
 ///   prisma/current-plan/migrations
-/// Run Prisma CLI with:
-///   --schema=prisma/current-plan/schema.prisma
-///   --migrations-dir=prisma/current-plan/migrations
+///
+/// IMPORTANT: Prisma CLI does not support selecting a custom migrations directory for
+/// `prisma migrate deploy`. In this repo layout, `prisma migrate deploy --schema prisma/current-plan/schema.prisma`
+/// will still scan `prisma/migrations` (not `prisma/current-plan/migrations`).
+///
+/// For production/staging ops, apply the SQL files in `prisma/current-plan/migrations/*/migration.sql`
+/// using `prisma db execute` (or run a dedicated ops script).
 generator currentPlanClient {
   provider      = "prisma-client-js"
   binaryTargets = ["native", "rhel-openssl-3.0.x"]
