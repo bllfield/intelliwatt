@@ -13,6 +13,7 @@ import { estimateTrueCost } from "@/lib/plan-engine/estimateTrueCost";
 import { ensureCurrentPlanEntry } from "@/lib/current-plan/ensureEntry";
 import { validateEflAvgPriceTable } from "@/lib/efl/eflValidator";
 import { requiredBucketsForRateStructure } from "@/lib/plan-engine/requiredBucketsForPlan";
+import { derivePlanCalcRequirementsFromTemplate } from "@/lib/plan-engine/planComputability";
 import { buildUsageBucketsForEstimate } from "@/lib/usage/buildUsageBucketsForEstimate";
 
 export const runtime = "nodejs";
@@ -129,6 +130,51 @@ function extractEnergyChargeCentsPerKwhFromEflText(rawText: string): number | nu
   return cents;
 }
 
+function extractRepPuctCertificateFromEflText(text: string): string | null {
+  const t = String(text ?? "");
+  if (!t.trim()) return null;
+  const m =
+    t.match(
+      /\b(?:PUCT\s*(?:Certificate\s*(?:No\.?|Number)?|Cert\.?|License)|REP\s*No\.)\s*[#:.\s]*([0-9]{4,6})\b/i,
+    ) ?? t.match(/\bPUC\s*license\s*#\s*([0-9]{4,6})\b/i);
+  return m?.[1] ?? null;
+}
+
+function extractEflVersionCodeFromEflText(text: string): string | null {
+  const raw = String(text ?? "");
+  if (!raw.trim()) return null;
+
+  const lines = raw.split(/\r?\n/).map((l) => l.trim());
+  const normalizeToken = (s: string): string =>
+    s
+      .replace(/\s+/g, " ")
+      .replace(/[^\w+\-./]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    if (!line) continue;
+
+    const mInline =
+      line.match(/\b(?:Version|Ver\.?)\s*#\s*:?\s*(.+)$/i) ?? line.match(/\bEFL\s*Ver\.?\s*#\s*:?\s*(.+)$/i);
+    if (mInline?.[1]) {
+      const token = normalizeToken(mInline[1]);
+      if (token) return token;
+    }
+
+    const isHeaderOnly =
+      /\b(?:Version|Ver\.?)\s*#\s*:?\s*$/i.test(line) || /\bEFL\s*Ver\.?\s*#\s*:?\s*$/i.test(line);
+    if (isHeaderOnly) {
+      const next = lines[i + 1] ?? "";
+      const token = normalizeToken(next);
+      if (token) return token;
+    }
+  }
+
+  return null;
+}
+
 function lastNYearMonthsChicago(n: number): string[] {
   try {
     const tz = "America/Chicago";
@@ -227,6 +273,8 @@ export async function POST(req: NextRequest) {
     }
 
     const labels = extractProviderAndPlanNameFromEflText(rawText);
+    const repPuctCertificateFromText = extractRepPuctCertificateFromEflText(rawText);
+    const eflVersionCodeFromText = extractEflVersionCodeFromEflText(rawText);
 
     // Try to reuse an existing current-plan template before running the full EFL pipeline again.
     // We still do deterministic PDF->text extraction (required), but we can skip the AI pipeline
@@ -275,7 +323,19 @@ export async function POST(req: NextRequest) {
       return hasEnergy && hasBase;
     })();
 
-    const shouldRunPipeline = !templateUsed || seasonalDiscountLike || !templateHasUsablePricing;
+    const templateHasSeasonalPeriods = (() => {
+      if (!templateUsed) return false;
+      const rt = String(existingBillPlanTemplate?.rateType ?? "").toUpperCase();
+      if (rt !== "TIME_OF_USE") return false;
+      const tiers = Array.isArray(existingBillPlanTemplate?.timeOfUseConfigJson)
+        ? (existingBillPlanTemplate.timeOfUseConfigJson as any[])
+        : [];
+      if (!tiers.length) return false;
+      return tiers.some((t: any) => Array.isArray(t?.monthsOfYear) && t.monthsOfYear.length > 0);
+    })();
+
+    const shouldRunPipeline =
+      !templateUsed || !templateHasUsablePricing || (seasonalDiscountLike && !templateHasSeasonalPeriods);
 
     // Use the same EFL engine as Fact Cards (AI parse → avg-price validator → gap solver) when needed.
     const pipeline = shouldRunPipeline
@@ -305,12 +365,18 @@ export async function POST(req: NextRequest) {
       rate: {
         supplierName: labels.providerName ?? null,
         planName: labels.planName ?? null,
-        termMonths: typeof effectivePlanRules?.termMonths === "number" ? effectivePlanRules.termMonths : null,
+        termMonths: (() => {
+          if (typeof effectivePlanRules?.termMonths === "number") return effectivePlanRules.termMonths;
+          if (templateUsed && typeof existingBillPlanTemplate?.termMonths === "number") return existingBillPlanTemplate.termMonths;
+          return null;
+        })(),
         baseMonthlyFeeCents:
           typeof effectivePlanRules?.baseChargePerMonthCents === "number"
             ? Math.round(effectivePlanRules.baseChargePerMonthCents)
             : typeof effectiveRateStructure?.baseMonthlyFeeCents === "number"
               ? Math.round(effectiveRateStructure.baseMonthlyFeeCents)
+              : templateUsed && typeof existingBillPlanTemplate?.baseChargeCentsPerMonth === "number"
+                ? Math.round(existingBillPlanTemplate.baseChargeCentsPerMonth)
               : null,
         cancelFeeCents: cancelFeeCentsDerived,
       },
@@ -583,7 +649,17 @@ export async function POST(req: NextRequest) {
         typeof parsed?.rate?.cancelFeeCents === "number" && Number.isFinite(parsed.rate.cancelFeeCents)
           ? parsed.rate.cancelFeeCents / 100
           : null,
-      energyRateTiersJson: null,
+      energyRateTiersJson:
+        rateType !== "TIME_OF_USE" && typeof flatEnergyRateCents === "number" && Number.isFinite(flatEnergyRateCents)
+          ? [
+              {
+                label: "Energy",
+                minKWh: 0,
+                maxKWh: null,
+                rateCentsPerKwh: Number(flatEnergyRateCents.toFixed(4)),
+              },
+            ]
+          : null,
       timeOfUseConfigJson: touWindowsNormalized.length ? touWindowsNormalized : touWindows,
       billCreditsJson: billCredits,
       rateStructure,
@@ -608,7 +684,11 @@ export async function POST(req: NextRequest) {
 
       const providerKey = String(entryData.providerName ?? "").trim().toUpperCase();
       const planKey = String(entryData.planName ?? "").trim().toUpperCase();
-      if (providerKey && planKey) {
+      const finalStatus = String(((pipeline as any)?.finalValidation?.status ?? "") as any).toUpperCase();
+      const calcReq = derivePlanCalcRequirementsFromTemplate({ rateStructure });
+      const canPromoteTemplate = Boolean(pipeline) && finalStatus === "PASS" && calcReq.planCalcStatus === "COMPUTABLE";
+
+      if (providerKey && planKey && canPromoteTemplate) {
         const billPlanTemplateDelegate = (currentPlanPrisma as any).billPlanTemplate as any;
         await billPlanTemplateDelegate.upsert({
           where: { providerNameKey_planNameKey: { providerNameKey: providerKey, planNameKey: planKey } },
@@ -759,7 +839,7 @@ export async function POST(req: NextRequest) {
           try {
             const pr: any = {
               rateType,
-              planType: "flat",
+              planType: rateType === "TIME_OF_USE" ? "tou" : "flat",
               termMonths: typeof entryData.termMonths === "number" ? entryData.termMonths : null,
               ...(typeof flatEnergyRateCents === "number" ? { defaultRateCentsPerKwh: flatEnergyRateCents } : {}),
               ...(typeof (rateStructure as any)?.baseMonthlyFeeCents === "number"
@@ -779,20 +859,10 @@ export async function POST(req: NextRequest) {
     // - Identity/required pricing fields are missing, OR
     // - Avg-table validation explicitly FAILs (manual review needed), OR
     // - Plan is not computable.
-    const planCalcStatus = templateUsed
-      ? (() => {
-          if (rateType === "TIME_OF_USE") {
-            const tiers = Array.isArray((rateStructure as any)?.tiers) ? (rateStructure as any).tiers : [];
-            return tiers.length > 0 ? "COMPUTABLE" : "UNKNOWN";
-          }
-          if (rateType === "VARIABLE") {
-            return typeof flatEnergyRateCents === "number" ? "COMPUTABLE" : "UNKNOWN";
-          }
-          return typeof flatEnergyRateCents === "number" ? "COMPUTABLE" : "UNKNOWN";
-        })()
-      : String((pipeline as any)?.planCalcStatus ?? "").toUpperCase();
+    const planCalcReq = derivePlanCalcRequirementsFromTemplate({ rateStructure });
+    const planCalcStatus = planCalcReq.planCalcStatus;
     if (finalValidationStatus && finalValidationStatus !== "PASS") reasonParts.push(`validation_${finalValidationStatus}`);
-    if (planCalcStatus && planCalcStatus !== "COMPUTABLE") reasonParts.push(`planCalc_${planCalcStatus}`);
+    if (planCalcStatus && planCalcStatus !== "COMPUTABLE") reasonParts.push(`planCalc_${planCalcReq.planCalcReasonCode}`);
 
     const needsReview = reasonParts.length > 0;
     if (needsReview) {
@@ -808,8 +878,8 @@ export async function POST(req: NextRequest) {
             kind: "EFL_PARSE",
             dedupeKey: `current_plan:${det.eflPdfSha256}`,
             eflPdfSha256: det.eflPdfSha256,
-            repPuctCertificate: (pipeline as any)?.deterministic?.repPuctCertificate ?? null,
-            eflVersionCode: (pipeline as any)?.deterministic?.eflVersionCode ?? null,
+            repPuctCertificate: repPuctCertificateFromText ?? (pipeline as any)?.deterministic?.repPuctCertificate ?? null,
+            eflVersionCode: eflVersionCodeFromText ?? (pipeline as any)?.deterministic?.eflVersionCode ?? null,
             offerId: null,
             supplier: entryData.providerName,
             planName: entryData.planName,
@@ -856,6 +926,10 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    const customerMessage = needsReview
+      ? "We uploaded your EFL, but we couldn't confidently calculate your current plan automatically. You'll still see the best available plans, but we can't show a savings comparison until you enter your current plan details manually below."
+      : "EFL parsed successfully.";
+
     return NextResponse.json(
       {
         ok: true,
@@ -871,6 +945,8 @@ export async function POST(req: NextRequest) {
         rawTextPreview: rawText.slice(0, 5000),
         savedParsedCurrentPlanId: record?.id ?? null,
         queuedForReview: needsReview,
+        canComputeFromEfl: !needsReview,
+        customerMessage,
         currentPlanEstimate,
         prefill: {
           providerName: labels.providerName ?? null,

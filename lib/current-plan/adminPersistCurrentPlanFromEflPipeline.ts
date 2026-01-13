@@ -147,6 +147,52 @@ export async function adminPersistCurrentPlanFromEflPipeline(args: {
     ? await parsedDelegate.update({ where: { id: existingParsed.id }, data: parsedData })
     : await parsedDelegate.create({ data: parsedData });
 
+  const billCreditsJson = (() => {
+    const rules = (rs as any)?.billCredits?.rules;
+    if (!Array.isArray(rules)) return null;
+    const out = rules
+      .map((r: any) => ({
+        label: typeof r?.label === "string" ? r.label : "Bill credit",
+        creditCents: typeof r?.creditAmountCents === "number" && Number.isFinite(r.creditAmountCents) ? Math.round(r.creditAmountCents) : null,
+        thresholdKwh: typeof r?.minUsageKWh === "number" && Number.isFinite(r.minUsageKWh) ? Math.round(r.minUsageKWh) : null,
+      }))
+      .filter((x: any) => typeof x.creditCents === "number" && x.creditCents !== 0 && typeof x.thresholdKwh === "number" && x.thresholdKwh > 0);
+    return out.length ? out : null;
+  })();
+
+  const timeOfUseConfigJson = (() => {
+    const tiers = Array.isArray((rs as any)?.tiers) ? (rs as any).tiers : [];
+    if (!tiers.length) return null;
+    const out = tiers
+      .map((t: any) => ({
+        label: typeof t?.label === "string" ? t.label : null,
+        start: typeof t?.startTime === "string" ? t.startTime : null,
+        end: typeof t?.endTime === "string" ? t.endTime : null,
+        cents: typeof t?.priceCents === "number" && Number.isFinite(t.priceCents) ? Number(t.priceCents) : null,
+        monthsOfYear: Array.isArray(t?.monthsOfYear) ? t.monthsOfYear : null,
+      }))
+      .filter((x: any) => x.start && x.end && typeof x.cents === "number");
+    return out.length ? out : null;
+  })();
+
+  const energyRateTiersJson = (() => {
+    const cents =
+      typeof (rs as any)?.energyRateCents === "number" && Number.isFinite((rs as any).energyRateCents)
+        ? Number((rs as any).energyRateCents)
+        : typeof (rs as any)?.currentBillEnergyRateCents === "number" && Number.isFinite((rs as any).currentBillEnergyRateCents)
+          ? Number((rs as any).currentBillEnergyRateCents)
+          : null;
+    if (cents == null) return null;
+    return [
+      {
+        label: "Energy",
+        minKWh: 0,
+        maxKWh: null,
+        rateCentsPerKwh: Number(cents.toFixed(4)),
+      },
+    ];
+  })();
+
   // Upsert plan-level BillPlanTemplate (so it shows up in Fact Cards "Current plan templates").
   await templateDelegate.upsert({
     where: { providerNameKey_planNameKey: { providerNameKey: providerKey, planNameKey: planKey } },
@@ -160,10 +206,9 @@ export async function adminPersistCurrentPlanFromEflPipeline(args: {
       contractEndDate: null,
       earlyTerminationFeeCents,
       baseChargeCentsPerMonth,
-      // Keep JSON blobs empty for now; the canonical engine input for comparisons is ParsedCurrentPlan.rateStructure.
-      energyRateTiersJson: null,
-      timeOfUseConfigJson: null,
-      billCreditsJson: null,
+      energyRateTiersJson,
+      timeOfUseConfigJson,
+      billCreditsJson,
     },
     update: {
       providerName,
@@ -172,6 +217,9 @@ export async function adminPersistCurrentPlanFromEflPipeline(args: {
       termMonths,
       earlyTerminationFeeCents,
       baseChargeCentsPerMonth,
+      energyRateTiersJson,
+      timeOfUseConfigJson,
+      billCreditsJson,
       updatedAt: new Date(),
     },
   });

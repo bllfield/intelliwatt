@@ -1064,7 +1064,19 @@ export function CurrentRateDetailsForm({
       }
 
       setPrefilledFromEfl(true);
-      setEflParseStatus("EFL parsed. We pre-filled your fields—please double-check everything before saving.");
+      if (j?.queuedForReview === true) {
+        setEflParseStatus(
+          typeof j?.customerMessage === "string" && j.customerMessage.trim()
+            ? j.customerMessage
+            : "We uploaded your EFL, but we couldn't confidently calculate your current plan automatically. You'll still see the best available plans, but we can't show a savings comparison until you enter your current plan details manually below.",
+        );
+      } else {
+        setEflParseStatus(
+          typeof j?.customerMessage === "string" && j.customerMessage.trim()
+            ? j.customerMessage
+            : "EFL parsed. We pre-filled your fields—please double-check everything before saving.",
+        );
+      }
       return true;
     } catch (e: any) {
       setEflParseStatus(e?.message ?? "EFL parse failed.");
