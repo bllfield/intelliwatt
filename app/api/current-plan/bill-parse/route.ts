@@ -317,13 +317,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // IMPORTANT: Cap the text we send through parsing/AI. Some PDF extractors can produce extremely
+    // large strings (e.g. duplicated table text) which can break OpenAI requests and cause timeouts.
+    // The admin bill parser hard-caps rawText; user flow must match to be reliable.
+    const rawTextCapped = String(text).slice(0, 50_000);
+
     debugHouseId = effectiveHouseId ?? null;
     debugUploadId = uploadRecord?.id ?? null;
-    debugRawText = text;
-    debugBillSha = uploadRecord?.billData ? sha256Hex(uploadRecord.billData) : sha256Hex(`text:${text}`);
+    debugRawText = rawTextCapped;
+    debugBillSha = uploadRecord?.billData ? sha256Hex(uploadRecord.billData) : sha256Hex(`text:${rawTextCapped}`);
 
     // 1) Baseline parse (regex-only)
-    const baseline = extractCurrentPlanFromBillText(text, {});
+    const baseline = extractCurrentPlanFromBillText(rawTextCapped, {});
     debugBaseline = baseline;
 
     // 2) Try to find a template based on providerName + planName from baseline
@@ -349,7 +354,7 @@ export async function POST(request: NextRequest) {
     if (existingTemplate) {
       parsed = applyTemplateToParsed(baseline, existingTemplate);
     } else {
-      const aiParsed = await extractCurrentPlanFromBillTextWithOpenAI(text, {});
+      const aiParsed = await extractCurrentPlanFromBillTextWithOpenAI(rawTextCapped, {});
       debugUsedAi = true;
       parsed = aiParsed;
 
@@ -431,8 +436,8 @@ export async function POST(request: NextRequest) {
       houseId: effectiveHouseId,
       sourceUploadId: uploadRecord?.id ?? null,
       uploadId: uploadRecord?.id ?? null,
-      rawText: parsed.rawText,
-      rawTextSnippet: parsed.rawText.slice(0, 4000),
+      rawText: String(parsed.rawText ?? rawTextCapped),
+      rawTextSnippet: String(parsed.rawText ?? rawTextCapped).slice(0, 4000),
       esiid: parsed.esiid,
       meterNumber: parsed.meterNumber,
       providerName: parsed.providerName,
@@ -750,7 +755,16 @@ export async function POST(request: NextRequest) {
       console.error('[current-plan/bill-parse] failed to enqueue exception case', e);
     }
 
-    return NextResponse.json({ error: 'Failed to parse bill' }, { status: 500 });
+    const message =
+      error instanceof Error ? error.message : String(error ?? 'Failed to parse bill');
+    return NextResponse.json(
+      {
+        ok: false,
+        error: 'Failed to parse bill',
+        details: message.slice(0, 800),
+      },
+      { status: 500 },
+    );
   }
 }
 
