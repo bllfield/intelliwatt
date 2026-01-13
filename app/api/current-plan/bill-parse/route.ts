@@ -10,6 +10,7 @@ import {
   type ParsedCurrentPlanPayload,
 } from '@/lib/billing/parseBillText';
 import { extractBillTextFromUpload } from '@/lib/billing/extractBillText';
+import { ensureCurrentPlanEntry } from '@/lib/current-plan/ensureEntry';
 
 export const dynamic = 'force-dynamic';
 // Bill parsing can be slow (pdf-to-text + optional AI). Allow long-running serverless execution.
@@ -34,6 +35,120 @@ function normalizeKey(value: string | null | undefined): string | null {
   const trimmed = value.trim();
   if (!trimmed) return null;
   return trimmed.toUpperCase();
+}
+
+function minutesToHhMm(m: number): string | null {
+  if (!Number.isFinite(m)) return null;
+  const mm = Math.round(m);
+  if (mm < 0 || mm > 1439) return null;
+  const hh = Math.floor(mm / 60);
+  const min = mm % 60;
+  return `${String(hh).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+}
+
+function buildRateStructureFromParsedBill(parsed: ParsedCurrentPlanPayload): any | null {
+  const rt = String(parsed.rateType ?? '').toUpperCase();
+  const baseMonthlyFeeCents =
+    typeof parsed.baseChargeCentsPerMonth === 'number' && Number.isFinite(parsed.baseChargeCentsPerMonth)
+      ? Math.round(parsed.baseChargeCentsPerMonth)
+      : null;
+
+  const billCredits = (() => {
+    const rules = parsed.billCredits?.enabled && Array.isArray(parsed.billCredits.rules) ? parsed.billCredits.rules : [];
+    const mapped = rules
+      .map((r: any) => {
+        const amountCents = typeof r?.amountCents === 'number' && Number.isFinite(r.amountCents) ? Math.round(r.amountCents) : null;
+        const minKWh = r?.minKWh == null ? null : Number(r.minKWh);
+        const maxKWh = r?.maxKWh == null ? null : Number(r.maxKWh);
+        if (amountCents == null || amountCents === 0) return null;
+        return {
+          label: typeof r?.kind === 'string' && r.kind ? `Bill credit: ${r.kind}` : 'Bill credit',
+          creditAmountCents: amountCents,
+          minUsageKWh: Number.isFinite(minKWh) && minKWh != null ? Math.round(minKWh) : 0,
+          maxUsageKWh: Number.isFinite(maxKWh) && maxKWh != null ? Math.round(maxKWh) : null,
+          monthsOfYear: null,
+        };
+      })
+      .filter(Boolean);
+    return mapped.length > 0 ? { hasBillCredit: true, rules: mapped } : { hasBillCredit: false, rules: [] };
+  })();
+
+  if (rt === 'TIME_OF_USE') {
+    const periods = parsed.timeOfUse && Array.isArray((parsed.timeOfUse as any).periods) ? (parsed.timeOfUse as any).periods : [];
+    if (!periods.length) return null;
+    const tiers: any[] = [];
+    for (const [idx, p] of periods.entries()) {
+      const startMin = Number((p as any)?.startMinutes);
+      const endMin = Number((p as any)?.endMinutes);
+      const start = minutesToHhMm(startMin);
+      const end = minutesToHhMm(endMin);
+      const rate = Number((p as any)?.rateCentsPerKWh);
+      const days = Array.isArray((p as any)?.days) ? (p as any).days : [];
+      if (!start || !end || !Number.isFinite(rate)) continue;
+
+      const daysOfWeek =
+        days.length === 7 ? 'ALL' : (days.filter((d: any) => typeof d === 'string') as any[]);
+
+      const wraps = Number.isFinite(startMin) && Number.isFinite(endMin) && startMin > endMin;
+      if (wraps) {
+        tiers.push({
+          label: `Period ${idx + 1} (part 1)`,
+          priceCents: Number(rate.toFixed(4)),
+          startTime: start,
+          endTime: '23:59',
+          daysOfWeek,
+        });
+        tiers.push({
+          label: `Period ${idx + 1} (part 2)`,
+          priceCents: Number(rate.toFixed(4)),
+          startTime: '00:00',
+          endTime: end,
+          daysOfWeek,
+        });
+      } else {
+        tiers.push({
+          label: `Period ${idx + 1}`,
+          priceCents: Number(rate.toFixed(4)),
+          startTime: start,
+          endTime: end,
+          daysOfWeek,
+        });
+      }
+    }
+    if (!tiers.length) return null;
+    return {
+      type: 'TIME_OF_USE',
+      ...(baseMonthlyFeeCents != null ? { baseMonthlyFeeCents } : {}),
+      tiers,
+      billCredits,
+    };
+  }
+
+  if (rt === 'FIXED' || rt === 'VARIABLE') {
+    const tiers = Array.isArray(parsed.energyRateTiers) ? parsed.energyRateTiers : [];
+    const usableTiers = tiers.filter((t: any) => typeof t?.rateCentsPerKWh === 'number' && Number.isFinite(t.rateCentsPerKWh));
+    if (usableTiers.length === 0) return null;
+    const rate0 = Number(usableTiers[0].rateCentsPerKWh);
+    const allSame = usableTiers.every((t: any) => Number(t.rateCentsPerKWh) === rate0);
+    if (!allSame) return null;
+
+    if (rt === 'VARIABLE') {
+      return {
+        type: 'VARIABLE',
+        currentBillEnergyRateCents: Number(rate0.toFixed(4)),
+        ...(baseMonthlyFeeCents != null ? { baseMonthlyFeeCents } : {}),
+        billCredits,
+      };
+    }
+    return {
+      type: 'FIXED',
+      energyRateCents: Number(rate0.toFixed(4)),
+      ...(baseMonthlyFeeCents != null ? { baseMonthlyFeeCents } : {}),
+      billCredits,
+    };
+  }
+
+  return null;
 }
 
 function applyTemplateToParsed(
@@ -119,9 +234,10 @@ export async function POST(request: NextRequest) {
     // If a houseId is provided, verify ownership. For flows that do not yet have
     // a resolved house (e.g., initial current-plan dashboard uploads), we allow
     // houseId to be null and rely solely on the authenticated user.
-    if (houseId) {
+    let effectiveHouseId: string | null = houseId;
+    if (effectiveHouseId) {
       const ownsHouse = await prisma.houseAddress.findFirst({
-        where: { id: houseId, userId: user.id },
+        where: { id: effectiveHouseId, userId: user.id },
         select: { id: true },
       });
 
@@ -131,6 +247,15 @@ export async function POST(request: NextRequest) {
           { status: 403 },
         );
       }
+    } else {
+      // Best-effort: attach bill-derived current-plan data to the user's primary (or most recent) house
+      // so Current Rate + Compare can load it consistently.
+      const bestHouse = await prisma.houseAddress.findFirst({
+        where: { userId: user.id, archivedAt: null },
+        orderBy: [{ isPrimary: 'desc' }, { createdAt: 'desc' }],
+        select: { id: true },
+      });
+      effectiveHouseId = bestHouse?.id ?? null;
     }
 
     const currentPlanPrisma = getCurrentPlanPrisma();
@@ -192,7 +317,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    debugHouseId = houseId ?? null;
+    debugHouseId = effectiveHouseId ?? null;
     debugUploadId = uploadRecord?.id ?? null;
     debugRawText = text;
     debugBillSha = uploadRecord?.billData ? sha256Hex(uploadRecord.billData) : sha256Hex(`text:${text}`);
@@ -299,9 +424,11 @@ export async function POST(request: NextRequest) {
       return decimalFromNumber(value, 8, scale);
     };
 
+    const rateStructure = buildRateStructureFromParsedBill(parsed);
+
     const entryData: any = {
       userId: user.id,
-      houseId,
+      houseId: effectiveHouseId,
       sourceUploadId: uploadRecord?.id ?? null,
       uploadId: uploadRecord?.id ?? null,
       rawText: parsed.rawText,
@@ -346,6 +473,7 @@ export async function POST(request: NextRequest) {
       billIssueDate: parsed.billIssueDate ? new Date(parsed.billIssueDate) : null,
       billDueDate: parsed.billDueDate ? new Date(parsed.billDueDate) : null,
       totalAmountDueCents: parsed.totalAmountDueCents,
+      rateStructure,
       parserVersion: process.env.OPENAI_IntelliWatt_Bill_Parcer ? 'bill-text-v3-json' : 'bill-text-v1-regex',
       confidenceScore: null,
     };
@@ -353,7 +481,7 @@ export async function POST(request: NextRequest) {
     const parsedDelegate = (currentPlanPrisma as any).parsedCurrentPlan as any;
 
     const existing = await parsedDelegate.findFirst({
-      where: { userId: user.id, houseId },
+      where: { userId: user.id, ...(effectiveHouseId ? { houseId: effectiveHouseId } : {}) },
       orderBy: { createdAt: 'desc' },
       select: { id: true },
     });
@@ -373,6 +501,57 @@ export async function POST(request: NextRequest) {
 
     const record = (saved ?? created) as any;
 
+    // Best-effort: promote a computable parsed structure into CurrentPlanManualEntry so the
+    // customer-facing snapshot + compare path use a single canonical rateStructure.
+    if (rateStructure && effectiveHouseId) {
+      try {
+        const manualDelegate = (currentPlanPrisma as any).currentPlanManualEntry as any;
+        const existingManual = await manualDelegate.findFirst({
+          where: { userId: user.id, houseId: effectiveHouseId },
+          orderBy: { updatedAt: 'desc' },
+          select: { id: true },
+        });
+
+        const flatRateCents =
+          rateStructure?.type === 'FIXED'
+            ? Number(rateStructure.energyRateCents)
+            : rateStructure?.type === 'VARIABLE'
+              ? Number(rateStructure.currentBillEnergyRateCents)
+              : null;
+
+        const manualData = {
+          userId: user.id,
+          houseId: effectiveHouseId,
+          providerName: parsed.providerName ?? baseline.providerName ?? 'Unknown provider',
+          planName: parsed.planName ?? baseline.planName ?? 'Unknown plan',
+          rateType: parsed.rateType ?? baseline.rateType ?? 'OTHER',
+          energyRateCents: Number.isFinite(flatRateCents) ? flatRateCents : null,
+          baseMonthlyFee: null,
+          billCreditDollars: null,
+          termLengthMonths: typeof parsed.termMonths === 'number' ? parsed.termMonths : null,
+          contractEndDate: parsed.contractEndDate ? new Date(parsed.contractEndDate) : null,
+          earlyTerminationFee: parsed.earlyTerminationFeeCents != null ? parsed.earlyTerminationFeeCents / 100 : null,
+          esiId: parsed.esiid ?? null,
+          accountNumberLast4: parsed.accountNumber ? String(parsed.accountNumber).slice(-4) : null,
+          notes: 'Imported from uploaded bill.',
+          rateStructure,
+          normalizedAt: new Date(),
+          lastConfirmedAt: null,
+        };
+
+        if (existingManual?.id) {
+          await manualDelegate.update({ where: { id: existingManual.id }, data: manualData });
+        } else {
+          await manualDelegate.create({ data: manualData });
+        }
+
+        await ensureCurrentPlanEntry(user.id, effectiveHouseId);
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.error('[current-plan/bill-parse] Failed to upsert CurrentPlanManualEntry from parsed bill', e);
+      }
+    }
+
     // Queue if we failed to extract key fields (so admin can iterate on regex/templates).
     const reasonParts: string[] = [];
     const providerOk = typeof parsed?.providerName === 'string' && parsed.providerName.trim().length > 0;
@@ -389,7 +568,8 @@ export async function POST(request: NextRequest) {
     // Fixed/Variable plans usually need a usable energy rate signal.
     const rt = String(parsed?.rateType ?? '').toUpperCase();
     const hasEnergyTiers = Array.isArray(parsed?.energyRateTiers) && parsed.energyRateTiers.length > 0;
-    const hasTou = Array.isArray(parsed?.timeOfUse) && parsed.timeOfUse.length > 0;
+    const hasTou =
+      parsed?.timeOfUse && Array.isArray((parsed.timeOfUse as any)?.periods) && (parsed.timeOfUse as any).periods.length > 0;
     if ((rt === 'FIXED' || rt === 'VARIABLE') && !hasEnergyTiers && !hasTou) {
       reasonParts.push('missing_energy_pricing');
     }

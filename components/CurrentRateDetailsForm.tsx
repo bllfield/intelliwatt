@@ -845,22 +845,25 @@ export function CurrentRateDetailsForm({
     </span>
   );
 
-  const savedPlanRateStructure =
-    savedPlan && savedPlan.rateStructure && typeof savedPlan.rateStructure === "object"
-      ? savedPlan.rateStructure
+  // Snapshot should render even if only parsed data exists (bill/EFL parsing can populate
+  // ParsedCurrentPlan before a CurrentPlanManualEntry exists).
+  const snapshotPlan = savedPlan ?? parsedPlan ?? null;
+  const snapshotPlanRateStructure =
+    snapshotPlan && snapshotPlan.rateStructure && typeof snapshotPlan.rateStructure === "object"
+      ? snapshotPlan.rateStructure
       : null;
 
   const timeOfUseTiers: Array<any> =
-    savedPlanRateStructure && Array.isArray(savedPlanRateStructure.tiers)
-      ? savedPlanRateStructure.tiers
+    snapshotPlanRateStructure && Array.isArray(snapshotPlanRateStructure.tiers)
+      ? snapshotPlanRateStructure.tiers
       : [];
 
   const billCreditRulesSummary: Array<any> =
-    savedPlanRateStructure &&
-    savedPlanRateStructure.billCredits &&
-    savedPlanRateStructure.billCredits.hasBillCredit &&
-    Array.isArray(savedPlanRateStructure.billCredits.rules)
-      ? savedPlanRateStructure.billCredits.rules
+    snapshotPlanRateStructure &&
+    snapshotPlanRateStructure.billCredits &&
+    snapshotPlanRateStructure.billCredits.hasBillCredit &&
+    Array.isArray(snapshotPlanRateStructure.billCredits.rules)
+      ? snapshotPlanRateStructure.billCredits.rules
       : [];
 
   const snapshotCardClasses =
@@ -1542,34 +1545,34 @@ export function CurrentRateDetailsForm({
           <div className="mt-4 rounded-2xl border border-rose-400/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
             {savedPlanError}
           </div>
-        ) : savedPlan ? (
+        ) : snapshotPlan ? (
           <>
             <div className="mt-6 grid gap-4 md:grid-cols-2">
               <div className={snapshotCardClasses}>
                 <p className={snapshotLabelClasses}>
                   Provider
                 </p>
-                <p className="mt-1 font-semibold">{savedPlan.providerName}</p>
+                <p className="mt-1 font-semibold">{snapshotPlan.providerName ?? "—"}</p>
               </div>
               <div className={snapshotCardClasses}>
                 <p className={snapshotLabelClasses}>
                   Plan name
                 </p>
-                <p className="mt-1 font-semibold">{savedPlan.planName}</p>
+                <p className="mt-1 font-semibold">{snapshotPlan.planName ?? "—"}</p>
               </div>
               <div className={snapshotCardClasses}>
                 <p className={snapshotLabelClasses}>
                   Rate type
                 </p>
-                <p className="mt-1 font-semibold">{savedPlan.rateType}</p>
+                <p className="mt-1 font-semibold">{snapshotPlan.rateType ?? "—"}</p>
                 <p className="mt-1 text-xs text-brand-cyan/70">
-                  {savedPlan.rateType === "FIXED" || savedPlan.rateType === "VARIABLE"
+                  {snapshotPlan.rateType === "FIXED" || snapshotPlan.rateType === "VARIABLE"
                     ? `Energy rate: ${formatRate(
                         toNumber(
-                          savedPlan.energyRateCents ?? savedPlanRateStructure?.energyRateCents ?? null,
+                          snapshotPlan.energyRateCents ?? snapshotPlanRateStructure?.energyRateCents ?? null,
                         ),
                       )}`
-                    : savedPlan.rateType === "TIME_OF_USE"
+                    : snapshotPlan.rateType === "TIME_OF_USE"
                     ? "Time-of-use pricing"
                     : "See details below"}
                 </p>
@@ -1578,14 +1581,14 @@ export function CurrentRateDetailsForm({
                 <p className={snapshotLabelClasses}>
                   Base monthly fee
                 </p>
-                <p className="mt-1 font-semibold">{formatCurrency(savedPlan.baseMonthlyFee)}</p>
+                <p className="mt-1 font-semibold">{formatCurrency(snapshotPlan.baseMonthlyFee)}</p>
               </div>
               <div className={snapshotCardClasses}>
                 <p className={snapshotLabelClasses}>
                   Term length
                 </p>
                 <p className="mt-1 font-semibold">
-                  {savedPlan.termLengthMonths ? `${savedPlan.termLengthMonths} months` : "—"}
+                  {snapshotPlan.termLengthMonths ? `${snapshotPlan.termLengthMonths} months` : "—"}
                 </p>
               </div>
               <div className={snapshotCardClasses}>
@@ -1605,7 +1608,7 @@ export function CurrentRateDetailsForm({
                   Early termination fee
                 </p>
                 <p className="mt-1 font-semibold">
-                  {formatCurrency(savedPlan.earlyTerminationFee)}
+                  {formatCurrency(snapshotPlan.earlyTerminationFee)}
                 </p>
               </div>
               <div className={snapshotCardClasses}>
@@ -1625,12 +1628,12 @@ export function CurrentRateDetailsForm({
                   Bill credit summary
                 </p>
                 <p className="mt-1 font-semibold">
-                  {formatCurrency(savedPlan.billCreditDollars)}
+                  {formatCurrency(snapshotPlan.billCreditDollars)}
                 </p>
               </div>
             </div>
 
-            {savedPlanRateStructure?.type === "TIME_OF_USE" && timeOfUseTiers.length > 0 ? (
+            {snapshotPlanRateStructure?.type === "TIME_OF_USE" && timeOfUseTiers.length > 0 ? (
               <div className={`${snapshotCardClasses} mt-5 space-y-2`}>
                 <p className={snapshotLabelClasses}>
                   Time-of-use tiers
@@ -1778,22 +1781,22 @@ export function CurrentRateDetailsForm({
               </div>
             </div>
 
-            {savedPlan.notes ? (
+            {snapshotPlan.notes ? (
               <div className={`${snapshotCardClasses} mt-5 text-sm`}>
                 <p className={snapshotLabelClasses}>
                   Notes
                 </p>
-                <p className="mt-1 whitespace-pre-wrap text-brand-cyan/80">{savedPlan.notes}</p>
+                <p className="mt-1 whitespace-pre-wrap text-brand-cyan/80">{snapshotPlan.notes}</p>
               </div>
             ) : null}
 
             <div className="mt-5 flex flex-wrap items-center gap-3 text-xs text-brand-cyan/70">
               <span>
-                Last updated: <LocalTime value={savedPlan.updatedAt} />
+                Last updated: <LocalTime value={snapshotPlan.updatedAt} />
               </span>
               <span>
                 Last confirmed:{" "}
-                {savedPlan.lastConfirmedAt ? (
+                {savedPlan?.lastConfirmedAt ? (
                   <LocalTime value={savedPlan.lastConfirmedAt} />
                 ) : (
                   "—"

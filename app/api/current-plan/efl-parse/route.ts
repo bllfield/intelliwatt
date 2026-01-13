@@ -343,6 +343,7 @@ export async function POST(req: NextRequest) {
             start: typeof t?.start === "string" ? t.start : null,
             end: typeof t?.end === "string" ? t.end : null,
             cents: typeof t?.cents === "number" ? t.cents : null,
+            monthsOfYear: Array.isArray(t?.monthsOfYear) ? t.monthsOfYear : null,
           }))
           .filter((x: any) => x.start && x.end && typeof x.cents === "number");
       }
@@ -353,6 +354,10 @@ export async function POST(req: NextRequest) {
           start: typeof t?.startTime === "string" ? t.startTime : null,
           end: typeof t?.endTime === "string" ? t.endTime : null,
           cents: typeof t?.priceCents === "number" ? t.priceCents : null,
+          monthsOfYear:
+            Array.isArray(t?.monthsOfYear) ? t.monthsOfYear
+              : Array.isArray(t?.months) ? t.months
+              : null,
         }))
         .filter((x: any) => x.start && x.end && typeof x.cents === "number");
     })();
@@ -364,7 +369,14 @@ export async function POST(req: NextRequest) {
         const end = normalizeHhMm(t?.end);
         const cents = typeof t?.cents === "number" && Number.isFinite(t.cents) ? t.cents : null;
         if (!start || !end || cents == null) return null;
-        return { ...t, start, end, cents };
+        // Preserve seasonal month scoping when present.
+        const monthsRaw = Array.isArray(t?.monthsOfYear) ? t.monthsOfYear : null;
+        const monthsOfYear = monthsRaw
+          ? monthsRaw
+              .map((m: any) => Number(m))
+              .filter((m: number) => Number.isFinite(m) && m >= 1 && m <= 12)
+          : null;
+        return { ...t, start, end, cents, monthsOfYear: monthsOfYear && monthsOfYear.length ? monthsOfYear : null };
       })
       .filter(Boolean) as any[];
 
@@ -468,6 +480,7 @@ export async function POST(req: NextRequest) {
               startTime: start,
               endTime: end,
               daysOfWeek: "ALL",
+              ...(Array.isArray(t?.monthsOfYear) && t.monthsOfYear.length ? { monthsOfYear: t.monthsOfYear } : {}),
             };
           })
           .filter(Boolean);
