@@ -31,12 +31,22 @@ export async function GET(req: NextRequest) {
       state,
       zip,
       language,
-      is_renter,
       all,
       category,
     });
     return NextResponse.json(
-      { ...resp, where: { address: compositeAddress || addressRaw, unit: formattedUnit ?? null, city, state, zip } },
+      {
+        ...resp,
+        where: {
+          address: compositeAddress || addressRaw,
+          unit: formattedUnit ?? null,
+          city,
+          state,
+          zip,
+          // NOTE: WattBuy currently rejects is_renter when passed via query params; we surface it here for diagnostics only.
+          is_renter_requested: is_renter,
+        },
+      },
       { status: resp.status },
     );
   } catch (err: any) {

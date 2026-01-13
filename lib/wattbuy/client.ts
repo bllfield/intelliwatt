@@ -640,6 +640,9 @@ export async function wbGetOffers(params: {
 
   const queryParams: Record<string, unknown> = {
     language: String(language),
+    // Critical: without all=true, WattBuy returns only a small default subset (e.g. ~7 plans).
+    // WattBuy accepts this flag as a query param, so include it to restore the full plan set (~56).
+    all: "true",
   };
 
   // Add rest of params (wattkey, address, city, state, zip, utility_eid, category).
