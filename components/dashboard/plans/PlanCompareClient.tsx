@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 type ApiResp = {
@@ -101,6 +102,7 @@ function sumNums(xs: Array<any>): number {
 
 export default function PlanCompareClient(props: { offerId: string }) {
   const offerId = String(props.offerId ?? "").trim();
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<ApiResp | null>(null);
@@ -152,7 +154,8 @@ export default function PlanCompareClient(props: { offerId: string }) {
         const j = (await r.json().catch(() => null)) as ApiResp | null;
         if (controller.signal.aborted) return;
         if (!r.ok || !j || !(j as any).ok) {
-          setError((j as any)?.error ?? `Request failed (${r.status})`);
+          const err = (j as any)?.error ?? `Request failed (${r.status})`;
+          setError(err);
           if (!hydratedFromCache) setData(j);
           return;
         }
@@ -175,6 +178,23 @@ export default function PlanCompareClient(props: { offerId: string }) {
     run();
     return () => controller.abort();
   }, [offerId, cacheKey, cacheTtlMs]);
+
+  // If the offerId is no longer available (WattBuy rotates offers), fall back to the compare landing
+  // page which will auto-pick a best offer. Also clear the remembered offer id so the user won't get
+  // stuck in a redirect loop.
+  useEffect(() => {
+    if (error !== "offer_not_found") return;
+    try {
+      window.localStorage.removeItem("dashboard_compare_last_offer_id_v1");
+    } catch {
+      // ignore
+    }
+    // Small delay so the user sees the error state briefly (helps debugging), then redirect.
+    const t = window.setTimeout(() => {
+      router.replace("/dashboard/plans/compare");
+    }, 200);
+    return () => window.clearTimeout(t);
+  }, [error, router]);
 
   // Default ETF toggle based on contract status
   useEffect(() => {
