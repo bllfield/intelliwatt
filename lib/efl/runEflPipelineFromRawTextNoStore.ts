@@ -218,5 +218,21 @@ function extractEflVersionCodeFromEflText(text: string): string | null {
     }
   }
 
+  // Fallback: some EFLs (notably certain REPs) do not include a "Version #"
+  // label, but do include a stable document/form identifier near the footer,
+  // e.g. "M1F00163039360A". Prefer this over returning null so the pipeline can
+  // persist the template deterministically (especially in raw-text-queue mode).
+  //
+  // Guardrails:
+  // - require a specific prefix (M1F) to avoid matching phone numbers / addresses.
+  // - require a substantial trailing payload.
+  {
+    const m1fAll = Array.from(raw.matchAll(/\bM1F[0-9A-Z]{8,24}\b/g));
+    if (m1fAll.length > 0) {
+      const token = normalizeToken(m1fAll[m1fAll.length - 1]?.[0] ?? "");
+      if (token) return token;
+    }
+  }
+
   return null;
 }

@@ -258,13 +258,24 @@ function parseCentsPerKwhFromLine(line: string): number | null {
     if (!Number.isFinite(dollars)) return null;
     return dollars * 100;
   }
-  const dollarAfterHeader = cleaned.match(
-    /per\s*kWh[^0-9$]{0,20}\$?\s*([0-9]+(?:\.[0-9]+)?)/i,
-  );
+  // Header-style: "per kWh $0.051248" (sometimes the "$" is missing in extraction).
+  // IMPORTANT: never treat "Average price per kWh: 17.6 ¢" as dollars/kWh — that
+  // would yield 1760 ¢/kWh and blow up validation. Only accept this fallback when:
+  // - the line has an explicit "$", OR
+  // - the captured value looks like a dollars-per-kWh decimal (< 1) AND there's no "¢" present.
+  const dollarAfterHeader =
+    cleaned.match(/per\s*kWh[^0-9$]{0,20}\$\s*([0-9]+(?:\.[0-9]+)?)/i) ??
+    cleaned.match(/per\s*kWh[^0-9$]{0,20}\s*([0-9]+(?:\.[0-9]+)?)/i);
   if (dollarAfterHeader?.[1]) {
-    const dollars = Number(dollarAfterHeader[1]);
-    if (!Number.isFinite(dollars)) return null;
-    return dollars * 100;
+    const rawNum = Number(dollarAfterHeader[1]);
+    if (!Number.isFinite(rawNum)) return null;
+    const hasDollar = /\$\s*[0-9]/.test(cleaned);
+    const hasCentSymbol = /¢/.test(cleaned);
+    if (hasCentSymbol && !hasDollar) return null;
+    if (!hasDollar) {
+      if (!(rawNum > 0 && rawNum < 1)) return null;
+    }
+    return rawNum * 100;
   }
 
   return null;
@@ -327,12 +338,22 @@ function parseCentsPerKwhToken(s: string): number | null {
     }
   }
   {
-    const m = cleaned.match(
-      /per\s*kwh[^0-9$]{0,20}\$?\s*([0-9]+(?:\.[0-9]+)?)/i,
-    );
+    // Same safety rule as parseCentsPerKwhFromLine: avoid interpreting "per kWh: 17.6 ¢"
+    // (avg price table) as $17.6/kWh. Only accept when explicit "$" is present OR
+    // the number looks like a sub-$1 dollars/kWh decimal and there is no "¢" in the token.
+    const m =
+      cleaned.match(/per\s*kwh[^0-9$]{0,20}\$\s*([0-9]+(?:\.[0-9]+)?)/i) ??
+      cleaned.match(/per\s*kwh[^0-9$]{0,20}\s*([0-9]+(?:\.[0-9]+)?)/i);
     if (m?.[1]) {
-      const dollars = Number(m[1]);
-      return Number.isFinite(dollars) ? dollars * 100 : null;
+      const rawNum = Number(m[1]);
+      if (!Number.isFinite(rawNum)) return null;
+      const hasDollar = /\$\s*[0-9]/.test(cleaned);
+      const hasCentSymbol = /¢/.test(cleaned);
+      if (hasCentSymbol && !hasDollar) return null;
+      if (!hasDollar) {
+        if (!(rawNum > 0 && rawNum < 1)) return null;
+      }
+      return rawNum * 100;
     }
   }
 
@@ -343,6 +364,9 @@ function pickBestTdspPerKwhLine(
   lines: string[],
 ): { value: number | null; line: string | null } {
   const isTdspTokenLine = (l: string): boolean => {
+    // Never treat the "Average price per kWh" table as a TDSP charge source.
+    if (/Average\s+price\s+per\s*kWh/i.test(l) || /Average\s+monthly\s+use/i.test(l)) return false;
+
     if (!/(TDU|TDSP)/i.test(l)) return false;
     if (!/Delivery/i.test(l)) return false;
     // Accept either cents-form or dollars-form per-kWh tokens.

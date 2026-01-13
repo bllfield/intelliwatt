@@ -149,11 +149,18 @@ export async function persistAndLinkFromPipeline(
   const missingTemplateFields: string[] = [];
   if (!(args.offerMeta?.planName ?? "").trim()) missingTemplateFields.push("planName");
   if (typeof args.offerMeta?.termMonths !== "number") missingTemplateFields.push("termMonths");
-  if (!(eflVersionCode ?? "").trim()) missingTemplateFields.push("eflVersionCode");
   if (!(args.offerMeta?.supplier ?? "").trim()) missingTemplateFields.push("providerName");
 
   if (missingTemplateFields.length > 0) {
     notes.push(`not_persisted:missing_fields=${missingTemplateFields.join(",")}`);
+  }
+
+  // Soft requirement: EFL version codes are not always present in the raw text
+  // (some PDFs omit the "Version #" label entirely). Since we always require the
+  // PDF SHA-256 (`sha`) for persistence (unique fingerprint), we can safely persist
+  // without a version code and still avoid collisions.
+  if (!(eflVersionCode ?? "").trim()) {
+    notes.push("template_identity_missing:eflVersionCode");
   }
 
   const eligibleForTemplatePersist =
