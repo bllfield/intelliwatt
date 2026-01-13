@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 const LAST_OFFER_KEY = "dashboard_compare_last_offer_id_v1";
@@ -9,25 +9,67 @@ const LAST_OFFER_KEY = "dashboard_compare_last_offer_id_v1";
 export default function CompareLandingClient() {
   const router = useRouter();
   const fallbackHref = useMemo(() => "/dashboard/plans", []);
+  const [status, setStatus] = useState<"idle" | "finding" | "failed">("idle");
+  const didRunRef = useRef(false);
 
   useEffect(() => {
+    if (didRunRef.current) return;
+    didRunRef.current = true;
     try {
       const last = (window.localStorage.getItem(LAST_OFFER_KEY) ?? "").trim();
       if (last) {
         router.replace(`/dashboard/plans/compare/${encodeURIComponent(last)}`);
+        return;
       }
     } catch {
       // ignore storage failures
     }
+    setStatus("finding");
+    (async () => {
+      try {
+        // If the user lands directly on Compare (no offer picked yet), default to the current "best offer"
+        // from the Plans API: prefer all-in true-cost best, else proxy best, else first offer.
+        const r = await fetch(`/api/dashboard/plans?dataset=0&page=1&pageSize=20&sort=best_for_you_proxy&_cmp=1`, {
+          cache: "no-store",
+        });
+        const j = await r.json().catch(() => null);
+        if (!r.ok || !j || j.ok !== true) throw new Error(j?.error ?? `Request failed (${r.status})`);
+        const pick = (xs: any) => (Array.isArray(xs) && xs.length > 0 ? xs[0] : null);
+        const bestAllIn = pick(j.bestOffersAllIn);
+        const bestProxy = pick(j.bestOffers);
+        const bestFromList = pick(j.offers);
+        const bestOfferId =
+          (bestAllIn && String(bestAllIn.offerId || "").trim()) ||
+          (bestProxy && String(bestProxy.offerId || "").trim()) ||
+          (bestFromList && String(bestFromList.offerId || "").trim()) ||
+          "";
+        if (bestOfferId) {
+          router.replace(`/dashboard/plans/compare/${encodeURIComponent(bestOfferId)}`);
+          return;
+        }
+        setStatus("failed");
+      } catch {
+        setStatus("failed");
+      }
+    })();
   }, [router]);
 
   return (
     <div className="mx-auto w-full max-w-5xl">
       <div className="mt-6 text-2xl font-semibold text-brand-white">Compare</div>
       <div className="mt-2 rounded-3xl border border-brand-cyan/20 bg-brand-navy p-6 text-brand-cyan/80 shadow-[0_18px_40px_rgba(10,20,60,0.22)]">
-        <div className="text-sm text-brand-cyan/80">
-          To compare, pick a plan first. We’ll take you to the side-by-side Current vs New breakdown (with a termination-fee toggle).
-        </div>
+        {status === "finding" ? (
+          <div className="text-sm text-brand-cyan/80">Finding your best plan to compare…</div>
+        ) : (
+          <div className="text-sm text-brand-cyan/80">
+            To compare, pick a plan first. We’ll take you to the side-by-side Current vs New breakdown (with a termination-fee toggle).
+          </div>
+        )}
+        {status === "failed" ? (
+          <div className="mt-2 text-xs text-brand-cyan/60">
+            We couldn’t auto-select a recommended plan yet. Please choose a plan from your Plans list.
+          </div>
+        ) : null}
         <div className="mt-4">
           <Link
             href={fallbackHref}

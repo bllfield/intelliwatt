@@ -25,14 +25,7 @@ import { computeMonthsRemainingOnContract } from "@/lib/current-plan/contractTer
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function parseBool(v: string | null, fallback: boolean): boolean {
-  if (v == null) return fallback;
-  const s = v.trim().toLowerCase();
-  if (!s) return fallback;
-  if (["1", "true", "yes", "y", "on"].includes(s)) return true;
-  if (["0", "false", "no", "n", "off"].includes(s)) return false;
-  return fallback;
-}
+// NOTE: renter status is a persisted house attribute (HouseAddress.isRenter), not a query param.
 
 function decimalToNumber(v: any): number | null {
   if (typeof v === "number" && Number.isFinite(v)) return v;
@@ -78,7 +71,6 @@ export async function GET(req: NextRequest) {
   try {
     const url = new URL(req.url);
     const offerId = (url.searchParams.get("offerId") ?? "").trim();
-    const isRenter = parseBool(url.searchParams.get("isRenter"), false);
     if (!offerId) return NextResponse.json({ ok: false, error: "offerId_required" }, { status: 400 });
 
     const cookieStore = cookies();
@@ -116,6 +108,7 @@ export async function GET(req: NextRequest) {
         id: true,
         userId: true,
         archivedAt: true,
+        isRenter: true,
         esiid: true,
         tdspSlug: true,
         addressLine1: true,
@@ -168,6 +161,8 @@ export async function GET(req: NextRequest) {
     const cutoff = new Date(windowEnd.getTime() - 365 * 24 * 60 * 60 * 1000);
 
     // Load the offer (for enroll link + RatePlan mapping).
+    // IMPORTANT: renter status is a persisted house attribute; do not accept it via query params.
+    const isRenter = Boolean((house as any)?.isRenter === true);
     const rawOffers = await wattbuy.offers({
       address: house.addressLine1,
       city: house.addressCity,
