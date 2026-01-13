@@ -6,7 +6,8 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
-    const emailRaw = "brian@intellipath-solutions.com";
+    const { searchParams } = new URL(request.url);
+    const emailRaw = String(searchParams.get("email") ?? "brian@intellipath-solutions.com").trim();
     // Normalize email to lowercase for consistent lookup
     const email = normalizeEmail(emailRaw);
     console.log(`Debug: Checking address for ${email}...`);
@@ -21,6 +22,7 @@ export async function GET(request: NextRequest) {
       include: {
         user: {
           select: {
+            id: true,
             email: true,
             createdAt: true
           }
@@ -30,19 +32,11 @@ export async function GET(request: NextRequest) {
     
     console.log("Debug: UserProfile data:", userProfile);
     
-    // Check HouseAddress table (new system)
-    const houseAddresses = await prisma.houseAddress.findMany({
-      where: {
-        userId: email
-      }
-    });
-    
-    console.log("Debug: HouseAddress data:", houseAddresses);
-    
     // Check if user exists
     const user = await prisma.user.findUnique({
       where: { email: email },
       select: {
+        id: true,
         email: true,
         createdAt: true,
         profile: true
@@ -50,6 +44,19 @@ export async function GET(request: NextRequest) {
     });
     
     console.log("Debug: User data:", user);
+
+    // Check HouseAddress table (current system)
+    const houseAddresses = await prisma.houseAddress.findMany({
+      where: {
+        OR: [
+          ...(user?.id ? [{ userId: user.id }] : []),
+          { userEmail: email },
+        ],
+      },
+      orderBy: { updatedAt: "desc" },
+    });
+    
+    console.log("Debug: HouseAddress data:", houseAddresses);
     
     return NextResponse.json({ 
       success: true,
