@@ -84,21 +84,6 @@ function fmtDollars(n: any): string {
   return `$${v.toFixed(2)}`;
 }
 
-function sumRepEnergyDollarsFromMonthlyRow(r: any): number | null {
-  const repLines = Array.isArray(r?.repBuckets) ? (r.repBuckets as any[]) : [];
-  if (!repLines.length) return null;
-  let sum = 0;
-  let any = false;
-  for (const x of repLines) {
-    const v = typeof x?.repCostDollars === "number" ? x.repCostDollars : Number(x?.repCostDollars);
-    if (Number.isFinite(v)) {
-      sum += v;
-      any = true;
-    }
-  }
-  return any ? sum : null;
-}
-
 export default function PlanCompareClient(props: { offerId: string }) {
   const offerId = String(props.offerId ?? "").trim();
   const [loading, setLoading] = useState(true);
@@ -215,29 +200,6 @@ export default function PlanCompareClient(props: { offerId: string }) {
   const usageDetail = (data as any)?.detail?.usage ?? null;
   const offerDetail = (data as any)?.detail?.offer ?? null;
   const currentDetail = (data as any)?.detail?.current ?? null;
-
-  const currentMonthlyBreakdown = (currentDetail as any)?.monthlyBreakdown ?? null;
-  const offerMonthlyBreakdown = (offerDetail as any)?.monthlyBreakdown ?? null;
-  const alignedMonths = useMemo(() => {
-    const fromUsage = Array.isArray((data as any)?.usage?.yearMonths) ? (((data as any).usage.yearMonths as any[]) ?? []) : [];
-    const fromCurrent = Array.isArray(currentMonthlyBreakdown?.rows)
-      ? (currentMonthlyBreakdown.rows as any[]).map((r) => String(r?.yearMonth ?? "").trim()).filter(Boolean)
-      : [];
-    const fromOffer = Array.isArray(offerMonthlyBreakdown?.rows)
-      ? (offerMonthlyBreakdown.rows as any[]).map((r) => String(r?.yearMonth ?? "").trim()).filter(Boolean)
-      : [];
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const ym of [...fromUsage, ...fromCurrent, ...fromOffer]) {
-      const k = String(ym ?? "").trim();
-      if (!k || seen.has(k)) continue;
-      seen.add(k);
-      out.push(k);
-    }
-    // Prefer chronological order if the server sent that; otherwise sort ascending.
-    if (fromUsage.length) return out;
-    return out.sort();
-  }, [data, currentMonthlyBreakdown, offerMonthlyBreakdown]);
 
   return (
     <div className="mx-auto w-full max-w-5xl">
@@ -505,98 +467,6 @@ export default function PlanCompareClient(props: { offerId: string }) {
               </div>
             </div>
 
-            {/* Monthly bill math: aligned month rows (scan across Current vs New) */}
-            {currentMonthlyBreakdown && offerMonthlyBreakdown ? (
-              <div className="mt-6 rounded-2xl border border-brand-cyan/20 bg-brand-navy p-4">
-                <div className="text-[0.7rem] font-semibold uppercase tracking-[0.22em] text-brand-cyan/60">
-                  Monthly bill math (aligned)
-                </div>
-                <div className="mt-1 text-xs text-brand-cyan/60">
-                  Each row is one month so you can scan across the two plans even when one has extra variables (credits, minimums, TOU buckets, etc.).
-                </div>
-
-                <div className="mt-3 overflow-auto rounded-xl border border-brand-cyan/15">
-                  <table className="min-w-[1100px] w-full text-xs">
-                    <thead className="bg-brand-white/5 text-brand-cyan/70">
-                      <tr>
-                        <th className="px-3 py-2 text-left">Year-Month</th>
-                        <th className="px-3 py-2 text-left whitespace-nowrap">kWh</th>
-                        <th className="px-3 py-2 text-left whitespace-nowrap">Current total $</th>
-                        <th className="px-3 py-2 text-left whitespace-nowrap">Current REP energy $</th>
-                        <th className="px-3 py-2 text-left whitespace-nowrap">Current TDSP delivery $</th>
-                        <th className="px-3 py-2 text-left whitespace-nowrap">Current fixed $</th>
-                        <th className="px-3 py-2 text-left whitespace-nowrap">Current credits $</th>
-                        <th className="px-3 py-2 text-left whitespace-nowrap">New total $</th>
-                        <th className="px-3 py-2 text-left whitespace-nowrap">New REP energy $</th>
-                        <th className="px-3 py-2 text-left whitespace-nowrap">New TDSP delivery $</th>
-                        <th className="px-3 py-2 text-left whitespace-nowrap">New fixed $</th>
-                        <th className="px-3 py-2 text-left whitespace-nowrap">New credits $</th>
-                        <th className="px-3 py-2 text-left whitespace-nowrap">Δ (New-Current)</th>
-                      </tr>
-                    </thead>
-                    <tbody className="text-brand-cyan/80">
-                      {alignedMonths.map((ym) => {
-                        const curRow =
-                          Array.isArray(currentMonthlyBreakdown?.rows) &&
-                          (currentMonthlyBreakdown.rows as any[]).find((r) => String(r?.yearMonth ?? "").trim() === ym);
-                        const newRow =
-                          Array.isArray(offerMonthlyBreakdown?.rows) &&
-                          (offerMonthlyBreakdown.rows as any[]).find((r) => String(r?.yearMonth ?? "").trim() === ym);
-                        const kwh =
-                          curRow?.bucketTotalKwh != null
-                            ? curRow.bucketTotalKwh
-                            : newRow?.bucketTotalKwh != null
-                              ? newRow.bucketTotalKwh
-                              : null;
-                        const curTotal = typeof curRow?.totalDollars === "number" ? curRow.totalDollars : Number(curRow?.totalDollars);
-                        const newTotal = typeof newRow?.totalDollars === "number" ? newRow.totalDollars : Number(newRow?.totalDollars);
-                        const delta =
-                          Number.isFinite(curTotal) && Number.isFinite(newTotal) ? (newTotal as number) - (curTotal as number) : null;
-
-                        const curFixed =
-                          (typeof curRow?.repFixedMonthlyChargeDollars === "number"
-                            ? curRow.repFixedMonthlyChargeDollars
-                            : Number(curRow?.repFixedMonthlyChargeDollars)) +
-                          (typeof curRow?.tdsp?.monthlyCustomerChargeDollars === "number"
-                            ? curRow.tdsp.monthlyCustomerChargeDollars
-                            : Number(curRow?.tdsp?.monthlyCustomerChargeDollars));
-                        const newFixed =
-                          (typeof newRow?.repFixedMonthlyChargeDollars === "number"
-                            ? newRow.repFixedMonthlyChargeDollars
-                            : Number(newRow?.repFixedMonthlyChargeDollars)) +
-                          (typeof newRow?.tdsp?.monthlyCustomerChargeDollars === "number"
-                            ? newRow.tdsp.monthlyCustomerChargeDollars
-                            : Number(newRow?.tdsp?.monthlyCustomerChargeDollars));
-
-                        return (
-                          <tr key={ym} className="border-t border-brand-cyan/10">
-                            <td className="px-3 py-2 font-mono text-brand-white/90">{ym}</td>
-                            <td className="px-3 py-2">{kwh == null ? "—" : fmtKwh0(kwh)}</td>
-
-                            <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(curRow?.totalDollars)}</td>
-                            <td className="px-3 py-2">{fmtDollars(sumRepEnergyDollarsFromMonthlyRow(curRow))}</td>
-                            <td className="px-3 py-2">{fmtDollars(curRow?.tdsp?.deliveryDollars)}</td>
-                            <td className="px-3 py-2">{Number.isFinite(curFixed) ? fmtDollars(curFixed) : "—"}</td>
-                            <td className="px-3 py-2">{fmtDollars(curRow?.creditsDollars)}</td>
-
-                            <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(newRow?.totalDollars)}</td>
-                            <td className="px-3 py-2">{fmtDollars(sumRepEnergyDollarsFromMonthlyRow(newRow))}</td>
-                            <td className="px-3 py-2">{fmtDollars(newRow?.tdsp?.deliveryDollars)}</td>
-                            <td className="px-3 py-2">{Number.isFinite(newFixed) ? fmtDollars(newFixed) : "—"}</td>
-                            <td className="px-3 py-2">{fmtDollars(newRow?.creditsDollars)}</td>
-
-                            <td className="px-3 py-2 font-semibold text-brand-white/90">
-                              {delta == null ? "—" : fmtDollars(delta)}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            ) : null}
-
             <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
               {(["current", "offer"] as const).map((side) => {
                 const d = side === "current" ? currentDetail : offerDetail;
@@ -607,7 +477,7 @@ export default function PlanCompareClient(props: { offerId: string }) {
                 const monthlyBreakdown = d?.monthlyBreakdown ?? null;
 
                 return (
-                  <div key={side} className="rounded-2xl border border-brand-cyan/20 bg-brand-navy p-4">
+                  <div key={side} className="rounded-2xl border border-brand-cyan/20 bg-brand-navy p-4 flex flex-col h-full">
                     <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
                       <div>
                         <div className="text-[0.7rem] font-semibold uppercase tracking-[0.22em] text-brand-cyan/60">
@@ -623,8 +493,8 @@ export default function PlanCompareClient(props: { offerId: string }) {
                       </div>
                     </div>
 
-                    <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
-                      <div className="rounded-xl border border-brand-cyan/15 bg-brand-white/5 p-3">
+                    <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 items-stretch">
+                      <div className="rounded-xl border border-brand-cyan/15 bg-brand-white/5 p-3 h-full flex flex-col">
                         <div className="text-xs font-semibold text-brand-white/90">Outputs</div>
                         <div className="mt-2 text-xs text-brand-cyan/75">
                           <div>
@@ -648,7 +518,7 @@ export default function PlanCompareClient(props: { offerId: string }) {
                         </div>
                       </div>
 
-                      <div className="rounded-xl border border-brand-cyan/15 bg-brand-white/5 p-3">
+                      <div className="rounded-xl border border-brand-cyan/15 bg-brand-white/5 p-3 h-full flex flex-col">
                         <div className="text-xs font-semibold text-brand-white/90">Components</div>
                         <div className="mt-2 text-xs text-brand-cyan/75">
                           {math?.componentsV2 ? (
@@ -694,6 +564,9 @@ export default function PlanCompareClient(props: { offerId: string }) {
                         </div>
                       </div>
                     </div>
+
+                    {/* Spacer so the Monthly table starts at the same vertical position in both columns (desktop). */}
+                    <div className="flex-1" />
 
                     <div className="mt-5 rounded-xl border border-brand-cyan/15 bg-brand-white/5 p-3">
                       <div className="text-xs font-semibold text-brand-white/90">Monthly bill math</div>
