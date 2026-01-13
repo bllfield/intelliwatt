@@ -243,7 +243,7 @@ export default function PlansClient() {
   // instead of refetching.
   // Bump when API semantics change so we don't pin users to stale session-cached payloads.
   // Bump when API semantics change so we don't pin users to stale session-cached payloads.
-  const cacheKey = useMemo(() => `dashboard_plans_dataset_v5:${serverDatasetKey}`, [serverDatasetKey]);
+  const cacheKey = useMemo(() => `dashboard_plans_dataset_v6:${serverDatasetKey}`, [serverDatasetKey]);
   // This is NOT the plan-engine cache (engine outputs are persisted in the WattBuy Offers DB).
   // This is only a UX cache for the API response to avoid flashing loading states on navigation.
   // Keep it long-lived; correctness still comes from server-side canonical inputs + DB-stored estimates.
@@ -370,8 +370,10 @@ export default function PlansClient() {
   }, [cacheKey]);
 
   useEffect(() => {
-    // If we have a fresh cached response for this dataset and we're not forcing a refresh,
-    // skip the network call entirely. This prevents "recalculations" on back/forward navigation.
+    // IMPORTANT: Do not ever "pin" the UI to a cached response.
+    // We can hydrate from cache for instant back/forward nav, but we must still revalidate.
+    // This prevents issues like seeing a stale 7-offer payload after the backend is fixed to return 56.
+    let hydratedFromCache = false;
     if (refreshNonce === 0) {
       try {
         const raw = window.sessionStorage.getItem(cacheKey);
@@ -379,10 +381,10 @@ export default function PlansClient() {
           const parsed = JSON.parse(raw) as { t: number; resp: ApiResponse };
           if (parsed && typeof parsed.t === "number" && parsed.resp && Date.now() - parsed.t <= cacheTtlMs) {
             if (!responseHasPending(parsed.resp)) {
-            setResp(parsed.resp);
-            setError(null);
-            setLoading(false);
-            return;
+              hydratedFromCache = true;
+              setResp(parsed.resp);
+              setError(null);
+              setLoading(false);
             }
           }
         }
@@ -393,7 +395,7 @@ export default function PlansClient() {
 
     const controller = new AbortController();
     const mySeq = ++reqSeqRef.current;
-    setLoading(true);
+    if (!hydratedFromCache) setLoading(true);
     setError(null);
 
     async function run() {
@@ -421,6 +423,8 @@ export default function PlansClient() {
         if (mySeq !== reqSeqRef.current) return;
         if (e?.name === "AbortError") return;
         setError(e?.message ?? String(e));
+        // Keep existing resp if we hydrated from cache; otherwise the UI would flash empty.
+        if (!hydratedFromCache) setResp(null);
       } finally {
         if (controller.signal.aborted) return;
         if (mySeq !== reqSeqRef.current) return;
