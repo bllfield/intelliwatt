@@ -377,10 +377,21 @@ export async function POST(request: NextRequest) {
         Number.isInteger(hours) &&
         Number.isInteger(minutes) &&
         hours >= 0 &&
-        hours < 24 &&
+        // Allow 24:00 as an end-of-day marker (we normalize it before persisting).
+        hours <= 24 &&
         minutes >= 0 &&
-        minutes < 60
+        minutes < 60 &&
+        !(hours === 24 && minutes !== 0)
       );
+    };
+
+    const normalizeEndForAllDayWindow = (startHhMm: string, endHhMm: string): string => {
+      // Guardrail: avoid accidental "last hour" gaps on all-day tiers.
+      // If a tier starts at midnight, the intent is often "full day".
+      if (startHhMm === '00:00' && endHhMm === '23:00') return '23:59';
+      if (startHhMm === '00:00' && endHhMm === '00:00') return '23:59';
+      if (startHhMm === '00:00' && endHhMm === '24:00') return '23:59';
+      return endHhMm;
     };
 
     const rawRateStructure = isPlainObject(body.rateStructure) ? body.rateStructure : null;
@@ -685,7 +696,7 @@ export async function POST(request: NextRequest) {
                     label,
                     priceCents: Number(price.toFixed(4)),
                     startTime: startTime as string,
-                    endTime: endTime as string,
+                    endTime: normalizeEndForAllDayWindow(startTime as string, endTime as string),
                     daysOfWeek,
                     ...(monthsOfYear ? { monthsOfYear } : {}),
                   });

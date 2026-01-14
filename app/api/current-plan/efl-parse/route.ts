@@ -52,6 +52,8 @@ function normalizeHhMm(v: any): string | null {
     const [hhRaw, mmRaw] = s.split(":");
     const hh = Number(hhRaw);
     const mm = Number(mmRaw);
+    // Allow 24:00 as an end-of-day marker (normalize later if needed).
+    if (hh === 24 && mm === 0) return "24:00";
     if (!Number.isFinite(hh) || !Number.isFinite(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) return null;
     return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
   }
@@ -60,6 +62,8 @@ function normalizeHhMm(v: any): string | null {
     const padded = s.padStart(4, "0");
     const hh = Number(padded.slice(0, 2));
     const mm = Number(padded.slice(2, 4));
+    // Allow 2400 as an end-of-day marker (normalize later if needed).
+    if (hh === 24 && mm === 0) return "24:00";
     if (!Number.isFinite(hh) || !Number.isFinite(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) return null;
     return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
   }
@@ -70,7 +74,10 @@ function normalizeEndForAllDayWindow(startHhMm: string, endHhMm: string): string
   // Heuristic: Some EFLs represent "all day" as 12:00 AM – 11:00 PM (instead of 11:59 PM).
   // If start is midnight and end is 23:00, treat it as end-of-day so we don't drop the last hour.
   if (startHhMm === "00:00" && endHhMm === "23:00") return "23:59";
-  // Also tolerate "24:00" inputs (normalize to 23:59).
+  // Some EFLs express "all day" as 12:00 AM – 12:00 AM.
+  // If start and end are both midnight, treat as end-of-day.
+  if (startHhMm === "00:00" && endHhMm === "00:00") return "23:59";
+  // Also tolerate "24:00" end-of-day marker (normalize to 23:59).
   if (startHhMm === "00:00" && endHhMm === "24:00") return "23:59";
   return endHhMm;
 }
