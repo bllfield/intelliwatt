@@ -288,7 +288,7 @@ export async function GET(req: NextRequest) {
         ? manualRs
         : parsedBillRsPresent
           ? parsedBillRs
-          : manualRs ?? parsedEflRs ?? parsedBillRs ?? null;
+          : parsedEflRs ?? manualRs ?? parsedBillRs ?? null;
 
     const mergedCurrent: any = {
       ...(latestParsed ?? {}),
