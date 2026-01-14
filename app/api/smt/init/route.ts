@@ -88,7 +88,16 @@ export async function GET(request: NextRequest) {
     const parsedDelegate = (currentPlanPrisma as any).parsedCurrentPlan as any;
 
     const parsed = await parsedDelegate.findFirst({
-      where: { userId: user.id, houseId },
+      // SMT init should hydrate from the customer's statement bill parses (not EFL uploads).
+      // Current-plan EFL PDFs are stored in the same table with filename prefix `EFL:`.
+      where: {
+        userId: user.id,
+        houseId,
+        uploadId: { not: null },
+        billUpload: {
+          filename: { not: { startsWith: "EFL:", mode: "insensitive" } },
+        },
+      },
       orderBy: { createdAt: "desc" },
     });
 
@@ -106,6 +115,7 @@ export async function GET(request: NextRequest) {
       trimOrNull(parsed?.meterNumber) ??
       null;
 
+    const customerName = trimOrNull(parsed?.customerName) ?? null;
     const providerName = trimOrNull(parsed?.providerName) ?? null;
     const tdspName =
       trimOrNull(parsed?.tdspName) ??
@@ -137,6 +147,7 @@ export async function GET(request: NextRequest) {
       houseId,
       esiid,
       meterNumber,
+      customerName,
       providerName,
       tdspName,
       serviceAddress,

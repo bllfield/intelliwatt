@@ -531,7 +531,29 @@ export async function POST(request: NextRequest) {
 
     // Best-effort: promote a computable parsed structure into CurrentPlanManualEntry so the
     // customer-facing snapshot + compare path use a single canonical rateStructure.
-    if (rateStructure && effectiveHouseId) {
+    // IMPORTANT: Bill parsing must NOT override a computable EFL-derived rateStructure for the same home.
+    // We only "promote" bill-derived data into CurrentPlanManualEntry when there is no EFL-derived parse.
+    let hasEflDerivedRateStructure = false;
+    if (effectiveHouseId) {
+      try {
+        const latestEfl = await parsedDelegate.findFirst({
+          where: {
+            userId: user.id,
+            houseId: effectiveHouseId,
+            uploadId: { not: null },
+            billUpload: { filename: { startsWith: 'EFL:', mode: 'insensitive' } },
+            rateStructure: { not: null },
+          },
+          orderBy: { createdAt: 'desc' },
+          select: { id: true },
+        });
+        hasEflDerivedRateStructure = Boolean(latestEfl?.id);
+      } catch {
+        hasEflDerivedRateStructure = false;
+      }
+    }
+
+    if (rateStructure && effectiveHouseId && !hasEflDerivedRateStructure) {
       try {
         const manualDelegate = (currentPlanPrisma as any).currentPlanManualEntry as any;
         const existingManual = await manualDelegate.findFirst({
@@ -572,11 +594,18 @@ export async function POST(request: NextRequest) {
         } else {
           await manualDelegate.create({ data: manualData });
         }
-
-        await ensureCurrentPlanEntry(user.id, effectiveHouseId);
       } catch (e) {
         // eslint-disable-next-line no-console
         console.error('[current-plan/bill-parse] Failed to upsert CurrentPlanManualEntry from parsed bill', e);
+      }
+    }
+
+    // Always refresh/award the Current Plan entry after a successful bill parse (best-effort).
+    if (effectiveHouseId) {
+      try {
+        await ensureCurrentPlanEntry(user.id, effectiveHouseId);
+      } catch {
+        // ignore
       }
     }
 

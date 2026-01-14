@@ -218,21 +218,53 @@ export async function GET(req: NextRequest) {
         }
       : null;
 
-    // Current plan: prefer latest manual entry for this house, else latest parsed plan for this house.
+    // Current plan:
+    // - Prefer a *confirmed* manual entry (user-entered).
+    // - Otherwise prefer an EFL-derived parsed plan (computable templates should not be overridden by bill parses).
+    // - Otherwise fall back to a statement-bill parsed plan.
     const currentPlanPrisma = getCurrentPlanPrisma();
     const manualDelegate = (currentPlanPrisma as any).currentPlanManualEntry as any;
     const parsedDelegate = (currentPlanPrisma as any).parsedCurrentPlan as any;
 
-    const latestManual = await manualDelegate.findFirst({
+    const latestManualRaw = await manualDelegate.findFirst({
       where: { userId: user.id, houseId: house.id },
       orderBy: { updatedAt: "desc" },
     });
-    const latestParsed = await parsedDelegate.findFirst({
-      where: { userId: user.id, houseId: house.id },
+
+    const isAutoImportedFromBill = (m: any): boolean => {
+      const notes = typeof m?.notes === "string" ? m.notes : "";
+      const confirmed = m?.lastConfirmedAt instanceof Date;
+      return !confirmed && /imported\s+from\s+uploaded\s+bill/i.test(notes);
+    };
+    const latestManual = latestManualRaw && !isAutoImportedFromBill(latestManualRaw) ? latestManualRaw : null;
+
+    const latestParsedEfl = await parsedDelegate.findFirst({
+      where: {
+        userId: user.id,
+        houseId: house.id,
+        uploadId: { not: null },
+        billUpload: { filename: { startsWith: "EFL:", mode: "insensitive" } },
+      },
       orderBy: { createdAt: "desc" },
     });
+    const latestParsedBill = await parsedDelegate.findFirst({
+      where: {
+        userId: user.id,
+        houseId: house.id,
+        uploadId: { not: null },
+        billUpload: { filename: { not: { startsWith: "EFL:", mode: "insensitive" } } },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    const latestParsed = latestParsedEfl ?? latestParsedBill ?? null;
 
-    const currentSource = latestManual ? "MANUAL" : latestParsed ? "PARSED" : null;
+    const currentSource = latestManual
+      ? "MANUAL"
+      : latestParsedEfl
+        ? "PARSED_EFL"
+        : latestParsedBill
+          ? "PARSED_BILL"
+          : null;
     const currentEntry = latestManual ?? latestParsed ?? null;
     if (!currentEntry) {
       return NextResponse.json({ ok: false, error: "no_current_plan" }, { status: 400 });
@@ -243,22 +275,20 @@ export async function GET(req: NextRequest) {
     // Manual entries are allowed to override, but should not silently override a newer/valid parsed
     // structure (this caused confusing "different current rates" across dashboards).
     const manualRs = (latestManual as any)?.rateStructure ?? null;
-    const parsedRs = (latestParsed as any)?.rateStructure ?? null;
+    const parsedEflRs = (latestParsedEfl as any)?.rateStructure ?? null;
+    const parsedBillRs = (latestParsedBill as any)?.rateStructure ?? null;
     const manualRsPresent = isRateStructurePresent(manualRs);
-    const parsedRsPresent = isRateStructurePresent(parsedRs);
+    const parsedEflRsPresent = isRateStructurePresent(parsedEflRs);
+    const parsedBillRsPresent = isRateStructurePresent(parsedBillRs);
 
-    const manualUpdatedAtMs =
-      (latestManual as any)?.updatedAt instanceof Date ? (latestManual as any).updatedAt.getTime() : null;
-    const parsedUpdatedAtMs =
-      (latestParsed as any)?.updatedAt instanceof Date ? (latestParsed as any).updatedAt.getTime() : null;
-
-    const effectiveRateStructure =
-      // Prefer a present manual structure only when it's at least as new as parsed (or parsed missing).
-      manualRsPresent && (!parsedRsPresent || (manualUpdatedAtMs != null && parsedUpdatedAtMs != null && manualUpdatedAtMs >= parsedUpdatedAtMs))
+    // Precedence: EFL-derived (when present) > confirmed manual > bill-derived.
+    const effectiveRateStructure = parsedEflRsPresent
+      ? parsedEflRs
+      : manualRsPresent
         ? manualRs
-        : parsedRsPresent
-          ? parsedRs
-          : manualRs ?? parsedRs ?? null;
+        : parsedBillRsPresent
+          ? parsedBillRs
+          : manualRs ?? parsedEflRs ?? parsedBillRs ?? null;
 
     const mergedCurrent: any = {
       ...(latestParsed ?? {}),

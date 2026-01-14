@@ -12,6 +12,7 @@ export type RepOption = {
 export interface RepSelectorProps {
   repPuctNumber?: string;
   onChange: (nextPuctNumber: string | undefined) => void;
+  preferredProviderName?: string | null;
   label?: string;
   helperText?: string;
   requiredMessage?: string;
@@ -21,6 +22,7 @@ export function RepSelector(props: RepSelectorProps) {
   const {
     repPuctNumber,
     onChange,
+    preferredProviderName,
     label = "Retail Electric Provider",
     helperText = "Select the Retail Electric Provider who issued your plan.",
     requiredMessage = "Please select a Retail Electric Provider.",
@@ -70,6 +72,40 @@ export function RepSelector(props: RepSelectorProps) {
       controller.abort();
     };
   }, []);
+
+  React.useEffect(() => {
+    if (repPuctNumber) return;
+    if (!preferredProviderName || !preferredProviderName.trim()) return;
+    if (!Array.isArray(options) || options.length === 0) return;
+
+    const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "");
+    const target = norm(preferredProviderName);
+    if (!target) return;
+
+    // Try to match against legal name / DBA name. Only auto-pick if we find a clear match.
+    const matches = options.filter((rep) => {
+      const legal = norm(rep.legalName ?? "");
+      const dba = norm(rep.dbaName ?? "");
+      if (!legal && !dba) return false;
+      return (
+        legal === target ||
+        dba === target ||
+        (legal.length >= 6 && target.length >= 6 && (legal.includes(target) || target.includes(legal))) ||
+        (dba.length >= 6 && target.length >= 6 && (dba.includes(target) || target.includes(dba)))
+      );
+    });
+
+    if (matches.length === 1) {
+      onChange(matches[0]!.puctNumber);
+      return;
+    }
+
+    // If multiple, prefer exact legalName match.
+    const exactLegal = matches.find((rep) => norm(rep.legalName ?? "") === target);
+    if (exactLegal) {
+      onChange(exactLegal.puctNumber);
+    }
+  }, [repPuctNumber, preferredProviderName, options, onChange]);
 
   const handleChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
     const value = event.target.value;

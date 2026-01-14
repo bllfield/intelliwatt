@@ -222,7 +222,7 @@ export async function GET(request: NextRequest) {
     const manualDelegate = currentPlanPrisma.currentPlanManualEntry as any;
     const parsedDelegate = (currentPlanPrisma as any).parsedCurrentPlan as any;
 
-  const latestManual: ManualEntry | null = await manualDelegate.findFirst({
+    const latestManualRaw: ManualEntry | null = await manualDelegate.findFirst({
       where: {
         userId: user.id,
         ...(houseId ? { houseId } : {}),
@@ -230,30 +230,45 @@ export async function GET(request: NextRequest) {
       orderBy: { updatedAt: 'desc' },
     });
 
-  let effectiveHouseId: string | null = houseId ?? latestManual?.houseId ?? null;
+    const isAutoImportedFromBill = (m: any): boolean => {
+      const notes = typeof m?.notes === 'string' ? m.notes : '';
+      const confirmed = m?.lastConfirmedAt instanceof Date;
+      return !confirmed && /imported\s+from\s+uploaded\s+bill/i.test(notes);
+    };
 
-  let latestParsed: ParsedEntry | null = null;
-  if (effectiveHouseId) {
-    latestParsed = await parsedDelegate.findFirst({
+    // Do not treat auto-imported bill parses as "manual overrides" (they should not override EFL-derived plans).
+    const latestManual: ManualEntry | null =
+      latestManualRaw && !isAutoImportedFromBill(latestManualRaw) ? latestManualRaw : null;
+
+    let effectiveHouseId: string | null = houseId ?? latestManual?.houseId ?? null;
+
+    // Parsed current plan: prefer EFL-derived parses when present; otherwise fall back to statement-bill parses.
+    // EFL uploads are tagged in CurrentPlanBillUpload.filename with prefix "EFL:".
+    const parsedWhereBase: any = effectiveHouseId
+      ? { userId: user.id, houseId: effectiveHouseId }
+      : { userId: user.id };
+
+    const latestParsedEfl: ParsedEntry | null = await parsedDelegate.findFirst({
       where: {
-        userId: user.id,
-        houseId: effectiveHouseId,
+        ...parsedWhereBase,
+        uploadId: { not: null },
+        billUpload: { filename: { startsWith: 'EFL:', mode: 'insensitive' } },
       },
       orderBy: { createdAt: 'desc' },
     });
-  } else {
-    // If there is no manual entry and no explicit houseId, fall back to the most recent
-    // parsed bill for this user so parsed data can still pre-fill the form.
-    latestParsed = await parsedDelegate.findFirst({
+    const latestParsedBill: ParsedEntry | null = await parsedDelegate.findFirst({
       where: {
-        userId: user.id,
+        ...parsedWhereBase,
+        uploadId: { not: null },
+        billUpload: { filename: { not: { startsWith: 'EFL:', mode: 'insensitive' } } },
       },
       orderBy: { createdAt: 'desc' },
     });
+    const latestParsed: ParsedEntry | null = latestParsedEfl ?? latestParsedBill ?? null;
+
     if (latestParsed && !effectiveHouseId) {
-      effectiveHouseId = latestParsed.houseId ?? null;
+      effectiveHouseId = (latestParsed as any).houseId ?? null;
     }
-  }
 
   // If the parsed payload includes an ESIID, prefer resolving the house by ESIID
   // (this is more reliable than "primary" when users have multiple homes).

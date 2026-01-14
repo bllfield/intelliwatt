@@ -49,6 +49,7 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
   const [meterNumber, setMeterNumber] = useState(
     typeof initialMeterNumber === "string" ? initialMeterNumber.trim() : "",
   );
+  const [preferredProviderName, setPreferredProviderName] = useState<string | null>(null);
   const [repPuctNumber, setRepPuctNumber] = useState<string | undefined>(undefined);
   const [isPending, startTransition] = useTransition();
 
@@ -111,6 +112,14 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
           setMeterNumber(data.meterNumber.trim());
         }
 
+        if (!customerName && typeof data.customerName === "string" && data.customerName.trim().length > 0) {
+          setCustomerName(data.customerName.trim());
+        }
+
+        if (!preferredProviderName && typeof data.providerName === "string" && data.providerName.trim().length > 0) {
+          setPreferredProviderName(data.providerName.trim());
+        }
+
         const addr = data.serviceAddress ?? {};
         if (!autoServiceAddressLine1 && typeof addr.line1 === "string" && addr.line1.trim().length > 0) {
           setAutoServiceAddressLine1(addr.line1.trim());
@@ -147,7 +156,9 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
     autoServiceCity,
     autoServiceState,
     autoServiceZip,
+    customerName,
     meterNumber,
+    preferredProviderName,
   ]);
 
   useEffect(() => {
@@ -413,6 +424,7 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
         <RepSelector
           repPuctNumber={repPuctNumber}
           onChange={setRepPuctNumber}
+          preferredProviderName={preferredProviderName}
         />
 
         <div className="space-y-1">
