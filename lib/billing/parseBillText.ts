@@ -90,6 +90,82 @@ const METER_REGEX = /\b(Meter(?:\s*Number)?[:\s#]*)([A-Za-z0-9\-]+)\b/i;
 const PROVIDER_REGEX = /\b(?:Provider|Retail Electric Provider|REP)[:\s]+(.+?)\b/;
 const ACCOUNT_REGEX = /\b(Account(?:\s*Number)?[:\s#]*)([A-Za-z0-9\-]+)\b/;
 
+function shouldDiscardLikelyCustomerServiceHoursTou(args: {
+  rawText: string;
+  timeOfUse: TimeOfUseConfig | null | undefined;
+  energyRateTiers: EnergyRateTier[] | null | undefined;
+}): boolean {
+  const tou = args.timeOfUse;
+  if (!tou || !Array.isArray(tou.periods) || tou.periods.length === 0) return false;
+
+  // Only consider dropping very small/simple schedules (the common false-positive shape).
+  if (tou.periods.length > 2) return false;
+
+  const t = String(args.rawText ?? '').toLowerCase();
+  if (!t) return false;
+
+  // Strong-ish "customer service hours" signal in many bills.
+  const hasCustomerServiceContext =
+    t.includes('customer service') ||
+    t.includes('service@') ||
+    t.includes('call ') ||
+    t.includes('daily ') ||
+    t.includes('am') ||
+    t.includes('pm');
+
+  if (!hasCustomerServiceContext) return false;
+
+  // If the bill text contains actual TOU signals, do NOT discard.
+  const hasTouKeywords =
+    t.includes('time of use') ||
+    t.includes('tou') ||
+    t.includes('on-peak') ||
+    t.includes('off-peak') ||
+    t.includes('shoulder') ||
+    t.includes('free nights') ||
+    t.includes('free weekends') ||
+    t.includes('nights free') ||
+    t.includes('weekend') ||
+    t.includes('solar days');
+
+  if (hasTouKeywords) return false;
+
+  // Customer service hour blocks often look like: "Daily 7:00 AM - 10:00 PM CST"
+  const hasDailyHoursPattern = /daily\s+\d{1,2}:\d{2}\s*(am|pm)\s*-\s*\d{1,2}:\d{2}\s*(am|pm)\s*(cst|ct|central)?/i.test(
+    args.rawText,
+  );
+  if (!hasDailyHoursPattern) return false;
+
+  // Heuristic: if the TOU schedule is all-days and looks like business hours, it's likely wrong.
+  const allDays = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
+  const isAllDays = (days: any) =>
+    Array.isArray(days) && allDays.every((d) => days.includes(d));
+
+  const tierRates = (args.energyRateTiers ?? [])
+    .map((r) => Number((r as any)?.rateCentsPerKWh))
+    .filter((n) => Number.isFinite(n));
+  const singleTierRate = tierRates.length ? tierRates[0]! : null;
+
+  const looksLikeBusinessHours = tou.periods.every((p: any) => {
+    const start = Number(p?.startMinutes);
+    const end = Number(p?.endMinutes);
+    const rate = Number(p?.rateCentsPerKWh);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || !Number.isFinite(rate)) return false;
+    if (!isAllDays(p?.days)) return false;
+    // 6:00–9:00am start, 6:00–11:59pm end is a common "office hours" window.
+    const startOk = start >= 360 && start <= 540;
+    const endOk = end >= 1080 && end <= 1439;
+    if (!startOk || !endOk) return false;
+    // If TOU rate matches the flat energy rate, even more likely a false positive.
+    if (singleTierRate != null && Number.isFinite(singleTierRate)) {
+      if (Math.abs(rate - singleTierRate) > 0.01) return false;
+    }
+    return true;
+  });
+
+  return looksLikeBusinessHours;
+}
+
 export function extractCurrentPlanFromBillText(
   rawText: string,
   hints: BillParseHints = {},
@@ -236,6 +312,9 @@ Your job:
   map those to TimeOfUsePeriod entries with correct days + minutes + rates.
 - When usage-based bill credits are present (e.g. "Credit of $20 when usage between 1000-1200 kWh"),
   encode them as BillCreditRule entries.
+- IMPORTANT: Do NOT interpret "Customer Service" / "Customer Care" contact hours (e.g. "Daily 7:00 AM - 10:00 PM CST")
+  as time-of-use pricing. Only create timeOfUse.periods when the bill explicitly indicates different energy prices
+  by time/day (on-peak/off-peak/free nights/weekends) and provides corresponding energy rates.
 
 You MUST return ONLY valid JSON that matches this TypeScript type:
 
@@ -414,6 +493,22 @@ Return ONLY a JSON object matching ParsedCurrentPlanPayload (no extra keys, no c
         return { ...p, startMinutes: start, endMinutes: end };
       })
       .filter((p) => Number.isFinite((p as any).rateCentsPerKWh) && (p as any).rateCentsPerKWh >= 0);
+  }
+
+  // Guardrail: customer-service contact hours are frequently misread as TOU pricing windows.
+  // Drop suspicious TOU schedules so FIXED plans don't get polluted with fake periods.
+  if (shouldDiscardLikelyCustomerServiceHoursTou({
+    rawText,
+    timeOfUse: aiResult.timeOfUse,
+    energyRateTiers: aiResult.energyRateTiers,
+  })) {
+    aiResult.timeOfUse = null;
+    if (aiResult.rateType === 'TIME_OF_USE') {
+      // Best-effort: if we also have a usable tiered rate, treat as FIXED instead of TOU.
+      if (Array.isArray(aiResult.energyRateTiers) && aiResult.energyRateTiers.length > 0) {
+        aiResult.rateType = 'FIXED';
+      }
+    }
   }
 
   if (!aiResult.billCredits) {
