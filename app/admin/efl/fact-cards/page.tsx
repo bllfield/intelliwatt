@@ -902,6 +902,7 @@ export default function FactCardOpsPage() {
   const [cpBillPlanErr, setCpBillPlanErr] = useState<string | null>(null);
   const [cpBillPlanTemplates, setCpBillPlanTemplates] = useState<CurrentPlanBillPlanTemplateRow[]>([]);
   const [cpBillPlanQ, setCpBillPlanQ] = useState<string>("");
+  const [cpBillPlanDeletingId, setCpBillPlanDeletingId] = useState<string | null>(null);
 
   async function loadCurrentPlanParsedTemplates() {
     if (!token) {
@@ -957,6 +958,46 @@ export default function FactCardOpsPage() {
       setCpBillPlanErr(e?.message ?? "Failed to load BillPlanTemplate rows.");
     } finally {
       setCpBillPlanLoading(false);
+    }
+  }
+
+  async function deleteCurrentPlanBillPlanTemplate(idRaw: any) {
+    if (!token) {
+      setCpBillPlanErr("Admin token required.");
+      return;
+    }
+    const id = String(idRaw ?? "").trim();
+    if (!id) return;
+
+    const row = cpBillPlanTemplates.find((t: any) => String(t?.id ?? "") === id) as any;
+    const label = row
+      ? `${String(row.providerName ?? "—")} — ${String(row.planName ?? "—")}`
+      : id;
+
+    const ok = window.confirm(
+      `Delete BillPlanTemplate?\n\n${label}\n\nThis removes the reusable template from CURRENT_PLAN_DATABASE_URL so the next EFL/bill parse can rebuild it using the latest code.`,
+    );
+    if (!ok) return;
+
+    setCpBillPlanDeletingId(id);
+    setCpBillPlanErr(null);
+    try {
+      const res = await fetch(`/api/admin/current-plan/bill-plan-templates/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers: { "x-admin-token": token },
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) {
+        const msg = data?.error || res.statusText || "Failed to delete BillPlanTemplate.";
+        throw new Error(msg);
+      }
+      // Optimistic remove, then refresh for correctness.
+      setCpBillPlanTemplates((prev) => prev.filter((t: any) => String(t?.id ?? "") !== id));
+      await loadCurrentPlanBillPlanTemplates();
+    } catch (e: any) {
+      setCpBillPlanErr(e?.message ?? "Failed to delete BillPlanTemplate.");
+    } finally {
+      setCpBillPlanDeletingId(null);
     }
   }
 
@@ -2325,6 +2366,7 @@ export default function FactCardOpsPage() {
                     <th className="px-2 py-2 text-right">Term</th>
                     <th className="px-2 py-2 text-right">Base</th>
                     <th className="px-2 py-2 text-right">ETF</th>
+                    <th className="px-2 py-2 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2345,11 +2387,22 @@ export default function FactCardOpsPage() {
                       <td className="px-2 py-2 text-right text-gray-700">
                         {typeof t.earlyTerminationFeeCents === "number" ? t.earlyTerminationFeeCents : "—"}
                       </td>
+                      <td className="px-2 py-2 text-right">
+                        <button
+                          type="button"
+                          className="rounded border border-red-200 px-2 py-1 text-[11px] font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                          disabled={!ready || cpBillPlanDeletingId === String(t.id)}
+                          onClick={() => void deleteCurrentPlanBillPlanTemplate(t.id)}
+                          title="Delete this BillPlanTemplate from current-plan DB"
+                        >
+                          {cpBillPlanDeletingId === String(t.id) ? "Deleting…" : "Delete"}
+                        </button>
+                      </td>
                     </tr>
                   ))}
                   {cpBillPlanTemplates.length === 0 ? (
                     <tr>
-                      <td className="px-2 py-3 text-gray-500" colSpan={7}>
+                      <td className="px-2 py-3 text-gray-500" colSpan={8}>
                         No items.
                       </td>
                     </tr>
