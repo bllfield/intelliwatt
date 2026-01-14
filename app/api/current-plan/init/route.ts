@@ -172,6 +172,15 @@ function deriveRepFixedMonthlyDollars(args: {
   return dollars != null ? dollars : null;
 }
 
+function isRateStructurePresent(rs: any): boolean {
+  if (!rs || typeof rs !== 'object') return false;
+  const t = String((rs as any)?.type ?? '').toUpperCase();
+  if (t === 'FIXED') return typeof (rs as any)?.energyRateCents === 'number';
+  if (t === 'VARIABLE') return typeof (rs as any)?.currentBillEnergyRateCents === 'number';
+  if (t === 'TIME_OF_USE') return Array.isArray((rs as any)?.tiers) && (rs as any).tiers.length > 0;
+  return false;
+}
+
 export async function GET(request: NextRequest) {
   try {
     if (!process.env.CURRENT_PLAN_DATABASE_URL) {
@@ -456,6 +465,38 @@ export async function GET(request: NextRequest) {
     const requiredBuckets = requiredBucketsForRateStructure({ rateStructure: rs ?? null });
     const requiredBucketKeys = requiredBuckets.map((b) => b.key);
 
+    // Customer-facing guidance: if we have a plan record but it is not computable yet,
+    // tell the customer to finish the manual entry (prefilled from bill/EFL).
+    const missingFields: string[] = [];
+    const providerName = typeof effectivePlan?.providerName === 'string' ? effectivePlan.providerName.trim() : '';
+    const planName = typeof effectivePlan?.planName === 'string' ? effectivePlan.planName.trim() : '';
+    const rtUpper = String(rateType ?? '').toUpperCase();
+    if (!providerName) missingFields.push('providerName');
+    if (!planName) missingFields.push('planName');
+    if (!['FIXED', 'VARIABLE', 'TIME_OF_USE'].includes(rtUpper)) missingFields.push('rateType');
+    if (rtUpper === 'FIXED') {
+      const hasFixedRate =
+        (rs && typeof (rs as any)?.energyRateCents === 'number') ||
+        (typeof effectivePlan?.energyRateCents === 'number' && Number.isFinite(effectivePlan.energyRateCents));
+      if (!hasFixedRate) missingFields.push('energyRateCentsPerKwh');
+    }
+    if (rtUpper === 'VARIABLE') {
+      const hasVarRate =
+        (rs && typeof (rs as any)?.currentBillEnergyRateCents === 'number') ||
+        (typeof effectivePlan?.energyRateCents === 'number' && Number.isFinite(effectivePlan.energyRateCents));
+      if (!hasVarRate) missingFields.push('currentBillEnergyRateCentsPerKwh');
+    }
+    if (rtUpper === 'TIME_OF_USE') {
+      const tiersOk = Array.isArray((rs as any)?.tiers) && (rs as any).tiers.length > 0;
+      if (!tiersOk) missingFields.push('timeOfUseTiers');
+    }
+
+    const computableNow = isRateStructurePresent(rs);
+    const needsManualCompletion = Boolean(effectivePlan) && !computableNow;
+    const manualCompletionMessage = needsManualCompletion
+      ? `We pre-filled what we could from your uploaded bill/EFL. To calculate your current rate and show savings, please review the form below, fill in any missing fields, and click Save.`
+      : null;
+
     if (rt === 'TIME_OF_USE') {
       const tiers = Array.isArray(rs?.tiers) ? rs.tiers : [];
       planVariablesList.push({ key: 'rep.tou_tiers', label: 'REP time-of-use tiers', value: String(tiers.length || 0) });
@@ -555,6 +596,12 @@ export async function GET(request: NextRequest) {
       // Aliases matching the bill parsing system overview contract:
       saved: savedCurrentPlan,
       parsed: parsedCurrentPlan,
+      manualCompletion: {
+        needed: needsManualCompletion,
+        computableNow,
+        missingFields,
+        message: manualCompletionMessage,
+      },
     });
   } catch (error) {
     console.error('[current-plan/init] Failed to fetch current plan init payload', error);

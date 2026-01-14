@@ -362,10 +362,18 @@ function CurrentPlanFormPreview({ parsed }: CurrentPlanPreviewProps) {
             </span>
             <div className="flex flex-wrap gap-2 text-xs">
               <span className="inline-flex items-center rounded-full border border-slate-300 bg-slate-100 px-3 py-1">
-                TOU config: {parsed.timeOfUse ? 'present' : '—'}
+                TOU config:{" "}
+                {Array.isArray((parsed as any)?.timeOfUse?.periods) && (parsed as any).timeOfUse.periods.length > 0
+                  ? 'present'
+                  : '—'}
               </span>
               <span className="inline-flex items-center rounded-full border border-slate-300 bg-slate-100 px-3 py-1">
-                Bill credits: {parsed.billCredits ? 'present' : '—'}
+                Bill credits:{" "}
+                {(parsed as any)?.billCredits?.enabled === true &&
+                Array.isArray((parsed as any)?.billCredits?.rules) &&
+                (parsed as any).billCredits.rules.length > 0
+                  ? 'present'
+                  : '—'}
               </span>
               <span className="inline-flex items-center rounded-full border border-slate-300 bg-slate-100 px-3 py-1">
                 Energy tiers:{' '}

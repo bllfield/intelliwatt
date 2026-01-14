@@ -20,6 +20,15 @@ function sha256Hex(s: string | Buffer): string {
   return crypto.createHash('sha256').update(s).digest('hex');
 }
 
+function isRateStructurePresent(rs: any): boolean {
+  if (!rs || typeof rs !== 'object') return false;
+  const t = String((rs as any)?.type ?? '').toUpperCase();
+  if (t === 'FIXED') return typeof (rs as any)?.energyRateCents === 'number';
+  if (t === 'VARIABLE') return typeof (rs as any)?.currentBillEnergyRateCents === 'number';
+  if (t === 'TIME_OF_USE') return Array.isArray((rs as any)?.tiers) && (rs as any).tiers.length > 0;
+  return false;
+}
+
 function isLikelyEflUploadFilename(filename: unknown): boolean {
   const s = typeof filename === 'string' ? filename.trim() : '';
   if (!s) return false;
@@ -629,6 +638,11 @@ export async function POST(request: NextRequest) {
       parsed?.timeOfUse && Array.isArray((parsed.timeOfUse as any)?.periods) && (parsed.timeOfUse as any).periods.length > 0;
     if ((rt === 'FIXED' || rt === 'VARIABLE') && !hasEnergyTiers && !hasTou) {
       reasonParts.push('missing_energy_pricing');
+    }
+
+    // If we built a rateStructure but it is still not computable, queue it for admin review.
+    if (rateStructure && !isRateStructurePresent(rateStructure)) {
+      reasonParts.push('incomplete_rate_structure');
     }
 
     const queuedForReview = reasonParts.length > 0;

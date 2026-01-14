@@ -253,6 +253,12 @@ export function CurrentRateDetailsForm({
   const [hasActiveUsage, setHasActiveUsage] = useState(false);
   const [loadingSavedPlan, setLoadingSavedPlan] = useState(true);
   const [savedPlanError, setSavedPlanError] = useState<string | null>(null);
+  const [manualCompletion, setManualCompletion] = useState<{
+    needed: boolean;
+    computableNow: boolean;
+    missingFields: string[];
+    message: string | null;
+  } | null>(null);
   const [reconfirming, setReconfirming] = useState(false);
   const [reconfirmMessage, setReconfirmMessage] = useState<string | null>(null);
   const [electricCompany, setElectricCompany] = useState("");
@@ -328,6 +334,7 @@ export function CurrentRateDetailsForm({
       if (response.status === 404) {
         setSavedPlan(null);
         setParsedPlan(null);
+        setManualCompletion(null);
         setPlanEntrySnapshot(null);
         setUsageSnapshot(null);
         setHasActiveUsage(false);
@@ -352,6 +359,7 @@ export function CurrentRateDetailsForm({
       const nextPlanEntrySnapshot = payload?.entry ?? null;
       setSavedPlan(payload?.savedCurrentPlan ?? null);
       setParsedPlan(payload?.parsedCurrentPlan ?? null);
+      setManualCompletion(payload?.manualCompletion ?? null);
       setPrefillSignals(payload?.prefillSignals ?? null);
       setPlanVariablesUsed(payload?.planVariablesUsed ?? null);
       setPlanVariablesList(Array.isArray(payload?.planVariablesList) ? payload.planVariablesList : null);
@@ -378,6 +386,7 @@ export function CurrentRateDetailsForm({
       setSavedPlanError(message);
       setSavedPlan(null);
       setParsedPlan(null);
+      setManualCompletion(null);
       setPlanVariablesUsed(null);
       setPlanVariablesList(null);
       setRequiredBuckets(null);
@@ -1547,6 +1556,20 @@ export function CurrentRateDetailsForm({
 
   return (
     <div className="space-y-8">
+      {manualCompletion?.needed ? (
+        <div className="rounded-2xl border border-amber-300/70 bg-amber-100/40 px-5 py-4 text-sm text-amber-900 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
+          <div className="font-semibold">Finish your current plan details to enable savings comparison</div>
+          <div className="mt-1 text-sm text-amber-900/90">
+            {manualCompletion.message ??
+              "We pre-filled what we could from your upload. Please review the fields below, fill in what's missing, and click Save."}
+          </div>
+          {Array.isArray(manualCompletion.missingFields) && manualCompletion.missingFields.length > 0 ? (
+            <div className="mt-2 text-xs text-amber-900/80">
+              Missing: <span className="font-mono">{manualCompletion.missingFields.join(", ")}</span>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       {!hasActiveUsage ? (
         <div className="rounded-3xl border border-rose-400/40 bg-rose-500/10 px-5 py-4 text-sm text-brand-navy shadow-[0_18px_45px_rgba(190,18,60,0.18)]">
           Current plan entries unlock only after IntelliWatt has active usage data. Connect Smart Meter Texas or upload usage on{" "}
