@@ -69,14 +69,15 @@ export function RepSelector(props: RepSelectorProps) {
 
         // Base list (small)
         const baseParams = new URLSearchParams();
-        baseParams.set("limit", "200");
+        // Load a large enough set that the dropdown effectively includes all REPs.
+        baseParams.set("limit", "2000");
         await fetchReps(baseParams);
 
         // Targeted list (by provider name)
         if (preferredProviderName && preferredProviderName.trim()) {
           const qParams = new URLSearchParams();
           qParams.set("q", preferredProviderName.trim());
-          qParams.set("limit", "200");
+          qParams.set("limit", "2000");
           await fetchReps(qParams);
         }
 
@@ -84,7 +85,7 @@ export function RepSelector(props: RepSelectorProps) {
         if (repPuctNumber && repPuctNumber.trim()) {
           const qParams = new URLSearchParams();
           qParams.set("q", repPuctNumber.trim());
-          qParams.set("limit", "200");
+          qParams.set("limit", "2000");
           await fetchReps(qParams);
         }
 

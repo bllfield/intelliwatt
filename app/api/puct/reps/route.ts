@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 
 const DEFAULT_LIMIT = 50;
-const MAX_LIMIT = 200;
+// We want the REP dropdown to be able to show the full list (small enough in practice).
+// Keep a safety cap anyway.
+const MAX_LIMIT = 2000;
 
 function normKey(input: string): string {
   return String(input ?? "")
