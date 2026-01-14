@@ -101,7 +101,9 @@ export async function GET(request: NextRequest) {
             uploadId: { not: null },
             billUpload: {
               is: {
-                filename: { not: { startsWith: "EFL:", mode: "insensitive" } },
+                // Prisma `startsWith` does not support `mode: "insensitive"`.
+                // We tag EFL uploads with an exact uppercase "EFL:" prefix.
+                filename: { not: { startsWith: "EFL:" } },
               },
             },
           },

@@ -243,7 +243,9 @@ export async function GET(req: NextRequest) {
         userId: user.id,
         houseId: house.id,
         uploadId: { not: null },
-        billUpload: { filename: { startsWith: "EFL:", mode: "insensitive" } },
+        // Prisma `startsWith` does not support `mode: "insensitive"`.
+        // We tag EFL uploads with an exact uppercase "EFL:" prefix.
+        billUpload: { filename: { startsWith: "EFL:" } },
       },
       orderBy: { createdAt: "desc" },
     });
@@ -252,7 +254,9 @@ export async function GET(req: NextRequest) {
         userId: user.id,
         houseId: house.id,
         uploadId: { not: null },
-        billUpload: { filename: { not: { startsWith: "EFL:", mode: "insensitive" } } },
+        // Prisma `startsWith` does not support `mode: "insensitive"`.
+        // We tag EFL uploads with an exact uppercase "EFL:" prefix.
+        billUpload: { filename: { not: { startsWith: "EFL:" } } },
       },
       orderBy: { createdAt: "desc" },
     });
@@ -288,7 +292,7 @@ export async function GET(req: NextRequest) {
         ? manualRs
         : parsedBillRsPresent
           ? parsedBillRs
-          : parsedEflRs ?? manualRs ?? parsedBillRs ?? null;
+          : manualRs ?? parsedEflRs ?? parsedBillRs ?? null;
 
     const mergedCurrent: any = {
       ...(latestParsed ?? {}),

@@ -261,7 +261,9 @@ export async function GET(request: NextRequest) {
       where: {
         ...parsedWhereBase,
         uploadId: { not: null },
-        billUpload: { filename: { startsWith: 'EFL:', mode: 'insensitive' } },
+        // Prisma `startsWith` does not support `mode: "insensitive"`.
+        // We tag EFL uploads with an exact uppercase "EFL:" prefix.
+        billUpload: { filename: { startsWith: 'EFL:' } },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -269,7 +271,9 @@ export async function GET(request: NextRequest) {
       where: {
         ...parsedWhereBase,
         uploadId: { not: null },
-        billUpload: { filename: { not: { startsWith: 'EFL:', mode: 'insensitive' } } },
+        // Prisma `startsWith` does not support `mode: "insensitive"`.
+        // We tag EFL uploads with an exact uppercase "EFL:" prefix.
+        billUpload: { filename: { not: { startsWith: 'EFL:' } } },
       },
       orderBy: { createdAt: 'desc' },
     });

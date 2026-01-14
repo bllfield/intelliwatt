@@ -314,7 +314,9 @@ export async function POST(request: NextRequest) {
             ...(houseId ? { houseId } : {}),
             // EFL uploads are stored in the same table (filename prefixed with "EFL:").
             // Bill parsing must select the user's statement uploads, not EFL PDFs.
-            filename: { not: { startsWith: 'EFL:', mode: 'insensitive' } },
+            // Prisma `startsWith` does not support `mode: "insensitive"`.
+            // We tag EFL uploads with an exact uppercase "EFL:" prefix.
+            filename: { not: { startsWith: 'EFL:' } },
           },
           orderBy: { uploadedAt: 'desc' },
           select: { id: true, filename: true, mimeType: true, billData: true },
@@ -550,7 +552,9 @@ export async function POST(request: NextRequest) {
             userId: user.id,
             houseId: effectiveHouseId,
             uploadId: { not: null },
-            billUpload: { filename: { startsWith: 'EFL:', mode: 'insensitive' } },
+            // Prisma `startsWith` does not support `mode: "insensitive"`.
+            // We tag EFL uploads with an exact uppercase "EFL:" prefix.
+            billUpload: { filename: { startsWith: 'EFL:' } },
             rateStructure: { not: null },
           },
           orderBy: { createdAt: 'desc' },
