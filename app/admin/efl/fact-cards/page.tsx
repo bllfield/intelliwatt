@@ -802,7 +802,7 @@ export default function FactCardOpsPage() {
   useEffect(() => {
     if (ready) void loadQueue();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, queueStatus, queueKind]);
+  }, [ready, queueStatus, queueKind, queueSource]);
 
   const sortedQueueItems = useMemo(() => {
     const out = [...queueItems];
