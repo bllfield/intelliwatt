@@ -65,44 +65,88 @@ export async function GET(req: NextRequest) {
 
     if (onlyFromBills) {
       // Restrict to templates that have at least one ParsedCurrentPlan derived from a STATEMENT upload.
+      // IMPORTANT: do this fully in the DB (DISTINCT + JOIN) so we don't:
+      // - cap at 500 ParsedCurrentPlan rows (bug)
+      // - build a huge OR list in JS (slow / can exceed query size)
+      //
       // We tag current-plan EFL uploads with filename prefix `EFL:` in CurrentPlanBillUpload.
-      const parsedRows = await (currentPlanPrisma.parsedCurrentPlan as any).findMany({
-        where: {
-          uploadId: { not: null },
-          billUpload: { filename: { not: { startsWith: "EFL:" } } },
-          providerNameKey: { not: null },
-          planNameKey: { not: null },
-        },
-        select: { providerNameKey: true, planNameKey: true },
-        take: 500,
+
+      const qLike = `%${q}%`;
+      const qKeyLike = `%${q.toUpperCase()}%`;
+
+      const rows = q
+        ? await currentPlanPrisma.$queryRaw`
+            WITH keys AS (
+              SELECT DISTINCT
+                UPPER(p."providerNameKey") AS "providerNameKey",
+                UPPER(p."planNameKey") AS "planNameKey"
+              FROM "ParsedCurrentPlan" p
+              JOIN "CurrentPlanBillUpload" u
+                ON u."id" = p."uploadId"
+              WHERE p."uploadId" IS NOT NULL
+                AND p."providerNameKey" IS NOT NULL
+                AND p."planNameKey" IS NOT NULL
+                AND u."filename" NOT ILIKE 'EFL:%'
+            )
+            SELECT t.*
+            FROM "BillPlanTemplate" t
+            JOIN keys k
+              ON k."providerNameKey" = t."providerNameKey"
+             AND k."planNameKey" = t."planNameKey"
+            WHERE
+              (t."providerName" ILIKE ${qLike}
+               OR t."planName" ILIKE ${qLike}
+               OR t."providerNameKey" ILIKE ${qKeyLike}
+               OR t."planNameKey" ILIKE ${qKeyLike})
+            ORDER BY t."updatedAt" DESC
+            LIMIT ${limit}
+          `
+        : await currentPlanPrisma.$queryRaw`
+            WITH keys AS (
+              SELECT DISTINCT
+                UPPER(p."providerNameKey") AS "providerNameKey",
+                UPPER(p."planNameKey") AS "planNameKey"
+              FROM "ParsedCurrentPlan" p
+              JOIN "CurrentPlanBillUpload" u
+                ON u."id" = p."uploadId"
+              WHERE p."uploadId" IS NOT NULL
+                AND p."providerNameKey" IS NOT NULL
+                AND p."planNameKey" IS NOT NULL
+                AND u."filename" NOT ILIKE 'EFL:%'
+            )
+            SELECT t.*
+            FROM "BillPlanTemplate" t
+            JOIN keys k
+              ON k."providerNameKey" = t."providerNameKey"
+             AND k."planNameKey" = t."planNameKey"
+            ORDER BY t."updatedAt" DESC
+            LIMIT ${limit}
+          `;
+
+      const templates = (Array.isArray(rows) ? rows : []).map((t: any) => ({
+        id: String(t.id),
+        providerNameKey: String(t.providerNameKey ?? ""),
+        planNameKey: String(t.planNameKey ?? ""),
+        providerName: (t.providerName as string | null) ?? null,
+        planName: (t.planName as string | null) ?? null,
+        rateType: (t.rateType as string | null) ?? null,
+        variableIndexType: (t.variableIndexType as string | null) ?? null,
+        termMonths: typeof t.termMonths === "number" ? t.termMonths : null,
+        earlyTerminationFeeCents: typeof t.earlyTerminationFeeCents === "number" ? t.earlyTerminationFeeCents : null,
+        baseChargeCentsPerMonth: typeof t.baseChargeCentsPerMonth === "number" ? t.baseChargeCentsPerMonth : null,
+        hasTimeOfUse: Boolean(t.timeOfUseConfigJson),
+        hasBillCredits: Boolean(t.billCreditsJson),
+        updatedAt: (t.updatedAt as Date).toISOString(),
+        createdAt: (t.createdAt as Date).toISOString(),
+      }));
+
+      return NextResponse.json({
+        ok: true,
+        limit,
+        count: templates.length,
+        templates,
+        ...(dbInfo ? { dbInfo } : {}),
       });
-
-      const keys = (parsedRows ?? [])
-        .map((r: any) => ({
-          providerNameKey: String(r.providerNameKey ?? "").toUpperCase(),
-          planNameKey: String(r.planNameKey ?? "").toUpperCase(),
-        }))
-        .filter((k: any) => k.providerNameKey && k.planNameKey);
-
-      if (!keys.length) {
-        return NextResponse.json({
-          ok: true,
-          limit,
-          count: 0,
-          templates: [],
-          ...(dbInfo ? { dbInfo } : {}),
-        });
-      }
-
-      where.AND = [
-        ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
-        {
-          OR: keys.map((k: any) => ({
-            providerNameKey: k.providerNameKey,
-            planNameKey: k.planNameKey,
-          })),
-        },
-      ];
     }
 
     const rows = await delegate.findMany({
