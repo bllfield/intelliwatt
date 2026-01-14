@@ -1,5 +1,6 @@
 import { cookies } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
+import crypto from 'crypto';
 import { normalizeEmail } from '@/lib/utils/email';
 import { prisma } from '@/lib/db';
 import { getCurrentPlanPrisma, CurrentPlanPrisma } from '@/lib/prismaCurrentPlan';
@@ -118,6 +119,31 @@ const decimalFromNumber = (
   const rounded = Math.round(value * multiplier) / multiplier;
   return new CurrentPlanPrisma.Decimal(rounded.toFixed(scale));
 };
+
+function stableJson(x: any): string {
+  const seen = new WeakSet<object>();
+  const normalize = (v: any): any => {
+    if (v == null) return v;
+    if (typeof v !== 'object') return v;
+    if (seen.has(v as any)) return '[Circular]';
+    seen.add(v as any);
+    if (Array.isArray(v)) return v.map(normalize);
+    const out: Record<string, any> = {};
+    for (const k of Object.keys(v).sort()) {
+      out[k] = normalize(v[k]);
+    }
+    return out;
+  };
+  try {
+    return JSON.stringify(normalize(x));
+  } catch {
+    return JSON.stringify(String(x ?? ''));
+  }
+}
+
+function sha256Hex(seed: string): string {
+  return crypto.createHash('sha256').update(seed).digest('hex');
+}
 
 export async function GET() {
   try {
@@ -846,6 +872,107 @@ export async function POST(request: NextRequest) {
     });
 
     const entryResult = await ensureCurrentPlanEntry(user.id, houseId);
+
+    // IMPORTANT: Customer "Update current plan" only affects the user's own CurrentPlanManualEntry.
+    // It must NEVER update BillPlanTemplate (reusable templates) — those are created/updated only by
+    // EFL/bill parsers and admin tools.
+    //
+    // If a user manually edits fields that were originally parsed, we enqueue an admin review item
+    // so we can inspect whether parsing/template logic should be improved — without mutating templates.
+    try {
+      const currentPlanDb = getCurrentPlanPrisma() as any;
+      const parsedDelegate = currentPlanDb.parsedCurrentPlan as any;
+      const latestParsed = await parsedDelegate.findFirst({
+        where: { userId: user.id, ...(houseId ? { houseId } : {}) },
+        orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+        select: { id: true, providerName: true, planName: true, rateStructure: true, timeOfUseConfigJson: true, energyRateTiersJson: true, billCreditsJson: true },
+      });
+
+      if (latestParsed?.id) {
+        const parsedRs = (latestParsed as any)?.rateStructure ?? null;
+        const manualRs = rateStructure ?? null;
+        const parsedCanon = stableJson(parsedRs);
+        const manualCanon = stableJson(manualRs);
+
+        // Only queue when the manual structure diverges from the parsed one.
+        if (parsedCanon !== manualCanon) {
+          const dedupeKey = `current_plan_manual_override:user=${user.id}|house=${houseId ?? 'none'}`;
+          const eflPdfSha256 = sha256Hex(dedupeKey);
+          const queueReason =
+            `Customer manually edited current plan fields after parse.\n` +
+            `manualEntryId=${entry.id} parsedId=${String(latestParsed.id)}\n` +
+            `provider="${providerName}" plan="${planName}"`;
+
+          await (prisma as any).eflParseReviewQueue.upsert({
+            where: { eflPdfSha256 },
+            create: {
+              source: 'current_plan_manual_override',
+              kind: 'EFL_PARSE',
+              dedupeKey,
+              eflPdfSha256,
+              repPuctCertificate: null,
+              eflVersionCode: null,
+              offerId: null,
+              supplier: providerName,
+              planName,
+              eflUrl: null,
+              tdspName: null,
+              termMonths: typeof termLengthMonths === 'number' ? termLengthMonths : null,
+              rawText: null,
+              planRules: null,
+              rateStructure: {
+                manual: manualRs,
+                parsed: parsedRs,
+              },
+              validation: null,
+              derivedForValidation: {
+                userEmail,
+                userId: user.id,
+                houseId: houseId ?? null,
+                manualEntryId: entry.id,
+                parsedId: String(latestParsed.id),
+                manualRateStructureSha256: sha256Hex(manualCanon),
+                parsedRateStructureSha256: sha256Hex(parsedCanon),
+              },
+              finalStatus: 'NEEDS_REVIEW',
+              queueReason,
+              solverApplied: null,
+              resolvedAt: null,
+              resolvedBy: null,
+              resolutionNotes: null,
+            },
+            update: {
+              source: 'current_plan_manual_override',
+              dedupeKey,
+              supplier: providerName,
+              planName,
+              termMonths: typeof termLengthMonths === 'number' ? termLengthMonths : null,
+              rateStructure: {
+                manual: manualRs,
+                parsed: parsedRs,
+              },
+              derivedForValidation: {
+                userEmail,
+                userId: user.id,
+                houseId: houseId ?? null,
+                manualEntryId: entry.id,
+                parsedId: String(latestParsed.id),
+                manualRateStructureSha256: sha256Hex(manualCanon),
+                parsedRateStructureSha256: sha256Hex(parsedCanon),
+              },
+              finalStatus: 'NEEDS_REVIEW',
+              queueReason,
+              resolvedAt: null,
+              resolvedBy: null,
+              resolutionNotes: null,
+            },
+          });
+        }
+      }
+    } catch (queueErr) {
+      console.error('[current-plan/manual] Failed to enqueue manual override review item', queueErr);
+      // Best-effort only; never block customer flow.
+    }
 
     try {
       await normalizeCurrentPlanForUserOrHome({ userId: user.id, homeId: houseId ?? undefined });
