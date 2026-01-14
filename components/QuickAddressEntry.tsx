@@ -57,17 +57,7 @@ export default function QuickAddressEntry({
   }, []);
 
   // Renter is an input to WattBuy offer eligibility (not a dashboard filter).
-  // Default OFF unless the user explicitly opts in.
-  useEffect(() => {
-    if (!mounted || typeof window === 'undefined') return;
-    try {
-      const raw = window.localStorage.getItem('intelliwatt_house_is_renter');
-      if (raw === 'true') setIsRenter(true);
-      if (raw === 'false') setIsRenter(false);
-    } catch {
-      // ignore
-    }
-  }, [mounted]);
+  // UX: default OFF (unchecked) unless the user explicitly opts in on this screen.
 
   useEffect(() => {
     if (!mounted || typeof window === 'undefined') {
@@ -400,11 +390,6 @@ export default function QuickAddressEntry({
       
       // Store the address in localStorage for persistence
       localStorage.setItem('intelliwatt_user_address', normalizedAddress);
-      try {
-        localStorage.setItem('intelliwatt_house_is_renter', String(isRenter));
-      } catch {
-        // ignore
-      }
       
       // Call the parent callback
       onAddressSubmitted(normalizedAddress);
