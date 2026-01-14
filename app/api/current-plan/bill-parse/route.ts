@@ -20,6 +20,12 @@ function sha256Hex(s: string | Buffer): string {
   return crypto.createHash('sha256').update(s).digest('hex');
 }
 
+function isLikelyEflUploadFilename(filename: unknown): boolean {
+  const s = typeof filename === 'string' ? filename.trim() : '';
+  if (!s) return false;
+  return s.toUpperCase().startsWith('EFL:');
+}
+
 const decimalFromNumber = (
   value: number,
   precision: number,
@@ -276,6 +282,20 @@ export async function POST(request: NextRequest) {
           },
           select: { id: true, filename: true, mimeType: true, billData: true },
         });
+
+        // Guardrail: this endpoint is a BILL parser. If the selected upload is actually an EFL,
+        // fail fast with a clear message instead of parsing the wrong document.
+        if (uploadRecord && isLikelyEflUploadFilename(uploadRecord.filename)) {
+          return NextResponse.json(
+            {
+              ok: false,
+              error:
+                "Selected upload looks like an EFL (fact label), not a statement bill. " +
+                "Use the EFL parser option, or upload a statement bill PDF and re-run bill parse.",
+            },
+            { status: 400 },
+          );
+        }
       }
 
       if (!uploadRecord) {
@@ -283,6 +303,9 @@ export async function POST(request: NextRequest) {
           where: {
             userId: user.id,
             ...(houseId ? { houseId } : {}),
+            // EFL uploads are stored in the same table (filename prefixed with "EFL:").
+            // Bill parsing must select the user's statement uploads, not EFL PDFs.
+            filename: { not: { startsWith: 'EFL:', mode: 'insensitive' } },
           },
           orderBy: { uploadedAt: 'desc' },
           select: { id: true, filename: true, mimeType: true, billData: true },
