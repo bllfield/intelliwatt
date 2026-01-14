@@ -266,6 +266,9 @@ export default async function UsageEntryHub() {
               description={
                 <span className="text-brand-cyan/85">
                   Securely link SMT so IntelliWatt auto-syncs 15-minute usage and billing history. Unlocks the full experience.
+                  <span className="mt-2 block text-xs text-brand-cyan/70">
+                    Available to all customers in deregulated Texas service areas.
+                  </span>
                 </span>
               }
               href="/dashboard/api/smt"
