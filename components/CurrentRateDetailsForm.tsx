@@ -292,6 +292,8 @@ export function CurrentRateDetailsForm({
   const [deliveryIncluded, setDeliveryIncluded] = useState<boolean>(false);
   const [isParsingPaste, setIsParsingPaste] = useState(false);
   const formRef = useRef<HTMLFormElement | null>(null);
+  const eflFileInputRef = useRef<HTMLInputElement | null>(null);
+  const billFileInputRef = useRef<HTMLInputElement | null>(null);
   const isMountedRef = useRef(true);
   const hasInitializedFromPlanRef = useRef(false);
 
@@ -1921,11 +1923,17 @@ export function CurrentRateDetailsForm({
               type="file"
               accept=".pdf,application/pdf"
               multiple={false}
+              ref={eflFileInputRef}
               onChange={(e) => {
-                const f = e.target.files && e.target.files[0] ? e.target.files[0] : null;
-                setEflFile(f);
-                setEflParseStatus(null);
-                setPrefilledFromEfl(false);
+                try {
+                  const f = e.target.files && e.target.files[0] ? e.target.files[0] : null;
+                  setEflFile(f);
+                  setEflParseStatus(null);
+                  setPrefilledFromEfl(false);
+                } finally {
+                  // Allow selecting the same file again (browser won't fire onChange if value didn't change).
+                  e.currentTarget.value = "";
+                }
               }}
               className="hidden"
             />
@@ -1941,6 +1949,9 @@ export function CurrentRateDetailsForm({
                     setEflFile(null);
                     setEflParseStatus(null);
                     setPrefilledFromEfl(false);
+                    if (eflFileInputRef.current) {
+                      eflFileInputRef.current.value = "";
+                    }
                   }}
                   className="text-rose-600 hover:text-rose-700"
                 >
@@ -1984,15 +1995,21 @@ export function CurrentRateDetailsForm({
               type="file"
               accept=".pdf,application/pdf"
               multiple={false}
+              ref={billFileInputRef}
               onChange={(e) => {
-                const selected = Array.from(e.target.files ?? []);
-                if (selected.length > 0) {
-                  setFiles((prev) => [...prev, ...selected]);
-                } else {
-                  setFiles([]);
+                try {
+                  const selected = Array.from(e.target.files ?? []);
+                  if (selected.length > 0) {
+                    setFiles((prev) => [...prev, ...selected]);
+                  } else {
+                    setFiles([]);
+                  }
+                  setBillUploaded(false);
+                  setUploadStatus(null);
+                } finally {
+                  // Allow re-selecting the same PDF after removing it.
+                  e.currentTarget.value = "";
                 }
-                setBillUploaded(false);
-                setUploadStatus(null);
               }}
               className="hidden"
             />
@@ -2007,6 +2024,9 @@ export function CurrentRateDetailsForm({
                     onClick={() => {
                       setFiles((prev) => prev.filter((_, idx) => idx !== index));
                       setBillUploaded(false);
+                      if (billFileInputRef.current) {
+                        billFileInputRef.current.value = "";
+                      }
                     }}
                     className="text-rose-600 hover:text-rose-700"
                   >
