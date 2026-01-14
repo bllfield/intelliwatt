@@ -44,7 +44,7 @@ export async function GET(req: NextRequest) {
         }
       : undefined;
 
-  const repsRaw = await prisma.puctRep.findMany({
+  const repsBase = await prisma.puctRep.findMany({
     where,
     select: {
       id: true,
@@ -56,6 +56,49 @@ export async function GET(req: NextRequest) {
     orderBy: { legalName: "asc" },
     take,
   });
+
+  // IMPORTANT:
+  // The client dropdown often requests `limit=200` with no `q`. That means many relevant REPs
+  // (including ones customers expect by brand name) may not appear purely due to alphabetical truncation.
+  // To make key brands discoverable, we union in a small "extras" set (still read-only) before aliasing.
+  const repsExtras =
+    query.length === 0
+      ? await prisma.puctRep.findMany({
+          where: {
+            OR: [
+              // Discount Power / Cirro (US Retailers). Customers often search by brand, but legalName is far down.
+              { puctNumber: "10177" },
+              { legalName: { contains: "US RETAILERS", mode: "insensitive" as const } },
+              { dbaName: { contains: "CIRRO", mode: "insensitive" as const } },
+              { website: { contains: "discountpower", mode: "insensitive" as const } },
+            ],
+          },
+          select: {
+            id: true,
+            puctNumber: true,
+            legalName: true,
+            dbaName: true,
+            website: true,
+          },
+          take: 20,
+        })
+      : [];
+
+  const repsRaw = (() => {
+    const merged: Array<(typeof repsBase)[number]> = [];
+    const seen = new Set<string>();
+    const add = (rows: any[]) => {
+      for (const r of rows ?? []) {
+        const id = String((r as any)?.id ?? "");
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        merged.push(r);
+      }
+    };
+    add(repsBase as any);
+    add(repsExtras as any);
+    return merged;
+  })();
 
   // Add alias entries so customers can find the REP by either the legal entity name
   // or the marketed brand name (e.g., "Discount Power" vs "U.S. Retailers, LLC").
