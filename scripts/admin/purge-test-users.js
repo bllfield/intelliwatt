@@ -132,6 +132,7 @@ async function main() {
       counts.UsageData = await db.usageData.count({ where: { userId: { in: targetUserIds } } });
       counts.UtilityPlan = await db.utilityPlan.count({ where: { userId: { in: targetUserIds } } });
       counts.Referral = await db.referral.count({ where: { referredById: { in: targetUserIds } } });
+      counts.ReferralInvitee = await db.referral.count({ where: { referredUserId: { in: targetUserIds } } });
       counts.CommissionRecord = await db.commissionRecord.count({ where: { userId: { in: targetUserIds } } });
       counts.JackpotPayout = await db.jackpotPayout.count({ where: { userId: { in: targetUserIds } } });
       counts.SmtAuthorization = await db.smtAuthorization.count({ where: { userId: { in: targetUserIds } } });
@@ -204,7 +205,16 @@ async function main() {
       deleted.CommissionRecord = (await db.commissionRecord.deleteMany({ where: { userId: { in: targetUserIds } } })).count;
       deleted.JackpotPayout = (await db.jackpotPayout.deleteMany({ where: { userId: { in: targetUserIds } } })).count;
       deleted.SmtAuthorization = (await db.smtAuthorization.deleteMany({ where: { userId: { in: targetUserIds } } })).count;
-      deleted.Referral = (await db.referral.deleteMany({ where: { referredById: { in: targetUserIds } } })).count;
+      // Referrals can reference a user as either the referrer (referredById) or the invitee (referredUserId).
+      // Delete BOTH directions to avoid FK violations when deleting User rows (no cascade on referredUser).
+      deleted.Referral = (await db.referral.deleteMany({
+        where: {
+          OR: [
+            { referredById: { in: targetUserIds } },
+            { referredUserId: { in: targetUserIds } },
+          ],
+        },
+      })).count;
       deleted.UserProfile = (await db.userProfile.deleteMany({ where: { userId: { in: targetUserIds } } })).count;
       deleted.NormalizedCurrentPlan = (await db.normalizedCurrentPlan.deleteMany({ where: { userId: { in: targetUserIds }, sourceModule: "current-plan" } })).count;
     }
