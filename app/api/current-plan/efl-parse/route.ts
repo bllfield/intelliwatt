@@ -26,6 +26,27 @@ const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB
 function normalizeHhMm(v: any): string | null {
   const s = typeof v === "string" ? v.trim() : "";
   if (!s) return null;
+  // Accept "h:mm AM/PM" (or "h AM/PM")
+  {
+    const m = s.match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)$/i);
+    if (m?.[1]) {
+      const hh12 = Number(m[1]);
+      const mm = m[2] ? Number(m[2]) : 0;
+      const ap = String(m[3] ?? "").toUpperCase();
+      if (
+        Number.isFinite(hh12) &&
+        Number.isFinite(mm) &&
+        hh12 >= 1 &&
+        hh12 <= 12 &&
+        mm >= 0 &&
+        mm <= 59 &&
+        (ap === "AM" || ap === "PM")
+      ) {
+        const hh24 = ap === "AM" ? (hh12 === 12 ? 0 : hh12) : (hh12 === 12 ? 12 : hh12 + 12);
+        return `${String(hh24).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+      }
+    }
+  }
   // Accept "HH:MM"
   if (/^\d{1,2}:\d{2}$/.test(s)) {
     const [hhRaw, mmRaw] = s.split(":");
@@ -43,6 +64,15 @@ function normalizeHhMm(v: any): string | null {
     return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
   }
   return null;
+}
+
+function normalizeEndForAllDayWindow(startHhMm: string, endHhMm: string): string {
+  // Heuristic: Some EFLs represent "all day" as 12:00 AM – 11:00 PM (instead of 11:59 PM).
+  // If start is midnight and end is 23:00, treat it as end-of-day so we don't drop the last hour.
+  if (startHhMm === "00:00" && endHhMm === "23:00") return "23:59";
+  // Also tolerate "24:00" inputs (normalize to 23:59).
+  if (startHhMm === "00:00" && endHhMm === "24:00") return "23:59";
+  return endHhMm;
 }
 
 function toRateType(parsed: any): "FIXED" | "VARIABLE" | "TIME_OF_USE" {
@@ -480,9 +510,10 @@ export async function POST(req: NextRequest) {
     const touWindowsNormalized = touWindows
       .map((t: any) => {
         const start = normalizeHhMm(t?.start);
-        const end = normalizeHhMm(t?.end);
+        const endRaw = normalizeHhMm(t?.end);
         const cents = typeof t?.cents === "number" && Number.isFinite(t.cents) ? t.cents : null;
-        if (!start || !end || cents == null) return null;
+        if (!start || !endRaw || cents == null) return null;
+        const end = normalizeEndForAllDayWindow(start, endRaw);
         // Preserve seasonal month scoping when present.
         const monthsRaw = Array.isArray(t?.monthsOfYear) ? t.monthsOfYear : null;
         const monthsOfYear = monthsRaw
@@ -585,9 +616,10 @@ export async function POST(req: NextRequest) {
         const tiers = (touWindowsNormalized.length ? touWindowsNormalized : touWindows)
           .map((t: any, idx: number) => {
             const start = normalizeHhMm(t?.start);
-            const end = normalizeHhMm(t?.end);
+            const endRaw = normalizeHhMm(t?.end);
             const cents = typeof t?.cents === "number" && Number.isFinite(t.cents) ? t.cents : null;
-            if (!start || !end || cents == null) return null;
+            if (!start || !endRaw || cents == null) return null;
+            const end = normalizeEndForAllDayWindow(start, endRaw);
             return {
               label: typeof t?.label === "string" && t.label.trim() ? t.label.trim() : `Period ${idx + 1}`,
               priceCents: Number(cents.toFixed(4)),
