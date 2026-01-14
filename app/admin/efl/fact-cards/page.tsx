@@ -499,6 +499,7 @@ export default function FactCardOpsPage() {
   // Default to ALL so ops can see both parse + quarantine items.
   // This matches how the customer site labels plans as QUEUED (often PLAN_CALC_QUARANTINE).
   const [queueKind, setQueueKind] = useState<"ALL" | "EFL_PARSE" | "PLAN_CALC_QUARANTINE">("ALL");
+  const [queueSource, setQueueSource] = useState<string>("");
   const [queueQ, setQueueQ] = useState("");
   const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
   const [queueTotalCount, setQueueTotalCount] = useState<number | null>(null);
@@ -529,6 +530,7 @@ export default function FactCardOpsPage() {
       // Keep the OPEN queue self-healing: if a template already exists, the list API
       // can auto-resolve the queue row so admins only see true attention-needed items.
       if (queueStatus === "OPEN") params.set("autoResolve", "1");
+      if (queueSource.trim()) params.set("source", queueSource.trim());
       if (queueQ.trim()) params.set("q", queueQ.trim());
       const res = await fetch(`/api/admin/efl-review/list?${params.toString()}`, {
         headers: { "x-admin-token": token },
@@ -2129,6 +2131,32 @@ export default function FactCardOpsPage() {
               <option value="PLAN_CALC_QUARANTINE">PLAN_CALC_QUARANTINE</option>
             </select>
           </label>
+          <div className="inline-flex items-center gap-2">
+            <span className="text-sm text-gray-600">Source</span>
+            <div className="inline-flex rounded-lg border bg-white">
+              <button
+                type="button"
+                className={`px-3 py-2 text-sm ${!queueSource.trim() ? "bg-gray-50 font-semibold" : "hover:bg-gray-50"}`}
+                onClick={() => setQueueSource("")}
+                title="Show all sources"
+              >
+                All
+              </button>
+              <button
+                type="button"
+                className={`px-3 py-2 text-sm border-l ${queueSource.trim() === "current_plan_manual_override" ? "bg-gray-50 font-semibold" : "hover:bg-gray-50"}`}
+                onClick={() => {
+                  setQueueSource("current_plan_manual_override");
+                  // Manual overrides are always EFL_PARSE, and we usually care about OPEN.
+                  if (queueKind === "ALL") setQueueKind("EFL_PARSE");
+                  if (queueStatus !== "OPEN") setQueueStatus("OPEN");
+                }}
+                title='Show only customer manual overrides ("Update current plan" edits)'
+              >
+                Manual overrides
+              </button>
+            </div>
+          </div>
           <input
             className="w-[140px] rounded-lg border px-3 py-2 text-sm"
             placeholder='utilityId (e.g. "oncor")'
