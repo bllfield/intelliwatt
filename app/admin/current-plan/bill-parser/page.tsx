@@ -429,8 +429,8 @@ export default function CurrentPlanBillParserAdmin() {
       const params = new URLSearchParams({
         status: queueStatus,
         limit: '100',
-        // Include all current-plan sources (bill parsing + current plan EFL parsing).
-        sourcePrefix: 'current_plan_',
+        // Bill parser page: ONLY include bill parsing queue items (statements), not current-plan EFL queue items.
+        source: 'current_plan_bill',
         kind: 'EFL_PARSE',
       });
       if (queueQ.trim()) params.set('q', queueQ.trim());
@@ -610,7 +610,8 @@ export default function CurrentPlanBillParserAdmin() {
     setTemplatesError(null);
 
     try {
-      const res = await fetch('/api/admin/current-plan/templates?limit=100', {
+      // Bill parser page: exclude EFL-derived ParsedCurrentPlan rows.
+      const res = await fetch('/api/admin/current-plan/templates?limit=100&excludeEfl=1', {
         headers: {
           'x-admin-token': token.trim(),
         },
@@ -647,7 +648,8 @@ export default function CurrentPlanBillParserAdmin() {
     setBillPlanTemplatesLoading(true);
     setBillPlanTemplatesError(null);
     try {
-      const res = await fetch("/api/admin/current-plan/bill-plan-templates?limit=200", {
+      // Bill parser page: show only templates backed by statement bill parses (exclude EFL-derived templates).
+      const res = await fetch("/api/admin/current-plan/bill-plan-templates?limit=200&onlyFromBills=1", {
         headers: { "x-admin-token": token.trim() },
       });
       const body = await res.json().catch(() => null);

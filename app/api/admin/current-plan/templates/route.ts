@@ -42,6 +42,7 @@ export async function GET(request: NextRequest) {
     const url = new URL(request.url);
     const limitParam = url.searchParams.get('limit');
     const limit = Math.max(1, Math.min(200, Number(limitParam) || 50));
+    const excludeEfl = url.searchParams.get('excludeEfl') === '1';
 
     const currentPlanPrisma = getCurrentPlanPrisma() as any;
     try {
@@ -59,6 +60,21 @@ export async function GET(request: NextRequest) {
     const templates = await parsedDelegate.findMany({
       orderBy: { createdAt: 'desc' },
       take: limit,
+      ...(excludeEfl
+        ? {
+            // `CurrentPlanBillUpload.filename` is prefixed with `EFL:` for current-plan EFL uploads.
+            // Bill parser page should only show statement-derived parses, so exclude those.
+            where: {
+              uploadId: { not: null },
+              billUpload: {
+                filename: { not: { startsWith: 'EFL:' } },
+              },
+            },
+          }
+        : {}),
+      include: {
+        billUpload: { select: { filename: true } },
+      },
     });
 
     const serialized = templates.map((t: any) => ({
@@ -66,6 +82,7 @@ export async function GET(request: NextRequest) {
       userId: t.userId as string,
       houseId: (t.houseId as string | null) ?? null,
       uploadId: (t.uploadId as string | null) ?? null,
+      uploadFilename: (t?.billUpload?.filename as string | null) ?? null,
       providerName: (t.providerName as string | null) ?? null,
       planName: (t.planName as string | null) ?? null,
       rateType: (t.rateType as string | null) ?? null,

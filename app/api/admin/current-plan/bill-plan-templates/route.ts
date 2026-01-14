@@ -38,6 +38,7 @@ export async function GET(req: NextRequest) {
     const limitRaw = Number(url.searchParams.get("limit") || "100");
     const limit = Math.max(1, Math.min(500, Number.isFinite(limitRaw) ? limitRaw : 100));
     const q = (url.searchParams.get("q") || "").trim();
+    const onlyFromBills = url.searchParams.get("onlyFromBills") === "1";
 
     const currentPlanPrisma = getCurrentPlanPrisma() as any;
     try {
@@ -59,6 +60,48 @@ export async function GET(req: NextRequest) {
         { planName: { contains: q, mode: "insensitive" } },
         { providerNameKey: { contains: q.toUpperCase(), mode: "insensitive" } },
         { planNameKey: { contains: q.toUpperCase(), mode: "insensitive" } },
+      ];
+    }
+
+    if (onlyFromBills) {
+      // Restrict to templates that have at least one ParsedCurrentPlan derived from a STATEMENT upload.
+      // We tag current-plan EFL uploads with filename prefix `EFL:` in CurrentPlanBillUpload.
+      const parsedRows = await (currentPlanPrisma.parsedCurrentPlan as any).findMany({
+        where: {
+          uploadId: { not: null },
+          billUpload: { filename: { not: { startsWith: "EFL:" } } },
+          providerNameKey: { not: null },
+          planNameKey: { not: null },
+        },
+        select: { providerNameKey: true, planNameKey: true },
+        take: 500,
+      });
+
+      const keys = (parsedRows ?? [])
+        .map((r: any) => ({
+          providerNameKey: String(r.providerNameKey ?? "").toUpperCase(),
+          planNameKey: String(r.planNameKey ?? "").toUpperCase(),
+        }))
+        .filter((k: any) => k.providerNameKey && k.planNameKey);
+
+      if (!keys.length) {
+        return NextResponse.json({
+          ok: true,
+          limit,
+          count: 0,
+          templates: [],
+          ...(dbInfo ? { dbInfo } : {}),
+        });
+      }
+
+      where.AND = [
+        ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+        {
+          OR: keys.map((k: any) => ({
+            providerNameKey: k.providerNameKey,
+            planNameKey: k.planNameKey,
+          })),
+        },
       ];
     }
 
