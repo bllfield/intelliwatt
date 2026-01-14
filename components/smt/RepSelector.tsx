@@ -40,19 +40,56 @@ export function RepSelector(props: RepSelectorProps) {
       setLoading(true);
       setLoadError(null);
       try {
-        const params = new URLSearchParams();
-        params.set("limit", "200");
-        const res = await fetch(`/api/puct/reps?${params.toString()}`, {
-          signal: controller.signal,
-          cache: "no-store",
-        });
-        if (!res.ok) {
-          const text = await res.text();
-          throw new Error(text || `HTTP ${res.status}`);
+        // Load a base list for browsing, but also do a targeted query when we have a preferred provider
+        // or a prefilled PUCT number so the correct REP is guaranteed to be in the options.
+        const merged: RepOption[] = [];
+        const seen = new Set<string>();
+        const add = (rows: any) => {
+          const list = Array.isArray(rows) ? (rows as RepOption[]) : [];
+          for (const r of list) {
+            const id = String((r as any)?.id ?? "");
+            if (!id || seen.has(id)) continue;
+            seen.add(id);
+            merged.push(r);
+          }
+        };
+
+        const fetchReps = async (params: URLSearchParams) => {
+          const res = await fetch(`/api/puct/reps?${params.toString()}`, {
+            signal: controller.signal,
+            cache: "no-store",
+          });
+          if (!res.ok) {
+            const text = await res.text();
+            throw new Error(text || `HTTP ${res.status}`);
+          }
+          const json = await res.json();
+          if (json?.ok && Array.isArray(json.reps)) add(json.reps);
+        };
+
+        // Base list (small)
+        const baseParams = new URLSearchParams();
+        baseParams.set("limit", "200");
+        await fetchReps(baseParams);
+
+        // Targeted list (by provider name)
+        if (preferredProviderName && preferredProviderName.trim()) {
+          const qParams = new URLSearchParams();
+          qParams.set("q", preferredProviderName.trim());
+          qParams.set("limit", "200");
+          await fetchReps(qParams);
         }
-        const json = await res.json();
-        if (!cancelled && json?.ok && Array.isArray(json.reps)) {
-          setOptions(json.reps as RepOption[]);
+
+        // Targeted list (by PUCT number)
+        if (repPuctNumber && repPuctNumber.trim()) {
+          const qParams = new URLSearchParams();
+          qParams.set("q", repPuctNumber.trim());
+          qParams.set("limit", "200");
+          await fetchReps(qParams);
+        }
+
+        if (!cancelled) {
+          setOptions(merged);
         }
       } catch (err) {
         if (!cancelled && !(err instanceof DOMException && err.name === "AbortError")) {
@@ -71,7 +108,7 @@ export function RepSelector(props: RepSelectorProps) {
       cancelled = true;
       controller.abort();
     };
-  }, []);
+  }, [preferredProviderName, repPuctNumber]);
 
   React.useEffect(() => {
     if (repPuctNumber) return;

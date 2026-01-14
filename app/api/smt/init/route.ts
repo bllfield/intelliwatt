@@ -93,10 +93,19 @@ export async function GET(request: NextRequest) {
       where: {
         userId: user.id,
         houseId,
-        uploadId: { not: null },
-        billUpload: {
-          filename: { not: { startsWith: "EFL:", mode: "insensitive" } },
-        },
+        OR: [
+          // Pasted bill text parses have no uploadId; treat as statement-derived.
+          { uploadId: null },
+          // Uploaded bills: exclude EFL-tagged uploads.
+          {
+            uploadId: { not: null },
+            billUpload: {
+              is: {
+                filename: { not: { startsWith: "EFL:", mode: "insensitive" } },
+              },
+            },
+          },
+        ],
       },
       orderBy: { createdAt: "desc" },
     });
@@ -117,6 +126,15 @@ export async function GET(request: NextRequest) {
 
     const customerName = trimOrNull(parsed?.customerName) ?? null;
     const providerName = trimOrNull(parsed?.providerName) ?? null;
+
+    // Best-effort: if the bill text includes a PUCT certificate number, surface it so the REP dropdown can preselect.
+    // Example: "PUCT Certificate: 10177"
+    const repPuctNumber =
+      (() => {
+        const raw = typeof parsed?.rawText === "string" ? parsed.rawText : "";
+        const m = raw.match(/\bPUCT\s+Certificate\s*:\s*(\d{3,6})\b/i);
+        return m && m[1] ? String(m[1]).trim() : null;
+      })() ?? null;
     const tdspName =
       trimOrNull(parsed?.tdspName) ??
       trimOrNull((house as any).utilityName) ??
@@ -149,6 +167,7 @@ export async function GET(request: NextRequest) {
       meterNumber,
       customerName,
       providerName,
+      repPuctNumber,
       tdspName,
       serviceAddress,
       hasParsedBill: !!parsed,

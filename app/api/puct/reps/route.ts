@@ -20,6 +20,7 @@ export async function GET(req: NextRequest) {
           OR: [
             { legalName: { contains: query, mode: "insensitive" as const } },
             { dbaName: { contains: query, mode: "insensitive" as const } },
+            { puctNumber: { contains: query } },
           ],
         }
       : undefined;

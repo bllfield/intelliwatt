@@ -120,6 +120,10 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
           setPreferredProviderName(data.providerName.trim());
         }
 
+        if (!repPuctNumber && typeof data.repPuctNumber === "string" && data.repPuctNumber.trim().length > 0) {
+          setRepPuctNumber(data.repPuctNumber.trim());
+        }
+
         const addr = data.serviceAddress ?? {};
         if (!autoServiceAddressLine1 && typeof addr.line1 === "string" && addr.line1.trim().length > 0) {
           setAutoServiceAddressLine1(addr.line1.trim());
