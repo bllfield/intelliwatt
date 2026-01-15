@@ -105,7 +105,6 @@ type UsageApiResponse = { ok: true; houses: HouseUsage[] } | { ok: false; error:
 type SessionCacheValue = { savedAt: number; payload: UsageApiResponse };
 const SESSION_KEY = "usage_dashboard_v1";
 const SESSION_TTL_MS = 60 * 60 * 1000; // UX cache only (real data lives in DB)
-const SESSION_SOFT_TTL_MS = 15 * 60 * 1000; // avoid re-fetching on quick re-entry
 
 function readSessionCache(): SessionCacheValue | null {
   try {
@@ -206,12 +205,10 @@ export const UsageDashboard: React.FC = () => {
           setLoading(true);
         }
 
-        // If the cache is still "fresh enough", don't re-fetch on page re-entry.
-        if (cached && Date.now() - cached.savedAt <= SESSION_SOFT_TTL_MS) {
-          return;
-        }
-
-        const res = await fetch("/api/user/usage");
+        // Always refresh in the background so SMT pulls/backfills show up immediately
+        // (even if the user recently visited this page and has sessionStorage cached).
+        // Use no-store + cache-bust to avoid browser cache keeping an old payload around.
+        const res = await fetch(`/api/user/usage?ts=${Date.now()}`, { cache: "no-store" });
         const json = (await res.json()) as UsageApiResponse;
         if (!res.ok || json.ok === false) {
           throw new Error((json as any).error || `Failed with status ${res.status}`);
