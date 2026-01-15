@@ -161,6 +161,17 @@ export async function GET(req: NextRequest) {
 
   out.sort((a, b) => a.legalName.localeCompare(b.legalName, "en", { sensitivity: "base" }));
 
-  return NextResponse.json({ ok: true, reps: out });
+  return NextResponse.json({
+    ok: true,
+    reps: out,
+    meta: {
+      query: query.length ? query : null,
+      limitRequested: Number.isFinite(limitParam) ? limitParam : DEFAULT_LIMIT,
+      returned: out.length,
+      // Helps confirm which deployment is serving traffic.
+      commit: process.env.VERCEL_GIT_COMMIT_SHA ?? null,
+      deploymentId: process.env.VERCEL_DEPLOYMENT_ID ?? null,
+    },
+  });
 }
 
