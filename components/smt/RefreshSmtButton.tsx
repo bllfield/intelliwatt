@@ -62,7 +62,7 @@ export default function RefreshSmtButton({ homeId }: RefreshSmtButtonProps) {
           setIsWaitingOnSmt(false);
           setIsProcessing(false);
           setStatus('success');
-          setMessage('Your SMT usage data has arrived and usage has been refreshed.');
+          setMessage('Your full SMT history has been ingested and your usage has been refreshed.');
           router.refresh();
           return;
         }
@@ -71,8 +71,14 @@ export default function RefreshSmtButton({ homeId }: RefreshSmtButtonProps) {
           setIsWaitingOnSmt(false);
           setIsProcessing(true);
           setStatus('success');
+          const coverage = payload?.coverage;
+          const coverageText =
+            coverage?.start && coverage?.end
+              ? ` Current coverage: ${String(coverage.start).slice(0, 10)} – ${String(coverage.end).slice(0, 10)} (${coverage.days ?? '?'} day(s)).`
+              : '';
           setMessage(
-            'We received your SMT data package and are processing your usage. This can take a few minutes.',
+            (payload?.message ||
+              'We are processing your SMT usage. Historical backfill can take some time.') + coverageText,
           );
         }
       }

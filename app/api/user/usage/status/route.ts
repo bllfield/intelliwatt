@@ -2,9 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
+import { getRollingBackfillRange } from "@/lib/smt/agreements";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+
+function daysBetweenInclusive(start: Date, end: Date): number {
+  const msPerDay = 24 * 60 * 60 * 1000;
+  const a = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate()));
+  const b = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate()));
+  return Math.max(0, Math.floor((b.getTime() - a.getTime()) / msPerDay) + 1);
+}
 
 export async function POST(req: NextRequest) {
   const cookieStore = cookies();
@@ -60,17 +68,41 @@ export async function POST(req: NextRequest) {
       {
         ok: true,
         status: "no_esiid",
-        ready: false,
+        ready: false, // ready == full-history ready
         message: "No ESIID is linked to this home yet.",
       },
       { status: 200 },
     );
   }
 
-  // Check whether any SMT intervals exist for this ESIID.
-  const intervalCount = await prisma.smtInterval.count({
+  const target = getRollingBackfillRange(12);
+
+  // Check whether any SMT intervals exist for this ESIID + compute coverage.
+  const intervalAgg = await prisma.smtInterval.aggregate({
     where: { esiid: house.esiid },
+    _count: { _all: true },
+    _min: { ts: true },
+    _max: { ts: true },
   });
+
+  const intervalCount = Number(intervalAgg._count?._all ?? 0);
+  const coverageStart = intervalAgg._min?.ts ?? null;
+  const coverageEnd = intervalAgg._max?.ts ?? null;
+
+  const coverageDays =
+    coverageStart && coverageEnd ? daysBetweenInclusive(coverageStart, coverageEnd) : 0;
+
+  // "Ready" means we have essentially the full 365-day window (allow a little slop).
+  const slopDays = 2;
+  const targetStartMs = target.startDate.getTime() + slopDays * 24 * 60 * 60 * 1000;
+  const targetEndMs = target.endDate.getTime() - slopDays * 24 * 60 * 60 * 1000;
+
+  const historyReady = Boolean(
+    coverageStart &&
+      coverageEnd &&
+      coverageStart.getTime() <= targetStartMs &&
+      coverageEnd.getTime() >= targetEndMs,
+  );
 
   // Also report whether any raw SMT files have landed for visibility.
   const rawCount = await prisma.rawSmtFile.count({
@@ -82,9 +114,21 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  const ready = intervalCount > 0;
-  const phase =
-    ready ? "ready" : rawCount > 0 ? "processing" : "pending";
+  const ready = historyReady;
+  const phase = ready ? "ready" : intervalCount > 0 || rawCount > 0 ? "processing" : "pending";
+
+  const message = (() => {
+    if (ready) return "Full SMT history has been ingested.";
+    if (phase === "pending") return "Waiting for SMT data delivery.";
+    if (phase === "processing") {
+      if (intervalCount > 0 && coverageStart && coverageEnd) {
+        return `Partial SMT history ingested (${coverageDays} day(s)). Still importing historical usage.`;
+      }
+      if (rawCount > 0) return "SMT files received; processing intervals.";
+      return "Processing SMT usage.";
+    }
+    return null;
+  })();
 
   return NextResponse.json({
     ok: true,
@@ -92,6 +136,16 @@ export async function POST(req: NextRequest) {
     ready,
     intervals: intervalCount,
     rawFiles: rawCount,
+    coverage: {
+      start: coverageStart ? coverageStart.toISOString() : null,
+      end: coverageEnd ? coverageEnd.toISOString() : null,
+      days: coverageDays,
+    },
+    target: {
+      start: target.startDate.toISOString(),
+      end: target.endDate.toISOString(),
+    },
+    message,
   });
 }
 

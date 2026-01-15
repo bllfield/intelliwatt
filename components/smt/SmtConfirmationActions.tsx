@@ -39,7 +39,7 @@ export function SmtConfirmationActions({ homeId }: Props) {
         if (payload.status === "ready" || payload.ready) {
           setIsWaitingOnSmt(false);
           setIsProcessing(false);
-          setStatusMessage("Your SMT usage data has arrived and your dashboard has been updated.");
+          setStatusMessage("Your full SMT history has been ingested and your dashboard has been updated.");
           setState("idle");
           router.push("/dashboard/api");
           return;
@@ -47,8 +47,14 @@ export function SmtConfirmationActions({ homeId }: Props) {
         if (payload.status === "processing" || (payload.rawFiles > 0 && !payload.ready)) {
           setIsWaitingOnSmt(false);
           setIsProcessing(true);
+          const coverage = payload?.coverage;
+          const coverageText =
+            coverage?.start && coverage?.end
+              ? ` Current coverage: ${String(coverage.start).slice(0, 10)} – ${String(coverage.end).slice(0, 10)} (${coverage.days ?? "?"} day(s)).`
+              : "";
           setStatusMessage(
-            "We received your SMT data package and are processing your usage. This can take a few minutes.",
+            (payload?.message ||
+              "We are processing your SMT usage. Historical backfill can take some time.") + coverageText,
           );
         }
       }
