@@ -11,6 +11,13 @@ export const runtime = "nodejs"; // ensure Node runtime for longer executions
 // strict request timeouts. Keep it fast: trigger work, don't block on long ingest/normalize.
 export const maxDuration = 30;
 
+function daysBetweenInclusive(start: Date, end: Date): number {
+  const msPerDay = 24 * 60 * 60 * 1000;
+  const a = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate()));
+  const b = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate()));
+  return Math.max(0, Math.floor((b.getTime() - a.getTime()) / msPerDay) + 1);
+}
+
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
   const ctrl = new AbortController();
   const id = setTimeout(() => ctrl.abort(`${label}:timeout`), timeoutMs);
@@ -233,9 +240,45 @@ export async function POST(req: NextRequest) {
         .toLowerCase();
       const isActive = statusNorm === "active" || statusNorm === "already_active";
 
+      // Compute coverage so we can safely decide whether "already requested" is still acceptable.
+      // If coverage is still partial and the previous request is stale, we allow a retry.
+      let coverageStart: Date | null = null;
+      let coverageEnd: Date | null = null;
+      let coverageDays = 0;
+      let historyReady = false;
+      if (auth?.esiid) {
+        const agg = await prisma.smtInterval.aggregate({
+          where: { esiid: auth.esiid },
+          _min: { ts: true },
+          _max: { ts: true },
+        });
+        coverageStart = agg._min.ts ?? null;
+        coverageEnd = agg._max.ts ?? null;
+        coverageDays = coverageStart && coverageEnd ? daysBetweenInclusive(coverageStart, coverageEnd) : 0;
+
+        const slopDays = 2;
+        const targetStartMs = backfillRange.startDate.getTime() + slopDays * 24 * 60 * 60 * 1000;
+        const targetEndMs = backfillRange.endDate.getTime() - slopDays * 24 * 60 * 60 * 1000;
+        historyReady = Boolean(
+          coverageStart &&
+            coverageEnd &&
+            coverageStart.getTime() <= targetStartMs &&
+            coverageEnd.getTime() >= targetEndMs,
+        );
+      }
+
+      // If we previously recorded a backfill request, only retry if:
+      // - coverage is still not full-history, AND
+      // - the request timestamp is "stale" (so we don't spam SMT)
+      const retryAfterMs = 6 * 60 * 60 * 1000; // 6h
+      const requestedAt = (auth as any)?.smtBackfillRequestedAt ? new Date((auth as any).smtBackfillRequestedAt) : null;
+      const isStale = requestedAt ? Date.now() - requestedAt.getTime() >= retryAfterMs : false;
+      const allowRetry = Boolean(requestedAt && !historyReady && isStale);
+
       // Only trigger backfill once ACTIVE (customer approved SMT email).
-      // Also avoid duplicate requests if we've already recorded a request time.
-      if (auth?.id && auth.esiid && isActive && !(auth as any)?.smtBackfillRequestedAt) {
+      // Also avoid duplicate requests if we've already recorded a request time,
+      // unless we are clearly still missing coverage and the prior request is stale.
+      if (auth?.id && auth.esiid && isActive && (!requestedAt || allowRetry)) {
         const res = await withTimeout(
           requestSmtBackfillForAuthorization({
             authorizationId: auth.id,
@@ -255,7 +298,11 @@ export async function POST(req: NextRequest) {
           });
         }
 
-        backfillOutcome = { homeId: house.id, ok: res.ok, message: res.message };
+        backfillOutcome = {
+          homeId: house.id,
+          ok: res.ok,
+          message: (allowRetry ? "backfill_retry:stale_request;" : "") + (res.message ?? ""),
+        };
       } else if (auth?.id && auth.esiid && !isActive) {
         backfillOutcome = {
           homeId: house.id,
@@ -266,7 +313,11 @@ export async function POST(req: NextRequest) {
         backfillOutcome = {
           homeId: house.id,
           ok: true,
-          message: "backfill_skipped:already_requested",
+          message: historyReady
+            ? "backfill_skipped:history_ready"
+            : isStale
+              ? `backfill_skipped:already_requested_stale_not_retried(coverage_days=${coverageDays})`
+              : `backfill_skipped:already_requested_recent(coverage_days=${coverageDays})`,
         };
       }
     } catch (backfillError) {
