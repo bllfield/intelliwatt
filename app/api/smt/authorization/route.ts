@@ -352,12 +352,11 @@ export async function POST(req: NextRequest) {
         smtSubscriptionId: subscriptionId,
         smtStatus: smtResult.status ?? null,
         smtStatusMessage: smtResult.message ?? null,
-        smtBackfillRequestedAt: smtResult.backfillRequestedAt
-          ? new Date(smtResult.backfillRequestedAt)
-          : null,
-        smtBackfillCompletedAt: smtResult.backfillCompletedAt
-          ? new Date(smtResult.backfillCompletedAt)
-          : null,
+        // IMPORTANT:
+        // Do NOT set smtBackfillRequestedAt / smtBackfillCompletedAt here.
+        // Backfill is requested only after SMT confirms the authorization is ACTIVE,
+        // via the email-confirmation flow or refresh actions. Setting these fields here
+        // can incorrectly block the real backfill request and lead to partial coverage.
         meterNumber,
       };
     } catch (agreementErr: any) {
