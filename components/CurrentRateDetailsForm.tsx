@@ -1113,6 +1113,10 @@ export function CurrentRateDetailsForm({
             : "EFL parsed. We pre-filled your fields—please double-check everything before saving.",
         );
       }
+
+      // Refresh saved/parsed plan snapshot so the "Saved Plan Snapshot" section reflects
+      // the newly-parsed EFL-derived data immediately.
+      await refreshPlan();
       return true;
     } catch (e: any) {
       setEflParseStatus(e?.message ?? "EFL parse failed.");
