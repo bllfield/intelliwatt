@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 
+export const dynamic = "force-dynamic";
+
 const DEFAULT_LIMIT = 50;
 // We want the REP dropdown to be able to show the full list (small enough in practice).
 // Keep a safety cap anyway.
@@ -17,6 +19,13 @@ const WEBSITE_ALIAS_RULES: Array<{ needle: string; label: string; key: string }>
   { needle: "discountpower", label: "Discount Power", key: "discountpower" },
   { needle: "cirroenergy", label: "Cirro Energy", key: "cirroenergy" },
 ];
+
+// Some brand relationships are not reliably represented in PUCT legalName/dbaName fields.
+// Encode a small, explicit map so the dropdown is usable even if website is missing/blank.
+const PUCT_NUMBER_ALIASES: Record<string, string[]> = {
+  // US RETAILERS LLC / Cirro Energy also sells as Discount Power (discountpowertx.com).
+  "10177": ["Discount Power"],
+};
 
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
@@ -125,6 +134,34 @@ export async function GET(req: NextRequest) {
 
     const website = typeof r.website === "string" ? r.website : "";
     const websiteKey = normKey(website);
+
+    // Explicit aliasing by PUCT number (always-on for known brands).
+    const explicit = PUCT_NUMBER_ALIASES[String(r.puctNumber ?? "")] ?? [];
+    for (const label of explicit) {
+      const aliasLabel = String(label).trim();
+      if (!aliasLabel) continue;
+      const aliasKey = normKey(aliasLabel);
+      const legalKey = normKey(r.legalName);
+      const dbaKey = r.dbaName ? normKey(r.dbaName) : "";
+
+      if (aliasKey && aliasKey !== legalKey && aliasKey !== dbaKey) {
+        push({
+          id: `alias:${r.puctNumber}:${aliasKey}:brand`,
+          puctNumber: r.puctNumber,
+          legalName: aliasLabel,
+          dbaName: `${r.legalName}${r.dbaName ? ` (${r.dbaName})` : ""}`,
+        });
+      }
+
+      if (aliasKey && !dbaKey.includes(aliasKey)) {
+        push({
+          id: `alias:${r.puctNumber}:${aliasKey}:legal`,
+          puctNumber: r.puctNumber,
+          legalName: r.legalName,
+          dbaName: `${aliasLabel}${r.dbaName ? ` (${r.dbaName})` : ""}`,
+        });
+      }
+    }
 
     for (const rule of WEBSITE_ALIAS_RULES) {
       const hasByWebsite = websiteKey.includes(rule.needle);
