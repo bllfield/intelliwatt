@@ -122,7 +122,7 @@ export async function POST(req: NextRequest) {
     if (phase === "pending") return "Waiting for SMT data delivery.";
     if (phase === "processing") {
       if (intervalCount > 0 && coverageStart && coverageEnd) {
-        if (rawCount === 0 && coverageDays <= 14) {
+        if (rawCount === 0) {
           return `Partial SMT snapshot ingested (${coverageDays} day(s)). Waiting for historical SMT files to arrive.`;
         }
         return `Partial SMT history ingested (${coverageDays} day(s)). Still importing historical usage.`;
