@@ -496,6 +496,75 @@ export async function upsertRatePlanFromEfl(
       },
     });
   } catch (e: any) {
+    const msgRaw = e?.message ? String(e.message) : "";
+    const isUnique =
+      String(e?.code ?? "") === "P2002" ||
+      /Unique constraint failed on the fields:/i.test(msgRaw) ||
+      /P2002/i.test(msgRaw);
+
+    // Defensive recovery: composite identity collision.
+    // This happens when we matched `existing` by eflPdfSha256 (or other heuristic),
+    // but the incoming template identity belongs to a different RatePlan row
+    // (unique: utilityId,state,supplier,planName,termMonths,isUtilityTariff).
+    //
+    // Fix: treat the composite-identity row as canonical, and "move" the SHA over by
+    // clearing it on the current row first (SHA is unique but nullable), then updating
+    // the canonical row with the new template fields.
+    if (isUnique) {
+      const supplier = String(providerName ?? "").trim();
+      const pn = String(planName ?? "").trim();
+      const tm = typeof termMonths === "number" && Number.isFinite(termMonths) ? Math.trunc(termMonths) : null;
+      const util = (utilityId ?? "").trim() ? String(utilityId).trim().toUpperCase() : "UNKNOWN";
+      const st = (state ?? "").trim() ? String(state).trim().toUpperCase() : "TX";
+
+      if (supplier && pn && tm != null) {
+        const composite = await prisma.ratePlan.findFirst({
+          where: {
+            utilityId: util,
+            state: st,
+            supplier: supplier,
+            planName: pn,
+            termMonths: tm,
+            isUtilityTariff: false,
+          },
+          select: { id: true },
+        });
+
+        if (composite && String(composite.id) !== String(existing.id)) {
+          const shaOwner = await prisma.ratePlan.findFirst({
+            where: { eflPdfSha256: eflPdfSha256 } as any,
+            select: { id: true },
+          });
+
+          const [canonicalUpdated] = await prisma.$transaction([
+            // Clear SHA from the current owner (if any) so we can attach it to the canonical row.
+            ...(shaOwner && String(shaOwner.id) !== String(composite.id)
+              ? [
+                  prisma.ratePlan.update({
+                    where: { id: shaOwner.id },
+                    data: { eflPdfSha256: null },
+                  }),
+                ]
+              : []),
+            prisma.ratePlan.update({
+              where: { id: composite.id },
+              data: {
+                // Keep canonical identity (utilityId/state/supplier/planName/termMonths/isUtilityTariff) stable.
+                ...dataCommon,
+              },
+            }),
+          ]);
+
+          return {
+            ratePlan: canonicalUpdated,
+            templatePersisted: Boolean(!requiresManualReview && safeRateStructure),
+            forcedManualReviewForMissingFields,
+            missingTemplateFields,
+          };
+        }
+      }
+    }
+
     // Defensive recovery: if a concurrent write caused a SHA uniqueness conflict,
     // resolve by updating the SHA-owned row instead of failing the request.
     const isShaConflict =
