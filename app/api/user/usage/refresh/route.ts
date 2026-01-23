@@ -65,6 +65,7 @@ interface HomeRefreshResult {
     ok: boolean;
     status?: number;
     message?: string;
+    webhookResponse?: any;
   };
 }
 
@@ -201,10 +202,12 @@ export async function POST(req: NextRequest) {
         if (pullResponse.ok && pullPayload?.ok !== false) {
           result.pull.ok = true;
           result.pull.message = pullPayload?.message ?? "SMT pull triggered.";
+          result.pull.webhookResponse = pullPayload?.webhookResponse ?? null;
         } else {
           result.pull.ok = false;
           result.pull.message =
             pullPayload?.error ?? pullPayload?.details ?? "SMT pull request failed.";
+          result.pull.webhookResponse = pullPayload?.webhookResponse ?? null;
         }
       } catch (error) {
         result.pull.ok = false;
@@ -270,7 +273,19 @@ export async function POST(req: NextRequest) {
       // If we previously recorded a backfill request, only retry if:
       // - coverage is still not full-history, AND
       // - the request timestamp is "stale" (so we don't spam SMT)
-      const retryAfterMs = 6 * 60 * 60 * 1000; // 6h
+      // If we have *no* raw files arriving, it’s likely the pipeline is stalled. Allow a quicker retry.
+      const rawCount = auth?.esiid
+        ? await prisma.rawSmtFile.count({
+            where: {
+              OR: [
+                { filename: { contains: auth.esiid } },
+                { storage_path: { contains: auth.esiid } },
+              ],
+            },
+          }).catch(() => 0)
+        : 0;
+
+      const retryAfterMs = rawCount === 0 ? 60 * 60 * 1000 : 6 * 60 * 60 * 1000; // 1h (stalled) else 6h
       const requestedAt = (auth as any)?.smtBackfillRequestedAt ? new Date((auth as any).smtBackfillRequestedAt) : null;
       const isStale = requestedAt ? Date.now() - requestedAt.getTime() >= retryAfterMs : false;
       const allowRetry = Boolean(requestedAt && !historyReady && isStale);
@@ -291,17 +306,18 @@ export async function POST(req: NextRequest) {
           "requestSmtBackfillForAuthorization",
         );
 
-        if (res.ok) {
-          await prisma.smtAuthorization.update({
-            where: { id: auth.id },
-            data: { smtBackfillRequestedAt: new Date() },
-          });
-        }
+        // Treat this as an attempt timestamp (used for rate-limiting retries).
+        await prisma.smtAuthorization.update({
+          where: { id: auth.id },
+          data: { smtBackfillRequestedAt: new Date() },
+        }).catch(() => null);
 
         backfillOutcome = {
           homeId: house.id,
           ok: res.ok,
-          message: (allowRetry ? "backfill_retry:stale_request;" : "") + (res.message ?? ""),
+          message:
+            (allowRetry ? `backfill_retry:stale_request(rawFiles=${rawCount});` : "") +
+            (res.message ?? ""),
         };
       } else if (auth?.id && auth.esiid && !isActive) {
         backfillOutcome = {
@@ -317,7 +333,7 @@ export async function POST(req: NextRequest) {
             ? "backfill_skipped:history_ready"
             : isStale
               ? `backfill_skipped:already_requested_stale_not_retried(coverage_days=${coverageDays})`
-              : `backfill_skipped:already_requested_recent(coverage_days=${coverageDays})`,
+              : `backfill_skipped:already_requested_recent(coverage_days=${coverageDays},rawFiles=${rawCount})`,
         };
       }
     } catch (backfillError) {
