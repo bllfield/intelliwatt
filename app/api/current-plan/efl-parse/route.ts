@@ -862,8 +862,20 @@ export async function POST(req: NextRequest) {
     }
 
     // Quarantine into the shared EFL review queue when parsing is incomplete/unsupported.
+    // Note: deterministicEflExtract() may emit "missing" warnings even when we can extract the values
+    // from the raw text reliably. Filter those to avoid confusing user-facing messaging.
+    const detWarningsRaw: string[] = (((det.warnings ?? []) as any[]) ?? []).map((x) => String(x)).filter(Boolean);
+    const detWarnings = detWarningsRaw.filter((w) => {
+      const s = String(w ?? "");
+      if (/Missing\s+REP\s+PUCT\s+Certificate/i.test(s)) return !repPuctCertificateFromText;
+      if (/Missing\s+EFL\s+Ver/i.test(s) || /Missing\s+EFL\s+Ver\.\s*#/i.test(s) || /Missing\s+EFL\s+Ver\s*#/i.test(s)) {
+        return !eflVersionCodeFromText;
+      }
+      return true;
+    });
+
     const warnings: string[] = [
-      ...((det.warnings ?? []) as any[]).map((x) => String(x)),
+      ...detWarnings,
       ...(templateUsed ? ["Template reused: BillPlanTemplate matched by provider+plan; skipped full EFL pipeline."] : []),
       ...(templateMatched && !templateUsed ? ["Template matched, but full EFL pipeline ran (template missing required seasonal/price fields)."] : []),
       ...(((pipeline?.parseWarnings ?? []) as any[]) ?? []).map((x) => String(x)),
@@ -899,6 +911,7 @@ export async function POST(req: NextRequest) {
       : ((pipeline as any)?.finalValidation ?? null);
 
     const finalValidationStatus = String(validationForQueue?.status ?? "").toUpperCase();
+    const validationPass = !finalValidationStatus || finalValidationStatus.startsWith("PASS");
     // For current plan templates: warnings are common and should not automatically quarantine.
     // We quarantine only when:
     // - Identity/required pricing fields are missing, OR
@@ -906,7 +919,7 @@ export async function POST(req: NextRequest) {
     // - Plan is not computable.
     const planCalcReq = derivePlanCalcRequirementsFromTemplate({ rateStructure });
     const planCalcStatus = planCalcReq.planCalcStatus;
-    if (finalValidationStatus && finalValidationStatus !== "PASS") reasonParts.push(`validation_${finalValidationStatus}`);
+    if (!validationPass) reasonParts.push(`validation_${finalValidationStatus || "FAIL"}`);
     if (planCalcStatus && planCalcStatus !== "COMPUTABLE") reasonParts.push(`planCalc_${planCalcReq.planCalcReasonCode}`);
 
     const needsReview = reasonParts.length > 0;
@@ -939,7 +952,7 @@ export async function POST(req: NextRequest) {
               ...(pipeline?.derivedForValidation ?? {}),
               userEmail,
             },
-            finalStatus: finalValidationStatus === "PASS" ? "PASS" : (finalValidationStatus || "FAIL"),
+            finalStatus: validationPass ? "PASS" : (finalValidationStatus || "FAIL"),
             queueReason,
             solverApplied: (pipeline as any)?.derivedForValidation?.solverApplied ?? null,
           },
@@ -959,7 +972,7 @@ export async function POST(req: NextRequest) {
               ...(pipeline?.derivedForValidation ?? {}),
               userEmail,
             },
-            finalStatus: finalValidationStatus === "PASS" ? "PASS" : (finalValidationStatus || "FAIL"),
+            finalStatus: validationPass ? "PASS" : (finalValidationStatus || "FAIL"),
             queueReason,
             resolvedAt: null,
             resolvedBy: null,
