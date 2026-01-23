@@ -89,7 +89,10 @@ export async function POST(req: NextRequest) {
     }
 
     // Create new record
-    // STEP 1: Store contentBase64 as Buffer if provided (RawSmtFile.content is Bytes type)
+    // NOTE:
+    // We may receive contentBase64 for inline normalization, but we intentionally do NOT store the raw
+    // CSV bytes in Postgres. Raw file audit should rely on `storage_path` (object storage / droplet),
+    // and we keep only sha256 + metadata in the DB to reduce write load.
     const contentBuffer = contentBase64 ? Buffer.from(contentBase64, 'base64') : undefined;
     
     const row = await prisma.rawSmtFile.create({
@@ -100,7 +103,6 @@ export async function POST(req: NextRequest) {
         source,
         content_type: contentType,
         storage_path: storagePath,
-        content: contentBuffer,
         received_at: receivedAt ? new Date(receivedAt) : new Date(),
       },
       select: { id: true, filename: true, size_bytes: true, sha256: true, created_at: true },
@@ -214,19 +216,28 @@ export async function POST(req: NextRequest) {
                 });
               }
 
-              const result = await tx.smtInterval.createMany({
-                data: bounded.map((interval) => ({
-                  esiid: interval.esiid,
-                  meter: interval.meter,
-                  ts: interval.ts,
-                  kwh: new Prisma.Decimal(interval.kwh),
-                  source: interval.source ?? source ?? 'smt',
-                })),
-                skipDuplicates: false,
-              });
+              const payload = bounded.map((interval) => ({
+                esiid: interval.esiid,
+                meter: interval.meter,
+                ts: interval.ts,
+                kwh: new Prisma.Decimal(interval.kwh),
+                source: interval.source ?? source ?? 'smt',
+              }));
 
-              inserted = result.count;
-              skipped = bounded.length - result.count;
+              // Chunk large createMany writes to reduce memory spikes and oversized DB statements.
+              const CHUNK_SIZE = 5000;
+              let createdTotal = 0;
+              for (let i = 0; i < payload.length; i += CHUNK_SIZE) {
+                const slice = payload.slice(i, i + CHUNK_SIZE);
+                const res = await tx.smtInterval.createMany({
+                  data: slice,
+                  skipDuplicates: false,
+                });
+                createdTotal += res.count;
+              }
+
+              inserted = createdTotal;
+              skipped = bounded.length - createdTotal;
             }, { timeout: 30000 });
           } catch (err) {
             console.error('[raw-upload:inline] failed overwrite transaction', { err });
@@ -259,17 +270,22 @@ export async function POST(req: NextRequest) {
                   },
                 });
 
-                await usageClient.usageIntervalModule.createMany({
-                  data: pairIntervals.map((interval) => ({
-                    esiid: interval.esiid,
-                    meter: interval.meter,
-                    ts: interval.ts,
-                    kwh: new Prisma.Decimal(interval.kwh),
-                    filled: false,
-                    source: interval.source ?? source ?? 'smt',
-                  })),
-                  skipDuplicates: false,
-                });
+                const payload = pairIntervals.map((interval) => ({
+                  esiid: interval.esiid,
+                  meter: interval.meter,
+                  ts: interval.ts,
+                  kwh: new Prisma.Decimal(interval.kwh),
+                  filled: false,
+                  source: interval.source ?? source ?? 'smt',
+                }));
+
+                const CHUNK_SIZE = 5000;
+                for (let i = 0; i < payload.length; i += CHUNK_SIZE) {
+                  await usageClient.usageIntervalModule.createMany({
+                    data: payload.slice(i, i + CHUNK_SIZE),
+                    skipDuplicates: false,
+                  });
+                }
               }
             }
           } catch (usageErr) {
@@ -350,11 +366,8 @@ export async function POST(req: NextRequest) {
             }
           }
 
-          // IMPORTANT for debugging: keep the RawSmtFile row so we can inspect
-          // the original SMT payloads (full 12‑month package) after ingest.
-          // Previously we deleted the raw record after inline normalize; now we
-          // retain it so admin tools (/api/admin/debug/smt/raw-files and the
-          // download route) can see every uploaded file.
+          // IMPORTANT for debugging/audit: keep the RawSmtFile row (sha256 + storage_path metadata).
+          // Raw bytes live in object storage / droplet path referenced by storage_path, not in Postgres.
 
           normalizedSummary = {
             inserted,

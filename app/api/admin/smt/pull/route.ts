@@ -505,7 +505,8 @@ export async function POST(req: NextRequest) {
             source: saved.source,
             content_type: saved.contentType,
             storage_path: saved.storagePath,
-            content: csvBytes,
+            // Do NOT store raw CSV bytes in Postgres. The raw file is already persisted to object storage
+            // (see storage_path), and storing large blobs in DB slows interval ingestion significantly.
             received_at: safeReceivedAt,
           },
           select: { id: true },
