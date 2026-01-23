@@ -46,6 +46,28 @@ function parseCentralIso(raw?: string | null): string | null {
   const value = raw.trim();
   if (!value) return null;
 
+  // Perf: computing timezone offsets via Intl.DateTimeFormat.formatToParts is expensive.
+  // SMT CSVs contain thousands of 15-min rows; we cache offsets at hour granularity.
+  const offsetCacheKeyForLocal = (y: number, m0: number, d: number, h: number) =>
+    `${y}-${String(m0 + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}-${String(h).padStart(2, '0')}`;
+
+  const CHICAGO_DTF = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Chicago',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+
+  // Module-level cache (survives across calls within the same invocation).
+  // Keyed by local YYYY-MM-DD-HH so DST transitions are handled correctly.
+  const offsetMinutesCache: Map<string, number> =
+    ((globalThis as any).__iwChicagoOffsetCache as Map<string, number> | undefined) ??
+    (((globalThis as any).__iwChicagoOffsetCache = new Map()) as Map<string, number>);
+
   // Extract basic components (MM/DD/YYYY HH:mm[:ss][AM|PM]) and treat them as America/Chicago local time.
   const normalized = value.replace(/\s+(CST|CDT|CT)$/i, '').replace(/[T]/g, ' ').trim();
   const match = normalized.match(
@@ -69,18 +91,13 @@ function parseCentralIso(raw?: string | null): string | null {
 
     const initialUtcMs = Date.UTC(year, month, day, hour, minute, second);
 
-    const getOffsetMinutes = (utcMs: number, timeZone: string): number => {
-      const dtf = new Intl.DateTimeFormat('en-US', {
-        timeZone,
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false,
-      });
-      const parts = dtf.formatToParts(new Date(utcMs));
+    const cacheKey = offsetCacheKeyForLocal(year, month, day, hour);
+    const cached = offsetMinutesCache.get(cacheKey);
+    const offsetMinutes =
+      typeof cached === 'number'
+        ? cached
+        : (() => {
+            const parts = CHICAGO_DTF.formatToParts(new Date(initialUtcMs));
       const map: Record<string, string> = {};
       for (const p of parts) {
         if (p.type !== 'literal') map[p.type] = p.value;
@@ -93,10 +110,11 @@ function parseCentralIso(raw?: string | null): string | null {
         Number(map.minute),
         Number(map.second),
       );
-      return (asUtc - utcMs) / 60000;
-    };
+            const off = (asUtc - initialUtcMs) / 60000;
+            offsetMinutesCache.set(cacheKey, off);
+            return off;
+          })();
 
-    const offsetMinutes = getOffsetMinutes(initialUtcMs, 'America/Chicago');
     const finalMs = initialUtcMs - offsetMinutes * 60000;
     return new Date(finalMs).toISOString();
   }
