@@ -37,6 +37,21 @@ export const BOT_EVENTS_BY_PAGE: Record<BotPageKey, BotEventMeta[]> = {
     { key: "usage_connected", label: "Usage connected", description: "Show after SMT/Green Button usage is available." },
     { key: "needs_smt_confirmation", label: "Needs SMT confirmation", description: "Show when SMT is pending approval." },
   ],
+  dashboard_api_manual: [
+    ...COMMON,
+    { key: "usage_connected", label: "Usage connected", description: "Show after manual usage is uploaded/saved." },
+    { key: "usage_missing", label: "Usage missing", description: "Show when no usage dataset exists yet." },
+  ],
+  dashboard_api_green_button: [
+    ...COMMON,
+    { key: "usage_connected", label: "Usage connected", description: "Show after Green Button usage is available." },
+    { key: "usage_missing", label: "Usage missing", description: "Show when no usage dataset exists yet." },
+  ],
+  dashboard_api_smt: [
+    ...COMMON,
+    { key: "usage_connected", label: "Usage connected", description: "Show after SMT usage is available." },
+    { key: "needs_smt_confirmation", label: "Needs SMT confirmation", description: "Show when SMT is pending approval." },
+  ],
   dashboard_usage: [
     ...COMMON,
     { key: "usage_connected", label: "Usage connected", description: "Show when usage insights are available." },

@@ -1,6 +1,9 @@
 export type BotPageKey =
   | "dashboard"
   | "dashboard_api"
+  | "dashboard_api_manual"
+  | "dashboard_api_green_button"
+  | "dashboard_api_smt"
   | "dashboard_usage"
   | "dashboard_current_rate"
   | "dashboard_current_rate_details"
@@ -35,7 +38,28 @@ export const BOT_PAGES: BotPageMeta[] = [
   {
     key: "dashboard_api",
     label: "API Connect (/dashboard/api)",
-    paths: ["/dashboard/api", "/dashboard/api/manual", "/dashboard/api/green-button", "/dashboard/api/smt"],
+    paths: ["/dashboard/api"],
+    defaultMessage:
+      "Step 2: Share your usage.\n\nConnect Smart Meter Texas (recommended) or Green Button so I can calculate true annual cost from your real intervals.\nOnce it’s connected, go to Plans so I can rank the best options for you.",
+  },
+  {
+    key: "dashboard_api_manual",
+    label: "API Connect — Manual Usage (/dashboard/api/manual)",
+    paths: ["/dashboard/api/manual"],
+    defaultMessage:
+      "Manual usage works, but it’s less precise than Smart Meter Texas intervals.\n\nIf you can, connect Smart Meter Texas for the most accurate plan ranking. Otherwise, upload/enter your usage carefully and I’ll still guide you forward.",
+  },
+  {
+    key: "dashboard_api_green_button",
+    label: "API Connect — Green Button (/dashboard/api/green-button)",
+    paths: ["/dashboard/api/green-button"],
+    defaultMessage:
+      "Green Button can unlock a full 12-month usage dataset.\n\nFollow the steps on this page, then come back once your usage is connected so I can rank the best plans for your real usage.",
+  },
+  {
+    key: "dashboard_api_smt",
+    label: "API Connect — Smart Meter Texas (/dashboard/api/smt)",
+    paths: ["/dashboard/api/smt"],
     defaultMessage:
       "Step 2: Share your usage.\n\nConnect Smart Meter Texas (recommended) or Green Button so I can calculate true annual cost from your real intervals.\nOnce it’s connected, go to Plans so I can rank the best options for you.",
   },
@@ -141,9 +165,9 @@ export function resolveBotPageKey(pathname: string | null | undefined): BotPageK
   if (!p) return "unknown";
   for (const meta of BOT_PAGES) {
     if (meta.paths.some((x) => x === p || (x.endsWith("/") && x.slice(0, -1) === p))) return meta.key;
-    // allow exact base match for nested subroutes under known roots
-    if (meta.key === "dashboard_api" && p.startsWith("/dashboard/api")) return meta.key;
   }
+  // allow base match for future nested subroutes under API Connect
+  if (p.startsWith("/dashboard/api/")) return "dashboard_api";
   if (p.startsWith("/dashboard")) return "dashboard";
   return "unknown";
 }
