@@ -37,6 +37,10 @@ export async function POST(req: NextRequest) {
   const contentBase64 = body.contentBase64 as string | undefined;
   const purgeExisting: boolean =
     body.purgeExisting === false ? false : true; // default: true for legacy callers
+  // When SMT uploads are chunked into multiple raw-upload calls, we should only run
+  // expensive "post ingest" steps (bucket aggregation + plan pipeline) once the final
+  // chunk has been ingested.
+  const postIngest: boolean = body.postIngest === false ? false : true; // default: true
 
   const missing: string[] = [];
 
@@ -292,7 +296,7 @@ export async function POST(req: NextRequest) {
             console.error('[raw-upload:inline] usage dual-write failed', usageErr);
           }
 
-          if (distinctEsiids.length > 0) {
+          if (distinctEsiids.length > 0 && purgeExisting) {
             try {
               const houses = await prisma.houseAddress.findMany({
                 where: { esiid: { in: distinctEsiids }, archivedAt: null },
@@ -318,45 +322,47 @@ export async function POST(req: NextRequest) {
                 await usagePrisma.rawGreenButton.deleteMany({ where: { homeId: { in: houseIds } } });
               }
 
-              // Best-effort: ensure CORE monthly bucket totals exist for homes touched by this upload.
-              // Must never fail SMT ingest.
-              try {
-                const rangeEnd = tsMax ?? new Date();
-                const rangeStart =
-                  windowStart ?? new Date(rangeEnd.getTime() - 365 * 24 * 60 * 60 * 1000);
-                for (const h of houses) {
-                  if (!h?.id) continue;
-                  await ensureCoreMonthlyBuckets({
-                    homeId: h.id,
-                    esiid: h.esiid,
-                    rangeStart,
-                    rangeEnd,
-                    source: "SMT",
-                    intervalSource: "SMT",
-                  });
+              if (postIngest) {
+                // Best-effort: ensure CORE monthly bucket totals exist for homes touched by this upload.
+                // Must never fail SMT ingest.
+                try {
+                  const rangeEnd = tsMax ?? new Date();
+                  const rangeStart =
+                    windowStart ?? new Date(rangeEnd.getTime() - 365 * 24 * 60 * 60 * 1000);
+                  for (const h of houses) {
+                    if (!h?.id) continue;
+                    await ensureCoreMonthlyBuckets({
+                      homeId: h.id,
+                      esiid: h.esiid,
+                      rangeStart,
+                      rangeEnd,
+                      source: "SMT",
+                      intervalSource: "SMT",
+                    });
+                  }
+                } catch (bucketErr) {
+                  console.error('[raw-upload:inline] CORE bucket aggregation failed (best-effort)', bucketErr);
                 }
-              } catch (bucketErr) {
-                console.error('[raw-upload:inline] CORE bucket aggregation failed (best-effort)', bucketErr);
-              }
 
-              // Proactive: any usage being present should trigger the plans pipeline (best-effort, bounded).
-              // This fills template mappings + plan-engine estimate cache so /dashboard/plans is instant later.
-              try {
-                for (const h of houses) {
-                  if (!h?.id) continue;
-                  await runPlanPipelineForHome({
-                    homeId: h.id,
-                    reason: 'usage_present',
-                    isRenter: false,
-                    timeBudgetMs: 7000,
-                    maxTemplateOffers: 2,
-                    maxEstimatePlans: 12,
-                    monthlyCadenceDays: 30,
-                    proactiveCooldownMs: 10 * 60 * 1000,
-                  });
+                // Proactive: any usage being present should trigger the plans pipeline (best-effort, bounded).
+                // This fills template mappings + plan-engine estimate cache so /dashboard/plans is instant later.
+                try {
+                  for (const h of houses) {
+                    if (!h?.id) continue;
+                    await runPlanPipelineForHome({
+                      homeId: h.id,
+                      reason: 'usage_present',
+                      isRenter: false,
+                      timeBudgetMs: 7000,
+                      maxTemplateOffers: 2,
+                      maxEstimatePlans: 12,
+                      monthlyCadenceDays: 30,
+                      proactiveCooldownMs: 10 * 60 * 1000,
+                    });
+                  }
+                } catch (pipelineErr) {
+                  console.error('[raw-upload:inline] plan pipeline failed (best-effort)', pipelineErr);
                 }
-              } catch (pipelineErr) {
-                console.error('[raw-upload:inline] plan pipeline failed (best-effort)', pipelineErr);
               }
             } catch (err) {
               console.error('[raw-upload:inline] failed to cleanup green-button/manual data for ESIID(s)', {

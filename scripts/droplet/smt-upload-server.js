@@ -254,7 +254,13 @@ async function registerAndNormalizeFile(filepath, filename, size_bytes) {
         const lines = text.split(/\r?\n/);
         const header = lines[0] || "";
         const dataLines = lines.slice(1).filter((l) => l.trim().length > 0);
-        const LINES_PER_CHUNK = Number(process.env.SMT_RAW_LINES_PER_CHUNK || "500");
+        // Performance:
+        // Each chunk triggers a full normalize + DB write on the app side, so too-small chunks
+        // dramatically slow ingest (lots of HTTP overhead + repeated transactions).
+        //
+        // 5,000 lines is still comfortably under typical Vercel body limits even after base64,
+        // and reduces a ~35k-row interval file from ~70 chunks to ~7.
+        const LINES_PER_CHUNK = Number(process.env.SMT_RAW_LINES_PER_CHUNK || "5000");
         const totalParts = dataLines.length > 0 ? Math.ceil(dataLines.length / LINES_PER_CHUNK) : 1;
         const rawUploadUrl = `${INTELLIWATT_BASE_URL}/api/admin/smt/raw-upload`;
         let totalFilesProcessed = 0;
@@ -280,6 +286,10 @@ async function registerAndNormalizeFile(filepath, filename, size_bytes) {
                         receivedAt: new Date().toISOString(),
                 purgeExisting: partIndex === 0,
                     };
+            rawUploadPayload.postIngest = partIndex === totalParts - 1;
+            if (esiid && esiid.trim().length > 0) {
+                rawUploadPayload.storagePath = `/smt/${esiid.trim()}/${partFilename}`;
+            }
                     // eslint-disable-next-line no-console
             console.log(`[smt-upload] registering raw file part ${partIndex + 1}/${totalParts} at ${rawUploadUrl} (bytes=${partBuffer.length})`);
             const rawResponse = await fetch(rawUploadUrl, {
@@ -289,7 +299,7 @@ async function registerAndNormalizeFile(filepath, filename, size_bytes) {
                                 "x-admin-token": ADMIN_TOKEN,
                             },
                             body: JSON.stringify(rawUploadPayload),
-                signal: AbortSignal.timeout(30000),
+                signal: AbortSignal.timeout(120000),
             });
             if (!rawResponse.ok) {
                 const errBody = await rawResponse.text();

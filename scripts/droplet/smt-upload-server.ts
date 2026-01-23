@@ -267,9 +267,13 @@ async function registerAndNormalizeFile(
     const header = lines[0] || "";
     const dataLines = lines.slice(1).filter((l) => l.trim().length > 0);
 
-    // Keep chunks very small to ensure each POST body is comfortably under Vercel limits.
-    // You can raise SMT_RAW_LINES_PER_CHUNK later once everything is stable.
-    const LINES_PER_CHUNK = Number(process.env.SMT_RAW_LINES_PER_CHUNK || "500");
+    // Performance:
+    // Each chunk triggers a full normalize + DB write on the app side, so too-small chunks
+    // dramatically slow ingest (lots of HTTP overhead + repeated transactions).
+    //
+    // 5,000 lines is still comfortably under typical Vercel body limits even after base64,
+    // and reduces a ~35k-row interval file from ~70 chunks to ~7.
+    const LINES_PER_CHUNK = Number(process.env.SMT_RAW_LINES_PER_CHUNK || "5000");
     const totalParts =
       dataLines.length > 0 ? Math.ceil(dataLines.length / LINES_PER_CHUNK) : 1;
 
@@ -309,10 +313,15 @@ async function registerAndNormalizeFile(
         source: "droplet-upload",
         receivedAt: new Date().toISOString(),
         purgeExisting: partIndex === 0, // only the first chunk clears existing intervals
+        // Only the last chunk should run expensive post-ingest steps (buckets + plan pipeline).
+        postIngest: partIndex === totalParts - 1,
       };
 
       if (esiid && esiid.trim().length > 0) {
         rawUploadPayload.esiid = esiid.trim();
+        // Give the app a stable place to associate this raw payload with the ESIID for visibility.
+        // (Even if the app chooses not to persist bytes, this helps status/debug tooling.)
+        rawUploadPayload.storagePath = `/smt/${esiid.trim()}/${partFilename}`;
       }
       if (meter && meter.trim().length > 0) {
         rawUploadPayload.meter = meter.trim();
@@ -330,7 +339,8 @@ async function registerAndNormalizeFile(
           "x-admin-token": ADMIN_TOKEN,
         },
         body: JSON.stringify(rawUploadPayload),
-        signal: AbortSignal.timeout(30000), // 30 second timeout for registration
+        // Larger chunks can legitimately take longer (DB delete+insert, dual-write).
+        signal: AbortSignal.timeout(120000),
       });
 
       if (!rawResponse.ok) {
