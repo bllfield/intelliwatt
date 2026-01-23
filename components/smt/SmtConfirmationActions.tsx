@@ -17,9 +17,15 @@ export function SmtConfirmationActions({ homeId }: Props) {
   const [isWaitingOnSmt, setIsWaitingOnSmt] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
 
+  function pollDelayMs(attempts: number): number {
+    if (attempts < 6) return 5000;
+    if (attempts < 20) return 15000;
+    return 30000;
+  }
+
   async function pollUsageReady(homeIdToPoll: string, attempts: number = 0): Promise<void> {
-    // Cap polling to about 8 minutes at 5s intervals (~96 attempts).
-    if (attempts > 96) {
+    // Cap polling to about ~20 minutes with backoff.
+    if (attempts > 60) {
       setIsWaitingOnSmt(false);
       setIsProcessing(false);
       setError("Still waiting on SMT data after several minutes. Try again later.");
@@ -64,7 +70,7 @@ export function SmtConfirmationActions({ homeId }: Props) {
 
     setTimeout(() => {
       void pollUsageReady(homeIdToPoll, attempts + 1);
-    }, 5000);
+    }, pollDelayMs(attempts));
   }
 
   async function triggerUsageRefreshFlow() {

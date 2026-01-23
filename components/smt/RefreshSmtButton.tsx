@@ -38,9 +38,16 @@ export default function RefreshSmtButton({ homeId }: RefreshSmtButtonProps) {
   const [isWaitingOnSmt, setIsWaitingOnSmt] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
 
+  function pollDelayMs(attempts: number): number {
+    // Reduce DB pressure while still giving quick initial feedback.
+    if (attempts < 6) return 5000; // ~30s fast checks
+    if (attempts < 20) return 15000; // ~3.5 min
+    return 30000; // thereafter
+  }
+
   async function pollUsageReady(homeIdToPoll: string, attempts: number = 0): Promise<void> {
-    // Cap polling to about 8 minutes at 5s intervals (~96 attempts).
-    if (attempts > 96) {
+    // Cap polling to about ~20 minutes with backoff.
+    if (attempts > 60) {
       setIsWaitingOnSmt(false);
       setIsProcessing(false);
       setStatus('error');
@@ -86,10 +93,10 @@ export default function RefreshSmtButton({ homeId }: RefreshSmtButtonProps) {
       // swallow transient polling errors; we will try again
     }
 
-    // Try again in 5 seconds.
+    // Try again with backoff.
     setTimeout(() => {
       void pollUsageReady(homeIdToPoll, attempts + 1);
-    }, 5000);
+    }, pollDelayMs(attempts));
   }
 
   const handleClick = () => {
