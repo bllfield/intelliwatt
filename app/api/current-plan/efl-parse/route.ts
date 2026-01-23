@@ -911,7 +911,10 @@ export async function POST(req: NextRequest) {
       : ((pipeline as any)?.finalValidation ?? null);
 
     const finalValidationStatus = String(validationForQueue?.status ?? "").toUpperCase();
-    const validationPass = !finalValidationStatus || finalValidationStatus.startsWith("PASS");
+    // Conservative:
+    // - Only explicit PASS* counts as a pass (PASS, PASS_WITH_ASSUMPTIONS, etc.)
+    // - Missing/empty status is treated as not-passing so we don't incorrectly auto-pass unknown validations
+    const validationPass = Boolean(finalValidationStatus) && finalValidationStatus.startsWith("PASS");
     // For current plan templates: warnings are common and should not automatically quarantine.
     // We quarantine only when:
     // - Identity/required pricing fields are missing, OR
@@ -919,7 +922,7 @@ export async function POST(req: NextRequest) {
     // - Plan is not computable.
     const planCalcReq = derivePlanCalcRequirementsFromTemplate({ rateStructure });
     const planCalcStatus = planCalcReq.planCalcStatus;
-    if (!validationPass) reasonParts.push(`validation_${finalValidationStatus || "FAIL"}`);
+    if (!validationPass) reasonParts.push(`validation_${finalValidationStatus || "MISSING"}`);
     if (planCalcStatus && planCalcStatus !== "COMPUTABLE") reasonParts.push(`planCalc_${planCalcReq.planCalcReasonCode}`);
 
     const needsReview = reasonParts.length > 0;
