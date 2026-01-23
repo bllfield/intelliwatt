@@ -82,6 +82,20 @@ function normalizeEndForAllDayWindow(startHhMm: string, endHhMm: string): string
   return endHhMm;
 }
 
+function hhmmToHour(v: string): number | null {
+  const s = String(v ?? "").trim();
+  if (!/^\d{2}:\d{2}$/.test(s)) return null;
+  const [hhRaw, mmRaw] = s.split(":");
+  const hh = Number(hhRaw);
+  const mm = Number(mmRaw);
+  if (!Number.isFinite(hh) || !Number.isFinite(mm) || hh < 0 || hh > 24 || mm < 0 || mm > 59) return null;
+  // Treat end-of-day markers as 24.0 for plan rules.
+  if (hh === 23 && mm === 59) return 24;
+  if (hh === 24 && mm === 0) return 24;
+  if (hh === 24 && mm !== 0) return null;
+  return hh + mm / 60;
+}
+
 function toRateType(parsed: any): "FIXED" | "VARIABLE" | "TIME_OF_USE" {
   const tou = Array.isArray(parsed?.rate?.touWindowsJson) ? parsed.rate.touWindowsJson : [];
   if (tou.length > 0) return "TIME_OF_USE";
@@ -894,15 +908,59 @@ export async function POST(req: NextRequest) {
     const validationForQueue = templateUsed
       ? await (async () => {
           try {
-            const pr: any = {
-              rateType,
-              planType: rateType === "TIME_OF_USE" ? "tou" : "flat",
-              termMonths: typeof entryData.termMonths === "number" ? entryData.termMonths : null,
-              ...(typeof flatEnergyRateCents === "number" ? { defaultRateCentsPerKwh: flatEnergyRateCents } : {}),
-              ...(typeof (rateStructure as any)?.baseMonthlyFeeCents === "number"
-                ? { baseChargePerMonthCents: (rateStructure as any).baseMonthlyFeeCents }
-                : {}),
-            };
+            // IMPORTANT:
+            // The validator uses PlanRules (EFL CDM) and the plan cost engine.
+            // For TOU-like current-plan templates, we must pass `timeOfUsePeriods` (not just RateStructure tiers),
+            // otherwise the engine can fail and validation status becomes missing/FAIL even when the plan is
+            // clearly computable (as seen in the admin fact-card pipeline).
+            const baseCents =
+              typeof (rateStructure as any)?.baseMonthlyFeeCents === "number"
+                ? Math.round((rateStructure as any).baseMonthlyFeeCents)
+                : typeof (parsed as any)?.rate?.baseMonthlyFeeCents === "number"
+                  ? Math.round((parsed as any).rate.baseMonthlyFeeCents)
+                  : null;
+
+            const pr: any =
+              rateType === "TIME_OF_USE"
+                ? {
+                    planType: "tou",
+                    rateType,
+                    termMonths: typeof entryData.termMonths === "number" ? entryData.termMonths : null,
+                    defaultRateCentsPerKwh: null,
+                    baseChargePerMonthCents: baseCents,
+                    solarBuyback: null,
+                    billCredits: [],
+                    timeOfUsePeriods: (touWindowsNormalized.length ? touWindowsNormalized : touWindows)
+                      .map((t: any) => {
+                        const start = typeof t?.start === "string" ? t.start : null;
+                        const end = typeof t?.end === "string" ? t.end : null;
+                        const startHour = start ? hhmmToHour(start) : null;
+                        const endHour = end ? hhmmToHour(end) : null;
+                        const months = Array.isArray(t?.monthsOfYear) ? t.monthsOfYear : undefined;
+                        const cents = typeof t?.cents === "number" && Number.isFinite(t.cents) ? t.cents : null;
+                        if (startHour == null || endHour == null || cents == null) return null;
+                        return {
+                          label: typeof t?.label === "string" && t.label.trim() ? t.label.trim() : "Time-of-use",
+                          startHour,
+                          endHour,
+                          daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
+                          ...(months && months.length ? { months } : {}),
+                          rateCentsPerKwh: cents,
+                          isFree: false,
+                        };
+                      })
+                      .filter(Boolean),
+                  }
+                : {
+                    rateType,
+                    planType: "flat",
+                    termMonths: typeof entryData.termMonths === "number" ? entryData.termMonths : null,
+                    ...(typeof flatEnergyRateCents === "number" ? { defaultRateCentsPerKwh: flatEnergyRateCents } : {}),
+                    ...(typeof baseCents === "number" ? { baseChargePerMonthCents: baseCents } : {}),
+                    solarBuyback: null,
+                    billCredits: [],
+                    timeOfUsePeriods: [],
+                  };
             return await validateEflAvgPriceTable({ rawText, planRules: pr, rateStructure });
           } catch {
             return null;
@@ -1001,7 +1059,7 @@ export async function POST(req: NextRequest) {
         templateUsed,
         templateId,
         templateKey: templateMatched && providerKey && planKey ? `${providerKey}::${planKey}` : null,
-        warnings: det.warnings ?? [],
+        warnings,
         parsedWarnings: ((pipeline?.parseWarnings ?? []) as any[]) as string[],
         notes: ((pipeline as any)?.parseWarnings ?? []) as string[],
         rawTextPreview: rawText.slice(0, 5000),
