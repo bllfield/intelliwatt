@@ -46,27 +46,57 @@ function parseCentralIso(raw?: string | null): string | null {
   const value = raw.trim();
   if (!value) return null;
 
-  // Perf: computing timezone offsets via Intl.DateTimeFormat.formatToParts is expensive.
-  // SMT CSVs contain thousands of 15-min rows; we cache offsets at hour granularity.
-  const offsetCacheKeyForLocal = (y: number, m0: number, d: number, h: number) =>
-    `${y}-${String(m0 + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}-${String(h).padStart(2, '0')}`;
+  // Perf:
+  // The old implementation used Intl.DateTimeFormat.formatToParts to derive America/Chicago offsets,
+  // which is extremely expensive per-row for 12-month SMT pulls (35k+ intervals).
+  //
+  // We replace it with a deterministic US DST rule for America/Chicago:
+  // - Standard time (CST): UTC-6
+  // - Daylight time (CDT): UTC-5
+  // - DST starts: second Sunday in March at 02:00 local
+  // - DST ends: first Sunday in November at 02:00 local
+  //
+  // This makes conversion O(1) math per row (no Intl calls).
+  const nthWeekdayOfMonth = (year: number, month0: number, weekday0: number, n: number): number => {
+    const first = new Date(Date.UTC(year, month0, 1));
+    const firstDow = first.getUTCDay(); // safe because we operate in calendar days
+    const delta = (weekday0 - firstDow + 7) % 7;
+    return 1 + delta + (n - 1) * 7;
+  };
 
-  const CHICAGO_DTF = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/Chicago',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  });
+  const isChicagoDstForLocal = (
+    year: number,
+    month0: number,
+    day: number,
+    hour: number,
+    minute: number,
+  ): boolean => {
+    // Jan/Feb/Dec => standard; Apr-Oct => DST
+    if (month0 < 2 || month0 > 10) return false;
+    if (month0 > 2 && month0 < 10) return true;
 
-  // Module-level cache (survives across calls within the same invocation).
-  // Keyed by local YYYY-MM-DD-HH so DST transitions are handled correctly.
-  const offsetMinutesCache: Map<string, number> =
-    ((globalThis as any).__iwChicagoOffsetCache as Map<string, number> | undefined) ??
-    (((globalThis as any).__iwChicagoOffsetCache = new Map()) as Map<string, number>);
+    const minutesOfDay = hour * 60 + minute;
+
+    // March transition
+    if (month0 === 2) {
+      const startDay = nthWeekdayOfMonth(year, 2, 0, 2); // 2nd Sunday in March
+      if (day < startDay) return false;
+      if (day > startDay) return true;
+      // same day: DST begins at 02:00 local (times before are standard)
+      return minutesOfDay >= 2 * 60;
+    }
+
+    // November transition
+    if (month0 === 10) {
+      const endDay = nthWeekdayOfMonth(year, 10, 0, 1); // 1st Sunday in Nov
+      if (day < endDay) return true;
+      if (day > endDay) return false;
+      // same day: DST ends at 02:00 local (times before are DST)
+      return minutesOfDay < 2 * 60;
+    }
+
+    return false;
+  };
 
   // Extract basic components (MM/DD/YYYY HH:mm[:ss][AM|PM]) and treat them as America/Chicago local time.
   const normalized = value.replace(/\s+(CST|CDT|CT)$/i, '').replace(/[T]/g, ' ').trim();
@@ -91,29 +121,8 @@ function parseCentralIso(raw?: string | null): string | null {
 
     const initialUtcMs = Date.UTC(year, month, day, hour, minute, second);
 
-    const cacheKey = offsetCacheKeyForLocal(year, month, day, hour);
-    const cached = offsetMinutesCache.get(cacheKey);
-    const offsetMinutes =
-      typeof cached === 'number'
-        ? cached
-        : (() => {
-            const parts = CHICAGO_DTF.formatToParts(new Date(initialUtcMs));
-      const map: Record<string, string> = {};
-      for (const p of parts) {
-        if (p.type !== 'literal') map[p.type] = p.value;
-      }
-      const asUtc = Date.UTC(
-        Number(map.year),
-        Number(map.month) - 1,
-        Number(map.day),
-        Number(map.hour),
-        Number(map.minute),
-        Number(map.second),
-      );
-            const off = (asUtc - initialUtcMs) / 60000;
-            offsetMinutesCache.set(cacheKey, off);
-            return off;
-          })();
+    const isDst = isChicagoDstForLocal(year, month, day, hour, minute);
+    const offsetMinutes = isDst ? -300 : -360;
 
     const finalMs = initialUtcMs - offsetMinutes * 60000;
     return new Date(finalMs).toISOString();
