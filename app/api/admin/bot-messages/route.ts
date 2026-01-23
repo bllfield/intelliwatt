@@ -30,7 +30,22 @@ export async function GET(req: NextRequest) {
   if (denied) return denied;
 
   try {
+    // IMPORTANT:
+    // Avoid a full-table scan / large result set here. This endpoint is used by the admin UI and
+    // must remain fast even if the table grows or the DB is under load.
+    // We only need:
+    // - base keys from BOT_PAGES
+    // - any variants for those base keys (pageKey like "dashboard_api::loading")
+    const baseKeys = BOT_PAGES.map((p) => p.key);
+    const where: any = {
+      OR: [
+        { pageKey: { in: baseKeys } },
+        ...baseKeys.map((k) => ({ pageKey: { startsWith: `${k}::` } })),
+      ],
+    };
+
     const rows = await (prisma as any).intelliwattBotPageMessage.findMany({
+      where,
       select: { pageKey: true, message: true, enabled: true, updatedAt: true },
     });
     const byKey = new Map<string, any>((rows ?? []).map((r: any) => [String(r.pageKey), r]));
@@ -93,7 +108,22 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ ok: true, pages: combined }, { status: 200 });
   } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message ?? String(e) }, { status: 500 });
+    // Fail open: still return the default set so the admin page doesn't hard-crash when the DB
+    // is under connection/lock pressure (e.g. query_wait_timeout).
+    // Saving will still require DB health.
+    const pages = BOT_PAGES.map((p) => ({
+      pageKey: p.key,
+      baseKey: p.key,
+      eventKey: null,
+      label: p.label,
+      paths: p.paths,
+      defaultMessage: p.defaultMessage,
+      current: { enabled: false, message: null, updatedAt: null },
+    }));
+    return NextResponse.json(
+      { ok: true, pages, warning: e?.message ?? String(e) },
+      { status: 200 },
+    );
   }
 }
 

@@ -45,7 +45,9 @@ Enter your email address and I will send you a link to get access to your user d
         return;
       }
       try {
-        const r = await fetch(`/api/bot/message?path=${encodeURIComponent(key)}`, { cache: "no-store" });
+        // Let the server set caching policy for this endpoint; avoid forcing no-store
+        // which can amplify DB load during spikes.
+        const r = await fetch(`/api/bot/message?path=${encodeURIComponent(key)}`);
         const j = (await r.json().catch(() => null)) as BotMsgResp | null;
         const msg = j?.ok && typeof j?.message === "string" ? j.message : "";
         const next = msg || defaultMessage || "";
