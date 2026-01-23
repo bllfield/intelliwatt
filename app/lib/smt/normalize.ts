@@ -98,6 +98,14 @@ function parseCentralIso(raw?: string | null): string | null {
     return false;
   };
 
+  // If SMT includes an explicit timezone suffix, honor it (this disambiguates the repeated
+  // 01:xx hour during the DST fall-back transition).
+  const tzSuffix = (() => {
+    const m = value.match(/\b(CDT|CST|CT)\b/i);
+    const s = m?.[1] ? String(m[1]).toUpperCase() : null;
+    return s === 'CDT' || s === 'CST' || s === 'CT' ? s : null;
+  })();
+
   // Extract basic components (MM/DD/YYYY HH:mm[:ss][AM|PM]) and treat them as America/Chicago local time.
   const normalized = value.replace(/\s+(CST|CDT|CT)$/i, '').replace(/[T]/g, ' ').trim();
   const match = normalized.match(
@@ -121,7 +129,12 @@ function parseCentralIso(raw?: string | null): string | null {
 
     const initialUtcMs = Date.UTC(year, month, day, hour, minute, second);
 
-    const isDst = isChicagoDstForLocal(year, month, day, hour, minute);
+    const isDst =
+      tzSuffix === 'CDT'
+        ? true
+        : tzSuffix === 'CST'
+          ? false
+          : isChicagoDstForLocal(year, month, day, hour, minute);
     const offsetMinutes = isDst ? -300 : -360;
 
     const finalMs = initialUtcMs - offsetMinutes * 60000;
