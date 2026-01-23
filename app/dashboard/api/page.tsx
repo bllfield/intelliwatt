@@ -170,6 +170,11 @@ export default async function UsageEntryHub() {
 
       <section className="bg-brand-white px-4 pb-12 pt-4">
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
+          {context.loadError ? (
+            <div className="rounded-2xl border border-amber-200/70 bg-amber-100/40 px-5 py-4 text-sm font-medium text-amber-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]">
+              We’re having trouble loading usage connections right now. Please refresh in a moment.
+            </div>
+          ) : null}
           {displacedAttention ? (
             <div className="rounded-2xl border border-rose-400/45 bg-rose-500/10 px-5 py-4 text-sm text-brand-navy shadow-[0_18px_45px_rgba(190,18,60,0.18)]">
               Another IntelliWatt household just connected this Smart Meter Texas meter. Update your service address below
