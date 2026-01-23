@@ -285,7 +285,10 @@ export async function POST(req: NextRequest) {
           }).catch(() => 0)
         : 0;
 
-      const retryAfterMs = rawCount === 0 ? 60 * 60 * 1000 : 6 * 60 * 60 * 1000; // 1h (stalled) else 6h
+      // If we have no raw files AND coverage is still very small, the pipeline may be stalled.
+      // But once we have substantial coverage, rawFiles=0 can be normal (inline ingest), so do not
+      // shorten the retry window in that case.
+      const retryAfterMs = rawCount === 0 && coverageDays < 30 ? 60 * 60 * 1000 : 6 * 60 * 60 * 1000; // 1h (tiny coverage) else 6h
       const requestedAt = (auth as any)?.smtBackfillRequestedAt ? new Date((auth as any).smtBackfillRequestedAt) : null;
       const isStale = requestedAt ? Date.now() - requestedAt.getTime() >= retryAfterMs : false;
       const allowRetry = Boolean(requestedAt && !historyReady && isStale);

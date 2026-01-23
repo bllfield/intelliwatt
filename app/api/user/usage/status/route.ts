@@ -117,13 +117,24 @@ export async function POST(req: NextRequest) {
   const ready = historyReady;
   const phase = ready ? "ready" : intervalCount > 0 || rawCount > 0 ? "processing" : "pending";
 
+  const tailGapDays =
+    coverageEnd && coverageEnd.getTime() < target.endDate.getTime()
+      ? Math.max(0, daysBetweenInclusive(coverageEnd, target.endDate) - 1)
+      : 0;
+
   const message = (() => {
     if (ready) return "Full SMT history has been ingested.";
     if (phase === "pending") return "Waiting for SMT data delivery.";
     if (phase === "processing") {
       if (intervalCount > 0 && coverageStart && coverageEnd) {
         if (rawCount === 0) {
-          return `Partial SMT snapshot ingested (${coverageDays} day(s)). Waiting for historical SMT files to arrive.`;
+          if (tailGapDays > 0) {
+            return `SMT intervals ingested (${coverageDays} day(s)). Still fetching the most recent ${tailGapDays} day(s) to complete the 12‑month window.`;
+          }
+          return `SMT intervals ingested (${coverageDays} day(s)). Finishing processing.`;
+        }
+        if (tailGapDays > 0) {
+          return `Partial SMT history ingested (${coverageDays} day(s)). Still fetching the most recent ${tailGapDays} day(s) to complete the 12‑month window.`;
         }
         return `Partial SMT history ingested (${coverageDays} day(s)). Still importing historical usage.`;
       }
