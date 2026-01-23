@@ -124,6 +124,7 @@ export default function OfferCard({ offer, recommended }: OfferCardProps) {
   const planCompReason = String((offer as any)?.intelliwatt?.planComputability?.reasonCode ?? "").toUpperCase();
   const tceStatus = String(tce?.status ?? "").toUpperCase();
   const tceReason = String(tce?.reason ?? offer.intelliwatt?.statusReason ?? "").toUpperCase();
+  const isTemplateLookupError = tceStatus === "NOT_IMPLEMENTED" && tceReason === "TEMPLATE_LOOKUP_ERROR";
 
   // Only show the scary UNSUPPORTED tag for true template/engine limitations.
   // Missing templates / cache misses / missing buckets should read as CALCULATING, not UNSUPPORTED.
@@ -160,7 +161,9 @@ export default function OfferCard({ offer, recommended }: OfferCardProps) {
         ? "AVAILABLE"
         : statusKind === "CALCULATING"
           ? "CALCULATING"
-          : "NOT COMPUTABLE YET";
+          : isTemplateLookupError
+            ? "TEMPORARILY UNAVAILABLE"
+            : "NOT COMPUTABLE YET";
 
   // tce already read above
   const showEstimateLine = tce?.status === "OK" || tce?.status === "APPROXIMATE";

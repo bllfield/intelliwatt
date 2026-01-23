@@ -1576,7 +1576,11 @@ export async function GET(req: NextRequest) {
         String(planCalcReasonCode ?? "").trim() === "ADMIN_OVERRIDE_COMPUTABLE" &&
         String(planCalcStatus ?? "").trim() === "COMPUTABLE";
 
-      if (hasUsage && (base as any)?.intelliwatt?.templateAvailable && templateOk) {
+      // IMPORTANT:
+      // If the RatePlan/template probe threw, we must not treat it as "missing template" (that triggers
+      // EFL re-parsing and can pin the UI in a "calculating" state). Instead, fail closed as a transient
+      // NOT_IMPLEMENTED condition and let the next fetch succeed when DB recovers.
+      if (hasUsage && (base as any)?.intelliwatt?.templateAvailable && templateOk && !didThrowTemplateProbe) {
         const offerId = String((base as any).offerId ?? "");
         const templateAvailable = Boolean((base as any)?.intelliwatt?.templateAvailable);
         const effectiveRatePlanId = templateOk ? ratePlanId : null;
@@ -1754,6 +1758,9 @@ export async function GET(req: NextRequest) {
         if (annualKwhForCalc == null) {
           return { status: "NOT_IMPLEMENTED", reason: "MISSING_USAGE_TOTALS" };
         }
+        if (didThrowTemplateProbe) {
+          return { status: "NOT_IMPLEMENTED", reason: "TEMPLATE_LOOKUP_ERROR" };
+        }
         if (!templateOk || !template?.rateStructure) {
           return { status: "MISSING_TEMPLATE" };
         }
@@ -1915,6 +1922,7 @@ export async function GET(req: NextRequest) {
             : {}),
           ...(planComputability ? { planComputability } : {}),
           ...(planCalcInputs ? { planCalcInputs } : {}),
+          ...(didThrowTemplateProbe ? { templateProbeDidThrow: true } : {}),
           trueCostEstimate,
         },
       };
