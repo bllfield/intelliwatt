@@ -11,6 +11,7 @@ import { runEflPipelineNoStore } from "@/lib/plan-engine-next/efl/runEflPipeline
 import { validatePlanRules } from "@/lib/plan-engine-next/efl/planEngine";
 import { upsertRatePlanFromEfl } from "@/lib/plan-engine-next/efl/planPersistence";
 import { inferTdspTerritoryFromEflText } from "@/lib/efl/eflValidator";
+import { Prisma } from "@prisma/client";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,6 +41,16 @@ function parseBool(v: string | null, fallback: boolean): boolean {
 
 function sha256Hex(s: string): string {
   return crypto.createHash("sha256").update(s).digest("hex");
+}
+
+function isMissingRateStructure(v: any): boolean {
+  if (v == null) return true;
+  // Prisma JSON null sentinels (defensive; different clients represent these slightly differently).
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+  if (typeof Prisma === "object" && (v === (Prisma as any).DbNull || v === (Prisma as any).JsonNull || v === (Prisma as any).AnyNull)) {
+    return true;
+  }
+  return false;
 }
 
 export async function POST(req: NextRequest) {
@@ -149,9 +160,36 @@ export async function POST(req: NextRequest) {
       (existingMaps as Array<{ offerId: string }>).map((m) => String(m.offerId)),
     );
 
+    // Repair mode: if an offer is mapped but its mapped RatePlan is missing `rateStructure`, treat it as "needs templating".
+    const mappedRatePlanIds = Array.from(
+      new Set(
+        (existingMaps as Array<{ ratePlanId: string | null }>)
+          .map((m) => (m?.ratePlanId != null ? String(m.ratePlanId) : ""))
+          .filter(Boolean),
+      ),
+    );
+    const mappedRatePlans =
+      mappedRatePlanIds.length > 0
+        ? await (prisma as any).ratePlan.findMany({
+            where: { id: { in: mappedRatePlanIds } },
+            select: { id: true, rateStructure: true },
+          })
+        : [];
+    const rpById = new Map<string, any>((mappedRatePlans as any[]).map((rp) => [String(rp?.id ?? ""), rp]));
+    const mappedButEmptyOfferIds = new Set<string>();
+    for (const m of existingMaps as any[]) {
+      const offerId = String(m?.offerId ?? "").trim();
+      const ratePlanId = String(m?.ratePlanId ?? "").trim();
+      if (!offerId || !ratePlanId) continue;
+      const rp = rpById.get(ratePlanId);
+      if (!rp || isMissingRateStructure((rp as any)?.rateStructure)) {
+        mappedButEmptyOfferIds.add(offerId);
+      }
+    }
+
     const candidates = normalized.offers.filter((o) => {
       if (!o.offer_id) return false;
-      if (mappedOfferIds.has(o.offer_id)) return false;
+      if (mappedOfferIds.has(o.offer_id) && !mappedButEmptyOfferIds.has(o.offer_id)) return false;
       // We can only auto-template if we have an EFL URL (or we’ll queue it).
       return true;
     });
@@ -586,6 +624,7 @@ export async function POST(req: NextRequest) {
         offersWithEflUrl,
         offerIdsCount: offerIds.length,
         mappedOfferIdsCount: mappedOfferIds.size,
+        mappedButEmptyOfferIdsCount: mappedButEmptyOfferIds.size,
         candidatesCount: candidates.length,
         existingMapsCount: Array.isArray(existingMaps) ? existingMaps.length : 0,
         offersSample: (Array.isArray(normalized?.offers) ? normalized.offers : [])

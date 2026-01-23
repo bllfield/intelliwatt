@@ -18,11 +18,22 @@ import { isComputableOverride } from "@/lib/plan-engine/planCalcOverrides";
 import { derivePlanCalcRequirementsFromTemplate } from "@/lib/plan-engine/planComputability";
 import { isPlanCalcQuarantineWorthyReasonCode } from "@/lib/plan-engine/planCalcQuarantine";
 import { getLatestPlanPipelineJob, shouldStartPlanPipelineJob, writePlanPipelineJobSnapshot } from "@/lib/plan-engine/planPipelineJob";
+import { Prisma } from "@prisma/client";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n));
+}
+
+function isMissingRateStructure(v: any): boolean {
+  if (v == null) return true;
+  // Prisma JSON null sentinels (defensive; different clients represent these slightly differently).
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+  if (typeof Prisma === "object" && (v === (Prisma as any).DbNull || v === (Prisma as any).JsonNull || v === (Prisma as any).AnyNull)) {
+    return true;
+  }
+  return false;
 }
 
 
@@ -255,6 +266,33 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
   });
   const mappedOfferIds = new Set<string>((existingMaps as any[]).map((m) => String(m.offerId)));
 
+  // Repair mode: allow templating even if mapped, when the mapped RatePlan is missing `rateStructure`.
+  const mappedRatePlanIds = Array.from(
+    new Set(
+      (existingMaps as Array<{ ratePlanId: string | null }>)
+        .map((m) => (m?.ratePlanId != null ? String(m.ratePlanId) : ""))
+        .filter(Boolean),
+    ),
+  );
+  const mappedRatePlans =
+    mappedRatePlanIds.length > 0
+      ? await (prisma as any).ratePlan.findMany({
+          where: { id: { in: mappedRatePlanIds } },
+          select: { id: true, rateStructure: true },
+        })
+      : [];
+  const rpById = new Map<string, any>((mappedRatePlans as any[]).map((rp) => [String(rp?.id ?? ""), rp]));
+  const mappedButEmptyOfferIds = new Set<string>();
+  for (const m of existingMaps as any[]) {
+    const offerId = String(m?.offerId ?? "").trim();
+    const ratePlanId = String(m?.ratePlanId ?? "").trim();
+    if (!offerId || !ratePlanId) continue;
+    const rp = rpById.get(ratePlanId);
+    if (!rp || isMissingRateStructure((rp as any)?.rateStructure)) {
+      mappedButEmptyOfferIds.add(offerId);
+    }
+  }
+
   let templatesLinked = 0;
   let templatesQueued = 0;
   let templatesProcessed = 0;
@@ -265,7 +303,7 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
 
     const offerId = String(o?.offer_id ?? "").trim();
     if (!offerId) continue;
-    if (mappedOfferIds.has(offerId)) continue;
+    if (mappedOfferIds.has(offerId) && !mappedButEmptyOfferIds.has(offerId)) continue;
     const eflUrl = String(o?.docs?.efl ?? "").trim();
     templatesProcessed++;
 
@@ -434,6 +472,7 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
 
     templatesLinked++;
     mappedOfferIds.add(offerId);
+    mappedButEmptyOfferIds.delete(offerId);
   }
 
   // ---------------- Step 2: Estimate cache fill (bounded) ----------------
