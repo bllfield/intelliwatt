@@ -78,14 +78,14 @@ export async function GET(req: NextRequest) {
         ? await currentPlanPrisma.$queryRaw`
             WITH keys AS (
               SELECT DISTINCT
-                UPPER(p."providerNameKey") AS "providerNameKey",
-                UPPER(p."planNameKey") AS "planNameKey"
+                UPPER(TRIM(p."providerName")) AS "providerNameKey",
+                UPPER(TRIM(p."planName")) AS "planNameKey"
               FROM "ParsedCurrentPlan" p
               JOIN "CurrentPlanBillUpload" u
                 ON u."id" = p."uploadId"
               WHERE p."uploadId" IS NOT NULL
-                AND p."providerNameKey" IS NOT NULL
-                AND p."planNameKey" IS NOT NULL
+                AND p."providerName" IS NOT NULL
+                AND p."planName" IS NOT NULL
                 AND u."filename" NOT ILIKE 'EFL:%'
             )
             SELECT t.*
@@ -104,14 +104,14 @@ export async function GET(req: NextRequest) {
         : await currentPlanPrisma.$queryRaw`
             WITH keys AS (
               SELECT DISTINCT
-                UPPER(p."providerNameKey") AS "providerNameKey",
-                UPPER(p."planNameKey") AS "planNameKey"
+                UPPER(TRIM(p."providerName")) AS "providerNameKey",
+                UPPER(TRIM(p."planName")) AS "planNameKey"
               FROM "ParsedCurrentPlan" p
               JOIN "CurrentPlanBillUpload" u
                 ON u."id" = p."uploadId"
               WHERE p."uploadId" IS NOT NULL
-                AND p."providerNameKey" IS NOT NULL
-                AND p."planNameKey" IS NOT NULL
+                AND p."providerName" IS NOT NULL
+                AND p."planName" IS NOT NULL
                 AND u."filename" NOT ILIKE 'EFL:%'
             )
             SELECT t.*
