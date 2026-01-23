@@ -496,7 +496,7 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
           </button>
           {isPending && (
             <p className="text-center text-[11px] uppercase tracking-wide text-slate-500">
-              Submitting authorization…
+              Submitting authorization… Next, confirm the Smart Meter Texas email and we’ll begin fetching your usage + billing data.
             </p>
           )}
         </div>
