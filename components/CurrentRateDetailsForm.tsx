@@ -1110,7 +1110,8 @@ export function CurrentRateDetailsForm({
         );
         setEflNotComputableModalMessage(
           "We uploaded your current plan EFL, but we can’t calculate your current plan automatically yet. " +
-            "Please check back soon to get your comparison results.",
+            "Please check back soon to get your comparison results. " +
+            "You will still get your plan options ranked on the Plans page, along with the best options, but the comparison to your current plan will not be available yet.",
         );
         setShowEflNotComputableModal(true);
       } else {
@@ -2176,7 +2177,7 @@ export function CurrentRateDetailsForm({
                   </h3>
                   <p className="mt-1 text-xs text-brand-slate">
                     {eflNotComputableModalMessage ??
-                      "We can’t calculate your current plan from this EFL yet. Please check back soon to get your comparison results."}
+                      "We can’t calculate your current plan from this EFL yet. Please check back soon to get your comparison results. You will still get your plan options ranked on the Plans page, along with the best options, but the comparison to your current plan will not be available yet."}
                   </p>
                 </div>
                 <button
