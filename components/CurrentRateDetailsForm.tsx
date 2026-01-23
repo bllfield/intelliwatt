@@ -284,6 +284,8 @@ export function CurrentRateDetailsForm({
   const [isParsingEfl, setIsParsingEfl] = useState(false);
   const [eflParseStatus, setEflParseStatus] = useState<string | null>(null);
   const [prefilledFromEfl, setPrefilledFromEfl] = useState(false);
+  const [showEflNotComputableModal, setShowEflNotComputableModal] = useState(false);
+  const [eflNotComputableModalMessage, setEflNotComputableModalMessage] = useState<string | null>(null);
   const [isParsingBill, setIsParsingBill] = useState(false);
   const [billParseStatus, setBillParseStatus] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -1106,6 +1108,11 @@ export function CurrentRateDetailsForm({
             ? j.customerMessage
             : "We uploaded your EFL, but we couldn't confidently calculate your current plan automatically. You'll still see the best available plans, but we can't show a savings comparison until you enter your current plan details manually below.",
         );
+        setEflNotComputableModalMessage(
+          "We uploaded your current plan EFL, but we can’t calculate your current plan automatically yet. " +
+            "Please check back soon to get your comparison results.",
+        );
+        setShowEflNotComputableModal(true);
       } else {
         setEflParseStatus(
           typeof j?.customerMessage === "string" && j.customerMessage.trim()
@@ -2153,6 +2160,41 @@ export function CurrentRateDetailsForm({
                   className="rounded-full bg-brand-navy px-4 py-1.5 text-xs font-semibold uppercase tracking-wide text-brand-cyan shadow-[0_6px_18px_rgba(16,46,90,0.35)] hover:bg-brand-navy/90 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {isParsingPaste ? "Parsing…" : "Parse pasted text"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showEflNotComputableModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+            <div className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-base font-semibold text-brand-navy">
+                    Current plan comparison not ready yet
+                  </h3>
+                  <p className="mt-1 text-xs text-brand-slate">
+                    {eflNotComputableModalMessage ??
+                      "We can’t calculate your current plan from this EFL yet. Please check back soon to get your comparison results."}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowEflNotComputableModal(false)}
+                  className="text-xs font-semibold uppercase tracking-wide text-brand-slate hover:text-brand-navy"
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="mt-4 flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowEflNotComputableModal(false)}
+                  className="rounded-full bg-brand-navy px-4 py-1.5 text-xs font-semibold uppercase tracking-wide text-brand-cyan shadow-[0_6px_18px_rgba(16,46,90,0.35)] hover:bg-brand-navy/90"
+                >
+                  Ok
                 </button>
               </div>
             </div>
