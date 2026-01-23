@@ -242,7 +242,7 @@ export function CurrentRateDetailsForm({
   onSkip,
 }: CurrentRateDetailsFormProps) {
   const DEFAULT_EFL_NOT_COMPUTABLE_MODAL_MESSAGE =
-    "We uploaded your current plan EFL, but we can’t calculate your current plan automatically yet. " +
+    "We can’t calculate your current plan from this EFL yet. " +
     "Please check back soon to get your comparison results. " +
     "You will still get your plan options ranked on the Plans page, along with the best options, but the comparison to your current plan will not be available yet.";
 
