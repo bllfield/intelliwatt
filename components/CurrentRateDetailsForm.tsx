@@ -241,6 +241,11 @@ export function CurrentRateDetailsForm({
   onContinue,
   onSkip,
 }: CurrentRateDetailsFormProps) {
+  const DEFAULT_EFL_NOT_COMPUTABLE_MODAL_MESSAGE =
+    "We uploaded your current plan EFL, but we can’t calculate your current plan automatically yet. " +
+    "Please check back soon to get your comparison results. " +
+    "You will still get your plan options ranked on the Plans page, along with the best options, but the comparison to your current plan will not be available yet.";
+
   const [savedPlan, setSavedPlan] = useState<SavedPlanDetails | null>(null);
   const [parsedPlan, setParsedPlan] = useState<ParsedPlanDetails | null>(null);
   const [prefillSignals, setPrefillSignals] = useState<{ esiId?: string | null; meterNumber?: string | null } | null>(null);
@@ -1108,11 +1113,7 @@ export function CurrentRateDetailsForm({
             ? j.customerMessage
             : "We uploaded your EFL, but we couldn't confidently calculate your current plan automatically. You'll still see the best available plans, but we can't show a savings comparison until you enter your current plan details manually below.",
         );
-        setEflNotComputableModalMessage(
-          "We uploaded your current plan EFL, but we can’t calculate your current plan automatically yet. " +
-            "Please check back soon to get your comparison results. " +
-            "You will still get your plan options ranked on the Plans page, along with the best options, but the comparison to your current plan will not be available yet.",
-        );
+        setEflNotComputableModalMessage(DEFAULT_EFL_NOT_COMPUTABLE_MODAL_MESSAGE);
         setShowEflNotComputableModal(true);
       } else {
         setEflParseStatus(
@@ -2177,7 +2178,7 @@ export function CurrentRateDetailsForm({
                   </h3>
                   <p className="mt-1 text-xs text-brand-slate">
                     {eflNotComputableModalMessage ??
-                      "We can’t calculate your current plan from this EFL yet. Please check back soon to get your comparison results. You will still get your plan options ranked on the Plans page, along with the best options, but the comparison to your current plan will not be available yet."}
+                      DEFAULT_EFL_NOT_COMPUTABLE_MODAL_MESSAGE}
                   </p>
                 </div>
                 <button
