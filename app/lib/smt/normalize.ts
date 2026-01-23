@@ -215,7 +215,11 @@ export function normalizeSmtIntervals(
     });
   }
 
-  const grouped = groupNormalize(rows, 'esiid_meter', { tz: 'America/Chicago' });
+  // Perf:
+  // At this point `rows[].timestamp` is already a UTC ISO string (`...Z`) produced by `parseCentralIso()`.
+  // Avoid re-parsing every row via Luxon (`parseInZoneToUTC`) inside groupNormalize; plain Date parsing
+  // of UTC ISO strings is sufficient and much faster.
+  const grouped = groupNormalize(rows, 'esiid_meter', { tz: 'America/Chicago', strictTz: false });
   const intervals: NormalizedInterval[] = [];
 
   let totalKwh = 0;
