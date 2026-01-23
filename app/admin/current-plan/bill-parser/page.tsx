@@ -412,6 +412,7 @@ export default function CurrentPlanBillParserAdmin() {
   const [billPlanTemplatesLoading, setBillPlanTemplatesLoading] = useState(false);
   const [billPlanTemplatesError, setBillPlanTemplatesError] = useState<string | null>(null);
   const [billPlanTemplates, setBillPlanTemplates] = useState<BillPlanTemplateRow[]>([]);
+  const [billPlanTemplatesOnlyFromBills, setBillPlanTemplatesOnlyFromBills] = useState(false);
   const [billPlanBackfillLoading, setBillPlanBackfillLoading] = useState(false);
   const [billPlanBackfillNote, setBillPlanBackfillNote] = useState<string | null>(null);
 
@@ -656,8 +657,10 @@ export default function CurrentPlanBillParserAdmin() {
     setBillPlanTemplatesLoading(true);
     setBillPlanTemplatesError(null);
     try {
-      // Bill parser page: show only templates backed by statement bill parses (exclude EFL-derived templates).
-      const res = await fetch("/api/admin/current-plan/bill-plan-templates?limit=200&onlyFromBills=1", {
+      const url =
+        "/api/admin/current-plan/bill-plan-templates?limit=200" +
+        (billPlanTemplatesOnlyFromBills ? "&onlyFromBills=1" : "");
+      const res = await fetch(url, {
         headers: { "x-admin-token": token.trim() },
       });
       const body = await res.json().catch(() => null);
@@ -710,6 +713,14 @@ export default function CurrentPlanBillParserAdmin() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
+
+  // When the filter toggles, refresh the list so the UI matches the setting.
+  useEffect(() => {
+    if (token.trim()) {
+      loadBillPlanTemplates();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [billPlanTemplatesOnlyFromBills]);
 
   const parsedOk = parseResult && parseResult.ok;
   const parsedPayload = parsedOk ? (parseResult as any).parsed : null;
@@ -1156,6 +1167,14 @@ export default function CurrentPlanBillParserAdmin() {
         <div className="flex items-center justify-between gap-3">
           <h2 className="font-medium">Current Plan Templates (BillPlanTemplate)</h2>
           <div className="flex items-center gap-2">
+            <label className="flex items-center gap-2 text-xs text-gray-700 select-none">
+              <input
+                type="checkbox"
+                checked={billPlanTemplatesOnlyFromBills}
+                onChange={(e) => setBillPlanTemplatesOnlyFromBills(e.target.checked)}
+              />
+              Bills only (exclude EFL-derived)
+            </label>
             <button
               type="button"
               onClick={loadBillPlanTemplates}
