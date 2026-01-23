@@ -1470,6 +1470,59 @@ export async function GET(req: NextRequest) {
 
     const tdspRatesCache = new Map<string, any | null>();
 
+    // PERF/RELIABILITY:
+    // Avoid N-per-offer RatePlan lookups (can trigger Postgres query_wait_timeout under load).
+    // Bulk-fetch the RatePlan rows for the current page slice once, then shape offers from the in-memory map.
+    const ratePlanRowsById = new Map<string, any>();
+    let didThrowRatePlanBatch = false;
+    try {
+      const ids = Array.from(
+        new Set(
+          pageSlice
+            .map((o: any) => {
+              const offerId = String(o?.offer_id ?? "").trim();
+              if (!offerId) return null;
+              const ratePlanId = mapByOfferId.get(offerId) ?? null;
+              return ratePlanId ? String(ratePlanId) : null;
+            })
+            .filter(Boolean) as string[],
+        ),
+      );
+
+      if (ids.length > 0) {
+        const rows = await (prisma as any).ratePlan.findMany({
+          where: { id: { in: ids } },
+          select: {
+            id: true,
+            cancelFee: true,
+            eflUrl: true,
+            tosUrl: true,
+            yracUrl: true,
+            repPuctCertificate: true,
+            supplierPUCT: true,
+            rateStructure: true,
+            planCalcVersion: true,
+            planCalcStatus: true,
+            planCalcReasonCode: true,
+            requiredBucketKeys: true,
+            supportedFeatures: true,
+            planCalcDerivedAt: true,
+          },
+        });
+        for (const r of rows ?? []) {
+          const id = String((r as any)?.id ?? "").trim();
+          if (!id) continue;
+          ratePlanRowsById.set(id, r);
+        }
+      }
+    } catch {
+      didThrowRatePlanBatch = true;
+    }
+
+    // Guardrail: never allow this route to spam writes while shaping large datasets.
+    let planCalcBackfillWrites = 0;
+    const MAX_PLAN_CALC_BACKFILL_WRITES = datasetMode ? 5 : 10;
+
     const shapeOffer = async (o: any) => {
       const base = shapeOfferBase(o);
       const ratePlanId = base?.intelliwatt?.ratePlanId ?? null;
@@ -1480,31 +1533,11 @@ export async function GET(req: NextRequest) {
       let ratePlanRow: any | null = null;
       let didThrowTemplateProbe = false;
       if (ratePlanId) {
-        try {
-          ratePlanRow = await (prisma as any).ratePlan.findUnique({
-            where: { id: ratePlanId },
-            select: {
-              id: true,
-              cancelFee: true,
-              eflUrl: true,
-              tosUrl: true,
-              yracUrl: true,
-              repPuctCertificate: true,
-              supplierPUCT: true,
-              rateStructure: true,
-              planCalcVersion: true,
-              planCalcStatus: true,
-              planCalcReasonCode: true,
-              requiredBucketKeys: true,
-              supportedFeatures: true,
-              planCalcDerivedAt: true,
-            },
-          });
+        // If the batch lookup threw, treat this as a transient lookup error for ALL offers on this response.
+        didThrowTemplateProbe = didThrowRatePlanBatch;
+        if (!didThrowRatePlanBatch) {
+          ratePlanRow = ratePlanRowsById.get(String(ratePlanId)) ?? null;
           if (!ratePlanRow) templateOk = false;
-        } catch {
-          didThrowTemplateProbe = true;
-          // do not downgrade templateOk on transient errors
-          ratePlanRow = null;
         }
       }
 
@@ -1612,7 +1645,8 @@ export async function GET(req: NextRequest) {
         planCalcReasonCode = shouldPreferDerived ? derived.planCalcReasonCode : (storedReason ?? "UNKNOWN");
 
         // Lazy backfill so older/stale RatePlans self-heal (best-effort; never breaks offers).
-        if (effectiveRatePlanId && shouldPreferDerived) {
+        if (effectiveRatePlanId && shouldPreferDerived && planCalcBackfillWrites < MAX_PLAN_CALC_BACKFILL_WRITES) {
+          planCalcBackfillWrites++;
           try {
             (prisma as any).ratePlan
               .update({
