@@ -1,6 +1,6 @@
 import type { PlanRules, RateStructure } from "@/lib/efl/planEngine";
 import type { EflAvgPriceValidation } from "@/lib/efl/eflValidator";
-import { validateEflAvgPriceTable } from "@/lib/efl/eflValidator";
+import { extractEflTdspCharges, validateEflAvgPriceTable } from "@/lib/efl/eflValidator";
 
 export type EflValidationGapSolveMode = "NONE" | "PASS_WITH_ASSUMPTIONS" | "FAIL";
 
@@ -239,8 +239,43 @@ export async function solveEflValidationGaps(args: {
         if (String((derivedRateStructure as any).type ?? "") !== "FIXED") {
           (derivedRateStructure as any).type = "FIXED";
         }
-        if (typeof (derivedRateStructure as any).energyRateCents !== "number") {
-          (derivedRateStructure as any).energyRateCents = cents;
+        // IMPORTANT:
+        // Override suspicious "energyRateCents" values when we can confidently extract an Energy Charge from EFL text.
+        // A common failure mode in side-by-side "Electricity Price" tables is to accidentally store the TDSP
+        // delivery ¢/kWh as the REP energy rate (making customer-facing estimates far too low).
+        try {
+          const existingRaw = (derivedRateStructure as any).energyRateCents;
+          const existing =
+            typeof existingRaw === "number" && Number.isFinite(existingRaw) ? (existingRaw as number) : null;
+          const currentBillRaw = (derivedPlanRules as any).currentBillEnergyRateCents;
+          const currentBill =
+            typeof currentBillRaw === "number" && Number.isFinite(currentBillRaw) ? (currentBillRaw as number) : null;
+          const tdspPer = (() => {
+            try {
+              const td = extractEflTdspCharges(rawText);
+              return typeof td?.perKwhCents === "number" && Number.isFinite(td.perKwhCents) ? td.perKwhCents : null;
+            } catch {
+              return null;
+            }
+          })();
+          const near = (a: number, b: number) => Math.abs(a - b) <= 0.02;
+
+          const shouldOverride =
+            existing != null &&
+            (
+              // Existing looks like TDSP per-kWh (most common bad case)
+              (tdspPer != null && near(existing, tdspPer) && !near(cents, tdspPer) && Math.abs(cents - existing) >= 0.25) ||
+              // Existing disagrees with current bill rate, but extracted cents matches it
+              (currentBill != null && near(cents, currentBill) && !near(existing, cents) && Math.abs(cents - existing) >= 0.25)
+            );
+
+          if (existing == null || shouldOverride) {
+            (derivedRateStructure as any).energyRateCents = cents;
+          }
+        } catch {
+          if (typeof (derivedRateStructure as any).energyRateCents !== "number") {
+            (derivedRateStructure as any).energyRateCents = cents;
+          }
         }
 
         solverApplied.push("FALLBACK_FIXED_ENERGY_CHARGE_FROM_EFL_TEXT");
@@ -608,6 +643,21 @@ function extractSingleEnergyChargeCentsPerKwhFromEflText(rawText: string): numbe
     const t = String(rawText ?? "");
     if (!t.trim()) return null;
 
+    // Side-by-side "Electricity Price" tables often place the TDSP delivery ¢/kWh
+    // near the REP "Energy Charge" label. We must avoid accidentally picking the
+    // TDSP delivery rate as the REP energy rate.
+    const tdsp = (() => {
+      try {
+        return extractEflTdspCharges(t);
+      } catch {
+        return { perKwhCents: null as number | null };
+      }
+    })();
+    const tdspPerKwhCents =
+      typeof (tdsp as any)?.perKwhCents === "number" && Number.isFinite((tdsp as any).perKwhCents)
+        ? (tdsp as any).perKwhCents
+        : null;
+
     // Scan line-by-line for a real "Energy Charge" *rate* row.
     // IMPORTANT: many EFLs mention "Energy Charge discount" (e.g. "50 percent discount off the Energy Charge"),
     // which must NOT be parsed as the ¢/kWh rate.
@@ -616,34 +666,59 @@ function extractSingleEnergyChargeCentsPerKwhFromEflText(rawText: string): numbe
     const looksLikeDiscountLine = (s: string): boolean =>
       /\b(discount|percent|%)\b/i.test(s) && /Energy\s*Charge/i.test(s);
 
-    const parsePerKwhRate = (s: string): number | null => {
+    const isNearTdsp = (rateCents: number): boolean => {
+      if (tdspPerKwhCents == null) return false;
+      // Tolerate minor formatting/rounding differences between EFL tokens and our TDSP extractor.
+      return Math.abs(rateCents - tdspPerKwhCents) <= 0.02;
+    };
+
+    const pickRepRateFromCandidates = (rates: number[]): number | null => {
+      const xs = rates
+        .filter((v) => Number.isFinite(v))
+        .filter((v) => v > 0 && v < 200);
+      if (xs.length === 0) return null;
+
+      // If multiple ¢/kWh tokens are present and one matches TDSP delivery, pick the other.
+      const withoutTdsp = tdspPerKwhCents != null ? xs.filter((v) => !isNearTdsp(v)) : xs.slice();
+      if (withoutTdsp.length === 1) return withoutTdsp[0]!;
+
+      // If there is exactly one token and it matches TDSP, reject (likely we captured delivery).
+      if (xs.length === 1 && tdspPerKwhCents != null && isNearTdsp(xs[0]!)) return null;
+
+      // Heuristic fallback: prefer the largest rate on the assumption that REP energy is usually
+      // >= TDSP delivery in these table formats. This is only reached when we cannot disambiguate.
+      return withoutTdsp.length > 0 ? Math.max(...withoutTdsp) : Math.max(...xs);
+    };
+
+    const parsePerKwhRates = (s: string): number[] => {
       const line = String(s ?? "");
-      if (!/per\s*kwh|\/\s*kwh/i.test(line)) return null;
-      if (looksLikeDiscountLine(line)) return null;
-      if (/Delivery/i.test(line) || /TDSP/i.test(line) || /TDU/i.test(line)) return null;
+      if (!/per\s*kwh|\/\s*kwh/i.test(line)) return [];
+      if (looksLikeDiscountLine(line)) return [];
+      if (/Delivery/i.test(line) || /TDSP/i.test(line) || /TDU/i.test(line)) return [];
 
       // Cents form: "17.06¢ per kWh" / "17.06 ¢/kWh"
-      const cm = line.match(/([0-9]{1,3}(?:\.[0-9]{1,6})?)\s*¢\s*(?:\/\s*kwh|per\s*kwh)/i);
-      if (cm?.[1]) {
-        const v = Number(cm[1]);
-        return Number.isFinite(v) ? v : null;
-      }
+      const centsAll = Array.from(
+        line.matchAll(/([0-9]{1,3}(?:\.[0-9]{1,6})?)\s*¢\s*(?:\/\s*kwh|per\s*kwh)/gi),
+      )
+        .map((m) => Number(m?.[1]))
+        .filter((n) => Number.isFinite(n));
 
       // Dollar form: "$0.1706 per kWh" / "per kWh $0.1706"
-      const dm1 = line.match(/\$\s*([0-9]{1,3}(?:\.[0-9]{1,6})?)\s*(?:\/\s*kwh|per\s*kwh)/i);
-      if (dm1?.[1]) {
-        const dollars = Number(dm1[1]);
-        return Number.isFinite(dollars) ? dollars * 100 : null;
-      }
-      const dm2 = line.match(/per\s*kwh[^0-9$]{0,30}\$?\s*([0-9]{1,3}(?:\.[0-9]{1,6})?)/i);
-      if (dm2?.[1]) {
-        const dollars = Number(dm2[1]);
-        // Heuristic: values <= 2 are $/kWh; values > 2 are almost certainly ¢/kWh.
-        if (!Number.isFinite(dollars)) return null;
-        return dollars <= 2 ? dollars * 100 : dollars;
-      }
+      const dollarAll = Array.from(
+        line.matchAll(/\$\s*([0-9]{1,3}(?:\.[0-9]{1,6})?)\s*(?:\/\s*kwh|per\s*kwh)/gi),
+      )
+        .map((m) => Number(m?.[1]))
+        .filter((n) => Number.isFinite(n))
+        .map((dollars) => dollars * 100);
 
-      return null;
+      const dm2All = Array.from(
+        line.matchAll(/per\s*kwh[^0-9$]{0,30}\$?\s*([0-9]{1,3}(?:\.[0-9]{1,6})?)/gi),
+      )
+        .map((m) => Number(m?.[1]))
+        .filter((n) => Number.isFinite(n))
+        .map((raw) => (raw <= 2 ? raw * 100 : raw));
+
+      return [...centsAll, ...dollarAll, ...dm2All];
     };
 
     for (let i = 0; i < lines.length; i++) {
@@ -656,14 +731,17 @@ function extractSingleEnergyChargeCentsPerKwhFromEflText(rawText: string): numbe
       if (looksLikeDiscountLine(line)) continue;
 
       // Try the line itself first.
-      const direct = parsePerKwhRate(line);
+      const directRates = parsePerKwhRates(line);
+      const direct = pickRepRateFromCandidates(directRates);
       if (direct != null) return direct;
 
       // Table-style: the numeric token can be on a subsequent line near the Energy Charge header.
       for (let j = 1; j <= 6; j++) {
         const next = lines[i + j] ?? "";
         if (!next) continue;
-        const v = parsePerKwhRate(`${line} ${next}`);
+        const joined = `${line} ${next}`;
+        const rates = parsePerKwhRates(joined);
+        const v = pickRepRateFromCandidates(rates);
         if (v != null) return v;
       }
     }
