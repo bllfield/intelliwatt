@@ -558,6 +558,22 @@ function extractEflVersionCode(text: string): string | null {
     }
   }
 
+  // F) Contract Version # fallback.
+  // Some providers omit "EFL Ver. #", but include a stable contract/version number:
+  //   "Contract Version #: 4916935"
+  // To avoid collisions (and satisfy downstream "real version code" heuristics),
+  // namespace it as an EFL_* token.
+  for (const l of lines) {
+    const m = l.match(/\bContract\s+Version\s*#\s*:?\s*([0-9]{5,12})\b/i);
+    if (!m?.[1]) continue;
+    const raw = String(m[1]).trim();
+    const digitCount = (raw.match(/\d/g) ?? []).length;
+    if (digitCount < 6) continue;
+    const token = `EFL_CONTRACT_${raw}`;
+    if (!isWeakVersionCandidate(token)) return token;
+    return token;
+  }
+
   return null;
 }
 

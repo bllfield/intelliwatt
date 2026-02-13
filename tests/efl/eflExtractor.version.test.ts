@@ -116,6 +116,14 @@ describe("eflExtractor - EFL Version code extraction", () => {
     `;
     expect(extractEflVersionCodeFromText(text)).toBe("202512074");
   });
+
+  test("falls back to Contract Version # when EFL Ver. # is missing (namespaced)", () => {
+    const text = `
+      Contract Version #:          4916935
+      PUCT License #:              10014
+    `;
+    expect(extractEflVersionCodeFromText(text)).toBe("EFL_CONTRACT_4916935");
+  });
 });
 
 

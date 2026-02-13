@@ -287,7 +287,7 @@ function parseMonthlyDollarsFromLine(line: string): number | null {
   // Standard inline pattern: "$4.23 per month" / "$4.23 per billing cycle"
   const m1All = Array.from(
     cleaned.matchAll(
-      /\$\s*([0-9]+(?:\.[0-9]+)?)\s*per\s*(?:month|billing\s*cycle)/gi,
+      /\$\s*([0-9]+(?:\.[0-9]+)?)\s*per\s*(?:bill\s*month|month|billing\s*cycle)/gi,
     ),
   );
   if (m1All.length > 0) {
@@ -296,9 +296,21 @@ function parseMonthlyDollarsFromLine(line: string): number | null {
     return Number.isFinite(v) ? v : null;
   }
 
+  // Alternate inline pattern: "7.85 $ per bill month" (amount before $)
+  const m1bAll = Array.from(
+    cleaned.matchAll(
+      /([0-9]+(?:\.[0-9]+)?)\s*\$\s*per\s*(?:bill\s*month|month|billing\s*cycle)/gi,
+    ),
+  );
+  if (m1bAll.length > 0) {
+    const last = m1bAll[m1bAll.length - 1];
+    const v = Number(last?.[1]);
+    return Number.isFinite(v) ? v : null;
+  }
+
   // Table/header pattern: the "per month" header may be on the same logical
   // row as the $ amount, but not necessarily immediately adjacent.
-  if (/per\s*(?:month|billing\s*cycle)/i.test(cleaned)) {
+  if (/per\s*(?:bill\s*month|month|billing\s*cycle)/i.test(cleaned)) {
     const m2All = Array.from(
       cleaned.matchAll(/\$\s*([0-9]+(?:\.[0-9]+)?)/gi),
     );
@@ -306,6 +318,16 @@ function parseMonthlyDollarsFromLine(line: string): number | null {
       // Prefer the last $ token on the line; in side-by-side tables the TDSP
       // "per month" value tends to appear after base-charge columns.
       const last = m2All[m2All.length - 1];
+      const v = Number(last?.[1]);
+      return Number.isFinite(v) ? v : null;
+    }
+
+    // Also support "$" appearing after the numeric value on the same line (rare but observed).
+    const m2bAll = Array.from(
+      cleaned.matchAll(/([0-9]+(?:\.[0-9]+)?)\s*\$/gi),
+    );
+    if (m2bAll.length > 0) {
+      const last = m2bAll[m2bAll.length - 1];
       const v = Number(last?.[1]);
       return Number.isFinite(v) ? v : null;
     }
@@ -422,7 +444,10 @@ function pickBestTdspMonthlyLine(
       !isBadUsageChargeLine(l) &&
       /(TDU|TDSP)/i.test(l) &&
       /Delivery/i.test(l) &&
-      /\$\s*[0-9]+(?:\.[0-9]+)?\s*per\s*(?:month|billing\s*cycle)/i.test(l),
+      (
+        /\$\s*[0-9]+(?:\.[0-9]+)?\s*per\s*(?:bill\s*month|month|billing\s*cycle)/i.test(l) ||
+        /[0-9]+(?:\.[0-9]+)?\s*\$\s*per\s*(?:bill\s*month|month|billing\s*cycle)/i.test(l)
+      ),
   );
   if (best)
     return { dollars: parseMonthlyDollarsFromLine(best), line: best };
@@ -431,7 +456,10 @@ function pickBestTdspMonthlyLine(
     (l) =>
       !isBadUsageChargeLine(l) &&
       /Delivery/i.test(l) &&
-      /\$\s*[0-9]+(?:\.[0-9]+)?\s*per\s*(?:month|billing\s*cycle)/i.test(l),
+      (
+        /\$\s*[0-9]+(?:\.[0-9]+)?\s*per\s*(?:bill\s*month|month|billing\s*cycle)/i.test(l) ||
+        /[0-9]+(?:\.[0-9]+)?\s*\$\s*per\s*(?:bill\s*month|month|billing\s*cycle)/i.test(l)
+      ),
   );
   if (next)
     return { dollars: parseMonthlyDollarsFromLine(next), line: next };
@@ -442,8 +470,8 @@ function pickBestTdspMonthlyLine(
     (l) =>
       !isBadUsageChargeLine(l) &&
       /(TDU|TDSP|Delivery)/i.test(l) &&
-      /per\s*(?:month|billing\s*cycle)/i.test(l) &&
-      /\$\s*[0-9]+(?:\.[0-9]+)?/i.test(l),
+      /per\s*(?:bill\s*month|month|billing\s*cycle)/i.test(l) &&
+      (/\$\s*[0-9]+(?:\.[0-9]+)?/i.test(l) || /[0-9]+(?:\.[0-9]+)?\s*\$/i.test(l)),
   );
   if (headerLike)
     return { dollars: parseMonthlyDollarsFromLine(headerLike), line: headerLike };

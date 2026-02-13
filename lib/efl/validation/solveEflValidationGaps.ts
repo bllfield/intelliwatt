@@ -477,6 +477,60 @@ export async function solveEflValidationGaps(args: {
     }
   }
 
+  // ---------------- Usage bill credits (threshold-min; additive-safe) ----------------
+  // Example EFL (Constellation):
+  //   Residential Usage Credit 35.00 $ per bill month if usage >= 1000kWh
+  //   Additional Residential Usage Credit 15.00 $ per bill month if usage >= 2000kWh
+  //
+  // These are additive credits. Our deterministic bill credit extractor fails-closed on overlapping
+  // usage ranges, so we normalize these into non-overlapping segments:
+  //   [1000,2000) => $35
+  //   [2000,∞)    => $50
+  if (validation?.status === "FAIL" && derivedPlanRules) {
+    const existingRsRules: any[] =
+      derivedRateStructure?.billCredits && Array.isArray((derivedRateStructure as any).billCredits?.rules)
+        ? ((derivedRateStructure as any).billCredits.rules as any[])
+        : [];
+    const hasAnyRsCredits = existingRsRules.length > 0;
+
+    const existingPrCredits: any[] = Array.isArray((derivedPlanRules as any).billCredits)
+      ? ((derivedPlanRules as any).billCredits as any[])
+      : [];
+    const hasAnyPrCredits = existingPrCredits.length > 0;
+
+    if (!hasAnyRsCredits && !hasAnyPrCredits) {
+      const extracted = extractThresholdMinUsageCreditsFromEflText(rawText);
+      const segments = normalizeAdditiveThresholdCreditsToSegments(extracted);
+      if (segments.length > 0) {
+        if (!derivedRateStructure || typeof derivedRateStructure !== "object") {
+          derivedRateStructure = {};
+        }
+        (derivedRateStructure as any).billCredits = {
+          hasBillCredit: true,
+          rules: segments.map((s) => ({
+            label: s.label,
+            creditAmountCents: s.creditCents,
+            minUsageKWh: s.minUsageKWh,
+            ...(typeof s.maxUsageKWh === "number" ? { maxUsageKWh: s.maxUsageKWh } : {}),
+          })),
+        };
+
+        // Validator math uses PlanRules.billCredits with additive THRESHOLD_MIN semantics.
+        // Keep the original extracted events here (35@1000 + 15@2000), rather than the
+        // non-overlapping segments (35@1000, 50@2000) which would double-count at 2000+.
+        (derivedPlanRules as any).billCredits = extracted.map((c) => ({
+          label: c.label,
+          creditDollars: c.creditCents / 100,
+          thresholdKwh: c.minUsageKWh,
+          monthsOfYear: null,
+          type: "THRESHOLD_MIN",
+        }));
+
+        solverApplied.push("SYNC_USAGE_BILL_CREDITS_THRESHOLD_MIN_FROM_EFL_TEXT");
+      }
+    }
+  }
+
   // ---------------- TOU: Peak / Off-Peak rates + disclosed Off-Peak usage % ----------------
   // Example (OhmConnect EVConnect):
   //   Energy Charge Peak 11.84¢ / kWh
@@ -636,6 +690,98 @@ export async function solveEflValidationGaps(args: {
     solveMode,
     queueReason: validationAfter.queueReason,
   };
+}
+
+function extractThresholdMinUsageCreditsFromEflText(rawText: string): Array<{
+  label: string;
+  creditCents: number;
+  minUsageKWh: number;
+}> {
+  const t = String(rawText ?? "");
+  if (!t.trim()) return [];
+
+  const out: Array<{ label: string; creditCents: number; minUsageKWh: number }> = [];
+
+  // Supports both "$35.00 per bill month" and "35.00 $ per bill month"
+  const re =
+    /\b(?:(Additional)\s+)?Residential\s+Usage\s+Credit\s+([0-9]+(?:\.[0-9]{1,2})?)\s*\$?\s*per\s*(?:bill\s*month|month|billing\s*cycle)[\s\S]{0,120}?\busage\s*>=\s*([0-9,]{1,6})\s*kwh\b/gi;
+
+  const matches = Array.from(t.matchAll(re));
+  for (const m of matches) {
+    const isAdditional = Boolean(m?.[1]);
+    const dollars = Number(m?.[2]);
+    const minKwh = Number(String(m?.[3] ?? "").replace(/,/g, ""));
+    if (!Number.isFinite(dollars) || dollars <= 0) continue;
+    if (!Number.isFinite(minKwh) || minKwh < 1) continue;
+
+    const minUsageKWh = Math.floor(minKwh);
+    const creditCents = Math.round(dollars * 100);
+    const label = `${isAdditional ? "Additional " : ""}Residential Usage Credit $${dollars.toFixed(2)} applies >= ${minUsageKWh} kWh`;
+    out.push({ label, creditCents, minUsageKWh });
+  }
+
+  // Dedupe exact duplicates (same threshold + same credit).
+  const seen = new Set<string>();
+  const uniq: typeof out = [];
+  for (const r of out) {
+    const k = `${r.minUsageKWh}|${r.creditCents}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    uniq.push(r);
+  }
+  return uniq.sort((a, b) => a.minUsageKWh - b.minUsageKWh);
+}
+
+function normalizeAdditiveThresholdCreditsToSegments(
+  credits: Array<{ label: string; creditCents: number; minUsageKWh: number }>,
+): Array<{ label: string; creditCents: number; minUsageKWh: number; maxUsageKWh: number | null }> {
+  const events = (Array.isArray(credits) ? credits : [])
+    .map((c) => ({
+      minUsageKWh: Math.max(0, Math.floor(Number(c.minUsageKWh))),
+      creditCents: Math.max(0, Math.floor(Number(c.creditCents))),
+      label: String(c.label ?? "").trim() || "Usage credit",
+    }))
+    .filter(
+      (c) =>
+        Number.isFinite(c.minUsageKWh) &&
+        c.minUsageKWh >= 1 &&
+        Number.isFinite(c.creditCents) &&
+        c.creditCents > 0,
+    )
+    .sort((a, b) => a.minUsageKWh - b.minUsageKWh);
+
+  if (events.length === 0) return [];
+
+  // Collapse multiple events at the same threshold by summing them.
+  const collapsed: typeof events = [];
+  for (const e of events) {
+    const last = collapsed[collapsed.length - 1];
+    if (last && last.minUsageKWh === e.minUsageKWh) {
+      last.creditCents += e.creditCents;
+      last.label = `${last.label} + ${e.label}`;
+    } else {
+      collapsed.push({ ...e });
+    }
+  }
+
+  let running = 0;
+  const segments: Array<{ label: string; creditCents: number; minUsageKWh: number; maxUsageKWh: number | null }> = [];
+  for (let i = 0; i < collapsed.length; i++) {
+    const cur = collapsed[i]!;
+    const next = collapsed[i + 1] ?? null;
+    running += cur.creditCents;
+    if (running <= 0) continue;
+    segments.push({
+      label:
+        running === cur.creditCents
+          ? cur.label
+          : `Usage credits total $${(running / 100).toFixed(2)} applies >= ${cur.minUsageKWh} kWh`,
+      creditCents: running,
+      minUsageKWh: cur.minUsageKWh,
+      maxUsageKWh: next ? next.minUsageKWh : null,
+    });
+  }
+  return segments;
 }
 
 function extractSingleEnergyChargeCentsPerKwhFromEflText(rawText: string): number | null {
