@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { requireAdmin } from "@/lib/auth/admin";
 import { db } from "@/lib/db";
-import { normalizeEmail } from "@/lib/utils/email";
+import { normalizeEmail, normalizeEmailSafe } from "@/lib/utils/email";
 
 export const dynamic = "force-dynamic";
 
@@ -50,8 +50,12 @@ export async function POST(req: NextRequest) {
     payload = null;
   }
 
-  const payloadAdmin = normalizeEmail(String(payload?.adminEmail ?? ""));
-  if (payloadAdmin && payloadAdmin !== adminEmail) {
+  // `normalizeEmail()` throws on empty; cookie payload may be missing/empty.
+  const payloadAdmin = normalizeEmailSafe(typeof payload?.adminEmail === "string" ? payload.adminEmail : null);
+  if (!payloadAdmin) {
+    return NextResponse.json({ ok: false, error: "Invalid impersonation cookie payload" }, { status: 400 });
+  }
+  if (payloadAdmin !== adminEmail) {
     return NextResponse.json({ ok: false, error: "Impersonation cookie does not match this admin" }, { status: 403 });
   }
 
