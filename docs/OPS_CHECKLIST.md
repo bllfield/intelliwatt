@@ -148,7 +148,7 @@ Notes:
 
 ## Database / Prisma Operations
 
-- **Canonical: apply master Prisma migrations on droplet (DO `defaultdb`)**
+- **Canonical: apply master Prisma migrations (dev DB first → then DO `defaultdb`)**
   - **Run these on the droplet in Linux bash** (not Windows PowerShell).
   - **Do not run as `root`** unless you know root has GitHub SSH keys; prefer `deploy`.
   - **Must run from the repo root** (where `package.json` and `prisma/schema.prisma` exist). If you run `npx prisma ...` from `~`, it may prompt to install a random Prisma version and then fail to find `--schema`.
@@ -163,7 +163,12 @@ Notes:
   2. Install deps (so `npx prisma` uses the pinned repo version):
      - `npm install`
 
-  3. Apply migrations to production-ish DB:
+  3. Apply migrations to **dev DB first** (recommended safety check):
+     - `export DATABASE_URL="postgresql://<db_user>:<db_password>@<db_host>:<db_port>/intelliwatt_dev?sslmode=require"`
+     - `npx prisma migrate deploy --schema=prisma/schema.prisma`
+     - `npx prisma migrate status --schema=prisma/schema.prisma`
+
+  4. Then apply migrations to **production-ish `defaultdb`**:
      - `export DATABASE_URL="postgresql://<db_user>:<db_password>@<db_host>:<db_port>/defaultdb?sslmode=require"`
      - `npx prisma migrate deploy --schema=prisma/schema.prisma`
      - `npx prisma migrate status --schema=prisma/schema.prisma`
