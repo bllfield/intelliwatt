@@ -164,7 +164,7 @@ Notes:
      - `npm install`
 
   3. Apply migrations to production-ish DB:
-     - `export DATABASE_URL="postgresql://doadmin:<PASSWORD>@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25060/defaultdb?sslmode=require"`
+     - `export DATABASE_URL="postgresql://<db_user>:<db_password>@<db_host>:<db_port>/defaultdb?sslmode=require"`
      - `npx prisma migrate deploy --schema=prisma/schema.prisma`
      - `npx prisma migrate status --schema=prisma/schema.prisma`
 
@@ -172,7 +172,7 @@ Notes:
   1. Fix the migration SQL locally to be idempotent (e.g., `CREATE TABLE IF NOT EXISTS`, conditional index rename via DO block), then commit and push.
   2. On the droplet (`deploy@intelliwatt-smt-proxy`):
      - `cd /home/deploy/apps/intelliwatt`
-     - `export DATABASE_URL="postgresql://doadmin:<PASSWORD>@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25060/defaultdb?sslmode=require"`
+     - `export DATABASE_URL="postgresql://<db_user>:<db_password>@<db_host>:<db_port>/defaultdb?sslmode=require"`
      - If the command errors with “remaining connection slots are reserved for roles with the SUPERUSER attribute”, terminate idle connections in the DO UI first.
      - Mark the migration as rolled back: `npx prisma migrate resolve --rolled-back 20251123035440_puct_rep_dev_setup --schema=prisma/schema.prisma`
      - Re-apply migrations: `npx prisma migrate deploy --schema=prisma/schema.prisma`
