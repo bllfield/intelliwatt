@@ -850,6 +850,8 @@ export default function FactCardOpsPage() {
   const [tplLimit, setTplLimit] = useState(1000);
   const [tplLoading, setTplLoading] = useState(false);
   const [tplErr, setTplErr] = useState<string | null>(null);
+  const [tplReparseLoadingId, setTplReparseLoadingId] = useState<string | null>(null);
+  const [tplReparseNote, setTplReparseNote] = useState<string | null>(null);
   const [tplRows, setTplRows] = useState<TemplateRow[]>([]);
   const [tplTotalCount, setTplTotalCount] = useState<number | null>(null);
   const [tdspNote, setTdspNote] = useState<string | null>(null);
@@ -1256,6 +1258,71 @@ export default function FactCardOpsPage() {
       await Promise.all([loadTemplates(), loadUnmappedTemplates()]);
     } catch (e: any) {
       setTplErr(e?.message || "Failed to invalidate template.");
+    }
+  }
+
+  async function reparseTemplateFromEfl(args: {
+    ratePlanId: string;
+    eflUrl: string;
+    offerId?: string | null;
+  }) {
+    if (!token) {
+      setTplErr("Admin token required.");
+      return;
+    }
+    const eflUrl = String(args.eflUrl ?? "").trim();
+    if (!eflUrl) {
+      setTplErr("Missing eflUrl for this template row.");
+      return;
+    }
+    const offerId = String(args.offerId ?? "").trim() || null;
+
+    const ok = window.confirm(
+      [
+        "Force reparse + overwrite this template?",
+        "",
+        "This will fetch the EFL again and overwrite RatePlan.rateStructure using the latest parser/solver.",
+        "It will also relink offerId → RatePlanId.",
+        "",
+        `ratePlanId: ${String(args.ratePlanId)}`,
+        `offerId: ${offerId ?? "(none)"}`,
+        `eflUrl: ${eflUrl}`,
+      ].join("\n"),
+    );
+    if (!ok) return;
+
+    setTplErr(null);
+    setTplReparseNote(null);
+    setTplReparseLoadingId(String(args.ratePlanId));
+    try {
+      const res = await fetch("/api/admin/efl/manual-url", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-admin-token": token },
+        body: JSON.stringify({
+          target: "offers",
+          eflUrl,
+          offerId,
+          persistTemplate: true,
+          forceReparse: true,
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      // Reuse the existing Raw Output panel (Probe raw) for this response.
+      setProbeRaw(data);
+      if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+
+      const persistedId = data?.persistedRatePlanId ? String(data.persistedRatePlanId) : null;
+      const autoResolved = Number(data?.autoResolvedQueueCount ?? 0) || 0;
+      setTplReparseNote(
+        `Reparse OK${persistedId ? ` (ratePlanId=${persistedId})` : ""}${autoResolved ? ` · auto-resolved queue=${autoResolved}` : ""}.`,
+      );
+
+      // Keep ops tables in sync: template overwrite may affect queue + orphan lists.
+      await Promise.all([loadTemplates(), loadQueue(), loadUnmappedTemplates()]);
+    } catch (e: any) {
+      setTplErr(e?.message || "Failed to reparse template.");
+    } finally {
+      setTplReparseLoadingId(null);
     }
   }
 
@@ -2541,6 +2608,7 @@ export default function FactCardOpsPage() {
           </button>
         </div>
         {unmappedTplErr ? <div className="text-sm text-red-700">{unmappedTplErr}</div> : null}
+        {tplReparseNote ? <div className="text-xs text-gray-600">{tplReparseNote}</div> : null}
 
         {/* ~5 visible rows + sticky header */}
         <div className="overflow-x-auto overflow-y-auto max-h-[280px] rounded-xl border">
@@ -2665,6 +2733,20 @@ export default function FactCardOpsPage() {
                             Open EFL
                           </a>
                         ) : null}
+                        <button
+                          className="px-2 py-1 rounded border hover:bg-gray-50 disabled:opacity-60"
+                          disabled={!ready || unmappedTplLoading || !eflUrl || tplReparseLoadingId === String(r.id)}
+                          title="Re-run the EFL pipeline and overwrite this stored template (RatePlan.rateStructure)."
+                          onClick={() =>
+                            void reparseTemplateFromEfl({
+                              ratePlanId: String(r.id),
+                              eflUrl,
+                              offerId: null,
+                            })
+                          }
+                        >
+                          {tplReparseLoadingId === String(r.id) ? "Reparsing…" : "Reparse (overwrite)"}
+                        </button>
                         <button
                           className="px-2 py-1 rounded border hover:bg-red-50 text-red-700 border-red-200"
                           onClick={() => void invalidateTemplate(String(r.id))}
@@ -2860,6 +2942,7 @@ export default function FactCardOpsPage() {
           </button>
         </div>
         {tplErr ? <div className="text-sm text-red-700">{tplErr}</div> : null}
+        {tplReparseNote ? <div className="text-xs text-gray-600">{tplReparseNote}</div> : null}
         {tdspNote ? <div className="text-xs text-gray-600">{tdspNote}</div> : null}
         {tplUsageNote ? <div className="text-xs text-gray-600">{tplUsageNote}</div> : null}
 
@@ -3121,6 +3204,20 @@ export default function FactCardOpsPage() {
                         )}
                         <button className="px-2 py-1 rounded border hover:bg-gray-50 disabled:opacity-60" disabled={!eflUrl} onClick={() => loadIntoManual({ eflUrl, offerId: (r as any)?.offerId ?? null })}>
                           Load
+                        </button>
+                        <button
+                          className="px-2 py-1 rounded border hover:bg-gray-50 disabled:opacity-60"
+                          disabled={!ready || tplLoading || !eflUrl || tplReparseLoadingId === String(r.id)}
+                          title="Re-run the EFL pipeline and overwrite this stored template (RatePlan.rateStructure)."
+                          onClick={() =>
+                            void reparseTemplateFromEfl({
+                              ratePlanId: String(r.id),
+                              eflUrl,
+                              offerId: offerId || null,
+                            })
+                          }
+                        >
+                          {tplReparseLoadingId === String(r.id) ? "Reparsing…" : "Reparse (overwrite)"}
                         </button>
                         <button className="px-2 py-1 rounded border hover:bg-red-50 text-red-700 border-red-200" onClick={() => void invalidateTemplate(String(r.id))}>
                           Invalidate
