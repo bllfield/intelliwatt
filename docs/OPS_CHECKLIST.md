@@ -148,6 +148,26 @@ Notes:
 
 ## Database / Prisma Operations
 
+- **Canonical: apply master Prisma migrations on droplet (DO `defaultdb`)**
+  - **Run these on the droplet in Linux bash** (not Windows PowerShell).
+  - **Do not run as `root`** unless you know root has GitHub SSH keys; prefer `deploy`.
+  - **Must run from the repo root** (where `package.json` and `prisma/schema.prisma` exist). If you run `npx prisma ...` from `~`, it may prompt to install a random Prisma version and then fail to find `--schema`.
+
+  1. Get into the repo as `deploy` and pull latest `main`:
+     - `sudo -iu deploy`
+     - `cd /home/deploy/apps/intelliwatt`
+     - `git status -sb`
+     - `git pull origin main`
+     - If you see `Permission denied (publickey)`, you are missing SSH auth for that user. Fix SSH keys (or switch the remote to HTTPS) before continuing.
+
+  2. Install deps (so `npx prisma` uses the pinned repo version):
+     - `npm install`
+
+  3. Apply migrations to production-ish DB:
+     - `export DATABASE_URL="postgresql://doadmin:<PASSWORD>@db-postgresql-nyc3-37693-do-user-27496845-0.k.db.ondigitalocean.com:25060/defaultdb?sslmode=require"`
+     - `npx prisma migrate deploy --schema=prisma/schema.prisma`
+     - `npx prisma migrate status --schema=prisma/schema.prisma`
+
 - **Recover from failed Prisma migration on DO `defaultdb`:**
   1. Fix the migration SQL locally to be idempotent (e.g., `CREATE TABLE IF NOT EXISTS`, conditional index rename via DO block), then commit and push.
   2. On the droplet (`deploy@intelliwatt-smt-proxy`):

@@ -215,6 +215,18 @@ When pulling changes directly on the droplet:
   git pull origin main
   sudo bash deploy/droplet/post_pull.sh
 
+NOTE: Common droplet pitfalls
+-----------------------------
+
+- Do NOT paste Windows paths (e.g. `C:\...`) into droplet bash.
+- Do NOT use PowerShell syntax on the droplet (e.g. `$env:DATABASE_URL=...`). In bash use:
+  - `export DATABASE_URL="..."`
+- Do NOT run `npx prisma ...` from `~` or any directory that is NOT the repo root.
+  Symptom: it asks to install `prisma@<latest>` and/or fails with:
+  - `Could not load --schema ... prisma/schema.prisma: file or directory not found`
+- If `git pull` errors with `Permission denied (publickey)` you are running under a user
+  without GitHub SSH auth (often `root`). Switch to `deploy` (`sudo -iu deploy`) or fix SSH keys.
+
 After `post_pull.sh` completes, the droplet nginx/site + systemd config for EFL pdftotext is reapplied from the repo, core services are restarted if present, and the EFL helper health is checked at:
 
   curl -i https://efl-pdftotext.intelliwatt.com/health
