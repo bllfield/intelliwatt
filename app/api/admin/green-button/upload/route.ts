@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createHash } from "node:crypto";
 import { EntryStatus, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { requireAdmin } from "@/lib/auth/admin";
 import { refreshUserEntryStatuses } from "@/lib/hitthejackwatt/entryLifecycle";
 import { qualifyReferralsForUser } from "@/lib/referral/qualify";
 import { parseGreenButtonBuffer } from "@/lib/usage/greenButtonParser";
@@ -20,6 +21,9 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export async function POST(request: NextRequest) {
   let uploadRecordId: string | null = null;
   try {
+    const gate = requireAdmin(request);
+    if (!gate.ok) return NextResponse.json(gate.body, { status: gate.status });
+
     const formData = await request.formData();
     const file = formData.get("file");
     if (!file || !(file instanceof File)) {

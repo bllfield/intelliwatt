@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { requireAdmin } from '@/lib/auth/admin';
+import { db } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
-    const users = await prisma.user.findMany({
+    const gate = requireAdmin(request);
+    if (!gate.ok) return NextResponse.json(gate.body, { status: gate.status });
+
+    const users = await db.user.findMany({
       include: {
         entries: true,
         referrals: true,
@@ -21,7 +23,7 @@ export async function GET(request: NextRequest) {
     const userIds = users.map((user) => user.id);
 
     const houses = userIds.length
-      ? await prisma.houseAddress.findMany({
+      ? await db.houseAddress.findMany({
           where: {
             userId: { in: userIds },
           },

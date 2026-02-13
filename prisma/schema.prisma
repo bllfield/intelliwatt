@@ -339,6 +339,26 @@ model MagicLinkToken {
   referralToken String?
 }
 
+model AdminImpersonationAudit {
+  id                String   @id @default(cuid())
+  adminEmail        String
+  targetEmail       String
+  reason            String
+  originalUserEmail String?
+  durationMinutes   Int?
+  expiresAt         DateTime?
+  startedAt         DateTime @default(now())
+  endedAt           DateTime?
+  startIp           String?
+  startUserAgent    String?
+  stopIp            String?
+  stopUserAgent     String?
+
+  @@index([adminEmail])
+  @@index([targetEmail])
+  @@index([startedAt])
+}
+
 model FinanceRecord {
   id        String   @id @default(cuid())
   type      String

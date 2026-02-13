@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { usagePrisma } from "@/lib/db/usageClient";
+import { requireAdmin } from "@/lib/auth/admin";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   try {
+    const gate = requireAdmin(request);
+    if (!gate.ok) return NextResponse.json(gate.body, { status: gate.status });
+
     const url = new URL(request.url);
     const take = Math.min(Number(url.searchParams.get("limit") ?? 10) || 10, 50);
 
