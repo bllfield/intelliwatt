@@ -173,6 +173,31 @@ Notes:
      - `npx prisma migrate deploy --schema=prisma/schema.prisma`
      - `npx prisma migrate status --schema=prisma/schema.prisma`
 
+- **Dev DB reset flow (when `migrate deploy` fails with `P3018` / “relation already exists”)**
+  - This specifically fixes the case we just hit on `intelliwatt_dev`:
+    - `Error: P3018` and Postgres `42P07` like `relation "ErcotEsiidIndex" already exists`
+  - Root cause: the dev DB is **not clean** (tables exist but Prisma migration history is not aligned).
+  - ✅ **Safe on dev DB**. ❌ **Never run reset on `defaultdb`**.
+
+  Steps (droplet, Linux bash):
+  1. Become deploy + go to repo:
+     - `sudo -iu deploy`
+     - `cd /home/deploy/apps/intelliwatt`
+     - `git pull origin main`
+     - `npm install`
+
+  2. Point Prisma at dev DB and **reset everything**:
+     - `export DATABASE_URL="postgresql://<db_user>:<db_password>@<db_host>:<db_port>/intelliwatt_dev?sslmode=require"`
+     - `npx prisma migrate reset --force --schema=prisma/schema.prisma`
+
+  3. Re-apply all migrations cleanly:
+     - `export DATABASE_URL="postgresql://<db_user>:<db_password>@<db_host>:<db_port>/intelliwatt_dev?sslmode=require"`
+     - `npx prisma migrate deploy --schema=prisma/schema.prisma`
+     - `npx prisma migrate status --schema=prisma/schema.prisma`
+
+  4. Only after dev DB is clean, move to `defaultdb` with `migrate deploy`.
+     - If `defaultdb` fails, do NOT reset; follow the “Recover from failed Prisma migration on DO `defaultdb`” procedure below.
+
 - **Recover from failed Prisma migration on DO `defaultdb`:**
   1. Fix the migration SQL locally to be idempotent (e.g., `CREATE TABLE IF NOT EXISTS`, conditional index rename via DO block), then commit and push.
   2. On the droplet (`deploy@intelliwatt-smt-proxy`):
