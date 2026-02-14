@@ -74,6 +74,12 @@ export const BOT_EVENTS_BY_PAGE: Record<BotPageKey, BotEventMeta[]> = {
     },
     { key: "usage_missing", label: "Usage missing", description: "Show when best-for-you ranking can’t run (no usage)." },
   ],
+  // Plan detail pages are informational; keep events minimal for now.
+  dashboard_plan_detail: [...COMMON],
+  // Compare has a few known states (needs current plan details, missing usage, etc.) but the page itself
+  // already has explicit UI. Keep COMMON so admins can override messaging if desired.
+  dashboard_compare: [...COMMON],
+  dashboard_compare_detail: [...COMMON],
   dashboard_home: [...COMMON],
   dashboard_appliances: [...COMMON],
   dashboard_upgrades: [...COMMON],

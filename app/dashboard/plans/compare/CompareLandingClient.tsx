@@ -15,10 +15,17 @@ export default function CompareLandingClient() {
   useEffect(() => {
     if (didRunRef.current) return;
     didRunRef.current = true;
+
+    let cancelled = false;
+    const controller = new AbortController();
+
     (async () => {
       try {
         // Compare requires current plan details (so the side-by-side comparison is meaningful).
-        const s = await fetch("/api/dashboard/current-plan/status", { cache: "no-store" });
+        const s = await fetch("/api/dashboard/current-plan/status", {
+          cache: "no-store",
+          signal: controller.signal,
+        });
         const sj = await s.json().catch(() => null);
         if (!s.ok || !sj || sj.ok !== true) throw new Error("status_check_failed");
         if (!sj.hasCurrentPlan) {
@@ -36,11 +43,12 @@ export default function CompareLandingClient() {
           // ignore storage failures
         }
 
-        setStatus("finding");
+        if (!cancelled) setStatus("finding");
         // If the user lands directly on Compare (no offer picked yet), default to the current "best offer"
         // from the Plans API: prefer all-in true-cost best, else proxy best, else first offer.
         const r = await fetch(`/api/dashboard/plans?dataset=0&page=1&pageSize=20&sort=best_for_you_proxy&_cmp=1`, {
           cache: "no-store",
+          signal: controller.signal,
         });
         const j = await r.json().catch(() => null);
         if (!r.ok || !j || j.ok !== true) throw new Error(j?.error ?? `Request failed (${r.status})`);
@@ -57,11 +65,16 @@ export default function CompareLandingClient() {
           router.replace(`/dashboard/plans/compare/${encodeURIComponent(bestOfferId)}`);
           return;
         }
-        setStatus("failed");
+        if (!cancelled) setStatus("failed");
       } catch {
-        setStatus("failed");
+        if (!cancelled) setStatus("failed");
       }
     })();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
   }, [router]);
 
   return (
