@@ -29,7 +29,7 @@ function serializeAuthorization(auth: any | null): SerializedAuth | null {
 async function findLatestAuthorization(homeId: string) {
   return prisma.smtAuthorization.findFirst({
     where: {
-      houseId: homeId,
+      OR: [{ houseId: homeId }, { houseAddressId: homeId }],
       archivedAt: null,
     },
     orderBy: {
@@ -155,15 +155,18 @@ export async function POST(req: NextRequest) {
     }
 
     const updated =
-      refreshResult.authorization ??
-      (await prisma.smtAuthorization.findUnique({
-        where: { id: auth.id },
-      }));
+      (refreshResult as any)?.authorization ??
+      (await prisma.smtAuthorization.findUnique({ where: { id: auth.id } }));
 
     return NextResponse.json(
       {
         ok: true,
         authorization: serializeAuthorization(updated),
+        throttled: Boolean((refreshResult as any)?.throttled),
+        cooldownMs:
+          typeof (refreshResult as any)?.cooldownMs === "number"
+            ? (refreshResult as any).cooldownMs
+            : null,
       },
       { status: 200 },
     );

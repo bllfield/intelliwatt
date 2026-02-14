@@ -9,27 +9,6 @@ interface RefreshSmtButtonProps {
 
 type RefreshState = 'idle' | 'success' | 'error';
 
-type UsageRefreshResponse = {
-  ok: boolean;
-  homes?: Array<{
-    homeId: string;
-    authorizationRefreshed: boolean;
-    authorizationMessage?: string;
-    pull: {
-      attempted: boolean;
-      ok: boolean;
-      status?: number;
-      message?: string;
-    };
-  }>;
-  normalization?: {
-    attempted: boolean;
-    ok: boolean;
-    status?: number;
-    message?: string;
-  };
-};
-
 export default function RefreshSmtButton({ homeId }: RefreshSmtButtonProps) {
   const router = useRouter();
   const [status, setStatus] = useState<RefreshState>('idle');
@@ -56,7 +35,7 @@ export default function RefreshSmtButton({ homeId }: RefreshSmtButtonProps) {
     }
 
     try {
-      const res = await fetch('/api/user/usage/status', {
+      const res = await fetch('/api/user/smt/orchestrate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ homeId: homeIdToPoll }),
@@ -65,7 +44,7 @@ export default function RefreshSmtButton({ homeId }: RefreshSmtButtonProps) {
 
       const payload: any = await res.json().catch(() => null);
       if (res.ok && payload?.ok) {
-        if (payload.status === 'ready' || payload.ready) {
+        if (payload.phase === 'ready' || payload?.usage?.ready) {
           setIsWaitingOnSmt(false);
           setIsProcessing(false);
           setStatus('success');
@@ -73,18 +52,18 @@ export default function RefreshSmtButton({ homeId }: RefreshSmtButtonProps) {
           router.refresh();
           return;
         }
-        if (payload.status === 'processing' || (payload.rawFiles > 0 && !payload.ready)) {
+        if (payload.phase === 'active_waiting_usage' || payload?.usage?.status === 'processing' || (payload?.usage?.rawFiles > 0 && !payload?.usage?.ready)) {
           // We have raw files but intervals are not fully ready; show "processing".
           setIsWaitingOnSmt(false);
           setIsProcessing(true);
           setStatus('success');
-          const coverage = payload?.coverage;
+          const coverage = payload?.usage?.coverage;
           const coverageText =
             coverage?.start && coverage?.end
               ? ` Current coverage: ${String(coverage.start).slice(0, 10)} – ${String(coverage.end).slice(0, 10)} (${coverage.days ?? '?'} day(s)).`
               : '';
           setMessage(
-            (payload?.message ||
+            (payload?.usage?.message ||
               'We are processing your SMT usage. Historical backfill can take some time.') + coverageText,
           );
         }
@@ -108,7 +87,7 @@ export default function RefreshSmtButton({ homeId }: RefreshSmtButtonProps) {
 
     startTransition(async () => {
       try {
-        const statusResponse = await fetch('/api/smt/authorization/status', {
+        const usageResponse = await fetch('/api/user/smt/orchestrate', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -116,68 +95,18 @@ export default function RefreshSmtButton({ homeId }: RefreshSmtButtonProps) {
           body: JSON.stringify({ homeId }),
         });
 
-        let statusPayload: any = null;
+        let usagePayload: any = null;
         try {
-          statusPayload = await statusResponse.json();
-        } catch {
-          statusPayload = null;
-        }
-
-        if (!statusResponse.ok || !statusPayload?.ok) {
-          throw new Error(
-            statusPayload?.message ||
-              statusPayload?.error ||
-              `SMT status refresh failed (${statusResponse.status})`,
-          );
-        }
-
-        const usageResponse = await fetch('/api/user/usage/refresh', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ homeId }),
-        });
-
-        let usagePayload: UsageRefreshResponse | null = null;
-        try {
-          usagePayload = (await usageResponse.json()) as UsageRefreshResponse;
+          usagePayload = await usageResponse.json();
         } catch {
           usagePayload = null;
         }
 
         if (!usageResponse.ok || !usagePayload?.ok) {
           throw new Error(
-            usagePayload?.normalization?.message ||
-              usagePayload?.homes?.[0]?.pull?.message ||
-              'Usage refresh failed.',
-          );
-        }
-
-        const homeSummary = usagePayload.homes?.find((home) => home.homeId === homeId);
-        const summaryMessages: string[] = [];
-
-        if (homeSummary) {
-          if (homeSummary.authorizationRefreshed) {
-            summaryMessages.push('SMT authorization refreshed.');
-          } else if (homeSummary.authorizationMessage) {
-            summaryMessages.push(homeSummary.authorizationMessage);
-          }
-
-          if (homeSummary.pull.attempted) {
-            summaryMessages.push(
-              homeSummary.pull.ok
-                ? homeSummary.pull.message ?? 'SMT usage pull triggered.'
-                : homeSummary.pull.message ?? 'SMT usage pull failed.',
-            );
-          }
-        }
-
-        if (usagePayload.normalization?.attempted) {
-          summaryMessages.push(
-            usagePayload.normalization.ok
-              ? usagePayload.normalization.message ?? 'Usage normalization triggered.'
-              : usagePayload.normalization.message ?? 'Usage normalization failed.',
+            (usagePayload as any)?.message ||
+              (usagePayload as any)?.error ||
+              'SMT orchestrator failed.',
           );
         }
 
@@ -187,8 +116,7 @@ export default function RefreshSmtButton({ homeId }: RefreshSmtButtonProps) {
         setIsWaitingOnSmt(true);
         setStatus('success');
         setMessage(
-          (summaryMessages.filter(Boolean).join(' ') || 'SMT usage refresh triggered.') +
-            ' We requested your SMT data and are waiting for it to be delivered. This can take a few minutes.',
+          'We’re monitoring your Smart Meter Texas authorization and pulling interval usage as soon as SMT confirms access. This can take a few minutes.',
         );
         void pollUsageReady(homeId);
       } catch (error) {

@@ -66,6 +66,18 @@ const SMT_INTERVAL_BACKFILL_ENABLED =
   process.env.SMT_INTERVAL_BACKFILL_ENABLED === "true" ||
   process.env.SMT_INTERVAL_BACKFILL_ENABLED === "1";
 
+// Hard cooldown to prevent hammering SMT proxy "myagreements" from the app.
+// Note: must be a string "true"/"1" for enablement flags; cooldown is milliseconds.
+const SMT_STATUS_REFRESH_COOLDOWN_MS = (() => {
+  const raw =
+    process.env.SMT_STATUS_REFRESH_COOLDOWN_MS ??
+    process.env.SMT_AUTH_STATUS_COOLDOWN_MS ??
+    "";
+  const n = Number.parseInt(String(raw || "").trim(), 10);
+  // Default: 60s cooldown. Set to 0 to disable throttling.
+  return Number.isFinite(n) && n >= 0 ? n : 60_000;
+})();
+
 // Droplet proxy wiring (already configured in Vercel).
 const SMT_PROXY_AGREEMENTS_URL =
   process.env.SMT_PROXY_AGREEMENTS_URL ||
@@ -544,11 +556,37 @@ export async function refreshSmtAuthorizationStatus(authId: string) {
       houseAddressId: true,
       meterNumber: true,
       contactEmail: true,
+      smtStatus: true,
+      smtStatusMessage: true,
+      smtLastSyncAt: true,
     },
   });
 
   if (!auth) {
     return { ok: false as const, reason: "no-auth" as const };
+  }
+
+  // Cooldown: return cached status instead of calling SMT proxy.
+  // This prevents repeated browser refreshes / polling from spamming `myagreements`.
+  if (
+    SMT_STATUS_REFRESH_COOLDOWN_MS > 0 &&
+    auth.smtLastSyncAt &&
+    Date.now() - auth.smtLastSyncAt.getTime() < SMT_STATUS_REFRESH_COOLDOWN_MS
+  ) {
+    return {
+      ok: true as const,
+      status: String(auth.smtStatus ?? "").trim(),
+      throttled: true as const,
+      cooldownMs: SMT_STATUS_REFRESH_COOLDOWN_MS,
+      authorization: {
+        id: auth.id,
+        esiid: auth.esiid,
+        meterNumber: auth.meterNumber,
+        houseAddressId: auth.houseAddressId,
+        smtStatus: auth.smtStatus,
+        smtStatusMessage: auth.smtStatusMessage,
+      },
+    };
   }
 
   let esiid: string | undefined = auth.esiid ?? undefined;
@@ -631,6 +669,7 @@ export async function refreshSmtAuthorizationStatus(authId: string) {
   const updateData: Record<string, unknown> = {
     smtStatus: localStatus,
     smtStatusMessage: rawStatus,
+    smtLastSyncAt: new Date(),
   };
 
   if (match.agreementNumber && match.agreementNumber > 0) {

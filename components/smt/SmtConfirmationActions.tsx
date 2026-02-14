@@ -33,7 +33,7 @@ export function SmtConfirmationActions({ homeId }: Props) {
     }
 
     try {
-      const res = await fetch("/api/user/usage/status", {
+      const res = await fetch("/api/user/smt/orchestrate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ homeId: homeIdToPoll }),
@@ -42,7 +42,7 @@ export function SmtConfirmationActions({ homeId }: Props) {
       const payload: any = await res.json().catch(() => null);
 
       if (res.ok && payload?.ok) {
-        if (payload.status === "ready" || payload.ready) {
+        if (payload.phase === "ready" || payload?.usage?.ready) {
           setIsWaitingOnSmt(false);
           setIsProcessing(false);
           setStatusMessage("Your full SMT history has been ingested and your dashboard has been updated.");
@@ -50,16 +50,16 @@ export function SmtConfirmationActions({ homeId }: Props) {
           router.push("/dashboard/api");
           return;
         }
-        if (payload.status === "processing" || (payload.rawFiles > 0 && !payload.ready)) {
+        if (payload.phase === "active_waiting_usage" || payload?.usage?.status === "processing" || (payload?.usage?.rawFiles > 0 && !payload?.usage?.ready)) {
           setIsWaitingOnSmt(false);
           setIsProcessing(true);
-          const coverage = payload?.coverage;
+          const coverage = payload?.usage?.coverage;
           const coverageText =
             coverage?.start && coverage?.end
               ? ` Current coverage: ${String(coverage.start).slice(0, 10)} – ${String(coverage.end).slice(0, 10)} (${coverage.days ?? "?"} day(s)).`
               : "";
           setStatusMessage(
-            (payload?.message ||
+            (payload?.usage?.message ||
               "We are processing your SMT usage. Historical backfill can take some time.") + coverageText,
           );
         }
@@ -75,25 +75,8 @@ export function SmtConfirmationActions({ homeId }: Props) {
 
   async function triggerUsageRefreshFlow() {
     try {
-      // 1) Re-check authorization status (same as refresh button)
-      const statusResponse = await fetch("/api/smt/authorization/status", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ homeId }),
-      });
-      const statusPayload: any = await statusResponse.json().catch(() => null);
-      if (!statusResponse.ok || !statusPayload?.ok) {
-        const message =
-          statusPayload?.message ||
-          statusPayload?.error ||
-          `SMT status refresh failed (${statusResponse.status})`;
-        throw new Error(message);
-      }
-
-      // 2) Trigger usage refresh (pull + backfill + normalize)
-      const usageResponse = await fetch("/api/user/usage/refresh", {
+      // Trigger the orchestrator: refresh status (cooldown), request backfill, and kick droplet pulls.
+      const usageResponse = await fetch("/api/user/smt/orchestrate", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -110,44 +93,14 @@ export function SmtConfirmationActions({ homeId }: Props) {
 
       if (!usageResponse.ok || !usagePayload?.ok) {
         const message =
-          usagePayload?.normalization?.message ||
-          usagePayload?.homes?.[0]?.pull?.message ||
-          "Usage refresh failed.";
+          usagePayload?.message || usagePayload?.error || "SMT orchestrator failed.";
         throw new Error(message);
-      }
-
-      const homeSummary = usagePayload.homes?.find((home: any) => home.homeId === homeId);
-      const summaryMessages: string[] = [];
-
-      if (homeSummary) {
-        if (homeSummary.authorizationRefreshed) {
-          summaryMessages.push("SMT authorization refreshed.");
-        } else if (homeSummary.authorizationMessage) {
-          summaryMessages.push(homeSummary.authorizationMessage);
-        }
-
-        if (homeSummary.pull.attempted) {
-          summaryMessages.push(
-            homeSummary.pull.ok
-              ? homeSummary.pull.message ?? "SMT usage pull triggered."
-              : homeSummary.pull.message ?? "SMT usage pull failed.",
-          );
-        }
-      }
-
-      if (usagePayload.normalization?.attempted) {
-        summaryMessages.push(
-          usagePayload.normalization.ok
-            ? usagePayload.normalization.message ?? "Usage normalization triggered."
-            : usagePayload.normalization.message ?? "Usage normalization failed.",
-        );
       }
 
       setIsWaitingOnSmt(true);
       setIsProcessing(false);
       setStatusMessage(
-        (summaryMessages.filter(Boolean).join(" ") || "SMT usage refresh triggered.") +
-          " We requested your SMT data and are waiting for it to be delivered. This can take a few minutes.",
+        "We’re monitoring your Smart Meter Texas authorization and pulling interval usage as soon as SMT confirms access. This can take a few minutes.",
       );
       void pollUsageReady(homeId);
     } catch (err) {
