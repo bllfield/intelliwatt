@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 const LAST_OFFER_KEY = "dashboard_compare_last_offer_id_v1";
@@ -10,16 +10,8 @@ export default function CompareLandingClient() {
   const router = useRouter();
   const fallbackHref = useMemo(() => "/dashboard/plans", []);
   const [status, setStatus] = useState<"idle" | "finding" | "failed">("idle");
-  const didRunRef = useRef(false);
 
   useEffect(() => {
-    if (didRunRef.current) {
-      return () => {
-        // no-op
-      };
-    }
-    didRunRef.current = true;
-
     let cancelled = false;
     const controller = new AbortController();
 
@@ -70,7 +62,9 @@ export default function CompareLandingClient() {
           return;
         }
         if (!cancelled) setStatus("failed");
-      } catch {
+      } catch (e) {
+        // Abort (unmount or rerun) should never flip the UI to "failed".
+        if (cancelled || controller.signal.aborted) return;
         if (!cancelled) setStatus("failed");
       }
     })();
