@@ -8,6 +8,7 @@ import { normalizeEmail } from '@/lib/utils/email';
 import { buildUsageBucketsForEstimate } from '@/lib/usage/buildUsageBucketsForEstimate';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const USAGE_DB_ENABLED = Boolean((process.env.USAGE_DATABASE_URL ?? '').trim());
 
 type UsageSeriesPoint = {
   timestamp: string;
@@ -113,6 +114,10 @@ async function computeImportExportTotalsFromDb(args: {
       const exportKwh = round2(rows?.[0]?.exportkwh ?? 0);
       return { importKwh, exportKwh, netKwh: round2(importKwh - exportKwh) };
     }
+
+    // Green Button data lives in the separate Usage DB; if it's not configured,
+    // don't fail the entire /api/user/usage endpoint.
+    if (!USAGE_DB_ENABLED) return { importKwh: 0, exportKwh: 0, netKwh: 0 };
 
     const usageClient = usagePrisma as any;
     const houseId = String(args.houseId ?? '').trim();
@@ -327,6 +332,10 @@ async function computeInsightsFromDb(args: {
         weekdayVsWeekend: { weekday, weekend },
       };
     }
+
+    // Green Button data lives in the separate Usage DB; if it's not configured,
+    // return empty insights rather than throwing.
+    if (!USAGE_DB_ENABLED) return empty;
 
     const usageClient = usagePrisma as any;
     const houseId = String(args.houseId ?? '').trim();
@@ -630,116 +639,129 @@ async function fetchSmtDataset(esiid: string | null): Promise<UsageDatasetResult
 }
 
 async function fetchGreenButtonDataset(houseId: string): Promise<UsageDatasetResult | null> {
-  const usageClient = usagePrisma as any;
+  // Green Button data lives in the separate Usage DB; if it's not configured,
+  // skip it rather than failing the whole /api/user/usage request.
+  if (!USAGE_DB_ENABLED) return null;
 
-  const latestRaw = await usageClient.rawGreenButton.findFirst({
-    where: { homeId: houseId },
-    orderBy: { createdAt: 'desc' },
-    select: { id: true },
-  });
+  try {
+    const usageClient = usagePrisma as any;
 
-  if (!latestRaw) {
+    const latestRaw = await usageClient.rawGreenButton.findFirst({
+      where: { homeId: houseId },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
+    });
+
+    if (!latestRaw) {
+      return null;
+    }
+
+    const window = await getGreenButtonWindow(usageClient, houseId, latestRaw.id);
+    if (!window) return null;
+
+    const aggregates = await usageClient.greenButtonInterval.aggregate({
+      where: { homeId: houseId, rawId: latestRaw.id, timestamp: { gte: window.cutoff } },
+      _count: { _all: true },
+      _sum: { consumptionKwh: true },
+      _min: { timestamp: true },
+      _max: { timestamp: true },
+    });
+
+    const count = aggregates._count?._all ?? 0;
+    if (count === 0) {
+      return null;
+    }
+
+    const totalKwh = decimalToNumber(aggregates._sum?.consumptionKwh ?? 0);
+    const start = aggregates._min?.timestamp ?? null;
+    const end = aggregates._max?.timestamp ?? null;
+
+    const recentIntervals = (await usageClient.greenButtonInterval.findMany({
+      where: { homeId: houseId, rawId: latestRaw.id, timestamp: { gte: window.cutoff } },
+      orderBy: { timestamp: 'desc' },
+      take: 192, // ~2 days of 15-minute intervals
+    })) as Array<{ timestamp: Date; consumptionKwh: Prisma.Decimal | number }>;
+
+    const intervals15 = recentIntervals
+      .map((row: { timestamp: Date; consumptionKwh: Prisma.Decimal | number }) => ({
+        timestamp: row.timestamp.toISOString(),
+        kwh: decimalToNumber(row.consumptionKwh),
+      }))
+      .reverse();
+
+    const hourlyRowsRaw = await usageClient.$queryRaw(Prisma.sql`
+      SELECT date_trunc('hour', "timestamp") AS bucket, SUM("consumptionKwh")::float AS kwh
+      FROM "GreenButtonInterval"
+      WHERE "homeId" = ${houseId}
+        AND "rawId" = ${latestRaw.id}
+        AND "timestamp" >= ${window.cutoff}
+        AND "timestamp" >= NOW() - INTERVAL '14 days'
+      GROUP BY bucket
+      ORDER BY bucket ASC
+    `);
+    const hourlyRows = hourlyRowsRaw as Array<{ bucket: Date; kwh: number }>;
+
+    const dailyRowsRaw = await usageClient.$queryRaw(Prisma.sql`
+      SELECT date_trunc('day', "timestamp" AT TIME ZONE 'America/Chicago') AT TIME ZONE 'UTC' AS bucket,
+             SUM("consumptionKwh")::float AS kwh
+      FROM "GreenButtonInterval"
+      WHERE "homeId" = ${houseId}
+        AND "rawId" = ${latestRaw.id}
+        AND "timestamp" >= ${window.cutoff}
+      GROUP BY bucket
+      ORDER BY bucket DESC
+      LIMIT 400
+    `);
+    const dailyRows = dailyRowsRaw as Array<{ bucket: Date; kwh: number }>;
+
+    const monthlyRowsRaw = await usageClient.$queryRaw(Prisma.sql`
+      SELECT date_trunc('month', "timestamp") AS bucket, SUM("consumptionKwh")::float AS kwh
+      FROM "GreenButtonInterval"
+      WHERE "homeId" = ${houseId}
+        AND "rawId" = ${latestRaw.id}
+        AND "timestamp" >= ${window.cutoff}
+      GROUP BY bucket
+      ORDER BY bucket DESC
+      LIMIT 120
+    `);
+    const monthlyRows = monthlyRowsRaw as Array<{ bucket: Date; kwh: number }>;
+
+    const annualRowsRaw = await usageClient.$queryRaw(Prisma.sql`
+      SELECT date_trunc('year', "timestamp") AS bucket, SUM("consumptionKwh")::float AS kwh
+      FROM "GreenButtonInterval"
+      WHERE "homeId" = ${houseId}
+        AND "rawId" = ${latestRaw.id}
+        AND "timestamp" >= ${window.cutoff}
+      GROUP BY bucket
+      ORDER BY bucket ASC
+    `);
+    const annualRows = annualRowsRaw as Array<{ bucket: Date; kwh: number }>;
+
+    return {
+      summary: {
+        source: 'GREEN_BUTTON',
+        intervalsCount: count,
+        totalKwh,
+        start: start ? start.toISOString() : null,
+        end: end ? end.toISOString() : null,
+        latest: end ? end.toISOString() : null,
+      },
+      series: {
+        intervals15,
+        hourly: toSeriesPoint(hourlyRows),
+        daily: fillDailyGaps(
+          toSeriesPoint(dailyRows),
+          start?.toISOString() ?? null,
+          end?.toISOString() ?? null,
+        ),
+        monthly: toSeriesPoint(monthlyRows),
+        annual: toSeriesPoint(annualRows),
+      },
+    };
+  } catch (err) {
+    console.warn('[user/usage] green button dataset fetch failed; continuing without green button', err);
     return null;
   }
-
-  const window = await getGreenButtonWindow(usageClient, houseId, latestRaw.id);
-  if (!window) return null;
-
-  const aggregates = await usageClient.greenButtonInterval.aggregate({
-    where: { homeId: houseId, rawId: latestRaw.id, timestamp: { gte: window.cutoff } },
-    _count: { _all: true },
-    _sum: { consumptionKwh: true },
-    _min: { timestamp: true },
-    _max: { timestamp: true },
-  });
-
-  const count = aggregates._count?._all ?? 0;
-  if (count === 0) {
-    return null;
-  }
-
-  const totalKwh = decimalToNumber(aggregates._sum?.consumptionKwh ?? 0);
-  const start = aggregates._min?.timestamp ?? null;
-  const end = aggregates._max?.timestamp ?? null;
-
-  const recentIntervals = (await usageClient.greenButtonInterval.findMany({
-    where: { homeId: houseId, rawId: latestRaw.id, timestamp: { gte: window.cutoff } },
-    orderBy: { timestamp: 'desc' },
-    take: 192, // ~2 days of 15-minute intervals
-  })) as Array<{ timestamp: Date; consumptionKwh: Prisma.Decimal | number }>;
-
-  const intervals15 = recentIntervals
-    .map((row: { timestamp: Date; consumptionKwh: Prisma.Decimal | number }) => ({
-      timestamp: row.timestamp.toISOString(),
-      kwh: decimalToNumber(row.consumptionKwh),
-    }))
-    .reverse();
-
-  const hourlyRowsRaw = await usageClient.$queryRaw(Prisma.sql`
-    SELECT date_trunc('hour', "timestamp") AS bucket, SUM("consumptionKwh")::float AS kwh
-    FROM "GreenButtonInterval"
-    WHERE "homeId" = ${houseId}
-      AND "rawId" = ${latestRaw.id}
-      AND "timestamp" >= ${window.cutoff}
-      AND "timestamp" >= NOW() - INTERVAL '14 days'
-    GROUP BY bucket
-    ORDER BY bucket ASC
-  `);
-  const hourlyRows = hourlyRowsRaw as Array<{ bucket: Date; kwh: number }>;
-
-  const dailyRowsRaw = await usageClient.$queryRaw(Prisma.sql`
-    SELECT date_trunc('day', "timestamp" AT TIME ZONE 'America/Chicago') AT TIME ZONE 'UTC' AS bucket,
-           SUM("consumptionKwh")::float AS kwh
-    FROM "GreenButtonInterval"
-    WHERE "homeId" = ${houseId}
-      AND "rawId" = ${latestRaw.id}
-      AND "timestamp" >= ${window.cutoff}
-    GROUP BY bucket
-    ORDER BY bucket DESC
-    LIMIT 400
-  `);
-  const dailyRows = dailyRowsRaw as Array<{ bucket: Date; kwh: number }>;
-
-  const monthlyRowsRaw = await usageClient.$queryRaw(Prisma.sql`
-    SELECT date_trunc('month', "timestamp") AS bucket, SUM("consumptionKwh")::float AS kwh
-    FROM "GreenButtonInterval"
-    WHERE "homeId" = ${houseId}
-      AND "rawId" = ${latestRaw.id}
-      AND "timestamp" >= ${window.cutoff}
-    GROUP BY bucket
-    ORDER BY bucket DESC
-    LIMIT 120
-  `);
-  const monthlyRows = monthlyRowsRaw as Array<{ bucket: Date; kwh: number }>;
-
-  const annualRowsRaw = await usageClient.$queryRaw(Prisma.sql`
-    SELECT date_trunc('year', "timestamp") AS bucket, SUM("consumptionKwh")::float AS kwh
-    FROM "GreenButtonInterval"
-    WHERE "homeId" = ${houseId}
-      AND "rawId" = ${latestRaw.id}
-      AND "timestamp" >= ${window.cutoff}
-    GROUP BY bucket
-    ORDER BY bucket ASC
-  `);
-  const annualRows = annualRowsRaw as Array<{ bucket: Date; kwh: number }>;
-
-  return {
-    summary: {
-      source: 'GREEN_BUTTON',
-      intervalsCount: count,
-      totalKwh,
-      start: start ? start.toISOString() : null,
-      end: end ? end.toISOString() : null,
-      latest: end ? end.toISOString() : null,
-    },
-    series: {
-      intervals15,
-      hourly: toSeriesPoint(hourlyRows),
-      daily: fillDailyGaps(toSeriesPoint(dailyRows), start?.toISOString() ?? null, end?.toISOString() ?? null),
-      monthly: toSeriesPoint(monthlyRows),
-      annual: toSeriesPoint(annualRows),
-    },
-  };
 }
 
 function chooseDataset(
@@ -793,8 +815,20 @@ export async function GET(_request: NextRequest) {
 
     const results = [];
     for (const house of houses) {
-      const smtDataset = await fetchSmtDataset(house.esiid ?? null);
-      const greenDataset = await fetchGreenButtonDataset(house.id);
+      let smtDataset: UsageDatasetResult | null = null;
+      let greenDataset: UsageDatasetResult | null = null;
+      try {
+        smtDataset = await fetchSmtDataset(house.esiid ?? null);
+      } catch (err) {
+        console.warn('[user/usage] SMT dataset fetch failed; continuing without SMT', err);
+        smtDataset = null;
+      }
+      try {
+        greenDataset = await fetchGreenButtonDataset(house.id);
+      } catch (err) {
+        console.warn('[user/usage] green button dataset fetch failed; continuing without green button', err);
+        greenDataset = null;
+      }
       const selected = chooseDataset(smtDataset, greenDataset);
 
       // Canonical monthly totals (stitched 12-month billing window) for SMT homes.
@@ -931,7 +965,19 @@ export async function GET(_request: NextRequest) {
     );
   } catch (error) {
     console.error('[user/usage] failed to fetch usage dataset', error);
-    return NextResponse.json({ ok: false, error: 'Internal error' }, { status: 500 });
+    // If an admin is logged in (e.g., impersonation/support), include a safe detail string
+    // to speed up debugging without leaking internals to normal users.
+    let detail: string | undefined = undefined;
+    try {
+      const cookieStore = cookies();
+      const isAdmin = Boolean(cookieStore.get('intelliwatt_admin')?.value);
+      if (isAdmin) {
+        detail = String((error as any)?.message || error || '').slice(0, 500);
+      }
+    } catch {
+      // ignore
+    }
+    return NextResponse.json({ ok: false, error: 'Internal error', ...(detail ? { detail } : {}) }, { status: 500 });
   }
 }
 
