@@ -13,7 +13,11 @@ export default function CompareLandingClient() {
   const didRunRef = useRef(false);
 
   useEffect(() => {
-    if (didRunRef.current) return;
+    if (didRunRef.current) {
+      return () => {
+        // no-op
+      };
+    }
     didRunRef.current = true;
 
     let cancelled = false;
@@ -105,5 +109,3 @@ export default function CompareLandingClient() {
     </div>
   );
 }
-
-
