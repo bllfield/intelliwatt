@@ -9,6 +9,9 @@ export type BotPageKey =
   | "dashboard_current_rate_details"
   | "dashboard_manual_entry"
   | "dashboard_plans"
+  | "dashboard_plan_detail"
+  | "dashboard_compare"
+  | "dashboard_compare_detail"
   | "dashboard_home"
   | "dashboard_appliances"
   | "dashboard_upgrades"
@@ -33,7 +36,7 @@ export const BOT_PAGES: BotPageMeta[] = [
     label: "Dashboard Home (/dashboard)",
     paths: ["/dashboard"],
     defaultMessage:
-      "Hey — I’m IntelliWattBot.\n\nTo get you the most accurate recommendations, please complete these steps in order:\n1) Save your address\n2) Share your usage\n3) Add your current rate (optional, but makes comparisons stronger)\n4) Home details\n5) Appliances\n\nTell me what you’ve completed so far and I’ll guide you to the next step.",
+      "Hey — I’m IntelliWattBot.\n\nTo get you the most accurate recommendations, please complete these steps in order:\n1) Save your address\n2) Share your usage (Usage Entry)\n3) Review your usage\n4) Browse plans and pick a plan to compare\n5) Add your current plan details (optional, but required for Compare)\n6) Compare side-by-side and sign up if you want\n\nTell me what you’ve completed so far and I’ll guide you to the next step.",
   },
   {
     key: "dashboard_api",
@@ -75,7 +78,7 @@ export const BOT_PAGES: BotPageMeta[] = [
     label: "Current Rate (/dashboard/current-rate)",
     paths: ["/dashboard/current-rate"],
     defaultMessage:
-      "Optional (but powerful): add your current plan details.\n\nThis lets me show the *difference* between what you pay today vs the best plans for your exact usage.",
+      "Optional (but powerful): add your current plan details.\n\nThis unlocks Compare, where you’ll see side‑by‑side Current vs New plan costs (and you can sign up from the Compare page).",
   },
   {
     key: "dashboard_current_rate_details",
@@ -96,7 +99,28 @@ export const BOT_PAGES: BotPageMeta[] = [
     label: "Plans (/dashboard/plans)",
     paths: ["/dashboard/plans"],
     defaultMessage:
-      "This is where I rank plans.\n\nTo make these recommendations truly accurate, connect usage (API Connect) and optionally add your current rate so I can show the savings delta.",
+      "This is where I rank plans.\n\nOnce you’ve connected usage, you can browse plans and pick one to compare. To use Compare, add your current plan details (optional, but required for side‑by‑side).",
+  },
+  {
+    key: "dashboard_plan_detail",
+    label: "Plan Details (/dashboard/plans/[offerId])",
+    paths: [],
+    defaultMessage:
+      "This is a plan detail page.\n\nIf you want to compare this plan against what you pay today, add your current plan details, then use Compare. If you’re ready, you can also sign up directly from here.",
+  },
+  {
+    key: "dashboard_compare",
+    label: "Compare (/dashboard/plans/compare)",
+    paths: ["/dashboard/plans/compare"],
+    defaultMessage:
+      "Compare shows a side‑by‑side Current vs New plan breakdown.\n\nIf you haven’t added your current plan details yet, go to Current Plan first — then come back here to compare and sign up.",
+  },
+  {
+    key: "dashboard_compare_detail",
+    label: "Compare Detail (/dashboard/plans/compare/[offerId])",
+    paths: [],
+    defaultMessage:
+      "You’re on the side‑by‑side Compare view.\n\nReview the cost difference, toggle the termination fee if needed, and sign up if you’re ready to switch.",
   },
   {
     key: "dashboard_home",
@@ -166,6 +190,11 @@ export function resolveBotPageKey(pathname: string | null | undefined): BotPageK
   for (const meta of BOT_PAGES) {
     if (meta.paths.some((x) => x === p || (x.endsWith("/") && x.slice(0, -1) === p))) return meta.key;
   }
+  // Plans/compare nested routes (must be checked before the broader /dashboard/plans/ prefix)
+  if (p.startsWith("/dashboard/plans/compare/")) return "dashboard_compare_detail";
+  if (p === "/dashboard/plans/compare") return "dashboard_compare";
+  // Plans detail routes
+  if (p.startsWith("/dashboard/plans/")) return "dashboard_plan_detail";
   // allow base match for future nested subroutes under API Connect
   if (p.startsWith("/dashboard/api/")) return "dashboard_api";
   if (p.startsWith("/dashboard")) return "dashboard";

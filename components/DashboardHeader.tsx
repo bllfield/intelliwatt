@@ -2,13 +2,11 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { DASHBOARD_FLOW_STEPS } from '@/lib/dashboard/flow';
 
 const dashboardLinks = [
-  { href: '/dashboard/api', label: 'Usage Entry' },
-  { href: '/dashboard/usage', label: 'Usage' },
-  { href: '/dashboard/current-rate', label: 'Current Rate' },
-  { href: '/dashboard/plans', label: 'Plans' },
-  { href: '/dashboard/plans/compare', label: 'Compare' },
+  // Primary flow first (single source of truth)
+  ...DASHBOARD_FLOW_STEPS.map((s) => ({ href: s.href, label: s.label })),
   { href: '/dashboard/home', label: 'Home Info' },
   { href: '/dashboard/appliances', label: 'Appliances' },
   { href: '/dashboard/upgrades', label: 'Upgrades' },

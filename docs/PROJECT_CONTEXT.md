@@ -8,18 +8,21 @@
    - Backend triggers agreement/subscription and begins pulling usage/billing.
 3. **Usage Normalization**
    - Normalize SMT interval/billing (or alternate sources) into canonical usage for the last 12 months.
-4. **Current Rate Details (Optional, +1 Entry)**
+4. **Rate Plan Analyzer Output (Plans/Rates)**
+   - Recommend plans based on real usage.
+   - Users can view plan details and sign up from the plan details page.
+5. **Current Plan Details (Optional, +1 Entry; required for Compare)**
    - Screen title: “Current Rate Details — Add your current plan info for a more detailed comparison.”
    - Paths:
      - **Upload your bill** (photo/image/PDF) for future OCR extraction.
      - **Enter manually** (plan name, primary rate, base fee, contract expiration, notes).
    - Copy explicitly states:
      - Step is optional; skipping still yields usage-based recommendations.
-     - Completing it shows how current contract costs compare against IntelliWatt recommendations and projected renewal costs.
-    - Completing grants **+1 HitTheJackWatt jackpot entry.**
-5. **Rate Plan Analyzer Output**
-   - Recommend plans based on real usage.
-   - When Current Rate Details are provided, include “current vs recommended vs renewal” cost comparisons.
+     - Completing it unlocks side-by-side Compare and highlights how current contract costs compare against IntelliWatt recommendations and projected renewal costs.
+     - Completing grants **+1 HitTheJackWatt jackpot entry.**
+6. **Compare (Current vs New)**
+   - Side-by-side comparison for a selected plan vs the user’s current plan.
+   - Users can sign up from the Compare page.
 6. **Home Details**
 7. **Appliances**
 8. **Upgrades**
@@ -27,7 +30,7 @@
 
 ## IntelliWattBot (Dashboard Guidance)
 
-- The customer dashboard includes an **IntelliWattBot** helper that guides users through the intended onboarding flow (address → usage → current rate → home → appliances).
+- The customer dashboard includes an **IntelliWattBot** helper that guides users through the intended onboarding flow (address → usage → plans → optional current plan → compare → home → appliances).
 - Bot messages are **per-page configurable** via admin tool: `/admin/tools/bot-messages` (admin-token required).
 - Customer pages fetch the current message via `GET /api/bot/message?path=/dashboard/<page>`.
 # IntelliWatt Project Context

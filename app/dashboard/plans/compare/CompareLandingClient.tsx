@@ -15,18 +15,28 @@ export default function CompareLandingClient() {
   useEffect(() => {
     if (didRunRef.current) return;
     didRunRef.current = true;
-    try {
-      const last = (window.localStorage.getItem(LAST_OFFER_KEY) ?? "").trim();
-      if (last) {
-        router.replace(`/dashboard/plans/compare/${encodeURIComponent(last)}`);
-        return;
-      }
-    } catch {
-      // ignore storage failures
-    }
-    setStatus("finding");
     (async () => {
       try {
+        // Compare requires current plan details (so the side-by-side comparison is meaningful).
+        const s = await fetch("/api/dashboard/current-plan/status", { cache: "no-store" });
+        const sj = await s.json().catch(() => null);
+        if (!s.ok || !sj || sj.ok !== true) throw new Error("status_check_failed");
+        if (!sj.hasCurrentPlan) {
+          router.replace("/dashboard/current-rate");
+          return;
+        }
+
+        try {
+          const last = (window.localStorage.getItem(LAST_OFFER_KEY) ?? "").trim();
+          if (last) {
+            router.replace(`/dashboard/plans/compare/${encodeURIComponent(last)}`);
+            return;
+          }
+        } catch {
+          // ignore storage failures
+        }
+
+        setStatus("finding");
         // If the user lands directly on Compare (no offer picked yet), default to the current "best offer"
         // from the Plans API: prefer all-in true-cost best, else proxy best, else first offer.
         const r = await fetch(`/api/dashboard/plans?dataset=0&page=1&pageSize=20&sort=best_for_you_proxy&_cmp=1`, {
@@ -62,7 +72,7 @@ export default function CompareLandingClient() {
           <div className="text-sm text-brand-cyan/80">Finding your best plan to compare…</div>
         ) : (
           <div className="text-sm text-brand-cyan/80">
-            To compare, pick a plan first. We’ll take you to the side-by-side Current vs New breakdown (with a termination-fee toggle).
+            To compare, make sure you’ve added your current plan details first. Then we’ll take you to the side-by-side Current vs New breakdown (with a termination-fee toggle).
           </div>
         )}
         {status === "failed" ? (

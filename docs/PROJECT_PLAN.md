@@ -125,7 +125,7 @@ Notes:
 - **Remaining To-Dos from the current checklist**
   - ⬜ **Current Rate Page (MVP)** with image upload or manual entry and "we're working hard to unlock these features" messaging across:
     - Usage, Plans, Home Info, Appliances, Upgrades, Analysis, Optimal Energy.
-  - ⬜ **Pop-Up Flow** to guide entries in order: SMT → Current Rate → Referrals, with an option to skip directly to Referrals at each step.
+  - ⬜ **Pop-Up Flow** to guide entries in order: SMT → Plans → (Optional) Current Plan → Compare → Referrals, with an option to skip directly to Referrals at each step.
   - ⬜ **Additional SMT Endpoints + Daily Poll** for agreement statuses:
     - acknowledged / approved / revoked / declined / cancel.
   - ⬜ **Real-Time SMT Approval Check**:
@@ -1934,8 +1934,8 @@ This Plan Change supersedes any prior instructions that defaulted to the direct 
 - Tying this step to a HitTheJackWatt entry deepens engagement and encourages richer data capture.
 
 **Scope:**
-- Insert an optional **Current Rate Details** step between SMT usage import and the Rate Plan Analyzer output:
-  - Address → SMT API Authorization → Usage Normalization → **Current Rate Details (optional)** → Rate Plan Analyzer → Home Details → Appliances → Upgrades → Optimal Energy.
+- Insert an optional **Current Plan Details** step after Plans output (and before Compare):
+  - Address → SMT API Authorization → Usage Normalization → Rate Plan Analyzer (Plans/Rates) → **Current Plan Details (optional; required for Compare)** → Compare → Home Details → Appliances → Upgrades → Optimal Energy.
 - Step definition:
   - Title: "Current Rate Details" with copy explaining the richer comparison (current vs recommended vs renewal) and the single-entry reward.
   - Two input paths:

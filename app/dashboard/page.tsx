@@ -300,17 +300,24 @@ const DASHBOARD_CARDS: DashboardCard[] = [
     Icon: UsageIcon,
   },
   {
-    title: 'Current Rate',
-    description: 'Upload your bill or enter plan details to earn 1 entry',
-    cta: 'Add Current Rate',
-    href: '/dashboard/current-rate',
-    Icon: CurrentRateIcon,
-  },
-  {
     title: 'Plans',
     description: 'Compare plans and find the best rates',
     cta: 'Compare Plans',
     href: '/dashboard/plans',
+    Icon: PlansIcon,
+  },
+  {
+    title: 'Current Plan (optional)',
+    description: 'Enter your current plan details to unlock comparisons and earn 1 entry',
+    cta: 'Add Current Plan',
+    href: '/dashboard/current-rate',
+    Icon: CurrentRateIcon,
+  },
+  {
+    title: 'Compare',
+    description: 'Compare your current plan vs a new plan side-by-side',
+    cta: 'Compare Plans',
+    href: '/dashboard/plans/compare',
     Icon: PlansIcon,
   },
   {

@@ -14,6 +14,7 @@ type ApiResp =
       variables: any;
       math: any | null;
       outputs: any;
+      enrollLink?: string | null;
       notes?: string[];
     };
 
@@ -75,6 +76,8 @@ export default function PlanDetailsClient({ offerId }: { offerId: string }) {
   const [data, setData] = useState<ApiResp | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [hasCurrentPlan, setHasCurrentPlan] = useState<boolean | null>(null);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   // Persist the last viewed offer so the Dashboard "Compare" nav can jump straight to compare.
   useEffect(() => {
@@ -133,6 +136,7 @@ export default function PlanDetailsClient({ offerId }: { offerId: string }) {
   const usage = ok ? (data as any).usage : null;
   const outputs = ok ? (data as any).outputs : null;
   const math = ok ? (data as any).math : null;
+  const enrollLink = ok ? String((data as any)?.enrollLink ?? "").trim() || null : null;
   const monthlyBreakdown = ok ? (data as any).monthlyBreakdown : null;
   const hasCalc = Boolean(
     outputs?.trueCostEstimate?.status === "OK" ||
@@ -150,6 +154,24 @@ export default function PlanDetailsClient({ offerId }: { offerId: string }) {
     return bucketDefs.filter((b) => wanted.has(String((b as any)?.key ?? "")));
   }, [bucketDefs, requiredBucketKeys]);
   const bucketTable = useMemo(() => (usage?.bucketTable ?? []) as any[], [usage]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function run() {
+      try {
+        const r = await fetch("/api/dashboard/current-plan/status", { cache: "no-store" });
+        const j = await r.json().catch(() => null);
+        if (!r.ok || !j || j.ok !== true) throw new Error("status_failed");
+        if (!cancelled) setHasCurrentPlan(Boolean(j.hasCurrentPlan));
+      } catch {
+        if (!cancelled) setHasCurrentPlan(null);
+      }
+    }
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 pb-16">
@@ -170,11 +192,25 @@ export default function PlanDetailsClient({ offerId }: { offerId: string }) {
 
         <div className="flex flex-col items-start gap-2 sm:items-end">
           <Link
-            href={`/dashboard/plans/compare/${encodeURIComponent(offerId)}`}
+            href={
+              hasCurrentPlan === false
+                ? "/dashboard/current-rate"
+                : `/dashboard/plans/compare/${encodeURIComponent(offerId)}`
+            }
             className="text-sm font-semibold text-brand-blue hover:underline"
           >
-            Compare vs your current plan
+            {hasCurrentPlan === false ? "Add current plan details to compare" : "Compare vs your current plan"}
           </Link>
+          {enrollLink ? (
+            <button
+              type="button"
+              onClick={() => setShowConfirm(true)}
+              className="inline-flex items-center justify-center rounded-full bg-brand-blue px-4 py-2 text-sm font-semibold text-white hover:bg-brand-blue/90"
+              title="Sign up for this plan"
+            >
+              Sign up
+            </button>
+          ) : null}
           {plan?.eflUrl ? (
             <Link
               href={plan.eflUrl}
@@ -582,6 +618,44 @@ export default function PlanDetailsClient({ offerId }: { offerId: string }) {
             </div>
           </div>
         </>
+      ) : null}
+
+      {showConfirm ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-lg rounded-3xl border border-brand-cyan/25 bg-brand-navy p-6 text-brand-white shadow-xl">
+            <div className="text-lg font-semibold text-brand-white/90">You’re about to leave IntelliWatt to sign up</div>
+            <div className="mt-2 text-sm text-brand-cyan/70">
+              We’ll open the provider enrollment flow in a new tab. Here’s what to expect:
+            </div>
+            <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-brand-cyan/80">
+              <li>You’ll complete enrollment details with the provider (address, contact info, etc.).</li>
+              <li>After enrollment, you may receive confirmation emails from the provider.</li>
+            </ul>
+            <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setShowConfirm(false)}
+                className="rounded-full border border-brand-cyan/25 bg-brand-white/5 px-5 py-3 text-sm font-semibold text-brand-cyan hover:bg-brand-white/10"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowConfirm(false);
+                  try {
+                    if (enrollLink) window.open(enrollLink, "_blank", "noopener,noreferrer");
+                  } catch {
+                    // ignore
+                  }
+                }}
+                className="rounded-full bg-brand-blue px-5 py-3 text-sm font-semibold text-white hover:bg-brand-blue/90"
+              >
+                Continue to signup
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </div>
   );

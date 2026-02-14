@@ -462,6 +462,8 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "offer_not_found", offerId }, { status: 404 });
     }
 
+    const enrollLink = typeof (offer as any)?.enroll_link === "string" ? String((offer as any).enroll_link) : null;
+
     // Mapping offerId -> RatePlan template
     const map = await (prisma as any).offerIdRatePlanMap.findUnique({
       where: { offerId },
@@ -849,6 +851,7 @@ export async function GET(req: NextRequest) {
         ok: true,
         offerId,
         isRenter,
+        enrollLink,
         plan: {
           supplierName: offer?.supplier_name ?? null,
           planName: offer?.plan_name ?? null,

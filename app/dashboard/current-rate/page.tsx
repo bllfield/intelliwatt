@@ -2,8 +2,10 @@
 
 import { CurrentRateDetailsForm } from "@/components/CurrentRateDetailsForm";
 import DashboardHero from "@/components/dashboard/DashboardHero";
+import { useRouter } from "next/navigation";
 
 export default function CurrentRatePage() {
+  const router = useRouter();
   return (
     <div className="min-h-screen bg-brand-white">
       <DashboardHero
@@ -18,9 +20,20 @@ export default function CurrentRatePage() {
             <CurrentRateDetailsForm
               onContinue={(data) => {
                 console.log("Current rate details submitted:", data);
+                try {
+                  const last = (window.localStorage.getItem("dashboard_compare_last_offer_id_v1") ?? "").trim();
+                  if (last) {
+                    router.push(`/dashboard/plans/compare/${encodeURIComponent(last)}`);
+                    return;
+                  }
+                } catch {
+                  // ignore
+                }
+                router.push("/dashboard/plans/compare");
               }}
               onSkip={() => {
                 console.log("Current rate details skipped; proceed to plan analyzer.");
+                router.push("/dashboard/plans");
               }}
             />
           </div>
