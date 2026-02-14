@@ -119,6 +119,7 @@ export async function GET() {
                 addressCity: true,
                 addressState: true,
                 addressZip5: true,
+                esiid: true,
               },
             },
           },
