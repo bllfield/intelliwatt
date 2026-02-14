@@ -258,13 +258,41 @@ for file_path in "${FILES[@]}"; do
     if [[ "$http_code" == "200" || "$http_code" == "201" || "$http_code" == "202" ]]; then
       log "Droplet upload success ($http_code): $(jq -c '.message // .' "$RESP_FILE" 2>/dev/null || cat "$RESP_FILE")"
       resp_ok="$(jq -r '.ok // empty' "$RESP_FILE" 2>/dev/null || true)"
+      # Support multiple response shapes:
+      # - droplet upload server: { ok, file: { interval }, ingest: { normalized } }
+      # - app raw-upload:        { ok, duplicate?, normalizedInline: { intervalsInserted/inserted/... } }
+      # - app smt/pull inline:   { ok, intervalNormalized?: true, ... }
       resp_interval="$(jq -r '.file.interval // empty' "$RESP_FILE" 2>/dev/null || true)"
-      resp_normalized="$(jq -r '.ingest.normalized // empty' "$RESP_FILE" 2>/dev/null || true)"
-      if [[ "$resp_ok" == "true" && "$resp_interval" == "true" && "$resp_normalized" == "true" ]]; then
+      resp_ingest_normalized="$(jq -r '.ingest.normalized // empty' "$RESP_FILE" 2>/dev/null || true)"
+      resp_inline_normalized="$(jq -r '.intervalNormalized // empty' "$RESP_FILE" 2>/dev/null || true)"
+      resp_has_normalized_inline="$(jq -r '(.normalizedInline != null) // false' "$RESP_FILE" 2>/dev/null || true)"
+      resp_duplicate="$(jq -r '.duplicate // empty' "$RESP_FILE" 2>/dev/null || true)"
+      resp_message="$(jq -r '.message // empty' "$RESP_FILE" 2>/dev/null || true)"
+
+      should_mark_posted="false"
+      if [[ "$resp_ok" == "true" ]]; then
+        # If the receiver explicitly reports normalization success, mark posted.
+        if [[ "$resp_ingest_normalized" == "true" || "$resp_inline_normalized" == "true" || "$resp_has_normalized_inline" == "true" ]]; then
+          should_mark_posted="true"
+        fi
+        # If the receiver reports a duplicate, we also consider it handled.
+        if [[ "$resp_duplicate" == "true" ]]; then
+          should_mark_posted="true"
+        fi
+        # If it was a non-interval file that was intentionally ignored/removed, do not re-upload forever.
+        if [[ "$resp_interval" == "false" ]]; then
+          should_mark_posted="true"
+        fi
+        if [[ -n "$resp_message" ]] && printf '%s' "$resp_message" | grep -qi 'upload ignored'; then
+          should_mark_posted="true"
+        fi
+      fi
+
+      if [[ "$should_mark_posted" == "true" ]]; then
         printf '%s\n' "$sha256" >>"$SEEN_FILE"
         upload_ok="true"
       else
-        log "INFO: Not marking as posted (ok=${resp_ok:-?} interval=${resp_interval:-?} normalized=${resp_normalized:-?})"
+        log "INFO: Not marking as posted (ok=${resp_ok:-?} interval=${resp_interval:-?} ingest.normalized=${resp_ingest_normalized:-?} intervalNormalized=${resp_inline_normalized:-?} normalizedInline=${resp_has_normalized_inline:-?} duplicate=${resp_duplicate:-?})"
         upload_ok="false"
       fi
     elif [[ "$http_code" == "429" ]]; then
