@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -185,6 +185,8 @@ export const UsageDashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [monthlyView, setMonthlyView] = useState<"chart" | "table">("chart");
+  const lastSmtIntervalsRef = useRef<number>(0);
+  const smtPollTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -229,6 +231,87 @@ export const UsageDashboard: React.FC = () => {
       cancelled = true;
     };
   }, []);
+
+  // If usage isn't available yet (common immediately after SMT backfill request),
+  // keep checking until it lands by polling the SMT orchestrator and reloading usage.
+  useEffect(() => {
+    // Clear any prior polling
+    if (smtPollTimerRef.current) {
+      window.clearTimeout(smtPollTimerRef.current);
+      smtPollTimerRef.current = null;
+    }
+
+    if (loading) return;
+    if (!selectedHouseId) return;
+    const active = houses.find((h) => h.houseId === selectedHouseId) || null;
+    if (!active) return;
+
+    // Only poll when there's an ESIID but no dataset yet.
+    const shouldPoll = Boolean(active.esiid && !active.dataset);
+    if (!shouldPoll) return;
+
+    let cancelled = false;
+    let attempts = 0;
+
+    async function reloadUsageOnce() {
+      const res = await fetch(`/api/user/usage?ts=${Date.now()}`, { cache: "no-store" });
+      const json = (await res.json()) as UsageApiResponse;
+      if (!res.ok || (json as any).ok === false) return;
+      if (cancelled) return;
+      writeSessionCache(json);
+      setHouses((json as any).houses || []);
+      const nextHouses = (json as any).houses || [];
+      const firstWithData = nextHouses.find((h: any) => h.dataset);
+      setSelectedHouseId(firstWithData?.houseId ?? nextHouses[0]?.houseId ?? null);
+    }
+
+    async function tick() {
+      if (cancelled) return;
+      attempts += 1;
+      if (attempts > 60) return; // ~20-30 minutes depending on nextPollMs
+
+      try {
+        const r = await fetch("/api/user/smt/orchestrate", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ homeId: selectedHouseId }),
+          cache: "no-store",
+        });
+        const j: any = await r.json().catch(() => null);
+        if (!cancelled && r.ok && j?.ok) {
+          const intervals = Number(j?.usage?.intervals ?? 0);
+          const ready = Boolean(j?.usage?.ready);
+          const nextPollMs =
+            typeof j?.nextPollMs === "number" && j.nextPollMs > 0 ? j.nextPollMs : 30_000;
+
+          // If intervals increased (or we reached ready), reload the usage dashboard data.
+          if (ready || intervals > lastSmtIntervalsRef.current) {
+            lastSmtIntervalsRef.current = intervals;
+            await reloadUsageOnce();
+          }
+
+          if (!ready) {
+            smtPollTimerRef.current = window.setTimeout(() => void tick(), nextPollMs);
+            return;
+          }
+          return;
+        }
+      } catch {
+        // ignore and back off
+      }
+
+      smtPollTimerRef.current = window.setTimeout(() => void tick(), 60_000);
+    }
+
+    void tick();
+    return () => {
+      cancelled = true;
+      if (smtPollTimerRef.current) {
+        window.clearTimeout(smtPollTimerRef.current);
+        smtPollTimerRef.current = null;
+      }
+    };
+  }, [loading, selectedHouseId, houses]);
 
   const activeHouse = useMemo(() => {
     if (!selectedHouseId) return null;

@@ -75,11 +75,18 @@ export default function ImpersonationBanner() {
 
   React.useEffect(() => {
     void refresh();
-    const t = window.setInterval(() => void refresh(), 30_000);
-    return () => window.clearInterval(t);
   }, [refresh]);
 
   const impersonating = status && (status as any).ok === true && (status as any).impersonating === true;
+
+  // Only poll while impersonating. This avoids a constant "status" request on every dashboard page
+  // for normal users (and reduces confusion when looking at the Network tab).
+  React.useEffect(() => {
+    if (!impersonating) return;
+    const t = window.setInterval(() => void refresh(), 30_000);
+    return () => window.clearInterval(t);
+  }, [impersonating, refresh]);
+
   if (!impersonating) return null;
 
   const s = status as Extract<Status, { ok: true; impersonating: true }>;
