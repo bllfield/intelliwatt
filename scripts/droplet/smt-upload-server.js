@@ -234,7 +234,7 @@ function recordPipelineError(status, step, details) {
         });
     });
 }
-async function registerAndNormalizeFile(filepath, filename, size_bytes) {
+async function registerAndNormalizeFile(filepath, filename, size_bytes, esiid, meter) {
                     if (!ADMIN_TOKEN || !INTELLIWATT_BASE_URL) {
                         console.warn("[smt-upload] Cannot register file: ADMIN_TOKEN or INTELLIWATT_BASE_URL not configured");
         return {
@@ -288,7 +288,11 @@ async function registerAndNormalizeFile(filepath, filename, size_bytes) {
                     };
             rawUploadPayload.postIngest = partIndex === totalParts - 1;
             if (esiid && esiid.trim().length > 0) {
+                rawUploadPayload.esiid = esiid.trim();
                 rawUploadPayload.storagePath = `/smt/${esiid.trim()}/${partFilename}`;
+            }
+            if (meter && meter.trim().length > 0) {
+                rawUploadPayload.meter = meter.trim();
             }
                     // eslint-disable-next-line no-console
             console.log(`[smt-upload] registering raw file part ${partIndex + 1}/${totalParts} at ${rawUploadUrl} (bytes=${partBuffer.length})`);
@@ -370,7 +374,7 @@ app.get("/health", function (_req, res) {
     });
 });
 app.post("/upload", verifyUploadToken, upload.single("file"), function (req, res) { return __awaiter(void 0, void 0, void 0, function () {
-    var roleHeader, accountHeader, roleRaw, role, accountKeyRaw, accountKey, rate, resetAtIso, file, destPath, writeErr_1, sizeGuess, originalName, intervalFile, unlinkErr_2, result, err_3;
+    var roleHeader, accountHeader, roleRaw, role, accountKeyRaw, accountKey, rate, resetAtIso, file, destPath, writeErr_1, sizeGuess, originalName, intervalFile, unlinkErr_2, esiid, meter, result, err_3;
     var _a, _b, _c, _d, _e;
     return __generator(this, function (_f) {
         switch (_f.label) {
@@ -486,7 +490,14 @@ app.post("/upload", verifyUploadToken, upload.single("file"), function (req, res
                     },
                 });
                 return [2 /*return*/];
-            case 13: return [4 /*yield*/, registerAndNormalizeFile(destPath, originalName, sizeGuess)];
+            case 13:
+                esiid = (typeof ((_d = req.body) === null || _d === void 0 ? void 0 : _d.esiid) === "string" && req.body.esiid.trim().length > 0)
+                    ? req.body.esiid.trim()
+                    : undefined;
+                meter = (typeof ((_e = req.body) === null || _e === void 0 ? void 0 : _e.meter) === "string" && req.body.meter.trim().length > 0)
+                    ? req.body.meter.trim()
+                    : undefined;
+                return [4 /*yield*/, registerAndNormalizeFile(destPath, originalName, sizeGuess, esiid, meter)];
             case 14:
                 result = _f.sent();
                 res.status(result.ok ? 200 : 500).json({
