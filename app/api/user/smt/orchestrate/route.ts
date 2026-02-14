@@ -74,24 +74,64 @@ async function computeUsageCoverageForEsiid(esiid: string): Promise<UsageCoverag
   const coverageDays =
     coverageStart && coverageEnd ? daysBetweenInclusive(coverageStart, coverageEnd) : 0;
 
-  // Completeness check (contiguous-series, global span):
+  // Completeness check (contiguous-series, per meter):
   // SMT delivers 15-minute reads as a contiguous series (zeros still appear as rows).
-  // Determine how many 15-min intervals *should* exist between the oldest and newest timestamps
-  // we currently have, and keep pulling until we have (nearly) all of them.
+  //
+  // A single ESIID can have multiple meters over time (e.g., meter replacement). Those meters can
+  // have different coverage windows, so we compute expected intervals per meter span and sum them.
   const FIFTEEN_MIN_MS = 15 * 60 * 1000;
-  const intervalExpectedBySpan = (() => {
-    if (!coverageStart || !coverageEnd) return 0;
-    const diff = coverageEnd.getTime() - coverageStart.getTime();
-    if (!Number.isFinite(diff) || diff < 0) return 0;
-    return Math.max(1, Math.round(diff / FIFTEEN_MIN_MS) + 1);
-  })();
+
+  let intervalExpectedBySpan = 0;
+  let minMeterCompleteness = 1;
+  let meterGroupsSeen = 0;
+
+  try {
+    const meterAgg = await prisma.smtInterval.groupBy({
+      by: ["meter"],
+      where: { esiid },
+      _count: { _all: true },
+      _min: { ts: true },
+      _max: { ts: true },
+    });
+
+    for (const m of meterAgg) {
+      const minTs = (m as any)?._min?.ts as Date | null | undefined;
+      const maxTs = (m as any)?._max?.ts as Date | null | undefined;
+      const count = Number((m as any)?._count?._all ?? 0);
+      if (!minTs || !maxTs || count <= 0) continue;
+
+      const diff = maxTs.getTime() - minTs.getTime();
+      if (!Number.isFinite(diff) || diff < 0) continue;
+
+      // Use rounding to tolerate any occasional ms drift; timestamps should be 15-min aligned.
+      const expected = Math.max(1, Math.round(diff / FIFTEEN_MIN_MS) + 1);
+      intervalExpectedBySpan += expected;
+
+      const completeness = expected > 0 ? count / expected : 0;
+      minMeterCompleteness = Math.min(minMeterCompleteness, completeness);
+      meterGroupsSeen += 1;
+    }
+  } catch {
+    // Fall back to naive expectation from global span if groupBy fails.
+    if (coverageStart && coverageEnd) {
+      const diff = coverageEnd.getTime() - coverageStart.getTime();
+      if (Number.isFinite(diff) && diff >= 0) {
+        intervalExpectedBySpan = Math.max(1, Math.round(diff / FIFTEEN_MIN_MS) + 1);
+        minMeterCompleteness =
+          intervalExpectedBySpan > 0 ? intervalCount / intervalExpectedBySpan : 0;
+        meterGroupsSeen = 1;
+      }
+    }
+  }
 
   const intervalCompletenessBySpan =
     intervalExpectedBySpan > 0 ? intervalCount / intervalExpectedBySpan : 0;
 
   // Allow a tiny amount of slop for rare edge cases (e.g., duplicate cleanup races).
   // If we have fewer than ~99.5% of expected intervals across the observed span, keep pulling.
-  const historyReady = intervalExpectedBySpan > 0 && intervalCompletenessBySpan >= 0.995;
+  // Use the *worst* meter completeness to avoid declaring "ready" when one meter is missing rows.
+  const historyReady =
+    intervalExpectedBySpan > 0 && meterGroupsSeen > 0 && minMeterCompleteness >= 0.995;
 
   const rawCount = await prisma.rawSmtFile.count({
     where: {
