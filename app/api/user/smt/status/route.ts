@@ -119,7 +119,6 @@ export async function GET() {
                 addressCity: true,
                 addressState: true,
                 addressZip5: true,
-                esiid: true,
               },
             },
           },
@@ -137,7 +136,14 @@ export async function GET() {
     }
 
     const address = authorization.houseAddress ?? null;
-    const effectiveEsiid = (address?.esiid ?? activeHouse.esiid ?? authorization.esiid) ?? null;
+
+    // Keep precedence consistent with /api/user/smt/orchestrate:
+    // prefer the ESIID the customer actually authorized (authorization row), then fall back to
+    // the active house ESIID (and finally the joined address ESIID if present).
+    const authEsiid = String(authorization.esiid ?? "").trim();
+    const houseEsiid = String(activeHouse.esiid ?? "").trim();
+    const addressEsiid = String(address?.esiid ?? "").trim();
+    const effectiveEsiid = (authEsiid || houseEsiid || addressEsiid) || null;
 
     return NextResponse.json({
       connected: true,
@@ -168,5 +174,4 @@ export async function GET() {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
-
 
