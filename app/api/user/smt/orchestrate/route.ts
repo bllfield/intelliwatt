@@ -45,9 +45,8 @@ function isActiveStatus(s: string | null | undefined): boolean {
 
 type UsageCoverage = {
   intervalCount: number;
-  intervalCountInTarget: number;
-  intervalExpectedInTarget: number;
-  intervalCompletenessInTarget: number; // 0..1
+  intervalExpectedBySpan: number;
+  intervalCompletenessBySpan: number; // 0..1
   rawCount: number;
   coverageStart: Date | null;
   coverageEnd: Date | null;
@@ -58,8 +57,6 @@ type UsageCoverage = {
 };
 
 async function computeUsageCoverageForEsiid(esiid: string): Promise<UsageCoverage> {
-  const target = getRollingBackfillRange(12);
-
   const intervalAggAll = await prisma.smtInterval.aggregate({
     where: { esiid },
     _count: { _all: true },
@@ -73,48 +70,53 @@ async function computeUsageCoverageForEsiid(esiid: string): Promise<UsageCoverag
   const coverageDays =
     coverageStart && coverageEnd ? daysBetweenInclusive(coverageStart, coverageEnd) : 0;
 
-  // Completeness check: ensure we actually have close to a full year of 15-minute intervals,
-  // not just a sparse set of points spanning the year (min/max alone is not sufficient).
-  const targetStart = target.startDate;
-  const targetEnd = target.endDate;
+  // Completeness check (contiguous-series):
+  // SMT delivers 15-minute reads as a contiguous series (zeros still appear as rows).
+  // We should NOT mark "ready" just because min/max spans a year.
+  //
+  // Instead, for each meter, compute the expected number of 15-minute timestamps between
+  // that meter's min/max (inclusive) and verify we have (nearly) all of them.
+  //
+  // This also correctly allows users who only have (e.g.) 6 months available: if the data
+  // we *do* have is contiguous and complete across its span, they are "ready".
+  const FIFTEEN_MIN_MS = 15 * 60 * 1000;
 
-  const intervalAggTarget = await prisma.smtInterval.aggregate({
-    where: { esiid, ts: { gte: targetStart, lte: targetEnd } },
-    _count: { _all: true },
-    _min: { ts: true },
-    _max: { ts: true },
-  });
-  const intervalCountInTarget = Number(intervalAggTarget._count?._all ?? 0);
-
-  let meterCountInTarget = 1;
+  let intervalExpectedBySpan = 0;
   try {
-    const meterGroups = await prisma.smtInterval.groupBy({
+    const meterAgg = await prisma.smtInterval.groupBy({
       by: ["meter"],
-      where: { esiid, ts: { gte: targetStart, lte: targetEnd } },
+      where: { esiid },
       _count: { _all: true },
+      _min: { ts: true },
+      _max: { ts: true },
     });
-    meterCountInTarget = Math.max(1, meterGroups.length);
+
+    for (const m of meterAgg) {
+      const minTs = (m as any)?._min?.ts as Date | null | undefined;
+      const maxTs = (m as any)?._max?.ts as Date | null | undefined;
+      if (!minTs || !maxTs) continue;
+      const diff = maxTs.getTime() - minTs.getTime();
+      if (!Number.isFinite(diff) || diff < 0) continue;
+      // Use rounding to tolerate any occasional ms drift; timestamps should be 15-min aligned.
+      const expected = Math.max(1, Math.round(diff / FIFTEEN_MIN_MS) + 1);
+      intervalExpectedBySpan += expected;
+    }
   } catch {
-    meterCountInTarget = 1;
+    // If groupBy fails (older Prisma / DB), fall back to naive expectation from global span.
+    if (coverageStart && coverageEnd) {
+      const diff = coverageEnd.getTime() - coverageStart.getTime();
+      if (Number.isFinite(diff) && diff >= 0) {
+        intervalExpectedBySpan = Math.max(1, Math.round(diff / FIFTEEN_MIN_MS) + 1);
+      }
+    }
   }
 
-  const expectedPerDay = 96; // 15-minute intervals
-  const targetDays = daysBetweenInclusive(targetStart, targetEnd);
-  const intervalExpectedInTarget = Math.max(0, targetDays * expectedPerDay * meterCountInTarget);
-  const intervalCompletenessInTarget =
-    intervalExpectedInTarget > 0 ? intervalCountInTarget / intervalExpectedInTarget : 0;
+  const intervalCompletenessBySpan =
+    intervalExpectedBySpan > 0 ? intervalCount / intervalExpectedBySpan : 0;
 
-  const slopDays = 2;
-  const targetStartMs = target.startDate.getTime() + slopDays * 24 * 60 * 60 * 1000;
-  const targetEndMs = target.endDate.getTime() - slopDays * 24 * 60 * 60 * 1000;
-  const spanReady = Boolean(
-    coverageStart &&
-      coverageEnd &&
-      coverageStart.getTime() <= targetStartMs &&
-      coverageEnd.getTime() >= targetEndMs,
-  );
-  const completenessReady = intervalCompletenessInTarget >= 0.85;
-  const historyReady = spanReady && completenessReady;
+  // Allow a tiny amount of slop for rare edge cases (e.g., duplicate cleanup races).
+  // If we have fewer than ~99.5% of expected intervals across the observed span, keep pulling.
+  const historyReady = intervalExpectedBySpan > 0 && intervalCompletenessBySpan >= 0.995;
 
   const rawCount = await prisma.rawSmtFile.count({
     where: {
@@ -136,7 +138,7 @@ async function computeUsageCoverageForEsiid(esiid: string): Promise<UsageCoverag
     if (phase === "pending") return "Waiting for SMT interval data delivery.";
     if (phase === "processing") {
       if (intervalCount > 0 && coverageStart && coverageEnd) {
-        const pct = intervalCompletenessInTarget > 0 ? Math.floor(intervalCompletenessInTarget * 100) : 0;
+        const pct = intervalCompletenessBySpan > 0 ? Math.floor(intervalCompletenessBySpan * 100) : 0;
         if (rawCount === 0) {
           if (tailGapDays > 0) {
             return `SMT intervals ingested (${coverageDays} day(s)). Coverage completeness ~${pct}%. Still fetching the most recent ${tailGapDays} day(s) to complete the 12‑month window.`;
@@ -156,9 +158,8 @@ async function computeUsageCoverageForEsiid(esiid: string): Promise<UsageCoverag
 
   return {
     intervalCount,
-    intervalCountInTarget,
-    intervalExpectedInTarget,
-    intervalCompletenessInTarget,
+    intervalExpectedBySpan,
+    intervalCompletenessBySpan,
     rawCount,
     coverageStart,
     coverageEnd,
@@ -463,9 +464,10 @@ export async function POST(req: NextRequest) {
         end: usage.coverageEnd ? usage.coverageEnd.toISOString() : null,
         days: usage.coverageDays,
         completenessPct:
-          usage.intervalExpectedInTarget > 0
-            ? Math.round((usage.intervalCountInTarget / usage.intervalExpectedInTarget) * 1000) / 10
+          usage.intervalExpectedBySpan > 0
+            ? Math.round((usage.intervalCount / usage.intervalExpectedBySpan) * 1000) / 10
             : 0,
+        expectedIntervals: usage.intervalExpectedBySpan,
       },
       message: usage.message,
     },
