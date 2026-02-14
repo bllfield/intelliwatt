@@ -2,6 +2,8 @@
 
 import * as React from "react";
 
+const SMT_STATUS_BANNER_BOOTSTRAP_KEY = "smt_status_banner_bootstrap_v1";
+
 interface SmtStatusBannerProps {
   homeId: string;
 }
@@ -80,6 +82,21 @@ export function SmtStatusBanner({ homeId }: SmtStatusBannerProps) {
       setError(null);
       setWarning(null);
       return;
+    }
+
+    // React StrictMode (dev) double-invokes effects via a mount → cleanup → remount cycle.
+    // Add a short session TTL guard to avoid duplicate initial status fetches.
+    try {
+      const key = `${SMT_STATUS_BANNER_BOOTSTRAP_KEY}:${homeId}`;
+      const lastRaw = window.sessionStorage.getItem(key);
+      const lastAt = lastRaw ? Number(lastRaw) : Number.NaN;
+      // 3s: enough to dedupe StrictMode's immediate remount; still allows real refreshes.
+      if (Number.isFinite(lastAt) && Date.now() - lastAt < 3000) {
+        return;
+      }
+      window.sessionStorage.setItem(key, String(Date.now()));
+    } catch {
+      // ignore storage failures
     }
 
     void fetchStatus(false);

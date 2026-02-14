@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 const LAST_OFFER_KEY = "dashboard_compare_last_offer_id_v1";
+const COMPARE_BOOTSTRAP_KEY = "dashboard_compare_landing_bootstrap_v1";
 
 export default function CompareLandingClient() {
   const router = useRouter();
@@ -12,6 +13,22 @@ export default function CompareLandingClient() {
   const [status, setStatus] = useState<"idle" | "finding" | "failed">("idle");
 
   useEffect(() => {
+    // React StrictMode (dev) intentionally double-invokes effects via a mount → cleanup → remount cycle.
+    // Add a short session TTL guard to avoid duplicate fetches/redirects.
+    try {
+      const lastRaw = window.sessionStorage.getItem(COMPARE_BOOTSTRAP_KEY);
+      const lastAt = lastRaw ? Number(lastRaw) : Number.NaN;
+      // 3s: enough to dedupe StrictMode's immediate remount; still allows future visits.
+      if (Number.isFinite(lastAt) && Date.now() - lastAt < 3000) {
+        return () => {
+          // no-op
+        };
+      }
+      window.sessionStorage.setItem(COMPARE_BOOTSTRAP_KEY, String(Date.now()));
+    } catch {
+      // ignore storage failures; effect remains abort-safe
+    }
+
     let cancelled = false;
     const controller = new AbortController();
 
@@ -62,8 +79,8 @@ export default function CompareLandingClient() {
           return;
         }
         if (!cancelled) setStatus("failed");
-      } catch (e) {
-        // Abort (unmount or rerun) should never flip the UI to "failed".
+      } catch {
+        // Abort (unmount or StrictMode remount) should never flip UI to "failed".
         if (cancelled || controller.signal.aborted) return;
         if (!cancelled) setStatus("failed");
       }
@@ -73,7 +90,7 @@ export default function CompareLandingClient() {
       cancelled = true;
       controller.abort();
     };
-  }, [router]);
+  }, []);
 
   return (
     <div className="mx-auto w-full max-w-5xl">
