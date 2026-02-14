@@ -433,9 +433,9 @@ export default function PlanCompareClient(props: { offerId: string }) {
                 </div>
               </div>
               <div className="rounded-2xl border border-brand-cyan/15 bg-brand-white/5 p-4">
-                <div className="text-xs text-brand-cyan/70">First-year delta (includes ETF if toggled)</div>
+                <div className="text-xs text-brand-cyan/70">First-year delta (annual; includes ETF once if toggled)</div>
                 <div className="mt-1 text-xl font-semibold text-brand-white/90">
-                  {firstYearDelta != null ? fmtDollars2(firstYearDelta) : "—"}
+                  {firstYearDelta != null ? `${fmtDollars2(firstYearDelta)}/yr` : "—"}
                 </div>
               </div>
               <div className="rounded-2xl border border-brand-cyan/15 bg-brand-white/5 p-4">
@@ -771,6 +771,38 @@ export default function PlanCompareClient(props: { offerId: string }) {
                                   const totalEtf = side === "offer" && includeEtf && etfDollars > 0 && rows.length > 0 ? etfDollars : 0;
                                   const totalMonthTotal = sumNums(baseMonthTotals) + totalEtf;
 
+                                  // Reconcile: monthlyBreakdown.totals.expectedAnnual is the canonical engine output.
+                                  // The per-month reconstruction can differ when a plan contains rules we don't yet
+                                  // fully model in the table (e.g., complex bill credits / TOU discounts).
+                                  const deltaCents =
+                                    typeof monthlyBreakdown?.totals?.deltaCents === "number"
+                                      ? monthlyBreakdown.totals.deltaCents
+                                      : null;
+                                  const adjustmentDollars =
+                                    deltaCents != null ? (-1 * deltaCents) / 100 : null;
+
+                                  const expectedAnnual =
+                                    typeof monthlyBreakdown?.totals?.expectedAnnual === "number"
+                                      ? monthlyBreakdown.totals.expectedAnnual
+                                      : null;
+                                  const reconciledTotal =
+                                    expectedAnnual != null
+                                      ? expectedAnnual + (side === "offer" ? totalEtf : 0)
+                                      : null;
+
+                                  const currentExpectedAnnual =
+                                    side === "offer" && typeof (currentDetail as any)?.monthlyBreakdown?.totals?.expectedAnnual === "number"
+                                      ? Number((currentDetail as any).monthlyBreakdown.totals.expectedAnnual)
+                                      : null;
+                                  const reconciledDeltaVsCurrent =
+                                    side === "offer" &&
+                                    typeof reconciledTotal === "number" &&
+                                    Number.isFinite(reconciledTotal) &&
+                                    typeof currentExpectedAnnual === "number" &&
+                                    Number.isFinite(currentExpectedAnnual)
+                                      ? reconciledTotal - currentExpectedAnnual
+                                      : null;
+
                                   let totalDelta: number | null = null;
                                   if (side === "offer") {
                                     // Sum month deltas against current (align by yearMonth).
@@ -790,56 +822,126 @@ export default function PlanCompareClient(props: { offerId: string }) {
                                   }
 
                                   return (
-                                    <tr className="border-t border-brand-cyan/20">
-                                      <td className="px-3 py-2 font-semibold text-brand-white/90">Total</td>
-                                      <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtKwh0(totalKwh)}</td>
+                                    <>
+                                      <tr className="border-t border-brand-cyan/20">
+                                        <td className="px-3 py-2 font-semibold text-brand-white/90">Total (sum of rows)</td>
+                                        <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtKwh0(totalKwh)}</td>
 
-                                      {repBuckets.map((b: any) => (
-                                        <td key={`total-${b.bucketKey}-kwh`} className="px-3 py-2 font-semibold text-brand-white/90">
-                                          {fmtKwh0(repKwhByKey.get(String(b.bucketKey)) ?? 0)}
-                                        </td>
-                                      ))}
-                                      {/* Rate columns don't have a meaningful "sum" */}
-                                      {repBuckets.map((b: any) => (
-                                        <td key={`total-${b.bucketKey}-rate`} className="px-3 py-2 text-brand-cyan/60">
-                                          —
-                                        </td>
-                                      ))}
-                                      {repBuckets.map((b: any) => (
-                                        <td key={`total-${b.bucketKey}-cost`} className="px-3 py-2 font-semibold text-brand-white/90">
-                                          {fmtDollars(repCostByKey.get(String(b.bucketKey)) ?? 0)}
-                                        </td>
-                                      ))}
+                                        {repBuckets.map((b: any) => (
+                                          <td key={`total-${b.bucketKey}-kwh`} className="px-3 py-2 font-semibold text-brand-white/90">
+                                            {fmtKwh0(repKwhByKey.get(String(b.bucketKey)) ?? 0)}
+                                          </td>
+                                        ))}
+                                        {/* Rate columns don't have a meaningful "sum" */}
+                                        {repBuckets.map((b: any) => (
+                                          <td key={`total-${b.bucketKey}-rate`} className="px-3 py-2 text-brand-cyan/60">
+                                            —
+                                          </td>
+                                        ))}
+                                        {repBuckets.map((b: any) => (
+                                          <td key={`total-${b.bucketKey}-cost`} className="px-3 py-2 font-semibold text-brand-white/90">
+                                            {fmtDollars(repCostByKey.get(String(b.bucketKey)) ?? 0)}
+                                          </td>
+                                        ))}
 
-                                      {/* TDSP ¢/kWh doesn't sum meaningfully */}
-                                      <td className="px-3 py-2 text-brand-cyan/60">—</td>
-                                      <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(tdspDelivery)}</td>
-                                      <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(repFixed)}</td>
-                                      <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(tdspFixed)}</td>
-                                      <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(credits)}</td>
-                                      <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(minUsage)}</td>
-                                      <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(minBill)}</td>
-                                      <td
-                                        className="px-3 py-2 font-semibold text-brand-white/90"
-                                        title={includeEtf && totalEtf > 0 ? `Total includes ETF once: ${fmtDollars(totalEtf)}` : undefined}
-                                      >
-                                        {fmtDollars(totalMonthTotal)}
-                                      </td>
-                                      {side === "offer" ? (
+                                        {/* TDSP ¢/kWh doesn't sum meaningfully */}
+                                        <td className="px-3 py-2 text-brand-cyan/60">—</td>
+                                        <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(tdspDelivery)}</td>
+                                        <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(repFixed)}</td>
+                                        <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(tdspFixed)}</td>
+                                        <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(credits)}</td>
+                                        <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(minUsage)}</td>
+                                        <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(minBill)}</td>
                                         <td
-                                          className={`px-3 py-2 font-semibold ${
-                                            typeof totalDelta === "number" && Number.isFinite(totalDelta)
-                                              ? totalDelta < 0
-                                                ? "text-emerald-200"
-                                                : "text-amber-200"
-                                              : "text-brand-cyan/60"
-                                          }`}
+                                          className="px-3 py-2 font-semibold text-brand-white/90"
                                           title={includeEtf && totalEtf > 0 ? `Total includes ETF once: ${fmtDollars(totalEtf)}` : undefined}
                                         >
-                                          {totalDelta == null ? "—" : fmtDollars(totalDelta)}
+                                          {fmtDollars(totalMonthTotal)}
                                         </td>
+                                        {side === "offer" ? (
+                                          <td
+                                            className={`px-3 py-2 font-semibold ${
+                                              typeof totalDelta === "number" && Number.isFinite(totalDelta)
+                                                ? totalDelta < 0
+                                                  ? "text-emerald-200"
+                                                  : "text-amber-200"
+                                                : "text-brand-cyan/60"
+                                            }`}
+                                            title={includeEtf && totalEtf > 0 ? `Total includes ETF once: ${fmtDollars(totalEtf)}` : undefined}
+                                          >
+                                            {totalDelta == null ? "—" : fmtDollars(totalDelta)}
+                                          </td>
+                                        ) : null}
+                                      </tr>
+
+                                      {typeof adjustmentDollars === "number" && Number.isFinite(adjustmentDollars) && adjustmentDollars !== 0 ? (
+                                        <tr className="border-t border-brand-cyan/10 text-brand-cyan/70">
+                                          <td className="px-3 py-2 font-semibold">Adjustment (credits/discounts not fully modeled in rows)</td>
+                                          <td className="px-3 py-2">—</td>
+                                          {repBuckets.map((b: any) => (
+                                            <td key={`adj-${b.bucketKey}-kwh`} className="px-3 py-2">—</td>
+                                          ))}
+                                          {repBuckets.map((b: any) => (
+                                            <td key={`adj-${b.bucketKey}-rate`} className="px-3 py-2">—</td>
+                                          ))}
+                                          {repBuckets.map((b: any) => (
+                                            <td key={`adj-${b.bucketKey}-cost`} className="px-3 py-2">—</td>
+                                          ))}
+                                          <td className="px-3 py-2">—</td>
+                                          <td className="px-3 py-2">—</td>
+                                          <td className="px-3 py-2">—</td>
+                                          <td className="px-3 py-2">—</td>
+                                          <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(adjustmentDollars)}</td>
+                                          <td className="px-3 py-2">—</td>
+                                          <td className="px-3 py-2">—</td>
+                                          <td className="px-3 py-2">—</td>
+                                          {side === "offer" ? <td className="px-3 py-2">—</td> : null}
+                                        </tr>
                                       ) : null}
-                                    </tr>
+
+                                      {typeof reconciledTotal === "number" && Number.isFinite(reconciledTotal) ? (
+                                        <tr className="border-t border-brand-cyan/10">
+                                          <td className="px-3 py-2 font-semibold text-brand-white/90">Reconciled total (matches engine)</td>
+                                          <td className="px-3 py-2 font-semibold text-brand-white/90">—</td>
+                                          {repBuckets.map((b: any) => (
+                                            <td key={`rec-${b.bucketKey}-kwh`} className="px-3 py-2 text-brand-cyan/60">—</td>
+                                          ))}
+                                          {repBuckets.map((b: any) => (
+                                            <td key={`rec-${b.bucketKey}-rate`} className="px-3 py-2 text-brand-cyan/60">—</td>
+                                          ))}
+                                          {repBuckets.map((b: any) => (
+                                            <td key={`rec-${b.bucketKey}-cost`} className="px-3 py-2 text-brand-cyan/60">—</td>
+                                          ))}
+                                          <td className="px-3 py-2 text-brand-cyan/60">—</td>
+                                          <td className="px-3 py-2 text-brand-cyan/60">—</td>
+                                          <td className="px-3 py-2 text-brand-cyan/60">—</td>
+                                          <td className="px-3 py-2 text-brand-cyan/60">—</td>
+                                          <td className="px-3 py-2 text-brand-cyan/60">—</td>
+                                          <td className="px-3 py-2 text-brand-cyan/60">—</td>
+                                          <td className="px-3 py-2 text-brand-cyan/60">—</td>
+                                          <td
+                                            className="px-3 py-2 font-semibold text-brand-white/90"
+                                            title={side === "offer" && includeEtf && totalEtf > 0 ? `Includes ETF once: ${fmtDollars(totalEtf)}` : undefined}
+                                          >
+                                            {fmtDollars(reconciledTotal)}
+                                          </td>
+                                          {side === "offer" ? (
+                                            <td
+                                              className={`px-3 py-2 font-semibold ${
+                                                typeof reconciledDeltaVsCurrent === "number" && Number.isFinite(reconciledDeltaVsCurrent)
+                                                  ? reconciledDeltaVsCurrent < 0
+                                                    ? "text-emerald-200"
+                                                    : "text-amber-200"
+                                                  : "text-brand-cyan/60"
+                                              }`}
+                                              title={side === "offer" && includeEtf && totalEtf > 0 ? `Includes ETF once: ${fmtDollars(totalEtf)}` : undefined}
+                                            >
+                                              {reconciledDeltaVsCurrent == null ? "—" : fmtDollars(reconciledDeltaVsCurrent)}
+                                            </td>
+                                          ) : null}
+                                        </tr>
+                                      ) : null}
+                                    </>
                                   );
                                 })()}
                               </tfoot>
