@@ -245,19 +245,6 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (!house.esiid) {
-    return NextResponse.json(
-      {
-        ok: true,
-        phase: "no_esiid",
-        done: false,
-        homeId: house.id,
-        message: "No ESIID linked to this home yet.",
-      },
-      { status: 200 },
-    );
-  }
-
   const authorization = await prisma.smtAuthorization.findFirst({
     where: {
       userId: user.id,
@@ -297,40 +284,10 @@ export async function POST(req: NextRequest) {
     ? now.getTime() > authorization.authorizationEndDate.getTime()
     : false;
 
-  const authEsiid = String(authorization.esiid ?? "").trim();
-  const houseEsiid = String(house.esiid ?? "").trim();
-  const effectiveEsiid = authEsiid || houseEsiid;
-  const esiidMismatch =
-    Boolean(authEsiid) && Boolean(houseEsiid) && authEsiid !== houseEsiid;
-
-  // If the house doesn't have an ESIID yet but the authorization does, hydrate it so the
-  // dashboard session house record becomes the source of truth going forward.
-  if (!houseEsiid && authEsiid) {
-    try {
-      await prisma.houseAddress.update({
-        where: { id: house.id },
-        data: { esiid: authEsiid },
-      });
-    } catch {
-      // non-fatal; we'll still use the authorization ESIID for this request
-    }
-  }
-
-  if (!effectiveEsiid) {
-    return NextResponse.json(
-      {
-        ok: true,
-        phase: "no_esiid",
-        done: false,
-        homeId: house.id,
-        message: "No ESIID is linked to this home/authorization yet.",
-      },
-      { status: 200 },
-    );
-  }
-
   // Always compute current usage coverage for visibility (cheap DB-only).
-  const usage = await computeUsageCoverageForEsiid(effectiveEsiid);
+  // Use the active house ESIID as the source of truth for what the dashboard should show.
+  const activeEsiid = house.esiid;
+  const usage = await computeUsageCoverageForEsiid(activeEsiid);
 
   // Remote actions throttling: use smtLastSyncAt as a coarse "last orchestration action" timestamp.
   const ORCHESTRATOR_COOLDOWN_MS = (() => {
@@ -361,9 +318,6 @@ export async function POST(req: NextRequest) {
     backfillRequested: false,
     pullTriggered: false,
     orchestratorThrottled: recentlySynced,
-    ...(esiidMismatch
-      ? { esiidMismatch: { houseEsiid, authorizationEsiid: authEsiid } }
-      : {}),
   };
 
   let effectiveStatus = normStatus(authorization.smtStatus);
@@ -403,7 +357,7 @@ export async function POST(req: NextRequest) {
     if (enableBackfill && (force || !requestedAt || allowRetry)) {
       const res = await requestSmtBackfillForAuthorization({
         authorizationId: authorization.id,
-        esiid: effectiveEsiid,
+        esiid: activeEsiid,
         meterNumber: authorization.meterNumber,
         startDate: backfillRange.startDate,
         endDate: backfillRange.endDate,
@@ -437,7 +391,7 @@ export async function POST(req: NextRequest) {
           cache: "no-store",
           body: JSON.stringify({
             homeId: house.id,
-            esiid: effectiveEsiid,
+            esiid: activeEsiid,
             reason: force ? "user_refresh" : "user_orchestrate",
             forceRepost: force,
           }),
@@ -484,7 +438,7 @@ export async function POST(req: NextRequest) {
     homeId: house.id,
     authorization: {
       id: authorization.id,
-      esiid: effectiveEsiid,
+      esiid: activeEsiid,
       meterNumber: authorization.meterNumber,
       status: effectiveStatus || null,
       message: effectiveMessage,
@@ -511,4 +465,3 @@ export async function POST(req: NextRequest) {
     actions,
   });
 }
-
