@@ -74,46 +74,17 @@ async function computeUsageCoverageForEsiid(esiid: string): Promise<UsageCoverag
   const coverageDays =
     coverageStart && coverageEnd ? daysBetweenInclusive(coverageStart, coverageEnd) : 0;
 
-  // Completeness check (contiguous-series):
+  // Completeness check (contiguous-series, global span):
   // SMT delivers 15-minute reads as a contiguous series (zeros still appear as rows).
-  // We should NOT mark "ready" just because min/max spans a year.
-  //
-  // Instead, for each meter, compute the expected number of 15-minute timestamps between
-  // that meter's min/max (inclusive) and verify we have (nearly) all of them.
-  //
-  // This also correctly allows users who only have (e.g.) 6 months available: if the data
-  // we *do* have is contiguous and complete across its span, they are "ready".
+  // Determine how many 15-min intervals *should* exist between the oldest and newest timestamps
+  // we currently have, and keep pulling until we have (nearly) all of them.
   const FIFTEEN_MIN_MS = 15 * 60 * 1000;
-
-  let intervalExpectedBySpan = 0;
-  try {
-    const meterAgg = await prisma.smtInterval.groupBy({
-      by: ["meter"],
-      where: { esiid },
-      _count: { _all: true },
-      _min: { ts: true },
-      _max: { ts: true },
-    });
-
-    for (const m of meterAgg) {
-      const minTs = (m as any)?._min?.ts as Date | null | undefined;
-      const maxTs = (m as any)?._max?.ts as Date | null | undefined;
-      if (!minTs || !maxTs) continue;
-      const diff = maxTs.getTime() - minTs.getTime();
-      if (!Number.isFinite(diff) || diff < 0) continue;
-      // Use rounding to tolerate any occasional ms drift; timestamps should be 15-min aligned.
-      const expected = Math.max(1, Math.round(diff / FIFTEEN_MIN_MS) + 1);
-      intervalExpectedBySpan += expected;
-    }
-  } catch {
-    // If groupBy fails (older Prisma / DB), fall back to naive expectation from global span.
-    if (coverageStart && coverageEnd) {
-      const diff = coverageEnd.getTime() - coverageStart.getTime();
-      if (Number.isFinite(diff) && diff >= 0) {
-        intervalExpectedBySpan = Math.max(1, Math.round(diff / FIFTEEN_MIN_MS) + 1);
-      }
-    }
-  }
+  const intervalExpectedBySpan = (() => {
+    if (!coverageStart || !coverageEnd) return 0;
+    const diff = coverageEnd.getTime() - coverageStart.getTime();
+    if (!Number.isFinite(diff) || diff < 0) return 0;
+    return Math.max(1, Math.round(diff / FIFTEEN_MIN_MS) + 1);
+  })();
 
   const intervalCompletenessBySpan =
     intervalExpectedBySpan > 0 ? intervalCount / intervalExpectedBySpan : 0;
