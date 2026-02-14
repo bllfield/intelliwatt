@@ -7,6 +7,7 @@ import DashboardPlanPipelineBootstrapper from '@/components/dashboard/DashboardP
 import DashboardSmtOrchestratorBootstrapper from '@/components/dashboard/DashboardSmtOrchestratorBootstrapper';
 import ImpersonationBanner from '@/components/dashboard/ImpersonationBanner';
 import { prisma } from '@/lib/db';
+import { refreshSmtAuthorizationStatus } from '@/lib/smt/agreements';
 import { normalizeEmail } from '@/lib/utils/email';
 
 async function isSmtConfirmationRequired(): Promise<boolean> {
@@ -48,22 +49,47 @@ async function isSmtConfirmationRequired(): Promise<boolean> {
       return false;
     }
 
-    const authorization = await prisma.smtAuthorization.findFirst({
+    let authorization = await prisma.smtAuthorization.findFirst({
       where: {
         userId: user.id,
         houseAddressId: targetHouseId,
         archivedAt: null,
       },
       orderBy: { createdAt: 'desc' },
-      select: { smtStatus: true, smtStatusMessage: true },
+      select: { id: true, smtStatus: true, smtStatusMessage: true, smtLastSyncAt: true },
     });
 
     if (!authorization) {
       return false;
     }
 
-    const normalizedStatus = (authorization.smtStatus ?? '').toLowerCase();
-    const normalizedMessage = (authorization.smtStatusMessage ?? '').toLowerCase();
+    // If we *think* SMT is pending, do a best-effort refresh (with cooldown) so users
+    // aren’t stuck on the confirmation page after SMT has already confirmed.
+    const statusBefore = (authorization.smtStatus ?? '').toLowerCase();
+    const isMaybePending = statusBefore === 'pending' || statusBefore === '';
+    const lastSyncAt = authorization.smtLastSyncAt ?? null;
+    const staleMs = 2 * 60 * 1000; // 2 minutes: avoid hammering on every request
+    const isStale = !lastSyncAt || Date.now() - lastSyncAt.getTime() > staleMs;
+
+    if (isMaybePending && isStale) {
+      try {
+        const refreshed = await refreshSmtAuthorizationStatus(authorization.id);
+        const nextAuth = (refreshed as any)?.authorization ?? null;
+        if (nextAuth) {
+          authorization = {
+            ...authorization,
+            smtStatus: nextAuth.smtStatus,
+            smtStatusMessage: nextAuth.smtStatusMessage,
+            smtLastSyncAt: new Date(),
+          } as any;
+        }
+      } catch {
+        // ignore; fail-open
+      }
+    }
+
+    const normalizedStatus = (authorization?.smtStatus ?? '').toLowerCase();
+    const normalizedMessage = (authorization?.smtStatusMessage ?? '').toLowerCase();
 
     const isExplicitPending = normalizedStatus === 'pending' || normalizedStatus === '';
     const messageImpliesPending =

@@ -551,6 +551,7 @@ export async function refreshSmtAuthorizationStatus(authId: string) {
     where: { id: authId },
     select: {
       id: true,
+      userId: true,
       smtAgreementId: true,
       esiid: true,
       houseAddressId: true,
@@ -559,6 +560,8 @@ export async function refreshSmtAuthorizationStatus(authId: string) {
       smtStatus: true,
       smtStatusMessage: true,
       smtLastSyncAt: true,
+      emailConfirmationStatus: true,
+      emailConfirmationAt: true,
     },
   });
 
@@ -672,6 +675,16 @@ export async function refreshSmtAuthorizationStatus(authId: string) {
     smtLastSyncAt: new Date(),
   };
 
+  // If SMT reports an ACTIVE agreement, we should not keep showing "pending email approval"
+  // inside IntelliWatt. Auto-mark as approved once we have proof from SMT.
+  const shouldAutoApproveEmail =
+    localStatus === "ACTIVE" &&
+    String((auth as any)?.emailConfirmationStatus ?? "").toUpperCase() !== "APPROVED";
+  if (shouldAutoApproveEmail) {
+    updateData.emailConfirmationStatus = "APPROVED";
+    updateData.emailConfirmationAt = new Date();
+  }
+
   if (match.agreementNumber && match.agreementNumber > 0) {
     updateData.smtAgreementId = String(match.agreementNumber);
   }
@@ -686,8 +699,24 @@ export async function refreshSmtAuthorizationStatus(authId: string) {
       houseAddressId: true,
       smtStatus: true,
       smtStatusMessage: true,
+      emailConfirmationStatus: true,
+      emailConfirmationAt: true,
     },
   });
+
+  // Clear attention flags once ACTIVE/approved is observed.
+  if (shouldAutoApproveEmail) {
+    prisma.userProfile
+      .updateMany({
+        where: { userId: auth.userId },
+        data: {
+          esiidAttentionRequired: false,
+          esiidAttentionCode: null,
+          esiidAttentionAt: null,
+        },
+      })
+      .catch(() => null);
+  }
 
   await syncHouseIdentifiersFromAuthorization({
     houseAddressId: updated.houseAddressId,
