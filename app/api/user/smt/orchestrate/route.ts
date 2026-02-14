@@ -57,6 +57,10 @@ type UsageCoverage = {
 };
 
 async function computeUsageCoverageForEsiid(esiid: string): Promise<UsageCoverage> {
+  // This "target" window is used for messaging/backoff (e.g. "tail gap" to the most recent day),
+  // not for readiness. Readiness is computed from contiguous completeness across the observed span.
+  const target = getRollingBackfillRange(12);
+
   const intervalAggAll = await prisma.smtInterval.aggregate({
     where: { esiid },
     _count: { _all: true },
