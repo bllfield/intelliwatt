@@ -35,8 +35,11 @@ export async function POST(req: NextRequest) {
     `/adhocusage/${filename ?? ''}`;
   // STEP 1: Accept optional contentBase64 for large-file SMT ingestion path
   const contentBase64 = body.contentBase64 as string | undefined;
-  const purgeExisting: boolean =
-    body.purgeExisting === false ? false : true; // default: true for legacy callers
+  // IMPORTANT:
+  // Never purge an entire ESIID history by default. Partial/daily interval files arrive frequently
+  // and would otherwise wipe older history (causing "only 30 days show up" symptoms).
+  // Full-history reset must be explicitly requested.
+  const purgeAll: boolean = body.purgeAll === true;
   // When SMT uploads are chunked into multiple raw-upload calls, we should only run
   // expensive "post ingest" steps (bucket aggregation + plan pipeline) once the final
   // chunk has been ingested.
@@ -74,48 +77,34 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    // Idempotency: if a row with this sha256 already exists, return it instead of failing
+    const contentBuffer = contentBase64 ? Buffer.from(contentBase64, 'base64') : undefined;
+
+    // Idempotency: if a row with this sha256 already exists, we still allow inline normalization
+    // when content is provided (e.g., operator "force refresh" / reprocess after a prior failure).
     const existing = await prisma.rawSmtFile.findUnique({
       where: { sha256 }, // requires a UNIQUE on sha256 (which you added)
       select: { id: true, filename: true, size_bytes: true, sha256: true, created_at: true },
     });
 
-    if (existing) {
-      return NextResponse.json({
-        ok: true,
-        duplicate: true,
-        id: String(existing.id), // BigInt -> string
-        filename: existing.filename,
-        sizeBytes: existing.size_bytes,
-        sha256: existing.sha256,
-        createdAt: existing.created_at, // Date serializes fine
-      });
-    }
-
-    // Create new record
-    // NOTE:
-    // We may receive contentBase64 for inline normalization, but we intentionally do NOT store the raw
-    // CSV bytes in Postgres. Raw file audit should rely on `storage_path` (object storage / droplet),
-    // and we keep only sha256 + metadata in the DB to reduce write load.
-    const contentBuffer = contentBase64 ? Buffer.from(contentBase64, 'base64') : undefined;
-    
-    const row = await prisma.rawSmtFile.create({
-      data: {
-        filename: filename!,
-        size_bytes: sizeBytes!,
-        sha256: sha256!,
-        source,
-        content_type: contentType,
-        storage_path: storagePath,
-        received_at: receivedAt ? new Date(receivedAt) : new Date(),
-      },
-      select: { id: true, filename: true, size_bytes: true, sha256: true, created_at: true },
-    });
+    const duplicate = Boolean(existing);
+    const row = existing
+      ? existing
+      : await prisma.rawSmtFile.create({
+          data: {
+            filename: filename!,
+            size_bytes: sizeBytes!,
+            sha256: sha256!,
+            source,
+            content_type: contentType,
+            storage_path: storagePath,
+            received_at: receivedAt ? new Date(receivedAt) : new Date(),
+          },
+          select: { id: true, filename: true, size_bytes: true, sha256: true, created_at: true },
+        });
 
     // Early purge of prior data for this ESIID so normalization has a clean slate.
-    // For large files that are chunked into multiple raw-upload calls, callers can pass
-    // purgeExisting=false on subsequent chunks so we only wipe once.
-    if (esiid && purgeExisting) {
+    // NOTE: This is intentionally off by default; only do it for explicit "full refresh" requests.
+    if (esiid && purgeAll) {
       try {
         const houses = await prisma.houseAddress.findMany({
           where: { esiid, archivedAt: null },
@@ -296,79 +285,55 @@ export async function POST(req: NextRequest) {
             console.error('[raw-upload:inline] usage dual-write failed', usageErr);
           }
 
-          if (distinctEsiids.length > 0 && purgeExisting) {
+          if (distinctEsiids.length > 0 && postIngest) {
+            // Best-effort: ensure CORE monthly bucket totals exist for homes touched by this upload.
+            // Must never fail SMT ingest.
             try {
               const houses = await prisma.houseAddress.findMany({
                 where: { esiid: { in: distinctEsiids }, archivedAt: null },
                 select: { id: true, esiid: true },
               });
-              const houseIds = houses.map((h) => h.id);
 
-              if (houseIds.length > 0) {
-                const manualIds = await prisma.manualUsageUpload.findMany({
-                  where: { houseId: { in: houseIds } },
-                  select: { id: true },
+              const rangeEnd = tsMax ?? new Date();
+              const rangeStart = windowStart ?? new Date(rangeEnd.getTime() - 365 * 24 * 60 * 60 * 1000);
+
+              for (const h of houses) {
+                if (!h?.id) continue;
+                await ensureCoreMonthlyBuckets({
+                  homeId: h.id,
+                  esiid: h.esiid,
+                  rangeStart,
+                  rangeEnd,
+                  source: "SMT",
+                  intervalSource: "SMT",
                 });
-                if (manualIds.length > 0) {
-                  await prisma.entry.updateMany({
-                    where: { manualUsageId: { in: manualIds.map((m) => m.id) } },
-                    data: { manualUsageId: null },
-                  });
-                }
-                await prisma.manualUsageUpload.deleteMany({ where: { houseId: { in: houseIds } } });
-                await prisma.greenButtonUpload.deleteMany({ where: { houseId: { in: houseIds } } });
-
-                await usagePrisma.greenButtonInterval.deleteMany({ where: { homeId: { in: houseIds } } });
-                await usagePrisma.rawGreenButton.deleteMany({ where: { homeId: { in: houseIds } } });
               }
+            } catch (bucketErr) {
+              console.error('[raw-upload:inline] CORE bucket aggregation failed (best-effort)', bucketErr);
+            }
 
-              if (postIngest) {
-                // Best-effort: ensure CORE monthly bucket totals exist for homes touched by this upload.
-                // Must never fail SMT ingest.
-                try {
-                  const rangeEnd = tsMax ?? new Date();
-                  const rangeStart =
-                    windowStart ?? new Date(rangeEnd.getTime() - 365 * 24 * 60 * 60 * 1000);
-                  for (const h of houses) {
-                    if (!h?.id) continue;
-                    await ensureCoreMonthlyBuckets({
-                      homeId: h.id,
-                      esiid: h.esiid,
-                      rangeStart,
-                      rangeEnd,
-                      source: "SMT",
-                      intervalSource: "SMT",
-                    });
-                  }
-                } catch (bucketErr) {
-                  console.error('[raw-upload:inline] CORE bucket aggregation failed (best-effort)', bucketErr);
-                }
-
-                // Proactive: any usage being present should trigger the plans pipeline (best-effort, bounded).
-                // This fills template mappings + plan-engine estimate cache so /dashboard/plans is instant later.
-                try {
-                  for (const h of houses) {
-                    if (!h?.id) continue;
-                    await runPlanPipelineForHome({
-                      homeId: h.id,
-                      reason: 'usage_present',
-                      isRenter: false,
-                      timeBudgetMs: 7000,
-                      maxTemplateOffers: 2,
-                      maxEstimatePlans: 12,
-                      monthlyCadenceDays: 30,
-                      proactiveCooldownMs: 10 * 60 * 1000,
-                    });
-                  }
-                } catch (pipelineErr) {
-                  console.error('[raw-upload:inline] plan pipeline failed (best-effort)', pipelineErr);
-                }
-              }
-            } catch (err) {
-              console.error('[raw-upload:inline] failed to cleanup green-button/manual data for ESIID(s)', {
-                distinctEsiids,
-                err,
+            // Proactive: any usage being present should trigger the plans pipeline (best-effort, bounded).
+            // This fills template mappings + plan-engine estimate cache so /dashboard/plans is instant later.
+            try {
+              const houses = await prisma.houseAddress.findMany({
+                where: { esiid: { in: distinctEsiids }, archivedAt: null },
+                select: { id: true },
               });
+              for (const h of houses) {
+                if (!h?.id) continue;
+                await runPlanPipelineForHome({
+                  homeId: h.id,
+                  reason: 'usage_present',
+                  isRenter: false,
+                  timeBudgetMs: 7000,
+                  maxTemplateOffers: 2,
+                  maxEstimatePlans: 12,
+                  monthlyCadenceDays: 30,
+                  proactiveCooldownMs: 10 * 60 * 1000,
+                });
+              }
+            } catch (pipelineErr) {
+              console.error('[raw-upload:inline] plan pipeline failed (best-effort)', pipelineErr);
             }
           }
 
@@ -376,6 +341,9 @@ export async function POST(req: NextRequest) {
           // Raw bytes live in object storage / droplet path referenced by storage_path, not in Postgres.
 
           normalizedSummary = {
+            // Compatibility: older droplet upload server expects `intervalsInserted`
+            // (but our app code prefers `inserted`).
+            intervalsInserted: inserted,
             inserted,
             skipped,
             records: bounded.length,
@@ -389,6 +357,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
+      ...(duplicate ? { duplicate: true } : {}),
       id: String(row.id), // BigInt -> string
       filename: row.filename,
       sizeBytes: row.size_bytes,

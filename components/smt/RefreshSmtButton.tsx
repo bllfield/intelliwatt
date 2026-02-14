@@ -92,7 +92,7 @@ export default function RefreshSmtButton({ homeId }: RefreshSmtButtonProps) {
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ homeId }),
+          body: JSON.stringify({ homeId, force: true }),
         });
 
         let usagePayload: any = null;

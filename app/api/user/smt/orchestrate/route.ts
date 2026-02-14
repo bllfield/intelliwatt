@@ -164,6 +164,12 @@ export async function POST(req: NextRequest) {
     body = {};
   }
 
+  const force =
+    body?.force === true ||
+    body?.forceRefresh === true ||
+    body?.forceRepost === true ||
+    body?.refresh === true;
+
   const requestedHomeId =
     typeof body?.homeId === "string" && body.homeId.trim().length > 0 ? body.homeId.trim() : null;
 
@@ -257,6 +263,7 @@ export async function POST(req: NextRequest) {
   })();
 
   const recentlySynced =
+    !force &&
     ORCHESTRATOR_COOLDOWN_MS > 0 &&
     authorization.smtLastSyncAt &&
     Date.now() - authorization.smtLastSyncAt.getTime() < ORCHESTRATOR_COOLDOWN_MS;
@@ -271,6 +278,7 @@ export async function POST(req: NextRequest) {
       : 0;
 
   const actions: Record<string, any> = {
+    forced: force,
     statusRefreshed: false,
     statusThrottled: false,
     backfillRequested: false,
@@ -282,7 +290,7 @@ export async function POST(req: NextRequest) {
   let effectiveMessage = authorization.smtStatusMessage ?? null;
 
   // 1) Status refresh until ACTIVE (hard cooldown inside refreshSmtAuthorizationStatus).
-  if (!isExpired && !recentlySynced && !isActiveStatus(effectiveStatus)) {
+  if (!isExpired && (!recentlySynced || force) && !isActiveStatus(effectiveStatus)) {
     const refresh = await refreshSmtAuthorizationStatus(authorization.id);
     actions.statusRefreshed = Boolean((refresh as any)?.ok);
     actions.statusThrottled = Boolean((refresh as any)?.throttled);
@@ -295,9 +303,9 @@ export async function POST(req: NextRequest) {
 
   // 2) Once ACTIVE: request interval backfill (rate-limited by smtBackfillRequestedAt and coverage).
   const active = isActiveStatus(effectiveStatus);
-  const shouldWork = !isExpired && active && !usage.ready;
+  const shouldWork = !isExpired && active && (!usage.ready || force);
 
-  if (shouldWork && !recentlySynced) {
+  if (shouldWork && (!recentlySynced || force)) {
     const backfillRange = getRollingBackfillRange(12);
     const requestedAt = authorization.smtBackfillRequestedAt
       ? new Date(authorization.smtBackfillRequestedAt)
@@ -312,7 +320,7 @@ export async function POST(req: NextRequest) {
       process.env.SMT_INTERVAL_BACKFILL_ENABLED === "true" ||
       process.env.SMT_INTERVAL_BACKFILL_ENABLED === "1";
 
-    if (enableBackfill && (!requestedAt || allowRetry)) {
+    if (enableBackfill && (force || !requestedAt || allowRetry)) {
       const res = await requestSmtBackfillForAuthorization({
         authorizationId: authorization.id,
         esiid: authorization.esiid,
@@ -347,7 +355,12 @@ export async function POST(req: NextRequest) {
             "content-type": "application/json",
           },
           cache: "no-store",
-          body: JSON.stringify({ homeId: house.id, esiid: authorization.esiid, reason: "user_orchestrate" }),
+          body: JSON.stringify({
+            homeId: house.id,
+            esiid: authorization.esiid,
+            reason: force ? "user_refresh" : "user_orchestrate",
+            forceRepost: force,
+          }),
         });
         actions.pullTriggered = pullRes.ok;
         await prisma.smtAuthorization

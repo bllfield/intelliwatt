@@ -600,6 +600,8 @@ export async function POST(req: NextRequest) {
   try {
     const { esiid, meter } = body || {};
     const houseId = requestedHomeId ?? (typeof body?.houseId === 'string' ? body.houseId : null);
+    const forceRepost = body?.forceRepost === true || body?.force === true || body?.refresh === true;
+    const reasonFromBody = typeof body?.reason === 'string' && body.reason.trim().length > 0 ? body.reason.trim() : null;
 
     const resolvedEsiid = await resolveSmtEsiid({
       prismaClient: prisma,
@@ -645,10 +647,11 @@ export async function POST(req: NextRequest) {
           'content-type': 'application/json',
         },
         body: JSON.stringify({
-          reason: 'admin_triggered',
+          reason: reasonFromBody ?? (forceRepost ? 'admin_refresh' : 'admin_triggered'),
           esiid: resolvedEsiid,
           meter: meter || undefined,
           houseId: typeof houseId === 'string' ? houseId : undefined,
+          forceRepost,
           ts: Date.now(),
         }),
         cache: 'no-store',
@@ -700,6 +703,7 @@ export async function POST(req: NextRequest) {
       message: 'SMT pull triggered successfully',
       esiid: resolvedEsiid,
       meter: meter || null,
+      forceRepost,
       webhookResponse: webhookData,
     });
   } catch (e: any) {

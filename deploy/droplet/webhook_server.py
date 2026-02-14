@@ -521,6 +521,7 @@ def handle_smt_authorized(payload: dict) -> bytes:
     include_billing = payload.get("includeBilling")
     auth_start = payload.get("authorizationStartDate")
     auth_end = payload.get("authorizationEndDate")
+    force_repost = bool(payload.get("forceRepost") is True)
 
     log_line = (
         "[INFO] SMT authorization webhook received: "
@@ -544,10 +545,11 @@ def handle_smt_authorized(payload: dict) -> bytes:
     # Use the existing ingest pipeline:
     #   SMT SFTP → /home/deploy/smt_inbox → deploy/smt/fetch_and_post.sh (inline POST)
     # We set ESIID_DEFAULT for this run so the script knows which meter to focus on.
-    ingest_cmd = (
-        "cd /home/deploy/apps/intelliwatt && "
-        f"ESIID_DEFAULT={esiid} deploy/smt/fetch_and_post.sh"
-    )
+    env_prefix = f"ESIID_DEFAULT={esiid}"
+    if force_repost:
+        env_prefix = env_prefix + " SMT_FORCE_REPOST=true"
+
+    ingest_cmd = "cd /home/deploy/apps/intelliwatt && " + env_prefix + " deploy/smt/fetch_and_post.sh"
 
     print(f"[INFO] Starting SMT ingest via: {ingest_cmd}", flush=True)
 

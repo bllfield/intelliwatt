@@ -133,6 +133,13 @@ require_cmd unzip
 
 # Default: process all files; set SMT_PROCESS_ONE=true to stop after the first successful upload/normalize
 PROCESS_ONE_FILE="${SMT_PROCESS_ONE:-false}"
+# Optional: bypass the local .posted_sha256 cache and reprocess everything in the inbox.
+# Used for explicit operator/admin "Refresh SMT Data" flows.
+FORCE_REPOST_RAW="${SMT_FORCE_REPOST:-false}"
+FORCE_REPOST="false"
+case "${FORCE_REPOST_RAW,,}" in
+  1|true|yes|y) FORCE_REPOST="true" ;;
+esac
 require_cmd python3
 
 mkdir -p "$SMT_LOCAL_DIR"
@@ -192,9 +199,11 @@ rate_limit_reset=""
 for file_path in "${FILES[@]}"; do
   sha256="$(sha256sum "$file_path" | awk '{print $1}')"
   upload_ok="false"
-  if grep -qx "$sha256" "$SEEN_FILE"; then
+  if [[ "$FORCE_REPOST" != "true" ]] && grep -qx "$sha256" "$SEEN_FILE"; then
     log "Skipping already-posted file: $file_path"
     continue
+  elif [[ "$FORCE_REPOST" == "true" ]] && grep -qx "$sha256" "$SEEN_FILE"; then
+    log "FORCE_REPOST enabled; reprocessing previously-posted file: $file_path"
   fi
 
   # Decrypt first if needed; ensure we don't concatenate duplicate paths on failure
@@ -248,8 +257,16 @@ for file_path in "${FILES[@]}"; do
 
     if [[ "$http_code" == "200" || "$http_code" == "201" || "$http_code" == "202" ]]; then
       log "Droplet upload success ($http_code): $(jq -c '.message // .' "$RESP_FILE" 2>/dev/null || cat "$RESP_FILE")"
-      printf '%s\n' "$sha256" >>"$SEEN_FILE"
-      upload_ok="true"
+      resp_ok="$(jq -r '.ok // empty' "$RESP_FILE" 2>/dev/null || true)"
+      resp_interval="$(jq -r '.file.interval // empty' "$RESP_FILE" 2>/dev/null || true)"
+      resp_normalized="$(jq -r '.ingest.normalized // empty' "$RESP_FILE" 2>/dev/null || true)"
+      if [[ "$resp_ok" == "true" && "$resp_interval" == "true" && "$resp_normalized" == "true" ]]; then
+        printf '%s\n' "$sha256" >>"$SEEN_FILE"
+        upload_ok="true"
+      else
+        log "INFO: Not marking as posted (ok=${resp_ok:-?} interval=${resp_interval:-?} normalized=${resp_normalized:-?})"
+        upload_ok="false"
+      fi
     elif [[ "$http_code" == "429" ]]; then
       rate_limit_reset="$(jq -r '.resetAt // empty' "$RESP_FILE" 2>/dev/null || true)"
       log "Droplet upload failed (rate limited 429); stopping this run. resetAt=${rate_limit_reset:-unknown}"
