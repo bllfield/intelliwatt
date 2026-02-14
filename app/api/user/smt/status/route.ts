@@ -27,14 +27,32 @@ export async function GET() {
 
     const prismaAny = prisma as any;
 
+    // IMPORTANT:
+    // Scope SMT status to the active house (primary if set, else most recent) so multi-home users
+    // and helpdesk impersonation see the correct ESIID in-session.
+    const activeHouse =
+      (await prismaAny.houseAddress.findFirst({
+        where: { userId: user.id, archivedAt: null, isPrimary: true },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, esiid: true },
+      })) ??
+      (await prismaAny.houseAddress.findFirst({
+        where: { userId: user.id, archivedAt: null },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, esiid: true },
+      }));
+
+    if (!activeHouse) {
+      return NextResponse.json({ connected: false });
+    }
+
     const authorization = await prismaAny.smtAuthorization.findFirst({
       where: {
         userId: user.id,
         archivedAt: null,
+        OR: [{ houseAddressId: activeHouse.id }, { houseId: activeHouse.id }],
       },
-      orderBy: {
-        createdAt: 'desc',
-      },
+      orderBy: { createdAt: 'desc' },
       select: {
         id: true,
         esiid: true,
@@ -54,6 +72,7 @@ export async function GET() {
             addressCity: true,
             addressState: true,
             addressZip5: true,
+            esiid: true,
           },
         },
       },
@@ -117,12 +136,13 @@ export async function GET() {
     }
 
     const address = authorization.houseAddress ?? null;
+    const effectiveEsiid = (address?.esiid ?? activeHouse.esiid ?? authorization.esiid) ?? null;
 
     return NextResponse.json({
       connected: true,
       authorization: {
         id: authorization.id,
-        esiid: authorization.esiid,
+        esiid: effectiveEsiid,
         meterNumber: authorization.meterNumber,
         authorizationStartDate: authorization.authorizationStartDate?.toISOString() ?? null,
         authorizationEndDate: authorization.authorizationEndDate?.toISOString() ?? null,

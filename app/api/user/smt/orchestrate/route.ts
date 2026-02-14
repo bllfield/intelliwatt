@@ -45,6 +45,9 @@ function isActiveStatus(s: string | null | undefined): boolean {
 
 type UsageCoverage = {
   intervalCount: number;
+  intervalCountInTarget: number;
+  intervalExpectedInTarget: number;
+  intervalCompletenessInTarget: number; // 0..1
   rawCount: number;
   coverageStart: Date | null;
   coverageEnd: Date | null;
@@ -57,28 +60,61 @@ type UsageCoverage = {
 async function computeUsageCoverageForEsiid(esiid: string): Promise<UsageCoverage> {
   const target = getRollingBackfillRange(12);
 
-  const intervalAgg = await prisma.smtInterval.aggregate({
+  const intervalAggAll = await prisma.smtInterval.aggregate({
     where: { esiid },
     _count: { _all: true },
     _min: { ts: true },
     _max: { ts: true },
   });
 
-  const intervalCount = Number(intervalAgg._count?._all ?? 0);
-  const coverageStart = intervalAgg._min?.ts ?? null;
-  const coverageEnd = intervalAgg._max?.ts ?? null;
+  const intervalCount = Number(intervalAggAll._count?._all ?? 0);
+  const coverageStart = intervalAggAll._min?.ts ?? null;
+  const coverageEnd = intervalAggAll._max?.ts ?? null;
   const coverageDays =
     coverageStart && coverageEnd ? daysBetweenInclusive(coverageStart, coverageEnd) : 0;
+
+  // Completeness check: ensure we actually have close to a full year of 15-minute intervals,
+  // not just a sparse set of points spanning the year (min/max alone is not sufficient).
+  const targetStart = target.startDate;
+  const targetEnd = target.endDate;
+
+  const intervalAggTarget = await prisma.smtInterval.aggregate({
+    where: { esiid, ts: { gte: targetStart, lte: targetEnd } },
+    _count: { _all: true },
+    _min: { ts: true },
+    _max: { ts: true },
+  });
+  const intervalCountInTarget = Number(intervalAggTarget._count?._all ?? 0);
+
+  let meterCountInTarget = 1;
+  try {
+    const meterGroups = await prisma.smtInterval.groupBy({
+      by: ["meter"],
+      where: { esiid, ts: { gte: targetStart, lte: targetEnd } },
+      _count: { _all: true },
+    });
+    meterCountInTarget = Math.max(1, meterGroups.length);
+  } catch {
+    meterCountInTarget = 1;
+  }
+
+  const expectedPerDay = 96; // 15-minute intervals
+  const targetDays = daysBetweenInclusive(targetStart, targetEnd);
+  const intervalExpectedInTarget = Math.max(0, targetDays * expectedPerDay * meterCountInTarget);
+  const intervalCompletenessInTarget =
+    intervalExpectedInTarget > 0 ? intervalCountInTarget / intervalExpectedInTarget : 0;
 
   const slopDays = 2;
   const targetStartMs = target.startDate.getTime() + slopDays * 24 * 60 * 60 * 1000;
   const targetEndMs = target.endDate.getTime() - slopDays * 24 * 60 * 60 * 1000;
-  const historyReady = Boolean(
+  const spanReady = Boolean(
     coverageStart &&
       coverageEnd &&
       coverageStart.getTime() <= targetStartMs &&
       coverageEnd.getTime() >= targetEndMs,
   );
+  const completenessReady = intervalCompletenessInTarget >= 0.85;
+  const historyReady = spanReady && completenessReady;
 
   const rawCount = await prisma.rawSmtFile.count({
     where: {
@@ -100,16 +136,17 @@ async function computeUsageCoverageForEsiid(esiid: string): Promise<UsageCoverag
     if (phase === "pending") return "Waiting for SMT interval data delivery.";
     if (phase === "processing") {
       if (intervalCount > 0 && coverageStart && coverageEnd) {
+        const pct = intervalCompletenessInTarget > 0 ? Math.floor(intervalCompletenessInTarget * 100) : 0;
         if (rawCount === 0) {
           if (tailGapDays > 0) {
-            return `SMT intervals ingested (${coverageDays} day(s)). Still fetching the most recent ${tailGapDays} day(s) to complete the 12‑month window.`;
+            return `SMT intervals ingested (${coverageDays} day(s)). Coverage completeness ~${pct}%. Still fetching the most recent ${tailGapDays} day(s) to complete the 12‑month window.`;
           }
-          return `SMT intervals ingested (${coverageDays} day(s)). Finishing processing.`;
+          return `SMT intervals ingested (${coverageDays} day(s)). Coverage completeness ~${pct}%. Finishing processing.`;
         }
         if (tailGapDays > 0) {
-          return `Partial SMT history ingested (${coverageDays} day(s)). Still fetching the most recent ${tailGapDays} day(s) to complete the 12‑month window.`;
+          return `Partial SMT history ingested (${coverageDays} day(s)). Coverage completeness ~${pct}%. Still fetching the most recent ${tailGapDays} day(s) to complete the 12‑month window.`;
         }
-        return `Partial SMT history ingested (${coverageDays} day(s)). Still importing historical usage.`;
+        return `Partial SMT history ingested (${coverageDays} day(s)). Coverage completeness ~${pct}%. Still importing historical usage.`;
       }
       if (rawCount > 0) return "SMT files received; processing intervals.";
       return "Processing SMT usage.";
@@ -119,6 +156,9 @@ async function computeUsageCoverageForEsiid(esiid: string): Promise<UsageCoverag
 
   return {
     intervalCount,
+    intervalCountInTarget,
+    intervalExpectedInTarget,
+    intervalCompletenessInTarget,
     rawCount,
     coverageStart,
     coverageEnd,
@@ -253,7 +293,9 @@ export async function POST(req: NextRequest) {
     : false;
 
   // Always compute current usage coverage for visibility (cheap DB-only).
-  const usage = await computeUsageCoverageForEsiid(authorization.esiid);
+  // Use the active house ESIID as the source of truth for what the dashboard should show.
+  const activeEsiid = house.esiid;
+  const usage = await computeUsageCoverageForEsiid(activeEsiid);
 
   // Remote actions throttling: use smtLastSyncAt as a coarse "last orchestration action" timestamp.
   const ORCHESTRATOR_COOLDOWN_MS = (() => {
@@ -323,7 +365,7 @@ export async function POST(req: NextRequest) {
     if (enableBackfill && (force || !requestedAt || allowRetry)) {
       const res = await requestSmtBackfillForAuthorization({
         authorizationId: authorization.id,
-        esiid: authorization.esiid,
+        esiid: activeEsiid,
         meterNumber: authorization.meterNumber,
         startDate: backfillRange.startDate,
         endDate: backfillRange.endDate,
@@ -357,7 +399,7 @@ export async function POST(req: NextRequest) {
           cache: "no-store",
           body: JSON.stringify({
             homeId: house.id,
-            esiid: authorization.esiid,
+            esiid: activeEsiid,
             reason: force ? "user_refresh" : "user_orchestrate",
             forceRepost: force,
           }),
@@ -404,7 +446,7 @@ export async function POST(req: NextRequest) {
     homeId: house.id,
     authorization: {
       id: authorization.id,
-      esiid: authorization.esiid,
+      esiid: activeEsiid,
       meterNumber: authorization.meterNumber,
       status: effectiveStatus || null,
       message: effectiveMessage,
@@ -420,6 +462,10 @@ export async function POST(req: NextRequest) {
         start: usage.coverageStart ? usage.coverageStart.toISOString() : null,
         end: usage.coverageEnd ? usage.coverageEnd.toISOString() : null,
         days: usage.coverageDays,
+        completenessPct:
+          usage.intervalExpectedInTarget > 0
+            ? Math.round((usage.intervalCountInTarget / usage.intervalExpectedInTarget) * 1000) / 10
+            : 0,
       },
       message: usage.message,
     },
