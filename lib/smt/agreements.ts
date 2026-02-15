@@ -576,6 +576,42 @@ export async function refreshSmtAuthorizationStatus(authId: string) {
     auth.smtLastSyncAt &&
     Date.now() - auth.smtLastSyncAt.getTime() < SMT_STATUS_REFRESH_COOLDOWN_MS
   ) {
+    // IMPORTANT:
+    // Even when throttled, we should still normalize local flags based on *existing* cached status.
+    // Otherwise the system can get stuck showing "pending SMT email" even though the row already
+    // shows ACTIVE (because we refuse to hit SMT again during cooldown).
+    const cachedLocal = String(auth.smtStatus ?? "").trim().toUpperCase();
+    const cachedIsActive = cachedLocal === "ACTIVE" || cachedLocal === "ALREADY_ACTIVE";
+    const cachedEmail =
+      String((auth as any)?.emailConfirmationStatus ?? "").trim().toUpperCase();
+    const cachedNeedsApprove = cachedIsActive && cachedEmail !== "APPROVED";
+
+    if (cachedNeedsApprove) {
+      try {
+        await prisma.smtAuthorization.update({
+          where: { id: auth.id },
+          data: {
+            emailConfirmationStatus: "APPROVED",
+            emailConfirmationAt: auth.emailConfirmationAt ?? new Date(),
+          },
+        });
+
+        // Clear attention flags opportunistically (do not block status refresh).
+        prisma.userProfile
+          .updateMany({
+            where: { userId: auth.userId },
+            data: {
+              esiidAttentionRequired: false,
+              esiidAttentionCode: null,
+              esiidAttentionAt: null,
+            },
+          })
+          .catch(() => null);
+      } catch {
+        // swallow; cooldown path must remain fast/robust
+      }
+    }
+
     return {
       ok: true as const,
       status: String(auth.smtStatus ?? "").trim(),
