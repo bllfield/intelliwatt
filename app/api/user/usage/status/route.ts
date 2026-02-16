@@ -27,16 +27,21 @@ function chicagoDateKey(d: Date): string {
   }
 }
 
-function dateKeyToUtcMidnight(key: string): Date {
-  return new Date(`${key}T00:00:00.000Z`);
+function dayIndexFromDateKey(key: string): number {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(key ?? "").trim());
+  if (!m) return Number.NaN;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  const ms = Date.UTC(y, mo - 1, d);
+  return Number.isFinite(ms) ? Math.floor(ms / DAY_MS) : Number.NaN;
 }
 
 function daysBetweenDateKeysInclusive(startKey: string, endKey: string): number {
-  const a = dateKeyToUtcMidnight(startKey);
-  const b = dateKeyToUtcMidnight(endKey);
-  const diff = b.getTime() - a.getTime();
-  if (!Number.isFinite(diff) || diff < 0) return 0;
-  return Math.floor(diff / DAY_MS) + 1;
+  const a = dayIndexFromDateKey(startKey);
+  const b = dayIndexFromDateKey(endKey);
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b < a) return 0;
+  return Math.floor(b - a) + 1;
 }
 
 export async function POST(req: NextRequest) {
@@ -139,11 +144,14 @@ export async function POST(req: NextRequest) {
   const ready = historyReady;
   const phase = ready ? "ready" : intervalCount > 0 || rawCount > 0 ? "processing" : "pending";
 
-  const targetEndKey = chicagoDateKey(target.endDate);
   const tailGapDays =
-    coverageEndDate &&
-    dateKeyToUtcMidnight(coverageEndDate).getTime() < dateKeyToUtcMidnight(targetEndKey).getTime()
-      ? Math.max(0, daysBetweenDateKeysInclusive(coverageEndDate, targetEndKey) - 1)
+    coverageEndDate
+      ? (() => {
+          const targetEndKey = target.endDate.toISOString().slice(0, 10);
+          return coverageEndDate < targetEndKey
+            ? Math.max(0, daysBetweenDateKeysInclusive(coverageEndDate, targetEndKey) - 1)
+            : 0;
+        })()
       : 0;
 
   const pullEligibleNow = !coverageEnd ? true : Date.now() - coverageEnd.getTime() >= SMT_PULL_COOLDOWN_MS;

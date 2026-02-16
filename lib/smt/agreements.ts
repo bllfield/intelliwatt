@@ -40,18 +40,55 @@ export function getRollingBackfillRange(monthsBack: number = 12): {
   endDate: Date;
 } {
   // SMT guidance: request 365 days of interval data ending "yesterday".
+  // IMPORTANT: SMT semantics are America/Chicago calendar days.
   // We ignore monthsBack here and always take a 365-day window for now
   // to avoid surprises around month length / DST.
-  const today = new Date();
-  const endDate = new Date(today);
-  // End = yesterday, 23:59:59.999 UTC
-  endDate.setUTCDate(endDate.getUTCDate() - 1);
-  endDate.setUTCHours(23, 59, 59, 999);
 
-  const startDate = new Date(endDate);
-  // Inclusive 365-day window: subtract 364 days so [start, end] has 365 days.
-  startDate.setUTCDate(startDate.getUTCDate() - 364);
-  startDate.setUTCHours(0, 0, 0, 0);
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const SMT_TZ = "America/Chicago";
+  const chicagoDateFmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: SMT_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+
+  const chicagoDateKey = (d: Date): string => {
+    try {
+      return chicagoDateFmt.format(d); // YYYY-MM-DD in America/Chicago
+    } catch {
+      // Fallback: stable UTC day key (better than throwing)
+      return d.toISOString().slice(0, 10);
+    }
+  };
+
+  const dayIndexFromKey = (key: string): number => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(key).trim());
+    if (!m) return Number.NaN;
+    const y = Number(m[1]);
+    const mo = Number(m[2]);
+    const d = Number(m[3]);
+    const ms = Date.UTC(y, mo - 1, d);
+    return Number.isFinite(ms) ? Math.floor(ms / DAY_MS) : Number.NaN;
+  };
+
+  const keyFromDayIndex = (idx: number): string => {
+    const ms = idx * DAY_MS;
+    return new Date(ms).toISOString().slice(0, 10);
+  };
+
+  const nowKey = chicagoDateKey(new Date());
+  const nowIdx = dayIndexFromKey(nowKey);
+  const endIdx = Number.isFinite(nowIdx) ? nowIdx - 1 : dayIndexFromKey(new Date().toISOString().slice(0, 10)) - 1;
+
+  // Inclusive 365-day window: [start, end] contains 365 distinct calendar days.
+  const endKey = keyFromDayIndex(endIdx);
+  const startKey = keyFromDayIndex(endIdx - 364);
+
+  // Represent day keys as UTC instants purely for transport/formatting (MM/DD/YYYY).
+  // Do NOT interpret these instants as "Chicago midnight" — they are calendar-day markers.
+  const startDate = new Date(`${startKey}T00:00:00.000Z`);
+  const endDate = new Date(`${endKey}T23:59:59.999Z`);
 
   return { startDate, endDate };
 }

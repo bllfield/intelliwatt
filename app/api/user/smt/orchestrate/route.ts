@@ -31,17 +31,21 @@ function chicagoDateKey(d: Date): string {
   }
 }
 
-function dateKeyToUtcMidnight(key: string): Date {
-  // Treat the key as a pure calendar day; represent it as UTC midnight for comparisons.
-  return new Date(`${key}T00:00:00.000Z`);
+function dayIndexFromDateKey(key: string): number {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(key ?? "").trim());
+  if (!m) return Number.NaN;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  const ms = Date.UTC(y, mo - 1, d);
+  return Number.isFinite(ms) ? Math.floor(ms / DAY_MS) : Number.NaN;
 }
 
 function daysBetweenDateKeysInclusive(startKey: string, endKey: string): number {
-  const a = dateKeyToUtcMidnight(startKey);
-  const b = dateKeyToUtcMidnight(endKey);
-  const diff = b.getTime() - a.getTime();
-  if (!Number.isFinite(diff) || diff < 0) return 0;
-  return Math.floor(diff / DAY_MS) + 1;
+  const a = dayIndexFromDateKey(startKey);
+  const b = dayIndexFromDateKey(endKey);
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b < a) return 0;
+  return Math.floor(b - a) + 1;
 }
 
 function resolveBaseUrl(): URL {
@@ -166,15 +170,17 @@ async function computeUsageCoverageForEsiid(esiid: string): Promise<UsageCoverag
     intervalExpectedBySpan > 0 ? intervalCount / intervalExpectedBySpan : 0;
 
   // Compute head/tail gaps against the target 12-month calendar window (for messaging + eligibility).
-  const targetStartKey = chicagoDateKey(target.startDate);
-  const targetEndKey = chicagoDateKey(target.endDate);
+  // getRollingBackfillRange() returns "calendar day markers" in UTC for transport/formatting.
+  // Treat them as date keys directly; do NOT convert them through Chicago timezone again.
+  const targetStartKey = target.startDate.toISOString().slice(0, 10);
+  const targetEndKey = target.endDate.toISOString().slice(0, 10);
 
   const headGapDays =
-    coverageStartDate && dateKeyToUtcMidnight(coverageStartDate).getTime() > dateKeyToUtcMidnight(targetStartKey).getTime()
+    coverageStartDate && coverageStartDate > targetStartKey
       ? Math.max(0, daysBetweenDateKeysInclusive(targetStartKey, coverageStartDate) - 1)
       : 0;
   const tailGapDays =
-    coverageEndDate && dateKeyToUtcMidnight(coverageEndDate).getTime() < dateKeyToUtcMidnight(targetEndKey).getTime()
+    coverageEndDate && coverageEndDate < targetEndKey
       ? Math.max(0, daysBetweenDateKeysInclusive(coverageEndDate, targetEndKey) - 1)
       : 0;
 
