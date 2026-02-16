@@ -1988,7 +1988,15 @@ class H(BaseHTTPRequestHandler):
             resp_body = run_default_command()
             if isinstance(payload, dict):
                 reason = payload.get("reason")
-                if reason in ("smt_authorized", "admin_triggered"):
+                # Start an ingest run for any reason that represents "pull latest SMT files now".
+                # Vercel callers may use different reason strings (customer orchestrator vs admin tools).
+                if reason in (
+                    "smt_authorized",
+                    "admin_triggered",
+                    "admin_refresh",
+                    "user_refresh",
+                    "user_orchestrate",
+                ):
                     resp_body = handle_smt_authorized(payload)
                 elif reason == "smt_meter_info":
                     resp_body = handle_smt_meter_info(payload)
