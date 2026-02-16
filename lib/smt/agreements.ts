@@ -62,6 +62,15 @@ export function getRollingBackfillRange(monthsBack: number = 12): {
     }
   };
 
+  /**
+   * Convert a date key (YYYY-MM-DD) into a monotonic day index.
+   *
+   * IMPORTANT:
+   * - `key` is a *calendar date label* (often produced in America/Chicago).
+   * - This function does NOT attempt to represent "Chicago midnight" as an instant.
+   * - We intentionally use `Date.UTC(y,m,d)` only to get a stable ordinal (days since epoch)
+   *   that is immune to local timezone/DST and safe for date-only comparisons and differences.
+   */
   const dayIndexFromKey = (key: string): number => {
     const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(key).trim());
     if (!m) return Number.NaN;

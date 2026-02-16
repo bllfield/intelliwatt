@@ -31,6 +31,14 @@ function chicagoDateKey(d: Date): string {
   }
 }
 
+/**
+ * Convert a YYYY-MM-DD date key into a monotonic day index.
+ *
+ * IMPORTANT:
+ * - The input may represent an America/Chicago *calendar day label*.
+ * - We intentionally do NOT treat it as a timezone-aware midnight instant.
+ * - `Date.UTC(y,m,d)` is used only to compute an ordinal day number for date math.
+ */
 function dayIndexFromDateKey(key: string): number {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(key ?? "").trim());
   if (!m) return Number.NaN;
@@ -170,8 +178,7 @@ async function computeUsageCoverageForEsiid(esiid: string): Promise<UsageCoverag
     intervalExpectedBySpan > 0 ? intervalCount / intervalExpectedBySpan : 0;
 
   // Compute head/tail gaps against the target 12-month calendar window (for messaging + eligibility).
-  // getRollingBackfillRange() returns "calendar day markers" in UTC for transport/formatting.
-  // Treat them as date keys directly; do NOT convert them through Chicago timezone again.
+  // getRollingBackfillRange() returns UTC day-marker Dates (YYYY-MM-DD keys). Treat as date keys directly.
   const targetStartKey = target.startDate.toISOString().slice(0, 10);
   const targetEndKey = target.endDate.toISOString().slice(0, 10);
 
