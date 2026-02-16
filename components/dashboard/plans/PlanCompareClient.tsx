@@ -105,6 +105,30 @@ function sumNums(xs: Array<any>): number {
   return s;
 }
 
+function parseYearMonth(ym: string): { y: number; m: number } | null {
+  const m = /^(\d{4})-(\d{2})$/.exec(String(ym ?? "").trim());
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  if (!Number.isFinite(y) || !Number.isFinite(mo) || mo < 1 || mo > 12) return null;
+  return { y, m: mo };
+}
+
+function formatYearMonth(y: number, m: number): string {
+  const yy = String(Math.trunc(y)).padStart(4, "0");
+  const mm = String(Math.trunc(m)).padStart(2, "0");
+  return `${yy}-${mm}`;
+}
+
+function addMonthsToYearMonth(ym: string, deltaMonths: number): string {
+  const p = parseYearMonth(ym);
+  if (!p) return ym;
+  const total = p.y * 12 + (p.m - 1) + Math.trunc(deltaMonths);
+  const y = Math.floor(total / 12);
+  const m = (total % 12) + 1;
+  return formatYearMonth(y, m);
+}
+
 export default function PlanCompareClient(props: { offerId: string }) {
   const offerId = String(props.offerId ?? "").trim();
   const router = useRouter();
@@ -239,24 +263,6 @@ export default function PlanCompareClient(props: { offerId: string }) {
     wouldIncurEtfNow === true ||
     (wouldIncurEtfNow == null && data?.currentPlan?.isInContract === true && etfCents > 0);
 
-  const comparisonCurrentTotal =
-    typeof currentMonthly === "number" && Number.isFinite(currentMonthly)
-      ? currentMonthly * comparisonMonths
-      : null;
-  const comparisonNewTotalBase =
-    typeof offerMonthly === "number" && Number.isFinite(offerMonthly)
-      ? offerMonthly * comparisonMonths
-      : null;
-  const addEtf =
-    includeEtf && etfAppliesNow ? etfDollars : 0;
-  const comparisonNewTotal =
-    typeof comparisonNewTotalBase === "number" ? comparisonNewTotalBase + addEtf : null;
-
-  const comparisonDelta =
-    typeof comparisonCurrentTotal === "number" && typeof comparisonNewTotal === "number"
-      ? comparisonNewTotal - comparisonCurrentTotal
-      : null;
-
   const monthlyDelta =
     typeof currentMonthly === "number" && typeof offerMonthly === "number"
       ? offerMonthly - currentMonthly
@@ -269,11 +275,91 @@ export default function PlanCompareClient(props: { offerId: string }) {
   const offerDetail = (data as any)?.detail?.offer ?? null;
   const currentDetail = (data as any)?.detail?.current ?? null;
 
+  const projection = useMemo(() => {
+    const windowMonthsRaw = Array.isArray(usageDetail?.yearMonths) ? (usageDetail.yearMonths as string[]) : [];
+    const windowMonths = windowMonthsRaw.map(String).filter(Boolean);
+    const lastWindowYm = windowMonths.length ? windowMonths[windowMonths.length - 1] : null;
+
+    const baseCurrentRows = Array.isArray(currentDetail?.monthlyBreakdown?.rows)
+      ? ((currentDetail.monthlyBreakdown.rows as any[]) ?? [])
+      : [];
+    const baseOfferRows = Array.isArray(offerDetail?.monthlyBreakdown?.rows)
+      ? ((offerDetail.monthlyBreakdown.rows as any[]) ?? [])
+      : [];
+
+    const baseLen = Math.max(baseCurrentRows.length, baseOfferRows.length, 0);
+    const baseMonths = baseLen > 0 ? baseLen : 12;
+    const monthsToShow = Math.max(1, Math.min(120, Math.trunc(comparisonMonths || 12)));
+
+    // Always show FUTURE months (not the historic stitched window keys).
+    // Anchor the projection to the month AFTER the last stitched month.
+    const startYm =
+      typeof lastWindowYm === "string" && parseYearMonth(lastWindowYm)
+        ? addMonthsToYearMonth(lastWindowYm, 1)
+        : baseCurrentRows?.[baseCurrentRows.length - 1]?.yearMonth
+          ? addMonthsToYearMonth(String(baseCurrentRows[baseCurrentRows.length - 1].yearMonth), 1)
+          : null;
+
+    const projectedYearMonths =
+      startYm && parseYearMonth(startYm)
+        ? Array.from({ length: monthsToShow }, (_, i) => addMonthsToYearMonth(startYm, i))
+        : [];
+
+    const projectRows = (baseRows: any[]): any[] => {
+      if (!Array.isArray(baseRows) || baseRows.length === 0) return [];
+      if (projectedYearMonths.length === 0) return baseRows;
+      const out: any[] = [];
+      for (let i = 0; i < projectedYearMonths.length; i++) {
+        const src = baseRows[i % baseRows.length];
+        out.push({ ...(src ?? {}), yearMonth: projectedYearMonths[i] });
+      }
+      return out;
+    };
+
+    const currentRowsProjected = projectRows(baseCurrentRows);
+    const offerRowsProjected = projectRows(baseOfferRows);
+
+    return {
+      monthsToShow,
+      baseMonths,
+      startYm,
+      projectedYearMonths,
+      currentRowsProjected,
+      offerRowsProjected,
+    };
+  }, [usageDetail, currentDetail, offerDetail, comparisonMonths]);
+
+  const comparisonTotals = useMemo(() => {
+    const fallbackCurrent =
+      typeof currentMonthly === "number" && Number.isFinite(currentMonthly)
+        ? currentMonthly * comparisonMonths
+        : null;
+    const fallbackOfferBase =
+      typeof offerMonthly === "number" && Number.isFinite(offerMonthly)
+        ? offerMonthly * comparisonMonths
+        : null;
+
+    const projectedCurrent = Array.isArray(projection?.currentRowsProjected)
+      ? sumNums((projection.currentRowsProjected as any[]).map((r) => r?.totalDollars))
+      : null;
+    const projectedOfferBase = Array.isArray(projection?.offerRowsProjected)
+      ? sumNums((projection.offerRowsProjected as any[]).map((r) => r?.totalDollars))
+      : null;
+
+    const addEtfOnce = includeEtf && etfAppliesNow && etfDollars > 0 ? etfDollars : 0;
+
+    const currentTotal = projectedCurrent != null ? projectedCurrent : fallbackCurrent;
+    const newTotalBase = projectedOfferBase != null ? projectedOfferBase : fallbackOfferBase;
+    const newTotal = typeof newTotalBase === "number" ? newTotalBase + addEtfOnce : null;
+    const delta =
+      typeof currentTotal === "number" && typeof newTotal === "number" ? newTotal - currentTotal : null;
+
+    return { currentTotal, newTotal, delta };
+  }, [projection, currentMonthly, offerMonthly, comparisonMonths, includeEtf, etfAppliesNow, etfDollars]);
+
   // For month-by-month deltas in the "New plan" monthly table, align by yearMonth against the current plan's rows.
   const currentMonthlyRowsByYm = useMemo(() => {
-    const rows = Array.isArray((currentDetail as any)?.monthlyBreakdown?.rows)
-      ? (((currentDetail as any).monthlyBreakdown.rows as any[]) ?? [])
-      : [];
+    const rows = Array.isArray(projection?.currentRowsProjected) ? (projection.currentRowsProjected as any[]) : [];
     const m = new Map<string, any>();
     for (const r of rows) {
       const ym = String(r?.yearMonth ?? "").trim();
@@ -281,7 +367,7 @@ export default function PlanCompareClient(props: { offerId: string }) {
       m.set(ym, r);
     }
     return m;
-  }, [currentDetail]);
+  }, [projection]);
 
   return (
     <div className="mx-auto w-full max-w-5xl">
@@ -386,7 +472,7 @@ export default function PlanCompareClient(props: { offerId: string }) {
                     <div className="mt-1 text-xs text-brand-cyan/60">
                       Next {comparisonMonths} mo:{" "}
                       <span className="font-semibold text-brand-white/90">
-                        {comparisonCurrentTotal != null ? fmtDollars2(comparisonCurrentTotal) : "—"}
+                        {comparisonTotals.currentTotal != null ? fmtDollars2(comparisonTotals.currentTotal) : "—"}
                       </span>
                     </div>
                   ) : null}
@@ -423,9 +509,9 @@ export default function PlanCompareClient(props: { offerId: string }) {
                   </div>
                   {useContractWindow ? (
                     <div className="mt-1 text-xs text-brand-cyan/60">
-                      Switch now ({comparisonMonths} mo{includeEtf && wouldIncurEtfNow ? " + ETF" : ""}):{" "}
+                      Switch now ({comparisonMonths} mo{includeEtf && etfAppliesNow ? " + ETF" : ""}):{" "}
                       <span className="font-semibold text-brand-white/90">
-                        {comparisonNewTotal != null ? fmtDollars2(comparisonNewTotal) : "—"}
+                        {comparisonTotals.newTotal != null ? fmtDollars2(comparisonTotals.newTotal) : "—"}
                       </span>
                     </div>
                   ) : null}
@@ -495,10 +581,10 @@ export default function PlanCompareClient(props: { offerId: string }) {
                     : `Delta until contract end (${comparisonMonths} mo; includes ETF once if toggled)`}
                 </div>
                 <div className="mt-1 text-xl font-semibold text-brand-white/90">
-                  {comparisonDelta != null
+                  {comparisonTotals.delta != null
                     ? comparisonIsAnnual
-                      ? `${fmtDollars2(comparisonDelta)}/yr`
-                      : fmtDollars2(comparisonDelta)
+                      ? `${fmtDollars2(comparisonTotals.delta)}/yr`
+                      : fmtDollars2(comparisonTotals.delta)
                     : "—"}
                 </div>
               </div>
@@ -514,6 +600,9 @@ export default function PlanCompareClient(props: { offerId: string }) {
 
           <div className="mt-6 text-xs text-brand-cyan/60">
             Estimates are generated by the IntelliWatt plan engine using your stitched 12‑month usage window and current TDSP tariffs.
+          </div>
+          <div className="mt-2 text-xs text-brand-cyan/60">
+            Future bill projections shift your last 12 months of real usage into upcoming months (best‑effort). Past usage does not guarantee future usage will be the same.
           </div>
 
           {/* Detailed breakdown (same style as Plan Details) */}
@@ -687,8 +776,22 @@ export default function PlanCompareClient(props: { offerId: string }) {
                         <div className="mt-2 text-xs text-brand-cyan/70">Monthly breakdown unavailable (needs an OK estimate and required usage buckets).</div>
                       ) : (
                         <>
+                          {projection?.startYm ? (
+                            <div className="mt-2 text-xs text-brand-cyan/60">
+                              Showing projected months{" "}
+                              <span className="font-mono text-brand-white/90">{String(projection.startYm)}</span>
+                              {" – "}
+                              <span className="font-mono text-brand-white/90">
+                                {String(addMonthsToYearMonth(String(projection.startYm), (projection.monthsToShow ?? 1) - 1))}
+                              </span>
+                              {" · "}based on last 12 months usage pattern
+                              {typeof data?.offer?.termMonths === "number" && projection.monthsToShow > data.offer.termMonths
+                                ? ` · note: offer term is ${data.offer.termMonths} months (months beyond term assume same rate for illustration)`
+                                : ""}
+                            </div>
+                          ) : null}
                           <div className="mt-2 text-xs text-brand-cyan/60 font-mono">
-                            rows={String(monthlyBreakdown?.monthsCount ?? "—")}
+                            rows={String(projection?.monthsToShow ?? monthlyBreakdown?.monthsCount ?? "—")}
                             {" · "}annualFromRows=${fmtNum(monthlyBreakdown?.totals?.annualFromRows, 2)}
                             {" · "}expectedAnnual=${fmtNum(monthlyBreakdown?.totals?.expectedAnnual, 2)}
                             {typeof monthlyBreakdown?.totals?.deltaCents === "number" ? ` · deltaCents=${String(monthlyBreakdown.totals.deltaCents)}` : ""}
@@ -732,13 +835,18 @@ export default function PlanCompareClient(props: { offerId: string }) {
                               </thead>
 
                               <tbody className="text-brand-cyan/80">
-                                {(monthlyBreakdown?.rows ?? []).map((r: any, idx: number) => {
+                                {((() => {
+                                  const rows = Array.isArray(projection?.currentRowsProjected) || Array.isArray(projection?.offerRowsProjected)
+                                    ? (side === "offer" ? (projection?.offerRowsProjected ?? []) : (projection?.currentRowsProjected ?? []))
+                                    : (monthlyBreakdown?.rows ?? []);
+                                  return rows as any[];
+                                })()).map((r: any, idx: number) => {
                                   const repLines = Array.isArray(r?.repBuckets) ? (r.repBuckets as any[]) : [];
                                   const byKey = new Map(repLines.map((x) => [String(x.bucketKey), x]));
                                   // If the user is switching now and ETF applies, treat the cancellation fee as
                                   // a one-time cost in the FIRST month of the new plan.
                                   const etfThisMonth =
-                                    side === "offer" && idx === 0 && includeEtf && etfDollars > 0 ? etfDollars : 0;
+                                    side === "offer" && idx === 0 && includeEtf && etfAppliesNow && etfDollars > 0 ? etfDollars : 0;
                                   const baseMonthTotal = numOrNull(r?.totalDollars) ?? 0;
                                   const monthTotalAdjusted = baseMonthTotal + etfThisMonth;
 
@@ -802,7 +910,9 @@ export default function PlanCompareClient(props: { offerId: string }) {
 
                               <tfoot className="bg-brand-white/5 text-brand-cyan/80">
                                 {(() => {
-                                  const rows = Array.isArray(monthlyBreakdown?.rows) ? (monthlyBreakdown.rows as any[]) : [];
+                                  const rows = Array.isArray(projection?.currentRowsProjected) || Array.isArray(projection?.offerRowsProjected)
+                                    ? ((side === "offer" ? (projection?.offerRowsProjected ?? []) : (projection?.currentRowsProjected ?? [])) as any[])
+                                    : (Array.isArray(monthlyBreakdown?.rows) ? (monthlyBreakdown.rows as any[]) : []);
                                   const repBuckets = Array.isArray(monthlyBreakdown?.repBuckets) ? (monthlyBreakdown.repBuckets as any[]) : [];
 
                                   // Totals
@@ -832,7 +942,7 @@ export default function PlanCompareClient(props: { offerId: string }) {
                                   const minBill = sumNums(rows.map((r) => r?.minimumBillTopUpDollars));
 
                                   const baseMonthTotals = rows.map((r) => numOrNull(r?.totalDollars) ?? 0);
-                                  const totalEtf = side === "offer" && includeEtf && etfDollars > 0 && rows.length > 0 ? etfDollars : 0;
+                                  const totalEtf = side === "offer" && includeEtf && etfAppliesNow && etfDollars > 0 && rows.length > 0 ? etfDollars : 0;
                                   const totalMonthTotal = sumNums(baseMonthTotals) + totalEtf;
 
                                   // Reconcile: monthlyBreakdown.totals.expectedAnnual is the canonical engine output.
@@ -879,7 +989,7 @@ export default function PlanCompareClient(props: { offerId: string }) {
                                       const curTotal = cur ? numOrNull(cur?.totalDollars) : null;
                                       if (curTotal == null) continue;
                                       const base = numOrNull(r?.totalDollars) ?? 0;
-                                      const etf = i === 0 && includeEtf && etfDollars > 0 ? etfDollars : 0;
+                                      const etf = i === 0 && includeEtf && etfAppliesNow && etfDollars > 0 ? etfDollars : 0;
                                       deltas.push(base + etf - curTotal);
                                     }
                                     if (deltas.length) totalDelta = sumNums(deltas);
