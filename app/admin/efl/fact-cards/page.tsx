@@ -1005,12 +1005,11 @@ export default function FactCardOpsPage() {
     }
   }
 
-  async function loadUnmappedTemplates(opts?: { preserveReparseNote?: boolean }) {
+  async function loadUnmappedTemplates() {
     if (!token) {
       setUnmappedTplErr("Admin token required.");
       return;
     }
-    if (!opts?.preserveReparseNote) setTplReparseNote(null);
     setUnmappedTplLoading(true);
     setUnmappedTplErr(null);
     try {
@@ -1035,14 +1034,13 @@ export default function FactCardOpsPage() {
     }
   }
 
-  async function loadTemplates(opts?: { preserveReparseNote?: boolean }) {
+  async function loadTemplates() {
     if (!token) {
       setTplErr("Admin token required.");
       return;
     }
     setTplLoading(true);
     setTplErr(null);
-    if (!opts?.preserveReparseNote) setTplReparseNote(null);
     setTplUsageNote(null);
     try {
       const params = new URLSearchParams();
@@ -1320,11 +1318,7 @@ export default function FactCardOpsPage() {
       );
 
       // Keep ops tables in sync: template overwrite may affect queue + orphan lists.
-      await Promise.all([
-        loadTemplates({ preserveReparseNote: true }),
-        loadQueue(),
-        loadUnmappedTemplates({ preserveReparseNote: true }),
-      ]);
+      await Promise.all([loadTemplates(), loadQueue(), loadUnmappedTemplates()]);
     } catch (e: any) {
       setTplErr(e?.message || "Failed to reparse template.");
     } finally {
@@ -3272,4 +3266,3 @@ export default function FactCardOpsPage() {
     </div>
   );
 }
-

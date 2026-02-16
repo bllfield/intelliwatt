@@ -430,18 +430,22 @@ export async function GET(req: NextRequest) {
       return days > 0 && days <= switchWithoutEtfWindowDays;
     })();
 
-    const wouldIncurEtfIfSwitchNow =
-      typeof isInContract === "boolean"
-        ? !isInContract
-          ? false
-          : etfCents <= 0
-            ? false
-            : canSwitchWithoutEtf === true
-              ? false
-              : canSwitchWithoutEtf === false
-                ? true
-                : null
-        : null;
+    const wouldIncurEtfIfSwitchNow = (() => {
+      // If we don't have an ETF amount, there's nothing to incur.
+      if (etfCents <= 0) return false;
+
+      // If we can explicitly determine the customer is within the ETF-free switch window, do not warn.
+      if (canSwitchWithoutEtf === true) return false;
+
+      // If we can explicitly determine they are OUTSIDE the ETF-free switch window, warn that switching now
+      // would incur an ETF unless we also know the contract is already over.
+      if (canSwitchWithoutEtf === false) return isInContract === false ? false : true;
+
+      // Otherwise, fall back to contract status when known.
+      if (typeof isInContract === "boolean") return isInContract ? null : false;
+
+      return null;
+    })();
 
     // Offer estimate (from cache or compute).
     const offerEstimate = await (async () => {
@@ -936,5 +940,4 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: false, error: e?.message ?? String(e) }, { status: 500 });
   }
 }
-
 

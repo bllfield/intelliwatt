@@ -566,27 +566,78 @@ export default function PlanCompareClient(props: { offerId: string }) {
           </div>
 
           <div className="mt-6 rounded-3xl border border-brand-cyan/20 bg-brand-navy p-6 text-brand-white shadow-[0_18px_40px_rgba(10,20,60,0.22)]">
-            <div className="text-xs font-semibold uppercase tracking-wide text-brand-cyan/60">Difference</div>
+            {(() => {
+              const d = comparisonTotals.delta;
+              const isSavings = typeof d === "number" && Number.isFinite(d) ? d < 0 : null;
+              const title = isSavings === null ? "Difference" : isSavings ? "Savings" : "Extra cost";
+              return <div className="text-xs font-semibold uppercase tracking-wide text-brand-cyan/60">{title}</div>;
+            })()}
             <div className="mt-2 grid grid-cols-1 gap-4 md:grid-cols-3">
               <div className="rounded-2xl border border-brand-cyan/15 bg-brand-white/5 p-4">
-                <div className="text-xs text-brand-cyan/70">Monthly delta</div>
-                <div className="mt-1 text-xl font-semibold text-brand-white/90">
-                  {monthlyDelta != null ? `${fmtDollars2(monthlyDelta)}/mo` : "—"}
-                </div>
+                {(() => {
+                  // Show the ongoing monthly delta (ETF is a one-time fee, not an ongoing monthly cost).
+                  const d = monthlyDelta;
+                  const isSavings = typeof d === "number" && Number.isFinite(d) ? d < 0 : null;
+                  const label =
+                    isSavings === null
+                      ? "Monthly delta"
+                      : isSavings
+                        ? "Monthly savings"
+                        : "Monthly extra cost";
+                  const value =
+                    typeof d === "number" && Number.isFinite(d) ? `${fmtDollars2(Math.abs(d))}/mo` : "—";
+                  return (
+                    <>
+                      <div className="text-xs text-brand-cyan/70">{label}</div>
+                      <div
+                        className={`mt-1 text-xl font-semibold ${
+                          isSavings === null ? "text-brand-white/90" : isSavings ? "text-emerald-200" : "text-amber-200"
+                        }`}
+                      >
+                        {value}
+                      </div>
+                      {includeEtf && etfAppliesNow && etfDollars > 0 ? (
+                        <div className="mt-1 text-[11px] text-brand-cyan/60">Monthly delta excludes the one-time ETF.</div>
+                      ) : null}
+                    </>
+                  );
+                })()}
               </div>
               <div className="rounded-2xl border border-brand-cyan/15 bg-brand-white/5 p-4">
-                <div className="text-xs text-brand-cyan/70">
-                  {comparisonIsAnnual
-                    ? "First-year delta (annual; includes ETF once if toggled)"
-                    : `Delta until contract end (${comparisonMonths} mo; includes ETF once if toggled)`}
-                </div>
-                <div className="mt-1 text-xl font-semibold text-brand-white/90">
-                  {comparisonTotals.delta != null
-                    ? comparisonIsAnnual
-                      ? `${fmtDollars2(comparisonTotals.delta)}/yr`
-                      : fmtDollars2(comparisonTotals.delta)
-                    : "—"}
-                </div>
+                {(() => {
+                  const d = comparisonTotals.delta;
+                  const isSavings = typeof d === "number" && Number.isFinite(d) ? d < 0 : null;
+                  const etfLabelSuffix =
+                    !comparisonIsAnnual && etfAppliesNow && etfDollars > 0 ? "; includes ETF once if toggled" : "";
+                  const label = (() => {
+                    if (comparisonIsAnnual) {
+                      return isSavings === null ? "Delta (first year)" : isSavings ? "Savings (first year)" : "Extra cost (first year)";
+                    }
+                    const window = `until contract end (${comparisonMonths} mo${etfLabelSuffix})`;
+                    return isSavings === null ? `Delta ${window}` : isSavings ? `Savings ${window}` : `Extra cost ${window}`;
+                  })();
+                  const value =
+                    typeof d === "number" && Number.isFinite(d)
+                      ? comparisonIsAnnual
+                        ? `${fmtDollars2(Math.abs(d))}/yr`
+                        : fmtDollars2(Math.abs(d))
+                      : "—";
+                  return (
+                    <>
+                      <div className="text-xs text-brand-cyan/70">{label}</div>
+                      <div
+                        className={`mt-1 text-xl font-semibold ${
+                          isSavings === null ? "text-brand-white/90" : isSavings ? "text-emerald-200" : "text-amber-200"
+                        }`}
+                      >
+                        {value}
+                      </div>
+                      {includeEtf && etfAppliesNow && etfDollars > 0 ? (
+                        <div className="mt-1 text-[11px] text-brand-cyan/60">Includes ETF once (if switching now).</div>
+                      ) : null}
+                    </>
+                  );
+                })()}
               </div>
               <div className="rounded-2xl border border-brand-cyan/15 bg-brand-white/5 p-4">
                 <div className="text-xs text-brand-cyan/70">Usage basis</div>
