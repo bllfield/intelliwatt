@@ -234,6 +234,11 @@ export default function PlanCompareClient(props: { offerId: string }) {
   const comparisonMonths = useContractWindow ? monthsRemaining : 12;
   const comparisonIsAnnual = comparisonMonths === 12;
 
+  const etfCents = data?.currentPlan?.earlyTerminationFeeCents ?? 0;
+  const etfAppliesNow =
+    wouldIncurEtfNow === true ||
+    (wouldIncurEtfNow == null && data?.currentPlan?.isInContract === true && etfCents > 0);
+
   const comparisonCurrentTotal =
     typeof currentMonthly === "number" && Number.isFinite(currentMonthly)
       ? currentMonthly * comparisonMonths
@@ -243,7 +248,7 @@ export default function PlanCompareClient(props: { offerId: string }) {
       ? offerMonthly * comparisonMonths
       : null;
   const addEtf =
-    includeEtf && (wouldIncurEtfNow === true) ? etfDollars : 0;
+    includeEtf && etfAppliesNow ? etfDollars : 0;
   const comparisonNewTotal =
     typeof comparisonNewTotalBase === "number" ? comparisonNewTotalBase + addEtf : null;
 

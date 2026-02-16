@@ -431,11 +431,17 @@ export async function GET(req: NextRequest) {
     })();
 
     const wouldIncurEtfIfSwitchNow =
-      typeof isInContract === "boolean" && isInContract && etfCents > 0
-        ? canSwitchWithoutEtf === false
-        : typeof isInContract === "boolean"
+      typeof isInContract === "boolean"
+        ? !isInContract
           ? false
-          : null;
+          : etfCents <= 0
+            ? false
+            : canSwitchWithoutEtf === true
+              ? false
+              : canSwitchWithoutEtf === false
+                ? true
+                : null
+        : null;
 
     // Offer estimate (from cache or compute).
     const offerEstimate = await (async () => {
