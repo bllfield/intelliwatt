@@ -9,11 +9,39 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
-function daysBetweenInclusive(start: Date, end: Date): number {
-  const msPerDay = 24 * 60 * 60 * 1000;
-  const a = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate()));
-  const b = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate()));
-  return Math.max(0, Math.floor((b.getTime() - a.getTime()) / msPerDay) + 1);
+const DAY_MS = 24 * 60 * 60 * 1000;
+const SMT_PULL_COOLDOWN_MS = 30 * DAY_MS;
+const SMT_READY_COMPLETENESS = 0.99; // stop chasing tiny tails; treat ~99% as sufficient for "ready"
+const SMT_GAP_SLOP_DAYS = 1; // tolerate up to 1 day tail/head mismatch for messaging/eligibility
+const SMT_TZ = "America/Chicago";
+
+const chicagoDateFmt = new Intl.DateTimeFormat("en-CA", {
+  timeZone: SMT_TZ,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+function chicagoDateKey(d: Date): string {
+  try {
+    return chicagoDateFmt.format(d); // YYYY-MM-DD
+  } catch {
+    // Fallback: UTC date (still stable)
+    return d.toISOString().slice(0, 10);
+  }
+}
+
+function dateKeyToUtcMidnight(key: string): Date {
+  // Treat the key as a pure calendar day; represent it as UTC midnight for comparisons.
+  return new Date(`${key}T00:00:00.000Z`);
+}
+
+function daysBetweenDateKeysInclusive(startKey: string, endKey: string): number {
+  const a = dateKeyToUtcMidnight(startKey);
+  const b = dateKeyToUtcMidnight(endKey);
+  const diff = b.getTime() - a.getTime();
+  if (!Number.isFinite(diff) || diff < 0) return 0;
+  return Math.floor(diff / DAY_MS) + 1;
 }
 
 function resolveBaseUrl(): URL {
@@ -50,7 +78,14 @@ type UsageCoverage = {
   rawCount: number;
   coverageStart: Date | null;
   coverageEnd: Date | null;
+  coverageStartDate: string | null; // America/Chicago date key
+  coverageEndDate: string | null;   // America/Chicago date key
   coverageDays: number;
+  headGapDays: number;
+  tailGapDays: number;
+  missingGaps: boolean;
+  pullEligibleNow: boolean;
+  pullEligibleAt: string | null;
   ready: boolean;
   phase: "ready" | "processing" | "pending";
   message: string | null;
@@ -71,8 +106,11 @@ async function computeUsageCoverageForEsiid(esiid: string): Promise<UsageCoverag
   const intervalCount = Number(intervalAggAll._count?._all ?? 0);
   const coverageStart = intervalAggAll._min?.ts ?? null;
   const coverageEnd = intervalAggAll._max?.ts ?? null;
+
+  const coverageStartDate = coverageStart ? chicagoDateKey(coverageStart) : null;
+  const coverageEndDate = coverageEnd ? chicagoDateKey(coverageEnd) : null;
   const coverageDays =
-    coverageStart && coverageEnd ? daysBetweenInclusive(coverageStart, coverageEnd) : 0;
+    coverageStartDate && coverageEndDate ? daysBetweenDateKeysInclusive(coverageStartDate, coverageEndDate) : 0;
 
   // Completeness check (contiguous-series, per meter):
   // SMT delivers 15-minute reads as a contiguous series (zeros still appear as rows).
@@ -127,11 +165,28 @@ async function computeUsageCoverageForEsiid(esiid: string): Promise<UsageCoverag
   const intervalCompletenessBySpan =
     intervalExpectedBySpan > 0 ? intervalCount / intervalExpectedBySpan : 0;
 
-  // Allow a tiny amount of slop for rare edge cases (e.g., duplicate cleanup races).
-  // If we have fewer than ~99.5% of expected intervals across the observed span, keep pulling.
-  // Use the *worst* meter completeness to avoid declaring "ready" when one meter is missing rows.
-  const historyReady =
-    intervalExpectedBySpan > 0 && meterGroupsSeen > 0 && minMeterCompleteness >= 0.995;
+  // Compute head/tail gaps against the target 12-month calendar window (for messaging + eligibility).
+  const targetStartKey = chicagoDateKey(target.startDate);
+  const targetEndKey = chicagoDateKey(target.endDate);
+
+  const headGapDays =
+    coverageStartDate && dateKeyToUtcMidnight(coverageStartDate).getTime() > dateKeyToUtcMidnight(targetStartKey).getTime()
+      ? Math.max(0, daysBetweenDateKeysInclusive(targetStartKey, coverageStartDate) - 1)
+      : 0;
+  const tailGapDays =
+    coverageEndDate && dateKeyToUtcMidnight(coverageEndDate).getTime() < dateKeyToUtcMidnight(targetEndKey).getTime()
+      ? Math.max(0, daysBetweenDateKeysInclusive(coverageEndDate, targetEndKey) - 1)
+      : 0;
+
+  const completenessOk =
+    intervalExpectedBySpan > 0 && meterGroupsSeen > 0 && minMeterCompleteness >= SMT_READY_COMPLETENESS;
+  const gapsOk = headGapDays <= SMT_GAP_SLOP_DAYS && tailGapDays <= SMT_GAP_SLOP_DAYS;
+  const hasFullWindow = coverageDays >= 365;
+  const missingGaps = !(completenessOk && gapsOk && hasFullWindow);
+
+  // "Ready" semantics for UX + throttling:
+  // If we have a full-year span and ~99% completeness, stop trying to "fetch 1 more day".
+  const historyReady = Boolean(completenessOk && gapsOk && hasFullWindow);
 
   const rawCount = await prisma.rawSmtFile.count({
     where: {
@@ -143,27 +198,33 @@ async function computeUsageCoverageForEsiid(esiid: string): Promise<UsageCoverag
   const phase: UsageCoverage["phase"] =
     ready ? "ready" : intervalCount > 0 || rawCount > 0 ? "processing" : "pending";
 
-  const tailGapDays =
-    coverageEnd && coverageEnd.getTime() < target.endDate.getTime()
-      ? Math.max(0, daysBetweenInclusive(coverageEnd, target.endDate) - 1)
-      : 0;
+  const dataAgeMs = coverageEnd ? Date.now() - coverageEnd.getTime() : Number.POSITIVE_INFINITY;
+  const dataOlderThan30d = !coverageEnd ? true : dataAgeMs >= SMT_PULL_COOLDOWN_MS;
+  const pullEligibleNow = intervalCount === 0 || dataOlderThan30d || missingGaps;
+  const pullEligibleAt = coverageEnd
+    ? new Date(coverageEnd.getTime() + SMT_PULL_COOLDOWN_MS).toISOString()
+    : new Date().toISOString();
 
   const message = (() => {
-    if (ready) return "Full SMT history has been ingested.";
+    if (ready) {
+      if (pullEligibleNow) return "SMT history is ingested. Refresh is available (data is older than 30 days).";
+      const next = coverageEnd ? chicagoDateKey(new Date(coverageEnd.getTime() + SMT_PULL_COOLDOWN_MS)) : null;
+      return next
+        ? `SMT history is ingested. Next refresh available after ${next}.`
+        : "SMT history is ingested.";
+    }
     if (phase === "pending") return "Waiting for SMT interval data delivery.";
     if (phase === "processing") {
       if (intervalCount > 0 && coverageStart && coverageEnd) {
-        const pct = intervalCompletenessBySpan > 0 ? Math.floor(intervalCompletenessBySpan * 100) : 0;
+        const pct = intervalCompletenessBySpan > 0 ? Math.round(intervalCompletenessBySpan * 100) : 0;
+        const gapsNote =
+          headGapDays > 0 || tailGapDays > 0
+            ? ` Missing ~${headGapDays} day(s) at start and ~${tailGapDays} day(s) at end of the 12‑month window.`
+            : "";
         if (rawCount === 0) {
-          if (tailGapDays > 0) {
-            return `SMT intervals ingested (${coverageDays} day(s)). Coverage completeness ~${pct}%. Still fetching the most recent ${tailGapDays} day(s) to complete the 12‑month window.`;
-          }
-          return `SMT intervals ingested (${coverageDays} day(s)). Coverage completeness ~${pct}%. Finishing processing.`;
+          return `SMT intervals ingested (${coverageDays} day(s)). Coverage completeness ~${pct}%.${gapsNote}`;
         }
-        if (tailGapDays > 0) {
-          return `Partial SMT history ingested (${coverageDays} day(s)). Coverage completeness ~${pct}%. Still fetching the most recent ${tailGapDays} day(s) to complete the 12‑month window.`;
-        }
-        return `Partial SMT history ingested (${coverageDays} day(s)). Coverage completeness ~${pct}%. Still importing historical usage.`;
+        return `SMT intervals ingested (${coverageDays} day(s)). Coverage completeness ~${pct}%.${gapsNote} Processing newly received SMT files.`;
       }
       if (rawCount > 0) return "SMT files received; processing intervals.";
       return "Processing SMT usage.";
@@ -178,7 +239,14 @@ async function computeUsageCoverageForEsiid(esiid: string): Promise<UsageCoverag
     rawCount,
     coverageStart,
     coverageEnd,
+    coverageStartDate,
+    coverageEndDate,
     coverageDays,
+    headGapDays,
+    tailGapDays,
+    missingGaps,
+    pullEligibleNow,
+    pullEligibleAt,
     ready,
     phase,
     message,
@@ -359,6 +427,8 @@ export async function POST(req: NextRequest) {
     backfillRequested: false,
     pullTriggered: false,
     orchestratorThrottled: recentlySynced,
+    pullEligibleNow: usage.pullEligibleNow,
+    pullEligibleAt: usage.pullEligibleAt,
     ...(esiidMismatch
       ? { esiidMismatch: { houseEsiid, authorizationEsiid: authEsiid } }
       : {}),
@@ -381,7 +451,10 @@ export async function POST(req: NextRequest) {
 
   // 2) Once ACTIVE: request interval backfill (rate-limited by smtBackfillRequestedAt and coverage).
   const active = isActiveStatus(effectiveStatus);
-  const shouldWork = !isExpired && active && (!usage.ready || force);
+  const shouldWork =
+    !isExpired &&
+    active &&
+    (!usage.ready || (force && usage.pullEligibleNow));
 
   if (shouldWork && (!recentlySynced || force)) {
     const backfillRange = getRollingBackfillRange(12);
@@ -398,7 +471,11 @@ export async function POST(req: NextRequest) {
       process.env.SMT_INTERVAL_BACKFILL_ENABLED === "true" ||
       process.env.SMT_INTERVAL_BACKFILL_ENABLED === "1";
 
-    if (enableBackfill && (force || !requestedAt || allowRetry)) {
+    // If the user forces a refresh but they are not eligible (data <30d old and no gaps),
+    // do NOT spam SMT backfill requests.
+    const allowForceBackfill = !force || usage.pullEligibleNow;
+
+    if (enableBackfill && allowForceBackfill && (force || !requestedAt || allowRetry)) {
       const res = await requestSmtBackfillForAuthorization({
         authorizationId: authorization.id,
         esiid: effectiveEsiid,
@@ -421,8 +498,12 @@ export async function POST(req: NextRequest) {
     }
 
     // 3) Trigger droplet pull so we fetch anything delivered via SFTP.
+    if (force && !usage.pullEligibleNow) {
+      actions.pullTriggered = false;
+      actions.pullBlockedReason = "cooldown";
+    }
     const adminToken = (process.env.ADMIN_TOKEN ?? "").trim();
-    if (adminToken) {
+    if (adminToken && (!force || usage.pullEligibleNow)) {
       try {
         const baseUrl = resolveBaseUrl();
         const pullUrl = new URL("/api/admin/smt/pull", baseUrl);
@@ -495,8 +576,9 @@ export async function POST(req: NextRequest) {
       intervals: usage.intervalCount,
       rawFiles: usage.rawCount,
       coverage: {
-        start: usage.coverageStart ? usage.coverageStart.toISOString() : null,
-        end: usage.coverageEnd ? usage.coverageEnd.toISOString() : null,
+        // Use America/Chicago calendar dates for user-facing display and gating.
+        start: usage.coverageStartDate,
+        end: usage.coverageEndDate,
         days: usage.coverageDays,
         completenessPct:
           usage.intervalExpectedBySpan > 0

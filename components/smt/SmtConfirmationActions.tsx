@@ -100,7 +100,7 @@ export function SmtConfirmationActions({ homeId }: Props) {
       setIsWaitingOnSmt(true);
       setIsProcessing(false);
       setStatusMessage(
-        "We’re monitoring your Smart Meter Texas authorization and pulling interval usage as soon as SMT confirms access. This can take a few minutes.",
+        "We’re processing your Smart Meter Texas data. Once a full 12‑month window is present, refresh will be limited to once every 30 days unless gaps are detected.",
       );
       void pollUsageReady(homeId);
     } catch (err) {

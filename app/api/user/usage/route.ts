@@ -9,6 +9,22 @@ import { buildUsageBucketsForEstimate } from '@/lib/usage/buildUsageBucketsForEs
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const USAGE_DB_ENABLED = Boolean((process.env.USAGE_DATABASE_URL ?? '').trim());
+const SMT_TZ = 'America/Chicago';
+
+const chicagoDateFmt = new Intl.DateTimeFormat('en-CA', {
+  timeZone: SMT_TZ,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
+
+function chicagoDateKey(d: Date): string {
+  try {
+    return chicagoDateFmt.format(d); // YYYY-MM-DD
+  } catch {
+    return d.toISOString().slice(0, 10);
+  }
+}
 
 type UsageSeriesPoint = {
   timestamp: string;
@@ -624,8 +640,10 @@ async function fetchSmtDataset(esiid: string | null): Promise<UsageDatasetResult
       source: 'SMT',
       intervalsCount: count,
       totalKwh,
-      start: start ? start.toISOString() : null,
-      end: end ? end.toISOString() : null,
+      // Display coverage dates in America/Chicago (matches SMT semantics + analysis buckets).
+      // Keep `latest` as an instant ISO string for internal windowing.
+      start: start ? chicagoDateKey(start) : null,
+      end: end ? chicagoDateKey(end) : null,
       latest: end ? end.toISOString() : null,
     },
     series: {

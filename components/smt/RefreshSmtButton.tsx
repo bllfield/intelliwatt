@@ -110,13 +110,33 @@ export default function RefreshSmtButton({ homeId }: RefreshSmtButtonProps) {
           );
         }
 
+        // If the server says we're in a 30-day cooldown (data is fresh and no gaps),
+        // surface that and avoid long polling loops.
+        const pullEligibleNow = Boolean(usagePayload?.actions?.pullEligibleNow ?? true);
+        const pullEligibleAt = usagePayload?.actions?.pullEligibleAt ?? null;
+        if (!pullEligibleNow && (usagePayload?.usage?.ready || usagePayload?.phase === 'ready')) {
+          setIsWaitingOnSmt(false);
+          setIsProcessing(false);
+          setStatus('success');
+          setMessage(
+            (usagePayload?.usage?.message as string) ||
+              (pullEligibleAt
+                ? `Your SMT data is up to date. Next refresh available after ${String(pullEligibleAt).slice(0, 10)}.`
+                : 'Your SMT data is up to date.'),
+          );
+          router.refresh();
+          return;
+        }
+
         // If SMT pull/backfill/normalize succeeded, start polling to see when
         // the data actually lands. This is primarily for the SMT path, which
         // may take some time between backfill request and SFTP delivery.
         setIsWaitingOnSmt(true);
         setStatus('success');
         setMessage(
-          'We’re monitoring your Smart Meter Texas authorization and pulling interval usage as soon as SMT confirms access. This can take a few minutes.',
+          pullEligibleAt && !pullEligibleNow
+            ? `Your SMT data is up to date. Next refresh available after ${String(pullEligibleAt).slice(0, 10)}.`
+            : 'Refresh requested. If your data is older than 30 days or has gaps, we will pull updated SMT usage. This can take a few minutes.',
         );
         void pollUsageReady(homeId);
       } catch (error) {

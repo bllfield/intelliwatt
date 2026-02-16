@@ -7,11 +7,36 @@ import { getRollingBackfillRange } from "@/lib/smt/agreements";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-function daysBetweenInclusive(start: Date, end: Date): number {
-  const msPerDay = 24 * 60 * 60 * 1000;
-  const a = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate()));
-  const b = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate()));
-  return Math.max(0, Math.floor((b.getTime() - a.getTime()) / msPerDay) + 1);
+const DAY_MS = 24 * 60 * 60 * 1000;
+const SMT_PULL_COOLDOWN_MS = 30 * DAY_MS;
+const SMT_READY_COMPLETENESS = 0.99;
+const SMT_TZ = "America/Chicago";
+
+const chicagoDateFmt = new Intl.DateTimeFormat("en-CA", {
+  timeZone: SMT_TZ,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+function chicagoDateKey(d: Date): string {
+  try {
+    return chicagoDateFmt.format(d); // YYYY-MM-DD
+  } catch {
+    return d.toISOString().slice(0, 10);
+  }
+}
+
+function dateKeyToUtcMidnight(key: string): Date {
+  return new Date(`${key}T00:00:00.000Z`);
+}
+
+function daysBetweenDateKeysInclusive(startKey: string, endKey: string): number {
+  const a = dateKeyToUtcMidnight(startKey);
+  const b = dateKeyToUtcMidnight(endKey);
+  const diff = b.getTime() - a.getTime();
+  if (!Number.isFinite(diff) || diff < 0) return 0;
+  return Math.floor(diff / DAY_MS) + 1;
 }
 
 export async function POST(req: NextRequest) {
@@ -89,20 +114,17 @@ export async function POST(req: NextRequest) {
   const coverageStart = intervalAgg._min?.ts ?? null;
   const coverageEnd = intervalAgg._max?.ts ?? null;
 
+  const coverageStartDate = coverageStart ? chicagoDateKey(coverageStart) : null;
+  const coverageEndDate = coverageEnd ? chicagoDateKey(coverageEnd) : null;
   const coverageDays =
-    coverageStart && coverageEnd ? daysBetweenInclusive(coverageStart, coverageEnd) : 0;
+    coverageStartDate && coverageEndDate
+      ? daysBetweenDateKeysInclusive(coverageStartDate, coverageEndDate)
+      : 0;
 
-  // "Ready" means we have essentially the full 365-day window (allow a little slop).
-  const slopDays = 2;
-  const targetStartMs = target.startDate.getTime() + slopDays * 24 * 60 * 60 * 1000;
-  const targetEndMs = target.endDate.getTime() - slopDays * 24 * 60 * 60 * 1000;
-
-  const historyReady = Boolean(
-    coverageStart &&
-      coverageEnd &&
-      coverageStart.getTime() <= targetStartMs &&
-      coverageEnd.getTime() >= targetEndMs,
-  );
+  // "Ready" means: full-year span and near-complete series (stop chasing a 1-day tail).
+  const expectedIntervals = Math.max(1, coverageDays * 96);
+  const completenessByDaySpan = expectedIntervals > 0 ? intervalCount / expectedIntervals : 0;
+  const historyReady = Boolean(coverageDays >= 365 && completenessByDaySpan >= SMT_READY_COMPLETENESS);
 
   // Also report whether any raw SMT files have landed for visibility.
   const rawCount = await prisma.rawSmtFile.count({
@@ -117,10 +139,17 @@ export async function POST(req: NextRequest) {
   const ready = historyReady;
   const phase = ready ? "ready" : intervalCount > 0 || rawCount > 0 ? "processing" : "pending";
 
+  const targetEndKey = chicagoDateKey(target.endDate);
   const tailGapDays =
-    coverageEnd && coverageEnd.getTime() < target.endDate.getTime()
-      ? Math.max(0, daysBetweenInclusive(coverageEnd, target.endDate) - 1)
+    coverageEndDate &&
+    dateKeyToUtcMidnight(coverageEndDate).getTime() < dateKeyToUtcMidnight(targetEndKey).getTime()
+      ? Math.max(0, daysBetweenDateKeysInclusive(coverageEndDate, targetEndKey) - 1)
       : 0;
+
+  const pullEligibleNow = !coverageEnd ? true : Date.now() - coverageEnd.getTime() >= SMT_PULL_COOLDOWN_MS;
+  const pullEligibleAt = coverageEnd
+    ? new Date(coverageEnd.getTime() + SMT_PULL_COOLDOWN_MS).toISOString()
+    : new Date().toISOString();
 
   const message = (() => {
     if (ready) return "Full SMT history has been ingested.";
@@ -129,14 +158,14 @@ export async function POST(req: NextRequest) {
       if (intervalCount > 0 && coverageStart && coverageEnd) {
         if (rawCount === 0) {
           if (tailGapDays > 0) {
-            return `SMT intervals ingested (${coverageDays} day(s)). Still fetching the most recent ${tailGapDays} day(s) to complete the 12‑month window.`;
+            return `SMT intervals ingested (${coverageDays} day(s)). Coverage is nearly complete. Refresh is limited to once every 30 days unless gaps are detected.`;
           }
           return `SMT intervals ingested (${coverageDays} day(s)). Finishing processing.`;
         }
         if (tailGapDays > 0) {
-          return `Partial SMT history ingested (${coverageDays} day(s)). Still fetching the most recent ${tailGapDays} day(s) to complete the 12‑month window.`;
+          return `SMT intervals ingested (${coverageDays} day(s)). Processing newly received SMT files. Refresh is limited to once every 30 days unless gaps are detected.`;
         }
-        return `Partial SMT history ingested (${coverageDays} day(s)). Still importing historical usage.`;
+        return `SMT intervals ingested (${coverageDays} day(s)). Processing newly received SMT files.`;
       }
       if (rawCount > 0) return "SMT files received; processing intervals.";
       return "Processing SMT usage.";
@@ -151,8 +180,8 @@ export async function POST(req: NextRequest) {
     intervals: intervalCount,
     rawFiles: rawCount,
     coverage: {
-      start: coverageStart ? coverageStart.toISOString() : null,
-      end: coverageEnd ? coverageEnd.toISOString() : null,
+      start: coverageStartDate,
+      end: coverageEndDate,
       days: coverageDays,
     },
     target: {
@@ -160,6 +189,10 @@ export async function POST(req: NextRequest) {
       end: target.endDate.toISOString(),
     },
     message,
+    pull: {
+      eligibleNow: pullEligibleNow,
+      eligibleAt: pullEligibleAt,
+    },
   });
 }
 
