@@ -22,6 +22,11 @@ type ApiResp = {
     contractEndDate: string | null;
     earlyTerminationFeeCents: number;
     isInContract: boolean | null;
+    contractAsOf?: string | null;
+    monthsRemainingOnContract?: number | null;
+    switchWithoutEtfWindowDays?: number;
+    canSwitchWithoutEtf?: boolean | null;
+    wouldIncurEtfIfSwitchNow?: boolean | null;
   };
   tdspApplied?: {
     perKwhDeliveryChargeCents: number;
@@ -200,12 +205,17 @@ export default function PlanCompareClient(props: { offerId: string }) {
   useEffect(() => {
     const isInContract = data?.currentPlan?.isInContract;
     const etfCents = data?.currentPlan?.earlyTerminationFeeCents ?? 0;
+    const wouldIncur = data?.currentPlan?.wouldIncurEtfIfSwitchNow;
+    if (typeof wouldIncur === "boolean") {
+      setIncludeEtf(wouldIncur);
+      return;
+    }
     if (typeof isInContract === "boolean" && etfCents > 0) {
-      setIncludeEtf(isInContract);
+      setIncludeEtf(Boolean(isInContract));
     } else if (etfCents <= 0) {
       setIncludeEtf(false);
     }
-  }, [data?.currentPlan?.isInContract, data?.currentPlan?.earlyTerminationFeeCents]);
+  }, [data?.currentPlan?.isInContract, data?.currentPlan?.earlyTerminationFeeCents, data?.currentPlan?.wouldIncurEtfIfSwitchNow]);
 
   const currentAnnual = pickAnnual(data?.estimates?.current);
   const offerAnnual = pickAnnual(data?.estimates?.offer);
@@ -213,15 +223,33 @@ export default function PlanCompareClient(props: { offerId: string }) {
   const offerMonthly = pickMonthly(data?.estimates?.offer);
   const etfDollars = (data?.currentPlan?.earlyTerminationFeeCents ?? 0) / 100;
 
-  const firstYearCurrent = currentAnnual;
-  const firstYearNew =
-    typeof offerAnnual === "number" && Number.isFinite(offerAnnual)
-      ? offerAnnual + (includeEtf ? etfDollars : 0)
-      : null;
+  const monthsRemaining = data?.currentPlan?.monthsRemainingOnContract ?? null;
+  const wouldIncurEtfNow = data?.currentPlan?.wouldIncurEtfIfSwitchNow;
+  const useContractWindow =
+    typeof monthsRemaining === "number" &&
+    Number.isFinite(monthsRemaining) &&
+    monthsRemaining > 0 &&
+    Boolean(data?.currentPlan?.contractEndDate) &&
+    wouldIncurEtfNow === true;
+  const comparisonMonths = useContractWindow ? monthsRemaining : 12;
+  const comparisonIsAnnual = comparisonMonths === 12;
 
-  const firstYearDelta =
-    typeof firstYearCurrent === "number" && typeof firstYearNew === "number"
-      ? firstYearNew - firstYearCurrent
+  const comparisonCurrentTotal =
+    typeof currentMonthly === "number" && Number.isFinite(currentMonthly)
+      ? currentMonthly * comparisonMonths
+      : null;
+  const comparisonNewTotalBase =
+    typeof offerMonthly === "number" && Number.isFinite(offerMonthly)
+      ? offerMonthly * comparisonMonths
+      : null;
+  const addEtf =
+    includeEtf && (wouldIncurEtfNow === true) ? etfDollars : 0;
+  const comparisonNewTotal =
+    typeof comparisonNewTotalBase === "number" ? comparisonNewTotalBase + addEtf : null;
+
+  const comparisonDelta =
+    typeof comparisonCurrentTotal === "number" && typeof comparisonNewTotal === "number"
+      ? comparisonNewTotal - comparisonCurrentTotal
       : null;
 
   const monthlyDelta =
@@ -349,6 +377,14 @@ export default function PlanCompareClient(props: { offerId: string }) {
                   <div className="mt-1 text-sm text-brand-cyan/70">
                     {currentAnnual != null ? `${fmtDollars2(currentAnnual)}/yr` : "—"}
                   </div>
+                  {useContractWindow ? (
+                    <div className="mt-1 text-xs text-brand-cyan/60">
+                      Next {comparisonMonths} mo:{" "}
+                      <span className="font-semibold text-brand-white/90">
+                        {comparisonCurrentTotal != null ? fmtDollars2(comparisonCurrentTotal) : "—"}
+                      </span>
+                    </div>
+                  ) : null}
                 </div>
                 <div className="rounded-2xl border border-brand-cyan/15 bg-brand-white/5 p-4">
                   <div className="text-xs text-brand-cyan/70">Contract</div>
@@ -380,6 +416,14 @@ export default function PlanCompareClient(props: { offerId: string }) {
                   <div className="mt-1 text-sm text-brand-cyan/70">
                     {offerAnnual != null ? `${fmtDollars2(offerAnnual)}/yr` : "—"}
                   </div>
+                  {useContractWindow ? (
+                    <div className="mt-1 text-xs text-brand-cyan/60">
+                      Switch now ({comparisonMonths} mo{includeEtf && wouldIncurEtfNow ? " + ETF" : ""}):{" "}
+                      <span className="font-semibold text-brand-white/90">
+                        {comparisonNewTotal != null ? fmtDollars2(comparisonNewTotal) : "—"}
+                      </span>
+                    </div>
+                  ) : null}
                 </div>
                 <div className="rounded-2xl border border-brand-cyan/15 bg-brand-white/5 p-4">
                   <div className="text-xs text-brand-cyan/70">Termination fee toggle</div>
@@ -396,6 +440,13 @@ export default function PlanCompareClient(props: { offerId: string }) {
                   <div className="mt-1 text-xs text-brand-cyan/70">
                     Toggle off to see the savings if you switch after your contract expires.
                   </div>
+                  {typeof data.currentPlan?.canSwitchWithoutEtf === "boolean" && data.currentPlan.contractEndDate ? (
+                    <div className="mt-1 text-[11px] text-brand-cyan/60">
+                      {data.currentPlan.canSwitchWithoutEtf
+                        ? `You’re within ${data.currentPlan.switchWithoutEtfWindowDays ?? 14} days of contract end (ETF-free switch window).`
+                        : `Outside the ${data.currentPlan.switchWithoutEtfWindowDays ?? 14}-day ETF-free switch window.`}
+                    </div>
+                  ) : null}
                 </div>
               </div>
 
@@ -433,9 +484,17 @@ export default function PlanCompareClient(props: { offerId: string }) {
                 </div>
               </div>
               <div className="rounded-2xl border border-brand-cyan/15 bg-brand-white/5 p-4">
-                <div className="text-xs text-brand-cyan/70">First-year delta (annual; includes ETF once if toggled)</div>
+                <div className="text-xs text-brand-cyan/70">
+                  {comparisonIsAnnual
+                    ? "First-year delta (annual; includes ETF once if toggled)"
+                    : `Delta until contract end (${comparisonMonths} mo; includes ETF once if toggled)`}
+                </div>
                 <div className="mt-1 text-xl font-semibold text-brand-white/90">
-                  {firstYearDelta != null ? `${fmtDollars2(firstYearDelta)}/yr` : "—"}
+                  {comparisonDelta != null
+                    ? comparisonIsAnnual
+                      ? `${fmtDollars2(comparisonDelta)}/yr`
+                      : fmtDollars2(comparisonDelta)
+                    : "—"}
                 </div>
               </div>
               <div className="rounded-2xl border border-brand-cyan/15 bg-brand-white/5 p-4">

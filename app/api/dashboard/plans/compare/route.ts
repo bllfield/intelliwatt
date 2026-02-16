@@ -27,6 +27,10 @@ export const dynamic = "force-dynamic";
 
 // NOTE: renter status is a persisted house attribute (HouseAddress.isRenter), not a query param.
 
+// Texas PUC rule: customers can switch without ETF if the switch is scheduled within 14 days
+// of the contract end date. We use this for "switch now" ETF gating.
+const TX_ETF_FREE_SWITCH_WINDOW_DAYS = 14;
+
 function decimalToNumber(v: any): number | null {
   if (typeof v === "number" && Number.isFinite(v)) return v;
   if (v && typeof v === "object" && typeof v.toString === "function") {
@@ -65,6 +69,12 @@ function monthKwh(m: Record<string, number> | null | undefined, key: string): nu
   if (typeof v === "string" && v.trim() === "") return null;
   const n = typeof v === "number" ? v : Number(v);
   return Number.isFinite(n) ? n : null;
+}
+
+function daysUntil(a: Date, b: Date): number | null {
+  const ms = b.getTime() - a.getTime();
+  if (!Number.isFinite(ms)) return null;
+  return ms / (24 * 60 * 60 * 1000);
 }
 
 export async function GET(req: NextRequest) {
@@ -403,11 +413,29 @@ export async function GET(req: NextRequest) {
         ? new Date(contractEndDateIso).getTime() > now.getTime()
         : null;
 
-    const contractAsOfIso = windowEnd ? windowEnd.toISOString() : now.toISOString();
+    const contractAsOfIso = now.toISOString();
     const monthsRemainingOnContract = computeMonthsRemainingOnContract({
       contractEndDate: contractEndDateIso,
-      asOf: windowEnd ?? now,
+      asOf: now,
     });
+
+    const switchWithoutEtfWindowDays = TX_ETF_FREE_SWITCH_WINDOW_DAYS;
+    const canSwitchWithoutEtf = (() => {
+      if (!contractEndDateIso) return null;
+      const end = new Date(contractEndDateIso);
+      if (!Number.isFinite(end.getTime())) return null;
+      const days = daysUntil(now, end);
+      if (days == null) return null;
+      // Within 14 days (and still before end) is considered ETF-free for scheduling.
+      return days > 0 && days <= switchWithoutEtfWindowDays;
+    })();
+
+    const wouldIncurEtfIfSwitchNow =
+      typeof isInContract === "boolean" && isInContract && etfCents > 0
+        ? canSwitchWithoutEtf === false
+        : typeof isInContract === "boolean"
+          ? false
+          : null;
 
     // Offer estimate (from cache or compute).
     const offerEstimate = await (async () => {
@@ -870,6 +898,9 @@ export async function GET(req: NextRequest) {
           isInContract,
           contractAsOf: contractAsOfIso,
           monthsRemainingOnContract,
+          switchWithoutEtfWindowDays,
+          canSwitchWithoutEtf,
+          wouldIncurEtfIfSwitchNow,
         },
         tdspApplied,
         usage: {
