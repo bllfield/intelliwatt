@@ -995,6 +995,8 @@ export default function PlanCompareClient(props: { offerId: string }) {
                                   const baseMonthTotals = rows.map((r) => numOrNull(r?.totalDollars) ?? 0);
                                   const totalEtf = side === "offer" && includeEtf && etfAppliesNow && etfDollars > 0 && rows.length > 0 ? etfDollars : 0;
                                   const totalMonthTotal = sumNums(baseMonthTotals) + totalEtf;
+                                  const windowMonths = rows.length > 0 ? rows.length : 12;
+                                  const windowFactor = windowMonths / 12;
 
                                   // Reconcile: monthlyBreakdown.totals.expectedAnnual is the canonical engine output.
                                   // The per-month reconstruction can differ when a plan contains rules we don't yet
@@ -1005,27 +1007,35 @@ export default function PlanCompareClient(props: { offerId: string }) {
                                       : null;
                                   const adjustmentDollars =
                                     deltaCents != null ? (-1 * deltaCents) / 100 : null;
+                                  const adjustmentDollarsWindow =
+                                    typeof adjustmentDollars === "number" && Number.isFinite(adjustmentDollars) ? adjustmentDollars * windowFactor : null;
 
                                   const expectedAnnual =
                                     typeof monthlyBreakdown?.totals?.expectedAnnual === "number"
                                       ? monthlyBreakdown.totals.expectedAnnual
                                       : null;
+                                  const expectedWindowTotal =
+                                    typeof expectedAnnual === "number" && Number.isFinite(expectedAnnual) ? expectedAnnual * windowFactor : null;
                                   const reconciledTotal =
-                                    expectedAnnual != null
-                                      ? expectedAnnual + (side === "offer" ? totalEtf : 0)
+                                    expectedWindowTotal != null
+                                      ? expectedWindowTotal + (side === "offer" ? totalEtf : 0)
                                       : null;
 
                                   const currentExpectedAnnual =
                                     side === "offer" && typeof (currentDetail as any)?.monthlyBreakdown?.totals?.expectedAnnual === "number"
                                       ? Number((currentDetail as any).monthlyBreakdown.totals.expectedAnnual)
                                       : null;
+                                  const currentExpectedWindowTotal =
+                                    side === "offer" && typeof currentExpectedAnnual === "number" && Number.isFinite(currentExpectedAnnual)
+                                      ? currentExpectedAnnual * windowFactor
+                                      : null;
                                   const reconciledDeltaVsCurrent =
                                     side === "offer" &&
                                     typeof reconciledTotal === "number" &&
                                     Number.isFinite(reconciledTotal) &&
-                                    typeof currentExpectedAnnual === "number" &&
-                                    Number.isFinite(currentExpectedAnnual)
-                                      ? reconciledTotal - currentExpectedAnnual
+                                    typeof currentExpectedWindowTotal === "number" &&
+                                    Number.isFinite(currentExpectedWindowTotal)
+                                      ? reconciledTotal - currentExpectedWindowTotal
                                       : null;
 
                                   let totalDelta: number | null = null;
@@ -1099,9 +1109,13 @@ export default function PlanCompareClient(props: { offerId: string }) {
                                         ) : null}
                                       </tr>
 
-                                      {typeof adjustmentDollars === "number" && Number.isFinite(adjustmentDollars) && adjustmentDollars !== 0 ? (
+                                      {typeof adjustmentDollarsWindow === "number" &&
+                                      Number.isFinite(adjustmentDollarsWindow) &&
+                                      adjustmentDollarsWindow !== 0 ? (
                                         <tr className="border-t border-brand-cyan/10 text-brand-cyan/70">
-                                          <td className="px-3 py-2 font-semibold">Adjustment (credits/discounts not fully modeled in rows)</td>
+                                          <td className="px-3 py-2 font-semibold">
+                                            Adjustment (credits/discounts not fully modeled in rows; scaled to {windowMonths} mo)
+                                          </td>
                                           <td className="px-3 py-2">—</td>
                                           {repBuckets.map((b: any) => (
                                             <td key={`adj-${b.bucketKey}-kwh`} className="px-3 py-2">—</td>
@@ -1116,7 +1130,7 @@ export default function PlanCompareClient(props: { offerId: string }) {
                                           <td className="px-3 py-2">—</td>
                                           <td className="px-3 py-2">—</td>
                                           <td className="px-3 py-2">—</td>
-                                          <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(adjustmentDollars)}</td>
+                                          <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(adjustmentDollarsWindow)}</td>
                                           <td className="px-3 py-2">—</td>
                                           <td className="px-3 py-2">—</td>
                                           <td className="px-3 py-2">—</td>
@@ -1126,7 +1140,9 @@ export default function PlanCompareClient(props: { offerId: string }) {
 
                                       {typeof reconciledTotal === "number" && Number.isFinite(reconciledTotal) ? (
                                         <tr className="border-t border-brand-cyan/10">
-                                          <td className="px-3 py-2 font-semibold text-brand-white/90">Reconciled total (matches engine)</td>
+                                          <td className="px-3 py-2 font-semibold text-brand-white/90">
+                                            Reconciled total (scaled from engine; {windowMonths} mo)
+                                          </td>
                                           <td className="px-3 py-2 font-semibold text-brand-white/90">—</td>
                                           {repBuckets.map((b: any) => (
                                             <td key={`rec-${b.bucketKey}-kwh`} className="px-3 py-2 text-brand-cyan/60">—</td>
