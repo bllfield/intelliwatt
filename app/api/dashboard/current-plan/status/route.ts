@@ -43,12 +43,24 @@ export async function GET(_req: NextRequest) {
     }
     if (!houseId) return NextResponse.json({ ok: true, hasCurrentPlan: false, houseId: null, source: null });
 
+    const house = await prisma.houseAddress.findFirst({
+      where: { id: houseId, userId: user.id, archivedAt: null },
+      select: { id: true, esiid: true },
+    });
+    if (!house) return NextResponse.json({ ok: true, hasCurrentPlan: false, houseId, source: null });
+    const houseEsiid = typeof house.esiid === "string" && house.esiid.trim().length > 0 ? house.esiid.trim() : null;
+
     const currentPlanPrisma = getCurrentPlanPrisma();
     const manualDelegate = (currentPlanPrisma as any).currentPlanManualEntry as any;
     const parsedDelegate = (currentPlanPrisma as any).parsedCurrentPlan as any;
 
     const latestManual = await manualDelegate.findFirst({
-      where: { userId: user.id, houseId },
+      where: houseEsiid
+        ? {
+            userId: user.id,
+            OR: [{ houseId }, { houseId: null, esiId: houseEsiid }],
+          }
+        : { userId: user.id, houseId },
       orderBy: { updatedAt: "desc" },
       select: { id: true, lastConfirmedAt: true, notes: true },
     });
@@ -64,7 +76,16 @@ export async function GET(_req: NextRequest) {
     // Parsed (EFL or bill) is acceptable as "has current plan" for compare gating.
     // (Compare route itself will still apply its own precedence rules.)
     const latestParsed = await parsedDelegate.findFirst({
-      where: { userId: user.id, houseId, uploadId: { not: null } },
+      where: houseEsiid
+        ? {
+            userId: user.id,
+            uploadId: { not: null },
+            OR: [
+              { houseId },
+              { houseId: null, OR: [{ esiId: houseEsiid }, { esiid: houseEsiid }] },
+            ],
+          }
+        : { userId: user.id, houseId, uploadId: { not: null } },
       orderBy: { createdAt: "desc" },
       select: { id: true },
     });

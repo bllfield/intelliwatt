@@ -227,7 +227,12 @@ export async function GET(req: NextRequest) {
     const parsedDelegate = (currentPlanPrisma as any).parsedCurrentPlan as any;
 
     const latestManualRaw = await manualDelegate.findFirst({
-      where: { userId: user.id, houseId: house.id },
+      where: esiid
+        ? {
+            userId: user.id,
+            OR: [{ houseId: house.id }, { houseId: null, esiId: esiid }],
+          }
+        : { userId: user.id, houseId: house.id },
       orderBy: { updatedAt: "desc" },
     });
 
@@ -238,11 +243,22 @@ export async function GET(req: NextRequest) {
     };
     const latestManual = latestManualRaw && !isAutoImportedFromBill(latestManualRaw) ? latestManualRaw : null;
 
+    // Some older/current-plan ingest paths created ParsedCurrentPlan rows with houseId=null.
+    // If we can match the ESIID to the active house, treat them as belonging to this home.
+    const parsedHouseWhere = esiid
+      ? {
+          OR: [
+            { houseId: house.id },
+            { houseId: null, OR: [{ esiId: esiid }, { esiid }] },
+          ],
+        }
+      : { houseId: house.id };
+
     const latestParsedEfl = await parsedDelegate.findFirst({
       where: {
         userId: user.id,
-        houseId: house.id,
         uploadId: { not: null },
+        ...parsedHouseWhere,
         // Prisma `startsWith` does not support `mode: "insensitive"`.
         // We tag EFL uploads with an exact uppercase "EFL:" prefix.
         billUpload: { filename: { startsWith: "EFL:" } },
@@ -252,8 +268,8 @@ export async function GET(req: NextRequest) {
     const latestParsedBill = await parsedDelegate.findFirst({
       where: {
         userId: user.id,
-        houseId: house.id,
         uploadId: { not: null },
+        ...parsedHouseWhere,
         // Prisma `startsWith` does not support `mode: "insensitive"`.
         // We tag EFL uploads with an exact uppercase "EFL:" prefix.
         billUpload: { filename: { not: { startsWith: "EFL:" } } },
