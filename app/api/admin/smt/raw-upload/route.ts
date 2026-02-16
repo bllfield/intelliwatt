@@ -144,6 +144,33 @@ export async function POST(req: NextRequest) {
         source: source ?? 'smt',
       });
 
+      // Always emit and return normalization diagnostics (even if intervals=0) so we can
+      // debug parsing/header issues in production without needing raw file bytes.
+      try {
+        console.log('[raw-upload] normalizeSmtIntervals result', {
+          filename,
+          source,
+          esiid,
+          meter,
+          intervals: intervals.length,
+          stats,
+        });
+      } catch {
+        // never block ingest on logging
+      }
+
+      if (intervals.length === 0) {
+        normalizedSummary = {
+          intervalsInserted: 0,
+          inserted: 0,
+          skipped: 0,
+          records: 0,
+          tsMin: stats.tsMin ?? null,
+          tsMax: stats.tsMax ?? null,
+          diagnostics: stats,
+        };
+      }
+
       if (intervals.length > 0) {
         const timestamps = intervals.map((i) => i.ts.getTime()).filter((ms) => Number.isFinite(ms));
         const tsMax = timestamps.length ? new Date(Math.max(...timestamps)) : null;

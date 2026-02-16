@@ -7,6 +7,11 @@ export type ParsedInterval = {
   kwh?: number | null;
 };
 
+type FindValueOptions = {
+  /** Reject headers that contain any of these substrings (sanitized header key). */
+  rejectIfKeyIncludes?: string[];
+};
+
 function splitCsvRows(csv: string): string[][] {
   const rows: string[][] = [];
   let currentField = '';
@@ -102,9 +107,15 @@ export function parseSmtCsvFlexible(csv: string): ParsedInterval[] {
       row.push('');
     }
 
-    const findValue = (...fragments: string[]): string | undefined => {
+    const findValueByFragments = (
+      fragments: string[],
+      options: FindValueOptions = {},
+    ): string | undefined => {
+      const reject = options.rejectIfKeyIncludes ?? [];
+
+      // Prefer exact sanitized header matches first (more deterministic).
       for (const fragment of fragments) {
-        const idx = sanitizedHeaders.findIndex((key) => key.includes(fragment));
+        const idx = sanitizedHeaders.findIndex((key) => key === fragment);
         if (idx !== -1) {
           const raw = row[idx];
           if (typeof raw === 'string') {
@@ -113,16 +124,74 @@ export function parseSmtCsvFlexible(csv: string): ParsedInterval[] {
           }
         }
       }
+
+      // Then allow "includes" matches, in the caller-provided priority order.
+      for (const fragment of fragments) {
+        const idx = sanitizedHeaders.findIndex((key) => {
+          if (!key.includes(fragment)) return false;
+          for (const bad of reject) {
+            if (bad && key.includes(bad)) return false;
+          }
+          return true;
+        });
+        if (idx !== -1) {
+          const raw = row[idx];
+          if (typeof raw === 'string') {
+            const trimmed = raw.trim();
+            if (trimmed.length > 0) return trimmed;
+          }
+        }
+      }
+
       return undefined;
     };
 
-    const esiid = findValue('esiid', 'esi');
-    const meter = findValue('meter', 'meterid');
-    const usageDate = findValue('usagedate', 'readdate', 'readdt');
-    const start = findValue('intervalstart', 'startdatetime', 'startdate', 'starttime');
-    const end = findValue('intervalend', 'enddatetime', 'enddate', 'endtime');
-    const single = findValue('datetime', 'datetimecst', 'datetimecdt', 'date/time', 'datetimect');
-    const kwhRaw = findValue('usagekwh', 'kwh', 'usage');
+    const esiid = findValueByFragments(['esiid', 'esi']);
+    const meter = findValueByFragments(['meter', 'meternumber', 'meterid', 'meter_id']);
+
+    // SMT interval exports often split date + time into separate columns.
+    // Prefer "read/usage date" for fusing with start/end time when present.
+    const usageDate = findValueByFragments(['usagedate', 'readdate', 'readdt', 'readingdate', 'date']);
+
+    // Timestamp selection is order-sensitive:
+    // - Prefer full datetime columns over time-only
+    // - Prefer time over date (to avoid mistakenly using "Interval End Date" when "Interval End Time" exists)
+    // - Avoid the generic "intervalend" until after trying the more specific variants, because it matches both date/time columns.
+    const start = findValueByFragments([
+      'intervalstartdatetime',
+      'startdatetime',
+      'intervalstarttime',
+      'starttime',
+      'intervalstart',
+      'start',
+      'intervalstartdate',
+      'startdate',
+    ]);
+    const end = findValueByFragments([
+      'intervalenddatetime',
+      'enddatetime',
+      'intervalendtime',
+      'endtime',
+      'intervalend',
+      'end',
+      'intervalenddate',
+      'enddate',
+    ]);
+    const single = findValueByFragments([
+      'datetimecst',
+      'datetimecdt',
+      'datetimect',
+      'datetime',
+      'date/time',
+      'datetimestamp',
+    ]);
+
+    // kWh selection:
+    // Prefer explicit kWh columns; avoid accidentally matching "Usage Type" / similar fields.
+    const kwhRaw = findValueByFragments(
+      ['usagekwh', 'consumptionkwh', 'kwh', 'kwhusage', 'usage'],
+      { rejectIfKeyIncludes: ['type'] },
+    );
     const kwh = toNumber(kwhRaw ?? null);
 
     if (kwh === null) continue;

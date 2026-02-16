@@ -155,7 +155,17 @@ function deriveTimestamp(entry: {
   dateTimeLocal?: string | null;
   startLocal?: string | null;
 }): string | null {
-  const candidates = [entry.endLocal, entry.dateTimeLocal, entry.startLocal];
+  const rawCandidates = [entry.endLocal, entry.dateTimeLocal, entry.startLocal].filter(
+    (c): c is string => Boolean(c && String(c).trim().length > 0),
+  );
+
+  const hasTime = (s: string): boolean => /\b\d{1,2}:\d{2}\b/.test(s);
+
+  // Prefer candidates that include a time-of-day component.
+  // This avoids accidentally treating "Interval End Date" (date-only) as the timestamp
+  // when a separate start/end time column exists.
+  const candidates = rawCandidates.sort((a, b) => Number(hasTime(b)) - Number(hasTime(a)));
+
   for (const candidate of candidates) {
     const iso = parseCentralIso(candidate);
     if (iso) return iso;
