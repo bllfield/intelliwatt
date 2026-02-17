@@ -16,6 +16,10 @@ function finiteOrNull(v: any): number | null {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
+function isFiniteNumber(v: unknown): v is number {
+  return typeof v === "number" && Number.isFinite(v);
+}
+
 export async function GET() {
   try {
     const now = new Date();
@@ -42,9 +46,9 @@ export async function GET() {
       return due ? next12 : (toEnd ?? next12);
     };
 
-    const values = latestByUser.map(metricForSnapshot).filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+    const values = (latestByUser.map(metricForSnapshot) as Array<number | null>).filter(isFiniteNumber);
     const analyzedUsers = values.length;
-    const avg = analyzedUsers > 0 ? values.reduce((a, b) => a + b, 0) / analyzedUsers : null;
+    const avg = analyzedUsers > 0 ? values.reduce((a: number, b: number) => a + b, 0) / analyzedUsers : null;
 
     // Running total savings for users who switched with IntelliWatt (CommissionRecord exists).
     const switchedUsers = await db.commissionRecord.findMany({
@@ -66,11 +70,9 @@ export async function GET() {
           },
         })
       : [];
-    const switchedValues = latestSwitched
-      .map(metricForSnapshot)
-      .filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+    const switchedValues = (latestSwitched.map(metricForSnapshot) as Array<number | null>).filter(isFiniteNumber);
     // “Total savings” should not go down due to negative deltas; treat extra-cost cases as 0 for the running total.
-    const totalSwitchedSavings = switchedValues.reduce((sum, v) => sum + Math.max(0, v), 0);
+    const totalSwitchedSavings = switchedValues.reduce((sum: number, v: number) => sum + Math.max(0, v), 0);
 
     return NextResponse.json({
       ok: true,
