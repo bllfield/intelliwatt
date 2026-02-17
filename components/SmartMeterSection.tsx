@@ -175,6 +175,23 @@ export default function SmartMeterSection({ houseId }: SmartMeterSectionProps) {
           window.dispatchEvent(new CustomEvent('entriesUpdated'));
         }
 
+        // Kick the same SMT orchestrator flow used elsewhere so usage pulls start immediately.
+        if (choice === 'approved') {
+          try {
+            await fetch('/api/user/smt/orchestrate', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                ...(houseId ? { homeId: houseId } : {}),
+                force: true,
+              }),
+              cache: 'no-store',
+            });
+          } catch {
+            // best-effort
+          }
+        }
+
         await fetchAuthorizationStatus();
         setShowEmailReminder(false);
       } catch (error) {

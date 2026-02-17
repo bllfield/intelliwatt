@@ -81,7 +81,7 @@ export function SmtConfirmationActions({ homeId }: Props) {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ homeId }),
+        body: JSON.stringify({ homeId, force: true }),
       });
 
       let usagePayload: any = null;

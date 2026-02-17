@@ -60,6 +60,7 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
     "idle" | "approved" | "declined"
   >("idle");
   const [emailConfirmationError, setEmailConfirmationError] = useState<string | null>(null);
+  const [emailConfirmationNote, setEmailConfirmationNote] = useState<string | null>(null);
   const router = useRouter();
 
   const reminderStorageKey = `smt-email-reminder:${houseAddressId}`;
@@ -271,6 +272,7 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
 
     setEmailConfirmationSubmitting(choice);
     setEmailConfirmationError(null);
+    setEmailConfirmationNote(null);
 
     try {
       const response = await fetch("/api/user/smt/email-confirmation", {
@@ -288,6 +290,33 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
 
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("entriesUpdated"));
+      }
+
+      // After approval, immediately kick the SAME usage orchestration flow the refresh button uses.
+      // This requests backfill (if eligible) and triggers droplet pulls so intervals land without waiting
+      // for the user to navigate to /dashboard/usage.
+      if (choice === "approved") {
+        try {
+          const usageResponse = await fetch("/api/user/smt/orchestrate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              ...(houseAddressId ? { homeId: houseAddressId } : {}),
+              force: true,
+            }),
+          });
+          const usagePayload: any = await usageResponse.json().catch(() => null);
+          if (usageResponse.ok && usagePayload?.ok) {
+            setEmailConfirmationNote(
+              usagePayload?.usage?.message ||
+                "SMT refresh requested. Historical usage may take a few minutes to arrive.",
+            );
+          } else {
+            setEmailConfirmationNote("SMT refresh requested. Historical usage may take a few minutes to arrive.");
+          }
+        } catch {
+          setEmailConfirmationNote("SMT refresh requested. Historical usage may take a few minutes to arrive.");
+        }
       }
 
       setShowEmailReminder(false);
@@ -552,6 +581,11 @@ export function SmtAuthorizationForm(props: SmtAuthorizationFormProps) {
             {emailConfirmationError ? (
               <div className="mt-4 rounded-md border border-rose-400/40 bg-rose-400/10 px-4 py-3 text-xs text-rose-200">
                 {emailConfirmationError}
+              </div>
+            ) : null}
+            {emailConfirmationNote ? (
+              <div className="mt-4 rounded-md border border-brand-cyan/40 bg-brand-cyan/10 px-4 py-3 text-xs text-brand-cyan/90">
+                {emailConfirmationNote}
               </div>
             ) : null}
             <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">
