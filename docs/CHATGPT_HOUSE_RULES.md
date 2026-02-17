@@ -73,6 +73,21 @@ INTELLIWATT_WATTBUY_OFFERS_DIRECT_URL="postgresql://doadmin:<PASSWORD>@db-postgr
 - Do **not** offer alternate connection strings unless a plan change explicitly overrides this section.
 - Droplet guidance must *always* include how to log in (`ssh …`), how to switch users (`sudo -iu deploy`), and the `cd` path before commands. Never assume the user is already on the right account or directory.
 
+## 6b) Prisma migrations (MANDATORY order + drift-safe approach)
+
+These rules exist because **DEV must be proven clean first** and PROD may have drift.
+
+- **Order is mandatory**: **reset/clean DEV → apply migrations to DEV → verify → then apply to PROD**.
+- **Canonical execution location**: run these commands from the **droplet repo checkout** (`/home/deploy/apps/intelliwatt`) as user `deploy` (starting from `root` then `sudo -iu deploy`). This matches our real deployment flow and avoids “local shell quirks”.
+- **PROD rule**: never instruct `npx prisma migrate reset` or `npx prisma migrate dev` on PROD.
+- **PROD rule**: if drift risk exists, apply the specific migration via:
+  - `npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/<migration>/migration.sql`
+- **Verification rule**: do not expect `prisma db execute` to print query results. Use `psql "$DATABASE_URL" -c ...` (droplet) for verification that shows output.
+- Any answer that mentions “apply migrations to production” must also include:
+  - the DEV-first step
+  - the exact droplet user transition (`root` → `deploy`) and repo `cd` path
+  - “snapshot first” instruction for DO
+
 ---
 
 ## 7) Terminal instruction format (MANDATORY TEMPLATE)

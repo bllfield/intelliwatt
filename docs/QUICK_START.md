@@ -42,6 +42,63 @@ If verification does not return `5`, stop and investigate before loading any add
 - **API**: Prefer **Preview** deployments for testing; treat **Production** as read-only for verified flows
 - **No local dev server** needed for data queries
 
+---
+
+## 🧱 Prisma migrations (CANONICAL, drift-safe)
+
+**Rule**: **DEV first, then PROD.** Never “try it on prod” first.
+
+### DEV (Droplet, canonical): reset + apply all migrations
+
+**Where**: Droplet SSH (start from `root`, switch to `deploy`, repo root).
+
+```bash
+# root -> deploy, then repo
+sudo -iu deploy
+cd /home/deploy/apps/intelliwatt
+git pull origin main
+
+# Point this shell session at DEV (intelliwatt_dev)
+export DATABASE_URL='postgresql://doadmin:<PASSWORD>@<HOST>:25060/intelliwatt_dev?sslmode=require'
+
+# Clean dev and apply all migrations
+npx prisma migrate reset --force --schema prisma/schema.prisma
+npx prisma migrate deploy --schema prisma/schema.prisma
+
+# Verify example table
+psql "$DATABASE_URL" -c 'SELECT current_database() AS db, to_regclass(''public."HomeSavingsSnapshot"'') AS table_name;'
+psql "$DATABASE_URL" -c '\d+ "HomeSavingsSnapshot"'
+```
+
+### PROD (Droplet): execute SQL for the specific migration
+
+**Where**: Droplet SSH.
+
+```bash
+# start as root, then:
+sudo -iu deploy
+cd /home/deploy/apps/intelliwatt
+git pull origin main
+
+# point this shell session at PROD
+export DATABASE_URL='postgresql://doadmin:<PASSWORD>@<HOST>:25060/intelliwatt?sslmode=require'
+
+# execute the migration SQL (example)
+npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20260217000000_home_savings_snapshot/migration.sql
+```
+
+Optional (if you ever verify from Windows PowerShell): use a pipe, not Ctrl+Z.
+```powershell
+'SELECT to_regclass(''public."HomeSavingsSnapshot"'') AS table_name;' | npx prisma db execute --stdin --schema prisma\schema.prisma
+```
+
+Note: `prisma db execute` is **not meant for returning data** (it only reports success/failure). Prefer `psql` on the droplet for verification output.
+
+**Never on PROD**:
+- `npx prisma migrate reset`
+- `npx prisma migrate dev`
+- “apply all migrations blindly” without proving DEV first
+
 ### Plan engine migration (one engine)
 - **Canonical home-scoped estimates** should come from `PlanEstimateMaterialized` (master DB), keyed by `(houseAddressId, ratePlanId, inputsSha256)`.
 - **Admin verification UI**: use `/admin/efl/fact-cards` and its Diagnostics panel to validate template creation + estimate behavior without guessing which endpoint failed.

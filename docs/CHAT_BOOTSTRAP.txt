@@ -215,6 +215,97 @@ When pulling changes directly on the droplet:
   git pull origin main
   sudo bash deploy/droplet/post_pull.sh
 
+===========================================================
+MASTER DB MIGRATIONS (DRIFT-SAFE): DEV FIRST, THEN PROD
+===========================================================
+
+Why this exists:
+- This repo has had schema drift historically. Running `prisma migrate deploy` directly on PROD can fail or do the wrong thing.
+- Our canonical workflow is: **reset/clean DEV**, apply all migrations there, verify, then apply the same migration(s) to PROD using **direct SQL execution**.
+
+-----------------------------------------------------------
+STEP A — DEV (LOCAL): reset + apply all migrations
+-----------------------------------------------------------
+
+CANONICAL: We run DEV and PROD migrations from the droplet repo checkout.
+This keeps “one environment” (Linux + repo) consistent and matches how we actually deploy.
+
+Where: Droplet SSH session. Start from `root`, then switch to `deploy`.
+
+0) Become `deploy` and go to the repo:
+     sudo -iu deploy
+     cd /home/deploy/apps/intelliwatt
+     pwd
+     whoami
+
+Expected:
+- `pwd`  -> `/home/deploy/apps/intelliwatt`
+- `whoami` -> `deploy`
+
+1) Pull latest code (so migrations are present):
+     git status -sb
+     git pull origin main
+
+2) Point DATABASE_URL at DEV *for this shell session only*:
+     export DATABASE_URL='postgresql://doadmin:<PASSWORD>@<HOST>:25060/intelliwatt_dev?sslmode=require'
+
+3) Reset DEV to a clean slate and apply all migrations:
+     npx prisma migrate reset --force --schema prisma/schema.prisma
+     npx prisma migrate deploy --schema prisma/schema.prisma
+
+4) Verify the new table exists (example for HomeSavingsSnapshot):
+   IMPORTANT: `prisma db execute` is **not meant for returning data**; it only reports success/failure.
+   For a verification that prints results, use `psql`:
+
+     psql "$DATABASE_URL" -c 'SELECT current_database() AS db, to_regclass(''public."HomeSavingsSnapshot"'') AS table_name;'
+     psql "$DATABASE_URL" -c '\d+ "HomeSavingsSnapshot"'
+
+Expected:
+- `table_name` is `HomeSavingsSnapshot` (not null)
+- `\d+` output shows the columns + indexes + constraints for the table
+
+-----------------------------------------------------------
+STEP B — PROD (DROPLET): execute SQL for the specific migration
+-----------------------------------------------------------
+
+Pre-req: Take a DO snapshot first (MANDATORY).
+
+Where: Droplet SSH session. Start from `root`, then switch to `deploy`.
+
+0) Become `deploy` and go to the repo:
+     sudo -iu deploy
+     cd /home/deploy/apps/intelliwatt
+     pwd
+     whoami
+
+Expected:
+- `pwd`  -> `/home/deploy/apps/intelliwatt`
+- `whoami` -> `deploy`
+
+1) Pull latest code (so the migration file exists):
+     git status -sb
+     git pull origin main
+
+2) Point DATABASE_URL at PROD *for this shell session only*.
+   (We never commit secrets; do NOT write real passwords into repo files.)
+     export DATABASE_URL='postgresql://doadmin:<PASSWORD>@<HOST>:25060/intelliwatt?sslmode=require'
+
+3) Execute the migration SQL directly (example: HomeSavingsSnapshot):
+     npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20260217000000_home_savings_snapshot/migration.sql
+
+4) Verify (prints results via `psql`):
+     psql "$DATABASE_URL" -c 'SELECT current_database() AS db, to_regclass(''public."HomeSavingsSnapshot"'') AS table_name;'
+     psql "$DATABASE_URL" -c '\d+ "HomeSavingsSnapshot"'
+
+Expected:
+- `table_name` is `HomeSavingsSnapshot` (not null)
+- `\d+` output shows the columns + indexes + constraints for the table
+
+Hard rules:
+- Do NOT run `npx prisma migrate reset` on PROD (ever).
+- Do NOT run `npx prisma migrate dev` on PROD (ever).
+- PROD gets the migration via `prisma db execute --file ...` only, after DEV has been proven clean.
+
 NOTE: Common droplet pitfalls
 -----------------------------
 

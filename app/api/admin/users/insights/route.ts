@@ -45,8 +45,8 @@ type SortKey =
 
 function parseSort(v: string | null): SortKey {
   const s = (v ?? "").trim();
-  if (s === "email") return "email";
   if (s === "joined") return "joined";
+  if (s === "email") return "email";
   if (s === "contractEnd") return "contractEnd";
   if (s === "savings12Net") return "savings12Net";
   if (s === "hasUsage") return "hasUsage";
@@ -163,8 +163,9 @@ export async function GET(request: NextRequest) {
           where: {
             archivedAt: null,
             houseAddressId: { in: primaryHouseIds },
-            OR: [{ authorizationEndDate: null }, { authorizationEndDate: { gt: now } }],
-          } as any,
+            // `authorizationEndDate` is required in our schema; treat "has SMT" as "has unexpired auth".
+            authorizationEndDate: { gt: now },
+          },
           select: { houseAddressId: true },
         })
       : [];
@@ -333,4 +334,3 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ ok: false, error: "Internal server error" }, { status: 500 });
   }
 }
-
