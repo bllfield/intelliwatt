@@ -11,6 +11,7 @@ import {
 } from '@/lib/billing/parseBillText';
 import { extractBillTextFromUpload } from '@/lib/billing/extractBillText';
 import { ensureCurrentPlanEntry } from '@/lib/current-plan/ensureEntry';
+import { cleanEsiid } from "@/lib/smt/esiid";
 
 export const dynamic = 'force-dynamic';
 // Bill parsing can be slow (pdf-to-text + optional AI). Allow long-running serverless execution.
@@ -457,6 +458,29 @@ export async function POST(request: NextRequest) {
     }
 
     debugParsed = parsed;
+
+    // If WattBuy/address resolution is down, bills often still contain the ESIID (e.g. "ESI: 1044...").
+    // Best-effort: hydrate the active HouseAddress with bill-derived ESIID so SMT auth can proceed.
+    if (effectiveHouseId) {
+      try {
+        const cleanedBillEsiid = cleanEsiid(parsed.esiid ?? null);
+        if (cleanedBillEsiid) {
+          const existingHouse = await prisma.houseAddress.findFirst({
+            where: { id: effectiveHouseId, userId: user.id, archivedAt: null },
+            select: { id: true, esiid: true },
+          });
+          const existingEsiid = cleanEsiid(existingHouse?.esiid ?? null);
+          if (existingHouse?.id && !existingEsiid) {
+            await prisma.houseAddress.update({
+              where: { id: existingHouse.id },
+              data: { esiid: cleanedBillEsiid },
+            });
+          }
+        }
+      } catch (e) {
+        console.error("[current-plan/bill-parse] Failed to hydrate houseAddress ESIID from bill parse", e);
+      }
+    }
 
     const decimalOrNull = (value: number | null | undefined, scale: number) => {
       if (value === null || value === undefined) return null;

@@ -85,7 +85,12 @@ export type BillParseHints = {
 
 import { logOpenAIUsage } from '@/lib/admin/openaiUsage';
 
-const ESIID_REGEX = /\b(ESI[\s-]*ID[:\s]*)(\d{17,22})\b/i;
+// Bills commonly show:
+// - "ESIID: 1044..."
+// - "ESI ID: 1044..."
+// - "ESI: 1044..."
+// Accept all of the above.
+const ESIID_REGEX = /\b((?:ESI(?:[\s-]*ID)?)[\s:#]*)(\d{17,22})\b/i;
 const METER_REGEX = /\b(Meter(?:\s*Number)?[:\s#]*)([A-Za-z0-9\-]+)\b/i;
 const PROVIDER_REGEX = /\b(?:Provider|Retail Electric Provider|REP)[:\s]+(.+?)\b/;
 const ACCOUNT_REGEX = /\b(Account(?:\s*Number)?[:\s#]*)([A-Za-z0-9\-]+)\b/;

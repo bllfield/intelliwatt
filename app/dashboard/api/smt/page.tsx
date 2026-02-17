@@ -8,6 +8,8 @@ import { SmtAuthorizationForm } from "@/components/smt/SmtAuthorizationForm";
 import RefreshSmtButton from "@/components/smt/RefreshSmtButton";
 import LocalTime from "@/components/LocalTime";
 import nextDynamic from "next/dynamic";
+import RefreshEsiidButton from "@/components/smt/RefreshEsiidButton";
+import ManualEsiidEntry from "@/components/smt/ManualEsiidEntry";
 
 const SmtBillUploadCard = nextDynamic(() => import("@/components/smt/SmtBillUploadCard"), {
   ssr: false,
@@ -200,7 +202,18 @@ export default async function UsageEntrySmartMeterPage() {
 
           {!hasEsiid ? (
             <div className="rounded-2xl border border-amber-200/70 bg-amber-100/40 px-5 py-4 text-sm font-medium text-amber-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)]">
-              We’re still resolving the ESIID for this address. Once it appears, you can submit the SMT authorization.
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div>
+                  We’re still resolving the ESIID for this address. Once it appears, you can submit the SMT authorization.
+                  <div className="mt-1 text-xs font-normal text-amber-800/80">
+                    If a provider server was temporarily down, you can retry the WattBuy ESIID lookup here. You can also upload/paste a bill above—bills often contain the ESIID.
+                  </div>
+                </div>
+                <RefreshEsiidButton houseAddressId={houseAddress.id} />
+              </div>
+              <div className="mt-4">
+                <ManualEsiidEntry houseAddressId={houseAddress.id} />
+              </div>
             </div>
           ) : null}
 
