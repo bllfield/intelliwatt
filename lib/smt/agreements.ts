@@ -649,6 +649,25 @@ async function maybeTriggerUsagePullIfMissing(args: {
     return;
   }
 
+  // Claim this retry window atomically so concurrent invocations don't race and spam SMT.
+  // We do this *before* making any network calls.
+  const claimedAt = new Date();
+  const cutoff = new Date(Date.now() - retryAfterMs);
+  const claim = await prisma.smtAuthorization
+    .updateMany({
+      where: {
+        id: args.authorizationId,
+        OR: [{ smtBackfillRequestedAt: null }, { smtBackfillRequestedAt: { lt: cutoff } }],
+      },
+      data: { smtBackfillRequestedAt: claimedAt },
+    })
+    .catch(() => ({ count: 0 }));
+
+  if (!claim || (claim as any).count !== 1) {
+    // Another request already claimed this window (or DB write failed); treat as throttled.
+    return;
+  }
+
   // 1) Best-effort request an SMT interval backfill (only if the proxy supports it).
   try {
     const enableBackfill =
@@ -691,13 +710,7 @@ async function maybeTriggerUsagePullIfMissing(args: {
     // ignore
   }
 
-  // Record an attempt timestamp so we can throttle subsequent triggers.
-  prisma.smtAuthorization
-    .update({
-      where: { id: args.authorizationId },
-      data: { smtBackfillRequestedAt: new Date() },
-    })
-    .catch(() => null);
+  // NOTE: We already recorded `smtBackfillRequestedAt` via the atomic claim above.
 }
 
 /**
