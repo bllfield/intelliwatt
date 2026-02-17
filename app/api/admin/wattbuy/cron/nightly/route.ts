@@ -19,6 +19,8 @@ const FLAG_WATTBUY_NIGHTLY_TIME = "cron:wattbuy_nightly:time_chicago";
 const FLAG_WATTBUY_NIGHTLY_LAST_RUN_AT = "cron:wattbuy_nightly:last_run_at";
 const FLAG_WATTBUY_NIGHTLY_RUNLOG = "cron:wattbuy_nightly:runlog_json";
 const FLAG_SAMPLE_HOME_EMAIL = "cron:sample_home:email";
+const FLAG_WATTBUY_NIGHTLY_LOCK_UNTIL = "cron:wattbuy_nightly:lock_until";
+const FLAG_WATTBUY_NIGHTLY_CURSOR_PREFIX = "cron:wattbuy_nightly:cursor:";
 
 function jsonError(status: number, error: string, details?: unknown) {
   return NextResponse.json({ ok: false, error, ...(details ? { details } : {}) }, { status });
@@ -73,6 +75,33 @@ async function getFlag(key: string): Promise<string | null> {
 
 async function setFlag(key: string, value: string): Promise<void> {
   await prisma.featureFlag.upsert({ where: { key }, create: { key, value }, update: { value } });
+}
+
+function parseIntSafe(v: string | null): number | null {
+  if (!v) return null;
+  const n = Number(String(v).trim());
+  return Number.isFinite(n) ? Math.trunc(n) : null;
+}
+
+async function getCursor(seedKey: TerritorySeed["key"]): Promise<number> {
+  const raw = await getFlag(`${FLAG_WATTBUY_NIGHTLY_CURSOR_PREFIX}${seedKey}`);
+  const n = parseIntSafe(raw);
+  return n != null && n >= 0 ? n : 0;
+}
+
+async function setCursor(seedKey: TerritorySeed["key"], next: number): Promise<void> {
+  const n = Number.isFinite(next) ? Math.max(0, Math.trunc(next)) : 0;
+  await setFlag(`${FLAG_WATTBUY_NIGHTLY_CURSOR_PREFIX}${seedKey}`, String(n));
+}
+
+function minutesSinceMidnightChicago(p: { hour: number; minute: number }): number {
+  return Math.max(0, Math.min(23, p.hour)) * 60 + Math.max(0, Math.min(59, p.minute));
+}
+
+function parseIsoDate(v: string | null): Date | null {
+  if (!v) return null;
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d;
 }
 
 function parseJsonArray<T = any>(raw: string | null): T[] {
@@ -225,15 +254,25 @@ export async function GET(req: NextRequest) {
       const configured = (await getFlag(FLAG_WATTBUY_NIGHTLY_TIME)) ?? "01:30";
       const parsed = parseTimeHHMM(configured) ?? { hour: 1, minute: 30 };
       const nowChicago = chicagoNowParts();
+      const nowMin = minutesSinceMidnightChicago(nowChicago);
+      const schedMin = minutesSinceMidnightChicago(parsed);
 
-      // Only run on exact HH:MM match (UI uses 5-minute step, and Vercel pings frequently).
-      if (nowChicago.hour !== parsed.hour || nowChicago.minute !== parsed.minute) {
+      // Determine if we have remaining catalog work (cursor > 0 for any territory).
+      // If we do, we allow a 2-hour "catch-up window" after the scheduled time so the 5-minute pings
+      // can keep draining the catalog on the same day.
+      const cursorVals = await Promise.all(TERRITORY_SEEDS.map((s) => getCursor(s.key)));
+      const incomplete = cursorVals.some((n) => n > 0);
+      const withinCatchupWindow = incomplete && nowMin >= schedMin && nowMin < schedMin + 120;
+
+      const shouldRunNow = (nowChicago.hour === parsed.hour && nowChicago.minute === parsed.minute) || withinCatchupWindow;
+      if (!shouldRunNow) {
         return NextResponse.json({
           ok: true,
           skipped: true,
           reason: "not_scheduled_time",
           nowChicago,
           scheduledChicago: configured,
+          incompleteCatalogDrain: incomplete,
         });
       }
 
@@ -243,23 +282,45 @@ export async function GET(req: NextRequest) {
         if (!Number.isNaN(lastDate.getTime())) {
           const lastChicago = chicagoNowParts(lastDate);
           if (lastChicago.ymd === nowChicago.ymd) {
-            return NextResponse.json({
-              ok: true,
-              skipped: true,
-              reason: "already_ran_today",
-              nowChicago,
-              scheduledChicago: configured,
-              lastRunAt: last,
-            });
+            // If the catalog drain is incomplete, allow repeated runs within the catch-up window.
+            if (!withinCatchupWindow) {
+              return NextResponse.json({
+                ok: true,
+                skipped: true,
+                reason: "already_ran_today",
+                nowChicago,
+                scheduledChicago: configured,
+                lastRunAt: last,
+                incompleteCatalogDrain: incomplete,
+              });
+            }
           }
         }
       }
     }
 
+    // Best-effort lock to prevent overlapping cron executions (saves money + avoids double writes).
+    const lockUntilRaw = await getFlag(FLAG_WATTBUY_NIGHTLY_LOCK_UNTIL);
+    const lockUntil = parseIsoDate(lockUntilRaw);
+    if (lockUntil && lockUntil.getTime() > Date.now() + 5_000) {
+      return NextResponse.json({
+        ok: true,
+        skipped: true,
+        reason: "lock_active",
+        lockUntil: lockUntil.toISOString(),
+      });
+    }
+    await setFlag(FLAG_WATTBUY_NIGHTLY_LOCK_UNTIL, new Date(Date.now() + 6 * 60 * 1000).toISOString());
+
     const startedAtMs = Date.now();
     const timeBudgetMs = 270_000; // leave buffer within maxDuration
     const deadlineMs = startedAtMs + timeBudgetMs;
     const shouldStop = () => Date.now() >= deadlineMs - 3_000;
+    const remainingMs = () => Math.max(0, deadlineMs - Date.now());
+    // IMPORTANT: we must reserve time for queue draining. Scanning can resume via cursor on later cron pings.
+    const RESERVE_FOR_QUEUE_DRAIN_MS = 95_000;
+    const RESERVE_FOR_SYNTHETIC_MS = 25_000;
+    const reserveTotalMs = RESERVE_FOR_QUEUE_DRAIN_MS + RESERVE_FOR_SYNTHETIC_MS;
 
     const only = String(url.searchParams.get("utility") ?? "").trim().toLowerCase() || null;
     const seeds = only
@@ -271,14 +332,17 @@ export async function GET(req: NextRequest) {
     // 1) Pull/parse offers for each territory seed and persist templates on PASS.
     for (const seed of seeds) {
       if (shouldStop()) break;
+      // If we're running low, stop scanning and switch to draining queues.
+      if (remainingMs() < reserveTotalMs) break;
 
       const seedRuns: any[] = [];
-      let startIndex = 0;
+      let startIndex = await getCursor(seed.key);
       let safetyLoops = 0;
       while (!shouldStop() && safetyLoops < 25) {
         safetyLoops++;
-        const remaining = Math.max(0, deadlineMs - Date.now());
-        const callBudget = Math.max(15_000, Math.min(120_000, remaining - 12_000));
+        const remaining = remainingMs();
+        // Ensure we keep enough time for queue drain + synthetic validation.
+        const callBudget = Math.max(15_000, Math.min(120_000, remaining - reserveTotalMs - 12_000));
         if (callBudget < 15_000) break;
 
         const r = await postJson(
@@ -318,30 +382,43 @@ export async function GET(req: NextRequest) {
         });
 
         if (!ok) break;
-        if (!truncated) break;
+        if (!truncated) {
+          // Completed this territory scan. Reset cursor so future days restart from beginning.
+          await setCursor(seed.key, 0);
+          break;
+        }
         if (nextStartIndex == null) break;
         if (nextStartIndex <= startIndex) break;
         startIndex = nextStartIndex;
+        // Persist cursor so the next cron continues where we left off, even if we time out later.
+        await setCursor(seed.key, startIndex);
         await new Promise((r) => setTimeout(r, 120));
       }
 
+      // If we stopped early due to time budget, ensure cursor is persisted for resumption.
+      if (shouldStop()) {
+        await setCursor(seed.key, startIndex);
+      }
       runs.push({ type: "offers_batch_efl_parse", territory: seed, chunks: seedRuns });
     }
 
     // 2) Drain OPEN EFL_PARSE queue (auto-persist PASS+STRONG templates).
     let processOpenResult: any = null;
     if (!shouldStop()) {
-      const remaining = Math.max(0, deadlineMs - Date.now());
-      const callBudget = Math.max(15_000, Math.min(remaining - 5_000, 120_000));
-      if (callBudget >= 15_000) {
+      const remaining = remainingMs();
+      const callBudget = Math.max(15_000, Math.min(120_000, remaining - RESERVE_FOR_SYNTHETIC_MS - 5_000));
+      if (callBudget < 15_000) {
+        processOpenResult = { ok: false, skipped: true, reason: "insufficient_time_budget" };
+      } else {
         const r = await postJson(
           req,
           "/api/admin/efl-review/process-open",
           {
+            // This is the same processor behind the admin UI "Process OPEN quarantines (auto-fix)" action.
             drain: true,
             dryRun: false,
-            limit: 50,
-            resultsLimit: 50,
+            limit: 200,
+            resultsLimit: 100,
             timeBudgetMs: callBudget,
             forceReparseTemplates: false,
           },
@@ -358,17 +435,19 @@ export async function GET(req: NextRequest) {
     // 3) Drain QUARANTINE queue (PLAN_CALC_QUARANTINE) best-effort.
     let processQuarantineResult: any = null;
     if (!shouldStop()) {
-      const remaining = Math.max(0, deadlineMs - Date.now());
-      const callBudget = Math.max(15_000, Math.min(remaining - 3_000, 120_000));
-      if (callBudget >= 15_000) {
+      const remaining = remainingMs();
+      const callBudget = Math.max(15_000, Math.min(120_000, remaining - RESERVE_FOR_SYNTHETIC_MS - 3_000));
+      if (callBudget < 15_000) {
+        processQuarantineResult = { ok: false, skipped: true, reason: "insufficient_time_budget" };
+      } else {
         const r = await postJson(
           req,
           "/api/admin/efl-review/process-quarantine",
           {
             drain: true,
             dryRun: false,
-            limit: 50,
-            resultsLimit: 50,
+            limit: 200,
+            resultsLimit: 100,
             timeBudgetMs: callBudget,
           },
           { timeoutMs: callBudget + 10_000 },
@@ -385,6 +464,10 @@ export async function GET(req: NextRequest) {
     // based on each plan's utilityId (NOT the sample home's address/tdsp).
     let syntheticValidation: any = null;
     if (!shouldStop() && sampleEmail) {
+      // If we don't have enough time left, skip synthetic validation; queue draining is higher priority.
+      if (remainingMs() < 12_000) {
+        syntheticValidation = { ok: false, skipped: true, reason: "insufficient_time_budget" };
+      } else {
       try {
         const house = await (prisma as any).houseAddress.findFirst({
           where: { user: { email: sampleEmail }, archivedAt: null } as any,
@@ -520,6 +603,7 @@ export async function GET(req: NextRequest) {
       } catch (e: any) {
         syntheticValidation = { ok: false, error: "synthetic_validation_failed", detail: e?.message ?? String(e) };
       }
+      }
     }
 
     const elapsedMs = Date.now() - startedAtMs;
@@ -527,6 +611,11 @@ export async function GET(req: NextRequest) {
     if (isCron || force) {
       await setFlag(FLAG_WATTBUY_NIGHTLY_LAST_RUN_AT, new Date().toISOString());
     }
+    // Release lock.
+    await setFlag(FLAG_WATTBUY_NIGHTLY_LOCK_UNTIL, new Date(Date.now() - 1_000).toISOString());
+
+    const cursorAfter = await Promise.all(TERRITORY_SEEDS.map(async (s) => ({ key: s.key, cursor: await getCursor(s.key) })));
+    const incompleteAfter = cursorAfter.some((x) => x.cursor > 0);
     await appendRunLog({
       at: new Date().toISOString(),
       forced: force,
@@ -537,6 +626,8 @@ export async function GET(req: NextRequest) {
       processQuarantineOk: Boolean(processQuarantineResult?.ok),
       syntheticValidationOk: Boolean(syntheticValidation?.ok),
       syntheticValidationCounts: syntheticValidation?.counts ?? null,
+      cursorAfter,
+      incompleteCatalogDrainAfter: incompleteAfter,
     });
     return NextResponse.json({
       ok: true,
@@ -549,8 +640,15 @@ export async function GET(req: NextRequest) {
       syntheticValidation,
       stoppedEarly: shouldStop(),
       forced: force,
+      cursorAfter,
+      incompleteCatalogDrainAfter: incompleteAfter,
     });
   } catch (e: any) {
+    try {
+      await setFlag(FLAG_WATTBUY_NIGHTLY_LOCK_UNTIL, new Date(Date.now() - 1_000).toISOString());
+    } catch {
+      // ignore
+    }
     return jsonError(500, "Internal error running nightly template job", e?.message ?? String(e));
   }
 }
