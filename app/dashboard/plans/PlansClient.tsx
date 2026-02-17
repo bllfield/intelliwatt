@@ -442,20 +442,52 @@ export default function PlansClient() {
     if (!resp?.ok) return;
     const offersNow = Array.isArray(resp?.offers) ? (resp!.offers as OfferRow[]) : [];
     const pending = pendingCountFromResponse(resp);
-    const needsUsage = offersNow.filter(
-      (o: any) => String((o as any)?.intelliwatt?.trueCostEstimate?.status ?? "").toUpperCase() === "MISSING_USAGE",
-    ).length;
-    const notComputableYet = offersNow.filter((o: any) => {
-      const st = String((o as any)?.intelliwatt?.trueCostEstimate?.status ?? "").toUpperCase();
-      if (st === "OK" || st === "APPROXIMATE") return false;
-      if (st === "MISSING_USAGE") return false;
-      return true;
-    }).length;
+    const classify = (o: any): "AVAILABLE" | "NEED_USAGE" | "CALCULATING" | "UNAVAILABLE" => {
+      const tceStatus = String((o as any)?.intelliwatt?.trueCostEstimate?.status ?? "").toUpperCase();
+      const tceReason = String((o as any)?.intelliwatt?.trueCostEstimate?.reason ?? "").toUpperCase();
+      if (tceStatus === "OK" || tceStatus === "APPROXIMATE") return "AVAILABLE";
+      if (tceStatus === "MISSING_USAGE") return "NEED_USAGE";
+
+      // "Calculating" means: expected to resolve once templates/usage buckets/estimates materialize.
+      // Keep this aligned with OfferCard's customer-facing language.
+      const calculating =
+        tceStatus === "MISSING_TEMPLATE" ||
+        (tceStatus === "NOT_IMPLEMENTED" && (tceReason === "CACHE_MISS" || tceReason === "MISSING_BUCKETS"));
+      if (calculating) return "CALCULATING";
+
+      // Everything else is currently unavailable (true defects, temporary lookups, etc).
+      return "UNAVAILABLE";
+    };
+
+    let availableCount = 0;
+    let needUsageCount = 0;
+    let calculatingCount = 0;
+    let unavailableCount = 0;
+    for (const o of offersNow) {
+      const k = classify(o);
+      if (k === "AVAILABLE") availableCount++;
+      else if (k === "NEED_USAGE") needUsageCount++;
+      else if (k === "CALCULATING") calculatingCount++;
+      else unavailableCount++;
+    }
     setAutoPreparing(false);
-    if (allowWarmupInBackground && pending > 0) setPrefetchNote(`Preparing IntelliWatt calculations… (${pending} pending)`);
-    else if (needsUsage > 0) setPrefetchNote("Need usage to estimate some plans.");
-    else if (notComputableYet > 0) setPrefetchNote("Some plans are not computable yet.");
-    else setPrefetchNote(null);
+    if (allowWarmupInBackground && pending > 0) {
+      setPrefetchNote(`Preparing IntelliWatt calculations… (${pending} pending)`);
+      return;
+    }
+
+    // Summary note: never let one uncomputable plan make the whole page feel "stuck calculating".
+    if (calculatingCount > 0 || unavailableCount > 0 || needUsageCount > 0) {
+      const parts: string[] = [];
+      parts.push(`${availableCount} available`);
+      if (calculatingCount > 0) parts.push(`${calculatingCount} calculating`);
+      if (unavailableCount > 0) parts.push(`${unavailableCount} not computable`);
+      if (needUsageCount > 0) parts.push(`${needUsageCount} need usage`);
+      setPrefetchNote(`IntelliWatt estimates: ${parts.join(" • ")}`);
+      return;
+    }
+
+    setPrefetchNote(null);
   }, [resp?.ok, resp?.offers, allowWarmupInBackground]);
 
   // When pending reaches 0, end the warmup session so future browsing doesn't keep background-kicking.
