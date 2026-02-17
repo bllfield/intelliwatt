@@ -17,7 +17,7 @@
   "crons": [
     { "path": "/api/admin/ercot/cron", "schedule": "0 12 * * *" },
     { "path": "/api/admin/tdsp/ingest", "schedule": "15 9 * * *" },
-    { "path": "/api/admin/wattbuy/cron/nightly", "schedule": "30 7 * * *" },
-    { "path": "/api/admin/smt/cron/pull-sample", "schedule": "0 8 1 * *" }
+    { "path": "/api/admin/wattbuy/cron/nightly", "schedule": "*/5 * * * *" },
+    { "path": "/api/admin/smt/cron/pull-sample", "schedule": "*/5 * * * *" }
   ]
 }

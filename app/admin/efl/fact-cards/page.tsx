@@ -151,6 +151,252 @@ function deriveTemplatePlanTypeLabel(r: any): string {
   return "—";
 }
 
+function CronControls({ token }: { token: string }) {
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const [nightlyTime, setNightlyTime] = useState("01:30");
+  const [smtTime, setSmtTime] = useState("02:00");
+  const [sampleEmail, setSampleEmail] = useState("bllfield32@gmail.com");
+  const [nightlyLastRunAt, setNightlyLastRunAt] = useState<string | null>(null);
+  const [smtLastRunAt, setSmtLastRunAt] = useState<string | null>(null);
+  const [nightlyRunResult, setNightlyRunResult] = useState<any | null>(null);
+  const [smtRunResult, setSmtRunResult] = useState<any | null>(null);
+  const [nightlyRecent, setNightlyRecent] = useState<any[]>([]);
+  const [smtRecent, setSmtRecent] = useState<any[]>([]);
+
+  async function refresh() {
+    if (!token) return;
+    setLoading(true);
+    setErr(null);
+    setNote(null);
+    try {
+      const res = await fetch("/api/admin/cron/schedule", { headers: { "x-admin-token": token } });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      setNightlyTime(String(data?.schedules?.wattbuyNightly?.timeChicago ?? "01:30"));
+      setSmtTime(String(data?.schedules?.smtSamplePull?.timeChicago ?? "02:00"));
+      setSampleEmail(String(data?.sampleHome?.email ?? "bllfield32@gmail.com"));
+      setNightlyLastRunAt(data?.schedules?.wattbuyNightly?.lastRunAt ?? null);
+      setSmtLastRunAt(data?.schedules?.smtSamplePull?.lastRunAt ?? null);
+      setNightlyRecent(Array.isArray(data?.schedules?.wattbuyNightly?.runLog) ? data.schedules.wattbuyNightly.runLog : []);
+      setSmtRecent(Array.isArray(data?.schedules?.smtSamplePull?.runLog) ? data.schedules.smtSamplePull.runLog : []);
+      setNote("Loaded cron schedule from DB (FeatureFlag).");
+    } catch (e: any) {
+      setErr(e?.message || "Failed to load cron schedule.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function save() {
+    if (!token) return;
+    setLoading(true);
+    setErr(null);
+    setNote(null);
+    try {
+      const res = await fetch("/api/admin/cron/schedule", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-admin-token": token },
+        body: JSON.stringify({
+          wattbuyNightly: { timeChicago: nightlyTime },
+          smtSamplePull: { timeChicago: smtTime },
+          sampleHome: { email: sampleEmail },
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      setNote("Saved. Cron endpoints will run at the next matching Chicago HH:MM (unless forced).");
+      await refresh();
+    } catch (e: any) {
+      setErr(e?.message || "Failed to save cron schedule.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function runNightlyNow() {
+    if (!token) return;
+    setLoading(true);
+    setErr(null);
+    setNote(null);
+    setNightlyRunResult(null);
+    try {
+      const res = await fetch("/api/admin/wattbuy/cron/nightly?force=1", { headers: { "x-admin-token": token } });
+      const data = await res.json().catch(() => ({ raw: null }));
+      if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      setNightlyRunResult(data);
+      setNote("Nightly job triggered.");
+      await refresh();
+    } catch (e: any) {
+      setErr(e?.message || "Failed to run nightly job.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function runSmtNow() {
+    if (!token) return;
+    setLoading(true);
+    setErr(null);
+    setNote(null);
+    setSmtRunResult(null);
+    try {
+      const res = await fetch("/api/admin/smt/cron/pull-sample?force=1", { headers: { "x-admin-token": token } });
+      const data = await res.json().catch(() => ({ raw: null }));
+      if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      setSmtRunResult(data);
+      setNote("Sample SMT pull triggered.");
+      await refresh();
+    } catch (e: any) {
+      setErr(e?.message || "Failed to run sample SMT pull.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!token) return;
+    // initial load
+    refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  const disabled = !token || loading;
+  return (
+    <section className="rounded-2xl border bg-white p-4 space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold">Cron jobs</div>
+          <div className="text-xs text-gray-600">
+            Configure run time (America/Chicago) and trigger manually. Vercel pings these endpoints every 5 minutes; they
+            execute only when the configured HH:MM matches (unless forced).
+          </div>
+        </div>
+        <button type="button" onClick={refresh} disabled={!token || loading} className="rounded-lg border px-3 py-2 text-sm hover:bg-gray-50 disabled:opacity-50">
+          Refresh
+        </button>
+      </div>
+
+      {err ? <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{err}</div> : null}
+      {note ? <div className="rounded-lg border bg-gray-50 p-3 text-sm text-gray-700">{note}</div> : null}
+
+      <div className="rounded-xl border p-3 space-y-2">
+        <div className="text-sm font-medium">Sample home (usage source)</div>
+        <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
+          <div>
+            <label className="block text-xs text-gray-600 mb-1">Email</label>
+            <input
+              className="w-full rounded-lg border px-3 py-2"
+              value={sampleEmail}
+              onChange={(e) => setSampleEmail(e.target.value)}
+              disabled={!token || loading}
+              placeholder="sample home email"
+            />
+            <div className="text-xs text-gray-500 mt-1">Used by cron validation + sample SMT pull.</div>
+          </div>
+          <button
+            type="button"
+            onClick={save}
+            disabled={disabled}
+            className="rounded-lg border px-3 py-2 text-sm hover:bg-gray-50 disabled:opacity-50"
+            title={!token ? "Paste x-admin-token first" : undefined}
+          >
+            Save
+          </button>
+        </div>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2">
+        <div className="rounded-xl border p-3 space-y-2">
+          <div className="text-sm font-medium">Nightly template maintenance</div>
+          <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">Run time (Chicago)</label>
+              <input
+                type="time"
+                step={300}
+                className="w-full rounded-lg border px-3 py-2"
+                value={nightlyTime}
+                onChange={(e) => setNightlyTime(e.target.value)}
+                disabled={!token || loading}
+              />
+              <div className="text-xs text-gray-500 mt-1">Last run: {nightlyLastRunAt ?? "—"}</div>
+            </div>
+            <button
+              type="button"
+              onClick={runNightlyNow}
+              disabled={disabled}
+              className="rounded-lg border px-3 py-2 text-sm hover:bg-gray-50 disabled:opacity-50"
+              title={!token ? "Paste x-admin-token first" : undefined}
+            >
+              Run now
+            </button>
+          </div>
+          {nightlyRecent.length > 0 ? (
+            <details className="rounded-lg border bg-gray-50 p-3">
+              <summary className="cursor-pointer text-sm font-medium">Last 5 runs</summary>
+              <pre className="mt-2 text-xs whitespace-pre-wrap">{pretty(nightlyRecent)}</pre>
+            </details>
+          ) : (
+            <div className="text-xs text-gray-500">No recent runs logged yet.</div>
+          )}
+        </div>
+
+        <div className="rounded-xl border p-3 space-y-2">
+          <div className="text-sm font-medium">Sample home SMT pull + pipeline</div>
+          <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">Run time (Chicago)</label>
+              <input
+                type="time"
+                step={300}
+                className="w-full rounded-lg border px-3 py-2"
+                value={smtTime}
+                onChange={(e) => setSmtTime(e.target.value)}
+                disabled={!token || loading}
+              />
+              <div className="text-xs text-gray-500 mt-1">Last run: {smtLastRunAt ?? "—"} (cooldown ≈ 30 days)</div>
+            </div>
+            <button
+              type="button"
+              onClick={runSmtNow}
+              disabled={disabled}
+              className="rounded-lg border px-3 py-2 text-sm hover:bg-gray-50 disabled:opacity-50"
+              title={!token ? "Paste x-admin-token first" : undefined}
+            >
+              Run now
+            </button>
+          </div>
+          {smtRecent.length > 0 ? (
+            <details className="rounded-lg border bg-gray-50 p-3">
+              <summary className="cursor-pointer text-sm font-medium">Last 5 runs</summary>
+              <pre className="mt-2 text-xs whitespace-pre-wrap">{pretty(smtRecent)}</pre>
+            </details>
+          ) : (
+            <div className="text-xs text-gray-500">No recent runs logged yet.</div>
+          )}
+        </div>
+      </div>
+
+      <div className="text-xs text-gray-500">Tip: use 5-minute increments (HH:MM) for best results.</div>
+
+      {nightlyRunResult ? (
+        <details className="rounded-lg border bg-gray-50 p-3">
+          <summary className="cursor-pointer text-sm font-medium">Nightly result</summary>
+          <pre className="mt-2 text-xs whitespace-pre-wrap">{pretty(nightlyRunResult)}</pre>
+        </details>
+      ) : null}
+      {smtRunResult ? (
+        <details className="rounded-lg border bg-gray-50 p-3">
+          <summary className="cursor-pointer text-sm font-medium">Sample SMT result</summary>
+          <pre className="mt-2 text-xs whitespace-pre-wrap">{pretty(smtRunResult)}</pre>
+        </details>
+      ) : null}
+    </section>
+  );
+}
+
 export default function FactCardOpsPage() {
   const { token, setToken } = useLocalToken();
   const ready = useMemo(() => Boolean(token), [token]);
@@ -1826,6 +2072,8 @@ export default function FactCardOpsPage() {
           </div>
         </div>
       </section>
+
+      <CronControls token={token} />
 
       <section className="grid gap-4 lg:grid-cols-2">
         <div className="rounded-2xl border bg-white p-4 space-y-3">

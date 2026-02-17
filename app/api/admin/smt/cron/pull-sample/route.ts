@@ -9,7 +9,12 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
-const SAMPLE_HOME_EMAIL = (process.env.SAMPLE_HOME_EMAIL ?? "bllfield32@gmail.com").trim().toLowerCase();
+const DEFAULT_SAMPLE_HOME_EMAIL = (process.env.SAMPLE_HOME_EMAIL ?? "bllfield32@gmail.com").trim().toLowerCase();
+
+const FLAG_SMT_SAMPLE_TIME = "cron:smt_sample_pull:time_chicago";
+const FLAG_SMT_SAMPLE_LAST_RUN_AT = "cron:smt_sample_pull:last_run_at";
+const FLAG_SMT_SAMPLE_RUNLOG = "cron:smt_sample_pull:runlog_json";
+const FLAG_SAMPLE_HOME_EMAIL = "cron:sample_home:email";
 
 function jsonError(status: number, error: string, details?: unknown) {
   return NextResponse.json({ ok: false, error, ...(details ? { details } : {}) }, { status });
@@ -24,6 +29,68 @@ function requireCronOrAdmin(req: NextRequest): Response | null {
     return jsonError(401, "Unauthorized");
   }
   return null;
+}
+
+function parseTimeHHMM(s: string): { hour: number; minute: number } | null {
+  const m = String(s ?? "")
+    .trim()
+    .match(/^([01]\d|2[0-3]):([0-5]\d)$/);
+  if (!m) return null;
+  return { hour: Number(m[1]), minute: Number(m[2]) };
+}
+
+function chicagoNowParts(now = new Date()): { ymd: string; hour: number; minute: number } {
+  const dtf = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Chicago",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  const parts = dtf.formatToParts(now);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  const y = get("year");
+  const mo = get("month");
+  const d = get("day");
+  const h = Number(get("hour"));
+  const mi = Number(get("minute"));
+  return { ymd: `${y}-${mo}-${d}`, hour: Number.isFinite(h) ? h : 0, minute: Number.isFinite(mi) ? mi : 0 };
+}
+
+async function getFlag(key: string): Promise<string | null> {
+  const row = await prisma.featureFlag.findUnique({ where: { key }, select: { value: true } });
+  return row?.value ?? null;
+}
+
+async function setFlag(key: string, value: string): Promise<void> {
+  await prisma.featureFlag.upsert({ where: { key }, create: { key, value }, update: { value } });
+}
+
+function parseJsonArray<T = any>(raw: string | null): T[] {
+  if (!raw) return [];
+  try {
+    const v = JSON.parse(raw);
+    return Array.isArray(v) ? (v as T[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+async function appendRunLog(entry: any): Promise<void> {
+  try {
+    const prev = parseJsonArray<any>(await getFlag(FLAG_SMT_SAMPLE_RUNLOG));
+    const next = [entry, ...prev].slice(0, 5);
+    await setFlag(FLAG_SMT_SAMPLE_RUNLOG, JSON.stringify(next));
+  } catch {
+    // ignore logging errors
+  }
+}
+
+function daysBetween(a: Date, b: Date): number {
+  const ms = Math.abs(b.getTime() - a.getTime());
+  return ms / (1000 * 60 * 60 * 24);
 }
 
 async function resolveHomeIdFromEmail(emailRaw: string): Promise<string | null> {
@@ -121,10 +188,54 @@ export async function GET(req: NextRequest) {
     if (!ADMIN_TOKEN) return jsonError(500, "ADMIN_TOKEN is not configured");
     const guard = requireCronOrAdmin(req);
     if (guard) return guard as any;
-    if (!SAMPLE_HOME_EMAIL) return jsonError(400, "SAMPLE_HOME_EMAIL is empty");
 
-    const homeId = await resolveHomeIdFromEmail(SAMPLE_HOME_EMAIL);
-    if (!homeId) return jsonError(404, "sample_home_not_found", { email: SAMPLE_HOME_EMAIL });
+    const url = new URL(req.url);
+    const forceRaw = String(url.searchParams.get("force") ?? "").trim().toLowerCase();
+    const force = forceRaw === "1" || forceRaw === "true" || forceRaw === "yes";
+    const isCron = Boolean(req.headers.get("x-vercel-cron"));
+
+    const sampleEmail =
+      normalizeEmail(String((await getFlag(FLAG_SAMPLE_HOME_EMAIL)) ?? "").trim()) ?? DEFAULT_SAMPLE_HOME_EMAIL;
+    if (!sampleEmail) return jsonError(400, "SAMPLE_HOME_EMAIL is empty");
+
+    // Time gating: run best-effort every ~30 days at configured Chicago time (unless force=1).
+    if (!force) {
+      const configured = (await getFlag(FLAG_SMT_SAMPLE_TIME)) ?? "02:00";
+      const parsed = parseTimeHHMM(configured) ?? { hour: 2, minute: 0 };
+      const nowChicago = chicagoNowParts();
+
+      if (nowChicago.hour !== parsed.hour || nowChicago.minute !== parsed.minute) {
+        return NextResponse.json({
+          ok: true,
+          skipped: true,
+          reason: "not_scheduled_time",
+          nowChicago,
+          scheduledChicago: configured,
+        });
+      }
+
+      const last = await getFlag(FLAG_SMT_SAMPLE_LAST_RUN_AT);
+      if (last) {
+        const lastDate = new Date(last);
+        if (!Number.isNaN(lastDate.getTime())) {
+          const d = daysBetween(lastDate, new Date());
+          if (d < 30) {
+            return NextResponse.json({
+              ok: true,
+              skipped: true,
+              reason: "cooldown_active",
+              cooldownDaysRemaining: Math.max(0, Math.ceil(30 - d)),
+              nowChicago,
+              scheduledChicago: configured,
+              lastRunAt: last,
+            });
+          }
+        }
+      }
+    }
+
+    const homeId = await resolveHomeIdFromEmail(sampleEmail);
+    if (!homeId) return jsonError(404, "sample_home_not_found", { email: sampleEmail });
 
     // (1) Trigger SMT pull via droplet webhook.
     // This writes new intervals; normalization is handled downstream by existing pipelines.
@@ -149,12 +260,27 @@ export async function GET(req: NextRequest) {
     });
     const pipeline = await postNoBody(req, `/api/admin/plans/pipeline?${qp.toString()}`, { timeoutMs: 60_000 });
 
+    // Record execution marker for time-gating (best-effort).
+    if (isCron || force) {
+      await setFlag(FLAG_SMT_SAMPLE_LAST_RUN_AT, new Date().toISOString());
+    }
+
+    await appendRunLog({
+      at: new Date().toISOString(),
+      forced: force,
+      sampleEmail,
+      homeId,
+      smtPull: { ok: smtPull.ok, status: smtPull.status },
+      pipeline: { ok: pipeline.ok, status: pipeline.status },
+    });
+
     return NextResponse.json({
       ok: true,
-      sampleEmail: SAMPLE_HOME_EMAIL,
+      sampleEmail,
       homeId,
       smtPull: { ok: smtPull.ok, status: smtPull.status, body: smtPull.json ?? { raw: smtPull.text } },
       pipeline: { ok: pipeline.ok, status: pipeline.status, body: pipeline.json ?? { raw: pipeline.text } },
+      forced: force,
     });
   } catch (e: any) {
     return jsonError(500, "Internal error running sample SMT pull cron", e?.message ?? String(e));

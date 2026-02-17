@@ -1,13 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { requireVercelCron } from "@/lib/auth/cron";
+import { prisma } from "@/lib/db";
+import { buildUsageBucketsForEstimate } from "@/lib/usage/buildUsageBucketsForEstimate";
+import { getTdspDeliveryRates } from "@/lib/plan-engine/getTdspDeliveryRates";
+import { estimateTrueCost } from "@/lib/plan-engine/estimateTrueCost";
+import { derivePlanCalcRequirementsFromTemplate } from "@/lib/plan-engine/planComputability";
+import { normalizeEmail } from "@/lib/utils/email";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
-const SAMPLE_HOME_EMAIL = (process.env.SAMPLE_HOME_EMAIL ?? "bllfield32@gmail.com").trim().toLowerCase();
+const DEFAULT_SAMPLE_HOME_EMAIL = (process.env.SAMPLE_HOME_EMAIL ?? "bllfield32@gmail.com").trim().toLowerCase();
+
+const FLAG_WATTBUY_NIGHTLY_TIME = "cron:wattbuy_nightly:time_chicago";
+const FLAG_WATTBUY_NIGHTLY_LAST_RUN_AT = "cron:wattbuy_nightly:last_run_at";
+const FLAG_WATTBUY_NIGHTLY_RUNLOG = "cron:wattbuy_nightly:runlog_json";
+const FLAG_SAMPLE_HOME_EMAIL = "cron:sample_home:email";
 
 function jsonError(status: number, error: string, details?: unknown) {
   return NextResponse.json({ ok: false, error, ...(details ? { details } : {}) }, { status });
@@ -27,6 +38,78 @@ function requireCronOrAdmin(req: NextRequest): Response | null {
   return null;
 }
 
+function parseTimeHHMM(s: string): { hour: number; minute: number } | null {
+  const m = String(s ?? "")
+    .trim()
+    .match(/^([01]\d|2[0-3]):([0-5]\d)$/);
+  if (!m) return null;
+  return { hour: Number(m[1]), minute: Number(m[2]) };
+}
+
+function chicagoNowParts(now = new Date()): { ymd: string; hour: number; minute: number } {
+  const dtf = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Chicago",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  const parts = dtf.formatToParts(now);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  const y = get("year");
+  const mo = get("month");
+  const d = get("day");
+  const h = Number(get("hour"));
+  const mi = Number(get("minute"));
+  return { ymd: `${y}-${mo}-${d}`, hour: Number.isFinite(h) ? h : 0, minute: Number.isFinite(mi) ? mi : 0 };
+}
+
+async function getFlag(key: string): Promise<string | null> {
+  const row = await prisma.featureFlag.findUnique({ where: { key }, select: { value: true } });
+  return row?.value ?? null;
+}
+
+async function setFlag(key: string, value: string): Promise<void> {
+  await prisma.featureFlag.upsert({ where: { key }, create: { key, value }, update: { value } });
+}
+
+function parseJsonArray<T = any>(raw: string | null): T[] {
+  if (!raw) return [];
+  try {
+    const v = JSON.parse(raw);
+    return Array.isArray(v) ? (v as T[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+async function appendRunLog(entry: any): Promise<void> {
+  try {
+    const prev = parseJsonArray<any>(await getFlag(FLAG_WATTBUY_NIGHTLY_RUNLOG));
+    const next = [entry, ...prev].slice(0, 5);
+    await setFlag(FLAG_WATTBUY_NIGHTLY_RUNLOG, JSON.stringify(next));
+  } catch {
+    // ignore logging errors
+  }
+}
+
+function mapUtilityIdToTdspCode(utilityId: string | null | undefined): string | null {
+  const u = String(utilityId ?? "").trim();
+  if (!u) return null;
+  const upper = u.toUpperCase();
+  if (["ONCOR", "CENTERPOINT", "AEP_NORTH", "AEP_CENTRAL", "TNMP"].includes(upper)) return upper;
+  const byWattbuyId: Record<string, string> = {
+    "44372": "ONCOR",
+    "8901": "CENTERPOINT",
+    "20404": "AEP_NORTH",
+    "3278": "AEP_CENTRAL",
+    "40051": "TNMP",
+  };
+  return byWattbuyId[u] ?? null;
+}
+
 type TerritorySeed = {
   key: "oncor" | "centerpoint" | "tnmp" | "aep_c" | "aep_n";
   label: string;
@@ -43,6 +126,13 @@ const TERRITORY_SEEDS: TerritorySeed[] = [
   { key: "aep_c", label: "AEP Central (Corpus Christi)", state: "TX", zip: "78401" },
   { key: "aep_n", label: "AEP North (Abilene)", state: "TX", zip: "79601" },
 ];
+
+function seedKeyToTdspSlug(seed: TerritorySeed["key"]): string {
+  // These slugs match HouseAddress.tdspSlug and getTdspDeliveryRates().
+  if (seed === "aep_c") return "aep_central";
+  if (seed === "aep_n") return "aep_north";
+  return seed; // oncor | centerpoint | tnmp
+}
 
 async function postJson(
   req: NextRequest,
@@ -121,12 +211,56 @@ export async function GET(req: NextRequest) {
     const guard = requireCronOrAdmin(req);
     if (guard) return guard as any;
 
+    const url = new URL(req.url);
+    const forceRaw = String(url.searchParams.get("force") ?? "").trim().toLowerCase();
+    const force = forceRaw === "1" || forceRaw === "true" || forceRaw === "yes";
+    const isCron = Boolean(req.headers.get("x-vercel-cron"));
+
+    const sampleEmail =
+      normalizeEmail(String((await getFlag(FLAG_SAMPLE_HOME_EMAIL)) ?? "").trim()) ?? DEFAULT_SAMPLE_HOME_EMAIL;
+
+    // Time gating: Vercel Cron hits this endpoint frequently; we only do work at the configured Chicago time
+    // unless force=1 is provided.
+    if (!force) {
+      const configured = (await getFlag(FLAG_WATTBUY_NIGHTLY_TIME)) ?? "01:30";
+      const parsed = parseTimeHHMM(configured) ?? { hour: 1, minute: 30 };
+      const nowChicago = chicagoNowParts();
+
+      // Only run on exact HH:MM match (UI uses 5-minute step, and Vercel pings frequently).
+      if (nowChicago.hour !== parsed.hour || nowChicago.minute !== parsed.minute) {
+        return NextResponse.json({
+          ok: true,
+          skipped: true,
+          reason: "not_scheduled_time",
+          nowChicago,
+          scheduledChicago: configured,
+        });
+      }
+
+      const last = await getFlag(FLAG_WATTBUY_NIGHTLY_LAST_RUN_AT);
+      if (last) {
+        const lastDate = new Date(last);
+        if (!Number.isNaN(lastDate.getTime())) {
+          const lastChicago = chicagoNowParts(lastDate);
+          if (lastChicago.ymd === nowChicago.ymd) {
+            return NextResponse.json({
+              ok: true,
+              skipped: true,
+              reason: "already_ran_today",
+              nowChicago,
+              scheduledChicago: configured,
+              lastRunAt: last,
+            });
+          }
+        }
+      }
+    }
+
     const startedAtMs = Date.now();
     const timeBudgetMs = 270_000; // leave buffer within maxDuration
     const deadlineMs = startedAtMs + timeBudgetMs;
     const shouldStop = () => Date.now() >= deadlineMs - 3_000;
 
-    const url = new URL(req.url);
     const only = String(url.searchParams.get("utility") ?? "").trim().toLowerCase() || null;
     const seeds = only
       ? TERRITORY_SEEDS.filter((s) => s.key === only || s.label.toLowerCase().includes(only))
@@ -138,45 +272,60 @@ export async function GET(req: NextRequest) {
     for (const seed of seeds) {
       if (shouldStop()) break;
 
-      const remaining = Math.max(0, deadlineMs - Date.now());
-      const callBudget = Math.max(15_000, Math.min(120_000, remaining - 10_000));
-      if (callBudget < 15_000) break;
+      const seedRuns: any[] = [];
+      let startIndex = 0;
+      let safetyLoops = 0;
+      while (!shouldStop() && safetyLoops < 25) {
+        safetyLoops++;
+        const remaining = Math.max(0, deadlineMs - Date.now());
+        const callBudget = Math.max(15_000, Math.min(120_000, remaining - 12_000));
+        if (callBudget < 15_000) break;
 
-      const r = await postJson(
-        req,
-        "/api/admin/wattbuy/offers-batch-efl-parse",
-        {
-          address: { state: seed.state, zip: seed.zip },
-          mode: "STORE_TEMPLATES_ON_PASS",
-          // Fetch a big slice of the catalog, but cap processing by timeBudget.
-          offerLimit: 500,
-          startIndex: 0,
-          processLimit: 500,
-          timeBudgetMs: callBudget,
-          dryRun: false,
-          // Hygiene: nightly should not reparse everything every day.
-          forceReparseTemplates: false,
-        },
-        { timeoutMs: callBudget + 10_000 },
-      );
+        const r = await postJson(
+          req,
+          "/api/admin/wattbuy/offers-batch-efl-parse",
+          {
+            address: { state: seed.state, zip: seed.zip },
+            mode: "STORE_TEMPLATES_ON_PASS",
+            offerLimit: 500,
+            startIndex,
+            processLimit: 500,
+            timeBudgetMs: callBudget,
+            dryRun: false,
+            forceReparseTemplates: false,
+            runAll: true,
+          },
+          { timeoutMs: callBudget + 10_000 },
+        );
 
-      runs.push({
-        type: "offers_batch_efl_parse",
-        territory: seed,
-        ok: r.ok,
-        status: r.status,
-        summary:
-          r.json && r.json.ok
-            ? {
-                offerCount: r.json.offerCount ?? null,
-                scannedCount: r.json.scannedCount ?? null,
-                processedCount: r.json.processedCount ?? null,
-                truncated: r.json.truncated ?? null,
-                nextStartIndex: r.json.nextStartIndex ?? null,
-              }
-            : null,
-        error: !r.ok ? (r.json?.error ?? r.text ?? "request_failed") : null,
-      });
+        const ok = Boolean(r.ok && r.json && r.json.ok);
+        const truncated = ok ? Boolean(r.json?.truncated) : false;
+        const nextStartIndex =
+          ok && typeof r.json?.nextStartIndex === "number" && Number.isFinite(r.json.nextStartIndex)
+            ? (r.json.nextStartIndex as number)
+            : null;
+
+        seedRuns.push({
+          ok: r.ok,
+          status: r.status,
+          startIndex,
+          truncated,
+          nextStartIndex,
+          processedCount: ok ? (r.json?.processedCount ?? null) : null,
+          scannedCount: ok ? (r.json?.scannedCount ?? null) : null,
+          offerCount: ok ? (r.json?.offerCount ?? null) : null,
+          error: !r.ok ? (r.json?.error ?? r.text ?? "request_failed") : null,
+        });
+
+        if (!ok) break;
+        if (!truncated) break;
+        if (nextStartIndex == null) break;
+        if (nextStartIndex <= startIndex) break;
+        startIndex = nextStartIndex;
+        await new Promise((r) => setTimeout(r, 120));
+      }
+
+      runs.push({ type: "offers_batch_efl_parse", territory: seed, chunks: seedRuns });
     }
 
     // 2) Drain OPEN EFL_PARSE queue (auto-persist PASS+STRONG templates).
@@ -232,30 +381,163 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // 4) Warm the plan pipeline against a stable sample home so new templates are actually exercised.
-    // This is intentionally bounded; the pipeline is designed for repeated short runs.
-    let sampleHomePipelineResult: any = null;
-    if (!shouldStop() && SAMPLE_HOME_EMAIL) {
-      const remaining = Math.max(0, deadlineMs - Date.now());
-      const callBudget = Math.max(8_000, Math.min(remaining - 2_500, 25_000));
-      if (callBudget >= 8_000) {
-        const qp = new URLSearchParams({
-          email: SAMPLE_HOME_EMAIL,
-          reason: "cron_nightly_templates",
-          timeBudgetMs: String(Math.min(25_000, callBudget)),
-          maxTemplateOffers: "10",
-          maxEstimatePlans: "200",
+    // 4) Synthetic compute validation: use ONLY the sample home's usage buckets, but apply TDSP rates
+    // based on each plan's utilityId (NOT the sample home's address/tdsp).
+    let syntheticValidation: any = null;
+    if (!shouldStop() && sampleEmail) {
+      try {
+        const house = await (prisma as any).houseAddress.findFirst({
+          where: { user: { email: sampleEmail }, archivedAt: null } as any,
+          orderBy: { createdAt: "desc" },
+          select: { id: true, esiid: true },
         });
-        const r = await postNoBody(req, `/api/admin/plans/pipeline?${qp.toString()}`, { timeoutMs: callBudget + 10_000 });
-        sampleHomePipelineResult = {
-          ok: r.ok,
-          status: r.status,
-          body: r.json ?? { raw: r.text },
-        };
+        const homeId = house?.id ? String(house.id) : null;
+        const esiid = house?.esiid ? String(house.esiid) : null;
+
+        if (!homeId || !esiid) {
+          syntheticValidation = { ok: false, error: "sample_home_missing_homeId_or_esiid", sampleEmail, homeId, esiid: Boolean(esiid) };
+        } else {
+          // Pull a small, representative set of templates per TDSP seed.
+          const bySeed: Record<string, any[]> = {};
+          const wantedUtilityIdsBySeed: Record<string, string[]> = {
+            oncor: ["ONCOR", "44372"],
+            centerpoint: ["CENTERPOINT", "8901"],
+            tnmp: ["TNMP", "40051"],
+            aep_c: ["AEP_CENTRAL", "3278"],
+            aep_n: ["AEP_NORTH", "20404"],
+          };
+
+          for (const seed of seeds) {
+            if (shouldStop()) break;
+            const utilityIds = wantedUtilityIdsBySeed[seed.key] ?? [];
+            const tpls =
+              utilityIds.length > 0
+                ? await (prisma as any).ratePlan.findMany({
+                    where: {
+                      state: "TX",
+                      isUtilityTariff: false,
+                      rateStructure: { not: null },
+                      utilityId: { in: utilityIds },
+                    } as any,
+                    orderBy: { updatedAt: "desc" },
+                    take: 10,
+                    select: { id: true, utilityId: true, supplier: true, planName: true, rateStructure: true, requiredBucketKeys: true },
+                  })
+                : [];
+            bySeed[seed.key] = Array.isArray(tpls) ? tpls : [];
+          }
+
+          // Union bucket keys across selected templates so we build usage buckets once.
+          const unionKeys = new Set<string>(["kwh.m.all.total"]);
+          const allTemplates: any[] = [];
+          for (const seedKey of Object.keys(bySeed)) {
+            for (const rp of bySeed[seedKey] ?? []) {
+              allTemplates.push(rp);
+              const keys = Array.isArray(rp?.requiredBucketKeys) ? (rp.requiredBucketKeys as string[]) : [];
+              for (const k of keys) {
+                const kk = String(k ?? "").trim();
+                if (kk) unionKeys.add(kk);
+              }
+              if (rp?.rateStructure) {
+                try {
+                  const derived = derivePlanCalcRequirementsFromTemplate({ rateStructure: rp.rateStructure }).requiredBucketKeys ?? [];
+                  for (const k of derived) {
+                    const kk = String(k ?? "").trim();
+                    if (kk) unionKeys.add(kk);
+                  }
+                } catch {
+                  // ignore derivation failures here; estimateTrueCost will surface issues
+                }
+              }
+            }
+          }
+
+          const usageWindowEnd = new Date();
+          const usageCutoff = new Date(usageWindowEnd.getTime() - 365 * 24 * 60 * 60 * 1000);
+          const bucketBuild = await buildUsageBucketsForEstimate({
+            homeId,
+            usageSource: "SMT",
+            esiid,
+            rawId: null,
+            windowEnd: usageWindowEnd,
+            cutoff: usageCutoff,
+            requiredBucketKeys: Array.from(unionKeys),
+            monthsCount: 12,
+            maxStepDays: 2,
+            stitchMode: "DAILY_OR_INTERVAL",
+            computeMissing: true,
+          });
+          const annualKwh =
+            typeof bucketBuild.annualKwh === "number" && Number.isFinite(bucketBuild.annualKwh) ? (bucketBuild.annualKwh as number) : null;
+
+          const results: any[] = [];
+          if (!annualKwh) {
+            syntheticValidation = { ok: false, error: "missing_annual_kwh_from_usage_buckets", sampleEmail, homeId };
+          } else {
+            for (const rp of allTemplates) {
+              if (shouldStop()) break;
+              const rpId = String(rp?.id ?? "").trim();
+              const utilityId = String(rp?.utilityId ?? "").trim() || null;
+              const tdspCode = mapUtilityIdToTdspCode(utilityId);
+              const tdspSlug = tdspCode ? tdspCode.toLowerCase() : null;
+              const tdspRates = tdspSlug ? await getTdspDeliveryRates({ tdspSlug, asOf: new Date() }).catch(() => null) : null;
+              const rateStructure = rp?.rateStructure ?? null;
+              if (!rpId || !tdspRates || !rateStructure) {
+                results.push({ ratePlanId: rpId || null, utilityId, tdspCode, status: "SKIP", reason: !tdspRates ? "missing_tdsp_rates" : "missing_rate_structure" });
+                continue;
+              }
+
+              const est = estimateTrueCost({
+                annualKwh,
+                monthsCount: 12,
+                rateStructure,
+                usageBucketsByMonth: bucketBuild.usageBucketsByMonth,
+                tdspRates: {
+                  perKwhDeliveryChargeCents: Number(tdspRates.perKwhDeliveryChargeCents ?? 0) || 0,
+                  monthlyCustomerChargeDollars: Number(tdspRates.monthlyCustomerChargeDollars ?? 0) || 0,
+                  effectiveDate: tdspRates.effectiveDate ?? null,
+                },
+              });
+              results.push({
+                ratePlanId: rpId,
+                utilityId,
+                tdspCode,
+                supplier: rp?.supplier ?? null,
+                planName: rp?.planName ?? null,
+                status: est?.status ?? "UNKNOWN",
+                reason: est?.reason ?? null,
+              });
+            }
+
+            const byStatus: Record<string, number> = {};
+            for (const r of results) {
+              const s = String(r?.status ?? "UNKNOWN");
+              byStatus[s] = (byStatus[s] ?? 0) + 1;
+            }
+            syntheticValidation = { ok: true, sampleEmail, homeId, annualKwh, counts: { total: results.length, byStatus }, results: results.slice(0, 60) };
+          }
+        }
+      } catch (e: any) {
+        syntheticValidation = { ok: false, error: "synthetic_validation_failed", detail: e?.message ?? String(e) };
       }
     }
 
     const elapsedMs = Date.now() - startedAtMs;
+    // Record a successful execution marker for time-gating (best-effort).
+    if (isCron || force) {
+      await setFlag(FLAG_WATTBUY_NIGHTLY_LAST_RUN_AT, new Date().toISOString());
+    }
+    await appendRunLog({
+      at: new Date().toISOString(),
+      forced: force,
+      sampleEmail,
+      elapsedMs,
+      seedsAttempted: seeds.length,
+      processOpenOk: Boolean(processOpenResult?.ok),
+      processQuarantineOk: Boolean(processQuarantineResult?.ok),
+      syntheticValidationOk: Boolean(syntheticValidation?.ok),
+      syntheticValidationCounts: syntheticValidation?.counts ?? null,
+    });
     return NextResponse.json({
       ok: true,
       startedAt: new Date(startedAtMs).toISOString(),
@@ -264,8 +546,9 @@ export async function GET(req: NextRequest) {
       runs,
       processOpenResult,
       processQuarantineResult,
-      sampleHomePipelineResult,
+      syntheticValidation,
       stoppedEarly: shouldStop(),
+      forced: force,
     });
   } catch (e: any) {
     return jsonError(500, "Internal error running nightly template job", e?.message ?? String(e));
