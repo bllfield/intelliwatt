@@ -24,6 +24,9 @@ type InsightsRow = {
   savingsNext12MonthsNoEtf: number | null;
   etfDollars: number | null;
   wouldIncurEtfIfSwitchNow: boolean | null;
+  monthlySavingsNoEtf: number | null;
+  monthlySavingsBasis: "TO_CONTRACT_END" | "NEXT_12_MONTHS" | null;
+  monthlySavingsBasisMonths: number | null;
   snapshotComputedAt: string | null;
 };
 
@@ -32,10 +35,16 @@ type InsightsResponse =
   | { ok?: false; error?: string; [k: string]: any };
 
 const currency = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+const currencyMonthly = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 function fmtMoney(n: number | null | undefined): string {
   if (typeof n !== "number" || !Number.isFinite(n)) return "—";
   return currency.format(Math.round(n));
+}
+
+function fmtMoneyMonthly(n: number | null | undefined): string {
+  if (typeof n !== "number" || !Number.isFinite(n)) return "—";
+  return `${currencyMonthly.format(n)}/mo`;
 }
 
 function fmtDate(iso: string | null | undefined): string {
@@ -287,6 +296,20 @@ export default function AdminUsersPage() {
                     type="button"
                     className="hover:underline"
                     onClick={() => {
+                      const nd = nextDir(sort, dir, "monthlyNoEtf");
+                      setSort("monthlyNoEtf");
+                      setDir(nd);
+                      setPage(1);
+                    }}
+                  >
+                    Monthly (no ETF)
+                  </button>
+                </th>
+                <th className="py-3 px-3 text-left font-semibold text-brand-navy">
+                  <button
+                    type="button"
+                    className="hover:underline"
+                    onClick={() => {
                       const nd = nextDir(sort, dir, "savingsToEndNet");
                       setSort("savingsToEndNet");
                       setDir(nd);
@@ -316,7 +339,7 @@ export default function AdminUsersPage() {
             <tbody>
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-8 px-3 text-center text-brand-navy/60">
+                  <td colSpan={9} className="py-8 px-3 text-center text-brand-navy/60">
                     {loading ? "Loading…" : "No users found"}
                   </td>
                 </tr>
@@ -339,12 +362,17 @@ export default function AdminUsersPage() {
                       <td className="py-3 px-3">{r.hasUsage ? <span className="text-emerald-700">Yes</span> : <span className="text-slate-500">No</span>}</td>
                       <td className="py-3 px-3">{r.hasSmt ? <span className="text-emerald-700">Yes</span> : <span className="text-slate-500">No</span>}</td>
                       <td className="py-3 px-3 text-brand-navy">{fmtDate(r.contractEndDate)}</td>
+                      <td className="py-3 px-3 text-brand-navy font-semibold">
+                        <span className={typeof r.monthlySavingsNoEtf === "number" && r.monthlySavingsNoEtf < 0 ? "text-rose-700" : "text-emerald-700"}>
+                          {fmtMoneyMonthly(r.monthlySavingsNoEtf)}
+                        </span>
+                      </td>
                       <td className="py-3 px-3 text-brand-navy font-semibold">{fmtMoney(r.savingsUntilContractEndNetEtf)}</td>
                       <td className="py-3 px-3 text-brand-navy font-semibold">{fmtMoney(r.savingsNext12MonthsNetEtf)}</td>
                       <td className="py-3 px-3">{r.switchedWithUs ? <span className="text-emerald-700">Yes</span> : <span className="text-slate-500">No</span>}</td>
                     </tr>
                     <tr className="border-b border-brand-navy/10">
-                      <td colSpan={8} className="px-3 pb-4">
+                      <td colSpan={9} className="px-3 pb-4">
                         <details className="mt-2">
                           <summary className="cursor-pointer select-none text-xs font-semibold uppercase tracking-wide text-brand-navy/60">
                             Details
@@ -359,6 +387,16 @@ export default function AdminUsersPage() {
                               <div className="font-semibold text-brand-navy">Savings (no ETF)</div>
                               <div>To end: {fmtMoney(r.savingsUntilContractEndNoEtf)}</div>
                               <div>12 mo: {fmtMoney(r.savingsNext12MonthsNoEtf)}</div>
+                              <div className="mt-1">
+                                Monthly: {fmtMoneyMonthly(r.monthlySavingsNoEtf)}{" "}
+                                <span className="text-brand-navy/60">
+                                  {r.monthlySavingsBasis === "NEXT_12_MONTHS"
+                                    ? "(12 mo basis)"
+                                    : r.monthlySavingsBasisMonths
+                                      ? `(${r.monthlySavingsBasisMonths} mo basis)`
+                                      : ""}
+                                </span>
+                              </div>
                             </div>
                             <div>
                               <div className="font-semibold text-brand-navy">ETF</div>

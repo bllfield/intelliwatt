@@ -39,6 +39,7 @@ type SortKey =
   | "contractEnd"
   | "savingsToEndNet"
   | "savings12Net"
+  | "monthlyNoEtf"
   | "hasUsage"
   | "hasSmt"
   | "switched";
@@ -49,6 +50,7 @@ function parseSort(v: string | null): SortKey {
   if (s === "email") return "email";
   if (s === "contractEnd") return "contractEnd";
   if (s === "savings12Net") return "savings12Net";
+  if (s === "monthlyNoEtf") return "monthlyNoEtf";
   if (s === "hasUsage") return "hasUsage";
   if (s === "hasSmt") return "hasSmt";
   if (s === "switched") return "switched";
@@ -60,6 +62,25 @@ function parseSort(v: string | null): SortKey {
 function parseDir(v: string | null): "asc" | "desc" {
   const s = (v ?? "").trim().toLowerCase();
   return s === "asc" ? "asc" : "desc";
+}
+
+function finiteNumber(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+function safeMonthlyFromTotal(total: unknown, months: unknown): number | null {
+  const t = finiteNumber(total);
+  const m = typeof months === "number" && Number.isFinite(months) ? months : null;
+  if (t === null || m === null || m <= 0) return null;
+  return t / m;
+}
+
+function daysUntil(d: Date, now: Date): number | null {
+  const t = d.getTime();
+  const n = now.getTime();
+  if (!Number.isFinite(t) || !Number.isFinite(n)) return null;
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  return Math.floor((t - n) / DAY_MS);
 }
 
 export async function GET(request: NextRequest) {
@@ -229,6 +250,9 @@ export async function GET(request: NextRequest) {
       savingsNext12MonthsNoEtf: number | null;
       etfDollars: number | null;
       wouldIncurEtfIfSwitchNow: boolean | null;
+      monthlySavingsNoEtf: number | null; // dollars per month, no ETF (matches portal "Monthly savings")
+      monthlySavingsBasis: "TO_CONTRACT_END" | "NEXT_12_MONTHS" | null;
+      monthlySavingsBasisMonths: number | null;
       snapshotComputedAt: string | null;
     };
 
@@ -244,6 +268,39 @@ export async function GET(request: NextRequest) {
       );
       const switchedWithUs = switchedUserIds.has(u.id);
 
+      const contractEndDateIso = snap?.contractEndDate
+        ? new Date(snap.contractEndDate).toISOString()
+        : null;
+      const contractEndDateObj = contractEndDateIso ? new Date(contractEndDateIso) : null;
+      const withinEtfFreeWindow = (() => {
+        // Mirror the portal behavior: within 14 days of contract end (or already expired)
+        // treat as ETF-free switch window.
+        if (!contractEndDateObj) return false;
+        const d = daysUntil(contractEndDateObj, now);
+        return d !== null && d <= 14;
+      })();
+      const monthsRemaining =
+        typeof snap?.monthsRemainingOnContract === "number" && Number.isFinite(snap.monthsRemainingOnContract)
+          ? snap.monthsRemainingOnContract
+          : null;
+
+      const monthlyBasisKind: Row["monthlySavingsBasis"] =
+        withinEtfFreeWindow ? "NEXT_12_MONTHS" : "TO_CONTRACT_END";
+      const basisMonths = withinEtfFreeWindow
+        ? 12
+        : (monthsRemaining && monthsRemaining > 0 ? monthsRemaining : null);
+
+      // Portal "Monthly savings" is the no-ETF monthly delta. We approximate it as:
+      // - to end window: savingsUntilContractEndNoEtf / monthsRemaining
+      // - ETF-free window: savingsNext12MonthsNoEtf / 12
+      // with a fallback to 12-month if monthsRemaining is missing.
+      const monthlySavingsNoEtf =
+        withinEtfFreeWindow
+          ? (safeMonthlyFromTotal(snap?.savingsNext12MonthsNoEtf, 12) ?? null)
+          : (safeMonthlyFromTotal(snap?.savingsUntilContractEndNoEtf, basisMonths) ??
+              safeMonthlyFromTotal(snap?.savingsNext12MonthsNoEtf, 12) ??
+              null);
+
       return {
         userId: u.id,
         email: u.email,
@@ -258,7 +315,7 @@ export async function GET(request: NextRequest) {
         hasSmt: hasSmtNow,
         hasUsage: hasUsageNow,
         switchedWithUs,
-        contractEndDate: snap?.contractEndDate ? new Date(snap.contractEndDate).toISOString() : null,
+        contractEndDate: contractEndDateIso,
         savingsUntilContractEndNetEtf:
           typeof snap?.savingsUntilContractEndNetEtf === "number" && Number.isFinite(snap.savingsUntilContractEndNetEtf)
             ? snap.savingsUntilContractEndNetEtf
@@ -281,6 +338,12 @@ export async function GET(request: NextRequest) {
             : null,
         wouldIncurEtfIfSwitchNow:
           typeof snap?.wouldIncurEtfIfSwitchNow === "boolean" ? snap.wouldIncurEtfIfSwitchNow : null,
+        monthlySavingsNoEtf:
+          typeof monthlySavingsNoEtf === "number" && Number.isFinite(monthlySavingsNoEtf)
+            ? monthlySavingsNoEtf
+            : null,
+        monthlySavingsBasis: monthlyBasisKind,
+        monthlySavingsBasisMonths: basisMonths,
         snapshotComputedAt: snap?.computedAt ? new Date(snap.computedAt).toISOString() : null,
       };
     });
@@ -306,6 +369,7 @@ export async function GET(request: NextRequest) {
       if (sort === "hasUsage") return mul * (Number(a.hasUsage) - Number(b.hasUsage));
       if (sort === "hasSmt") return mul * (Number(a.hasSmt) - Number(b.hasSmt));
       if (sort === "switched") return mul * (Number(a.switchedWithUs) - Number(b.switchedWithUs));
+      if (sort === "monthlyNoEtf") return mul * (num(a.monthlySavingsNoEtf) - num(b.monthlySavingsNoEtf));
       if (sort === "savings12Net") return mul * (num(a.savingsNext12MonthsNetEtf) - num(b.savingsNext12MonthsNetEtf));
       // default: savingsToEndNet
       return mul * (num(a.savingsUntilContractEndNetEtf) - num(b.savingsUntilContractEndNetEtf));

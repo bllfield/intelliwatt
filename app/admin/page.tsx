@@ -25,6 +25,9 @@ interface UserInsightRow {
   hasUsage: boolean;
   switchedWithUs: boolean;
   contractEndDate: string | null;
+  monthlySavingsNoEtf: number | null;
+  monthlySavingsBasis?: "TO_CONTRACT_END" | "NEXT_12_MONTHS" | null;
+  monthlySavingsBasisMonths?: number | null;
   savingsUntilContractEndNetEtf: number | null;
   savingsNext12MonthsNetEtf: number | null;
   houseAddressId: string | null;
@@ -1619,6 +1622,7 @@ export default function AdminDashboard() {
                 <tr className="border-b border-brand-navy/20">
                   <th className="text-left py-3 px-4 text-brand-navy font-semibold">Email</th>
                   <th className="text-left py-3 px-4 text-brand-navy font-semibold">Contract end</th>
+                  <th className="text-left py-3 px-4 text-brand-navy font-semibold">Monthly (no ETF)</th>
                   <th className="text-left py-3 px-4 text-brand-navy font-semibold">Savings to end (net ETF)</th>
                   <th className="text-left py-3 px-4 text-brand-navy font-semibold">Savings 12 mo (net ETF)</th>
                   <th className="text-left py-3 px-4 text-brand-navy font-semibold">Usage</th>
@@ -1649,6 +1653,11 @@ export default function AdminDashboard() {
                         {row.contractEndDate ? new Date(row.contractEndDate).toLocaleDateString() : "—"}
                       </td>
                       <td className="py-3 px-4 text-brand-navy font-semibold">
+                        {typeof row.monthlySavingsNoEtf === "number" && Number.isFinite(row.monthlySavingsNoEtf)
+                          ? `${currencyFormatter.format(row.monthlySavingsNoEtf)}/mo`
+                          : "—"}
+                      </td>
+                      <td className="py-3 px-4 text-brand-navy font-semibold">
                         {typeof row.savingsUntilContractEndNetEtf === "number" && Number.isFinite(row.savingsUntilContractEndNetEtf)
                           ? currencyFormatter.format(row.savingsUntilContractEndNetEtf)
                           : "—"}
@@ -1665,7 +1674,7 @@ export default function AdminDashboard() {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={7} className="py-8 px-4 text-center text-brand-navy/60">
+                    <td colSpan={8} className="py-8 px-4 text-center text-brand-navy/60">
                       No users found (or snapshots still computing).
                     </td>
                   </tr>
