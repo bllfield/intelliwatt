@@ -52,6 +52,22 @@ function parseIsoDate(s: any): Date | null {
   return Number.isFinite(d.getTime()) ? d : null;
 }
 
+function readCount(payload: PlanPipelineJobPayload | null, key: string): number | null {
+  const v = (payload as any)?.counts?.[key];
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+function hasRemainingWork(latest: PlanPipelineJobPayload | null): boolean {
+  if (!latest) return false;
+  const ratePlanIdsCount = readCount(latest, "ratePlanIdsCount");
+  const estimatesComputed = readCount(latest, "estimatesComputed") ?? 0;
+  const estimatesAlreadyCached = readCount(latest, "estimatesAlreadyCached") ?? 0;
+  if (ratePlanIdsCount == null) return false;
+  // If we haven't computed/cached estimates for all known ratePlans yet, the pipeline is incomplete
+  // and we should NOT block follow-on batches behind a long cooldown.
+  return estimatesComputed + estimatesAlreadyCached < ratePlanIdsCount;
+}
+
 export function shouldStartPlanPipelineJob(args: {
   latest: PlanPipelineJobPayload | null;
   now?: Date;
@@ -69,11 +85,6 @@ export function shouldStartPlanPipelineJob(args: {
 
   if (!latest) return { okToStart: true, reason: "no_prior_job" };
 
-  const cooldownUntil = parseIsoDate(latest.cooldownUntil ?? null);
-  if (cooldownUntil && cooldownUntil.getTime() > now.getTime()) {
-    return { okToStart: false, reason: "cooldown_active" };
-  }
-
   if (latest.status === "RUNNING") {
     const startedAt = parseIsoDate(latest.startedAt);
     if (startedAt) {
@@ -84,6 +95,15 @@ export function shouldStartPlanPipelineJob(args: {
     } else {
       return { okToStart: false, reason: "already_running" };
     }
+  }
+
+  const cooldownUntil = parseIsoDate(latest.cooldownUntil ?? null);
+  // IMPORTANT: The pipeline is intentionally bounded (timeBudgetMs + maxEstimatePlans). It often takes
+  // multiple runs to drain the queue. We must not apply a long cooldown while work remains, otherwise
+  // the UI can get stuck with many offers in QUEUED.
+  const bypassCooldown = latest.status === "DONE" && hasRemainingWork(latest);
+  if (!bypassCooldown && cooldownUntil && cooldownUntil.getTime() > now.getTime()) {
+    return { okToStart: false, reason: "cooldown_active" };
   }
 
   // If the engine/estimate version changed, we must refill caches immediately even if cadence hasn't elapsed.

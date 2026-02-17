@@ -940,6 +940,12 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
   }
 
   const finished = new Date();
+  const totalRatePlans = ratePlanIds.length;
+  const computedOrCached = estimatesComputed + estimatesAlreadyCached;
+  const incomplete = computedOrCached < totalRatePlans;
+  // If we didn't drain the queue (bounded run), allow rapid follow-on batches.
+  // This prevents the UI from getting stuck behind a long cooldown with many offers still QUEUED.
+  const nextCooldownMs = incomplete ? Math.min(15_000, cooldownMs) : cooldownMs;
   await writePlanPipelineJobSnapshot({
     v: 1,
     homeId,
@@ -949,7 +955,7 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
     calcVersion: PLAN_ENGINE_ESTIMATE_VERSION,
     startedAt: new Date(startedAt).toISOString(),
     finishedAt: finished.toISOString(),
-    cooldownUntil: new Date(Date.now() + cooldownMs).toISOString(),
+    cooldownUntil: new Date(Date.now() + nextCooldownMs).toISOString(),
     lastCalcWindowEnd: usageWindowEnd.toISOString(),
     counts: {
       offersTotal: offers.length,
