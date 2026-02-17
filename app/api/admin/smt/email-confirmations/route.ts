@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { getRollingBackfillRange, requestSmtBackfillForAuthorization } from '@/lib/smt/agreements';
+import { getRollingBackfillRange, refreshSmtAuthorizationStatus, requestSmtBackfillForAuthorization } from '@/lib/smt/agreements';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,6 +28,43 @@ type RawAuthorization = {
 export async function GET() {
   try {
     const prismaAny = prisma as any;
+    // Best-effort cleanup:
+    // - If SMT status is ACTIVE, refreshSmtAuthorizationStatus() will auto-mark emailConfirmationStatus=APPROVED
+    //   and clear attention flags so the admin dashboard doesn't show "awaiting confirmation".
+    // - IMPORTANT: `smtLastSyncAt` is also used by orchestrator/pull flows, so we cannot rely on it
+    //   to determine staleness for status checks. Instead, we force-refresh a small batch of older
+    //   queued rows each time this endpoint is loaded.
+    const now = Date.now();
+    const forceMinAgeMs = 3 * 60 * 1000; // don't force-hit SMT for brand new rows
+    const forceCutoff = new Date(now - forceMinAgeMs);
+    const maxForceRefresh = 40;
+
+    const candidates = (await prismaAny.smtAuthorization.findMany({
+      where: {
+        archivedAt: null,
+        emailConfirmationStatus: { in: ['PENDING', 'DECLINED'] },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 150,
+      select: { id: true, createdAt: true },
+    })) as Array<{ id: string; createdAt: Date }>;
+
+    const forceIds = candidates
+      .filter((c) => c.createdAt && c.createdAt <= forceCutoff)
+      .slice(0, maxForceRefresh)
+      .map((c) => String(c.id));
+
+    if (forceIds.length > 0) {
+      await Promise.all(
+        forceIds.map((id) =>
+          refreshSmtAuthorizationStatus(id, {
+            force: true,
+            triggerUsagePullIfActive: true,
+          }).catch(() => null),
+        ),
+      );
+    }
+
     const authorizations = (await prismaAny.smtAuthorization.findMany({
       where: {
         archivedAt: null,
@@ -64,7 +101,15 @@ export async function GET() {
       },
     })) as RawAuthorization[];
 
-    const mapped = authorizations.map((auth) => ({
+    // Filter out rows where SMT is already ACTIVE-ish (these should have been auto-approved, but keep this defensive).
+    const mapped = authorizations
+      .filter((auth) => {
+        const st = String(auth.smtStatus ?? '').trim().toUpperCase();
+        // Be liberal: older rows may have stored codes like "ACT".
+        const isActiveish = st === 'ACTIVE' || st === 'ALREADY_ACTIVE' || st === 'ACT' || st.includes('ACTIVE');
+        return !isActiveish;
+      })
+      .map((auth) => ({
       id: auth.id,
       userId: auth.userId,
       email: auth.user?.email ?? null,

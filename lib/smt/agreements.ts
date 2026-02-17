@@ -576,6 +576,130 @@ export interface SmtBackfillRange {
   end: Date;
 }
 
+type RefreshSmtAuthorizationStatusOpts = {
+  /**
+   * Bypass the `smtLastSyncAt` cooldown and hit SMT proxy immediately.
+   * Use sparingly (admin queue cleanup, manual refresh buttons).
+   */
+  force?: boolean;
+  /**
+   * If SMT reports ACTIVE but we have no interval usage yet, kick off the
+   * interval pull workflow immediately (best-effort).
+   *
+   * Defaults to true.
+   */
+  triggerUsagePullIfActive?: boolean;
+};
+
+function resolveInternalBaseUrl(): URL {
+  const explicit =
+    process.env.ADMIN_INTERNAL_BASE_URL ??
+    process.env.NEXT_PUBLIC_BASE_URL ??
+    process.env.PROD_BASE_URL ??
+    process.env.VERCEL_PROJECT_PRODUCTION_URL ??
+    "";
+
+  if (explicit) {
+    try {
+      return new URL(explicit.startsWith("http") ? explicit : `https://${explicit}`);
+    } catch {
+      // fall through
+    }
+  }
+  return new URL("https://intelliwatt.com");
+}
+
+function isActiveishStatus(value: unknown): boolean {
+  const s = String(value ?? "").trim().toUpperCase();
+  if (!s) return false;
+  // Be liberal in what we accept: older rows may have stored SMT codes like "ACT".
+  if (s === "ACTIVE" || s === "ALREADY_ACTIVE" || s === "ACT") return true;
+  if (s.includes("ACTIVE")) return true;
+  return false;
+}
+
+async function maybeTriggerUsagePullIfMissing(args: {
+  authorizationId: string;
+  userId: string;
+  esiid: string;
+  meterNumber: string | null | undefined;
+  lastAttemptAt: Date | null | undefined;
+  trigger: boolean;
+}): Promise<void> {
+  if (!args.trigger) return;
+
+  const esiid = normalizeEsiid(args.esiid);
+  if (!esiid) return;
+
+  // If we already have interval usage, do nothing.
+  try {
+    const anyInterval = await prisma.smtInterval.findFirst({
+      where: { esiid },
+      select: { id: true },
+    });
+    if (anyInterval) return;
+  } catch {
+    // If the usage table doesn't exist yet or query fails, don't block.
+  }
+
+  // Throttle retries (we don't want every page load to spam the proxy/pull).
+  const last = args.lastAttemptAt ?? null;
+  const retryAfterMs = 30 * 60 * 1000; // 30 minutes
+  if (last && Date.now() - last.getTime() < retryAfterMs) {
+    return;
+  }
+
+  // 1) Best-effort request an SMT interval backfill (only if the proxy supports it).
+  try {
+    const enableBackfill =
+      process.env.SMT_INTERVAL_BACKFILL_ENABLED === "true" ||
+      process.env.SMT_INTERVAL_BACKFILL_ENABLED === "1";
+    if (enableBackfill) {
+      const range = getRollingBackfillRange(12);
+      await requestSmtBackfillForAuthorization({
+        authorizationId: args.authorizationId,
+        esiid,
+        meterNumber: args.meterNumber ?? null,
+        startDate: range.startDate,
+        endDate: range.endDate,
+      }).catch(() => null);
+    }
+  } catch {
+    // ignore
+  }
+
+  // 2) Trigger the droplet pull (so anything delivered gets ingested quickly).
+  try {
+    const adminToken = (process.env.ADMIN_TOKEN ?? "").trim();
+    if (adminToken) {
+      const baseUrl = resolveInternalBaseUrl();
+      const pullUrl = new URL("/api/admin/smt/pull", baseUrl);
+      await fetch(pullUrl, {
+        method: "POST",
+        headers: {
+          "x-admin-token": adminToken,
+          "content-type": "application/json",
+        },
+        cache: "no-store",
+        body: JSON.stringify({
+          esiid,
+          reason: "auto_after_active_agreement",
+        }),
+      }).catch(() => null);
+    }
+  } catch {
+    // ignore
+  }
+
+  // Record an attempt timestamp so we can throttle subsequent triggers.
+  prisma.smtAuthorization
+    .update({
+      where: { id: args.authorizationId },
+      data: { smtBackfillRequestedAt: new Date() },
+    })
+    .catch(() => null);
+}
+
 /**
  * Refresh SMT agreement status for a given SmtAuthorization by calling
  * the SMT droplet and normalizing the result into local status fields.
@@ -583,7 +707,13 @@ export interface SmtBackfillRange {
  * This does NOT throw on SMT errors; it records an "ERROR" status on the
  * SmtAuthorization row instead.
  */
-export async function refreshSmtAuthorizationStatus(authId: string) {
+export async function refreshSmtAuthorizationStatus(
+  authId: string,
+  opts: RefreshSmtAuthorizationStatusOpts = {},
+) {
+  const force = opts.force === true;
+  const triggerUsagePullIfActive = opts.triggerUsagePullIfActive !== false;
+
   const auth = await prisma.smtAuthorization.findUnique({
     where: { id: authId },
     select: {
@@ -597,6 +727,7 @@ export async function refreshSmtAuthorizationStatus(authId: string) {
       smtStatus: true,
       smtStatusMessage: true,
       smtLastSyncAt: true,
+      smtBackfillRequestedAt: true,
       emailConfirmationStatus: true,
       emailConfirmationAt: true,
     },
@@ -609,6 +740,7 @@ export async function refreshSmtAuthorizationStatus(authId: string) {
   // Cooldown: return cached status instead of calling SMT proxy.
   // This prevents repeated browser refreshes / polling from spamming `myagreements`.
   if (
+    !force &&
     SMT_STATUS_REFRESH_COOLDOWN_MS > 0 &&
     auth.smtLastSyncAt &&
     Date.now() - auth.smtLastSyncAt.getTime() < SMT_STATUS_REFRESH_COOLDOWN_MS
@@ -618,7 +750,7 @@ export async function refreshSmtAuthorizationStatus(authId: string) {
     // Otherwise the system can get stuck showing "pending SMT email" even though the row already
     // shows ACTIVE (because we refuse to hit SMT again during cooldown).
     const cachedLocal = String(auth.smtStatus ?? "").trim().toUpperCase();
-    const cachedIsActive = cachedLocal === "ACTIVE" || cachedLocal === "ALREADY_ACTIVE";
+    const cachedIsActive = isActiveishStatus(cachedLocal);
     const cachedEmail =
       String((auth as any)?.emailConfirmationStatus ?? "").trim().toUpperCase();
     const cachedNeedsApprove = cachedIsActive && cachedEmail !== "APPROVED";
@@ -647,6 +779,18 @@ export async function refreshSmtAuthorizationStatus(authId: string) {
       } catch {
         // swallow; cooldown path must remain fast/robust
       }
+    }
+
+    // If SMT is already known ACTIVE, but usage hasn't arrived yet, kick off pull/backfill.
+    if (cachedIsActive) {
+      await maybeTriggerUsagePullIfMissing({
+        authorizationId: auth.id,
+        userId: auth.userId,
+        esiid: auth.esiid,
+        meterNumber: auth.meterNumber,
+        lastAttemptAt: auth.smtBackfillRequestedAt,
+        trigger: triggerUsagePullIfActive,
+      });
     }
 
     return {
@@ -774,11 +918,12 @@ export async function refreshSmtAuthorizationStatus(authId: string) {
       smtStatusMessage: true,
       emailConfirmationStatus: true,
       emailConfirmationAt: true,
+      smtBackfillRequestedAt: true,
     },
   });
 
-  // Clear attention flags once ACTIVE/approved is observed.
-  if (shouldAutoApproveEmail) {
+  // Clear SMT-email attention flags once ACTIVE is observed (even if the approval flag is already set).
+  if (localStatus === "ACTIVE") {
     prisma.userProfile
       .updateMany({
         where: { userId: auth.userId },
@@ -796,6 +941,18 @@ export async function refreshSmtAuthorizationStatus(authId: string) {
     esiid: updated.esiid ?? auth.esiid,
     meterNumber: updated.meterNumber ?? auth.meterNumber ?? null,
   });
+
+  // If SMT is ACTIVE but usage hasn't arrived yet, kick off pull/backfill.
+  if (localStatus === "ACTIVE") {
+    await maybeTriggerUsagePullIfMissing({
+      authorizationId: updated.id,
+      userId: auth.userId,
+      esiid: updated.esiid ?? auth.esiid,
+      meterNumber: updated.meterNumber ?? auth.meterNumber,
+      lastAttemptAt: updated.smtBackfillRequestedAt ?? auth.smtBackfillRequestedAt,
+      trigger: triggerUsagePullIfActive,
+    });
+  }
 
   return {
     ok: true as const,
