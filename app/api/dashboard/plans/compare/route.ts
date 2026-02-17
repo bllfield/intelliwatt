@@ -900,17 +900,57 @@ export async function GET(req: NextRequest) {
           ? (offerEstimate as any).annualCostDollars
           : null;
 
-      if (curAnnual != null && offerAnnual != null) {
-        const savings12NoEtf = curAnnual - offerAnnual;
-        const factor = typeof monthsRemainingOnContract === "number" && Number.isFinite(monthsRemainingOnContract)
-          ? monthsRemainingOnContract / 12
+      const curMonthly =
+        typeof (currentEstimate as any)?.monthlyCostDollars === "number" && Number.isFinite((currentEstimate as any).monthlyCostDollars)
+          ? (currentEstimate as any).monthlyCostDollars
           : null;
-        const savingsToEndNoEtf = factor == null ? null : savings12NoEtf * factor;
+      const offerMonthly =
+        typeof (offerEstimate as any)?.monthlyCostDollars === "number" && Number.isFinite((offerEstimate as any).monthlyCostDollars)
+          ? (offerEstimate as any).monthlyCostDollars
+          : null;
+
+      const safeMonths = (m: unknown): number | null => {
+        const n = typeof m === "number" ? m : Number(m);
+        if (!Number.isFinite(n)) return null;
+        const t = Math.trunc(n);
+        if (t <= 0) return null;
+        return Math.max(1, Math.min(120, t));
+      };
+
+      const projectTotalFromRows = (rows: any[], monthsCount: number): number | null => {
+        if (!Array.isArray(rows) || rows.length === 0) return null;
+        let s = 0;
+        let has = false;
+        for (let i = 0; i < monthsCount; i++) {
+          const v = rows[i % rows.length]?.totalDollars;
+          if (typeof v === "number" && Number.isFinite(v)) {
+            s += v;
+            has = true;
+          }
+        }
+        return has ? s : null;
+      };
+
+      const currentRows = Array.isArray((currentDetail as any)?.monthlyBreakdown?.rows) ? ((currentDetail as any).monthlyBreakdown.rows as any[]) : [];
+      const offerRows = Array.isArray((offerDetail as any)?.monthlyBreakdown?.rows) ? ((offerDetail as any).monthlyBreakdown.rows as any[]) : [];
+
+      const projectedCurrent12 = projectTotalFromRows(currentRows, 12) ?? (curMonthly != null ? curMonthly * 12 : null);
+      const projectedOffer12 = projectTotalFromRows(offerRows, 12) ?? (offerMonthly != null ? offerMonthly * 12 : null);
+
+      const endMonths = safeMonths(monthsRemainingOnContract);
+      const projectedCurrentToEnd = endMonths != null ? (projectTotalFromRows(currentRows, endMonths) ?? (curMonthly != null ? curMonthly * endMonths : null)) : null;
+      const projectedOfferToEnd = endMonths != null ? (projectTotalFromRows(offerRows, endMonths) ?? (offerMonthly != null ? offerMonthly * endMonths : null)) : null;
+
+      // Only persist if we can compute at least the 12-month projection.
+      if (projectedCurrent12 != null && projectedOffer12 != null) {
+        const savings12NoEtf = projectedCurrent12 - projectedOffer12;
+        const savingsToEndNoEtf =
+          projectedCurrentToEnd != null && projectedOfferToEnd != null ? projectedCurrentToEnd - projectedOfferToEnd : null;
 
         const etfDollars = etfCents > 0 ? etfCents / 100 : 0;
         const shouldDeductEtf = etfDollars > 0 && wouldIncurEtfIfSwitchNow !== false;
         const savings12NetEtf = shouldDeductEtf ? savings12NoEtf - etfDollars : savings12NoEtf;
-        const savingsToEndNetEtf = factor == null ? null : (shouldDeductEtf ? (savingsToEndNoEtf as number) - etfDollars : savingsToEndNoEtf);
+        const savingsToEndNetEtf = savingsToEndNoEtf == null ? null : (shouldDeductEtf ? savingsToEndNoEtf - etfDollars : savingsToEndNoEtf);
 
         await (prisma as any).homeSavingsSnapshot
           .upsert({
