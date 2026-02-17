@@ -46,6 +46,7 @@ type SortKey =
 function parseSort(v: string | null): SortKey {
   const s = (v ?? "").trim();
   if (s === "email") return "email";
+  if (s === "joined") return "joined";
   if (s === "contractEnd") return "contractEnd";
   if (s === "savings12Net") return "savings12Net";
   if (s === "hasUsage") return "hasUsage";

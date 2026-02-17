@@ -1031,7 +1031,7 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
         try {
           const notes = typeof m?.notes === "string" ? m.notes : "";
           const confirmed = m?.lastConfirmedAt instanceof Date;
-          return !confirmed && /imported\\s+from\\s+uploaded\\s+bill/i.test(notes);
+          return !confirmed && /imported\s+from\s+uploaded\s+bill/i.test(notes);
         } catch {
           return false;
         }
