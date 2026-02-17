@@ -32,6 +32,7 @@ model User {
   smtAuthorizations  SmtAuthorization[]
   manualUsageUploads ManualUsageUpload[]
   entryExpiryDigests EntryExpiryDigest[]     @relation("EntryExpiryDigestUser")
+  homeSavingsSnapshots HomeSavingsSnapshot[]
 }
 
 model UserProfile {
@@ -714,6 +715,7 @@ model HouseAddress {
   entries            Entry[]
   manualUsageUploads ManualUsageUpload[]
   greenButtonUploads GreenButtonUpload[]
+  savingsSnapshot    HomeSavingsSnapshot?
 
   @@index([placeId])
   @@index([addressState, addressZip5])
@@ -1063,6 +1065,48 @@ model PlanEstimateMaterialized {
   @@index([ratePlanId])
   @@index([houseAddressId, ratePlanId])
   @@index([computedAt])
+}
+
+/// Per-home savings snapshot used by admin dashboards + landing page aggregates.
+/// Stores both "no ETF" (marketing/average) and "net ETF" (admin net) variants.
+model HomeSavingsSnapshot {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  houseAddressId String @unique
+  userId         String
+
+  computedAt DateTime @default(now())
+
+  // Current contract meta (from current plan normalization / bill parsing).
+  contractEndDate          DateTime?
+  monthsRemainingOnContract Int?
+
+  // Current ETF meta (from current plan inputs).
+  earlyTerminationFeeDollars Float?
+  wouldIncurEtfIfSwitchNow   Boolean?
+
+  // Savings windows (positive means savings; negative means extra cost).
+  // Landing-page averages must use the *NoEtf* fields.
+  savingsNext12MonthsNoEtf        Float?
+  savingsUntilContractEndNoEtf    Float?
+  savingsNext12MonthsNetEtf       Float?
+  savingsUntilContractEndNetEtf   Float?
+
+  // Debug/traceability.
+  currentAnnualCostDollars Float?
+  bestAnnualCostDollars    Float?
+  bestRatePlanId           String?
+  bestOfferId              String?
+  bestTermMonths           Int?
+
+  user  User        @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  house HouseAddress @relation(fields: [houseAddressId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([userId])
+  @@index([computedAt])
+  @@index([contractEndDate])
 }
 
 /// IntelliWattBot - per-page guidance messages shown across customer dashboard pages.

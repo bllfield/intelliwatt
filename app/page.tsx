@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, Suspense } from 'react';
+import React, { useEffect, useMemo, useState, Suspense } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
@@ -11,10 +11,40 @@ function LandingPageContent() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [showSuccessPopup, setShowSuccessPopup] = useState(false);
+  const [publicStats, setPublicStats] = useState<any>(null);
   const searchParams = useSearchParams();
   const from = searchParams?.get('from');
   const source = searchParams?.get('source');
   const showJackpotBanner = from === 'htjw' || source === 'jackpot';
+
+  const currency = useMemo(
+    () =>
+      new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: 'USD',
+        maximumFractionDigits: 0,
+      }),
+    [],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/public/stats', { cache: 'no-store' });
+        const json = await res.json().catch(() => null);
+        if (cancelled) return;
+        if (res.ok && json?.ok === true) {
+          setPublicStats(json);
+        }
+      } catch {
+        // best-effort only
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const testimonials = [
     {
@@ -316,18 +346,31 @@ function LandingPageContent() {
             </div>
           
           {/* Hero Stats */}
-          <div className="grid md:grid-cols-3 gap-8 mb-16">
+          <div className="grid md:grid-cols-4 gap-8 mb-16">
             <div className="text-center">
-              <div className="text-4xl font-bold text-brand-blue mb-2">$847</div>
-              <div className="text-brand-white">Average Annual Savings</div>
+              <div className="text-4xl font-bold text-brand-blue mb-2">
+                {typeof publicStats?.avgSavingsDollars === 'number' && Number.isFinite(publicStats.avgSavingsDollars)
+                  ? currency.format(Math.round(publicStats.avgSavingsDollars))
+                  : '—'}
+              </div>
+              <div className="text-brand-white">Average savings (real comparisons)</div>
+              <div className="mt-1 text-xs text-brand-white/70">ETF excluded</div>
             </div>
             <div className="text-center">
-              <div className="text-4xl font-bold text-brand-blue mb-2">94%</div>
-              <div className="text-brand-white">Accuracy Rate</div>
+              <div className="text-4xl font-bold text-brand-blue mb-2">
+                {typeof publicStats?.totalSwitchedSavingsDollars === 'number' && Number.isFinite(publicStats.totalSwitchedSavingsDollars)
+                  ? currency.format(Math.round(publicStats.totalSwitchedSavingsDollars))
+                  : '—'}
+              </div>
+              <div className="text-brand-white">Total savings (switched users)</div>
             </div>
             <div className="text-center">
               <div className="text-4xl font-bold text-brand-blue mb-2">2min</div>
               <div className="text-brand-white">Setup Time</div>
+            </div>
+            <div className="text-center">
+              <div className="text-4xl font-bold text-brand-blue mb-2">94%</div>
+              <div className="text-brand-white">Accuracy Rate</div>
             </div>
           </div>
         </div>

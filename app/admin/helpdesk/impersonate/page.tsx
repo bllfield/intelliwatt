@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useSearchParams } from "next/navigation";
 
 type ApiResult =
   | { ok: true; [k: string]: any }
@@ -60,6 +61,7 @@ function maskToken(token: string): string {
 }
 
 export default function HelpdeskImpersonatePage() {
+  const searchParams = useSearchParams();
   const [email, setEmail] = React.useState("");
   const [reason, setReason] = React.useState("");
   const [durationMinutes, setDurationMinutes] = React.useState<number>(30);
@@ -77,6 +79,14 @@ export default function HelpdeskImpersonatePage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [picked.token]);
+
+  React.useEffect(() => {
+    // Allow other admin tools to deep-link into this page with an email prefilled.
+    const qEmail = searchParams?.get("email") ?? "";
+    if (qEmail.trim() && !email.trim()) {
+      setEmail(qEmail.trim());
+    }
+  }, [searchParams, email]);
 
   function persistToken(value: string) {
     const trimmed = value.trim();

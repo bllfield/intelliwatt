@@ -19,6 +19,8 @@ import { derivePlanCalcRequirementsFromTemplate } from "@/lib/plan-engine/planCo
 import { isPlanCalcQuarantineWorthyReasonCode } from "@/lib/plan-engine/planCalcQuarantine";
 import { getLatestPlanPipelineJob, shouldStartPlanPipelineJob, writePlanPipelineJobSnapshot } from "@/lib/plan-engine/planPipelineJob";
 import { Prisma } from "@prisma/client";
+import { currentPlanPrisma } from "@/lib/db/currentPlanClient";
+import { computeMonthsRemainingOnContract } from "@/lib/current-plan/contractTerm";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -34,6 +36,24 @@ function isMissingRateStructure(v: any): boolean {
     return true;
   }
   return false;
+}
+
+function isRateStructurePresent(v: any): boolean {
+  if (v == null) return false;
+  if (isMissingRateStructure(v)) return false;
+  if (typeof v !== "object") return false;
+  try {
+    return Object.keys(v as any).length > 0;
+  } catch {
+    return true;
+  }
+}
+
+function daysUntil(a: Date, b: Date): number | null {
+  const t0 = a?.getTime?.();
+  const t1 = b?.getTime?.();
+  if (!Number.isFinite(t0) || !Number.isFinite(t1)) return null;
+  return Math.ceil((t1 - t0) / DAY_MS);
 }
 
 
@@ -89,6 +109,7 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
     where: { id: homeId },
     select: {
       id: true,
+      userId: true,
       addressLine1: true,
       addressCity: true,
       addressState: true,
@@ -571,6 +592,10 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
   let ratePlansMissingRateStructure = 0;
   let ratePlansDerivedNotComputable = 0;
   let ratePlansMissingRequiredKeys = 0;
+  const estimateByRatePlanId = new Map<
+    string,
+    { status: string; reason: string | null; annualCostDollars: number | null; monthlyCostDollars: number | null }
+  >();
 
   if (!annualKwhForCalc || !tdspRates) {
     const finished = new Date();
@@ -750,6 +775,19 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
     const cached = await getCachedPlanEstimate({ houseAddressId: homeId, ratePlanId, inputsSha256, monthsCount: 12 });
     if (cached) {
       estimatesAlreadyCached++;
+      try {
+        const st = String((cached as any)?.status ?? "").trim() || "UNKNOWN";
+        const rsn = typeof (cached as any)?.reason === "string" ? String((cached as any).reason) : null;
+        const annual = typeof (cached as any)?.annualCostDollars === "number" && Number.isFinite((cached as any).annualCostDollars)
+          ? (cached as any).annualCostDollars
+          : null;
+        const monthly = typeof (cached as any)?.monthlyCostDollars === "number" && Number.isFinite((cached as any).monthlyCostDollars)
+          ? (cached as any).monthlyCostDollars
+          : null;
+        estimateByRatePlanId.set(ratePlanId, { status: st, reason: rsn, annualCostDollars: annual, monthlyCostDollars: monthly });
+      } catch {
+        // ignore
+      }
 
       // Migration: also ensure the new materialized store is populated (best-effort).
       try {
@@ -815,6 +853,19 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
       usageBucketsByMonth: usageBucketsByMonthForCalc,
       estimateMode,
     });
+    try {
+      const st = String((est as any)?.status ?? "").trim() || "UNKNOWN";
+      const rsn = typeof (est as any)?.reason === "string" ? String((est as any).reason) : null;
+      const annual = typeof (est as any)?.annualCostDollars === "number" && Number.isFinite((est as any).annualCostDollars)
+        ? (est as any).annualCostDollars
+        : null;
+      const monthly = typeof (est as any)?.monthlyCostDollars === "number" && Number.isFinite((est as any).monthlyCostDollars)
+        ? (est as any).monthlyCostDollars
+        : null;
+      estimateByRatePlanId.set(ratePlanId, { status: st, reason: rsn, annualCostDollars: annual, monthlyCostDollars: monthly });
+    } catch {
+      // ignore
+    }
 
     await putCachedPlanEstimate({ houseAddressId: homeId, ratePlanId, esiid: house.esiid ?? null, inputsSha256, monthsCount: 12, payloadJson: est });
 
@@ -937,6 +988,239 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
     } catch {
       // ignore
     }
+  }
+
+  // ---------------- Step 3: Persist per-home savings snapshot (best-effort) ----------------
+  // This is used for admin sorting/filtering and landing-page aggregate stats.
+  try {
+    // Pick best offer estimate among plans that have an offerId and an OK/APPROX annual cost.
+    let bestRatePlanId: string | null = null;
+    let bestOfferId: string | null = null;
+    let bestAnnualCostDollars: number | null = null;
+    let bestTermMonths: number | null = null;
+
+    estimateByRatePlanId.forEach((est, ratePlanId) => {
+      const status = String(est.status ?? "").trim().toUpperCase();
+      if (!(status === "OK" || status === "APPROXIMATE")) return;
+      const annual = typeof est.annualCostDollars === "number" && Number.isFinite(est.annualCostDollars) ? est.annualCostDollars : null;
+      if (annual == null) return;
+      const offerIdsForPlan = Array.from(new Set(offerIdsByRatePlanId.get(ratePlanId) ?? []));
+      if (offerIdsForPlan.length === 0) return;
+
+      const offerId = String(offerIdsForPlan[0] ?? "").trim() || null;
+      const meta = offerId ? offerMetaById.get(offerId) ?? null : null;
+      const termMonths = typeof meta?.termMonths === "number" && Number.isFinite(meta.termMonths) ? meta.termMonths : null;
+
+      if (bestAnnualCostDollars == null || annual < bestAnnualCostDollars) {
+        bestAnnualCostDollars = annual;
+        bestRatePlanId = ratePlanId;
+        bestOfferId = offerId;
+        bestTermMonths = termMonths;
+      }
+    });
+
+    // Load current-plan details (rateStructure, contract end, ETF) from the current-plan module DB.
+    const now = new Date();
+    const userId = String((house as any)?.userId ?? "").trim();
+    if (userId && bestAnnualCostDollars != null) {
+      const latestManualRaw = await (currentPlanPrisma as any).currentPlanManualEntry.findFirst({
+        where: { userId, houseId: homeId },
+        orderBy: { createdAt: "desc" },
+      });
+      const isAutoImportedFromBill = (m: any): boolean => {
+        try {
+          const notes = typeof m?.notes === "string" ? m.notes : "";
+          const confirmed = m?.lastConfirmedAt instanceof Date;
+          return !confirmed && /imported\\s+from\\s+uploaded\\s+bill/i.test(notes);
+        } catch {
+          return false;
+        }
+      };
+      const latestManual = latestManualRaw && !isAutoImportedFromBill(latestManualRaw) ? latestManualRaw : null;
+
+      const esiid = typeof house.esiid === "string" && house.esiid.trim() ? house.esiid.trim() : null;
+      const parsedHouseWhere = esiid
+        ? {
+            OR: [
+              { houseId: homeId },
+              { houseId: null, OR: [{ esiId: esiid }, { esiid }] },
+            ],
+          }
+        : { houseId: homeId };
+
+      const latestParsedEfl = await (currentPlanPrisma as any).parsedCurrentPlan.findFirst({
+        where: {
+          userId,
+          uploadId: { not: null },
+          ...parsedHouseWhere,
+          billUpload: { filename: { startsWith: "EFL:" } },
+        },
+        orderBy: { createdAt: "desc" },
+      });
+      const latestParsedBill = await (currentPlanPrisma as any).parsedCurrentPlan.findFirst({
+        where: {
+          userId,
+          uploadId: { not: null },
+          ...parsedHouseWhere,
+          billUpload: { filename: { not: { startsWith: "EFL:" } } },
+        },
+        orderBy: { createdAt: "desc" },
+      });
+      const latestParsed = latestParsedEfl ?? latestParsedBill ?? null;
+
+      const manualRs = (latestManual as any)?.rateStructure ?? null;
+      const parsedEflRs = (latestParsedEfl as any)?.rateStructure ?? null;
+      const parsedBillRs = (latestParsedBill as any)?.rateStructure ?? null;
+      const manualRsPresent = isRateStructurePresent(manualRs);
+      const parsedEflRsPresent = isRateStructurePresent(parsedEflRs);
+      const parsedBillRsPresent = isRateStructurePresent(parsedBillRs);
+
+      // Precedence: EFL-derived (when present) > confirmed manual > bill-derived.
+      const effectiveRateStructure = parsedEflRsPresent
+        ? parsedEflRs
+        : manualRsPresent
+          ? manualRs
+          : parsedBillRsPresent
+            ? parsedBillRs
+            : manualRs ?? parsedEflRs ?? parsedBillRs ?? null;
+
+      const mergedCurrent: any = {
+        ...(latestParsed ?? {}),
+        ...(latestManual ?? {}),
+        contractEndDate: (latestManual as any)?.contractEndDate ?? (latestParsed as any)?.contractEndDate ?? null,
+        earlyTerminationFee: (latestManual as any)?.earlyTerminationFee ?? (latestParsed as any)?.earlyTerminationFee ?? null,
+        earlyTerminationFeeCents: (latestManual as any)?.earlyTerminationFeeCents ?? (latestParsed as any)?.earlyTerminationFeeCents ?? null,
+        rateStructure: effectiveRateStructure,
+      };
+
+      const contractEndDate = mergedCurrent?.contractEndDate ? new Date(mergedCurrent.contractEndDate) : null;
+      const contractEndDateIso = contractEndDate && Number.isFinite(contractEndDate.getTime()) ? contractEndDate.toISOString() : null;
+      const monthsRemaining = computeMonthsRemainingOnContract({ contractEndDate: contractEndDateIso, asOf: now });
+
+      const etfDollarsRaw = mergedCurrent?.earlyTerminationFee;
+      const etfDollars =
+        typeof etfDollarsRaw === "number" && Number.isFinite(etfDollarsRaw)
+          ? etfDollarsRaw
+          : etfDollarsRaw && typeof etfDollarsRaw === "object" && typeof etfDollarsRaw.toString === "function"
+            ? Number(etfDollarsRaw.toString())
+            : typeof mergedCurrent?.earlyTerminationFeeCents === "number"
+              ? Number(mergedCurrent.earlyTerminationFeeCents) / 100
+              : null;
+      const etf = typeof etfDollars === "number" && Number.isFinite(etfDollars) && etfDollars > 0 ? etfDollars : 0;
+
+      // Texas: within 14 days (and before end) is considered ETF-free.
+      const switchWithoutEtfWindowDays = 14;
+      const canSwitchWithoutEtf = (() => {
+        if (!contractEndDate || !Number.isFinite(contractEndDate.getTime())) return null;
+        const d = daysUntil(now, contractEndDate);
+        if (d == null) return null;
+        return d > 0 && d <= switchWithoutEtfWindowDays;
+      })();
+      const isInContract = contractEndDate && Number.isFinite(contractEndDate.getTime()) ? contractEndDate.getTime() > now.getTime() : null;
+      const wouldIncurEtfIfSwitchNow = (() => {
+        if (etf <= 0) return false;
+        if (canSwitchWithoutEtf === true) return false;
+        if (canSwitchWithoutEtf === false) return isInContract === false ? false : true;
+        if (typeof isInContract === "boolean") return isInContract ? null : false;
+        return null;
+      })();
+
+      const currentRs = mergedCurrent?.rateStructure ?? null;
+      if (isRateStructurePresent(currentRs) && annualKwhForCalc && tdspRates) {
+        // Ensure the current plan's required buckets are present (may not be in unionKeys derived from templates).
+        const currentReq = derivePlanCalcRequirementsFromTemplate({ rateStructure: currentRs }).requiredBucketKeys ?? [];
+        const missingKeys = currentReq.filter((k) => !unionKeys.has(String(k ?? "").trim()));
+        const bucketBuildForCurrent =
+          missingKeys.length > 0
+            ? await buildUsageBucketsForEstimate({
+                homeId,
+                usageSource,
+                esiid: usageSource === "SMT" ? esiid : null,
+                rawId: usageSource === "GREEN_BUTTON" ? gbRawId : null,
+                windowEnd: usageWindowEnd,
+                cutoff: usageCutoff,
+                requiredBucketKeys: Array.from(new Set([...Array.from(unionKeys), ...currentReq.map((x) => String(x))])),
+                monthsCount: 12,
+                maxStepDays: 2,
+                stitchMode: "DAILY_OR_INTERVAL",
+              })
+            : null;
+        const yearMonthsCur = bucketBuildForCurrent?.yearMonths ?? yearMonthsForCalc;
+        const bucketsCur = bucketBuildForCurrent?.usageBucketsByMonth ?? usageBucketsByMonthForCalc;
+
+        const rt = String((currentRs as any)?.type ?? "").trim().toUpperCase();
+        const estimateModeCur = rt === "VARIABLE" || rt === "INDEXED" ? ("INDEXED_EFL_ANCHOR_APPROX" as const) : ("DEFAULT" as const);
+        const curEst = estimateTrueCost({
+          annualKwh: annualKwhForCalc,
+          monthsCount: 12,
+          tdspRates: { perKwhDeliveryChargeCents: tdspPer, monthlyCustomerChargeDollars: tdspMonthly, effectiveDate: tdspEff },
+          rateStructure: currentRs,
+          usageBucketsByMonth: bucketsCur,
+          estimateMode: estimateModeCur,
+        });
+        const curAnnual =
+          typeof (curEst as any)?.annualCostDollars === "number" && Number.isFinite((curEst as any).annualCostDollars)
+            ? (curEst as any).annualCostDollars
+            : null;
+
+        if (curAnnual != null) {
+          const savings12NoEtf = curAnnual - bestAnnualCostDollars;
+          const endMonths = monthsRemaining == null ? null : monthsRemaining;
+          const factor = endMonths == null ? null : endMonths / 12;
+          const savingsToEndNoEtf = factor == null ? null : savings12NoEtf * factor;
+
+          const shouldDeductEtf = etf > 0 && (wouldIncurEtfIfSwitchNow !== false);
+          const savings12NetEtf = shouldDeductEtf ? savings12NoEtf - etf : savings12NoEtf;
+          const savingsToEndNetEtf = factor == null ? null : (shouldDeductEtf ? savingsToEndNoEtf! - etf : savingsToEndNoEtf);
+
+          await (prisma as any).homeSavingsSnapshot
+            .upsert({
+              where: { houseAddressId: homeId },
+              create: {
+                houseAddressId: homeId,
+                userId,
+                computedAt: new Date(),
+                contractEndDate: contractEndDateIso ? new Date(contractEndDateIso) : null,
+                monthsRemainingOnContract: endMonths,
+                earlyTerminationFeeDollars: etf > 0 ? etf : null,
+                wouldIncurEtfIfSwitchNow,
+                savingsNext12MonthsNoEtf: savings12NoEtf,
+                savingsUntilContractEndNoEtf: savingsToEndNoEtf,
+                savingsNext12MonthsNetEtf: savings12NetEtf,
+                savingsUntilContractEndNetEtf: savingsToEndNetEtf,
+                currentAnnualCostDollars: curAnnual,
+                bestAnnualCostDollars,
+                bestRatePlanId,
+                bestOfferId,
+                bestTermMonths,
+              },
+              update: {
+                computedAt: new Date(),
+                contractEndDate: contractEndDateIso ? new Date(contractEndDateIso) : null,
+                monthsRemainingOnContract: endMonths,
+                earlyTerminationFeeDollars: etf > 0 ? etf : null,
+                wouldIncurEtfIfSwitchNow,
+                savingsNext12MonthsNoEtf: savings12NoEtf,
+                savingsUntilContractEndNoEtf: savingsToEndNoEtf,
+                savingsNext12MonthsNetEtf: savings12NetEtf,
+                savingsUntilContractEndNetEtf: savingsToEndNetEtf,
+                currentAnnualCostDollars: curAnnual,
+                bestAnnualCostDollars,
+                bestRatePlanId,
+                bestOfferId,
+                bestTermMonths,
+              },
+              select: { houseAddressId: true },
+            })
+            .catch(() => null);
+        }
+
+        // Silence unused vars in case of future refactors.
+        void yearMonthsCur;
+      }
+    }
+  } catch {
+    // best-effort only; pipeline must not fail on snapshot persistence
   }
 
   const finished = new Date();

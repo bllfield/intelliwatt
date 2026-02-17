@@ -17,6 +17,28 @@ interface User {
   }[];
 }
 
+interface UserInsightRow {
+  userId: string;
+  email: string;
+  joinedAt: string;
+  hasSmt: boolean;
+  hasUsage: boolean;
+  switchedWithUs: boolean;
+  contractEndDate: string | null;
+  savingsUntilContractEndNetEtf: number | null;
+  savingsNext12MonthsNetEtf: number | null;
+  houseAddressId: string | null;
+}
+
+interface UserInsightsResponse {
+  ok: true;
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+  rows: UserInsightRow[];
+}
+
 interface Commission {
   id: string;
   userId: string;
@@ -177,6 +199,8 @@ export default function AdminDashboard() {
   
   // Real data state
   const [users, setUsers] = useState<User[]>([]);
+  const [userInsights, setUserInsights] = useState<UserInsightsResponse | null>(null);
+  const [userInsightsPage, setUserInsightsPage] = useState<number>(1);
   const [commissions, setCommissions] = useState<Commission[]>([]);
   const [jackpotPayouts, setJackpotPayouts] = useState<JackpotPayout[]>([]);
   const [financeRecords, setFinanceRecords] = useState<FinanceRecord[]>([]);
@@ -245,6 +269,25 @@ export default function AdminDashboard() {
     [withAdminHeaders],
   );
 
+  const fetchUserInsightsPage = useCallback(
+    async (page: number) => {
+      try {
+        const safePage = Number.isFinite(page) ? Math.max(1, Math.trunc(page)) : 1;
+        const res = await fetchWithAdmin(
+          `/api/admin/users/insights?page=${encodeURIComponent(String(safePage))}&pageSize=20&sort=savingsToEndNet&dir=desc`,
+          { cache: 'no-store' },
+        );
+        const json = await res.json().catch(() => null);
+        if (res.ok && json?.ok === true) {
+          setUserInsights(json as UserInsightsResponse);
+        }
+      } catch {
+        // ignore; best-effort
+      }
+    },
+    [fetchWithAdmin],
+  );
+
   const fetchPreviewPlansShare = useCallback(async () => {
     try {
       const res = await fetchWithAdmin('/api/admin/preview/plans-token');
@@ -259,6 +302,14 @@ export default function AdminDashboard() {
       // ignore
     }
   }, [fetchWithAdmin]);
+
+  useEffect(() => {
+    // Carousel/slider paging for the lightweight dashboard view (20 users per page).
+    if (!mounted) return;
+    // Page 1 is loaded as part of the main dashboard fetch.
+    if (userInsightsPage <= 1) return;
+    fetchUserInsightsPage(userInsightsPage);
+  }, [mounted, userInsightsPage, fetchUserInsightsPage]);
 
   // Fetch real data from API
   const fetchData = useCallback(async () => {
@@ -277,7 +328,7 @@ export default function AdminDashboard() {
         emailConfirmationsRes,
       ] = await Promise.all([
         fetchWithAdmin('/api/admin/stats/summary'),
-        fetchWithAdmin('/api/admin/users'),
+        fetchWithAdmin('/api/admin/users/insights?page=1&pageSize=20&sort=savingsToEndNet&dir=desc'),
         fetchWithAdmin('/api/admin/commissions'),
         fetchWithAdmin('/api/admin/jackpot'),
         fetchWithAdmin('/api/admin/finance'),
@@ -298,8 +349,11 @@ export default function AdminDashboard() {
 
       if (usersRes.ok) {
         const usersData = await usersRes.json();
-        console.log('Fetched users data:', usersData);
-        setUsers(usersData);
+        console.log('Fetched user insights:', usersData);
+        setUserInsights(usersData?.ok === true ? (usersData as UserInsightsResponse) : null);
+        setUserInsightsPage(1);
+        // Keep legacy `users` empty; summary stats provide total user counts.
+        setUsers([]);
       } else {
         console.error('Failed to fetch users:', usersRes.status, usersRes.statusText);
       }
@@ -1501,58 +1555,116 @@ export default function AdminDashboard() {
         {/* Users Section */}
         <section className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
           <h2 className="text-2xl font-bold text-brand-navy mb-4">📋 Users</h2>
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-sm text-brand-navy/70">
+              Showing 20 users per page. Use the slider to page through, or open the full Users view.
+            </div>
+            <div className="flex gap-2">
+              <a
+                href="/admin/users"
+                className="inline-flex items-center gap-2 rounded-full border border-brand-blue/40 bg-brand-blue/10 px-4 py-2 text-sm font-semibold text-brand-blue hover:bg-brand-blue/20"
+              >
+                Open full Users UI
+              </a>
+              <a
+                href="/admin/helpdesk/impersonate"
+                className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50"
+              >
+                Help desk
+              </a>
+            </div>
+          </div>
+
+          <div className="mb-4 rounded-xl border border-brand-navy/10 bg-brand-navy/5 p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="text-xs font-semibold uppercase tracking-wide text-brand-navy/60">
+                Page {userInsightsPage} / {userInsights?.totalPages ?? 1}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setUserInsightsPage((p) => Math.max(1, p - 1))}
+                  disabled={userInsightsPage <= 1}
+                  className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Prev
+                </button>
+                <input
+                  type="range"
+                  min={1}
+                  max={Math.max(1, userInsights?.totalPages ?? 1)}
+                  value={Math.min(Math.max(1, userInsightsPage), Math.max(1, userInsights?.totalPages ?? 1))}
+                  onChange={(e) => setUserInsightsPage(Number(e.target.value))}
+                  className="w-56"
+                />
+                <button
+                  type="button"
+                  onClick={() => setUserInsightsPage((p) => Math.min(userInsights?.totalPages ?? 1, p + 1))}
+                  disabled={userInsightsPage >= (userInsights?.totalPages ?? 1)}
+                  className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          </div>
+
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-brand-navy/20">
                   <th className="text-left py-3 px-4 text-brand-navy font-semibold">Email</th>
-                  <th className="text-left py-3 px-4 text-brand-navy font-semibold">Joined</th>
-                  <th className="text-left py-3 px-4 text-brand-navy font-semibold">Entries</th>
-                  <th className="text-left py-3 px-4 text-brand-navy font-semibold">Referrals</th>
-                  <th className="text-left py-3 px-4 text-brand-navy font-semibold">House IDs</th>
+                  <th className="text-left py-3 px-4 text-brand-navy font-semibold">Contract end</th>
+                  <th className="text-left py-3 px-4 text-brand-navy font-semibold">Savings to end (net ETF)</th>
+                  <th className="text-left py-3 px-4 text-brand-navy font-semibold">Savings 12 mo (net ETF)</th>
+                  <th className="text-left py-3 px-4 text-brand-navy font-semibold">Usage</th>
+                  <th className="text-left py-3 px-4 text-brand-navy font-semibold">SMT</th>
+                  <th className="text-left py-3 px-4 text-brand-navy font-semibold">Switched</th>
                 </tr>
               </thead>
               <tbody>
-                {users.length === 0 ? (
+                {userInsights?.rows?.length ? (
+                  userInsights.rows.map((row) => (
+                    <tr
+                      key={row.userId}
+                      className="border-b border-brand-navy/10 hover:bg-brand-navy/5"
+                    >
+                      <td className="py-3 px-4 text-brand-navy">
+                        <a
+                          className="font-semibold hover:underline"
+                          href={`/admin/helpdesk/impersonate?email=${encodeURIComponent(row.email)}`}
+                        >
+                          {row.email}
+                        </a>
+                        <div className="mt-1 text-[11px] text-brand-navy/60">
+                          Joined {new Date(row.joinedAt).toLocaleDateString()}
+                          {row.houseAddressId ? ` · House ${row.houseAddressId}` : ""}
+                        </div>
+                      </td>
+                      <td className="py-3 px-4 text-brand-navy">
+                        {row.contractEndDate ? new Date(row.contractEndDate).toLocaleDateString() : "—"}
+                      </td>
+                      <td className="py-3 px-4 text-brand-navy font-semibold">
+                        {typeof row.savingsUntilContractEndNetEtf === "number" && Number.isFinite(row.savingsUntilContractEndNetEtf)
+                          ? currencyFormatter.format(row.savingsUntilContractEndNetEtf)
+                          : "—"}
+                      </td>
+                      <td className="py-3 px-4 text-brand-navy font-semibold">
+                        {typeof row.savingsNext12MonthsNetEtf === "number" && Number.isFinite(row.savingsNext12MonthsNetEtf)
+                          ? currencyFormatter.format(row.savingsNext12MonthsNetEtf)
+                          : "—"}
+                      </td>
+                      <td className="py-3 px-4">{row.hasUsage ? <span className="text-emerald-700">Yes</span> : <span className="text-slate-500">No</span>}</td>
+                      <td className="py-3 px-4">{row.hasSmt ? <span className="text-emerald-700">Yes</span> : <span className="text-slate-500">No</span>}</td>
+                      <td className="py-3 px-4">{row.switchedWithUs ? <span className="text-emerald-700">Yes</span> : <span className="text-slate-500">No</span>}</td>
+                    </tr>
+                  ))
+                ) : (
                   <tr>
-                    <td colSpan={5} className="py-8 px-4 text-center text-brand-navy/60">
-                      No users found
+                    <td colSpan={7} className="py-8 px-4 text-center text-brand-navy/60">
+                      No users found (or snapshots still computing).
                     </td>
                   </tr>
-                ) : (
-                  users.map((user) => {
-                    const totalEntries =
-                      user.entries?.reduce((sum, entry) => sum + entry.amount, 0) ?? 0;
-                    const totalReferrals = user.referrals?.length ?? 0;
-
-                    return (
-                      <tr
-                        key={user.id}
-                        className="border-b border-brand-navy/10 hover:bg-brand-navy/5"
-                      >
-                        <td className="py-3 px-4 text-brand-navy">{user.email}</td>
-                        <td className="py-3 px-4 text-brand-navy">
-                          {new Date(user.createdAt).toLocaleDateString()}
-                        </td>
-                        <td className="py-3 px-4 text-brand-navy">{totalEntries}</td>
-                        <td className="py-3 px-4 text-brand-navy">{totalReferrals}</td>
-                        <td className="py-3 px-4 text-brand-navy font-mono text-xs">
-                          {user.houseAddresses && user.houseAddresses.length > 0 ? (
-                            <div className="flex flex-col gap-1">
-                              {user.houseAddresses.map((house) => (
-                                <span key={house.id}>
-                                  {house.id}
-                                  {house.archivedAt ? ' (archived)' : ''}
-                                </span>
-                              ))}
-                            </div>
-                          ) : (
-                            '—'
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })
                 )}
               </tbody>
             </table>

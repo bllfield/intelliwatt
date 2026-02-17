@@ -888,6 +888,75 @@ export async function GET(req: NextRequest) {
       },
     });
 
+    // Best-effort: persist a per-home savings snapshot so admin + landing can use real numbers
+    // without re-running the compare calculation for every user.
+    try {
+      const curAnnual =
+        typeof (currentEstimate as any)?.annualCostDollars === "number" && Number.isFinite((currentEstimate as any).annualCostDollars)
+          ? (currentEstimate as any).annualCostDollars
+          : null;
+      const offerAnnual =
+        typeof (offerEstimate as any)?.annualCostDollars === "number" && Number.isFinite((offerEstimate as any).annualCostDollars)
+          ? (offerEstimate as any).annualCostDollars
+          : null;
+
+      if (curAnnual != null && offerAnnual != null) {
+        const savings12NoEtf = curAnnual - offerAnnual;
+        const factor = typeof monthsRemainingOnContract === "number" && Number.isFinite(monthsRemainingOnContract)
+          ? monthsRemainingOnContract / 12
+          : null;
+        const savingsToEndNoEtf = factor == null ? null : savings12NoEtf * factor;
+
+        const etfDollars = etfCents > 0 ? etfCents / 100 : 0;
+        const shouldDeductEtf = etfDollars > 0 && wouldIncurEtfIfSwitchNow !== false;
+        const savings12NetEtf = shouldDeductEtf ? savings12NoEtf - etfDollars : savings12NoEtf;
+        const savingsToEndNetEtf = factor == null ? null : (shouldDeductEtf ? (savingsToEndNoEtf as number) - etfDollars : savingsToEndNoEtf);
+
+        await (prisma as any).homeSavingsSnapshot
+          .upsert({
+            where: { houseAddressId: house.id },
+            create: {
+              houseAddressId: house.id,
+              userId: user.id,
+              computedAt: new Date(),
+              contractEndDate: contractEndDateIso ? new Date(contractEndDateIso) : null,
+              monthsRemainingOnContract,
+              earlyTerminationFeeDollars: etfDollars > 0 ? etfDollars : null,
+              wouldIncurEtfIfSwitchNow,
+              savingsNext12MonthsNoEtf: savings12NoEtf,
+              savingsUntilContractEndNoEtf: savingsToEndNoEtf,
+              savingsNext12MonthsNetEtf: savings12NetEtf,
+              savingsUntilContractEndNetEtf: savingsToEndNetEtf,
+              currentAnnualCostDollars: curAnnual,
+              bestAnnualCostDollars: offerAnnual,
+              bestRatePlanId: ratePlanRow?.id ? String(ratePlanRow.id) : null,
+              bestOfferId: offerId ?? null,
+              bestTermMonths: typeof (offer as any)?.term_months === "number" ? (offer as any).term_months : null,
+            },
+            update: {
+              computedAt: new Date(),
+              contractEndDate: contractEndDateIso ? new Date(contractEndDateIso) : null,
+              monthsRemainingOnContract,
+              earlyTerminationFeeDollars: etfDollars > 0 ? etfDollars : null,
+              wouldIncurEtfIfSwitchNow,
+              savingsNext12MonthsNoEtf: savings12NoEtf,
+              savingsUntilContractEndNoEtf: savingsToEndNoEtf,
+              savingsNext12MonthsNetEtf: savings12NetEtf,
+              savingsUntilContractEndNetEtf: savingsToEndNetEtf,
+              currentAnnualCostDollars: curAnnual,
+              bestAnnualCostDollars: offerAnnual,
+              bestRatePlanId: ratePlanRow?.id ? String(ratePlanRow.id) : null,
+              bestOfferId: offerId ?? null,
+              bestTermMonths: typeof (offer as any)?.term_months === "number" ? (offer as any).term_months : null,
+            },
+            select: { houseAddressId: true },
+          })
+          .catch(() => null);
+      }
+    } catch {
+      // best-effort only
+    }
+
     return NextResponse.json(
       {
         ok: true,
