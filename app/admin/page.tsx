@@ -546,10 +546,11 @@ export default function AdminDashboard() {
     href?: string;
     tone?: 'default' | 'danger';
   }> = [
-    { label: 'Users', value: totalUsersCount.toLocaleString() },
-    { label: "SMT API's", value: smtApiCount.toLocaleString() },
-    { label: 'Manual Entries', value: manualEntriesCount.toLocaleString() },
-    { label: 'Total Usage Customers', value: totalUsageCustomers.toLocaleString() },
+    { label: 'Users', value: totalUsersCount.toLocaleString(), href: '/admin/users' },
+    { label: "SMT API's", value: smtApiCount.toLocaleString(), href: '/admin/smt' },
+    // Closest existing destination for manual/usage tooling.
+    { label: 'Manual Entries', value: manualEntriesCount.toLocaleString(), href: '/admin/usage' },
+    { label: 'Total Usage Customers', value: totalUsageCustomers.toLocaleString(), href: '/admin/users' },
     {
       label: 'EFL Quarantine (Open)',
       value: eflQuarantineOpenCount.toLocaleString(),
@@ -569,20 +570,20 @@ export default function AdminDashboard() {
       tone: currentPlanBillQuarantineOpenCount > 0 ? 'danger' : 'default',
     },
     { label: 'Appliances #', value: applianceCount.toLocaleString() },
-    { label: 'Testimonials', value: testimonialsTotal.toLocaleString() },
-    { label: 'Testimonials Pending', value: testimonialsPendingCount.toLocaleString() },
-    { label: 'Referrals Pending', value: referralPendingTotal.toLocaleString() },
-    { label: 'Referrals Qualified', value: referralQualifiedTotal.toLocaleString() },
-    { label: 'SMT Email Confirmations Pending', value: pendingEmailConfirmationsCount.toLocaleString() },
-    { label: 'SMT Email Confirmations Declined', value: declinedEmailConfirmationsCount.toLocaleString() },
-    { label: 'SMT Email Confirmations Approved', value: approvedEmailConfirmationsCount.toLocaleString() },
-    { label: 'SMT Email Follow-ups Flagged', value: flaggedEmailPending.length.toLocaleString() },
-    { label: 'SMT Revocations Pending', value: pendingRevocationsCount.toLocaleString() },
-    { label: 'Total Commissions', value: currencyFormatter.format(totalCommissions) },
-    { label: 'Net Finance', value: currencyFormatter.format(totalFinance) },
-    { label: 'Pending Jackpot Payouts', value: pendingJackpot.toLocaleString() },
-    { label: 'Homes flagged for SMT replacement email', value: flaggedReplacements.length.toLocaleString() },
-    { label: 'Entries expiring within 30 days', value: expiringSoonCount.toLocaleString() },
+    { label: 'Testimonials', value: testimonialsTotal.toLocaleString(), href: '#testimonials' },
+    { label: 'Testimonials Pending', value: testimonialsPendingCount.toLocaleString(), href: '#testimonials' },
+    { label: 'Referrals Pending', value: referralPendingTotal.toLocaleString(), href: '#referrals' },
+    { label: 'Referrals Qualified', value: referralQualifiedTotal.toLocaleString(), href: '#referrals' },
+    { label: 'SMT Email Confirmations Pending', value: pendingEmailConfirmationsCount.toLocaleString(), href: '#smt-email-confirmations' },
+    { label: 'SMT Email Confirmations Declined', value: declinedEmailConfirmationsCount.toLocaleString(), href: '#smt-email-confirmations' },
+    { label: 'SMT Email Confirmations Approved', value: approvedEmailConfirmationsCount.toLocaleString(), href: '#smt-email-confirmations' },
+    { label: 'SMT Email Follow-ups Flagged', value: flaggedEmailPending.length.toLocaleString(), href: '#smt-followups' },
+    { label: 'SMT Revocations Pending', value: pendingRevocationsCount.toLocaleString(), href: '#smt-revocations' },
+    { label: 'Total Commissions', value: currencyFormatter.format(totalCommissions), href: '#commissions' },
+    { label: 'Net Finance', value: currencyFormatter.format(totalFinance), href: '#finance' },
+    { label: 'Pending Jackpot Payouts', value: pendingJackpot.toLocaleString(), href: '#jackpot' },
+    { label: 'Homes flagged for SMT replacement email', value: flaggedReplacements.length.toLocaleString(), href: '#smt-replacements' },
+    { label: 'Entries expiring within 30 days', value: expiringSoonCount.toLocaleString(), href: '#entry-expiration' },
   ];
 
   return (
@@ -644,21 +645,24 @@ export default function AdminDashboard() {
       <div className="max-w-7xl mx-auto px-4 py-8">
         {/* Stats Overview */}
         <div className="grid gap-6 mb-8 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {overviewStats.map((stat) => (
-            <a
-              key={stat.label}
-              href={stat.href ?? undefined}
-              className={
-                (stat.href ? 'block ' : '') +
-                (stat.tone === 'danger'
-                  ? 'bg-rose-50 border border-rose-200 rounded-lg p-6 shadow-lg hover:bg-rose-100 transition-colors'
-                  : 'bg-brand-white rounded-lg p-6 shadow-lg')
-              }
-            >
-              <div className="text-2xl font-bold text-brand-navy">{stat.value}</div>
-              <div className="text-brand-navy/60">{stat.label}</div>
-            </a>
-          ))}
+          {overviewStats.map((stat) => {
+            const className =
+              (stat.href ? 'block ' : '') +
+              (stat.tone === 'danger'
+                ? 'bg-rose-50 border border-rose-200 rounded-lg p-6 shadow-lg hover:bg-rose-100 transition-colors'
+                : 'bg-brand-white rounded-lg p-6 shadow-lg');
+            return stat.href ? (
+              <a key={stat.label} href={stat.href} className={className}>
+                <div className="text-2xl font-bold text-brand-navy">{stat.value}</div>
+                <div className="text-brand-navy/60">{stat.label}</div>
+              </a>
+            ) : (
+              <div key={stat.label} className={className}>
+                <div className="text-2xl font-bold text-brand-navy">{stat.value}</div>
+                <div className="text-brand-navy/60">{stat.label}</div>
+              </div>
+            );
+          })}
         </div>
 
         {/* Quick Links / Tools Section */}
@@ -911,7 +915,7 @@ export default function AdminDashboard() {
         </section>
 
         {/* Entry Expiration Digest */}
-        <section className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
+        <section id="entry-expiration" className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
           <h2 className="text-2xl font-bold text-brand-navy mb-4">⚠️ Jackpot Entry Expiration</h2>
           <p className="text-brand-navy/70 mb-4">
             Entries listed here are either expiring within the next 30 days or already expired due to missing usage
@@ -977,7 +981,7 @@ export default function AdminDashboard() {
         </section>
 
         {/* Customer Testimonials */}
-        <section className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
+        <section id="testimonials" className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
           <h2 className="text-2xl font-bold text-brand-navy mb-2">🗣️ Customer Testimonials</h2>
           <p className="text-sm text-brand-navy/70 mb-4">
             Testimonials unlock only after a customer switches plans or completes an IntelliPath upgrade. Monitor pending
@@ -1045,7 +1049,7 @@ export default function AdminDashboard() {
         </section>
 
         {/* Referral Progress */}
-        <section className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
+        <section id="referrals" className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
           <h2 className="text-2xl font-bold text-brand-navy mb-2">🤝 Referral Progress</h2>
           <div className="flex flex-wrap items-center gap-3 text-sm text-brand-navy/80 mb-4">
             <span>
@@ -1178,7 +1182,7 @@ export default function AdminDashboard() {
           )}
         </section>
 
-        <section className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
+        <section id="smt-email-confirmations" className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
           <h2 className="text-2xl font-bold text-brand-navy mb-2">📧 SMT Email Confirmations</h2>
           <p className="text-sm text-brand-navy/70 mb-4">
             Customers listed here still need to act on the Smart Meter Texas authorization email. Follow up with pending
@@ -1291,7 +1295,7 @@ export default function AdminDashboard() {
           </div>
         </section>
 
-        <section className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
+        <section id="smt-replacements" className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
           <h2 className="text-2xl font-bold text-brand-navy mb-2">🚨 Houses Awaiting Notification</h2>
           <p className="text-sm text-brand-navy/70 mb-4">
             These users lost SMT access when another account took their service address. Send the replacement email and help them reconnect.
@@ -1356,7 +1360,7 @@ export default function AdminDashboard() {
           </div>
         </section>
 
-        <section className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
+        <section id="smt-revocations" className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
           <h2 className="text-2xl font-bold text-brand-navy mb-2">🛑 SMT Revocations Awaiting Manual Disconnect</h2>
           <p className="text-sm text-brand-navy/70 mb-4">
             Customers who revoked SMT access are queued here so operations can finish the manual disconnect inside Smart
@@ -1428,7 +1432,7 @@ export default function AdminDashboard() {
           </div>
         </section>
 
-        <section className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
+        <section id="smt-followups" className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
           <h2 className="text-2xl font-bold text-brand-navy mb-2">⏳ SMT Emails Awaiting Confirmation</h2>
           <p className="text-sm text-brand-navy/70 mb-4">
             These customers submitted the Smart Meter Texas authorization form but have not yet confirmed the follow-up
@@ -1553,7 +1557,7 @@ export default function AdminDashboard() {
         </section>
 
         {/* Users Section */}
-        <section className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
+        <section id="users-section" className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
           <h2 className="text-2xl font-bold text-brand-navy mb-4">📋 Users</h2>
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="text-sm text-brand-navy/70">
@@ -1672,7 +1676,7 @@ export default function AdminDashboard() {
         </section>
 
         {/* Commissions Section */}
-        <section className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
+        <section id="commissions" className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
           <h2 className="text-2xl font-bold text-brand-navy mb-4">💰 Commissions</h2>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -1715,7 +1719,7 @@ export default function AdminDashboard() {
         </section>
 
         {/* Jackpot Section */}
-        <section className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
+        <section id="jackpot" className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
           <h2 className="text-2xl font-bold text-brand-navy mb-4">🎰 Jackpot Payouts</h2>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -1754,7 +1758,7 @@ export default function AdminDashboard() {
         </section>
 
         {/* Finance Section */}
-        <section className="bg-brand-white rounded-lg p-6 shadow-lg">
+        <section id="finance" className="bg-brand-white rounded-lg p-6 shadow-lg">
           <h2 className="text-2xl font-bold text-brand-navy mb-4">📊 Finance Records</h2>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
