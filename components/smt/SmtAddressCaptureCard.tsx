@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import QuickAddressEntry from '@/components/QuickAddressEntry';
-import SmtManualFallbackCard from '@/components/smt/SmtManualFallbackCard';
 
 type Props = {
   houseAddressId?: string | null;
@@ -14,9 +13,20 @@ export default function SmtAddressCaptureCard({ houseAddressId = null, initialAd
   const router = useRouter();
   const [savedAddress, setSavedAddress] = useState(initialAddress ?? '');
   const [addressReady, setAddressReady] = useState(Boolean(initialAddress && initialAddress.trim().length > 0));
+  const [isEditing, setIsEditing] = useState(false);
 
-  if (addressReady) {
-    return null;
+  if (addressReady && !isEditing) {
+    return (
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+        <button
+          type="button"
+          onClick={() => setIsEditing(true)}
+          className="inline-flex items-center rounded-full border border-brand-cyan/30 bg-brand-white/5 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-brand-cyan transition hover:bg-brand-white/10"
+        >
+          Reset address
+        </button>
+      </div>
+    );
   }
 
   return (
@@ -28,6 +38,7 @@ export default function SmtAddressCaptureCard({ houseAddressId = null, initialAd
           const ready = Boolean(next && next.trim().length > 0);
           setAddressReady(ready);
           if (ready) {
+            setIsEditing(false);
             router.refresh();
           }
         }}
