@@ -996,7 +996,6 @@ export default function PlanCompareClient(props: { offerId: string }) {
                                   const totalEtf = side === "offer" && includeEtf && etfAppliesNow && etfDollars > 0 && rows.length > 0 ? etfDollars : 0;
                                   const totalMonthTotal = sumNums(baseMonthTotals) + totalEtf;
                                   const windowMonths = rows.length > 0 ? rows.length : 12;
-                                  const windowFactor = windowMonths / 12;
 
                                   // Reconcile: monthlyBreakdown.totals.expectedAnnual is the canonical engine output.
                                   // The per-month reconstruction can differ when a plan contains rules we don't yet
@@ -1008,34 +1007,8 @@ export default function PlanCompareClient(props: { offerId: string }) {
                                   const adjustmentDollars =
                                     deltaCents != null ? (-1 * deltaCents) / 100 : null;
                                   const adjustmentDollarsWindow =
-                                    typeof adjustmentDollars === "number" && Number.isFinite(adjustmentDollars) ? adjustmentDollars * windowFactor : null;
-
-                                  const expectedAnnual =
-                                    typeof monthlyBreakdown?.totals?.expectedAnnual === "number"
-                                      ? monthlyBreakdown.totals.expectedAnnual
-                                      : null;
-                                  const expectedWindowTotal =
-                                    typeof expectedAnnual === "number" && Number.isFinite(expectedAnnual) ? expectedAnnual * windowFactor : null;
-                                  const reconciledTotal =
-                                    expectedWindowTotal != null
-                                      ? expectedWindowTotal + (side === "offer" ? totalEtf : 0)
-                                      : null;
-
-                                  const currentExpectedAnnual =
-                                    side === "offer" && typeof (currentDetail as any)?.monthlyBreakdown?.totals?.expectedAnnual === "number"
-                                      ? Number((currentDetail as any).monthlyBreakdown.totals.expectedAnnual)
-                                      : null;
-                                  const currentExpectedWindowTotal =
-                                    side === "offer" && typeof currentExpectedAnnual === "number" && Number.isFinite(currentExpectedAnnual)
-                                      ? currentExpectedAnnual * windowFactor
-                                      : null;
-                                  const reconciledDeltaVsCurrent =
-                                    side === "offer" &&
-                                    typeof reconciledTotal === "number" &&
-                                    Number.isFinite(reconciledTotal) &&
-                                    typeof currentExpectedWindowTotal === "number" &&
-                                    Number.isFinite(currentExpectedWindowTotal)
-                                      ? reconciledTotal - currentExpectedWindowTotal
+                                    typeof adjustmentDollars === "number" && Number.isFinite(adjustmentDollars)
+                                      ? adjustmentDollars * (windowMonths / 12)
                                       : null;
 
                                   let totalDelta: number | null = null;
@@ -1111,7 +1084,7 @@ export default function PlanCompareClient(props: { offerId: string }) {
 
                                       {typeof adjustmentDollarsWindow === "number" &&
                                       Number.isFinite(adjustmentDollarsWindow) &&
-                                      adjustmentDollarsWindow !== 0 ? (
+                                      Math.abs(adjustmentDollarsWindow) >= 1 ? (
                                         <tr className="border-t border-brand-cyan/10 text-brand-cyan/70">
                                           <td className="px-3 py-2 font-semibold">
                                             Adjustment (credits/discounts not fully modeled in rows; scaled to {windowMonths} mo)
@@ -1135,51 +1108,6 @@ export default function PlanCompareClient(props: { offerId: string }) {
                                           <td className="px-3 py-2">—</td>
                                           <td className="px-3 py-2">—</td>
                                           {side === "offer" ? <td className="px-3 py-2">—</td> : null}
-                                        </tr>
-                                      ) : null}
-
-                                      {typeof reconciledTotal === "number" && Number.isFinite(reconciledTotal) ? (
-                                        <tr className="border-t border-brand-cyan/10">
-                                          <td className="px-3 py-2 font-semibold text-brand-white/90">
-                                            Reconciled total (scaled from engine; {windowMonths} mo)
-                                          </td>
-                                          <td className="px-3 py-2 font-semibold text-brand-white/90">—</td>
-                                          {repBuckets.map((b: any) => (
-                                            <td key={`rec-${b.bucketKey}-kwh`} className="px-3 py-2 text-brand-cyan/60">—</td>
-                                          ))}
-                                          {repBuckets.map((b: any) => (
-                                            <td key={`rec-${b.bucketKey}-rate`} className="px-3 py-2 text-brand-cyan/60">—</td>
-                                          ))}
-                                          {repBuckets.map((b: any) => (
-                                            <td key={`rec-${b.bucketKey}-cost`} className="px-3 py-2 text-brand-cyan/60">—</td>
-                                          ))}
-                                          <td className="px-3 py-2 text-brand-cyan/60">—</td>
-                                          <td className="px-3 py-2 text-brand-cyan/60">—</td>
-                                          <td className="px-3 py-2 text-brand-cyan/60">—</td>
-                                          <td className="px-3 py-2 text-brand-cyan/60">—</td>
-                                          <td className="px-3 py-2 text-brand-cyan/60">—</td>
-                                          <td className="px-3 py-2 text-brand-cyan/60">—</td>
-                                          <td className="px-3 py-2 text-brand-cyan/60">—</td>
-                                          <td
-                                            className="px-3 py-2 font-semibold text-brand-white/90"
-                                            title={side === "offer" && includeEtf && totalEtf > 0 ? `Includes ETF once: ${fmtDollars(totalEtf)}` : undefined}
-                                          >
-                                            {fmtDollars(reconciledTotal)}
-                                          </td>
-                                          {side === "offer" ? (
-                                            <td
-                                              className={`px-3 py-2 font-semibold ${
-                                                typeof reconciledDeltaVsCurrent === "number" && Number.isFinite(reconciledDeltaVsCurrent)
-                                                  ? reconciledDeltaVsCurrent < 0
-                                                    ? "text-emerald-200"
-                                                    : "text-amber-200"
-                                                  : "text-brand-cyan/60"
-                                              }`}
-                                              title={side === "offer" && includeEtf && totalEtf > 0 ? `Includes ETF once: ${fmtDollars(totalEtf)}` : undefined}
-                                            >
-                                              {reconciledDeltaVsCurrent == null ? "—" : fmtDollars(reconciledDeltaVsCurrent)}
-                                            </td>
-                                          ) : null}
                                         </tr>
                                       ) : null}
                                     </>
