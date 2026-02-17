@@ -5,6 +5,7 @@ import { detectIndexedOrVariable } from "@/lib/plan-engine/indexedPricing";
 import { extractDeterministicTierSchedule } from "@/lib/plan-engine/tieredPricing";
 import { extractDeterministicBillCredits } from "@/lib/plan-engine/billCredits";
 import { extractDeterministicMinimumRules } from "@/lib/plan-engine/minimumRules";
+import { bucketDefsFromBucketKeys } from "@/lib/plan-engine/usageBuckets";
 import { Prisma } from "@prisma/client";
 
 export type ComputabilityStatus =
@@ -479,8 +480,30 @@ export function derivePlanCalcRequirementsFromTemplate(args: {
     };
   })();
 
+  // IMPORTANT:
+  // Validate requiredBucketKeys against the monthly bucket-key grammar.
+  // If a template emits an invalid bucket key, that's a TEMPLATE defect (not home-specific) and should be queued.
+  try {
+    bucketDefsFromBucketKeys(Array.isArray(out.requiredBucketKeys) ? out.requiredBucketKeys : []);
+  } catch (e: any) {
+    const msg = e?.message ? String(e.message) : String(e);
+    return {
+      planCalcVersion,
+      planCalcStatus: "NOT_COMPUTABLE",
+      planCalcReasonCode: "UNSUPPORTED_BUCKET_KEY",
+      requiredBucketKeys: Array.isArray(out.requiredBucketKeys) ? out.requiredBucketKeys : [],
+      supportedFeatures: {
+        ...(out.supportedFeatures ?? {}),
+        notes: [
+          ...((out.supportedFeatures as any)?.notes ?? []),
+          `Invalid required bucket key(s): ${msg}`,
+        ],
+      },
+    };
+  }
+
   // Side-effect only (best-effort): ensure usage bucket definitions exist in the registry table.
-  // This must not change status logic yet; unparsable keys are swallowed.
+  // This must not change status logic; failures here are typically infrastructure/transient.
   bestEffortEnsureBucketsExist(out.requiredBucketKeys);
 
   return out;

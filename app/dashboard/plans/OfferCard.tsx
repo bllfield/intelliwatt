@@ -125,6 +125,7 @@ export default function OfferCard({ offer, recommended }: OfferCardProps) {
   const tceStatus = String(tce?.status ?? "").toUpperCase();
   const tceReason = String(tce?.reason ?? offer.intelliwatt?.statusReason ?? "").toUpperCase();
   const isTemplateLookupError = tceStatus === "NOT_IMPLEMENTED" && tceReason === "TEMPLATE_LOOKUP_ERROR";
+  const isMissingBuckets = tceStatus === "NOT_IMPLEMENTED" && tceReason === "MISSING_BUCKETS";
 
   // Only show the scary UNSUPPORTED tag for true template/engine limitations.
   // Missing templates / cache misses / missing buckets should read as CALCULATING, not UNSUPPORTED.
@@ -140,7 +141,6 @@ export default function OfferCard({ offer, recommended }: OfferCardProps) {
     // Plans list is read-only: a CACHE_MISS means "pipeline hasn't materialized this input-set yet".
     (tceStatus === "NOT_IMPLEMENTED" &&
       (tceReason === "CACHE_MISS" ||
-        tceReason === "MISSING_BUCKETS" ||
         tceReason.includes("MISSING TEMPLATE") ||
         tceReason.includes("MISSING BUCKET"))) ||
     // Template missing can be transient (prefetch/pipeline may be building it); treat as calculating on the card.
@@ -149,6 +149,8 @@ export default function OfferCard({ offer, recommended }: OfferCardProps) {
   const statusKind: "AVAILABLE" | "CALCULATING" | "NEED_USAGE" | "NOT_COMPUTABLE_YET" =
     tceStatus === "MISSING_USAGE"
       ? "NEED_USAGE"
+      : isMissingBuckets
+        ? "NEED_USAGE"
       : status === "AVAILABLE"
         ? "AVAILABLE"
         : isCalculating
@@ -314,6 +316,12 @@ export default function OfferCard({ offer, recommended }: OfferCardProps) {
           </div>
         </div>
       </div>
+
+      {statusKind === "NEED_USAGE" && isMissingBuckets ? (
+        <div className="mt-3 text-xs text-brand-cyan/70">
+          We don’t have enough usable usage history to compute this plan yet.
+        </div>
+      ) : null}
 
       {showEstimateLine && estimateMonthly ? (
         <div className="mt-3 text-xs text-brand-cyan/70">

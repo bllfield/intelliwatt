@@ -447,12 +447,13 @@ export default function PlansClient() {
       const tceReason = String((o as any)?.intelliwatt?.trueCostEstimate?.reason ?? "").toUpperCase();
       if (tceStatus === "OK" || tceStatus === "APPROXIMATE") return "AVAILABLE";
       if (tceStatus === "MISSING_USAGE") return "NEED_USAGE";
+      if (tceStatus === "NOT_IMPLEMENTED" && tceReason === "MISSING_BUCKETS") return "NEED_USAGE";
 
       // "Calculating" means: expected to resolve once templates/usage buckets/estimates materialize.
       // Keep this aligned with OfferCard's customer-facing language.
       const calculating =
         tceStatus === "MISSING_TEMPLATE" ||
-        (tceStatus === "NOT_IMPLEMENTED" && (tceReason === "CACHE_MISS" || tceReason === "MISSING_BUCKETS"));
+        (tceStatus === "NOT_IMPLEMENTED" && tceReason === "CACHE_MISS");
       if (calculating) return "CALCULATING";
 
       // Everything else is currently unavailable (true defects, temporary lookups, etc).

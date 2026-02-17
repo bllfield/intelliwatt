@@ -1,20 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { requireVercelCron } from "@/lib/auth/cron";
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
+const SAMPLE_HOME_EMAIL = (process.env.SAMPLE_HOME_EMAIL ?? "bllfield32@gmail.com").trim().toLowerCase();
 
 function jsonError(status: number, error: string, details?: unknown) {
   return NextResponse.json({ ok: false, error, ...(details ? { details } : {}) }, { status });
 }
 
-function isAuthorized(req: NextRequest): boolean {
-  // Vercel Cron requests include this header.
-  if (req.headers.get("x-vercel-cron") === "1") return true;
+function requireCronOrAdmin(req: NextRequest): Response | null {
+  // If this was triggered by Vercel Cron, enforce cron auth (and optional CRON_SECRET).
+  if (req.headers.get("x-vercel-cron")) {
+    return requireVercelCron(req);
+  }
+
+  // Otherwise, allow manual invocations with x-admin-token.
   const headerToken = req.headers.get("x-admin-token");
-  return Boolean(ADMIN_TOKEN && headerToken && headerToken === ADMIN_TOKEN);
+  if (!ADMIN_TOKEN || !headerToken || headerToken !== ADMIN_TOKEN) {
+    return jsonError(401, "Unauthorized");
+  }
+  return null;
 }
 
 type TerritorySeed = {
@@ -71,10 +81,45 @@ async function postJson(
   }
 }
 
+async function postNoBody(
+  req: NextRequest,
+  pathWithQuery: string,
+  opts?: { timeoutMs?: number },
+): Promise<{ ok: boolean; status: number; json: any | null; text: string | null }> {
+  if (!ADMIN_TOKEN) {
+    return { ok: false, status: 500, json: null, text: "ADMIN_TOKEN not configured" };
+  }
+  const url = new URL(pathWithQuery, req.nextUrl.origin);
+  const timeoutMs = Math.max(5_000, Math.min(270_000, Number(opts?.timeoutMs ?? 120_000)));
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url.toString(), {
+      method: "POST",
+      headers: {
+        "x-admin-token": ADMIN_TOKEN,
+      },
+      signal: controller.signal,
+    });
+    const raw = await res.text();
+    try {
+      const json = raw ? JSON.parse(raw) : null;
+      return { ok: res.ok, status: res.status, json, text: null };
+    } catch {
+      return { ok: res.ok, status: res.status, json: null, text: raw };
+    }
+  } catch (e: any) {
+    return { ok: false, status: 599, json: null, text: e?.message ? String(e.message) : String(e) };
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 export async function GET(req: NextRequest) {
   try {
     if (!ADMIN_TOKEN) return jsonError(500, "ADMIN_TOKEN is not configured");
-    if (!isAuthorized(req)) return jsonError(401, "Unauthorized");
+    const guard = requireCronOrAdmin(req);
+    if (guard) return guard as any;
 
     const startedAtMs = Date.now();
     const timeBudgetMs = 270_000; // leave buffer within maxDuration
@@ -187,6 +232,29 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // 4) Warm the plan pipeline against a stable sample home so new templates are actually exercised.
+    // This is intentionally bounded; the pipeline is designed for repeated short runs.
+    let sampleHomePipelineResult: any = null;
+    if (!shouldStop() && SAMPLE_HOME_EMAIL) {
+      const remaining = Math.max(0, deadlineMs - Date.now());
+      const callBudget = Math.max(8_000, Math.min(remaining - 2_500, 25_000));
+      if (callBudget >= 8_000) {
+        const qp = new URLSearchParams({
+          email: SAMPLE_HOME_EMAIL,
+          reason: "cron_nightly_templates",
+          timeBudgetMs: String(Math.min(25_000, callBudget)),
+          maxTemplateOffers: "10",
+          maxEstimatePlans: "200",
+        });
+        const r = await postNoBody(req, `/api/admin/plans/pipeline?${qp.toString()}`, { timeoutMs: callBudget + 10_000 });
+        sampleHomePipelineResult = {
+          ok: r.ok,
+          status: r.status,
+          body: r.json ?? { raw: r.text },
+        };
+      }
+    }
+
     const elapsedMs = Date.now() - startedAtMs;
     return NextResponse.json({
       ok: true,
@@ -196,6 +264,7 @@ export async function GET(req: NextRequest) {
       runs,
       processOpenResult,
       processQuarantineResult,
+      sampleHomePipelineResult,
       stoppedEarly: shouldStop(),
     });
   } catch (e: any) {

@@ -5,7 +5,13 @@ export function requireVercelCron(req: NextRequest) {
   // Vercel adds x-vercel-cron to scheduled invocations
   const cronHeader = req.headers.get('x-vercel-cron');
   const secret = process.env.CRON_SECRET;
-  const provided = req.headers.get('x-cron-secret');
+  const providedHeader = req.headers.get('x-cron-secret');
+  const auth = req.headers.get('authorization') || req.headers.get('Authorization');
+  const providedBearer =
+    typeof auth === 'string' && auth.toLowerCase().startsWith('bearer ')
+      ? auth.slice('bearer '.length).trim()
+      : null;
+  const provided = (providedBearer || providedHeader || '').trim() || null;
 
   // If CRON_SECRET is configured, require it as well.
   if (!cronHeader) {
