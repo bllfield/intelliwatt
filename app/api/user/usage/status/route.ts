@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
 import { getRollingBackfillRange } from "@/lib/smt/agreements";
@@ -108,16 +109,22 @@ export async function POST(req: NextRequest) {
   const target = getRollingBackfillRange(12);
 
   // Check whether any SMT intervals exist for this ESIID + compute coverage.
-  const intervalAgg = await prisma.smtInterval.aggregate({
-    where: { esiid: house.esiid },
-    _count: { _all: true },
-    _min: { ts: true },
-    _max: { ts: true },
-  });
+  // Count distinct ts so SMT re-syncs with different meter IDs can't inflate coverage.
+  const intervalAggRows = await prisma.$queryRaw<
+    Array<{ intervalscount: number; minTs: Date | null; maxTs: Date | null }>
+  >(Prisma.sql`
+    SELECT
+      COUNT(DISTINCT "ts")::int AS intervalsCount,
+      MIN("ts") AS "minTs",
+      MAX("ts") AS "maxTs"
+    FROM "SmtInterval"
+    WHERE "esiid" = ${house.esiid}
+  `);
 
-  const intervalCount = Number(intervalAgg._count?._all ?? 0);
-  const coverageStart = intervalAgg._min?.ts ?? null;
-  const coverageEnd = intervalAgg._max?.ts ?? null;
+  const intervalAgg = intervalAggRows?.[0] ?? null;
+  const intervalCount = Number(intervalAgg?.intervalscount ?? 0);
+  const coverageStart = intervalAgg?.minTs ?? null;
+  const coverageEnd = intervalAgg?.maxTs ?? null;
 
   const coverageStartDate = coverageStart ? chicagoDateKey(coverageStart) : null;
   const coverageEndDate = coverageEnd ? chicagoDateKey(coverageEnd) : null;

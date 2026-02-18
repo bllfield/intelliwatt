@@ -119,12 +119,20 @@ async function computeImportExportTotalsFromDb(args: {
       if (!esiid) return { importKwh: 0, exportKwh: 0, netKwh: 0 };
 
       const rows = await prisma.$queryRaw<Array<{ importkwh: number; exportkwh: number }>>(Prisma.sql`
+        WITH iv AS (
+          SELECT
+            "ts",
+            MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS importkwh,
+            MAX(CASE WHEN "kwh" < 0 THEN ABS("kwh") ELSE 0 END)::float AS exportkwh
+          FROM "SmtInterval"
+          WHERE "esiid" = ${esiid}
+            AND "ts" >= ${args.cutoff}
+          GROUP BY "ts"
+        )
         SELECT
-          COALESCE(SUM(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float, 0) AS importkwh,
-          COALESCE(SUM(CASE WHEN "kwh" < 0 THEN ABS("kwh") ELSE 0 END)::float, 0) AS exportkwh
-        FROM "SmtInterval"
-        WHERE "esiid" = ${esiid}
-          AND "ts" >= ${args.cutoff}
+          COALESCE(SUM(importkwh)::float, 0) AS importkwh,
+          COALESCE(SUM(exportkwh)::float, 0) AS exportkwh
+        FROM iv
       `);
       const importKwh = round2(rows?.[0]?.importkwh ?? 0);
       const exportKwh = round2(rows?.[0]?.exportkwh ?? 0);
@@ -190,15 +198,21 @@ async function computeInsightsFromDb(args: {
       if (!esiid) return empty;
 
       const dailyRows = await prisma.$queryRaw<Array<{ date: string; kwh: number }>>(Prisma.sql`
+        WITH iv AS (
+          SELECT
+            "ts",
+            MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh
+          FROM "SmtInterval"
+          WHERE "esiid" = ${esiid}
+            AND "ts" >= ${args.cutoff}
+          GROUP BY "ts"
+        )
         SELECT
           -- SmtInterval.ts is TIMESTAMP (no tz) but represents UTC instants.
           -- Convert UTC->America/Chicago explicitly before day bucketing.
           to_char((("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago')::date, 'YYYY-MM-DD') AS date,
-          -- IMPORTANT: SMT can include signed kWh (export negative). For "usage" charts, show import kWh.
-          COALESCE(SUM(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END), 0)::float AS kwh
-        FROM "SmtInterval"
-        WHERE "esiid" = ${esiid}
-          AND "ts" >= ${args.cutoff}
+          COALESCE(SUM("kwh"), 0)::float AS kwh
+        FROM iv
         GROUP BY 1
         ORDER BY 1 ASC
       `);
@@ -207,28 +221,42 @@ async function computeInsightsFromDb(args: {
         dailyTotals.length > 0 ? dailyTotals.reduce((a, b) => (b.kwh > a.kwh ? b : a)) : null;
 
       const monthlyRows = await prisma.$queryRaw<Array<{ month: string; kwh: number }>>(Prisma.sql`
+        WITH iv AS (
+          SELECT
+            "ts",
+            MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh
+          FROM "SmtInterval"
+          WHERE "esiid" = ${esiid}
+            AND "ts" >= ${args.cutoff}
+          GROUP BY "ts"
+        )
         SELECT
           -- Bucket by America/Chicago local month (SMT semantics) and sum import kWh only.
           to_char(
             date_trunc('month', (("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago'))::date,
             'YYYY-MM'
           ) AS month,
-          COALESCE(SUM(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END), 0)::float AS kwh
-        FROM "SmtInterval"
-        WHERE "esiid" = ${esiid}
-          AND "ts" >= ${args.cutoff}
+          COALESCE(SUM("kwh"), 0)::float AS kwh
+        FROM iv
         GROUP BY 1
         ORDER BY 1 ASC
       `);
       const monthlyTotals = monthlyRows.map((r) => ({ month: String(r.month), kwh: round2(r.kwh) }));
 
       const fifteenRows = await prisma.$queryRaw<Array<{ hhmm: string; avgkw: number }>>(Prisma.sql`
+        WITH iv AS (
+          SELECT
+            "ts",
+            MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh
+          FROM "SmtInterval"
+          WHERE "esiid" = ${esiid}
+            AND "ts" >= ${args.cutoff}
+          GROUP BY "ts"
+        )
         SELECT
           to_char((("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago'), 'HH24:MI') AS hhmm,
           AVG(("kwh" * 4))::float AS avgkw
-        FROM "SmtInterval"
-        WHERE "esiid" = ${esiid}
-          AND "ts" >= ${args.cutoff}
+        FROM iv
         GROUP BY 1
         ORDER BY 1 ASC
       `);
@@ -279,9 +307,15 @@ async function computeInsightsFromDb(args: {
               ELSE 4
             END AS sort,
             "kwh"
-          FROM "SmtInterval"
-          WHERE "esiid" = ${esiid}
-            AND "ts" >= ${args.cutoff}
+          FROM (
+            SELECT
+              "ts",
+              MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh
+            FROM "SmtInterval"
+            WHERE "esiid" = ${esiid}
+              AND "ts" >= ${args.cutoff}
+            GROUP BY "ts"
+          ) iv
         ) t
         GROUP BY key, label, sort
         ORDER BY sort ASC
@@ -296,9 +330,15 @@ async function computeInsightsFromDb(args: {
         SELECT
           EXTRACT(HOUR FROM (("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago'))::int AS hour,
           SUM("kwh")::float AS sumkwh
-        FROM "SmtInterval"
-        WHERE "esiid" = ${esiid}
-          AND "ts" >= ${args.cutoff}
+        FROM (
+          SELECT
+            "ts",
+            MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh
+          FROM "SmtInterval"
+          WHERE "esiid" = ${esiid}
+            AND "ts" >= ${args.cutoff}
+          GROUP BY "ts"
+        ) iv
         GROUP BY 1
         ORDER BY sumkwh DESC
         LIMIT 1
@@ -310,9 +350,15 @@ async function computeInsightsFromDb(args: {
       const baseloadRows = await prisma.$queryRaw<Array<{ baseload: number | null }>>(Prisma.sql`
         WITH t AS (
           SELECT ("kwh" * 4)::float AS kw
-          FROM "SmtInterval"
-          WHERE "esiid" = ${esiid}
-            AND "ts" >= ${args.cutoff}
+          FROM (
+            SELECT
+              "ts",
+              MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh
+            FROM "SmtInterval"
+            WHERE "esiid" = ${esiid}
+              AND "ts" >= ${args.cutoff}
+            GROUP BY "ts"
+          ) iv
         ),
         p AS (
           SELECT percentile_cont(0.10) WITHIN GROUP (ORDER BY kw) AS p10
@@ -330,9 +376,15 @@ async function computeInsightsFromDb(args: {
         SELECT
           COALESCE(SUM(CASE WHEN EXTRACT(DOW FROM "ts") IN (0,6) THEN 0 ELSE "kwh" END)::float, 0) AS weekdaykwh,
           COALESCE(SUM(CASE WHEN EXTRACT(DOW FROM "ts") IN (0,6) THEN "kwh" ELSE 0 END)::float, 0) AS weekendkwh
-        FROM "SmtInterval"
-        WHERE "esiid" = ${esiid}
-          AND "ts" >= ${args.cutoff}
+        FROM (
+          SELECT
+            "ts",
+            MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh
+          FROM "SmtInterval"
+          WHERE "esiid" = ${esiid}
+            AND "ts" >= ${args.cutoff}
+          GROUP BY "ts"
+        ) iv
       `);
       const weekday = round2(dowRows?.[0]?.weekdaykwh ?? 0);
       const weekend = round2(dowRows?.[0]?.weekendkwh ?? 0);
@@ -554,31 +606,78 @@ async function fetchSmtDataset(esiid: string | null): Promise<UsageDatasetResult
   const window = await getSmtWindow(esiid);
   if (!window) return null;
 
-  const aggregates = await prisma.smtInterval.aggregate({
-    where: {
-      esiid,
-      ts: { gte: window.cutoff },
-    },
-    _count: { _all: true },
-    _sum: { kwh: true },
-    _min: { ts: true },
-    _max: { ts: true },
-  });
+  // Opportunistic repair: if old data exists under meter='unknown' and a later re-sync
+  // inserted the same timestamps under the real meter, delete the unknown duplicates.
+  // This prevents downstream consumers (plan engine, etc.) from ever seeing doubled usage.
+  try {
+    const meters = await prisma.smtInterval.findMany({
+      where: { esiid },
+      distinct: ['meter'],
+      select: { meter: true },
+      take: 5,
+    });
+    const meterValues = meters.map((m) => String(m.meter ?? '').trim()).filter(Boolean);
+    if (meterValues.includes('unknown') && meterValues.some((m) => m !== 'unknown')) {
+      await prisma.$executeRaw(Prisma.sql`
+        DELETE FROM "SmtInterval" u
+        USING "SmtInterval" r
+        WHERE u."esiid" = ${esiid}
+          AND u."meter" = 'unknown'
+          AND r."esiid" = u."esiid"
+          AND r."ts" = u."ts"
+          AND r."meter" <> u."meter"
+      `);
+    }
+  } catch {
+    // Never fail the usage endpoint due to cleanup best-effort.
+  }
 
-  const count = aggregates._count?._all ?? 0;
+  // Deduplicate by ts to avoid double-counting if SMT re-syncs arrive with different meter IDs.
+  const aggRows = await prisma.$queryRaw<
+    Array<{ intervalscount: number; importkwh: number; exportkwh: number; start: Date | null; end: Date | null }>
+  >(Prisma.sql`
+    WITH iv AS (
+      SELECT
+        "ts",
+        MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS importkwh,
+        MAX(CASE WHEN "kwh" < 0 THEN ABS("kwh") ELSE 0 END)::float AS exportkwh
+      FROM "SmtInterval"
+      WHERE "esiid" = ${esiid}
+        AND "ts" >= ${window.cutoff}
+      GROUP BY "ts"
+    )
+    SELECT
+      COUNT(*)::int AS intervalsCount,
+      COALESCE(SUM(importkwh), 0)::float AS importkwh,
+      COALESCE(SUM(exportkwh), 0)::float AS exportkwh,
+      MIN("ts") AS start,
+      MAX("ts") AS end
+    FROM iv
+  `);
+
+  const agg = aggRows?.[0] ?? null;
+  const count = Number(agg?.intervalscount ?? 0);
   if (count === 0) {
     return null;
   }
 
-  const totalKwh = decimalToNumber(aggregates._sum?.kwh ?? 0);
-  const start = aggregates._min?.ts ?? null;
-  const end = aggregates._max?.ts ?? null;
+  const importKwh = round2(Number(agg?.importkwh ?? 0));
+  const exportKwh = round2(Number(agg?.exportkwh ?? 0));
+  const totalKwh = round2(importKwh - exportKwh);
+  const start = agg?.start ?? null;
+  const end = agg?.end ?? null;
 
-  const recentIntervals = await prisma.smtInterval.findMany({
-    where: { esiid, ts: { gte: window.cutoff } },
-    orderBy: { ts: 'desc' },
-    take: 192, // ~2 days of 15-minute intervals
-  });
+  const recentIntervals = await prisma.$queryRaw<Array<{ ts: Date; kwh: number }>>(Prisma.sql`
+    SELECT
+      "ts",
+      MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh
+    FROM "SmtInterval"
+    WHERE "esiid" = ${esiid}
+      AND "ts" >= ${window.cutoff}
+    GROUP BY "ts"
+    ORDER BY "ts" DESC
+    LIMIT 192
+  `);
 
   const intervals15 = recentIntervals
     .map((row) => ({
@@ -588,49 +687,77 @@ async function fetchSmtDataset(esiid: string | null): Promise<UsageDatasetResult
     .reverse();
 
   const hourlyRows = await prisma.$queryRaw<Array<{ bucket: Date; kwh: number }>>(Prisma.sql`
+    WITH iv AS (
+      SELECT
+        "ts",
+        MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh
+      FROM "SmtInterval"
+      WHERE "esiid" = ${esiid}
+        AND "ts" >= ${window.cutoff}
+        AND "ts" >= NOW() - INTERVAL '14 days'
+      GROUP BY "ts"
+    )
     SELECT
       date_trunc('hour', "ts") AS bucket,
-      COALESCE(SUM(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END), 0)::float AS kwh
-    FROM "SmtInterval"
-    WHERE "esiid" = ${esiid}
-      AND "ts" >= ${window.cutoff}
-      AND "ts" >= NOW() - INTERVAL '14 days'
+      COALESCE(SUM("kwh"), 0)::float AS kwh
+    FROM iv
     GROUP BY bucket
     ORDER BY bucket ASC
   `);
 
   const dailyRows = await prisma.$queryRaw<Array<{ bucket: Date; kwh: number }>>(Prisma.sql`
+    WITH iv AS (
+      SELECT
+        "ts",
+        MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh
+      FROM "SmtInterval"
+      WHERE "esiid" = ${esiid}
+        AND "ts" >= ${window.cutoff}
+      GROUP BY "ts"
+    )
     SELECT
       -- SmtInterval.ts is UTC stored as TIMESTAMP (no tz). Convert to local time first for day bucketing.
       date_trunc('day', (("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago')) AT TIME ZONE 'America/Chicago' AS bucket,
-           COALESCE(SUM(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END), 0)::float AS kwh
-    FROM "SmtInterval"
-    WHERE "esiid" = ${esiid}
-      AND "ts" >= ${window.cutoff}
+      COALESCE(SUM("kwh"), 0)::float AS kwh
+    FROM iv
     GROUP BY bucket
     ORDER BY bucket DESC
     LIMIT 400
   `);
 
   const monthlyRows = await prisma.$queryRaw<Array<{ bucket: Date; kwh: number }>>(Prisma.sql`
+    WITH iv AS (
+      SELECT
+        "ts",
+        MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh
+      FROM "SmtInterval"
+      WHERE "esiid" = ${esiid}
+        AND "ts" >= ${window.cutoff}
+      GROUP BY "ts"
+    )
     SELECT
       date_trunc('month', (("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago')) AT TIME ZONE 'America/Chicago' AS bucket,
-      COALESCE(SUM(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END), 0)::float AS kwh
-    FROM "SmtInterval"
-    WHERE "esiid" = ${esiid}
-      AND "ts" >= ${window.cutoff}
+      COALESCE(SUM("kwh"), 0)::float AS kwh
+    FROM iv
     GROUP BY bucket
     ORDER BY bucket DESC
     LIMIT 120
   `);
 
   const annualRows = await prisma.$queryRaw<Array<{ bucket: Date; kwh: number }>>(Prisma.sql`
+    WITH iv AS (
+      SELECT
+        "ts",
+        MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh
+      FROM "SmtInterval"
+      WHERE "esiid" = ${esiid}
+        AND "ts" >= ${window.cutoff}
+      GROUP BY "ts"
+    )
     SELECT
       date_trunc('year', "ts") AS bucket,
-      COALESCE(SUM(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END), 0)::float AS kwh
-    FROM "SmtInterval"
-    WHERE "esiid" = ${esiid}
-      AND "ts" >= ${window.cutoff}
+      COALESCE(SUM("kwh"), 0)::float AS kwh
+    FROM iv
     GROUP BY bucket
     ORDER BY bucket ASC
   `);
