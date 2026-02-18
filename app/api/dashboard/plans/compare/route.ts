@@ -21,6 +21,7 @@ import { extractDeterministicTierSchedule, computeRepEnergyCostForMonthlyKwhTier
 import { extractDeterministicBillCredits, applyBillCreditsToMonth } from "@/lib/plan-engine/billCredits";
 import { extractDeterministicMinimumRules, applyMinimumRulesToMonth } from "@/lib/plan-engine/minimumRules";
 import { computeMonthsRemainingOnContract } from "@/lib/current-plan/contractTerm";
+import { pickTouPeriodForMonth } from "@/lib/plan-engine/touBreakdown";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -719,28 +720,11 @@ export async function GET(req: NextRequest) {
             repCentsPerKwh = totalKwh > 0 ? repCostCents / totalKwh : null;
             notes = ["tiered"];
           } else if (touMaybe?.schedule?.periods?.length) {
-            const candidates = ((touMaybe as any).schedule.periods as any[]).filter((pp: any) => {
-              const dayType = String(pp?.dayType ?? "").trim();
-              const startHHMM = String(pp?.startHHMM ?? "").trim();
-              const endHHMM = String(pp?.endHHMM ?? "").trim();
-              const key =
-                startHHMM === "0000" && endHHMM === "2400"
-                  ? `kwh.m.${dayType}.total`
-                  : `kwh.m.${dayType}.${startHHMM}-${endHHMM}`;
-              return key === b.bucketKey;
+            const p = pickTouPeriodForMonth({
+              periods: (touMaybe as any).schedule.periods as any[],
+              bucketKey: b.bucketKey,
+              monthOfYear,
             });
-
-            // NOTE:
-            // Many current plans encode "seasonal discounts" as month-scoped all-day TOU periods.
-            // Those periods share the same bucket key (`kwh.m.all.total`) but differ by `months`.
-            // For monthly breakdowns we must pick the period whose months include the target month.
-            const p =
-              (monthOfYear
-                ? candidates.find((pp) => Array.isArray(pp?.months) && (pp.months as any[]).includes(monthOfYear))
-                : null) ??
-              candidates.find((pp) => !Array.isArray(pp?.months) || (pp.months as any[]).length === 0) ??
-              candidates[0] ??
-              null;
             const cents =
               typeof p?.repEnergyCentsPerKwh === "number" ? p.repEnergyCentsPerKwh : null;
             repCentsPerKwh = cents;
