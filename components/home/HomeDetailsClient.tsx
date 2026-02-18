@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { mergePrefillIntoHomeDetailsState } from "@/modules/homeProfile/prefillMerge";
+import { mergePrefillIntoHomeDetailsState } from "@/lib/home/prefillMerge";
 
 type PrefillValue<T> = { value: T | null; source: "PREFILL" | "DEFAULT" | "UNKNOWN" };
 type PrefillResp =

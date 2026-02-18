@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
-import { homeDetailsPrisma } from "@/lib/db/homeDetailsClient";
-import { appliancesPrisma } from "@/lib/db/appliancesClient";
+import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
+import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 
 export function normalizeScenarioKey(scenarioId: string | null | undefined): string {
   const s = String(scenarioId ?? "").trim();
@@ -20,21 +20,11 @@ export async function loadManualUsagePayload(args: { userId: string; houseId: st
 }
 
 export async function loadHomeProfileSimulated(args: { userId: string; houseId: string }) {
-  const rec = await (homeDetailsPrisma as any).homeProfileSimulated
-    .findUnique({
-      where: { userId_houseId: { userId: args.userId, houseId: args.houseId } },
-    })
-    .catch(() => null);
-  return rec ?? null;
+  return await getHomeProfileSimulatedByUserHouse(args);
 }
 
 export async function loadApplianceProfileSimulated(args: { userId: string; houseId: string }) {
-  const rec = await (appliancesPrisma as any).applianceProfileSimulated
-    .findUnique({
-      where: { userId_houseId: { userId: args.userId, houseId: args.houseId } },
-      select: { appliancesJson: true },
-    })
-    .catch(() => null);
+  const rec = await getApplianceProfileSimulatedByUserHouse(args);
   return (rec?.appliancesJson as any) ?? null;
 }
 
@@ -44,6 +34,36 @@ export async function loadHouseForSimulator(args: { userId: string; houseId: str
     select: { id: true, esiid: true },
   });
   return h ?? null;
+}
+
+export async function getHouseAddressForUserHouse(args: { userId: string; houseId: string }) {
+  const h = await prisma.houseAddress.findFirst({
+    where: { id: args.houseId, userId: args.userId, archivedAt: null },
+    select: {
+      id: true,
+      label: true,
+      addressLine1: true,
+      addressCity: true,
+      addressState: true,
+      esiid: true,
+    },
+  });
+  return h ?? null;
+}
+
+export async function listHouseAddressesForUser(args: { userId: string }) {
+  const rows = await prisma.houseAddress.findMany({
+    where: { userId: args.userId, archivedAt: null },
+    select: {
+      id: true,
+      label: true,
+      addressLine1: true,
+      addressCity: true,
+      addressState: true,
+      esiid: true,
+    },
+  });
+  return rows;
 }
 
 export async function loadExistingSimulatorBuild(args: { userId: string; houseId: string; scenarioKey?: string }) {

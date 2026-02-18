@@ -1,8 +1,8 @@
 import { prisma } from "@/lib/db";
-import { homeDetailsPrisma } from "@/lib/db/homeDetailsClient";
-import { appliancesPrisma } from "@/lib/db/appliancesClient";
 import { monthsEndingAt, lastFullMonthChicago } from "@/modules/manualUsage/anchor";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
+import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
+import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import { buildSimulatorInputs, type BaseKind, type BuildMode } from "@/modules/usageSimulator/build";
 import { computeRequirements, type SimulatorMode } from "@/modules/usageSimulator/requirements";
 import { hasSmtIntervals, SMT_SHAPE_DERIVATION_VERSION } from "@/modules/realUsageAdapter/smt";
@@ -10,7 +10,7 @@ import { buildSimulatedUsageDatasetFromBuildInputs, type SimulatorBuildInputsV1 
 import { computeBuildInputsHash } from "@/modules/usageSimulator/hash";
 import { INTRADAY_TEMPLATE_VERSION } from "@/modules/simulatedUsage/intradayTemplates";
 import { computeMonthlyOverlay } from "@/modules/usageScenario/overlay";
-import { normalizeScenarioKey } from "@/modules/usageSimulator/repo";
+import { getHouseAddressForUserHouse, listHouseAddressesForUser, normalizeScenarioKey, upsertSimulatorBuild } from "@/modules/usageSimulator/repo";
 
 type ManualUsagePayloadAny = any;
 
@@ -70,35 +70,15 @@ export async function recalcSimulatorBuild(args: {
     (prisma as any).manualUsageInput
       .findUnique({ where: { userId_houseId: { userId, houseId } }, select: { payload: true } })
       .catch(() => null),
-    (homeDetailsPrisma as any).homeProfileSimulated.findUnique({ where: { userId_houseId: { userId, houseId } } }).catch(() => null),
-    (appliancesPrisma as any).applianceProfileSimulated
-      .findUnique({ where: { userId_houseId: { userId, houseId } }, select: { appliancesJson: true } })
-      .catch(() => null),
+    getHomeProfileSimulatedByUserHouse({ userId, houseId }),
+    getApplianceProfileSimulatedByUserHouse({ userId, houseId }),
   ]);
 
   const manualUsagePayload = (manualRec?.payload as any) ?? null;
   const canonical = canonicalMonthsForRecalc({ mode, manualUsagePayload, now: args.now });
 
   const applianceProfile = normalizeStoredApplianceProfile((applianceRec?.appliancesJson as any) ?? null);
-  const homeProfile = homeRec
-    ? {
-        homeAge: homeRec.homeAge,
-        homeStyle: homeRec.homeStyle,
-        squareFeet: homeRec.squareFeet,
-        stories: homeRec.stories,
-        insulationType: homeRec.insulationType,
-        windowType: homeRec.windowType,
-        foundation: homeRec.foundation,
-        ledLights: homeRec.ledLights,
-        smartThermostat: homeRec.smartThermostat,
-        summerTemp: homeRec.summerTemp,
-        winterTemp: homeRec.winterTemp,
-        occupantsWork: homeRec.occupantsWork,
-        occupantsSchool: homeRec.occupantsSchool,
-        occupantsHomeAllDay: homeRec.occupantsHomeAllDay,
-        fuelConfiguration: homeRec.fuelConfiguration,
-      }
-    : null;
+  const homeProfile = homeRec ? { ...homeRec } : null;
 
   const smtOk = esiid ? await hasSmtIntervals({ esiid, canonicalMonths: canonical.months }) : false;
 
@@ -273,37 +253,17 @@ export async function recalcSimulatorBuild(args: {
     scenarioId,
   };
 
-  await (prisma as any).usageSimulatorBuild.upsert({
-    where: { userId_houseId_scenarioKey: { userId, houseId, scenarioKey } },
-    create: {
-      userId,
-      houseId,
-      scenarioKey,
-      mode,
-      baseKind,
-      canonicalEndMonth: buildInputs.canonicalEndMonth,
-      canonicalMonthsJson: buildInputs.canonicalMonths,
-      buildInputs,
-      buildInputsHash,
-      estimatorVersion: versions.estimatorVersion,
-      reshapeCoeffVersion: versions.reshapeCoeffVersion,
-      intradayTemplateVersion: versions.intradayTemplateVersion,
-      smtShapeDerivationVersion: versions.smtShapeDerivationVersion,
-      lastBuiltAt: new Date(),
-    },
-    update: {
-      mode,
-      baseKind,
-      canonicalEndMonth: buildInputs.canonicalEndMonth,
-      canonicalMonthsJson: buildInputs.canonicalMonths,
-      buildInputs,
-      buildInputsHash,
-      estimatorVersion: versions.estimatorVersion,
-      reshapeCoeffVersion: versions.reshapeCoeffVersion,
-      intradayTemplateVersion: versions.intradayTemplateVersion,
-      smtShapeDerivationVersion: versions.smtShapeDerivationVersion,
-      lastBuiltAt: new Date(),
-    },
+  await upsertSimulatorBuild({
+    userId,
+    houseId,
+    scenarioKey,
+    mode,
+    baseKind,
+    canonicalEndMonth: buildInputs.canonicalEndMonth,
+    canonicalMonths: buildInputs.canonicalMonths,
+    buildInputs,
+    buildInputsHash,
+    versions,
   });
 
   return { ok: true, houseId, buildInputsHash, dataset };
@@ -322,17 +282,7 @@ export async function getSimulatedUsageForUser(args: {
   userId: string;
 }): Promise<{ ok: true; houses: SimulatedUsageHouseRow[] } | { ok: false; error: string }> {
   try {
-    const houses = await prisma.houseAddress.findMany({
-      where: { userId: args.userId, archivedAt: null },
-      select: {
-        id: true,
-        label: true,
-        addressLine1: true,
-        addressCity: true,
-        addressState: true,
-        esiid: true,
-      },
-    });
+    const houses = await listHouseAddressesForUser({ userId: args.userId });
 
     const results: SimulatedUsageHouseRow[] = [];
     for (let i = 0; i < houses.length; i++) {
@@ -388,10 +338,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
     const scenarioKey = normalizeScenarioKey(args.scenarioId);
     const scenarioId = scenarioKey === "BASELINE" ? null : scenarioKey;
 
-    const house = await prisma.houseAddress.findFirst({
-      where: { id: args.houseId, userId: args.userId, archivedAt: null },
-      select: { id: true },
-    });
+    const house = await getHouseAddressForUserHouse({ userId: args.userId, houseId: args.houseId });
     if (!house) return { ok: false, code: "HOUSE_NOT_FOUND", message: "House not found for user" };
 
     if (scenarioId) {
@@ -448,9 +395,7 @@ export async function listSimulatedBuildAvailability(args: {
     }
   | { ok: false; error: string }
 > {
-  const house = await prisma.houseAddress
-    .findFirst({ where: { id: args.houseId, userId: args.userId, archivedAt: null }, select: { id: true } })
-    .catch(() => null);
+  const house = await getHouseAddressForUserHouse({ userId: args.userId, houseId: args.houseId }).catch(() => null);
   if (!house) return { ok: false, error: "house_not_found" };
 
   const rows = await (prisma as any).usageSimulatorBuild
@@ -496,10 +441,7 @@ function isYearMonth(s: unknown): s is string {
 }
 
 async function requireHouseForUser(args: { userId: string; houseId: string }) {
-  const h = await prisma.houseAddress.findFirst({
-    where: { id: args.houseId, userId: args.userId, archivedAt: null },
-    select: { id: true },
-  });
+  const h = await getHouseAddressForUserHouse({ userId: args.userId, houseId: args.houseId });
   return h ?? null;
 }
 
@@ -667,44 +609,22 @@ export async function deleteScenarioEvent(args: { userId: string; houseId: strin
 }
 
 export async function getSimulatorRequirements(args: { userId: string; houseId: string; mode: SimulatorMode; now?: Date }) {
-  const house = await prisma.houseAddress
-    .findFirst({ where: { id: args.houseId, userId: args.userId, archivedAt: null }, select: { id: true, esiid: true } })
-    .catch(() => null);
+  const house = await getHouseAddressForUserHouse({ userId: args.userId, houseId: args.houseId }).catch(() => null);
   if (!house) return { ok: false as const, error: "house_not_found" };
 
   const [manualRec, homeRec, applianceRec] = await Promise.all([
     (prisma as any).manualUsageInput
       .findUnique({ where: { userId_houseId: { userId: args.userId, houseId: args.houseId } }, select: { payload: true } })
       .catch(() => null),
-    (homeDetailsPrisma as any).homeProfileSimulated.findUnique({ where: { userId_houseId: { userId: args.userId, houseId: args.houseId } } }).catch(() => null),
-    (appliancesPrisma as any).applianceProfileSimulated
-      .findUnique({ where: { userId_houseId: { userId: args.userId, houseId: args.houseId } }, select: { appliancesJson: true } })
-      .catch(() => null),
+    getHomeProfileSimulatedByUserHouse({ userId: args.userId, houseId: args.houseId }),
+    getApplianceProfileSimulatedByUserHouse({ userId: args.userId, houseId: args.houseId }),
   ]);
 
   const manualUsagePayload = (manualRec?.payload as any) ?? null;
   const canonical = canonicalMonthsForRecalc({ mode: args.mode, manualUsagePayload, now: args.now });
 
   const applianceProfile = normalizeStoredApplianceProfile((applianceRec?.appliancesJson as any) ?? null);
-  const homeProfile = homeRec
-    ? {
-        homeAge: homeRec.homeAge,
-        homeStyle: homeRec.homeStyle,
-        squareFeet: homeRec.squareFeet,
-        stories: homeRec.stories,
-        insulationType: homeRec.insulationType,
-        windowType: homeRec.windowType,
-        foundation: homeRec.foundation,
-        ledLights: homeRec.ledLights,
-        smartThermostat: homeRec.smartThermostat,
-        summerTemp: homeRec.summerTemp,
-        winterTemp: homeRec.winterTemp,
-        occupantsWork: homeRec.occupantsWork,
-        occupantsSchool: homeRec.occupantsSchool,
-        occupantsHomeAllDay: homeRec.occupantsHomeAllDay,
-        fuelConfiguration: homeRec.fuelConfiguration,
-      }
-    : null;
+  const homeProfile = homeRec ? { ...homeRec } : null;
 
   const hasSmt = house.esiid ? await hasSmtIntervals({ esiid: house.esiid, canonicalMonths: canonical.months }) : false;
   const req = computeRequirements(

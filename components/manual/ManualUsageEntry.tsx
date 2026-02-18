@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { lastFullMonthChicago, monthsEndingAt } from "@/modules/manualUsage/anchor";
+import { lastFullMonthChicago, monthsEndingAt } from "@/lib/time/chicago";
 
 type TravelRange = { startDate: string; endDate: string };
 
