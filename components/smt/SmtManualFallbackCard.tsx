@@ -18,7 +18,7 @@ export default function SmtManualFallbackCard({ houseAddressId = null }: Props) 
       </p>
       <button
         type="button"
-        onClick={() => router.push('/dashboard/api/manual#manual-entry')}
+        onClick={() => router.push('/dashboard/usage/simulated#start-here')}
         className="mt-4 inline-flex items-center rounded-full border border-brand-blue px-5 py-2 text-xs font-semibold uppercase tracking-wide text-brand-blue transition hover:border-brand-blue/70 hover:bg-brand-blue/10 disabled:cursor-not-allowed disabled:opacity-60"
       >
         Enter manual usage

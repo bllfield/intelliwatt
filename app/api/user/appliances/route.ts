@@ -3,39 +3,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { appliancesPrisma } from "@/lib/db/appliancesClient";
 import { normalizeEmail } from "@/lib/utils/email";
+import {
+  normalizeStoredApplianceProfile,
+  validateApplianceProfile,
+  type ApplianceProfilePayloadV1,
+  type ApplianceRow,
+} from "@/modules/applianceProfile/validation";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-type ApplianceRow = { id: string; type: string; data: Record<string, any> };
-type ApplianceProfilePayloadV1 = {
-  version: 1;
-  fuelConfiguration: string;
-  appliances: ApplianceRow[];
-};
-
-function requireNonEmptyString(v: unknown): string | null {
-  if (typeof v !== "string") return null;
-  const s = v.trim();
-  return s.length ? s : null;
-}
-
-function normalizeStoredProfile(raw: any): ApplianceProfilePayloadV1 {
-  // Back-compat: older records stored just an array of rows.
-  if (Array.isArray(raw)) {
-    return {
-      version: 1,
-      fuelConfiguration: "",
-      appliances: raw as any,
-    };
-  }
-
-  const version = raw?.version === 1 ? 1 : 1;
-  const fuelConfiguration = typeof raw?.fuelConfiguration === "string" ? raw.fuelConfiguration : "";
-  const appliances = Array.isArray(raw?.appliances) ? raw.appliances : [];
-
-  return { version, fuelConfiguration, appliances };
-}
+const normalizeStoredProfile = normalizeStoredApplianceProfile;
 
 async function requireUser() {
   const cookieStore = cookies();
@@ -113,34 +91,13 @@ export async function POST(request: NextRequest) {
     if (!houseId) return NextResponse.json({ ok: false, error: "house_required" }, { status: 400 });
 
     const incomingProfile = body?.profile ?? null;
-    const appliances = Array.isArray(incomingProfile?.appliances)
-      ? incomingProfile.appliances
-      : Array.isArray(body?.appliances)
-        ? body.appliances
-        : [];
-    const fuelConfiguration =
-      requireNonEmptyString(incomingProfile?.fuelConfiguration) ??
-      requireNonEmptyString(body?.fuelConfiguration) ??
-      null;
+    const v = validateApplianceProfile({
+      fuelConfiguration: incomingProfile?.fuelConfiguration ?? body?.fuelConfiguration ?? "",
+      appliances: incomingProfile?.appliances ?? body?.appliances ?? [],
+    });
+    if (!v.ok) return NextResponse.json({ ok: false, error: v.error }, { status: 400 });
 
-    // Mandatory: fuel configuration selection (everything else is optional).
-    if (!fuelConfiguration) {
-      return NextResponse.json({ ok: false, error: "fuelConfiguration_required" }, { status: 400 });
-    }
-
-    // Minimal validation: require a type on each row.
-    for (let i = 0; i < appliances.length; i++) {
-      const t = appliances[i]?.type;
-      if (typeof t !== "string" || !t.trim()) {
-        return NextResponse.json({ ok: false, error: "appliance_type_required" }, { status: 400 });
-      }
-    }
-
-    const profileToStore: ApplianceProfilePayloadV1 = {
-      version: 1,
-      fuelConfiguration,
-      appliances,
-    };
+    const profileToStore: ApplianceProfilePayloadV1 = v.value;
 
     const rec = await (appliancesPrisma as any).applianceProfileSimulated.upsert({
       where: { userId_houseId: { userId: u.user.id, houseId } },

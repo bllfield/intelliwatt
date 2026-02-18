@@ -7,8 +7,6 @@ import { DASHBOARD_FLOW_STEPS } from '@/lib/dashboard/flow';
 const dashboardLinks = [
   // Primary flow first (single source of truth)
   ...DASHBOARD_FLOW_STEPS.map((s) => ({ href: s.href, label: s.label })),
-  { href: '/dashboard/home', label: 'Home Info' },
-  { href: '/dashboard/appliances', label: 'Appliances' },
   { href: '/dashboard/upgrades', label: 'Upgrades' },
   { href: '/dashboard/analysis', label: 'Analysis' },
   { href: '/dashboard/optimal', label: 'Optimal Energy' },

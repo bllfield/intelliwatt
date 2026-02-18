@@ -247,6 +247,126 @@ export function generateSimulatedCurveFromManual(payload: ManualUsagePayload): S
   };
 }
 
+export function generateSimulatedCurve(args: {
+  canonicalMonths: string[]; // 12 months, YYYY-MM, ascending
+  monthlyTotalsKwhByMonth: Record<string, number>; // YYYY-MM -> kWh (net/import-only)
+  intradayShape96: number[]; // length 96, sums to 1
+  weekdayWeekendShape96?: { weekday: number[]; weekend: number[] };
+  travelRanges?: TravelRange[];
+}): SimulatedCurve {
+  const canonicalMonths = (args.canonicalMonths || []).slice(0, 24);
+  if (!canonicalMonths.length) throw new Error("canonicalMonths_required");
+
+  const excludedDays = buildExcludedDaySet(args.travelRanges ?? []);
+
+  const windowStart = monthStartUtc(canonicalMonths[0]);
+  const windowEnd = monthEndUtc(canonicalMonths[canonicalMonths.length - 1]);
+  if (!windowStart || !windowEnd) throw new Error("canonicalMonths_invalid");
+
+  const intraday = Array.isArray(args.intradayShape96) && args.intradayShape96.length === INTERVALS_PER_DAY
+    ? args.intradayShape96
+    : Array.from({ length: INTERVALS_PER_DAY }, () => 1 / INTERVALS_PER_DAY);
+
+  const weekdayWeekend = args.weekdayWeekendShape96
+    ? {
+        weekday:
+          Array.isArray(args.weekdayWeekendShape96.weekday) && args.weekdayWeekendShape96.weekday.length === INTERVALS_PER_DAY
+            ? args.weekdayWeekendShape96.weekday
+            : intraday,
+        weekend:
+          Array.isArray(args.weekdayWeekendShape96.weekend) && args.weekdayWeekendShape96.weekend.length === INTERVALS_PER_DAY
+            ? args.weekdayWeekendShape96.weekend
+            : intraday,
+      }
+    : null;
+
+  // Build day totals from monthly totals.
+  const dayTotals = new Map<string, number>();
+  for (const ym of canonicalMonths) {
+    const startM = monthStartUtc(ym);
+    const endM = monthEndUtc(ym);
+    if (!startM || !endM) continue;
+    const days = enumerateDaysInclusive(startM, endM);
+    const monthKwh = Math.max(0, Number(args.monthlyTotalsKwhByMonth?.[ym] ?? 0) || 0);
+    const perDay = days.length > 0 ? monthKwh / days.length : 0;
+    for (const d of days) {
+      const dk = dateKeyUtc(d);
+      dayTotals.set(dk, (dayTotals.get(dk) ?? 0) + perDay);
+    }
+  }
+
+  // Apply exclusions and renormalize to preserve intended totals.
+  const intendedTotal = sum(Array.from(dayTotals.values()));
+  let excludedDaysInWindow = 0;
+  const rows = Array.from(dayTotals.entries());
+  for (let i = 0; i < rows.length; i++) {
+    const [dk, kwh] = rows[i];
+    if (excludedDays.has(dk)) {
+      excludedDaysInWindow += 1;
+      void kwh;
+      dayTotals.set(dk, 0);
+    }
+  }
+
+  const remainingTotal = sum(Array.from(dayTotals.values()));
+  if (intendedTotal > 0 && (remainingTotal === 0 || excludedDaysInWindow === dayTotals.size)) {
+    throw new Error("travel_exclusions_cover_full_range");
+  }
+
+  const renormalizeFactor = intendedTotal > 0 && remainingTotal > 0 ? intendedTotal / remainingTotal : 1;
+  const renormalized = Math.abs(renormalizeFactor - 1) > 1e-9;
+  if (renormalized) {
+    const cur = Array.from(dayTotals.entries());
+    for (let i = 0; i < cur.length; i++) {
+      const [dk, kwh] = cur[i];
+      if (kwh <= 0) continue;
+      dayTotals.set(dk, kwh * renormalizeFactor);
+    }
+  }
+
+  // Build intervals using the intraday shape.
+  const intervals = [];
+  const days = enumerateDaysInclusive(windowStart, windowEnd);
+  for (const day of days) {
+    const dk = dateKeyUtc(day);
+    const dayKwh = dayTotals.get(dk) ?? 0;
+
+    const dow = day.getUTCDay(); // 0=Sun..6=Sat
+    const shape = weekdayWeekend ? (dow === 0 || dow === 6 ? weekdayWeekend.weekend : weekdayWeekend.weekday) : intraday;
+
+    for (let i = 0; i < INTERVALS_PER_DAY; i++) {
+      const ts = new Date(day.getTime() + i * INTERVAL_MINUTES * 60 * 1000).toISOString();
+      intervals.push({
+        timestamp: ts,
+        consumption_kwh: dayKwh * (Number(shape[i]) || 0),
+        interval_minutes: 15 as const,
+      });
+    }
+  }
+
+  const monthlyTotalsMap = new Map<string, number>();
+  const dayRows = Array.from(dayTotals.entries());
+  for (let i = 0; i < dayRows.length; i++) {
+    const [dk, kwh] = dayRows[i];
+    const ym = dk.slice(0, 7);
+    monthlyTotalsMap.set(ym, (monthlyTotalsMap.get(ym) ?? 0) + kwh);
+  }
+  const monthlyTotals = Array.from(monthlyTotalsMap.entries())
+    .map(([month, kwh]) => ({ month, kwh }))
+    .sort((a, b) => (a.month < b.month ? -1 : 1));
+
+  const annualTotalKwh = sum(monthlyTotals.map((m) => m.kwh));
+
+  return {
+    start: windowStart.toISOString(),
+    end: windowEnd.toISOString(),
+    intervals,
+    monthlyTotals,
+    annualTotalKwh,
+    meta: { excludedDays: excludedDays.size, renormalized },
+  };
+}
+
 // Future stubs (do not implement yet)
 export type UsagePatch = { start: string; end: string; reason: string };
 export function applyScenarioDeltasStub() {

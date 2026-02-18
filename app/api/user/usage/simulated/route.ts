@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
 import { generateSimulatedCurveFromManual } from "@/modules/simulatedUsage/engine";
+import { buildSimulatedUsageDatasetFromBuildInputs, type SimulatorBuildInputsV1 } from "@/modules/usageSimulator/dataset";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -78,15 +79,37 @@ export async function GET(_request: NextRequest) {
     const results: any[] = [];
     for (let i = 0; i < houses.length; i++) {
       const house = houses[i];
-      const rec = await (prisma as any).manualUsageInput
+      const buildRec = await (prisma as any).usageSimulatorBuild
         .findUnique({
           where: { userId_houseId: { userId: user.id, houseId: house.id } },
-          select: { payload: true },
+          select: { buildInputs: true, buildInputsHash: true, lastBuiltAt: true },
         })
         .catch(() => null);
 
+      const rec =
+        buildRec?.buildInputs
+          ? null
+          : await (prisma as any).manualUsageInput
+              .findUnique({
+                where: { userId_houseId: { userId: user.id, houseId: house.id } },
+                select: { payload: true },
+              })
+              .catch(() => null);
+
       let dataset: any | null = null;
-      if (rec?.payload) {
+      if (buildRec?.buildInputs) {
+        try {
+          const buildInputs = buildRec.buildInputs as SimulatorBuildInputsV1;
+          dataset = buildSimulatedUsageDatasetFromBuildInputs(buildInputs);
+          dataset.meta = {
+            ...(dataset.meta ?? {}),
+            buildInputsHash: String(buildRec.buildInputsHash ?? ""),
+            lastBuiltAt: buildRec.lastBuiltAt ? new Date(buildRec.lastBuiltAt).toISOString() : null,
+          };
+        } catch {
+          dataset = null;
+        }
+      } else if (rec?.payload) {
         try {
           const curve = generateSimulatedCurveFromManual(rec.payload as any);
 

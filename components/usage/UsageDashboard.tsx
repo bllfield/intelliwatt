@@ -1,18 +1,8 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Legend,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { UsageChartsPanel } from "@/components/usage/UsageChartsPanel";
+import { formatDateLong, formatDateShort } from "@/components/usage/usageFormatting";
 
 type UsageSeriesPoint = {
   timestamp: string;
@@ -132,39 +122,6 @@ function writeSessionCache(mode: "REAL" | "SIMULATED", payload: UsageApiResponse
   }
 }
 
-function formatMonthLabel(month: string) {
-  const [y, m] = month.split("-");
-  return `${m}/${y.slice(2)}`;
-}
-
-function formatDateShort(date: string) {
-  const [y, m, d] = date.split("-");
-  return `${m}/${d}`;
-}
-
-function formatDateLong(date: string) {
-  const [y, m, d] = date.split("-");
-  if (!y || !m || !d) return date;
-  return `${m}/${d}/${y}`;
-}
-
-function formatTimeLabel(hhmm: string) {
-  const [hh, mm] = hhmm.split(":").map(Number);
-  const ampm = hh >= 12 ? "pm" : "am";
-  const h12 = hh % 12 === 0 ? 12 : hh % 12;
-  return `${h12}:${String(mm).padStart(2, "0")}${ampm}`;
-}
-
-function sumKwh(rows: { kwh: number }[]) {
-  return rows.reduce((sum, r) => sum + r.kwh, 0);
-}
-
-function pct(part: number, total: number): string {
-  const p = total > 0 ? (part / total) * 100 : 0;
-  if (!Number.isFinite(p)) return "0%";
-  return `${p.toFixed(0)}%`;
-}
-
 function deriveTotalsFromRows(rows: { kwh: number }[]): UsageTotals {
   let importKwh = 0;
   let exportKwh = 0;
@@ -183,8 +140,20 @@ function toDateKeyFromTimestamp(ts: string): string {
   return ts.slice(0, 10);
 }
 
-export const UsageDashboard: React.FC = () => {
-  const [datasetMode, setDatasetMode] = useState<"REAL" | "SIMULATED">("REAL");
+type Props = {
+  initialMode?: "REAL" | "SIMULATED";
+  forcedMode?: "REAL" | "SIMULATED";
+  allowModeToggle?: boolean;
+  refreshToken?: string | number;
+};
+
+export const UsageDashboard: React.FC<Props> = ({
+  initialMode = "REAL",
+  forcedMode,
+  allowModeToggle = true,
+  refreshToken,
+}) => {
+  const [datasetMode, setDatasetMode] = useState<"REAL" | "SIMULATED">(forcedMode ?? initialMode);
   const [houses, setHouses] = useState<HouseUsage[]>([]);
   const [selectedHouseId, setSelectedHouseId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -192,6 +161,10 @@ export const UsageDashboard: React.FC = () => {
   const [monthlyView, setMonthlyView] = useState<"chart" | "table">("chart");
   const lastSmtIntervalsRef = useRef<number>(0);
   const smtPollTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (forcedMode) setDatasetMode(forcedMode);
+  }, [forcedMode]);
 
   useEffect(() => {
     let cancelled = false;
@@ -239,7 +212,7 @@ export const UsageDashboard: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [datasetMode]);
+  }, [datasetMode, refreshToken]);
 
   // If usage isn't available yet (common immediately after SMT backfill request),
   // keep checking until it lands by polling the SMT orchestrator and reloading usage.
@@ -469,30 +442,32 @@ export const UsageDashboard: React.FC = () => {
           ) : null}
         </div>
         <div className="flex flex-col gap-2 md:items-end">
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setDatasetMode("REAL")}
-              className={`rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-wide transition ${
-                datasetMode === "REAL"
-                  ? "border-brand-blue bg-brand-blue/10 text-brand-navy"
-                  : "border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-50"
-              }`}
-            >
-              Real
-            </button>
-            <button
-              type="button"
-              onClick={() => setDatasetMode("SIMULATED")}
-              className={`rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-wide transition ${
-                datasetMode === "SIMULATED"
-                  ? "border-brand-blue bg-brand-blue/10 text-brand-navy"
-                  : "border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-50"
-              }`}
-            >
-              Simulated
-            </button>
-          </div>
+          {allowModeToggle && !forcedMode ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setDatasetMode("REAL")}
+                className={`rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-wide transition ${
+                  datasetMode === "REAL"
+                    ? "border-brand-blue bg-brand-blue/10 text-brand-navy"
+                    : "border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-50"
+                }`}
+              >
+                Real
+              </button>
+              <button
+                type="button"
+                onClick={() => setDatasetMode("SIMULATED")}
+                className={`rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-wide transition ${
+                  datasetMode === "SIMULATED"
+                    ? "border-brand-blue bg-brand-blue/10 text-brand-navy"
+                    : "border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-50"
+                }`}
+              >
+                Simulated
+              </button>
+            </div>
+          ) : null}
 
           {houses.length > 1 ? (
             <label className="text-sm text-neutral-700">
@@ -519,8 +494,8 @@ export const UsageDashboard: React.FC = () => {
             {datasetMode === "SIMULATED" ? (
               <>
                 No simulated dataset yet for this home.{" "}
-                <a className="font-semibold text-brand-blue hover:underline" href="/dashboard/api/manual">
-                  Enter manual usage
+                <a className="font-semibold text-brand-blue hover:underline" href="/dashboard/usage/simulated#manual-totals">
+                  Open the Usage Simulator
                 </a>{" "}
                 to generate a simulated curve.
               </>
@@ -593,235 +568,17 @@ export const UsageDashboard: React.FC = () => {
           </div>
 
           {/* Weekday vs weekend + Monthly */}
-          <div className="grid gap-4 lg:grid-cols-3">
-            <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm lg:col-span-1">
-              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Weekday vs Weekend</div>
-              <div className="mt-3 flex flex-col gap-2 text-sm text-neutral-800">
-                {(() => {
-                  const total = derived.weekdayKwh + derived.weekendKwh;
-                  return (
-                    <>
-                      <div className="flex items-center justify-between">
-                        <span>Weekdays</span>
-                        <span className="font-semibold">
-                          {derived.weekdayKwh.toFixed(1)} kWh{" "}
-                          <span className="text-neutral-500 font-normal">({pct(derived.weekdayKwh, total)})</span>
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span>Weekends</span>
-                        <span className="font-semibold">
-                          {derived.weekendKwh.toFixed(1)} kWh{" "}
-                          <span className="text-neutral-500 font-normal">({pct(derived.weekendKwh, total)})</span>
-                        </span>
-                      </div>
-                    </>
-                  );
-                })()}
-
-                {derived.timeOfDayBuckets?.length ? (
-                  <>
-                    <div className="my-2 h-px w-full bg-neutral-200" />
-                    <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Time of day</div>
-                    {(() => {
-                      const total = derived.timeOfDayBuckets.reduce((s, b) => s + (Number(b.kwh) || 0), 0);
-                      return derived.timeOfDayBuckets.map((b) => (
-                        <div key={b.key} className="flex items-center justify-between">
-                          <span className="text-neutral-800">{b.label}</span>
-                          <span className="font-semibold">
-                            {Number(b.kwh).toFixed(1)} kWh{" "}
-                            <span className="text-neutral-500 font-normal">({pct(Number(b.kwh) || 0, total)})</span>
-                          </span>
-                        </div>
-                      ));
-                    })()}
-                  </>
-                ) : null}
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm lg:col-span-2">
-              <div className="mb-2 flex items-center justify-between">
-                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Monthly usage</div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setMonthlyView("chart")}
-                    className={`rounded-full px-3 py-1 text-xs font-semibold border ${
-                      monthlyView === "chart"
-                        ? "border-sky-300 bg-sky-50 text-sky-700"
-                        : "border-neutral-200 bg-white text-neutral-600 hover:bg-neutral-50"
-                    }`}
-                  >
-                    Chart
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setMonthlyView("table")}
-                    className={`rounded-full px-3 py-1 text-xs font-semibold border ${
-                      monthlyView === "table"
-                        ? "border-sky-300 bg-sky-50 text-sky-700"
-                        : "border-neutral-200 bg-white text-neutral-600 hover:bg-neutral-50"
-                    }`}
-                  >
-                    Table
-                  </button>
-                </div>
-              </div>
-              {derived.monthly.length ? (
-                <div>
-                  {monthlyView === "chart" ? (
-                    <div className="h-64">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart
-                          data={derived.monthly.map((m) => ({
-                            ...m,
-                            label: formatMonthLabel(m.month),
-                            consumed: Math.max(m.kwh, 0),
-                            // Recharts stacked bars do not reliably render negative values in a stack.
-                            // Represent exports as positive magnitude.
-                            exported: Math.max(-m.kwh, 0),
-                          }))}
-                          margin={{ top: 10, right: 16, bottom: 8, left: 0 }}
-                        >
-                          <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                          <XAxis dataKey="label" />
-                          <YAxis />
-                          <Tooltip
-                            formatter={(value: number, key) => {
-                              const label = key === 'consumed' ? 'Imported' : 'Exported';
-                              return `${(value as number).toFixed(1)} kWh (${label})`;
-                            }}
-                          />
-                          <Legend />
-                          <Bar dataKey="consumed" stackId="a" fill="#0EA5E9" radius={[6, 6, 0, 0]} name="Imported" />
-                          <Bar dataKey="exported" stackId="a" fill="#F59E0B" radius={[6, 6, 0, 0]} name="Exported" />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
-                  ) : (
-                    <div className="overflow-auto rounded-lg border border-neutral-200">
-                      <table className="min-w-[520px] w-full text-sm">
-                        <thead className="bg-neutral-50 text-neutral-600">
-                          <tr>
-                            <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide">Month</th>
-                            <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide">Imported</th>
-                            <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide">Exported</th>
-                            <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide">Net</th>
-                          </tr>
-                        </thead>
-                        <tbody className="text-neutral-800">
-                          {derived.monthly.map((m) => {
-                            const imported = Math.max(m.kwh, 0);
-                            const exported = Math.max(-m.kwh, 0);
-                            return (
-                              <tr key={m.month} className="border-t border-neutral-200">
-                                <td className="px-3 py-2 font-medium">{formatMonthLabel(m.month)}</td>
-                                <td className="px-3 py-2 text-right">{imported.toFixed(1)} kWh</td>
-                                <td className="px-3 py-2 text-right">{exported.toFixed(1)} kWh</td>
-                                <td className="px-3 py-2 text-right font-semibold">{m.kwh.toFixed(1)} kWh</td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                        <tfoot className="bg-neutral-50 text-neutral-800">
-                          {(() => {
-                            const imported = sumKwh(derived.monthly.map((m) => ({ kwh: Math.max(m.kwh, 0) })));
-                            const exported = sumKwh(derived.monthly.map((m) => ({ kwh: Math.max(-m.kwh, 0) })));
-                            const net = sumKwh(derived.monthly.map((m) => ({ kwh: m.kwh })));
-                            return (
-                              <tr className="border-t border-neutral-200">
-                                <td className="px-3 py-2 font-semibold">Total</td>
-                                <td className="px-3 py-2 text-right font-semibold">{imported.toFixed(1)} kWh</td>
-                                <td className="px-3 py-2 text-right font-semibold">{exported.toFixed(1)} kWh</td>
-                                <td className="px-3 py-2 text-right font-semibold">{net.toFixed(1)} kWh</td>
-                              </tr>
-                            );
-                          })()}
-                        </tfoot>
-                      </table>
-                    </div>
-                  )}
-                  {derived.stitchedMonth ? (
-                    <p className="mt-2 text-xs text-neutral-500">
-                      Note: The latest month may be <span className="font-medium text-neutral-700">stitched</span> to
-                      show a full month total—days after the last complete day are filled using the same day-range from{" "}
-                      {derived.stitchedMonth.borrowedFromYearMonth}.
-                    </p>
-                  ) : null}
-                </div>
-              ) : (
-                <p className="text-xs text-neutral-500">No monthly rollup available yet.</p>
-              )}
-            </div>
-          </div>
-
-          {/* Daily + 15-min */}
-          <div className="grid gap-4 lg:grid-cols-2">
-            <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-              <div className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">
-                Daily usage (all {derived.daily.length} days)
-              </div>
-              {derived.daily.length ? (
-                <div className="h-64">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      data={derived.daily.map((d) => ({
-                        ...d,
-                        label: formatDateShort(d.date),
-                        consumed: Math.max(d.kwh, 0),
-                        // Recharts stacked bars do not reliably render negative values in a stack.
-                        // Represent exports as positive magnitude.
-                        exported: Math.max(-d.kwh, 0),
-                      }))}
-                      margin={{ top: 10, right: 16, bottom: 8, left: 0 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                      <XAxis dataKey="label" />
-                      <YAxis />
-                      <Tooltip
-                        formatter={(value: number, key) => {
-                          const label = key === 'consumed' ? 'Imported' : 'Exported';
-                          return `${(value as number).toFixed(1)} kWh (${label})`;
-                        }}
-                      />
-                      <Legend />
-                      <Bar dataKey="consumed" stackId="daily" fill="#14B8A6" radius={[6, 6, 0, 0]} name="Imported" />
-                      <Bar dataKey="exported" stackId="daily" fill="#F59E0B" radius={[6, 6, 0, 0]} name="Exported" />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              ) : (
-                <p className="text-xs text-neutral-500">No daily data available yet.</p>
-              )}
-            </div>
-
-            <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-              <div className="mb-2 flex items-center justify-between">
-                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">15-minute load curve</div>
-                <div className="text-[11px] text-neutral-400">Average kW by time of day</div>
-              </div>
-              {derived.fifteenCurve.length ? (
-                <div className="h-64">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart
-                      data={derived.fifteenCurve.map((p) => ({ ...p, label: formatTimeLabel(p.hhmm) }))}
-                      margin={{ top: 10, right: 16, bottom: 8, left: 0 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                      <XAxis dataKey="label" tick={{ fontSize: 10 }} minTickGap={20} />
-                      <YAxis />
-                      <Tooltip formatter={(value: number) => `${(value as number).toFixed(2)} kW`} />
-                      <Legend />
-                      <Line type="monotone" dataKey="avgKw" stroke="#6366F1" dot={false} strokeWidth={2} />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              ) : (
-                <p className="text-xs text-neutral-500">Not enough interval data yet to build a load curve.</p>
-              )}
-            </div>
-          </div>
+          <UsageChartsPanel
+            monthly={derived.monthly}
+            stitchedMonth={derived.stitchedMonth}
+            weekdayKwh={derived.weekdayKwh}
+            weekendKwh={derived.weekendKwh}
+            timeOfDayBuckets={derived.timeOfDayBuckets}
+            monthlyView={monthlyView}
+            onMonthlyViewChange={setMonthlyView}
+            daily={derived.daily}
+            fifteenCurve={derived.fifteenCurve}
+          />
         </>
       )}
     </div>

@@ -1,5 +1,5 @@
 export type DashboardFlowStep = {
-  key: "usage_entry" | "usage_view" | "plans" | "current_plan" | "compare";
+  key: "usage_entry" | "usage_view" | "usage_simulator" | "plans" | "current_plan" | "compare";
   href: string;
   label: string;
   shortLabel?: string;
@@ -18,6 +18,7 @@ export type DashboardFlowStep = {
 export const DASHBOARD_FLOW_STEPS: DashboardFlowStep[] = [
   { key: "usage_entry", href: "/dashboard/api", label: "Usage Entry" },
   { key: "usage_view", href: "/dashboard/usage", label: "Usage" },
+  { key: "usage_simulator", href: "/dashboard/usage/simulated", label: "Simulated Usage" },
   { key: "plans", href: "/dashboard/plans", label: "Plans" },
   { key: "current_plan", href: "/dashboard/current-rate", label: "Current Plan (optional)", shortLabel: "Current Plan" },
   { key: "compare", href: "/dashboard/plans/compare", label: "Compare" },
