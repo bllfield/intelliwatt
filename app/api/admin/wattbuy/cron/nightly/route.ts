@@ -264,7 +264,11 @@ export async function GET(req: NextRequest) {
       const incomplete = cursorVals.some((n) => n > 0);
       const withinCatchupWindow = incomplete && nowMin >= schedMin && nowMin < schedMin + 120;
 
-      const shouldRunNow = (nowChicago.hour === parsed.hour && nowChicago.minute === parsed.minute) || withinCatchupWindow;
+      // Scheduled window: 5 minutes starting at configured time (aligns with Vercel cron */5).
+      // Exact-minute match was too brittle when cron fires a bit late (e.g. 01:31 Chicago).
+      const SCHED_WINDOW_MIN = 5;
+      const withinScheduledWindow = nowMin >= schedMin && nowMin < schedMin + SCHED_WINDOW_MIN;
+      const shouldRunNow = withinScheduledWindow || withinCatchupWindow;
       if (!shouldRunNow) {
         return NextResponse.json({
           ok: true,
