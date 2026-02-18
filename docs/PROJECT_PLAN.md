@@ -99,6 +99,118 @@ Notes:
 - Scenario deltas (EV, occupants, upgrades, solar) beyond baseline flat distribution.
 - More realistic load-shaping (weather/HVAC/occupancy) beyond baseline.
 
+## Phase: Usage Simulator Workspace + Scenarios (V1)
+
+### Goals (what users can do)
+- Keep baseline inputs saved (manual totals, home profile, appliances, occupancy, etc.) and use them to build a canonical 12-month simulated curve.
+- Add saved scenarios (named) that overlay changes on top of the baseline.
+- Support a timeline of changes with month granularity (V1):
+  - Already happened upgrades (affect historical months)
+  - Future what-ifs (affect forward months)
+- Make the simulator page UX-compact:
+  - One top panel for mode + scenario + “Edit inputs” + “Recalculate”
+  - Charts immediately below (no long scrolling)
+  - Manual/Home/Appliances editors open in modal/drawer popups
+
+### Baseline ladder + canonical window contract (authoritative, V1)
+- SMT interval data (15-minute) is the ONLY trusted “Actual baseline” shape source in this phase.
+- “Start from Actual” is enabled ONLY if SMT 15-minute intervals exist for the house.
+- If SMT is not connected / no 15-minute intervals → “Start from Actual” is disabled (even if other summary data exists). User must use Manual totals or New build estimate.
+- Canonical 12-month window:
+  - Simulator always targets one canonical 12-month analysis window.
+  - Default anchor = platform’s last full month in America/Chicago (same concept as manual monthly anchor default).
+  - Gap-fill targets completing this canonical window (not “12 months from first SMT sample”).
+- Shaping / reshaping scope (V1, keep it simple):
+  - Reshaping primarily adjusts monthly totals (seasonality scaling) using deterministic coefficients derived from saved home/appliance/occupancy changes.
+  - Once monthly totals are set, distribute within-day using:
+    - SMT intraday shape (96-bucket) when “Start from Actual” is enabled, OR
+    - A generic deterministic intraday shape template (weekday/weekend) when SMT is unavailable.
+  - Do NOT simulate appliance duty cycles in V1 (coefficient-based only).
+
+### Current state (what exists now)
+- Baseline inputs persisted via:
+  - Manual usage: GET/POST /api/user/manual-usage
+  - Home: GET/POST /api/user/home-profile
+  - Appliances: GET/POST /api/user/appliances
+- Scenario persistence (house-scoped):
+  - Scenarios + month-granular events stored in `UsageSimulatorScenario` / `UsageSimulatorScenarioEvent`
+  - Thin CRUD under `/api/user/simulator/scenarios/*`
+- Recalc persists deterministic builds (baseline + per-scenario):
+  - POST `/api/user/simulator/recalc` accepts `{ houseId, mode, scenarioId? }`
+  - Builds stored in `UsageSimulatorBuild` keyed by `scenarioKey` (`BASELINE` or scenario UUID string)
+- Simulated usage reads persisted builds:
+  - GET `/api/user/usage/simulated` returns baseline builds across houses (scenarioKey=`BASELINE`)
+  - GET `/api/user/usage/simulated/house?houseId&scenarioId` returns a single house+scenario dataset (404 `NO_BUILD` when missing)
+  - GET `/api/user/usage/simulated/builds?houseId` returns build availability metadata only (no datasets)
+- Requirements are computed server-side:
+  - GET `/api/user/simulator/requirements?houseId&mode` returns `canRecalc` + `missingItems` (UI does not compute requirements)
+
+### Critical modularity guardrails (mandatory; no monolith)
+- NO business logic in API routes (app/api/**/route.ts):
+  - Routes are thin controllers only: auth/context → parse/validate → call module service → return JSON.
+  - Routes must NOT contain estimator math, scenario math, SMT shape derivation, curve generation, hashing, or gap-fill logic.
+- NO business logic in UI (components/**, app/dashboard/**):
+  - UI is composition only (layout, modals, wiring, display).
+  - UI must NOT contain estimator math, scenario math, SMT shape derivation, curve generation, hashing, or gap-fill logic.
+- Modules-only pipeline rule:
+  - All computation/pipeline logic lives under modules/** as pure TypeScript.
+  - Modules must NOT import React/Next/UI code.
+  - UI should talk to APIs (or minimal client helpers), not engine internals.
+
+### Required module boundaries (no monolith; enforce these directories)
+A) modules/usageSimulator/ (orchestration only)
+- state.ts: load inputs (manual/home/appliances) + flags.
+- requirements.ts: missing items derived ONLY from existing API validators.
+- service.ts (required): the single orchestration entrypoint called by API routes.
+  - service.ts composes other modules below.
+  - service.ts must NOT implement scenario overlay math or SMT shape derivation.
+
+B) modules/usageScenario/ (scenario overlay engine only — MUST be separate)
+- types.ts: scenario + event schemas (effectiveMonth YYYY-MM)
+- overlay.ts: pure deterministic overlay computation:
+  - outputs monthlyMultipliersByMonth + monthlyAddersKwhByMonth + inactiveEventIds + warnings
+  - combine rule: adjusted[ym] = max(0, baseline[ym] * multiplier[ym] + adder[ym])
+- This module is the ONLY place allowed to compute scenario overlays.
+- NOTE: Do NOT place this logic under modules/usageSimulator/.
+
+C) modules/realUsageAdapter/ (read-only real data adapters — SMT only for V1)
+- smt.ts (required): ONLY place to read/transform SMT intervals/coverage/shape for simulation:
+  - hasSmtIntervals({ esiid, canonicalMonths })
+  - fetchSmtCanonicalMonthlyTotals({ esiid, canonicalMonths })
+  - fetchSmtIntradayShape96({ esiid, canonicalMonths }) (sums to 1; versioned by smtShapeDerivationVersion)
+- Read-only; never writes to real tables; SMT/GB ingestion remains untouched.
+
+D) modules/usageEstimator/ (estimate + gap-fill monthly totals)
+- estimate.ts deterministic + testable:
+  - produces monthlyKwh[12], annualKwh, confidence, notes, filledMonths
+  - fills missing canonical months when SMT is partial
+- Only module allowed to generate “new build estimate” totals or gap-fill monthly totals.
+
+E) modules/simulatedUsage/ (curve generation only)
+- engine.ts converts monthly totals + intraday shape into 15-minute intervals
+- versioned generic intraday template lives here (modules/simulatedUsage/intradayTemplates.ts)
+- V1 pipeline order: monthly totals set → scenario overlays → interval generation; no duty cycles.
+
+### Data model + determinism clarifications (V1)
+- Baseline build uses immutable baseKind:
+  - MANUAL (manual totals)
+  - ESTIMATED (new build estimate)
+  - SMT_ACTUAL_BASELINE (only when SMT 15-minute intervals exist; SMT provides intraday shape + optional monthly anchors)
+- Scenarios are overlays on top of a baseline build and do not change the canonical window in V1.
+- Canonical window single source of truth:
+  - Store `canonicalMonthsJson` (12 YYYY-MM strings) on `UsageSimulatorBuild`; treat as authoritative.
+- buildInputsHash:
+  - Stable hash of normalized JSON including canonicalMonths[12], mode, baseKind, `scenarioKey`, ordered normalized events,
+    plus version strings: `estimatorVersion`, `reshapeCoeffVersion`, `intradayTemplateVersion`, `smtShapeDerivationVersion`.
+  - Baseline builds always use `scenarioKey = "BASELINE"` (avoid Postgres NULL uniqueness behavior).
+
+### Implementation order (safe, incremental)
+- ✅ UX compacting: top control panel + modal editors + explicit Recalculate.
+- ✅ Add scenario persistence models + migration.
+- ✅ Add scenario timeline UI (create/edit + events).
+- ✅ Extend recalc + simulated usage APIs to be scenario-aware and persist per-scenario builds.
+- Observed-effect scaffolding optional later.
+
 ### Current Plan Module Migrations
 
 - Schema: `prisma/current-plan/schema.prisma`

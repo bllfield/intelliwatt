@@ -2,8 +2,7 @@ import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
-import { recalcSimulatorBuild } from "@/modules/usageSimulator/service";
-import type { SimulatorMode } from "@/modules/usageSimulator/requirements";
+import { createScenario, listScenarios } from "@/modules/usageSimulator/service";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -18,12 +17,22 @@ async function requireUser() {
   return { ok: true as const, user };
 }
 
-async function requireHouse(userId: string, houseId: string) {
-  const h = await prisma.houseAddress.findFirst({
-    where: { id: houseId, userId, archivedAt: null },
-    select: { id: true, esiid: true },
-  });
-  return h ?? null;
+export async function GET(request: NextRequest) {
+  try {
+    const u = await requireUser();
+    if (!u.ok) return NextResponse.json(u.body, { status: u.status });
+
+    const { searchParams } = new URL(request.url);
+    const houseId = String(searchParams.get("houseId") ?? "").trim();
+    if (!houseId) return NextResponse.json({ ok: false, error: "houseId_required" }, { status: 400 });
+
+    const out = await listScenarios({ userId: u.user.id, houseId });
+    if (!out.ok) return NextResponse.json(out, { status: 400 });
+    return NextResponse.json(out);
+  } catch (e) {
+    console.error("[user/simulator/scenarios] GET failed", e);
+    return NextResponse.json({ ok: false, error: "Internal server error" }, { status: 500 });
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -33,26 +42,15 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json().catch(() => ({}));
     const houseId = typeof body?.houseId === "string" ? body.houseId.trim() : "";
-    const mode = typeof body?.mode === "string" ? (body.mode.trim() as SimulatorMode) : null;
-    const scenarioId = typeof body?.scenarioId === "string" ? body.scenarioId.trim() : null;
+    const name = typeof body?.name === "string" ? body.name.trim() : "";
     if (!houseId) return NextResponse.json({ ok: false, error: "houseId_required" }, { status: 400 });
-    if (mode !== "MANUAL_TOTALS" && mode !== "NEW_BUILD_ESTIMATE" && mode !== "SMT_BASELINE") {
-      return NextResponse.json({ ok: false, error: "mode_invalid" }, { status: 400 });
-    }
+    if (!name) return NextResponse.json({ ok: false, error: "name_required" }, { status: 400 });
 
-    const house = await requireHouse(u.user.id, houseId);
-    if (!house) return NextResponse.json({ ok: false, error: "House not found for user" }, { status: 403 });
-    const out = await recalcSimulatorBuild({
-      userId: u.user.id,
-      houseId,
-      esiid: house.esiid ?? null,
-      mode,
-      scenarioId,
-    });
+    const out = await createScenario({ userId: u.user.id, houseId, name });
     if (!out.ok) return NextResponse.json(out, { status: 400 });
     return NextResponse.json(out);
   } catch (e) {
-    console.error("[user/simulator/recalc] failed", e);
+    console.error("[user/simulator/scenarios] POST failed", e);
     return NextResponse.json({ ok: false, error: "Internal server error" }, { status: 500 });
   }
 }

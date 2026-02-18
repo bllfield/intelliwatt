@@ -1,10 +1,10 @@
 import type { ManualUsagePayload } from "@/modules/simulatedUsage/types";
 import { canonicalWindow12Months } from "@/modules/usageSimulator/canonicalWindow";
-import { genericWeekdayShape96, genericWeekendShape96, normalizeShape96, type Shape96 } from "@/modules/usageSimulator/shapes";
 import { estimateUsageForCanonicalWindow } from "@/modules/usageEstimator/estimate";
 import type { HomeProfileInput } from "@/modules/homeProfile/validation";
 import type { ApplianceProfilePayloadV1 } from "@/modules/applianceProfile/validation";
-import { fetchSmtCanonicalMonthlyTotals, fetchSmtIntradayShape96 } from "@/modules/usageSimulator/smt";
+import { getGenericWeekdayShape96, getGenericWeekendShape96, normalizeShape96, type Shape96 } from "@/modules/simulatedUsage/intradayTemplates";
+import { fetchSmtCanonicalMonthlyTotals, fetchSmtIntradayShape96 } from "@/modules/realUsageAdapter/smt";
 import { reshapeMonthlyTotalsFromBaseline } from "@/modules/usageSimulator/reshape";
 
 export type BuildMode = "MANUAL_TOTALS" | "NEW_BUILD_ESTIMATE" | "SMT_BASELINE";
@@ -80,10 +80,13 @@ export async function buildSimulatorInputs(args: {
   esiidForSmt?: string | null;
   baselineHomeProfile?: HomeProfileInput | null;
   baselineApplianceProfile?: ApplianceProfilePayloadV1 | null;
+  canonicalMonths?: string[]; // optional override (V1 determinism)
   now?: Date;
 }): Promise<BuildResult> {
-  const canonical = canonicalWindow12Months(args.now ?? new Date());
-  const canonicalMonths = canonical.months;
+  const canonicalMonths =
+    Array.isArray(args.canonicalMonths) && args.canonicalMonths.length === 12
+      ? args.canonicalMonths
+      : canonicalWindow12Months(args.now ?? new Date()).months;
 
   if (args.mode === "MANUAL_TOTALS") {
     if (!args.manualUsagePayload) {
@@ -95,8 +98,8 @@ export async function buildSimulatorInputs(args: {
       baseKind: "MANUAL",
       canonicalMonths,
       monthlyTotalsKwhByMonth: monthly,
-      intradayShape96: genericWeekdayShape96(),
-      weekdayWeekendShape96: { weekday: genericWeekdayShape96(), weekend: genericWeekendShape96() },
+      intradayShape96: getGenericWeekdayShape96(),
+      weekdayWeekendShape96: { weekday: getGenericWeekdayShape96(), weekend: getGenericWeekendShape96() },
       notes,
       filledMonths: [],
     };
@@ -115,8 +118,8 @@ export async function buildSimulatorInputs(args: {
       baseKind: "ESTIMATED",
       canonicalMonths,
       monthlyTotalsKwhByMonth,
-      intradayShape96: genericWeekdayShape96(),
-      weekdayWeekendShape96: { weekday: genericWeekdayShape96(), weekend: genericWeekendShape96() },
+      intradayShape96: getGenericWeekdayShape96(),
+      weekdayWeekendShape96: { weekday: getGenericWeekdayShape96(), weekend: getGenericWeekendShape96() },
       notes: est.notes,
       filledMonths: est.filledMonths,
     };

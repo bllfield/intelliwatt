@@ -145,6 +145,7 @@ type Props = {
   forcedMode?: "REAL" | "SIMULATED";
   allowModeToggle?: boolean;
   refreshToken?: string | number;
+  simulatedHousesOverride?: HouseUsage[] | null;
 };
 
 export const UsageDashboard: React.FC<Props> = ({
@@ -152,6 +153,7 @@ export const UsageDashboard: React.FC<Props> = ({
   forcedMode,
   allowModeToggle = true,
   refreshToken,
+  simulatedHousesOverride = null,
 }) => {
   const [datasetMode, setDatasetMode] = useState<"REAL" | "SIMULATED">(forcedMode ?? initialMode);
   const [houses, setHouses] = useState<HouseUsage[]>([]);
@@ -171,6 +173,17 @@ export const UsageDashboard: React.FC<Props> = ({
     const load = async () => {
       try {
         setError(null);
+
+        // When the simulator supplies a scenario-specific simulated dataset,
+        // bypass the baseline simulated endpoint and use the override as-is.
+        if (datasetMode === "SIMULATED" && simulatedHousesOverride && simulatedHousesOverride.length) {
+          const hs = simulatedHousesOverride;
+          setHouses(hs);
+          const firstWithData = hs.find((h) => h.dataset);
+          setSelectedHouseId(firstWithData?.houseId ?? hs[0]?.houseId ?? null);
+          setLoading(false);
+          return;
+        }
 
         // Show cached payload instantly (back/forward nav), then refresh in the background.
         const cached = readSessionCache(datasetMode);
@@ -212,7 +225,7 @@ export const UsageDashboard: React.FC<Props> = ({
     return () => {
       cancelled = true;
     };
-  }, [datasetMode, refreshToken]);
+  }, [datasetMode, refreshToken, simulatedHousesOverride]);
 
   // If usage isn't available yet (common immediately after SMT backfill request),
   // keep checking until it lands by polling the SMT orchestrator and reloading usage.
