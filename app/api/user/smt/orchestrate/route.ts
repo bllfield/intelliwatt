@@ -193,13 +193,23 @@ async function computeUsageCoverageForEsiid(esiid: string): Promise<UsageCoverag
 
   const completenessOk =
     intervalExpectedBySpan > 0 && meterGroupsSeen > 0 && minMeterCompleteness >= SMT_READY_COMPLETENESS;
-  const gapsOk = headGapDays <= SMT_GAP_SLOP_DAYS && tailGapDays <= SMT_GAP_SLOP_DAYS;
-  const hasFullWindow = coverageDays >= 365;
-  const missingGaps = !(completenessOk && gapsOk && hasFullWindow);
+  const headGapOk = headGapDays <= SMT_GAP_SLOP_DAYS;
+  const tailGapOk = tailGapDays <= SMT_GAP_SLOP_DAYS;
+  const gapsOk = headGapOk && tailGapOk;
+  const dataAgeMs = coverageEnd ? Date.now() - coverageEnd.getTime() : Number.POSITIVE_INFINITY;
+  const dataOlderThan30d = !coverageEnd ? true : dataAgeMs >= SMT_PULL_COOLDOWN_MS;
 
-  // Ready = SMT interval data has been ingested into the DB for a full 12‑month span with ~99% completeness and small gaps.
-  // (Phase "processing" = we have intervals or raw files but not yet ready; "pending" = no data yet.)
-  const historyReady = Boolean(completenessOk && gapsOk && hasFullWindow);
+  // Full window = 365+ days, OR shorter span with tail at target (100% of what SMT has delivered, up to 365 days).
+  const hasFullWindow =
+    coverageDays >= 365 || (coverageDays > 0 && coverageDays < 365 && tailGapOk);
+
+  // Inside 30 days: 100% if we have full span from last pull (ignore tail). After 30 days: 100% when tail reaches target (yesterday).
+  const gapsOkForReady = dataOlderThan30d ? gapsOk : headGapOk;
+  const missingGapsForPull = dataOlderThan30d
+    ? !(completenessOk && hasFullWindow && gapsOk)
+    : !(completenessOk && hasFullWindow && headGapOk);
+
+  const missingGaps = missingGapsForPull;
 
   const rawCount = await prisma.rawSmtFile.count({
     where: {
@@ -207,24 +217,40 @@ async function computeUsageCoverageForEsiid(esiid: string): Promise<UsageCoverag
     },
   });
 
+  // Don't declare 100% while SMT might still be delivering: require no unprocessed raw files and no gaps.
+  // Keep pulling while rawCount > 0 or missingGaps so we pick up any older dates SMT delivers later.
+  const deliveryComplete = rawCount === 0;
+  const historyReady = Boolean(completenessOk && hasFullWindow && gapsOkForReady && deliveryComplete);
+  const missingGapsOrPendingDelivery = missingGaps || !deliveryComplete;
+
+  const missingGapsForEligibility = missingGapsOrPendingDelivery;
+
   const ready = historyReady;
   const phase: UsageCoverage["phase"] =
     ready ? "ready" : intervalCount > 0 || rawCount > 0 ? "processing" : "pending";
 
-  const dataAgeMs = coverageEnd ? Date.now() - coverageEnd.getTime() : Number.POSITIVE_INFINITY;
-  const dataOlderThan30d = !coverageEnd ? true : dataAgeMs >= SMT_PULL_COOLDOWN_MS;
-  const pullEligibleNow = intervalCount === 0 || dataOlderThan30d || missingGaps;
+  const pullEligibleNow = intervalCount === 0 || dataOlderThan30d || missingGapsForEligibility;
   const pullEligibleAt = coverageEnd
     ? new Date(coverageEnd.getTime() + SMT_PULL_COOLDOWN_MS).toISOString()
     : new Date().toISOString();
 
+  const rangeText =
+    coverageStartDate && coverageEndDate
+      ? `Usage data only available ${coverageStartDate} to ${coverageEndDate}.`
+      : "";
+
   const message = (() => {
     if (ready) {
-      if (pullEligibleNow) return "SMT history is ingested. Refresh is available (data is older than 30 days).";
+      const base = coverageDays < 365 && rangeText ? `${rangeText} We have 100%.` : "SMT history is ingested.";
+      if (pullEligibleNow)
+        return coverageDays < 365 && rangeText
+          ? `${rangeText} We have 100%. Refresh is available (data is older than 30 days).`
+          : "SMT history is ingested. Refresh is available (data is older than 30 days).";
       const next = coverageEnd ? chicagoDateKey(new Date(coverageEnd.getTime() + SMT_PULL_COOLDOWN_MS)) : null;
       return next
-        ? `Too early to pull more data. Next refresh available after ${next}.`
-        : "SMT history is ingested.";
+        ? (rangeText ? `${rangeText} We have 100%. ` : "") +
+            `Too early to pull more data. Next refresh available after ${next}.`.trim()
+        : base;
     }
     if (phase === "pending") return "Waiting for SMT interval data delivery.";
     if (phase === "processing") {
@@ -234,12 +260,14 @@ async function computeUsageCoverageForEsiid(esiid: string): Promise<UsageCoverag
           headGapDays > 0 || tailGapDays > 0
             ? ` Missing ~${headGapDays} day(s) at start and ~${tailGapDays} day(s) at end of the 12‑month window (to yesterday).`
             : "";
+        const shortRangeLead = coverageDays < 365 && rangeText ? `${rangeText} ` : "";
         if (rawCount === 0) {
-          return `SMT intervals ingested (${coverageDays} day(s)). Coverage completeness ~${pct}%.${gapsNote}`;
+          return `${shortRangeLead}SMT intervals ingested (${coverageDays} day(s)). Coverage completeness ~${pct}%.${gapsNote}`.trim();
         }
-        return `SMT intervals ingested (${coverageDays} day(s)). Coverage completeness ~${pct}%.${gapsNote} Processing newly received SMT files.`;
+        return `${shortRangeLead}SMT intervals ingested (${coverageDays} day(s)). Coverage completeness ~${pct}%.${gapsNote} Processing newly received SMT files; we will keep checking for more older dates from SMT.`.trim();
       }
-      if (rawCount > 0) return "SMT files received; processing intervals.";
+      if (rawCount > 0)
+        return "SMT files received; processing intervals. We will keep checking for more older dates from SMT.";
       return "Processing SMT usage.";
     }
     return null;
