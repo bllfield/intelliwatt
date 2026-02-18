@@ -346,12 +346,15 @@ function LandingPageContent() {
             </div>
           
           {/* Hero Stats */}
-          <div className="grid gap-8 mb-16 md:grid-cols-3">
+          {(() => {
+            const SETUP_MINUTES = 5;
+            const avgSavings = typeof publicStats?.avgSavingsDollars === 'number' && Number.isFinite(publicStats.avgSavingsDollars) ? publicStats.avgSavingsDollars : null;
+            const savingsPerHr = avgSavings != null && SETUP_MINUTES > 0 ? (avgSavings / SETUP_MINUTES) * 60 : null;
+            return (
+          <div className="grid gap-8 mb-16 md:grid-cols-2 lg:grid-cols-4">
             <div className="text-center">
               <div className="text-4xl font-bold text-brand-blue mb-2">
-                {typeof publicStats?.avgSavingsDollars === 'number' && Number.isFinite(publicStats.avgSavingsDollars)
-                  ? currency.format(Math.round(publicStats.avgSavingsDollars))
-                  : '—'}
+                {avgSavings != null ? currency.format(Math.round(avgSavings)) : '—'}
               </div>
               <div className="text-brand-white">Average savings (running average from real users)</div>
               <div className="mt-1 text-xs text-brand-white/70">Based on completed comparisons · ETF excluded</div>
@@ -365,10 +368,19 @@ function LandingPageContent() {
               <div className="text-brand-white">Total savings (switched users)</div>
             </div>
             <div className="text-center">
-              <div className="text-4xl font-bold text-brand-blue mb-2">5 minutes</div>
+              <div className="text-4xl font-bold text-brand-blue mb-2">{SETUP_MINUTES} minutes</div>
               <div className="text-brand-white">Setup Time</div>
             </div>
+            <div className="text-center">
+              <div className="text-4xl font-bold text-brand-blue mb-2">
+                {savingsPerHr != null ? currency.format(Math.round(savingsPerHr)) : '—'}
+              </div>
+              <div className="text-brand-white">$/hr of work</div>
+              <div className="mt-1 text-xs text-brand-white/70">Average savings ÷ setup time, as hourly equivalent</div>
+            </div>
           </div>
+            );
+          })()}
         </div>
       </section>
 
