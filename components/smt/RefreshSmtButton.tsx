@@ -87,6 +87,18 @@ export default function RefreshSmtButton({ homeId }: RefreshSmtButtonProps) {
 
     startTransition(async () => {
       try {
+        // Call usage refresh first so backfill + pull run immediately (no 60s orchestrate throttle).
+        try {
+          await fetch('/api/user/usage/refresh', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ homeId }),
+            cache: 'no-store',
+          });
+        } catch {
+          // Non-blocking; orchestrate below still runs for status and pull if needed.
+        }
+
         const usageResponse = await fetch('/api/user/smt/orchestrate', {
           method: 'POST',
           headers: {

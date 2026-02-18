@@ -197,8 +197,8 @@ async function computeUsageCoverageForEsiid(esiid: string): Promise<UsageCoverag
   const hasFullWindow = coverageDays >= 365;
   const missingGaps = !(completenessOk && gapsOk && hasFullWindow);
 
-  // "Ready" semantics for UX + throttling:
-  // If we have a full-year span and ~99% completeness, stop trying to "fetch 1 more day".
+  // Ready = SMT interval data has been ingested into the DB for a full 12‑month span with ~99% completeness and small gaps.
+  // (Phase "processing" = we have intervals or raw files but not yet ready; "pending" = no data yet.)
   const historyReady = Boolean(completenessOk && gapsOk && hasFullWindow);
 
   const rawCount = await prisma.rawSmtFile.count({
@@ -223,7 +223,7 @@ async function computeUsageCoverageForEsiid(esiid: string): Promise<UsageCoverag
       if (pullEligibleNow) return "SMT history is ingested. Refresh is available (data is older than 30 days).";
       const next = coverageEnd ? chicagoDateKey(new Date(coverageEnd.getTime() + SMT_PULL_COOLDOWN_MS)) : null;
       return next
-        ? `SMT history is ingested. Next refresh available after ${next}.`
+        ? `Too early to pull more data. Next refresh available after ${next}.`
         : "SMT history is ingested.";
     }
     if (phase === "pending") return "Waiting for SMT interval data delivery.";
@@ -232,7 +232,7 @@ async function computeUsageCoverageForEsiid(esiid: string): Promise<UsageCoverag
         const pct = intervalCompletenessBySpan > 0 ? Math.round(intervalCompletenessBySpan * 100) : 0;
         const gapsNote =
           headGapDays > 0 || tailGapDays > 0
-            ? ` Missing ~${headGapDays} day(s) at start and ~${tailGapDays} day(s) at end of the 12‑month window.`
+            ? ` Missing ~${headGapDays} day(s) at start and ~${tailGapDays} day(s) at end of the 12‑month window (to yesterday).`
             : "";
         if (rawCount === 0) {
           return `SMT intervals ingested (${coverageDays} day(s)). Coverage completeness ~${pct}%.${gapsNote}`;
@@ -411,7 +411,9 @@ export async function POST(req: NextRequest) {
   // Always compute current usage coverage for visibility (cheap DB-only).
   const usage = await computeUsageCoverageForEsiid(effectiveEsiid);
 
-  // Remote actions throttling: use smtLastSyncAt as a coarse "last orchestration action" timestamp.
+  // Throttle only automatic polling: avoid running backfill + pull on every poll (e.g. every 5–30s).
+  // Without this, the dashboard would trigger dozens of backfill/pull requests per minute and hammer SMT/droplet.
+  // User-initiated refresh bypasses this (force=true) and the "Refresh SMT Data" button also calls /api/user/usage/refresh so backfill + pull always run on click.
   const ORCHESTRATOR_COOLDOWN_MS = (() => {
     const raw = (process.env.SMT_ORCHESTRATOR_COOLDOWN_MS ?? "").trim();
     const n = Number.parseInt(raw, 10);
@@ -433,6 +435,9 @@ export async function POST(req: NextRequest) {
         )
       : 0;
 
+  const backfillEnvRaw = (process.env.SMT_INTERVAL_BACKFILL_ENABLED ?? "").toString().trim().toLowerCase();
+  const backfillEnvEnabled = backfillEnvRaw === "true" || backfillEnvRaw === "1" || backfillEnvRaw === "yes";
+
   const actions: Record<string, any> = {
     forced: force,
     statusRefreshed: false,
@@ -442,6 +447,7 @@ export async function POST(req: NextRequest) {
     orchestratorThrottled: recentlySynced,
     pullEligibleNow: usage.pullEligibleNow,
     pullEligibleAt: usage.pullEligibleAt,
+    backfillEnabled: backfillEnvEnabled,
     ...(esiidMismatch
       ? { esiidMismatch: { houseEsiid, authorizationEsiid: authEsiid } }
       : {}),
@@ -480,9 +486,10 @@ export async function POST(req: NextRequest) {
     const isStale = requestedAt ? Date.now() - requestedAt.getTime() >= retryAfterMs : false;
     const allowRetry = Boolean(requestedAt && !usage.ready && isStale);
 
+    // Accept "true", "1", "True", "TRUE", "yes" so Vercel/env casing doesn't break it.
+    const rawBackfill = (process.env.SMT_INTERVAL_BACKFILL_ENABLED ?? "").toString().trim().toLowerCase();
     const enableBackfill =
-      process.env.SMT_INTERVAL_BACKFILL_ENABLED === "true" ||
-      process.env.SMT_INTERVAL_BACKFILL_ENABLED === "1";
+      rawBackfill === "true" || rawBackfill === "1" || rawBackfill === "yes";
 
     // If the user forces a refresh but they are not eligible (data <30d old and no gaps),
     // do NOT spam SMT backfill requests.
@@ -593,11 +600,11 @@ export async function POST(req: NextRequest) {
         start: usage.coverageStartDate,
         end: usage.coverageEndDate,
         days: usage.coverageDays,
-        // Expected intervals from per-meter span logic (accounts for meter time ranges and rounding).
-        expectedIntervals: Math.max(1, usage.intervalExpectedBySpan),
+        // Expected intervals from the same span as start/end/days (15-min = 96/day).
+        expectedIntervals: Math.max(1, usage.coverageDays * 96),
         completenessPct:
-          usage.intervalExpectedBySpan > 0
-            ? Math.round((usage.intervalCount / usage.intervalExpectedBySpan) * 1000) / 10
+          usage.coverageDays > 0
+            ? Math.round((usage.intervalCount / (usage.coverageDays * 96)) * 1000) / 10
             : 0,
       },
       message: usage.message,
