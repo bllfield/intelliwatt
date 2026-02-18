@@ -264,12 +264,12 @@ export default function AdminUsageProduction() {
       ) : null}
 
       {!loading && lastNormalize ? (
-        <div className="rounded border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900">
+        <div className="rounded border border-blue-200 bg-blue-50 p-3 text-xs text-brand-navy">
           <div className="flex items-center justify-between">
             <span className="font-semibold">Last /api/admin/usage/normalize response</span>
-            <span className="font-mono text-[11px] text-blue-800">status {lastNormalize.status}</span>
+            <span className="font-mono text-[11px] text-brand-navy">status {lastNormalize.status}</span>
           </div>
-          <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-white/80 p-2 text-[11px] text-blue-900">
+          <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-white/80 p-2 text-[11px] text-brand-navy">
             {JSON.stringify(lastNormalize.body ?? lastNormalize.rawText ?? "", null, 2)}
           </pre>
         </div>

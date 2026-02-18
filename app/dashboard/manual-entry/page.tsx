@@ -15,19 +15,19 @@ export default function ManualEntryPage() {
             <h3 className="text-lg font-semibold text-brand-navy mb-3">What You'll Be Able To Do</h3>
             <ul className="text-brand-slate space-y-2 text-left max-w-md mx-auto">
               <li className="flex items-center space-x-2">
-                <span className="text-brand-blue">•</span>
+                <span className="text-brand-navy">•</span>
                 <span>Upload energy bills as PDFs</span>
               </li>
               <li className="flex items-center space-x-2">
-                <span className="text-brand-blue">•</span>
+                <span className="text-brand-navy">•</span>
                 <span>Enter monthly usage data manually</span>
               </li>
               <li className="flex items-center space-x-2">
-                <span className="text-brand-blue">•</span>
+                <span className="text-brand-navy">•</span>
                 <span>Track usage patterns over time</span>
               </li>
               <li className="flex items-center space-x-2">
-                <span className="text-brand-blue">•</span>
+                <span className="text-brand-navy">•</span>
                 <span>Get personalized recommendations</span>
               </li>
             </ul>

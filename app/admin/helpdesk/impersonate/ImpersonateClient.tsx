@@ -283,7 +283,7 @@ export default function ImpersonateClient() {
               "inline-flex items-center gap-2 rounded-full border px-4 py-2 font-semibold uppercase tracking-wide transition",
               busy
                 ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-500"
-                : "border-brand-blue/40 bg-brand-blue/10 text-brand-blue hover:bg-brand-blue/20",
+                : "border-brand-blue/40 bg-brand-blue/10 text-brand-navy hover:bg-brand-blue/20",
             ].join(" ")}
           >
             {busy ? "Working…" : "Stop impersonation"}

@@ -131,7 +131,7 @@ export function CommissionsClient() {
           <button
             type="button"
             onClick={() => fetchRows()}
-            className="inline-flex items-center rounded-full border border-brand-blue/40 bg-brand-blue/10 px-4 py-2 text-sm font-semibold text-brand-blue hover:bg-brand-blue/20"
+            className="inline-flex items-center rounded-full border border-brand-blue/40 bg-brand-blue/10 px-4 py-2 text-sm font-semibold text-brand-navy hover:bg-brand-blue/20"
           >
             Refresh
           </button>

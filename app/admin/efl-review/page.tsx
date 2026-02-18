@@ -203,7 +203,7 @@ export default function EflReviewPage() {
           <div className="font-medium">Fact Card ops are now unified</div>
           <div className="text-xs text-gray-600 mt-1">
             For batch parsing + queue + templates + manual loader (URL/upload/text) in one place, use{" "}
-            <a className="text-blue-700 underline" href="/admin/efl/fact-cards">
+            <a className="text-brand-navy underline" href="/admin/efl/fact-cards">
               /admin/efl/fact-cards
             </a>
             .
@@ -312,7 +312,7 @@ export default function EflReviewPage() {
 
         <div className="rounded-2xl border bg-white p-3 text-xs text-gray-600">
           Tip: to jump straight to plan-calc quarantines, open{' '}
-          <a className="text-blue-700 underline" href="/admin/efl-review?kind=PLAN_CALC_QUARANTINE">
+          <a className="text-brand-navy underline" href="/admin/efl-review?kind=PLAN_CALC_QUARANTINE">
             /admin/efl-review?kind=PLAN_CALC_QUARANTINE
           </a>
           .
@@ -329,7 +329,7 @@ export default function EflReviewPage() {
             </div>
             <a
               href="/admin/efl/links"
-              className="text-xs font-medium text-blue-700 underline"
+              className="text-xs font-medium text-brand-navy underline"
             >
               Open full Link Runner
             </a>

@@ -22,7 +22,7 @@ export default async function HomePage() {
             <div className="rounded-2xl border border-amber-200/70 bg-amber-100/40 px-5 py-4 text-sm font-medium text-amber-800">
               Temporarily unavailable: {context.loadError}
             </div>
-            <Link href="/dashboard" className="inline-flex items-center text-sm font-semibold text-brand-blue underline-offset-4 hover:underline">
+            <Link href="/dashboard" className="inline-flex items-center text-sm font-semibold text-brand-navy underline-offset-4 hover:underline">
               ← Back to Dashboard
             </Link>
           </div>
@@ -48,7 +48,7 @@ export default async function HomePage() {
             <SmtAddressCaptureCard houseAddressId={null} initialAddress={null} />
             <Link
               href="/dashboard"
-              className="inline-flex items-center text-sm font-semibold text-brand-blue underline-offset-4 hover:underline"
+              className="inline-flex items-center text-sm font-semibold text-brand-navy underline-offset-4 hover:underline"
             >
               ← Back to Dashboard
             </Link>

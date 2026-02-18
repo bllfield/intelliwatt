@@ -106,7 +106,7 @@ export default function SMTSubscriptionsAdmin() {
         </p>
         <p className="mt-1 text-sm text-gray-600">
           Return to{' '}
-          <Link className="text-blue-600 underline" href="/admin/smt/inspector">
+          <Link className="text-brand-navy underline" href="/admin/smt/inspector">
             SMT Inspector hub
           </Link>
           .

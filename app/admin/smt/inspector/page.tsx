@@ -503,7 +503,7 @@ export default function SMTInspector() {
         {SMT_TOOLS.map((tool) => (
           <li key={tool.href} className="border rounded p-3">
             <div className="flex items-center justify-between">
-              <Link className="text-blue-600 underline text-base" href={tool.href}>
+              <Link className="text-brand-navy underline text-base" href={tool.href}>
                 {tool.title}
               </Link>
               {tool.paused ? (

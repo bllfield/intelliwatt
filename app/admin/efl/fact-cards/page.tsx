@@ -3086,7 +3086,7 @@ export default function FactCardOpsPage() {
               Cleanup missing fields
             </button>
             <button
-              className="px-3 py-2 rounded-lg border border-blue-200 text-blue-800 hover:bg-blue-50 disabled:opacity-60"
+              className="px-3 py-2 rounded-lg border border-blue-200 text-brand-navy hover:bg-blue-50 disabled:opacity-60"
               onClick={() => void runTemplateHygiene(false)}
               disabled={!ready || tplLoading || hygieneLoading}
               title="Scan templates that look like legacy/junk (missing identity fields) and report which are orphaned vs linked to offers."
@@ -3094,7 +3094,7 @@ export default function FactCardOpsPage() {
               {hygieneLoading ? "Hygiene…" : "Hygiene scan"}
             </button>
             <button
-              className="px-3 py-2 rounded-lg border border-blue-200 text-blue-800 hover:bg-blue-50 disabled:opacity-60"
+              className="px-3 py-2 rounded-lg border border-blue-200 text-brand-navy hover:bg-blue-50 disabled:opacity-60"
               onClick={() => void runTemplateHygiene(true)}
               disabled={!ready || tplLoading || hygieneLoading}
               title="Invalidate ONLY orphan junk templates (no OfferIdRatePlanMap link). Safe alternative to 'Cleanup missing fields'."

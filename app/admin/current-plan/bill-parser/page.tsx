@@ -1187,7 +1187,7 @@ export default function CurrentPlanBillParserAdmin() {
               type="button"
               onClick={backfillBillPlanTemplates}
               disabled={billPlanBackfillLoading || !ready}
-              className="px-4 py-2 rounded-lg border border-blue-200 bg-blue-50 text-blue-900 text-sm hover:bg-blue-100 disabled:opacity-60 disabled:cursor-not-allowed"
+              className="px-4 py-2 rounded-lg border border-blue-200 bg-blue-50 text-brand-navy text-sm hover:bg-blue-100 disabled:opacity-60 disabled:cursor-not-allowed"
               title="Promote the most recent ParsedCurrentPlan rows into plan-level templates (provider+plan)."
             >
               {billPlanBackfillLoading ? "Backfilling…" : "Backfill from ParsedCurrentPlan"}

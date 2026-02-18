@@ -19,7 +19,7 @@ export default function CurrentRateDetailsPage() {
               href="https://www.hitthejackwatt.com"
               target="_blank"
               rel="noopener noreferrer"
-              className="font-semibold text-brand-blue underline decoration-transparent transition hover:decoration-brand-blue"
+              className="font-semibold text-brand-navy underline decoration-transparent transition hover:decoration-brand-navy"
             >
               HitTheJackWatt™
             </a>{' '}

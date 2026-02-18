@@ -61,7 +61,7 @@ function TravelRangesEditor({
         <button
           type="button"
           onClick={() => onChange([...(value || []), { startDate: "", endDate: "" }])}
-          className="inline-flex items-center rounded-full border border-brand-blue/60 bg-brand-blue/15 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-brand-blue transition hover:border-brand-blue hover:bg-brand-blue/25"
+          className="inline-flex items-center rounded-full border border-brand-blue/60 bg-brand-blue/15 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-brand-navy transition hover:border-brand-blue hover:bg-brand-blue/25"
         >
           Add range
         </button>
@@ -251,7 +251,7 @@ export function ManualUsageEntry({ houseId }: { houseId: string }) {
               onClick={() => setActiveTab("MONTHLY")}
               className={`rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-wide transition ${
                 activeTab === "MONTHLY"
-                  ? "border-brand-blue bg-brand-blue/20 text-brand-blue"
+                  ? "border-brand-blue bg-brand-blue/20 text-brand-navy"
                   : "border-brand-cyan/20 bg-brand-navy text-brand-cyan/80 hover:bg-brand-cyan/5"
               }`}
             >
@@ -262,7 +262,7 @@ export function ManualUsageEntry({ houseId }: { houseId: string }) {
               onClick={() => setActiveTab("ANNUAL")}
               className={`rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-wide transition ${
                 activeTab === "ANNUAL"
-                  ? "border-brand-blue bg-brand-blue/20 text-brand-blue"
+                  ? "border-brand-blue bg-brand-blue/20 text-brand-navy"
                   : "border-brand-cyan/20 bg-brand-navy text-brand-cyan/80 hover:bg-brand-cyan/5"
               }`}
             >
@@ -389,7 +389,7 @@ export function ManualUsageEntry({ houseId }: { houseId: string }) {
               type="button"
               onClick={save}
               disabled={saving}
-              className="inline-flex items-center justify-center rounded-full border border-brand-blue/60 bg-brand-blue/15 px-6 py-2 text-xs font-semibold uppercase tracking-wide text-brand-blue transition hover:border-brand-blue hover:bg-brand-blue/25 disabled:opacity-60"
+              className="inline-flex items-center justify-center rounded-full border border-brand-blue/60 bg-brand-blue/15 px-6 py-2 text-xs font-semibold uppercase tracking-wide text-brand-navy transition hover:border-brand-blue hover:bg-brand-blue/25 disabled:opacity-60"
             >
               {saving ? "Saving…" : "Save manual usage"}
             </button>

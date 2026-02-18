@@ -340,7 +340,7 @@ export default function WattbuyTemplatedPlansPage() {
         <div className="font-medium">Fact Card ops are now unified</div>
         <div className="text-xs text-gray-600 mt-1">
           For templates + queue + batch parsing + manual loader (URL/upload/text) in one place, use{" "}
-          <a className="text-blue-700 underline" href="/admin/efl/fact-cards">
+          <a className="text-brand-navy underline" href="/admin/efl/fact-cards">
             /admin/efl/fact-cards
           </a>
           .

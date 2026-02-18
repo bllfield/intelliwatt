@@ -103,7 +103,7 @@ export default function PrismaStudioShortcutsPage() {
                   <div className="font-semibold text-brand-navy">{b.title}</div>
                   <button
                     type="button"
-                    className="rounded-full border border-brand-blue/30 bg-brand-blue/10 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-brand-blue transition hover:border-brand-blue hover:bg-brand-blue/20"
+                    className="rounded-full border border-brand-blue/30 bg-brand-blue/10 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-brand-navy transition hover:border-brand-blue hover:bg-brand-blue/20"
                     onClick={async () => {
                       const ok = await copyToClipboard(b.body);
                       if (ok) {

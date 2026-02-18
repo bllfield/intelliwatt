@@ -170,7 +170,7 @@ export default async function EflLinkRunnerPage({ searchParams }: PageProps) {
                         href={result.url}
                         target="_blank"
                         rel="noreferrer"
-                        className="break-all text-blue-600 underline"
+                        className="break-all text-brand-navy underline"
                       >
                         {result.url}
                       </a>
@@ -201,7 +201,7 @@ export default async function EflLinkRunnerPage({ searchParams }: PageProps) {
                         href={result.url}
                         target="_blank"
                         rel="noreferrer"
-                        className="inline-flex items-center rounded-md border border-blue-600 px-3 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-50"
+                        className="inline-flex items-center rounded-md border border-blue-600 px-3 py-1 text-xs font-semibold text-brand-navy hover:bg-blue-50"
                       >
                         Open EFL PDF in new tab
                       </a>

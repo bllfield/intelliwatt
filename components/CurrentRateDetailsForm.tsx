@@ -1613,7 +1613,7 @@ export function CurrentRateDetailsForm({
         </div>
 
         {loadingSavedPlan ? (
-          <div className="mt-4 rounded-2xl border border-brand-blue/25 bg-brand-blue/5 px-4 py-3 text-sm text-brand-blue">
+          <div className="mt-4 rounded-2xl border border-brand-blue/25 bg-brand-blue/5 px-4 py-3 text-sm text-brand-navy">
             Loading your saved plan…
           </div>
         ) : savedPlanError ? (
@@ -1902,7 +1902,7 @@ export function CurrentRateDetailsForm({
                 <button
                   type="button"
                   onClick={() => formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
-                  className="inline-flex items-center rounded-full border border-brand-blue px-4 py-2 text-xs font-semibold uppercase tracking-wide text-brand-blue transition hover:bg-brand-blue/10"
+                  className="inline-flex items-center rounded-full border border-brand-blue px-4 py-2 text-xs font-semibold uppercase tracking-wide text-brand-navy transition hover:bg-brand-blue/10"
                 >
                   Update plan details
                 </button>
@@ -1913,7 +1913,7 @@ export function CurrentRateDetailsForm({
             </div>
 
             {reconfirmMessage ? (
-              <div className="mt-3 rounded-xl border border-brand-blue/30 bg-brand-blue/5 px-4 py-3 text-xs text-brand-blue">
+              <div className="mt-3 rounded-xl border border-brand-blue/30 bg-brand-blue/5 px-4 py-3 text-xs text-brand-navy">
                 {reconfirmMessage}
               </div>
             ) : null}
@@ -2453,7 +2453,7 @@ export function CurrentRateDetailsForm({
                               key={`${rule.id}-month-${month.value}`}
                               className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold ${
                                 rule.selectedMonths.includes(month.value)
-                                  ? "border-brand-blue bg-brand-blue/10 text-brand-blue"
+                                  ? "border-brand-blue bg-brand-blue/10 text-brand-navy"
                                   : "border-slate-300 text-brand-slate"
                               }`}
                             >
@@ -2477,7 +2477,7 @@ export function CurrentRateDetailsForm({
               <button
                 type="button"
                 onClick={handleAddBillCreditRule}
-                className="inline-flex items-center rounded-full border border-brand-blue px-4 py-2 text-xs font-semibold uppercase tracking-wide text-brand-blue transition hover:bg-brand-blue/10"
+                className="inline-flex items-center rounded-full border border-brand-blue px-4 py-2 text-xs font-semibold uppercase tracking-wide text-brand-navy transition hover:bg-brand-blue/10"
               >
                 + Add another bill credit
               </button>
@@ -2635,7 +2635,7 @@ export function CurrentRateDetailsForm({
                             key={`${tier.id}-${day.value}`}
                             className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold ${
                               tier.selectedDays.includes(day.value)
-                                ? "border-brand-blue bg-brand-blue/10 text-brand-blue"
+                                ? "border-brand-blue bg-brand-blue/10 text-brand-navy"
                                 : "border-slate-300 text-brand-slate"
                             }`}
                           >
@@ -2662,7 +2662,7 @@ export function CurrentRateDetailsForm({
                           key={`${tier.id}-month-${month.value}`}
                           className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold ${
                             tier.selectedMonths.includes(month.value)
-                              ? "border-brand-blue bg-brand-blue/10 text-brand-blue"
+                              ? "border-brand-blue bg-brand-blue/10 text-brand-navy"
                               : "border-slate-300 text-brand-slate"
                           }`}
                         >
@@ -2683,7 +2683,7 @@ export function CurrentRateDetailsForm({
               <button
                 type="button"
                 onClick={handleAddTier}
-                className="inline-flex items-center rounded-full border border-brand-blue px-4 py-2 text-xs font-semibold uppercase tracking-wide text-brand-blue transition hover:bg-brand-blue/10"
+                className="inline-flex items-center rounded-full border border-brand-blue px-4 py-2 text-xs font-semibold uppercase tracking-wide text-brand-navy transition hover:bg-brand-blue/10"
               >
                 + Add another time-of-use tier
               </button>

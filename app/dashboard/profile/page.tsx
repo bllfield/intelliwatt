@@ -408,7 +408,7 @@ export default async function ProfilePage() {
               </dl>
             </>
           ) : (
-            <div className="mt-6 rounded-2xl border border-brand-blue/40 bg-brand-blue/10 p-4 text-sm text-brand-blue">
+            <div className="mt-6 rounded-2xl border border-brand-blue/40 bg-brand-blue/10 p-4 text-sm text-brand-navy">
               You haven’t authorized Smart Meter Texas access yet for this home. Head to the API connect page to get started.
             </div>
           )}

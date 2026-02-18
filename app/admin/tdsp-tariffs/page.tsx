@@ -189,7 +189,7 @@ export default function TdspTariffViewer() {
                       href={utility.websiteUrl}
                       target="_blank"
                       rel="noreferrer"
-                      className="text-blue-600 underline"
+                      className="text-brand-navy underline"
                     >
                       {utility.websiteUrl}
                     </a>
@@ -232,7 +232,7 @@ export default function TdspTariffViewer() {
                       href={version.sourceUrl}
                       target="_blank"
                       rel="noreferrer"
-                      className="text-blue-600 underline"
+                      className="text-brand-navy underline"
                     >
                       {version.sourceUrl}
                     </a>

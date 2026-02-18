@@ -239,7 +239,7 @@ export function SmtConfirmationActions({ homeId }: Props) {
           type="button"
           onClick={refreshAuthorizationStatus}
           disabled={state !== "idle" || isWaitingOnSmt || isProcessing}
-          className="inline-flex items-center justify-center rounded-md border border-blue-500 px-4 py-2 text-sm font-semibold text-blue-600 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
+          className="inline-flex items-center justify-center rounded-md border border-blue-500 px-4 py-2 text-sm font-semibold text-brand-navy transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {state === "refresh" ? "Refreshing…" : "Refresh status"}
         </button>

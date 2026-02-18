@@ -475,7 +475,7 @@ export const UsageDashboard: React.FC = () => {
               onClick={() => setDatasetMode("REAL")}
               className={`rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-wide transition ${
                 datasetMode === "REAL"
-                  ? "border-brand-blue bg-brand-blue/10 text-brand-blue"
+                  ? "border-brand-blue bg-brand-blue/10 text-brand-navy"
                   : "border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-50"
               }`}
             >
@@ -486,7 +486,7 @@ export const UsageDashboard: React.FC = () => {
               onClick={() => setDatasetMode("SIMULATED")}
               className={`rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-wide transition ${
                 datasetMode === "SIMULATED"
-                  ? "border-brand-blue bg-brand-blue/10 text-brand-blue"
+                  ? "border-brand-blue bg-brand-blue/10 text-brand-navy"
                   : "border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-50"
               }`}
             >

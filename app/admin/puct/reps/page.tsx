@@ -288,7 +288,7 @@ export default async function PuctRepImportPage({ searchParams }: PageProps) {
                               href={rep.website.startsWith("http") ? rep.website : `https://${rep.website}`}
                               target="_blank"
                               rel="noreferrer"
-                              className="text-brand-blue underline"
+                              className="text-brand-navy underline"
                             >
                               Website
                             </a>

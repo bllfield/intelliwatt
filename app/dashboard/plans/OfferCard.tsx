@@ -100,7 +100,7 @@ function fmtDollars2(v: number | undefined): string | null {
 function badgeClasses(kind: "AVAILABLE" | "CALCULATING" | "NEED_USAGE" | "NOT_COMPUTABLE_YET"): string {
   if (kind === "AVAILABLE") return "border-emerald-400/40 bg-emerald-500/10 text-emerald-200";
   if (kind === "CALCULATING") return "border-brand-cyan/30 bg-brand-cyan/10 text-brand-cyan";
-  if (kind === "NEED_USAGE") return "border-brand-blue/30 bg-brand-blue/10 text-brand-blue";
+  if (kind === "NEED_USAGE") return "border-brand-blue/30 bg-brand-blue/10 text-brand-navy";
   return "border-amber-400/40 bg-amber-500/10 text-amber-200";
 }
 
@@ -247,7 +247,7 @@ export default function OfferCard({ offer, recommended }: OfferCardProps) {
                 href={eflUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="text-xs font-semibold text-brand-blue hover:underline"
+                className="text-xs font-semibold text-brand-navy hover:underline"
                 onClick={(e) => e.stopPropagation()}
               >
                 View EFL
@@ -261,7 +261,7 @@ export default function OfferCard({ offer, recommended }: OfferCardProps) {
                 href={tosUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="text-xs font-semibold text-brand-blue hover:underline"
+                className="text-xs font-semibold text-brand-navy hover:underline"
                 onClick={(e) => e.stopPropagation()}
               >
                 Terms
@@ -272,7 +272,7 @@ export default function OfferCard({ offer, recommended }: OfferCardProps) {
                 href={yracUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="text-xs font-semibold text-brand-blue hover:underline"
+                className="text-xs font-semibold text-brand-navy hover:underline"
                 onClick={(e) => e.stopPropagation()}
               >
                 YRAC

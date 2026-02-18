@@ -106,7 +106,7 @@ export default function HitTheJackWattSocialAdsPage() {
               href="https://www.hitthejackwatt.com"
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 self-start rounded-full border border-brand-blue/30 bg-brand-blue/10 px-4 py-2 text-sm font-semibold uppercase tracking-wide text-brand-blue transition hover:border-brand-blue hover:bg-brand-blue/20"
+              className="inline-flex items-center gap-2 self-start rounded-full border border-brand-blue/30 bg-brand-blue/10 px-4 py-2 text-sm font-semibold uppercase tracking-wide text-brand-navy transition hover:border-brand-blue hover:bg-brand-blue/20"
             >
               View landing site
             </a>
@@ -135,7 +135,7 @@ export default function HitTheJackWattSocialAdsPage() {
                     <button
                       type="button"
                       onClick={() => void handleCopyAdCaption(ad.id, ad.caption)}
-                      className="inline-flex items-center gap-2 rounded-full border border-brand-blue/30 bg-brand-blue/10 px-4 py-2 text-sm font-semibold uppercase tracking-wide text-brand-blue transition hover:border-brand-blue hover:bg-brand-blue/20"
+                      className="inline-flex items-center gap-2 rounded-full border border-brand-blue/30 bg-brand-blue/10 px-4 py-2 text-sm font-semibold uppercase tracking-wide text-brand-navy transition hover:border-brand-blue hover:bg-brand-blue/20"
                     >
                       {copiedAdId === ad.id ? "Caption copied!" : "Copy caption"}
                     </button>

@@ -26,7 +26,7 @@ export default async function UsageEntryGreenButtonPage() {
             <div className="rounded-2xl border border-amber-200/70 bg-amber-100/40 px-5 py-4 text-sm font-medium text-amber-800">
               Temporarily unavailable: {context.loadError}
             </div>
-            <Link href="/dashboard/api" className="inline-flex items-center text-sm font-semibold text-brand-blue underline-offset-4 hover:underline">
+            <Link href="/dashboard/api" className="inline-flex items-center text-sm font-semibold text-brand-navy underline-offset-4 hover:underline">
               ← Back to Usage Entry hub
             </Link>
           </div>
@@ -52,7 +52,7 @@ export default async function UsageEntryGreenButtonPage() {
             <SmtAddressCaptureCard houseAddressId={null} initialAddress={null} />
             <Link
               href="/dashboard/api"
-              className="inline-flex items-center text-sm font-semibold text-brand-blue underline-offset-4 hover:underline"
+              className="inline-flex items-center text-sm font-semibold text-brand-navy underline-offset-4 hover:underline"
             >
               ← Back to Usage Entry hub
             </Link>
@@ -76,7 +76,7 @@ export default async function UsageEntryGreenButtonPage() {
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
           <Link
             href="/dashboard/api"
-            className="inline-flex items-center text-sm font-semibold text-brand-blue underline-offset-4 hover:underline"
+            className="inline-flex items-center text-sm font-semibold text-brand-navy underline-offset-4 hover:underline"
           >
             ← Back to Usage Entry hub
           </Link>

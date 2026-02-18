@@ -15,7 +15,12 @@ body {
   @apply bg-brand-white text-brand-navy;
 }
 
+/* Default links: navy for readability on white (user/admin content areas) */
 a {
+  @apply text-brand-navy hover:text-brand-navy/80 transition duration-200;
+}
+/* Neon link style for use on dark backgrounds only (e.g. .link-brand) */
+a.link-brand {
   @apply text-brand-blue hover:text-brand-cyan transition duration-200;
 }
 

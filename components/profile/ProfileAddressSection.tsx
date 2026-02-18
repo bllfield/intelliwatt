@@ -144,7 +144,7 @@ export function ProfileAddressSection({
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
           <button
             onClick={startAdd}
-            className="inline-flex items-center rounded-full border border-brand-blue bg-brand-blue/20 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-brand-blue transition hover:bg-brand-blue/30 disabled:opacity-60 disabled:cursor-not-allowed"
+            className="inline-flex items-center rounded-full border border-brand-blue bg-brand-blue/20 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-brand-navy transition hover:bg-brand-blue/30 disabled:opacity-60 disabled:cursor-not-allowed"
             disabled={!allowAdd}
           >
             Add another home
@@ -208,7 +208,7 @@ export function ProfileAddressSection({
                   onClick={() => handleHouseSwitch(house.id)}
                   className={`rounded-2xl border px-4 py-3 text-left transition ${
                     isActive
-                      ? "border-brand-blue bg-brand-blue/20 text-brand-blue"
+                      ? "border-brand-blue bg-brand-blue/20 text-brand-navy"
                       : "border-brand-cyan/30 bg-brand-navy/70 text-brand-cyan hover:border-brand-blue/60 hover:text-brand-blue"
                   }`}
                 >

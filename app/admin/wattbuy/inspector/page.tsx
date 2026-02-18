@@ -251,7 +251,7 @@ export default function WattBuyInspector() {
         <div className="font-medium">Fact Card parsing tools moved</div>
         <div className="text-xs text-gray-600 mt-1">
           Use the unified ops page to run batch parses, inspect the review queue, browse templates, and load any plan into the manual loader:{" "}
-          <a className="text-blue-700 underline" href="/admin/efl/fact-cards">
+          <a className="text-brand-navy underline" href="/admin/efl/fact-cards">
             /admin/efl/fact-cards
           </a>
         </div>

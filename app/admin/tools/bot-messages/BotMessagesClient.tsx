@@ -263,7 +263,7 @@ export default function BotMessagesClient() {
                       type="button"
                       onClick={() => void save(p.pageKey)}
                       disabled={isSaving || loading}
-                      className="rounded-full border border-brand-blue/40 bg-brand-blue/10 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-brand-blue hover:border-brand-blue hover:bg-brand-blue/20 disabled:opacity-60"
+                      className="rounded-full border border-brand-blue/40 bg-brand-blue/10 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-brand-navy hover:border-brand-blue hover:bg-brand-blue/20 disabled:opacity-60"
                     >
                       {isSaving ? "Saving…" : "Save / Publish"}
                     </button>

@@ -197,7 +197,7 @@ export default function PlanDetailsClient({ offerId }: { offerId: string }) {
                 ? "/dashboard/current-rate"
                 : `/dashboard/plans/compare/${encodeURIComponent(offerId)}`
             }
-            className="text-sm font-semibold text-brand-blue hover:underline"
+            className="text-sm font-semibold text-brand-navy hover:underline"
           >
             {hasCurrentPlan === false ? "Add current plan details to compare" : "Compare vs your current plan"}
           </Link>

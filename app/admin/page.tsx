@@ -670,13 +670,13 @@ export default function AdminDashboard() {
                     value={adminToken}
                     onChange={(event) => setAdminToken(event.target.value)}
                     placeholder="Admin token"
-                    className="w-40 bg-transparent text-xs font-semibold uppercase tracking-wide text-brand-blue placeholder:text-brand-blue/60 focus:outline-none"
+                    className="w-40 bg-transparent text-xs font-semibold uppercase tracking-wide text-brand-navy placeholder:text-brand-navy/60 focus:outline-none"
                   />
                   {adminToken ? (
                     <button
                       type="button"
                       onClick={() => setAdminToken('')}
-                      className="text-xs font-semibold uppercase tracking-wide text-brand-blue/70 transition hover:text-brand-blue"
+                      className="text-xs font-semibold uppercase tracking-wide text-brand-navy/70 transition hover:text-brand-navy"
                     >
                       Clear
                     </button>
@@ -686,7 +686,7 @@ export default function AdminDashboard() {
                 type="button"
                 onClick={handleRecalculateEntries}
                 disabled={recalculatingEntries || refreshing || recalculatingReferrals}
-                className="inline-flex items-center gap-2 rounded-full border border-brand-blue/40 bg-brand-blue/10 px-4 py-2 font-semibold uppercase tracking-wide text-brand-blue transition hover:border-brand-blue hover:bg-brand-blue/20 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex items-center gap-2 rounded-full border border-brand-blue/40 bg-brand-blue/10 px-4 py-2 font-semibold uppercase tracking-wide text-brand-navy transition hover:border-brand-blue hover:bg-brand-blue/20 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {recalculatingEntries ? 'Resyncing entries…' : 'Re-sync entries'}
               </button>
@@ -694,7 +694,7 @@ export default function AdminDashboard() {
                 type="button"
                 onClick={handleRecalculateReferrals}
                 disabled={recalculatingReferrals || refreshing || recalculatingEntries}
-                className="inline-flex items-center gap-2 rounded-full border border-brand-blue/40 bg-brand-blue/10 px-4 py-2 font-semibold uppercase tracking-wide text-brand-blue transition hover:border-brand-blue hover:bg-brand-blue/20 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex items-center gap-2 rounded-full border border-brand-blue/40 bg-brand-blue/10 px-4 py-2 font-semibold uppercase tracking-wide text-brand-navy transition hover:border-brand-blue hover:bg-brand-blue/20 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {recalculatingReferrals ? 'Replaying referrals…' : 'Re-run referral sync'}
               </button>
@@ -702,7 +702,7 @@ export default function AdminDashboard() {
                 type="button"
                 onClick={fetchData}
                 disabled={refreshing}
-                className="inline-flex items-center gap-2 rounded-full border border-brand-blue/40 bg-brand-blue/10 px-4 py-2 font-semibold uppercase tracking-wide text-brand-blue transition hover:border-brand-blue hover:bg-brand-blue/20 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex items-center gap-2 rounded-full border border-brand-blue/40 bg-brand-blue/10 px-4 py-2 font-semibold uppercase tracking-wide text-brand-navy transition hover:border-brand-blue hover:bg-brand-blue/20 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {refreshing ? 'Refreshing…' : 'Refresh data'}
               </button>
@@ -1636,7 +1636,7 @@ export default function AdminDashboard() {
             <div className="flex gap-2">
               <a
                 href="/admin/users"
-                className="inline-flex items-center gap-2 rounded-full border border-brand-blue/40 bg-brand-blue/10 px-4 py-2 text-sm font-semibold text-brand-blue hover:bg-brand-blue/20"
+                className="inline-flex items-center gap-2 rounded-full border border-brand-blue/40 bg-brand-blue/10 px-4 py-2 text-sm font-semibold text-brand-navy hover:bg-brand-blue/20"
               >
                 Open full Users UI
               </a>
@@ -1839,7 +1839,7 @@ export default function AdminDashboard() {
                       <td className="py-3 px-4">
                         <span className={`px-2 py-1 rounded-full text-xs ${
                           c.status === 'paid' ? 'bg-green-100 text-green-800' :
-                          c.status === 'approved' ? 'bg-blue-100 text-blue-800' :
+                          c.status === 'approved' ? 'bg-blue-100 text-brand-navy' :
                           'bg-yellow-100 text-yellow-800'
                         }`}>
                           {c.status}
@@ -1871,7 +1871,7 @@ export default function AdminDashboard() {
                 type="button"
                 onClick={handleRunJackpotDraw}
                 disabled={runningJackpotDraw || refreshing || recalculatingEntries || recalculatingReferrals}
-                className="inline-flex items-center rounded-full border border-brand-blue/40 bg-brand-blue/10 px-4 py-2 text-sm font-semibold text-brand-blue hover:bg-brand-blue/20 disabled:opacity-60"
+                className="inline-flex items-center rounded-full border border-brand-blue/40 bg-brand-blue/10 px-4 py-2 text-sm font-semibold text-brand-navy hover:bg-brand-blue/20 disabled:opacity-60"
               >
                 {runningJackpotDraw ? 'Running drawing…' : 'Run drawing'}
               </button>

@@ -268,7 +268,7 @@ export function HomeDetailsClient({ houseId }: { houseId: string }) {
               type="button"
               onClick={save}
               disabled={saving}
-              className="rounded-full border border-brand-blue/60 bg-brand-blue/15 px-6 py-2 text-xs font-semibold uppercase tracking-wide text-brand-blue transition hover:border-brand-blue hover:bg-brand-blue/25 disabled:opacity-60"
+              className="rounded-full border border-brand-blue/60 bg-brand-blue/15 px-6 py-2 text-xs font-semibold uppercase tracking-wide text-brand-navy transition hover:border-brand-blue hover:bg-brand-blue/25 disabled:opacity-60"
             >
               {saving ? "Saving…" : "Save"}
             </button>
