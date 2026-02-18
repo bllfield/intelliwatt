@@ -51,7 +51,7 @@ export async function dualWriteUsageIntervals(
 
   const canonicalMeterByEsiid = new Map<string, string>();
 
-  for (const [esiid, rows] of byEsiid.entries()) {
+  for (const [esiid, rows] of Array.from(byEsiid.entries())) {
     const incomingMeters = Array.from(
       new Set(rows.map((r) => cleanMeter((r as any)?.meter))),
     );
@@ -109,7 +109,7 @@ export async function dualWriteUsageIntervals(
   // Apply canonical meter and de-dupe within-batch by (esiid, meter, ts).
   const normalizedData: UsageIntervalCreateInput[] = [];
   const seen = new Set<string>();
-  for (const [esiid, rows] of byEsiid.entries()) {
+  for (const [esiid, rows] of Array.from(byEsiid.entries())) {
     const canonicalMeter = canonicalMeterByEsiid.get(esiid) ?? 'unknown';
     for (const row of rows) {
       const ts = (row as any).ts as Date;
