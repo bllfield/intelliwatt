@@ -63,14 +63,8 @@ export async function GET(request: NextRequest) {
 
     // Best-effort status filtering (status is stored as a string, case varies).
     if (statusFilter === "earned") {
-      where.OR = [
-        ...(where.OR ?? []),
-      ];
       where.status = { in: ["paid", "PAID", "approved", "APPROVED"] };
     } else if (statusFilter === "pending") {
-      where.OR = [
-        ...(where.OR ?? []),
-      ];
       where.NOT = [{ status: { in: ["paid", "PAID", "approved", "APPROVED"] } }];
     }
 
