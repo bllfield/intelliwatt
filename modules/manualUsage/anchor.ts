@@ -6,6 +6,23 @@ function pad2(n: number): string {
   return String(n).padStart(2, "0");
 }
 
+function daysInUtcMonth(year: number, monthIndex0: number): number {
+  // monthIndex0: 0-11
+  return new Date(Date.UTC(year, monthIndex0 + 1, 0)).getUTCDate();
+}
+
+export function anchorEndDateUtc(anchorEndMonth: string, billEndDay: number): Date | null {
+  const m = /^(\d{4})-(\d{2})$/.exec(String(anchorEndMonth ?? "").trim());
+  if (!m) return null;
+  const year = Number(m[1]);
+  const monthIndex0 = Number(m[2]) - 1;
+  if (!Number.isFinite(year) || !Number.isFinite(monthIndex0) || monthIndex0 < 0 || monthIndex0 > 11) return null;
+
+  const dim = daysInUtcMonth(year, monthIndex0);
+  const day = Math.max(1, Math.min(dim, Math.trunc(billEndDay)));
+  return new Date(Date.UTC(year, monthIndex0, day, 0, 0, 0, 0));
+}
+
 export function monthAdd(ym: string, delta: number): string {
   const m = /^(\d{4})-(\d{2})$/.exec(String(ym ?? "").trim());
   if (!m) return ym;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lastFullMonthChicago, monthsEndingAt } from "@/modules/manualUsage/anchor";
+import { anchorEndDateUtc, lastFullMonthChicago, monthsEndingAt } from "@/modules/manualUsage/anchor";
 
 describe("manualUsage monthly anchor labeling", () => {
   it("lastFullMonthChicago returns previous month in Chicago", () => {
@@ -13,6 +13,12 @@ describe("manualUsage monthly anchor labeling", () => {
     expect(months[0]).toBe("2025-02");
     expect(months[11]).toBe("2026-01");
     expect(months).toHaveLength(12);
+  });
+
+  it("anchorEndDateUtc clamps bill end day to month length", () => {
+    expect(anchorEndDateUtc("2026-02", 31)?.toISOString().slice(0, 10)).toBe("2026-02-28");
+    expect(anchorEndDateUtc("2024-02", 31)?.toISOString().slice(0, 10)).toBe("2024-02-29"); // leap year
+    expect(anchorEndDateUtc("2026-04", 31)?.toISOString().slice(0, 10)).toBe("2026-04-30");
   });
 });
 

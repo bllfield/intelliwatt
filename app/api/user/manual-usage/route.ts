@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
+import { anchorEndDateUtc } from "@/modules/manualUsage/anchor";
 
 type TravelRange = { startDate: string; endDate: string };
 
@@ -124,6 +125,10 @@ export async function POST(request: NextRequest) {
       }
       anchorEndMonth = payload.anchorEndMonth.trim();
       const billEndDay = clampInt(payload.billEndDay, 1, 31);
+      anchorEndDate = anchorEndDateUtc(anchorEndMonth, billEndDay);
+      if (!anchorEndDate) {
+        return NextResponse.json({ ok: false, error: "anchorEndMonth_invalid" }, { status: 400 });
+      }
       const monthly = Array.isArray(payload.monthlyKwh) ? payload.monthlyKwh.slice(0, 12) : [];
       const cleaned = monthly.map((r) => ({
         month: String((r as any)?.month ?? "").trim(),
