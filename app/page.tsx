@@ -371,7 +371,7 @@ function LandingPageContent() {
             </div>
             <div className="text-center">
               <div className="text-4xl font-bold text-brand-blue mb-2">{setupMinutes} minutes</div>
-              <div className="text-brand-white">Setup Time</div>
+              <div className="text-brand-white">Average set up time</div>
             </div>
             <div className="text-center">
               <div className="text-4xl font-bold text-brand-blue mb-2">
