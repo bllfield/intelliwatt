@@ -24,6 +24,9 @@ export default function BotMessagesClient() {
   const [pages, setPages] = useState<PageRow[]>([]);
   const [drafts, setDrafts] = useState<Record<string, { enabled: boolean; message: string }>>({});
   const [newEventByBase, setNewEventByBase] = useState<Record<string, string>>({});
+  const [setupTimeMinutes, setSetupTimeMinutes] = useState<number>(10);
+  const [setupTimeSaving, setSetupTimeSaving] = useState(false);
+  const [landingSettingsLoaded, setLandingSettingsLoaded] = useState(false);
 
   useEffect(() => {
     try {
@@ -80,10 +83,31 @@ export default function BotMessagesClient() {
     }
   }
 
+  async function loadLandingSettings() {
+    if (!adminToken.trim()) return;
+    try {
+      const r = await fetch("/api/admin/landing-settings", { headers, cache: "no-store" });
+      const j = (await r.json().catch(() => null)) as { ok: boolean; setupTimeMinutes?: number } | null;
+      if (r.ok && j?.ok && typeof j.setupTimeMinutes === "number") {
+        setSetupTimeMinutes(Math.max(1, Math.min(120, Math.round(j.setupTimeMinutes))));
+      }
+    } catch {
+      // ignore
+    } finally {
+      setLandingSettingsLoaded(true);
+    }
+  }
+
   useEffect(() => {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (adminToken.trim()) void loadLandingSettings();
+    else setLandingSettingsLoaded(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken]);
 
   async function save(pageKey: string) {
     const d = drafts[pageKey];
@@ -143,6 +167,30 @@ export default function BotMessagesClient() {
     setNewEventByBase((prev) => ({ ...prev, [baseKey]: "" }));
   }
 
+  async function saveSetupTime() {
+    const mins = Math.max(1, Math.min(120, Math.round(Number(setupTimeMinutes))));
+    if (!Number.isFinite(mins)) return;
+    setSetupTimeSaving(true);
+    setError(null);
+    try {
+      const r = await fetch("/api/admin/landing-settings", {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ setupTimeMinutes: mins }),
+      });
+      const j = (await r.json().catch(() => null)) as { ok: boolean; setupTimeMinutes?: number; error?: string } | null;
+      if (!r.ok || !j?.ok) {
+        setError(j?.error ?? `Save failed (${r.status})`);
+        return;
+      }
+      if (typeof j.setupTimeMinutes === "number") setSetupTimeMinutes(j.setupTimeMinutes);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSetupTimeSaving(false);
+    }
+  }
+
   return (
     <div className="mx-auto w-full max-w-6xl p-6">
       <div className="rounded-3xl border border-brand-cyan/25 bg-brand-navy p-6 text-brand-cyan shadow-[0_18px_40px_rgba(10,20,60,0.35)]">
@@ -175,6 +223,39 @@ export default function BotMessagesClient() {
         </div>
 
         {error ? <div className="mt-4 rounded-2xl border border-rose-400/40 bg-rose-500/10 p-3 text-sm text-rose-200">{error}</div> : null}
+
+        {/* Landing page setup time — drives "Setup Time" and "$/hr of work" on main landing */}
+        {landingSettingsLoaded ? (
+          <div className="mt-6 rounded-2xl border border-brand-cyan/20 bg-brand-white/5 p-4">
+            <div className="text-sm font-semibold text-brand-white">Landing page setup time</div>
+            <p className="mt-1 text-xs text-brand-cyan/70">
+              Minutes used for the main landing page “Setup Time” stat and “$/hr of work” (average savings ÷ this number × 60).
+              Tune this to match real setup time for a better $/hr average.
+            </p>
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <input
+                type="number"
+                min={1}
+                max={120}
+                value={setupTimeMinutes}
+                onChange={(e) => {
+                  const v = e.target.value === "" ? 10 : Number(e.target.value);
+                  if (Number.isFinite(v)) setSetupTimeMinutes(Math.max(1, Math.min(120, Math.round(v))));
+                }}
+                className="w-24 rounded-xl border border-brand-cyan/25 bg-brand-white/5 px-3 py-2 text-sm text-brand-white outline-none focus:border-brand-blue/60 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+              />
+              <span className="text-sm text-brand-cyan/80">minutes</span>
+              <button
+                type="button"
+                onClick={() => void saveSetupTime()}
+                disabled={setupTimeSaving || !adminToken.trim()}
+                className="rounded-full border border-brand-blue/40 bg-brand-blue/10 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-brand-navy hover:bg-brand-blue/20 disabled:opacity-60"
+              >
+                {setupTimeSaving ? "Saving…" : "Save"}
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         <div className="mt-6 space-y-4">
           {pages.map((p) => {

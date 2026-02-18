@@ -20,6 +20,16 @@ function isFiniteNumber(v: unknown): v is number {
   return typeof v === "number" && Number.isFinite(v);
 }
 
+const FLAG_LANDING_SETUP_TIME_MINUTES = "public:landing_setup_time_minutes";
+const DEFAULT_SETUP_TIME_MINUTES = 10;
+
+function parseSetupTimeMinutes(raw: string | null): number {
+  if (raw == null || raw === "") return DEFAULT_SETUP_TIME_MINUTES;
+  const n = Number(String(raw).trim());
+  if (!Number.isFinite(n)) return DEFAULT_SETUP_TIME_MINUTES;
+  return Math.max(1, Math.min(120, Math.round(n)));
+}
+
 export async function GET() {
   try {
     const now = new Date();
@@ -74,12 +84,19 @@ export async function GET() {
     // “Total savings” should not go down due to negative deltas; treat extra-cost cases as 0 for the running total.
     const totalSwitchedSavings = switchedValues.reduce((sum: number, v: number) => sum + Math.max(0, v), 0);
 
+    const setupTimeFlag = await (db as any).featureFlag.findUnique({
+      where: { key: FLAG_LANDING_SETUP_TIME_MINUTES },
+      select: { value: true },
+    }).catch(() => null);
+    const setupTimeMinutes = parseSetupTimeMinutes(setupTimeFlag?.value ?? null);
+
     return NextResponse.json({
       ok: true,
       analyzedUsers,
       avgSavingsDollars: avg,
       switchedUsers: switchedValues.length,
       totalSwitchedSavingsDollars: totalSwitchedSavings,
+      setupTimeMinutes,
       // Policy metadata for transparency/debugging.
       policy: {
         averageExcludesEtf: true,

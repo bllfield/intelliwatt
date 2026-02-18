@@ -347,9 +347,11 @@ function LandingPageContent() {
           
           {/* Hero Stats */}
           {(() => {
-            const SETUP_MINUTES = 5;
+            const setupMinutes = typeof publicStats?.setupTimeMinutes === 'number' && Number.isFinite(publicStats.setupTimeMinutes) && publicStats.setupTimeMinutes > 0
+              ? publicStats.setupTimeMinutes
+              : 10;
             const avgSavings = typeof publicStats?.avgSavingsDollars === 'number' && Number.isFinite(publicStats.avgSavingsDollars) ? publicStats.avgSavingsDollars : null;
-            const savingsPerHr = avgSavings != null && SETUP_MINUTES > 0 ? (avgSavings / SETUP_MINUTES) * 60 : null;
+            const savingsPerHr = avgSavings != null && setupMinutes > 0 ? (avgSavings / setupMinutes) * 60 : null;
             return (
           <div className="grid gap-8 mb-16 md:grid-cols-2 lg:grid-cols-4">
             <div className="text-center">
@@ -368,7 +370,7 @@ function LandingPageContent() {
               <div className="text-brand-white">Total savings (switched users)</div>
             </div>
             <div className="text-center">
-              <div className="text-4xl font-bold text-brand-blue mb-2">{SETUP_MINUTES} minutes</div>
+              <div className="text-4xl font-bold text-brand-blue mb-2">{setupMinutes} minutes</div>
               <div className="text-brand-white">Setup Time</div>
             </div>
             <div className="text-center">
