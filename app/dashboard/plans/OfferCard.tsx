@@ -144,18 +144,20 @@ export default function OfferCard({ offer, recommended }: OfferCardProps) {
         tceReason.includes("MISSING TEMPLATE") ||
         tceReason.includes("MISSING BUCKET"))) ||
     // Template missing can be transient (prefetch/pipeline may be building it); treat as calculating on the card.
-    tceStatus === "MISSING_TEMPLATE";
+    tceStatus === "MISSING_TEMPLATE" ||
+    // Backend says QUEUED but no estimate yet → still processing.
+    (status === "QUEUED" && !(tce?.status === "OK" || tce?.status === "APPROXIMATE") && !isUnsupported);
 
   const statusKind: "AVAILABLE" | "CALCULATING" | "NEED_USAGE" | "NOT_COMPUTABLE_YET" =
     tceStatus === "MISSING_USAGE"
       ? "NEED_USAGE"
       : isMissingBuckets
         ? "NEED_USAGE"
-      : status === "AVAILABLE"
-        ? "AVAILABLE"
-        : isCalculating
-          ? "CALCULATING"
-          : "NOT_COMPUTABLE_YET";
+        : status === "AVAILABLE" && (tce?.status === "OK" || tce?.status === "APPROXIMATE")
+          ? "AVAILABLE"
+          : isCalculating
+            ? "CALCULATING"
+            : "NOT_COMPUTABLE_YET";
   const statusText =
     statusKind === "NEED_USAGE"
       ? "NEED USAGE"
@@ -247,7 +249,7 @@ export default function OfferCard({ offer, recommended }: OfferCardProps) {
                 href={eflUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="text-xs font-semibold text-brand-navy hover:underline"
+                className="link-brand text-xs font-semibold hover:underline"
                 onClick={(e) => e.stopPropagation()}
               >
                 View EFL
@@ -261,7 +263,7 @@ export default function OfferCard({ offer, recommended }: OfferCardProps) {
                 href={tosUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="text-xs font-semibold text-brand-navy hover:underline"
+                className="link-brand text-xs font-semibold hover:underline"
                 onClick={(e) => e.stopPropagation()}
               >
                 Terms

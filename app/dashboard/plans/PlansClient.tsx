@@ -443,8 +443,10 @@ export default function PlansClient() {
     const offersNow = Array.isArray(resp?.offers) ? (resp!.offers as OfferRow[]) : [];
     const pending = pendingCountFromResponse(resp);
     const classify = (o: any): "AVAILABLE" | "NEED_USAGE" | "CALCULATING" | "UNAVAILABLE" => {
-      const tceStatus = String((o as any)?.intelliwatt?.trueCostEstimate?.status ?? "").toUpperCase();
-      const tceReason = String((o as any)?.intelliwatt?.trueCostEstimate?.reason ?? "").toUpperCase();
+      const tce = (o as any)?.intelliwatt?.trueCostEstimate;
+      const tceStatus = String(tce?.status ?? "").toUpperCase();
+      const tceReason = String(tce?.reason ?? (o as any)?.intelliwatt?.statusReason ?? "").toUpperCase();
+      const statusLabel = String((o as any)?.intelliwatt?.statusLabel ?? "").toUpperCase();
       if (tceStatus === "OK" || tceStatus === "APPROXIMATE") return "AVAILABLE";
       if (tceStatus === "MISSING_USAGE") return "NEED_USAGE";
       if (tceStatus === "NOT_IMPLEMENTED" && tceReason === "MISSING_BUCKETS") return "NEED_USAGE";
@@ -453,7 +455,13 @@ export default function PlansClient() {
       // Keep this aligned with OfferCard's customer-facing language.
       const calculating =
         tceStatus === "MISSING_TEMPLATE" ||
-        (tceStatus === "NOT_IMPLEMENTED" && tceReason === "CACHE_MISS");
+        (tceStatus === "NOT_IMPLEMENTED" &&
+          (tceReason === "CACHE_MISS" ||
+            tceReason.includes("MISSING TEMPLATE") ||
+            tceReason.includes("MISSING BUCKET"))) ||
+        (statusLabel === "QUEUED" &&
+          tce?.status !== "OK" &&
+          tce?.status !== "APPROXIMATE");
       if (calculating) return "CALCULATING";
 
       // Everything else is currently unavailable (true defects, temporary lookups, etc).
