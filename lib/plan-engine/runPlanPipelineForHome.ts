@@ -173,9 +173,9 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
     latest: latestJob,
     now: new Date(),
     monthlyCadenceDays,
-    // Vercel maxDuration is 5 minutes for our pipeline routes. If a job stays RUNNING longer than a few minutes,
-    // it is almost certainly stale (killed/timeout) and should not block auto-recovery/auto-queueing.
-    maxRunningMinutes: 3,
+    // RUNNING jobs that don't write DONE (e.g. platform timeout/crash) must not block plans. Treat as stale after 2 min
+    // so the next trigger can start a new run and pending plans can keep processing.
+    maxRunningMinutes: 2,
     requiredCalcVersion: PLAN_ENGINE_ESTIMATE_VERSION,
     enforceCadence,
   });
@@ -520,10 +520,13 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
     ),
   );
 
+  // Stable order so each run processes the same "remaining" set: we skip cached and compute up to maxEstimatePlans,
+  // so the next run continues from the same tail instead of non-deterministic order.
   const ratePlans =
     ratePlanIds.length > 0
       ? await (prisma as any).ratePlan.findMany({
           where: { id: { in: ratePlanIds } },
+          orderBy: { id: "asc" as const },
           select: { id: true, rateStructure: true, requiredBucketKeys: true, planCalcStatus: true, planCalcReasonCode: true },
         })
       : [];
@@ -1031,7 +1034,7 @@ export async function runPlanPipelineForHome(args: RunPlanPipelineForHomeArgs): 
         try {
           const notes = typeof m?.notes === "string" ? m.notes : "";
           const confirmed = m?.lastConfirmedAt instanceof Date;
-          return !confirmed && /imported\s+from\s+uploaded\s+bill/i.test(notes);
+          return !confirmed && /imported\\s+from\\s+uploaded\\s+bill/i.test(notes);
         } catch {
           return false;
         }

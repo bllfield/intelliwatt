@@ -11,6 +11,7 @@ import { estimateTrueCost } from "@/lib/plan-engine/estimateTrueCost";
 import { getCachedPlanEstimate, putCachedPlanEstimate, sha256Hex as sha256HexCache } from "@/lib/plan-engine/planEstimateCache";
 import { PLAN_ENGINE_ESTIMATE_VERSION, makePlanEstimateInputsSha256 } from "@/lib/plan-engine/estimateInputsKey";
 import { getMaterializedPlanEstimate } from "@/lib/plan-engine/materializedEstimateStore";
+import { getLatestPlanPipelineJob } from "@/lib/plan-engine/planPipelineJob";
 import { wattbuyOffersPrisma } from "@/lib/db/wattbuyOffersClient";
 import { usagePrisma } from "@/lib/db/usageClient";
 import { buildUsageBucketsForEstimate } from "@/lib/usage/buildUsageBucketsForEstimate";
@@ -359,6 +360,26 @@ export async function GET(req: NextRequest) {
     // Must be declared before any downstream usage-window / display logic uses it.
     const usageSummaryTotalKwh = numOrNull((usageSummary as any)?.totalKwh);
 
+    // Use the pipeline's last calc window for bucket build when available so cache keys match pipeline writes.
+    // This prevents "58 available" from flipping to "58 pending" when new usage arrives (different window = different key).
+    let usageWindowEndForCalc = usageWindowEnd;
+    let usageCutoffForCalc = usageCutoff;
+    if (house.id) {
+      try {
+        const latestJob = await getLatestPlanPipelineJob(house.id);
+        const windowEndIso = latestJob?.lastCalcWindowEnd;
+        if (windowEndIso && typeof windowEndIso === "string") {
+          const d = new Date(windowEndIso);
+          if (Number.isFinite(d.getTime())) {
+            usageWindowEndForCalc = d;
+            usageCutoffForCalc = new Date(d.getTime() - 365 * DAY_MS);
+          }
+        }
+      } catch {
+        // ignore; use latest SMT window
+      }
+    }
+
     // Canonical calc buckets (stitched 12 months). We'll fill after we know requiredBucketKeys.
     let recentYearMonths: string[] = [];
     let bucketPresenceByKey: Map<string, Set<string>> = new Map();
@@ -699,8 +720,8 @@ export async function GET(req: NextRequest) {
             usageSource: "SMT",
             esiid: house.esiid,
             rawId: null,
-            windowEnd: usageWindowEnd,
-            cutoff: usageCutoff,
+            windowEnd: usageWindowEndForCalc,
+            cutoff: usageCutoffForCalc,
             requiredBucketKeys: Array.from(unionKeys),
             monthsCount: 12,
             maxStepDays: 2,

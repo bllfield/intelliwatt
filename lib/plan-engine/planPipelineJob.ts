@@ -72,14 +72,14 @@ export function shouldStartPlanPipelineJob(args: {
   latest: PlanPipelineJobPayload | null;
   now?: Date;
   monthlyCadenceDays?: number; // default 30
-  maxRunningMinutes?: number; // default 3 (pipeline runs are time-budgeted; stale RUNNING jobs must not block)
+  maxRunningMinutes?: number; // default 2 (stale RUNNING e.g. timeout must not block plans; allow new run after this many minutes)
   requiredCalcVersion?: string | null;
   enforceCadence?: boolean; // default true
 }): { okToStart: boolean; reason: string } {
   const now = args.now ?? new Date();
   const latest = args.latest;
   const cadenceDays = Number.isFinite(args.monthlyCadenceDays ?? NaN) ? (args.monthlyCadenceDays as number) : 30;
-  const maxRunningMin = Number.isFinite(args.maxRunningMinutes ?? NaN) ? (args.maxRunningMinutes as number) : 3;
+  const maxRunningMin = Number.isFinite(args.maxRunningMinutes ?? NaN) ? (args.maxRunningMinutes as number) : 2;
   const requiredCalcVersion = typeof args.requiredCalcVersion === "string" ? args.requiredCalcVersion.trim() : "";
   const enforceCadence = args.enforceCadence !== false;
 
