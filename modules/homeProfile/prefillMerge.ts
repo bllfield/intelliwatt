@@ -30,6 +30,9 @@ export type HomeDetailsFormState = {
   fuelConfiguration: string;
 };
 
+const DEFAULT_SUMMER_TEMP = 73;
+const DEFAULT_WINTER_TEMP = 70;
+
 export function mergePrefillIntoHomeDetailsState(state: HomeDetailsFormState, prefill: HomePrefill): HomeDetailsFormState {
   const next = { ...state };
   if (next.homeAge === "" && prefill?.homeAge?.value != null) next.homeAge = prefill.homeAge.value;
@@ -39,8 +42,18 @@ export function mergePrefillIntoHomeDetailsState(state: HomeDetailsFormState, pr
   if (!next.insulationType && prefill?.insulationType?.value) next.insulationType = prefill.insulationType.value;
   if (!next.windowType && prefill?.windowType?.value) next.windowType = prefill.windowType.value;
   if (!next.foundation && prefill?.foundation?.value) next.foundation = prefill.foundation.value;
-  if (next.summerTemp === "" && prefill?.summerTemp?.value != null) next.summerTemp = prefill.summerTemp.value;
-  if (next.winterTemp === "" && prefill?.winterTemp?.value != null) next.winterTemp = prefill.winterTemp.value;
+  if (
+    (next.summerTemp === "" || next.summerTemp === DEFAULT_SUMMER_TEMP) &&
+    prefill?.summerTemp?.value != null
+  ) {
+    next.summerTemp = prefill.summerTemp.value;
+  }
+  if (
+    (next.winterTemp === "" || next.winterTemp === DEFAULT_WINTER_TEMP) &&
+    prefill?.winterTemp?.value != null
+  ) {
+    next.winterTemp = prefill.winterTemp.value;
+  }
   return next;
 }
 

@@ -34,6 +34,35 @@ describe("homeProfile prefill merge rules", () => {
     expect(merged.summerTemp).toBe(74);
   });
 
+  it("overrides default temps when prefill provides values", () => {
+    const merged = mergePrefillIntoHomeDetailsState(
+      {
+        homeAge: "",
+        homeStyle: "",
+        squareFeet: "",
+        stories: "",
+        insulationType: "",
+        windowType: "",
+        foundation: "",
+        ledLights: false,
+        smartThermostat: false,
+        summerTemp: 73,
+        winterTemp: 70,
+        occupantsWork: "",
+        occupantsSchool: "",
+        occupantsHomeAllDay: "",
+        fuelConfiguration: "",
+      },
+      {
+        summerTemp: { value: 76, source: "PREFILL" },
+        winterTemp: { value: 68, source: "PREFILL" },
+      },
+    );
+
+    expect(merged.summerTemp).toBe(76);
+    expect(merged.winterTemp).toBe(68);
+  });
+
   it("fills only empty fields", () => {
     const merged = mergePrefillIntoHomeDetailsState(
       {
