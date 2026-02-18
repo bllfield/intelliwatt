@@ -7,6 +7,36 @@ import { normalizeEmail } from "@/lib/utils/email";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+type ApplianceRow = { id: string; type: string; data: Record<string, any> };
+type ApplianceProfilePayloadV1 = {
+  version: 1;
+  fuelConfiguration: string;
+  appliances: ApplianceRow[];
+};
+
+function requireNonEmptyString(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const s = v.trim();
+  return s.length ? s : null;
+}
+
+function normalizeStoredProfile(raw: any): ApplianceProfilePayloadV1 {
+  // Back-compat: older records stored just an array of rows.
+  if (Array.isArray(raw)) {
+    return {
+      version: 1,
+      fuelConfiguration: "",
+      appliances: raw as any,
+    };
+  }
+
+  const version = raw?.version === 1 ? 1 : 1;
+  const fuelConfiguration = typeof raw?.fuelConfiguration === "string" ? raw.fuelConfiguration : "";
+  const appliances = Array.isArray(raw?.appliances) ? raw.appliances : [];
+
+  return { version, fuelConfiguration, appliances };
+}
+
 async function requireUser() {
   const cookieStore = cookies();
   const rawEmail = cookieStore.get("intelliwatt_user")?.value ?? null;
@@ -56,10 +86,15 @@ export async function GET(request: NextRequest) {
       })
       .catch(() => null);
 
+    const profile = normalizeStoredProfile((rec?.appliancesJson as any) ?? null);
+
     return NextResponse.json({
       ok: true,
       houseId,
-      appliances: (rec?.appliancesJson as any) ?? [],
+      profile,
+      // Back-compat: keep these top-level keys for older clients.
+      appliances: profile.appliances,
+      fuelConfiguration: profile.fuelConfiguration,
       updatedAt: rec?.updatedAt ? new Date(rec.updatedAt).toISOString() : null,
     });
   } catch (e) {
@@ -77,7 +112,22 @@ export async function POST(request: NextRequest) {
     const houseId = await resolveHouseId(u.user.id, typeof body?.houseId === "string" ? body.houseId : null);
     if (!houseId) return NextResponse.json({ ok: false, error: "house_required" }, { status: 400 });
 
-    const appliances = Array.isArray(body?.appliances) ? body.appliances : [];
+    const incomingProfile = body?.profile ?? null;
+    const appliances = Array.isArray(incomingProfile?.appliances)
+      ? incomingProfile.appliances
+      : Array.isArray(body?.appliances)
+        ? body.appliances
+        : [];
+    const fuelConfiguration =
+      requireNonEmptyString(incomingProfile?.fuelConfiguration) ??
+      requireNonEmptyString(body?.fuelConfiguration) ??
+      null;
+
+    // Mandatory: fuel configuration selection (everything else is optional).
+    if (!fuelConfiguration) {
+      return NextResponse.json({ ok: false, error: "fuelConfiguration_required" }, { status: 400 });
+    }
+
     // Minimal validation: require a type on each row.
     for (let i = 0; i < appliances.length; i++) {
       const t = appliances[i]?.type;
@@ -86,10 +136,16 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    const profileToStore: ApplianceProfilePayloadV1 = {
+      version: 1,
+      fuelConfiguration,
+      appliances,
+    };
+
     const rec = await (appliancesPrisma as any).applianceProfileSimulated.upsert({
       where: { userId_houseId: { userId: u.user.id, houseId } },
-      create: { userId: u.user.id, houseId, appliancesJson: appliances },
-      update: { appliancesJson: appliances },
+      create: { userId: u.user.id, houseId, appliancesJson: profileToStore },
+      update: { appliancesJson: profileToStore },
       select: { updatedAt: true },
     });
 
