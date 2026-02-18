@@ -40,6 +40,7 @@ type SortKey =
   | "savingsToEndNet"
   | "savings12Net"
   | "monthlyNoEtf"
+  | "entriesEligible"
   | "hasUsage"
   | "hasSmt"
   | "switched";
@@ -51,6 +52,7 @@ function parseSort(v: string | null): SortKey {
   if (s === "contractEnd") return "contractEnd";
   if (s === "savings12Net") return "savings12Net";
   if (s === "monthlyNoEtf") return "monthlyNoEtf";
+  if (s === "entriesEligible") return "entriesEligible";
   if (s === "hasUsage") return "hasUsage";
   if (s === "hasSmt") return "hasSmt";
   if (s === "switched") return "switched";
@@ -81,6 +83,33 @@ function daysUntil(d: Date, now: Date): number | null {
   if (!Number.isFinite(t) || !Number.isFinite(n)) return null;
   const DAY_MS = 24 * 60 * 60 * 1000;
   return Math.floor((t - n) / DAY_MS);
+}
+
+type EntryStatus = "ACTIVE" | "EXPIRING_SOON" | "EXPIRED";
+
+function normStatus(v: unknown): string {
+  return String(v ?? "").trim().toLowerCase();
+}
+
+function isEarnedCommissionStatus(v: unknown): boolean {
+  const s = normStatus(v);
+  // Current UI uses `paid` and `approved`; treat both as earned.
+  return s === "paid" || s === "approved";
+}
+
+function isPendingCommissionStatus(v: unknown): boolean {
+  const s = normStatus(v);
+  if (!s) return false;
+  // Anything not earned is considered pending for tracking.
+  return !isEarnedCommissionStatus(s);
+}
+
+function bestEntryStatus(statuses: EntryStatus[]): EntryStatus | null {
+  // Preference order for a single badge: ACTIVE > EXPIRING_SOON > EXPIRED
+  if (statuses.includes("ACTIVE")) return "ACTIVE";
+  if (statuses.includes("EXPIRING_SOON")) return "EXPIRING_SOON";
+  if (statuses.includes("EXPIRED")) return "EXPIRED";
+  return null;
 }
 
 export async function GET(request: NextRequest) {
@@ -219,15 +248,85 @@ export async function GET(request: NextRequest) {
         : [];
     const housesWithGb = new Set<string>(gbUploads.map((r) => String(r.houseId)));
 
-    const commissionRows =
+    const [commissionRows, referralRows, entryRows, profileRows] = await Promise.all([
       userIds.length > 0
-        ? await db.commissionRecord.findMany({
+        ? db.commissionRecord.findMany({
             where: { userId: { in: userIds } },
-            select: { userId: true },
-            distinct: ["userId"],
+            select: { userId: true, amount: true, status: true },
           })
-        : [];
-    const switchedUserIds = new Set<string>(commissionRows.map((r) => String(r.userId)));
+        : Promise.resolve([]),
+      userIds.length > 0
+        ? db.referral.findMany({
+            where: { referredById: { in: userIds } },
+            select: { referredById: true, status: true },
+          })
+        : Promise.resolve([]),
+      userIds.length > 0
+        ? db.entry.findMany({
+            where: { userId: { in: userIds } },
+            select: {
+              userId: true,
+              type: true,
+              amount: true,
+              status: true,
+              expiresAt: true,
+              expirationReason: true,
+            },
+          })
+        : Promise.resolve([]),
+      userIds.length > 0
+        ? (db as any).userProfile.findMany({
+            where: { userId: { in: userIds } },
+            select: {
+              userId: true,
+              _count: { select: { appliances: true } },
+            },
+          })
+        : Promise.resolve([]),
+    ]);
+
+    const commissionAgg = new Map<
+      string,
+      { earnedDollars: number; pendingDollars: number }
+    >();
+    for (const row of commissionRows as any[]) {
+      const uid = String(row.userId);
+      const amt = typeof row.amount === "number" && Number.isFinite(row.amount) ? Number(row.amount) : 0;
+      const cur = commissionAgg.get(uid) ?? { earnedDollars: 0, pendingDollars: 0 };
+      if (isEarnedCommissionStatus(row.status)) cur.earnedDollars += amt;
+      else if (isPendingCommissionStatus(row.status)) cur.pendingDollars += amt;
+      commissionAgg.set(uid, cur);
+    }
+    const switchedUserIds = new Set<string>(Array.from(commissionAgg.keys()));
+
+    const referralAgg = new Map<
+      string,
+      { total: number; pending: number; qualified: number }
+    >();
+    for (const row of referralRows as any[]) {
+      const uid = String(row.referredById);
+      const st = String(row.status ?? "").trim().toUpperCase();
+      const cur = referralAgg.get(uid) ?? { total: 0, pending: 0, qualified: 0 };
+      cur.total += 1;
+      if (st === "PENDING") cur.pending += 1;
+      if (st === "QUALIFIED") cur.qualified += 1;
+      referralAgg.set(uid, cur);
+    }
+
+    const applianceCountByUser = new Map<string, number>();
+    for (const p of profileRows as any[]) {
+      const uid = String(p.userId);
+      const n = Number(p?._count?.appliances ?? 0);
+      applianceCountByUser.set(uid, Number.isFinite(n) ? n : 0);
+    }
+
+    const entriesByUser = new Map<string, Array<any>>();
+    for (const e of entryRows as any[]) {
+      const uid = String(e.userId);
+      const arr = entriesByUser.get(uid) ?? [];
+      arr.push(e);
+      entriesByUser.set(uid, arr);
+    }
 
     type Row = {
       userId: string;
@@ -253,6 +352,22 @@ export async function GET(request: NextRequest) {
       monthlySavingsNoEtf: number | null; // dollars per month, no ETF (matches portal "Monthly savings")
       monthlySavingsBasis: "TO_CONTRACT_END" | "NEXT_12_MONTHS" | null;
       monthlySavingsBasisMonths: number | null;
+      referralsTotal: number;
+      referralsPending: number;
+      referralsQualified: number;
+      applianceCount: number;
+      // Entries summary for the drawing pool
+      entriesEligibleTotal: number;
+      entriesExpiredTotal: number;
+      smartMeterEntryStatus: EntryStatus | null;
+      currentPlanEntryStatus: EntryStatus | null;
+      homeDetailsEntryStatus: EntryStatus | null;
+      applianceDetailsEntryStatus: EntryStatus | null;
+      testimonialEntryStatus: EntryStatus | null;
+      referralEntriesTotal: number;
+      // Commissions
+      commissionLifetimeEarnedDollars: number;
+      commissionPendingDollars: number;
       snapshotComputedAt: string | null;
     };
 
@@ -301,6 +416,42 @@ export async function GET(request: NextRequest) {
               safeMonthlyFromTotal(snap?.savingsNext12MonthsNoEtf, 12) ??
               null);
 
+      const rAgg = referralAgg.get(u.id) ?? { total: 0, pending: 0, qualified: 0 };
+      const applianceCount = applianceCountByUser.get(u.id) ?? 0;
+
+      const userEntries = entriesByUser.get(u.id) ?? [];
+      let entriesEligibleTotal = 0;
+      let entriesExpiredTotal = 0;
+      const statusesByType = new Map<string, EntryStatus[]>();
+      let referralEntriesTotal = 0;
+
+      for (const e of userEntries) {
+        const amt = typeof e.amount === "number" && Number.isFinite(e.amount) ? Number(e.amount) : 0;
+        const st = String(e.status ?? "").trim().toUpperCase() as EntryStatus;
+        if (st === "ACTIVE" || st === "EXPIRING_SOON") entriesEligibleTotal += amt;
+        if (st === "EXPIRED") entriesExpiredTotal += amt;
+
+        const type = String(e.type ?? "").trim();
+        if (type) {
+          const arr = statusesByType.get(type) ?? [];
+          if (st === "ACTIVE" || st === "EXPIRING_SOON" || st === "EXPIRED") {
+            arr.push(st);
+            statusesByType.set(type, arr);
+          }
+        }
+        if (type === "referral") {
+          referralEntriesTotal += amt;
+        }
+      }
+
+      const smartMeterEntryStatus = bestEntryStatus(statusesByType.get("smart_meter_connect") ?? []);
+      const currentPlanEntryStatus = bestEntryStatus(statusesByType.get("current_plan_details") ?? []);
+      const homeDetailsEntryStatus = bestEntryStatus(statusesByType.get("home_details_complete") ?? []);
+      const applianceDetailsEntryStatus = bestEntryStatus(statusesByType.get("appliance_details_complete") ?? []);
+      const testimonialEntryStatus = bestEntryStatus(statusesByType.get("testimonial") ?? []);
+
+      const comm = commissionAgg.get(u.id) ?? { earnedDollars: 0, pendingDollars: 0 };
+
       return {
         userId: u.id,
         email: u.email,
@@ -344,6 +495,20 @@ export async function GET(request: NextRequest) {
             : null,
         monthlySavingsBasis: monthlyBasisKind,
         monthlySavingsBasisMonths: basisMonths,
+        referralsTotal: rAgg.total,
+        referralsPending: rAgg.pending,
+        referralsQualified: rAgg.qualified,
+        applianceCount,
+        entriesEligibleTotal: Math.max(0, Math.trunc(entriesEligibleTotal)),
+        entriesExpiredTotal: Math.max(0, Math.trunc(entriesExpiredTotal)),
+        smartMeterEntryStatus,
+        currentPlanEntryStatus,
+        homeDetailsEntryStatus,
+        applianceDetailsEntryStatus,
+        testimonialEntryStatus,
+        referralEntriesTotal: Math.max(0, Math.trunc(referralEntriesTotal)),
+        commissionLifetimeEarnedDollars: comm.earnedDollars,
+        commissionPendingDollars: comm.pendingDollars,
         snapshotComputedAt: snap?.computedAt ? new Date(snap.computedAt).toISOString() : null,
       };
     });
@@ -370,6 +535,7 @@ export async function GET(request: NextRequest) {
       if (sort === "hasSmt") return mul * (Number(a.hasSmt) - Number(b.hasSmt));
       if (sort === "switched") return mul * (Number(a.switchedWithUs) - Number(b.switchedWithUs));
       if (sort === "monthlyNoEtf") return mul * (num(a.monthlySavingsNoEtf) - num(b.monthlySavingsNoEtf));
+      if (sort === "entriesEligible") return mul * (num(a.entriesEligibleTotal) - num(b.entriesEligibleTotal));
       if (sort === "savings12Net") return mul * (num(a.savingsNext12MonthsNetEtf) - num(b.savingsNext12MonthsNetEtf));
       // default: savingsToEndNet
       return mul * (num(a.savingsUntilContractEndNetEtf) - num(b.savingsUntilContractEndNetEtf));

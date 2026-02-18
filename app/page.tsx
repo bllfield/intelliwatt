@@ -346,15 +346,15 @@ function LandingPageContent() {
             </div>
           
           {/* Hero Stats */}
-          <div className="grid md:grid-cols-4 gap-8 mb-16">
+          <div className="grid gap-8 mb-16 md:grid-cols-3">
             <div className="text-center">
               <div className="text-4xl font-bold text-brand-blue mb-2">
                 {typeof publicStats?.avgSavingsDollars === 'number' && Number.isFinite(publicStats.avgSavingsDollars)
                   ? currency.format(Math.round(publicStats.avgSavingsDollars))
                   : '—'}
               </div>
-              <div className="text-brand-white">Average savings (real comparisons)</div>
-              <div className="mt-1 text-xs text-brand-white/70">ETF excluded</div>
+              <div className="text-brand-white">Average savings (running average from real users)</div>
+              <div className="mt-1 text-xs text-brand-white/70">Based on completed comparisons · ETF excluded</div>
             </div>
             <div className="text-center">
               <div className="text-4xl font-bold text-brand-blue mb-2">
@@ -365,12 +365,8 @@ function LandingPageContent() {
               <div className="text-brand-white">Total savings (switched users)</div>
             </div>
             <div className="text-center">
-              <div className="text-4xl font-bold text-brand-blue mb-2">2min</div>
+              <div className="text-4xl font-bold text-brand-blue mb-2">5 minutes</div>
               <div className="text-brand-white">Setup Time</div>
-            </div>
-            <div className="text-center">
-              <div className="text-4xl font-bold text-brand-blue mb-2">94%</div>
-              <div className="text-brand-white">Accuracy Rate</div>
             </div>
           </div>
         </div>

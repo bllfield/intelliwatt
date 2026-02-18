@@ -30,6 +30,17 @@ interface UserInsightRow {
   monthlySavingsBasisMonths?: number | null;
   savingsUntilContractEndNetEtf: number | null;
   savingsNext12MonthsNetEtf: number | null;
+  referralsTotal?: number;
+  referralsPending?: number;
+  referralsQualified?: number;
+  applianceCount?: number;
+  homeDetailsEntryStatus?: "ACTIVE" | "EXPIRING_SOON" | "EXPIRED" | null;
+  applianceDetailsEntryStatus?: "ACTIVE" | "EXPIRING_SOON" | "EXPIRED" | null;
+  testimonialEntryStatus?: "ACTIVE" | "EXPIRING_SOON" | "EXPIRED" | null;
+  entriesEligibleTotal?: number;
+  entriesExpiredTotal?: number;
+  commissionLifetimeEarnedDollars?: number;
+  commissionPendingDollars?: number;
   houseAddressId: string | null;
 }
 
@@ -194,6 +205,22 @@ const currencyFormatter = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 2,
 });
 
+const entryBadgeClass = (status: string | null | undefined) => {
+  if (!status) return 'border-slate-200 bg-white text-slate-500';
+  const s = String(status).toUpperCase();
+  if (s === 'ACTIVE') return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  if (s === 'EXPIRING_SOON') return 'border-amber-200 bg-amber-50 text-amber-700';
+  return 'border-rose-200 bg-rose-50 text-rose-700';
+};
+
+const entryBadgeLabel = (status: string | null | undefined) => {
+  if (!status) return '—';
+  const s = String(status).toUpperCase();
+  if (s === 'ACTIVE') return 'Active';
+  if (s === 'EXPIRING_SOON') return 'Expiring';
+  return 'Expired';
+};
+
 export default function AdminDashboard() {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
@@ -220,6 +247,9 @@ export default function AdminDashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [recalculatingReferrals, setRecalculatingReferrals] = useState(false);
   const [recalculatingEntries, setRecalculatingEntries] = useState(false);
+  const [runningJackpotDraw, setRunningJackpotDraw] = useState(false);
+  const [jackpotDrawResult, setJackpotDrawResult] = useState<any | null>(null);
+  const [jackpotDrawError, setJackpotDrawError] = useState<string | null>(null);
   const [previewPlansShare, setPreviewPlansShare] = useState<{ url: string | null; token: string | null }>({
     url: null,
     token: null,
@@ -364,7 +394,21 @@ export default function AdminDashboard() {
       if (commissionsRes.ok) {
         const commissionsData = await commissionsRes.json();
         console.log('Fetched commissions data:', commissionsData);
-        setCommissions(commissionsData);
+        if (commissionsData && commissionsData.ok === true && Array.isArray(commissionsData.rows)) {
+          setCommissions(
+            commissionsData.rows.map((r: any) => ({
+              id: r.id,
+              userId: r.userId,
+              type: r.type,
+              amount: typeof r.amount === 'number' && Number.isFinite(r.amount) ? r.amount : 0,
+              status: r.status,
+              user: r.userEmail ? { id: r.userId, email: r.userEmail, createdAt: r.createdAt ?? new Date().toISOString() } : undefined,
+            })),
+          );
+        } else {
+          // Backwards-compat (older payloads returned an array)
+          setCommissions(commissionsData);
+        }
       } else {
         console.error('Failed to fetch commissions:', commissionsRes.status, commissionsRes.statusText);
       }
@@ -471,6 +515,29 @@ export default function AdminDashboard() {
       fetchData();
     }
   }, [fetchData]);
+
+  const handleRunJackpotDraw = useCallback(async () => {
+    try {
+      setRunningJackpotDraw(true);
+      setJackpotDrawError(null);
+      setJackpotDrawResult(null);
+
+      const response = await fetchWithAdmin('/api/admin/jackpot/draw', { method: 'POST' });
+      const { raw, json } = await readResponseBody(response);
+      if (!response.ok || !json || json.ok !== true) {
+        const msg = json?.error || `HTTP ${response.status}`;
+        setJackpotDrawError(msg);
+        console.error('Jackpot draw failed:', response.status, raw);
+        return;
+      }
+      setJackpotDrawResult(json);
+    } catch (error: any) {
+      setJackpotDrawError(error?.message || String(error));
+    } finally {
+      setRunningJackpotDraw(false);
+      fetchData();
+    }
+  }, [fetchData, fetchWithAdmin, readResponseBody]);
 
   useEffect(() => {
     setMounted(true);
@@ -1628,6 +1695,13 @@ export default function AdminDashboard() {
                   <th className="text-left py-3 px-4 text-brand-navy font-semibold">Usage</th>
                   <th className="text-left py-3 px-4 text-brand-navy font-semibold">SMT</th>
                   <th className="text-left py-3 px-4 text-brand-navy font-semibold">Switched</th>
+                  <th className="text-left py-3 px-4 text-brand-navy font-semibold">Referrals</th>
+                  <th className="text-left py-3 px-4 text-brand-navy font-semibold">Home</th>
+                  <th className="text-left py-3 px-4 text-brand-navy font-semibold">Appliances</th>
+                  <th className="text-left py-3 px-4 text-brand-navy font-semibold">Testimonial</th>
+                  <th className="text-left py-3 px-4 text-brand-navy font-semibold">Entries</th>
+                  <th className="text-left py-3 px-4 text-brand-navy font-semibold">Commission $</th>
+                  <th className="text-left py-3 px-4 text-brand-navy font-semibold">Pending $</th>
                 </tr>
               </thead>
               <tbody>
@@ -1670,11 +1744,63 @@ export default function AdminDashboard() {
                       <td className="py-3 px-4">{row.hasUsage ? <span className="text-emerald-700">Yes</span> : <span className="text-slate-500">No</span>}</td>
                       <td className="py-3 px-4">{row.hasSmt ? <span className="text-emerald-700">Yes</span> : <span className="text-slate-500">No</span>}</td>
                       <td className="py-3 px-4">{row.switchedWithUs ? <span className="text-emerald-700">Yes</span> : <span className="text-slate-500">No</span>}</td>
+                      <td className="py-3 px-4 text-brand-navy">
+                        <span className="font-semibold">{row.referralsTotal ?? 0}</span>
+                        <div className="text-[11px] text-brand-navy/60">
+                          {`${row.referralsPending ?? 0} pending · ${row.referralsQualified ?? 0} qualified`}
+                        </div>
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${entryBadgeClass(row.homeDetailsEntryStatus ?? null)}`}>
+                          {entryBadgeLabel(row.homeDetailsEntryStatus ?? null)}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4">
+                        <div className="flex flex-col gap-1">
+                          <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${entryBadgeClass(row.applianceDetailsEntryStatus ?? null)}`}>
+                            {entryBadgeLabel(row.applianceDetailsEntryStatus ?? null)}
+                          </span>
+                          <span className="text-[11px] text-brand-navy/60">{row.applianceCount ?? 0} item(s)</span>
+                        </div>
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${entryBadgeClass(row.testimonialEntryStatus ?? null)}`}>
+                          {entryBadgeLabel(row.testimonialEntryStatus ?? null)}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-brand-navy font-semibold">
+                        <a
+                          className="hover:underline"
+                          href={`/admin/jackpot/entries?q=${encodeURIComponent(row.email)}`}
+                          title="Open Jackpot Entries inspection"
+                        >
+                          {String(row.entriesEligibleTotal ?? 0)}
+                        </a>
+                        <div className="text-[11px] text-brand-navy/60">
+                          {row.entriesExpiredTotal ? `${row.entriesExpiredTotal} expired` : ""}
+                        </div>
+                      </td>
+                      <td className="py-3 px-4 text-brand-navy font-semibold">
+                        {typeof row.commissionLifetimeEarnedDollars === "number" && Number.isFinite(row.commissionLifetimeEarnedDollars)
+                          ? currencyFormatter.format(row.commissionLifetimeEarnedDollars)
+                          : "—"}
+                      </td>
+                      <td className="py-3 px-4 text-brand-navy font-semibold">
+                        <a
+                          className="hover:underline"
+                          href={`/admin/commissions?q=${encodeURIComponent(row.email)}&status=pending`}
+                          title="Open Commissions tracking"
+                        >
+                          {typeof row.commissionPendingDollars === "number" && Number.isFinite(row.commissionPendingDollars)
+                            ? currencyFormatter.format(row.commissionPendingDollars)
+                            : "—"}
+                        </a>
+                      </td>
                     </tr>
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={8} className="py-8 px-4 text-center text-brand-navy/60">
+                    <td colSpan={15} className="py-8 px-4 text-center text-brand-navy/60">
                       No users found (or snapshots still computing).
                     </td>
                   </tr>
@@ -1730,6 +1856,45 @@ export default function AdminDashboard() {
         {/* Jackpot Section */}
         <section id="jackpot" className="bg-brand-white rounded-lg p-6 mb-8 shadow-lg">
           <h2 className="text-2xl font-bold text-brand-navy mb-4">🎰 Jackpot Payouts</h2>
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-sm text-brand-navy/70">
+              Run the monthly draw using the current eligible entries pool (after a status refresh).
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <a
+                href="/admin/jackpot/entries"
+                className="inline-flex items-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50"
+              >
+                Inspect entries
+              </a>
+              <button
+                type="button"
+                onClick={handleRunJackpotDraw}
+                disabled={runningJackpotDraw || refreshing || recalculatingEntries || recalculatingReferrals}
+                className="inline-flex items-center rounded-full border border-brand-blue/40 bg-brand-blue/10 px-4 py-2 text-sm font-semibold text-brand-blue hover:bg-brand-blue/20 disabled:opacity-60"
+              >
+                {runningJackpotDraw ? 'Running drawing…' : 'Run drawing'}
+              </button>
+            </div>
+          </div>
+
+          {jackpotDrawError ? (
+            <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+              {jackpotDrawError}
+            </div>
+          ) : null}
+          {jackpotDrawResult?.ok === true ? (
+            <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+              <div className="font-semibold">
+                Winner: {jackpotDrawResult?.winner?.email ?? jackpotDrawResult?.winner?.userId}
+              </div>
+              <div className="text-emerald-900/80">
+                Pool: {Number(jackpotDrawResult?.pool?.totalTickets ?? 0).toLocaleString()} tickets across{' '}
+                {Number(jackpotDrawResult?.pool?.eligibleUsers ?? 0).toLocaleString()} users · Payout:{' '}
+                {currencyFormatter.format(Number(jackpotDrawResult?.payout?.amount ?? 0))}
+              </div>
+            </div>
+          ) : null}
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>

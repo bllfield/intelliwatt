@@ -27,6 +27,20 @@ type InsightsRow = {
   monthlySavingsNoEtf: number | null;
   monthlySavingsBasis: "TO_CONTRACT_END" | "NEXT_12_MONTHS" | null;
   monthlySavingsBasisMonths: number | null;
+  referralsTotal: number;
+  referralsPending: number;
+  referralsQualified: number;
+  applianceCount: number;
+  entriesEligibleTotal: number;
+  entriesExpiredTotal: number;
+  smartMeterEntryStatus: "ACTIVE" | "EXPIRING_SOON" | "EXPIRED" | null;
+  currentPlanEntryStatus: "ACTIVE" | "EXPIRING_SOON" | "EXPIRED" | null;
+  homeDetailsEntryStatus: "ACTIVE" | "EXPIRING_SOON" | "EXPIRED" | null;
+  applianceDetailsEntryStatus: "ACTIVE" | "EXPIRING_SOON" | "EXPIRED" | null;
+  testimonialEntryStatus: "ACTIVE" | "EXPIRING_SOON" | "EXPIRED" | null;
+  referralEntriesTotal: number;
+  commissionLifetimeEarnedDollars: number;
+  commissionPendingDollars: number;
   snapshotComputedAt: string | null;
 };
 
@@ -36,10 +50,16 @@ type InsightsResponse =
 
 const currency = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 const currencyMonthly = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const currencyMoney = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 function fmtMoney(n: number | null | undefined): string {
   if (typeof n !== "number" || !Number.isFinite(n)) return "—";
   return currency.format(Math.round(n));
+}
+
+function fmtMoney2(n: number | null | undefined): string {
+  if (typeof n !== "number" || !Number.isFinite(n)) return "—";
+  return currencyMoney.format(n);
 }
 
 function fmtMoneyMonthly(n: number | null | undefined): string {
@@ -57,6 +77,27 @@ function fmtDate(iso: string | null | undefined): string {
 function nextDir(curSort: string, curDir: string, nextSort: string): "asc" | "desc" {
   if (curSort !== nextSort) return "desc";
   return curDir === "asc" ? "desc" : "asc";
+}
+
+function EntryStatusBadge({ status }: { status: InsightsRow["smartMeterEntryStatus"] }) {
+  if (!status) return <span className="text-slate-500">—</span>;
+  const cls =
+    status === "ACTIVE"
+      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+      : status === "EXPIRING_SOON"
+        ? "bg-amber-50 text-amber-700 border-amber-200"
+        : "bg-rose-50 text-rose-700 border-rose-200";
+  const label =
+    status === "ACTIVE"
+      ? "Active"
+      : status === "EXPIRING_SOON"
+        ? "Expiring"
+        : "Expired";
+  return (
+    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${cls}`}>
+      {label}
+    </span>
+  );
 }
 
 export default function AdminUsersPage() {
@@ -334,12 +375,32 @@ export default function AdminUsersPage() {
                   </button>
                 </th>
                 <th className="py-3 px-3 text-left font-semibold text-brand-navy">Switched</th>
+                <th className="py-3 px-3 text-left font-semibold text-brand-navy">Referrals</th>
+                <th className="py-3 px-3 text-left font-semibold text-brand-navy">Home</th>
+                <th className="py-3 px-3 text-left font-semibold text-brand-navy">Appliances</th>
+                <th className="py-3 px-3 text-left font-semibold text-brand-navy">Testimonial</th>
+                <th className="py-3 px-3 text-left font-semibold text-brand-navy">
+                  <button
+                    type="button"
+                    className="hover:underline"
+                    onClick={() => {
+                      const nd = nextDir(sort, dir, "entriesEligible");
+                      setSort("entriesEligible");
+                      setDir(nd);
+                      setPage(1);
+                    }}
+                  >
+                    Entries (eligible)
+                  </button>
+                </th>
+                <th className="py-3 px-3 text-left font-semibold text-brand-navy">Commission $ (lifetime)</th>
+                <th className="py-3 px-3 text-left font-semibold text-brand-navy">Commission $ (pending)</th>
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="py-8 px-3 text-center text-brand-navy/60">
+                  <td colSpan={16} className="py-8 px-3 text-center text-brand-navy/60">
                     {loading ? "Loading…" : "No users found"}
                   </td>
                 </tr>
@@ -370,9 +431,49 @@ export default function AdminUsersPage() {
                       <td className="py-3 px-3 text-brand-navy font-semibold">{fmtMoney(r.savingsUntilContractEndNetEtf)}</td>
                       <td className="py-3 px-3 text-brand-navy font-semibold">{fmtMoney(r.savingsNext12MonthsNetEtf)}</td>
                       <td className="py-3 px-3">{r.switchedWithUs ? <span className="text-emerald-700">Yes</span> : <span className="text-slate-500">No</span>}</td>
+                      <td className="py-3 px-3 text-brand-navy">
+                        <span className="font-semibold">{r.referralsTotal ?? 0}</span>
+                        <span className="text-xs text-brand-navy/60">
+                          {` (${r.referralsPending ?? 0} pending, ${r.referralsQualified ?? 0} qualified)`}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3 text-brand-navy">
+                        <EntryStatusBadge status={r.homeDetailsEntryStatus} />
+                      </td>
+                      <td className="py-3 px-3 text-brand-navy">
+                        <div className="flex flex-col gap-1">
+                          <EntryStatusBadge status={r.applianceDetailsEntryStatus} />
+                          <span className="text-xs text-brand-navy/60">{r.applianceCount ?? 0} item(s)</span>
+                        </div>
+                      </td>
+                      <td className="py-3 px-3 text-brand-navy">
+                        <EntryStatusBadge status={r.testimonialEntryStatus} />
+                      </td>
+                      <td className="py-3 px-3 text-brand-navy font-semibold">
+                        <a
+                          className="hover:underline"
+                          href={`/admin/jackpot/entries?q=${encodeURIComponent(r.email)}`}
+                          title="Open Jackpot Entries inspection"
+                        >
+                          {String(r.entriesEligibleTotal ?? 0)}
+                        </a>
+                        <div className="text-[11px] text-brand-navy/60">
+                          {r.entriesExpiredTotal ? `${r.entriesExpiredTotal} expired` : ""}
+                        </div>
+                      </td>
+                      <td className="py-3 px-3 text-brand-navy font-semibold">{fmtMoney2(r.commissionLifetimeEarnedDollars)}</td>
+                      <td className="py-3 px-3 text-brand-navy font-semibold">
+                        <a
+                          className="hover:underline"
+                          href={`/admin/commissions?q=${encodeURIComponent(r.email)}&status=pending`}
+                          title="Open Commissions tracking"
+                        >
+                          {fmtMoney2(r.commissionPendingDollars)}
+                        </a>
+                      </td>
                     </tr>
                     <tr className="border-b border-brand-navy/10">
-                      <td colSpan={9} className="px-3 pb-4">
+                      <td colSpan={16} className="px-3 pb-4">
                         <details className="mt-2">
                           <summary className="cursor-pointer select-none text-xs font-semibold uppercase tracking-wide text-brand-navy/60">
                             Details
