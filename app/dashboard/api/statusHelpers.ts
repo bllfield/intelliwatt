@@ -59,6 +59,22 @@ export function deriveSmtStatus(
   }
 
   if (rawStatus === "pending") {
+    // If we have recent SMT interval data, the orchestrator has already treated this as active.
+    const hasRecentUsage =
+      smtLatestIntervalAt &&
+      Date.now() - smtLatestIntervalAt.getTime() < 7 * 24 * 60 * 60 * 1000;
+    if (hasRecentUsage) {
+      return {
+        label: "Connected",
+        tone: "success",
+        message:
+          auth.smtStatusMessage && auth.smtStatusMessage.trim().length > 0
+            ? auth.smtStatusMessage
+            : "SMT usage will refresh automatically.",
+        lastUpdated: smtLatestIntervalAt ?? lastUpdated,
+        expiresAt: auth.authorizationEndDate ?? null,
+      };
+    }
     return {
       label: "Awaiting confirmation",
       tone: "warning",

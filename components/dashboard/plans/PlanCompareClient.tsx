@@ -369,6 +369,29 @@ export default function PlanCompareClient(props: { offerId: string }) {
     return m;
   }, [projection]);
 
+  // Unified REP bucket list so both monthly tables use the same columns (current first, then offer-only keys).
+  const unifiedRepBuckets = useMemo(() => {
+    const current = Array.isArray(currentDetail?.monthlyBreakdown?.repBuckets) ? (currentDetail.monthlyBreakdown.repBuckets as any[]) : [];
+    const offer = Array.isArray(offerDetail?.monthlyBreakdown?.repBuckets) ? (offerDetail.monthlyBreakdown.repBuckets as any[]) : [];
+    const seen = new Set<string>();
+    const out: any[] = [];
+    for (const b of current) {
+      const key = String(b?.bucketKey ?? "").trim();
+      if (key && !seen.has(key)) {
+        seen.add(key);
+        out.push(b);
+      }
+    }
+    for (const b of offer) {
+      const key = String(b?.bucketKey ?? "").trim();
+      if (key && !seen.has(key)) {
+        seen.add(key);
+        out.push(b);
+      }
+    }
+    return out;
+  }, [currentDetail?.monthlyBreakdown?.repBuckets, offerDetail?.monthlyBreakdown?.repBuckets]);
+
   return (
     <div className="mx-auto w-full max-w-5xl">
       <div className="mt-2 text-xs text-brand-cyan/70">
@@ -817,312 +840,301 @@ export default function PlanCompareClient(props: { offerId: string }) {
                         </div>
                       </div>
                     </div>
-
-                    {/* Spacer so the Monthly table starts at the same vertical position in both columns (desktop). */}
-                    <div className="flex-1" />
-
-                    <div className="mt-5 rounded-xl border border-brand-cyan/15 bg-brand-white/5 p-3">
-                      <div className="text-xs font-semibold text-brand-white/90">Monthly bill math</div>
-                      {!monthlyBreakdown ? (
-                        <div className="mt-2 text-xs text-brand-cyan/70">Monthly breakdown unavailable (needs an OK estimate and required usage buckets).</div>
-                      ) : (
-                        <>
-                          {projection?.startYm ? (
-                            <div className="mt-2 text-xs text-brand-cyan/60">
-                              Showing projected months{" "}
-                              <span className="font-mono text-brand-white/90">{String(projection.startYm)}</span>
-                              {" – "}
-                              <span className="font-mono text-brand-white/90">
-                                {String(addMonthsToYearMonth(String(projection.startYm), (projection.monthsToShow ?? 1) - 1))}
-                              </span>
-                              {" · "}based on last 12 months usage pattern
-                              {typeof data?.offer?.termMonths === "number" && projection.monthsToShow > data.offer.termMonths
-                                ? ` · note: offer term is ${data.offer.termMonths} months (months beyond term assume same rate for illustration)`
-                                : ""}
-                            </div>
-                          ) : null}
-                          <div className="mt-2 text-xs text-brand-cyan/60 font-mono">
-                            rows={String(projection?.monthsToShow ?? monthlyBreakdown?.monthsCount ?? "—")}
-                            {" · "}annualFromRows=${fmtNum(monthlyBreakdown?.totals?.annualFromRows, 2)}
-                            {" · "}expectedAnnual=${fmtNum(monthlyBreakdown?.totals?.expectedAnnual, 2)}
-                            {typeof monthlyBreakdown?.totals?.deltaCents === "number" ? ` · deltaCents=${String(monthlyBreakdown.totals.deltaCents)}` : ""}
-                          </div>
-
-                          <div className="mt-3 overflow-auto rounded-xl border border-brand-cyan/15">
-                            <table className="min-w-[1200px] w-full text-xs">
-                              <thead className="bg-brand-white/5 text-brand-cyan/70">
-                                <tr>
-                                  <th className="px-3 py-2 text-left">Year-Month</th>
-                                  <th className="px-3 py-2 text-left whitespace-nowrap">Total kWh</th>
-                                  {(monthlyBreakdown?.repBuckets ?? []).map((b: any) => (
-                                    <th key={`${b.bucketKey}-kwh`} className="px-3 py-2 text-left whitespace-nowrap" title={b.bucketKey}>
-                                      {b.label} kWh
-                                    </th>
-                                  ))}
-                                  {(monthlyBreakdown?.repBuckets ?? []).map((b: any) => (
-                                    <th key={`${b.bucketKey}-rate`} className="px-3 py-2 text-left whitespace-nowrap" title={b.bucketKey}>
-                                      {b.label} ¢/kWh
-                                    </th>
-                                  ))}
-                                  {(monthlyBreakdown?.repBuckets ?? []).map((b: any) => (
-                                    <th key={`${b.bucketKey}-cost`} className="px-3 py-2 text-left whitespace-nowrap" title={b.bucketKey}>
-                                      {b.label} $
-                                    </th>
-                                  ))}
-                                  <th className="px-3 py-2 text-left whitespace-nowrap">TDSP ¢/kWh</th>
-                                  <th className="px-3 py-2 text-left whitespace-nowrap">TDSP delivery $</th>
-                                  <th className="px-3 py-2 text-left whitespace-nowrap">REP fixed $</th>
-                                  <th className="px-3 py-2 text-left whitespace-nowrap">TDSP fixed $</th>
-                                  <th className="px-3 py-2 text-left whitespace-nowrap">Credits $</th>
-                                  <th className="px-3 py-2 text-left whitespace-nowrap">Min usage fee $</th>
-                                  <th className="px-3 py-2 text-left whitespace-nowrap">Min bill top-up $</th>
-                                  <th className="px-3 py-2 text-left whitespace-nowrap">Month total $</th>
-                                  {side === "offer" ? (
-                                    <th className="px-3 py-2 text-left whitespace-nowrap" title="New - Current">
-                                      Δ vs current $
-                                    </th>
-                                  ) : null}
-                                </tr>
-                              </thead>
-
-                              <tbody className="text-brand-cyan/80">
-                                {((() => {
-                                  const rows = Array.isArray(projection?.currentRowsProjected) || Array.isArray(projection?.offerRowsProjected)
-                                    ? (side === "offer" ? (projection?.offerRowsProjected ?? []) : (projection?.currentRowsProjected ?? []))
-                                    : (monthlyBreakdown?.rows ?? []);
-                                  return rows as any[];
-                                })()).map((r: any, idx: number) => {
-                                  const repLines = Array.isArray(r?.repBuckets) ? (r.repBuckets as any[]) : [];
-                                  const byKey = new Map(repLines.map((x) => [String(x.bucketKey), x]));
-                                  // If the user is switching now and ETF applies, treat the cancellation fee as
-                                  // a one-time cost in the FIRST month of the new plan.
-                                  const etfThisMonth =
-                                    side === "offer" && idx === 0 && includeEtf && etfAppliesNow && etfDollars > 0 ? etfDollars : 0;
-                                  const baseMonthTotal = numOrNull(r?.totalDollars) ?? 0;
-                                  const monthTotalAdjusted = baseMonthTotal + etfThisMonth;
-
-                                  const ymKey = String(r?.yearMonth ?? "").trim();
-                                  const currentRow = side === "offer" && ymKey ? currentMonthlyRowsByYm.get(ymKey) : null;
-                                  const currentMonthTotal = currentRow ? numOrNull(currentRow?.totalDollars) : null;
-                                  const deltaVsCurrent =
-                                    side === "offer" && currentMonthTotal != null
-                                      ? monthTotalAdjusted - currentMonthTotal
-                                      : null;
-                                  return (
-                                    <tr key={String(r?.yearMonth ?? Math.random())} className="border-t border-brand-cyan/10">
-                                      <td className="px-3 py-2 font-mono text-brand-white/90">{String(r?.yearMonth ?? "")}</td>
-                                      <td className="px-3 py-2">{fmtKwh0(r?.bucketTotalKwh)}</td>
-                                      {(monthlyBreakdown?.repBuckets ?? []).map((b: any) => (
-                                        <td key={`${r.yearMonth}-${b.bucketKey}-kwh`} className="px-3 py-2">
-                                          {fmtKwh0(byKey.get(String(b.bucketKey))?.kwh ?? 0)}
-                                        </td>
-                                      ))}
-                                      {(monthlyBreakdown?.repBuckets ?? []).map((b: any) => (
-                                        <td key={`${r.yearMonth}-${b.bucketKey}-rate`} className="px-3 py-2">
-                                          {fmtNum(byKey.get(String(b.bucketKey))?.repCentsPerKwh, 4)}¢
-                                        </td>
-                                      ))}
-                                      {(monthlyBreakdown?.repBuckets ?? []).map((b: any) => (
-                                        <td key={`${r.yearMonth}-${b.bucketKey}-cost`} className="px-3 py-2">
-                                          {fmtDollars(byKey.get(String(b.bucketKey))?.repCostDollars)}
-                                        </td>
-                                      ))}
-                                      <td className="px-3 py-2">{fmtNum(r?.tdsp?.perKwhDeliveryChargeCents, 4)}¢</td>
-                                      <td className="px-3 py-2">{fmtDollars(r?.tdsp?.deliveryDollars)}</td>
-                                      <td className="px-3 py-2">{fmtDollars(r?.repFixedMonthlyChargeDollars)}</td>
-                                      <td className="px-3 py-2">{fmtDollars(r?.tdsp?.monthlyCustomerChargeDollars)}</td>
-                                      <td className="px-3 py-2">{fmtDollars(r?.creditsDollars)}</td>
-                                      <td className="px-3 py-2">{fmtDollars(r?.minimumUsageFeeDollars)}</td>
-                                      <td className="px-3 py-2">{fmtDollars(r?.minimumBillTopUpDollars)}</td>
-                                      <td
-                                        className="px-3 py-2 font-semibold text-brand-white/90"
-                                        title={includeEtf && etfThisMonth > 0 ? `Includes ETF in first month: ${fmtDollars(etfThisMonth)}` : undefined}
-                                      >
-                                        {fmtDollars(monthTotalAdjusted)}
-                                      </td>
-                                      {side === "offer" ? (
-                                        <td
-                                          className={`px-3 py-2 font-semibold ${
-                                            typeof deltaVsCurrent === "number" && Number.isFinite(deltaVsCurrent)
-                                              ? deltaVsCurrent < 0
-                                                ? "text-emerald-200"
-                                                : "text-amber-200"
-                                              : "text-brand-white/80"
-                                          }`}
-                                          title={includeEtf && etfThisMonth > 0 ? `Includes ETF in first month: ${fmtDollars(etfThisMonth)}` : undefined}
-                                        >
-                                          {deltaVsCurrent == null ? "—" : fmtDollars(deltaVsCurrent)}
-                                        </td>
-                                      ) : null}
-                                    </tr>
-                                  );
-                                })}
-                              </tbody>
-
-                              <tfoot className="bg-brand-white/5 text-brand-cyan/80">
-                                {(() => {
-                                  const rows = Array.isArray(projection?.currentRowsProjected) || Array.isArray(projection?.offerRowsProjected)
-                                    ? ((side === "offer" ? (projection?.offerRowsProjected ?? []) : (projection?.currentRowsProjected ?? [])) as any[])
-                                    : (Array.isArray(monthlyBreakdown?.rows) ? (monthlyBreakdown.rows as any[]) : []);
-                                  const repBuckets = Array.isArray(monthlyBreakdown?.repBuckets) ? (monthlyBreakdown.repBuckets as any[]) : [];
-
-                                  // Totals
-                                  const totalKwh = sumNums(rows.map((r) => r?.bucketTotalKwh));
-                                  const repKwhByKey = new Map<string, number>();
-                                  const repCostByKey = new Map<string, number>();
-                                  for (const b of repBuckets) {
-                                    repKwhByKey.set(String(b.bucketKey), 0);
-                                    repCostByKey.set(String(b.bucketKey), 0);
-                                  }
-                                  for (const r of rows) {
-                                    const repLines = Array.isArray(r?.repBuckets) ? (r.repBuckets as any[]) : [];
-                                    for (const x of repLines) {
-                                      const key = String(x?.bucketKey ?? "");
-                                      if (!key) continue;
-                                      if (repKwhByKey.has(key)) repKwhByKey.set(key, (repKwhByKey.get(key) ?? 0) + (numOrNull(x?.kwh) ?? 0));
-                                      if (repCostByKey.has(key))
-                                        repCostByKey.set(key, (repCostByKey.get(key) ?? 0) + (numOrNull(x?.repCostDollars) ?? 0));
-                                    }
-                                  }
-
-                                  const tdspDelivery = sumNums(rows.map((r) => r?.tdsp?.deliveryDollars));
-                                  const repFixed = sumNums(rows.map((r) => r?.repFixedMonthlyChargeDollars));
-                                  const tdspFixed = sumNums(rows.map((r) => r?.tdsp?.monthlyCustomerChargeDollars));
-                                  const credits = sumNums(rows.map((r) => r?.creditsDollars));
-                                  const minUsage = sumNums(rows.map((r) => r?.minimumUsageFeeDollars));
-                                  const minBill = sumNums(rows.map((r) => r?.minimumBillTopUpDollars));
-
-                                  const baseMonthTotals = rows.map((r) => numOrNull(r?.totalDollars) ?? 0);
-                                  const totalEtf = side === "offer" && includeEtf && etfAppliesNow && etfDollars > 0 && rows.length > 0 ? etfDollars : 0;
-                                  const totalMonthTotal = sumNums(baseMonthTotals) + totalEtf;
-                                  const windowMonths = rows.length > 0 ? rows.length : 12;
-
-                                  // Reconcile: monthlyBreakdown.totals.expectedAnnual is the canonical engine output.
-                                  // The per-month reconstruction can differ when a plan contains rules we don't yet
-                                  // fully model in the table (e.g., complex bill credits / TOU discounts).
-                                  const deltaCents =
-                                    typeof monthlyBreakdown?.totals?.deltaCents === "number"
-                                      ? monthlyBreakdown.totals.deltaCents
-                                      : null;
-                                  const adjustmentDollars =
-                                    deltaCents != null ? (-1 * deltaCents) / 100 : null;
-                                  const adjustmentDollarsWindow =
-                                    typeof adjustmentDollars === "number" && Number.isFinite(adjustmentDollars)
-                                      ? adjustmentDollars * (windowMonths / 12)
-                                      : null;
-
-                                  let totalDelta: number | null = null;
-                                  if (side === "offer") {
-                                    // Sum month deltas against current (align by yearMonth).
-                                    const deltas: number[] = [];
-                                    for (let i = 0; i < rows.length; i++) {
-                                      const r = rows[i];
-                                      const ym = String(r?.yearMonth ?? "").trim();
-                                      if (!ym) continue;
-                                      const cur = currentMonthlyRowsByYm.get(ym);
-                                      const curTotal = cur ? numOrNull(cur?.totalDollars) : null;
-                                      if (curTotal == null) continue;
-                                      const base = numOrNull(r?.totalDollars) ?? 0;
-                                      const etf = i === 0 && includeEtf && etfAppliesNow && etfDollars > 0 ? etfDollars : 0;
-                                      deltas.push(base + etf - curTotal);
-                                    }
-                                    if (deltas.length) totalDelta = sumNums(deltas);
-                                  }
-
-                                  return (
-                                    <>
-                                      <tr className="border-t border-brand-cyan/20">
-                                        <td className="px-3 py-2 font-semibold text-brand-white/90">Total (sum of rows)</td>
-                                        <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtKwh0(totalKwh)}</td>
-
-                                        {repBuckets.map((b: any) => (
-                                          <td key={`total-${b.bucketKey}-kwh`} className="px-3 py-2 font-semibold text-brand-white/90">
-                                            {fmtKwh0(repKwhByKey.get(String(b.bucketKey)) ?? 0)}
-                                          </td>
-                                        ))}
-                                        {/* Rate columns don't have a meaningful "sum" */}
-                                        {repBuckets.map((b: any) => (
-                                          <td key={`total-${b.bucketKey}-rate`} className="px-3 py-2 text-brand-cyan/60">
-                                            —
-                                          </td>
-                                        ))}
-                                        {repBuckets.map((b: any) => (
-                                          <td key={`total-${b.bucketKey}-cost`} className="px-3 py-2 font-semibold text-brand-white/90">
-                                            {fmtDollars(repCostByKey.get(String(b.bucketKey)) ?? 0)}
-                                          </td>
-                                        ))}
-
-                                        {/* TDSP ¢/kWh doesn't sum meaningfully */}
-                                        <td className="px-3 py-2 text-brand-cyan/60">—</td>
-                                        <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(tdspDelivery)}</td>
-                                        <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(repFixed)}</td>
-                                        <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(tdspFixed)}</td>
-                                        <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(credits)}</td>
-                                        <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(minUsage)}</td>
-                                        <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(minBill)}</td>
-                                        <td
-                                          className="px-3 py-2 font-semibold text-brand-white/90"
-                                          title={includeEtf && totalEtf > 0 ? `Total includes ETF once: ${fmtDollars(totalEtf)}` : undefined}
-                                        >
-                                          {fmtDollars(totalMonthTotal)}
-                                        </td>
-                                        {side === "offer" ? (
-                                          <td
-                                            className={`px-3 py-2 font-semibold ${
-                                              typeof totalDelta === "number" && Number.isFinite(totalDelta)
-                                                ? totalDelta < 0
-                                                  ? "text-emerald-200"
-                                                  : "text-amber-200"
-                                                : "text-brand-cyan/60"
-                                            }`}
-                                            title={includeEtf && totalEtf > 0 ? `Total includes ETF once: ${fmtDollars(totalEtf)}` : undefined}
-                                          >
-                                            {totalDelta == null ? "—" : fmtDollars(totalDelta)}
-                                          </td>
-                                        ) : null}
-                                      </tr>
-
-                                      {typeof adjustmentDollarsWindow === "number" &&
-                                      Number.isFinite(adjustmentDollarsWindow) &&
-                                      Math.abs(adjustmentDollarsWindow) >= 1 ? (
-                                        <tr className="border-t border-brand-cyan/10 text-brand-cyan/70">
-                                          <td className="px-3 py-2 font-semibold">
-                                            Adjustment (credits/discounts not fully modeled in rows; scaled to {windowMonths} mo)
-                                          </td>
-                                          <td className="px-3 py-2">—</td>
-                                          {repBuckets.map((b: any) => (
-                                            <td key={`adj-${b.bucketKey}-kwh`} className="px-3 py-2">—</td>
-                                          ))}
-                                          {repBuckets.map((b: any) => (
-                                            <td key={`adj-${b.bucketKey}-rate`} className="px-3 py-2">—</td>
-                                          ))}
-                                          {repBuckets.map((b: any) => (
-                                            <td key={`adj-${b.bucketKey}-cost`} className="px-3 py-2">—</td>
-                                          ))}
-                                          <td className="px-3 py-2">—</td>
-                                          <td className="px-3 py-2">—</td>
-                                          <td className="px-3 py-2">—</td>
-                                          <td className="px-3 py-2">—</td>
-                                          <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(adjustmentDollarsWindow)}</td>
-                                          <td className="px-3 py-2">—</td>
-                                          <td className="px-3 py-2">—</td>
-                                          <td className="px-3 py-2">—</td>
-                                          {side === "offer" ? <td className="px-3 py-2">—</td> : null}
-                                        </tr>
-                                      ) : null}
-                                    </>
-                                  );
-                                })()}
-                              </tfoot>
-                            </table>
-                          </div>
-                        </>
-                      )}
-                    </div>
                   </div>
                 );
               })}
             </div>
+
+            {/* Monthly bill math: one scroll container, two tables side-by-side so rows and scroll stay aligned */}
+            {(() => {
+              const currentBreakdown = currentDetail?.monthlyBreakdown ?? null;
+              const offerBreakdown = offerDetail?.monthlyBreakdown ?? null;
+              const hasEither = Boolean(currentBreakdown || offerBreakdown);
+              const currentRowsRaw = Array.isArray(projection?.currentRowsProjected) ? (projection.currentRowsProjected as any[]) : (currentBreakdown?.rows ?? []);
+              const offerRowsRaw = Array.isArray(projection?.offerRowsProjected) ? (projection.offerRowsProjected as any[]) : (offerBreakdown?.rows ?? []);
+              const rowCount = Math.max(currentRowsRaw.length, offerRowsRaw.length, 1);
+              const repBuckets = unifiedRepBuckets;
+              const showDelta = true;
+
+              if (!hasEither) {
+                return (
+                  <div className="mt-6 rounded-xl border border-brand-cyan/15 bg-brand-white/5 p-3">
+                    <div className="text-xs font-semibold text-brand-white/90">Monthly bill math</div>
+                    <div className="mt-2 text-xs text-brand-cyan/70">Monthly breakdown unavailable (needs an OK estimate and required usage buckets).</div>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="mt-6 rounded-xl border border-brand-cyan/15 bg-brand-white/5 p-3">
+                  <div className="text-xs font-semibold text-brand-white/90">Monthly bill math</div>
+                  {projection?.startYm ? (
+                    <div className="mt-2 text-xs text-brand-cyan/60">
+                      Showing projected months{" "}
+                      <span className="font-mono text-brand-white/90">{String(projection.startYm)}</span>
+                      {" – "}
+                      <span className="font-mono text-brand-white/90">
+                        {String(addMonthsToYearMonth(String(projection.startYm), (projection.monthsToShow ?? 1) - 1))}
+                      </span>
+                      {" · "}based on last 12 months usage pattern
+                      {typeof data?.offer?.termMonths === "number" && projection.monthsToShow > data.offer.termMonths
+                        ? ` · note: offer term is ${data.offer.termMonths} months (months beyond term assume same rate for illustration)`
+                        : ""}
+                    </div>
+                  ) : null}
+                  <div className="mt-2 text-xs text-brand-cyan/60 font-mono">
+                    rows={String((projection?.monthsToShow ?? currentRowsRaw.length) || offerRowsRaw.length || "—")}
+                    {currentBreakdown?.totals ? ` · current annualFromRows=${fmtNum(currentBreakdown.totals.annualFromRows, 2)}` : ""}
+                    {offerBreakdown?.totals ? ` · offer annualFromRows=${fmtNum(offerBreakdown.totals.annualFromRows, 2)}` : ""}
+                  </div>
+
+                  <div className="mt-3 overflow-auto max-h-[70vh] rounded-xl border border-brand-cyan/15">
+                    <div className="flex gap-4 min-w-max">
+                      {/* Current plan table */}
+                      <div className="flex-shrink-0">
+                        <div className="text-[0.65rem] font-semibold uppercase text-brand-cyan/70 mb-1">Current plan</div>
+                        <table className="min-w-[600px] w-full text-xs">
+                          <thead className="bg-brand-white/5 text-brand-cyan/70">
+                            <tr>
+                              <th className="px-3 py-2 text-left">Year-Month</th>
+                              <th className="px-3 py-2 text-left whitespace-nowrap">Total kWh</th>
+                              {repBuckets.map((b: any) => (
+                                <th key={`cur-${b.bucketKey}-kwh`} className="px-3 py-2 text-left whitespace-nowrap" title={b.bucketKey}>{b.label} kWh</th>
+                              ))}
+                              {repBuckets.map((b: any) => (
+                                <th key={`cur-${b.bucketKey}-rate`} className="px-3 py-2 text-left whitespace-nowrap">{b.label} ¢/kWh</th>
+                              ))}
+                              {repBuckets.map((b: any) => (
+                                <th key={`cur-${b.bucketKey}-cost`} className="px-3 py-2 text-left whitespace-nowrap">{b.label} $</th>
+                              ))}
+                              <th className="px-3 py-2 text-left whitespace-nowrap">TDSP ¢/kWh</th>
+                              <th className="px-3 py-2 text-left whitespace-nowrap">TDSP delivery $</th>
+                              <th className="px-3 py-2 text-left whitespace-nowrap">REP fixed $</th>
+                              <th className="px-3 py-2 text-left whitespace-nowrap">TDSP fixed $</th>
+                              <th className="px-3 py-2 text-left whitespace-nowrap">Credits $</th>
+                              <th className="px-3 py-2 text-left whitespace-nowrap">Min usage $</th>
+                              <th className="px-3 py-2 text-left whitespace-nowrap">Min bill $</th>
+                              <th className="px-3 py-2 text-left whitespace-nowrap">Month total $</th>
+                            </tr>
+                          </thead>
+                          <tbody className="text-brand-cyan/80">
+                            {Array.from({ length: rowCount }, (_, idx) => {
+                              const r = currentRowsRaw[idx];
+                              const repLines = Array.isArray(r?.repBuckets) ? (r.repBuckets as any[]) : [];
+                              const byKey = new Map(repLines.map((x) => [String(x.bucketKey), x]));
+                              return (
+                                <tr key={`cur-${String(r?.yearMonth ?? idx)}-${idx}`} className="border-t border-brand-cyan/10">
+                                  <td className="px-3 py-2 font-mono text-brand-white/90">{String(r?.yearMonth ?? "")}</td>
+                                  <td className="px-3 py-2">{fmtKwh0(r?.bucketTotalKwh)}</td>
+                                  {repBuckets.map((b: any) => (
+                                    <td key={`${r?.yearMonth}-cur-${b.bucketKey}-kwh`} className="px-3 py-2">{fmtKwh0(byKey.get(String(b.bucketKey))?.kwh ?? 0)}</td>
+                                  ))}
+                                  {repBuckets.map((b: any) => (
+                                    <td key={`${r?.yearMonth}-cur-${b.bucketKey}-rate`} className="px-3 py-2">{fmtNum(byKey.get(String(b.bucketKey))?.repCentsPerKwh, 4)}¢</td>
+                                  ))}
+                                  {repBuckets.map((b: any) => (
+                                    <td key={`${r?.yearMonth}-cur-${b.bucketKey}-cost`} className="px-3 py-2">{fmtDollars(byKey.get(String(b.bucketKey))?.repCostDollars)}</td>
+                                  ))}
+                                  <td className="px-3 py-2">{fmtNum(r?.tdsp?.perKwhDeliveryChargeCents, 4)}¢</td>
+                                  <td className="px-3 py-2">{fmtDollars(r?.tdsp?.deliveryDollars)}</td>
+                                  <td className="px-3 py-2">{fmtDollars(r?.repFixedMonthlyChargeDollars)}</td>
+                                  <td className="px-3 py-2">{fmtDollars(r?.tdsp?.monthlyCustomerChargeDollars)}</td>
+                                  <td className="px-3 py-2">{fmtDollars(r?.creditsDollars)}</td>
+                                  <td className="px-3 py-2">{fmtDollars(r?.minimumUsageFeeDollars)}</td>
+                                  <td className="px-3 py-2">{fmtDollars(r?.minimumBillTopUpDollars)}</td>
+                                  <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(r?.totalDollars)}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                          <tfoot className="bg-brand-white/5 text-brand-cyan/80">
+                            {(() => {
+                              const rows = currentRowsRaw;
+                              const totalKwh = sumNums(rows.map((r: any) => r?.bucketTotalKwh));
+                              const repKwhByKey = new Map<string, number>();
+                              const repCostByKey = new Map<string, number>();
+                              for (const b of repBuckets) {
+                                repKwhByKey.set(String(b.bucketKey), 0);
+                                repCostByKey.set(String(b.bucketKey), 0);
+                              }
+                              for (const r of rows) {
+                                const repLines = Array.isArray(r?.repBuckets) ? (r.repBuckets as any[]) : [];
+                                for (const x of repLines) {
+                                  const key = String(x?.bucketKey ?? "");
+                                  if (!key || !repKwhByKey.has(key)) continue;
+                                  repKwhByKey.set(key, (repKwhByKey.get(key) ?? 0) + (numOrNull(x?.kwh) ?? 0));
+                                  repCostByKey.set(key, (repCostByKey.get(key) ?? 0) + (numOrNull(x?.repCostDollars) ?? 0));
+                                }
+                              }
+                              const totalMonthTotal = sumNums(rows.map((r: any) => numOrNull(r?.totalDollars) ?? 0));
+                              return (
+                                <tr className="border-t border-brand-cyan/20">
+                                  <td className="px-3 py-2 font-semibold text-brand-white/90">Total (sum of rows)</td>
+                                  <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtKwh0(totalKwh)}</td>
+                                  {repBuckets.map((b: any) => (
+                                    <td key={`t-${b.bucketKey}-kwh`} className="px-3 py-2 font-semibold text-brand-white/90">{fmtKwh0(repKwhByKey.get(String(b.bucketKey)) ?? 0)}</td>
+                                  ))}
+                                  {repBuckets.map((b: any, i: number) => <td key={`t-${b.bucketKey}-rate-${i}`} className="px-3 py-2 text-brand-cyan/60">—</td>)}
+                                  {repBuckets.map((b: any) => (
+                                    <td key={`t-${b.bucketKey}-cost`} className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(repCostByKey.get(String(b.bucketKey)) ?? 0)}</td>
+                                  ))}
+                                  <td className="px-3 py-2 text-brand-cyan/60">—</td>
+                                  <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(sumNums(rows.map((r: any) => r?.tdsp?.deliveryDollars)))}</td>
+                                  <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(sumNums(rows.map((r: any) => r?.repFixedMonthlyChargeDollars)))}</td>
+                                  <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(sumNums(rows.map((r: any) => r?.tdsp?.monthlyCustomerChargeDollars)))}</td>
+                                  <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(sumNums(rows.map((r: any) => r?.creditsDollars)))}</td>
+                                  <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(sumNums(rows.map((r: any) => r?.minimumUsageFeeDollars)))}</td>
+                                  <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(sumNums(rows.map((r: any) => r?.minimumBillTopUpDollars)))}</td>
+                                  <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(totalMonthTotal)}</td>
+                                </tr>
+                              );
+                            })()}
+                          </tfoot>
+                        </table>
+                      </div>
+
+                      {/* New plan table (same columns + delta) */}
+                      <div className="flex-shrink-0">
+                        <div className="text-[0.65rem] font-semibold uppercase text-brand-cyan/70 mb-1">New plan (selected)</div>
+                        <table className="min-w-[600px] w-full text-xs">
+                          <thead className="bg-brand-white/5 text-brand-cyan/70">
+                            <tr>
+                              <th className="px-3 py-2 text-left">Year-Month</th>
+                              <th className="px-3 py-2 text-left whitespace-nowrap">Total kWh</th>
+                              {repBuckets.map((b: any) => (
+                                <th key={`off-${b.bucketKey}-kwh`} className="px-3 py-2 text-left whitespace-nowrap" title={b.bucketKey}>{b.label} kWh</th>
+                              ))}
+                              {repBuckets.map((b: any) => (
+                                <th key={`off-${b.bucketKey}-rate`} className="px-3 py-2 text-left whitespace-nowrap">{b.label} ¢/kWh</th>
+                              ))}
+                              {repBuckets.map((b: any) => (
+                                <th key={`off-${b.bucketKey}-cost`} className="px-3 py-2 text-left whitespace-nowrap">{b.label} $</th>
+                              ))}
+                              <th className="px-3 py-2 text-left whitespace-nowrap">TDSP ¢/kWh</th>
+                              <th className="px-3 py-2 text-left whitespace-nowrap">TDSP delivery $</th>
+                              <th className="px-3 py-2 text-left whitespace-nowrap">REP fixed $</th>
+                              <th className="px-3 py-2 text-left whitespace-nowrap">TDSP fixed $</th>
+                              <th className="px-3 py-2 text-left whitespace-nowrap">Credits $</th>
+                              <th className="px-3 py-2 text-left whitespace-nowrap">Min usage $</th>
+                              <th className="px-3 py-2 text-left whitespace-nowrap">Min bill $</th>
+                              <th className="px-3 py-2 text-left whitespace-nowrap">Month total $</th>
+                              {showDelta ? <th className="px-3 py-2 text-left whitespace-nowrap" title="New − Current">Δ vs current $</th> : null}
+                            </tr>
+                          </thead>
+                          <tbody className="text-brand-cyan/80">
+                            {Array.from({ length: rowCount }, (_, idx) => {
+                              const r = offerRowsRaw[idx];
+                              const repLines = Array.isArray(r?.repBuckets) ? (r.repBuckets as any[]) : [];
+                              const byKey = new Map(repLines.map((x) => [String(x.bucketKey), x]));
+                              const etfThisMonth = idx === 0 && includeEtf && etfAppliesNow && etfDollars > 0 ? etfDollars : 0;
+                              const monthTotalAdjusted = (numOrNull(r?.totalDollars) ?? 0) + etfThisMonth;
+                              const currentRow = currentRowsRaw[idx];
+                              const currentMonthTotal = currentRow != null ? numOrNull(currentRow?.totalDollars) : null;
+                              const deltaVsCurrent = currentMonthTotal != null ? monthTotalAdjusted - currentMonthTotal : null;
+                              return (
+                                <tr key={`off-${String(r?.yearMonth ?? idx)}-${idx}`} className="border-t border-brand-cyan/10">
+                                  <td className="px-3 py-2 font-mono text-brand-white/90">{String(r?.yearMonth ?? "")}</td>
+                                  <td className="px-3 py-2">{fmtKwh0(r?.bucketTotalKwh)}</td>
+                                  {repBuckets.map((b: any) => (
+                                    <td key={`${r?.yearMonth}-off-${b.bucketKey}-kwh`} className="px-3 py-2">{fmtKwh0(byKey.get(String(b.bucketKey))?.kwh ?? 0)}</td>
+                                  ))}
+                                  {repBuckets.map((b: any) => (
+                                    <td key={`${r?.yearMonth}-off-${b.bucketKey}-rate`} className="px-3 py-2">{fmtNum(byKey.get(String(b.bucketKey))?.repCentsPerKwh, 4)}¢</td>
+                                  ))}
+                                  {repBuckets.map((b: any) => (
+                                    <td key={`${r?.yearMonth}-off-${b.bucketKey}-cost`} className="px-3 py-2">{fmtDollars(byKey.get(String(b.bucketKey))?.repCostDollars)}</td>
+                                  ))}
+                                  <td className="px-3 py-2">{fmtNum(r?.tdsp?.perKwhDeliveryChargeCents, 4)}¢</td>
+                                  <td className="px-3 py-2">{fmtDollars(r?.tdsp?.deliveryDollars)}</td>
+                                  <td className="px-3 py-2">{fmtDollars(r?.repFixedMonthlyChargeDollars)}</td>
+                                  <td className="px-3 py-2">{fmtDollars(r?.tdsp?.monthlyCustomerChargeDollars)}</td>
+                                  <td className="px-3 py-2">{fmtDollars(r?.creditsDollars)}</td>
+                                  <td className="px-3 py-2">{fmtDollars(r?.minimumUsageFeeDollars)}</td>
+                                  <td className="px-3 py-2">{fmtDollars(r?.minimumBillTopUpDollars)}</td>
+                                  <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(monthTotalAdjusted)}</td>
+                                  {showDelta ? (
+                                    <td
+                                      className={`px-3 py-2 font-semibold ${
+                                        typeof deltaVsCurrent === "number" && Number.isFinite(deltaVsCurrent)
+                                          ? deltaVsCurrent < 0 ? "text-emerald-200" : "text-amber-200"
+                                          : "text-brand-white/80"
+                                      }`}
+                                    >
+                                      {deltaVsCurrent == null ? "—" : fmtDollars(deltaVsCurrent)}
+                                    </td>
+                                  ) : null}
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                          <tfoot className="bg-brand-white/5 text-brand-cyan/80">
+                            {(() => {
+                              const rows = offerRowsRaw;
+                              const totalKwh = sumNums(rows.map((r: any) => r?.bucketTotalKwh));
+                              const repKwhByKey = new Map<string, number>();
+                              const repCostByKey = new Map<string, number>();
+                              for (const b of repBuckets) {
+                                repKwhByKey.set(String(b.bucketKey), 0);
+                                repCostByKey.set(String(b.bucketKey), 0);
+                              }
+                              for (const r of rows) {
+                                const repLines = Array.isArray(r?.repBuckets) ? (r.repBuckets as any[]) : [];
+                                for (const x of repLines) {
+                                  const key = String(x?.bucketKey ?? "");
+                                  if (!key || !repKwhByKey.has(key)) continue;
+                                  repKwhByKey.set(key, (repKwhByKey.get(key) ?? 0) + (numOrNull(x?.kwh) ?? 0));
+                                  repCostByKey.set(key, (repCostByKey.get(key) ?? 0) + (numOrNull(x?.repCostDollars) ?? 0));
+                                }
+                              }
+                              const totalEtf = includeEtf && etfAppliesNow && etfDollars > 0 && rows.length > 0 ? etfDollars : 0;
+                              const totalMonthTotal = sumNums(rows.map((r: any) => numOrNull(r?.totalDollars) ?? 0)) + totalEtf;
+                              let totalDelta: number | null = null;
+                              const deltas: number[] = [];
+                              for (let i = 0; i < rows.length; i++) {
+                                const r = rows[i];
+                                const cur = currentRowsRaw[i];
+                                const curTotal = cur != null ? numOrNull(cur?.totalDollars) : null;
+                                if (curTotal == null) continue;
+                                const base = numOrNull(r?.totalDollars) ?? 0;
+                                const etf = i === 0 && includeEtf && etfAppliesNow && etfDollars > 0 ? etfDollars : 0;
+                                deltas.push(base + etf - curTotal);
+                              }
+                              if (deltas.length) totalDelta = sumNums(deltas);
+                              return (
+                                <tr className="border-t border-brand-cyan/20">
+                                  <td className="px-3 py-2 font-semibold text-brand-white/90">Total (sum of rows)</td>
+                                  <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtKwh0(totalKwh)}</td>
+                                  {repBuckets.map((b: any) => (
+                                    <td key={`t2-${b.bucketKey}-kwh`} className="px-3 py-2 font-semibold text-brand-white/90">{fmtKwh0(repKwhByKey.get(String(b.bucketKey)) ?? 0)}</td>
+                                  ))}
+                                  {repBuckets.map((b: any, i: number) => <td key={`t2-${b.bucketKey}-rate-${i}`} className="px-3 py-2 text-brand-cyan/60">—</td>)}
+                                  {repBuckets.map((b: any) => (
+                                    <td key={`t2-${b.bucketKey}-cost`} className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(repCostByKey.get(String(b.bucketKey)) ?? 0)}</td>
+                                  ))}
+                                  <td className="px-3 py-2 text-brand-cyan/60">—</td>
+                                  <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(sumNums(rows.map((r: any) => r?.tdsp?.deliveryDollars)))}</td>
+                                  <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(sumNums(rows.map((r: any) => r?.repFixedMonthlyChargeDollars)))}</td>
+                                  <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(sumNums(rows.map((r: any) => r?.tdsp?.monthlyCustomerChargeDollars)))}</td>
+                                  <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(sumNums(rows.map((r: any) => r?.creditsDollars)))}</td>
+                                  <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(sumNums(rows.map((r: any) => r?.minimumUsageFeeDollars)))}</td>
+                                  <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(sumNums(rows.map((r: any) => r?.minimumBillTopUpDollars)))}</td>
+                                  <td className="px-3 py-2 font-semibold text-brand-white/90">{fmtDollars(totalMonthTotal)}</td>
+                                  {showDelta ? (
+                                    <td className={`px-3 py-2 font-semibold ${typeof totalDelta === "number" && totalDelta < 0 ? "text-emerald-200" : "text-amber-200"}`}>
+                                      {totalDelta == null ? "—" : fmtDollars(totalDelta)}
+                                    </td>
+                                  ) : null}
+                                </tr>
+                              );
+                            })()}
+                          </tfoot>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
 
           {showConfirm ? (

@@ -593,11 +593,12 @@ export async function POST(req: NextRequest) {
         start: usage.coverageStartDate,
         end: usage.coverageEndDate,
         days: usage.coverageDays,
+        // Expected intervals from the same span as start/end/days (15-min = 96/day).
+        expectedIntervals: Math.max(1, usage.coverageDays * 96),
         completenessPct:
-          usage.intervalExpectedBySpan > 0
-            ? Math.round((usage.intervalCount / usage.intervalExpectedBySpan) * 1000) / 10
+          usage.coverageDays > 0
+            ? Math.round((usage.intervalCount / (usage.coverageDays * 96)) * 1000) / 10
             : 0,
-        expectedIntervals: usage.intervalExpectedBySpan,
       },
       message: usage.message,
     },
