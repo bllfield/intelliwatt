@@ -75,6 +75,30 @@ Notes:
 - [ ] Gradually refactor Usage, Home Details, Appliances, Upgrades, Offers, and Referrals to follow the Current Plan pattern: module DB ingestion → normalize into the master DB.
 - Current Plan is the **first module** fully wired to a separate database and normalized into the master dataset. Usage, Home Details, Appliances, Upgrades, Offers, and Referrals will follow the same "module DB → normalization → master DB" pattern using the env vars defined in `docs/ENV_VARS.md`.
 
+## Phase: Manual Entry → Simulated Usage Layer (15-Minute Curve)
+
+### Phase Summary
+- Manual entry is no longer a placeholder. /dashboard/api/manual contains real Monthly + Annual entry UI (with travel ranges) and persists real kWh inputs.
+- Manual monthly requires an explicit anchor (anchorEndMonth YYYY-MM or anchorEndDate). Default is the platform’s last full month in America/Chicago. Anchor is persisted and used for validation, simulated generation, and chart labels.
+- Existing SMT and Green Button ingestion/storage paths are untouched. Real usage remains immutable.
+- Added a new simulated usage engine module that generates a baseline 15-minute interval curve (flat distribution) from manual totals, applies whole-day travel exclusions, and renormalizes totals.
+- Added /api/user/usage/simulated which returns the exact same JSON shape as /api/user/usage (ok + houses[] with dataset), enabling reuse of UsageDashboard charts.
+- Do NOT expand dataset.summary.source union. Simulated labeling is done via dataset.meta.datasetKind = "SIMULATED" and/or dataset.meta.isSimulated.
+- UsageDashboard now supports a Real vs Simulated toggle. Simulated mode fetches /api/user/usage/simulated; when dataset is null it shows a CTA to /dashboard/api/manual.
+- Replaced Home Details and Appliances dashboard placeholders with real forms using existing dashboard design language, persisted to additive simulated-layer tables.
+- Home Details supports WattBuy prefill from existing stored sources (HouseAddress.rawWattbuyJson, WattBuyApiSnapshot, fallback proxy). Prefill never auto-saves; user edits always win; Apply/Reset controls provided.
+- SmtManualFallbackCard no longer creates placeholder records; it links/scrolls the user into the real manual entry UI. Manual status helper reflects “Active” when valid manual inputs exist.
+
+### Architecture Notes
+- New modules added under /modules (additive, isolated): manualUsage, simulatedUsage, homeProfile, applianceProfile, usageScenario.
+- New additive prisma models/tables were added for simulated-layer persistence (manual inputs, home profile, appliances, scenarios). Existing real-usage tables are unchanged.
+- Tests added (Vitest): simulation totals preserved, travel exclusions renormalize, prefill merge rules, monthly-anchor labeling consistency.
+
+### Out of Scope / Next Phase
+- Patch incomplete SMT months using simulated segments (real usage remains unchanged; simulated curve will support patch ranges).
+- Scenario deltas (EV, occupants, upgrades, solar) beyond baseline flat distribution.
+- More realistic load-shaping (weather/HVAC/occupancy) beyond baseline.
+
 ### Current Plan Module Migrations
 
 - Schema: `prisma/current-plan/schema.prisma`

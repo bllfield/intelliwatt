@@ -1,5 +1,7 @@
 # Usage Simulation Plan (Manual Entry + Partial Usage Backfill)
 
+Phase-specific implementation notes live in `docs/PROJECT_PLAN.md` under "Phase: Manual Entry → Simulated Usage Layer (15-Minute Curve)".
+
 ## Purpose
 We want **plan cost calculations to always run** even when we do not have a full 12 months of measured usage (SMT / Green Button), by generating **clearly-labeled simulated usage** for missing months.
 
