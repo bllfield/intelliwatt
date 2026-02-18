@@ -10,7 +10,7 @@ type UsageSeriesPoint = {
 };
 
 type UsageDatasetSummary = {
-  source: "SMT" | "GREEN_BUTTON";
+  source: "SMT" | "GREEN_BUTTON" | "SIMULATED";
   intervalsCount: number;
   totalKwh: number;
   start: string | null;

@@ -151,8 +151,7 @@ export async function GET(_request: NextRequest) {
 
           dataset = {
             summary: {
-              // Do NOT expand strict unions: keep within existing values.
-              source: "SMT",
+              source: "SIMULATED",
               intervalsCount: curve.intervals.length,
               totalKwh: round2(curve.annualTotalKwh),
               start: curve.start,

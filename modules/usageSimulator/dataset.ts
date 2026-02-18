@@ -98,7 +98,7 @@ export function buildSimulatedUsageDatasetFromBuildInputs(buildInputs: Simulator
 
   return {
     summary: {
-      source: "SMT" as const,
+      source: "SIMULATED" as const,
       intervalsCount: curve.intervals.length,
       totalKwh: round2(curve.annualTotalKwh),
       start: curve.start,
