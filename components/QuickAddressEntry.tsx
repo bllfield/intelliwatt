@@ -52,6 +52,10 @@ export default function QuickAddressEntry({
   const [reinitNonce, setReinitNonce] = useState(0);
   const wait = (durationMs: number) => new Promise<void>((resolve) => setTimeout(resolve, durationMs));
 
+  const hasSavedAddress = Boolean(userAddress);
+  const showForm = editing || !hasSavedAddress;
+  const showSaved = hasSavedAddress && !editing;
+
   useEffect(() => {
     setMounted(true);
   }, []);
@@ -101,6 +105,7 @@ export default function QuickAddressEntry({
 
   useEffect(() => {
     if (!mounted) return;
+    if (!showForm) return;
     let cancelled = false;
     let widget: any = null;
     let handleInput: ((event: any) => void) | null = null;
@@ -109,9 +114,7 @@ export default function QuickAddressEntry({
     const googleObj = typeof window !== 'undefined' ? (window as any).google : undefined;
 
     const fallback = () => {
-      if (!useFallbackInput) {
-        setUseFallbackInput(true);
-      }
+      setUseFallbackInput(true);
     };
 
     async function initAutocomplete() {
@@ -244,7 +247,7 @@ export default function QuickAddressEntry({
         autocompleteElementRef.current = null;
       }
     };
-  }, [mounted, reinitNonce]);
+  }, [mounted, reinitNonce, showForm]);
   useEffect(() => {
     if (!mounted) return;
     if (!userAddress) return;
@@ -429,9 +432,6 @@ export default function QuickAddressEntry({
   const baseClass =
     'rounded-2xl border border-[#00F0FF]/30 bg-brand-navy/95 p-6 text-brand-cyan shadow-[0_24px_70px_rgba(0,240,255,0.12)] sm:p-8';
   const containerClass = className ? `${baseClass} ${className}` : baseClass;
-  const hasSavedAddress = Boolean(userAddress);
-  const showForm = editing || !hasSavedAddress;
-  const showSaved = hasSavedAddress && !editing;
 
   const resetAddress = () => {
     const widget = autocompleteElementRef.current;
