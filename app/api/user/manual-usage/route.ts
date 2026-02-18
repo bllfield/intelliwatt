@@ -179,11 +179,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: "endDate_invalid" }, { status: 400 });
     }
     const annualKwh =
-      payload.annualKwh === ""
-        ? ""
-        : typeof payload.annualKwh === "number" && Number.isFinite(payload.annualKwh)
-          ? payload.annualKwh
-          : "";
+      typeof payload.annualKwh === "number" && Number.isFinite(payload.annualKwh) ? payload.annualKwh : null;
+    if (annualKwh == null) {
+      return NextResponse.json({ ok: false, error: "annualKwh_required" }, { status: 400 });
+    }
     const travelRanges = normalizeRanges(payload.travelRanges);
 
     const stored: AnnualPayload = {
