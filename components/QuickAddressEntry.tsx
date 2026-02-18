@@ -44,6 +44,7 @@ export default function QuickAddressEntry({
   const [editing, setEditing] = useState(!userAddress);
   const [placeDetails, setPlaceDetails] = useState<any>(null); // Store full Google Place object
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const fallbackInputRef = useRef<HTMLInputElement | null>(null);
   const autocompleteElementRef = useRef<any>(null);
   const placeDetailsRef = useRef<any>(null);
   const parsedAddressRef = useRef<ParsedPlace | null>(null);
@@ -248,6 +249,69 @@ export default function QuickAddressEntry({
       }
     };
   }, [mounted, reinitNonce, showForm]);
+
+  useEffect(() => {
+    if (!mounted) return;
+    if (!showForm) return;
+    if (!useFallbackInput) return;
+
+    const input = fallbackInputRef.current;
+    if (!input) return;
+
+    const googleObj = typeof window !== 'undefined' ? (window as any).google : undefined;
+    const AutocompleteCtor = googleObj?.maps?.places?.Autocomplete;
+    if (!AutocompleteCtor) {
+      return;
+    }
+
+    let listener: any = null;
+    let autocomplete: any = null;
+
+    try {
+      autocomplete = new AutocompleteCtor(input, {
+        types: ['address'],
+        fields: ['address_components', 'formatted_address', 'geometry'],
+      });
+
+      listener = autocomplete.addListener('place_changed', () => {
+        try {
+          const place = autocomplete.getPlace?.();
+          const parsed = parseGooglePlace(place);
+          if (!parsed || !parsed.line1 || !parsed.city || !parsed.state || !parsed.zip) {
+            placeDetailsRef.current = null;
+            parsedAddressRef.current = null;
+            setPlaceDetails(null);
+            setError('Unable to parse the selected address. Please complete the fields manually.');
+            return;
+          }
+
+          setError(null);
+          placeDetailsRef.current = place;
+          parsedAddressRef.current = parsed;
+          addressValueRef.current = parsed.formattedAddress;
+          setAddress(parsed.formattedAddress);
+          setPlaceDetails(place);
+        } catch (err) {
+          console.error('Places Autocomplete selection error', err);
+          placeDetailsRef.current = null;
+          parsedAddressRef.current = null;
+          setPlaceDetails(null);
+          setError('Unable to retrieve address details. Please enter the full address manually.');
+        }
+      });
+    } catch (err) {
+      console.warn('Failed to initialize classic Places Autocomplete:', err);
+    }
+
+    return () => {
+      try {
+        if (listener?.remove) listener.remove();
+      } catch {
+        // ignore
+      }
+    };
+  }, [mounted, showForm, useFallbackInput]);
+
   useEffect(() => {
     if (!mounted) return;
     if (!userAddress) return;
@@ -503,6 +567,7 @@ export default function QuickAddressEntry({
                   <div ref={containerRef} className="min-h-[46px]" />
                   {useFallbackInput && (
                     <input
+                      ref={fallbackInputRef}
                       type="text"
                       placeholder="Start typing your service address..."
                       value={address}
