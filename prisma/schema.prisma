@@ -31,6 +31,7 @@ model User {
   utilityPlans       UtilityPlan[]
   smtAuthorizations  SmtAuthorization[]
   manualUsageUploads ManualUsageUpload[]
+  manualUsageInputs  ManualUsageInput[]
   entryExpiryDigests EntryExpiryDigest[]     @relation("EntryExpiryDigestUser")
   homeSavingsSnapshots HomeSavingsSnapshot[]
 }
@@ -241,6 +242,26 @@ model ManualUsageUpload {
   @@index([userId])
   @@index([houseId])
   @@index([expiresAt])
+}
+
+model ManualUsageInput {
+  id             String      @id @default(cuid())
+  userId         String
+  houseId        String
+  mode           String      // MONTHLY | ANNUAL
+  payload        Json
+  anchorEndMonth String?     // YYYY-MM (monthly mode)
+  anchorEndDate  DateTime?   // optional monthly anchor (date)
+  annualEndDate  DateTime?   // annual mode
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  user  User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  house HouseAddress @relation(fields: [houseId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, houseId])
+  @@index([userId])
+  @@index([houseId])
 }
 
 model NormalizedCurrentPlan {
@@ -714,6 +735,7 @@ model HouseAddress {
   smtAuthorizations  SmtAuthorization[]
   entries            Entry[]
   manualUsageUploads ManualUsageUpload[]
+  manualUsageInputs  ManualUsageInput[]
   greenButtonUploads GreenButtonUpload[]
   savingsSnapshot    HomeSavingsSnapshot?
 

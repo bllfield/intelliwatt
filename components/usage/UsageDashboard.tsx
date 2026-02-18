@@ -103,12 +103,16 @@ type HouseUsage = {
 type UsageApiResponse = { ok: true; houses: HouseUsage[] } | { ok: false; error: string };
 
 type SessionCacheValue = { savedAt: number; payload: UsageApiResponse };
-const SESSION_KEY = "usage_dashboard_v1";
+const SESSION_KEY_PREFIX = "usage_dashboard_v1";
 const SESSION_TTL_MS = 60 * 60 * 1000; // UX cache only (real data lives in DB)
 
-function readSessionCache(): SessionCacheValue | null {
+function sessionKey(mode: "REAL" | "SIMULATED") {
+  return `${SESSION_KEY_PREFIX}:${mode}`;
+}
+
+function readSessionCache(mode: "REAL" | "SIMULATED"): SessionCacheValue | null {
   try {
-    const raw = sessionStorage.getItem(SESSION_KEY);
+    const raw = sessionStorage.getItem(sessionKey(mode));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as SessionCacheValue;
     if (!parsed?.savedAt || !parsed?.payload) return null;
@@ -119,10 +123,10 @@ function readSessionCache(): SessionCacheValue | null {
   }
 }
 
-function writeSessionCache(payload: UsageApiResponse) {
+function writeSessionCache(mode: "REAL" | "SIMULATED", payload: UsageApiResponse) {
   try {
     const v: SessionCacheValue = { savedAt: Date.now(), payload };
-    sessionStorage.setItem(SESSION_KEY, JSON.stringify(v));
+    sessionStorage.setItem(sessionKey(mode), JSON.stringify(v));
   } catch {
     // ignore
   }
@@ -180,6 +184,7 @@ function toDateKeyFromTimestamp(ts: string): string {
 }
 
 export const UsageDashboard: React.FC = () => {
+  const [datasetMode, setDatasetMode] = useState<"REAL" | "SIMULATED">("REAL");
   const [houses, setHouses] = useState<HouseUsage[]>([]);
   const [selectedHouseId, setSelectedHouseId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -195,7 +200,7 @@ export const UsageDashboard: React.FC = () => {
         setError(null);
 
         // Show cached payload instantly (back/forward nav), then refresh in the background.
-        const cached = readSessionCache();
+        const cached = readSessionCache(datasetMode);
         const cachedPayload = cached?.payload ?? null;
         if (cachedPayload && (cachedPayload as any).ok !== false && (cachedPayload as any).houses) {
           const c = cachedPayload as { ok: true; houses: HouseUsage[] };
@@ -210,13 +215,17 @@ export const UsageDashboard: React.FC = () => {
         // Always refresh in the background so SMT pulls/backfills show up immediately
         // (even if the user recently visited this page and has sessionStorage cached).
         // Use no-store + cache-bust to avoid browser cache keeping an old payload around.
-        const res = await fetch(`/api/user/usage?ts=${Date.now()}`, { cache: "no-store" });
+        const url =
+          datasetMode === "SIMULATED"
+            ? `/api/user/usage/simulated?ts=${Date.now()}`
+            : `/api/user/usage?ts=${Date.now()}`;
+        const res = await fetch(url, { cache: "no-store" });
         const json = (await res.json()) as UsageApiResponse;
         if (!res.ok || json.ok === false) {
           throw new Error((json as any).error || `Failed with status ${res.status}`);
         }
         if (cancelled) return;
-        writeSessionCache(json);
+        writeSessionCache(datasetMode, json);
         setHouses(json.houses || []);
         const firstWithData = json.houses.find((h) => h.dataset);
         setSelectedHouseId(firstWithData?.houseId ?? json.houses[0]?.houseId ?? null);
@@ -230,11 +239,19 @@ export const UsageDashboard: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [datasetMode]);
 
   // If usage isn't available yet (common immediately after SMT backfill request),
   // keep checking until it lands by polling the SMT orchestrator and reloading usage.
   useEffect(() => {
+    if (datasetMode === "SIMULATED") {
+      if (smtPollTimerRef.current) {
+        window.clearTimeout(smtPollTimerRef.current);
+        smtPollTimerRef.current = null;
+      }
+      return;
+    }
+
     // Clear any prior polling
     if (smtPollTimerRef.current) {
       window.clearTimeout(smtPollTimerRef.current);
@@ -258,7 +275,7 @@ export const UsageDashboard: React.FC = () => {
       const json = (await res.json()) as UsageApiResponse;
       if (!res.ok || (json as any).ok === false) return;
       if (cancelled) return;
-      writeSessionCache(json);
+      writeSessionCache("REAL", json);
       setHouses((json as any).houses || []);
       const nextHouses = (json as any).houses || [];
       const firstWithData = nextHouses.find((h: any) => h.dataset);
@@ -311,7 +328,7 @@ export const UsageDashboard: React.FC = () => {
         smtPollTimerRef.current = null;
       }
     };
-  }, [loading, selectedHouseId, houses]);
+  }, [datasetMode, loading, selectedHouseId, houses]);
 
   const activeHouse = useMemo(() => {
     if (!selectedHouseId) return null;
@@ -320,13 +337,14 @@ export const UsageDashboard: React.FC = () => {
 
   const coverage = useMemo(() => {
     const ds = activeHouse?.dataset;
+    const datasetKind = (ds as any)?.meta?.datasetKind ?? null;
     const startIso = ds?.summary?.start ?? null;
     // Prefer "end" if present; otherwise use "latest" (the last timestamp we saw in DB).
     const endIso = ds?.summary?.end ?? ds?.summary?.latest ?? null;
     const start = startIso ? String(startIso).slice(0, 10) : null;
     const end = endIso ? String(endIso).slice(0, 10) : null;
     return {
-      source: ds?.summary?.source ?? null,
+      source: datasetKind === "SIMULATED" ? "SIMULATED" : ds?.summary?.source ?? null,
       start,
       end,
       intervalsCount: ds?.summary?.intervalsCount ?? null,
@@ -417,7 +435,11 @@ export const UsageDashboard: React.FC = () => {
   if (!houses.length) {
     return (
       <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
-        <p className="text-sm text-neutral-600">No usage data yet. Connect SMT or upload a Green Button file to view analytics.</p>
+        <p className="text-sm text-neutral-600">
+          {datasetMode === "SIMULATED"
+            ? "No homes found yet. Add a service address, then enter manual usage to generate a simulated curve."
+            : "No usage data yet. Connect SMT or upload a Green Button file to view analytics."}
+        </p>
       </div>
     );
   }
@@ -430,7 +452,11 @@ export const UsageDashboard: React.FC = () => {
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Usage dashboard</p>
           <h2 className="text-xl font-semibold text-neutral-900">Household energy insights</h2>
-          <p className="text-sm text-neutral-600">Based on normalized 15-minute interval data from your connected sources.</p>
+          <p className="text-sm text-neutral-600">
+            {datasetMode === "SIMULATED"
+              ? "Based on a simulated 15-minute curve generated from your manual entry."
+              : "Based on normalized 15-minute interval data from your connected sources."}
+          </p>
           {coverage?.start && coverage?.end ? (
             <p className="mt-1 text-xs text-neutral-500">
               Data coverage:{" "}
@@ -442,28 +468,65 @@ export const UsageDashboard: React.FC = () => {
             </p>
           ) : null}
         </div>
-        {houses.length > 1 ? (
-          <label className="text-sm text-neutral-700">
-            <span className="mr-2 text-xs uppercase tracking-wide text-neutral-500">Home</span>
-            <select
-              className="rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-800"
-              value={selectedHouseId ?? ''}
-              onChange={(e) => setSelectedHouseId(e.target.value)}
+        <div className="flex flex-col gap-2 md:items-end">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setDatasetMode("REAL")}
+              className={`rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-wide transition ${
+                datasetMode === "REAL"
+                  ? "border-brand-blue bg-brand-blue/10 text-brand-blue"
+                  : "border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-50"
+              }`}
             >
-              {houses.map((h) => (
-                <option key={h.houseId} value={h.houseId}>
-                  {h.label || h.address.line1 || 'Home'}
-                </option>
-              ))}
-            </select>
-          </label>
-        ) : null}
+              Real
+            </button>
+            <button
+              type="button"
+              onClick={() => setDatasetMode("SIMULATED")}
+              className={`rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-wide transition ${
+                datasetMode === "SIMULATED"
+                  ? "border-brand-blue bg-brand-blue/10 text-brand-blue"
+                  : "border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-50"
+              }`}
+            >
+              Simulated
+            </button>
+          </div>
+
+          {houses.length > 1 ? (
+            <label className="text-sm text-neutral-700">
+              <span className="mr-2 text-xs uppercase tracking-wide text-neutral-500">Home</span>
+              <select
+                className="rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-800"
+                value={selectedHouseId ?? ""}
+                onChange={(e) => setSelectedHouseId(e.target.value)}
+              >
+                {houses.map((h) => (
+                  <option key={h.houseId} value={h.houseId}>
+                    {h.label || h.address.line1 || "Home"}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+        </div>
       </div>
 
       {!hasData ? (
         <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
           <p className="text-sm text-neutral-600">
-            No usage data for this home yet. Once SMT or Green Button data is ingested, charts will appear here.
+            {datasetMode === "SIMULATED" ? (
+              <>
+                No simulated dataset yet for this home.{" "}
+                <a className="font-semibold text-brand-blue hover:underline" href="/dashboard/api/manual">
+                  Enter manual usage
+                </a>{" "}
+                to generate a simulated curve.
+              </>
+            ) : (
+              "No usage data for this home yet. Once SMT or Green Button data is ingested, charts will appear here."
+            )}
           </p>
         </div>
       ) : (

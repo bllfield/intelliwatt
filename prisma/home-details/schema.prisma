@@ -15,3 +15,35 @@ model HomeDetailsModuleBootstrap {
   createdAt DateTime @default(now())
 }
 
+model HomeProfileSimulated {
+  id                  String   @id @default(cuid())
+  userId              String
+  houseId             String
+
+  homeAge             Int
+  homeStyle           String
+  squareFeet          Int
+  stories             Int
+  insulationType      String
+  windowType          String
+  foundation          String
+  ledLights           Boolean
+  smartThermostat     Boolean
+  summerTemp          Int
+  winterTemp          Int
+  occupantsWork       Int
+  occupantsSchool     Int
+  occupantsHomeAllDay Int
+  fuelConfiguration   String
+
+  provenanceJson Json?
+  prefillJson    Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, houseId])
+  @@index([userId])
+  @@index([houseId])
+}
+
