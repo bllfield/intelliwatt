@@ -460,8 +460,8 @@ export default function PlansClient() {
             tceReason.includes("MISSING TEMPLATE") ||
             tceReason.includes("MISSING BUCKET"))) ||
         (statusLabel === "QUEUED" &&
-          tce?.status !== "OK" &&
-          tce?.status !== "APPROXIMATE");
+          tceStatus !== "OK" &&
+          tceStatus !== "APPROXIMATE");
       if (calculating) return "CALCULATING";
 
       // Everything else is currently unavailable (true defects, temporary lookups, etc).

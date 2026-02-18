@@ -146,14 +146,14 @@ export default function OfferCard({ offer, recommended }: OfferCardProps) {
     // Template missing can be transient (prefetch/pipeline may be building it); treat as calculating on the card.
     tceStatus === "MISSING_TEMPLATE" ||
     // Backend says QUEUED but no estimate yet → still processing.
-    (status === "QUEUED" && !(tce?.status === "OK" || tce?.status === "APPROXIMATE") && !isUnsupported);
+    (status === "QUEUED" && !(tceStatus === "OK" || tceStatus === "APPROXIMATE") && !isUnsupported);
 
   const statusKind: "AVAILABLE" | "CALCULATING" | "NEED_USAGE" | "NOT_COMPUTABLE_YET" =
     tceStatus === "MISSING_USAGE"
       ? "NEED_USAGE"
       : isMissingBuckets
         ? "NEED_USAGE"
-        : status === "AVAILABLE" && (tce?.status === "OK" || tce?.status === "APPROXIMATE")
+        : status === "AVAILABLE" && (tceStatus === "OK" || tceStatus === "APPROXIMATE")
           ? "AVAILABLE"
           : isCalculating
             ? "CALCULATING"
