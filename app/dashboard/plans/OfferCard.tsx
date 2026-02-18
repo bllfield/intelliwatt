@@ -272,7 +272,7 @@ export default function OfferCard({ offer, recommended }: OfferCardProps) {
                 href={yracUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="text-xs font-semibold text-brand-navy hover:underline"
+                className="link-brand text-xs font-semibold hover:underline"
                 onClick={(e) => e.stopPropagation()}
               >
                 YRAC
