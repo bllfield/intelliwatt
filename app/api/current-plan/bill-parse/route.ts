@@ -413,7 +413,7 @@ export async function POST(request: NextRequest) {
               variableIndexType:
                 parsed.variableIndexType ?? baseline.variableIndexType ?? null,
               termMonths: parsed.termMonths ?? baseline.termMonths ?? null,
-              contractEndDate: nextContractEndDate ? new Date(nextContractEndDate) : null,
+              ...(nextContractEndDate ? { contractEndDate: new Date(nextContractEndDate) } : {}),
               earlyTerminationFeeCents:
                 parsed.earlyTerminationFeeCents ?? baseline.earlyTerminationFeeCents ?? null,
               baseChargeCentsPerMonth:
@@ -434,7 +434,7 @@ export async function POST(request: NextRequest) {
               variableIndexType:
                 parsed.variableIndexType ?? baseline.variableIndexType ?? null,
               termMonths: parsed.termMonths ?? baseline.termMonths ?? null,
-              contractEndDate: nextContractEndDate ? new Date(nextContractEndDate) : null,
+              ...(nextContractEndDate ? { contractEndDate: new Date(nextContractEndDate) } : {}),
               earlyTerminationFeeCents:
                 parsed.earlyTerminationFeeCents ?? baseline.earlyTerminationFeeCents ?? null,
               baseChargeCentsPerMonth:
