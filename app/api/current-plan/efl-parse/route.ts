@@ -789,10 +789,10 @@ export async function POST(req: NextRequest) {
       const existingManual = await manualDelegate.findFirst({
         where: { userId: user.id, ...(houseId ? { houseId } : {}) },
         orderBy: { updatedAt: "desc" },
-        select: { id: true },
+        select: { id: true, contractEndDate: true, esiId: true, accountNumberLast4: true },
       });
 
-      const manualData = {
+      const manualDataBase = {
         userId: user.id,
         houseId,
         providerName: entryData.providerName ?? "Unknown provider",
@@ -803,10 +803,7 @@ export async function POST(req: NextRequest) {
         baseMonthlyFee: null,
         billCreditDollars: null,
         termLengthMonths: entryData.termLengthMonths ?? null,
-        contractEndDate: null,
         earlyTerminationFee: typeof entryData.earlyTerminationFee === "number" ? entryData.earlyTerminationFee : null,
-        esiId: null,
-        accountNumberLast4: null,
         notes: "Imported from current plan EFL (fact label).",
         rateStructure,
         normalizedAt: new Date(),
@@ -814,9 +811,25 @@ export async function POST(req: NextRequest) {
       };
 
       if (existingManual?.id) {
-        await manualDelegate.update({ where: { id: existingManual.id }, data: manualData });
+        // Non-destructive merge: never wipe bill-derived contract/account fields.
+        await manualDelegate.update({
+          where: { id: existingManual.id },
+          data: {
+            ...manualDataBase,
+            ...(existingManual.contractEndDate ? { contractEndDate: existingManual.contractEndDate } : {}),
+            ...(existingManual.esiId ? { esiId: existingManual.esiId } : {}),
+            ...(existingManual.accountNumberLast4 ? { accountNumberLast4: existingManual.accountNumberLast4 } : {}),
+          },
+        });
       } else {
-        await manualDelegate.create({ data: manualData });
+        await manualDelegate.create({
+          data: {
+            ...manualDataBase,
+            contractEndDate: null,
+            esiId: null,
+            accountNumberLast4: null,
+          },
+        });
       }
 
       await ensureCurrentPlanEntry(user.id, houseId);

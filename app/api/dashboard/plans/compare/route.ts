@@ -320,13 +320,20 @@ export async function GET(req: NextRequest) {
           ? parsedBillRs
           : manualRs ?? parsedEflRs ?? parsedBillRs ?? null;
 
+    const parsedContractEndDate =
+      (latestParsedEfl as any)?.contractEndDate ?? (latestParsedBill as any)?.contractEndDate ?? null;
+    const parsedEarlyTerminationFee =
+      (latestParsedEfl as any)?.earlyTerminationFee ?? (latestParsedBill as any)?.earlyTerminationFee ?? null;
+    const parsedEarlyTerminationFeeCents =
+      (latestParsedEfl as any)?.earlyTerminationFeeCents ?? (latestParsedBill as any)?.earlyTerminationFeeCents ?? null;
+
     const mergedCurrent: any = {
       ...(latestParsed ?? {}),
       ...(latestManual ?? {}),
       // Explicit picks: prefer manual overrides, but fall back to parsed if manual is blank.
-      contractEndDate: (latestManual as any)?.contractEndDate ?? (latestParsed as any)?.contractEndDate ?? null,
-      earlyTerminationFee: (latestManual as any)?.earlyTerminationFee ?? (latestParsed as any)?.earlyTerminationFee ?? null,
-      earlyTerminationFeeCents: (latestManual as any)?.earlyTerminationFeeCents ?? (latestParsed as any)?.earlyTerminationFeeCents ?? null,
+      contractEndDate: (latestManual as any)?.contractEndDate ?? parsedContractEndDate ?? null,
+      earlyTerminationFee: (latestManual as any)?.earlyTerminationFee ?? parsedEarlyTerminationFee ?? null,
+      earlyTerminationFeeCents: (latestManual as any)?.earlyTerminationFeeCents ?? parsedEarlyTerminationFeeCents ?? null,
       rateStructure: effectiveRateStructure,
       providerName: (latestManual as any)?.providerName ?? (latestParsed as any)?.providerName ?? null,
       planName: (latestManual as any)?.planName ?? (latestParsed as any)?.planName ?? null,
@@ -687,6 +694,10 @@ export async function GET(req: NextRequest) {
       const rows: any[] = months.map((ym) => {
         const m = byMonth[ym] ?? {};
         const totalKwh = monthKwh(m, "kwh.m.all.total") ?? 0;
+        const monthOfYear = (() => {
+          const mm = Number(String(ym ?? "").slice(5, 7));
+          return Number.isFinite(mm) && mm >= 1 && mm <= 12 ? mm : null;
+        })();
 
         const tdspDeliveryCents =
           rs?.tdspDeliveryIncludedInEnergyCharge === true ? 0 : totalKwh * tdspPerKwhCents;
@@ -708,7 +719,7 @@ export async function GET(req: NextRequest) {
             repCentsPerKwh = totalKwh > 0 ? repCostCents / totalKwh : null;
             notes = ["tiered"];
           } else if (touMaybe?.schedule?.periods?.length) {
-            const p = (touMaybe as any).schedule.periods.find((pp: any) => {
+            const candidates = ((touMaybe as any).schedule.periods as any[]).filter((pp: any) => {
               const dayType = String(pp?.dayType ?? "").trim();
               const startHHMM = String(pp?.startHHMM ?? "").trim();
               const endHHMM = String(pp?.endHHMM ?? "").trim();
@@ -718,6 +729,18 @@ export async function GET(req: NextRequest) {
                   : `kwh.m.${dayType}.${startHHMM}-${endHHMM}`;
               return key === b.bucketKey;
             });
+
+            // NOTE:
+            // Many current plans encode "seasonal discounts" as month-scoped all-day TOU periods.
+            // Those periods share the same bucket key (`kwh.m.all.total`) but differ by `months`.
+            // For monthly breakdowns we must pick the period whose months include the target month.
+            const p =
+              (monthOfYear
+                ? candidates.find((pp) => Array.isArray(pp?.months) && (pp.months as any[]).includes(monthOfYear))
+                : null) ??
+              candidates.find((pp) => !Array.isArray(pp?.months) || (pp.months as any[]).length === 0) ??
+              candidates[0] ??
+              null;
             const cents =
               typeof p?.repEnergyCentsPerKwh === "number" ? p.repEnergyCentsPerKwh : null;
             repCentsPerKwh = cents;

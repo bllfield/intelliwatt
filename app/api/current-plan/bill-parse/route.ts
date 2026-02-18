@@ -398,6 +398,7 @@ export async function POST(request: NextRequest) {
 
       if (templateDelegate && providerNameKey && planNameKey) {
         try {
+          const nextContractEndDate = parsed.contractEndDate ?? baseline.contractEndDate ?? null;
           await templateDelegate.upsert({
             where: {
               providerNameKey_planNameKey: {
@@ -412,9 +413,7 @@ export async function POST(request: NextRequest) {
               variableIndexType:
                 parsed.variableIndexType ?? baseline.variableIndexType ?? null,
               termMonths: parsed.termMonths ?? baseline.termMonths ?? null,
-              contractEndDate: parsed.contractEndDate
-                ? new Date(parsed.contractEndDate)
-                : null,
+              ...(nextContractEndDate ? { contractEndDate: new Date(nextContractEndDate) } : {}),
               earlyTerminationFeeCents:
                 parsed.earlyTerminationFeeCents ?? baseline.earlyTerminationFeeCents ?? null,
               baseChargeCentsPerMonth:
@@ -435,9 +434,7 @@ export async function POST(request: NextRequest) {
               variableIndexType:
                 parsed.variableIndexType ?? baseline.variableIndexType ?? null,
               termMonths: parsed.termMonths ?? baseline.termMonths ?? null,
-              contractEndDate: parsed.contractEndDate
-                ? new Date(parsed.contractEndDate)
-                : null,
+              contractEndDate: nextContractEndDate ? new Date(nextContractEndDate) : null,
               earlyTerminationFeeCents:
                 parsed.earlyTerminationFeeCents ?? baseline.earlyTerminationFeeCents ?? null,
               baseChargeCentsPerMonth:
@@ -546,14 +543,26 @@ export async function POST(request: NextRequest) {
     const existing = await parsedDelegate.findFirst({
       where: { userId: user.id, ...(effectiveHouseId ? { houseId: effectiveHouseId } : {}) },
       orderBy: { createdAt: 'desc' },
-      select: { id: true },
+      select: {
+        id: true,
+        customerName: true,
+        meterNumber: true,
+        contractEndDate: true,
+      },
     });
 
     const saved =
       existing &&
       (await parsedDelegate.update({
         where: { id: existing.id },
-        data: entryData,
+        // Non-destructive merge: never wipe bill-derived identity/contract fields
+        // when a later parse fails to extract them.
+        data: {
+          ...entryData,
+          ...(entryData.customerName == null && existing.customerName ? { customerName: existing.customerName } : {}),
+          ...(entryData.meterNumber == null && existing.meterNumber ? { meterNumber: existing.meterNumber } : {}),
+          ...(entryData.contractEndDate == null && existing.contractEndDate ? { contractEndDate: existing.contractEndDate } : {}),
+        },
       }));
 
     const created =
@@ -596,7 +605,7 @@ export async function POST(request: NextRequest) {
         const existingManual = await manualDelegate.findFirst({
           where: { userId: user.id, houseId: effectiveHouseId },
           orderBy: { updatedAt: 'desc' },
-          select: { id: true },
+          select: { id: true, contractEndDate: true },
         });
 
         const flatRateCents =
@@ -616,7 +625,7 @@ export async function POST(request: NextRequest) {
           baseMonthlyFee: null,
           billCreditDollars: null,
           termLengthMonths: typeof parsed.termMonths === 'number' ? parsed.termMonths : null,
-          contractEndDate: parsed.contractEndDate ? new Date(parsed.contractEndDate) : null,
+          ...(parsed.contractEndDate ? { contractEndDate: new Date(parsed.contractEndDate) } : {}),
           earlyTerminationFee: parsed.earlyTerminationFeeCents != null ? parsed.earlyTerminationFeeCents / 100 : null,
           esiId: parsed.esiid ?? null,
           accountNumberLast4: parsed.accountNumber ? String(parsed.accountNumber).slice(-4) : null,
@@ -627,7 +636,13 @@ export async function POST(request: NextRequest) {
         };
 
         if (existingManual?.id) {
-          await manualDelegate.update({ where: { id: existingManual.id }, data: manualData });
+          await manualDelegate.update({
+            where: { id: existingManual.id },
+            data: {
+              ...manualData,
+              ...(parsed.contractEndDate ? {} : existingManual.contractEndDate ? { contractEndDate: existingManual.contractEndDate } : {}),
+            },
+          });
         } else {
           await manualDelegate.create({ data: manualData });
         }
