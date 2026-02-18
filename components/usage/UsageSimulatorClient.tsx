@@ -214,7 +214,13 @@ export function UsageSimulatorClient({ houseId }: { houseId: string }) {
         );
         const j = (await r.json().catch(() => null)) as ScenarioHouseResp | null;
         if (cancelled) return;
-        if (!r.ok || !j?.ok) {
+        if (!r.ok) {
+          const msg = j && "message" in j && typeof (j as any).message === "string" ? String((j as any).message) : "Recalculate to generate this scenario.";
+          setScenarioBanner(msg);
+          setScenarioSimHouseOverride(null);
+          return;
+        }
+        if (!j?.ok) {
           const msg = j?.message ? String(j.message) : "Recalculate to generate this scenario.";
           setScenarioBanner(msg);
           setScenarioSimHouseOverride(null);
@@ -650,12 +656,30 @@ export function UsageSimulatorClient({ houseId }: { houseId: string }) {
                       />
                       <input
                         defaultValue={mult}
-                        onBlur={(ev) => void saveTimelineEvent(String(e.id), { payloadJson: { multiplier: Number(ev.target.value || 0) || undefined, adderKwh: p?.adderKwh } })}
+                        onBlur={(ev) => {
+                          const s = String(ev.target.value ?? "").trim();
+                          const n = s === "" ? null : Number(s);
+                          void saveTimelineEvent(String(e.id), {
+                            payloadJson: {
+                              multiplier: n !== null && Number.isFinite(n) ? n : undefined,
+                              adderKwh: p?.adderKwh,
+                            },
+                          });
+                        }}
                         className="rounded-lg border border-brand-blue/20 bg-white px-2 py-1 text-xs text-brand-navy"
                       />
                       <input
                         defaultValue={add}
-                        onBlur={(ev) => void saveTimelineEvent(String(e.id), { payloadJson: { multiplier: p?.multiplier, adderKwh: Number(ev.target.value || 0) || undefined } })}
+                        onBlur={(ev) => {
+                          const s = String(ev.target.value ?? "").trim();
+                          const n = s === "" ? null : Number(s);
+                          void saveTimelineEvent(String(e.id), {
+                            payloadJson: {
+                              multiplier: p?.multiplier,
+                              adderKwh: n !== null && Number.isFinite(n) ? n : undefined,
+                            },
+                          });
+                        }}
                         className="rounded-lg border border-brand-blue/20 bg-white px-2 py-1 text-xs text-brand-navy"
                       />
                       <div className="text-xs text-brand-navy/60 md:col-span-1">{String(e.kind ?? "")}</div>

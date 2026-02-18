@@ -178,8 +178,13 @@ export async function recalcSimulatorBuild(args: {
       monthlyTotalsKwhByMonth[ym] = Math.max(0, base);
       continue;
     }
-    const mult = Number(overlay.monthlyMultipliersByMonth?.[ym] ?? 1) || 1;
-    const add = Number(overlay.monthlyAddersKwhByMonth?.[ym] ?? 0) || 0;
+    const multRaw = overlay.monthlyMultipliersByMonth?.[ym];
+    const multNum = multRaw == null ? NaN : Number(multRaw);
+    const mult = Number.isFinite(multNum) ? multNum : 1;
+
+    const addRaw = overlay.monthlyAddersKwhByMonth?.[ym];
+    const addNum = addRaw == null ? NaN : Number(addRaw);
+    const add = Number.isFinite(addNum) ? addNum : 0;
     monthlyTotalsKwhByMonth[ym] = Math.max(0, base * mult + add);
   }
 

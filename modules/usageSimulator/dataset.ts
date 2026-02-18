@@ -55,10 +55,65 @@ export type SimulatorBuildInputsV1 = {
     baselineApplianceProfile?: any;
     smtMonthlyAnchorsByMonth?: Record<string, number>;
     smtIntradayShape96?: number[];
+    // Scenario audit fields (not used for regen)
+    scenario?: { id: string; name: string } | null;
+    scenarioEvents?: any[];
+    scenarioOverlay?: any;
   };
 };
 
-export function buildSimulatedUsageDatasetFromBuildInputs(buildInputs: SimulatorBuildInputsV1) {
+export type SimulatedUsageDatasetMeta = {
+  datasetKind: "SIMULATED";
+  baseKind: SimulatorBuildInputsV1["baseKind"];
+  mode: SimulatorBuildInputsV1["mode"];
+  canonicalEndMonth: string;
+  notes: string[];
+  filledMonths: string[];
+  excludedDays: number;
+  renormalized: boolean;
+  // Service-attached metadata (persisted build)
+  buildInputsHash?: string;
+  lastBuiltAt?: string | null;
+  scenarioKey?: string;
+  scenarioId?: string | null;
+};
+
+export type SimulatedUsageDataset = {
+  summary: {
+    source: "SIMULATED";
+    intervalsCount: number;
+    totalKwh: number;
+    start: string;
+    end: string;
+    latest: string;
+  };
+  series: {
+    intervals15: Array<{ timestamp: string; kwh: number }>;
+    hourly: Array<{ timestamp: string; kwh: number }>;
+    daily: Array<{ timestamp: string; kwh: number }>;
+    monthly: Array<{ timestamp: string; kwh: number }>;
+    annual: Array<{ timestamp: string; kwh: number }>;
+  };
+  daily: Array<{ date: string; kwh: number }>;
+  monthly: Array<{ month: string; kwh: number }>;
+  insights: {
+    fifteenMinuteAverages: Array<{ hhmm: string; avgKw: number }>;
+    timeOfDayBuckets: any[];
+    stitchedMonth: any;
+    peakDay: { date: string; kwh: number } | null;
+    peakHour: any;
+    baseload: any;
+    weekdayVsWeekend: { weekday: number; weekend: number };
+  };
+  totals: {
+    importKwh: number;
+    exportKwh: number;
+    netKwh: number;
+  };
+  meta: SimulatedUsageDatasetMeta;
+};
+
+export function buildSimulatedUsageDatasetFromBuildInputs(buildInputs: SimulatorBuildInputsV1): SimulatedUsageDataset {
   const curve = generateSimulatedCurve({
     canonicalMonths: buildInputs.canonicalMonths,
     monthlyTotalsKwhByMonth: buildInputs.monthlyTotalsKwhByMonth,
