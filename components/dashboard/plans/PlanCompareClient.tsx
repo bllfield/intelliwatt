@@ -357,9 +357,11 @@ export default function PlanCompareClient(props: { offerId: string }) {
     return { currentTotal, newTotal, delta };
   }, [projection, currentMonthly, offerMonthly, comparisonMonths, includeEtf, etfAppliesNow, etfDollars]);
 
-  // For month-by-month deltas in the "New plan" monthly table, align by yearMonth against the current plan's rows.
+  // For month-by-month deltas in the "New plan" monthly table, align by yearMonth (not index) so comparisons are correct when row lengths/order differ.
   const currentMonthlyRowsByYm = useMemo(() => {
-    const rows = Array.isArray(projection?.currentRowsProjected) ? (projection.currentRowsProjected as any[]) : [];
+    const rows = Array.isArray(projection?.currentRowsProjected)
+      ? (projection.currentRowsProjected as any[])
+      : (currentDetail?.monthlyBreakdown?.rows ?? []);
     const m = new Map<string, any>();
     for (const r of rows) {
       const ym = String(r?.yearMonth ?? "").trim();
@@ -367,7 +369,7 @@ export default function PlanCompareClient(props: { offerId: string }) {
       m.set(ym, r);
     }
     return m;
-  }, [projection]);
+  }, [projection, currentDetail?.monthlyBreakdown?.rows]);
 
   // Unified REP bucket list so both monthly tables use the same columns (current first, then offer-only keys).
   const unifiedRepBuckets = useMemo(() => {
@@ -1092,7 +1094,8 @@ export default function PlanCompareClient(props: { offerId: string }) {
                               const deltas: number[] = [];
                               for (let i = 0; i < rows.length; i++) {
                                 const r = rows[i];
-                                const cur = currentRowsRaw[i];
+                                const ym = String(r?.yearMonth ?? "").trim();
+                                const cur = ym ? currentMonthlyRowsByYm.get(ym) : null;
                                 const curTotal = cur != null ? numOrNull(cur?.totalDollars) : null;
                                 if (curTotal == null) continue;
                                 const base = numOrNull(r?.totalDollars) ?? 0;
@@ -1186,5 +1189,4 @@ export default function PlanCompareClient(props: { offerId: string }) {
     </div>
   );
 }
-
 
