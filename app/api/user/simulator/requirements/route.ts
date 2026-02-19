@@ -25,7 +25,8 @@ function classifyDbError(e: any, envVarName: string): DbStatus {
 async function probeHomeDetails(): Promise<DbStatus> {
   if (!String(process.env.HOME_DETAILS_DATABASE_URL ?? "").trim()) return "missing_env";
   try {
-    await (homeDetailsPrisma as any).homeDetailsModuleBootstrap.findFirst({ select: { id: true } });
+    // Avoid model coupling: this probe should work even if module schemas change.
+    await homeDetailsPrisma.$queryRaw`SELECT 1`;
     return "ok";
   } catch (e: any) {
     return classifyDbError(e, "HOME_DETAILS_DATABASE_URL");
@@ -35,7 +36,8 @@ async function probeHomeDetails(): Promise<DbStatus> {
 async function probeAppliances(): Promise<DbStatus> {
   if (!String(process.env.APPLIANCES_DATABASE_URL ?? "").trim()) return "missing_env";
   try {
-    await (appliancesPrisma as any).appliancesModuleBootstrap.findFirst({ select: { id: true } });
+    // Avoid model coupling: this probe should work even if module schemas change.
+    await appliancesPrisma.$queryRaw`SELECT 1`;
     return "ok";
   } catch (e: any) {
     return classifyDbError(e, "APPLIANCES_DATABASE_URL");
@@ -45,7 +47,8 @@ async function probeAppliances(): Promise<DbStatus> {
 async function probeUsage(): Promise<DbStatus> {
   if (!String(process.env.USAGE_DATABASE_URL ?? "").trim()) return "missing_env";
   try {
-    await (usagePrisma as any).usageModuleBootstrap.findFirst({ select: { id: true } });
+    // Avoid model coupling: this probe should work even if module schemas change.
+    await usagePrisma.$queryRaw`SELECT 1`;
     return "ok";
   } catch (e: any) {
     return classifyDbError(e, "USAGE_DATABASE_URL");
