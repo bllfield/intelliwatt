@@ -110,8 +110,9 @@ model UsageBucketDefinition {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  monthly HomeMonthlyUsageBucket[]
-  daily   HomeDailyUsageBucket[]
+  monthly   HomeMonthlyUsageBucket[]
+  daily     HomeDailyUsageBucket[]
+  simulated HomeSimulatedUsageBucket[]
 
   @@index([dayType])
 }
@@ -145,5 +146,23 @@ model HomeDailyUsageBucket {
 
   @@unique([homeId, day, bucketKey])
   @@index([homeId, day])
+  @@index([bucketKey])
+}
+
+model HomeSimulatedUsageBucket {
+  id          String   @id @default(cuid())
+  homeId      String
+  scenarioKey String   // "PAST" | "FUTURE" (workspace scenario key)
+  scenarioId  String?  // usageSimulatorScenario.id when scenarioKey is scenario id
+  yearMonth   String   // "YYYY-MM"
+  bucketKey   String   // references UsageBucketDefinition.key
+  kwhTotal    Decimal  @usageDb.Decimal(12, 6)
+  source      String   @default("SIMULATED")
+  computedAt  DateTime @default(now())
+
+  bucket UsageBucketDefinition @relation(fields: [bucketKey], references: [key], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([homeId, scenarioKey, yearMonth, bucketKey])
+  @@index([homeId, scenarioKey])
   @@index([bucketKey])
 }

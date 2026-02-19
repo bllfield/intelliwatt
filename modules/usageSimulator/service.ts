@@ -8,6 +8,7 @@ import { computeRequirements, type SimulatorMode } from "@/modules/usageSimulato
 import { chooseActualSource, hasActualIntervals } from "@/modules/realUsageAdapter/actual";
 import { SMT_SHAPE_DERIVATION_VERSION } from "@/modules/realUsageAdapter/smt";
 import { getActualUsageDatasetForHouse } from "@/lib/usage/actualDatasetForHouse";
+import { upsertSimulatedUsageBuckets } from "@/lib/usage/simulatedUsageBuckets";
 import { buildSimulatedUsageDatasetFromBuildInputs, type SimulatorBuildInputsV1 } from "@/modules/usageSimulator/dataset";
 import { computeBuildInputsHash } from "@/modules/usageSimulator/hash";
 import { INTRADAY_TEMPLATE_VERSION } from "@/modules/simulatedUsage/intradayTemplates";
@@ -503,6 +504,20 @@ export async function recalcSimulatorBuild(args: {
     buildInputsHash,
     versions,
   });
+
+  // Persist usage buckets for Past/Future so plan costing can use simulated usage.
+  if (
+    scenarioKey !== "BASELINE" &&
+    dataset?.usageBucketsByMonth &&
+    Object.keys(dataset.usageBucketsByMonth).length > 0
+  ) {
+    await upsertSimulatedUsageBuckets({
+      homeId: houseId,
+      scenarioKey,
+      scenarioId: scenarioId ?? null,
+      usageBucketsByMonth: dataset.usageBucketsByMonth,
+    }).catch(() => {});
+  }
 
   return { ok: true, houseId, buildInputsHash, dataset };
 }

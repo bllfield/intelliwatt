@@ -124,6 +124,8 @@ export type SimulatedUsageDataset = {
     netKwh: number;
   };
   meta: SimulatedUsageDatasetMeta;
+  /** Monthly usage buckets (e.g. kwh.m.all.total per YYYY-MM) for plan costing; same shape as buildUsageBucketsForEstimate. */
+  usageBucketsByMonth: Record<string, Record<string, number>>;
 };
 
 export function buildSimulatedUsageDatasetFromBuildInputs(buildInputs: SimulatorBuildInputsV1): SimulatedUsageDataset {
@@ -174,6 +176,8 @@ export function buildSimulatedUsageDatasetFromBuildInputs(buildInputs: Simulator
   const baseSlice = powerSamples.slice(0, count10);
   const baseload = baseSlice.length > 0 ? round2(baseSlice.reduce((a, b) => a + b, 0) / baseSlice.length) : null;
 
+  const usageBucketsByMonth = usageBucketsByMonthFromSimulatedMonthly(monthly);
+
   return {
     summary: {
       source: "SIMULATED" as const,
@@ -216,6 +220,23 @@ export function buildSimulatedUsageDatasetFromBuildInputs(buildInputs: Simulator
       excludedDays: curve.meta.excludedDays,
       renormalized: curve.meta.renormalized,
     },
+    usageBucketsByMonth,
   };
+}
+
+/** Build usage buckets by month (same shape as buildUsageBucketsForEstimate) from simulated monthly totals. Used for Past/Future so plan costing can use simulated usage. */
+export function usageBucketsByMonthFromSimulatedMonthly(
+  monthly: Array<{ month: string; kwh: number }>
+): Record<string, Record<string, number>> {
+  const CORE_TOTAL_KEY = "kwh.m.all.total";
+  const out: Record<string, Record<string, number>> = {};
+  for (const m of monthly ?? []) {
+    const ym = String(m?.month ?? "").trim();
+    if (!/^\d{4}-\d{2}$/.test(ym)) continue;
+    const kwh = typeof m?.kwh === "number" && Number.isFinite(m.kwh) ? m.kwh : 0;
+    if (!out[ym]) out[ym] = {};
+    out[ym][CORE_TOTAL_KEY] = Math.max(0, kwh);
+  }
+  return out;
 }
 
