@@ -82,7 +82,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
         : "MANUAL_TOTALS";
 
   const [mode, setMode] = useState<Mode>(initialMode);
-  const [compareView, setCompareView] = useState<CompareView>("ACTUAL");
+  const [compareView, setCompareView] = useState<CompareView>("SIMULATED");
   const [hasActualIntervals, setHasActualIntervals] = useState<boolean>(false);
   const [actualSource, setActualSource] = useState<"SMT" | "GREEN_BUTTON" | null>(null);
   const [actualCoverage, setActualCoverage] = useState<{ start: string | null; end: string | null; intervalsCount: number } | null>(
@@ -141,6 +141,11 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      // Reset "Actual" view for this house until we confirm intervals exist.
+      setCompareView("SIMULATED");
+      setHasActualIntervals(false);
+      setActualSource(null);
+      setActualCoverage(null);
       setLoadingActual(true);
       try {
         const r = await fetch("/api/user/usage", { cache: "no-store" });
