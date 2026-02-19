@@ -10,7 +10,8 @@ export const runtime = "nodejs";
 
 function formatHomeDetailsDbError(e: any): string {
   const msg = typeof e?.message === "string" ? e.message : String(e ?? "");
-  const code = typeof e?.code === "string" ? e.code : null; // Prisma error codes like P1001 / P2002
+  const rawCode = (e as any)?.code ?? (e as any)?.errorCode ?? null; // Prisma error codes like P1001 / P2002
+  const code = typeof rawCode === "string" ? rawCode : null;
   if (code) return `home_details_db_error_${code}`;
   if (/HOME_DETAILS_DATABASE_URL/i.test(msg)) return "home_details_db_missing_env";
   if (/P1001/i.test(msg)) return "home_details_db_unreachable";
