@@ -355,7 +355,7 @@ export async function getBaseloadFromActualExcludingDates(args: {
       const dateFilter =
         excludeDateKeys.length === 0
           ? Prisma.sql``
-          : Prisma.sql` AND to_char((("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago')::date, 'YYYY-MM-DD') NOT IN (${Prisma.join(excludeDateKeys.map((d) => Prisma.sql`${d}`), Prisma.sql`, `)})`;
+          : Prisma.sql` AND to_char((("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago')::date, 'YYYY-MM-DD') NOT IN (${Prisma.join(excludeDateKeys.map((d) => Prisma.sql`${d}`), ", ")})`;
       const baseloadRows = await prisma.$queryRaw<Array<{ baseload: number | null }>>(Prisma.sql`
         WITH iv AS (
           SELECT "ts", MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh
@@ -384,7 +384,7 @@ export async function getBaseloadFromActualExcludingDates(args: {
     const dateFilter =
       excludeDateKeys.length === 0
         ? Prisma.sql``
-        : Prisma.sql` AND to_char(("timestamp" AT TIME ZONE 'America/Chicago')::date, 'YYYY-MM-DD') NOT IN (${Prisma.join(excludeDateKeys.map((d) => Prisma.sql`${d}`), Prisma.sql`, `)})`;
+        : Prisma.sql` AND to_char(("timestamp" AT TIME ZONE 'America/Chicago')::date, 'YYYY-MM-DD') NOT IN (${Prisma.join(excludeDateKeys.map((d) => Prisma.sql`${d}`), ", ")})`;
     const baseloadRows = (await usageClient.$queryRaw(Prisma.sql`
       WITH t AS (
         SELECT ("consumptionKwh" * 4)::float AS kw
