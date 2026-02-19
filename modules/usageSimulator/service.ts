@@ -553,14 +553,12 @@ export async function getSimulatedUsageForUser(args: {
                   !filledSet.has(String(ym)) ? "ACTUAL" : "SIMULATED";
               }
               const actualSummary = actualResult.dataset.summary ?? {};
-              const actualInsights = actualResult.dataset.insights ?? {};
               dataset = {
                 ...actualResult.dataset,
                 summary: {
                   ...actualSummary,
                   source: "SIMULATED" as const,
                 },
-                insights: actualInsights,
                 meta: {
                   buildInputsHash: String(buildRec.buildInputsHash ?? ""),
                   lastBuiltAt: buildRec.lastBuiltAt ? new Date(buildRec.lastBuiltAt).toISOString() : null,
@@ -659,14 +657,12 @@ export async function getSimulatedUsageForHouseScenario(args: {
           monthProvenanceByMonth[String(ym)] = !filledSet.has(String(ym)) ? "ACTUAL" : "SIMULATED";
         }
         const actualSummary = actualResult.dataset.summary ?? {};
-        const actualInsights = actualResult.dataset.insights ?? {};
         dataset = {
           ...actualResult.dataset,
           summary: {
             ...actualSummary,
             source: "SIMULATED" as const,
           },
-          insights: actualInsights,
           meta: {
             buildInputsHash: String(buildRec.buildInputsHash ?? ""),
             lastBuiltAt: buildRec.lastBuiltAt ? new Date(buildRec.lastBuiltAt).toISOString() : null,

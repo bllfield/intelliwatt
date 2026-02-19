@@ -544,7 +544,15 @@ export async function getActualUsageDatasetForHouse(
     stitchedMonthMeta = null;
   }
 
-  let insights: Record<string, unknown> | null = null;
+  const emptyInsights = {
+    fifteenMinuteAverages: [] as Array<{ hhmm: string; avgKw: number }>,
+    timeOfDayBuckets: [] as Array<{ key: string; label: string; kwh: number }>,
+    peakDay: null as { date: string; kwh: number } | null,
+    peakHour: null as { hour: number; kw: number } | null,
+    baseload: null as number | null,
+    weekdayVsWeekend: { weekday: 0, weekend: 0 },
+  };
+  let insights: Record<string, unknown> = { ...emptyInsights };
   let dailyTotals: Array<{ date: string; kwh: number }> = [];
   let monthlyTotals: Array<{ month: string; kwh: number }> = [];
   let totals: ImportExportTotals = { importKwh: 0, exportKwh: 0, netKwh: 0 };
@@ -574,7 +582,7 @@ export async function getActualUsageDatasetForHouse(
       };
     }
   } catch {
-    insights = null;
+    insights = { ...emptyInsights };
     dailyTotals = [];
     monthlyTotals = [];
     totals = { importKwh: 0, exportKwh: 0, netKwh: 0 };
