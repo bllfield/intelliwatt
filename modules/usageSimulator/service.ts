@@ -301,17 +301,35 @@ export async function recalcSimulatorBuild(args: {
     }
   }
 
-  // Baseline chaining: Future baseline = raw when no Past events; Future baseline = Past-normalized (raw + Past overlay) when Past events exist. Upgrades/overlay then adjust that curve.
+  // Past curve = baseline + any Past adjustments. If Past is never touched, Past curve = baseline. Future always uses the final Past curve as its baseline, then applies Future changes.
+  let pastCurveByMonth: Record<string, number> | null = null;
+  if (isFutureScenario && pastScenario?.id) {
+    const pastBuild = await (prisma as any).usageSimulatorBuild
+      .findUnique({
+        where: { userId_houseId_scenarioKey: { userId, houseId, scenarioKey: pastScenario.id } },
+        select: { buildInputs: true },
+      })
+      .catch(() => null);
+    const pastInputs = pastBuild?.buildInputs as any;
+    if (pastInputs?.monthlyTotalsKwhByMonth && typeof pastInputs.monthlyTotalsKwhByMonth === "object") {
+      pastCurveByMonth = pastInputs.monthlyTotalsKwhByMonth;
+    }
+  }
+
+  // Future = Past curve + Future overlay. Past curve is: stored Past build (baseline + Past adjustments), or baseline + pastOverlay, or baseline.
   let monthlyTotalsKwhByMonth: Record<string, number> = {};
   for (let i = 0; i < built.canonicalMonths.length; i++) {
     const ym = built.canonicalMonths[i];
     const base = Number(built.monthlyTotalsKwhByMonth?.[ym] ?? 0) || 0;
-    const afterPast = pastOverlay
-      ? applyMonthlyOverlay({ base, mult: pastOverlay.monthlyMultipliersByMonth?.[ym], add: pastOverlay.monthlyAddersKwhByMonth?.[ym] })
-      : Math.max(0, base);
-    monthlyTotalsKwhByMonth[ym] = overlay
-      ? applyMonthlyOverlay({ base: afterPast, mult: overlay.monthlyMultipliersByMonth?.[ym], add: overlay.monthlyAddersKwhByMonth?.[ym] })
-      : afterPast;
+    const pastCurveKwh =
+      pastCurveByMonth != null && Object.prototype.hasOwnProperty.call(pastCurveByMonth, ym)
+        ? Number(pastCurveByMonth[ym])
+        : undefined;
+    const pastCurve: number =
+      Number.isFinite(pastCurveKwh) ? Math.max(0, pastCurveKwh ?? 0) : pastOverlay ? applyMonthlyOverlay({ base, mult: pastOverlay.monthlyMultipliersByMonth?.[ym], add: pastOverlay.monthlyAddersKwhByMonth?.[ym] }) : Math.max(0, base);
+    const curveForMonth: number = Number.isFinite(pastCurve) ? pastCurve : Math.max(0, base);
+    const curveNum = typeof curveForMonth === "number" && Number.isFinite(curveForMonth) ? curveForMonth : 0;
+    monthlyTotalsKwhByMonth[ym] = overlay ? applyMonthlyOverlay({ base: curveNum, mult: overlay.monthlyMultipliersByMonth?.[ym], add: overlay.monthlyAddersKwhByMonth?.[ym] }) : curveForMonth;
   }
 
   // Month-level uplift for travel exclusions: when travel days exclude usage, uplift remaining days to fill the month.
@@ -345,10 +363,16 @@ export async function recalcSimulatorBuild(args: {
     if ((overlay?.inactiveEventIds?.length ?? 0) > 0) notes.push(`Scenario: ${overlay!.inactiveEventIds.length} inactive event(s).`);
     if ((overlay?.warnings?.length ?? 0) > 0) notes.push(`Scenario: ${overlay!.warnings.length} warning(s).`);
   }
-  if (pastOverlay) {
-    notes.push(`Future base: ${WORKSPACE_PAST_NAME}`);
-    if ((pastOverlay.inactiveEventIds?.length ?? 0) > 0) notes.push(`Past: ${pastOverlay.inactiveEventIds.length} inactive event(s).`);
-    if ((pastOverlay.warnings?.length ?? 0) > 0) notes.push(`Past: ${pastOverlay.warnings.length} warning(s).`);
+  if (isFutureScenario) {
+    if (pastCurveByMonth != null || pastOverlay) {
+      notes.push(`Future base: ${WORKSPACE_PAST_NAME} (Past curve = baseline + Past adjustments)`);
+      if (pastOverlay) {
+        if ((pastOverlay.inactiveEventIds?.length ?? 0) > 0) notes.push(`Past: ${pastOverlay.inactiveEventIds.length} inactive event(s).`);
+        if ((pastOverlay.warnings?.length ?? 0) > 0) notes.push(`Past: ${pastOverlay.warnings.length} warning(s).`);
+      }
+    } else {
+      notes.push("Future base: Past curve (= baseline; no Past adjustments)");
+    }
   }
 
   const weatherPreference: WeatherPreference = args.weatherPreference ?? "NONE";
@@ -656,8 +680,18 @@ export async function getSimulatedUsageForHouseScenario(args: {
           select: { buildInputs: true },
         })
         .catch(() => null);
-      const mode = (baselineBuild?.buildInputs as any)?.mode;
-      const weatherPreference = (baselineBuild?.buildInputs as any)?.weatherPreference ?? "NONE";
+      let mode = (baselineBuild?.buildInputs as any)?.mode;
+      let weatherPreference = (baselineBuild?.buildInputs as any)?.weatherPreference ?? "NONE";
+      if (!mode) {
+        const existingFuture = await (prisma as any).usageSimulatorBuild
+          .findUnique({
+            where: { userId_houseId_scenarioKey: { userId: args.userId, houseId: args.houseId, scenarioKey } },
+            select: { buildInputs: true },
+          })
+          .catch(() => null);
+        mode = (existingFuture?.buildInputs as any)?.mode;
+        if ((existingFuture?.buildInputs as any)?.weatherPreference != null) weatherPreference = (existingFuture.buildInputs as any).weatherPreference;
+      }
       if (mode) {
         const recalcResult = await recalcSimulatorBuild({
           userId: args.userId,

@@ -4,33 +4,33 @@ This adds the `HomeSimulatedUsageBucket` table to the **Usage module** database 
 
 - **Schema**: `prisma/usage/schema.prisma`
 - **Migrations dir**: `prisma/usage/migrations`
-- **Env**: `USAGE_DATABASE_URL` and `USAGE_DIRECT_URL` (see schema datasource)
+- **Env**: `USAGE_DATABASE_URL`, `USAGE_DIRECT_URL` (usage DB; db name e.g. `intelliwatt_usage`)
 
 ---
 
-## 1. Prerequisites
+## 1. Local / dev: set env and create migration
 
-- Usage DB reachable (e.g. `intelliwatt_usage`).
-- In `.env` (or shell):
-  - `USAGE_DATABASE_URL` — connection URL for the usage DB.
-  - `USAGE_DIRECT_URL` — direct URL (e.g. for migrations); can match `USAGE_DATABASE_URL` if you don’t use a pooler.
+From the **repo root**. Set the usage DB URL (include the **db name** in the path, e.g. `intelliwatt_usage`).
 
----
-
-## 2. Dev: create and apply the migration
-
-From the **repo root**:
-
+**Bash (Linux / macOS / Git Bash):**
 ```bash
-# Generate the Usage Prisma client
-npx prisma generate --schema=prisma/usage/schema.prisma
+export USAGE_DATABASE_URL="postgresql://<db_user>:<db_password>@<db_host>:<db_port>/intelliwatt_usage?sslmode=require"
+export USAGE_DIRECT_URL="postgresql://<db_user>:<db_password>@<db_host>:<db_port>/intelliwatt_usage?sslmode=require"
+```
 
-# Create and apply the migration (creates migration SQL and applies it to the DB)
+**PowerShell (Windows):**
+```powershell
+$env:USAGE_DATABASE_URL = "postgresql://<db_user>:<db_password>@<db_host>:<db_port>/intelliwatt_usage?sslmode=require"
+$env:USAGE_DIRECT_URL   = "postgresql://<db_user>:<db_password>@<db_host>:<db_port>/intelliwatt_usage?sslmode=require"
+```
+
+Then generate and create/apply the migration:
+```bash
+npx prisma generate --schema=prisma/usage/schema.prisma
 npx prisma migrate dev --schema=prisma/usage/schema.prisma --name add_home_simulated_usage_bucket
 ```
 
-If Prisma says the schema is already in sync but you expect the new table, create the migration without applying, then apply:
-
+If Prisma says “Already in sync” but you expect the new table:
 ```bash
 npx prisma migrate dev --schema=prisma/usage/schema.prisma --name add_home_simulated_usage_bucket --create-only
 npx prisma migrate dev --schema=prisma/usage/schema.prisma
@@ -38,54 +38,53 @@ npx prisma migrate dev --schema=prisma/usage/schema.prisma
 
 ---
 
-## 3. PowerShell (Windows)
+## 2. Deploy (staging / production)
 
-From the project docs (e.g. `docs/PROJECT_PLAN.md` “PowerShell runbook — Module Prisma CLI”):
+Get to your deploy environment (e.g. droplet or CI), then **export the usage DB name and URLs** and run migrate deploy.
 
-1. **Optional**: stop any stuck Prisma/Node and relax execution policy:
-   ```powershell
-   Get-Process prisma, node -ErrorAction SilentlyContinue | Stop-Process
-   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-   ```
+**Bash (e.g. on droplet):**
+```bash
+cd /home/deploy/apps/intelliwatt
+git pull origin main
+npm install
 
-2. **Set the Usage DB URLs** (replace with your values):
-   ```powershell
-   $env:USAGE_DATABASE_URL = "postgresql://user:pass@host:port/intelliwatt_usage?sslmode=require"
-   $env:USAGE_DIRECT_URL   = "postgresql://user:pass@host:port/intelliwatt_usage?sslmode=require"
-   ```
+export USAGE_DATABASE_URL="postgresql://<db_user>:<db_password>@<db_host>:<db_port>/intelliwatt_usage?sslmode=require"
+export USAGE_DIRECT_URL="postgresql://<db_user>:<db_password>@<db_host>:<db_port>/intelliwatt_usage?sslmode=require"
 
-3. **Generate and migrate**:
-   ```powershell
-   npx prisma generate --schema=prisma/usage/schema.prisma
-   npx prisma migrate dev --schema=prisma/usage/schema.prisma --name add_home_simulated_usage_bucket
-   ```
+npx prisma migrate deploy --schema=prisma/usage/schema.prisma
+npx prisma migrate status --schema=prisma/usage/schema.prisma
+```
+
+Replace `<db_user>`, `<db_password>`, `<db_host>`, `<db_port>` with your cluster values. The **database name** must be the usage DB (e.g. `intelliwatt_usage`); do not use the main app DB name.
 
 ---
 
-## 4. Production / staging deploy
+## 3. Copy-paste (fill placeholders once)
 
-After the migration is committed and you’re ready to update staging/production:
-
+**Local dev – set env then migrate:**
 ```bash
+export USAGE_DATABASE_URL="postgresql://<user>:<pass>@<host>:<port>/intelliwatt_usage?sslmode=require"
+export USAGE_DIRECT_URL="postgresql://<user>:<pass>@<host>:<port>/intelliwatt_usage?sslmode=require"
+npx prisma generate --schema=prisma/usage/schema.prisma
+npx prisma migrate dev --schema=prisma/usage/schema.prisma --name add_home_simulated_usage_bucket
+```
+
+**Deploy – set env then deploy:**
+```bash
+export USAGE_DATABASE_URL="postgresql://<user>:<pass>@<host>:<port>/intelliwatt_usage?sslmode=require"
+export USAGE_DIRECT_URL="postgresql://<user>:<pass>@<host>:<port>/intelliwatt_usage?sslmode=require"
 npx prisma migrate deploy --schema=prisma/usage/schema.prisma
 ```
 
-Ensure `USAGE_DATABASE_URL` and `USAGE_DIRECT_URL` are set in the target environment.
+**Verify:**
+```bash
+npx prisma migrate status --schema=prisma/usage/schema.prisma
+```
 
 ---
 
-## 5. Verify
-
-- **Status**:
-  ```bash
-  npx prisma migrate status --schema=prisma/usage/schema.prisma
-  ```
-- **Tables**: In the usage DB, confirm `HomeSimulatedUsageBucket` exists and has the expected columns and unique constraint `(homeId, scenarioKey, yearMonth, bucketKey)`.
-
----
-
-## 6. Notes (from project conventions)
+## 4. Notes
 
 - Usage migrations are **isolated** from the main app schema; do not put main-schema migrations in `prisma/usage/migrations`.
-- Always use the **usage schema** for this module: `--schema=prisma/usage/schema.prisma`.
-- The schema comment also references `--migrations-dir=prisma/usage/migrations`; `migrate dev` will use the migrations directory configured in the schema when you pass `--schema`.
+- Always use **usage schema**: `--schema=prisma/usage/schema.prisma`.
+- You must **export** (or set) both `USAGE_DATABASE_URL` and `USAGE_DIRECT_URL` with the **correct db name** (e.g. `intelliwatt_usage`) before running generate or migrate; Prisma will fail if these env vars are missing.
