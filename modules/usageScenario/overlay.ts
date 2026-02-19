@@ -135,6 +135,7 @@ export function computePastOverlay(args: {
 
   for (const entry of args.entries) {
     const start = entry.effectiveMonth;
+    // effectiveEndDate may be YYYY-MM-DD; V1 we use month precision only (slice 0,7) — full month included if end is mid-month.
     const end = entry.effectiveEndDate != null && String(entry.effectiveEndDate).trim() !== ""
       ? String(entry.effectiveEndDate).trim().slice(0, 7)
       : null;
@@ -174,6 +175,7 @@ export function computeFutureOverlay(args: {
 
   for (const entry of args.entries) {
     const start = entry.effectiveMonth;
+    // effectiveEndDate: YYYY-MM-DD → end month slice(0,7); V1 applies full month if end is mid-month.
     const end = entry.effectiveEndDate != null && String(entry.effectiveEndDate).trim() !== ""
       ? String(entry.effectiveEndDate).trim().slice(0, 7)
       : null;

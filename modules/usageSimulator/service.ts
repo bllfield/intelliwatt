@@ -256,6 +256,7 @@ export async function recalcSimulatorBuild(args: {
         baselineMonthlyKwhByMonth: built.monthlyTotalsKwhByMonth,
       });
     }
+    // Fallback: event-based overlay only when no ledger entries. computeMonthlyOverlay applies MONTHLY_ADJUSTMENT only; UPGRADE_ACTION is excluded there, so no split-brain (upgrades never apply month-only here).
     if (overlay == null) {
       overlay = computeMonthlyOverlay({
         canonicalMonths: built.canonicalMonths,

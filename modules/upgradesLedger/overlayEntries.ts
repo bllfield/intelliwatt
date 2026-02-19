@@ -48,6 +48,8 @@ export function buildOrderedLedgerEntriesForOverlay(
     used.add(row.id);
 
     const effectiveMonth = ev.effectiveMonth?.trim() || toYearMonth(row.effectiveDate) || "";
+    if (!effectiveMonth || !/^\d{4}-\d{2}$/.test(effectiveMonth)) continue;
+
     const effectiveEndDate =
       ev.payloadJson?.effectiveEndDate != null && String(ev.payloadJson.effectiveEndDate).trim() !== ""
         ? String(ev.payloadJson.effectiveEndDate).trim().slice(0, 10)

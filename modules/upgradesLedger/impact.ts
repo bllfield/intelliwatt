@@ -42,7 +42,8 @@ export function isYearMonthKey(s: unknown): s is YearMonthKey {
 
 /**
  * Extract V1 delta input from a ledger row (existing columns or impact blob).
- * Uses: deltaKwhAnnualSimulated, deltaKwhMonthlySimulatedJson, and optional impactJson when present.
+ * Uses: deltaKwhAnnualSimulated, deltaKwhMonthlySimulatedJson (shape: { uniform?: number } or { value?: number }).
+ * impactJson is optional (e.g. future column or nested blob); when present can supply monthlyDeltaKwh, annualDeltaKwh, dailyDeltaShape96, schedules.
  */
 export function getV1DeltaFromLedgerRow(row: {
   deltaKwhAnnualSimulated?: number | null;

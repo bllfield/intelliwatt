@@ -84,6 +84,10 @@ export type CreateLedgerInput = {
   inputsJson?: Record<string, unknown>;
   notes?: string;
   source?: string;
+  /** V1 overlay: when set, overlay uses this (preferred over annual). Shape: { uniform?: number } or { value?: number }. */
+  deltaKwhMonthlySimulatedJson?: Record<string, unknown> | null;
+  /** V1 overlay: fallback when deltaKwhMonthlySimulatedJson is not set; distributed by baseline share. */
+  deltaKwhAnnualSimulated?: number | null;
 };
 
 export type UpdateLedgerInput = {
@@ -103,6 +107,10 @@ export type UpdateLedgerInput = {
   inputsJson?: Record<string, unknown> | null;
   notes?: string | null;
   status?: string;
+  /** V1 overlay: preferred when set. Shape: { uniform?: number } or { value?: number }. */
+  deltaKwhMonthlySimulatedJson?: Record<string, unknown> | null;
+  /** V1 overlay: fallback when monthly json not set. */
+  deltaKwhAnnualSimulated?: number | null;
 };
 
 export type ListLedgerQuery = {
@@ -192,11 +200,12 @@ export function validateCreateLedger(body: unknown): { ok: true; value: CreateLe
   const v = validateUpgradeActionPayload(body);
   if (!v.ok) return v;
   const { value } = v;
+  const b = body as any;
   const createValue: CreateLedgerInput = {
-    houseId: (body as any)?.houseId != null ? String((body as any).houseId).trim() || undefined : undefined,
-    houseState: (body as any)?.houseState != null ? String((body as any).houseState).trim() || undefined : undefined,
-    tdspRegion: (body as any)?.tdspRegion != null ? String((body as any).tdspRegion).trim() || undefined : undefined,
-    scenarioId: (body as any)?.scenarioId != null ? String((body as any).scenarioId).trim() || undefined : undefined,
+    houseId: b?.houseId != null ? String(b.houseId).trim() || undefined : undefined,
+    houseState: b?.houseState != null ? String(b.houseState).trim() || undefined : undefined,
+    tdspRegion: b?.tdspRegion != null ? String(b.tdspRegion).trim() || undefined : undefined,
+    scenarioId: b?.scenarioId != null ? String(b.scenarioId).trim() || undefined : undefined,
     upgradeType: value.upgradeType,
     changeType: value.changeType,
     quantity: value.quantity ?? undefined,
@@ -207,7 +216,9 @@ export function validateCreateLedger(body: unknown): { ok: true; value: CreateLe
     afterJson: value.afterJson ?? undefined,
     inputsJson: value.inputsJson ?? undefined,
     notes: value.notes ?? undefined,
-    source: (body as any)?.source != null ? String((body as any).source).trim() || undefined : undefined,
+    source: b?.source != null ? String(b.source).trim() || undefined : undefined,
+    deltaKwhMonthlySimulatedJson: isPlainObject(b?.deltaKwhMonthlySimulatedJson) ? b.deltaKwhMonthlySimulatedJson : undefined,
+    deltaKwhAnnualSimulated: typeof b?.deltaKwhAnnualSimulated === "number" && Number.isFinite(b.deltaKwhAnnualSimulated) ? b.deltaKwhAnnualSimulated : undefined,
   };
   return { ok: true, value: createValue };
 }
@@ -243,6 +254,8 @@ export function validateUpdateLedger(body: unknown): { ok: true; value: UpdateLe
   if (b?.inputsJson !== undefined) value.inputsJson = isPlainObject(inputsJson) ? inputsJson : null;
   if (b?.notes !== undefined) value.notes = typeof b.notes === "string" ? b.notes.trim() || null : null;
   if (b?.status !== undefined) value.status = typeof b.status === "string" ? b.status.trim() : undefined;
+  if (b?.deltaKwhMonthlySimulatedJson !== undefined) value.deltaKwhMonthlySimulatedJson = isPlainObject(b.deltaKwhMonthlySimulatedJson) ? b.deltaKwhMonthlySimulatedJson : null;
+  if (b?.deltaKwhAnnualSimulated !== undefined) value.deltaKwhAnnualSimulated = typeof b.deltaKwhAnnualSimulated === "number" && Number.isFinite(b.deltaKwhAnnualSimulated) ? b.deltaKwhAnnualSimulated : null;
   return { ok: true, value };
 }
 

@@ -62,6 +62,8 @@ export async function createLedgerRow(userId: string, input: CreateLedgerInput):
       inputsJson: input.inputsJson ?? undefined,
       notes: input.notes ?? null,
       source: input.source ?? "USER",
+      deltaKwhMonthlySimulatedJson: input.deltaKwhMonthlySimulatedJson ?? undefined,
+      deltaKwhAnnualSimulated: input.deltaKwhAnnualSimulated ?? undefined,
     },
   });
   return rec as LedgerRow;
@@ -112,6 +114,8 @@ export async function updateLedgerRow(id: string, userId: string, input: UpdateL
   if (input.inputsJson !== undefined) data.inputsJson = input.inputsJson;
   if (input.notes !== undefined) data.notes = input.notes;
   if (input.status !== undefined) data.status = input.status;
+  if (input.deltaKwhMonthlySimulatedJson !== undefined) data.deltaKwhMonthlySimulatedJson = input.deltaKwhMonthlySimulatedJson;
+  if (input.deltaKwhAnnualSimulated !== undefined) data.deltaKwhAnnualSimulated = input.deltaKwhAnnualSimulated;
   const rec = await (db as any).upgradeLedger.update({ where: { id }, data });
   return rec as LedgerRow;
 }
