@@ -305,7 +305,7 @@ export default async function UsageEntryHub() {
               disabledMessage={!user ? "Sign in to continue" : "Save your service address first"}
             />
             <OptionCard
-              title="Manual Usage-Coming Soon"
+              title="Manual Usage"
               subtitle="Quick fallback"
               description={
                 <span className="text-brand-cyan/85">
