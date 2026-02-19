@@ -12,6 +12,8 @@ import SmtAddressCaptureCard from "@/components/smt/SmtAddressCaptureCard";
 import DashboardHero from "@/components/dashboard/DashboardHero";
 import LocalTime from "@/components/LocalTime";
 import RefreshSmtButton from "@/components/smt/RefreshSmtButton";
+import { fetchActualCanonicalMonthlyTotals } from "@/modules/realUsageAdapter/actual";
+import { lastFullMonthChicago, monthsEndingAt } from "@/modules/manualUsage/anchor";
 
 // Note: this page is user-specific (reads cookies) so it will remain dynamic,
 // but we avoid forcing re-render on every client navigation so Next can reuse
@@ -165,6 +167,21 @@ export default async function UsageEntryHub() {
 
   const hasHouseAddress = Boolean(houseAddress);
 
+  const canonicalEndMonth = lastFullMonthChicago();
+  const canonicalMonths = monthsEndingAt(canonicalEndMonth, 12);
+  const actualSummary =
+    user && houseAddress
+      ? await fetchActualCanonicalMonthlyTotals({
+          houseId: houseAddress.id,
+          esiid: houseAddress.esiid ?? null,
+          canonicalMonths,
+        })
+      : null;
+  const hasActualData = Boolean(actualSummary?.source) && (Number(actualSummary?.intervalsCount ?? 0) || 0) > 0;
+  const actualLockMessage = hasActualData
+    ? "Actual usage is already connected. Disconnect Smart Meter Texas and/or delete your Green Button upload to use this option."
+    : null;
+
   return (
     <div className="min-h-screen bg-brand-white">
       <DashboardHero
@@ -315,8 +332,8 @@ export default async function UsageEntryHub() {
               }
               href="/dashboard/api/manual"
               status={manualStatus}
-              disabled={!user || !hasHouseAddress}
-              disabledMessage={!user ? "Sign in to continue" : "Save your service address first"}
+              disabled={!user || !hasHouseAddress || hasActualData}
+              disabledMessage={!user ? "Sign in to continue" : !hasHouseAddress ? "Save your service address first" : actualLockMessage ?? undefined}
             />
             <OptionCard
               title="New Build / No usage history"
@@ -329,8 +346,8 @@ export default async function UsageEntryHub() {
               }
               href="/dashboard/usage/simulated?intent=NEW_BUILD#start-here"
               status={newBuildStatus}
-              disabled={!user || !hasHouseAddress}
-              disabledMessage={!user ? "Sign in to continue" : "Save your service address first"}
+              disabled={!user || !hasHouseAddress || hasActualData}
+              disabledMessage={!user ? "Sign in to continue" : !hasHouseAddress ? "Save your service address first" : actualLockMessage ?? undefined}
             />
           </div>
 
