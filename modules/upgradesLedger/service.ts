@@ -1,5 +1,5 @@
 import type { CreateLedgerInput, UpdateLedgerInput, ListLedgerQuery } from "./types";
-import { validateCreateLedger, validateUpdateLedger, fromEffectiveDate } from "./types";
+import { validateCreateLedger, validateUpdateLedger, validateUpgradeActionPayload, fromEffectiveDate } from "./types";
 import * as repo from "./repo";
 
 export type LedgerDto = {
@@ -106,6 +106,11 @@ export async function createLedger(userId: string, body: unknown): Promise<Creat
 }
 
 export async function updateLedger(userId: string, id: string, body: unknown): Promise<UpdateResult> {
+  const b = body as Record<string, unknown> | null;
+  if (b && typeof b.upgradeType === "string" && typeof b.changeType === "string" && b.effectiveDate != null) {
+    const vp = validateUpgradeActionPayload(body);
+    if (!vp.ok) return { ok: false, error: vp.error };
+  }
   const v = validateUpdateLedger(body);
   if (!v.ok) return { ok: false, error: v.error };
   try {
