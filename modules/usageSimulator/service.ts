@@ -585,11 +585,13 @@ export async function getSimulatedUsageForHouseScenario(args: {
           },
         };
       } else {
-        // Actual fetch failed; we return simulated data so mark all months as SIMULATED.
+        // Actual fetch failed; for SMT_BASELINE BASELINE, use filledSet: unfilled ACTUAL, filled SIMULATED (aligns with else-branch).
         dataset = buildSimulatedUsageDatasetFromBuildInputs(buildInputs);
+        const filledSet = new Set<string>(((buildInputs as any).filledMonths ?? []).map(String));
         const monthProvenanceByMonth: Record<string, "ACTUAL" | "SIMULATED"> = {};
         for (const ym of (buildInputs as any).canonicalMonths ?? []) {
-          monthProvenanceByMonth[String(ym)] = "SIMULATED";
+          monthProvenanceByMonth[String(ym)] =
+            mode === "SMT_BASELINE" && scenarioKey === "BASELINE" && !filledSet.has(String(ym)) ? "ACTUAL" : "SIMULATED";
         }
         dataset.meta = {
           ...(dataset.meta ?? {}),
