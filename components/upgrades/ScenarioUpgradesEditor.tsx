@@ -309,6 +309,7 @@ export function ScenarioUpgradesEditor({
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
+  const [createError, setCreateError] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(() => emptyForm(defaultDate));
 
   const load = useCallback(async () => {
@@ -339,6 +340,7 @@ export function ScenarioUpgradesEditor({
 
   async function createLedgerAndEvent() {
     if (!canSave || !template) return;
+    setCreateError(null);
     setAdding(true);
     try {
       const beforeJson = { ...form.beforeJson };
@@ -366,8 +368,9 @@ export function ScenarioUpgradesEditor({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const createJson = (await createRes.json().catch(() => null)) as { ok?: boolean; data?: { id?: string } };
+      const createJson = (await createRes.json().catch(() => null)) as { ok?: boolean; data?: { id?: string }; error?: string; message?: string };
       if (!createRes.ok || !createJson?.ok || !createJson?.data?.id) {
+        setCreateError(createJson?.error ?? createJson?.message ?? "Could not save upgrade.");
         setAdding(false);
         return;
       }
@@ -391,15 +394,17 @@ export function ScenarioUpgradesEditor({
           notes: form.notes.trim() || "",
         }),
       });
-      const eventJson = (await eventRes.json().catch(() => null)) as { ok?: boolean; event?: { id?: string } } | null;
+      const eventJson = (await eventRes.json().catch(() => null)) as { ok?: boolean; event?: { id?: string }; error?: string; message?: string } | null;
       const eventPayload = eventJson && typeof eventJson === "object" && eventJson.event;
       if (!eventRes.ok || !eventPayload) {
+        setCreateError(eventJson?.error ?? eventJson?.message ?? "Upgrade saved but could not link to scenario.");
         setAdding(false);
         await load();
         return;
       }
       const eventId = eventPayload.id;
       if (!eventId) {
+        setCreateError("Upgrade saved but could not link to scenario.");
         setAdding(false);
         await load();
         return;
@@ -409,6 +414,7 @@ export function ScenarioUpgradesEditor({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ scenarioEventId: eventId, scenarioId }),
       });
+      setCreateError(null);
       setForm(emptyForm(defaultDate));
       await load();
       onRecalc?.();
@@ -522,6 +528,7 @@ export function ScenarioUpgradesEditor({
             <select
               value={form.upgradeType}
               onChange={(e) => {
+                setCreateError(null);
                 const key = e.target.value;
                 const t = key ? getTemplateByKey(key) : null;
                 setForm((prev) => ({
@@ -600,6 +607,11 @@ export function ScenarioUpgradesEditor({
             </div>
           )}
 
+          {createError && (
+            <div className="text-xs text-red-600" role="alert">
+              {createError}
+            </div>
+          )}
           <div className="flex gap-2 flex-wrap items-center">
             <input
               value={form.notes}
