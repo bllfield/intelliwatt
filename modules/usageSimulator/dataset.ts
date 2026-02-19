@@ -165,6 +165,15 @@ export function buildSimulatedUsageDatasetFromBuildInputs(buildInputs: Simulator
 
   const peakDay = daily.length > 0 ? daily.reduce((a, b) => (b.kwh > a.kwh ? b : a)) : null;
 
+  // Baseload from the built curve (lowest 10% of 15-min power samples), so Past/Future reflect overlay/upgrades/vacant fill.
+  const powerSamples = curve.intervals
+    .map((i) => (Number(i.consumption_kwh) || 0) * 4)
+    .filter((kw) => Number.isFinite(kw))
+    .sort((a, b) => a - b);
+  const count10 = Math.max(1, Math.floor(powerSamples.length * 0.1));
+  const baseSlice = powerSamples.slice(0, count10);
+  const baseload = baseSlice.length > 0 ? round2(baseSlice.reduce((a, b) => a + b, 0) / baseSlice.length) : null;
+
   return {
     summary: {
       source: "SIMULATED" as const,
@@ -189,7 +198,7 @@ export function buildSimulatedUsageDatasetFromBuildInputs(buildInputs: Simulator
       stitchedMonth: null,
       peakDay: peakDay ? { date: peakDay.date, kwh: peakDay.kwh } : null,
       peakHour: null,
-      baseload: null,
+      baseload,
       weekdayVsWeekend: { weekday: round2(weekdaySum), weekend: round2(weekendSum) },
     },
     totals: {

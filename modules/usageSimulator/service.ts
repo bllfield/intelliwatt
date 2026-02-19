@@ -300,7 +300,7 @@ export async function recalcSimulatorBuild(args: {
     }
   }
 
-  // Baseline chaining: Future baseline = raw when no Past events; Future baseline = Past-normalized (raw + Past overlay) when Past events exist.
+  // Baseline chaining: Future baseline = raw when no Past events; Future baseline = Past-normalized (raw + Past overlay) when Past events exist. Upgrades/overlay then adjust that curve.
   let monthlyTotalsKwhByMonth: Record<string, number> = {};
   for (let i = 0; i < built.canonicalMonths.length; i++) {
     const ym = built.canonicalMonths[i];
@@ -710,6 +710,9 @@ export async function getSimulatedUsageForHouseScenario(args: {
         actualSource: (buildInputs as any)?.snapshots?.actualSource ?? null,
       };
     }
+
+    // Past and Future baseload come from the built curve (buildSimulatedUsageDatasetFromBuildInputs), which already
+    // computes baseload from curve.intervals after overlay/upgrades/vacant fill; no overwrite from actual usage.
 
     return { ok: true, houseId: args.houseId, scenarioKey, scenarioId, dataset };
   } catch (e) {

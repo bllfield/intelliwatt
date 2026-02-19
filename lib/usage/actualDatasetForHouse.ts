@@ -325,6 +325,83 @@ async function computeInsightsFromDb(args: {
   }
 }
 
+const YYYY_MM_DD = /^\d{4}-\d{2}-\d{2}$/;
+function validDateKeys(keys: string[]): string[] {
+  return keys.filter((k) => typeof k === "string" && YYYY_MM_DD.test(String(k).trim()));
+}
+
+/**
+ * Baseload from actual usage excluding given date keys (e.g. travel/vacant days).
+ * Used by the simulator for Past/Future so only non-vacant days determine always-on power.
+ */
+export async function getBaseloadFromActualExcludingDates(args: {
+  houseId: string;
+  esiid: string | null;
+  source: "SMT" | "GREEN_BUTTON";
+  latestIso: string;
+  excludeDateKeys: string[];
+}): Promise<number | null> {
+  const latestIso = String(args.latestIso ?? "").trim().slice(0, 10);
+  if (!YYYY_MM_DD.test(latestIso)) return null;
+  const latest = new Date(latestIso + "T12:00:00.000Z");
+  if (!Number.isFinite(latest.getTime())) return null;
+  const cutoff = new Date(latest.getTime() - 365 * DAY_MS);
+  const excludeDateKeys = validDateKeys(args.excludeDateKeys ?? []);
+
+  try {
+    if (args.source === "SMT") {
+      const esiid = String(args.esiid ?? "").trim();
+      if (!esiid) return null;
+      const dateFilter =
+        excludeDateKeys.length === 0
+          ? Prisma.sql``
+          : Prisma.sql` AND to_char((("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago')::date, 'YYYY-MM-DD') NOT IN (${Prisma.join(excludeDateKeys.map((d) => Prisma.sql`${d}`), Prisma.sql`, `)})`;
+      const baseloadRows = await prisma.$queryRaw<Array<{ baseload: number | null }>>(Prisma.sql`
+        WITH iv AS (
+          SELECT "ts", MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh
+          FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${cutoff}
+          ${dateFilter}
+          GROUP BY "ts"
+        ),
+        t AS (SELECT ("kwh" * 4)::float AS kw FROM iv),
+        p AS (SELECT percentile_cont(0.10) WITHIN GROUP (ORDER BY kw) AS p10 FROM t)
+        SELECT AVG(t.kw)::float AS baseload FROM t, p WHERE t.kw <= p.p10
+      `);
+      const baseload = baseloadRows?.[0]?.baseload;
+      return baseload != null && Number.isFinite(baseload) ? round2(Number(baseload)) : null;
+    }
+    if (!USAGE_DB_ENABLED) return null;
+    const usageClient = usagePrisma as any;
+    const houseId = String(args.houseId ?? "").trim();
+    if (!houseId) return null;
+    const latestRaw = await usageClient.rawGreenButton.findFirst({
+      where: { homeId: houseId },
+      orderBy: { createdAt: "desc" },
+      select: { id: true },
+    });
+    const rawId = latestRaw?.id ?? null;
+    if (!rawId) return null;
+    const dateFilter =
+      excludeDateKeys.length === 0
+        ? Prisma.sql``
+        : Prisma.sql` AND to_char(("timestamp" AT TIME ZONE 'America/Chicago')::date, 'YYYY-MM-DD') NOT IN (${Prisma.join(excludeDateKeys.map((d) => Prisma.sql`${d}`), Prisma.sql`, `)})`;
+    const baseloadRows = (await usageClient.$queryRaw(Prisma.sql`
+      WITH t AS (
+        SELECT ("consumptionKwh" * 4)::float AS kw
+        FROM "GreenButtonInterval"
+        WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${cutoff}
+        ${dateFilter}
+      ),
+      p AS (SELECT percentile_cont(0.10) WITHIN GROUP (ORDER BY kw) AS p10 FROM t)
+      SELECT AVG(t.kw)::float AS baseload FROM t, p WHERE t.kw <= p.p10
+    `)) as Array<{ baseload: number | null }>;
+    const baseload = baseloadRows?.[0]?.baseload;
+    return baseload != null && Number.isFinite(baseload) ? round2(Number(baseload)) : null;
+  } catch {
+    return null;
+  }
+}
+
 async function getGreenButtonWindow(usageClient: any, houseId: string, rawId: string) {
   const latest = await usageClient.greenButtonInterval.findFirst({
     where: { homeId: houseId, rawId },
