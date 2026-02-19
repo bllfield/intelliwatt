@@ -151,6 +151,7 @@ export async function buildSimulatorInputs(args: {
   const esiid = args.esiidForSmt ?? null;
   if (!houseIdForActual) throw new Error("houseId_required");
 
+  // B1: Travel/vacant — exclude these dates from shape derivation inputs. Curve fill for those days remains as-is until B2.
   const excludeDateKeys = args.travelRanges?.length ? travelRangesToExcludeDateKeys(args.travelRanges) : undefined;
   const actualMonthly = await fetchActualCanonicalMonthlyTotals({
     houseId: houseIdForActual,

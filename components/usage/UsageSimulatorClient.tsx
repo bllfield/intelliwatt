@@ -1083,6 +1083,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
           <div className="text-sm text-brand-navy/70">Select or create a scenario to edit its timeline.</div>
         ) : (
           <div className="space-y-4">
+            {/* UI separation: only the current workspace's scenarioId (Past or Future) is passed; no combined list. */}
             {(workspace === "PAST" || workspace === "FUTURE") && scenarioId !== "baseline" ? (
               <ScenarioUpgradesEditor
                 houseId={houseId}

@@ -1,3 +1,15 @@
+/** Upgrade impact contract (V1: additive kWh deltas only). Defined in modules/upgradesLedger/impact; re-exported for overlay/curve consumption. */
+export type { UpgradeImpact, V1DeltaInput } from "@/modules/upgradesLedger/impact";
+
+import type { V1DeltaInput } from "@/modules/upgradesLedger/impact";
+
+/** One ledger-derived entry for overlay: dates + V1 delta. Timeline order is determined by caller (scenario events). */
+export type LedgerOverlayEntry = {
+  effectiveMonth: string; // YYYY-MM
+  effectiveEndDate?: string | null; // YYYY-MM or YYYY-MM-DD; null/undefined = permanent
+  delta: V1DeltaInput;
+};
+
 export type UsageScenario = {
   id: string;
   userId: string;

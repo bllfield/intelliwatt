@@ -11,7 +11,9 @@ import { getActualUsageDatasetForHouse } from "@/lib/usage/actualDatasetForHouse
 import { buildSimulatedUsageDatasetFromBuildInputs, type SimulatorBuildInputsV1 } from "@/modules/usageSimulator/dataset";
 import { computeBuildInputsHash } from "@/modules/usageSimulator/hash";
 import { INTRADAY_TEMPLATE_VERSION } from "@/modules/simulatedUsage/intradayTemplates";
-import { computeMonthlyOverlay } from "@/modules/usageScenario/overlay";
+import { computeMonthlyOverlay, computePastOverlay, computeFutureOverlay } from "@/modules/usageScenario/overlay";
+import { listLedgerRows } from "@/modules/upgradesLedger/repo";
+import { buildOrderedLedgerEntriesForOverlay } from "@/modules/upgradesLedger/overlayEntries";
 import { getHouseAddressForUserHouse, listHouseAddressesForUser, normalizeScenarioKey, upsertSimulatorBuild } from "@/modules/usageSimulator/repo";
 import { billingPeriodsEndingAt } from "@/modules/manualUsage/billingPeriods";
 import { normalizeMonthlyTotals, WEATHER_NORMALIZER_VERSION, type WeatherPreference } from "@/modules/weatherNormalization/normalizer";
@@ -224,23 +226,66 @@ export async function recalcSimulatorBuild(args: {
     return { ok: false, error: "baseKind_mismatch" };
   }
 
-  const overlay = scenarioId
-    ? computeMonthlyOverlay({
+  // Overlay: source of truth = UpgradeLedger (status ACTIVE); timeline order = scenario events. V1 = delta kWh only (additive).
+  let overlay: ReturnType<typeof computeMonthlyOverlay> | null = null;
+  if (scenarioId) {
+    let ledgerRows: Awaited<ReturnType<typeof listLedgerRows>> = [];
+    try {
+      ledgerRows = await listLedgerRows(userId, { scenarioId, status: "ACTIVE" });
+    } catch (_) {
+      // Upgrades DB optional; fall back to event-based overlay
+    }
+    const entries = buildOrderedLedgerEntriesForOverlay(
+      scenarioEvents.map((e) => ({
+        id: e.id,
+        effectiveMonth: e.effectiveMonth,
+        payloadJson: e.payloadJson,
+      })),
+      ledgerRows
+    );
+    if (entries.length > 0 && scenario?.name === WORKSPACE_PAST_NAME) {
+      overlay = computePastOverlay({
+        canonicalMonths: built.canonicalMonths,
+        entries,
+        baselineMonthlyKwhByMonth: built.monthlyTotalsKwhByMonth,
+      });
+    } else if (entries.length > 0 && scenario?.name === WORKSPACE_FUTURE_NAME) {
+      overlay = computeFutureOverlay({
+        canonicalMonths: built.canonicalMonths,
+        entries,
+        baselineMonthlyKwhByMonth: built.monthlyTotalsKwhByMonth,
+      });
+    }
+    if (overlay == null) {
+      overlay = computeMonthlyOverlay({
         canonicalMonths: built.canonicalMonths,
         events: scenarioEvents as any,
-      })
-    : null;
+      });
+    }
+  }
 
-  if (isFutureScenario && pastEventsForOverlay.length > 0) {
-    const pastHasEdits = pastEventsForOverlay.some((e) => {
-      const k = String(e?.kind ?? "");
-      return k === "MONTHLY_ADJUSTMENT" || k === "TRAVEL_RANGE";
-    });
-    if (pastHasEdits) {
+  // Past overlay for Future baseline: same rule (ledger ACTIVE, event order); Past = full-year or range (Option 1).
+  if (isFutureScenario && pastScenario?.id) {
+    let pastLedgerRows: Awaited<ReturnType<typeof listLedgerRows>> = [];
+    try {
+      pastLedgerRows = await listLedgerRows(userId, { scenarioId: pastScenario.id, status: "ACTIVE" });
+    } catch (_) {}
+    const pastEntries = buildOrderedLedgerEntriesForOverlay(
+      pastEventsForOverlay.map((e) => ({ id: e.id, effectiveMonth: e.effectiveMonth, payloadJson: e.payloadJson })),
+      pastLedgerRows
+    );
+    if (pastEntries.length > 0) {
+      pastOverlay = computePastOverlay({
+        canonicalMonths: built.canonicalMonths,
+        entries: pastEntries,
+        baselineMonthlyKwhByMonth: built.monthlyTotalsKwhByMonth,
+      });
+    } else if (pastEventsForOverlay.some((e) => String(e?.kind ?? "") === "MONTHLY_ADJUSTMENT" || String(e?.kind ?? "") === "TRAVEL_RANGE")) {
       pastOverlay = computeMonthlyOverlay({ canonicalMonths: built.canonicalMonths, events: pastEventsForOverlay as any });
     }
   }
 
+  // Baseline chaining: Future baseline = raw when no Past events; Future baseline = Past-normalized (raw + Past overlay) when Past events exist.
   let monthlyTotalsKwhByMonth: Record<string, number> = {};
   for (let i = 0; i < built.canonicalMonths.length; i++) {
     const ym = built.canonicalMonths[i];
