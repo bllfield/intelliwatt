@@ -424,7 +424,7 @@ export function ScenarioUpgradesEditor({
     const afterJson = { ...form.afterJson };
     const inputsJson = { ...form.inputsJson };
     const quantity = form.quantity.trim() ? Number(form.quantity) : null;
-    const units = form.units.trim() || (template.defaultUnits ?? null);
+    const units = form.units.trim() || (template.defaultUnits ?? undefined);
     const payload = {
       upgradeType: form.upgradeType.trim(),
       changeType: form.changeType,
