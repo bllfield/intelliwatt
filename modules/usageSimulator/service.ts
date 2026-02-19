@@ -489,12 +489,10 @@ export async function getSimulatedUsageForUser(args: {
           }
           if (!dataset) {
             dataset = buildSimulatedUsageDatasetFromBuildInputs(buildInputs);
-            const filledSet = new Set<string>(((buildInputs as any).filledMonths ?? []).map(String));
             const monthProvenanceByMonth: Record<string, "ACTUAL" | "SIMULATED"> = {};
-            // When actual fetch was attempted but failed (useActualBaseline), we return simulated data so mark all months as SIMULATED.
+            // This branch always returns simulated data (built curve); mark all months as SIMULATED for correct provenance.
             for (const ym of (buildInputs as any).canonicalMonths ?? []) {
-              monthProvenanceByMonth[String(ym)] =
-                useActualBaseline ? "SIMULATED" : ((buildInputs as any).mode === "SMT_BASELINE" && !filledSet.has(String(ym)) ? "ACTUAL" : "SIMULATED");
+              monthProvenanceByMonth[String(ym)] = "SIMULATED";
             }
             dataset.meta = {
               ...(dataset.meta ?? {}),
