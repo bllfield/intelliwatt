@@ -15,6 +15,17 @@ export const runtime = "nodejs";
 
 const normalizeStoredProfile = normalizeStoredApplianceProfile;
 
+function formatAppliancesDbError(e: any): string {
+  const msg = typeof e?.message === "string" ? e.message : String(e ?? "");
+  const code = typeof e?.code === "string" ? e.code : null; // Prisma error codes like P1001 / P2002
+  if (code) return `appliances_db_error_${code}`;
+  if (/APPLIANCES_DATABASE_URL/i.test(msg)) return "appliances_db_missing_env";
+  if (/P1001/i.test(msg)) return "appliances_db_unreachable";
+  if (/permission denied/i.test(msg)) return "appliances_db_permission_denied";
+  if (/timeout/i.test(msg)) return "appliances_db_timeout";
+  return "appliances_db_error";
+}
+
 async function requireUser() {
   const cookieStore = cookies();
   const rawEmail = cookieStore.get("intelliwatt_user")?.value ?? null;
@@ -57,12 +68,16 @@ export async function GET(request: NextRequest) {
     const houseId = await resolveHouseId(u.user.id, url.searchParams.get("houseId"));
     if (!houseId) return NextResponse.json({ ok: false, error: "house_required" }, { status: 400 });
 
-    const rec = await (appliancesPrisma as any).applianceProfileSimulated
-      .findUnique({
+    let rec: any = null;
+    try {
+      rec = await (appliancesPrisma as any).applianceProfileSimulated.findUnique({
         where: { userId_houseId: { userId: u.user.id, houseId } },
         select: { appliancesJson: true, updatedAt: true },
-      })
-      .catch(() => null);
+      });
+    } catch (e: any) {
+      console.error("[user/appliances] Appliances DB read failed", e);
+      return NextResponse.json({ ok: false, error: formatAppliancesDbError(e) }, { status: 503 });
+    }
 
     const profile = normalizeStoredProfile((rec?.appliancesJson as any) ?? null);
 
@@ -99,12 +114,18 @@ export async function POST(request: NextRequest) {
 
     const profileToStore: ApplianceProfilePayloadV1 = v.value;
 
-    const rec = await (appliancesPrisma as any).applianceProfileSimulated.upsert({
-      where: { userId_houseId: { userId: u.user.id, houseId } },
-      create: { userId: u.user.id, houseId, appliancesJson: profileToStore },
-      update: { appliancesJson: profileToStore },
-      select: { updatedAt: true },
-    });
+    let rec: any = null;
+    try {
+      rec = await (appliancesPrisma as any).applianceProfileSimulated.upsert({
+        where: { userId_houseId: { userId: u.user.id, houseId } },
+        create: { userId: u.user.id, houseId, appliancesJson: profileToStore },
+        update: { appliancesJson: profileToStore },
+        select: { updatedAt: true },
+      });
+    } catch (e: any) {
+      console.error("[user/appliances] Appliances DB write failed", e);
+      return NextResponse.json({ ok: false, error: formatAppliancesDbError(e) }, { status: 503 });
+    }
 
     return NextResponse.json({ ok: true, houseId, updatedAt: new Date(rec.updatedAt).toISOString() });
   } catch (e) {

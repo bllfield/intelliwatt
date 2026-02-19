@@ -51,6 +51,30 @@ type LoadResp =
 
 type SaveResp = { ok: true; houseId: string; updatedAt: string } | { ok: false; error: string };
 
+function friendlyErrorMessage(codeOrMessage: string): string {
+  const s = String(codeOrMessage ?? "").trim();
+  if (!s) return "Unknown error";
+  if (s.startsWith("home_details_db_missing_env")) {
+    return "Home Details service is temporarily unavailable (missing configuration). Please contact support.";
+  }
+  if (s.startsWith("home_details_db_unreachable") || s.startsWith("home_details_db_error_P1001")) {
+    return "Home Details service is temporarily unavailable. Please try again in a moment.";
+  }
+  if (s.startsWith("home_details_db_permission_denied")) {
+    return "Home Details service cannot save right now (permission denied). Please contact support.";
+  }
+  if (s.startsWith("home_details_db_timeout")) {
+    return "Home Details service timed out. Please try again.";
+  }
+  if (s.startsWith("home_details_db_error_P2002")) {
+    return "A home profile already exists for this house. Please refresh and try again.";
+  }
+  if (s.startsWith("home_details_db_error_")) {
+    return "Home Details service error. Please try again.";
+  }
+  return s;
+}
+
 const HOME_STYLE = ["brick", "wood", "stucco", "metal", "manufactured"] as const;
 const INSULATION = ["fiberglass", "open_cell_spray_foam", "closed_cell_spray_foam", "mineral_wool"] as const;
 const WINDOW = ["single_pane", "double_pane", "triple_pane"] as const;
@@ -214,7 +238,9 @@ export function HomeDetailsClient({ houseId }: { houseId: string }) {
         }),
       });
       const json = (await res.json().catch(() => null)) as SaveResp | null;
-      if (!res.ok || !json || (json as any).ok === false) throw new Error((json as any)?.error || `HTTP ${res.status}`);
+      if (!res.ok || !json || (json as any).ok === false) {
+        throw new Error(friendlyErrorMessage((json as any)?.error || `HTTP ${res.status}`));
+      }
       setSavedAt((json as any).updatedAt ?? new Date().toISOString());
 
       // Award entry (client-side best-effort; server-side status refresh can also compute later).

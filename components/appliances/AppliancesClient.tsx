@@ -34,6 +34,30 @@ type ApplianceType =
 
 type FuelConfiguration = "" | "all_electric" | "mixed";
 
+function friendlyErrorMessage(codeOrMessage: string): string {
+  const s = String(codeOrMessage ?? "").trim();
+  if (!s) return "Unknown error";
+  if (s.startsWith("appliances_db_missing_env")) {
+    return "Appliances service is temporarily unavailable (missing configuration). Please contact support.";
+  }
+  if (s.startsWith("appliances_db_unreachable") || s.startsWith("appliances_db_error_P1001")) {
+    return "Appliances service is temporarily unavailable. Please try again in a moment.";
+  }
+  if (s.startsWith("appliances_db_permission_denied")) {
+    return "Appliances service cannot save right now (permission denied). Please contact support.";
+  }
+  if (s.startsWith("appliances_db_timeout")) {
+    return "Appliances service timed out. Please try again.";
+  }
+  if (s.startsWith("appliances_db_error_P2002")) {
+    return "An appliances profile already exists for this house. Please refresh and try again.";
+  }
+  if (s.startsWith("appliances_db_error_")) {
+    return "Appliances service error. Please try again.";
+  }
+  return s;
+}
+
 function uid(): string {
   return Math.random().toString(16).slice(2) + Date.now().toString(16);
 }
@@ -535,14 +559,14 @@ export function AppliancesClient({ houseId }: { houseId: string }) {
       try {
         const res = await fetch(`/api/user/appliances?houseId=${encodeURIComponent(houseId)}`, { cache: "no-store" });
         const json = (await res.json().catch(() => null)) as LoadResp | null;
-        if (!res.ok || !json || json.ok !== true) throw new Error((json as any)?.error || `HTTP ${res.status}`);
+        if (!res.ok || !json || json.ok !== true) throw new Error(friendlyErrorMessage((json as any)?.error || `HTTP ${res.status}`));
         if (cancelled) return;
         const normalized = normalizeServerProfile(json);
         setRows(normalized.appliances);
         setFuelConfiguration(normalized.fuelConfiguration);
         setSavedAt(json.updatedAt ?? null);
       } catch (e: any) {
-        if (!cancelled) setError(e?.message || "Failed to load");
+        if (!cancelled) setError(friendlyErrorMessage(e?.message || "Failed to load"));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -571,7 +595,9 @@ export function AppliancesClient({ houseId }: { houseId: string }) {
         body: JSON.stringify({ houseId, profile: { version: 1, fuelConfiguration, appliances: rows } }),
       });
       const json = await res.json().catch(() => null);
-      if (!res.ok || !json || json.ok !== true) throw new Error(json?.error || `HTTP ${res.status}`);
+      if (!res.ok || !json || json.ok !== true) {
+        throw new Error(friendlyErrorMessage(json?.error || `HTTP ${res.status}`));
+      }
       setSavedAt(json.updatedAt ?? new Date().toISOString());
 
       // Best-effort entry award.
@@ -590,7 +616,7 @@ export function AppliancesClient({ houseId }: { houseId: string }) {
         // ignore
       }
     } catch (e: any) {
-      setError(e?.message || "Save failed");
+      setError(friendlyErrorMessage(e?.message || "Save failed"));
     } finally {
       setSaving(false);
     }

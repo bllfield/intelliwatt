@@ -8,6 +8,17 @@ import { validateHomeProfile, type HomeProfileInput } from "@/modules/homeProfil
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+function formatHomeDetailsDbError(e: any): string {
+  const msg = typeof e?.message === "string" ? e.message : String(e ?? "");
+  const code = typeof e?.code === "string" ? e.code : null; // Prisma error codes like P1001 / P2002
+  if (code) return `home_details_db_error_${code}`;
+  if (/HOME_DETAILS_DATABASE_URL/i.test(msg)) return "home_details_db_missing_env";
+  if (/P1001/i.test(msg)) return "home_details_db_unreachable";
+  if (/permission denied/i.test(msg)) return "home_details_db_permission_denied";
+  if (/timeout/i.test(msg)) return "home_details_db_timeout";
+  return "home_details_db_error";
+}
+
 
 async function requireUser() {
   const cookieStore = cookies();
@@ -53,11 +64,15 @@ export async function GET(request: NextRequest) {
     const houseId = await resolveHouseId(u.user.id, url.searchParams.get("houseId"));
     if (!houseId) return NextResponse.json({ ok: false, error: "house_required" }, { status: 400 });
 
-    const rec = await (homeDetailsPrisma as any).homeProfileSimulated
-      .findUnique({
+    let rec: any = null;
+    try {
+      rec = await (homeDetailsPrisma as any).homeProfileSimulated.findUnique({
         where: { userId_houseId: { userId: u.user.id, houseId } },
-      })
-      .catch(() => null);
+      });
+    } catch (e: any) {
+      console.error("[user/home-profile] HomeDetails DB read failed", e);
+      return NextResponse.json({ ok: false, error: formatHomeDetailsDbError(e) }, { status: 503 });
+    }
 
     if (!rec) {
       return NextResponse.json({ ok: true, houseId, profile: null, updatedAt: null });
@@ -108,22 +123,28 @@ export async function POST(request: NextRequest) {
     const provenanceJson = body?.provenance ?? null;
     const prefillJson = body?.prefill ?? null;
 
-    const rec = await (homeDetailsPrisma as any).homeProfileSimulated.upsert({
-      where: { userId_houseId: { userId: u.user.id, houseId } },
-      create: {
-        userId: u.user.id,
-        houseId,
-        ...v.value,
-        provenanceJson,
-        prefillJson,
-      },
-      update: {
-        ...v.value,
-        provenanceJson,
-        prefillJson,
-      },
-      select: { updatedAt: true },
-    });
+    let rec: any = null;
+    try {
+      rec = await (homeDetailsPrisma as any).homeProfileSimulated.upsert({
+        where: { userId_houseId: { userId: u.user.id, houseId } },
+        create: {
+          userId: u.user.id,
+          houseId,
+          ...v.value,
+          provenanceJson,
+          prefillJson,
+        },
+        update: {
+          ...v.value,
+          provenanceJson,
+          prefillJson,
+        },
+        select: { updatedAt: true },
+      });
+    } catch (e: any) {
+      console.error("[user/home-profile] HomeDetails DB write failed", e);
+      return NextResponse.json({ ok: false, error: formatHomeDetailsDbError(e) }, { status: 503 });
+    }
 
     return NextResponse.json({ ok: true, houseId, updatedAt: new Date(rec.updatedAt).toISOString() });
   } catch (e) {
