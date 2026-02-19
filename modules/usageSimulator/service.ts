@@ -489,10 +489,12 @@ export async function getSimulatedUsageForUser(args: {
           }
           if (!dataset) {
             dataset = buildSimulatedUsageDatasetFromBuildInputs(buildInputs);
+            const filledSet = new Set<string>(((buildInputs as any).filledMonths ?? []).map(String));
             const monthProvenanceByMonth: Record<string, "ACTUAL" | "SIMULATED"> = {};
-            // We always return simulated data here; mark all months as SIMULATED for consistency with getSimulatedUsageForHouseScenario.
+            // When actual fetch was attempted but failed (useActualBaseline), we return simulated data so mark all months as SIMULATED.
             for (const ym of (buildInputs as any).canonicalMonths ?? []) {
-              monthProvenanceByMonth[String(ym)] = "SIMULATED";
+              monthProvenanceByMonth[String(ym)] =
+                useActualBaseline ? "SIMULATED" : ((buildInputs as any).mode === "SMT_BASELINE" && !filledSet.has(String(ym)) ? "ACTUAL" : "SIMULATED");
             }
             dataset.meta = {
               ...(dataset.meta ?? {}),
@@ -919,4 +921,3 @@ export async function getSimulatorRequirements(args: { userId: string; houseId: 
     canonicalEndMonth: canonical.endMonth,
   };
 }
-
