@@ -203,6 +203,7 @@ export async function POST(req: NextRequest) {
       tdspSlug: true,
       utilityName: true,
       utilityPhone: true,
+      rawWattbuyJson: true,
       createdAt: true,
       updatedAt: true,
   isPrimary: true,
@@ -369,6 +370,17 @@ export async function POST(req: NextRequest) {
         });
 
         if (lookup.esiid) {
+          // Persist the WattBuy raw payload we already fetched (no extra WattBuy calls).
+          // Keep this conservative: only fill when missing (or when client explicitly provided payload).
+          const resolvedWattbuyRaw = (lookup as any)?.raw ?? null;
+          const rawWattbuyPatchFor = (current: any) => {
+            if (body.wattbuyJson != null) return { rawWattbuyJson: body.wattbuyJson as any };
+            if (resolvedWattbuyRaw != null && (current as any)?.rawWattbuyJson == null) {
+              return { rawWattbuyJson: resolvedWattbuyRaw as any };
+            }
+            return {};
+          };
+
           const conflicting = await prisma.houseAddress.findFirst({
             where: { esiid: lookup.esiid },
             select: selectFields,
@@ -413,6 +425,7 @@ export async function POST(req: NextRequest) {
                   esiid: lookup.esiid,
                   utilityName: nextUtilityName,
                   tdspSlug: nextTdspSlug,
+                  ...rawWattbuyPatchFor(record),
                   ...(houseAddressEmailAvailable ? { userEmail: resolvedUserEmail } : {}),
                 };
 
@@ -449,7 +462,7 @@ export async function POST(req: NextRequest) {
                   toOptionalString(conflicting.tdspSlug) ??
                   null,
                 rawGoogleJson: body.googlePlaceDetails as any,
-                rawWattbuyJson: body.wattbuyJson as any,
+                ...rawWattbuyPatchFor(conflicting),
                 ...(houseAddressEmailAvailable ? { userEmail: resolvedUserEmail } : {}),
               };
 
@@ -476,6 +489,7 @@ export async function POST(req: NextRequest) {
               esiid: lookup.esiid,
               utilityName: nextUtilityName,
               tdspSlug: nextTdspSlug,
+              ...rawWattbuyPatchFor(record),
               ...(houseAddressEmailAvailable ? { userEmail: resolvedUserEmail } : {}),
             };
 

@@ -154,7 +154,7 @@ export function HomeDetailsClient({ houseId, onSaved }: { houseId: string; onSav
         if (!cancelled && prefillJson) setPrefill(prefillJson);
 
         if (!profileRes.ok || !profileJson || profileJson.ok !== true) {
-          throw new Error((profileJson as any)?.error || `HTTP ${profileRes.status}`);
+          throw new Error(friendlyErrorMessage((profileJson as any)?.error || `HTTP ${profileRes.status}`));
         }
         if (cancelled) return;
 

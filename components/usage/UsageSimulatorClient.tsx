@@ -39,6 +39,8 @@ type ScenarioHouseResp =
   | { ok: true; houseId: string; scenarioKey: string; scenarioId: string | null; dataset: any }
   | { ok: false; code: string; message: string };
 
+type RequirementsDbStatus = "ok" | "missing_env" | "unreachable" | "error";
+
 type RequirementsResp =
   | {
       ok: true;
@@ -47,6 +49,11 @@ type RequirementsResp =
       hasActualIntervals: boolean;
       actualSource: "SMT" | "GREEN_BUTTON" | null;
       canonicalEndMonth: string;
+      dbStatus?: {
+        homeDetails: RequirementsDbStatus;
+        appliances: RequirementsDbStatus;
+        usage: RequirementsDbStatus;
+      };
     }
   | { ok: false; error: string };
 
@@ -92,6 +99,12 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
   const [recalcNote, setRecalcNote] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
   const [canRecalc, setCanRecalc] = useState(false);
+  const [requirementsError, setRequirementsError] = useState<string | null>(null);
+  const [requirementsDbStatus, setRequirementsDbStatus] = useState<{
+    homeDetails: RequirementsDbStatus;
+    appliances: RequirementsDbStatus;
+    usage: RequirementsDbStatus;
+  } | null>(null);
   const [canonicalEndMonth, setCanonicalEndMonth] = useState<string>("");
   const [weatherPreference, setWeatherPreference] = useState<"NONE" | "LAST_YEAR_WEATHER" | "LONG_TERM_AVERAGE">(
     "LAST_YEAR_WEATHER",
@@ -225,14 +238,20 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
         if (cancelled) return;
         if (!r.ok || !j?.ok) {
           setCanRecalc(false);
+          setRequirementsError(j && "error" in j && typeof (j as any).error === "string" ? String((j as any).error) : `HTTP ${r.status}`);
+          setRequirementsDbStatus(null);
           setCanonicalEndMonth("");
           return;
         }
         setCanRecalc(Boolean(j.canRecalc));
+        setRequirementsError(null);
+        setRequirementsDbStatus((j as any).dbStatus ?? null);
         setCanonicalEndMonth(typeof (j as any).canonicalEndMonth === "string" ? String((j as any).canonicalEndMonth) : "");
       } catch {
         if (!cancelled) {
           setCanRecalc(false);
+          setRequirementsError("Unable to load simulator requirements.");
+          setRequirementsDbStatus(null);
           setCanonicalEndMonth("");
         }
       }
@@ -247,6 +266,29 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
     if (hasActualIntervals) return null;
     return "Connect Smart Meter Texas or upload Green Button usage to view Actual usage here.";
   }, [hasActualIntervals, loadingActual]);
+
+  const wiringIssues = useMemo(() => {
+    const issues: string[] = [];
+    if (requirementsError) issues.push(`Simulator requirements unavailable: ${requirementsError}`);
+
+    const s = requirementsDbStatus;
+    if (s) {
+      const fmt = (label: string, status: RequirementsDbStatus, envVar: string) => {
+        if (status === "ok") return null;
+        if (status === "missing_env") return `${label} database not configured (${envVar}).`;
+        if (status === "unreachable") return `${label} database unreachable.`;
+        return `${label} database error.`;
+      };
+      const homeMsg = fmt("Home Details", s.homeDetails, "HOME_DETAILS_DATABASE_URL");
+      const appMsg = fmt("Appliances", s.appliances, "APPLIANCES_DATABASE_URL");
+      const usageMsg = fmt("Usage", s.usage, "USAGE_DATABASE_URL");
+      if (homeMsg) issues.push(homeMsg);
+      if (appMsg) issues.push(appMsg);
+      if (usageMsg) issues.push(usageMsg);
+    }
+
+    return issues;
+  }, [requirementsDbStatus, requirementsError]);
 
   const selectedBuild = useMemo(() => {
     if (!Array.isArray(builds)) return null;
@@ -643,6 +685,18 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
             <p className="mt-2 text-sm text-brand-cyan/75">
               Complete the required details and save changes. Saving automatically updates the Baseline/Past/Future curves for viewing below.
             </p>
+            {wiringIssues.length ? (
+              <div className="mt-4 rounded-2xl border border-amber-300/30 bg-amber-200/10 px-4 py-3 text-sm text-amber-100">
+                <div className="text-[0.7rem] font-semibold uppercase tracking-[0.25em] text-amber-200/80">
+                  Wiring / configuration
+                </div>
+                <ul className="mt-2 list-disc space-y-1 pl-5 text-amber-50/90">
+                  {wiringIssues.map((x, idx) => (
+                    <li key={`${idx}-${x}`}>{x}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -722,7 +776,13 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
                   <button
                     type="button"
                     onClick={() => setOpenHome(true)}
-                    className="rounded-xl border border-brand-cyan/30 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-white hover:bg-brand-white/10"
+                    disabled={Boolean(requirementsDbStatus && requirementsDbStatus.homeDetails !== "ok")}
+                    title={
+                      requirementsDbStatus && requirementsDbStatus.homeDetails !== "ok"
+                        ? "Home Details service is unavailable in this environment."
+                        : undefined
+                    }
+                    className="rounded-xl border border-brand-cyan/30 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-white hover:bg-brand-white/10 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     Open Home
                   </button>
@@ -742,7 +802,13 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
                   <button
                     type="button"
                     onClick={() => setOpenAppliances(true)}
-                    className="rounded-xl border border-brand-cyan/30 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-white hover:bg-brand-white/10"
+                    disabled={Boolean(requirementsDbStatus && requirementsDbStatus.appliances !== "ok")}
+                    title={
+                      requirementsDbStatus && requirementsDbStatus.appliances !== "ok"
+                        ? "Appliances service is unavailable in this environment."
+                        : undefined
+                    }
+                    className="rounded-xl border border-brand-cyan/30 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-white hover:bg-brand-white/10 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     Open Appliances
                   </button>

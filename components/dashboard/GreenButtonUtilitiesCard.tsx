@@ -122,19 +122,33 @@ export default function GreenButtonHelpSection({
             body: JSON.stringify({ homeId: houseAddressId }),
           });
           if (!refreshRes.ok) {
-            const detail = await refreshRes.text().catch(() => '');
-            console.warn('Usage refresh after Green Button upload failed', refreshRes.status, detail);
+            const data = await refreshRes.json().catch(() => null);
+            const code = typeof (data as any)?.error === "string" ? String((data as any).error) : null;
+            const message = typeof (data as any)?.message === "string" ? String((data as any).message) : null;
+            if (code === "admin_token_missing") {
+              return { ok: false as const, code, message };
+            }
+            console.warn('Usage refresh after Green Button upload failed', refreshRes.status, data ?? null);
+            return { ok: false as const, code: code ?? `http_${refreshRes.status}`, message };
           }
+          return { ok: true as const };
         } catch (refreshError) {
           console.error('Usage refresh post-upload encountered an error', refreshError);
+          return { ok: false as const, code: "refresh_failed", message: null as string | null };
         }
       };
 
       try {
         await attemptDropletUpload();
-        await triggerUsageRefresh();
+        const refresh = await triggerUsageRefresh();
         setStatusTone("success");
-        setStatusMessage("Upload received! We’ll start parsing your usage data shortly.");
+        setStatusMessage(
+          refresh.ok
+            ? "Upload received! We’ll start parsing your usage data shortly."
+            : refresh.code === "admin_token_missing"
+              ? "Upload complete. Usage refresh is pending because ADMIN_TOKEN is not configured in this environment."
+              : "Upload received! Parsing will begin shortly (usage refresh pending).",
+        );
         setSelectedFile(null);
         if (fileInputRef.current) {
           fileInputRef.current.value = "";
