@@ -167,7 +167,11 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
         setHasActualIntervals(hasIntervals);
         setActualSource(source === "SMT" || source === "GREEN_BUTTON" ? (source as any) : null);
         setActualCoverage({ start: ds?.summary?.start ?? null, end: ds?.summary?.end ?? null, intervalsCount });
-        if (hasIntervals) setCompareView("ACTUAL");
+        if (hasIntervals) {
+          setCompareView("ACTUAL");
+          // If we have interval data, baseline is Actual (read-only). Prefer the actual-baseline simulation mode.
+          if (normalizedIntent !== "MANUAL" && normalizedIntent !== "NEW_BUILD") setMode("SMT_BASELINE");
+        }
       } catch {
         if (!cancelled) {
           setHasActualIntervals(false);
@@ -251,6 +255,13 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
     if (!Array.isArray(builds)) return null;
     return builds.find((b) => String(b?.scenarioKey ?? "") === "BASELINE") ?? null;
   }, [builds]);
+
+  const workspacesUnlocked = useMemo(() => {
+    // If interval data exists, baseline is Actual and workspaces unlock once required details are saved (requirements endpoint).
+    if (hasActualIntervals) return Boolean(canRecalc);
+    // Otherwise, V1 requires a generated simulated baseline build.
+    return Boolean(baselineBuild);
+  }, [baselineBuild, canRecalc, hasActualIntervals]);
 
   const pastScenario = useMemo(() => scenarios.find((s) => s.name === WORKSPACE_PAST_NAME) ?? null, [scenarios]);
   const futureScenario = useMemo(() => scenarios.find((s) => s.name === WORKSPACE_FUTURE_NAME) ?? null, [scenarios]);
@@ -461,7 +472,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
       setRecalcNote(`Create the “${WORKSPACE_FUTURE_NAME}” workspace first.`);
       return;
     }
-    if (scenarioId !== "baseline" && !baselineBuild) {
+    if (scenarioId !== "baseline" && !baselineBuild && !hasActualIntervals) {
       setRecalcNote("Generate the simulated baseline first to unlock Past/Future scenarios.");
       return;
     }
@@ -564,11 +575,13 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
             <div>
               <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Simulated baseline type</div>
               <div className="mt-1 text-xs text-brand-cyan/80">
-                {mode === "MANUAL_TOTALS"
-                  ? "Manual totals"
-                  : mode === "NEW_BUILD_ESTIMATE"
-                    ? "New build estimate"
-                    : "Gap-fill from Actual (SMT/Green Button)"}
+                {hasActualIntervals
+                  ? "Actual intervals (read-only baseline)"
+                  : mode === "MANUAL_TOTALS"
+                    ? "Manual totals"
+                    : mode === "NEW_BUILD_ESTIMATE"
+                      ? "New build estimate"
+                      : "Gap-fill from Actual (SMT/Green Button)"}
               </div>
             </div>
           </div>
@@ -588,15 +601,15 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
                     : "border-brand-cyan/20 bg-brand-white/5 text-brand-cyan/70 hover:bg-brand-white/10",
                 ].join(" ")}
               >
-                Baseline (Simulated)
+                {hasActualIntervals ? "Baseline (Actual)" : "Baseline (Simulated)"}
               </button>
               <button
                 type="button"
                 onClick={() => setWorkspace("PAST")}
-                disabled={!baselineBuild}
+                disabled={!workspacesUnlocked}
                 className={[
                   "rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-wide transition",
-                  !baselineBuild ? "cursor-not-allowed opacity-60" : "",
+                  !workspacesUnlocked ? "cursor-not-allowed opacity-60" : "",
                   workspace === "PAST"
                     ? "border-brand-cyan/50 bg-brand-cyan/10 text-brand-cyan"
                     : "border-brand-cyan/20 bg-brand-white/5 text-brand-cyan/70 hover:bg-brand-white/10",
@@ -607,10 +620,10 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
               <button
                 type="button"
                 onClick={() => setWorkspace("FUTURE")}
-                disabled={!baselineBuild}
+                disabled={!workspacesUnlocked}
                 className={[
                   "rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-wide transition",
-                  !baselineBuild ? "cursor-not-allowed opacity-60" : "",
+                  !workspacesUnlocked ? "cursor-not-allowed opacity-60" : "",
                   workspace === "FUTURE"
                     ? "border-brand-cyan/50 bg-brand-cyan/10 text-brand-cyan"
                     : "border-brand-cyan/20 bg-brand-white/5 text-brand-cyan/70 hover:bg-brand-white/10",
@@ -621,8 +634,12 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
               <button
                 type="button"
                 onClick={async () => {
-                  if (!baselineBuild) {
-                    setRecalcNote("Generate the simulated baseline first to unlock workspaces.");
+                  if (!workspacesUnlocked) {
+                    setRecalcNote(
+                      hasActualIntervals
+                        ? "Save Home + Appliances details first to unlock Past/Future workspaces."
+                        : "Generate the simulated baseline first to unlock workspaces.",
+                    );
                     return;
                   }
                   if (workspace === "PAST" && !pastScenario) {
@@ -654,7 +671,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
                   setOpenTimeline(true);
                   void loadTimeline();
                 }}
-                disabled={!baselineBuild || scenarioId === "baseline"}
+                disabled={!workspacesUnlocked || scenarioId === "baseline"}
                 className="rounded-xl border border-brand-cyan/30 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-white hover:bg-brand-white/10 disabled:opacity-60"
               >
                 Edit timeline
@@ -667,13 +684,26 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
                 {String(selectedBuild.buildInputsHash || "").slice(0, 10)}
               </div>
             ) : (
-              <div className="mt-2 text-xs text-brand-cyan/70">Not generated yet. Click Recalculate.</div>
+              <div className="mt-2 text-xs text-brand-cyan/70">
+                {workspace === "BASELINE" && hasActualIntervals
+                  ? "Baseline uses your Actual usage. Recalculate is only needed for Past/Future simulations."
+                  : "Not generated yet. Click Recalculate."}
+              </div>
             )}
-            {!baselineBuild ? (
+            {!workspacesUnlocked ? (
               <div className="mt-3 rounded-2xl border border-brand-cyan/20 bg-brand-white/5 px-4 py-3 text-xs text-brand-cyan/80">
                 <div className="font-semibold text-brand-white/90">Workspaces locked</div>
                 <div className="mt-1">
-                  Past/Future require a <span className="font-semibold">simulated baseline</span> build. Actual usage remains untouched.
+                  {hasActualIntervals ? (
+                    <>
+                      Save <span className="font-semibold">Home</span> and <span className="font-semibold">Appliances</span> to unlock Past/Future.
+                      Actual usage is read-only.
+                    </>
+                  ) : (
+                    <>
+                      Past/Future require a <span className="font-semibold">simulated baseline</span> build.
+                    </>
+                  )}
                 </div>
               </div>
             ) : null}
@@ -682,13 +712,24 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
           <div className="md:col-span-1">
             <div className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-cyan/60">Edit inputs</div>
             <div className="mt-2 flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => setOpenManual(true)}
-                className="rounded-xl border border-brand-cyan/30 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-white hover:bg-brand-white/10"
-              >
-                Manual
-              </button>
+              {!hasActualIntervals ? (
+                <button
+                  type="button"
+                  onClick={() => setOpenManual(true)}
+                  className="rounded-xl border border-brand-cyan/30 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-white hover:bg-brand-white/10"
+                >
+                  Manual
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled
+                  title="Manual totals are disabled when interval usage is connected."
+                  className="cursor-not-allowed rounded-xl border border-brand-cyan/20 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-white/50 opacity-60"
+                >
+                  Manual (disabled)
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setOpenHome(true)}
