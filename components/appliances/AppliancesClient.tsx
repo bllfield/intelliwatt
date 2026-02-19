@@ -543,7 +543,7 @@ const CATEGORIES: CategoryDef[] = [
   },
 ];
 
-export function AppliancesClient({ houseId }: { houseId: string }) {
+export function AppliancesClient({ houseId, onSaved }: { houseId: string; onSaved?: () => void | Promise<void> }) {
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -615,6 +615,8 @@ export function AppliancesClient({ houseId }: { houseId: string }) {
       } catch {
         // ignore
       }
+
+      if (onSaved) await Promise.resolve(onSaved());
     } catch (e: any) {
       setError(friendlyErrorMessage(e?.message || "Save failed"));
     } finally {

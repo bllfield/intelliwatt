@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ManualUsageEntry } from "@/components/manual/ManualUsageEntry";
 import { HomeDetailsClient } from "@/components/home/HomeDetailsClient";
 import { AppliancesClient } from "@/components/appliances/AppliancesClient";
@@ -12,7 +12,6 @@ import {
 } from "@/lib/usageScenario/catalog";
 
 type Mode = "MANUAL_TOTALS" | "NEW_BUILD_ESTIMATE" | "SMT_BASELINE";
-type CompareView = "SIMULATED" | "ACTUAL";
 
 type UsageApiResp =
   | { ok: true; houses: Array<{ houseId: string; dataset: any | null }> }
@@ -82,7 +81,6 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
         : "MANUAL_TOTALS";
 
   const [mode, setMode] = useState<Mode>(initialMode);
-  const [compareView, setCompareView] = useState<CompareView>("SIMULATED");
   const [hasActualIntervals, setHasActualIntervals] = useState<boolean>(false);
   const [actualSource, setActualSource] = useState<"SMT" | "GREEN_BUTTON" | null>(null);
   const [actualCoverage, setActualCoverage] = useState<{ start: string | null; end: string | null; intervalsCount: number } | null>(
@@ -106,6 +104,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
   const WORKSPACE_PAST_NAME = "Past (Corrected)";
   const WORKSPACE_FUTURE_NAME = "Future (What-if)";
   const [workspace, setWorkspace] = useState<"BASELINE" | "PAST" | "FUTURE">("BASELINE");
+  const [curveView, setCurveView] = useState<"BASELINE" | "PAST" | "FUTURE">("BASELINE");
 
   const [openManual, setOpenManual] = useState(false);
   const [openHome, setOpenHome] = useState(false);
@@ -119,6 +118,13 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
   const [timelineCatalogValue, setTimelineCatalogValue] = useState<string>("");
   const [timelineMultiplier, setTimelineMultiplier] = useState<string>("");
   const [timelineAdderKwh, setTimelineAdderKwh] = useState<string>("");
+
+  const [pastEventCount, setPastEventCount] = useState<number>(0);
+  const [futureEventCount, setFutureEventCount] = useState<number>(0);
+
+  const scenarioRecalcTimerRef = useRef<number | null>(null);
+  const autoBaselineAttemptedRef = useRef(false);
+  const lastWeatherPreferenceRef = useRef(weatherPreference);
 
   useEffect(() => {
     // Intent-driven Step 2 focus. Intent is deterministic (querystring/prop); no source-selection UI on this page.
@@ -142,8 +148,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      // Reset "Actual" view for this house until we confirm intervals exist.
-      setCompareView("SIMULATED");
+      // Reset actual coverage for this house until we confirm intervals exist.
       setHasActualIntervals(false);
       setActualSource(null);
       setActualCoverage(null);
@@ -167,11 +172,8 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
         setHasActualIntervals(hasIntervals);
         setActualSource(source === "SMT" || source === "GREEN_BUTTON" ? (source as any) : null);
         setActualCoverage({ start: ds?.summary?.start ?? null, end: ds?.summary?.end ?? null, intervalsCount });
-        if (hasIntervals) {
-          setCompareView("ACTUAL");
-          // If we have interval data, baseline is Actual (read-only). Prefer the actual-baseline simulation mode.
-          if (normalizedIntent !== "MANUAL" && normalizedIntent !== "NEW_BUILD") setMode("SMT_BASELINE");
-        }
+        // If we have interval data, baseline is Actual (read-only). Prefer the actual-baseline simulation mode.
+        if (hasIntervals && normalizedIntent !== "MANUAL" && normalizedIntent !== "NEW_BUILD") setMode("SMT_BASELINE");
       } catch {
         if (!cancelled) {
           setHasActualIntervals(false);
@@ -256,15 +258,40 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
     return builds.find((b) => String(b?.scenarioKey ?? "") === "BASELINE") ?? null;
   }, [builds]);
 
-  const workspacesUnlocked = useMemo(() => {
-    // If interval data exists, baseline is Actual and workspaces unlock once required details are saved (requirements endpoint).
-    if (hasActualIntervals) return Boolean(canRecalc);
-    // Otherwise, V1 requires a generated simulated baseline build.
-    return Boolean(baselineBuild);
-  }, [baselineBuild, canRecalc, hasActualIntervals]);
+  const baselineReady = useMemo(() => Boolean(baselineBuild?.lastBuiltAt), [baselineBuild?.lastBuiltAt]);
 
   const pastScenario = useMemo(() => scenarios.find((s) => s.name === WORKSPACE_PAST_NAME) ?? null, [scenarios]);
   const futureScenario = useMemo(() => scenarios.find((s) => s.name === WORKSPACE_FUTURE_NAME) ?? null, [scenarios]);
+
+  const pastBuild = useMemo(() => {
+    if (!Array.isArray(builds)) return null;
+    const id = pastScenario?.id ?? "";
+    if (!id) return null;
+    return builds.find((b) => String(b?.scenarioId ?? "") === id) ?? null;
+  }, [builds, pastScenario?.id]);
+
+  const futureBuild = useMemo(() => {
+    if (!Array.isArray(builds)) return null;
+    const id = futureScenario?.id ?? "";
+    if (!id) return null;
+    return builds.find((b) => String(b?.scenarioId ?? "") === id) ?? null;
+  }, [builds, futureScenario?.id]);
+
+  const pastReady = useMemo(() => {
+    return Boolean(pastScenario?.id) && pastEventCount > 0 && Boolean(pastBuild?.lastBuiltAt);
+  }, [pastBuild?.lastBuiltAt, pastEventCount, pastScenario?.id]);
+
+  const futureReady = useMemo(() => {
+    return Boolean(futureScenario?.id) && futureEventCount > 0 && Boolean(futureBuild?.lastBuiltAt);
+  }, [futureBuild?.lastBuiltAt, futureEventCount, futureScenario?.id]);
+
+  useEffect(() => {
+    autoBaselineAttemptedRef.current = false;
+    if (scenarioRecalcTimerRef.current) {
+      window.clearTimeout(scenarioRecalcTimerRef.current);
+      scenarioRecalcTimerRef.current = null;
+    }
+  }, [houseId]);
 
   useEffect(() => {
     if (workspace === "BASELINE") {
@@ -277,6 +304,12 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
     }
     setScenarioId(futureScenario?.id ?? "baseline");
   }, [workspace, pastScenario?.id, futureScenario?.id]);
+
+  const viewScenarioId = useMemo(() => {
+    if (curveView === "BASELINE") return "baseline";
+    if (curveView === "PAST") return pastScenario?.id ?? "baseline";
+    return futureScenario?.id ?? "baseline";
+  }, [curveView, pastScenario?.id, futureScenario?.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -304,22 +337,25 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
     (async () => {
       setScenarioBanner(null);
       setScenarioSimHouseOverride(null);
-      if (!scenarioId || scenarioId === "baseline") return;
+      if (!viewScenarioId || viewScenarioId === "baseline") return;
       try {
         const r = await fetch(
-          `/api/user/usage/simulated/house?houseId=${encodeURIComponent(houseId)}&scenarioId=${encodeURIComponent(scenarioId)}`,
+          `/api/user/usage/simulated/house?houseId=${encodeURIComponent(houseId)}&scenarioId=${encodeURIComponent(viewScenarioId)}`,
           { cache: "no-store" },
         );
         const j = (await r.json().catch(() => null)) as ScenarioHouseResp | null;
         if (cancelled) return;
         if (!r.ok) {
-          const msg = j && "message" in j && typeof (j as any).message === "string" ? String((j as any).message) : "Recalculate to generate this scenario.";
+          const msg =
+            j && "message" in j && typeof (j as any).message === "string"
+              ? String((j as any).message)
+              : "Scenario not computed yet. Save changes in this workspace to compute it.";
           setScenarioBanner(msg);
           setScenarioSimHouseOverride(null);
           return;
         }
         if (!j?.ok) {
-          const msg = j?.message ? String(j.message) : "Recalculate to generate this scenario.";
+          const msg = j?.message ? String(j.message) : "Scenario not computed yet. Save changes in this workspace to compute it.";
           setScenarioBanner(msg);
           setScenarioSimHouseOverride(null);
           return;
@@ -337,7 +373,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
         ]);
       } catch {
         if (!cancelled) {
-          setScenarioBanner("Unable to load scenario dataset. Try recalculating.");
+          setScenarioBanner("Unable to load scenario dataset. Try saving again to recompute.");
           setScenarioSimHouseOverride(null);
         }
       }
@@ -345,7 +381,43 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
     return () => {
       cancelled = true;
     };
-  }, [houseId, scenarioId, refreshToken]);
+  }, [houseId, viewScenarioId, refreshToken]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      async function loadCount(sid: string | null, setter: (n: number) => void) {
+        if (!sid) {
+          setter(0);
+          return;
+        }
+        try {
+          const r = await fetch(
+            `/api/user/simulator/scenarios/${encodeURIComponent(sid)}/events?houseId=${encodeURIComponent(houseId)}`,
+            { cache: "no-store" },
+          );
+          const j = (await r.json().catch(() => null)) as any;
+          if (cancelled) return;
+          if (!r.ok || !j?.ok) {
+            setter(0);
+            return;
+          }
+          const events = Array.isArray(j.events) ? j.events : [];
+          setter(events.length);
+        } catch {
+          if (!cancelled) setter(0);
+        }
+      }
+
+      await Promise.all([
+        loadCount(pastScenario?.id ?? null, setPastEventCount),
+        loadCount(futureScenario?.id ?? null, setFutureEventCount),
+      ]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [houseId, pastScenario?.id, futureScenario?.id, refreshToken]);
 
   async function createScenario(name: string) {
     const trimmed = name.trim();
@@ -431,6 +503,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
       setTimelineMultiplier("");
       setTimelineAdderKwh("");
       await loadTimeline();
+      scheduleScenarioRecalc(scenarioId);
     }
   }
 
@@ -443,7 +516,10 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
       body: JSON.stringify({ houseId, effectiveMonth, kind: "TRAVEL_RANGE", startDate: "", endDate: "" }),
     });
     const j = (await r.json().catch(() => null)) as any;
-    if (r.ok && j?.ok) await loadTimeline();
+    if (r.ok && j?.ok) {
+      await loadTimeline();
+      scheduleScenarioRecalc(scenarioId);
+    }
   }
 
   async function saveTimelineEvent(eventId: string, patch: any) {
@@ -454,7 +530,10 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
       body: JSON.stringify({ houseId, ...patch }),
     });
     const j = (await r.json().catch(() => null)) as any;
-    if (r.ok && j?.ok) await loadTimeline();
+    if (r.ok && j?.ok) {
+      await loadTimeline();
+      scheduleScenarioRecalc(scenarioId);
+    }
   }
 
   async function deleteTimelineEvent(eventId: string) {
@@ -464,24 +543,15 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
       { method: "DELETE" },
     );
     const j = (await r.json().catch(() => null)) as any;
-    if (r.ok && j?.ok) await loadTimeline();
+    if (r.ok && j?.ok) {
+      await loadTimeline();
+      scheduleScenarioRecalc(scenarioId);
+    }
   }
 
-  async function recalc() {
-    if (workspace === "PAST" && !pastScenario) {
-      setRecalcNote(`Create the “${WORKSPACE_PAST_NAME}” workspace first.`);
-      return;
-    }
-    if (workspace === "FUTURE" && !futureScenario) {
-      setRecalcNote(`Create the “${WORKSPACE_FUTURE_NAME}” workspace first.`);
-      return;
-    }
-    if (scenarioId !== "baseline" && !baselineBuild && !hasActualIntervals) {
-      setRecalcNote("Generate the simulated baseline first to unlock Past/Future scenarios.");
-      return;
-    }
+  async function recalcNow(args: { scenarioId: string | null; note?: string }) {
     setRecalcBusy(true);
-    setRecalcNote(null);
+    setRecalcNote(args.note ?? "Updating curves…");
     try {
       const r = await fetch("/api/user/simulator/recalc", {
         method: "POST",
@@ -489,7 +559,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
         body: JSON.stringify({
           houseId,
           mode,
-          scenarioId: scenarioId === "baseline" ? null : scenarioId,
+          scenarioId: args.scenarioId,
           weatherPreference,
         }),
       });
@@ -501,7 +571,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
         setRecalcNote(j?.error ? String(j.error) : `Recalc failed (${r.status})`);
         return;
       }
-      setRecalcNote("Recalculated.");
+      setRecalcNote("Updated.");
       setRefreshToken((x) => x + 1);
     } catch (e: any) {
       setRecalcNote(e?.message ?? String(e));
@@ -509,6 +579,37 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
       setRecalcBusy(false);
     }
   }
+
+  function scheduleScenarioRecalc(sid: string) {
+    if (!sid || sid === "baseline") return;
+    if (scenarioRecalcTimerRef.current) window.clearTimeout(scenarioRecalcTimerRef.current);
+    scenarioRecalcTimerRef.current = window.setTimeout(() => {
+      scenarioRecalcTimerRef.current = null;
+      void recalcNow({ scenarioId: sid, note: "Updating scenario…" });
+    }, 750);
+  }
+
+  useEffect(() => {
+    // With no explicit "Recalculate" button, auto-generate the baseline once requirements are met.
+    if (baselineReady) return;
+    if (!canRecalc) return;
+    if (recalcBusy) return;
+    if (autoBaselineAttemptedRef.current) return;
+    autoBaselineAttemptedRef.current = true;
+    void recalcNow({ scenarioId: null, note: "Generating baseline…" });
+  }, [baselineReady, canRecalc, recalcBusy, mode, weatherPreference]);
+
+  useEffect(() => {
+    // Weather preference affects determinism of builds; recompute when it changes.
+    if (lastWeatherPreferenceRef.current === weatherPreference) return;
+    lastWeatherPreferenceRef.current = weatherPreference;
+    if (!canRecalc) return;
+    void (async () => {
+      await recalcNow({ scenarioId: null, note: "Updating baseline…" });
+      if (pastScenario?.id && pastEventCount > 0) await recalcNow({ scenarioId: pastScenario.id, note: "Updating Past…" });
+      if (futureScenario?.id && futureEventCount > 0) await recalcNow({ scenarioId: futureScenario.id, note: "Updating Future…" });
+    })();
+  }, [canRecalc, futureEventCount, futureScenario?.id, pastEventCount, pastScenario?.id, weatherPreference]);
 
   return (
     <div className="space-y-6">
@@ -518,40 +619,40 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
             <div className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-cyan/60">Start here</div>
             <h2 className="mt-2 text-2xl font-semibold text-brand-white">Usage Simulator</h2>
             <p className="mt-2 text-sm text-brand-cyan/75">
-              Review Actual usage (if available), complete the required details, then generate a simulated baseline and scenarios.
+              Complete the required details and save changes. Saving automatically updates the Baseline/Past/Future curves for viewing below.
             </p>
           </div>
 
-          {hasActualIntervals ? (
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setCompareView("SIMULATED")}
-                className={[
-                  "rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-wide transition",
-                  compareView === "SIMULATED"
-                    ? "border-brand-cyan/50 bg-brand-cyan/10 text-brand-cyan"
-                    : "border-brand-cyan/20 bg-brand-white/5 text-brand-cyan/70 hover:bg-brand-white/10",
-                ].join(" ")}
-              >
-                Simulated
-              </button>
-              <button
-                type="button"
-                onClick={() => setCompareView("ACTUAL")}
-                className={[
-                  "rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-wide transition",
-                  compareView === "ACTUAL"
-                    ? "border-brand-cyan/50 bg-brand-cyan/10 text-brand-cyan"
-                    : "border-brand-cyan/20 bg-brand-white/5 text-brand-cyan/70 hover:bg-brand-white/10",
-                ].join(" ")}
-              >
-                Actual
-              </button>
-            </div>
-          ) : (
-            <div className="text-xs text-brand-cyan/60">{actualDisabledReason}</div>
-          )}
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setOpenManual(true)}
+              disabled={normalizedIntent !== "MANUAL" || hasActualIntervals}
+              title={
+                hasActualIntervals
+                  ? "Manual totals are disabled when interval usage is connected."
+                  : normalizedIntent !== "MANUAL"
+                    ? "Manual totals are only used when you enter via Usage Entry → Manual."
+                    : undefined
+              }
+              className={[
+                "rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-wide transition",
+                normalizedIntent === "MANUAL" && !hasActualIntervals
+                  ? "border-brand-cyan/30 bg-brand-white/5 text-brand-white hover:bg-brand-white/10"
+                  : "cursor-not-allowed border-brand-cyan/20 bg-brand-white/5 text-brand-white/50 opacity-60",
+              ].join(" ")}
+            >
+              Manual totals
+            </button>
+
+            {hasActualIntervals ? (
+              <div className="rounded-full border border-brand-cyan/20 bg-brand-white/5 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-brand-cyan/80">
+                Actual connected
+              </div>
+            ) : (
+              <div className="text-xs text-brand-cyan/60">{actualDisabledReason}</div>
+            )}
+          </div>
         </div>
 
         <div className="mt-5 rounded-2xl border border-brand-cyan/20 bg-brand-white/5 p-4">
@@ -566,8 +667,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
                   </>
                 ) : (
                   <>
-                    No interval usage connected yet. You can start with Manual totals or the New Build estimator, then fill in
-                    details below.
+                    No interval usage connected yet. Complete Home + Appliances, then use Past/Future workspaces to simulate.
                   </>
                 )}
               </div>
@@ -583,89 +683,55 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
           </div>
 
           <div className="mt-4 grid gap-3">
-            {/* Step 1: Manual */}
-            <div className="grid gap-3 rounded-2xl border border-brand-cyan/20 bg-brand-navy/70 px-4 py-4 md:grid-cols-12">
-              <div className="md:col-span-4">
-                <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Step 1</div>
-                <div className="mt-1 text-sm font-semibold text-brand-white">Manual totals</div>
-                <div className="mt-1 text-xs text-brand-cyan/70">
-                  Only use this when you do <span className="font-semibold">not</span> have SMT/Green Button interval data.
+            {/* Step 1/2: Home + Appliances (side-by-side on desktop) */}
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="grid gap-3 rounded-2xl border border-brand-cyan/20 bg-brand-navy/70 px-4 py-4 md:grid-cols-12">
+                <div className="md:col-span-5">
+                  <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Step 1</div>
+                  <div className="mt-1 text-sm font-semibold text-brand-white">Home details</div>
+                  <div className="mt-1 text-xs text-brand-cyan/70">Required for Past/Future simulations.</div>
+                </div>
+                <div className="md:col-span-4">
+                  <div className="text-xs text-brand-cyan/80">
+                    Save insulation, HVAC, occupancy, and other characteristics.
+                  </div>
+                </div>
+                <div className="md:col-span-3 md:flex md:justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setOpenHome(true)}
+                    className="rounded-xl border border-brand-cyan/30 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-white hover:bg-brand-white/10"
+                  >
+                    Open Home
+                  </button>
                 </div>
               </div>
-              <div className="md:col-span-5">
-                <div className="text-xs text-brand-cyan/80">
-                  {hasActualIntervals
-                    ? "Disabled because interval usage is connected."
-                    : "Optional. Enter totals if you need a baseline without interval data."}
+
+              <div className="grid gap-3 rounded-2xl border border-brand-cyan/20 bg-brand-navy/70 px-4 py-4 md:grid-cols-12">
+                <div className="md:col-span-5">
+                  <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Step 2</div>
+                  <div className="mt-1 text-sm font-semibold text-brand-white">Appliance details</div>
+                  <div className="mt-1 text-xs text-brand-cyan/70">Required for Past/Future simulations.</div>
                 </div>
-              </div>
-              <div className="md:col-span-3 md:flex md:justify-end">
-                <button
-                  type="button"
-                  onClick={() => setOpenManual(true)}
-                  disabled={hasActualIntervals}
-                  className={[
-                    "rounded-xl border px-3 py-2 text-xs font-semibold transition",
-                    hasActualIntervals
-                      ? "cursor-not-allowed border-brand-cyan/20 bg-brand-white/5 text-brand-white/50 opacity-60"
-                      : "border-brand-cyan/30 bg-brand-white/5 text-brand-white hover:bg-brand-white/10",
-                  ].join(" ")}
-                >
-                  {hasActualIntervals ? "Manual (disabled)" : "Open Manual"}
-                </button>
+                <div className="md:col-span-4">
+                  <div className="text-xs text-brand-cyan/80">Save fuel configuration and major loads.</div>
+                </div>
+                <div className="md:col-span-3 md:flex md:justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setOpenAppliances(true)}
+                    className="rounded-xl border border-brand-cyan/30 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-white hover:bg-brand-white/10"
+                  >
+                    Open Appliances
+                  </button>
+                </div>
               </div>
             </div>
 
-            {/* Step 2: Home */}
-            <div className="grid gap-3 rounded-2xl border border-brand-cyan/20 bg-brand-navy/70 px-4 py-4 md:grid-cols-12">
-              <div className="md:col-span-4">
-                <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Step 2</div>
-                <div className="mt-1 text-sm font-semibold text-brand-white">Home details</div>
-                <div className="mt-1 text-xs text-brand-cyan/70">Required for Past/Future simulations.</div>
-              </div>
-              <div className="md:col-span-5">
-                <div className="text-xs text-brand-cyan/80">
-                  Save insulation, HVAC, occupancy, and other characteristics so IntelliWatt can reshape simulated curves.
-                </div>
-              </div>
-              <div className="md:col-span-3 md:flex md:justify-end">
-                <button
-                  type="button"
-                  onClick={() => setOpenHome(true)}
-                  className="rounded-xl border border-brand-cyan/30 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-white hover:bg-brand-white/10"
-                >
-                  Open Home
-                </button>
-              </div>
-            </div>
-
-            {/* Step 3: Appliances */}
+            {/* Step 3/4: Workspaces */}
             <div className="grid gap-3 rounded-2xl border border-brand-cyan/20 bg-brand-navy/70 px-4 py-4 md:grid-cols-12">
               <div className="md:col-span-4">
                 <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Step 3</div>
-                <div className="mt-1 text-sm font-semibold text-brand-white">Appliance details</div>
-                <div className="mt-1 text-xs text-brand-cyan/70">Required for Past/Future simulations.</div>
-              </div>
-              <div className="md:col-span-5">
-                <div className="text-xs text-brand-cyan/80">
-                  Save fuel configuration and major loads. This influences the shape of simulated adjustments.
-                </div>
-              </div>
-              <div className="md:col-span-3 md:flex md:justify-end">
-                <button
-                  type="button"
-                  onClick={() => setOpenAppliances(true)}
-                  className="rounded-xl border border-brand-cyan/30 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-white hover:bg-brand-white/10"
-                >
-                  Open Appliances
-                </button>
-              </div>
-            </div>
-
-            {/* Step 4/5: Workspaces */}
-            <div className="grid gap-3 rounded-2xl border border-brand-cyan/20 bg-brand-navy/70 px-4 py-4 md:grid-cols-12">
-              <div className="md:col-span-4">
-                <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Step 4</div>
                 <div className="mt-1 text-sm font-semibold text-brand-white">Past (Corrected)</div>
                 <div className="mt-1 text-xs text-brand-cyan/70">Optional.</div>
               </div>
@@ -682,7 +748,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
                     setWorkspace("PAST");
                     if (!pastScenario) void createScenario(WORKSPACE_PAST_NAME);
                   }}
-                  disabled={!workspacesUnlocked}
+                disabled={!baselineReady}
                   className="rounded-xl border border-brand-cyan/30 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-white hover:bg-brand-white/10 disabled:opacity-60"
                 >
                   {pastScenario ? "Past workspace ready" : "Create Past"}
@@ -695,7 +761,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
                     if (pastScenario?.id) setScenarioId(pastScenario.id);
                     void loadTimeline(pastScenario?.id ?? undefined);
                   }}
-                  disabled={!workspacesUnlocked || !pastScenario}
+                  disabled={!baselineReady || !pastScenario}
                   className="rounded-xl border border-brand-cyan/30 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-white hover:bg-brand-white/10 disabled:opacity-60"
                 >
                   Edit Past
@@ -705,7 +771,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
 
             <div className="grid gap-3 rounded-2xl border border-brand-cyan/20 bg-brand-navy/70 px-4 py-4 md:grid-cols-12">
               <div className="md:col-span-4">
-                <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Step 5</div>
+                <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Step 4</div>
                 <div className="mt-1 text-sm font-semibold text-brand-white">Future (What-if)</div>
                 <div className="mt-1 text-xs text-brand-cyan/70">Create scenarios for planned changes.</div>
               </div>
@@ -721,7 +787,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
                     setWorkspace("FUTURE");
                     if (!futureScenario) void createScenario(WORKSPACE_FUTURE_NAME);
                   }}
-                  disabled={!workspacesUnlocked}
+                  disabled={!baselineReady}
                   className="rounded-xl border border-brand-cyan/30 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-white hover:bg-brand-white/10 disabled:opacity-60"
                 >
                   {futureScenario ? "Future workspace ready" : "Create Future"}
@@ -734,7 +800,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
                     if (futureScenario?.id) setScenarioId(futureScenario.id);
                     void loadTimeline(futureScenario?.id ?? undefined);
                   }}
-                  disabled={!workspacesUnlocked || !futureScenario}
+                  disabled={!baselineReady || !futureScenario}
                   className="rounded-xl border border-brand-cyan/30 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-white hover:bg-brand-white/10 disabled:opacity-60"
                 >
                   Edit Future
@@ -742,62 +808,58 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
               </div>
             </div>
 
-            {/* Step 6: Weather */}
+            {/* Weather normalization (toggle only) */}
             <div className="grid gap-3 rounded-2xl border border-brand-cyan/20 bg-brand-navy/70 px-4 py-4 md:grid-cols-12">
               <div className="md:col-span-4">
-                <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Step 6</div>
                 <div className="mt-1 text-sm font-semibold text-brand-white">Weather normalization</div>
-                <div className="mt-1 text-xs text-brand-cyan/70">Last step (optional in Phase 1).</div>
+                <div className="mt-1 text-xs text-brand-cyan/70">Optional. No extra popup—just a preference.</div>
               </div>
               <div className="md:col-span-5">
-                <div className="text-xs text-brand-cyan/80">Phase 1 behavior is identity. Preference is stored for determinism.</div>
+                <div className="text-xs text-brand-cyan/80">
+                  Phase 1 behavior is identity. We store this choice so the simulator stays deterministic as we roll out weather adjustments.
+                </div>
               </div>
               <div className="md:col-span-3">
-                <select
-                  value={weatherPreference}
-                  onChange={(e) => setWeatherPreference(e.target.value as any)}
-                  className="w-full rounded-xl border border-brand-cyan/20 bg-brand-white/5 px-3 py-2 text-xs text-brand-white"
-                >
-                  <option value="NONE">None (Phase 1)</option>
-                  <option value="LAST_YEAR_WEATHER">Last year weather (stub)</option>
-                  <option value="LONG_TERM_AVERAGE">Long-term average (stub)</option>
-                </select>
+                <div className="flex flex-wrap gap-2">
+                  {(["NONE", "LAST_YEAR_WEATHER", "LONG_TERM_AVERAGE"] as const).map((v) => (
+                    <button
+                      key={v}
+                      type="button"
+                      onClick={() => setWeatherPreference(v)}
+                      className={[
+                        "rounded-full border px-4 py-2 text-[0.7rem] font-semibold uppercase tracking-wide transition",
+                        weatherPreference === v
+                          ? "border-brand-cyan/50 bg-brand-cyan/10 text-brand-cyan"
+                          : "border-brand-cyan/20 bg-brand-white/5 text-brand-cyan/70 hover:bg-brand-white/10",
+                      ].join(" ")}
+                    >
+                      {v === "NONE" ? "None" : v === "LAST_YEAR_WEATHER" ? "Last year" : "Long-term"}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
 
-            {!workspacesUnlocked ? (
+            {!baselineReady ? (
               <div className="rounded-2xl border border-brand-cyan/20 bg-brand-white/5 px-4 py-3 text-xs text-brand-cyan/80">
                 <div className="font-semibold text-brand-white/90">To continue</div>
                 <div className="mt-1">
-                  {hasActualIntervals ? (
-                    <>
-                      Save <span className="font-semibold">Home</span> and <span className="font-semibold">Appliances</span> first.
-                    </>
-                  ) : (
-                    <>
-                      Generate a <span className="font-semibold">simulated baseline</span> first (via Recalculate).
-                    </>
-                  )}
+                  Save <span className="font-semibold">Home</span> and <span className="font-semibold">Appliances</span> to generate your{" "}
+                  <span className="font-semibold">Baseline</span>. Saving automatically updates curves.
                 </div>
               </div>
             ) : null}
           </div>
         </div>
 
-        <div className="mt-5 flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            onClick={() => void recalc()}
-            disabled={recalcBusy || !canRecalc}
-            className="rounded-full border border-brand-blue/40 bg-brand-blue/10 px-5 py-2 text-xs font-semibold uppercase tracking-wide text-brand-navy hover:bg-brand-blue/20 disabled:opacity-60"
-          >
-            {recalcBusy ? "Recalculating…" : "Recalculate Simulated Curve"}
-          </button>
-          {recalcNote ? <div className="text-xs text-brand-cyan/80">{recalcNote}</div> : null}
-        </div>
+        {recalcBusy || recalcNote ? (
+          <div className="mt-5 flex flex-wrap items-center gap-3">
+            <div className="text-xs text-brand-cyan/80">{recalcBusy ? "Updating curves…" : recalcNote}</div>
+          </div>
+        ) : null}
         {!canRecalc && missingItems.length ? (
           <div className="mt-3 rounded-2xl border border-brand-cyan/20 bg-brand-white/5 px-4 py-3 text-xs text-brand-cyan/80">
-            <div className="font-semibold text-brand-white/90">To recalculate:</div>
+            <div className="font-semibold text-brand-white/90">To generate Baseline:</div>
             <ul className="mt-2 list-disc space-y-1 pl-5">
               {missingItems.map((m, idx) => (
                 <li key={`${idx}-${m}`}>{m}</li>
@@ -809,12 +871,71 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
 
       <div id="preview">
         <UsageDashboard
-          forcedMode={compareView === "ACTUAL" ? "REAL" : "SIMULATED"}
+          forcedMode="SIMULATED"
           allowModeToggle={false}
           initialMode="SIMULATED"
           refreshToken={refreshToken}
-          simulatedHousesOverride={compareView === "SIMULATED" ? scenarioSimHouseOverride : null}
+          simulatedHousesOverride={curveView === "BASELINE" ? null : scenarioSimHouseOverride}
         />
+      </div>
+
+      <div className="rounded-2xl border border-brand-cyan/20 bg-brand-navy p-4 text-brand-cyan">
+        <div className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-cyan/60">View curve</div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setCurveView("BASELINE")}
+            disabled={!baselineReady}
+            className={[
+              "rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-wide transition",
+              curveView === "BASELINE" && baselineReady
+                ? "border-brand-cyan/50 bg-brand-cyan/10 text-brand-cyan"
+                : baselineReady
+                  ? "border-brand-cyan/20 bg-brand-white/5 text-brand-cyan/70 hover:bg-brand-white/10"
+                  : "cursor-not-allowed border-brand-cyan/20 bg-brand-white/5 text-brand-white/50 opacity-60",
+            ].join(" ")}
+          >
+            Baseline
+          </button>
+          <button
+            type="button"
+            onClick={() => setCurveView("PAST")}
+            disabled={!pastReady}
+            className={[
+              "rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-wide transition",
+              curveView === "PAST" && pastReady
+                ? "border-brand-cyan/50 bg-brand-cyan/10 text-brand-cyan"
+                : pastReady
+                  ? "border-brand-cyan/20 bg-brand-white/5 text-brand-cyan/70 hover:bg-brand-white/10"
+                  : "cursor-not-allowed border-brand-cyan/20 bg-brand-white/5 text-brand-white/50 opacity-60",
+            ].join(" ")}
+          >
+            Past
+          </button>
+          <button
+            type="button"
+            onClick={() => setCurveView("FUTURE")}
+            disabled={!futureReady}
+            className={[
+              "rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-wide transition",
+              curveView === "FUTURE" && futureReady
+                ? "border-brand-cyan/50 bg-brand-cyan/10 text-brand-cyan"
+                : futureReady
+                  ? "border-brand-cyan/20 bg-brand-white/5 text-brand-cyan/70 hover:bg-brand-white/10"
+                  : "cursor-not-allowed border-brand-cyan/20 bg-brand-white/5 text-brand-white/50 opacity-60",
+            ].join(" ")}
+          >
+            Future
+          </button>
+        </div>
+        {curveView !== "BASELINE" && scenarioBanner ? (
+          <div className="mt-3 rounded-xl border border-brand-cyan/20 bg-brand-white/5 px-3 py-2 text-xs text-brand-cyan/80">
+            {scenarioBanner}
+          </div>
+        ) : null}
+        <div className="mt-3 text-xs text-brand-cyan/75">
+          Baseline unlocks after Home + Appliances are saved and computed. Past/Future unlock after you save corrections/changes and they compute.
+        </div>
       </div>
 
       <Modal
@@ -822,11 +943,14 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
         title="Manual usage totals"
         onClose={() => {
           setOpenManual(false);
-          setRecalcNote("Saved inputs. Click Recalculate to update charts.");
-          setRefreshToken((x) => x + 1);
         }}
       >
-        <ManualUsageEntry houseId={houseId} />
+        <ManualUsageEntry
+          houseId={houseId}
+          onSaved={async () => {
+            await recalcNow({ scenarioId: null, note: "Updating baseline…" });
+          }}
+        />
       </Modal>
 
       <Modal
@@ -834,11 +958,16 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
         title="Home details"
         onClose={() => {
           setOpenHome(false);
-          setRecalcNote("Saved inputs. Click Recalculate to update charts.");
-          setRefreshToken((x) => x + 1);
         }}
       >
-        <HomeDetailsClient houseId={houseId} />
+        <HomeDetailsClient
+          houseId={houseId}
+          onSaved={async () => {
+            await recalcNow({ scenarioId: null, note: "Updating baseline…" });
+            if (pastScenario?.id && pastEventCount > 0) await recalcNow({ scenarioId: pastScenario.id, note: "Updating Past…" });
+            if (futureScenario?.id && futureEventCount > 0) await recalcNow({ scenarioId: futureScenario.id, note: "Updating Future…" });
+          }}
+        />
       </Modal>
 
       <Modal
@@ -846,11 +975,16 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
         title="Appliances"
         onClose={() => {
           setOpenAppliances(false);
-          setRecalcNote("Saved inputs. Click Recalculate to update charts.");
-          setRefreshToken((x) => x + 1);
         }}
       >
-        <AppliancesClient houseId={houseId} />
+        <AppliancesClient
+          houseId={houseId}
+          onSaved={async () => {
+            await recalcNow({ scenarioId: null, note: "Updating baseline…" });
+            if (pastScenario?.id && pastEventCount > 0) await recalcNow({ scenarioId: pastScenario.id, note: "Updating Past…" });
+            if (futureScenario?.id && futureEventCount > 0) await recalcNow({ scenarioId: futureScenario.id, note: "Updating Future…" });
+          }}
+        />
       </Modal>
 
       <Modal
@@ -858,7 +992,6 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
         title="Scenario timeline"
         onClose={() => {
           setOpenTimeline(false);
-          setRecalcNote("Saved timeline. Click Recalculate to generate/update this scenario build.");
         }}
       >
         {scenarioId === "baseline" ? (

@@ -129,7 +129,7 @@ function applyPrefill(state: FormState, p: any): FormState {
   return mergePrefillIntoHomeDetailsState(state as any, p as any) as any;
 }
 
-export function HomeDetailsClient({ houseId }: { houseId: string }) {
+export function HomeDetailsClient({ houseId, onSaved }: { houseId: string; onSaved?: () => void | Promise<void> }) {
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -258,6 +258,8 @@ export function HomeDetailsClient({ houseId }: { houseId: string }) {
       } catch {
         // ignore
       }
+
+      if (onSaved) await Promise.resolve(onSaved());
     } catch (e: any) {
       setError(e?.message || "Save failed");
     } finally {

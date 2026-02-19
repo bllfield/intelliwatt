@@ -43,7 +43,7 @@ function normalizeRanges(ranges: TravelRange[]): TravelRange[] {
     .filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(r.endDate));
 }
 
-export function ManualUsageEntry({ houseId }: { houseId: string }) {
+export function ManualUsageEntry({ houseId, onSaved }: { houseId: string; onSaved?: () => void | Promise<void> }) {
   const [activeTab, setActiveTab] = React.useState<"MONTHLY" | "ANNUAL">("MONTHLY");
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
@@ -153,6 +153,7 @@ export function ManualUsageEntry({ houseId }: { houseId: string }) {
         throw new Error(json?.error || `HTTP ${res.status}`);
       }
       setSavedAt(json.updatedAt ?? new Date().toISOString());
+      if (onSaved) await Promise.resolve(onSaved());
     } catch (e: any) {
       setError(e?.message || "Save failed");
     } finally {
