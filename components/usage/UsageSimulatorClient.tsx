@@ -71,6 +71,7 @@ function Modal(props: { open: boolean; title: string; onClose: () => void; child
   );
 }
 
+
 export function UsageSimulatorClient({ houseId, intent }: { houseId: string; intent?: string }) {
   const normalizedIntent = String(intent ?? "").trim().toUpperCase();
   const initialMode: Mode =
@@ -122,7 +123,9 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
   const [pastEventCount, setPastEventCount] = useState<number>(0);
   const [futureEventCount, setFutureEventCount] = useState<number>(0);
 
-  const scenarioRecalcTimerRef = useRef<number | null>(null);
+  const scenarioRecalcTimersRef = useRef<Map<string, number>>(new Map());
+  const recalcQueueRef = useRef<Array<{ scenarioId: string | null; note?: string }>>([]);
+  const recalcRunningRef = useRef(false);
   const autoBaselineAttemptedRef = useRef(false);
   const lastWeatherPreferenceRef = useRef(weatherPreference);
 
@@ -287,10 +290,10 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
 
   useEffect(() => {
     autoBaselineAttemptedRef.current = false;
-    if (scenarioRecalcTimerRef.current) {
-      window.clearTimeout(scenarioRecalcTimerRef.current);
-      scenarioRecalcTimerRef.current = null;
-    }
+    scenarioRecalcTimersRef.current.forEach((t) => window.clearTimeout(t));
+    scenarioRecalcTimersRef.current.clear();
+    recalcQueueRef.current = [];
+    recalcRunningRef.current = false;
   }, [houseId]);
 
   useEffect(() => {
@@ -580,13 +583,35 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
     }
   }
 
+  function enqueueRecalc(item: { scenarioId: string | null; note?: string }) {
+    // De-dupe by scenarioId so rapid saves only keep the latest request.
+    recalcQueueRef.current = recalcQueueRef.current.filter((x) => x.scenarioId !== item.scenarioId);
+    recalcQueueRef.current.push(item);
+  }
+
+  async function drainRecalcQueue() {
+    if (recalcRunningRef.current) return;
+    recalcRunningRef.current = true;
+    try {
+      while (recalcQueueRef.current.length) {
+        const next = recalcQueueRef.current.shift()!;
+        await recalcNow(next);
+      }
+    } finally {
+      recalcRunningRef.current = false;
+    }
+  }
+
   function scheduleScenarioRecalc(sid: string) {
     if (!sid || sid === "baseline") return;
-    if (scenarioRecalcTimerRef.current) window.clearTimeout(scenarioRecalcTimerRef.current);
-    scenarioRecalcTimerRef.current = window.setTimeout(() => {
-      scenarioRecalcTimerRef.current = null;
-      void recalcNow({ scenarioId: sid, note: "Updating scenario…" });
+    const existing = scenarioRecalcTimersRef.current.get(sid);
+    if (existing) window.clearTimeout(existing);
+    const t = window.setTimeout(() => {
+      scenarioRecalcTimersRef.current.delete(sid);
+      enqueueRecalc({ scenarioId: sid, note: "Updating scenario…" });
+      void drainRecalcQueue();
     }, 750);
+    scenarioRecalcTimersRef.current.set(sid, t);
   }
 
   useEffect(() => {
@@ -596,7 +621,8 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
     if (recalcBusy) return;
     if (autoBaselineAttemptedRef.current) return;
     autoBaselineAttemptedRef.current = true;
-    void recalcNow({ scenarioId: null, note: "Generating baseline…" });
+    enqueueRecalc({ scenarioId: null, note: "Generating baseline…" });
+    void drainRecalcQueue();
   }, [baselineReady, canRecalc, recalcBusy, mode, weatherPreference]);
 
   useEffect(() => {
@@ -605,9 +631,10 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
     lastWeatherPreferenceRef.current = weatherPreference;
     if (!canRecalc) return;
     void (async () => {
-      await recalcNow({ scenarioId: null, note: "Updating baseline…" });
-      if (pastScenario?.id && pastEventCount > 0) await recalcNow({ scenarioId: pastScenario.id, note: "Updating Past…" });
-      if (futureScenario?.id && futureEventCount > 0) await recalcNow({ scenarioId: futureScenario.id, note: "Updating Future…" });
+      enqueueRecalc({ scenarioId: null, note: "Updating baseline…" });
+      if (pastScenario?.id && pastEventCount > 0) enqueueRecalc({ scenarioId: pastScenario.id, note: "Updating Past…" });
+      if (futureScenario?.id && futureEventCount > 0) enqueueRecalc({ scenarioId: futureScenario.id, note: "Updating Future…" });
+      await drainRecalcQueue();
     })();
   }, [canRecalc, futureEventCount, futureScenario?.id, pastEventCount, pastScenario?.id, weatherPreference]);
 
