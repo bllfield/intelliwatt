@@ -308,6 +308,7 @@ export function ScenarioUpgradesEditor({
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [updateError, setUpdateError] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(() => emptyForm(defaultDate));
 
   const load = useCallback(async () => {
@@ -418,11 +419,12 @@ export function ScenarioUpgradesEditor({
 
   async function updateLedgerAndEvent(row: LedgerRow) {
     if (!template) return;
+    setUpdateError(null);
     const beforeJson = { ...form.beforeJson };
     const afterJson = { ...form.afterJson };
     const inputsJson = { ...form.inputsJson };
     const quantity = form.quantity.trim() ? Number(form.quantity) : null;
-    const units = form.units.trim() || null;
+    const units = form.units.trim() || (template.defaultUnits ?? null);
     const payload = {
       upgradeType: form.upgradeType.trim(),
       changeType: form.changeType,
@@ -440,7 +442,10 @@ export function ScenarioUpgradesEditor({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    if (!ledgerRes.ok) return;
+    if (!ledgerRes.ok) {
+      setUpdateError("Save failed. Please try again.");
+      return;
+    }
     if (row.scenarioEventId) {
       const eventRes = await fetch(`/api/user/simulator/scenarios/${encodeURIComponent(scenarioId)}/events/${encodeURIComponent(row.scenarioEventId)}`, {
         method: "PATCH",
@@ -463,7 +468,10 @@ export function ScenarioUpgradesEditor({
           effectiveMonth: form.effectiveDate.slice(0, 7),
         }),
       });
-      if (!eventRes.ok) return;
+      if (!eventRes.ok) {
+        setUpdateError("Save failed. Please try again.");
+        return;
+      }
     }
     setEditingId(null);
     await load();
@@ -699,6 +707,11 @@ export function ScenarioUpgradesEditor({
                         ))}
                     </div>
                   )}
+                  {updateError && (
+                    <div className="text-xs text-red-600" role="alert">
+                      {updateError}
+                    </div>
+                  )}
                   <div className="flex gap-2">
                     <button
                       type="button"
@@ -710,7 +723,7 @@ export function ScenarioUpgradesEditor({
                     </button>
                     <button
                       type="button"
-                      onClick={() => setEditingId(null)}
+                      onClick={() => { setUpdateError(null); setEditingId(null); }}
                       className="rounded-lg border border-brand-blue/20 bg-white px-2 py-1.5 text-xs font-semibold text-brand-navy"
                     >
                       Cancel
@@ -742,6 +755,7 @@ export function ScenarioUpgradesEditor({
                     <button
                       type="button"
                       onClick={() => {
+                        setUpdateError(null);
                         setForm(formFromRow(row, defaultDate));
                         setEditingId(row.id);
                       }}
