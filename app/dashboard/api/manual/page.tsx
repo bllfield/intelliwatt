@@ -36,6 +36,6 @@ export default async function UsageEntryManualPage() {
   }
 
   // Manual totals entry is simulator-only now.
-  redirect("/dashboard/usage/simulated#start-here");
+  redirect("/dashboard/usage/simulated?intent=MANUAL#start-here");
 }
 

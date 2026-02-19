@@ -5,7 +5,11 @@ import SmtAddressCaptureCard from "@/components/smt/SmtAddressCaptureCard";
 import { loadUsageEntryContext } from "../../api/context";
 import { UsageSimulatorClient } from "@/components/usage/UsageSimulatorClient";
 
-export default async function UsageSimulatorPage() {
+export default async function UsageSimulatorPage({
+  searchParams,
+}: {
+  searchParams?: Record<string, string | string[] | undefined>;
+}) {
   const context = await loadUsageEntryContext();
   const { user, houseAddress } = context;
 
@@ -71,7 +75,16 @@ export default async function UsageSimulatorPage() {
 
       <section className="bg-brand-white px-4 pb-12 pt-4">
         <div className="mx-auto w-full max-w-6xl">
-          <UsageSimulatorClient houseId={houseAddress.id} />
+          <UsageSimulatorClient
+            houseId={houseAddress.id}
+            intent={
+              typeof searchParams?.intent === "string"
+                ? searchParams.intent.trim()
+                : Array.isArray(searchParams?.intent)
+                  ? String(searchParams?.intent?.[0] ?? "").trim()
+                  : ""
+            }
+          />
         </div>
       </section>
     </div>

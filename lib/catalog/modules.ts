@@ -87,7 +87,6 @@ export const modulesCatalog: ModuleDef[] = [
     id: 70,
     name: 'Results UI',
     purpose: 'User-facing results page with cards, costs, disclosures',
-    endpoint: '/results',
     inputs: ['User-provided usage (intervals or monthly kWh)'],
     outputs: ['Rendered plan list with outbound links'],
     estDevTime: '1.5d'

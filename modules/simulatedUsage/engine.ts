@@ -1,5 +1,6 @@
 import { ManualUsagePayload, SimulatedCurve, TravelRange } from "./types";
-import { monthsEndingAt } from "@/modules/manualUsage/anchor";
+import { billingPeriodsEndingAt } from "@/modules/manualUsage/billingPeriods";
+import { anchorEndDateUtc } from "@/modules/manualUsage/anchor";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const INTERVAL_MINUTES = 15;
@@ -118,7 +119,8 @@ export function generateSimulatedCurveFromManual(payload: ManualUsagePayload): S
   let windowEnd: Date;
 
   if (payload.mode === "ANNUAL") {
-    const p = parseIsoDate(payload.endDate);
+    const anchorEndDateKey = String((payload as any).anchorEndDate ?? (payload as any).endDate ?? "").trim();
+    const p = parseIsoDate(anchorEndDateKey);
     if (!p) throw new Error("endDate_invalid");
     const end = new Date(Date.UTC(p.year, p.month1 - 1, p.day, 0, 0, 0, 0));
     if (!Number.isFinite(end.getTime())) throw new Error("endDate_invalid");
@@ -137,19 +139,22 @@ export function generateSimulatedCurveFromManual(payload: ManualUsagePayload): S
       monthTotals.set(mk, (monthTotals.get(mk) ?? 0) + perDay);
     }
   } else {
-    if (!isYearMonth(payload.anchorEndMonth)) throw new Error("anchorEndMonth_invalid");
-    const months = monthsEndingAt(payload.anchorEndMonth, 12);
-    const billEndDay = Math.max(1, Math.min(31, Math.trunc(payload.billEndDay || 15)));
-
-    // We define the monthly window as month-by-month, using billEndDay as the end-of-bill boundary anchor.
-    // For v1 baseline: interpret each month as the calendar month and ignore billEndDay for segmentation,
-    // but store it and keep anchor stable for labeling. (We can refine billing boundary later.)
-    // Window = first day of first month .. last day of last month.
-    const start = monthStartUtc(months[0]);
-    const end = monthEndUtc(months[months.length - 1]);
-    if (!start || !end) throw new Error("anchorEndMonth_invalid");
-    windowStart = start;
-    windowEnd = end;
+    const anchorEndDateKey =
+      typeof (payload as any).anchorEndDate === "string" && isIsoDate(String((payload as any).anchorEndDate))
+        ? String((payload as any).anchorEndDate).trim()
+        : typeof (payload as any).anchorEndMonth === "string" && isYearMonth(String((payload as any).anchorEndMonth))
+          ? (() => {
+              const endMonth = String((payload as any).anchorEndMonth).trim();
+              const day = Math.max(1, Math.min(31, Math.trunc((payload as any).billEndDay || 15)));
+              const d = anchorEndDateUtc(endMonth, day);
+              return d ? d.toISOString().slice(0, 10) : "";
+            })()
+          : "";
+    if (!isIsoDate(anchorEndDateKey)) throw new Error("anchorEndDate_invalid");
+    const periods = billingPeriodsEndingAt(anchorEndDateKey, 12);
+    if (!periods.length) throw new Error("anchorEndDate_invalid");
+    windowStart = toUtcMidnight(periods[0].startDate);
+    windowEnd = toUtcMidnight(periods[periods.length - 1].endDate);
 
     const map = new Map<string, number>();
     for (const r of payload.monthlyKwh || []) {
@@ -160,11 +165,11 @@ export function generateSimulatedCurveFromManual(payload: ManualUsagePayload): S
       map.set(ym, kwh);
     }
 
-    for (const ym of months) {
-      const kwh = map.get(ym) ?? 0;
-      monthTotals.set(ym, kwh);
-      const startM = monthStartUtc(ym)!;
-      const endM = monthEndUtc(ym)!;
+    for (const period of periods) {
+      const kwh = map.get(period.id) ?? 0;
+      monthTotals.set(period.id, kwh);
+      const startM = toUtcMidnight(period.startDate);
+      const endM = toUtcMidnight(period.endDate);
       const days = enumerateDaysInclusive(startM, endM);
       const perDay = days.length > 0 ? kwh / days.length : 0;
       for (const d of days) {
@@ -172,9 +177,6 @@ export function generateSimulatedCurveFromManual(payload: ManualUsagePayload): S
         dayTotals.set(dk, (dayTotals.get(dk) ?? 0) + perDay);
       }
     }
-
-    // Silence unused warning for now; billEndDay is persisted/validated elsewhere.
-    void billEndDay;
   }
 
   // Apply exclusions and renormalize totals to preserve the intended totals.
@@ -253,14 +255,16 @@ export function generateSimulatedCurve(args: {
   intradayShape96: number[]; // length 96, sums to 1
   weekdayWeekendShape96?: { weekday: number[]; weekend: number[] };
   travelRanges?: TravelRange[];
+  periods?: Array<{ id: string; startDate: string; endDate: string }>;
 }): SimulatedCurve {
   const canonicalMonths = (args.canonicalMonths || []).slice(0, 24);
   if (!canonicalMonths.length) throw new Error("canonicalMonths_required");
 
   const excludedDays = buildExcludedDaySet(args.travelRanges ?? []);
 
-  const windowStart = monthStartUtc(canonicalMonths[0]);
-  const windowEnd = monthEndUtc(canonicalMonths[canonicalMonths.length - 1]);
+  const periods = Array.isArray(args.periods) && args.periods.length > 0 ? args.periods.slice(0, 24) : null;
+  const windowStart = periods ? toUtcMidnight(periods[0].startDate) : monthStartUtc(canonicalMonths[0]);
+  const windowEnd = periods ? toUtcMidnight(periods[periods.length - 1].endDate) : monthEndUtc(canonicalMonths[canonicalMonths.length - 1]);
   if (!windowStart || !windowEnd) throw new Error("canonicalMonths_invalid");
 
   const intraday = Array.isArray(args.intradayShape96) && args.intradayShape96.length === INTERVALS_PER_DAY
@@ -280,47 +284,59 @@ export function generateSimulatedCurve(args: {
       }
     : null;
 
-  // Build day totals from monthly totals.
-  const dayTotals = new Map<string, number>();
-  for (const ym of canonicalMonths) {
-    const startM = monthStartUtc(ym);
-    const endM = monthEndUtc(ym);
-    if (!startM || !endM) continue;
-    const days = enumerateDaysInclusive(startM, endM);
-    const monthKwh = Math.max(0, Number(args.monthlyTotalsKwhByMonth?.[ym] ?? 0) || 0);
-    const perDay = days.length > 0 ? monthKwh / days.length : 0;
+  // Build day totals from monthly totals (calendar months or billing periods).
+  const dayTotals = new Map<string, number>(); // YYYY-MM-DD -> kWh
+  const dayToBucket = new Map<string, string>(); // YYYY-MM-DD -> bucket id
+  const bucketIntended = new Map<string, number>(); // bucket id -> intended kWh
+
+  const buckets = periods
+    ? periods.map((p) => ({ id: String(p.id), start: toUtcMidnight(p.startDate), end: toUtcMidnight(p.endDate) }))
+    : canonicalMonths.map((ym) => ({ id: String(ym), start: monthStartUtc(ym), end: monthEndUtc(ym) }));
+
+  for (const b of buckets) {
+    if (!b.start || !b.end) continue;
+    const days = enumerateDaysInclusive(b.start, b.end);
+    const bucketKwh = Math.max(0, Number(args.monthlyTotalsKwhByMonth?.[b.id] ?? 0) || 0);
+    bucketIntended.set(b.id, bucketKwh);
+    const perDay = days.length > 0 ? bucketKwh / days.length : 0;
     for (const d of days) {
       const dk = dateKeyUtc(d);
+      dayToBucket.set(dk, b.id);
       dayTotals.set(dk, (dayTotals.get(dk) ?? 0) + perDay);
     }
   }
 
-  // Apply exclusions and renormalize to preserve intended totals.
-  const intendedTotal = sum(Array.from(dayTotals.values()));
+  // Apply exclusions.
   let excludedDaysInWindow = 0;
-  const rows = Array.from(dayTotals.entries());
-  for (let i = 0; i < rows.length; i++) {
-    const [dk, kwh] = rows[i];
+  for (const dk of Array.from(dayTotals.keys())) {
     if (excludedDays.has(dk)) {
       excludedDaysInWindow += 1;
-      void kwh;
       dayTotals.set(dk, 0);
     }
   }
 
-  const remainingTotal = sum(Array.from(dayTotals.values()));
-  if (intendedTotal > 0 && (remainingTotal === 0 || excludedDaysInWindow === dayTotals.size)) {
-    throw new Error("travel_exclusions_cover_full_range");
-  }
+  // Renormalize per bucket to preserve intended totals (manual totals immutability).
+  let anyRenormalized = false;
+  const bucketEntries = Array.from(bucketIntended.entries());
+  for (let i = 0; i < bucketEntries.length; i++) {
+    const [bucketId, intendedKwh] = bucketEntries[i];
+    if (intendedKwh <= 0) continue;
 
-  const renormalizeFactor = intendedTotal > 0 && remainingTotal > 0 ? intendedTotal / remainingTotal : 1;
-  const renormalized = Math.abs(renormalizeFactor - 1) > 1e-9;
-  if (renormalized) {
-    const cur = Array.from(dayTotals.entries());
-    for (let i = 0; i < cur.length; i++) {
-      const [dk, kwh] = cur[i];
+    let remaining = 0;
+    const dayEntries = Array.from(dayTotals.entries());
+    for (let j = 0; j < dayEntries.length; j++) {
+      const [dk, kwh] = dayEntries[j];
+      if (dayToBucket.get(dk) === bucketId) remaining += kwh;
+    }
+    if (remaining <= 0) throw new Error("travel_exclusions_cover_full_range");
+
+    const factor = intendedKwh / remaining;
+    if (Math.abs(factor - 1) > 1e-9) anyRenormalized = true;
+    for (let j = 0; j < dayEntries.length; j++) {
+      const [dk, kwh] = dayEntries[j];
+      if (dayToBucket.get(dk) !== bucketId) continue;
       if (kwh <= 0) continue;
-      dayTotals.set(dk, kwh * renormalizeFactor);
+      dayTotals.set(dk, kwh * factor);
     }
   }
 
@@ -348,8 +364,8 @@ export function generateSimulatedCurve(args: {
   const dayRows = Array.from(dayTotals.entries());
   for (let i = 0; i < dayRows.length; i++) {
     const [dk, kwh] = dayRows[i];
-    const ym = dk.slice(0, 7);
-    monthlyTotalsMap.set(ym, (monthlyTotalsMap.get(ym) ?? 0) + kwh);
+    const bucketId = dayToBucket.get(dk) ?? dk.slice(0, 7);
+    monthlyTotalsMap.set(bucketId, (monthlyTotalsMap.get(bucketId) ?? 0) + kwh);
   }
   const monthlyTotals = Array.from(monthlyTotalsMap.entries())
     .map(([month, kwh]) => ({ month, kwh }))
@@ -363,7 +379,7 @@ export function generateSimulatedCurve(args: {
     intervals,
     monthlyTotals,
     annualTotalKwh,
-    meta: { excludedDays: excludedDays.size, renormalized },
+    meta: { excludedDays: excludedDaysInWindow, renormalized: anyRenormalized },
   };
 }
 

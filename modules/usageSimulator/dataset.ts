@@ -40,6 +40,10 @@ export type SimulatorBuildInputsV1 = {
   baseKind: "MANUAL" | "ESTIMATED" | "SMT_ACTUAL_BASELINE";
   canonicalEndMonth: string;
   canonicalMonths: string[];
+  // For manual billing-period semantics (V1): optional explicit periods overriding calendar-month bucketing.
+  canonicalPeriods?: Array<{ id: string; startDate: string; endDate: string }>;
+  weatherPreference?: "NONE" | "LAST_YEAR_WEATHER" | "LONG_TERM_AVERAGE";
+  weatherNormalizerVersion?: string;
   monthlyTotalsKwhByMonth: Record<string, number>;
   intradayShape96: number[];
   weekdayWeekendShape96?: { weekday: number[]; weekend: number[] };
@@ -53,6 +57,9 @@ export type SimulatorBuildInputsV1 = {
     applianceProfile?: any;
     baselineHomeProfile?: any;
     baselineApplianceProfile?: any;
+    actualSource?: "SMT" | "GREEN_BUTTON" | null;
+    actualMonthlyAnchorsByMonth?: Record<string, number>;
+    actualIntradayShape96?: number[];
     smtMonthlyAnchorsByMonth?: Record<string, number>;
     smtIntradayShape96?: number[];
     // Scenario audit fields (not used for regen)
@@ -71,6 +78,9 @@ export type SimulatedUsageDatasetMeta = {
   filledMonths: string[];
   excludedDays: number;
   renormalized: boolean;
+  // Hybrid gap-fill support (V1): which months are actual vs simulated.
+  monthProvenanceByMonth?: Record<string, "ACTUAL" | "SIMULATED">;
+  actualSource?: "SMT" | "GREEN_BUTTON" | null;
   // Service-attached metadata (persisted build)
   buildInputsHash?: string;
   lastBuiltAt?: string | null;
@@ -116,6 +126,7 @@ export type SimulatedUsageDataset = {
 export function buildSimulatedUsageDatasetFromBuildInputs(buildInputs: SimulatorBuildInputsV1): SimulatedUsageDataset {
   const curve = generateSimulatedCurve({
     canonicalMonths: buildInputs.canonicalMonths,
+    periods: (buildInputs as any).canonicalPeriods ?? undefined,
     monthlyTotalsKwhByMonth: buildInputs.monthlyTotalsKwhByMonth,
     intradayShape96: buildInputs.intradayShape96,
     weekdayWeekendShape96: buildInputs.weekdayWeekendShape96,

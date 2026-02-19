@@ -4,7 +4,7 @@ import { estimateUsageForCanonicalWindow } from "@/modules/usageEstimator/estima
 import type { HomeProfileInput } from "@/modules/homeProfile/validation";
 import type { ApplianceProfilePayloadV1 } from "@/modules/applianceProfile/validation";
 import { getGenericWeekdayShape96, getGenericWeekendShape96, normalizeShape96, type Shape96 } from "@/modules/simulatedUsage/intradayTemplates";
-import { fetchSmtCanonicalMonthlyTotals, fetchSmtIntradayShape96 } from "@/modules/realUsageAdapter/smt";
+import { fetchActualCanonicalMonthlyTotals, fetchActualIntradayShape96 } from "@/modules/realUsageAdapter/actual";
 import { reshapeMonthlyTotalsFromBaseline } from "@/modules/usageSimulator/reshape";
 
 export type BuildMode = "MANUAL_TOTALS" | "NEW_BUILD_ESTIMATE" | "SMT_BASELINE";
@@ -19,6 +19,9 @@ export type BuildResult = {
   notes: string[];
   filledMonths: string[];
   source?: {
+    actualSource?: "SMT" | "GREEN_BUTTON";
+    actualMonthlyAnchorsByMonth?: Record<string, number>;
+    actualIntradayShape96?: number[];
     smtMonthlyAnchorsByMonth?: Record<string, number>;
     smtIntradayShape96?: number[];
   };
@@ -78,6 +81,7 @@ export async function buildSimulatorInputs(args: {
   homeProfile: HomeProfileInput;
   applianceProfile: ApplianceProfilePayloadV1;
   esiidForSmt?: string | null;
+  houseIdForActual?: string | null;
   baselineHomeProfile?: HomeProfileInput | null;
   baselineApplianceProfile?: ApplianceProfilePayloadV1 | null;
   canonicalMonths?: string[]; // optional override (V1 determinism)
@@ -126,12 +130,14 @@ export async function buildSimulatorInputs(args: {
   }
 
   // SMT_BASELINE
+  const houseIdForActual = args.houseIdForActual ?? null;
   const esiid = args.esiidForSmt ?? null;
-  if (!esiid) throw new Error("smt_esiid_missing");
+  if (!houseIdForActual) throw new Error("houseId_required");
 
-  const { monthlyKwhByMonth } = await fetchSmtCanonicalMonthlyTotals({ esiid, canonicalMonths });
-  const shape = await fetchSmtIntradayShape96({ esiid, canonicalMonths });
-  if (!shape) throw new Error("smt_intraday_shape_missing");
+  const actualMonthly = await fetchActualCanonicalMonthlyTotals({ houseId: houseIdForActual, esiid, canonicalMonths });
+  const actualShape = await fetchActualIntradayShape96({ houseId: houseIdForActual, esiid, canonicalMonths });
+  const monthlyKwhByMonth = actualMonthly.monthlyKwhByMonth ?? {};
+  const shape = actualShape.shape96 ?? null;
 
   const baselineHome = args.baselineHomeProfile ?? args.homeProfile;
   const baselineAppliances = args.baselineApplianceProfile ?? args.applianceProfile;
@@ -157,17 +163,34 @@ export async function buildSimulatorInputs(args: {
     currentAppliances: args.applianceProfile,
   });
 
+  const notes = [...baselineEst.notes, ...reshaped.notes];
+  const intradayShape96 = shape ? normalizeShape96(shape) : getGenericWeekdayShape96();
+  if (!shape) notes.push("Actual intraday shape unavailable; using deterministic generic intraday template.");
+
+  // Gap-fill rule: do NOT modify months that have actual anchors.
+  // We only allow reshaping to affect months that were simulated (filled) or derived from non-actual inputs.
+  const anchoredMonths = Object.keys(monthlyKwhByMonth ?? {});
+  const monthlyTotalsKwhByMonthFinal: Record<string, number> = { ...reshaped.monthlyTotalsKwhByMonth };
+  for (let i = 0; i < anchoredMonths.length; i++) {
+    const ym = anchoredMonths[i];
+    if (ym in monthlyTotalsKwhByMonthFinal) monthlyTotalsKwhByMonthFinal[ym] = monthlyKwhByMonth[ym] ?? 0;
+  }
+
   return {
     baseKind: "SMT_ACTUAL_BASELINE",
     canonicalMonths,
-    monthlyTotalsKwhByMonth: reshaped.monthlyTotalsKwhByMonth,
-    intradayShape96: normalizeShape96(shape),
-    notes: [...baselineEst.notes, ...reshaped.notes],
+    monthlyTotalsKwhByMonth: monthlyTotalsKwhByMonthFinal,
+    intradayShape96,
     filledMonths: baselineEst.filledMonths,
     source: {
-      smtMonthlyAnchorsByMonth: monthlyKwhByMonth,
-      smtIntradayShape96: shape,
+      actualSource: actualMonthly.source ?? actualShape.source ?? undefined,
+      actualMonthlyAnchorsByMonth: monthlyKwhByMonth,
+      actualIntradayShape96: shape ?? undefined,
+      ...(actualMonthly.source === "SMT"
+        ? { smtMonthlyAnchorsByMonth: monthlyKwhByMonth, smtIntradayShape96: shape ?? undefined }
+        : {}),
     },
+    notes,
   };
 }
 

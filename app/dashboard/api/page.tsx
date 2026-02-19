@@ -157,6 +157,11 @@ export default async function UsageEntryHub() {
   const smtStatus = deriveSmtStatus(existingAuthorization, context.smtLatestIntervalAt);
   const greenStatus = deriveGreenButtonStatus(context.greenButtonUpload);
   const manualStatus = deriveManualStatus(context.manualUsageUpload);
+  const newBuildStatus: EntryStatus = {
+    label: "Available",
+    tone: "info",
+    message: "No usage history? Estimate a baseline from your home, appliances, and occupancy details.",
+  };
 
   const hasHouseAddress = Boolean(houseAddress);
 
@@ -264,7 +269,7 @@ export default async function UsageEntryHub() {
             </div>
           ) : null}
 
-          <div className="mt-1 grid gap-5 md:grid-cols-3">
+          <div className="mt-1 grid gap-5 md:grid-cols-2">
             <OptionCard
               title="Smart Meter Texas"
               subtitle="Preferred"
@@ -310,6 +315,20 @@ export default async function UsageEntryHub() {
               }
               href="/dashboard/api/manual"
               status={manualStatus}
+              disabled={!user || !hasHouseAddress}
+              disabledMessage={!user ? "Sign in to continue" : "Save your service address first"}
+            />
+            <OptionCard
+              title="New Build / No usage history"
+              subtitle="Estimator"
+              description={
+                <span className="text-brand-cyan/85">
+                  If you don’t have 12 months of usage yet (or it’s a brand new home), start here. We’ll estimate a baseline
+                  curve from your home, appliances, and occupancy details so you can still compare plans and scenarios.
+                </span>
+              }
+              href="/dashboard/usage/simulated?intent=NEW_BUILD#start-here"
+              status={newBuildStatus}
               disabled={!user || !hasHouseAddress}
               disabledMessage={!user ? "Sign in to continue" : "Save your service address first"}
             />

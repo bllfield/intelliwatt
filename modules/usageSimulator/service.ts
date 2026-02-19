@@ -1,16 +1,19 @@
 import { prisma } from "@/lib/db";
-import { monthsEndingAt, lastFullMonthChicago } from "@/modules/manualUsage/anchor";
+import { anchorEndDateUtc, monthsEndingAt, lastFullMonthChicago } from "@/modules/manualUsage/anchor";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
 import { buildSimulatorInputs, type BaseKind, type BuildMode } from "@/modules/usageSimulator/build";
 import { computeRequirements, type SimulatorMode } from "@/modules/usageSimulator/requirements";
-import { hasSmtIntervals, SMT_SHAPE_DERIVATION_VERSION } from "@/modules/realUsageAdapter/smt";
+import { chooseActualSource, hasActualIntervals } from "@/modules/realUsageAdapter/actual";
+import { SMT_SHAPE_DERIVATION_VERSION } from "@/modules/realUsageAdapter/smt";
 import { buildSimulatedUsageDatasetFromBuildInputs, type SimulatorBuildInputsV1 } from "@/modules/usageSimulator/dataset";
 import { computeBuildInputsHash } from "@/modules/usageSimulator/hash";
 import { INTRADAY_TEMPLATE_VERSION } from "@/modules/simulatedUsage/intradayTemplates";
 import { computeMonthlyOverlay } from "@/modules/usageScenario/overlay";
 import { getHouseAddressForUserHouse, listHouseAddressesForUser, normalizeScenarioKey, upsertSimulatorBuild } from "@/modules/usageSimulator/repo";
+import { billingPeriodsEndingAt } from "@/modules/manualUsage/billingPeriods";
+import { normalizeMonthlyTotals, WEATHER_NORMALIZER_VERSION, type WeatherPreference } from "@/modules/weatherNormalization/normalizer";
 
 type ManualUsagePayloadAny = any;
 
@@ -20,13 +23,28 @@ function canonicalMonthsForRecalc(args: { mode: SimulatorMode; manualUsagePayloa
   // V1 determinism: derive canonicalMonths from manual anchor when in manual mode, else platform default (last full month Chicago).
   if (args.mode === "MANUAL_TOTALS" && args.manualUsagePayload) {
     const p = args.manualUsagePayload as any;
-    if (p?.mode === "MONTHLY" && typeof p.anchorEndMonth === "string" && /^\d{4}-\d{2}$/.test(p.anchorEndMonth)) {
-      const endMonth = String(p.anchorEndMonth);
-      return { endMonth, months: monthsEndingAt(endMonth, 12) };
+    if (p?.mode === "MONTHLY") {
+      const anchorEndDateKey = typeof p.anchorEndDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(p.anchorEndDate) ? String(p.anchorEndDate) : null;
+      const legacyEndMonth = typeof p.anchorEndMonth === "string" && /^\d{4}-\d{2}$/.test(p.anchorEndMonth) ? String(p.anchorEndMonth) : null;
+      const legacyBillEndDay = typeof p.billEndDay === "number" && Number.isFinite(p.billEndDay) ? Math.trunc(p.billEndDay) : 15;
+      const endMonth = anchorEndDateKey
+        ? anchorEndDateKey.slice(0, 7)
+        : legacyEndMonth
+          ? (anchorEndDateUtc(legacyEndMonth, legacyBillEndDay)?.toISOString().slice(0, 7) ?? legacyEndMonth)
+          : null;
+      if (endMonth) return { endMonth, months: monthsEndingAt(endMonth, 12) };
     }
-    if (p?.mode === "ANNUAL" && typeof p.endDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(p.endDate)) {
-      const endMonth = String(p.endDate).slice(0, 7);
-      return { endMonth, months: monthsEndingAt(endMonth, 12) };
+    if (p?.mode === "ANNUAL") {
+      const endKey =
+        typeof p.anchorEndDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(p.anchorEndDate)
+          ? String(p.anchorEndDate)
+          : typeof p.endDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(p.endDate)
+            ? String(p.endDate)
+            : null;
+      if (endKey) {
+        const endMonth = endKey.slice(0, 7);
+        return { endMonth, months: monthsEndingAt(endMonth, 12) };
+      }
     }
   }
 
@@ -59,6 +77,7 @@ export async function recalcSimulatorBuild(args: {
   esiid: string | null;
   mode: SimulatorMode;
   scenarioId?: string | null;
+  weatherPreference?: WeatherPreference;
   now?: Date;
 }): Promise<SimulatorRecalcOk | SimulatorRecalcErr> {
   const { userId, houseId, esiid, mode } = args;
@@ -80,11 +99,16 @@ export async function recalcSimulatorBuild(args: {
   const applianceProfile = normalizeStoredApplianceProfile((applianceRec?.appliancesJson as any) ?? null);
   const homeProfile = homeRec ? { ...homeRec } : null;
 
-  const smtOk = esiid ? await hasSmtIntervals({ esiid, canonicalMonths: canonical.months }) : false;
+  const actualOk = await hasActualIntervals({ houseId, esiid: esiid ?? null, canonicalMonths: canonical.months });
+  const actualSource = await chooseActualSource({ houseId, esiid: esiid ?? null });
 
-  // Baseline ladder enforcement (V1): SMT_BASELINE requires SMT 15-minute intervals.
-  if (mode === "SMT_BASELINE" && !smtOk) {
-    return { ok: false, error: "requirements_unmet", missingItems: ["SMT 15-minute interval data required"] };
+  // Baseline ladder enforcement (V1): SMT_BASELINE requires actual 15-minute intervals (SMT or Green Button).
+  if (mode === "SMT_BASELINE" && !actualOk) {
+    return {
+      ok: false,
+      error: "requirements_unmet",
+      missingItems: ["Actual 15-minute interval data required (Smart Meter Texas or Green Button upload)."],
+    };
   }
 
   // Scenario must exist (and be house-scoped) when scenarioId is provided.
@@ -114,7 +138,7 @@ export async function recalcSimulatorBuild(args: {
       manualUsagePayload: manualUsagePayload as any,
       homeProfile: homeProfile as any,
       applianceProfile: applianceProfile as any,
-      hasSmtIntervals: smtOk,
+      hasActualIntervals: actualOk,
     },
     mode,
   );
@@ -132,6 +156,7 @@ export async function recalcSimulatorBuild(args: {
     homeProfile: homeProfile as any,
     applianceProfile: applianceProfile as any,
     esiidForSmt: esiid,
+    houseIdForActual: houseId,
     baselineHomeProfile: homeProfile,
     baselineApplianceProfile: applianceProfile,
     canonicalMonths: canonical.months,
@@ -150,7 +175,7 @@ export async function recalcSimulatorBuild(args: {
       })
     : null;
 
-  const monthlyTotalsKwhByMonth: Record<string, number> = {};
+  let monthlyTotalsKwhByMonth: Record<string, number> = {};
   for (let i = 0; i < built.canonicalMonths.length; i++) {
     const ym = built.canonicalMonths[i];
     const base = Number(built.monthlyTotalsKwhByMonth?.[ym] ?? 0) || 0;
@@ -175,12 +200,38 @@ export async function recalcSimulatorBuild(args: {
     if ((overlay?.warnings?.length ?? 0) > 0) notes.push(`Scenario: ${overlay!.warnings.length} warning(s).`);
   }
 
+  const weatherPreference: WeatherPreference = args.weatherPreference ?? "NONE";
+  const weatherNorm = normalizeMonthlyTotals({
+    canonicalMonths: built.canonicalMonths,
+    monthlyTotalsKwhByMonth,
+    preference: weatherPreference,
+  });
+  monthlyTotalsKwhByMonth = weatherNorm.monthlyTotalsKwhByMonth;
+  for (const n of weatherNorm.notes) notes.push(n);
+
   const versions = {
     estimatorVersion: "v1",
     reshapeCoeffVersion: "v1",
     intradayTemplateVersion: INTRADAY_TEMPLATE_VERSION,
     smtShapeDerivationVersion: SMT_SHAPE_DERIVATION_VERSION,
+    weatherNormalizerVersion: WEATHER_NORMALIZER_VERSION,
   };
+
+  const manualCanonicalPeriods =
+    mode === "MANUAL_TOTALS" && manualUsagePayload
+      ? (() => {
+          const p = manualUsagePayload as any;
+          const endKey =
+            typeof p.anchorEndDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(p.anchorEndDate)
+              ? String(p.anchorEndDate)
+              : typeof p.endDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(p.endDate)
+                ? String(p.endDate)
+                : typeof p.anchorEndMonth === "string" && /^\d{4}-\d{2}$/.test(p.anchorEndMonth)
+                  ? (anchorEndDateUtc(String(p.anchorEndMonth), Number(p.billEndDay) || 15)?.toISOString().slice(0, 10) ?? null)
+                  : null;
+          return endKey ? billingPeriodsEndingAt(endKey, 12) : [];
+        })()
+      : [];
 
   const buildInputs: SimulatorBuildInputsV1 & {
     scenarioKey?: string;
@@ -192,6 +243,9 @@ export async function recalcSimulatorBuild(args: {
     baseKind,
     canonicalEndMonth: canonical.endMonth,
     canonicalMonths: built.canonicalMonths,
+    canonicalPeriods: manualCanonicalPeriods.length ? manualCanonicalPeriods : undefined,
+    weatherPreference,
+    weatherNormalizerVersion: WEATHER_NORMALIZER_VERSION,
     monthlyTotalsKwhByMonth,
     intradayShape96: built.intradayShape96,
     weekdayWeekendShape96: built.weekdayWeekendShape96,
@@ -204,6 +258,9 @@ export async function recalcSimulatorBuild(args: {
       applianceProfile,
       baselineHomeProfile: homeProfile,
       baselineApplianceProfile: applianceProfile,
+      actualSource: built.source?.actualSource ?? actualSource ?? undefined,
+      actualMonthlyAnchorsByMonth: built.source?.actualMonthlyAnchorsByMonth ?? undefined,
+      actualIntradayShape96: built.source?.actualIntradayShape96 ?? undefined,
       smtMonthlyAnchorsByMonth: built.source?.smtMonthlyAnchorsByMonth ?? undefined,
       smtIntradayShape96: built.source?.smtIntradayShape96 ?? undefined,
       scenario: scenario ? { id: scenario.id, name: scenario.name } : null,
@@ -241,16 +298,25 @@ export async function recalcSimulatorBuild(args: {
     baseKind: buildInputs.baseKind,
     scenarioKey,
     scenarioEvents: eventsForHash,
+    weatherPreference,
     versions,
   });
 
   const dataset = buildSimulatedUsageDatasetFromBuildInputs(buildInputs);
+  const filledSet = new Set<string>((buildInputs.filledMonths ?? []).map(String));
+  const monthProvenanceByMonth: Record<string, "ACTUAL" | "SIMULATED"> = {};
+  for (const ym of buildInputs.canonicalMonths ?? []) {
+    monthProvenanceByMonth[String(ym)] =
+      mode === "SMT_BASELINE" && !scenarioId && !filledSet.has(String(ym)) ? "ACTUAL" : "SIMULATED";
+  }
   dataset.meta = {
     ...(dataset.meta ?? {}),
     buildInputsHash,
     lastBuiltAt: new Date().toISOString(),
     scenarioKey,
     scenarioId,
+    monthProvenanceByMonth,
+    actualSource: built.source?.actualSource ?? actualSource ?? null,
   };
 
   await upsertSimulatorBuild({
@@ -299,10 +365,18 @@ export async function getSimulatedUsageForUser(args: {
         try {
           const buildInputs = buildRec.buildInputs as SimulatorBuildInputsV1;
           dataset = buildSimulatedUsageDatasetFromBuildInputs(buildInputs);
+          const filledSet = new Set<string>(((buildInputs as any).filledMonths ?? []).map(String));
+          const monthProvenanceByMonth: Record<string, "ACTUAL" | "SIMULATED"> = {};
+          for (const ym of (buildInputs as any).canonicalMonths ?? []) {
+            monthProvenanceByMonth[String(ym)] =
+              (buildInputs as any).mode === "SMT_BASELINE" && !filledSet.has(String(ym)) ? "ACTUAL" : "SIMULATED";
+          }
           dataset.meta = {
             ...(dataset.meta ?? {}),
             buildInputsHash: String(buildRec.buildInputsHash ?? ""),
             lastBuiltAt: buildRec.lastBuiltAt ? new Date(buildRec.lastBuiltAt).toISOString() : null,
+            monthProvenanceByMonth,
+            actualSource: (buildInputs as any)?.snapshots?.actualSource ?? null,
           };
         } catch {
           dataset = null;
@@ -360,12 +434,20 @@ export async function getSimulatedUsageForHouseScenario(args: {
 
     const buildInputs = buildRec.buildInputs as SimulatorBuildInputsV1;
     const dataset = buildSimulatedUsageDatasetFromBuildInputs(buildInputs);
+    const filledSet = new Set<string>(((buildInputs as any).filledMonths ?? []).map(String));
+    const monthProvenanceByMonth: Record<string, "ACTUAL" | "SIMULATED"> = {};
+    for (const ym of (buildInputs as any).canonicalMonths ?? []) {
+      monthProvenanceByMonth[String(ym)] =
+        (buildInputs as any).mode === "SMT_BASELINE" && scenarioKey === "BASELINE" && !filledSet.has(String(ym)) ? "ACTUAL" : "SIMULATED";
+    }
     dataset.meta = {
       ...(dataset.meta ?? {}),
       buildInputsHash: String(buildRec.buildInputsHash ?? ""),
       lastBuiltAt: buildRec.lastBuiltAt ? new Date(buildRec.lastBuiltAt).toISOString() : null,
       scenarioKey,
       scenarioId,
+      monthProvenanceByMonth,
+      actualSource: (buildInputs as any)?.snapshots?.actualSource ?? null,
     };
 
     return { ok: true, houseId: args.houseId, scenarioKey, scenarioId, dataset };
@@ -391,6 +473,7 @@ export async function listSimulatedBuildAvailability(args: {
         buildInputsHash: string;
         lastBuiltAt: string | null;
         canonicalEndMonth: string;
+        weatherPreference?: string | null;
       }>;
     }
   | { ok: false; error: string }
@@ -401,7 +484,15 @@ export async function listSimulatedBuildAvailability(args: {
   const rows = await (prisma as any).usageSimulatorBuild
     .findMany({
       where: { userId: args.userId, houseId: args.houseId },
-      select: { scenarioKey: true, mode: true, baseKind: true, buildInputsHash: true, lastBuiltAt: true, canonicalEndMonth: true },
+      select: {
+        scenarioKey: true,
+        mode: true,
+        baseKind: true,
+        buildInputsHash: true,
+        lastBuiltAt: true,
+        canonicalEndMonth: true,
+        buildInputs: true,
+      },
       orderBy: [{ lastBuiltAt: "desc" }, { updatedAt: "desc" }],
     })
     .catch(() => []);
@@ -430,6 +521,7 @@ export async function listSimulatedBuildAvailability(args: {
       buildInputsHash: String(r?.buildInputsHash ?? ""),
       lastBuiltAt: r?.lastBuiltAt ? new Date(r.lastBuiltAt).toISOString() : null,
       canonicalEndMonth: String(r?.canonicalEndMonth ?? ""),
+      weatherPreference: (r as any)?.buildInputs?.weatherPreference ?? null,
     };
   });
 
@@ -626,12 +718,20 @@ export async function getSimulatorRequirements(args: { userId: string; houseId: 
   const applianceProfile = normalizeStoredApplianceProfile((applianceRec?.appliancesJson as any) ?? null);
   const homeProfile = homeRec ? { ...homeRec } : null;
 
-  const hasSmt = house.esiid ? await hasSmtIntervals({ esiid: house.esiid, canonicalMonths: canonical.months }) : false;
+  const hasActual = await hasActualIntervals({ houseId: args.houseId, esiid: house.esiid ?? null, canonicalMonths: canonical.months });
+  const actualSource = await chooseActualSource({ houseId: args.houseId, esiid: house.esiid ?? null });
   const req = computeRequirements(
-    { manualUsagePayload: manualUsagePayload as any, homeProfile: homeProfile as any, applianceProfile: applianceProfile as any, hasSmtIntervals: hasSmt },
+    { manualUsagePayload: manualUsagePayload as any, homeProfile: homeProfile as any, applianceProfile: applianceProfile as any, hasActualIntervals: hasActual },
     args.mode,
   );
 
-  return { ok: true as const, canRecalc: req.canRecalc, missingItems: req.missingItems, hasSmtIntervals: hasSmt, canonicalEndMonth: canonical.endMonth };
+  return {
+    ok: true as const,
+    canRecalc: req.canRecalc,
+    missingItems: req.missingItems,
+    hasActualIntervals: hasActual,
+    actualSource,
+    canonicalEndMonth: canonical.endMonth,
+  };
 }
 

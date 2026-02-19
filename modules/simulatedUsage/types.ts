@@ -2,17 +2,23 @@ export type TravelRange = { startDate: string; endDate: string };
 
 export type MonthlyManualUsagePayload = {
   mode: "MONTHLY";
-  anchorEndMonth: string; // YYYY-MM
-  billEndDay: number;
+  // V1 contract: full-date anchor for billing-cycle periods (America/Chicago semantics at UI level).
+  anchorEndDate: string; // YYYY-MM-DD
   monthlyKwh: Array<{ month: string; kwh: number | "" }>;
   travelRanges: TravelRange[];
+  // Legacy (supported for backward compatibility with saved payloads)
+  anchorEndMonth?: string; // YYYY-MM
+  billEndDay?: number;
 };
 
 export type AnnualManualUsagePayload = {
   mode: "ANNUAL";
-  endDate: string; // YYYY-MM-DD
+  // V1 contract: full-date anchor for 12 billing periods ending at this date.
+  anchorEndDate: string; // YYYY-MM-DD
   annualKwh: number | "";
   travelRanges: TravelRange[];
+  // Legacy (supported for backward compatibility with saved payloads)
+  endDate?: string; // YYYY-MM-DD
 };
 
 export type ManualUsagePayload = MonthlyManualUsagePayload | AnnualManualUsagePayload;

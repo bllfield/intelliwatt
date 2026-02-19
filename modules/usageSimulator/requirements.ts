@@ -9,7 +9,7 @@ export type SimulatorInputs = {
   manualUsagePayload: ManualUsagePayload | null;
   homeProfile: HomeProfileInput | null;
   applianceProfile: ApplianceProfilePayloadV1 | null;
-  hasSmtIntervals: boolean;
+  hasActualIntervals: boolean;
 };
 
 export function computeRequirements(inputs: SimulatorInputs, mode: SimulatorMode): { canRecalc: boolean; missingItems: string[] } {
@@ -22,7 +22,9 @@ export function computeRequirements(inputs: SimulatorInputs, mode: SimulatorMode
   if (!appliancesOk) missingItems.push("Complete Appliances (select fuel configuration, add appliance types as needed).");
 
   if (mode === "SMT_BASELINE") {
-    if (!inputs.hasSmtIntervals) missingItems.push("Connect Smart Meter Texas (15‑minute intervals required).");
+    if (!inputs.hasActualIntervals) {
+      missingItems.push("Connect Smart Meter Texas or upload Green Button usage (15‑minute intervals required).");
+    }
     return { canRecalc: missingItems.length === 0, missingItems };
   }
 

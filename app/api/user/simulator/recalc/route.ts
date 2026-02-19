@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { normalizeEmail } from "@/lib/utils/email";
 import { recalcSimulatorBuild } from "@/modules/usageSimulator/service";
 import type { SimulatorMode } from "@/modules/usageSimulator/requirements";
+import type { WeatherPreference } from "@/modules/weatherNormalization/normalizer";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -35,6 +36,11 @@ export async function POST(request: NextRequest) {
     const houseId = typeof body?.houseId === "string" ? body.houseId.trim() : "";
     const mode = typeof body?.mode === "string" ? (body.mode.trim() as SimulatorMode) : null;
     const scenarioId = typeof body?.scenarioId === "string" ? body.scenarioId.trim() : null;
+    const weatherPreferenceRaw = typeof body?.weatherPreference === "string" ? body.weatherPreference.trim() : "";
+    const weatherPreference: WeatherPreference | undefined =
+      weatherPreferenceRaw === "NONE" || weatherPreferenceRaw === "LAST_YEAR_WEATHER" || weatherPreferenceRaw === "LONG_TERM_AVERAGE"
+        ? (weatherPreferenceRaw as WeatherPreference)
+        : undefined;
     if (!houseId) return NextResponse.json({ ok: false, error: "houseId_required" }, { status: 400 });
     if (mode !== "MANUAL_TOTALS" && mode !== "NEW_BUILD_ESTIMATE" && mode !== "SMT_BASELINE") {
       return NextResponse.json({ ok: false, error: "mode_invalid" }, { status: 400 });
@@ -48,6 +54,7 @@ export async function POST(request: NextRequest) {
       esiid: house.esiid ?? null,
       mode,
       scenarioId,
+      weatherPreference,
     });
     if (!out.ok) return NextResponse.json(out, { status: 400 });
     return NextResponse.json(out);

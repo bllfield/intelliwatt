@@ -8,17 +8,21 @@ type TravelRange = { startDate: string; endDate: string };
 
 type MonthlyPayload = {
   mode: "MONTHLY";
-  anchorEndMonth: string; // YYYY-MM
-  billEndDay: number;
+  anchorEndDate: string; // YYYY-MM-DD
   monthlyKwh: Array<{ month: string; kwh: number | "" }>;
   travelRanges: TravelRange[];
+  // legacy
+  anchorEndMonth?: string; // YYYY-MM
+  billEndDay?: number;
 };
 
 type AnnualPayload = {
   mode: "ANNUAL";
-  endDate: string; // YYYY-MM-DD
+  anchorEndDate: string; // YYYY-MM-DD
   annualKwh: number | "";
   travelRanges: TravelRange[];
+  // legacy
+  endDate?: string; // YYYY-MM-DD
 };
 
 type ManualUsagePayload = MonthlyPayload | AnnualPayload;
@@ -120,15 +124,36 @@ export async function POST(request: NextRequest) {
     let annualEndDate: Date | null = null;
 
     if (mode === "MONTHLY") {
-      if (!isYearMonth(payload.anchorEndMonth)) {
-        return NextResponse.json({ ok: false, error: "anchorEndMonth_invalid" }, { status: 400 });
+      const anchorEndDateKey = isIsoDate((payload as any).anchorEndDate)
+        ? String((payload as any).anchorEndDate).trim()
+        : null;
+      const legacyEndMonth = isYearMonth((payload as any).anchorEndMonth) ? String((payload as any).anchorEndMonth).trim() : null;
+      const legacyBillEndDay =
+        typeof (payload as any).billEndDay !== "undefined" ? clampInt((payload as any).billEndDay, 1, 31) : null;
+
+      if (!anchorEndDateKey && !legacyEndMonth) {
+        return NextResponse.json({ ok: false, error: "anchorEndDate_invalid" }, { status: 400 });
       }
-      anchorEndMonth = payload.anchorEndMonth.trim();
-      const billEndDay = clampInt(payload.billEndDay, 1, 31);
-      anchorEndDate = anchorEndDateUtc(anchorEndMonth, billEndDay);
-      if (!anchorEndDate) {
-        return NextResponse.json({ ok: false, error: "anchorEndMonth_invalid" }, { status: 400 });
+
+      if (anchorEndDateKey) {
+        anchorEndMonth = anchorEndDateKey.slice(0, 7);
+        anchorEndDate = new Date(`${anchorEndDateKey}T00:00:00.000Z`);
+        if (!Number.isFinite(anchorEndDate.getTime())) {
+          return NextResponse.json({ ok: false, error: "anchorEndDate_invalid" }, { status: 400 });
+        }
+      } else {
+        const endMonth = legacyEndMonth;
+        if (!endMonth) {
+          return NextResponse.json({ ok: false, error: "anchorEndMonth_invalid" }, { status: 400 });
+        }
+        anchorEndMonth = endMonth;
+        const day = legacyBillEndDay ?? 15;
+        anchorEndDate = anchorEndDateUtc(endMonth, day);
+        if (!anchorEndDate) {
+          return NextResponse.json({ ok: false, error: "anchorEndMonth_invalid" }, { status: 400 });
+        }
       }
+
       const monthly = Array.isArray(payload.monthlyKwh) ? payload.monthlyKwh.slice(0, 12) : [];
       const cleaned = monthly.map((r) => ({
         month: String((r as any)?.month ?? "").trim(),
@@ -139,8 +164,7 @@ export async function POST(request: NextRequest) {
 
       const stored: MonthlyPayload = {
         mode: "MONTHLY",
-        anchorEndMonth,
-        billEndDay,
+        anchorEndDate: (anchorEndDateKey ?? `${anchorEndMonth}-${String(anchorEndDate.getUTCDate()).padStart(2, "0")}`).slice(0, 10),
         monthlyKwh: cleaned,
         travelRanges,
       };
@@ -171,12 +195,17 @@ export async function POST(request: NextRequest) {
     }
 
     // ANNUAL
-    if (!isIsoDate(payload.endDate)) {
-      return NextResponse.json({ ok: false, error: "endDate_invalid" }, { status: 400 });
+    const anchorEndDateKey = isIsoDate((payload as any).anchorEndDate)
+      ? String((payload as any).anchorEndDate).trim()
+      : isIsoDate((payload as any).endDate)
+        ? String((payload as any).endDate).trim()
+        : null;
+    if (!anchorEndDateKey) {
+      return NextResponse.json({ ok: false, error: "anchorEndDate_invalid" }, { status: 400 });
     }
-    annualEndDate = new Date(`${payload.endDate}T00:00:00.000Z`);
+    annualEndDate = new Date(`${anchorEndDateKey}T00:00:00.000Z`);
     if (!Number.isFinite(annualEndDate.getTime())) {
-      return NextResponse.json({ ok: false, error: "endDate_invalid" }, { status: 400 });
+      return NextResponse.json({ ok: false, error: "anchorEndDate_invalid" }, { status: 400 });
     }
     const annualKwh =
       typeof payload.annualKwh === "number" && Number.isFinite(payload.annualKwh) ? payload.annualKwh : null;
@@ -187,7 +216,7 @@ export async function POST(request: NextRequest) {
 
     const stored: AnnualPayload = {
       mode: "ANNUAL",
-      endDate: payload.endDate.trim(),
+      anchorEndDate: anchorEndDateKey,
       annualKwh,
       travelRanges,
     };
@@ -199,15 +228,15 @@ export async function POST(request: NextRequest) {
         houseId,
         mode: "ANNUAL",
         payload: stored,
-        anchorEndMonth: null,
-        anchorEndDate: null,
+        anchorEndMonth: anchorEndDateKey.slice(0, 7),
+        anchorEndDate: annualEndDate,
         annualEndDate,
       },
       update: {
         mode: "ANNUAL",
         payload: stored,
-        anchorEndMonth: null,
-        anchorEndDate: null,
+        anchorEndMonth: anchorEndDateKey.slice(0, 7),
+        anchorEndDate: annualEndDate,
         annualEndDate,
         updatedAt: now,
       },

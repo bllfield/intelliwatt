@@ -5,6 +5,11 @@ import { ManualUsageEntry } from "@/components/manual/ManualUsageEntry";
 import { HomeDetailsClient } from "@/components/home/HomeDetailsClient";
 import { AppliancesClient } from "@/components/appliances/AppliancesClient";
 import UsageDashboard from "@/components/usage/UsageDashboard";
+import {
+  USAGE_SCENARIO_ADJUSTMENT_CATALOG,
+  toMonthlyAdjustmentPayload,
+  type AdjustmentType,
+} from "@/lib/usageScenario/catalog";
 
 type Mode = "MANUAL_TOTALS" | "NEW_BUILD_ESTIMATE" | "SMT_BASELINE";
 type CompareView = "SIMULATED" | "ACTUAL";
@@ -36,7 +41,14 @@ type ScenarioHouseResp =
   | { ok: false; code: string; message: string };
 
 type RequirementsResp =
-  | { ok: true; canRecalc: boolean; missingItems: string[]; hasSmtIntervals: boolean; canonicalEndMonth: string }
+  | {
+      ok: true;
+      canRecalc: boolean;
+      missingItems: string[];
+      hasActualIntervals: boolean;
+      actualSource: "SMT" | "GREEN_BUTTON" | null;
+      canonicalEndMonth: string;
+    }
   | { ok: false; error: string };
 
 function Modal(props: { open: boolean; title: string; onClose: () => void; children: React.ReactNode }) {
@@ -60,23 +72,39 @@ function Modal(props: { open: boolean; title: string; onClose: () => void; child
   );
 }
 
-export function UsageSimulatorClient({ houseId }: { houseId: string }) {
-  const [mode, setMode] = useState<Mode>("MANUAL_TOTALS");
-  const [compareView, setCompareView] = useState<CompareView>("SIMULATED");
-  const [hasSmtIntervals, setHasSmtIntervals] = useState<boolean>(false);
+export function UsageSimulatorClient({ houseId, intent }: { houseId: string; intent?: string }) {
+  const normalizedIntent = String(intent ?? "").trim().toUpperCase();
+  const initialMode: Mode =
+    normalizedIntent === "NEW_BUILD"
+      ? "NEW_BUILD_ESTIMATE"
+      : normalizedIntent === "GAP_FILL_ACTUAL"
+        ? "SMT_BASELINE"
+        : "MANUAL_TOTALS";
+
+  const [mode, setMode] = useState<Mode>(initialMode);
+  const [compareView, setCompareView] = useState<CompareView>("ACTUAL");
+  const [hasActualIntervals, setHasActualIntervals] = useState<boolean>(false);
+  const [actualSource, setActualSource] = useState<"SMT" | "GREEN_BUTTON" | null>(null);
+  const [actualCoverage, setActualCoverage] = useState<{ start: string | null; end: string | null; intervalsCount: number } | null>(
+    null,
+  );
   const [loadingActual, setLoadingActual] = useState(false);
   const [recalcBusy, setRecalcBusy] = useState(false);
   const [recalcNote, setRecalcNote] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
   const [canRecalc, setCanRecalc] = useState(false);
   const [missingItems, setMissingItems] = useState<string[]>([]);
+  const [weatherPreference, setWeatherPreference] = useState<"NONE" | "LAST_YEAR_WEATHER" | "LONG_TERM_AVERAGE">("NONE");
 
   const [scenarioId, setScenarioId] = useState<string>("baseline");
   const [scenarios, setScenarios] = useState<Array<{ id: string; name: string }>>([]);
-  const [newScenarioName, setNewScenarioName] = useState("");
   const [builds, setBuilds] = useState<BuildsResp extends { ok: true } ? BuildsResp["builds"] : any[]>([]);
   const [scenarioSimHouseOverride, setScenarioSimHouseOverride] = useState<any[] | null>(null);
   const [scenarioBanner, setScenarioBanner] = useState<string | null>(null);
+
+  const WORKSPACE_PAST_NAME = "Past (Corrected)";
+  const WORKSPACE_FUTURE_NAME = "Future (What-if)";
+  const [workspace, setWorkspace] = useState<"BASELINE" | "PAST" | "FUTURE">("BASELINE");
 
   const [openManual, setOpenManual] = useState(false);
   const [openHome, setOpenHome] = useState(false);
@@ -86,8 +114,29 @@ export function UsageSimulatorClient({ houseId }: { houseId: string }) {
   // Scenario events editor state (minimal)
   const [timelineEvents, setTimelineEvents] = useState<any[]>([]);
   const [timelineMonth, setTimelineMonth] = useState<string>("");
+  const [timelineAdjustmentType, setTimelineAdjustmentType] = useState<AdjustmentType>("CUSTOM");
+  const [timelineCatalogValue, setTimelineCatalogValue] = useState<string>("");
   const [timelineMultiplier, setTimelineMultiplier] = useState<string>("");
   const [timelineAdderKwh, setTimelineAdderKwh] = useState<string>("");
+
+  useEffect(() => {
+    // Intent-driven Step 2 focus. Intent is deterministic (querystring/prop); no source-selection UI on this page.
+    if (normalizedIntent === "MANUAL") {
+      setMode("MANUAL_TOTALS");
+      setOpenManual(true);
+      return;
+    }
+    if (normalizedIntent === "NEW_BUILD") {
+      setMode("NEW_BUILD_ESTIMATE");
+      setOpenHome(true);
+      return;
+    }
+    if (normalizedIntent === "GAP_FILL_ACTUAL") {
+      setMode("SMT_BASELINE");
+      setOpenHome(true);
+      return;
+    }
+  }, [houseId, normalizedIntent]);
 
   useEffect(() => {
     let cancelled = false;
@@ -98,7 +147,9 @@ export function UsageSimulatorClient({ houseId }: { houseId: string }) {
         const j = (await r.json().catch(() => null)) as UsageApiResp | null;
         if (cancelled) return;
         if (!r.ok || !j?.ok) {
-          setHasSmtIntervals(false);
+          setHasActualIntervals(false);
+          setActualSource(null);
+          setActualCoverage(null);
           return;
         }
         const row = (j.houses || []).find((h) => h.houseId === houseId) ?? null;
@@ -106,10 +157,17 @@ export function UsageSimulatorClient({ houseId }: { houseId: string }) {
         const source = String(ds?.summary?.source ?? "");
         const intervalsCount = Number(ds?.summary?.intervalsCount ?? 0);
         const intervals15Len = Array.isArray(ds?.series?.intervals15) ? ds.series.intervals15.length : 0;
-        // V1 rule: SMT 15-minute interval presence is required to enable “Start from Actual”.
-        setHasSmtIntervals(source === "SMT" && intervalsCount > 0 && intervals15Len > 0);
+        const hasIntervals = intervalsCount > 0 && intervals15Len > 0;
+        setHasActualIntervals(hasIntervals);
+        setActualSource(source === "SMT" || source === "GREEN_BUTTON" ? (source as any) : null);
+        setActualCoverage({ start: ds?.summary?.start ?? null, end: ds?.summary?.end ?? null, intervalsCount });
+        if (hasIntervals) setCompareView("ACTUAL");
       } catch {
-        if (!cancelled) setHasSmtIntervals(false);
+        if (!cancelled) {
+          setHasActualIntervals(false);
+          setActualSource(null);
+          setActualCoverage(null);
+        }
       } finally {
         if (!cancelled) setLoadingActual(false);
       }
@@ -168,17 +226,37 @@ export function UsageSimulatorClient({ houseId }: { houseId: string }) {
     };
   }, [houseId, mode, refreshToken]);
 
-  const startFromActualDisabledReason = useMemo(() => {
-    if (loadingActual) return "Checking SMT baseline availability…";
-    if (hasSmtIntervals) return null;
-    return "Requires Smart Meter Texas 15‑minute intervals for this home.";
-  }, [hasSmtIntervals, loadingActual]);
+  const actualDisabledReason = useMemo(() => {
+    if (loadingActual) return "Checking actual usage availability…";
+    if (hasActualIntervals) return null;
+    return "Connect Smart Meter Texas or upload Green Button usage to view Actual usage here.";
+  }, [hasActualIntervals, loadingActual]);
 
   const selectedBuild = useMemo(() => {
     if (!Array.isArray(builds)) return null;
     if (scenarioId === "baseline") return builds.find((b) => String(b?.scenarioKey ?? "") === "BASELINE") ?? null;
     return builds.find((b) => String(b?.scenarioId ?? "") === scenarioId) ?? null;
   }, [builds, scenarioId]);
+
+  const baselineBuild = useMemo(() => {
+    if (!Array.isArray(builds)) return null;
+    return builds.find((b) => String(b?.scenarioKey ?? "") === "BASELINE") ?? null;
+  }, [builds]);
+
+  const pastScenario = useMemo(() => scenarios.find((s) => s.name === WORKSPACE_PAST_NAME) ?? null, [scenarios]);
+  const futureScenario = useMemo(() => scenarios.find((s) => s.name === WORKSPACE_FUTURE_NAME) ?? null, [scenarios]);
+
+  useEffect(() => {
+    if (workspace === "BASELINE") {
+      setScenarioId("baseline");
+      return;
+    }
+    if (workspace === "PAST") {
+      setScenarioId(pastScenario?.id ?? "baseline");
+      return;
+    }
+    setScenarioId(futureScenario?.id ?? "baseline");
+  }, [workspace, pastScenario?.id, futureScenario?.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -249,25 +327,26 @@ export function UsageSimulatorClient({ houseId }: { houseId: string }) {
     };
   }, [houseId, scenarioId, refreshToken]);
 
-  async function createNewScenario() {
-    const name = newScenarioName.trim();
-    if (!name) return;
+  async function createScenario(name: string) {
+    const trimmed = name.trim();
+    if (!trimmed) return null;
     try {
       const r = await fetch("/api/user/simulator/scenarios", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ houseId, name }),
+        body: JSON.stringify({ houseId, name: trimmed }),
       });
       const j = (await r.json().catch(() => null)) as any;
       if (!r.ok || !j?.ok) {
         setRecalcNote(j?.error ? String(j.error) : "Failed to create scenario");
-        return;
+        return null;
       }
-      setNewScenarioName("");
-      setScenarioId(String(j.scenario?.id ?? "baseline"));
+      const id = String(j.scenario?.id ?? "");
       setRefreshToken((x) => x + 1);
+      return id || null;
     } catch (e: any) {
       setRecalcNote(e?.message ?? String(e));
+      return null;
     }
   }
 
@@ -290,8 +369,31 @@ export function UsageSimulatorClient({ houseId }: { houseId: string }) {
   async function addTimelineEvent() {
     if (!scenarioId || scenarioId === "baseline") return;
     const effectiveMonth = timelineMonth;
-    const multiplier = timelineMultiplier.trim() ? Number(timelineMultiplier) : undefined;
-    const adderKwh = timelineAdderKwh.trim() ? Number(timelineAdderKwh) : undefined;
+    const multiplier =
+      timelineAdjustmentType === "CUSTOM"
+        ? timelineMultiplier.trim()
+          ? Number(timelineMultiplier)
+          : undefined
+        : toMonthlyAdjustmentPayload({
+            type: timelineAdjustmentType,
+            value: timelineCatalogValue.trim() ? Number(timelineCatalogValue) : NaN,
+          }).multiplier;
+    const adderKwh =
+      timelineAdjustmentType === "CUSTOM"
+        ? timelineAdderKwh.trim()
+          ? Number(timelineAdderKwh)
+          : undefined
+        : toMonthlyAdjustmentPayload({
+            type: timelineAdjustmentType,
+            value: timelineCatalogValue.trim() ? Number(timelineCatalogValue) : NaN,
+          }).adderKwh;
+    if (
+      (multiplier === undefined || !Number.isFinite(Number(multiplier))) &&
+      (adderKwh === undefined || !Number.isFinite(Number(adderKwh)))
+    ) {
+      setRecalcNote("Enter a valid adjustment value.");
+      return;
+    }
     const r = await fetch(`/api/user/simulator/scenarios/${encodeURIComponent(scenarioId)}/events`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -300,6 +402,8 @@ export function UsageSimulatorClient({ houseId }: { houseId: string }) {
     const j = (await r.json().catch(() => null)) as any;
     if (r.ok && j?.ok) {
       setTimelineMonth("");
+      setTimelineAdjustmentType("CUSTOM");
+      setTimelineCatalogValue("");
       setTimelineMultiplier("");
       setTimelineAdderKwh("");
       await loadTimeline();
@@ -328,13 +432,30 @@ export function UsageSimulatorClient({ houseId }: { houseId: string }) {
   }
 
   async function recalc() {
+    if (workspace === "PAST" && !pastScenario) {
+      setRecalcNote(`Create the “${WORKSPACE_PAST_NAME}” workspace first.`);
+      return;
+    }
+    if (workspace === "FUTURE" && !futureScenario) {
+      setRecalcNote(`Create the “${WORKSPACE_FUTURE_NAME}” workspace first.`);
+      return;
+    }
+    if (scenarioId !== "baseline" && !baselineBuild) {
+      setRecalcNote("Generate the simulated baseline first to unlock Past/Future scenarios.");
+      return;
+    }
     setRecalcBusy(true);
     setRecalcNote(null);
     try {
       const r = await fetch("/api/user/simulator/recalc", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ houseId, mode, scenarioId: scenarioId === "baseline" ? null : scenarioId }),
+        body: JSON.stringify({
+          houseId,
+          mode,
+          scenarioId: scenarioId === "baseline" ? null : scenarioId,
+          weatherPreference,
+        }),
       });
       const j = (await r.json().catch(() => null)) as any;
       if (!r.ok || !j?.ok) {
@@ -361,11 +482,11 @@ export function UsageSimulatorClient({ houseId }: { houseId: string }) {
             <div className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-cyan/60">Start here</div>
             <h2 className="mt-2 text-2xl font-semibold text-brand-white">Usage Simulator</h2>
             <p className="mt-2 text-sm text-brand-cyan/75">
-              Choose a data source, save inputs below, then recalculate to build a 12‑month simulated curve.
+              Review Actual usage (if available), complete the required details, then generate a simulated baseline and scenarios.
             </p>
           </div>
 
-          {hasSmtIntervals ? (
+          {hasActualIntervals ? (
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
@@ -393,87 +514,118 @@ export function UsageSimulatorClient({ houseId }: { houseId: string }) {
               </button>
             </div>
           ) : (
-            <div className="text-xs text-brand-cyan/60">Actual compare requires SMT intervals.</div>
+            <div className="text-xs text-brand-cyan/60">{actualDisabledReason}</div>
           )}
         </div>
 
-        <div className="mt-5 grid gap-4 md:grid-cols-3">
-          <button
-            type="button"
-            onClick={() => setMode("MANUAL_TOTALS")}
-            className={[
-              "rounded-2xl border p-4 text-left transition",
-              mode === "MANUAL_TOTALS"
-                ? "border-brand-cyan/40 bg-brand-white/10"
-                : "border-brand-cyan/20 bg-brand-white/5 hover:bg-brand-white/10",
-            ].join(" ")}
-          >
-            <div className="text-sm font-semibold text-brand-white">Enter usage totals</div>
-            <div className="mt-1 text-xs text-brand-cyan/70">Use monthly or annual totals you enter manually.</div>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setMode("NEW_BUILD_ESTIMATE")}
-            className={[
-              "rounded-2xl border p-4 text-left transition",
-              mode === "NEW_BUILD_ESTIMATE"
-                ? "border-brand-cyan/40 bg-brand-white/10"
-                : "border-brand-cyan/20 bg-brand-white/5 hover:bg-brand-white/10",
-            ].join(" ")}
-          >
-            <div className="text-sm font-semibold text-brand-white">New build / no history</div>
-            <div className="mt-1 text-xs text-brand-cyan/70">Estimate totals from home + appliances + occupancy.</div>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setMode("SMT_BASELINE")}
-            disabled={!hasSmtIntervals}
-            title={startFromActualDisabledReason ?? undefined}
-            className={[
-              "rounded-2xl border p-4 text-left transition",
-              !hasSmtIntervals ? "cursor-not-allowed opacity-60" : "",
-              mode === "SMT_BASELINE"
-                ? "border-brand-cyan/40 bg-brand-white/10"
-                : "border-brand-cyan/20 bg-brand-white/5 hover:bg-brand-white/10",
-            ].join(" ")}
-          >
-            <div className="text-sm font-semibold text-brand-white">Start from Actual (SMT)</div>
-            <div className="mt-1 text-xs text-brand-cyan/70">
-              Use SMT 15‑minute intervals as the baseline shape and fill to a full 12 months.
+        <div className="mt-5 rounded-2xl border border-brand-cyan/20 bg-brand-white/5 p-4">
+          <div className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-cyan/60">Simulator context</div>
+          <div className="mt-2 grid gap-3 md:grid-cols-3">
+            <div>
+              <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Intent</div>
+              <div className="mt-1 text-sm font-semibold text-brand-white">
+                {normalizedIntent ? normalizedIntent : "NONE"}
+              </div>
+              <div className="mt-1 text-xs text-brand-cyan/70">
+                Source selection happens on <span className="font-semibold">Usage Entry</span>.
+              </div>
             </div>
-          </button>
+            <div>
+              <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Actual coverage</div>
+              <div className="mt-1 text-xs text-brand-cyan/80">
+                {hasActualIntervals
+                  ? `${actualSource ?? "ACTUAL"} · ${actualCoverage?.start ?? "?"} → ${actualCoverage?.end ?? "?"} · ${
+                      actualCoverage?.intervalsCount ?? 0
+                    } intervals`
+                  : "No actual usage connected yet."}
+              </div>
+            </div>
+            <div>
+              <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Simulated baseline type</div>
+              <div className="mt-1 text-xs text-brand-cyan/80">
+                {mode === "MANUAL_TOTALS"
+                  ? "Manual totals"
+                  : mode === "NEW_BUILD_ESTIMATE"
+                    ? "New build estimate"
+                    : "Gap-fill from Actual (SMT/Green Button)"}
+              </div>
+            </div>
+          </div>
         </div>
 
         <div className="mt-5 grid gap-3 md:grid-cols-3">
           <div className="md:col-span-2">
-            <div className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-cyan/60">Scenario</div>
+            <div className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-cyan/60">Workspaces</div>
             <div className="mt-2 flex flex-wrap items-center gap-2">
-              <select
-                value={scenarioId}
-                onChange={(e) => setScenarioId(e.target.value)}
-                className="rounded-xl border border-brand-cyan/20 bg-brand-white/5 px-3 py-2 text-xs text-brand-white"
-              >
-                <option value="baseline">Baseline</option>
-                {scenarios.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
-              <input
-                value={newScenarioName}
-                onChange={(e) => setNewScenarioName(e.target.value)}
-                placeholder="New scenario name"
-                className="w-48 rounded-xl border border-brand-cyan/20 bg-brand-white/5 px-3 py-2 text-xs text-brand-white placeholder:text-brand-cyan/50"
-              />
               <button
                 type="button"
-                onClick={() => void createNewScenario()}
+                onClick={() => setWorkspace("BASELINE")}
+                className={[
+                  "rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-wide transition",
+                  workspace === "BASELINE"
+                    ? "border-brand-cyan/50 bg-brand-cyan/10 text-brand-cyan"
+                    : "border-brand-cyan/20 bg-brand-white/5 text-brand-cyan/70 hover:bg-brand-white/10",
+                ].join(" ")}
+              >
+                Baseline (Simulated)
+              </button>
+              <button
+                type="button"
+                onClick={() => setWorkspace("PAST")}
+                disabled={!baselineBuild}
+                className={[
+                  "rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-wide transition",
+                  !baselineBuild ? "cursor-not-allowed opacity-60" : "",
+                  workspace === "PAST"
+                    ? "border-brand-cyan/50 bg-brand-cyan/10 text-brand-cyan"
+                    : "border-brand-cyan/20 bg-brand-white/5 text-brand-cyan/70 hover:bg-brand-white/10",
+                ].join(" ")}
+              >
+                Past (Corrected)
+              </button>
+              <button
+                type="button"
+                onClick={() => setWorkspace("FUTURE")}
+                disabled={!baselineBuild}
+                className={[
+                  "rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-wide transition",
+                  !baselineBuild ? "cursor-not-allowed opacity-60" : "",
+                  workspace === "FUTURE"
+                    ? "border-brand-cyan/50 bg-brand-cyan/10 text-brand-cyan"
+                    : "border-brand-cyan/20 bg-brand-white/5 text-brand-cyan/70 hover:bg-brand-white/10",
+                ].join(" ")}
+              >
+                Future (What-if)
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!baselineBuild) {
+                    setRecalcNote("Generate the simulated baseline first to unlock workspaces.");
+                    return;
+                  }
+                  if (workspace === "PAST" && !pastScenario) {
+                    const id = await createScenario(WORKSPACE_PAST_NAME);
+                    if (id) {
+                      setWorkspace("PAST");
+                      setRefreshToken((x) => x + 1);
+                    }
+                    return;
+                  }
+                  if (workspace === "FUTURE" && !futureScenario) {
+                    const id = await createScenario(WORKSPACE_FUTURE_NAME);
+                    if (id) {
+                      setWorkspace("FUTURE");
+                      setRefreshToken((x) => x + 1);
+                    }
+                    return;
+                  }
+                  setRecalcNote("Select Past or Future to create that workspace.");
+                }}
+                disabled={workspace === "BASELINE" || (workspace === "PAST" ? Boolean(pastScenario) : Boolean(futureScenario))}
                 className="rounded-xl border border-brand-cyan/30 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-white hover:bg-brand-white/10"
               >
-                Create
+                Create workspace
               </button>
               <button
                 type="button"
@@ -481,7 +633,7 @@ export function UsageSimulatorClient({ houseId }: { houseId: string }) {
                   setOpenTimeline(true);
                   void loadTimeline();
                 }}
-                disabled={scenarioId === "baseline"}
+                disabled={!baselineBuild || scenarioId === "baseline"}
                 className="rounded-xl border border-brand-cyan/30 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-white hover:bg-brand-white/10 disabled:opacity-60"
               >
                 Edit timeline
@@ -496,6 +648,14 @@ export function UsageSimulatorClient({ houseId }: { houseId: string }) {
             ) : (
               <div className="mt-2 text-xs text-brand-cyan/70">Not generated yet. Click Recalculate.</div>
             )}
+            {!baselineBuild ? (
+              <div className="mt-3 rounded-2xl border border-brand-cyan/20 bg-brand-white/5 px-4 py-3 text-xs text-brand-cyan/80">
+                <div className="font-semibold text-brand-white/90">Workspaces locked</div>
+                <div className="mt-1">
+                  Past/Future require a <span className="font-semibold">simulated baseline</span> build. Actual usage remains untouched.
+                </div>
+              </div>
+            ) : null}
           </div>
 
           <div className="md:col-span-1">
@@ -522,6 +682,21 @@ export function UsageSimulatorClient({ houseId }: { houseId: string }) {
               >
                 Appliances
               </button>
+            </div>
+            <div className="mt-4">
+              <div className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-cyan/60">Weather normalization</div>
+              <select
+                value={weatherPreference}
+                onChange={(e) => setWeatherPreference(e.target.value as any)}
+                className="mt-2 w-full rounded-xl border border-brand-cyan/20 bg-brand-white/5 px-3 py-2 text-xs text-brand-white"
+              >
+                <option value="NONE">None (Phase 1)</option>
+                <option value="LAST_YEAR_WEATHER">Last year weather (stub)</option>
+                <option value="LONG_TERM_AVERAGE">Long-term average (stub)</option>
+              </select>
+              <div className="mt-2 text-xs text-brand-cyan/70">
+                Phase 1 behavior is identity. The preference is stored in build inputs and included in hashing for determinism.
+              </div>
             </div>
           </div>
         </div>
@@ -609,25 +784,51 @@ export function UsageSimulatorClient({ houseId }: { houseId: string }) {
           <div className="space-y-4">
             <div className="rounded-2xl border border-brand-blue/10 bg-brand-blue/5 p-4">
               <div className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-navy/60">Add event (month)</div>
-              <div className="mt-3 grid gap-2 md:grid-cols-4">
+              <div className="mt-3 grid gap-2 md:grid-cols-5">
                 <input
                   type="month"
                   value={timelineMonth}
                   onChange={(e) => setTimelineMonth(e.target.value)}
                   className="rounded-xl border border-brand-blue/20 bg-white px-3 py-2 text-xs text-brand-navy"
                 />
-                <input
-                  value={timelineMultiplier}
-                  onChange={(e) => setTimelineMultiplier(e.target.value)}
-                  placeholder="Multiplier (e.g. 1.10)"
+                <select
+                  value={timelineAdjustmentType}
+                  onChange={(e) => setTimelineAdjustmentType(e.target.value as AdjustmentType)}
                   className="rounded-xl border border-brand-blue/20 bg-white px-3 py-2 text-xs text-brand-navy"
-                />
-                <input
-                  value={timelineAdderKwh}
-                  onChange={(e) => setTimelineAdderKwh(e.target.value)}
-                  placeholder="Adder kWh (e.g. 50)"
-                  className="rounded-xl border border-brand-blue/20 bg-white px-3 py-2 text-xs text-brand-navy"
-                />
+                >
+                  {USAGE_SCENARIO_ADJUSTMENT_CATALOG.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+                {timelineAdjustmentType === "CUSTOM" ? (
+                  <>
+                    <input
+                      value={timelineMultiplier}
+                      onChange={(e) => setTimelineMultiplier(e.target.value)}
+                      placeholder="Multiplier (e.g. 1.10 or 0)"
+                      className="rounded-xl border border-brand-blue/20 bg-white px-3 py-2 text-xs text-brand-navy"
+                    />
+                    <input
+                      value={timelineAdderKwh}
+                      onChange={(e) => setTimelineAdderKwh(e.target.value)}
+                      placeholder="Adder kWh (e.g. 50 or 0)"
+                      className="rounded-xl border border-brand-blue/20 bg-white px-3 py-2 text-xs text-brand-navy"
+                    />
+                  </>
+                ) : (
+                  <input
+                    value={timelineCatalogValue}
+                    onChange={(e) => setTimelineCatalogValue(e.target.value)}
+                    placeholder={
+                      USAGE_SCENARIO_ADJUSTMENT_CATALOG.find((c) => c.id === timelineAdjustmentType)?.inputKind === "PERCENT"
+                        ? "Percent (0–100)"
+                        : "kWh (e.g. 50)"
+                    }
+                    className="md:col-span-2 rounded-xl border border-brand-blue/20 bg-white px-3 py-2 text-xs text-brand-navy"
+                  />
+                )}
                 <button
                   type="button"
                   onClick={() => void addTimelineEvent()}

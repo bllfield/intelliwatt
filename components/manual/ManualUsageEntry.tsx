@@ -1,23 +1,27 @@
 "use client";
 
 import * as React from "react";
-import { lastFullMonthChicago, monthsEndingAt } from "@/lib/time/chicago";
+import { anchorEndDateUtc, lastFullMonthChicago, monthsEndingAt } from "@/lib/time/chicago";
 
 type TravelRange = { startDate: string; endDate: string };
 
 type ManualUsagePayload =
   | {
       mode: "MONTHLY";
-      anchorEndMonth: string; // YYYY-MM
-      billEndDay: number;
+      anchorEndDate: string; // YYYY-MM-DD
       monthlyKwh: Array<{ month: string; kwh: number | "" }>; // month == YYYY-MM
       travelRanges: TravelRange[];
+      // legacy
+      anchorEndMonth?: string;
+      billEndDay?: number;
     }
   | {
       mode: "ANNUAL";
-      endDate: string; // YYYY-MM-DD
+      anchorEndDate: string; // YYYY-MM-DD
       annualKwh: number | "";
       travelRanges: TravelRange[];
+      // legacy
+      endDate?: string;
     };
 
 type LoadResp =
@@ -130,12 +134,11 @@ export function ManualUsageEntry({ houseId }: { houseId: string }) {
   const [error, setError] = React.useState<string | null>(null);
   const [savedAt, setSavedAt] = React.useState<string | null>(null);
 
-  const [monthlyAnchorEndMonth, setMonthlyAnchorEndMonth] = React.useState<string>(lastFullMonthChicago());
-  const [billEndDay, setBillEndDay] = React.useState<number>(15);
+  const [monthlyAnchorEndDate, setMonthlyAnchorEndDate] = React.useState<string>(`${lastFullMonthChicago()}-15`);
   const [monthlyKwh, setMonthlyKwh] = React.useState<Array<{ month: string; kwh: number | "" }>>(
     monthsEndingAt(lastFullMonthChicago(), 12).map((m) => ({ month: m, kwh: "" })),
   );
-  const [annualEndDate, setAnnualEndDate] = React.useState<string>("");
+  const [annualAnchorEndDate, setAnnualAnchorEndDate] = React.useState<string>("");
   const [annualKwh, setAnnualKwh] = React.useState<number | "">("");
   const [travelRanges, setTravelRanges] = React.useState<TravelRange[]>([]);
 
@@ -157,9 +160,19 @@ export function ManualUsageEntry({ houseId }: { houseId: string }) {
         setSavedAt((json as any).updatedAt ?? null);
         if (payload?.mode === "MONTHLY") {
           setActiveTab("MONTHLY");
-          setMonthlyAnchorEndMonth(payload.anchorEndMonth);
-          setBillEndDay(payload.billEndDay);
-          const months = monthsEndingAt(payload.anchorEndMonth, 12);
+          const anchor =
+            typeof (payload as any).anchorEndDate === "string" && String((payload as any).anchorEndDate).trim().length > 0
+              ? String((payload as any).anchorEndDate).slice(0, 10)
+              : typeof (payload as any).anchorEndMonth === "string"
+                ? (() => {
+                    const endMonth = String((payload as any).anchorEndMonth).trim();
+                    const day = clampInt((payload as any).billEndDay ?? 15, 1, 31);
+                    const d = anchorEndDateUtc(endMonth, day);
+                    return d ? d.toISOString().slice(0, 10) : `${endMonth}-15`;
+                  })()
+                : `${lastFullMonthChicago()}-15`;
+          setMonthlyAnchorEndDate(anchor);
+          const months = monthsEndingAt(anchor.slice(0, 7), 12);
           const map = new Map<string, number | "">(
             payload.monthlyKwh.map((r) => [r.month, typeof r.kwh === "number" ? r.kwh : ""]),
           );
@@ -169,7 +182,7 @@ export function ManualUsageEntry({ houseId }: { houseId: string }) {
         }
         if (payload?.mode === "ANNUAL") {
           setActiveTab("ANNUAL");
-          setAnnualEndDate(payload.endDate);
+          setAnnualAnchorEndDate(String((payload as any).anchorEndDate ?? (payload as any).endDate ?? "").slice(0, 10));
           setAnnualKwh(payload.annualKwh);
           setTravelRanges(payload.travelRanges ?? []);
           return;
@@ -187,13 +200,13 @@ export function ManualUsageEntry({ houseId }: { houseId: string }) {
   }, [houseId]);
 
   React.useEffect(() => {
-    // Keep month labels stable when anchor changes.
+    // Keep month labels stable when anchor changes (months are billing-period labels ending at anchor's month).
     setMonthlyKwh((prev) => {
-      const months = monthsEndingAt(monthlyAnchorEndMonth, 12);
+      const months = monthsEndingAt(String(monthlyAnchorEndDate ?? "").slice(0, 7), 12);
       const map = new Map(prev.map((r) => [r.month, r.kwh]));
       return months.map((m) => ({ month: m, kwh: map.get(m) ?? "" }));
     });
-  }, [monthlyAnchorEndMonth]);
+  }, [monthlyAnchorEndDate]);
 
   const save = async () => {
     setSaving(true);
@@ -203,14 +216,13 @@ export function ManualUsageEntry({ houseId }: { houseId: string }) {
         activeTab === "MONTHLY"
           ? {
               mode: "MONTHLY",
-              anchorEndMonth: monthlyAnchorEndMonth,
-              billEndDay: clampInt(billEndDay, 1, 31),
+              anchorEndDate: String(monthlyAnchorEndDate ?? "").slice(0, 10),
               monthlyKwh: monthlyKwh.map((r) => ({ month: r.month, kwh: r.kwh === "" ? "" : Number(r.kwh) })),
               travelRanges: normalizeRanges(travelRanges),
             }
           : {
               mode: "ANNUAL",
-              endDate: annualEndDate,
+              anchorEndDate: String(annualAnchorEndDate ?? "").slice(0, 10),
               annualKwh: annualKwh === "" ? "" : Number(annualKwh),
               travelRanges: normalizeRanges(travelRanges),
             };
@@ -287,30 +299,21 @@ export function ManualUsageEntry({ houseId }: { houseId: string }) {
               <div className="mt-4 grid gap-4 sm:grid-cols-2">
                 <div>
                   <label className="block text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">
-                    Anchor end month (last full month)
+                    Anchor end date (meter read end date)
                   </label>
                   <input
-                    type="month"
-                    value={monthlyAnchorEndMonth}
-                    onChange={(e) => setMonthlyAnchorEndMonth(e.target.value)}
+                    type="date"
+                    value={monthlyAnchorEndDate}
+                    onChange={(e) => setMonthlyAnchorEndDate(e.target.value)}
                     className="mt-1 w-full rounded-lg border border-brand-cyan/20 bg-brand-navy px-3 py-2 text-sm text-brand-cyan"
                   />
                   <p className="mt-2 text-xs text-brand-cyan/60">
-                    The 12 months will be labeled ending at this month (America/Chicago last full month by default).
+                    We model 12 billing periods ending at this date (America/Chicago). UI labels periods by the end month.
                   </p>
                 </div>
-                <div>
-                  <label className="block text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">
-                    Bill end day (1–31)
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={31}
-                    value={billEndDay}
-                    onChange={(e) => setBillEndDay(clampInt(Number(e.target.value), 1, 31))}
-                    className="mt-1 w-full rounded-lg border border-brand-cyan/20 bg-brand-navy px-3 py-2 text-sm text-brand-cyan"
-                  />
+                <div className="text-xs text-brand-cyan/70 sm:flex sm:items-end">
+                  Each “month” entered is treated as a billing-period total (not a calendar month). We generate a curve that
+                  matches these totals exactly.
                 </div>
               </div>
 
@@ -349,12 +352,12 @@ export function ManualUsageEntry({ houseId }: { houseId: string }) {
               <div className="mt-4 grid gap-4 sm:grid-cols-2">
                 <div>
                   <label className="block text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">
-                    End date
+                    Anchor end date
                   </label>
                   <input
                     type="date"
-                    value={annualEndDate}
-                    onChange={(e) => setAnnualEndDate(e.target.value)}
+                    value={annualAnchorEndDate}
+                    onChange={(e) => setAnnualAnchorEndDate(e.target.value)}
                     className="mt-1 w-full rounded-lg border border-brand-cyan/20 bg-brand-navy px-3 py-2 text-sm text-brand-cyan"
                   />
                 </div>
@@ -374,7 +377,7 @@ export function ManualUsageEntry({ houseId }: { houseId: string }) {
                 </div>
               </div>
               <p className="mt-2 text-xs text-brand-cyan/60">
-                We’ll derive a 365-day window ending on your end date.
+                We’ll distribute the annual total across 12 billing periods ending at this date using a deterministic seasonal profile.
               </p>
             </div>
           )}
