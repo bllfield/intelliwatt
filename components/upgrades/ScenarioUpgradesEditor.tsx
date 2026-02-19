@@ -435,13 +435,14 @@ export function ScenarioUpgradesEditor({
       inputsJson,
       notes: form.notes.trim() || null,
     };
-    await fetch(`/api/user/upgrades-ledger/${encodeURIComponent(row.id)}`, {
+    const ledgerRes = await fetch(`/api/user/upgrades-ledger/${encodeURIComponent(row.id)}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
+    if (!ledgerRes.ok) return;
     if (row.scenarioEventId) {
-      await fetch(`/api/user/simulator/scenarios/${encodeURIComponent(scenarioId)}/events/${encodeURIComponent(row.scenarioEventId)}`, {
+      const eventRes = await fetch(`/api/user/simulator/scenarios/${encodeURIComponent(scenarioId)}/events/${encodeURIComponent(row.scenarioEventId)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -462,6 +463,7 @@ export function ScenarioUpgradesEditor({
           effectiveMonth: form.effectiveDate.slice(0, 7),
         }),
       });
+      if (!eventRes.ok) return;
     }
     setEditingId(null);
     await load();
