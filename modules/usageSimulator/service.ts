@@ -316,17 +316,21 @@ export async function recalcSimulatorBuild(args: {
     }
   }
 
-  // Future = Past curve + Future overlay. Past curve is: stored Past build (baseline + Past adjustments), or baseline + pastOverlay, or baseline.
+  // Future = Past curve + Future overlay. Always prefer stored Past curve when available (that is baseline + Past adjustments as saved); else baseline + pastOverlay; else baseline.
   let monthlyTotalsKwhByMonth: Record<string, number> = {};
   for (let i = 0; i < built.canonicalMonths.length; i++) {
     const ym = built.canonicalMonths[i];
     const base = Number(built.monthlyTotalsKwhByMonth?.[ym] ?? 0) || 0;
-    const pastCurveKwh =
+    const storedPastKwh =
       pastCurveByMonth != null && Object.prototype.hasOwnProperty.call(pastCurveByMonth, ym)
         ? Number(pastCurveByMonth[ym])
         : undefined;
     const pastCurve: number =
-      Number.isFinite(pastCurveKwh) ? Math.max(0, pastCurveKwh ?? 0) : pastOverlay ? applyMonthlyOverlay({ base, mult: pastOverlay.monthlyMultipliersByMonth?.[ym], add: pastOverlay.monthlyAddersKwhByMonth?.[ym] }) : Math.max(0, base);
+      Number.isFinite(storedPastKwh)
+        ? Math.max(0, storedPastKwh ?? 0)
+        : pastOverlay
+          ? applyMonthlyOverlay({ base, mult: pastOverlay.monthlyMultipliersByMonth?.[ym], add: pastOverlay.monthlyAddersKwhByMonth?.[ym] })
+          : Math.max(0, base);
     const curveForMonth: number = Number.isFinite(pastCurve) ? pastCurve : Math.max(0, base);
     const curveNum = typeof curveForMonth === "number" && Number.isFinite(curveForMonth) ? curveForMonth : 0;
     monthlyTotalsKwhByMonth[ym] = overlay ? applyMonthlyOverlay({ base: curveNum, mult: overlay.monthlyMultipliersByMonth?.[ym], add: overlay.monthlyAddersKwhByMonth?.[ym] }) : curveForMonth;
