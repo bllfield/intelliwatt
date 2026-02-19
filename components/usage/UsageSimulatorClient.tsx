@@ -10,6 +10,7 @@ import {
   toMonthlyAdjustmentPayload,
   type AdjustmentType,
 } from "@/lib/usageScenario/catalog";
+import { ScenarioUpgradesEditor } from "@/components/upgrades/ScenarioUpgradesEditor";
 
 type Mode = "MANUAL_TOTALS" | "NEW_BUILD_ESTIMATE" | "SMT_BASELINE";
 
@@ -133,6 +134,9 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
   const [timelineCatalogValue, setTimelineCatalogValue] = useState<string>("");
   const [timelineMultiplier, setTimelineMultiplier] = useState<string>("");
   const [timelineAdderKwh, setTimelineAdderKwh] = useState<string>("");
+  const [travelRangeStart, setTravelRangeStart] = useState<string>("");
+  const [travelRangeEnd, setTravelRangeEnd] = useState<string>("");
+  const [showAdvancedMonthly, setShowAdvancedMonthly] = useState(false);
 
   const [pastEventCount, setPastEventCount] = useState<number>(0);
   const [futureEventCount, setFutureEventCount] = useState<number>(0);
@@ -550,13 +554,14 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
     }
   }
 
-  async function addTravelRange() {
+  async function addTravelRange(startDate: string, endDate: string) {
     if (!scenarioId || scenarioId === "baseline") return;
-    const effectiveMonth = canonicalEndMonth || new Date().toISOString().slice(0, 7);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) return;
+    const effectiveMonth = startDate.slice(0, 7);
     const r = await fetch(`/api/user/simulator/scenarios/${encodeURIComponent(scenarioId)}/events`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ houseId, effectiveMonth, kind: "TRAVEL_RANGE", startDate: "", endDate: "" }),
+      body: JSON.stringify({ houseId, effectiveMonth, kind: "TRAVEL_RANGE", startDate, endDate }),
     });
     const j = (await r.json().catch(() => null)) as any;
     if (r.ok && j?.ok) {
@@ -1078,27 +1083,56 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
           <div className="text-sm text-brand-navy/70">Select or create a scenario to edit its timeline.</div>
         ) : (
           <div className="space-y-4">
+            {(workspace === "PAST" || workspace === "FUTURE") && scenarioId !== "baseline" ? (
+              <ScenarioUpgradesEditor
+                houseId={houseId}
+                scenarioId={scenarioId}
+                canonicalEndMonth={canonicalEndMonth || new Date().toISOString().slice(0, 7)}
+                onRecalc={() => {
+                  scheduleScenarioRecalc(scenarioId);
+                }}
+              />
+            ) : null}
+
             {workspace === "PAST" ? (
               <div className="rounded-2xl border border-brand-blue/10 bg-white p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-navy/60">
-                      Unusual travel (exclude whole days)
-                    </div>
-                    <div className="mt-2 text-xs text-brand-navy/70">
-                      Add date ranges where the home was vacant/unusually low usage. Simulated totals will be renormalized to
-                      still match your kWh targets.
-                    </div>
-                  </div>
+                <div className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-navy/60">
+                  Travel/Vacant
+                </div>
+                <div className="mt-2 text-xs text-brand-navy/70">
+                  Add date ranges when the home was vacant or you were away. Those days are excluded from baseline shape
+                  derivation and shown as Travel/Vacant on the Past curve.
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <input
+                    type="date"
+                    value={travelRangeStart}
+                    onChange={(e) => setTravelRangeStart(e.target.value)}
+                    className="rounded-lg border border-brand-blue/20 bg-white px-2 py-1.5 text-xs text-brand-navy"
+                    placeholder="Start"
+                  />
+                  <input
+                    type="date"
+                    value={travelRangeEnd}
+                    onChange={(e) => setTravelRangeEnd(e.target.value)}
+                    className="rounded-lg border border-brand-blue/20 bg-white px-2 py-1.5 text-xs text-brand-navy"
+                    placeholder="End"
+                  />
                   <button
                     type="button"
-                    onClick={() => void addTravelRange()}
-                    className="rounded-xl border border-brand-blue/30 bg-white px-3 py-2 text-xs font-semibold text-brand-navy hover:bg-brand-blue/5"
+                    disabled={!/^\d{4}-\d{2}-\d{2}$/.test(travelRangeStart) || !/^\d{4}-\d{2}-\d{2}$/.test(travelRangeEnd)}
+                    onClick={() => {
+                      if (/^\d{4}-\d{2}-\d{2}$/.test(travelRangeStart) && /^\d{4}-\d{2}-\d{2}$/.test(travelRangeEnd)) {
+                        void addTravelRange(travelRangeStart, travelRangeEnd);
+                        setTravelRangeStart("");
+                        setTravelRangeEnd("");
+                      }
+                    }}
+                    className="rounded-xl border border-brand-blue/30 bg-white px-3 py-2 text-xs font-semibold text-brand-navy hover:bg-brand-blue/5 disabled:opacity-50"
                   >
                     Add range
                   </button>
                 </div>
-
                 <div className="mt-3 space-y-2">
                   {timelineEvents.filter((e) => String((e as any)?.kind ?? "") === "TRAVEL_RANGE").length ? null : (
                     <div className="text-sm text-brand-navy/70">No travel ranges yet.</div>
@@ -1118,11 +1152,13 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
                             type="date"
                             defaultValue={start}
                             onBlur={(ev) => {
-                              const v = String(ev.target.value ?? "").slice(0, 10);
-                              void saveTimelineEvent(String(e.id), {
-                                effectiveMonth: /^\d{4}-\d{2}-\d{2}$/.test(v) ? v.slice(0, 7) : String(e.effectiveMonth ?? ""),
-                                payloadJson: { ...p, startDate: v },
-                              });
+                              const newStart = String(ev.target.value ?? "").slice(0, 10);
+                              const otherEnd = typeof p?.endDate === "string" ? String(p.endDate).slice(0, 10) : "";
+                              if (/^\d{4}-\d{2}-\d{2}$/.test(newStart) && /^\d{4}-\d{2}-\d{2}$/.test(otherEnd))
+                                void saveTimelineEvent(String(e.id), {
+                                  effectiveMonth: newStart.slice(0, 7),
+                                  payloadJson: { ...p, startDate: newStart, endDate: otherEnd },
+                                });
                             }}
                             className="rounded-lg border border-brand-blue/20 bg-white px-2 py-1 text-xs text-brand-navy md:col-span-2"
                           />
@@ -1130,8 +1166,13 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
                             type="date"
                             defaultValue={end}
                             onBlur={(ev) => {
-                              const v = String(ev.target.value ?? "").slice(0, 10);
-                              void saveTimelineEvent(String(e.id), { payloadJson: { ...p, endDate: v } });
+                              const newEnd = String(ev.target.value ?? "").slice(0, 10);
+                              const otherStart = typeof p?.startDate === "string" ? String(p.startDate).slice(0, 10) : "";
+                              if (/^\d{4}-\d{2}-\d{2}$/.test(newEnd) && /^\d{4}-\d{2}-\d{2}$/.test(otherStart))
+                                void saveTimelineEvent(String(e.id), {
+                                  effectiveMonth: otherStart.slice(0, 7),
+                                  payloadJson: { ...p, startDate: otherStart, endDate: newEnd },
+                                });
                             }}
                             className="rounded-lg border border-brand-blue/20 bg-white px-2 py-1 text-xs text-brand-navy md:col-span-2"
                           />
@@ -1150,8 +1191,17 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
             ) : null}
 
             <div className="rounded-2xl border border-brand-blue/10 bg-brand-blue/5 p-4">
-              <div className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-navy/60">Add event (month)</div>
-              <div className="mt-3 grid gap-2 md:grid-cols-5">
+              <button
+                type="button"
+                onClick={() => setShowAdvancedMonthly((s) => !s)}
+                className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-navy/60 hover:text-brand-navy"
+              >
+                {showAdvancedMonthly ? "▼" : "▶"} Advanced monthly adjustments
+              </button>
+              {showAdvancedMonthly ? (
+              <>
+              <div className="mt-3 text-xs text-brand-navy/60">Add event (month)</div>
+              <div className="mt-2 grid gap-2 md:grid-cols-5">
                 <input
                   type="month"
                   value={timelineMonth}
@@ -1204,10 +1254,9 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
                   Add
                 </button>
               </div>
-            </div>
 
-            <div className="rounded-2xl border border-brand-blue/10 bg-white p-4">
-              <div className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-navy/60">Events</div>
+            <div className="mt-4 rounded-2xl border border-brand-blue/10 bg-white p-4">
+              <div className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-navy/60">Monthly adjustment events</div>
               <div className="mt-3 space-y-2">
                 {timelineEvents.filter((e) => String((e as any)?.kind ?? "") === "MONTHLY_ADJUSTMENT").length ? null : (
                   <div className="text-sm text-brand-navy/70">No events yet.</div>
@@ -1266,6 +1315,9 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
                   );
                 })}
               </div>
+            </div>
+              </>
+              ) : null}
             </div>
           </div>
         )}

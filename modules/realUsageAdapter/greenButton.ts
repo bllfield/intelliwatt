@@ -31,6 +31,26 @@ function chicagoYearMonthFromBucket(bucket: Date): string {
   return bucket.toISOString().slice(0, 7);
 }
 
+function excludeDateKeysFragment(excludeDateKeys: string[] | undefined): Prisma.Sql {
+  if (!excludeDateKeys?.length) return Prisma.sql``;
+  return Prisma.sql` AND to_char(("timestamp" AT TIME ZONE 'America/Chicago')::timestamp, 'YYYY-MM-DD') NOT IN (${Prisma.join(excludeDateKeys.map((d) => Prisma.sql`${d}`), ", ")})`;
+}
+
+function travelRangesToExcludeDateKeys(ranges: Array<{ startDate: string; endDate: string }> | undefined): string[] {
+  if (!ranges?.length) return [];
+  const set = new Set<string>();
+  const re = /^\d{4}-\d{2}-\d{2}$/;
+  for (const r of ranges) {
+    if (!re.test(String(r.startDate).trim()) || !re.test(String(r.endDate).trim())) continue;
+    const start = new Date(String(r.startDate).trim() + "T12:00:00.000Z");
+    const end = new Date(String(r.endDate).trim() + "T12:00:00.000Z");
+    for (let d = new Date(start); d.getTime() <= end.getTime(); d.setDate(d.getDate() + 1)) {
+      set.add(d.toISOString().slice(0, 10));
+    }
+  }
+  return Array.from(set);
+}
+
 async function latestRawGreenButtonIdForHouse(houseId: string): Promise<string | null> {
   if (!USAGE_DB_ENABLED) return null;
   try {
@@ -87,7 +107,12 @@ export async function hasGreenButtonIntervals(args: { houseId: string; canonical
   }
 }
 
-export async function fetchGreenButtonCanonicalMonthlyTotals(args: { houseId: string; canonicalMonths: string[] }) {
+export async function fetchGreenButtonCanonicalMonthlyTotals(args: {
+  houseId: string;
+  canonicalMonths: string[];
+  excludeDateKeys?: string[];
+  travelRanges?: Array<{ startDate: string; endDate: string }>;
+}) {
   if (!USAGE_DB_ENABLED) return { intervalsCount: 0, monthlyKwhByMonth: {} as Record<string, number> };
   const rawId = await latestRawGreenButtonIdForHouse(args.houseId);
   if (!rawId) return { intervalsCount: 0, monthlyKwhByMonth: {} as Record<string, number> };
@@ -95,6 +120,10 @@ export async function fetchGreenButtonCanonicalMonthlyTotals(args: { houseId: st
 
   const { start, endExclusive } = utcRangeWithChicagoBuffer(args.canonicalMonths);
   const monthSet = new Set(args.canonicalMonths);
+  const travelKeys = args.travelRanges?.length ? travelRangesToExcludeDateKeys(args.travelRanges) : [];
+  const mergedExclude = [...(args.excludeDateKeys ?? []), ...travelKeys];
+  const exclude = mergedExclude.length ? mergedExclude : args.excludeDateKeys;
+  const excludeFrag = excludeDateKeysFragment(exclude);
 
   try {
     const usageClient = usagePrisma as any;
@@ -108,6 +137,7 @@ export async function fetchGreenButtonCanonicalMonthlyTotals(args: { houseId: st
         AND "rawId" = ${rawId}
         AND "timestamp" >= ${start}
         AND "timestamp" < ${endExclusive}
+        ${excludeFrag}
       GROUP BY bucket
       ORDER BY bucket ASC
     `)) as Array<{ bucket: Date; kwh: number; intervalscount: number }>;
@@ -127,13 +157,23 @@ export async function fetchGreenButtonCanonicalMonthlyTotals(args: { houseId: st
   }
 }
 
-export async function fetchGreenButtonIntradayShape96(args: { houseId: string; canonicalMonths: string[] }): Promise<number[] | null> {
+export async function fetchGreenButtonIntradayShape96(args: {
+  houseId: string;
+  canonicalMonths: string[];
+  excludeDateKeys?: string[];
+  travelRanges?: Array<{ startDate: string; endDate: string }>;
+}): Promise<number[] | null> {
   if (!USAGE_DB_ENABLED) return null;
   const rawId = await latestRawGreenButtonIdForHouse(args.houseId);
   if (!rawId) return null;
   if (!args.canonicalMonths.length) return null;
 
   const { start, endExclusive } = utcRangeWithChicagoBuffer(args.canonicalMonths);
+  const travelKeys = args.travelRanges?.length ? travelRangesToExcludeDateKeys(args.travelRanges) : [];
+  const mergedExclude = [...(args.excludeDateKeys ?? []), ...travelKeys];
+  const exclude = mergedExclude.length ? mergedExclude : args.excludeDateKeys;
+  const excludeFrag = excludeDateKeysFragment(exclude);
+
   try {
     const usageClient = usagePrisma as any;
     const rows = (await usageClient.$queryRaw(Prisma.sql`
@@ -145,6 +185,7 @@ export async function fetchGreenButtonIntradayShape96(args: { houseId: string; c
         AND "rawId" = ${rawId}
         AND "timestamp" >= ${start}
         AND "timestamp" < ${endExclusive}
+        ${excludeFrag}
       GROUP BY bucket
       ORDER BY bucket ASC
     `)) as Array<{ bucket: number; kwh: number }>;

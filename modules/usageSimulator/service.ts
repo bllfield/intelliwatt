@@ -3,7 +3,7 @@ import { anchorEndDateUtc, monthsEndingAt, lastFullMonthChicago } from "@/module
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
-import { buildSimulatorInputs, type BaseKind, type BuildMode } from "@/modules/usageSimulator/build";
+import { buildSimulatorInputs, travelRangesToExcludeDateKeys, type BaseKind, type BuildMode } from "@/modules/usageSimulator/build";
 import { computeRequirements, type SimulatorMode } from "@/modules/usageSimulator/requirements";
 import { chooseActualSource, hasActualIntervals } from "@/modules/realUsageAdapter/actual";
 import { SMT_SHAPE_DERIVATION_VERSION } from "@/modules/realUsageAdapter/smt";
@@ -160,6 +160,31 @@ export async function recalcSimulatorBuild(args: {
 
   const scenarioTravelRanges = scenarioId ? normalizeScenarioTravelRanges(scenarioEvents as any) : [];
 
+  const isFutureScenario = Boolean(scenarioId) && scenario?.name === WORKSPACE_FUTURE_NAME;
+  let pastTravelRanges: Array<{ startDate: string; endDate: string }> = [];
+  let pastScenario: { id: string; name: string } | null = null;
+  let pastEventsForOverlay: Array<{ id: string; effectiveMonth: string; kind: string; payloadJson: any }> = [];
+  let pastOverlay: ReturnType<typeof computeMonthlyOverlay> | null = null;
+
+  if (isFutureScenario) {
+    pastScenario = await (prisma as any).usageSimulatorScenario
+      .findFirst({
+        where: { userId, houseId, name: WORKSPACE_PAST_NAME, archivedAt: null },
+        select: { id: true, name: true },
+      })
+      .catch(() => null);
+    if (pastScenario?.id) {
+      pastEventsForOverlay = await (prisma as any).usageSimulatorScenarioEvent
+        .findMany({
+          where: { scenarioId: pastScenario.id },
+          select: { id: true, effectiveMonth: true, kind: true, payloadJson: true },
+          orderBy: [{ effectiveMonth: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+        })
+        .catch(() => []);
+      pastTravelRanges = normalizeScenarioTravelRanges(pastEventsForOverlay as any);
+    }
+  }
+
   // NEW_BUILD_ESTIMATE completeness enforcement uses existing validators via requirements.
   const req = computeRequirements(
     {
@@ -178,6 +203,7 @@ export async function recalcSimulatorBuild(args: {
   // Enforce mode->baseKind mapping (no mismatches)
   const baseKind = baseKindFromMode(mode);
 
+  const travelRangesForBuild = scenarioId ? [...pastTravelRanges, ...scenarioTravelRanges] : undefined;
   const built = await buildSimulatorInputs({
     mode: mode as BuildMode,
     manualUsagePayload: manualUsagePayload as any,
@@ -188,6 +214,7 @@ export async function recalcSimulatorBuild(args: {
     baselineHomeProfile: homeProfile,
     baselineApplianceProfile: applianceProfile,
     canonicalMonths: canonical.months,
+    travelRanges: travelRangesForBuild,
     now: args.now,
   });
 
@@ -203,36 +230,13 @@ export async function recalcSimulatorBuild(args: {
       })
     : null;
 
-  // Past -> Future chaining (V1 UX):
-  // If the Future workspace is used and Past has edits, apply Future adjustments on top of Past-corrected usage.
-  let pastScenario: { id: string; name: string } | null = null;
-  let pastEvents: Array<{ id: string; effectiveMonth: string; kind: string; payloadJson: any }> = [];
-  let pastOverlay: ReturnType<typeof computeMonthlyOverlay> | null = null;
-  let pastTravelRanges: Array<{ startDate: string; endDate: string }> = [];
-  const isFutureScenario = Boolean(scenarioId) && scenario?.name === WORKSPACE_FUTURE_NAME;
-  if (isFutureScenario) {
-    pastScenario = await (prisma as any).usageSimulatorScenario
-      .findFirst({
-        where: { userId, houseId, name: WORKSPACE_PAST_NAME, archivedAt: null },
-        select: { id: true, name: true },
-      })
-      .catch(() => null);
-    if (pastScenario?.id) {
-      pastEvents = await (prisma as any).usageSimulatorScenarioEvent
-        .findMany({
-          where: { scenarioId: pastScenario.id },
-          select: { id: true, effectiveMonth: true, kind: true, payloadJson: true },
-          orderBy: [{ effectiveMonth: "asc" }, { createdAt: "asc" }, { id: "asc" }],
-        })
-        .catch(() => []);
-      const pastHasEdits = pastEvents.some((e) => {
-        const k = String(e?.kind ?? "");
-        return k === "MONTHLY_ADJUSTMENT" || k === "TRAVEL_RANGE";
-      });
-      if (pastHasEdits) {
-        pastOverlay = computeMonthlyOverlay({ canonicalMonths: built.canonicalMonths, events: pastEvents as any });
-        pastTravelRanges = normalizeScenarioTravelRanges(pastEvents as any);
-      }
+  if (isFutureScenario && pastEventsForOverlay.length > 0) {
+    const pastHasEdits = pastEventsForOverlay.some((e) => {
+      const k = String(e?.kind ?? "");
+      return k === "MONTHLY_ADJUSTMENT" || k === "TRAVEL_RANGE";
+    });
+    if (pastHasEdits) {
+      pastOverlay = computeMonthlyOverlay({ canonicalMonths: built.canonicalMonths, events: pastEventsForOverlay as any });
     }
   }
 
@@ -246,6 +250,31 @@ export async function recalcSimulatorBuild(args: {
     monthlyTotalsKwhByMonth[ym] = overlay
       ? applyMonthlyOverlay({ base: afterPast, mult: overlay.monthlyMultipliersByMonth?.[ym], add: overlay.monthlyAddersKwhByMonth?.[ym] })
       : afterPast;
+  }
+
+  // Month-level uplift for travel exclusions: when travel days exclude usage, uplift remaining days to fill the month.
+  const allTravelRanges = scenarioId ? [...pastTravelRanges, ...scenarioTravelRanges] : [];
+  if (allTravelRanges.length > 0) {
+    const excludeSet = new Set(travelRangesToExcludeDateKeys(allTravelRanges));
+    for (const ym of built.canonicalMonths) {
+      const [y, m] = ym.split("-").map(Number);
+      if (!Number.isFinite(y) || !Number.isFinite(m) || m < 1 || m > 12) continue;
+      const daysInMonth = new Date(y, m, 0).getDate();
+      let travelDays = 0;
+      for (let d = 1; d <= daysInMonth; d++) {
+        const key = `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+        if (excludeSet.has(key)) travelDays++;
+      }
+      const nonTravelDays = daysInMonth - travelDays;
+      if (travelDays > 0 && nonTravelDays <= 0) {
+        return { ok: false, error: "travel_exclusions_cover_full_range" };
+      }
+      const baseMonthKwh = monthlyTotalsKwhByMonth[ym] ?? 0;
+      if (baseMonthKwh > 0 && nonTravelDays > 0) {
+        const factor = daysInMonth / nonTravelDays;
+        monthlyTotalsKwhByMonth[ym] = baseMonthKwh * factor;
+      }
+    }
   }
 
   const notes = [...(built.notes ?? [])];
@@ -327,7 +356,7 @@ export async function recalcSimulatorBuild(args: {
       scenarioEvents: scenarioEvents ?? [],
       scenarioOverlay: overlay ?? null,
       pastScenario: pastOverlay ? pastScenario : null,
-      pastScenarioEvents: pastOverlay ? pastEvents : [],
+      pastScenarioEvents: pastOverlay ? pastEventsForOverlay : [],
     } as any,
     scenarioKey,
     scenarioId,
@@ -335,7 +364,7 @@ export async function recalcSimulatorBuild(args: {
   };
 
   // V1 hash: stable JSON of a deterministic object.
-  const eventsForHash = (pastOverlay ? [...pastEvents, ...(scenarioEvents ?? [])] : (scenarioEvents ?? []))
+  const eventsForHash = (pastOverlay ? [...pastEventsForOverlay, ...(scenarioEvents ?? [])] : (scenarioEvents ?? []))
     .map((e) => {
       const p = (e as any)?.payloadJson ?? {};
       const multiplier = typeof p?.multiplier === "number" && Number.isFinite(p.multiplier) ? p.multiplier : null;
@@ -675,19 +704,27 @@ export async function archiveScenario(args: { userId: string; houseId: string; s
   return { ok: true as const };
 }
 
+function eventSortKey(e: { effectiveMonth: string; kind: string; payloadJson: any; id: string }): string {
+  const p = e?.payloadJson ?? {};
+  const effectiveDate = typeof p.effectiveDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(p.effectiveDate) ? p.effectiveDate : null;
+  const ym = effectiveDate ? effectiveDate.slice(0, 7) : String(e?.effectiveMonth ?? "");
+  return `${ym}-${effectiveDate ?? e?.effectiveMonth ?? ""}-${e?.id ?? ""}`;
+}
+
 export async function listScenarioEvents(args: { userId: string; houseId: string; scenarioId: string }) {
   const scenario = await (prisma as any).usageSimulatorScenario
     .findFirst({ where: { id: args.scenarioId, userId: args.userId, houseId: args.houseId, archivedAt: null }, select: { id: true } })
     .catch(() => null);
   if (!scenario) return { ok: false as const, error: "scenario_not_found" };
 
-  const events = await (prisma as any).usageSimulatorScenarioEvent
+  const raw = await (prisma as any).usageSimulatorScenarioEvent
     .findMany({
       where: { scenarioId: args.scenarioId },
       select: { id: true, scenarioId: true, effectiveMonth: true, kind: true, payloadJson: true, createdAt: true, updatedAt: true },
       orderBy: [{ effectiveMonth: "asc" }, { createdAt: "asc" }, { id: "asc" }],
     })
     .catch(() => []);
+  const events = (raw as any[]).slice().sort((a, b) => eventSortKey(a).localeCompare(eventSortKey(b)));
   return { ok: true as const, events };
 }
 

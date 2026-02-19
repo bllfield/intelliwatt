@@ -37,15 +37,29 @@ export async function fetchActualCanonicalMonthlyTotals(args: {
   houseId: string;
   esiid: string | null;
   canonicalMonths: string[];
+  /** Exclude these date keys (YYYY-MM-DD) from aggregation (e.g. Travel/Vacant). */
+  excludeDateKeys?: string[];
+  /** Travel/Vacant ranges: dates in these ranges are excluded from aggregation. */
+  travelRanges?: Array<{ startDate: string; endDate: string }>;
 }): Promise<{ source: ActualUsageSource | null; intervalsCount: number; monthlyKwhByMonth: Record<string, number> }> {
   const source = await chooseActualSource({ houseId: args.houseId, esiid: args.esiid });
   if (!source) return { source: null, intervalsCount: 0, monthlyKwhByMonth: {} };
   if (source === "SMT") {
     if (!args.esiid) return { source: "SMT", intervalsCount: 0, monthlyKwhByMonth: {} };
-    const out = await fetchSmtCanonicalMonthlyTotals({ esiid: args.esiid, canonicalMonths: args.canonicalMonths });
+    const out = await fetchSmtCanonicalMonthlyTotals({
+      esiid: args.esiid,
+      canonicalMonths: args.canonicalMonths,
+      excludeDateKeys: args.excludeDateKeys,
+      travelRanges: args.travelRanges,
+    });
     return { source: "SMT", intervalsCount: out.intervalsCount, monthlyKwhByMonth: out.monthlyKwhByMonth };
   }
-  const out = await fetchGreenButtonCanonicalMonthlyTotals({ houseId: args.houseId, canonicalMonths: args.canonicalMonths });
+  const out = await fetchGreenButtonCanonicalMonthlyTotals({
+    houseId: args.houseId,
+    canonicalMonths: args.canonicalMonths,
+    excludeDateKeys: args.excludeDateKeys,
+    travelRanges: args.travelRanges,
+  });
   return { source: "GREEN_BUTTON", intervalsCount: out.intervalsCount, monthlyKwhByMonth: out.monthlyKwhByMonth };
 }
 
@@ -53,15 +67,29 @@ export async function fetchActualIntradayShape96(args: {
   houseId: string;
   esiid: string | null;
   canonicalMonths: string[];
+  /** Exclude these date keys (YYYY-MM-DD) from shape derivation (e.g. Travel/Vacant). */
+  excludeDateKeys?: string[];
+  /** Travel/Vacant ranges: dates in these ranges are excluded from shape derivation. */
+  travelRanges?: Array<{ startDate: string; endDate: string }>;
 }): Promise<{ source: ActualUsageSource | null; shape96: number[] | null }> {
   const source = await chooseActualSource({ houseId: args.houseId, esiid: args.esiid });
   if (!source) return { source: null, shape96: null };
   if (source === "SMT") {
     if (!args.esiid) return { source: "SMT", shape96: null };
-    const shape96 = await fetchSmtIntradayShape96({ esiid: args.esiid, canonicalMonths: args.canonicalMonths });
+    const shape96 = await fetchSmtIntradayShape96({
+      esiid: args.esiid,
+      canonicalMonths: args.canonicalMonths,
+      excludeDateKeys: args.excludeDateKeys,
+      travelRanges: args.travelRanges,
+    });
     return { source: "SMT", shape96 };
   }
-  const shape96 = await fetchGreenButtonIntradayShape96({ houseId: args.houseId, canonicalMonths: args.canonicalMonths });
+  const shape96 = await fetchGreenButtonIntradayShape96({
+    houseId: args.houseId,
+    canonicalMonths: args.canonicalMonths,
+    excludeDateKeys: args.excludeDateKeys,
+    travelRanges: args.travelRanges,
+  });
   return { source: "GREEN_BUTTON", shape96 };
 }
 

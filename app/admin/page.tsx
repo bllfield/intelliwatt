@@ -676,7 +676,7 @@ export default function AdminDashboard() {
                     <button
                       type="button"
                       onClick={() => setAdminToken('')}
-                      className="text-xs font-semibold uppercase tracking-wide text-brand-navy/70 transition hover:text-brand-navy"
+                      className="text-xs font-semibold uppercase tracking-wide text-[#00E5FF] transition hover:text-[#5FF7FF]"
                     >
                       Clear
                     </button>
@@ -686,7 +686,7 @@ export default function AdminDashboard() {
                 type="button"
                 onClick={handleRecalculateEntries}
                 disabled={recalculatingEntries || refreshing || recalculatingReferrals}
-                className="inline-flex items-center gap-2 rounded-full border border-brand-blue/40 bg-brand-blue/10 px-4 py-2 font-semibold uppercase tracking-wide text-brand-navy transition hover:border-brand-blue hover:bg-brand-blue/20 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex items-center gap-2 rounded-full border border-brand-blue/40 bg-brand-blue/10 px-4 py-2 font-semibold uppercase tracking-wide text-[#00E5FF] transition hover:border-brand-blue hover:bg-brand-blue/20 hover:text-[#5FF7FF] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {recalculatingEntries ? 'Resyncing entries…' : 'Re-sync entries'}
               </button>
@@ -694,7 +694,7 @@ export default function AdminDashboard() {
                 type="button"
                 onClick={handleRecalculateReferrals}
                 disabled={recalculatingReferrals || refreshing || recalculatingEntries}
-                className="inline-flex items-center gap-2 rounded-full border border-brand-blue/40 bg-brand-blue/10 px-4 py-2 font-semibold uppercase tracking-wide text-brand-navy transition hover:border-brand-blue hover:bg-brand-blue/20 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex items-center gap-2 rounded-full border border-brand-blue/40 bg-brand-blue/10 px-4 py-2 font-semibold uppercase tracking-wide text-[#00E5FF] transition hover:border-brand-blue hover:bg-brand-blue/20 hover:text-[#5FF7FF] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {recalculatingReferrals ? 'Replaying referrals…' : 'Re-run referral sync'}
               </button>
@@ -702,7 +702,7 @@ export default function AdminDashboard() {
                 type="button"
                 onClick={fetchData}
                 disabled={refreshing}
-                className="inline-flex items-center gap-2 rounded-full border border-brand-blue/40 bg-brand-blue/10 px-4 py-2 font-semibold uppercase tracking-wide text-brand-navy transition hover:border-brand-blue hover:bg-brand-blue/20 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex items-center gap-2 rounded-full border border-brand-blue/40 bg-brand-blue/10 px-4 py-2 font-semibold uppercase tracking-wide text-[#00E5FF] transition hover:border-brand-blue hover:bg-brand-blue/20 hover:text-[#5FF7FF] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {refreshing ? 'Refreshing…' : 'Refresh data'}
               </button>

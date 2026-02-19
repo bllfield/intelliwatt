@@ -15,3 +15,72 @@ model UpgradesModuleBootstrap {
   createdAt DateTime @default(now())
 }
 
+model UpgradeLedger {
+  id               String   @id @default(cuid())
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  // Ownership / linkage
+  userId           String
+  houseId          String?
+  houseState       String?
+  tdspRegion       String?
+  scenarioId       String?
+  scenarioEventId  String?
+
+  // Lifecycle + provenance (NO enums)
+  status           String   @default("ACTIVE") // ACTIVE | DELETED | SUPERSEDED (convention)
+  source           String? // USER | WATTBUY_PREFILL | ADMIN_IMPORT | OTHER (convention)
+
+  // Core queryable analytics fields (NO enums)
+  upgradeType      String
+  changeType       String
+  quantity         Float?
+  units            String?
+
+  effectiveDate    DateTime?
+  effectiveEndDate DateTime?
+
+  // ROI / measurement context placeholders (no math here)
+  vendorId         String?
+  costUsd          Float?
+  costJson         Json?
+  measuredStartDate DateTime?
+  measuredEndDate   DateTime?
+
+  // Rich extensible details (avoid migrations)
+  beforeJson       Json?
+  afterJson        Json?
+  inputsJson       Json?
+  notes            String?
+
+  // Impact placeholders (NO math here; just storage)
+  impactMethod                 String?
+  deltaKwhAnnualMeasured       Float?
+  deltaKwhAnnualSimulated      Float?
+  deltaKwhMonthlyMeasuredJson  Json?
+  deltaKwhMonthlySimulatedJson Json?
+  confidence                   Float?
+
+  // Versioning hooks
+  schemaVersion    String   @default("v1")
+  calcVersion      String?
+  normalizationVersion String?
+
+  @@index([userId])
+  @@index([houseId])
+  @@index([status])
+  @@index([source])
+  @@index([impactMethod])
+  @@index([houseState])
+  @@index([tdspRegion])
+  @@index([scenarioId])
+  @@index([scenarioEventId])
+  @@index([upgradeType])
+  @@index([changeType])
+  @@index([effectiveDate])
+  @@index([userId, upgradeType])
+  @@index([userId, upgradeType, changeType])
+  @@map("UpgradeLedger")
+}
+

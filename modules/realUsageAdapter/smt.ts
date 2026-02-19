@@ -50,12 +50,26 @@ export async function hasSmtIntervals(args: { esiid: string; canonicalMonths: st
   return (Number(rows?.[0]?.c ?? 0) || 0) > 0;
 }
 
-export async function fetchSmtCanonicalMonthlyTotals(args: { esiid: string; canonicalMonths: string[] }) {
-  const { esiid, canonicalMonths } = args;
+function excludeDateKeysFragment(excludeDateKeys: string[] | undefined): Prisma.Sql {
+  if (!excludeDateKeys?.length) return Prisma.sql``;
+  return Prisma.sql` AND to_char((("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago')::timestamp, 'YYYY-MM-DD') NOT IN (${Prisma.join(excludeDateKeys.map((d) => Prisma.sql`${d}`), ", ")})`;
+}
+
+export async function fetchSmtCanonicalMonthlyTotals(args: {
+  esiid: string;
+  canonicalMonths: string[];
+  excludeDateKeys?: string[];
+  travelRanges?: Array<{ startDate: string; endDate: string }>;
+}) {
+  const { esiid, canonicalMonths, excludeDateKeys, travelRanges } = args;
+  const travelKeys = travelRanges?.length ? travelRangesToExcludeDateKeys(travelRanges) : [];
+  const mergedExclude = [...(excludeDateKeys ?? []), ...travelKeys];
+  const exclude = mergedExclude.length ? mergedExclude : excludeDateKeys;
   if (!esiid) return { intervalsCount: 0, monthlyKwhByMonth: {} as Record<string, number> };
   if (!canonicalMonths.length) return { intervalsCount: 0, monthlyKwhByMonth: {} as Record<string, number> };
 
   const { start, endExclusive } = utcRangeWithChicagoBuffer(canonicalMonths);
+  const excludeFrag = excludeDateKeysFragment(exclude);
 
   const rows = await prisma.$queryRaw<Array<{ bucket: Date; kwh: number; intervalscount: number }>>(Prisma.sql`
     WITH iv AS (
@@ -66,6 +80,7 @@ export async function fetchSmtCanonicalMonthlyTotals(args: { esiid: string; cano
       WHERE "esiid" = ${esiid}
         AND "ts" >= ${start}
         AND "ts" < ${endExclusive}
+        ${excludeFrag}
       GROUP BY "ts"
     )
     SELECT
@@ -91,12 +106,36 @@ export async function fetchSmtCanonicalMonthlyTotals(args: { esiid: string; cano
   return { intervalsCount, monthlyKwhByMonth };
 }
 
-export async function fetchSmtIntradayShape96(args: { esiid: string; canonicalMonths: string[] }): Promise<number[] | null> {
-  const { esiid, canonicalMonths } = args;
+function travelRangesToExcludeDateKeys(ranges: Array<{ startDate: string; endDate: string }> | undefined): string[] {
+  if (!ranges?.length) return [];
+  const set = new Set<string>();
+  const re = /^\d{4}-\d{2}-\d{2}$/;
+  for (const r of ranges) {
+    if (!re.test(String(r.startDate).trim()) || !re.test(String(r.endDate).trim())) continue;
+    const start = new Date(String(r.startDate).trim() + "T12:00:00.000Z");
+    const end = new Date(String(r.endDate).trim() + "T12:00:00.000Z");
+    for (let d = new Date(start); d.getTime() <= end.getTime(); d.setDate(d.getDate() + 1)) {
+      set.add(d.toISOString().slice(0, 10));
+    }
+  }
+  return Array.from(set);
+}
+
+export async function fetchSmtIntradayShape96(args: {
+  esiid: string;
+  canonicalMonths: string[];
+  excludeDateKeys?: string[];
+  travelRanges?: Array<{ startDate: string; endDate: string }>;
+}): Promise<number[] | null> {
+  const { esiid, canonicalMonths, excludeDateKeys, travelRanges } = args;
+  const travelKeys = travelRanges?.length ? travelRangesToExcludeDateKeys(travelRanges) : [];
+  const mergedExclude = [...(excludeDateKeys ?? []), ...travelKeys];
+  const exclude = mergedExclude.length ? mergedExclude : undefined;
   if (!esiid) return null;
   if (!canonicalMonths.length) return null;
 
   const { start, endExclusive } = utcRangeWithChicagoBuffer(canonicalMonths);
+  const excludeFrag = excludeDateKeysFragment(exclude);
 
   const rows = await prisma.$queryRaw<Array<{ bucket: number; kwh: number }>>(Prisma.sql`
     WITH iv AS (
@@ -107,6 +146,7 @@ export async function fetchSmtIntradayShape96(args: { esiid: string; canonicalMo
       WHERE "esiid" = ${esiid}
         AND "ts" >= ${start}
         AND "ts" < ${endExclusive}
+        ${excludeFrag}
       GROUP BY "ts"
     ),
     local AS (

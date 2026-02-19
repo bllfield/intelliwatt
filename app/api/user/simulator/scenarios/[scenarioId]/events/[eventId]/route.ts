@@ -27,12 +27,33 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ scena
     const houseId = typeof body?.houseId === "string" ? body.houseId.trim() : "";
     if (!houseId) return NextResponse.json({ ok: false, error: "houseId_required" }, { status: 400 });
 
-    const effectiveMonth = typeof body?.effectiveMonth === "string" ? body.effectiveMonth.trim() : undefined;
     const kind = typeof body?.kind === "string" ? body.kind.trim() : undefined;
-    const multiplier = typeof body?.multiplier === "number" && Number.isFinite(body.multiplier) ? body.multiplier : undefined;
-    const adderKwh = typeof body?.adderKwh === "number" && Number.isFinite(body.adderKwh) ? body.adderKwh : undefined;
+    let effectiveMonth = typeof body?.effectiveMonth === "string" ? body.effectiveMonth.trim() : undefined;
+    let payloadJson = body?.payloadJson;
 
-    const payloadJson = body?.payloadJson !== undefined ? body.payloadJson : { multiplier, adderKwh };
+    if (payloadJson === undefined && kind !== "UPGRADE_ACTION" && kind !== "TRAVEL_RANGE") {
+      const multiplier = typeof body?.multiplier === "number" && Number.isFinite(body.multiplier) ? body.multiplier : undefined;
+      const adderKwh = typeof body?.adderKwh === "number" && Number.isFinite(body.adderKwh) ? body.adderKwh : undefined;
+      payloadJson = { multiplier, adderKwh };
+    }
+    if (kind === "UPGRADE_ACTION" && payloadJson !== undefined) {
+      const p = payloadJson as any;
+      const effectiveDate = typeof p?.effectiveDate === "string" ? p.effectiveDate.trim().slice(0, 10) : "";
+      if (effectiveDate && /^\d{4}-\d{2}-\d{2}$/.test(effectiveDate)) effectiveMonth = effectiveDate.slice(0, 7);
+    }
+    if (kind === "TRAVEL_RANGE" && payloadJson !== undefined) {
+      const p = payloadJson as any;
+      const hasStart = typeof p?.startDate === "string";
+      const hasEnd = typeof p?.endDate === "string";
+      if (hasStart || hasEnd) {
+        const startDate = hasStart ? String(p.startDate).trim().slice(0, 10) : "";
+        const endDate = hasEnd ? String(p.endDate).trim().slice(0, 10) : "";
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate))
+          return NextResponse.json({ ok: false, error: "TRAVEL_RANGE requires both startDate and endDate (YYYY-MM-DD)" }, { status: 400 });
+        payloadJson = { ...p, startDate, endDate };
+        if (startDate) effectiveMonth = startDate.slice(0, 7);
+      }
+    }
 
     const out = await updateScenarioEvent({ userId: u.user.id, houseId, scenarioId, eventId, effectiveMonth, kind, payloadJson });
     if (!out.ok) return NextResponse.json(out, { status: 400 });

@@ -27,6 +27,21 @@ export type BuildResult = {
   };
 };
 
+/** Expand Travel/Vacant ranges to a list of YYYY-MM-DD date keys to exclude from shape derivation. */
+export function travelRangesToExcludeDateKeys(ranges: Array<{ startDate: string; endDate: string }>): string[] {
+  const set = new Set<string>();
+  const re = /^\d{4}-\d{2}-\d{2}$/;
+  for (const r of ranges) {
+    if (!re.test(String(r.startDate).trim()) || !re.test(String(r.endDate).trim())) continue;
+    const start = new Date(String(r.startDate).trim() + "T12:00:00.000Z");
+    const end = new Date(String(r.endDate).trim() + "T12:00:00.000Z");
+    for (let d = new Date(start); d.getTime() <= end.getTime(); d.setDate(d.getDate() + 1)) {
+      set.add(d.toISOString().slice(0, 10));
+    }
+  }
+  return Array.from(set);
+}
+
 function yearMonthToMonthIndex0(ym: string): number | null {
   const m = /^(\d{4})-(\d{2})$/.exec(String(ym ?? "").trim());
   if (!m) return null;
@@ -85,6 +100,8 @@ export async function buildSimulatorInputs(args: {
   baselineHomeProfile?: HomeProfileInput | null;
   baselineApplianceProfile?: ApplianceProfilePayloadV1 | null;
   canonicalMonths?: string[]; // optional override (V1 determinism)
+  /** Travel/Vacant ranges: dates in these ranges are excluded from actual shape derivation. */
+  travelRanges?: Array<{ startDate: string; endDate: string }>;
   now?: Date;
 }): Promise<BuildResult> {
   const canonicalMonths =
@@ -134,8 +151,21 @@ export async function buildSimulatorInputs(args: {
   const esiid = args.esiidForSmt ?? null;
   if (!houseIdForActual) throw new Error("houseId_required");
 
-  const actualMonthly = await fetchActualCanonicalMonthlyTotals({ houseId: houseIdForActual, esiid, canonicalMonths });
-  const actualShape = await fetchActualIntradayShape96({ houseId: houseIdForActual, esiid, canonicalMonths });
+  const excludeDateKeys = args.travelRanges?.length ? travelRangesToExcludeDateKeys(args.travelRanges) : undefined;
+  const actualMonthly = await fetchActualCanonicalMonthlyTotals({
+    houseId: houseIdForActual,
+    esiid,
+    canonicalMonths,
+    excludeDateKeys,
+    travelRanges: args.travelRanges,
+  });
+  const actualShape = await fetchActualIntradayShape96({
+    houseId: houseIdForActual,
+    esiid,
+    canonicalMonths,
+    excludeDateKeys,
+    travelRanges: args.travelRanges,
+  });
   const monthlyKwhByMonth = actualMonthly.monthlyKwhByMonth ?? {};
   const shape = actualShape.shape96 ?? null;
 
