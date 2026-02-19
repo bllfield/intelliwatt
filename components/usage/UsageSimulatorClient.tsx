@@ -92,9 +92,10 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
   const [recalcNote, setRecalcNote] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
   const [canRecalc, setCanRecalc] = useState(false);
-  const [missingItems, setMissingItems] = useState<string[]>([]);
   const [canonicalEndMonth, setCanonicalEndMonth] = useState<string>("");
-  const [weatherPreference, setWeatherPreference] = useState<"NONE" | "LAST_YEAR_WEATHER" | "LONG_TERM_AVERAGE">("NONE");
+  const [weatherPreference, setWeatherPreference] = useState<"NONE" | "LAST_YEAR_WEATHER" | "LONG_TERM_AVERAGE">(
+    "LAST_YEAR_WEATHER",
+  );
 
   const [scenarioId, setScenarioId] = useState<string>("baseline");
   const [scenarios, setScenarios] = useState<Array<{ id: string; name: string }>>([]);
@@ -224,17 +225,14 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
         if (cancelled) return;
         if (!r.ok || !j?.ok) {
           setCanRecalc(false);
-          setMissingItems(["Unable to load requirements. Try refreshing."]);
           setCanonicalEndMonth("");
           return;
         }
         setCanRecalc(Boolean(j.canRecalc));
-        setMissingItems(Array.isArray(j.missingItems) ? j.missingItems.map(String) : []);
         setCanonicalEndMonth(typeof (j as any).canonicalEndMonth === "string" ? String((j as any).canonicalEndMonth) : "");
       } catch {
         if (!cancelled) {
           setCanRecalc(false);
-          setMissingItems(["Unable to load requirements. Try refreshing."]);
           setCanonicalEndMonth("");
         }
       }
@@ -568,9 +566,6 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
       });
       const j = (await r.json().catch(() => null)) as any;
       if (!r.ok || !j?.ok) {
-        if (j?.missingItems && Array.isArray(j.missingItems)) {
-          setMissingItems(j.missingItems.map(String));
-        }
         setRecalcNote(j?.error ? String(j.error) : `Recalc failed (${r.status})`);
         return;
       }
@@ -755,143 +750,194 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
               </div>
             </div>
 
-            {/* Step 3/4: Workspaces */}
-            <div className="grid gap-3 rounded-2xl border border-brand-cyan/20 bg-brand-navy/70 px-4 py-4 md:grid-cols-12">
-              <div className="md:col-span-4">
-                <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Step 3</div>
-                <div className="mt-1 text-sm font-semibold text-brand-white">Past (Corrected)</div>
-                <div className="mt-1 text-xs text-brand-cyan/70">Optional.</div>
-              </div>
-              <div className="md:col-span-5">
-                <div className="text-xs text-brand-cyan/80">
-                  Use this to correct historical usage (e.g. vacancy/travel or known retrofits). If you use Past corrections,
-                  Future adjustments will build on top of the corrected curve.
+            {/* Step 3/4: Workspaces (side-by-side on desktop) */}
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="grid gap-3 rounded-2xl border border-brand-cyan/20 bg-brand-navy/70 px-4 py-4 md:grid-cols-12">
+                <div className="md:col-span-4">
+                  <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Step 3</div>
+                  <div className="mt-1 text-sm font-semibold text-brand-white">Past (Corrected)</div>
+                  <div className="mt-1 text-xs text-brand-cyan/70">Optional.</div>
+                </div>
+                <div className="md:col-span-5">
+                  <div className="text-xs text-brand-cyan/80">
+                    Use this to correct historical usage (e.g. vacancy/travel or known retrofits). If you use Past corrections,
+                    Future adjustments will build on top of the corrected curve.
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2 md:col-span-3 md:justify-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setWorkspace("PAST");
+                      if (!pastScenario) void createScenario(WORKSPACE_PAST_NAME);
+                    }}
+                    disabled={!baselineReady}
+                    className="rounded-xl border border-brand-cyan/30 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-white hover:bg-brand-white/10 disabled:opacity-60"
+                  >
+                    {pastScenario ? "Past workspace ready" : "Create Past"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setWorkspace("PAST");
+                      setOpenTimeline(true);
+                      if (pastScenario?.id) setScenarioId(pastScenario.id);
+                      void loadTimeline(pastScenario?.id ?? undefined);
+                    }}
+                    disabled={!baselineReady || !pastScenario}
+                    className="rounded-xl border border-brand-cyan/30 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-white hover:bg-brand-white/10 disabled:opacity-60"
+                  >
+                    Edit Past
+                  </button>
                 </div>
               </div>
-              <div className="flex flex-wrap gap-2 md:col-span-3 md:justify-end">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setWorkspace("PAST");
-                    if (!pastScenario) void createScenario(WORKSPACE_PAST_NAME);
-                  }}
-                disabled={!baselineReady}
-                  className="rounded-xl border border-brand-cyan/30 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-white hover:bg-brand-white/10 disabled:opacity-60"
-                >
-                  {pastScenario ? "Past workspace ready" : "Create Past"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setWorkspace("PAST");
-                    setOpenTimeline(true);
-                    if (pastScenario?.id) setScenarioId(pastScenario.id);
-                    void loadTimeline(pastScenario?.id ?? undefined);
-                  }}
-                  disabled={!baselineReady || !pastScenario}
-                  className="rounded-xl border border-brand-cyan/30 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-white hover:bg-brand-white/10 disabled:opacity-60"
-                >
-                  Edit Past
-                </button>
+
+              <div className="grid gap-3 rounded-2xl border border-brand-cyan/20 bg-brand-navy/70 px-4 py-4 md:grid-cols-12">
+                <div className="md:col-span-4">
+                  <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Step 4</div>
+                  <div className="mt-1 text-sm font-semibold text-brand-white">Future (What-if)</div>
+                  <div className="mt-1 text-xs text-brand-cyan/70">Create scenarios for planned changes.</div>
+                </div>
+                <div className="md:col-span-5">
+                  <div className="text-xs text-brand-cyan/80">
+                    Future simulations never edit Actual usage. They generate simulated curves for comparison only.
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2 md:col-span-3 md:justify-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setWorkspace("FUTURE");
+                      if (!futureScenario) void createScenario(WORKSPACE_FUTURE_NAME);
+                    }}
+                    disabled={!baselineReady}
+                    className="rounded-xl border border-brand-cyan/30 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-white hover:bg-brand-white/10 disabled:opacity-60"
+                  >
+                    {futureScenario ? "Future workspace ready" : "Create Future"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setWorkspace("FUTURE");
+                      setOpenTimeline(true);
+                      if (futureScenario?.id) setScenarioId(futureScenario.id);
+                      void loadTimeline(futureScenario?.id ?? undefined);
+                    }}
+                    disabled={!baselineReady || !futureScenario}
+                    className="rounded-xl border border-brand-cyan/30 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-white hover:bg-brand-white/10 disabled:opacity-60"
+                  >
+                    Edit Future
+                  </button>
+                </div>
               </div>
             </div>
 
-            <div className="grid gap-3 rounded-2xl border border-brand-cyan/20 bg-brand-navy/70 px-4 py-4 md:grid-cols-12">
-              <div className="md:col-span-4">
-                <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Step 4</div>
-                <div className="mt-1 text-sm font-semibold text-brand-white">Future (What-if)</div>
-                <div className="mt-1 text-xs text-brand-cyan/70">Create scenarios for planned changes.</div>
-              </div>
-              <div className="md:col-span-5">
-                <div className="text-xs text-brand-cyan/80">
-                  Future simulations never edit Actual usage. They generate simulated curves for comparison only.
+            {/* Step 5/6: Weather + View curve (side-by-side on desktop) */}
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="grid gap-3 rounded-2xl border border-brand-cyan/20 bg-brand-navy/70 px-4 py-4 md:grid-cols-12">
+                <div className="md:col-span-5">
+                  <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Step 5</div>
+                  <div className="mt-1 text-sm font-semibold text-brand-white">Weather normalization</div>
+                  <div className="mt-1 text-xs text-brand-cyan/70">Optional. No extra popup—just a preference.</div>
+                </div>
+                <div className="md:col-span-4">
+                  <div className="text-xs text-brand-cyan/80">
+                    Last year is the default baseline assumption. We store this choice so the simulator stays deterministic as we roll out weather adjustments.
+                  </div>
+                </div>
+                <div className="md:col-span-3">
+                  <div className="flex flex-wrap gap-2">
+                    {(["LAST_YEAR_WEATHER", "LONG_TERM_AVERAGE"] as const).map((v) => (
+                      <button
+                        key={v}
+                        type="button"
+                        onClick={() => setWeatherPreference(v)}
+                        className={[
+                          "rounded-full border px-4 py-2 text-[0.7rem] font-semibold uppercase tracking-wide transition",
+                          weatherPreference === v
+                            ? "border-brand-cyan/50 bg-brand-cyan/10 text-brand-cyan"
+                            : "border-brand-cyan/20 bg-brand-white/5 text-brand-cyan/70 hover:bg-brand-white/10",
+                        ].join(" ")}
+                      >
+                        {v === "LAST_YEAR_WEATHER" ? "Last year" : "Long-term"}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
-              <div className="flex flex-wrap gap-2 md:col-span-3 md:justify-end">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setWorkspace("FUTURE");
-                    if (!futureScenario) void createScenario(WORKSPACE_FUTURE_NAME);
-                  }}
-                  disabled={!baselineReady}
-                  className="rounded-xl border border-brand-cyan/30 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-white hover:bg-brand-white/10 disabled:opacity-60"
-                >
-                  {futureScenario ? "Future workspace ready" : "Create Future"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setWorkspace("FUTURE");
-                    setOpenTimeline(true);
-                    if (futureScenario?.id) setScenarioId(futureScenario.id);
-                    void loadTimeline(futureScenario?.id ?? undefined);
-                  }}
-                  disabled={!baselineReady || !futureScenario}
-                  className="rounded-xl border border-brand-cyan/30 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-white hover:bg-brand-white/10 disabled:opacity-60"
-                >
-                  Edit Future
-                </button>
-              </div>
-            </div>
 
-            {/* Weather normalization (toggle only) */}
-            <div className="grid gap-3 rounded-2xl border border-brand-cyan/20 bg-brand-navy/70 px-4 py-4 md:grid-cols-12">
-              <div className="md:col-span-4">
-                <div className="mt-1 text-sm font-semibold text-brand-white">Weather normalization</div>
-                <div className="mt-1 text-xs text-brand-cyan/70">Optional. No extra popup—just a preference.</div>
-              </div>
-              <div className="md:col-span-5">
-                <div className="text-xs text-brand-cyan/80">
-                  Phase 1 behavior is identity. We store this choice so the simulator stays deterministic as we roll out weather adjustments.
+              <div className="grid gap-3 rounded-2xl border border-brand-cyan/20 bg-brand-navy/70 px-4 py-4 md:grid-cols-12">
+                <div className="md:col-span-5">
+                  <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Step 6</div>
+                  <div className="mt-1 text-sm font-semibold text-brand-white">View curve</div>
+                  <div className="mt-1 text-xs text-brand-cyan/70">Select which curve to display below.</div>
                 </div>
-              </div>
-              <div className="md:col-span-3">
-                <div className="flex flex-wrap gap-2">
-                  {(["NONE", "LAST_YEAR_WEATHER", "LONG_TERM_AVERAGE"] as const).map((v) => (
+                <div className="md:col-span-4">
+                  {curveView !== "BASELINE" && scenarioBanner ? (
+                    <div className="rounded-xl border border-brand-cyan/20 bg-brand-white/5 px-3 py-2 text-xs text-brand-cyan/80">
+                      {scenarioBanner}
+                    </div>
+                  ) : (
+                    <div className="text-xs text-brand-cyan/70">Baseline is generated automatically when requirements are met.</div>
+                  )}
+                </div>
+                <div className="md:col-span-3">
+                  <div className="flex flex-wrap gap-2">
                     <button
-                      key={v}
                       type="button"
-                      onClick={() => setWeatherPreference(v)}
+                      onClick={() => setCurveView("BASELINE")}
+                      disabled={!baselineReady}
                       className={[
                         "rounded-full border px-4 py-2 text-[0.7rem] font-semibold uppercase tracking-wide transition",
-                        weatherPreference === v
+                        curveView === "BASELINE" && baselineReady
                           ? "border-brand-cyan/50 bg-brand-cyan/10 text-brand-cyan"
-                          : "border-brand-cyan/20 bg-brand-white/5 text-brand-cyan/70 hover:bg-brand-white/10",
+                          : baselineReady
+                            ? "border-brand-cyan/20 bg-brand-white/5 text-brand-cyan/70 hover:bg-brand-white/10"
+                            : "cursor-not-allowed border-brand-cyan/20 bg-brand-white/5 text-brand-white/50 opacity-60",
                       ].join(" ")}
                     >
-                      {v === "NONE" ? "None" : v === "LAST_YEAR_WEATHER" ? "Last year" : "Long-term"}
+                      Baseline
                     </button>
-                  ))}
+                    <button
+                      type="button"
+                      onClick={() => setCurveView("PAST")}
+                      disabled={!pastReady}
+                      className={[
+                        "rounded-full border px-4 py-2 text-[0.7rem] font-semibold uppercase tracking-wide transition",
+                        curveView === "PAST" && pastReady
+                          ? "border-brand-cyan/50 bg-brand-cyan/10 text-brand-cyan"
+                          : pastReady
+                            ? "border-brand-cyan/20 bg-brand-white/5 text-brand-cyan/70 hover:bg-brand-white/10"
+                            : "cursor-not-allowed border border-brand-cyan/20 bg-brand-white/5 text-brand-white/50 opacity-60",
+                      ].join(" ")}
+                    >
+                      Past
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCurveView("FUTURE")}
+                      disabled={!futureReady}
+                      className={[
+                        "rounded-full border px-4 py-2 text-[0.7rem] font-semibold uppercase tracking-wide transition",
+                        curveView === "FUTURE" && futureReady
+                          ? "border-brand-cyan/50 bg-brand-cyan/10 text-brand-cyan"
+                          : futureReady
+                            ? "border-brand-cyan/20 bg-brand-white/5 text-brand-cyan/70 hover:bg-brand-white/10"
+                            : "cursor-not-allowed border border-brand-cyan/20 bg-brand-white/5 text-brand-white/50 opacity-60",
+                      ].join(" ")}
+                    >
+                      Future
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
-
-            {!baselineReady ? (
-              <div className="rounded-2xl border border-brand-cyan/20 bg-brand-white/5 px-4 py-3 text-xs text-brand-cyan/80">
-                <div className="font-semibold text-brand-white/90">To continue</div>
-                <div className="mt-1">
-                  Save <span className="font-semibold">Home</span> and <span className="font-semibold">Appliances</span> to generate your{" "}
-                  <span className="font-semibold">Baseline</span>. Saving automatically updates curves.
-                </div>
-              </div>
-            ) : null}
           </div>
         </div>
 
         {recalcBusy || recalcNote ? (
           <div className="mt-5 flex flex-wrap items-center gap-3">
             <div className="text-xs text-brand-cyan/80">{recalcBusy ? "Updating curves…" : recalcNote}</div>
-          </div>
-        ) : null}
-        {!canRecalc && missingItems.length ? (
-          <div className="mt-3 rounded-2xl border border-brand-cyan/20 bg-brand-white/5 px-4 py-3 text-xs text-brand-cyan/80">
-            <div className="font-semibold text-brand-white/90">To generate Baseline:</div>
-            <ul className="mt-2 list-disc space-y-1 pl-5">
-              {missingItems.map((m, idx) => (
-                <li key={`${idx}-${m}`}>{m}</li>
-              ))}
-            </ul>
           </div>
         ) : null}
       </div>
@@ -904,65 +950,6 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
           refreshToken={refreshToken}
           simulatedHousesOverride={curveView === "BASELINE" ? null : scenarioSimHouseOverride}
         />
-      </div>
-
-      <div className="rounded-2xl border border-brand-cyan/20 bg-brand-navy p-4 text-brand-cyan">
-        <div className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-cyan/60">View curve</div>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => setCurveView("BASELINE")}
-            disabled={!baselineReady}
-            className={[
-              "rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-wide transition",
-              curveView === "BASELINE" && baselineReady
-                ? "border-brand-cyan/50 bg-brand-cyan/10 text-brand-cyan"
-                : baselineReady
-                  ? "border-brand-cyan/20 bg-brand-white/5 text-brand-cyan/70 hover:bg-brand-white/10"
-                  : "cursor-not-allowed border-brand-cyan/20 bg-brand-white/5 text-brand-white/50 opacity-60",
-            ].join(" ")}
-          >
-            Baseline
-          </button>
-          <button
-            type="button"
-            onClick={() => setCurveView("PAST")}
-            disabled={!pastReady}
-            className={[
-              "rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-wide transition",
-              curveView === "PAST" && pastReady
-                ? "border-brand-cyan/50 bg-brand-cyan/10 text-brand-cyan"
-                : pastReady
-                  ? "border-brand-cyan/20 bg-brand-white/5 text-brand-cyan/70 hover:bg-brand-white/10"
-                  : "cursor-not-allowed border-brand-cyan/20 bg-brand-white/5 text-brand-white/50 opacity-60",
-            ].join(" ")}
-          >
-            Past
-          </button>
-          <button
-            type="button"
-            onClick={() => setCurveView("FUTURE")}
-            disabled={!futureReady}
-            className={[
-              "rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-wide transition",
-              curveView === "FUTURE" && futureReady
-                ? "border-brand-cyan/50 bg-brand-cyan/10 text-brand-cyan"
-                : futureReady
-                  ? "border-brand-cyan/20 bg-brand-white/5 text-brand-cyan/70 hover:bg-brand-white/10"
-                  : "cursor-not-allowed border-brand-cyan/20 bg-brand-white/5 text-brand-white/50 opacity-60",
-            ].join(" ")}
-          >
-            Future
-          </button>
-        </div>
-        {curveView !== "BASELINE" && scenarioBanner ? (
-          <div className="mt-3 rounded-xl border border-brand-cyan/20 bg-brand-white/5 px-3 py-2 text-xs text-brand-cyan/80">
-            {scenarioBanner}
-          </div>
-        ) : null}
-        <div className="mt-3 text-xs text-brand-cyan/75">
-          Baseline unlocks after Home + Appliances are saved and computed. Past/Future unlock after you save corrections/changes and they compute.
-        </div>
       </div>
 
       <Modal
