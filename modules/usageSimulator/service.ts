@@ -747,12 +747,19 @@ export async function addScenarioEvent(args: {
   const kind = String(args.kind ?? "").trim() || "MONTHLY_ADJUSTMENT";
   const payloadJson = args.payloadJson ?? {};
 
-  const event = await (prisma as any).usageSimulatorScenarioEvent
-    .create({
-      data: { scenarioId: args.scenarioId, effectiveMonth, kind, payloadJson },
-      select: { id: true, scenarioId: true, effectiveMonth: true, kind: true, payloadJson, createdAt: true, updatedAt: true },
-    })
-    .catch(() => null);
+  let event: any = null;
+  try {
+    const sanitizedPayload =
+      payloadJson != null && typeof payloadJson === "object"
+        ? JSON.parse(JSON.stringify(payloadJson))
+        : {};
+    event = await (prisma as any).usageSimulatorScenarioEvent.create({
+      data: { scenarioId: args.scenarioId, effectiveMonth, kind, payloadJson: sanitizedPayload },
+      select: { id: true, scenarioId: true, effectiveMonth: true, kind: true, payloadJson: true, createdAt: true, updatedAt: true },
+    });
+  } catch (err) {
+    console.error("[usageSimulator] addScenarioEvent create failed", err);
+  }
   if (!event) return { ok: false as const, error: "event_create_failed" };
   return { ok: true as const, event };
 }
