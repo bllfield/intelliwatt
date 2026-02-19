@@ -711,6 +711,26 @@ export async function getSimulatedUsageForHouseScenario(args: {
       };
     }
 
+    // Past and Future: show the same date range as SMT/Green Button anchor (e.g. 02/18/2025 – 02/18/2026), not calendar-month window.
+    if (
+      scenarioKey !== "BASELINE" &&
+      mode === "SMT_BASELINE" &&
+      (actualSource === "SMT" || actualSource === "GREEN_BUTTON") &&
+      dataset?.summary
+    ) {
+      try {
+        const actualResult = await getActualUsageDatasetForHouse(args.houseId, house.esiid ?? null);
+        const actualSummary = actualResult?.dataset?.summary;
+        if (actualSummary?.start != null && actualSummary?.end != null) {
+          dataset.summary.start = actualSummary.start;
+          dataset.summary.end = actualSummary.end;
+          dataset.summary.latest = actualSummary.latest ?? actualSummary.end;
+        }
+      } catch {
+        /* ignore; keep built curve dates */
+      }
+    }
+
     // Past and Future baseload come from the built curve (buildSimulatedUsageDatasetFromBuildInputs), which already
     // computes baseload from curve.intervals after overlay/upgrades/vacant fill; no overwrite from actual usage.
 
