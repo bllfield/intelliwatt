@@ -56,7 +56,7 @@ export async function upsertSimulatedUsageBuckets(args: {
             source,
           },
           update: {
-            ...(args.scenarioId != null ? { scenarioId: args.scenarioId } : {}),
+            scenarioId: args.scenarioId ?? null,
             kwhTotal: kwh,
             source,
             computedAt: new Date(),

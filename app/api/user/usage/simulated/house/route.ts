@@ -30,7 +30,9 @@ export async function GET(request: NextRequest) {
     if (!houseId) return NextResponse.json({ ok: false, error: "houseId_required" }, { status: 400 });
 
     const out = await getSimulatedUsageForHouseScenario({ userId: u.user.id, houseId, scenarioId });
-    if (out.ok) return NextResponse.json(out, { headers: { "Cache-Control": "private, max-age=30" } });
+    // Past/Future: never cache so each open uses latest state (e.g. Future always sees latest Past).
+    const cacheControl = scenarioId ? "private, no-store" : "private, max-age=30";
+    if (out.ok) return NextResponse.json(out, { headers: { "Cache-Control": cacheControl } });
 
     if (out.code === "NO_BUILD") return NextResponse.json(out, { status: 404 });
     if (out.code === "HOUSE_NOT_FOUND") return NextResponse.json(out, { status: 403 });

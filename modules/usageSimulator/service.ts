@@ -636,11 +636,45 @@ export async function getSimulatedUsageForHouseScenario(args: {
     const house = await getHouseAddressForUserHouse({ userId: args.userId, houseId: args.houseId });
     if (!house) return { ok: false, code: "HOUSE_NOT_FOUND", message: "House not found for user" };
 
+    let scenarioRow: { id: string; name: string } | null = null;
     if (scenarioId) {
-      const scenario = await (prisma as any).usageSimulatorScenario
-        .findFirst({ where: { id: scenarioId, userId: args.userId, houseId: args.houseId, archivedAt: null }, select: { id: true } })
+      scenarioRow = await (prisma as any).usageSimulatorScenario
+        .findFirst({
+          where: { id: scenarioId, userId: args.userId, houseId: args.houseId, archivedAt: null },
+          select: { id: true, name: true },
+        })
         .catch(() => null);
-      if (!scenario) return { ok: false, code: "SCENARIO_NOT_FOUND", message: "Scenario not found for user/house" };
+      if (!scenarioRow) return { ok: false, code: "SCENARIO_NOT_FOUND", message: "Scenario not found for user/house" };
+    }
+
+    // Future always recomputed from current Past (or Baseline when no Past): no cache. Every time Future is opened we recalc so it uses the latest Past curve.
+    const isFutureScenario = Boolean(scenarioId) && scenarioRow?.name === WORKSPACE_FUTURE_NAME;
+    if (isFutureScenario) {
+      const baselineBuild = await (prisma as any).usageSimulatorBuild
+        .findUnique({
+          where: { userId_houseId_scenarioKey: { userId: args.userId, houseId: args.houseId, scenarioKey: "BASELINE" } },
+          select: { buildInputs: true },
+        })
+        .catch(() => null);
+      const mode = (baselineBuild?.buildInputs as any)?.mode;
+      const weatherPreference = (baselineBuild?.buildInputs as any)?.weatherPreference ?? "NONE";
+      if (mode) {
+        const recalcResult = await recalcSimulatorBuild({
+          userId: args.userId,
+          houseId: args.houseId,
+          esiid: house.esiid ?? null,
+          mode,
+          scenarioId,
+          weatherPreference,
+        });
+        if (!recalcResult.ok) {
+          return {
+            ok: false,
+            code: "INTERNAL_ERROR",
+            message: recalcResult.error ?? "Failed to update Future from latest Past.",
+          };
+        }
+      }
     }
 
     const buildRec = await (prisma as any).usageSimulatorBuild
