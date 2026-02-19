@@ -7,6 +7,7 @@ import { buildSimulatorInputs, travelRangesToExcludeDateKeys, type BaseKind, typ
 import { computeRequirements, type SimulatorMode } from "@/modules/usageSimulator/requirements";
 import { chooseActualSource, hasActualIntervals } from "@/modules/realUsageAdapter/actual";
 import { SMT_SHAPE_DERIVATION_VERSION } from "@/modules/realUsageAdapter/smt";
+import { getActualUsageDatasetForHouse } from "@/lib/usage/actualDatasetForHouse";
 import { buildSimulatedUsageDatasetFromBuildInputs, type SimulatorBuildInputsV1 } from "@/modules/usageSimulator/dataset";
 import { computeBuildInputsHash } from "@/modules/usageSimulator/hash";
 import { INTRADAY_TEMPLATE_VERSION } from "@/modules/simulatedUsage/intradayTemplates";
@@ -460,20 +461,48 @@ export async function getSimulatedUsageForUser(args: {
       if (buildRec?.buildInputs) {
         try {
           const buildInputs = buildRec.buildInputs as SimulatorBuildInputsV1;
-          dataset = buildSimulatedUsageDatasetFromBuildInputs(buildInputs);
-          const filledSet = new Set<string>(((buildInputs as any).filledMonths ?? []).map(String));
-          const monthProvenanceByMonth: Record<string, "ACTUAL" | "SIMULATED"> = {};
-          for (const ym of (buildInputs as any).canonicalMonths ?? []) {
-            monthProvenanceByMonth[String(ym)] =
-              (buildInputs as any).mode === "SMT_BASELINE" && !filledSet.has(String(ym)) ? "ACTUAL" : "SIMULATED";
+          const mode = (buildInputs as any).mode;
+          const actualSource = (buildInputs as any)?.snapshots?.actualSource ?? null;
+          const useActualBaseline =
+            mode === "SMT_BASELINE" &&
+            (actualSource === "SMT" || actualSource === "GREEN_BUTTON");
+
+          if (useActualBaseline) {
+            const actualResult = await getActualUsageDatasetForHouse(h.id, h.esiid ?? null);
+            if (actualResult?.dataset) {
+              const filledSet = new Set<string>(((buildInputs as any).filledMonths ?? []).map(String));
+              const monthProvenanceByMonth: Record<string, "ACTUAL" | "SIMULATED"> = {};
+              for (const ym of (buildInputs as any).canonicalMonths ?? []) {
+                monthProvenanceByMonth[String(ym)] =
+                  !filledSet.has(String(ym)) ? "ACTUAL" : "SIMULATED";
+              }
+              dataset = {
+                ...actualResult.dataset,
+                meta: {
+                  buildInputsHash: String(buildRec.buildInputsHash ?? ""),
+                  lastBuiltAt: buildRec.lastBuiltAt ? new Date(buildRec.lastBuiltAt).toISOString() : null,
+                  monthProvenanceByMonth,
+                  actualSource,
+                },
+              };
+            }
           }
-          dataset.meta = {
-            ...(dataset.meta ?? {}),
-            buildInputsHash: String(buildRec.buildInputsHash ?? ""),
-            lastBuiltAt: buildRec.lastBuiltAt ? new Date(buildRec.lastBuiltAt).toISOString() : null,
-            monthProvenanceByMonth,
-            actualSource: (buildInputs as any)?.snapshots?.actualSource ?? null,
-          };
+          if (!dataset) {
+            dataset = buildSimulatedUsageDatasetFromBuildInputs(buildInputs);
+            const filledSet = new Set<string>(((buildInputs as any).filledMonths ?? []).map(String));
+            const monthProvenanceByMonth: Record<string, "ACTUAL" | "SIMULATED"> = {};
+            for (const ym of (buildInputs as any).canonicalMonths ?? []) {
+              monthProvenanceByMonth[String(ym)] =
+                (buildInputs as any).mode === "SMT_BASELINE" && !filledSet.has(String(ym)) ? "ACTUAL" : "SIMULATED";
+            }
+            dataset.meta = {
+              ...(dataset.meta ?? {}),
+              buildInputsHash: String(buildRec.buildInputsHash ?? ""),
+              lastBuiltAt: buildRec.lastBuiltAt ? new Date(buildRec.lastBuiltAt).toISOString() : null,
+              monthProvenanceByMonth,
+              actualSource: (buildInputs as any)?.snapshots?.actualSource ?? null,
+            };
+          }
         } catch {
           dataset = null;
         }
@@ -529,22 +558,69 @@ export async function getSimulatedUsageForHouseScenario(args: {
     }
 
     const buildInputs = buildRec.buildInputs as SimulatorBuildInputsV1;
-    const dataset = buildSimulatedUsageDatasetFromBuildInputs(buildInputs);
-    const filledSet = new Set<string>(((buildInputs as any).filledMonths ?? []).map(String));
-    const monthProvenanceByMonth: Record<string, "ACTUAL" | "SIMULATED"> = {};
-    for (const ym of (buildInputs as any).canonicalMonths ?? []) {
-      monthProvenanceByMonth[String(ym)] =
-        (buildInputs as any).mode === "SMT_BASELINE" && scenarioKey === "BASELINE" && !filledSet.has(String(ym)) ? "ACTUAL" : "SIMULATED";
+    const mode = (buildInputs as any).mode;
+    const actualSource = (buildInputs as any)?.snapshots?.actualSource ?? null;
+    const useActualBaseline =
+      scenarioKey === "BASELINE" &&
+      mode === "SMT_BASELINE" &&
+      (actualSource === "SMT" || actualSource === "GREEN_BUTTON");
+
+    let dataset: any;
+    if (useActualBaseline) {
+      const actualResult = await getActualUsageDatasetForHouse(args.houseId, house.esiid ?? null);
+      if (actualResult?.dataset) {
+        const filledSet = new Set<string>(((buildInputs as any).filledMonths ?? []).map(String));
+        const monthProvenanceByMonth: Record<string, "ACTUAL" | "SIMULATED"> = {};
+        for (const ym of (buildInputs as any).canonicalMonths ?? []) {
+          monthProvenanceByMonth[String(ym)] = !filledSet.has(String(ym)) ? "ACTUAL" : "SIMULATED";
+        }
+        dataset = {
+          ...actualResult.dataset,
+          meta: {
+            buildInputsHash: String(buildRec.buildInputsHash ?? ""),
+            lastBuiltAt: buildRec.lastBuiltAt ? new Date(buildRec.lastBuiltAt).toISOString() : null,
+            scenarioKey,
+            scenarioId,
+            monthProvenanceByMonth,
+            actualSource,
+          },
+        };
+      } else {
+        dataset = buildSimulatedUsageDatasetFromBuildInputs(buildInputs);
+        const filledSet = new Set<string>(((buildInputs as any).filledMonths ?? []).map(String));
+        const monthProvenanceByMonth: Record<string, "ACTUAL" | "SIMULATED"> = {};
+        for (const ym of (buildInputs as any).canonicalMonths ?? []) {
+          monthProvenanceByMonth[String(ym)] =
+            mode === "SMT_BASELINE" && scenarioKey === "BASELINE" && !filledSet.has(String(ym)) ? "ACTUAL" : "SIMULATED";
+        }
+        dataset.meta = {
+          ...(dataset.meta ?? {}),
+          buildInputsHash: String(buildRec.buildInputsHash ?? ""),
+          lastBuiltAt: buildRec.lastBuiltAt ? new Date(buildRec.lastBuiltAt).toISOString() : null,
+          scenarioKey,
+          scenarioId,
+          monthProvenanceByMonth,
+          actualSource,
+        };
+      }
+    } else {
+      dataset = buildSimulatedUsageDatasetFromBuildInputs(buildInputs);
+      const filledSet = new Set<string>(((buildInputs as any).filledMonths ?? []).map(String));
+      const monthProvenanceByMonth: Record<string, "ACTUAL" | "SIMULATED"> = {};
+      for (const ym of (buildInputs as any).canonicalMonths ?? []) {
+        monthProvenanceByMonth[String(ym)] =
+          (buildInputs as any).mode === "SMT_BASELINE" && scenarioKey === "BASELINE" && !filledSet.has(String(ym)) ? "ACTUAL" : "SIMULATED";
+      }
+      dataset.meta = {
+        ...(dataset.meta ?? {}),
+        buildInputsHash: String(buildRec.buildInputsHash ?? ""),
+        lastBuiltAt: buildRec.lastBuiltAt ? new Date(buildRec.lastBuiltAt).toISOString() : null,
+        scenarioKey,
+        scenarioId,
+        monthProvenanceByMonth,
+        actualSource: (buildInputs as any)?.snapshots?.actualSource ?? null,
+      };
     }
-    dataset.meta = {
-      ...(dataset.meta ?? {}),
-      buildInputsHash: String(buildRec.buildInputsHash ?? ""),
-      lastBuiltAt: buildRec.lastBuiltAt ? new Date(buildRec.lastBuiltAt).toISOString() : null,
-      scenarioKey,
-      scenarioId,
-      monthProvenanceByMonth,
-      actualSource: (buildInputs as any)?.snapshots?.actualSource ?? null,
-    };
 
     return { ok: true, houseId: args.houseId, scenarioKey, scenarioId, dataset };
   } catch (e) {
