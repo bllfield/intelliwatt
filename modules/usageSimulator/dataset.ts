@@ -66,6 +66,9 @@ export type SimulatorBuildInputsV1 = {
     scenario?: { id: string; name: string } | null;
     scenarioEvents?: any[];
     scenarioOverlay?: any;
+    // Workspace chaining audit (Future based on Past)
+    pastScenario?: { id: string; name: string } | null;
+    pastScenarioEvents?: any[];
   };
 };
 

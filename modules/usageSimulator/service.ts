@@ -17,6 +17,32 @@ import { normalizeMonthlyTotals, WEATHER_NORMALIZER_VERSION, type WeatherPrefere
 
 type ManualUsagePayloadAny = any;
 
+const WORKSPACE_PAST_NAME = "Past (Corrected)";
+const WORKSPACE_FUTURE_NAME = "Future (What-if)";
+
+function normalizeScenarioTravelRanges(
+  events: Array<{ kind: string; payloadJson: any }>,
+): Array<{ startDate: string; endDate: string }> {
+  return (events || [])
+    .filter((e) => String(e?.kind ?? "") === "TRAVEL_RANGE")
+    .map((e) => {
+      const p = (e as any)?.payloadJson ?? {};
+      const startDate = typeof p?.startDate === "string" ? String(p.startDate).slice(0, 10) : "";
+      const endDate = typeof p?.endDate === "string" ? String(p.endDate).slice(0, 10) : "";
+      return { startDate, endDate };
+    })
+    .filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(r.endDate));
+}
+
+function applyMonthlyOverlay(args: { base: number; mult?: unknown; add?: unknown }): number {
+  const base = Number(args.base) || 0;
+  const multNum = args.mult == null ? NaN : Number(args.mult);
+  const mult = Number.isFinite(multNum) ? multNum : 1;
+  const addNum = args.add == null ? NaN : Number(args.add);
+  const add = Number.isFinite(addNum) ? addNum : 0;
+  return Math.max(0, base * mult + add);
+}
+
 function canonicalMonthsForRecalc(args: { mode: SimulatorMode; manualUsagePayload: ManualUsagePayloadAny | null; now?: Date }) {
   const now = args.now ?? new Date();
 
@@ -132,18 +158,7 @@ export async function recalcSimulatorBuild(args: {
       .catch(() => []);
   }
 
-  const scenarioTravelRanges =
-    scenarioId && scenarioEvents.length
-      ? scenarioEvents
-          .filter((e) => String(e?.kind ?? "") === "TRAVEL_RANGE")
-          .map((e) => {
-            const p = (e as any)?.payloadJson ?? {};
-            const startDate = typeof p?.startDate === "string" ? String(p.startDate).slice(0, 10) : "";
-            const endDate = typeof p?.endDate === "string" ? String(p.endDate).slice(0, 10) : "";
-            return { startDate, endDate };
-          })
-          .filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(r.endDate))
-      : [];
+  const scenarioTravelRanges = scenarioId ? normalizeScenarioTravelRanges(scenarioEvents as any) : [];
 
   // NEW_BUILD_ESTIMATE completeness enforcement uses existing validators via requirements.
   const req = computeRequirements(
@@ -188,22 +203,49 @@ export async function recalcSimulatorBuild(args: {
       })
     : null;
 
+  // Past -> Future chaining (V1 UX):
+  // If the Future workspace is used and Past has edits, apply Future adjustments on top of Past-corrected usage.
+  let pastScenario: { id: string; name: string } | null = null;
+  let pastEvents: Array<{ id: string; effectiveMonth: string; kind: string; payloadJson: any }> = [];
+  let pastOverlay: ReturnType<typeof computeMonthlyOverlay> | null = null;
+  let pastTravelRanges: Array<{ startDate: string; endDate: string }> = [];
+  const isFutureScenario = Boolean(scenarioId) && scenario?.name === WORKSPACE_FUTURE_NAME;
+  if (isFutureScenario) {
+    pastScenario = await (prisma as any).usageSimulatorScenario
+      .findFirst({
+        where: { userId, houseId, name: WORKSPACE_PAST_NAME, archivedAt: null },
+        select: { id: true, name: true },
+      })
+      .catch(() => null);
+    if (pastScenario?.id) {
+      pastEvents = await (prisma as any).usageSimulatorScenarioEvent
+        .findMany({
+          where: { scenarioId: pastScenario.id },
+          select: { id: true, effectiveMonth: true, kind: true, payloadJson: true },
+          orderBy: [{ effectiveMonth: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+        })
+        .catch(() => []);
+      const pastHasEdits = pastEvents.some((e) => {
+        const k = String(e?.kind ?? "");
+        return k === "MONTHLY_ADJUSTMENT" || k === "TRAVEL_RANGE";
+      });
+      if (pastHasEdits) {
+        pastOverlay = computeMonthlyOverlay({ canonicalMonths: built.canonicalMonths, events: pastEvents as any });
+        pastTravelRanges = normalizeScenarioTravelRanges(pastEvents as any);
+      }
+    }
+  }
+
   let monthlyTotalsKwhByMonth: Record<string, number> = {};
   for (let i = 0; i < built.canonicalMonths.length; i++) {
     const ym = built.canonicalMonths[i];
     const base = Number(built.monthlyTotalsKwhByMonth?.[ym] ?? 0) || 0;
-    if (!overlay) {
-      monthlyTotalsKwhByMonth[ym] = Math.max(0, base);
-      continue;
-    }
-    const multRaw = overlay.monthlyMultipliersByMonth?.[ym];
-    const multNum = multRaw == null ? NaN : Number(multRaw);
-    const mult = Number.isFinite(multNum) ? multNum : 1;
-
-    const addRaw = overlay.monthlyAddersKwhByMonth?.[ym];
-    const addNum = addRaw == null ? NaN : Number(addRaw);
-    const add = Number.isFinite(addNum) ? addNum : 0;
-    monthlyTotalsKwhByMonth[ym] = Math.max(0, base * mult + add);
+    const afterPast = pastOverlay
+      ? applyMonthlyOverlay({ base, mult: pastOverlay.monthlyMultipliersByMonth?.[ym], add: pastOverlay.monthlyAddersKwhByMonth?.[ym] })
+      : Math.max(0, base);
+    monthlyTotalsKwhByMonth[ym] = overlay
+      ? applyMonthlyOverlay({ base: afterPast, mult: overlay.monthlyMultipliersByMonth?.[ym], add: overlay.monthlyAddersKwhByMonth?.[ym] })
+      : afterPast;
   }
 
   const notes = [...(built.notes ?? [])];
@@ -211,6 +253,11 @@ export async function recalcSimulatorBuild(args: {
     notes.push(`Scenario applied: ${scenario?.name ?? scenarioId}`);
     if ((overlay?.inactiveEventIds?.length ?? 0) > 0) notes.push(`Scenario: ${overlay!.inactiveEventIds.length} inactive event(s).`);
     if ((overlay?.warnings?.length ?? 0) > 0) notes.push(`Scenario: ${overlay!.warnings.length} warning(s).`);
+  }
+  if (pastOverlay) {
+    notes.push(`Future base: ${WORKSPACE_PAST_NAME}`);
+    if ((pastOverlay.inactiveEventIds?.length ?? 0) > 0) notes.push(`Past: ${pastOverlay.inactiveEventIds.length} inactive event(s).`);
+    if ((pastOverlay.warnings?.length ?? 0) > 0) notes.push(`Past: ${pastOverlay.warnings.length} warning(s).`);
   }
 
   const weatherPreference: WeatherPreference = args.weatherPreference ?? "NONE";
@@ -262,7 +309,7 @@ export async function recalcSimulatorBuild(args: {
     monthlyTotalsKwhByMonth,
     intradayShape96: built.intradayShape96,
     weekdayWeekendShape96: built.weekdayWeekendShape96,
-    travelRanges: scenarioId ? scenarioTravelRanges : [],
+    travelRanges: scenarioId ? [...pastTravelRanges, ...scenarioTravelRanges] : [],
     notes,
     filledMonths: built.filledMonths,
     snapshots: {
@@ -279,14 +326,16 @@ export async function recalcSimulatorBuild(args: {
       scenario: scenario ? { id: scenario.id, name: scenario.name } : null,
       scenarioEvents: scenarioEvents ?? [],
       scenarioOverlay: overlay ?? null,
-    },
+      pastScenario: pastOverlay ? pastScenario : null,
+      pastScenarioEvents: pastOverlay ? pastEvents : [],
+    } as any,
     scenarioKey,
     scenarioId,
     versions,
   };
 
   // V1 hash: stable JSON of a deterministic object.
-  const eventsForHash = (scenarioEvents ?? [])
+  const eventsForHash = (pastOverlay ? [...pastEvents, ...(scenarioEvents ?? [])] : (scenarioEvents ?? []))
     .map((e) => {
       const p = (e as any)?.payloadJson ?? {};
       const multiplier = typeof p?.multiplier === "number" && Number.isFinite(p.multiplier) ? p.multiplier : null;
@@ -314,6 +363,7 @@ export async function recalcSimulatorBuild(args: {
     mode: buildInputs.mode,
     baseKind: buildInputs.baseKind,
     scenarioKey,
+    baseScenarioKey: pastOverlay ? String(pastScenario?.id ?? "") : null,
     scenarioEvents: eventsForHash,
     weatherPreference,
     versions,

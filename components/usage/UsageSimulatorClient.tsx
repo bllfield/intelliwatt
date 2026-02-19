@@ -370,14 +370,18 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
     }
   }
 
-  async function loadTimeline() {
-    if (!scenarioId || scenarioId === "baseline") {
+  async function loadTimeline(overrideScenarioId?: string) {
+    const effectiveScenarioId = typeof overrideScenarioId === "string" && overrideScenarioId.trim() ? overrideScenarioId.trim() : scenarioId;
+    if (!effectiveScenarioId || effectiveScenarioId === "baseline") {
       setTimelineEvents([]);
       return;
     }
-    const r = await fetch(`/api/user/simulator/scenarios/${encodeURIComponent(scenarioId)}/events?houseId=${encodeURIComponent(houseId)}`, {
+    const r = await fetch(
+      `/api/user/simulator/scenarios/${encodeURIComponent(effectiveScenarioId)}/events?houseId=${encodeURIComponent(houseId)}`,
+      {
       cache: "no-store",
-    });
+      },
+    );
     const j = (await r.json().catch(() => null)) as any;
     if (!r.ok || !j?.ok) {
       setTimelineEvents([]);
@@ -551,215 +555,232 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
         </div>
 
         <div className="mt-5 rounded-2xl border border-brand-cyan/20 bg-brand-white/5 p-4">
-          <div className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-cyan/60">Simulator context</div>
-          <div className="mt-2 grid gap-3 md:grid-cols-3">
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
             <div>
-              <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Intent</div>
-              <div className="mt-1 text-sm font-semibold text-brand-white">
-                {normalizedIntent ? normalizedIntent : "NONE"}
-              </div>
-              <div className="mt-1 text-xs text-brand-cyan/70">
-                Source selection happens on <span className="font-semibold">Usage Entry</span>.
+              <div className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-cyan/60">Steps</div>
+              <div className="mt-2 text-sm text-brand-cyan/80">
+                {hasActualIntervals ? (
+                  <>
+                    Your <span className="font-semibold">baseline is Actual usage</span> (read-only). Complete the required
+                    details below to unlock Past/Future simulations.
+                  </>
+                ) : (
+                  <>
+                    No interval usage connected yet. You can start with Manual totals or the New Build estimator, then fill in
+                    details below.
+                  </>
+                )}
               </div>
             </div>
-            <div>
-              <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Actual coverage</div>
-              <div className="mt-1 text-xs text-brand-cyan/80">
-                {hasActualIntervals
-                  ? `${actualSource ?? "ACTUAL"} · ${actualCoverage?.start ?? "?"} → ${actualCoverage?.end ?? "?"} · ${
-                      actualCoverage?.intervalsCount ?? 0
-                    } intervals`
-                  : "No actual usage connected yet."}
-              </div>
-            </div>
-            <div>
-              <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Simulated baseline type</div>
-              <div className="mt-1 text-xs text-brand-cyan/80">
-                {hasActualIntervals
-                  ? "Actual intervals (read-only baseline)"
-                  : mode === "MANUAL_TOTALS"
-                    ? "Manual totals"
-                    : mode === "NEW_BUILD_ESTIMATE"
-                      ? "New build estimate"
-                      : "Gap-fill from Actual (SMT/Green Button)"}
-              </div>
+            <div className="text-xs text-brand-cyan/75">
+              <span className="font-semibold">Actual coverage:</span>{" "}
+              {hasActualIntervals
+                ? `${actualSource ?? "ACTUAL"} · ${actualCoverage?.start ?? "?"} → ${actualCoverage?.end ?? "?"} · ${
+                    actualCoverage?.intervalsCount ?? 0
+                  } intervals`
+                : "none"}
             </div>
           </div>
-        </div>
 
-        <div className="mt-5 grid gap-3 md:grid-cols-3">
-          <div className="md:col-span-2">
-            <div className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-cyan/60">Workspaces</div>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setWorkspace("BASELINE")}
-                className={[
-                  "rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-wide transition",
-                  workspace === "BASELINE"
-                    ? "border-brand-cyan/50 bg-brand-cyan/10 text-brand-cyan"
-                    : "border-brand-cyan/20 bg-brand-white/5 text-brand-cyan/70 hover:bg-brand-white/10",
-                ].join(" ")}
-              >
-                {hasActualIntervals ? "Baseline (Actual)" : "Baseline (Simulated)"}
-              </button>
-              <button
-                type="button"
-                onClick={() => setWorkspace("PAST")}
-                disabled={!workspacesUnlocked}
-                className={[
-                  "rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-wide transition",
-                  !workspacesUnlocked ? "cursor-not-allowed opacity-60" : "",
-                  workspace === "PAST"
-                    ? "border-brand-cyan/50 bg-brand-cyan/10 text-brand-cyan"
-                    : "border-brand-cyan/20 bg-brand-white/5 text-brand-cyan/70 hover:bg-brand-white/10",
-                ].join(" ")}
-              >
-                Past (Corrected)
-              </button>
-              <button
-                type="button"
-                onClick={() => setWorkspace("FUTURE")}
-                disabled={!workspacesUnlocked}
-                className={[
-                  "rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-wide transition",
-                  !workspacesUnlocked ? "cursor-not-allowed opacity-60" : "",
-                  workspace === "FUTURE"
-                    ? "border-brand-cyan/50 bg-brand-cyan/10 text-brand-cyan"
-                    : "border-brand-cyan/20 bg-brand-white/5 text-brand-cyan/70 hover:bg-brand-white/10",
-                ].join(" ")}
-              >
-                Future (What-if)
-              </button>
-              <button
-                type="button"
-                onClick={async () => {
-                  if (!workspacesUnlocked) {
-                    setRecalcNote(
-                      hasActualIntervals
-                        ? "Save Home + Appliances details first to unlock Past/Future workspaces."
-                        : "Generate the simulated baseline first to unlock workspaces.",
-                    );
-                    return;
-                  }
-                  if (workspace === "PAST" && !pastScenario) {
-                    const id = await createScenario(WORKSPACE_PAST_NAME);
-                    if (id) {
-                      setWorkspace("PAST");
-                      setRefreshToken((x) => x + 1);
-                    }
-                    return;
-                  }
-                  if (workspace === "FUTURE" && !futureScenario) {
-                    const id = await createScenario(WORKSPACE_FUTURE_NAME);
-                    if (id) {
-                      setWorkspace("FUTURE");
-                      setRefreshToken((x) => x + 1);
-                    }
-                    return;
-                  }
-                  setRecalcNote("Select Past or Future to create that workspace.");
-                }}
-                disabled={workspace === "BASELINE" || (workspace === "PAST" ? Boolean(pastScenario) : Boolean(futureScenario))}
-                className="rounded-xl border border-brand-cyan/30 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-white hover:bg-brand-white/10"
-              >
-                Create workspace
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setOpenTimeline(true);
-                  void loadTimeline();
-                }}
-                disabled={!workspacesUnlocked || scenarioId === "baseline"}
-                className="rounded-xl border border-brand-cyan/30 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-white hover:bg-brand-white/10 disabled:opacity-60"
-              >
-                Edit timeline
-              </button>
+          <div className="mt-4 grid gap-3">
+            {/* Step 1: Manual */}
+            <div className="grid gap-3 rounded-2xl border border-brand-cyan/20 bg-brand-navy/70 px-4 py-4 md:grid-cols-12">
+              <div className="md:col-span-4">
+                <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Step 1</div>
+                <div className="mt-1 text-sm font-semibold text-brand-white">Manual totals</div>
+                <div className="mt-1 text-xs text-brand-cyan/70">
+                  Only use this when you do <span className="font-semibold">not</span> have SMT/Green Button interval data.
+                </div>
+              </div>
+              <div className="md:col-span-5">
+                <div className="text-xs text-brand-cyan/80">
+                  {hasActualIntervals
+                    ? "Disabled because interval usage is connected."
+                    : "Optional. Enter totals if you need a baseline without interval data."}
+                </div>
+              </div>
+              <div className="md:col-span-3 md:flex md:justify-end">
+                <button
+                  type="button"
+                  onClick={() => setOpenManual(true)}
+                  disabled={hasActualIntervals}
+                  className={[
+                    "rounded-xl border px-3 py-2 text-xs font-semibold transition",
+                    hasActualIntervals
+                      ? "cursor-not-allowed border-brand-cyan/20 bg-brand-white/5 text-brand-white/50 opacity-60"
+                      : "border-brand-cyan/30 bg-brand-white/5 text-brand-white hover:bg-brand-white/10",
+                  ].join(" ")}
+                >
+                  {hasActualIntervals ? "Manual (disabled)" : "Open Manual"}
+                </button>
+              </div>
             </div>
-            {scenarioBanner ? <div className="mt-2 text-xs text-brand-cyan/80">{scenarioBanner}</div> : null}
-            {selectedBuild ? (
-              <div className="mt-2 text-xs text-brand-cyan/70">
-                Generated: {selectedBuild.lastBuiltAt ? new Date(selectedBuild.lastBuiltAt).toLocaleString() : "unknown"} · hash{" "}
-                {String(selectedBuild.buildInputsHash || "").slice(0, 10)}
+
+            {/* Step 2: Home */}
+            <div className="grid gap-3 rounded-2xl border border-brand-cyan/20 bg-brand-navy/70 px-4 py-4 md:grid-cols-12">
+              <div className="md:col-span-4">
+                <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Step 2</div>
+                <div className="mt-1 text-sm font-semibold text-brand-white">Home details</div>
+                <div className="mt-1 text-xs text-brand-cyan/70">Required for Past/Future simulations.</div>
               </div>
-            ) : (
-              <div className="mt-2 text-xs text-brand-cyan/70">
-                {workspace === "BASELINE" && hasActualIntervals
-                  ? "Baseline uses your Actual usage. Recalculate is only needed for Past/Future simulations."
-                  : "Not generated yet. Click Recalculate."}
+              <div className="md:col-span-5">
+                <div className="text-xs text-brand-cyan/80">
+                  Save insulation, HVAC, occupancy, and other characteristics so IntelliWatt can reshape simulated curves.
+                </div>
               </div>
-            )}
+              <div className="md:col-span-3 md:flex md:justify-end">
+                <button
+                  type="button"
+                  onClick={() => setOpenHome(true)}
+                  className="rounded-xl border border-brand-cyan/30 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-white hover:bg-brand-white/10"
+                >
+                  Open Home
+                </button>
+              </div>
+            </div>
+
+            {/* Step 3: Appliances */}
+            <div className="grid gap-3 rounded-2xl border border-brand-cyan/20 bg-brand-navy/70 px-4 py-4 md:grid-cols-12">
+              <div className="md:col-span-4">
+                <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Step 3</div>
+                <div className="mt-1 text-sm font-semibold text-brand-white">Appliance details</div>
+                <div className="mt-1 text-xs text-brand-cyan/70">Required for Past/Future simulations.</div>
+              </div>
+              <div className="md:col-span-5">
+                <div className="text-xs text-brand-cyan/80">
+                  Save fuel configuration and major loads. This influences the shape of simulated adjustments.
+                </div>
+              </div>
+              <div className="md:col-span-3 md:flex md:justify-end">
+                <button
+                  type="button"
+                  onClick={() => setOpenAppliances(true)}
+                  className="rounded-xl border border-brand-cyan/30 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-white hover:bg-brand-white/10"
+                >
+                  Open Appliances
+                </button>
+              </div>
+            </div>
+
+            {/* Step 4/5: Workspaces */}
+            <div className="grid gap-3 rounded-2xl border border-brand-cyan/20 bg-brand-navy/70 px-4 py-4 md:grid-cols-12">
+              <div className="md:col-span-4">
+                <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Step 4</div>
+                <div className="mt-1 text-sm font-semibold text-brand-white">Past (Corrected)</div>
+                <div className="mt-1 text-xs text-brand-cyan/70">Optional.</div>
+              </div>
+              <div className="md:col-span-5">
+                <div className="text-xs text-brand-cyan/80">
+                  Use this to correct historical usage (e.g. vacancy/travel or known retrofits). If you use Past corrections,
+                  Future adjustments will build on top of the corrected curve.
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2 md:col-span-3 md:justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setWorkspace("PAST");
+                    if (!pastScenario) void createScenario(WORKSPACE_PAST_NAME);
+                  }}
+                  disabled={!workspacesUnlocked}
+                  className="rounded-xl border border-brand-cyan/30 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-white hover:bg-brand-white/10 disabled:opacity-60"
+                >
+                  {pastScenario ? "Past workspace ready" : "Create Past"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setWorkspace("PAST");
+                    setOpenTimeline(true);
+                    if (pastScenario?.id) setScenarioId(pastScenario.id);
+                    void loadTimeline(pastScenario?.id ?? undefined);
+                  }}
+                  disabled={!workspacesUnlocked || !pastScenario}
+                  className="rounded-xl border border-brand-cyan/30 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-white hover:bg-brand-white/10 disabled:opacity-60"
+                >
+                  Edit Past
+                </button>
+              </div>
+            </div>
+
+            <div className="grid gap-3 rounded-2xl border border-brand-cyan/20 bg-brand-navy/70 px-4 py-4 md:grid-cols-12">
+              <div className="md:col-span-4">
+                <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Step 5</div>
+                <div className="mt-1 text-sm font-semibold text-brand-white">Future (What-if)</div>
+                <div className="mt-1 text-xs text-brand-cyan/70">Create scenarios for planned changes.</div>
+              </div>
+              <div className="md:col-span-5">
+                <div className="text-xs text-brand-cyan/80">
+                  Future simulations never edit Actual usage. They generate simulated curves for comparison only.
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2 md:col-span-3 md:justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setWorkspace("FUTURE");
+                    if (!futureScenario) void createScenario(WORKSPACE_FUTURE_NAME);
+                  }}
+                  disabled={!workspacesUnlocked}
+                  className="rounded-xl border border-brand-cyan/30 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-white hover:bg-brand-white/10 disabled:opacity-60"
+                >
+                  {futureScenario ? "Future workspace ready" : "Create Future"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setWorkspace("FUTURE");
+                    setOpenTimeline(true);
+                    if (futureScenario?.id) setScenarioId(futureScenario.id);
+                    void loadTimeline(futureScenario?.id ?? undefined);
+                  }}
+                  disabled={!workspacesUnlocked || !futureScenario}
+                  className="rounded-xl border border-brand-cyan/30 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-white hover:bg-brand-white/10 disabled:opacity-60"
+                >
+                  Edit Future
+                </button>
+              </div>
+            </div>
+
+            {/* Step 6: Weather */}
+            <div className="grid gap-3 rounded-2xl border border-brand-cyan/20 bg-brand-navy/70 px-4 py-4 md:grid-cols-12">
+              <div className="md:col-span-4">
+                <div className="text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Step 6</div>
+                <div className="mt-1 text-sm font-semibold text-brand-white">Weather normalization</div>
+                <div className="mt-1 text-xs text-brand-cyan/70">Last step (optional in Phase 1).</div>
+              </div>
+              <div className="md:col-span-5">
+                <div className="text-xs text-brand-cyan/80">Phase 1 behavior is identity. Preference is stored for determinism.</div>
+              </div>
+              <div className="md:col-span-3">
+                <select
+                  value={weatherPreference}
+                  onChange={(e) => setWeatherPreference(e.target.value as any)}
+                  className="w-full rounded-xl border border-brand-cyan/20 bg-brand-white/5 px-3 py-2 text-xs text-brand-white"
+                >
+                  <option value="NONE">None (Phase 1)</option>
+                  <option value="LAST_YEAR_WEATHER">Last year weather (stub)</option>
+                  <option value="LONG_TERM_AVERAGE">Long-term average (stub)</option>
+                </select>
+              </div>
+            </div>
+
             {!workspacesUnlocked ? (
-              <div className="mt-3 rounded-2xl border border-brand-cyan/20 bg-brand-white/5 px-4 py-3 text-xs text-brand-cyan/80">
-                <div className="font-semibold text-brand-white/90">Workspaces locked</div>
+              <div className="rounded-2xl border border-brand-cyan/20 bg-brand-white/5 px-4 py-3 text-xs text-brand-cyan/80">
+                <div className="font-semibold text-brand-white/90">To continue</div>
                 <div className="mt-1">
                   {hasActualIntervals ? (
                     <>
-                      Save <span className="font-semibold">Home</span> and <span className="font-semibold">Appliances</span> to unlock Past/Future.
-                      Actual usage is read-only.
+                      Save <span className="font-semibold">Home</span> and <span className="font-semibold">Appliances</span> first.
                     </>
                   ) : (
                     <>
-                      Past/Future require a <span className="font-semibold">simulated baseline</span> build.
+                      Generate a <span className="font-semibold">simulated baseline</span> first (via Recalculate).
                     </>
                   )}
                 </div>
               </div>
             ) : null}
-          </div>
-
-          <div className="md:col-span-1">
-            <div className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-cyan/60">Edit inputs</div>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {!hasActualIntervals ? (
-                <button
-                  type="button"
-                  onClick={() => setOpenManual(true)}
-                  className="rounded-xl border border-brand-cyan/30 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-white hover:bg-brand-white/10"
-                >
-                  Manual
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  disabled
-                  title="Manual totals are disabled when interval usage is connected."
-                  className="cursor-not-allowed rounded-xl border border-brand-cyan/20 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-white/50 opacity-60"
-                >
-                  Manual (disabled)
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => setOpenHome(true)}
-                className="rounded-xl border border-brand-cyan/30 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-white hover:bg-brand-white/10"
-              >
-                Home
-              </button>
-              <button
-                type="button"
-                onClick={() => setOpenAppliances(true)}
-                className="rounded-xl border border-brand-cyan/30 bg-brand-white/5 px-3 py-2 text-xs font-semibold text-brand-white hover:bg-brand-white/10"
-              >
-                Appliances
-              </button>
-            </div>
-            <div className="mt-4">
-              <div className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-cyan/60">Weather normalization</div>
-              <select
-                value={weatherPreference}
-                onChange={(e) => setWeatherPreference(e.target.value as any)}
-                className="mt-2 w-full rounded-xl border border-brand-cyan/20 bg-brand-white/5 px-3 py-2 text-xs text-brand-white"
-              >
-                <option value="NONE">None (Phase 1)</option>
-                <option value="LAST_YEAR_WEATHER">Last year weather (stub)</option>
-                <option value="LONG_TERM_AVERAGE">Long-term average (stub)</option>
-              </select>
-              <div className="mt-2 text-xs text-brand-cyan/70">
-                Phase 1 behavior is identity. The preference is stored in build inputs and included in hashing for determinism.
-              </div>
-            </div>
           </div>
         </div>
 
