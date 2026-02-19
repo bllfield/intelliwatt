@@ -26,7 +26,12 @@ export function computeMonthlyOverlay(args: {
     const e = args.events[i];
     const eventId = String(e?.id ?? "");
     const ym = String(e?.effectiveMonth ?? "");
+    const kind = String((e as any)?.kind ?? "");
     if (!eventId) continue;
+
+    // V1 overlay supports monthly adjustments only.
+    // Other event kinds (e.g. travel/day exclusions) are handled elsewhere.
+    if (kind && kind !== "MONTHLY_ADJUSTMENT") continue;
 
     if (!isYearMonth(ym)) {
       inactiveEventIds.push(eventId);

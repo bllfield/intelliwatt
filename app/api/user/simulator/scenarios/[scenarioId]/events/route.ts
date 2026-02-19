@@ -55,7 +55,23 @@ export async function POST(request: NextRequest, ctx: { params: Promise<{ scenar
     if (!scenarioId) return NextResponse.json({ ok: false, error: "scenarioId_required" }, { status: 400 });
     if (!effectiveMonth) return NextResponse.json({ ok: false, error: "effectiveMonth_required" }, { status: 400 });
 
-    const payloadJson = { multiplier, adderKwh };
+    const payloadJson =
+      kind === "TRAVEL_RANGE"
+        ? {
+            startDate:
+              typeof body?.startDate === "string"
+                ? body.startDate.trim()
+                : typeof body?.payloadJson?.startDate === "string"
+                  ? body.payloadJson.startDate.trim()
+                  : "",
+            endDate:
+              typeof body?.endDate === "string"
+                ? body.endDate.trim()
+                : typeof body?.payloadJson?.endDate === "string"
+                  ? body.payloadJson.endDate.trim()
+                  : "",
+          }
+        : { multiplier, adderKwh };
     const out = await addScenarioEvent({ userId: u.user.id, houseId, scenarioId, effectiveMonth, kind, payloadJson });
     if (!out.ok) return NextResponse.json(out, { status: 400 });
     return NextResponse.json(out);

@@ -94,6 +94,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
   const [refreshToken, setRefreshToken] = useState(0);
   const [canRecalc, setCanRecalc] = useState(false);
   const [missingItems, setMissingItems] = useState<string[]>([]);
+  const [canonicalEndMonth, setCanonicalEndMonth] = useState<string>("");
   const [weatherPreference, setWeatherPreference] = useState<"NONE" | "LAST_YEAR_WEATHER" | "LONG_TERM_AVERAGE">("NONE");
 
   const [scenarioId, setScenarioId] = useState<string>("baseline");
@@ -215,14 +216,17 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
         if (!r.ok || !j?.ok) {
           setCanRecalc(false);
           setMissingItems(["Unable to load requirements. Try refreshing."]);
+          setCanonicalEndMonth("");
           return;
         }
         setCanRecalc(Boolean(j.canRecalc));
         setMissingItems(Array.isArray(j.missingItems) ? j.missingItems.map(String) : []);
+        setCanonicalEndMonth(typeof (j as any).canonicalEndMonth === "string" ? String((j as any).canonicalEndMonth) : "");
       } catch {
         if (!cancelled) {
           setCanRecalc(false);
           setMissingItems(["Unable to load requirements. Try refreshing."]);
+          setCanonicalEndMonth("");
         }
       }
     })();
@@ -413,6 +417,18 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
       setTimelineAdderKwh("");
       await loadTimeline();
     }
+  }
+
+  async function addTravelRange() {
+    if (!scenarioId || scenarioId === "baseline") return;
+    const effectiveMonth = canonicalEndMonth || new Date().toISOString().slice(0, 7);
+    const r = await fetch(`/api/user/simulator/scenarios/${encodeURIComponent(scenarioId)}/events`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ houseId, effectiveMonth, kind: "TRAVEL_RANGE", startDate: "", endDate: "" }),
+    });
+    const j = (await r.json().catch(() => null)) as any;
+    if (r.ok && j?.ok) await loadTimeline();
   }
 
   async function saveTimelineEvent(eventId: string, patch: any) {
@@ -787,6 +803,77 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
           <div className="text-sm text-brand-navy/70">Select or create a scenario to edit its timeline.</div>
         ) : (
           <div className="space-y-4">
+            {workspace === "PAST" ? (
+              <div className="rounded-2xl border border-brand-blue/10 bg-white p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-navy/60">
+                      Unusual travel (exclude whole days)
+                    </div>
+                    <div className="mt-2 text-xs text-brand-navy/70">
+                      Add date ranges where the home was vacant/unusually low usage. Simulated totals will be renormalized to
+                      still match your kWh targets.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void addTravelRange()}
+                    className="rounded-xl border border-brand-blue/30 bg-white px-3 py-2 text-xs font-semibold text-brand-navy hover:bg-brand-blue/5"
+                  >
+                    Add range
+                  </button>
+                </div>
+
+                <div className="mt-3 space-y-2">
+                  {timelineEvents.filter((e) => String((e as any)?.kind ?? "") === "TRAVEL_RANGE").length ? null : (
+                    <div className="text-sm text-brand-navy/70">No travel ranges yet.</div>
+                  )}
+                  {timelineEvents
+                    .filter((e) => String((e as any)?.kind ?? "") === "TRAVEL_RANGE")
+                    .map((e) => {
+                      const p = (e as any)?.payloadJson ?? {};
+                      const start = typeof p?.startDate === "string" ? String(p.startDate).slice(0, 10) : "";
+                      const end = typeof p?.endDate === "string" ? String(p.endDate).slice(0, 10) : "";
+                      return (
+                        <div
+                          key={String(e.id)}
+                          className="grid gap-2 rounded-xl border border-brand-blue/10 bg-brand-blue/5 p-3 md:grid-cols-5"
+                        >
+                          <input
+                            type="date"
+                            defaultValue={start}
+                            onBlur={(ev) => {
+                              const v = String(ev.target.value ?? "").slice(0, 10);
+                              void saveTimelineEvent(String(e.id), {
+                                effectiveMonth: /^\d{4}-\d{2}-\d{2}$/.test(v) ? v.slice(0, 7) : String(e.effectiveMonth ?? ""),
+                                payloadJson: { ...p, startDate: v },
+                              });
+                            }}
+                            className="rounded-lg border border-brand-blue/20 bg-white px-2 py-1 text-xs text-brand-navy md:col-span-2"
+                          />
+                          <input
+                            type="date"
+                            defaultValue={end}
+                            onBlur={(ev) => {
+                              const v = String(ev.target.value ?? "").slice(0, 10);
+                              void saveTimelineEvent(String(e.id), { payloadJson: { ...p, endDate: v } });
+                            }}
+                            className="rounded-lg border border-brand-blue/20 bg-white px-2 py-1 text-xs text-brand-navy md:col-span-2"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => void deleteTimelineEvent(String(e.id))}
+                            className="rounded-lg border border-red-200 bg-white px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-50"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+            ) : null}
+
             <div className="rounded-2xl border border-brand-blue/10 bg-brand-blue/5 p-4">
               <div className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-navy/60">Add event (month)</div>
               <div className="mt-3 grid gap-2 md:grid-cols-5">
@@ -847,8 +934,12 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
             <div className="rounded-2xl border border-brand-blue/10 bg-white p-4">
               <div className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-navy/60">Events</div>
               <div className="mt-3 space-y-2">
-                {timelineEvents.length ? null : <div className="text-sm text-brand-navy/70">No events yet.</div>}
-                {timelineEvents.map((e) => {
+                {timelineEvents.filter((e) => String((e as any)?.kind ?? "") === "MONTHLY_ADJUSTMENT").length ? null : (
+                  <div className="text-sm text-brand-navy/70">No events yet.</div>
+                )}
+                {timelineEvents
+                  .filter((e) => String((e as any)?.kind ?? "") === "MONTHLY_ADJUSTMENT")
+                  .map((e) => {
                   const p = (e as any)?.payloadJson ?? {};
                   const mult = typeof p?.multiplier === "number" ? String(p.multiplier) : "";
                   const add = typeof p?.adderKwh === "number" ? String(p.adderKwh) : "";
@@ -907,4 +998,3 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
     </div>
   );
 }
-

@@ -132,6 +132,19 @@ export async function recalcSimulatorBuild(args: {
       .catch(() => []);
   }
 
+  const scenarioTravelRanges =
+    scenarioId && scenarioEvents.length
+      ? scenarioEvents
+          .filter((e) => String(e?.kind ?? "") === "TRAVEL_RANGE")
+          .map((e) => {
+            const p = (e as any)?.payloadJson ?? {};
+            const startDate = typeof p?.startDate === "string" ? String(p.startDate).slice(0, 10) : "";
+            const endDate = typeof p?.endDate === "string" ? String(p.endDate).slice(0, 10) : "";
+            return { startDate, endDate };
+          })
+          .filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(r.endDate))
+      : [];
+
   // NEW_BUILD_ESTIMATE completeness enforcement uses existing validators via requirements.
   const req = computeRequirements(
     {
@@ -249,7 +262,7 @@ export async function recalcSimulatorBuild(args: {
     monthlyTotalsKwhByMonth,
     intradayShape96: built.intradayShape96,
     weekdayWeekendShape96: built.weekdayWeekendShape96,
-    travelRanges: mode === "MANUAL_TOTALS" ? (manualUsagePayload?.travelRanges ?? []) : [],
+    travelRanges: scenarioId ? scenarioTravelRanges : [],
     notes,
     filledMonths: built.filledMonths,
     snapshots: {
@@ -278,12 +291,16 @@ export async function recalcSimulatorBuild(args: {
       const p = (e as any)?.payloadJson ?? {};
       const multiplier = typeof p?.multiplier === "number" && Number.isFinite(p.multiplier) ? p.multiplier : null;
       const adderKwh = typeof p?.adderKwh === "number" && Number.isFinite(p.adderKwh) ? p.adderKwh : null;
+      const startDate = typeof p?.startDate === "string" ? String(p.startDate).slice(0, 10) : null;
+      const endDate = typeof p?.endDate === "string" ? String(p.endDate).slice(0, 10) : null;
       return {
         id: String(e?.id ?? ""),
         effectiveMonth: String(e?.effectiveMonth ?? ""),
         kind: String(e?.kind ?? ""),
         multiplier,
         adderKwh,
+        startDate,
+        endDate,
       };
     })
     .sort((a, b) => {
