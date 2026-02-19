@@ -34,6 +34,15 @@ function clampInt(n: unknown, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, y));
 }
 
+function normalizeRanges(ranges: TravelRange[]): TravelRange[] {
+  return (ranges || [])
+    .map((r) => ({
+      startDate: String(r.startDate || "").slice(0, 10),
+      endDate: String(r.endDate || "").slice(0, 10),
+    }))
+    .filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(r.endDate));
+}
+
 export function ManualUsageEntry({ houseId }: { houseId: string }) {
   const [activeTab, setActiveTab] = React.useState<"MONTHLY" | "ANNUAL">("MONTHLY");
   const [loading, setLoading] = React.useState(true);
@@ -47,6 +56,7 @@ export function ManualUsageEntry({ houseId }: { houseId: string }) {
   );
   const [annualAnchorEndDate, setAnnualAnchorEndDate] = React.useState<string>("");
   const [annualKwh, setAnnualKwh] = React.useState<number | "">("");
+  const [travelRanges, setTravelRanges] = React.useState<TravelRange[]>([]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -83,12 +93,14 @@ export function ManualUsageEntry({ houseId }: { houseId: string }) {
             payload.monthlyKwh.map((r) => [r.month, typeof r.kwh === "number" ? r.kwh : ""]),
           );
           setMonthlyKwh(months.map((m) => ({ month: m, kwh: map.get(m) ?? "" })));
+          setTravelRanges(Array.isArray(payload.travelRanges) ? payload.travelRanges : []);
           return;
         }
         if (payload?.mode === "ANNUAL") {
           setActiveTab("ANNUAL");
           setAnnualAnchorEndDate(String((payload as any).anchorEndDate ?? (payload as any).endDate ?? "").slice(0, 10));
           setAnnualKwh(payload.annualKwh);
+          setTravelRanges(Array.isArray(payload.travelRanges) ? payload.travelRanges : []);
           return;
         }
       } catch (e: any) {
@@ -122,13 +134,13 @@ export function ManualUsageEntry({ houseId }: { houseId: string }) {
               mode: "MONTHLY",
               anchorEndDate: String(monthlyAnchorEndDate ?? "").slice(0, 10),
               monthlyKwh: monthlyKwh.map((r) => ({ month: r.month, kwh: r.kwh === "" ? "" : Number(r.kwh) })),
-              travelRanges: [],
+              travelRanges: normalizeRanges(travelRanges),
             }
           : {
               mode: "ANNUAL",
               anchorEndDate: String(annualAnchorEndDate ?? "").slice(0, 10),
               annualKwh: annualKwh === "" ? "" : Number(annualKwh),
-              travelRanges: [],
+              travelRanges: normalizeRanges(travelRanges),
             };
 
       const res = await fetch("/api/user/manual-usage", {
@@ -293,7 +305,7 @@ export function ManualUsageEntry({ houseId }: { houseId: string }) {
             <button
               type="button"
               onClick={save}
-              disabled={saving}
+              disabled={saving || loading}
               className="inline-flex items-center justify-center rounded-full border border-brand-blue/60 bg-brand-blue/15 px-6 py-2 text-xs font-semibold uppercase tracking-wide text-brand-navy transition hover:border-brand-blue hover:bg-brand-blue/25 disabled:opacity-60"
             >
               {saving ? "Saving…" : "Save manual usage"}
