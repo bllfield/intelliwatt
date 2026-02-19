@@ -46,6 +46,20 @@ function applyMonthlyOverlay(args: { base: number; mult?: unknown; add?: unknown
   return Math.max(0, base * mult + add);
 }
 
+/** Canonical window as date range (YYYY-MM-DD) and day count for display and interval count. */
+function canonicalWindowDateRange(canonicalMonths: string[]): { start: string; end: string; days: number } | null {
+  if (!Array.isArray(canonicalMonths) || canonicalMonths.length === 0) return null;
+  const first = String(canonicalMonths[0]).trim();
+  const last = String(canonicalMonths[canonicalMonths.length - 1]).trim();
+  if (!/^\d{4}-\d{2}$/.test(first) || !/^\d{4}-\d{2}$/.test(last)) return null;
+  const start = `${first}-01`;
+  const [y, m] = last.split("-").map(Number);
+  const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const end = `${last}-${String(lastDay).padStart(2, "0")}`;
+  const days = Math.round((new Date(end + "T12:00:00.000Z").getTime() - new Date(start + "T12:00:00.000Z").getTime()) / (24 * 60 * 60 * 1000)) + 1;
+  return { start, end, days: Math.max(1, days) };
+}
+
 function canonicalMonthsForRecalc(args: { mode: SimulatorMode; manualUsagePayload: ManualUsagePayloadAny | null; now?: Date }) {
   const now = args.now ?? new Date();
 
@@ -369,6 +383,21 @@ export async function recalcSimulatorBuild(args: {
         })()
       : [];
 
+  // SMT_BASELINE: use actual data's date range (anchor) so Baseline, Past, and Future all show the same dates (e.g. 02/18/2025 – 02/18/2026).
+  let smtAnchorPeriods: Array<{ id: string; startDate: string; endDate: string }> | undefined;
+  if (mode === "SMT_BASELINE" && (built.source?.actualSource === "SMT" || built.source?.actualSource === "GREEN_BUTTON")) {
+    try {
+      const actualResult = await getActualUsageDatasetForHouse(houseId, esiid ?? null);
+      const start = actualResult?.dataset?.summary?.start ? String(actualResult.dataset.summary.start).slice(0, 10) : null;
+      const end = actualResult?.dataset?.summary?.end ? String(actualResult.dataset.summary.end).slice(0, 10) : null;
+      if (start && end && /^\d{4}-\d{2}-\d{2}$/.test(start) && /^\d{4}-\d{2}-\d{2}$/.test(end)) {
+        smtAnchorPeriods = [{ id: "anchor", startDate: start, endDate: end }];
+      }
+    } catch {
+      smtAnchorPeriods = undefined;
+    }
+  }
+
   const buildInputs: SimulatorBuildInputsV1 & {
     scenarioKey?: string;
     scenarioId?: string | null;
@@ -379,7 +408,7 @@ export async function recalcSimulatorBuild(args: {
     baseKind,
     canonicalEndMonth: canonical.endMonth,
     canonicalMonths: built.canonicalMonths,
-    canonicalPeriods: manualCanonicalPeriods.length ? manualCanonicalPeriods : undefined,
+    canonicalPeriods: manualCanonicalPeriods.length ? manualCanonicalPeriods : smtAnchorPeriods ?? undefined,
     weatherPreference,
     weatherNormalizerVersion: WEATHER_NORMALIZER_VERSION,
     monthlyTotalsKwhByMonth,
@@ -518,15 +547,24 @@ export async function getSimulatedUsageForUser(args: {
             if (actualResult?.dataset) {
               const filledSet = new Set<string>(((buildInputs as any).filledMonths ?? []).map(String));
               const monthProvenanceByMonth: Record<string, "ACTUAL" | "SIMULATED"> = {};
-              for (const ym of (buildInputs as any).canonicalMonths ?? []) {
+              const canonicalMonths = (buildInputs as any).canonicalMonths ?? [];
+              for (const ym of canonicalMonths) {
                 monthProvenanceByMonth[String(ym)] =
                   !filledSet.has(String(ym)) ? "ACTUAL" : "SIMULATED";
               }
+              const actualSummary = actualResult.dataset.summary ?? {};
+              const actualInsights = actualResult.dataset.insights ?? {};
               dataset = {
                 ...actualResult.dataset,
+                summary: {
+                  ...actualSummary,
+                  source: "SIMULATED" as const,
+                },
+                insights: actualInsights,
                 meta: {
                   buildInputsHash: String(buildRec.buildInputsHash ?? ""),
                   lastBuiltAt: buildRec.lastBuiltAt ? new Date(buildRec.lastBuiltAt).toISOString() : null,
+                  datasetKind: "SIMULATED" as const,
                   monthProvenanceByMonth,
                   actualSource,
                 },
@@ -616,14 +654,23 @@ export async function getSimulatedUsageForHouseScenario(args: {
       if (actualResult?.dataset) {
         const filledSet = new Set<string>(((buildInputs as any).filledMonths ?? []).map(String));
         const monthProvenanceByMonth: Record<string, "ACTUAL" | "SIMULATED"> = {};
-        for (const ym of (buildInputs as any).canonicalMonths ?? []) {
+        const canonicalMonths = (buildInputs as any).canonicalMonths ?? [];
+        for (const ym of canonicalMonths) {
           monthProvenanceByMonth[String(ym)] = !filledSet.has(String(ym)) ? "ACTUAL" : "SIMULATED";
         }
+        const actualSummary = actualResult.dataset.summary ?? {};
+        const actualInsights = actualResult.dataset.insights ?? {};
         dataset = {
           ...actualResult.dataset,
+          summary: {
+            ...actualSummary,
+            source: "SIMULATED" as const,
+          },
+          insights: actualInsights,
           meta: {
             buildInputsHash: String(buildRec.buildInputsHash ?? ""),
             lastBuiltAt: buildRec.lastBuiltAt ? new Date(buildRec.lastBuiltAt).toISOString() : null,
+            datasetKind: "SIMULATED" as const,
             scenarioKey,
             scenarioId,
             monthProvenanceByMonth,

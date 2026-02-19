@@ -186,7 +186,9 @@ export const UsageDashboard: React.FC<Props> = ({
         }
 
         // Show cached payload instantly (back/forward nav), then refresh in the background.
-        const cached = readSessionCache(datasetMode);
+        // Skip cache when on simulator baseline (simulatedHousesOverride === null) so baseline always shows canonical dates + SIMULATED source.
+        const skipCache = datasetMode === "SIMULATED" && simulatedHousesOverride === null;
+        const cached = skipCache ? null : readSessionCache(datasetMode);
         const cachedPayload = cached?.payload ?? null;
         if (cachedPayload && (cachedPayload as any).ok !== false && (cachedPayload as any).houses) {
           const c = cachedPayload as { ok: true; houses: HouseUsage[] };
@@ -323,17 +325,31 @@ export const UsageDashboard: React.FC<Props> = ({
 
   const coverage = useMemo(() => {
     const ds = activeHouse?.dataset;
-    const datasetKind = (ds as any)?.meta?.datasetKind ?? null;
+    const meta = (ds as any)?.meta ?? {};
+    const datasetKind = meta.datasetKind ?? null;
     const startIso = ds?.summary?.start ?? null;
-    // Prefer "end" if present; otherwise use "latest" (the last timestamp we saw in DB).
     const endIso = ds?.summary?.end ?? ds?.summary?.latest ?? null;
     const start = startIso ? String(startIso).slice(0, 10) : null;
     const end = endIso ? String(endIso).slice(0, 10) : null;
+    const provenance = meta.monthProvenanceByMonth as Record<string, string> | undefined;
+    const actualSource = meta.actualSource as string | undefined;
+    const hasSimulatedFill =
+      datasetKind === "SIMULATED" &&
+      actualSource &&
+      provenance &&
+      Object.values(provenance).some((v) => v === "SIMULATED");
+    const source =
+      hasSimulatedFill && actualSource
+        ? `${actualSource} with simulated fill for Travel/Vacant`
+        : datasetKind === "SIMULATED"
+          ? "SIMULATED"
+          : ds?.summary?.source ?? null;
     return {
-      source: datasetKind === "SIMULATED" ? "SIMULATED" : ds?.summary?.source ?? null,
+      source,
       start,
       end,
       intervalsCount: ds?.summary?.intervalsCount ?? null,
+      hasSimulatedFill,
     };
   }, [activeHouse]);
 
@@ -440,7 +456,9 @@ export const UsageDashboard: React.FC<Props> = ({
           <h2 className="text-xl font-semibold text-neutral-900">Household energy insights</h2>
           <p className="text-sm text-neutral-600">
             {datasetMode === "SIMULATED"
-              ? "Based on a simulated 15-minute curve generated from your manual entry."
+              ? coverage?.hasSimulatedFill
+                ? "Based on actual usage data with simulated fill for Travel/Vacant dates."
+                : "Based on a simulated 15-minute curve generated from your manual entry or SMT baseline."
               : "Based on normalized 15-minute interval data from your connected sources."}
           </p>
           {coverage?.start && coverage?.end ? (
