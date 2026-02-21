@@ -472,17 +472,9 @@ export async function recalcSimulatorBuild(args: {
         travelRanges: allTravelRanges,
         filledMonths: built.filledMonths ?? [],
       });
-      const startDate =
-        smtAnchorPeriods?.[0]?.startDate ?? `${built.canonicalMonths[0]}-01`;
-      const lastYm = built.canonicalMonths[built.canonicalMonths.length - 1];
-      const [ly, lm] = (lastYm ?? "").split("-").map(Number);
-      const lastDay =
-        Number.isFinite(ly) && Number.isFinite(lm) && lm >= 1 && lm <= 12
-          ? new Date(Date.UTC(ly, lm, 0)).getUTCDate()
-          : 28;
-      const endDate =
-        smtAnchorPeriods?.[smtAnchorPeriods.length - 1]?.endDate ??
-        `${lastYm}-${String(lastDay).padStart(2, "0")}`;
+      const canonicalWindow = canonicalWindowDateRange(built.canonicalMonths);
+      const startDate = canonicalWindow?.start ?? `${built.canonicalMonths[0]}-01`;
+      const endDate = canonicalWindow?.end ?? `${built.canonicalMonths[built.canonicalMonths.length - 1]}-28`;
       const actualIntervals = await getActualIntervalsForRange({
         houseId,
         esiid: esiid ?? null,
@@ -496,7 +488,7 @@ export async function recalcSimulatorBuild(args: {
         pastMonthlyTotalsKwhByMonth: monthlyTotalsKwhByMonth,
         intradayShape96: built.intradayShape96,
         weekdayWeekendShape96: built.weekdayWeekendShape96,
-        periods: smtAnchorPeriods ?? undefined,
+        periods: undefined,
       });
       const byMonth: Record<string, number> = {};
       for (const m of stitchedCurve.monthlyTotals) {
@@ -869,16 +861,51 @@ export async function getSimulatedUsageForHouseScenario(args: {
         };
       }
     } else {
+      const pastSimulatedList = (buildInputs as any).pastSimulatedMonths;
+      const pastHasNoEvents =
+        scenarioRow?.name === WORKSPACE_PAST_NAME &&
+        (pastSimulatedList == null || !Array.isArray(pastSimulatedList) || pastSimulatedList.length === 0) &&
+        (actualSource === "SMT" || actualSource === "GREEN_BUTTON");
+      if (pastHasNoEvents) {
+        const actualResult = await getActualUsageDatasetForHouse(args.houseId, house.esiid ?? null);
+        if (actualResult?.dataset) {
+          const filledSet = new Set<string>(((buildInputs as any).filledMonths ?? []).map(String));
+          const monthProvenanceByMonth: Record<string, "ACTUAL" | "SIMULATED"> = {};
+          for (const ym of (buildInputs as any).canonicalMonths ?? []) {
+            monthProvenanceByMonth[String(ym)] = !filledSet.has(String(ym)) ? "ACTUAL" : "SIMULATED";
+          }
+          const actualSummary = actualResult.dataset.summary ?? {};
+          const summarySource = actualSummary.source === "SMT" || actualSummary.source === "GREEN_BUTTON" ? actualSummary.source : (actualSource === "SMT" || actualSource === "GREEN_BUTTON" ? actualSource : "SIMULATED");
+          dataset = {
+            ...actualResult.dataset,
+            summary: {
+              ...actualSummary,
+              source: summarySource as "SMT" | "GREEN_BUTTON" | "SIMULATED",
+            },
+            meta: {
+              buildInputsHash: String(buildRec.buildInputsHash ?? ""),
+              lastBuiltAt: buildRec.lastBuiltAt ? new Date(buildRec.lastBuiltAt).toISOString() : null,
+              datasetKind: summarySource === "SIMULATED" ? ("SIMULATED" as const) : ("ACTUAL" as const),
+              scenarioKey,
+              scenarioId,
+              monthProvenanceByMonth,
+              actualSource,
+            },
+          };
+          ensureBaselineMonthlyFromBuild(dataset, buildInputs);
+        }
+      }
       const isPastStitched =
+        !dataset &&
         scenarioRow?.name === WORKSPACE_PAST_NAME &&
         Array.isArray((buildInputs as any).pastSimulatedMonths) &&
+        (buildInputs as any).pastSimulatedMonths.length > 0 &&
         (actualSource === "SMT" || actualSource === "GREEN_BUTTON");
       if (isPastStitched) {
         const canonicalMonths = (buildInputs as any).canonicalMonths ?? [];
-        const periods = (buildInputs as any).canonicalPeriods;
         const window = canonicalWindowDateRange(canonicalMonths);
-        const startDate = periods?.[0]?.startDate ?? window?.start;
-        const endDate = periods?.[periods.length - 1]?.endDate ?? window?.end;
+        const startDate = window?.start;
+        const endDate = window?.end;
         if (startDate && endDate) {
           const actualIntervals = await getActualIntervalsForRange({
             houseId: args.houseId,
@@ -894,7 +921,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
             pastMonthlyTotalsKwhByMonth: buildInputs.monthlyTotalsKwhByMonth,
             intradayShape96: buildInputs.intradayShape96,
             weekdayWeekendShape96: buildInputs.weekdayWeekendShape96,
-            periods: periods ?? undefined,
+            periods: undefined,
           });
           dataset = buildSimulatedUsageDatasetFromCurve(stitchedCurve, {
             baseKind: buildInputs.baseKind,

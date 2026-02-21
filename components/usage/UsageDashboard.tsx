@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { getTemplateByKey } from "@/components/upgrades/catalog";
 import { UsageChartsPanel } from "@/components/usage/UsageChartsPanel";
 import { formatDateLong, formatDateShort } from "@/components/usage/usageFormatting";
 
@@ -143,19 +144,40 @@ function toDateKeyFromTimestamp(ts: string): string {
 function formatScenarioVariable(v: ScenarioVariable): string {
   const kind = String(v.kind ?? "").toUpperCase();
   const month = v.effectiveMonth ?? "";
-  const p = v.payloadJson ?? {};
+  const p = (v.payloadJson ?? {}) as Record<string, unknown>;
   if (kind === "TRAVEL_RANGE") {
-    const start = (p as any).startDate ?? "";
-    const end = (p as any).endDate ?? "";
+    const start = (p.startDate as string) ?? "";
+    const end = (p.endDate as string) ?? "";
     return `Travel/Vacant: ${start} – ${end}`;
   }
   if (kind === "MONTHLY_ADJUSTMENT") {
-    const mult = (p as any).monthlyMultiplier;
-    const add = (p as any).monthlyAdderKwh;
-    const parts = [month];
+    const mult = p.monthlyMultiplier ?? (p as any).multiplier;
+    const add = p.monthlyAdderKwh ?? (p as any).adderKwh;
+    const parts: string[] = [month];
     if (typeof mult === "number" && Number.isFinite(mult)) parts.push(`${(mult * 100).toFixed(0)}%`);
     if (typeof add === "number" && Number.isFinite(add)) parts.push(`${add >= 0 ? "+" : ""}${add} kWh`);
-    return `Monthly adjustment (${parts.join(", ")})`;
+    return `Monthly adjustment: ${parts.join(", ")}`;
+  }
+  if (kind === "UPGRADE_ACTION") {
+    const upgradeType = String(p.upgradeType ?? "").trim();
+    const changeType = String(p.changeType ?? "").trim();
+    const effectiveDate = typeof p.effectiveDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(p.effectiveDate) ? p.effectiveDate : "";
+    const effectiveEndDate = typeof p.effectiveEndDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(p.effectiveEndDate) ? p.effectiveEndDate : "";
+    const quantity = typeof p.quantity === "number" && Number.isFinite(p.quantity) ? p.quantity : null;
+    const units = String(p.units ?? "").trim();
+    const notes = String(p.notes ?? "").trim();
+    const label = upgradeType ? (getTemplateByKey(upgradeType)?.label ?? upgradeType) : "Upgrade";
+    const change = changeType ? `${changeType} · ` : "";
+    const dateRange = effectiveDate
+      ? effectiveEndDate
+        ? ` (${effectiveDate} – ${effectiveEndDate})`
+        : ` (effective ${effectiveDate})`
+      : month
+        ? ` (${month})`
+        : "";
+    const qty = quantity != null && quantity !== 0 ? `, ${quantity}${units ? ` ${units}` : ""}` : "";
+    const note = notes ? ` — ${notes}` : "";
+    return `${change}${label}${dateRange}${qty}${note}`;
   }
   return `${kind}${month ? ` ${month}` : ""}`;
 }
