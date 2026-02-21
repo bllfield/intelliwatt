@@ -120,6 +120,14 @@ Notes:
 - [ ] Ensure partial SMT/GB gap-fill generates missing months ONLY (actual months untouched).
 - [ ] Ensure manual anchorEndDate mid‑month billing periods are supported and totals remain immutable.
 
+### Past Curve Completion V1 (ACTUAL baseline fill)
+
+- **Scope:** For Past (Corrected) builds that start from ACTUAL (SMT/Green Button), produce a **complete** canonical-window 15‑min curve by simulating (a) travel/vacant excluded days and (b) any day with missing/incomplete intervals. Hourly-then-quarter pattern-based simulation; no upgrade deltas; no Future/Manual/New Build changes.
+- **Implementation plan:** See Cursor plan “Past Curve Completion V1” (`.cursor/plans/` or agent plan file). Target files: `modules/simulatedUsage/engine.ts`, `modules/usageSimulator/service.ts`; optional shared helper in `modules/usageSimulator/pastStitchedCurve.ts`.
+- **Alignment LOCKs (must be followed):**
+  - **LOCK: Date keys** — `excludedDateKeys` MUST be computed using the same date-key function used by `buildPastStitchedCurve` for day grouping. Do not mix UTC and Chicago keys. In `completeActualIntervalsV1`, grouping days, enumerating days, and checking exclusion must all use that same function (e.g. import/reuse the stitcher’s helper or a shared helper).
+  - **LOCK: Interval grid** — Simulated timestamps MUST fill the same 96-slot-per-day grid used by `buildPastStitchedCurve`. Do not assume `00:00Z` unless that is already the stitcher’s grid. Derive the expected timestamps for each day from the stitcher’s logic (e.g. shared helper that returns the 96 timestamps for a given day). Build the canonical list of expected timestamps per day from the stitcher, then fill missing/absent slots to that set to avoid duplicate/misaligned points.
+
 ### Current Plan Module Migrations
 
 - Schema: `prisma/current-plan/schema.prisma`

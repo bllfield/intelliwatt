@@ -8,6 +8,21 @@ import type { ActualIntervalPoint } from "@/lib/usage/actualDatasetForHouse";
 const INTERVAL_MINUTES = 15;
 const INTERVALS_PER_DAY = (24 * 60) / INTERVAL_MINUTES; // 96
 const DAY_MS = 24 * 60 * 60 * 1000;
+const SLOT_MS = INTERVAL_MINUTES * 60 * 1000;
+
+/** Date key from an interval timestamp (same convention as stitcher day grouping). LOCK: use this for grouping/enumeration/exclusion. */
+export function dateKeyFromTimestamp(ts: string): string {
+  return String(ts ?? "").slice(0, 10);
+}
+
+/** 96 ISO timestamps for one day (same grid as stitcher). LOCK: use this for simulated/fill slots. */
+export function getDayGridTimestamps(dayStartMs: number): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < INTERVALS_PER_DAY; i++) {
+    out.push(new Date(dayStartMs + i * SLOT_MS).toISOString());
+  }
+  return out;
+}
 
 function parseYearMonth(ym: string): { year: number; month1: number } | null {
   const m = /^(\d{4})-(\d{2})$/.exec(String(ym ?? "").trim());
@@ -99,10 +114,10 @@ export function buildPastStitchedCurve(args: BuildPastStitchedCurveArgs): Simula
       }
     : null;
 
-  // Group actual intervals by date key (YYYY-MM-DD).
+  // Group actual intervals by date key (YYYY-MM-DD); use shared helper for alignment.
   const actualByDate = new Map<string, ActualIntervalPoint[]>();
   for (const p of args.actualIntervals ?? []) {
-    const dk = String(p.timestamp ?? "").slice(0, 10);
+    const dk = dateKeyFromTimestamp(p.timestamp ?? "");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) continue;
     const list = actualByDate.get(dk) ?? [];
     list.push(p);
@@ -113,7 +128,6 @@ export function buildPastStitchedCurve(args: BuildPastStitchedCurveArgs): Simula
   }
 
   // Day totals for simulated months (distribute monthly kWh across days).
-  const byMonth = args.pastMonthlyTotalsKwhByMonth ?? {};
   const buckets = periods
     ? periods.map((p) => ({ id: String(p.id), start: toUtcMidnight(p.startDate), end: toUtcMidnight(p.endDate) }))
     : canonicalMonths.map((ym) => ({
@@ -125,21 +139,7 @@ export function buildPastStitchedCurve(args: BuildPastStitchedCurveArgs): Simula
   for (const b of buckets) {
     if (!b.start || !b.end) continue;
     const days = enumerateDaysInclusive(b.start, b.end);
-    // Resolve bucket kWh: by-month keys are YYYY-MM; period id may be e.g. "anchor", so sum overlapping months.
-    let bucketKwh: number;
-    if (/^\d{4}-\d{2}$/.test(b.id)) {
-      bucketKwh = Math.max(0, Number(byMonth[b.id] ?? 0) || 0);
-    } else {
-      let sum = 0;
-      for (const ym of canonicalMonths) {
-        const mStart = monthStartUtc(ym);
-        const mEnd = monthEndUtc(ym);
-        if (mStart && mEnd && b.start && b.end && mStart.getTime() <= b.end.getTime() && mEnd.getTime() >= b.start.getTime()) {
-          sum += Number(byMonth[ym] ?? 0) || 0;
-        }
-      }
-      bucketKwh = Math.max(0, sum);
-    }
+    const bucketKwh = Math.max(0, Number(args.pastMonthlyTotalsKwhByMonth?.[b.id] ?? 0) || 0);
     const perDay = days.length > 0 ? bucketKwh / days.length : 0;
     for (const d of days) {
       const dk = dateKeyUtc(d);
@@ -151,7 +151,7 @@ export function buildPastStitchedCurve(args: BuildPastStitchedCurveArgs): Simula
   const days = enumerateDaysInclusive(windowStart, windowEnd);
 
   for (const day of days) {
-    const dk = dateKeyUtc(day);
+    const dk = dateKeyFromTimestamp(day.toISOString());
     const ym = dk.slice(0, 7);
     const useSimulated = args.simulatedMonths.has(ym);
 

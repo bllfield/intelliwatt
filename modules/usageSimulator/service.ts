@@ -9,6 +9,7 @@ import { chooseActualSource, hasActualIntervals } from "@/modules/realUsageAdapt
 import { SMT_SHAPE_DERIVATION_VERSION } from "@/modules/realUsageAdapter/smt";
 import { getActualUsageDatasetForHouse, getActualIntervalsForRange } from "@/lib/usage/actualDatasetForHouse";
 import { upsertSimulatedUsageBuckets } from "@/lib/usage/simulatedUsageBuckets";
+import { completeActualIntervalsV1 } from "@/modules/simulatedUsage/engine";
 import { computePastSimulatedMonths } from "@/modules/usageSimulator/pastSimulatedMonths";
 import { buildPastStitchedCurve } from "@/modules/usageSimulator/pastStitchedCurve";
 import {
@@ -481,8 +482,17 @@ export async function recalcSimulatorBuild(args: {
         startDate,
         endDate,
       });
-      const stitchedCurve = buildPastStitchedCurve({
+      const excludedDateKeys = new Set(travelRangesToExcludeDateKeys(allTravelRanges));
+      const canonicalStartTsUtc = new Date(startDate + "T00:00:00.000Z").getTime();
+      const canonicalEndTsUtc = new Date(endDate + "T23:59:59.999Z").getTime();
+      const completedIntervals = completeActualIntervalsV1({
         actualIntervals,
+        canonicalStartTsUtc,
+        canonicalEndTsUtc,
+        excludedDateKeys,
+      });
+      const stitchedCurve = buildPastStitchedCurve({
+        actualIntervals: completedIntervals,
         canonicalMonths: built.canonicalMonths,
         simulatedMonths: simulatedMonthsSet,
         pastMonthlyTotalsKwhByMonth: monthlyTotalsKwhByMonth,
@@ -913,9 +923,20 @@ export async function getSimulatedUsageForHouseScenario(args: {
             startDate,
             endDate,
           });
+          const excludedDateKeys = new Set(
+            travelRangesToExcludeDateKeys((buildInputs as any).travelRanges ?? [])
+          );
+          const canonicalStartTsUtc = new Date(startDate + "T00:00:00.000Z").getTime();
+          const canonicalEndTsUtc = new Date(endDate + "T23:59:59.999Z").getTime();
+          const completedIntervals = completeActualIntervalsV1({
+            actualIntervals,
+            canonicalStartTsUtc,
+            canonicalEndTsUtc,
+            excludedDateKeys,
+          });
           const simulatedMonthsSet = new Set<string>((buildInputs as any).pastSimulatedMonths);
           const stitchedCurve = buildPastStitchedCurve({
-            actualIntervals,
+            actualIntervals: completedIntervals,
             canonicalMonths,
             simulatedMonths: simulatedMonthsSet,
             pastMonthlyTotalsKwhByMonth: buildInputs.monthlyTotalsKwhByMonth,
