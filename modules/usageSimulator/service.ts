@@ -831,16 +831,17 @@ export async function getSimulatedUsageForHouseScenario(args: {
           monthProvenanceByMonth[String(ym)] = !filledSet.has(String(ym)) ? "ACTUAL" : "SIMULATED";
         }
         const actualSummary = actualResult.dataset.summary ?? {};
+        const summarySource = actualSummary.source === "SMT" || actualSummary.source === "GREEN_BUTTON" ? actualSummary.source : (actualSource === "SMT" || actualSource === "GREEN_BUTTON" ? actualSource : "SIMULATED");
         dataset = {
           ...actualResult.dataset,
           summary: {
             ...actualSummary,
-            source: "SIMULATED" as const,
+            source: summarySource as "SMT" | "GREEN_BUTTON" | "SIMULATED",
           },
           meta: {
             buildInputsHash: String(buildRec.buildInputsHash ?? ""),
             lastBuiltAt: buildRec.lastBuiltAt ? new Date(buildRec.lastBuiltAt).toISOString() : null,
-            datasetKind: "SIMULATED" as const,
+            datasetKind: summarySource === "SIMULATED" ? ("SIMULATED" as const) : ("ACTUAL" as const),
             scenarioKey,
             scenarioId,
             monthProvenanceByMonth,
@@ -915,11 +916,9 @@ export async function getSimulatedUsageForHouseScenario(args: {
         monthProvenanceByMonth[key] =
           pastSimulatedSet.size > 0 && pastSimulatedSet.has(key)
             ? "SIMULATED"
-            : pastSimulatedSet.size > 0
-              ? "ACTUAL" // Past stitched: not in pastSimulatedSet = uses actual 15-min intervals
-              : scenarioKey === "BASELINE" && !filledSet.has(key)
-                ? "ACTUAL"
-                : "SIMULATED";
+            : scenarioKey === "BASELINE" && !filledSet.has(key)
+              ? "ACTUAL"
+              : "SIMULATED";
       }
       dataset.meta = {
         ...(dataset.meta ?? {}),
