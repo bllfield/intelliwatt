@@ -479,10 +479,8 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
       }
       async function fetchEvents(sid: string | null): Promise<ScenarioVariable[]> {
         if (!sid) return [];
-        const r = await fetch(
-          `/api/user/simulator/scenarios/${encodeURIComponent(sid)}/events?houseId=${encodeURIComponent(houseId)}`,
-          { cache: "no-store" }
-        );
+        const url = `/api/user/simulator/scenarios/${encodeURIComponent(sid)}/events?houseId=${encodeURIComponent(houseId)}&_t=${refreshToken}`;
+        const r = await fetch(url, { cache: "no-store" });
         const j = (await r.json().catch(() => null)) as any;
         if (!r.ok || !j?.ok) return [];
         const events = Array.isArray(j.events) ? j.events : [];
@@ -1132,6 +1130,7 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
         title="Scenario timeline"
         onClose={() => {
           setOpenTimeline(false);
+          setRefreshToken((x) => x + 1);
         }}
       >
         {scenarioId === "baseline" ? (
