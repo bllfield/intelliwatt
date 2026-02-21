@@ -514,36 +514,41 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
     };
   }, [houseId, curveView, pastScenario?.id, futureScenario?.id, refreshToken]);
 
-  const refetchDashboardVariables = useCallback(async () => {
-    async function fetchEvents(sid: string | null): Promise<ScenarioVariable[]> {
-      if (!sid) return [];
-      const url = `/api/user/simulator/scenarios/${encodeURIComponent(sid)}/events?houseId=${encodeURIComponent(houseId)}&_t=${Date.now()}`;
-      const r = await fetch(url, { cache: "no-store" });
-      const j = (await r.json().catch(() => null)) as any;
-      if (!r.ok || !j?.ok) return [];
-      const events = Array.isArray(j.events) ? j.events : [];
-      return events.map((e: any) => ({
-        kind: String(e?.kind ?? ""),
-        effectiveMonth: e?.effectiveMonth,
-        payloadJson: e?.payloadJson ?? {},
-      }));
-    }
-    if (curveView === "BASELINE") return;
-    if (curveView === "PAST") {
-      const past = await fetchEvents(pastScenario?.id ?? null);
-      setDashboardPastVariables(past);
-      setDashboardFutureVariables([]);
-      return;
-    }
-    if (curveView === "FUTURE") {
-      const [past, future] = await Promise.all([
-        fetchEvents(pastScenario?.id ?? null),
-        fetchEvents(futureScenario?.id ?? null),
-      ]);
-      setDashboardPastVariables(past);
-      setDashboardFutureVariables(future);
-    }
-  }, [houseId, curveView, pastScenario?.id, futureScenario?.id]);
+  const refetchDashboardVariables = useCallback(
+    async (closedScenarioId?: string) => {
+      async function fetchEvents(sid: string | null): Promise<ScenarioVariable[]> {
+        if (!sid) return [];
+        const url = `/api/user/simulator/scenarios/${encodeURIComponent(sid)}/events?houseId=${encodeURIComponent(houseId)}&_t=${Date.now()}`;
+        const r = await fetch(url, { cache: "no-store" });
+        const j = (await r.json().catch(() => null)) as any;
+        if (!r.ok || !j?.ok) return [];
+        const events = Array.isArray(j.events) ? j.events : [];
+        return events.map((e: any) => ({
+          kind: String(e?.kind ?? ""),
+          effectiveMonth: e?.effectiveMonth,
+          payloadJson: e?.payloadJson ?? {},
+        }));
+      }
+      if (curveView === "BASELINE") return;
+      if (curveView === "PAST") {
+        const pastSid = closedScenarioId ?? pastScenario?.id ?? null;
+        const past = await fetchEvents(pastSid);
+        setDashboardPastVariables(past);
+        setDashboardFutureVariables([]);
+        return;
+      }
+      if (curveView === "FUTURE") {
+        const futureSid = closedScenarioId ?? futureScenario?.id ?? null;
+        const [past, future] = await Promise.all([
+          fetchEvents(pastScenario?.id ?? null),
+          fetchEvents(futureSid),
+        ]);
+        setDashboardPastVariables(past);
+        setDashboardFutureVariables(future);
+      }
+    },
+    [houseId, curveView, pastScenario?.id, futureScenario?.id]
+  );
 
   async function createScenario(name: string) {
     const trimmed = name.trim();
@@ -1160,9 +1165,9 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
         open={openTimeline}
         title="Scenario timeline"
         onClose={() => {
+          const editedScenarioId = scenarioId;
           setOpenTimeline(false);
-          void refetchDashboardVariables();
-          setRefreshToken((x) => x + 1);
+          void refetchDashboardVariables(editedScenarioId);
         }}
       >
         {scenarioId === "baseline" ? (
