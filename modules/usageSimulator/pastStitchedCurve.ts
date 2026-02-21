@@ -113,6 +113,7 @@ export function buildPastStitchedCurve(args: BuildPastStitchedCurveArgs): Simula
   }
 
   // Day totals for simulated months (distribute monthly kWh across days).
+  const byMonth = args.pastMonthlyTotalsKwhByMonth ?? {};
   const buckets = periods
     ? periods.map((p) => ({ id: String(p.id), start: toUtcMidnight(p.startDate), end: toUtcMidnight(p.endDate) }))
     : canonicalMonths.map((ym) => ({
@@ -124,7 +125,21 @@ export function buildPastStitchedCurve(args: BuildPastStitchedCurveArgs): Simula
   for (const b of buckets) {
     if (!b.start || !b.end) continue;
     const days = enumerateDaysInclusive(b.start, b.end);
-    const bucketKwh = Math.max(0, Number(args.pastMonthlyTotalsKwhByMonth?.[b.id] ?? 0) || 0);
+    // Resolve bucket kWh: by-month keys are YYYY-MM; period id may be e.g. "anchor", so sum overlapping months.
+    let bucketKwh: number;
+    if (/^\d{4}-\d{2}$/.test(b.id)) {
+      bucketKwh = Math.max(0, Number(byMonth[b.id] ?? 0) || 0);
+    } else {
+      let sum = 0;
+      for (const ym of canonicalMonths) {
+        const mStart = monthStartUtc(ym);
+        const mEnd = monthEndUtc(ym);
+        if (mStart && mEnd && b.start && b.end && mStart.getTime() <= b.end.getTime() && mEnd.getTime() >= b.start.getTime()) {
+          sum += Number(byMonth[ym] ?? 0) || 0;
+        }
+      }
+      bucketKwh = Math.max(0, sum);
+    }
     const perDay = days.length > 0 ? bucketKwh / days.length : 0;
     for (const d of days) {
       const dk = dateKeyUtc(d);
