@@ -141,7 +141,7 @@ function toDateKeyFromTimestamp(ts: string): string {
   return ts.slice(0, 10);
 }
 
-function formatScenarioVariable(v: ScenarioVariable): string {
+export function formatScenarioVariable(v: ScenarioVariable): string {
   const kind = String(v.kind ?? "").toUpperCase();
   const month = v.effectiveMonth ?? "";
   const p = (v.payloadJson ?? {}) as Record<string, unknown>;

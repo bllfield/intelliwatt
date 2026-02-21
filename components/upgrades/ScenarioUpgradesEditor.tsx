@@ -9,6 +9,7 @@ import {
   type UpgradeTemplate,
   type FieldDescriptor,
 } from "@/components/upgrades/catalog";
+import { formatScenarioVariable } from "@/components/usage/UsageDashboard";
 import { TimeRangeList } from "@/components/upgrades/TimeRangeList";
 import type { ScheduleWindow } from "@/modules/upgradesLedger/catalog-types";
 
@@ -305,6 +306,7 @@ export function ScenarioUpgradesEditor({
 }: ScenarioUpgradesEditorProps) {
   const defaultDate = canonicalEndMonth + "-01";
   const [list, setList] = useState<LedgerRow[]>([]);
+  const [scenarioEvents, setScenarioEvents] = useState<Array<{ id: string; kind: string; effectiveMonth: string; payloadJson: Record<string, unknown> }>>([]);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -315,12 +317,16 @@ export function ScenarioUpgradesEditor({
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await fetch(
-        `/api/user/upgrades-ledger?houseId=${encodeURIComponent(houseId)}&scenarioId=${encodeURIComponent(scenarioId)}`
-      );
-      const j = (await r.json().catch(() => null)) as { ok?: boolean; data?: LedgerRow[] };
-      if (j?.ok && Array.isArray(j.data)) setList(j.data);
+      const [ledgerRes, eventsRes] = await Promise.all([
+        fetch(`/api/user/upgrades-ledger?houseId=${encodeURIComponent(houseId)}&scenarioId=${encodeURIComponent(scenarioId)}`),
+        fetch(`/api/user/simulator/scenarios/${encodeURIComponent(scenarioId)}/events?houseId=${encodeURIComponent(houseId)}`),
+      ]);
+      const ledgerJson = (await ledgerRes.json().catch(() => null)) as { ok?: boolean; data?: LedgerRow[] };
+      const eventsJson = (await eventsRes.json().catch(() => null)) as { ok?: boolean; events?: Array<{ id: string; kind: string; effectiveMonth: string; payloadJson: unknown }> };
+      if (ledgerJson?.ok && Array.isArray(ledgerJson.data)) setList(ledgerJson.data);
       else setList([]);
+      const events = eventsJson?.ok && Array.isArray(eventsJson.events) ? eventsJson.events : [];
+      setScenarioEvents(events.map((e) => ({ id: e.id, kind: e.kind ?? "", effectiveMonth: e.effectiveMonth ?? "", payloadJson: (e.payloadJson as Record<string, unknown>) ?? {} })));
     } finally {
       setLoading(false);
     }
@@ -329,6 +335,21 @@ export function ScenarioUpgradesEditor({
   useEffect(() => {
     void load();
   }, [load]);
+
+  const ledgerEventIds = new Set(list.map((row) => row.scenarioEventId).filter(Boolean) as string[]);
+  const eventOnlyUpgrades = scenarioEvents
+    .filter((e) => e.kind === "UPGRADE_ACTION" && !ledgerEventIds.has(e.id))
+    .sort((a, b) => (a.effectiveMonth ?? "").localeCompare(b.effectiveMonth ?? ""));
+
+  async function deleteEventOnlyUpgrade(eventId: string) {
+    const r = await fetch(
+      `/api/user/simulator/scenarios/${encodeURIComponent(scenarioId)}/events/${encodeURIComponent(eventId)}?houseId=${encodeURIComponent(houseId)}`,
+      { method: "DELETE" }
+    );
+    const j = (await r.json().catch(() => null)) as { ok?: boolean };
+    if (r.ok && j?.ok) await load();
+    if (onRecalc) onRecalc();
+  }
 
   const template = form.upgradeType ? getTemplateByKey(form.upgradeType) : null;
   const canSave =
@@ -634,7 +655,9 @@ export function ScenarioUpgradesEditor({
       <div className="rounded-2xl border border-brand-blue/10 bg-brand-blue/5 p-4">
         <div className="text-xs font-semibold uppercase tracking-[0.3em] text-brand-navy/60">Upgrade actions</div>
         <div className="mt-3 space-y-2">
-          {list.length === 0 && <div className="text-sm text-brand-navy/70">No upgrade actions yet.</div>}
+          {list.length === 0 && eventOnlyUpgrades.length === 0 && (
+            <div className="text-sm text-brand-navy/70">No upgrade actions yet.</div>
+          )}
           {[...list].sort((a, b) => (a.effectiveDate ?? "").localeCompare(b.effectiveDate ?? "")).map((row) => (
             <div
               key={row.id}
@@ -785,6 +808,23 @@ export function ScenarioUpgradesEditor({
                   </div>
                 </div>
               )}
+            </div>
+          ))}
+          {eventOnlyUpgrades.map((e) => (
+            <div
+              key={e.id}
+              className="rounded-xl border border-brand-blue/10 bg-white p-3 flex flex-wrap items-center justify-between gap-2"
+            >
+              <span className="text-xs font-medium text-brand-navy">
+                {formatScenarioVariable({ kind: e.kind, effectiveMonth: e.effectiveMonth, payloadJson: e.payloadJson })}
+              </span>
+              <button
+                type="button"
+                onClick={() => void deleteEventOnlyUpgrade(e.id)}
+                className="rounded-lg border border-red-200 bg-white px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-50"
+              >
+                Remove
+              </button>
             </div>
           ))}
         </div>
