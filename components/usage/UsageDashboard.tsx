@@ -140,12 +140,48 @@ function toDateKeyFromTimestamp(ts: string): string {
   return ts.slice(0, 10);
 }
 
+function formatScenarioVariable(v: ScenarioVariable): string {
+  const kind = String(v.kind ?? "").toUpperCase();
+  const month = v.effectiveMonth ?? "";
+  const p = v.payloadJson ?? {};
+  if (kind === "TRAVEL_RANGE") {
+    const start = (p as any).startDate ?? "";
+    const end = (p as any).endDate ?? "";
+    return `Travel/Vacant: ${start} – ${end}`;
+  }
+  if (kind === "MONTHLY_ADJUSTMENT") {
+    const mult = (p as any).monthlyMultiplier;
+    const add = (p as any).monthlyAdderKwh;
+    const parts = [month];
+    if (typeof mult === "number" && Number.isFinite(mult)) parts.push(`${(mult * 100).toFixed(0)}%`);
+    if (typeof add === "number" && Number.isFinite(add)) parts.push(`${add >= 0 ? "+" : ""}${add} kWh`);
+    return `Monthly adjustment (${parts.join(", ")})`;
+  }
+  return `${kind}${month ? ` ${month}` : ""}`;
+}
+
+export type ScenarioVariable = {
+  kind: string;
+  effectiveMonth?: string;
+  payloadJson?: Record<string, unknown>;
+};
+
 type Props = {
   initialMode?: "REAL" | "SIMULATED";
   forcedMode?: "REAL" | "SIMULATED";
   allowModeToggle?: boolean;
   refreshToken?: string | number;
   simulatedHousesOverride?: HouseUsage[] | null;
+  /** When set (simulator context), show this as the dashboard label and optionally list variables. */
+  dashboardVariant?: "USAGE" | "PAST_SIMULATED_USAGE" | "FUTURE_SIMULATED_USAGE";
+  pastVariables?: ScenarioVariable[];
+  futureVariables?: ScenarioVariable[];
+};
+
+const DASHBOARD_LABELS: Record<NonNullable<Props["dashboardVariant"]>, string> = {
+  USAGE: "Usage",
+  PAST_SIMULATED_USAGE: "Past simulated usage",
+  FUTURE_SIMULATED_USAGE: "Future simulated usage",
 };
 
 export const UsageDashboard: React.FC<Props> = ({
@@ -154,6 +190,9 @@ export const UsageDashboard: React.FC<Props> = ({
   allowModeToggle = true,
   refreshToken,
   simulatedHousesOverride = null,
+  dashboardVariant,
+  pastVariables = [],
+  futureVariables = [],
 }) => {
   const [datasetMode, setDatasetMode] = useState<"REAL" | "SIMULATED">(forcedMode ?? initialMode);
   const [houses, setHouses] = useState<HouseUsage[]>([]);
@@ -452,7 +491,9 @@ export const UsageDashboard: React.FC<Props> = ({
     <div className="space-y-6">
       <div className="flex flex-col gap-3 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm md:flex-row md:items-center md:justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Usage dashboard</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">
+            {dashboardVariant ? DASHBOARD_LABELS[dashboardVariant] : "Usage dashboard"}
+          </p>
           <h2 className="text-xl font-semibold text-neutral-900">Household energy insights</h2>
           <p className="text-sm text-neutral-600">
             {datasetMode === "SIMULATED"
@@ -470,6 +511,39 @@ export const UsageDashboard: React.FC<Props> = ({
               {coverage.source ? <span> · Source: {coverage.source}</span> : null}
               {typeof coverage.intervalsCount === "number" ? <span> · {coverage.intervalsCount.toLocaleString()} intervals</span> : null}
             </p>
+          ) : null}
+          {dashboardVariant && (dashboardVariant === "PAST_SIMULATED_USAGE" || dashboardVariant === "FUTURE_SIMULATED_USAGE") ? (
+            <div className="mt-3 rounded-lg border border-neutral-200 bg-neutral-50/80 px-3 py-2">
+              <p className="text-xs font-semibold uppercase tracking-wider text-neutral-500">Scenario variables</p>
+              <ul className="mt-1.5 list-inside list-disc space-y-0.5 text-xs text-neutral-700">
+                {dashboardVariant === "PAST_SIMULATED_USAGE" &&
+                  (pastVariables.length > 0
+                    ? pastVariables.map((v, i) => (
+                        <li key={`past-${i}`}>{formatScenarioVariable(v)}</li>
+                      ))
+                    : [<li key="none" className="text-neutral-500">None</li>])}
+                {dashboardVariant === "FUTURE_SIMULATED_USAGE" && (
+                  <>
+                    <li className="mt-1 font-medium text-neutral-600">Past</li>
+                    {pastVariables.length > 0
+                      ? pastVariables.map((v, i) => (
+                          <li key={`past-${i}`} className="ml-3">
+                            {formatScenarioVariable(v)}
+                          </li>
+                        ))
+                      : [<li key="past-none" className="ml-3 text-neutral-500">None</li>]}
+                    <li className="mt-1 font-medium text-neutral-600">Future</li>
+                    {futureVariables.length > 0
+                      ? futureVariables.map((v, i) => (
+                          <li key={`future-${i}`} className="ml-3">
+                            {formatScenarioVariable(v)}
+                          </li>
+                        ))
+                      : [<li key="future-none" className="ml-3 text-neutral-500">None</li>]}
+                  </>
+                )}
+              </ul>
+            </div>
           ) : null}
         </div>
         <div className="flex flex-col gap-2 md:items-end">

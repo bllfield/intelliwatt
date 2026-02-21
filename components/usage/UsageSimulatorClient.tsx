@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ManualUsageEntry } from "@/components/manual/ManualUsageEntry";
 import { HomeDetailsClient } from "@/components/home/HomeDetailsClient";
 import { AppliancesClient } from "@/components/appliances/AppliancesClient";
-import UsageDashboard from "@/components/usage/UsageDashboard";
+import UsageDashboard, { type ScenarioVariable } from "@/components/usage/UsageDashboard";
 import {
   USAGE_SCENARIO_ADJUSTMENT_CATALOG,
   toMonthlyAdjustmentPayload,
@@ -140,6 +140,8 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
 
   const [pastEventCount, setPastEventCount] = useState<number>(0);
   const [futureEventCount, setFutureEventCount] = useState<number>(0);
+  const [dashboardPastVariables, setDashboardPastVariables] = useState<ScenarioVariable[]>([]);
+  const [dashboardFutureVariables, setDashboardFutureVariables] = useState<ScenarioVariable[]>([]);
 
   const scenarioRecalcTimersRef = useRef<Map<string, number>>(new Map());
   const recalcQueueRef = useRef<Array<{ scenarioId: string | null; note?: string }>>([]);
@@ -466,6 +468,53 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
       cancelled = true;
     };
   }, [houseId, pastScenario?.id, futureScenario?.id, refreshToken]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (curveView === "BASELINE") {
+        setDashboardPastVariables([]);
+        setDashboardFutureVariables([]);
+        return;
+      }
+      async function fetchEvents(sid: string | null): Promise<ScenarioVariable[]> {
+        if (!sid) return [];
+        const r = await fetch(
+          `/api/user/simulator/scenarios/${encodeURIComponent(sid)}/events?houseId=${encodeURIComponent(houseId)}`,
+          { cache: "no-store" }
+        );
+        const j = (await r.json().catch(() => null)) as any;
+        if (!r.ok || !j?.ok) return [];
+        const events = Array.isArray(j.events) ? j.events : [];
+        return events.map((e: any) => ({
+          kind: String(e?.kind ?? ""),
+          effectiveMonth: e?.effectiveMonth,
+          payloadJson: e?.payloadJson ?? {},
+        }));
+      }
+      if (curveView === "PAST") {
+        const past = await fetchEvents(pastScenario?.id ?? null);
+        if (!cancelled) {
+          setDashboardPastVariables(past);
+          setDashboardFutureVariables([]);
+        }
+        return;
+      }
+      if (curveView === "FUTURE") {
+        const [past, future] = await Promise.all([
+          fetchEvents(pastScenario?.id ?? null),
+          fetchEvents(futureScenario?.id ?? null),
+        ]);
+        if (!cancelled) {
+          setDashboardPastVariables(past);
+          setDashboardFutureVariables(future);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [houseId, curveView, pastScenario?.id, futureScenario?.id, refreshToken]);
 
   async function createScenario(name: string) {
     const trimmed = name.trim();
@@ -1021,6 +1070,11 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
           initialMode="SIMULATED"
           refreshToken={refreshToken}
           simulatedHousesOverride={curveView === "BASELINE" ? null : scenarioSimHouseOverride}
+          dashboardVariant={
+            curveView === "BASELINE" ? "USAGE" : curveView === "PAST" ? "PAST_SIMULATED_USAGE" : "FUTURE_SIMULATED_USAGE"
+          }
+          pastVariables={curveView === "PAST" || curveView === "FUTURE" ? dashboardPastVariables : undefined}
+          futureVariables={curveView === "FUTURE" ? dashboardFutureVariables : undefined}
         />
       </div>
 
