@@ -347,8 +347,10 @@ export function ScenarioUpgradesEditor({
       { method: "DELETE" }
     );
     const j = (await r.json().catch(() => null)) as { ok?: boolean };
-    if (r.ok && j?.ok) await load();
-    if (onRecalc) onRecalc();
+    if (r.ok && j?.ok) {
+      await load();
+      onRecalc?.();
+    }
   }
 
   const template = form.upgradeType ? getTemplateByKey(form.upgradeType) : null;
