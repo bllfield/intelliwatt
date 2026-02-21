@@ -1,4 +1,5 @@
 import { generateSimulatedCurve } from "@/modules/simulatedUsage/engine";
+import type { SimulatedCurve } from "@/modules/simulatedUsage/types";
 
 type UsageSeriesPoint = { timestamp: string; kwh: number };
 
@@ -217,6 +218,106 @@ export function buildSimulatedUsageDatasetFromBuildInputs(buildInputs: Simulator
       canonicalEndMonth: buildInputs.canonicalEndMonth,
       notes: buildInputs.notes ?? [],
       filledMonths: buildInputs.filledMonths ?? [],
+      excludedDays: curve.meta.excludedDays,
+      renormalized: curve.meta.renormalized,
+    },
+    usageBucketsByMonth,
+  };
+}
+
+/** Build dataset from a precomputed curve (e.g. Past stitched actual + simulated). Use when the curve was built outside generateSimulatedCurve. */
+export function buildSimulatedUsageDatasetFromCurve(
+  curve: SimulatedCurve,
+  meta: {
+    baseKind: SimulatorBuildInputsV1["baseKind"];
+    mode: SimulatorBuildInputsV1["mode"];
+    canonicalEndMonth: string;
+    notes?: string[];
+    filledMonths?: string[];
+  }
+): SimulatedUsageDataset {
+  const dailyMap = new Map<string, number>();
+  for (let j = 0; j < curve.intervals.length; j++) {
+    const dk = toDateKey(curve.intervals[j].timestamp);
+    dailyMap.set(dk, (dailyMap.get(dk) ?? 0) + (Number(curve.intervals[j].consumption_kwh) || 0));
+  }
+  const daily = Array.from(dailyMap.entries())
+    .map(([date, kwh]) => ({ date, kwh: round2(kwh) }))
+    .sort((a, b) => (a.date < b.date ? -1 : 1));
+
+  const monthly = curve.monthlyTotals
+    .map((m) => ({ month: m.month, kwh: round2(m.kwh) }))
+    .sort((a, b) => (a.month < b.month ? -1 : 1));
+
+  const seriesDaily: UsageSeriesPoint[] = daily.map((d) => ({ timestamp: `${d.date}T00:00:00.000Z`, kwh: d.kwh }));
+  const seriesMonthly: UsageSeriesPoint[] = monthly.map((m) => ({ timestamp: `${m.month}-01T00:00:00.000Z`, kwh: m.kwh }));
+  const seriesAnnual: UsageSeriesPoint[] = [{ timestamp: curve.end.slice(0, 4) + "-01-01T00:00:00.000Z", kwh: round2(curve.annualTotalKwh) }];
+  const seriesIntervals15: UsageSeriesPoint[] = curve.intervals.map((i) => ({
+    timestamp: i.timestamp,
+    kwh: Number(i.consumption_kwh) || 0,
+  }));
+
+  const fifteenMinuteAverages = computeFifteenMinuteAverages(curve.intervals);
+
+  let weekdaySum = 0;
+  let weekendSum = 0;
+  for (let j = 0; j < daily.length; j++) {
+    const dow = dayOfWeekUtc(daily[j].date);
+    if (dow === 0 || dow === 6) weekendSum += daily[j].kwh;
+    else weekdaySum += daily[j].kwh;
+  }
+
+  const peakDay = daily.length > 0 ? daily.reduce((a, b) => (b.kwh > a.kwh ? b : a)) : null;
+
+  const powerSamples = curve.intervals
+    .map((i) => (Number(i.consumption_kwh) || 0) * 4)
+    .filter((kw) => Number.isFinite(kw))
+    .sort((a, b) => a - b);
+  const count10 = Math.max(1, Math.floor(powerSamples.length * 0.1));
+  const baseSlice = powerSamples.slice(0, count10);
+  const baseload = baseSlice.length > 0 ? round2(baseSlice.reduce((a, b) => a + b, 0) / baseSlice.length) : null;
+
+  const usageBucketsByMonth = usageBucketsByMonthFromSimulatedMonthly(monthly);
+
+  return {
+    summary: {
+      source: "SIMULATED" as const,
+      intervalsCount: curve.intervals.length,
+      totalKwh: round2(curve.annualTotalKwh),
+      start: curve.start,
+      end: curve.end,
+      latest: curve.end,
+    },
+    series: {
+      intervals15: seriesIntervals15,
+      hourly: [] as UsageSeriesPoint[],
+      daily: seriesDaily,
+      monthly: seriesMonthly,
+      annual: seriesAnnual,
+    },
+    daily,
+    monthly,
+    insights: {
+      fifteenMinuteAverages,
+      timeOfDayBuckets: [],
+      stitchedMonth: null,
+      peakDay: peakDay ? { date: peakDay.date, kwh: peakDay.kwh } : null,
+      peakHour: null,
+      baseload,
+      weekdayVsWeekend: { weekday: round2(weekdaySum), weekend: round2(weekendSum) },
+    },
+    totals: {
+      importKwh: round2(curve.annualTotalKwh),
+      exportKwh: 0,
+      netKwh: round2(curve.annualTotalKwh),
+    },
+    meta: {
+      datasetKind: "SIMULATED",
+      baseKind: meta.baseKind,
+      mode: meta.mode,
+      canonicalEndMonth: meta.canonicalEndMonth,
+      notes: meta.notes ?? [],
+      filledMonths: meta.filledMonths ?? [],
       excludedDays: curve.meta.excludedDays,
       renormalized: curve.meta.renormalized,
     },

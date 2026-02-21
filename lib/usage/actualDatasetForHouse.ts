@@ -8,6 +8,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { usagePrisma } from "@/lib/db/usageClient";
 import { buildUsageBucketsForEstimate } from "@/lib/usage/buildUsageBucketsForEstimate";
+import { chooseActualSource } from "@/modules/realUsageAdapter/actual";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const USAGE_DB_ENABLED = Boolean((process.env.USAGE_DATABASE_URL ?? "").trim());
@@ -683,4 +684,66 @@ export async function getActualUsageDatasetForHouse(
       greenButton: greenDataset?.summary ?? null,
     },
   };
+}
+
+/** 15-min interval point for the full window. Used by Past stitched curve. */
+export type ActualIntervalPoint = { timestamp: string; kwh: number };
+
+/**
+ * Fetches all actual 15-min intervals for a house in a date range (inclusive).
+ * Used when building Past so unchanged segments use real usage intervals.
+ */
+export async function getActualIntervalsForRange(args: {
+  houseId: string;
+  esiid: string | null;
+  startDate: string;
+  endDate: string;
+}): Promise<ActualIntervalPoint[]> {
+  const start = new Date(args.startDate + "T00:00:00.000Z");
+  const end = new Date(args.endDate + "T23:59:59.999Z");
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || start.getTime() > end.getTime()) {
+    return [];
+  }
+  const source = await chooseActualSource({ houseId: args.houseId, esiid: args.esiid });
+  if (!source) return [];
+  if (source === "SMT") {
+    if (!args.esiid) return [];
+    try {
+      const rows = await prisma.$queryRaw<Array<{ ts: Date; kwh: number }>>(Prisma.sql`
+        WITH iv AS (
+          SELECT "ts", MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh
+          FROM "SmtInterval"
+          WHERE "esiid" = ${args.esiid} AND "ts" >= ${start} AND "ts" <= ${end}
+          GROUP BY "ts"
+        )
+        SELECT "ts", kwh FROM iv ORDER BY "ts" ASC
+      `);
+      return rows.map((r) => ({ timestamp: r.ts.toISOString(), kwh: Number(r.kwh) || 0 }));
+    } catch {
+      return [];
+    }
+  }
+  if (!USAGE_DB_ENABLED) return [];
+  try {
+    const usageClient = usagePrisma as any;
+    const latestRaw = await usageClient.rawGreenButton.findFirst({
+      where: { homeId: args.houseId },
+      orderBy: { createdAt: "desc" },
+      select: { id: true },
+    });
+    if (!latestRaw?.id) return [];
+    const rows = (await usageClient.$queryRaw(Prisma.sql`
+      SELECT "timestamp" AS ts, "consumptionKwh"::float AS kwh
+      FROM "GreenButtonInterval"
+      WHERE "homeId" = ${args.houseId} AND "rawId" = ${latestRaw.id}
+        AND "timestamp" >= ${start} AND "timestamp" <= ${end}
+      ORDER BY "timestamp" ASC
+    `)) as Array<{ ts: Date; kwh: number }>;
+    return rows.map((r) => ({
+      timestamp: (r.ts instanceof Date ? r.ts : new Date(r.ts)).toISOString(),
+      kwh: Number(r.kwh) || 0,
+    }));
+  } catch {
+    return [];
+  }
 }
