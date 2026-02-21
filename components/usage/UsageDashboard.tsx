@@ -535,36 +535,49 @@ export const UsageDashboard: React.FC<Props> = ({
             </p>
           ) : null}
           {dashboardVariant && (dashboardVariant === "PAST_SIMULATED_USAGE" || dashboardVariant === "FUTURE_SIMULATED_USAGE") ? (
-            <div className="mt-3 rounded-lg border border-neutral-200 bg-neutral-50/80 px-3 py-2">
+            <div className="mt-3 rounded-lg border border-neutral-200 bg-neutral-50/80 px-3 py-2 min-w-0">
               <p className="text-xs font-semibold uppercase tracking-wider text-neutral-500">Scenario variables</p>
-              <ul className="mt-1.5 list-inside list-disc space-y-0.5 text-xs text-neutral-700">
-                {dashboardVariant === "PAST_SIMULATED_USAGE" &&
-                  (pastVariables.length > 0
-                    ? pastVariables.map((v, i) => (
-                        <li key={`past-${i}`}>{formatScenarioVariable(v)}</li>
-                      ))
-                    : [<li key="none" className="text-neutral-500">None</li>])}
-                {dashboardVariant === "FUTURE_SIMULATED_USAGE" && (
-                  <>
-                    <li className="mt-1 font-medium text-neutral-600">Past</li>
+              <div className="mt-1.5 text-xs text-neutral-700">
+                {dashboardVariant === "PAST_SIMULATED_USAGE" && (
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                     {pastVariables.length > 0
                       ? pastVariables.map((v, i) => (
-                          <li key={`past-${i}`} className="ml-3">
+                          <span key={`past-${i}`} className="inline-flex rounded bg-white/80 px-2 py-0.5 border border-neutral-200">
                             {formatScenarioVariable(v)}
-                          </li>
+                          </span>
                         ))
-                      : [<li key="past-none" className="ml-3 text-neutral-500">None</li>]}
-                    <li className="mt-1 font-medium text-neutral-600">Future</li>
-                    {futureVariables.length > 0
-                      ? futureVariables.map((v, i) => (
-                          <li key={`future-${i}`} className="ml-3">
-                            {formatScenarioVariable(v)}
-                          </li>
-                        ))
-                      : [<li key="future-none" className="ml-3 text-neutral-500">None</li>]}
-                  </>
+                      : <span className="text-neutral-500">None</span>}
+                  </div>
                 )}
-              </ul>
+                {dashboardVariant === "FUTURE_SIMULATED_USAGE" && (
+                  <div className="flex flex-col gap-1.5">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <span className="font-medium text-neutral-600 shrink-0">Past</span>
+                      {pastVariables.length > 0 ? (
+                        pastVariables.map((v, i) => (
+                          <span key={`past-${i}`} className="inline-flex rounded bg-white/80 px-2 py-0.5 border border-neutral-200">
+                            {formatScenarioVariable(v)}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-neutral-500">None</span>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <span className="font-medium text-neutral-600 shrink-0">Future</span>
+                      {futureVariables.length > 0 ? (
+                        futureVariables.map((v, i) => (
+                          <span key={`future-${i}`} className="inline-flex rounded bg-white/80 px-2 py-0.5 border border-neutral-200">
+                            {formatScenarioVariable(v)}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-neutral-500">None</span>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           ) : null}
         </div>
