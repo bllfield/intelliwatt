@@ -916,9 +916,11 @@ export async function getSimulatedUsageForHouseScenario(args: {
         monthProvenanceByMonth[key] =
           pastSimulatedSet.size > 0 && pastSimulatedSet.has(key)
             ? "SIMULATED"
-            : scenarioKey === "BASELINE" && !filledSet.has(key)
-              ? "ACTUAL"
-              : "SIMULATED";
+            : pastSimulatedSet.size > 0
+              ? "ACTUAL" // Past stitched: not in pastSimulatedSet = uses actual 15-min intervals
+              : scenarioKey === "BASELINE" && !filledSet.has(key)
+                ? "ACTUAL"
+                : "SIMULATED";
       }
       dataset.meta = {
         ...(dataset.meta ?? {}),
@@ -932,11 +934,17 @@ export async function getSimulatedUsageForHouseScenario(args: {
     }
 
     // Past and Future: show the same date range as SMT/Green Button anchor (e.g. 02/18/2025 – 02/18/2026), not calendar-month window.
+    // For Past stitched curve, do not overwrite summary start/end so the chart window exactly matches the built curve (anchor order).
+    const isPastStitchedCurve =
+      scenarioRow?.name === WORKSPACE_PAST_NAME &&
+      Array.isArray((buildInputs as any).pastSimulatedMonths) &&
+      (buildInputs as any).pastSimulatedMonths.length > 0;
     if (
       scenarioKey !== "BASELINE" &&
       mode === "SMT_BASELINE" &&
       (actualSource === "SMT" || actualSource === "GREEN_BUTTON") &&
-      dataset?.summary
+      dataset?.summary &&
+      !isPastStitchedCurve
     ) {
       try {
         const actualResult = await getActualUsageDatasetForHouse(args.houseId, house.esiid ?? null);

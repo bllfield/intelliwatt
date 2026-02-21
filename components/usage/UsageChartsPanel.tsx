@@ -13,7 +13,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { formatDateShort, formatMonthLabel, formatTimeLabel } from "@/components/usage/usageFormatting";
+import { formatDateShort, formatDateShortWithYear, formatMonthLabel, formatTimeLabel } from "@/components/usage/usageFormatting";
 import { pct, sumKwh } from "@/components/usage/usageMath";
 
 type MonthlyRow = { month: string; kwh: number };
@@ -41,6 +41,9 @@ export function UsageChartsPanel(props: {
   onMonthlyViewChange: (next: "chart" | "table") => void;
   daily: DailyRow[];
   fifteenCurve: FifteenMinuteAverage[];
+  /** When set and range spans two years, daily chart labels include year (e.g. Past anchor). */
+  coverageStart?: string | null;
+  coverageEnd?: string | null;
 }) {
   const {
     monthly,
@@ -52,7 +55,11 @@ export function UsageChartsPanel(props: {
     onMonthlyViewChange,
     daily,
     fifteenCurve,
+    coverageStart,
+    coverageEnd,
   } = props;
+  const dailyLabelFormat =
+    coverageStart && coverageEnd && coverageStart.slice(0, 4) !== coverageEnd.slice(0, 4) ? formatDateShortWithYear : formatDateShort;
 
   return (
     <>
@@ -228,7 +235,7 @@ export function UsageChartsPanel(props: {
                 <BarChart
                   data={daily.map((d) => ({
                     ...d,
-                    label: formatDateShort(d.date),
+                    label: dailyLabelFormat(d.date),
                     consumed: Math.max(d.kwh, 0),
                     exported: Math.max(-d.kwh, 0),
                   }))}

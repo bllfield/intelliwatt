@@ -8,6 +8,13 @@ export function formatDateShort(date: string) {
   return `${m}/${d}`;
 }
 
+/** Use when the range spans two years so the axis isn’t ambiguous (e.g. Past anchor). */
+export function formatDateShortWithYear(date: string) {
+  const [y, m, d] = date.split("-");
+  if (!y || !m || !d) return date;
+  return `${Number(m)}/${Number(d)}/${y.slice(2)}`;
+}
+
 export function formatDateLong(date: string) {
   const [y, m, d] = date.split("-");
   if (!y || !m || !d) return date;

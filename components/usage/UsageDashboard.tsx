@@ -609,6 +609,8 @@ export const UsageDashboard: React.FC<Props> = ({
             onMonthlyViewChange={setMonthlyView}
             daily={derived.daily}
             fifteenCurve={derived.fifteenCurve}
+            coverageStart={coverage?.start ?? null}
+            coverageEnd={coverage?.end ?? null}
           />
         </>
       )}

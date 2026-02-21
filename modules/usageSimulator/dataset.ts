@@ -279,14 +279,19 @@ export function buildSimulatedUsageDatasetFromCurve(
 
   const usageBucketsByMonth = usageBucketsByMonthFromSimulatedMonthly(monthly);
 
+  const startDateOnly = curve.start.slice(0, 10);
+  const endDateOnly = curve.end.slice(0, 10);
+  const summaryStart = /^\d{4}-\d{2}-\d{2}$/.test(startDateOnly) ? startDateOnly : curve.start;
+  const summaryEnd = /^\d{4}-\d{2}-\d{2}$/.test(endDateOnly) ? endDateOnly : curve.end;
+
   return {
     summary: {
       source: "SIMULATED" as const,
       intervalsCount: curve.intervals.length,
       totalKwh: round2(curve.annualTotalKwh),
-      start: curve.start,
-      end: curve.end,
-      latest: curve.end,
+      start: summaryStart,
+      end: summaryEnd,
+      latest: summaryEnd,
     },
     series: {
       intervals15: seriesIntervals15,
