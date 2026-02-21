@@ -915,9 +915,11 @@ export async function getSimulatedUsageForHouseScenario(args: {
         monthProvenanceByMonth[key] =
           pastSimulatedSet.size > 0 && pastSimulatedSet.has(key)
             ? "SIMULATED"
-            : scenarioKey === "BASELINE" && !filledSet.has(key)
-              ? "ACTUAL"
-              : "SIMULATED";
+            : pastSimulatedSet.size > 0
+              ? "ACTUAL" // Past stitched: not in pastSimulatedSet = uses actual 15-min intervals
+              : scenarioKey === "BASELINE" && !filledSet.has(key)
+                ? "ACTUAL"
+                : "SIMULATED";
       }
       dataset.meta = {
         ...(dataset.meta ?? {}),
