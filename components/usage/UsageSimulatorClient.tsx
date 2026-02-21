@@ -325,8 +325,9 @@ export function UsageSimulatorClient({ houseId, intent }: { houseId: string; int
   }, [builds, futureScenario?.id]);
 
   const pastReady = useMemo(() => {
-    return Boolean(pastScenario?.id) && pastEventCount > 0 && Boolean(pastBuild?.lastBuiltAt);
-  }, [pastBuild?.lastBuiltAt, pastEventCount, pastScenario?.id]);
+    if (!pastScenario?.id) return false;
+    return Boolean(pastBuild?.lastBuiltAt) || baselineReady;
+  }, [pastBuild?.lastBuiltAt, pastScenario?.id, baselineReady]);
 
   const futureReady = useMemo(() => {
     return Boolean(futureScenario?.id) && futureEventCount > 0 && Boolean(futureBuild?.lastBuiltAt);
