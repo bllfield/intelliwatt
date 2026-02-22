@@ -872,10 +872,12 @@ export async function getSimulatedUsageForHouseScenario(args: {
       }
     } else {
       const pastSimulatedList = (buildInputs as any).pastSimulatedMonths;
+      // Never return raw actual for Past + SMT/GB so completeActualIntervalsV1 always runs (Travel/Vacant + missing intervals fill).
       const pastHasNoEvents =
         scenarioRow?.name === WORKSPACE_PAST_NAME &&
         (pastSimulatedList == null || !Array.isArray(pastSimulatedList) || pastSimulatedList.length === 0) &&
-        (actualSource === "SMT" || actualSource === "GREEN_BUTTON");
+        (actualSource === "SMT" || actualSource === "GREEN_BUTTON") &&
+        !(scenarioRow?.name === WORKSPACE_PAST_NAME && (actualSource === "SMT" || actualSource === "GREEN_BUTTON"));
       if (pastHasNoEvents) {
         const actualResult = await getActualUsageDatasetForHouse(args.houseId, house.esiid ?? null);
         if (actualResult?.dataset) {
@@ -905,11 +907,10 @@ export async function getSimulatedUsageForHouseScenario(args: {
           ensureBaselineMonthlyFromBuild(dataset, buildInputs);
         }
       }
+      // Always build stitched curve for Past + SMT/GB so Travel/Vacant and missing/incomplete intervals are filled.
       const isPastStitched =
         !dataset &&
         scenarioRow?.name === WORKSPACE_PAST_NAME &&
-        Array.isArray((buildInputs as any).pastSimulatedMonths) &&
-        (buildInputs as any).pastSimulatedMonths.length > 0 &&
         (actualSource === "SMT" || actualSource === "GREEN_BUTTON");
       if (isPastStitched) {
         const canonicalMonths = (buildInputs as any).canonicalMonths ?? [];
