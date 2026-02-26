@@ -786,8 +786,8 @@ export async function getSimulatedUsageForHouseScenario(args: {
     }
 
     // Future always recomputed from current Past (or Baseline when no Past): no cache. Every time Future is opened we recalc so it uses the latest Past curve.
-    const isFutureScenario = Boolean(scenarioId) && scenarioRow?.name === WORKSPACE_FUTURE_NAME;
-    if (isFutureScenario) {
+    const isFutureScenarioForRecalc = Boolean(scenarioId) && scenarioRow?.name === WORKSPACE_FUTURE_NAME;
+    if (isFutureScenarioForRecalc) {
       const baselineBuild = await (prisma as any).usageSimulatorBuild
         .findUnique({
           where: { userId_houseId_scenarioKey: { userId: args.userId, houseId: args.houseId, scenarioKey: "BASELINE" } },
@@ -838,8 +838,13 @@ export async function getSimulatedUsageForHouseScenario(args: {
     const buildInputs = buildRec.buildInputs as SimulatorBuildInputsV1;
     const mode = (buildInputs as any).mode;
     const actualSource = (buildInputs as any)?.snapshots?.actualSource ?? null;
+    const snapshotScenarioName = String((buildInputs as any)?.snapshots?.scenario?.name ?? "");
     const isSmtBaselineMode = mode === "SMT_BASELINE";
-    const isPastScenario = scenarioRow?.name === WORKSPACE_PAST_NAME;
+    const isFutureWorkspaceScenario =
+      Boolean(scenarioId) &&
+      (scenarioRow?.name === WORKSPACE_FUTURE_NAME || snapshotScenarioName === WORKSPACE_FUTURE_NAME);
+    // Treat any non-baseline, non-future scenario as Past to avoid brittle name-only gating.
+    const isPastScenario = Boolean(scenarioId) && !isFutureWorkspaceScenario;
     const useActualBaseline =
       scenarioKey === "BASELINE" &&
       isSmtBaselineMode;
