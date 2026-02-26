@@ -1092,16 +1092,11 @@ export async function getSimulatedUsageForHouseScenario(args: {
     }
 
     // Past and Future: show the same date range as SMT/Green Button anchor (e.g. 02/18/2025 – 02/18/2026), not calendar-month window.
-    // For Past stitched curve, do not overwrite summary start/end so the chart window exactly matches the built curve (anchor order).
-    const isPastStitchedCurve =
-      isPastScenario &&
-      isSmtBaselineMode;
     if (
       scenarioKey !== "BASELINE" &&
       mode === "SMT_BASELINE" &&
       isSmtBaselineMode &&
-      dataset?.summary &&
-      !isPastStitchedCurve
+      dataset?.summary
     ) {
       try {
         const actualResult = await getActualUsageDatasetForHouse(args.houseId, house.esiid ?? null);
