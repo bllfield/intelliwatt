@@ -935,7 +935,26 @@ export async function getSimulatedUsageForHouseScenario(args: {
         scenarioRow?.name === WORKSPACE_PAST_NAME &&
         (actualSource === "SMT" || actualSource === "GREEN_BUTTON");
       if (isPastStitched) {
-        const canonicalMonths = (buildInputs as any).canonicalMonths ?? [];
+        // Use baseline build's canonical window when available so Past matches Usage tab (e.g. 03/25-02/26) without requiring recalc.
+        let canonicalMonths = (buildInputs as any).canonicalMonths ?? [];
+        let canonicalEndMonthForMeta = buildInputs.canonicalEndMonth;
+        if (scenarioKey !== "BASELINE") {
+          const baselineBuild = await (prisma as any).usageSimulatorBuild
+            .findUnique({
+              where: { userId_houseId_scenarioKey: { userId: args.userId, houseId: args.houseId, scenarioKey: "BASELINE" } },
+              select: { buildInputs: true },
+            })
+            .catch(() => null);
+          const baselineInputs = baselineBuild?.buildInputs as any;
+          if (
+            Array.isArray(baselineInputs?.canonicalMonths) &&
+            baselineInputs.canonicalMonths.length > 0
+          ) {
+            canonicalMonths = baselineInputs.canonicalMonths;
+            if (typeof baselineInputs.canonicalEndMonth === "string")
+              canonicalEndMonthForMeta = baselineInputs.canonicalEndMonth;
+          }
+        }
         const window = canonicalWindowDateRange(canonicalMonths);
         const startDate = window?.start;
         const endDate = window?.end;
@@ -970,7 +989,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
           dataset = buildSimulatedUsageDatasetFromCurve(stitchedCurve, {
             baseKind: buildInputs.baseKind,
             mode: buildInputs.mode,
-            canonicalEndMonth: buildInputs.canonicalEndMonth,
+            canonicalEndMonth: canonicalEndMonthForMeta,
             notes: buildInputs.notes,
             filledMonths: buildInputs.filledMonths,
           });

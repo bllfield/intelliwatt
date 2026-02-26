@@ -135,8 +135,8 @@ export function buildPastStitchedCurve(args: BuildPastStitchedCurveArgs): Simula
         start: monthStartUtc(ym),
         end: monthEndUtc(ym),
       }));
-  const byMonth = args.pastMonthlyTotalsKwhByMonth ?? {};
   const simulatedDayKwh = new Map<string, number>();
+  const byMonth = args.pastMonthlyTotalsKwhByMonth ?? {};
   for (const b of buckets) {
     if (!b.start || !b.end) continue;
     const days = enumerateDaysInclusive(b.start, b.end);

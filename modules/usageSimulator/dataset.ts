@@ -169,14 +169,18 @@ export function buildSimulatedUsageDatasetFromBuildInputs(buildInputs: Simulator
   const peakDay = daily.length > 0 ? daily.reduce((a, b) => (b.kwh > a.kwh ? b : a)) : null;
 
   // Baseload from the built curve (lowest 10% of 15-min power samples), so Past/Future reflect overlay/upgrades/vacant fill.
-  // Use only positive power samples so always-on load is not diluted by zeros (e.g. from shape or vacant fill).
-  const powerSamples = curve.intervals
+  // Use positive power samples first so always-on load is not diluted by zeros; fall back to all samples if result would be 0.
+  const allPower = curve.intervals
     .map((i) => (Number(i.consumption_kwh) || 0) * 4)
-    .filter((kw) => Number.isFinite(kw) && kw > 0.001)
-    .sort((a, b) => a - b);
-  const count10 = Math.max(1, Math.floor(powerSamples.length * 0.1));
-  const baseSlice = powerSamples.slice(0, count10);
-  const baseload = baseSlice.length > 0 ? round2(baseSlice.reduce((a, b) => a + b, 0) / baseSlice.length) : null;
+    .filter((kw) => Number.isFinite(kw));
+  const positivePower = allPower.filter((kw) => kw > 1e-6).sort((a, b) => a - b);
+  const count10 = Math.max(1, Math.floor((positivePower.length || allPower.length) * 0.1));
+  const baseSlice =
+    positivePower.length >= count10
+      ? positivePower.slice(0, count10)
+      : allPower.sort((a, b) => a - b).slice(0, Math.max(1, Math.floor(allPower.length * 0.1)));
+  const baseloadRaw = baseSlice.length > 0 ? baseSlice.reduce((a, b) => a + b, 0) / baseSlice.length : null;
+  const baseload = baseloadRaw != null && baseloadRaw > 0 ? round2(baseloadRaw) : null;
 
   const usageBucketsByMonth = usageBucketsByMonthFromSimulatedMonthly(monthly);
 
@@ -270,14 +274,18 @@ export function buildSimulatedUsageDatasetFromCurve(
 
   const peakDay = daily.length > 0 ? daily.reduce((a, b) => (b.kwh > a.kwh ? b : a)) : null;
 
-  // Baseload = lowest 10% of positive 15-min power samples (exclude zeros so always-on load is not diluted).
-  const powerSamples = curve.intervals
+  // Baseload = lowest 10% of 15-min power; prefer positive-only, fall back to all samples so we don't show 0 when there is load.
+  const allPower = curve.intervals
     .map((i) => (Number(i.consumption_kwh) || 0) * 4)
-    .filter((kw) => Number.isFinite(kw) && kw > 0.001)
-    .sort((a, b) => a - b);
-  const count10 = Math.max(1, Math.floor(powerSamples.length * 0.1));
-  const baseSlice = powerSamples.slice(0, count10);
-  const baseload = baseSlice.length > 0 ? round2(baseSlice.reduce((a, b) => a + b, 0) / baseSlice.length) : null;
+    .filter((kw) => Number.isFinite(kw));
+  const positivePower = allPower.filter((kw) => kw > 1e-6).sort((a, b) => a - b);
+  const count10 = Math.max(1, Math.floor((positivePower.length || allPower.length) * 0.1));
+  const baseSlice =
+    positivePower.length >= count10
+      ? positivePower.slice(0, count10)
+      : allPower.sort((a, b) => a - b).slice(0, Math.max(1, Math.floor(allPower.length * 0.1)));
+  const baseloadRaw = baseSlice.length > 0 ? baseSlice.reduce((a, b) => a + b, 0) / baseSlice.length : null;
+  const baseload = baseloadRaw != null && baseloadRaw > 0 ? round2(baseloadRaw) : null;
 
   const usageBucketsByMonth = usageBucketsByMonthFromSimulatedMonthly(monthly);
 

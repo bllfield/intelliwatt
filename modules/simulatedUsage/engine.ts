@@ -464,12 +464,12 @@ export function completeActualIntervalsV1(args: {
     }
     avgTotal[ym][dow] += dayTotal[dk] ?? 0;
     avgTotalMonth[ym] += dayTotal[dk] ?? 0;
+    const slotKwh = daySlotKwh.get(dk) ?? [];
     for (let h = 0; h < 24; h++) {
       if (!quarterShape[ym][dow][h]) quarterShape[ym][dow][h] = [0, 0, 0, 0];
-      const sum = (hourly[h] ?? 0) || 1;
+      const sum = (dayHourly[dk]?.[h] ?? 0) || 1;
       for (let q = 0; q < 4; q++) {
-        const idx = h * 4 + q;
-        const v = Number(list[idx]?.kwh) || 0;
+        const v = Number(slotKwh[h * 4 + q]) || 0;
         quarterShape[ym][dow][h][q] += v / sum;
       }
     }
@@ -586,4 +586,3 @@ export type UsagePatch = { start: string; end: string; reason: string };
 export function applyScenarioDeltasStub() {
   throw new Error("not_implemented");
 }
-

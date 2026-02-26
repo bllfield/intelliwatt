@@ -248,8 +248,8 @@ async function computeInsightsFromDb(args: {
       const peakHour = peakHourRows?.[0] ? { hour: Number(peakHourRows[0].hour), kw: round2(Number(peakHourRows[0].sumkwh) * 4) } : null;
       const baseloadRows = await prisma.$queryRaw<Array<{ baseload: number | null }>>(Prisma.sql`
         WITH t AS (SELECT ("kwh" * 4)::float AS kw FROM (SELECT "ts", MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${args.cutoff} GROUP BY "ts") iv),
-             p AS (SELECT percentile_cont(0.10) WITHIN GROUP (ORDER BY kw) AS p10 FROM t)
-        SELECT AVG(t.kw)::float AS baseload FROM t, p WHERE t.kw <= p.p10
+             p AS (SELECT percentile_cont(0.10) WITHIN GROUP (ORDER BY kw) AS p10 FROM t WHERE kw > 0)
+        SELECT AVG(t.kw)::float AS baseload FROM t, p WHERE t.kw > 0 AND t.kw <= p.p10
       `);
       const baseload = baseloadRows?.[0]?.baseload == null ? null : round2(Number(baseloadRows[0].baseload));
       const dowRows = await prisma.$queryRaw<Array<{ weekdaykwh: number; weekendkwh: number }>>(Prisma.sql`
@@ -309,8 +309,8 @@ async function computeInsightsFromDb(args: {
     const peakHour = peakHourRows?.[0] ? { hour: Number(peakHourRows[0].hour), kw: round2(Number(peakHourRows[0].sumkwh) * 4) } : null;
     const baseloadRows = (await usageClient.$queryRaw(Prisma.sql`
       WITH t AS (SELECT ("consumptionKwh" * 4)::float AS kw FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${args.cutoff}),
-           p AS (SELECT percentile_cont(0.10) WITHIN GROUP (ORDER BY kw) AS p10 FROM t)
-      SELECT AVG(t.kw)::float AS baseload FROM t, p WHERE t.kw <= p.p10
+           p AS (SELECT percentile_cont(0.10) WITHIN GROUP (ORDER BY kw) AS p10 FROM t WHERE kw > 0)
+      SELECT AVG(t.kw)::float AS baseload FROM t, p WHERE t.kw > 0 AND t.kw <= p.p10
     `)) as Array<{ baseload: number | null }>;
     const baseload = baseloadRows?.[0]?.baseload == null ? null : round2(Number(baseloadRows[0].baseload));
     const dowRows = (await usageClient.$queryRaw(Prisma.sql`
