@@ -968,8 +968,24 @@ export async function getSimulatedUsageForHouseScenario(args: {
         // Prefer actual dataset month keys so Past uses the same month window/order as Usage (e.g. 03/25..02/26).
         let canonicalMonths = (buildInputs as any).canonicalMonths ?? [];
         let canonicalEndMonthForMeta = buildInputs.canonicalEndMonth;
+        let periodsForStitch: Array<{ id: string; startDate: string; endDate: string }> | undefined =
+          Array.isArray((buildInputs as any).canonicalPeriods) &&
+          (buildInputs as any).canonicalPeriods.length > 0
+            ? ((buildInputs as any).canonicalPeriods as Array<{ id?: string; startDate?: string; endDate?: string }>)
+                .map((p, idx) => ({
+                  id: String(p?.id ?? `p${idx + 1}`),
+                  startDate: String(p?.startDate ?? "").slice(0, 10),
+                  endDate: String(p?.endDate ?? "").slice(0, 10),
+                }))
+                .filter((p) => /^\d{4}-\d{2}-\d{2}$/.test(p.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(p.endDate))
+            : undefined;
         try {
           const actualResult = await getActualUsageDatasetForHouse(args.houseId, house.esiid ?? null);
+          const summaryStart = String(actualResult?.dataset?.summary?.start ?? "").slice(0, 10);
+          const summaryEnd = String(actualResult?.dataset?.summary?.end ?? "").slice(0, 10);
+          if (/^\d{4}-\d{2}-\d{2}$/.test(summaryStart) && /^\d{4}-\d{2}-\d{2}$/.test(summaryEnd)) {
+            periodsForStitch = [{ id: "anchor", startDate: summaryStart, endDate: summaryEnd }];
+          }
           const actualMonths = Array.isArray(actualResult?.dataset?.monthly)
             ? (actualResult!.dataset.monthly as Array<{ month?: string }>)
                 .map((m) => String(m?.month ?? "").trim())
@@ -1012,8 +1028,8 @@ export async function getSimulatedUsageForHouseScenario(args: {
           }
         }
         const window = canonicalWindowDateRange(canonicalMonths);
-        const startDate = window?.start;
-        const endDate = window?.end;
+        const startDate = periodsForStitch?.[0]?.startDate ?? window?.start;
+        const endDate = periodsForStitch?.[periodsForStitch.length - 1]?.endDate ?? window?.end;
         if (startDate && endDate) {
           const actualIntervals = await getActualIntervalsForRange({
             houseId: args.houseId,
@@ -1047,7 +1063,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
             pastMonthlyTotalsKwhByMonth: buildInputs.monthlyTotalsKwhByMonth,
             intradayShape96: buildInputs.intradayShape96,
             weekdayWeekendShape96: buildInputs.weekdayWeekendShape96,
-            periods: undefined,
+            periods: periodsForStitch,
           });
           dataset = buildSimulatedUsageDatasetFromCurve(stitchedCurve, {
             baseKind: buildInputs.baseKind,
