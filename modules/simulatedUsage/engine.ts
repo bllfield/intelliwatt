@@ -423,20 +423,27 @@ export function completeActualIntervalsV1(args: {
     if (!excludedDateKeys.has(dk) && list.length === INTERVALS_PER_DAY) usableDays.add(dk);
   }
 
+  // Build slot-aligned kWh per day from timestamp-derived slot index so we don't assume list[i] = grid slot i.
+  const daySlotKwh = new Map<string, number[]>();
   const dayHourly: Record<string, number[]> = {};
   const dayTotal: Record<string, number> = {};
   for (const dk of Array.from(usableDays)) {
     const list = dayIntervals.get(dk) ?? [];
-    const hourly = Array.from({ length: 24 }, () => 0);
-    let total = 0;
-    for (let i = 0; i < list.length; i++) {
-      const kwh = Number(list[i]?.kwh) || 0;
-      total += kwh;
-      const h = Math.floor(i / 4);
-      if (h >= 0 && h < 24) hourly[h] += kwh;
+    const dayStartMs = new Date(dk + "T00:00:00.000Z").getTime();
+    const slotKwh = new Array<number>(INTERVALS_PER_DAY).fill(0);
+    for (const p of list) {
+      const t = new Date(p.timestamp).getTime();
+      const slot = Math.floor((t - dayStartMs) / SLOT_MS);
+      if (slot >= 0 && slot < INTERVALS_PER_DAY) slotKwh[slot] += Number(p.kwh) || 0;
     }
+    daySlotKwh.set(dk, slotKwh);
+    const hourly = Array.from({ length: 24 }, (_, h) => {
+      let s = 0;
+      for (let q = 0; q < 4; q++) s += slotKwh[h * 4 + q] ?? 0;
+      return s;
+    });
     dayHourly[dk] = hourly;
-    dayTotal[dk] = total;
+    dayTotal[dk] = slotKwh.reduce((a, b) => a + b, 0);
   }
 
   const avgHourly: Record<string, Record<number, number[]>> = {};
