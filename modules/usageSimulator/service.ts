@@ -84,6 +84,31 @@ function canonicalWindowDateRange(canonicalMonths: string[]): { start: string; e
   return { start, end, days: Math.max(1, days) };
 }
 
+function monthsIntersectingTravelRanges(
+  canonicalMonths: string[],
+  travelRanges: Array<{ startDate: string; endDate: string }>
+): Set<string> {
+  const out = new Set<string>();
+  const monthSet = new Set((canonicalMonths ?? []).map((m) => String(m)));
+  for (const r of travelRanges ?? []) {
+    const start = String(r?.startDate ?? "").slice(0, 10);
+    const end = String(r?.endDate ?? "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) continue;
+    const a = new Date(start + "T12:00:00.000Z");
+    const b = new Date(end + "T12:00:00.000Z");
+    if (!Number.isFinite(a.getTime()) || !Number.isFinite(b.getTime())) continue;
+    const firstMs = Math.min(a.getTime(), b.getTime());
+    const lastMs = Math.max(a.getTime(), b.getTime());
+    let cur = new Date(firstMs);
+    while (cur.getTime() <= lastMs) {
+      const ym = cur.toISOString().slice(0, 7);
+      if (monthSet.has(ym)) out.add(ym);
+      cur = new Date(Date.UTC(cur.getUTCFullYear(), cur.getUTCMonth() + 1, 1, 12, 0, 0, 0));
+    }
+  }
+  return out;
+}
+
 function canonicalMonthsForRecalc(args: { mode: SimulatorMode; manualUsagePayload: ManualUsagePayloadAny | null; now?: Date }) {
   const now = args.now ?? new Date();
 
@@ -1006,7 +1031,13 @@ export async function getSimulatedUsageForHouseScenario(args: {
             canonicalEndTsUtc,
             excludedDateKeys,
           });
-          const simulatedMonthsSet = new Set<string>((buildInputs as any).pastSimulatedMonths);
+          const simulatedMonthsSet = new Set<string>((buildInputs as any).pastSimulatedMonths ?? []);
+          // Travel/vacant is day-level fill only; do not force whole-month simulation for travel months.
+          const travelMonths = monthsIntersectingTravelRanges(
+            canonicalMonths,
+            ((buildInputs as any).travelRanges ?? []) as Array<{ startDate: string; endDate: string }>
+          );
+          for (const ym of Array.from(travelMonths)) simulatedMonthsSet.delete(ym);
           const stitchedCurve = buildPastStitchedCurve({
             actualIntervals: completedIntervals,
             canonicalMonths,
@@ -1030,6 +1061,11 @@ export async function getSimulatedUsageForHouseScenario(args: {
       }
       const filledSet = new Set<string>(((buildInputs as any).filledMonths ?? []).map(String));
       const pastSimulatedSet = new Set<string>((buildInputs as any).pastSimulatedMonths ?? []);
+      const travelMonths = monthsIntersectingTravelRanges(
+        ((buildInputs as any).canonicalMonths ?? []) as string[],
+        ((buildInputs as any).travelRanges ?? []) as Array<{ startDate: string; endDate: string }>
+      );
+      for (const ym of Array.from(travelMonths)) pastSimulatedSet.delete(ym);
       const monthProvenanceByMonth: Record<string, "ACTUAL" | "SIMULATED"> = {};
       for (const ym of (buildInputs as any).canonicalMonths ?? []) {
         const key = String(ym);

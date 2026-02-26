@@ -1,6 +1,7 @@
 /**
  * Determines which canonical months use simulated data for Past (vs actual 15-min intervals).
- * Simulated months = (a) months with any Past overlay impact (ledger/events), (b) months with travel/vacancy, (c) months with no actual data (gap fill).
+ * Simulated months = (a) months with any Past overlay impact (ledger/events), (b) months with no actual data (gap fill).
+ * Travel/vacancy is handled day-level in completeActualIntervalsV1 and must NOT force whole-month simulation.
  */
 
 const YYYY_MM = /^\d{4}-\d{2}$/;
@@ -40,7 +41,7 @@ export type ComputePastSimulatedMonthsArgs = {
   ledgerEntries: Array<{ effectiveMonth: string }>;
   /** Scenario events (effectiveMonth, kind e.g. MONTHLY_ADJUSTMENT, TRAVEL_RANGE). */
   scenarioEvents: Array<{ effectiveMonth: string; kind: string }>;
-  /** Travel/vacancy date ranges. Months intersecting any range are simulated. */
+  /** Travel/vacancy date ranges (accepted for API compatibility; does not mark whole months simulated). */
   travelRanges: Array<{ startDate: string; endDate: string }>;
   /** Months that were gap-filled (no actual data); these are simulated. */
   filledMonths: string[];
@@ -76,15 +77,7 @@ export function computePastSimulatedMonths(args: ComputePastSimulatedMonthsArgs)
     }
   }
 
-  // (b) Months intersecting travel/vacancy ranges.
-  for (const r of args.travelRanges ?? []) {
-    const start = String(r?.startDate ?? "").trim().slice(0, 10);
-    const end = String(r?.endDate ?? "").trim().slice(0, 10);
-    const hit = monthsIntersectingRange(args.canonicalMonths, start, end);
-    for (const ym of Array.from(hit)) simulated.add(ym);
-  }
-
-  // (c) Missing actual data (gap-filled months).
+  // (b) Missing actual data (gap-filled months).
   for (const ym of args.filledMonths ?? []) {
     const t = String(ym).trim().slice(0, 7);
     if (YYYY_MM.test(t) && monthSet.has(t)) simulated.add(t);
