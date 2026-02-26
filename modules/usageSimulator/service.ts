@@ -536,6 +536,7 @@ export async function recalcSimulatorBuild(args: {
         canonicalStartTsUtc,
         canonicalEndTsUtc,
         excludedDateKeys,
+        simulateIncompleteDays: false,
       });
       const stitchedCurve = buildPastStitchedCurve({
         actualIntervals: completedIntervals,
@@ -1030,6 +1031,7 @@ export async function getSimulatedUsageForHouseScenario(args: {
             canonicalStartTsUtc,
             canonicalEndTsUtc,
             excludedDateKeys,
+            simulateIncompleteDays: false,
           });
           const simulatedMonthsSet = new Set<string>((buildInputs as any).pastSimulatedMonths ?? []);
           // Travel/vacant is day-level fill only; do not force whole-month simulation for travel months.

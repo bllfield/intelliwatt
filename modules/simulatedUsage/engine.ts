@@ -387,8 +387,8 @@ export function generateSimulatedCurve(args: {
 const SLOT_MS = INTERVAL_MINUTES * 60 * 1000;
 
 /**
- * Completes actual 15-min intervals over the canonical window: fills excluded (travel/vacant) days
- * and any day with missing/incomplete intervals using hourly-then-quarter pattern-based simulation.
+ * Completes actual 15-min intervals over the canonical window: fills excluded (travel/vacant) days,
+ * and optionally fills any day with missing/incomplete intervals using hourly-then-quarter simulation.
  * Used only for Past (Corrected) builds with ACTUAL baseline. LOCK: uses dateKeyFromTimestamp and
  * getDayGridTimestamps from pastStitchedCurve so date keys and interval grid match the stitcher.
  */
@@ -397,8 +397,10 @@ export function completeActualIntervalsV1(args: {
   canonicalStartTsUtc: number;
   canonicalEndTsUtc: number;
   excludedDateKeys: Set<string>;
+  simulateIncompleteDays?: boolean;
 }): Array<{ timestamp: string; kwh: number }> {
   const { actualIntervals, canonicalStartTsUtc, canonicalEndTsUtc, excludedDateKeys } = args;
+  const simulateIncompleteDays = args.simulateIncompleteDays ?? true;
 
   const firstDayStart = new Date(new Date(canonicalStartTsUtc).toISOString().slice(0, 10) + "T00:00:00.000Z");
   const lastDayStart = new Date(new Date(canonicalEndTsUtc).toISOString().slice(0, 10) + "T00:00:00.000Z");
@@ -464,17 +466,16 @@ export function completeActualIntervalsV1(args: {
     if (!quarterShape[ym]) quarterShape[ym] = {};
     if (!quarterShape[ym][dow]) quarterShape[ym][dow] = {};
     const hourly = dayHourly[dk] ?? [];
-    const list = dayIntervals.get(dk) ?? [];
+    const slotKwh = daySlotKwh.get(dk) ?? [];
     for (let h = 0; h < 24; h++) {
       avgHourly[ym][dow][h] += hourly[h] ?? 0;
       avgHourlyMonth[ym][h] += hourly[h] ?? 0;
     }
     avgTotal[ym][dow] += dayTotal[dk] ?? 0;
     avgTotalMonth[ym] += dayTotal[dk] ?? 0;
-    const slotKwh = daySlotKwh.get(dk) ?? [];
     for (let h = 0; h < 24; h++) {
       if (!quarterShape[ym][dow][h]) quarterShape[ym][dow][h] = [0, 0, 0, 0];
-      const sum = (dayHourly[dk]?.[h] ?? 0) || 1;
+      const sum = (hourly[h] ?? 0) || 1;
       for (let q = 0; q < 4; q++) {
         const v = Number(slotKwh[h * 4 + q]) || 0;
         quarterShape[ym][dow][h][q] += v / sum;
@@ -541,7 +542,7 @@ export function completeActualIntervalsV1(args: {
     const ym = dk.slice(0, 7);
     const dow = day.getUTCDay();
     const list = dayIntervals.get(dk) ?? [];
-    const needSimulate = excludedDateKeys.has(dk) || list.length !== INTERVALS_PER_DAY;
+    const needSimulate = excludedDateKeys.has(dk) || (simulateIncompleteDays && list.length !== INTERVALS_PER_DAY);
     const gridTs = getDayGridTimestamps(day.getTime());
 
     if (needSimulate) {
