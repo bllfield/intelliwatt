@@ -244,6 +244,28 @@ export async function recalcSimulatorBuild(args: {
   // Enforce mode->baseKind mapping (no mismatches)
   const baseKind = baseKindFromMode(mode);
 
+  // When recalc'ing a scenario (Past/Future), use the baseline build's canonical window so scenario and Usage tab stay aligned (e.g. both Mar 2025–Feb 2026).
+  let canonicalForBuild = canonical;
+  if (scenarioId) {
+    const baselineBuild = await (prisma as any).usageSimulatorBuild
+      .findUnique({
+        where: { userId_houseId_scenarioKey: { userId, houseId, scenarioKey: "BASELINE" } },
+        select: { buildInputs: true },
+      })
+      .catch(() => null);
+    const baselineInputs = baselineBuild?.buildInputs as any;
+    if (
+      Array.isArray(baselineInputs?.canonicalMonths) &&
+      baselineInputs.canonicalMonths.length > 0 &&
+      typeof baselineInputs.canonicalEndMonth === "string"
+    ) {
+      canonicalForBuild = {
+        endMonth: baselineInputs.canonicalEndMonth,
+        months: baselineInputs.canonicalMonths,
+      };
+    }
+  }
+
   const travelRangesForBuild = scenarioId ? [...pastTravelRanges, ...scenarioTravelRanges] : undefined;
   const built = await buildSimulatorInputs({
     mode: mode as BuildMode,
@@ -254,7 +276,7 @@ export async function recalcSimulatorBuild(args: {
     houseIdForActual: houseId,
     baselineHomeProfile: homeProfile,
     baselineApplianceProfile: applianceProfile,
-    canonicalMonths: canonical.months,
+    canonicalMonths: canonicalForBuild.months,
     travelRanges: travelRangesForBuild,
     now: args.now,
   });
@@ -522,7 +544,7 @@ export async function recalcSimulatorBuild(args: {
     version: 1,
     mode,
     baseKind,
-    canonicalEndMonth: canonical.endMonth,
+    canonicalEndMonth: canonicalForBuild.endMonth,
     canonicalMonths: built.canonicalMonths,
     canonicalPeriods: manualCanonicalPeriods.length ? manualCanonicalPeriods : smtAnchorPeriods ?? undefined,
     weatherPreference,

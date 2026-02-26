@@ -169,9 +169,10 @@ export function buildSimulatedUsageDatasetFromBuildInputs(buildInputs: Simulator
   const peakDay = daily.length > 0 ? daily.reduce((a, b) => (b.kwh > a.kwh ? b : a)) : null;
 
   // Baseload from the built curve (lowest 10% of 15-min power samples), so Past/Future reflect overlay/upgrades/vacant fill.
+  // Use only positive power samples so always-on load is not diluted by zeros (e.g. from shape or vacant fill).
   const powerSamples = curve.intervals
     .map((i) => (Number(i.consumption_kwh) || 0) * 4)
-    .filter((kw) => Number.isFinite(kw))
+    .filter((kw) => Number.isFinite(kw) && kw > 0.001)
     .sort((a, b) => a - b);
   const count10 = Math.max(1, Math.floor(powerSamples.length * 0.1));
   const baseSlice = powerSamples.slice(0, count10);
@@ -269,9 +270,10 @@ export function buildSimulatedUsageDatasetFromCurve(
 
   const peakDay = daily.length > 0 ? daily.reduce((a, b) => (b.kwh > a.kwh ? b : a)) : null;
 
+  // Baseload = lowest 10% of positive 15-min power samples (exclude zeros so always-on load is not diluted).
   const powerSamples = curve.intervals
     .map((i) => (Number(i.consumption_kwh) || 0) * 4)
-    .filter((kw) => Number.isFinite(kw))
+    .filter((kw) => Number.isFinite(kw) && kw > 0.001)
     .sort((a, b) => a - b);
   const count10 = Math.max(1, Math.floor(powerSamples.length * 0.1));
   const baseSlice = powerSamples.slice(0, count10);
