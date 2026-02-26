@@ -459,7 +459,7 @@ export async function recalcSimulatorBuild(args: {
 
   // SMT_BASELINE: use actual data's date range (anchor) so Baseline, Past, and Future all show the same dates (e.g. 02/18/2025 – 02/18/2026).
   let smtAnchorPeriods: Array<{ id: string; startDate: string; endDate: string }> | undefined;
-  if (mode === "SMT_BASELINE" && (built.source?.actualSource === "SMT" || built.source?.actualSource === "GREEN_BUTTON")) {
+  if (mode === "SMT_BASELINE") {
     try {
       const actualResult = await getActualUsageDatasetForHouse(houseId, esiid ?? null);
       const start = actualResult?.dataset?.summary?.start ? String(actualResult.dataset.summary.start).slice(0, 10) : null;
@@ -476,8 +476,7 @@ export async function recalcSimulatorBuild(args: {
   let pastSimulatedMonths: string[] | undefined;
   if (
     scenario?.name === WORKSPACE_PAST_NAME &&
-    mode === "SMT_BASELINE" &&
-    (built.source?.actualSource === "SMT" || built.source?.actualSource === "GREEN_BUTTON")
+    mode === "SMT_BASELINE"
   ) {
     try {
       let ledgerRows: Awaited<ReturnType<typeof listLedgerRows>> = [];
@@ -839,10 +838,11 @@ export async function getSimulatedUsageForHouseScenario(args: {
     const buildInputs = buildRec.buildInputs as SimulatorBuildInputsV1;
     const mode = (buildInputs as any).mode;
     const actualSource = (buildInputs as any)?.snapshots?.actualSource ?? null;
+    const isSmtBaselineMode = mode === "SMT_BASELINE";
+    const isPastScenario = scenarioRow?.name === WORKSPACE_PAST_NAME;
     const useActualBaseline =
       scenarioKey === "BASELINE" &&
-      mode === "SMT_BASELINE" &&
-      (actualSource === "SMT" || actualSource === "GREEN_BUTTON");
+      isSmtBaselineMode;
 
     let dataset: any;
     if (useActualBaseline) {
@@ -896,10 +896,9 @@ export async function getSimulatedUsageForHouseScenario(args: {
       const pastSimulatedList = (buildInputs as any).pastSimulatedMonths;
       // Never return raw actual for Past + SMT/GB so completeActualIntervalsV1 always runs (Travel/Vacant + missing intervals fill).
       const pastHasNoEvents =
-        scenarioRow?.name === WORKSPACE_PAST_NAME &&
+        isPastScenario &&
         (pastSimulatedList == null || !Array.isArray(pastSimulatedList) || pastSimulatedList.length === 0) &&
-        (actualSource === "SMT" || actualSource === "GREEN_BUTTON") &&
-        !(scenarioRow?.name === WORKSPACE_PAST_NAME && (actualSource === "SMT" || actualSource === "GREEN_BUTTON"));
+        !isSmtBaselineMode;
       if (pastHasNoEvents) {
         const actualResult = await getActualUsageDatasetForHouse(args.houseId, house.esiid ?? null);
         if (actualResult?.dataset) {
@@ -932,8 +931,8 @@ export async function getSimulatedUsageForHouseScenario(args: {
       // Always build stitched curve for Past + SMT/GB so Travel/Vacant and missing/incomplete intervals are filled.
       const isPastStitched =
         !dataset &&
-        scenarioRow?.name === WORKSPACE_PAST_NAME &&
-        (actualSource === "SMT" || actualSource === "GREEN_BUTTON");
+        isPastScenario &&
+        isSmtBaselineMode;
       if (isPastStitched) {
         // Use baseline build's canonical window when available so Past matches Usage tab (e.g. 03/25-02/26) without requiring recalc.
         let canonicalMonths = (buildInputs as any).canonicalMonths ?? [];
@@ -1026,13 +1025,12 @@ export async function getSimulatedUsageForHouseScenario(args: {
     // Past and Future: show the same date range as SMT/Green Button anchor (e.g. 02/18/2025 – 02/18/2026), not calendar-month window.
     // For Past stitched curve, do not overwrite summary start/end so the chart window exactly matches the built curve (anchor order).
     const isPastStitchedCurve =
-      scenarioRow?.name === WORKSPACE_PAST_NAME &&
-      Array.isArray((buildInputs as any).pastSimulatedMonths) &&
-      (buildInputs as any).pastSimulatedMonths.length > 0;
+      isPastScenario &&
+      isSmtBaselineMode;
     if (
       scenarioKey !== "BASELINE" &&
       mode === "SMT_BASELINE" &&
-      (actualSource === "SMT" || actualSource === "GREEN_BUTTON") &&
+      isSmtBaselineMode &&
       dataset?.summary &&
       !isPastStitchedCurve
     ) {
