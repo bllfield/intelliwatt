@@ -939,24 +939,50 @@ export async function getSimulatedUsageForHouseScenario(args: {
         isPastScenario &&
         isSmtBaselineMode;
       if (isPastStitched) {
-        // Use baseline build's canonical window when available so Past matches Usage tab (e.g. 03/25-02/26) without requiring recalc.
+        // Prefer actual dataset month keys so Past uses the same month window/order as Usage (e.g. 03/25..02/26).
         let canonicalMonths = (buildInputs as any).canonicalMonths ?? [];
         let canonicalEndMonthForMeta = buildInputs.canonicalEndMonth;
-        if (scenarioKey !== "BASELINE") {
-          const baselineBuild = await (prisma as any).usageSimulatorBuild
-            .findUnique({
-              where: { userId_houseId_scenarioKey: { userId: args.userId, houseId: args.houseId, scenarioKey: "BASELINE" } },
-              select: { buildInputs: true },
-            })
-            .catch(() => null);
-          const baselineInputs = baselineBuild?.buildInputs as any;
-          if (
-            Array.isArray(baselineInputs?.canonicalMonths) &&
-            baselineInputs.canonicalMonths.length > 0
-          ) {
-            canonicalMonths = baselineInputs.canonicalMonths;
-            if (typeof baselineInputs.canonicalEndMonth === "string")
-              canonicalEndMonthForMeta = baselineInputs.canonicalEndMonth;
+        try {
+          const actualResult = await getActualUsageDatasetForHouse(args.houseId, house.esiid ?? null);
+          const actualMonths = Array.isArray(actualResult?.dataset?.monthly)
+            ? (actualResult!.dataset.monthly as Array<{ month?: string }>)
+                .map((m) => String(m?.month ?? "").trim())
+                .filter((ym) => /^\d{4}-\d{2}$/.test(ym))
+            : [];
+          if (actualMonths.length > 0) {
+            const uniqueSorted = Array.from(new Set(actualMonths)).sort((a, b) => (a < b ? -1 : 1));
+            canonicalMonths = uniqueSorted;
+            canonicalEndMonthForMeta = uniqueSorted[uniqueSorted.length - 1] ?? canonicalEndMonthForMeta;
+          } else if (scenarioKey !== "BASELINE") {
+            const baselineBuild = await (prisma as any).usageSimulatorBuild
+              .findUnique({
+                where: { userId_houseId_scenarioKey: { userId: args.userId, houseId: args.houseId, scenarioKey: "BASELINE" } },
+                select: { buildInputs: true },
+              })
+              .catch(() => null);
+            const baselineInputs = baselineBuild?.buildInputs as any;
+            if (Array.isArray(baselineInputs?.canonicalMonths) && baselineInputs.canonicalMonths.length > 0) {
+              canonicalMonths = baselineInputs.canonicalMonths;
+              if (typeof baselineInputs.canonicalEndMonth === "string") {
+                canonicalEndMonthForMeta = baselineInputs.canonicalEndMonth;
+              }
+            }
+          }
+        } catch {
+          if (scenarioKey !== "BASELINE") {
+            const baselineBuild = await (prisma as any).usageSimulatorBuild
+              .findUnique({
+                where: { userId_houseId_scenarioKey: { userId: args.userId, houseId: args.houseId, scenarioKey: "BASELINE" } },
+                select: { buildInputs: true },
+              })
+              .catch(() => null);
+            const baselineInputs = baselineBuild?.buildInputs as any;
+            if (Array.isArray(baselineInputs?.canonicalMonths) && baselineInputs.canonicalMonths.length > 0) {
+              canonicalMonths = baselineInputs.canonicalMonths;
+              if (typeof baselineInputs.canonicalEndMonth === "string") {
+                canonicalEndMonthForMeta = baselineInputs.canonicalEndMonth;
+              }
+            }
           }
         }
         const window = canonicalWindowDateRange(canonicalMonths);
