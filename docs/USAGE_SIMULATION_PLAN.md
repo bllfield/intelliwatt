@@ -161,6 +161,14 @@ Applies:
 - Travel/Vacant replacement (day-level only)
 - Leading-missing replacement (day-level only)
 - Weather-aware HVAC simulation for those days only
+- NEAREST_WEATHER reference-day selection for simulated days when weather-backed candidates exist
+
+Deterministic simulated-day fallback ladder:
+1. `NEAREST_WEATHER` (K-nearest weather reference days from non-excluded, non-leading-missing days; deterministic tie-break by weather distance, temperature distance, then `dateKey`)
+2. `MONTH_DOW`
+3. `MONTH`
+4. `GLOBAL`
+5. `UNIFORM`/`ZERO`
 
 Non-simulated days are exact copies.
 

@@ -589,20 +589,23 @@ export function completeActualIntervalsV1(args: {
   return out;
 }
 
-export type PastHourFallbackLevel = "MONTH_DOW" | "MONTH" | "GLOBAL" | "UNIFORM";
-export type PastTotalFallbackLevel = "MONTH_DOW" | "MONTH" | "GLOBAL" | "ZERO";
+export type PastFallbackLevel = "NEAREST_WEATHER" | "MONTH_DOW" | "MONTH" | "GLOBAL" | "UNIFORM" | "ZERO";
 
 export type PastSimulatedDayDiagnostic = {
   dateKey: string;
   monthKey: string;
   dow: number;
   dayType: "ACTUAL" | "SIMULATED";
+  simulatedReason: "EXCLUDED" | "LEADING_MISSING" | null;
   dayIsExcluded: boolean;
   dayIsLeadingMissing: boolean;
   weatherUsed: boolean;
   wx: { tAvgF: number; hdd65: number; cdd65: number } | null;
-  hourFallbackLevel: PastHourFallbackLevel | null;
-  totalFallbackLevel: PastTotalFallbackLevel | null;
+  hourFallbackLevel: PastFallbackLevel | null;
+  totalFallbackLevel: PastFallbackLevel | null;
+  referenceCandidateCount: number;
+  referencePickedCount: number;
+  weatherDistanceAvg: number | null;
   baseNonHvacKwh: number | null;
   hvacKwh: number | null;
   targetTotalKwh: number | null;
@@ -747,7 +750,19 @@ export function buildPastSimulatedBaselineV1(args: {
     };
   };
 
-  const referenceDays: Array<{ dayStartMs: number; dateKey: string; monthKey: string; dow: number; slotKwh: number[]; hourly: number[]; total: number }> = [];
+  const referenceDays: Array<{
+    dayStartMs: number;
+    dateKey: string;
+    monthKey: string;
+    dow: number;
+    slotKwh: number[];
+    hourly: number[];
+    total: number;
+    hourlyWeights: number[];
+    quarterShapeByHour: number[][];
+    wx: { tAvgF: number; hdd65: number; cdd65: number } | null;
+    hvacKwh: number;
+  }> = [];
   for (const dayStartMs of args.canonicalDayStartsMs ?? []) {
     if (!Number.isFinite(dayStartMs)) continue;
     const day = analyzeDay(dayStartMs);
@@ -763,6 +778,36 @@ export function buildPastSimulatedBaselineV1(args: {
       return s;
     });
     const total = slotKwh.reduce((a, b) => a + b, 0);
+    const totalForWeights = total > 0 ? total : 1;
+    const hourlyWeights = hourly.map((h) => (Number(h) || 0) / totalForWeights);
+    const sHourly = hourlyWeights.reduce((a, b) => a + b, 0) || 1;
+    for (let h = 0; h < 24; h++) hourlyWeights[h] = (hourlyWeights[h] ?? 0) / sHourly;
+
+    const quarterShapeByHour: number[][] = [];
+    for (let h = 0; h < 24; h++) {
+      const hourSum = (hourly[h] ?? 0) || 0;
+      const q = [0.25, 0.25, 0.25, 0.25];
+      if (hourSum > 0) {
+        for (let i = 0; i < 4; i++) q[i] = Math.max(0, (Number(slotKwh[h * 4 + i]) || 0) / hourSum);
+        const qs = q.reduce((a, b) => a + b, 0) || 1;
+        for (let i = 0; i < 4; i++) q[i] /= qs;
+      }
+      quarterShapeByHour.push(q);
+    }
+
+    const wxRaw = args.actualWxByDateKey?.get(day.dateKey) ?? null;
+    const wx = wxRaw
+      ? {
+          tAvgF: Number(wxRaw.tAvgF) || 0,
+          hdd65: Number(wxRaw.hdd65) || 0,
+          cdd65: Number(wxRaw.cdd65) || 0,
+        }
+      : null;
+    const hvacRef = weatherAwareHvacKwh({
+      wx,
+      homeProfile: args.homeProfile,
+      applianceProfile: args.applianceProfile,
+    });
     referenceDays.push({
       dayStartMs,
       dateKey: day.dateKey,
@@ -771,6 +816,10 @@ export function buildPastSimulatedBaselineV1(args: {
       slotKwh,
       hourly,
       total,
+      hourlyWeights,
+      quarterShapeByHour,
+      wx,
+      hvacKwh: Number(hvacRef.hvacKwh) || 0,
     });
   }
 
@@ -852,6 +901,102 @@ export function buildPastSimulatedBaselineV1(args: {
   const globalHourlySum = globalHourly.reduce((a, b) => a + b, 0) || 1;
   for (let h = 0; h < 24; h++) globalHourly[h] /= globalHourlySum;
 
+  const NEAREST_WEATHER_K = 7;
+  const NEAREST_WEATHER_MIN_CANDS = 4;
+  const NEAREST_WEATHER_HVAC_BLEND = 0.5;
+  const modDow = (n: number) => ((n % 7) + 7) % 7;
+
+  const nearestWeatherProfileForDay = (target: {
+    dateKey: string;
+    dow: number;
+  }):
+    | {
+        hourWeights: number[];
+        quarterShapeByHour: number[][];
+        baseTotalKwh: number;
+        avgRefHvacKwh: number;
+        candidateCount: number;
+        pickedCount: number;
+        weatherDistanceAvg: number | null;
+      }
+    | null => {
+    const targetWxRaw = args.actualWxByDateKey?.get(target.dateKey) ?? null;
+    if (!targetWxRaw) return null;
+    const targetWx = {
+      tAvgF: Number(targetWxRaw.tAvgF) || 0,
+      hdd65: Number(targetWxRaw.hdd65) || 0,
+      cdd65: Number(targetWxRaw.cdd65) || 0,
+    };
+
+    const allWeatherCandidates = referenceDays.filter((d) => d.wx != null);
+    if (allWeatherCandidates.length < NEAREST_WEATHER_MIN_CANDS) return null;
+
+    const sameDow = allWeatherCandidates.filter((d) => d.dow === target.dow);
+    let scoped =
+      sameDow.length >= NEAREST_WEATHER_MIN_CANDS
+        ? sameDow
+        : allWeatherCandidates.filter((d) => {
+            const allowed = new Set<number>([target.dow, modDow(target.dow - 1), modDow(target.dow + 1)]);
+            return allowed.has(d.dow);
+          });
+    if (scoped.length < NEAREST_WEATHER_MIN_CANDS) scoped = allWeatherCandidates;
+    if (scoped.length < NEAREST_WEATHER_MIN_CANDS) return null;
+
+    const scored = scoped
+      .map((d) => {
+        const wx = d.wx as { tAvgF: number; hdd65: number; cdd65: number };
+        const weatherDist = Math.abs(wx.hdd65 - targetWx.hdd65) + Math.abs(wx.cdd65 - targetWx.cdd65);
+        const tempDist = Math.abs((wx.tAvgF ?? 0) - (targetWx.tAvgF ?? 0));
+        return { d, weatherDist, tempDist };
+      })
+      .sort((a, b) => {
+        if (a.weatherDist !== b.weatherDist) return a.weatherDist - b.weatherDist;
+        if (a.tempDist !== b.tempDist) return a.tempDist - b.tempDist;
+        return a.d.dateKey.localeCompare(b.d.dateKey);
+      });
+
+    const pickedCount = Math.min(NEAREST_WEATHER_K, scored.length);
+    if (pickedCount <= 0) return null;
+    const picked = scored.slice(0, pickedCount);
+
+    const hourWeights = Array.from({ length: 24 }, () => 0);
+    const quarterShapeByHour: number[][] = Array.from({ length: 24 }, () => [0, 0, 0, 0]);
+    let baseTotalKwh = 0;
+    let avgRefHvacKwh = 0;
+    let weatherDistanceAvg = 0;
+    for (const p of picked) {
+      baseTotalKwh += Number(p.d.total) || 0;
+      avgRefHvacKwh += Number(p.d.hvacKwh) || 0;
+      weatherDistanceAvg += p.weatherDist;
+      for (let h = 0; h < 24; h++) {
+        hourWeights[h] += Number(p.d.hourlyWeights[h]) || 0;
+        const q = p.d.quarterShapeByHour[h] ?? [0.25, 0.25, 0.25, 0.25];
+        for (let i = 0; i < 4; i++) quarterShapeByHour[h][i] += Number(q[i]) || 0;
+      }
+    }
+    baseTotalKwh /= pickedCount;
+    avgRefHvacKwh /= pickedCount;
+    weatherDistanceAvg /= pickedCount;
+
+    const hourSum = hourWeights.reduce((a, b) => a + b, 0) || 1;
+    for (let h = 0; h < 24; h++) {
+      hourWeights[h] = (hourWeights[h] ?? 0) / hourSum;
+      const q = quarterShapeByHour[h];
+      const qSum = q.reduce((a, b) => a + b, 0) || 1;
+      for (let i = 0; i < 4; i++) q[i] /= qSum;
+    }
+
+    return {
+      hourWeights,
+      quarterShapeByHour,
+      baseTotalKwh,
+      avgRefHvacKwh,
+      candidateCount: scored.length,
+      pickedCount,
+      weatherDistanceAvg: Number.isFinite(weatherDistanceAvg) ? weatherDistanceAvg : null,
+    };
+  };
+
   const out: Array<{ timestamp: string; kwh: number }> = [];
   let totalDays = 0;
   let excludedDays = 0;
@@ -875,20 +1020,7 @@ export function buildPastSimulatedBaselineV1(args: {
 
     if (shouldSimulateDay) {
       simulatedDays += 1;
-      let hourWeights = avgHourly[ym]?.[dow];
-      let hourFallbackLevel: PastHourFallbackLevel = "MONTH_DOW";
-      if (!hourWeights || hourWeights.every((w) => w === 0)) {
-        hourWeights = avgHourlyMonth[ym];
-        hourFallbackLevel = "MONTH";
-      }
-      if (!hourWeights || hourWeights.every((w) => w === 0)) {
-        hourWeights = globalHourly;
-        hourFallbackLevel = "GLOBAL";
-      }
-      if (!hourWeights || hourWeights.every((w) => w === 0)) {
-        hourWeights = Array.from({ length: 24 }, () => 1 / 24);
-        hourFallbackLevel = "UNIFORM";
-      }
+      const simulatedReason: "EXCLUDED" | "LEADING_MISSING" = day.dayIsExcluded ? "EXCLUDED" : "LEADING_MISSING";
 
       // Use ACTUAL_LAST_YEAR weather when available; if missing, keep pattern-only totals/weights.
       const wx = args.actualWxByDateKey?.get(dateKey) ?? null;
@@ -897,33 +1029,72 @@ export function buildPastSimulatedBaselineV1(args: {
         homeProfile: args.homeProfile,
         applianceProfile: args.applianceProfile,
       });
+
+      let hourWeights: number[] = Array.from({ length: 24 }, () => 1 / 24);
+      let qShapeByHour: number[][] | undefined;
+      let baseBeforeHvac = 0;
+      let targetTotal = 0;
+      let hourFallbackLevel: PastFallbackLevel = "MONTH_DOW";
+      let totalFallbackLevel: PastFallbackLevel = "MONTH_DOW";
+      let referenceCandidateCount = 0;
+      let referencePickedCount = 0;
+      let weatherDistanceAvg: number | null = null;
+
+      const nearest = nearestWeatherProfileForDay({ dateKey, dow });
+      if (nearest) {
+        hourWeights = nearest.hourWeights;
+        qShapeByHour = nearest.quarterShapeByHour;
+        const hvacTarget = wx ? Number(hvac.hvacKwh) || 0 : 0;
+        const hvacDelta = hvacTarget - (Number(nearest.avgRefHvacKwh) || 0);
+        baseBeforeHvac = Number(nearest.baseTotalKwh) || 0;
+        targetTotal = Math.max(0, baseBeforeHvac + hvacDelta * NEAREST_WEATHER_HVAC_BLEND + hvacTarget * (1 - NEAREST_WEATHER_HVAC_BLEND));
+        hourFallbackLevel = "NEAREST_WEATHER";
+        totalFallbackLevel = "NEAREST_WEATHER";
+        referenceCandidateCount = nearest.candidateCount;
+        referencePickedCount = nearest.pickedCount;
+        weatherDistanceAvg = nearest.weatherDistanceAvg;
+      } else {
+        hourWeights = avgHourly[ym]?.[dow];
+        if (!hourWeights || hourWeights.every((w) => w === 0)) {
+          hourWeights = avgHourlyMonth[ym];
+          hourFallbackLevel = "MONTH";
+        }
+        if (!hourWeights || hourWeights.every((w) => w === 0)) {
+          hourWeights = globalHourly;
+          hourFallbackLevel = "GLOBAL";
+        }
+        if (!hourWeights || hourWeights.every((w) => w === 0)) {
+          hourWeights = Array.from({ length: 24 }, () => 1 / 24);
+          hourFallbackLevel = "UNIFORM";
+        }
+
+        let baseNonHvac = avgTotal[ym]?.[dow];
+        if (baseNonHvac == null || !Number.isFinite(baseNonHvac)) {
+          baseNonHvac = avgTotalMonth[ym];
+          totalFallbackLevel = "MONTH";
+        }
+        if (baseNonHvac == null || !Number.isFinite(baseNonHvac)) {
+          baseNonHvac = globalTotal;
+          totalFallbackLevel = "GLOBAL";
+        }
+        if (baseNonHvac == null || !Number.isFinite(baseNonHvac)) {
+          baseNonHvac = 0;
+          totalFallbackLevel = "ZERO";
+        }
+        baseBeforeHvac = Number(baseNonHvac ?? 0) || 0;
+        targetTotal = Math.max(0, baseBeforeHvac + (wx ? Number(hvac.hvacKwh) || 0 : 0));
+      }
+
       const tiltedHourWeights = applyWeatherTiltHourWeights({
         hourWeights,
         wx,
         electricHeat: hvac.electricHeat,
       });
 
-      let baseNonHvac = avgTotal[ym]?.[dow];
-      let totalFallbackLevel: PastTotalFallbackLevel = "MONTH_DOW";
-      if (baseNonHvac == null || !Number.isFinite(baseNonHvac)) {
-        baseNonHvac = avgTotalMonth[ym];
-        totalFallbackLevel = "MONTH";
-      }
-      if (baseNonHvac == null || !Number.isFinite(baseNonHvac)) {
-        baseNonHvac = globalTotal;
-        totalFallbackLevel = "GLOBAL";
-      }
-      if (baseNonHvac == null || !Number.isFinite(baseNonHvac)) {
-        baseNonHvac = 0;
-        totalFallbackLevel = "ZERO";
-      }
-      const targetTotal = Math.max(0, (baseNonHvac ?? 0) + (wx ? hvac.hvacKwh : 0));
-
       const sumW = tiltedHourWeights.reduce((a, b) => a + b, 0) || 1;
       const hourKwh = tiltedHourWeights.map((w) => (targetTotal * w) / sumW);
-      const qsByHour = quarterShape[ym]?.[dow];
       for (let h = 0; h < 24; h++) {
-        const qShare = qsByHour?.[h] ?? [0.25, 0.25, 0.25, 0.25];
+        const qShare = qShapeByHour?.[h] ?? quarterShape[ym]?.[dow]?.[h] ?? [0.25, 0.25, 0.25, 0.25];
         const qSum = qShare.reduce((a, b) => a + b, 0) || 1;
         for (let q = 0; q < 4; q++) {
           const idx = h * 4 + q;
@@ -936,6 +1107,7 @@ export function buildPastSimulatedBaselineV1(args: {
           monthKey: ym,
           dow,
           dayType: "SIMULATED",
+          simulatedReason,
           dayIsExcluded: day.dayIsExcluded,
           dayIsLeadingMissing: day.dayIsLeadingMissing,
           weatherUsed: Boolean(wx),
@@ -948,7 +1120,10 @@ export function buildPastSimulatedBaselineV1(args: {
             : null,
           hourFallbackLevel,
           totalFallbackLevel,
-          baseNonHvacKwh: Number(baseNonHvac ?? 0) || 0,
+          referenceCandidateCount,
+          referencePickedCount,
+          weatherDistanceAvg,
+          baseNonHvacKwh: baseBeforeHvac,
           hvacKwh: wx ? Number(hvac.hvacKwh) || 0 : 0,
           targetTotalKwh: Number(targetTotal) || 0,
         });
@@ -965,6 +1140,7 @@ export function buildPastSimulatedBaselineV1(args: {
           monthKey: ym,
           dow,
           dayType: "ACTUAL",
+          simulatedReason: null,
           dayIsExcluded: day.dayIsExcluded,
           dayIsLeadingMissing: day.dayIsLeadingMissing,
           weatherUsed: Boolean(wx),
@@ -977,6 +1153,9 @@ export function buildPastSimulatedBaselineV1(args: {
             : null,
           hourFallbackLevel: null,
           totalFallbackLevel: null,
+          referenceCandidateCount: 0,
+          referencePickedCount: 0,
+          weatherDistanceAvg: null,
           baseNonHvacKwh: null,
           hvacKwh: null,
           targetTotalKwh: null,
