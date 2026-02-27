@@ -41,6 +41,8 @@ describe("usageSimulator dataset summary invariants", () => {
     const expectedTotal = Math.round(sumIntervals * 100) / 100;
     expect(dataset.summary.totalKwh).toBe(expectedTotal);
     expect(dataset.summary.intervalsCount).toBe(intervals15.length);
+    const monthlySum = (dataset.monthly ?? []).reduce((s, m) => s + (Number(m.kwh) || 0), 0);
+    expect(Math.abs(monthlySum - dataset.summary.totalKwh)).toBeLessThanOrEqual(0.01);
 
     const start = new Date(`${dataset.summary.start}T12:00:00.000Z`);
     const end = new Date(`${dataset.summary.end}T12:00:00.000Z`);

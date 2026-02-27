@@ -240,6 +240,20 @@ function buildDisplayMonthlyFromIntervals(args: {
   return { monthly, stitchedMonth };
 }
 
+function buildMonthlyTotalsFromIntervals(intervals: Array<{ timestamp: string; consumption_kwh: number }>) {
+  const monthTotals = new Map<string, number>();
+  for (const iv of intervals ?? []) {
+    const tsIso = String(iv?.timestamp ?? "");
+    const ym = tsIso.slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(ym)) continue;
+    const kwh = Number(iv?.consumption_kwh) || 0;
+    monthTotals.set(ym, (monthTotals.get(ym) ?? 0) + kwh);
+  }
+  return Array.from(monthTotals.entries())
+    .map(([month, kwh]) => ({ month, kwh: round2(kwh) }))
+    .sort((a, b) => (a.month < b.month ? -1 : 1));
+}
+
 function computeFifteenMinuteAverages(intervals: Array<{ timestamp: string; consumption_kwh: number }>) {
   const buckets = new Map<string, { sumKw: number; count: number }>();
   for (let i = 0; i < intervals.length; i++) {
@@ -551,7 +565,8 @@ export function buildSimulatedUsageDatasetFromCurve(
     intervals: curve.intervals,
     endDate: curve.end,
   });
-  const monthly = monthlyBuild.monthly;
+  // Keep stitched metadata for diagnostics, but align reported monthly totals to the final returned intervals.
+  const monthly = buildMonthlyTotalsFromIntervals(curve.intervals);
   const totalFromMonthly = round2(monthly.reduce((s, m) => s + (Number(m.kwh) || 0), 0));
 
   const seriesDaily: UsageSeriesPoint[] = daily.map((d) => ({ timestamp: `${d.date}T00:00:00.000Z`, kwh: d.kwh }));
