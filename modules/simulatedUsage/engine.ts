@@ -701,7 +701,8 @@ export function buildPastSimulatedBaselineV1(args: {
     if (!gridTs.length) continue;
     const dateKey = args.dateKeyFromTimestamp(gridTs[0]);
     if (args.excludedDateKeys.has(dateKey)) continue;
-    if (dayStartMs < oldestActualTsMs) continue;
+    const dayEndMs = dayStartMs + DAY_MS - 1;
+    if (oldestActualTsMs !== Number.POSITIVE_INFINITY && dayEndMs < oldestActualTsMs) continue;
 
     const slotKwh = new Array<number>(INTERVALS_PER_DAY).fill(0);
     for (let i = 0; i < INTERVALS_PER_DAY; i++) slotKwh[i] = Number(actualByTs.get(gridTs[i]) ?? 0) || 0;
