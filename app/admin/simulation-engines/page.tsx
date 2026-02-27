@@ -36,6 +36,7 @@ export default function SimulationEnginesPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [payload, setPayload] = useState<InspectResponse | null>(null);
+  const [exportNotice, setExportNotice] = useState<string | null>(null);
 
   useEffect(() => {
     const token = window.localStorage.getItem("iw_admin_token");
@@ -95,8 +96,57 @@ export default function SimulationEnginesPage() {
   }
 
   const prettyJson = useMemo(() => (payload ? JSON.stringify(payload, null, 2) : ""), [payload]);
+  const compactJson = useMemo(() => (payload ? JSON.stringify(payload) : ""), [payload]);
   const houses = Array.isArray(payload?.availableHouses) ? payload.availableHouses : [];
   const scenarios = Array.isArray(payload?.availableScenarios) ? payload.availableScenarios : [];
+
+  function buildExportFileName(): string {
+    const safeEmail = (email.trim() || "unknown")
+      .toLowerCase()
+      .replace(/[^a-z0-9@._-]+/g, "_")
+      .replace(/@/g, "_at_");
+    const ts = new Date().toISOString().replace(/[:]/g, "-").replace(/\.\d{3}Z$/, "Z");
+    return `simulation-engines_${scenario}_${safeEmail}_${ts}.txt`;
+  }
+
+  async function copyOutput() {
+    if (!prettyJson) return;
+    try {
+      await navigator.clipboard.writeText(prettyJson);
+      setExportNotice("Copied output to clipboard.");
+    } catch {
+      setExportNotice("Copy failed. Your browser blocked clipboard access.");
+    }
+  }
+
+  function saveOutputAsTxt() {
+    if (!prettyJson) return;
+    const blob = new Blob([prettyJson], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = buildExportFileName();
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    setExportNotice(`Saved ${a.download}`);
+  }
+
+  function saveCompactJson() {
+    if (!compactJson) return;
+    const filename = buildExportFileName().replace(/\.txt$/i, ".json");
+    const blob = new Blob([compactJson], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    setExportNotice(`Saved ${a.download}`);
+  }
 
   return (
     <div className="min-h-screen bg-brand-navy">
@@ -253,7 +303,34 @@ export default function SimulationEnginesPage() {
 
           {payload ? (
             <div className="mt-6">
-              <div className="mb-2 text-sm font-semibold text-brand-navy">Engine payload + response</div>
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <div className="text-sm font-semibold text-brand-navy">Engine payload + response</div>
+                <button
+                  type="button"
+                  onClick={() => copyOutput()}
+                  disabled={!prettyJson}
+                  className="rounded border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-brand-navy hover:bg-slate-50 disabled:opacity-60"
+                >
+                  Copy output
+                </button>
+                <button
+                  type="button"
+                  onClick={() => saveOutputAsTxt()}
+                  disabled={!prettyJson}
+                  className="rounded border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-brand-navy hover:bg-slate-50 disabled:opacity-60"
+                >
+                  Save to .txt
+                </button>
+                <button
+                  type="button"
+                  onClick={() => saveCompactJson()}
+                  disabled={!compactJson}
+                  className="rounded border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-brand-navy hover:bg-slate-50 disabled:opacity-60"
+                >
+                  Save compact JSON
+                </button>
+                {exportNotice ? <span className="text-xs text-slate-600">{exportNotice}</span> : null}
+              </div>
               <textarea
                 readOnly
                 value={prettyJson}
