@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { wattbuyOffersPrisma } from "@/lib/db/wattbuyOffersClient";
 import { normalizeEmail } from "@/lib/utils/email";
 
 export const dynamic = "force-dynamic";
@@ -31,6 +32,20 @@ function pickString(obj: any, keys: string[]): string | null {
   return null;
 }
 
+function asObjectRecord(v: unknown): Record<string, unknown> | null {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  return v as Record<string, unknown>;
+}
+
+function normalizeWattbuyPayload(raw: unknown): Record<string, unknown> | null {
+  const obj = asObjectRecord(raw);
+  if (!obj) return null;
+  if (obj.housing_chars || obj.housingChars) return obj;
+  const nested = asObjectRecord(obj.data) ?? asObjectRecord(obj.payloadJson) ?? asObjectRecord(obj.payload);
+  if (nested && (nested.housing_chars || nested.housingChars)) return nested;
+  return obj;
+}
+
 function parseWattbuyBoolean(v: unknown): boolean | null {
   if (typeof v === "boolean") return v;
   if (typeof v === "number") return v === 1 ? true : v === 0 ? false : null;
@@ -42,15 +57,76 @@ function parseWattbuyBoolean(v: unknown): boolean | null {
   return null;
 }
 
-function mapHouseTypeToHomeStyle(v: unknown): string | null {
+function mapHouseTypeToHomeStyle(v: unknown): "brick" | "wood" | "stucco" | "metal" | "manufactured" | null {
   const s = typeof v === "string" ? v.trim().toLowerCase() : "";
   if (!s) return null;
   if (s.includes("manufactured") || s.includes("mobile")) return "manufactured";
   if (s.includes("brick")) return "brick";
   if (s.includes("stucco")) return "stucco";
   if (s.includes("metal")) return "metal";
-  if (s.includes("wood")) return "wood";
+  if (s.includes("wood") || s.includes("frame")) return "wood";
   return null;
+}
+
+function mapInsulationType(v: unknown): "fiberglass" | "open_cell_spray_foam" | "closed_cell_spray_foam" | "mineral_wool" | null {
+  const s = typeof v === "string" ? v.trim().toLowerCase() : "";
+  if (!s) return null;
+  if (s.includes("open") && s.includes("cell")) return "open_cell_spray_foam";
+  if (s.includes("closed") && s.includes("cell")) return "closed_cell_spray_foam";
+  if (s.includes("mineral") || s.includes("rockwool") || s.includes("rock wool")) return "mineral_wool";
+  if (s.includes("fiberglass") || s.includes("fibreglass")) return "fiberglass";
+  return null;
+}
+
+function mapWindowType(v: unknown): "single_pane" | "double_pane" | "triple_pane" | null {
+  const s = typeof v === "string" ? v.trim().toLowerCase() : "";
+  if (!s) return null;
+  if (s.includes("triple")) return "triple_pane";
+  if (s.includes("double")) return "double_pane";
+  if (s.includes("single")) return "single_pane";
+  return null;
+}
+
+function mapFoundationType(v: unknown): "slab" | "crawlspace" | "basement" | null {
+  const s = typeof v === "string" ? v.trim().toLowerCase() : "";
+  if (!s) return null;
+  if (s.includes("crawl")) return "crawlspace";
+  if (s.includes("basement")) return "basement";
+  if (s.includes("slab")) return "slab";
+  return null;
+}
+
+async function loadWattbuyProfileSeed(args: {
+  houseId: string;
+  esiid: string | null;
+  rawWattbuyJson: unknown;
+}): Promise<Record<string, unknown> | null> {
+  const fromAddress = normalizeWattbuyPayload(args.rawWattbuyJson);
+  if (fromAddress) return fromAddress;
+
+  const snapshotWhere: any = {
+    endpoint: "ELECTRICITY_INFO",
+    OR: [{ houseAddressId: args.houseId }, ...(args.esiid ? [{ esiid: args.esiid }] : [])],
+  };
+
+  const fromModule = await (wattbuyOffersPrisma as any).wattBuyApiSnapshot
+    .findFirst({
+      where: snapshotWhere,
+      orderBy: { fetchedAt: "desc" },
+      select: { payloadJson: true },
+    })
+    .catch(() => null);
+  const fromModulePayload = normalizeWattbuyPayload(fromModule?.payloadJson ?? null);
+  if (fromModulePayload) return fromModulePayload;
+
+  const fromMaster = await (prisma as any).wattBuyApiSnapshot
+    .findFirst({
+      where: snapshotWhere,
+      orderBy: { fetchedAt: "desc" },
+      select: { payloadJson: true },
+    })
+    .catch(() => null);
+  return normalizeWattbuyPayload(fromMaster?.payloadJson ?? null);
 }
 
 async function requireUser() {
@@ -97,20 +173,35 @@ export async function GET(request: NextRequest) {
 
     const house = await (prisma as any).houseAddress.findFirst({
       where: { id: houseId, userId: u.user.id, archivedAt: null },
-      select: { id: true, rawWattbuyJson: true, tdspSlug: true, utilityName: true, isRenter: true },
+      select: { id: true, esiid: true, rawWattbuyJson: true, tdspSlug: true, utilityName: true, isRenter: true },
     });
     if (!house) return NextResponse.json({ ok: false, error: "House not found" }, { status: 403 });
 
     // Defensive mapper: WattBuy payload shapes vary; only fill what we can infer.
-    const wb = (house as any)?.rawWattbuyJson ?? null;
+    const wb =
+      (await loadWattbuyProfileSeed({
+        houseId,
+        esiid: typeof (house as any)?.esiid === "string" ? (house as any).esiid : null,
+        rawWattbuyJson: (house as any)?.rawWattbuyJson ?? null,
+      })) ?? {};
     const housing = wb?.housing_chars ?? wb?.housingChars ?? null;
 
-    const style =
+    const style = mapHouseTypeToHomeStyle(
       pickString(wb, ["home_style", "homeStyle", "construction", "style"]) ??
-      mapHouseTypeToHomeStyle(pickString(housing, ["house_type", "houseType"]));
-    const insulation = pickString(wb, ["insulation_type", "insulationType"]);
-    const windowType = pickString(wb, ["window_type", "windowType"]);
-    const foundation = pickString(wb, ["foundation", "foundation_type", "foundationType"]);
+        pickString(housing, ["house_type", "houseType", "construction_type", "constructionType"]),
+    );
+    const insulation = mapInsulationType(
+      pickString(wb, ["insulation_type", "insulationType", "insulation"]) ??
+        pickString(housing, ["insulation_type", "insulationType", "insulation"]),
+    );
+    const windowType = mapWindowType(
+      pickString(wb, ["window_type", "windowType", "windows"]) ??
+        pickString(housing, ["window_type", "windowType", "windows"]),
+    );
+    const foundation = mapFoundationType(
+      pickString(wb, ["foundation", "foundation_type", "foundationType"]) ??
+        pickString(housing, ["foundation", "foundation_type", "foundationType"]),
+    );
 
     const squareFeet =
       pickNumber(wb, ["square_feet", "squareFeet", "sqft", "sq_ft", "homeSqFt"]) ??
@@ -123,7 +214,9 @@ export async function GET(request: NextRequest) {
     const homeAgeFromYearBuilt =
       yearBuilt != null && yearBuilt >= 1700 && yearBuilt <= currentYear ? Math.max(0, currentYear - Math.trunc(yearBuilt)) : null;
     const homeAge = homeAgeTopLevel ?? homeAgeFromYearBuilt;
-    const hasPool = parseWattbuyBoolean(housing?.has_pool ?? wb?.has_pool ?? null);
+    const hasPool = parseWattbuyBoolean(
+      (housing as any)?.has_pool ?? (housing as any)?.hasPool ?? (wb as any)?.has_pool ?? (wb as any)?.hasPool ?? null,
+    );
 
     // Defaults
     const summerTemp: PrefillValue<number> = { value: 73, source: "DEFAULT" };
