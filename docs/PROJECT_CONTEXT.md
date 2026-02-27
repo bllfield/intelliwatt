@@ -496,3 +496,7 @@ All CSP documentation, SMT tickets, and API requests must reference these identi
 - Future baseline not yet using weather normalization.
 - No changes to plan engine.
 
+### Time Alignment Architecture Context
+
+Usage = canonical UTC 15-minute timestamps. Weather = station-based daily lookup by UTC `dateKey` for temp/HDD/CDD drivers. Solar (future) = separate tile/grid source aligned to the same canonical UTC 15-minute timestamps (or deterministic upsample), not station-based.
+

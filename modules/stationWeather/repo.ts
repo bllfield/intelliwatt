@@ -137,7 +137,7 @@ export async function getStationWeatherDays(args: {
       cdd65: Number(r?.cdd65) || 0,
       source: String(r?.source ?? ""),
     }))
-    .filter((r) => YYYY_MM_DD.test(r.dateKey));
+    .filter((r: DayWeather) => YYYY_MM_DD.test(r.dateKey));
 }
 
 export async function findMissingStationWeatherDateKeys(args: {

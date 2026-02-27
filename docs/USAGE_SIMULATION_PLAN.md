@@ -18,6 +18,33 @@ Those inputs will be used to generate a **15‑minute interval estimate** for th
 - **Deterministic + auditable**: given the same inputs, we should regenerate the same simulated series (or store the generated series + an inputs hash).
 - **Compatibility with the plan engine**: the generated data must obey the plan engine invariants (e.g., monthly totals match the sum of required period buckets → no `USAGE_BUCKET_SUM_MISMATCH`).
 
+## Time Alignment Contract (UTC 15-Minute Grid)
+
+- Canonical timebase: UTC, fixed 15-minute slots (96 per UTC day).
+- Usage curves (ACTUAL, Past Baseline, Future Baseline) are always represented on this grid.
+- Any lookup (weather/solar) must map to these timestamps without shifting or rebucketing usage points.
+
+Weather rules:
+- Weather is stored as DAILY rows keyed by `(stationId, dateKey UTC, kind, version)`.
+- For a given 15-minute interval timestamp, derive `dateKey = timestamp.slice(0,10)` and lookup that day’s weather row.
+- Weather is never used to shift timestamps; it only influences simulated kWh values for intervals that are being synthesized.
+
+Solar rules (future):
+- Solar/irradiance is a separate source layer (tile/grid-based), NOT station-based.
+- Solar data aligns to the same canonical UTC 15-minute timestamps as usage (or is upsampled deterministically).
+- Solar keys will be `tileId/gridId` (or equivalent), not `stationId`, to prevent airport != irradiance mismatch.
+
+Why we chose stations:
+- Dedupes DB rows across houses.
+- Operationally simple (few stations, deterministic mapping).
+- Good enough for temperature-driven usage shaping.
+- Solar will be handled separately.
+
+Do Not Do:
+- Do not store solar irradiance inside `WeatherDaily`.
+- Do not attempt to align solar using county/zip boundaries.
+- Do not convert canonical UTC interval timestamps into local time for storage.
+
 ## What I understand the task to be
 - Build new UI flows for:
   - **Manual usage entry** (months of kWh, optional bill amounts)

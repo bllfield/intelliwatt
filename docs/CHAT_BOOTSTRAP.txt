@@ -12,6 +12,7 @@ Follow docs/CHATGPT_HOUSE_RULES.md:
 - Wait for me to say “done” after each step
 - Before asking the user to add or change anything, search the repo. If the value or script already exists, paste it directly—do not tell the user to create what’s already here.
 - If a command needs root (or deploy), spell out the transition steps every time (e.g., `exit` back to root, or `sudo -iu deploy` from root) before giving the command—never assume the user is already at the right prompt.
+- All time-series modeling uses canonical UTC 15-minute timestamps; weather is daily station lookup by `dateKey`; solar will be a separate tile/grid layer later.
 
 ========================================
 DATABASE CONNECTION (DO NOT COMMIT SECRETS)

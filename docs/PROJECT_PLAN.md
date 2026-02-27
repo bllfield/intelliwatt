@@ -156,6 +156,11 @@ Layer contract:
 - Future = Overlay Layer
 - Usage = Raw Actual
 
+Post-ship contract notes:
+- Time Alignment Contract (UTC 15-Minute Grid) is now LOCKED: all simulator math is keyed off canonical UTC 15-minute timestamps.
+- Station-based weather is daily-only (`WeatherDaily` by `stationId + dateKey`) for temperature/HDD/CDD HVAC drivers and is looked up by UTC `dateKey` from each interval timestamp.
+- Solar/irradiance will be implemented as a separate tile/grid source layer aligned to canonical UTC 15-minute timestamps, and must not be stored in station weather tables.
+
 ### Current Plan Module Migrations
 
 - Schema: `prisma/current-plan/schema.prisma`
