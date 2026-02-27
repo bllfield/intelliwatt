@@ -169,6 +169,43 @@ function computeFifteenMinuteAverages(intervals: Array<{ timestamp: string; cons
     .sort((a, b) => (a.hhmm < b.hhmm ? -1 : 1));
 }
 
+function chicagoHour(ts: Date): number | null {
+  try {
+    const fmt = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/Chicago",
+      hour: "numeric",
+      hour12: false,
+    });
+    const parts = fmt.formatToParts(ts);
+    const hour = Number(parts.find((p) => p.type === "hour")?.value ?? "");
+    if (!Number.isFinite(hour) || hour < 0 || hour > 23) return null;
+    return hour;
+  } catch {
+    return null;
+  }
+}
+
+function computeTimeOfDayBuckets(intervals: Array<{ timestamp: string; consumption_kwh: number }>) {
+  const sums = { overnight: 0, morning: 0, afternoon: 0, evening: 0 };
+  for (const iv of intervals ?? []) {
+    const ts = new Date(String(iv?.timestamp ?? ""));
+    if (!Number.isFinite(ts.getTime())) continue;
+    const hour = chicagoHour(ts);
+    if (hour == null) continue;
+    const kwh = Number(iv?.consumption_kwh) || 0;
+    if (hour < 6) sums.overnight += kwh;
+    else if (hour < 12) sums.morning += kwh;
+    else if (hour < 18) sums.afternoon += kwh;
+    else sums.evening += kwh;
+  }
+  return [
+    { key: "overnight", label: "Overnight (12am–6am)", kwh: round2(sums.overnight) },
+    { key: "morning", label: "Morning (6am–12pm)", kwh: round2(sums.morning) },
+    { key: "afternoon", label: "Afternoon (12pm–6pm)", kwh: round2(sums.afternoon) },
+    { key: "evening", label: "Evening (6pm–12am)", kwh: round2(sums.evening) },
+  ];
+}
+
 export type SimulatorBuildInputsV1 = {
   version: 1;
   mode: "MANUAL_TOTALS" | "NEW_BUILD_ESTIMATE" | "SMT_BASELINE";
@@ -296,6 +333,7 @@ export function buildSimulatedUsageDatasetFromBuildInputs(buildInputs: Simulator
   const seriesAnnual: UsageSeriesPoint[] = [{ timestamp: curve.end.slice(0, 4) + "-01-01T00:00:00.000Z", kwh: totalFromMonthly }];
 
   const fifteenMinuteAverages = computeFifteenMinuteAverages(curve.intervals);
+  const timeOfDayBuckets = computeTimeOfDayBuckets(curve.intervals);
 
   let weekdaySum = 0;
   let weekendSum = 0;
@@ -345,7 +383,7 @@ export function buildSimulatedUsageDatasetFromBuildInputs(buildInputs: Simulator
     monthly,
     insights: {
       fifteenMinuteAverages,
-      timeOfDayBuckets: [],
+      timeOfDayBuckets,
       stitchedMonth: monthlyBuild.stitchedMonth,
       peakDay: peakDay ? { date: peakDay.date, kwh: peakDay.kwh } : null,
       peakHour: null,
@@ -409,6 +447,7 @@ export function buildSimulatedUsageDatasetFromCurve(
   }));
 
   const fifteenMinuteAverages = computeFifteenMinuteAverages(curve.intervals);
+  const timeOfDayBuckets = computeTimeOfDayBuckets(curve.intervals);
 
   let weekdaySum = 0;
   let weekendSum = 0;
@@ -462,7 +501,7 @@ export function buildSimulatedUsageDatasetFromCurve(
     monthly,
     insights: {
       fifteenMinuteAverages,
-      timeOfDayBuckets: [],
+      timeOfDayBuckets,
       stitchedMonth: monthlyBuild.stitchedMonth,
       peakDay: peakDay ? { date: peakDay.date, kwh: peakDay.kwh } : null,
       peakHour: null,
