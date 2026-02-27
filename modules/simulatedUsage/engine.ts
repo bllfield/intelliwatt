@@ -1047,7 +1047,7 @@ export function buildPastSimulatedBaselineV1(args: {
         const hvacTarget = wx ? Number(hvac.hvacKwh) || 0 : 0;
         const hvacDelta = hvacTarget - (Number(nearest.avgRefHvacKwh) || 0);
         baseBeforeHvac = Number(nearest.baseTotalKwh) || 0;
-        targetTotal = Math.max(0, baseBeforeHvac + hvacDelta * NEAREST_WEATHER_HVAC_BLEND + hvacTarget * (1 - NEAREST_WEATHER_HVAC_BLEND));
+        targetTotal = Math.max(0, baseBeforeHvac + hvacDelta * NEAREST_WEATHER_HVAC_BLEND);
         hourFallbackLevel = "NEAREST_WEATHER";
         totalFallbackLevel = "NEAREST_WEATHER";
         referenceCandidateCount = nearest.candidateCount;
