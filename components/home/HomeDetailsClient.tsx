@@ -16,6 +16,7 @@ type PrefillResp =
         squareFeet: PrefillValue<number>;
         stories: PrefillValue<number>;
         homeAge: PrefillValue<number>;
+        hasPool: PrefillValue<boolean>;
         summerTemp: PrefillValue<number>;
         winterTemp: PrefillValue<number>;
       };

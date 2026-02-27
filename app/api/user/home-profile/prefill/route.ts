@@ -31,6 +31,28 @@ function pickString(obj: any, keys: string[]): string | null {
   return null;
 }
 
+function parseWattbuyBoolean(v: unknown): boolean | null {
+  if (typeof v === "boolean") return v;
+  if (typeof v === "number") return v === 1 ? true : v === 0 ? false : null;
+  if (typeof v !== "string") return null;
+  const s = v.trim().toLowerCase();
+  if (!s) return null;
+  if (["true", "t", "yes", "y", "1"].includes(s)) return true;
+  if (["false", "f", "no", "n", "0"].includes(s)) return false;
+  return null;
+}
+
+function mapHouseTypeToHomeStyle(v: unknown): string | null {
+  const s = typeof v === "string" ? v.trim().toLowerCase() : "";
+  if (!s) return null;
+  if (s.includes("manufactured") || s.includes("mobile")) return "manufactured";
+  if (s.includes("brick")) return "brick";
+  if (s.includes("stucco")) return "stucco";
+  if (s.includes("metal")) return "metal";
+  if (s.includes("wood")) return "wood";
+  return null;
+}
+
 async function requireUser() {
   const cookieStore = cookies();
   const rawEmail = cookieStore.get("intelliwatt_user")?.value ?? null;
@@ -81,14 +103,27 @@ export async function GET(request: NextRequest) {
 
     // Defensive mapper: WattBuy payload shapes vary; only fill what we can infer.
     const wb = (house as any)?.rawWattbuyJson ?? null;
-    const style = pickString(wb, ["home_style", "homeStyle", "construction", "style"]);
+    const housing = wb?.housing_chars ?? wb?.housingChars ?? null;
+
+    const style =
+      pickString(wb, ["home_style", "homeStyle", "construction", "style"]) ??
+      mapHouseTypeToHomeStyle(pickString(housing, ["house_type", "houseType"]));
     const insulation = pickString(wb, ["insulation_type", "insulationType"]);
     const windowType = pickString(wb, ["window_type", "windowType"]);
     const foundation = pickString(wb, ["foundation", "foundation_type", "foundationType"]);
 
-    const squareFeet = pickNumber(wb, ["square_feet", "squareFeet", "sqft", "sq_ft", "homeSqFt"]);
-    const stories = pickNumber(wb, ["stories", "numStories"]);
-    const homeAge = pickNumber(wb, ["home_age", "homeAge", "age"]);
+    const squareFeet =
+      pickNumber(wb, ["square_feet", "squareFeet", "sqft", "sq_ft", "homeSqFt"]) ??
+      pickNumber(housing, ["sq_ft", "square_feet", "sqft"]);
+    const stories = pickNumber(wb, ["stories", "numStories"]) ?? pickNumber(housing, ["stories"]);
+
+    const homeAgeTopLevel = pickNumber(wb, ["home_age", "homeAge", "age"]);
+    const yearBuilt = pickNumber(housing, ["year_built", "yearBuilt"]);
+    const currentYear = new Date().getFullYear();
+    const homeAgeFromYearBuilt =
+      yearBuilt != null && yearBuilt >= 1700 && yearBuilt <= currentYear ? Math.max(0, currentYear - Math.trunc(yearBuilt)) : null;
+    const homeAge = homeAgeTopLevel ?? homeAgeFromYearBuilt;
+    const hasPool = parseWattbuyBoolean(housing?.has_pool ?? wb?.has_pool ?? null);
 
     // Defaults
     const summerTemp: PrefillValue<number> = { value: 73, source: "DEFAULT" };
@@ -111,6 +146,7 @@ export async function GET(request: NextRequest) {
         squareFeet: squareFeet != null ? { value: Math.trunc(squareFeet), source: "PREFILL" } : { value: null, source: "UNKNOWN" },
         stories: stories != null ? { value: Math.max(1, Math.trunc(stories)), source: "PREFILL" } : { value: null, source: "UNKNOWN" },
         homeAge: homeAge != null ? { value: Math.max(0, Math.trunc(homeAge)), source: "PREFILL" } : { value: null, source: "UNKNOWN" },
+        hasPool: hasPool != null ? { value: hasPool, source: "PREFILL" } : { value: null, source: "UNKNOWN" },
         summerTemp,
         winterTemp,
       },

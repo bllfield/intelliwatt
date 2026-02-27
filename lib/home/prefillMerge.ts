@@ -8,6 +8,7 @@ export type HomePrefill = {
   squareFeet?: PrefillValue<number>;
   stories?: PrefillValue<number>;
   homeAge?: PrefillValue<number>;
+  hasPool?: PrefillValue<boolean>;
   summerTemp?: PrefillValue<number>;
   winterTemp?: PrefillValue<number>;
 };
@@ -28,6 +29,7 @@ export type HomeDetailsFormState = {
   occupantsSchool: number | "";
   occupantsHomeAllDay: number | "";
   fuelConfiguration: string;
+  hasPool?: boolean;
 };
 
 const DEFAULT_SUMMER_TEMP = 73;
@@ -42,6 +44,9 @@ export function mergePrefillIntoHomeDetailsState(state: HomeDetailsFormState, pr
   if (!next.insulationType && prefill?.insulationType?.value) next.insulationType = prefill.insulationType.value;
   if (!next.windowType && prefill?.windowType?.value) next.windowType = prefill.windowType.value;
   if (!next.foundation && prefill?.foundation?.value) next.foundation = prefill.foundation.value;
+  if (next.hasPool === false && prefill?.hasPool?.value === true) {
+    next.hasPool = true;
+  }
   if (
     (next.summerTemp === "" || next.summerTemp === DEFAULT_SUMMER_TEMP) &&
     prefill?.summerTemp?.value != null

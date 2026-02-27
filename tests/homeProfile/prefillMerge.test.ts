@@ -97,5 +97,33 @@ describe("homeProfile prefill merge rules", () => {
     expect(merged.summerTemp).toBe(73);
     expect(merged.winterTemp).toBe(70);
   });
+
+  it("prefills hasPool from source data", () => {
+    const prefilled = mergePrefillIntoHomeDetailsState(
+      {
+        homeAge: "",
+        homeStyle: "",
+        squareFeet: "",
+        stories: "",
+        insulationType: "",
+        windowType: "",
+        foundation: "",
+        ledLights: false,
+        smartThermostat: false,
+        summerTemp: 73,
+        winterTemp: 70,
+        occupantsWork: "",
+        occupantsSchool: "",
+        occupantsHomeAllDay: "",
+        fuelConfiguration: "",
+        hasPool: false,
+      },
+      {
+        hasPool: { value: true, source: "PREFILL" },
+      },
+    );
+
+    expect(prefilled.hasPool).toBe(true);
+  });
 });
 
