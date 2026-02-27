@@ -589,6 +589,34 @@ export function completeActualIntervalsV1(args: {
   return out;
 }
 
+export type PastHourFallbackLevel = "MONTH_DOW" | "MONTH" | "GLOBAL" | "UNIFORM";
+export type PastTotalFallbackLevel = "MONTH_DOW" | "MONTH" | "GLOBAL" | "ZERO";
+
+export type PastSimulatedDayDiagnostic = {
+  dateKey: string;
+  monthKey: string;
+  dow: number;
+  dayType: "ACTUAL" | "SIMULATED";
+  dayIsExcluded: boolean;
+  dayIsLeadingMissing: boolean;
+  weatherUsed: boolean;
+  wx: { tAvgF: number; hdd65: number; cdd65: number } | null;
+  hourFallbackLevel: PastHourFallbackLevel | null;
+  totalFallbackLevel: PastTotalFallbackLevel | null;
+  baseNonHvacKwh: number | null;
+  hvacKwh: number | null;
+  targetTotalKwh: number | null;
+};
+
+export type PastSimulationDebug = {
+  totalDays: number;
+  excludedDays: number;
+  leadingMissingDays: number;
+  referenceDaysUsed: number;
+  simulatedDays: number;
+  dayDiagnostics: PastSimulatedDayDiagnostic[];
+};
+
 function hasHvacAppliance(applianceProfile: any): boolean {
   const appliances = Array.isArray(applianceProfile?.appliances) ? applianceProfile.appliances : [];
   return appliances.some((a: any) => String(a?.type ?? "").toLowerCase() === "hvac");
@@ -683,6 +711,11 @@ export function buildPastSimulatedBaselineV1(args: {
   applianceProfile?: any;
   actualWxByDateKey?: Map<string, { tAvgF: number; tMinF: number; tMaxF: number; hdd65: number; cdd65: number }>;
   _normalWxByDateKey?: Map<string, { tAvgF: number; tMinF: number; tMaxF: number; hdd65: number; cdd65: number }>;
+  debug?: {
+    collectDayDiagnostics?: boolean;
+    maxDayDiagnostics?: number;
+    out?: PastSimulationDebug;
+  };
 }): Array<{ timestamp: string; kwh: number }> {
   const actualByTs = new Map<string, number>();
   let oldestActualTsMs = Number.POSITIVE_INFINITY;
@@ -824,6 +857,9 @@ export function buildPastSimulatedBaselineV1(args: {
   let excludedDays = 0;
   let leadingMissingDays = 0;
   let simulatedDays = 0;
+  const collectDayDiagnostics = Boolean(args.debug?.collectDayDiagnostics);
+  const maxDayDiagnostics = Math.max(0, Number(args.debug?.maxDayDiagnostics ?? 0) || 0);
+  const dayDiagnostics: PastSimulatedDayDiagnostic[] = [];
   for (const dayStartMs of args.canonicalDayStartsMs ?? []) {
     if (!Number.isFinite(dayStartMs)) continue;
     const day = analyzeDay(dayStartMs);
@@ -840,9 +876,19 @@ export function buildPastSimulatedBaselineV1(args: {
     if (shouldSimulateDay) {
       simulatedDays += 1;
       let hourWeights = avgHourly[ym]?.[dow];
-      if (!hourWeights || hourWeights.every((w) => w === 0)) hourWeights = avgHourlyMonth[ym];
-      if (!hourWeights || hourWeights.every((w) => w === 0)) hourWeights = globalHourly;
-      if (!hourWeights || hourWeights.every((w) => w === 0)) hourWeights = Array.from({ length: 24 }, () => 1 / 24);
+      let hourFallbackLevel: PastHourFallbackLevel = "MONTH_DOW";
+      if (!hourWeights || hourWeights.every((w) => w === 0)) {
+        hourWeights = avgHourlyMonth[ym];
+        hourFallbackLevel = "MONTH";
+      }
+      if (!hourWeights || hourWeights.every((w) => w === 0)) {
+        hourWeights = globalHourly;
+        hourFallbackLevel = "GLOBAL";
+      }
+      if (!hourWeights || hourWeights.every((w) => w === 0)) {
+        hourWeights = Array.from({ length: 24 }, () => 1 / 24);
+        hourFallbackLevel = "UNIFORM";
+      }
 
       // Use ACTUAL_LAST_YEAR weather when available; if missing, keep pattern-only totals/weights.
       const wx = args.actualWxByDateKey?.get(dateKey) ?? null;
@@ -858,9 +904,19 @@ export function buildPastSimulatedBaselineV1(args: {
       });
 
       let baseNonHvac = avgTotal[ym]?.[dow];
-      if (baseNonHvac == null || !Number.isFinite(baseNonHvac)) baseNonHvac = avgTotalMonth[ym];
-      if (baseNonHvac == null || !Number.isFinite(baseNonHvac)) baseNonHvac = globalTotal;
-      if (baseNonHvac == null || !Number.isFinite(baseNonHvac)) baseNonHvac = 0;
+      let totalFallbackLevel: PastTotalFallbackLevel = "MONTH_DOW";
+      if (baseNonHvac == null || !Number.isFinite(baseNonHvac)) {
+        baseNonHvac = avgTotalMonth[ym];
+        totalFallbackLevel = "MONTH";
+      }
+      if (baseNonHvac == null || !Number.isFinite(baseNonHvac)) {
+        baseNonHvac = globalTotal;
+        totalFallbackLevel = "GLOBAL";
+      }
+      if (baseNonHvac == null || !Number.isFinite(baseNonHvac)) {
+        baseNonHvac = 0;
+        totalFallbackLevel = "ZERO";
+      }
       const targetTotal = Math.max(0, (baseNonHvac ?? 0) + (wx ? hvac.hvacKwh : 0));
 
       const sumW = tiltedHourWeights.reduce((a, b) => a + b, 0) || 1;
@@ -874,12 +930,68 @@ export function buildPastSimulatedBaselineV1(args: {
           out.push({ timestamp: gridTs[idx], kwh: (hourKwh[h] * (qShare[q] ?? 0.25)) / qSum });
         }
       }
+      if (collectDayDiagnostics && (maxDayDiagnostics <= 0 || dayDiagnostics.length < maxDayDiagnostics)) {
+        dayDiagnostics.push({
+          dateKey,
+          monthKey: ym,
+          dow,
+          dayType: "SIMULATED",
+          dayIsExcluded: day.dayIsExcluded,
+          dayIsLeadingMissing: day.dayIsLeadingMissing,
+          weatherUsed: Boolean(wx),
+          wx: wx
+            ? {
+                tAvgF: Number(wx.tAvgF) || 0,
+                hdd65: Number(wx.hdd65) || 0,
+                cdd65: Number(wx.cdd65) || 0,
+              }
+            : null,
+          hourFallbackLevel,
+          totalFallbackLevel,
+          baseNonHvacKwh: Number(baseNonHvac ?? 0) || 0,
+          hvacKwh: wx ? Number(hvac.hvacKwh) || 0 : 0,
+          targetTotalKwh: Number(targetTotal) || 0,
+        });
+      }
     } else {
       for (let i = 0; i < INTERVALS_PER_DAY; i++) {
         const ts = gridTs[i];
         out.push({ timestamp: ts, kwh: Number(actualByTs.get(ts) ?? 0) || 0 });
       }
+      if (collectDayDiagnostics && (maxDayDiagnostics <= 0 || dayDiagnostics.length < maxDayDiagnostics)) {
+        const wx = args.actualWxByDateKey?.get(dateKey) ?? null;
+        dayDiagnostics.push({
+          dateKey,
+          monthKey: ym,
+          dow,
+          dayType: "ACTUAL",
+          dayIsExcluded: day.dayIsExcluded,
+          dayIsLeadingMissing: day.dayIsLeadingMissing,
+          weatherUsed: Boolean(wx),
+          wx: wx
+            ? {
+                tAvgF: Number(wx.tAvgF) || 0,
+                hdd65: Number(wx.hdd65) || 0,
+                cdd65: Number(wx.cdd65) || 0,
+              }
+            : null,
+          hourFallbackLevel: null,
+          totalFallbackLevel: null,
+          baseNonHvacKwh: null,
+          hvacKwh: null,
+          targetTotalKwh: null,
+        });
+      }
     }
+  }
+
+  if (args.debug?.out) {
+    args.debug.out.totalDays = totalDays;
+    args.debug.out.excludedDays = excludedDays;
+    args.debug.out.leadingMissingDays = leadingMissingDays;
+    args.debug.out.referenceDaysUsed = referenceDays.length;
+    args.debug.out.simulatedDays = simulatedDays;
+    args.debug.out.dayDiagnostics = dayDiagnostics;
   }
 
   if (process.env.NODE_ENV !== "production") {

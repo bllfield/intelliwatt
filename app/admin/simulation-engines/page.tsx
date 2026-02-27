@@ -31,6 +31,8 @@ export default function SimulationEnginesPage() {
   );
   const [includeSeries, setIncludeSeries] = useState(false);
   const [includeBuildInputsRaw, setIncludeBuildInputsRaw] = useState(false);
+  const [includeDayDiagnostics, setIncludeDayDiagnostics] = useState(true);
+  const [dayDiagnosticsLimit, setDayDiagnosticsLimit] = useState(400);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [payload, setPayload] = useState<InspectResponse | null>(null);
@@ -65,6 +67,8 @@ export default function SimulationEnginesPage() {
         recalc: recalc ? "1" : "0",
         includeSeries: includeSeries ? "1" : "0",
         includeBuildInputsRaw: includeBuildInputsRaw ? "1" : "0",
+        includeDayDiagnostics: includeDayDiagnostics ? "1" : "0",
+        dayDiagnosticsLimit: String(Math.max(10, Math.min(2000, Math.trunc(dayDiagnosticsLimit || 400)))),
       });
       if (recalc) {
         qs.set("mode", mode);
@@ -215,6 +219,25 @@ export default function SimulationEnginesPage() {
                 onChange={(e) => setIncludeBuildInputsRaw(e.target.checked)}
               />
               Include raw buildInputs payload
+            </label>
+            <label className="inline-flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={includeDayDiagnostics}
+                onChange={(e) => setIncludeDayDiagnostics(e.target.checked)}
+              />
+              Include per-day diagnostics
+            </label>
+            <label className="inline-flex items-center gap-2">
+              <span>Day diag limit</span>
+              <input
+                type="number"
+                min={10}
+                max={2000}
+                value={dayDiagnosticsLimit}
+                onChange={(e) => setDayDiagnosticsLimit(Number(e.target.value) || 400)}
+                className="w-24 rounded border border-slate-300 px-2 py-1 text-xs"
+              />
             </label>
             <button
               type="button"

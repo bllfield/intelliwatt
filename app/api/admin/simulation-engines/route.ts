@@ -7,7 +7,7 @@ import { getActualIntervalsForRange } from "@/lib/usage/actualDatasetForHouse";
 import { normalizeStoredApplianceProfile } from "@/modules/applianceProfile/validation";
 import { getApplianceProfileSimulatedByUserHouse } from "@/modules/applianceProfile/repo";
 import { getHomeProfileSimulatedByUserHouse } from "@/modules/homeProfile/repo";
-import { buildPastSimulatedBaselineV1 } from "@/modules/simulatedUsage/engine";
+import { buildPastSimulatedBaselineV1, type PastSimulationDebug } from "@/modules/simulatedUsage/engine";
 import { getHouseWeatherDays } from "@/modules/weather/repo";
 import { enumerateDayStartsMsForWindow, dateKeyFromTimestamp, getDayGridTimestamps } from "@/modules/usageSimulator/pastStitchedCurve";
 import { recalcSimulatorBuild, getSimulatedUsageForHouseScenario } from "@/modules/usageSimulator/service";
@@ -87,6 +87,12 @@ export async function GET(req: NextRequest) {
     const requestedScenarioId = String(url.searchParams.get("scenarioId") ?? "").trim();
     const includeSeries = toBool(url.searchParams.get("includeSeries"));
     const includeBuildInputsRaw = toBool(url.searchParams.get("includeBuildInputsRaw"));
+    const includeDayDiagnosticsParam = url.searchParams.get("includeDayDiagnostics");
+    const includeDayDiagnostics = includeDayDiagnosticsParam == null ? true : toBool(includeDayDiagnosticsParam);
+    const dayDiagnosticsLimitParam = Number(url.searchParams.get("dayDiagnosticsLimit"));
+    const dayDiagnosticsLimit = Number.isFinite(dayDiagnosticsLimitParam)
+      ? Math.max(10, Math.min(2000, Math.trunc(dayDiagnosticsLimitParam)))
+      : 400;
     const doRecalc = toBool(url.searchParams.get("recalc"));
 
     const modeRaw = String(url.searchParams.get("mode") ?? "").trim();
@@ -228,6 +234,7 @@ export async function GET(req: NextRequest) {
 
     let weatherContext: any = null;
     let pastPatchPayload: any = null;
+    let pastEngineDebug: PastSimulationDebug | null = null;
     if (window) {
       const canonicalDayStartsMs = enumerateDayStartsMsForWindow(window.startDate, window.endDate);
       const canonicalDateKeys = canonicalDayStartsMs
@@ -270,6 +277,32 @@ export async function GET(req: NextRequest) {
       );
 
       if (String(buildInputs?.mode ?? "") === "SMT_BASELINE") {
+        const debugOut: PastSimulationDebug = {
+          totalDays: 0,
+          excludedDays: 0,
+          leadingMissingDays: 0,
+          referenceDaysUsed: 0,
+          simulatedDays: 0,
+          dayDiagnostics: [],
+        };
+        buildPastSimulatedBaselineV1({
+          actualIntervals,
+          canonicalDayStartsMs,
+          excludedDateKeys,
+          dateKeyFromTimestamp,
+          getDayGridTimestamps,
+          homeProfile,
+          applianceProfile,
+          actualWxByDateKey,
+          _normalWxByDateKey: normalWxByDateKey,
+          debug: {
+            collectDayDiagnostics: includeDayDiagnostics,
+            maxDayDiagnostics: dayDiagnosticsLimit,
+            out: debugOut,
+          },
+        });
+        pastEngineDebug = debugOut;
+
         pastPatchPayload = {
           mode: buildInputs?.mode ?? null,
           startDate: window.startDate,
@@ -283,9 +316,19 @@ export async function GET(req: NextRequest) {
             actual: actualWxByDateKey.size,
             normal: normalWxByDateKey.size,
           },
+          dayStats: pastEngineDebug
+            ? {
+                totalDays: pastEngineDebug.totalDays,
+                excludedDays: pastEngineDebug.excludedDays,
+                leadingMissingDays: pastEngineDebug.leadingMissingDays,
+                referenceDaysUsed: pastEngineDebug.referenceDaysUsed,
+                simulatedDays: pastEngineDebug.simulatedDays,
+              }
+            : null,
+          dayDiagnosticsSample: pastEngineDebug?.dayDiagnostics ?? [],
           callSignature:
             "buildPastSimulatedBaselineV1(actualIntervals, canonicalDayStartsMs, excludedDateKeys, homeProfile, applianceProfile, actualWxByDateKey)",
-          implementationRef: String(buildPastSimulatedBaselineV1.name || "buildPastSimulatedBaselineV1"),
+          implementationRef: "buildPastSimulatedBaselineV1",
         };
       }
     }
@@ -303,6 +346,8 @@ export async function GET(req: NextRequest) {
         scenarioName,
         includeSeries,
         includeBuildInputsRaw,
+        includeDayDiagnostics,
+        dayDiagnosticsLimit,
       },
       user: { id: user.id, email: user.email },
       house: {
