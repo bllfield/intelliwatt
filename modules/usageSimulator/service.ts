@@ -9,9 +9,8 @@ import { chooseActualSource, hasActualIntervals } from "@/modules/realUsageAdapt
 import { SMT_SHAPE_DERIVATION_VERSION } from "@/modules/realUsageAdapter/smt";
 import { getActualUsageDatasetForHouse, getActualIntervalsForRange } from "@/lib/usage/actualDatasetForHouse";
 import { upsertSimulatedUsageBuckets } from "@/lib/usage/simulatedUsageBuckets";
-import { completeActualIntervalsV1 } from "@/modules/simulatedUsage/engine";
-import { computePastSimulatedMonths } from "@/modules/usageSimulator/pastSimulatedMonths";
-import { buildPastStitchedCurve } from "@/modules/usageSimulator/pastStitchedCurve";
+import { buildPastSimulatedBaselineV1 } from "@/modules/simulatedUsage/engine";
+import { buildPastStitchedCurve, dateKeyFromTimestamp, enumerateDayStartsMsForWindow, getDayGridTimestamps } from "@/modules/usageSimulator/pastStitchedCurve";
 import {
   buildSimulatedUsageDatasetFromBuildInputs,
   buildSimulatedUsageDatasetFromCurve,
@@ -504,24 +503,12 @@ export async function recalcSimulatorBuild(args: {
     mode === "SMT_BASELINE"
   ) {
     try {
-      let ledgerRows: Awaited<ReturnType<typeof listLedgerRows>> = [];
-      try {
-        ledgerRows = await listLedgerRows(userId, { scenarioId: scenarioId!, status: "ACTIVE" });
-      } catch (_) {}
-      const pastEntries = buildOrderedLedgerEntriesForOverlay(
-        scenarioEvents.map((e) => ({ id: e.id, effectiveMonth: e.effectiveMonth, payloadJson: e.payloadJson })),
-        ledgerRows
-      );
-      const simulatedMonthsSet = computePastSimulatedMonths({
-        canonicalMonths: built.canonicalMonths,
-        ledgerEntries: pastEntries,
-        scenarioEvents: scenarioEvents as Array<{ effectiveMonth: string; kind: string }>,
-        travelRanges: allTravelRanges,
-        filledMonths: built.filledMonths ?? [],
-      });
       const canonicalWindow = canonicalWindowDateRange(built.canonicalMonths);
-      const startDate = canonicalWindow?.start ?? `${built.canonicalMonths[0]}-01`;
-      const endDate = canonicalWindow?.end ?? `${built.canonicalMonths[built.canonicalMonths.length - 1]}-28`;
+      const startDate = smtAnchorPeriods?.[0]?.startDate ?? canonicalWindow?.start ?? `${built.canonicalMonths[0]}-01`;
+      const endDate =
+        smtAnchorPeriods?.[smtAnchorPeriods.length - 1]?.endDate ??
+        canonicalWindow?.end ??
+        `${built.canonicalMonths[built.canonicalMonths.length - 1]}-28`;
       const actualIntervals = await getActualIntervalsForRange({
         houseId,
         esiid: esiid ?? null,
@@ -529,23 +516,22 @@ export async function recalcSimulatorBuild(args: {
         endDate,
       });
       const excludedDateKeys = new Set(travelRangesToExcludeDateKeys(allTravelRanges));
-      const canonicalStartTsUtc = new Date(startDate + "T00:00:00.000Z").getTime();
-      const canonicalEndTsUtc = new Date(endDate + "T23:59:59.999Z").getTime();
-      const completedIntervals = completeActualIntervalsV1({
+      const canonicalDayStartsMs = enumerateDayStartsMsForWindow(startDate, endDate);
+      const patchedIntervals = buildPastSimulatedBaselineV1({
         actualIntervals,
-        canonicalStartTsUtc,
-        canonicalEndTsUtc,
+        canonicalDayStartsMs,
         excludedDateKeys,
-        simulateIncompleteDays: false,
+        dateKeyFromTimestamp,
+        getDayGridTimestamps,
       });
       const stitchedCurve = buildPastStitchedCurve({
-        actualIntervals: completedIntervals,
+        actualIntervals: patchedIntervals,
         canonicalMonths: built.canonicalMonths,
-        simulatedMonths: simulatedMonthsSet,
+        simulatedMonths: new Set<string>(),
         pastMonthlyTotalsKwhByMonth: monthlyTotalsKwhByMonth,
         intradayShape96: built.intradayShape96,
         weekdayWeekendShape96: built.weekdayWeekendShape96,
-        periods: undefined,
+        periods: smtAnchorPeriods,
       });
       const byMonth: Record<string, number> = {};
       for (const m of stitchedCurve.monthlyTotals) {
@@ -553,8 +539,8 @@ export async function recalcSimulatorBuild(args: {
         if (/^\d{4}-\d{2}$/.test(ym) && typeof m?.kwh === "number" && Number.isFinite(m.kwh)) byMonth[ym] = m.kwh;
       }
       if (Object.keys(byMonth).length > 0) monthlyTotalsKwhByMonth = byMonth;
-      pastSimulatedMonths = Array.from(simulatedMonthsSet);
-      notes.push("Past: stitched actual + simulated by month");
+      pastSimulatedMonths = [];
+      notes.push("Past: baseline patched for excluded + leading-missing days");
     } catch (e) {
       console.warn("[usageSimulator] Past stitched curve failed, using monthly curve", e);
     }
@@ -1040,26 +1026,18 @@ export async function getSimulatedUsageForHouseScenario(args: {
           const excludedDateKeys = new Set(
             travelRangesToExcludeDateKeys((buildInputs as any).travelRanges ?? [])
           );
-          const canonicalStartTsUtc = new Date(startDate + "T00:00:00.000Z").getTime();
-          const canonicalEndTsUtc = new Date(endDate + "T23:59:59.999Z").getTime();
-          const completedIntervals = completeActualIntervalsV1({
+          const canonicalDayStartsMs = enumerateDayStartsMsForWindow(startDate, endDate);
+          const patchedIntervals = buildPastSimulatedBaselineV1({
             actualIntervals,
-            canonicalStartTsUtc,
-            canonicalEndTsUtc,
+            canonicalDayStartsMs,
             excludedDateKeys,
-            simulateIncompleteDays: false,
+            dateKeyFromTimestamp,
+            getDayGridTimestamps,
           });
-          const simulatedMonthsSet = new Set<string>((buildInputs as any).pastSimulatedMonths ?? []);
-          // Travel/vacant is day-level fill only; do not force whole-month simulation for travel months.
-          const travelMonths = monthsIntersectingTravelRanges(
-            canonicalMonths,
-            ((buildInputs as any).travelRanges ?? []) as Array<{ startDate: string; endDate: string }>
-          );
-          for (const ym of Array.from(travelMonths)) simulatedMonthsSet.delete(ym);
           const stitchedCurve = buildPastStitchedCurve({
-            actualIntervals: completedIntervals,
+            actualIntervals: patchedIntervals,
             canonicalMonths,
-            simulatedMonths: simulatedMonthsSet,
+            simulatedMonths: new Set<string>(),
             pastMonthlyTotalsKwhByMonth: buildInputs.monthlyTotalsKwhByMonth,
             intradayShape96: buildInputs.intradayShape96,
             weekdayWeekendShape96: buildInputs.weekdayWeekendShape96,

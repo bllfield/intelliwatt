@@ -24,6 +24,16 @@ export function getDayGridTimestamps(dayStartMs: number): string[] {
   return out;
 }
 
+/** Enumerate UTC day-start milliseconds for an inclusive date window (YYYY-MM-DD..YYYY-MM-DD). */
+export function enumerateDayStartsMsForWindow(startIso: string, endIso: string): number[] {
+  const a = toUtcMidnight(String(startIso ?? "").slice(0, 10));
+  const b = toUtcMidnight(String(endIso ?? "").slice(0, 10));
+  if (!Number.isFinite(a.getTime()) || !Number.isFinite(b.getTime())) return [];
+  const start = a.getTime() <= b.getTime() ? a : b;
+  const end = a.getTime() <= b.getTime() ? b : a;
+  return enumerateDaysInclusive(start, end).map((d) => d.getTime());
+}
+
 function parseYearMonth(ym: string): { year: number; month1: number } | null {
   const m = /^(\d{4})-(\d{2})$/.exec(String(ym ?? "").trim());
   if (!m) return null;
@@ -135,8 +145,8 @@ export function buildPastStitchedCurve(args: BuildPastStitchedCurveArgs): Simula
         start: monthStartUtc(ym),
         end: monthEndUtc(ym),
       }));
-  const simulatedDayKwh = new Map<string, number>();
   const byMonth = args.pastMonthlyTotalsKwhByMonth ?? {};
+  const simulatedDayKwh = new Map<string, number>();
   for (const b of buckets) {
     if (!b.start || !b.end) continue;
     const days = enumerateDaysInclusive(b.start, b.end);

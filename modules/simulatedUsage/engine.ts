@@ -589,6 +589,175 @@ export function completeActualIntervalsV1(args: {
   return out;
 }
 
+export function buildPastSimulatedBaselineV1(args: {
+  actualIntervals: Array<{ timestamp: string; kwh: number }>;
+  canonicalDayStartsMs: number[];
+  excludedDateKeys: Set<string>;
+  dateKeyFromTimestamp: (ts: string) => string;
+  getDayGridTimestamps: (dayStartMs: number) => string[];
+}): Array<{ timestamp: string; kwh: number }> {
+  const actualByTs = new Map<string, number>();
+  let oldestActualTsMs = Number.POSITIVE_INFINITY;
+  for (const p of args.actualIntervals ?? []) {
+    const ts = String(p?.timestamp ?? "");
+    if (!ts) continue;
+    const ms = new Date(ts).getTime();
+    if (Number.isFinite(ms) && ms < oldestActualTsMs) oldestActualTsMs = ms;
+    actualByTs.set(ts, (actualByTs.get(ts) ?? 0) + (Number(p?.kwh) || 0));
+  }
+
+  const referenceDays: Array<{ dayStartMs: number; dateKey: string; monthKey: string; dow: number; slotKwh: number[]; hourly: number[]; total: number }> = [];
+  for (const dayStartMs of args.canonicalDayStartsMs ?? []) {
+    if (!Number.isFinite(dayStartMs)) continue;
+    const gridTs = args.getDayGridTimestamps(dayStartMs);
+    if (!gridTs.length) continue;
+    const dateKey = args.dateKeyFromTimestamp(gridTs[0]);
+    if (args.excludedDateKeys.has(dateKey)) continue;
+    if (dayStartMs < oldestActualTsMs) continue;
+
+    const slotKwh = new Array<number>(INTERVALS_PER_DAY).fill(0);
+    for (let i = 0; i < INTERVALS_PER_DAY; i++) slotKwh[i] = Number(actualByTs.get(gridTs[i]) ?? 0) || 0;
+
+    const hourly = Array.from({ length: 24 }, (_, h) => {
+      let s = 0;
+      for (let q = 0; q < 4; q++) s += slotKwh[h * 4 + q] ?? 0;
+      return s;
+    });
+    const total = slotKwh.reduce((a, b) => a + b, 0);
+    referenceDays.push({
+      dayStartMs,
+      dateKey,
+      monthKey: dateKey.slice(0, 7),
+      dow: new Date(dayStartMs).getUTCDay(),
+      slotKwh,
+      hourly,
+      total,
+    });
+  }
+
+  const avgHourly: Record<string, Record<number, number[]>> = {};
+  const avgTotal: Record<string, Record<number, number>> = {};
+  const avgHourlyMonth: Record<string, number[]> = {};
+  const avgTotalMonth: Record<string, number> = {};
+  const quarterShape: Record<string, Record<number, Record<number, number[]>>> = {};
+  const nByMonthDow: Record<string, Record<number, number>> = {};
+  const nByMonth: Record<string, number> = {};
+
+  for (const d of referenceDays) {
+    const ym = d.monthKey;
+    const dow = d.dow;
+    if (!avgHourly[ym]) avgHourly[ym] = {};
+    if (!avgHourly[ym][dow]) avgHourly[ym][dow] = Array.from({ length: 24 }, () => 0);
+    if (!avgTotal[ym]) avgTotal[ym] = {};
+    if (!avgTotal[ym][dow]) avgTotal[ym][dow] = 0;
+    if (!avgHourlyMonth[ym]) avgHourlyMonth[ym] = Array.from({ length: 24 }, () => 0);
+    if (!(ym in avgTotalMonth)) avgTotalMonth[ym] = 0;
+    if (!quarterShape[ym]) quarterShape[ym] = {};
+    if (!quarterShape[ym][dow]) quarterShape[ym][dow] = {};
+    if (!nByMonthDow[ym]) nByMonthDow[ym] = {};
+    nByMonthDow[ym][dow] = (nByMonthDow[ym][dow] ?? 0) + 1;
+    nByMonth[ym] = (nByMonth[ym] ?? 0) + 1;
+
+    for (let h = 0; h < 24; h++) {
+      avgHourly[ym][dow][h] += d.hourly[h] ?? 0;
+      avgHourlyMonth[ym][h] += d.hourly[h] ?? 0;
+    }
+    avgTotal[ym][dow] += d.total;
+    avgTotalMonth[ym] += d.total;
+
+    for (let h = 0; h < 24; h++) {
+      if (!quarterShape[ym][dow][h]) quarterShape[ym][dow][h] = [0, 0, 0, 0];
+      const sum = (d.hourly[h] ?? 0) || 1;
+      for (let q = 0; q < 4; q++) {
+        quarterShape[ym][dow][h][q] += (Number(d.slotKwh[h * 4 + q]) || 0) / sum;
+      }
+    }
+  }
+
+  for (const ym of Object.keys(avgHourly)) {
+    for (const dowStr of Object.keys(avgHourly[ym] ?? {})) {
+      const dow = Number(dowStr);
+      const n = nByMonthDow[ym]?.[dow] ?? 0;
+      if (n <= 0) continue;
+      for (let h = 0; h < 24; h++) avgHourly[ym][dow][h] /= n;
+      avgTotal[ym][dow] /= n;
+    }
+  }
+  for (const ym of Object.keys(avgHourlyMonth)) {
+    const n = nByMonth[ym] ?? 0;
+    if (n <= 0) continue;
+    for (let h = 0; h < 24; h++) avgHourlyMonth[ym][h] /= n;
+    avgTotalMonth[ym] /= n;
+  }
+  for (const ym of Object.keys(quarterShape)) {
+    for (const dowStr of Object.keys(quarterShape[ym] ?? {})) {
+      const dow = Number(dowStr);
+      const dowMap = quarterShape[ym]?.[dow];
+      if (!dowMap) continue;
+      for (let h = 0; h < 24; h++) {
+        const qs = dowMap[h];
+        if (!qs) continue;
+        const s = qs.reduce((a, b) => a + b, 0) || 1;
+        for (let q = 0; q < 4; q++) qs[q] /= s;
+      }
+    }
+  }
+
+  const globalHourly = Array.from({ length: 24 }, (_, h) => {
+    let s = 0;
+    for (const d of referenceDays) s += d.hourly[h] ?? 0;
+    return s;
+  });
+  const globalTotal =
+    referenceDays.length > 0 ? referenceDays.reduce((s, d) => s + d.total, 0) / referenceDays.length : 0;
+  const globalHourlySum = globalHourly.reduce((a, b) => a + b, 0) || 1;
+  for (let h = 0; h < 24; h++) globalHourly[h] /= globalHourlySum;
+
+  const out: Array<{ timestamp: string; kwh: number }> = [];
+  for (const dayStartMs of args.canonicalDayStartsMs ?? []) {
+    if (!Number.isFinite(dayStartMs)) continue;
+    const gridTs = args.getDayGridTimestamps(dayStartMs);
+    if (!gridTs.length) continue;
+    const dateKey = args.dateKeyFromTimestamp(gridTs[0]);
+    const ym = dateKey.slice(0, 7);
+    const dow = new Date(dayStartMs).getUTCDay();
+    const dayEndMs = dayStartMs + DAY_MS - 1;
+    const shouldSimulateDay = args.excludedDateKeys.has(dateKey) || dayEndMs < oldestActualTsMs;
+
+    if (shouldSimulateDay) {
+      let hourWeights = avgHourly[ym]?.[dow];
+      if (!hourWeights || hourWeights.every((w) => w === 0)) hourWeights = avgHourlyMonth[ym];
+      if (!hourWeights || hourWeights.every((w) => w === 0)) hourWeights = globalHourly;
+      if (!hourWeights || hourWeights.every((w) => w === 0)) hourWeights = Array.from({ length: 24 }, () => 1 / 24);
+
+      let targetTotal = avgTotal[ym]?.[dow];
+      if (targetTotal == null || !Number.isFinite(targetTotal)) targetTotal = avgTotalMonth[ym];
+      if (targetTotal == null || !Number.isFinite(targetTotal)) targetTotal = globalTotal;
+      if (targetTotal == null || !Number.isFinite(targetTotal)) targetTotal = 0;
+
+      const sumW = hourWeights.reduce((a, b) => a + b, 0) || 1;
+      const hourKwh = hourWeights.map((w) => (targetTotal! * w) / sumW);
+      const qsByHour = quarterShape[ym]?.[dow];
+      for (let h = 0; h < 24; h++) {
+        const qShare = qsByHour?.[h] ?? [0.25, 0.25, 0.25, 0.25];
+        const qSum = qShare.reduce((a, b) => a + b, 0) || 1;
+        for (let q = 0; q < 4; q++) {
+          const idx = h * 4 + q;
+          out.push({ timestamp: gridTs[idx], kwh: (hourKwh[h] * (qShare[q] ?? 0.25)) / qSum });
+        }
+      }
+    } else {
+      for (let i = 0; i < INTERVALS_PER_DAY; i++) {
+        const ts = gridTs[i];
+        out.push({ timestamp: ts, kwh: Number(actualByTs.get(ts) ?? 0) || 0 });
+      }
+    }
+  }
+
+  out.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+  return out;
+}
+
 // Future stubs (do not implement yet)
 export type UsagePatch = { start: string; end: string; reason: string };
 export function applyScenarioDeltasStub() {
