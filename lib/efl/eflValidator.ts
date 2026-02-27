@@ -1453,6 +1453,34 @@ export function extractEflAvgPricePoints(
   );
   const has3 = centsTokens.length >= 3;
 
+  const extractHeaderDeclaredCentsValues = (
+    textBlock: string,
+  ): number[] => {
+    const block = String(textBlock ?? "");
+    if (!block.trim()) return [];
+
+    // Common EFL format:
+    // "Average Price ¢ per kWh 14.4 14.0 13.8"
+    // i.e., header declares cents/kWh, but the values themselves don't repeat "¢".
+    const headerMatch = block.match(
+      /Average\s+price[\s\S]{0,80}(?:¢|cents?)[\s\S]{0,40}(?:per\s+k(?:ilo)?watt-?hour|per\s*kwh|por\s*kwh|por\s+kilovatio-hora)([\s\S]*)/i,
+    );
+    const tail = (headerMatch?.[1] ?? "").trim();
+    if (!tail) return [];
+
+    const nums = Array.from(
+      tail.matchAll(/\b(\d{1,2}(?:\.\d{1,4})?)\b/g),
+    ).map((m) => Number(m[1]));
+
+    // Guardrails:
+    // - price values should be > 0 and realistically < 100 ¢/kWh
+    // - exclude common usage anchors if they appear in the same text window
+    const filtered = nums.filter(
+      (n) => Number.isFinite(n) && n > 0 && n < 100 && n !== 500 && n !== 1000 && n !== 2000,
+    );
+    return filtered.slice(0, 3);
+  };
+
   if (!hasRequiredUses || !has3) {
     const tableScan = rawText.replace(/\r/g, "");
     const useMatch = tableScan.match(
@@ -1509,9 +1537,15 @@ export function extractEflAvgPricePoints(
     const uses2 = Array.from(
       useText.matchAll(/(\d{1,4}(?:,\d{3})?)\s*kwh/gi),
     ).map((m) => Number(m[1].replace(/,/g, "")));
-    const cents2 = Array.from(priceText.matchAll(centsPattern)).map((m) =>
+    let cents2 = Array.from(priceText.matchAll(centsPattern)).map((m) =>
       Number(m[1]),
     );
+    if (cents2.length < 3) {
+      const fallback = extractHeaderDeclaredCentsValues(priceText);
+      if (fallback.length >= 3) {
+        cents2 = fallback;
+      }
+    }
 
     if (
       !(
