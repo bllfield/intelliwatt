@@ -151,10 +151,11 @@ export function buildSimulatedUsageDatasetFromBuildInputs(buildInputs: Simulator
   const monthly = curve.monthlyTotals
     .map((m) => ({ month: m.month, kwh: round2(m.kwh) }))
     .sort((a, b) => (a.month < b.month ? -1 : 1));
+  const totalFromMonthly = round2(monthly.reduce((s, m) => s + (Number(m.kwh) || 0), 0));
 
   const seriesDaily: UsageSeriesPoint[] = daily.map((d) => ({ timestamp: `${d.date}T00:00:00.000Z`, kwh: d.kwh }));
   const seriesMonthly: UsageSeriesPoint[] = monthly.map((m) => ({ timestamp: `${m.month}-01T00:00:00.000Z`, kwh: m.kwh }));
-  const seriesAnnual: UsageSeriesPoint[] = [{ timestamp: curve.end.slice(0, 4) + "-01-01T00:00:00.000Z", kwh: round2(curve.annualTotalKwh) }];
+  const seriesAnnual: UsageSeriesPoint[] = [{ timestamp: curve.end.slice(0, 4) + "-01-01T00:00:00.000Z", kwh: totalFromMonthly }];
 
   const fifteenMinuteAverages = computeFifteenMinuteAverages(curve.intervals);
 
@@ -188,7 +189,7 @@ export function buildSimulatedUsageDatasetFromBuildInputs(buildInputs: Simulator
     summary: {
       source: "SIMULATED" as const,
       intervalsCount: curve.intervals.length,
-      totalKwh: round2(curve.annualTotalKwh),
+      totalKwh: totalFromMonthly,
       start: curve.start,
       end: curve.end,
       latest: curve.end,
@@ -212,9 +213,9 @@ export function buildSimulatedUsageDatasetFromBuildInputs(buildInputs: Simulator
       weekdayVsWeekend: { weekday: round2(weekdaySum), weekend: round2(weekendSum) },
     },
     totals: {
-      importKwh: round2(curve.annualTotalKwh),
+      importKwh: totalFromMonthly,
       exportKwh: 0,
-      netKwh: round2(curve.annualTotalKwh),
+      netKwh: totalFromMonthly,
     },
     meta: {
       datasetKind: "SIMULATED",
@@ -253,10 +254,11 @@ export function buildSimulatedUsageDatasetFromCurve(
   const monthly = curve.monthlyTotals
     .map((m) => ({ month: m.month, kwh: round2(m.kwh) }))
     .sort((a, b) => (a.month < b.month ? -1 : 1));
+  const totalFromMonthly = round2(monthly.reduce((s, m) => s + (Number(m.kwh) || 0), 0));
 
   const seriesDaily: UsageSeriesPoint[] = daily.map((d) => ({ timestamp: `${d.date}T00:00:00.000Z`, kwh: d.kwh }));
   const seriesMonthly: UsageSeriesPoint[] = monthly.map((m) => ({ timestamp: `${m.month}-01T00:00:00.000Z`, kwh: m.kwh }));
-  const seriesAnnual: UsageSeriesPoint[] = [{ timestamp: curve.end.slice(0, 4) + "-01-01T00:00:00.000Z", kwh: round2(curve.annualTotalKwh) }];
+  const seriesAnnual: UsageSeriesPoint[] = [{ timestamp: curve.end.slice(0, 4) + "-01-01T00:00:00.000Z", kwh: totalFromMonthly }];
   const seriesIntervals15: UsageSeriesPoint[] = curve.intervals.map((i) => ({
     timestamp: i.timestamp,
     kwh: Number(i.consumption_kwh) || 0,
@@ -298,7 +300,7 @@ export function buildSimulatedUsageDatasetFromCurve(
     summary: {
       source: "SIMULATED" as const,
       intervalsCount: curve.intervals.length,
-      totalKwh: round2(curve.annualTotalKwh),
+      totalKwh: totalFromMonthly,
       start: summaryStart,
       end: summaryEnd,
       latest: summaryEnd,
@@ -322,9 +324,9 @@ export function buildSimulatedUsageDatasetFromCurve(
       weekdayVsWeekend: { weekday: round2(weekdaySum), weekend: round2(weekendSum) },
     },
     totals: {
-      importKwh: round2(curve.annualTotalKwh),
+      importKwh: totalFromMonthly,
       exportKwh: 0,
-      netKwh: round2(curve.annualTotalKwh),
+      netKwh: totalFromMonthly,
     },
     meta: {
       datasetKind: "SIMULATED",
