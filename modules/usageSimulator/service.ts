@@ -438,8 +438,10 @@ export async function recalcSimulatorBuild(args: {
   }
 
   // Month-level uplift for travel exclusions: when travel days exclude usage, uplift remaining days to fill the month.
+  // Past SMT patch baseline mode uses day-level patching and must not use month-level travel uplift.
   const allTravelRanges = scenarioId ? [...pastTravelRanges, ...scenarioTravelRanges] : [];
-  if (allTravelRanges.length > 0) {
+  const isPastSmtPatchMode = scenario?.name === WORKSPACE_PAST_NAME && mode === "SMT_BASELINE";
+  if (allTravelRanges.length > 0 && !isPastSmtPatchMode) {
     const excludeSet = new Set(travelRangesToExcludeDateKeys(allTravelRanges));
     for (const ym of built.canonicalMonths) {
       const [y, m] = ym.split("-").map(Number);
@@ -528,8 +530,9 @@ export async function recalcSimulatorBuild(args: {
     }
   }
 
-  // Past with actual source: stitch actual 15-min intervals (unchanged months) with simulated (changed/missing months).
+  // Past with actual source: patch baseline by simulating only excluded + leading-missing days.
   let pastSimulatedMonths: string[] | undefined;
+  let pastPatchedCurve: SimulatedCurve | null = null;
   if (
     scenario?.name === WORKSPACE_PAST_NAME &&
     mode === "SMT_BASELINE"
@@ -561,6 +564,7 @@ export async function recalcSimulatorBuild(args: {
         endDate,
         intervals: patchedIntervals,
       });
+      pastPatchedCurve = stitchedCurve;
       const byMonth: Record<string, number> = {};
       for (const m of stitchedCurve.monthlyTotals) {
         const ym = String(m?.month ?? "").trim();
@@ -652,7 +656,16 @@ export async function recalcSimulatorBuild(args: {
     versions,
   });
 
-  const dataset = buildSimulatedUsageDatasetFromBuildInputs(buildInputs);
+  const dataset =
+    pastPatchedCurve != null
+      ? buildSimulatedUsageDatasetFromCurve(pastPatchedCurve, {
+          baseKind: buildInputs.baseKind,
+          mode: buildInputs.mode,
+          canonicalEndMonth: buildInputs.canonicalEndMonth,
+          notes: buildInputs.notes,
+          filledMonths: buildInputs.filledMonths,
+        })
+      : buildSimulatedUsageDatasetFromBuildInputs(buildInputs);
   const filledSet = new Set<string>((buildInputs.filledMonths ?? []).map(String));
   const monthProvenanceByMonth: Record<string, "ACTUAL" | "SIMULATED"> = {};
   for (const ym of buildInputs.canonicalMonths ?? []) {
