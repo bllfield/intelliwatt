@@ -24,6 +24,8 @@ import { buildOrderedLedgerEntriesForOverlay } from "@/modules/upgradesLedger/ov
 import { getHouseAddressForUserHouse, listHouseAddressesForUser, normalizeScenarioKey, upsertSimulatorBuild } from "@/modules/usageSimulator/repo";
 import { billingPeriodsEndingAt } from "@/modules/manualUsage/billingPeriods";
 import { normalizeMonthlyTotals, WEATHER_NORMALIZER_VERSION, type WeatherPreference } from "@/modules/weatherNormalization/normalizer";
+import { ensureHouseWeatherStubbed } from "@/modules/weather/stubs";
+import { getHouseWeatherDays } from "@/modules/weather/repo";
 import type { SimulatedCurve } from "@/modules/simulatedUsage/types";
 
 type ManualUsagePayloadAny = any;
@@ -82,6 +84,21 @@ function canonicalWindowDateRange(canonicalMonths: string[]): { start: string; e
   const end = `${last}-${String(lastDay).padStart(2, "0")}`;
   const days = Math.round((new Date(end + "T12:00:00.000Z").getTime() - new Date(start + "T12:00:00.000Z").getTime()) / (24 * 60 * 60 * 1000)) + 1;
   return { start, end, days: Math.max(1, days) };
+}
+
+function dateKeysFromCanonicalDayStarts(canonicalDayStartsMs: number[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const dayStartMs of canonicalDayStartsMs ?? []) {
+    if (!Number.isFinite(dayStartMs)) continue;
+    const dayTs = getDayGridTimestamps(dayStartMs);
+    if (!dayTs.length) continue;
+    const dateKey = dateKeyFromTimestamp(dayTs[0]);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey) || seen.has(dateKey)) continue;
+    seen.add(dateKey);
+    out.push(dateKey);
+  }
+  return out;
 }
 
 function buildCurveFromPatchedIntervals(args: {
@@ -552,12 +569,22 @@ export async function recalcSimulatorBuild(args: {
       });
       const excludedDateKeys = new Set(travelRangesToExcludeDateKeys(allTravelRanges));
       const canonicalDayStartsMs = enumerateDayStartsMsForWindow(startDate, endDate);
+      const canonicalDateKeys = dateKeysFromCanonicalDayStarts(canonicalDayStartsMs);
+      await ensureHouseWeatherStubbed({ houseId, dateKeys: canonicalDateKeys });
+      const [actualWxByDateKey, normalWxByDateKey] = await Promise.all([
+        getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
+        getHouseWeatherDays({ houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
+      ]);
       const patchedIntervals = buildPastSimulatedBaselineV1({
         actualIntervals,
         canonicalDayStartsMs,
         excludedDateKeys,
         dateKeyFromTimestamp,
         getDayGridTimestamps,
+        homeProfile,
+        applianceProfile,
+        actualWxByDateKey,
+        _normalWxByDateKey: normalWxByDateKey,
       });
       const stitchedCurve = buildCurveFromPatchedIntervals({
         startDate,
@@ -1090,12 +1117,31 @@ export async function getSimulatedUsageForHouseScenario(args: {
             travelRangesToExcludeDateKeys((buildInputs as any).travelRanges ?? [])
           );
           const canonicalDayStartsMs = enumerateDayStartsMsForWindow(startDate, endDate);
+          const canonicalDateKeys = dateKeysFromCanonicalDayStarts(canonicalDayStartsMs);
+          await ensureHouseWeatherStubbed({ houseId: args.houseId, dateKeys: canonicalDateKeys });
+          const [actualWxByDateKey, normalWxByDateKey] = await Promise.all([
+            getHouseWeatherDays({ houseId: args.houseId, dateKeys: canonicalDateKeys, kind: "ACTUAL_LAST_YEAR" }),
+            getHouseWeatherDays({ houseId: args.houseId, dateKeys: canonicalDateKeys, kind: "NORMAL_AVG" }),
+          ]);
+          const [homeRecForPast, applianceRecForPast] = await Promise.all([
+            getHomeProfileSimulatedByUserHouse({ userId: args.userId, houseId: args.houseId }),
+            getApplianceProfileSimulatedByUserHouse({ userId: args.userId, houseId: args.houseId }),
+          ]);
+          const homeProfileForPast = homeRecForPast ? { ...homeRecForPast } : (buildInputs as any)?.snapshots?.homeProfile ?? null;
+          const applianceProfileForPast =
+            normalizeStoredApplianceProfile((applianceRecForPast?.appliancesJson as any) ?? null)?.fuelConfiguration
+              ? normalizeStoredApplianceProfile((applianceRecForPast?.appliancesJson as any) ?? null)
+              : normalizeStoredApplianceProfile((buildInputs as any)?.snapshots?.applianceProfile ?? null);
           const patchedIntervals = buildPastSimulatedBaselineV1({
             actualIntervals,
             canonicalDayStartsMs,
             excludedDateKeys,
             dateKeyFromTimestamp,
             getDayGridTimestamps,
+            homeProfile: homeProfileForPast,
+            applianceProfile: applianceProfileForPast,
+            actualWxByDateKey,
+            _normalWxByDateKey: normalWxByDateKey,
           });
           const stitchedCurve = buildCurveFromPatchedIntervals({
             startDate,

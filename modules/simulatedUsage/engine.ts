@@ -589,12 +589,100 @@ export function completeActualIntervalsV1(args: {
   return out;
 }
 
+function hasHvacAppliance(applianceProfile: any): boolean {
+  const appliances = Array.isArray(applianceProfile?.appliances) ? applianceProfile.appliances : [];
+  return appliances.some((a: any) => String(a?.type ?? "").toLowerCase() === "hvac");
+}
+
+function parseHeatingType(applianceProfile: any): "HEAT_STRIP" | "HEAT_PUMP" | "UNKNOWN" {
+  const appliances = Array.isArray(applianceProfile?.appliances) ? applianceProfile.appliances : [];
+  const hvac = appliances.find((a: any) => String(a?.type ?? "").toLowerCase() === "hvac");
+  const s = String(
+    hvac?.data?.heating_type ??
+      hvac?.data?.heat_type ??
+      hvac?.data?.heat_source ??
+      hvac?.data?.fuel_type ??
+      ""
+  ).toLowerCase();
+  if (s.includes("strip") || s.includes("resistance")) return "HEAT_STRIP";
+  if (s.includes("heat_pump") || s.includes("heat pump")) return "HEAT_PUMP";
+  return "UNKNOWN";
+}
+
+function isGasHeating(homeProfile: any, applianceProfile: any): boolean {
+  const fuel = String(homeProfile?.fuelConfiguration ?? applianceProfile?.fuelConfiguration ?? "").toLowerCase();
+  return fuel.includes("gas") || fuel.includes("natural_gas");
+}
+
+function isElectricHeating(homeProfile: any, applianceProfile: any): boolean {
+  const fuel = String(homeProfile?.fuelConfiguration ?? applianceProfile?.fuelConfiguration ?? "").toLowerCase();
+  return fuel.includes("all_electric") || fuel.includes("electric");
+}
+
+function weatherAwareHvacKwh(args: {
+  wx: { hdd65: number; cdd65: number } | null;
+  homeProfile: any;
+  applianceProfile: any;
+}): { hvacKwh: number; electricHeat: boolean } {
+  if (!args.wx || !hasHvacAppliance(args.applianceProfile)) return { hvacKwh: 0, electricHeat: false };
+
+  const hdd65 = Math.max(0, Number(args.wx?.hdd65) || 0);
+  const cdd65 = Math.max(0, Number(args.wx?.cdd65) || 0);
+  const gasHeat = isGasHeating(args.homeProfile, args.applianceProfile);
+  const electricHeat = !gasHeat && isElectricHeating(args.homeProfile, args.applianceProfile);
+  const heatingType = parseHeatingType(args.applianceProfile);
+
+  let kHeat = gasHeat ? 0.02 : 0.16;
+  if (electricHeat && heatingType === "HEAT_STRIP") kHeat = 0.30;
+  if (electricHeat && heatingType === "HEAT_PUMP") kHeat = 0.18;
+  let kCool = 0.12;
+
+  const summerTemp = Number(args.homeProfile?.summerTemp);
+  const winterTemp = Number(args.homeProfile?.winterTemp);
+  const coolAdj = Number.isFinite(summerTemp) ? Math.max(0.8, Math.min(1.2, 1 - (summerTemp - 72) * 0.01)) : 1;
+  const heatAdj = Number.isFinite(winterTemp) ? Math.max(0.8, Math.min(1.2, 1 - (68 - winterTemp) * 0.01)) : 1;
+  kCool *= coolAdj;
+  kHeat *= heatAdj;
+
+  const hvacRaw = kHeat * hdd65 + kCool * cdd65;
+  const hvacKwh = Math.max(0, Math.min(60, hvacRaw)); // Temporary guardrail while tuning.
+  return { hvacKwh, electricHeat };
+}
+
+function applyWeatherTiltHourWeights(args: {
+  hourWeights: number[];
+  wx: { hdd65: number; cdd65: number } | null;
+  electricHeat: boolean;
+}): number[] {
+  const base = Array.isArray(args.hourWeights) && args.hourWeights.length === 24 ? [...args.hourWeights] : Array.from({ length: 24 }, () => 1 / 24);
+  const wx = args.wx;
+  if (!wx) return base;
+
+  const cdd65 = Math.max(0, Number(wx.cdd65) || 0);
+  const hdd65 = Math.max(0, Number(wx.hdd65) || 0);
+
+  const afternoonBoost = 1 + Math.min(0.55, cdd65 * 0.015);
+  for (const h of [14, 15, 16, 17, 18, 19]) base[h] *= afternoonBoost;
+
+  const heatScale = args.electricHeat ? 0.015 : 0.006;
+  const heatBoost = 1 + Math.min(0.45, hdd65 * heatScale);
+  for (const h of [6, 7, 8, 9, 17, 18, 19, 20, 21, 22]) base[h] *= heatBoost;
+
+  const s = base.reduce((a, b) => a + b, 0);
+  if (!Number.isFinite(s) || s <= 0) return Array.from({ length: 24 }, () => 1 / 24);
+  return base.map((w) => w / s);
+}
+
 export function buildPastSimulatedBaselineV1(args: {
   actualIntervals: Array<{ timestamp: string; kwh: number }>;
   canonicalDayStartsMs: number[];
   excludedDateKeys: Set<string>;
   dateKeyFromTimestamp: (ts: string) => string;
   getDayGridTimestamps: (dayStartMs: number) => string[];
+  homeProfile?: any;
+  applianceProfile?: any;
+  actualWxByDateKey?: Map<string, { tAvgF: number; tMinF: number; tMaxF: number; hdd65: number; cdd65: number }>;
+  _normalWxByDateKey?: Map<string, { tAvgF: number; tMinF: number; tMaxF: number; hdd65: number; cdd65: number }>;
 }): Array<{ timestamp: string; kwh: number }> {
   const actualByTs = new Map<string, number>();
   let oldestActualTsMs = Number.POSITIVE_INFINITY;
@@ -721,8 +809,11 @@ export function buildPastSimulatedBaselineV1(args: {
     const dateKey = args.dateKeyFromTimestamp(gridTs[0]);
     const ym = dateKey.slice(0, 7);
     const dow = new Date(dayStartMs).getUTCDay();
-    const dayEndMs = dayStartMs + DAY_MS - 1;
-    const shouldSimulateDay = args.excludedDateKeys.has(dateKey) || dayEndMs < oldestActualTsMs;
+    const dayHasAnySlotBeforeOldest =
+      oldestActualTsMs !== Number.POSITIVE_INFINITY &&
+      gridTs.length > 0 &&
+      new Date(gridTs[0]).getTime() < oldestActualTsMs;
+    const shouldSimulateDay = args.excludedDateKeys.has(dateKey) || dayHasAnySlotBeforeOldest;
 
     if (shouldSimulateDay) {
       let hourWeights = avgHourly[ym]?.[dow];
@@ -730,13 +821,27 @@ export function buildPastSimulatedBaselineV1(args: {
       if (!hourWeights || hourWeights.every((w) => w === 0)) hourWeights = globalHourly;
       if (!hourWeights || hourWeights.every((w) => w === 0)) hourWeights = Array.from({ length: 24 }, () => 1 / 24);
 
-      let targetTotal = avgTotal[ym]?.[dow];
-      if (targetTotal == null || !Number.isFinite(targetTotal)) targetTotal = avgTotalMonth[ym];
-      if (targetTotal == null || !Number.isFinite(targetTotal)) targetTotal = globalTotal;
-      if (targetTotal == null || !Number.isFinite(targetTotal)) targetTotal = 0;
+      // Use ACTUAL_LAST_YEAR weather when available; if missing, keep pattern-only totals/weights.
+      const wx = args.actualWxByDateKey?.get(dateKey) ?? null;
+      const hvac = weatherAwareHvacKwh({
+        wx,
+        homeProfile: args.homeProfile,
+        applianceProfile: args.applianceProfile,
+      });
+      const tiltedHourWeights = applyWeatherTiltHourWeights({
+        hourWeights,
+        wx,
+        electricHeat: hvac.electricHeat,
+      });
 
-      const sumW = hourWeights.reduce((a, b) => a + b, 0) || 1;
-      const hourKwh = hourWeights.map((w) => (targetTotal! * w) / sumW);
+      let baseNonHvac = avgTotal[ym]?.[dow];
+      if (baseNonHvac == null || !Number.isFinite(baseNonHvac)) baseNonHvac = avgTotalMonth[ym];
+      if (baseNonHvac == null || !Number.isFinite(baseNonHvac)) baseNonHvac = globalTotal;
+      if (baseNonHvac == null || !Number.isFinite(baseNonHvac)) baseNonHvac = 0;
+      const targetTotal = Math.max(0, (baseNonHvac ?? 0) + (wx ? hvac.hvacKwh : 0));
+
+      const sumW = tiltedHourWeights.reduce((a, b) => a + b, 0) || 1;
+      const hourKwh = tiltedHourWeights.map((w) => (targetTotal * w) / sumW);
       const qsByHour = quarterShape[ym]?.[dow];
       for (let h = 0; h < 24; h++) {
         const qShare = qsByHour?.[h] ?? [0.25, 0.25, 0.25, 0.25];
