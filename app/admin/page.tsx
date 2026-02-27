@@ -898,6 +898,15 @@ export default function AdminDashboard() {
               </div>
             </a>
             <a
+              href="/admin/simulation-engines"
+              className="block p-4 border-2 border-brand-blue/20 rounded-lg hover:border-brand-blue hover:bg-brand-blue/5 transition-colors"
+            >
+              <div className="font-semibold text-brand-navy mb-1">🧪 Simulation Engines</div>
+              <div className="text-sm text-brand-navy/60">
+                Debug Past/Future/New Build simulation payloads, profile inputs, weather context, and output curves by email
+              </div>
+            </a>
+            <a
               href="/admin/retail-rates"
               className="block p-4 border-2 border-brand-blue/20 rounded-lg hover:border-brand-blue hover:bg-brand-blue/5 transition-colors"
             >
