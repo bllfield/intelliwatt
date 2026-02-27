@@ -889,6 +889,15 @@ export default function AdminDashboard() {
               </div>
             </a>
             <a
+              href="/admin/weather"
+              className="block p-4 border-2 border-brand-blue/20 rounded-lg hover:border-brand-blue hover:bg-brand-blue/5 transition-colors"
+            >
+              <div className="font-semibold text-brand-navy mb-1">🌤️ Station Weather Inspector</div>
+              <div className="text-sm text-brand-navy/60">
+                Inspect station weather rows by house/date and toggle STUB vs REAL_API mode
+              </div>
+            </a>
+            <a
               href="/admin/retail-rates"
               className="block p-4 border-2 border-brand-blue/20 rounded-lg hover:border-brand-blue hover:bg-brand-blue/5 transition-colors"
             >

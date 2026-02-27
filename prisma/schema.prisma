@@ -692,6 +692,47 @@ model FeatureFlag {
   createdAt DateTime @default(now())
 }
 
+model WeatherStation {
+  id        String   @id @default(cuid())
+  code      String
+  name      String?
+  lat       Float?
+  lon       Float?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  houses HouseAddress[]
+  days   WeatherDaily[]
+
+  @@unique([code])
+}
+
+enum WeatherKind {
+  ACTUAL_LAST_YEAR
+  NORMAL_AVG
+}
+
+model WeatherDaily {
+  id        String   @id @default(cuid())
+  stationId String
+  station   WeatherStation @relation(fields: [stationId], references: [id], onDelete: Cascade)
+  dateKey   String
+  kind      WeatherKind
+  version   Int      @default(1)
+  tAvgF     Float
+  tMinF     Float
+  tMaxF     Float
+  hdd65     Float
+  cdd65     Float
+  source    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([stationId, dateKey, kind, version])
+  @@index([stationId, kind, version])
+  @@index([stationId, dateKey])
+}
+
 /// Raw WattBuy API response snapshots for audit + replay.
 /// This is intentionally "append-only-ish": we store the raw payload + sha256 so we can
 /// trace what WattBuy returned at a given time for a given request/house.
@@ -795,6 +836,7 @@ model HouseAddress {
   smartMeterConsentDate DateTime?
   rawGoogleJson         Json?
   rawWattbuyJson        Json?
+  weatherStationId      String?
   createdAt             DateTime         @default(now())
   updatedAt             DateTime         @updatedAt
   isPrimary             Boolean          @default(false)
@@ -810,11 +852,13 @@ model HouseAddress {
   greenButtonUploads GreenButtonUpload[]
   savingsSnapshot    HomeSavingsSnapshot?
   dailyWeather      HouseDailyWeather[]
+  weatherStation    WeatherStation?      @relation(fields: [weatherStationId], references: [id])
 
   @@index([placeId])
   @@index([addressState, addressZip5])
   @@index([esiid])
   @@index([userEmail])
+  @@index([weatherStationId])
   @@index([userId, isPrimary])
 }
 
