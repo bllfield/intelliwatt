@@ -666,14 +666,31 @@ export async function getActualUsageDatasetForHouse(
     totals = { importKwh: 0, exportKwh: 0, netKwh: 0 };
   }
 
+  const monthlyForDataset = stitchedMonthlyTotals ?? monthlyTotals;
+  const totalFromMonthly = round2(
+    (monthlyForDataset ?? []).reduce((s, m) => s + (Number(m?.kwh) || 0), 0)
+  );
+  const totalsForDataset: ImportExportTotals =
+    monthlyForDataset.length > 0
+      ? { importKwh: totalFromMonthly, exportKwh: 0, netKwh: totalFromMonthly }
+      : totals;
+
   const dataset: ActualHouseDataset | null = selected
     ? {
-        summary: selected.summary,
-        series: selected.series,
+        summary: {
+          ...selected.summary,
+          totalKwh: monthlyForDataset.length > 0 ? totalFromMonthly : selected.summary.totalKwh,
+        },
+        series: {
+          ...selected.series,
+          annual: selected.series?.annual?.length
+            ? [{ ...selected.series.annual[0], kwh: monthlyForDataset.length > 0 ? totalFromMonthly : selected.series.annual[0].kwh }]
+            : selected.series.annual,
+        },
         daily: dailyTotals,
-        monthly: stitchedMonthlyTotals ?? monthlyTotals,
+        monthly: monthlyForDataset,
         insights,
-        totals,
+        totals: totalsForDataset,
       }
     : null;
 
