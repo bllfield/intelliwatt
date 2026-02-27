@@ -694,18 +694,35 @@ export function buildPastSimulatedBaselineV1(args: {
     actualByTs.set(ts, (actualByTs.get(ts) ?? 0) + (Number(p?.kwh) || 0));
   }
 
+  const analyzeDay = (dayStartMs: number) => {
+    const gridTs = args.getDayGridTimestamps(dayStartMs);
+    const dateKey = gridTs.length > 0 ? args.dateKeyFromTimestamp(gridTs[0]) : "";
+    const dayIsExcluded = Boolean(dateKey) && args.excludedDateKeys.has(dateKey);
+    const dayIsLeadingMissing =
+      oldestActualTsMs !== Number.POSITIVE_INFINITY &&
+      gridTs.length > 0 &&
+      new Date(gridTs[0]).getTime() < oldestActualTsMs;
+    const shouldSimulateDay = dayIsExcluded || dayIsLeadingMissing;
+    const isReferenceDay = !dayIsExcluded && !dayIsLeadingMissing;
+    return {
+      gridTs,
+      dateKey,
+      dayIsExcluded,
+      dayIsLeadingMissing,
+      shouldSimulateDay,
+      isReferenceDay,
+    };
+  };
+
   const referenceDays: Array<{ dayStartMs: number; dateKey: string; monthKey: string; dow: number; slotKwh: number[]; hourly: number[]; total: number }> = [];
   for (const dayStartMs of args.canonicalDayStartsMs ?? []) {
     if (!Number.isFinite(dayStartMs)) continue;
-    const gridTs = args.getDayGridTimestamps(dayStartMs);
-    if (!gridTs.length) continue;
-    const dateKey = args.dateKeyFromTimestamp(gridTs[0]);
-    if (args.excludedDateKeys.has(dateKey)) continue;
-    const dayEndMs = dayStartMs + DAY_MS - 1;
-    if (oldestActualTsMs !== Number.POSITIVE_INFINITY && dayEndMs < oldestActualTsMs) continue;
+    const day = analyzeDay(dayStartMs);
+    if (!day.gridTs.length || !day.dateKey) continue;
+    if (!day.isReferenceDay) continue;
 
     const slotKwh = new Array<number>(INTERVALS_PER_DAY).fill(0);
-    for (let i = 0; i < INTERVALS_PER_DAY; i++) slotKwh[i] = Number(actualByTs.get(gridTs[i]) ?? 0) || 0;
+    for (let i = 0; i < INTERVALS_PER_DAY; i++) slotKwh[i] = Number(actualByTs.get(day.gridTs[i]) ?? 0) || 0;
 
     const hourly = Array.from({ length: 24 }, (_, h) => {
       let s = 0;
@@ -715,8 +732,8 @@ export function buildPastSimulatedBaselineV1(args: {
     const total = slotKwh.reduce((a, b) => a + b, 0);
     referenceDays.push({
       dayStartMs,
-      dateKey,
-      monthKey: dateKey.slice(0, 7),
+      dateKey: day.dateKey,
+      monthKey: day.dateKey.slice(0, 7),
       dow: new Date(dayStartMs).getUTCDay(),
       slotKwh,
       hourly,
@@ -803,19 +820,25 @@ export function buildPastSimulatedBaselineV1(args: {
   for (let h = 0; h < 24; h++) globalHourly[h] /= globalHourlySum;
 
   const out: Array<{ timestamp: string; kwh: number }> = [];
+  let totalDays = 0;
+  let excludedDays = 0;
+  let leadingMissingDays = 0;
+  let simulatedDays = 0;
   for (const dayStartMs of args.canonicalDayStartsMs ?? []) {
     if (!Number.isFinite(dayStartMs)) continue;
-    const gridTs = args.getDayGridTimestamps(dayStartMs);
-    if (!gridTs.length) continue;
-    const dateKey = args.dateKeyFromTimestamp(gridTs[0]);
+    const day = analyzeDay(dayStartMs);
+    const gridTs = day.gridTs;
+    const dateKey = day.dateKey;
+    if (!gridTs.length || !dateKey) continue;
+    totalDays += 1;
+    if (day.dayIsExcluded) excludedDays += 1;
+    if (day.dayIsLeadingMissing) leadingMissingDays += 1;
     const ym = dateKey.slice(0, 7);
     const dow = new Date(dayStartMs).getUTCDay();
-    const dayEndMs = dayStartMs + DAY_MS - 1;
-    const dayEndsBeforeOldestActual =
-      oldestActualTsMs !== Number.POSITIVE_INFINITY && dayEndMs < oldestActualTsMs;
-    const shouldSimulateDay = args.excludedDateKeys.has(dateKey) || dayEndsBeforeOldestActual;
+    const shouldSimulateDay = day.shouldSimulateDay;
 
     if (shouldSimulateDay) {
+      simulatedDays += 1;
       let hourWeights = avgHourly[ym]?.[dow];
       if (!hourWeights || hourWeights.every((w) => w === 0)) hourWeights = avgHourlyMonth[ym];
       if (!hourWeights || hourWeights.every((w) => w === 0)) hourWeights = globalHourly;
@@ -857,6 +880,19 @@ export function buildPastSimulatedBaselineV1(args: {
         out.push({ timestamp: ts, kwh: Number(actualByTs.get(ts) ?? 0) || 0 });
       }
     }
+  }
+
+  if (process.env.NODE_ENV !== "production") {
+    console.debug(
+      "[simulatedUsage] past-v1 day stats",
+      JSON.stringify({
+        totalDays,
+        excludedDays,
+        leadingMissingDays,
+        referenceDaysUsed: referenceDays.length,
+        simulatedDays,
+      })
+    );
   }
 
   out.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
