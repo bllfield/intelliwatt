@@ -73,6 +73,20 @@ function round2(n: number): number {
   return Math.round((Number(n) || 0) * 100) / 100;
 }
 
+function low10Average(values: number[]): number | null {
+  const finite = (values ?? []).filter((v) => Number.isFinite(v));
+  if (!finite.length) return null;
+  const positive = finite.filter((v) => v > 1e-6).sort((a, b) => a - b);
+  const count10 = Math.max(1, Math.floor((positive.length || finite.length) * 0.1));
+  const slice =
+    positive.length >= count10
+      ? positive.slice(0, count10)
+      : finite.sort((a, b) => a - b).slice(0, Math.max(1, Math.floor(finite.length * 0.1)));
+  if (!slice.length) return null;
+  const avg = slice.reduce((a, b) => a + b, 0) / slice.length;
+  return Number.isFinite(avg) ? round2(avg) : null;
+}
+
 function toSeriesPoint(rows: Array<{ bucket: Date; kwh: number }>): UsageSeriesPoint[] {
   return rows
     .map((row) => ({
@@ -172,6 +186,8 @@ async function computeInsightsFromDb(args: {
   peakDay: { date: string; kwh: number } | null;
   peakHour: { hour: number; kw: number } | null;
   baseload: number | null;
+  baseloadDaily: number | null;
+  baseloadMonthly: number | null;
   weekdayVsWeekend: { weekday: number; weekend: number };
 }> {
   const empty = {
@@ -182,6 +198,8 @@ async function computeInsightsFromDb(args: {
     peakDay: null as { date: string; kwh: number } | null,
     peakHour: null as { hour: number; kw: number } | null,
     baseload: null as number | null,
+    baseloadDaily: null as number | null,
+    baseloadMonthly: null as number | null,
     weekdayVsWeekend: { weekday: 0, weekend: 0 },
   };
   try {
@@ -247,11 +265,13 @@ async function computeInsightsFromDb(args: {
       `);
       const peakHour = peakHourRows?.[0] ? { hour: Number(peakHourRows[0].hour), kw: round2(Number(peakHourRows[0].sumkwh) * 4) } : null;
       const baseloadRows = await prisma.$queryRaw<Array<{ baseload: number | null }>>(Prisma.sql`
-        WITH t AS (SELECT ("kwh" * 4)::float AS kw FROM (SELECT "ts", MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${args.cutoff} GROUP BY "ts") iv),
-             p AS (SELECT percentile_cont(0.10) WITHIN GROUP (ORDER BY kw) AS p10 FROM t WHERE kw > 0)
-        SELECT AVG(t.kw)::float AS baseload FROM t, p WHERE t.kw > 0 AND t.kw <= p.p10
+        WITH t AS (SELECT kwh::float AS kwh FROM (SELECT "ts", MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${args.cutoff} GROUP BY "ts") iv),
+             p AS (SELECT percentile_cont(0.10) WITHIN GROUP (ORDER BY kwh) AS p10 FROM t WHERE kwh > 0)
+        SELECT AVG(t.kwh)::float AS baseload FROM t, p WHERE t.kwh > 0 AND t.kwh <= p.p10
       `);
       const baseload = baseloadRows?.[0]?.baseload == null ? null : round2(Number(baseloadRows[0].baseload));
+      const baseloadDaily = low10Average(dailyTotals.map((d) => Number(d.kwh) || 0));
+      const baseloadMonthly = low10Average(monthlyTotals.map((m) => Number(m.kwh) || 0));
       const dowRows = await prisma.$queryRaw<Array<{ weekdaykwh: number; weekendkwh: number }>>(Prisma.sql`
         SELECT COALESCE(SUM(CASE WHEN EXTRACT(DOW FROM "ts") IN (0,6) THEN 0 ELSE "kwh" END)::float, 0) AS weekdaykwh,
                COALESCE(SUM(CASE WHEN EXTRACT(DOW FROM "ts") IN (0,6) THEN "kwh" ELSE 0 END)::float, 0) AS weekendkwh
@@ -259,7 +279,18 @@ async function computeInsightsFromDb(args: {
       `);
       const weekday = round2(dowRows?.[0]?.weekdaykwh ?? 0);
       const weekend = round2(dowRows?.[0]?.weekendkwh ?? 0);
-      return { dailyTotals, monthlyTotals, fifteenMinuteAverages, timeOfDayBuckets, peakDay, peakHour, baseload, weekdayVsWeekend: { weekday, weekend } };
+      return {
+        dailyTotals,
+        monthlyTotals,
+        fifteenMinuteAverages,
+        timeOfDayBuckets,
+        peakDay,
+        peakHour,
+        baseload,
+        baseloadDaily,
+        baseloadMonthly,
+        weekdayVsWeekend: { weekday, weekend },
+      };
     }
     if (!USAGE_DB_ENABLED) return empty;
     const usageClient = usagePrisma as any;
@@ -308,11 +339,13 @@ async function computeInsightsFromDb(args: {
     `)) as Array<{ hour: number; sumkwh: number }>;
     const peakHour = peakHourRows?.[0] ? { hour: Number(peakHourRows[0].hour), kw: round2(Number(peakHourRows[0].sumkwh) * 4) } : null;
     const baseloadRows = (await usageClient.$queryRaw(Prisma.sql`
-      WITH t AS (SELECT ("consumptionKwh" * 4)::float AS kw FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${args.cutoff}),
-           p AS (SELECT percentile_cont(0.10) WITHIN GROUP (ORDER BY kw) AS p10 FROM t WHERE kw > 0)
-      SELECT AVG(t.kw)::float AS baseload FROM t, p WHERE t.kw > 0 AND t.kw <= p.p10
+      WITH t AS (SELECT "consumptionKwh"::float AS kwh FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${args.cutoff}),
+           p AS (SELECT percentile_cont(0.10) WITHIN GROUP (ORDER BY kwh) AS p10 FROM t WHERE kwh > 0)
+      SELECT AVG(t.kwh)::float AS baseload FROM t, p WHERE t.kwh > 0 AND t.kwh <= p.p10
     `)) as Array<{ baseload: number | null }>;
     const baseload = baseloadRows?.[0]?.baseload == null ? null : round2(Number(baseloadRows[0].baseload));
+    const baseloadDaily = low10Average(dailyTotals.map((d) => Number(d.kwh) || 0));
+    const baseloadMonthly = low10Average(monthlyTotals.map((m) => Number(m.kwh) || 0));
     const dowRows = (await usageClient.$queryRaw(Prisma.sql`
       SELECT COALESCE(SUM(CASE WHEN EXTRACT(DOW FROM "timestamp") IN (0,6) THEN 0 ELSE "consumptionKwh" END)::float, 0) AS weekdaykwh,
              COALESCE(SUM(CASE WHEN EXTRACT(DOW FROM "timestamp") IN (0,6) THEN "consumptionKwh" ELSE 0 END)::float, 0) AS weekendkwh
@@ -320,7 +353,18 @@ async function computeInsightsFromDb(args: {
     `)) as Array<{ weekdaykwh: number; weekendkwh: number }>;
     const weekday = round2(dowRows?.[0]?.weekdaykwh ?? 0);
     const weekend = round2(dowRows?.[0]?.weekendkwh ?? 0);
-    return { dailyTotals, monthlyTotals, fifteenMinuteAverages, timeOfDayBuckets, peakDay, peakHour, baseload, weekdayVsWeekend: { weekday, weekend } };
+    return {
+      dailyTotals,
+      monthlyTotals,
+      fifteenMinuteAverages,
+      timeOfDayBuckets,
+      peakDay,
+      peakHour,
+      baseload,
+      baseloadDaily,
+      baseloadMonthly,
+      weekdayVsWeekend: { weekday, weekend },
+    };
   } catch {
     return empty;
   }
@@ -364,9 +408,9 @@ export async function getBaseloadFromActualExcludingDates(args: {
           ${dateFilter}
           GROUP BY "ts"
         ),
-        t AS (SELECT ("kwh" * 4)::float AS kw FROM iv),
-        p AS (SELECT percentile_cont(0.10) WITHIN GROUP (ORDER BY kw) AS p10 FROM t)
-        SELECT AVG(t.kw)::float AS baseload FROM t, p WHERE t.kw <= p.p10
+        t AS (SELECT kwh::float AS kwh FROM iv),
+        p AS (SELECT percentile_cont(0.10) WITHIN GROUP (ORDER BY kwh) AS p10 FROM t)
+        SELECT AVG(t.kwh)::float AS baseload FROM t, p WHERE t.kwh <= p.p10
       `);
       const baseload = baseloadRows?.[0]?.baseload;
       return baseload != null && Number.isFinite(baseload) ? round2(Number(baseload)) : null;
@@ -388,13 +432,13 @@ export async function getBaseloadFromActualExcludingDates(args: {
         : Prisma.sql` AND to_char(("timestamp" AT TIME ZONE 'America/Chicago')::date, 'YYYY-MM-DD') NOT IN (${Prisma.join(excludeDateKeys.map((d) => Prisma.sql`${d}`), ", ")})`;
     const baseloadRows = (await usageClient.$queryRaw(Prisma.sql`
       WITH t AS (
-        SELECT ("consumptionKwh" * 4)::float AS kw
+        SELECT "consumptionKwh"::float AS kwh
         FROM "GreenButtonInterval"
         WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${cutoff}
         ${dateFilter}
       ),
-      p AS (SELECT percentile_cont(0.10) WITHIN GROUP (ORDER BY kw) AS p10 FROM t)
-      SELECT AVG(t.kw)::float AS baseload FROM t, p WHERE t.kw <= p.p10
+      p AS (SELECT percentile_cont(0.10) WITHIN GROUP (ORDER BY kwh) AS p10 FROM t)
+      SELECT AVG(t.kwh)::float AS baseload FROM t, p WHERE t.kwh <= p.p10
     `)) as Array<{ baseload: number | null }>;
     const baseload = baseloadRows?.[0]?.baseload;
     return baseload != null && Number.isFinite(baseload) ? round2(Number(baseload)) : null;
@@ -628,6 +672,8 @@ export async function getActualUsageDatasetForHouse(
     peakDay: null as { date: string; kwh: number } | null,
     peakHour: null as { hour: number; kw: number } | null,
     baseload: null as number | null,
+    baseloadDaily: null as number | null,
+    baseloadMonthly: null as number | null,
     weekdayVsWeekend: { weekday: 0, weekend: 0 },
   };
   let insights: Record<string, unknown> = { ...emptyInsights };
@@ -656,6 +702,8 @@ export async function getActualUsageDatasetForHouse(
         peakDay: computed.peakDay,
         peakHour: computed.peakHour,
         baseload: computed.baseload,
+        baseloadDaily: computed.baseloadDaily,
+        baseloadMonthly: computed.baseloadMonthly,
         weekdayVsWeekend: computed.weekdayVsWeekend,
       };
     }
@@ -667,6 +715,12 @@ export async function getActualUsageDatasetForHouse(
   }
 
   const monthlyForDataset = stitchedMonthlyTotals ?? monthlyTotals;
+  const baseloadMonthlyFromDataset = low10Average(
+    (monthlyForDataset ?? []).map((m) => Number(m?.kwh) || 0)
+  );
+  if (insights && typeof insights === "object") {
+    (insights as any).baseloadMonthly = baseloadMonthlyFromDataset;
+  }
   const totalFromMonthly = round2(
     (monthlyForDataset ?? []).reduce((s, m) => s + (Number(m?.kwh) || 0), 0)
   );

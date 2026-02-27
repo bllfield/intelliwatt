@@ -56,6 +56,8 @@ type UsageInsights = {
   peakDay: { date: string; kwh: number } | null;
   peakHour: { hour: number; kw: number } | null;
   baseload: number | null;
+  baseloadDaily?: number | null;
+  baseloadMonthly?: number | null;
   weekdayVsWeekend: { weekday: number; weekend: number };
 } | null;
 
@@ -139,6 +141,20 @@ function deriveTotalsFromRows(rows: { kwh: number }[]): UsageTotals {
 
 function toDateKeyFromTimestamp(ts: string): string {
   return ts.slice(0, 10);
+}
+
+function low10AverageKwh(values: number[]): number | null {
+  const finite = values.filter((v) => Number.isFinite(v));
+  if (!finite.length) return null;
+  const positive = finite.filter((v) => v > 1e-6).sort((a, b) => a - b);
+  const count10 = Math.max(1, Math.floor((positive.length || finite.length) * 0.1));
+  const slice =
+    positive.length >= count10
+      ? positive.slice(0, count10)
+      : finite.sort((a, b) => a - b).slice(0, Math.max(1, Math.floor(finite.length * 0.1)));
+  if (!slice.length) return null;
+  const avg = slice.reduce((a, b) => a + b, 0) / slice.length;
+  return Number.isFinite(avg) ? avg : null;
 }
 
 export function formatScenarioVariable(v: ScenarioVariable): string {
@@ -469,6 +485,18 @@ export const UsageDashboard: React.FC<Props> = ({
       .sort((a, b) => (a.date < b.date ? -1 : 1));
 
     const monthlySorted = monthly.slice().sort((a, b) => (a.month < b.month ? -1 : 1));
+    const baseloadDaily =
+      dataset?.insights?.baseloadDaily ??
+      (() => {
+        const v = low10AverageKwh(recentDaily.map((d) => Number(d.kwh) || 0));
+        return v != null ? Number(v.toFixed(2)) : null;
+      })();
+    const baseloadMonthly =
+      dataset?.insights?.baseloadMonthly ??
+      (() => {
+        const v = low10AverageKwh(monthlySorted.map((m) => Number(m.kwh) || 0));
+        return v != null ? Number(v.toFixed(2)) : null;
+      })();
 
     return {
       monthly: monthlySorted,
@@ -484,6 +512,8 @@ export const UsageDashboard: React.FC<Props> = ({
       peakDay,
       peakHour,
       baseload,
+      baseloadDaily,
+      baseloadMonthly,
     };
   }, [activeHouse]);
 
@@ -688,11 +718,27 @@ export const UsageDashboard: React.FC<Props> = ({
             </div>
 
             <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Baseload</div>
+              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Baseload (15-min)</div>
               <div className="mt-2 text-2xl font-semibold text-neutral-900">
-                {derived.baseload != null ? derived.baseload.toFixed(2) : "--"} <span className="text-base font-normal text-neutral-500">kW</span>
+                {derived.baseload != null ? derived.baseload.toFixed(2) : "--"} <span className="text-base font-normal text-neutral-500">kWh</span>
               </div>
-              <p className="mt-1 text-xs text-neutral-500">Estimated always-on power.</p>
+              <p className="mt-1 text-xs text-neutral-500">Estimated always-on interval energy.</p>
+            </div>
+
+            <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Baseload (daily)</div>
+              <div className="mt-2 text-2xl font-semibold text-neutral-900">
+                {derived.baseloadDaily != null ? derived.baseloadDaily.toFixed(2) : "--"}{" "}
+                <span className="text-base font-normal text-neutral-500">kWh/day</span>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">Baseload (monthly)</div>
+              <div className="mt-2 text-2xl font-semibold text-neutral-900">
+                {derived.baseloadMonthly != null ? derived.baseloadMonthly.toFixed(2) : "--"}{" "}
+                <span className="text-base font-normal text-neutral-500">kWh/month</span>
+              </div>
             </div>
 
             <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">

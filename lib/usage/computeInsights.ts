@@ -108,10 +108,10 @@ export function computeInsights(intervals: NormalizedUsageRow[]): UsageInsights 
       })()
     : null;
 
-  // ----- BASELOAD = lowest 10% power samples -----
-  const powerSamples = sorted.map((row) => row.kwh * 4).sort((a, b) => a - b);
-  const count10 = Math.max(1, Math.floor(powerSamples.length * 0.1));
-  const baseSlice = powerSamples.slice(0, count10);
+  // ----- BASELOAD = lowest 10% kWh samples -----
+  const kwhSamples = sorted.map((row) => row.kwh).sort((a, b) => a - b);
+  const count10 = Math.max(1, Math.floor(kwhSamples.length * 0.1));
+  const baseSlice = kwhSamples.slice(0, count10);
   const baseload = baseSlice.length > 0 ? round2(baseSlice.reduce((a, b) => a + b, 0) / baseSlice.length) : null;
 
   // ----- WEEKDAY vs WEEKEND -----
