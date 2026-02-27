@@ -258,12 +258,13 @@ async function computeInsightsFromDb(args: {
       `
       );
       const timeOfDayBuckets = todRows.map((r) => ({ key: String(r.key), label: String(r.label), kwh: round2(r.kwh) }));
-      const peakHourRows = await prisma.$queryRaw<Array<{ hour: number; sumkwh: number }>>(Prisma.sql`
-        SELECT EXTRACT(HOUR FROM (("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago'))::int AS hour, SUM("kwh")::float AS sumkwh
+      const peakHourRows = await prisma.$queryRaw<Array<{ hour: number; avgkw: number }>>(Prisma.sql`
+        SELECT EXTRACT(HOUR FROM (("ts" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Chicago'))::int AS hour,
+               AVG(("kwh" * 4))::float AS avgkw
         FROM (SELECT "ts", MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${args.cutoff} GROUP BY "ts") iv
-        GROUP BY 1 ORDER BY sumkwh DESC LIMIT 1
+        GROUP BY 1 ORDER BY avgkw DESC LIMIT 1
       `);
-      const peakHour = peakHourRows?.[0] ? { hour: Number(peakHourRows[0].hour), kw: round2(Number(peakHourRows[0].sumkwh) * 4) } : null;
+      const peakHour = peakHourRows?.[0] ? { hour: Number(peakHourRows[0].hour), kw: round2(Number(peakHourRows[0].avgkw)) } : null;
       const baseloadRows = await prisma.$queryRaw<Array<{ baseload: number | null }>>(Prisma.sql`
         WITH t AS (SELECT kwh::float AS kwh FROM (SELECT "ts", MAX(CASE WHEN "kwh" >= 0 THEN "kwh" ELSE 0 END)::float AS kwh FROM "SmtInterval" WHERE "esiid" = ${esiid} AND "ts" >= ${args.cutoff} GROUP BY "ts") iv),
              p AS (SELECT percentile_cont(0.10) WITHIN GROUP (ORDER BY kwh) AS p10 FROM t WHERE kwh > 0)
@@ -333,11 +334,11 @@ async function computeInsightsFromDb(args: {
     `)) as Array<{ key: string; label: string; sort: number; kwh: number }>;
     const timeOfDayBuckets = todRows.map((r) => ({ key: String(r.key), label: String(r.label), kwh: round2(r.kwh) }));
     const peakHourRows = (await usageClient.$queryRaw(Prisma.sql`
-      SELECT EXTRACT(HOUR FROM "timestamp")::int AS hour, SUM("consumptionKwh")::float AS sumkwh
+      SELECT EXTRACT(HOUR FROM "timestamp")::int AS hour, AVG(("consumptionKwh" * 4))::float AS avgkw
       FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${args.cutoff}
-      GROUP BY 1 ORDER BY sumkwh DESC LIMIT 1
-    `)) as Array<{ hour: number; sumkwh: number }>;
-    const peakHour = peakHourRows?.[0] ? { hour: Number(peakHourRows[0].hour), kw: round2(Number(peakHourRows[0].sumkwh) * 4) } : null;
+      GROUP BY 1 ORDER BY avgkw DESC LIMIT 1
+    `)) as Array<{ hour: number; avgkw: number }>;
+    const peakHour = peakHourRows?.[0] ? { hour: Number(peakHourRows[0].hour), kw: round2(Number(peakHourRows[0].avgkw)) } : null;
     const baseloadRows = (await usageClient.$queryRaw(Prisma.sql`
       WITH t AS (SELECT "consumptionKwh"::float AS kwh FROM "GreenButtonInterval" WHERE "homeId" = ${houseId} AND "rawId" = ${rawId} AND "timestamp" >= ${args.cutoff}),
            p AS (SELECT percentile_cont(0.10) WITHIN GROUP (ORDER BY kwh) AS p10 FROM t WHERE kwh > 0)

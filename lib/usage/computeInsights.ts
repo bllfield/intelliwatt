@@ -96,15 +96,20 @@ export function computeInsights(intervals: NormalizedUsageRow[]): UsageInsights 
     : null;
 
   // ----- PEAK HOUR -----
-  const hourMap = new Map<number, number>();
+  const hourMap = new Map<number, { sumKw: number; count: number }>();
   for (const row of sorted) {
     const hr = row.timestamp.getHours();
-    hourMap.set(hr, (hourMap.get(hr) ?? 0) + row.kwh);
+    const cur = hourMap.get(hr) ?? { sumKw: 0, count: 0 };
+    cur.sumKw += row.kwh * 4;
+    cur.count += 1;
+    hourMap.set(hr, cur);
   }
   const peakHour = hourMap.size > 0
     ? (() => {
-        const top = Array.from(hourMap.entries()).reduce((a, b) => (b[1] > a[1] ? b : a));
-        return { hour: top[0], kw: round2(top[1] * 4) };
+        const top = Array.from(hourMap.entries())
+          .map(([hour, v]) => ({ hour, avgKw: v.count > 0 ? v.sumKw / v.count : 0 }))
+          .reduce((a, b) => (b.avgKw > a.avgKw ? b : a));
+        return { hour: top.hour, kw: round2(top.avgKw) };
       })()
     : null;
 
