@@ -809,11 +809,10 @@ export function buildPastSimulatedBaselineV1(args: {
     const dateKey = args.dateKeyFromTimestamp(gridTs[0]);
     const ym = dateKey.slice(0, 7);
     const dow = new Date(dayStartMs).getUTCDay();
-    const dayHasAnySlotBeforeOldest =
-      oldestActualTsMs !== Number.POSITIVE_INFINITY &&
-      gridTs.length > 0 &&
-      new Date(gridTs[0]).getTime() < oldestActualTsMs;
-    const shouldSimulateDay = args.excludedDateKeys.has(dateKey) || dayHasAnySlotBeforeOldest;
+    const dayEndMs = dayStartMs + DAY_MS - 1;
+    const dayEndsBeforeOldestActual =
+      oldestActualTsMs !== Number.POSITIVE_INFINITY && dayEndMs < oldestActualTsMs;
+    const shouldSimulateDay = args.excludedDateKeys.has(dateKey) || dayEndsBeforeOldestActual;
 
     if (shouldSimulateDay) {
       let hourWeights = avgHourly[ym]?.[dow];

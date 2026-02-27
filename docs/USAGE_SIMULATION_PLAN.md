@@ -122,3 +122,32 @@ We then extend the bucket builder to read from a canonical “interval usage” 
 - **How do we pick the calc window** for partial history (still last 365 days ending at latest interval vs “most recent N months” anchored on available data)?
 - **How do we explain confidence** (simple label vs numeric score)?
 
+## Finalized Baseline Flow (Authoritative)
+
+### 1) Usage
+Raw actual SMT / GB data.  
+Never modified.
+
+### 2) Past Simulated Baseline
+Starts from Usage.  
+Applies:
+- Travel/Vacant replacement (day-level only)
+- Leading-missing replacement (day-level only)
+- Weather-aware HVAC simulation for those days only
+
+Non-simulated days are exact copies.
+
+### 3) Future Baseline
+Starts from Past Simulated Baseline.  
+Applies overlay delta logic (upgrades/additions).
+
+### 4) Future Curve
+Future Baseline + additional future overlays.
+
+Note:
+Weather DB supports:
+- ACTUAL_LAST_YEAR
+- NORMAL_AVG
+
+Future engine will switch between these depending on scenario.
+

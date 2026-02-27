@@ -218,3 +218,11 @@
 - Nodemailer for email-based authentication flows
 - Cursor-based AI blocks for code reviews and delivery (follow repo GPT block guidelines)
 - Future integrations include WattBuy, Smart Meter Texas (SMT), Zillow, Google Maps, and appliance recognition tooling
+
+## Simulation Invariants
+
+1. Non-excluded actual timestamps are immutable.
+2. Simulation is additive/patch-based only.
+3. Baseline generation must be deterministic.
+4. Weather keys must match canonical day grid (no timezone drift).
+5. Past must be fully stable before Future overlay is applied.

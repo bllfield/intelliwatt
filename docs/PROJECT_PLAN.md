@@ -125,8 +125,36 @@ Notes:
 - **Scope:** For Past (Corrected) builds that start from ACTUAL (SMT/Green Button), produce a **complete** canonical-window 15‑min curve by simulating (a) travel/vacant excluded days and (b) any day with missing/incomplete intervals. Hourly-then-quarter pattern-based simulation; no upgrade deltas; no Future/Manual/New Build changes.
 - **Implementation plan:** See Cursor plan “Past Curve Completion V1” (`.cursor/plans/` or agent plan file). Target files: `modules/simulatedUsage/engine.ts`, `modules/usageSimulator/service.ts`; optional shared helper in `modules/usageSimulator/pastStitchedCurve.ts`.
 - **Alignment LOCKs (must be followed):**
-  - **LOCK: Date keys** — `excludedDateKeys` MUST be computed using the same date-key function used by `buildPastStitchedCurve` for day grouping. Do not mix UTC and Chicago keys. In `completeActualIntervalsV1`, grouping days, enumerating days, and checking exclusion must all use that same function (e.g. import/reuse the stitcher’s helper or a shared helper).
+  - **LOCK: Date keys** — `excludedDateKeys` MUST be computed using the same date-key function used by `buildPastStitchedCurve` for day grouping. Do not mix UTC and Chicago keys. In the Past patch path, grouping days, enumerating days, and checking exclusion must all use that same function (e.g. import/reuse the stitcher’s helper or a shared helper).
   - **LOCK: Interval grid** — Simulated timestamps MUST fill the same 96-slot-per-day grid used by `buildPastStitchedCurve`. Do not assume `00:00Z` unless that is already the stitcher’s grid. Derive the expected timestamps for each day from the stitcher’s logic (e.g. shared helper that returns the 96 timestamps for a given day). Build the canonical list of expected timestamps per day from the stitcher, then fill missing/absent slots to that set to avoid duplicate/misaligned points.
+
+## PC-2026-02 — Weather-Aware Past Baseline (V1)
+
+### Summary
+Past (Corrected) with ACTUAL baseline now:
+
+1. Loads raw SMT / Green Button intervals.
+2. Applies day-level patching only:
+   - Travel/Vacant excluded days -> fully simulated.
+   - Leading missing history (day ends before oldest actual timestamp) -> fully simulated.
+   - All other timestamps remain exact copies of actual data.
+3. Simulation uses:
+   - Pattern learned from non-excluded actual days.
+   - Weather-aware HVAC contribution (ACTUAL_LAST_YEAR stub for now).
+4. Output becomes:
+   - "Past Simulated Baseline"
+5. This Past Simulated Baseline is the only input to Future baseline generation.
+
+Clarifications:
+- No month-level simulation from travel.
+- No redistribution of non-excluded intervals.
+- No internal gap filling after `oldestActualTsMs`.
+- No renormalization of months.
+
+Layer contract:
+- Past = Patch Layer
+- Future = Overlay Layer
+- Usage = Raw Actual
 
 ### Current Plan Module Migrations
 

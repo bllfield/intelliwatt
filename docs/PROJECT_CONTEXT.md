@@ -487,3 +487,12 @@ All CSP documentation, SMT tickets, and API requests must reference these identi
 
 - **Oct 2025:** Introduced `ADMIN_TOKEN` gating for `/api/debug/*`, `/api/migrate`, and `/api/admin/*`. Production requires the token; Preview/Dev requires it only if set.
 
+### Current System State (Post Weather Stub Integration)
+
+- Weather storage added (`HouseDailyWeather` model).
+- Stub population implemented.
+- Past SMT patch engine is weather-aware.
+- Overlay logic not yet applied to Past.
+- Future baseline not yet using weather normalization.
+- No changes to plan engine.
+
