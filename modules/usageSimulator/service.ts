@@ -10,7 +10,7 @@ import { SMT_SHAPE_DERIVATION_VERSION } from "@/modules/realUsageAdapter/smt";
 import { getActualUsageDatasetForHouse, getActualIntervalsForRange } from "@/lib/usage/actualDatasetForHouse";
 import { upsertSimulatedUsageBuckets } from "@/lib/usage/simulatedUsageBuckets";
 import { buildPastSimulatedBaselineV1 } from "@/modules/simulatedUsage/engine";
-import { buildPastStitchedCurve, dateKeyFromTimestamp, enumerateDayStartsMsForWindow, getDayGridTimestamps } from "@/modules/usageSimulator/pastStitchedCurve";
+import { dateKeyFromTimestamp, enumerateDayStartsMsForWindow, getDayGridTimestamps } from "@/modules/usageSimulator/pastStitchedCurve";
 import {
   buildSimulatedUsageDatasetFromBuildInputs,
   buildSimulatedUsageDatasetFromCurve,
@@ -24,6 +24,7 @@ import { buildOrderedLedgerEntriesForOverlay } from "@/modules/upgradesLedger/ov
 import { getHouseAddressForUserHouse, listHouseAddressesForUser, normalizeScenarioKey, upsertSimulatorBuild } from "@/modules/usageSimulator/repo";
 import { billingPeriodsEndingAt } from "@/modules/manualUsage/billingPeriods";
 import { normalizeMonthlyTotals, WEATHER_NORMALIZER_VERSION, type WeatherPreference } from "@/modules/weatherNormalization/normalizer";
+import type { SimulatedCurve } from "@/modules/simulatedUsage/types";
 
 type ManualUsagePayloadAny = any;
 
@@ -81,6 +82,37 @@ function canonicalWindowDateRange(canonicalMonths: string[]): { start: string; e
   const end = `${last}-${String(lastDay).padStart(2, "0")}`;
   const days = Math.round((new Date(end + "T12:00:00.000Z").getTime() - new Date(start + "T12:00:00.000Z").getTime()) / (24 * 60 * 60 * 1000)) + 1;
   return { start, end, days: Math.max(1, days) };
+}
+
+function buildCurveFromPatchedIntervals(args: {
+  startDate: string;
+  endDate: string;
+  intervals: Array<{ timestamp: string; kwh: number }>;
+}): SimulatedCurve {
+  const rows = (args.intervals ?? [])
+    .map((p) => ({ timestamp: String(p?.timestamp ?? ""), consumption_kwh: Number(p?.kwh) || 0, interval_minutes: 15 as const }))
+    .filter((p) => p.timestamp.length > 0)
+    .sort((a, b) => (a.timestamp < b.timestamp ? -1 : a.timestamp > b.timestamp ? 1 : 0));
+
+  const monthlyTotalsMap = new Map<string, number>();
+  for (const iv of rows) {
+    const ym = iv.timestamp.slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(ym)) continue;
+    monthlyTotalsMap.set(ym, (monthlyTotalsMap.get(ym) ?? 0) + (Number(iv.consumption_kwh) || 0));
+  }
+  const monthlyTotals = Array.from(monthlyTotalsMap.entries())
+    .map(([month, kwh]) => ({ month, kwh: Math.round(kwh * 100) / 100 }))
+    .sort((a, b) => (a.month < b.month ? -1 : 1));
+  const annualTotalKwh = monthlyTotals.reduce((s, m) => s + m.kwh, 0);
+
+  return {
+    start: String(args.startDate).slice(0, 10),
+    end: String(args.endDate).slice(0, 10),
+    intervals: rows,
+    monthlyTotals,
+    annualTotalKwh: Math.round(annualTotalKwh * 100) / 100,
+    meta: { excludedDays: 0, renormalized: false },
+  };
 }
 
 function monthsIntersectingTravelRanges(
@@ -524,14 +556,10 @@ export async function recalcSimulatorBuild(args: {
         dateKeyFromTimestamp,
         getDayGridTimestamps,
       });
-      const stitchedCurve = buildPastStitchedCurve({
-        actualIntervals: patchedIntervals,
-        canonicalMonths: built.canonicalMonths,
-        simulatedMonths: new Set<string>(),
-        pastMonthlyTotalsKwhByMonth: monthlyTotalsKwhByMonth,
-        intradayShape96: built.intradayShape96,
-        weekdayWeekendShape96: built.weekdayWeekendShape96,
-        periods: smtAnchorPeriods,
+      const stitchedCurve = buildCurveFromPatchedIntervals({
+        startDate,
+        endDate,
+        intervals: patchedIntervals,
       });
       const byMonth: Record<string, number> = {};
       for (const m of stitchedCurve.monthlyTotals) {
@@ -910,6 +938,28 @@ export async function getSimulatedUsageForHouseScenario(args: {
         };
       }
     } else {
+      if (isPastScenario && isSmtBaselineMode && scenarioId) {
+        const pastEventCount = await (prisma as any).usageSimulatorScenarioEvent
+          .count({ where: { scenarioId } })
+          .catch(() => 0);
+        if (!pastEventCount || pastEventCount <= 0) {
+          const baselineRes = await getSimulatedUsageForHouseScenario({
+            userId: args.userId,
+            houseId: args.houseId,
+            scenarioId: null,
+          });
+          if (baselineRes.ok) {
+            dataset = baselineRes.dataset;
+            dataset.meta = {
+              ...(dataset.meta ?? {}),
+              scenarioKey,
+              scenarioId,
+              mirroredFromBaseline: true,
+            };
+          }
+        }
+      }
+
       const pastSimulatedList = (buildInputs as any).pastSimulatedMonths;
       // Never return raw actual for Past + SMT/GB so completeActualIntervalsV1 always runs (Travel/Vacant + missing intervals fill).
       const pastHasNoEvents =
@@ -1034,14 +1084,10 @@ export async function getSimulatedUsageForHouseScenario(args: {
             dateKeyFromTimestamp,
             getDayGridTimestamps,
           });
-          const stitchedCurve = buildPastStitchedCurve({
-            actualIntervals: patchedIntervals,
-            canonicalMonths,
-            simulatedMonths: new Set<string>(),
-            pastMonthlyTotalsKwhByMonth: buildInputs.monthlyTotalsKwhByMonth,
-            intradayShape96: buildInputs.intradayShape96,
-            weekdayWeekendShape96: buildInputs.weekdayWeekendShape96,
-            periods: periodsForStitch,
+          const stitchedCurve = buildCurveFromPatchedIntervals({
+            startDate,
+            endDate,
+            intervals: patchedIntervals,
           });
           dataset = buildSimulatedUsageDatasetFromCurve(stitchedCurve, {
             baseKind: buildInputs.baseKind,
