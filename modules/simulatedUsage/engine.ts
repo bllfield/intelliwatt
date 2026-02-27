@@ -606,6 +606,8 @@ export type PastSimulatedDayDiagnostic = {
   referenceCandidateCount: number;
   referencePickedCount: number;
   weatherDistanceAvg: number | null;
+  poolApplied: boolean;
+  poolKwh: number | null;
   baseNonHvacKwh: number | null;
   hvacKwh: number | null;
   targetTotalKwh: number | null;
@@ -625,6 +627,12 @@ function hasHvacAppliance(applianceProfile: any): boolean {
   return appliances.some((a: any) => String(a?.type ?? "").toLowerCase() === "hvac");
 }
 
+function hasHomeHvacSignal(homeProfile: any): boolean {
+  const hvacType = String(homeProfile?.hvacType ?? "").trim();
+  const heatingType = String(homeProfile?.heatingType ?? "").trim();
+  return hvacType.length > 0 || heatingType.length > 0;
+}
+
 function parseHeatingType(applianceProfile: any): "HEAT_STRIP" | "HEAT_PUMP" | "UNKNOWN" {
   const appliances = Array.isArray(applianceProfile?.appliances) ? applianceProfile.appliances : [];
   const hvac = appliances.find((a: any) => String(a?.type ?? "").toLowerCase() === "hvac");
@@ -636,6 +644,13 @@ function parseHeatingType(applianceProfile: any): "HEAT_STRIP" | "HEAT_PUMP" | "
       ""
   ).toLowerCase();
   if (s.includes("strip") || s.includes("resistance")) return "HEAT_STRIP";
+  if (s.includes("heat_pump") || s.includes("heat pump")) return "HEAT_PUMP";
+  return "UNKNOWN";
+}
+
+function parseHomeHeatingType(homeProfile: any): "HEAT_STRIP" | "HEAT_PUMP" | "UNKNOWN" {
+  const s = String(homeProfile?.heatingType ?? "").toLowerCase();
+  if (s.includes("electric")) return "HEAT_STRIP";
   if (s.includes("heat_pump") || s.includes("heat pump")) return "HEAT_PUMP";
   return "UNKNOWN";
 }
@@ -655,13 +670,17 @@ function weatherAwareHvacKwh(args: {
   homeProfile: any;
   applianceProfile: any;
 }): { hvacKwh: number; electricHeat: boolean } {
-  if (!args.wx || !hasHvacAppliance(args.applianceProfile)) return { hvacKwh: 0, electricHeat: false };
+  if (!args.wx || (!hasHvacAppliance(args.applianceProfile) && !hasHomeHvacSignal(args.homeProfile))) {
+    return { hvacKwh: 0, electricHeat: false };
+  }
 
   const hdd65 = Math.max(0, Number(args.wx?.hdd65) || 0);
   const cdd65 = Math.max(0, Number(args.wx?.cdd65) || 0);
   const gasHeat = isGasHeating(args.homeProfile, args.applianceProfile);
   const electricHeat = !gasHeat && isElectricHeating(args.homeProfile, args.applianceProfile);
-  const heatingType = parseHeatingType(args.applianceProfile);
+  const heatingTypeFromHome = parseHomeHeatingType(args.homeProfile);
+  const heatingTypeFromAppliance = parseHeatingType(args.applianceProfile);
+  const heatingType = heatingTypeFromHome !== "UNKNOWN" ? heatingTypeFromHome : heatingTypeFromAppliance;
 
   let kHeat = gasHeat ? 0.02 : 0.16;
   if (electricHeat && heatingType === "HEAT_STRIP") kHeat = 0.30;
@@ -678,6 +697,34 @@ function weatherAwareHvacKwh(args: {
   const hvacRaw = kHeat * hdd65 + kCool * cdd65;
   const hvacKwh = Math.max(0, Math.min(60, hvacRaw)); // Temporary guardrail while tuning.
   return { hvacKwh, electricHeat };
+}
+
+function poolSeasonalKwh(args: { dateKey: string; homeProfile: any }): number {
+  if (!args?.homeProfile?.hasPool) return 0;
+  const pumpType = String(args.homeProfile?.poolPumpType ?? "").toLowerCase();
+  const hpRaw = Number(args.homeProfile?.poolPumpHp);
+  const hp = Number.isFinite(hpRaw) ? Math.max(0, Math.min(5, hpRaw)) : 1;
+  const summerRunRaw = Number(args.homeProfile?.poolSummerRunHoursPerDay);
+  const winterRunRaw = Number(args.homeProfile?.poolWinterRunHoursPerDay);
+  const summerRun = Number.isFinite(summerRunRaw) ? Math.max(0, Math.min(24, summerRunRaw)) : 8;
+  const winterRun = Number.isFinite(winterRunRaw) ? Math.max(0, Math.min(24, winterRunRaw)) : 2;
+
+  let pumpKwPerHp = 0.75;
+  if (pumpType === "dual_speed") pumpKwPerHp = 0.65;
+  if (pumpType === "variable_speed") pumpKwPerHp = 0.45;
+  const pumpKw = hp * pumpKwPerHp;
+
+  const month = Number(String(args.dateKey ?? "").slice(5, 7));
+  const summerMonths = new Set([5, 6, 7, 8, 9]);
+  const shoulderMonths = new Set([3, 4, 10, 11]);
+  const seasonHours = summerMonths.has(month) ? summerRun : shoulderMonths.has(month) ? (summerRun + winterRun) / 2 : winterRun;
+  const pumpKwh = Math.max(0, pumpKw * seasonHours);
+
+  const hasHeater = Boolean(args.homeProfile?.hasPoolHeater);
+  const heaterType = String(args.homeProfile?.poolHeaterType ?? "").toLowerCase();
+  const heaterAdder = hasHeater && (heaterType === "electric" || heaterType === "heat_pump") && summerMonths.has(month) ? 1.25 : 0;
+
+  return Math.max(0, Math.min(40, pumpKwh + heaterAdder));
 }
 
 function applyWeatherTiltHourWeights(args: {
@@ -1039,6 +1086,7 @@ export function buildPastSimulatedBaselineV1(args: {
       let referenceCandidateCount = 0;
       let referencePickedCount = 0;
       let weatherDistanceAvg: number | null = null;
+      const poolKwh = poolSeasonalKwh({ dateKey, homeProfile: args.homeProfile });
 
       const nearest = nearestWeatherProfileForDay({ dateKey, dow });
       if (nearest) {
@@ -1047,7 +1095,7 @@ export function buildPastSimulatedBaselineV1(args: {
         const hvacTarget = wx ? Number(hvac.hvacKwh) || 0 : 0;
         const hvacDelta = hvacTarget - (Number(nearest.avgRefHvacKwh) || 0);
         baseBeforeHvac = Number(nearest.baseTotalKwh) || 0;
-        targetTotal = Math.max(0, baseBeforeHvac + hvacDelta * NEAREST_WEATHER_HVAC_BLEND);
+        targetTotal = Math.max(0, baseBeforeHvac + hvacDelta * NEAREST_WEATHER_HVAC_BLEND + poolKwh);
         hourFallbackLevel = "NEAREST_WEATHER";
         totalFallbackLevel = "NEAREST_WEATHER";
         referenceCandidateCount = nearest.candidateCount;
@@ -1082,7 +1130,7 @@ export function buildPastSimulatedBaselineV1(args: {
           totalFallbackLevel = "ZERO";
         }
         baseBeforeHvac = Number(baseNonHvac ?? 0) || 0;
-        targetTotal = Math.max(0, baseBeforeHvac + (wx ? Number(hvac.hvacKwh) || 0 : 0));
+        targetTotal = Math.max(0, baseBeforeHvac + (wx ? Number(hvac.hvacKwh) || 0 : 0) + poolKwh);
       }
 
       const tiltedHourWeights = applyWeatherTiltHourWeights({
@@ -1123,6 +1171,8 @@ export function buildPastSimulatedBaselineV1(args: {
           referenceCandidateCount,
           referencePickedCount,
           weatherDistanceAvg,
+          poolApplied: poolKwh > 0,
+          poolKwh: poolKwh > 0 ? poolKwh : 0,
           baseNonHvacKwh: baseBeforeHvac,
           hvacKwh: wx ? Number(hvac.hvacKwh) || 0 : 0,
           targetTotalKwh: Number(targetTotal) || 0,
@@ -1156,6 +1206,8 @@ export function buildPastSimulatedBaselineV1(args: {
           referenceCandidateCount: 0,
           referencePickedCount: 0,
           weatherDistanceAvg: null,
+          poolApplied: false,
+          poolKwh: null,
           baseNonHvacKwh: null,
           hvacKwh: null,
           targetTotalKwh: null,

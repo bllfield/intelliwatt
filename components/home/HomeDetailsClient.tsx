@@ -42,6 +42,15 @@ type LoadResp =
         occupantsSchool: number;
         occupantsHomeAllDay: number;
         fuelConfiguration: string;
+        hvacType: string | null;
+        heatingType: string | null;
+        hasPool: boolean;
+        poolPumpType: string | null;
+        poolPumpHp: number | null;
+        poolSummerRunHoursPerDay: number | null;
+        poolWinterRunHoursPerDay: number | null;
+        hasPoolHeater: boolean;
+        poolHeaterType: string | null;
       };
       provenance?: any;
       prefill?: any;
@@ -80,6 +89,10 @@ const INSULATION = ["fiberglass", "open_cell_spray_foam", "closed_cell_spray_foa
 const WINDOW = ["single_pane", "double_pane", "triple_pane"] as const;
 const FOUNDATION = ["slab", "crawlspace", "basement"] as const;
 const FUEL = ["all_electric", "mixed"] as const;
+const HVAC_TYPES = ["central", "heat_pump", "mini_split", "window", "portable", "other"] as const;
+const HEATING_TYPES = ["electric", "gas", "heat_pump", "other"] as const;
+const POOL_PUMP_TYPES = ["single_speed", "dual_speed", "variable_speed"] as const;
+const POOL_HEATER_TYPES = ["gas", "electric", "heat_pump", "solar"] as const;
 
 function clampInt(n: unknown, lo: number, hi: number): number {
   const x = typeof n === "number" && Number.isFinite(n) ? Math.trunc(n) : Number(n);
@@ -103,6 +116,15 @@ type FormState = {
   occupantsSchool: number | "";
   occupantsHomeAllDay: number | "";
   fuelConfiguration: string;
+  hvacType: string;
+  heatingType: string;
+  hasPool: boolean;
+  poolPumpType: string;
+  poolPumpHp: number | "";
+  poolSummerRunHoursPerDay: number | "";
+  poolWinterRunHoursPerDay: number | "";
+  hasPoolHeater: boolean;
+  poolHeaterType: string;
 };
 
 function emptyState(): FormState {
@@ -122,6 +144,15 @@ function emptyState(): FormState {
     occupantsSchool: "",
     occupantsHomeAllDay: "",
     fuelConfiguration: "",
+    hvacType: "",
+    heatingType: "",
+    hasPool: false,
+    poolPumpType: "",
+    poolPumpHp: "",
+    poolSummerRunHoursPerDay: "",
+    poolWinterRunHoursPerDay: "",
+    hasPoolHeater: false,
+    poolHeaterType: "",
   };
 }
 
@@ -177,6 +208,15 @@ export function HomeDetailsClient({ houseId, onSaved }: { houseId: string; onSav
             occupantsSchool: profileJson.profile.occupantsSchool,
             occupantsHomeAllDay: profileJson.profile.occupantsHomeAllDay,
             fuelConfiguration: profileJson.profile.fuelConfiguration,
+            hvacType: profileJson.profile.hvacType ?? "",
+            heatingType: profileJson.profile.heatingType ?? "",
+            hasPool: Boolean(profileJson.profile.hasPool),
+            poolPumpType: profileJson.profile.poolPumpType ?? "",
+            poolPumpHp: profileJson.profile.poolPumpHp ?? "",
+            poolSummerRunHoursPerDay: profileJson.profile.poolSummerRunHoursPerDay ?? "",
+            poolWinterRunHoursPerDay: profileJson.profile.poolWinterRunHoursPerDay ?? "",
+            hasPoolHeater: Boolean(profileJson.profile.hasPoolHeater),
+            poolHeaterType: profileJson.profile.poolHeaterType ?? "",
           });
           setProvenance((profileJson as any).provenance ?? {});
         } else if (prefillJson && (prefillJson as any).ok === true) {
@@ -225,6 +265,23 @@ export function HomeDetailsClient({ houseId, onSaved }: { houseId: string; onSav
         occupantsSchool: clampInt(occupantsSchool, 0, 50),
         occupantsHomeAllDay: clampInt(occupantsHomeAllDay, 0, 50),
         fuelConfiguration: state.fuelConfiguration,
+        hvacType: state.hvacType || null,
+        heatingType: state.heatingType || null,
+        hasPool: Boolean(state.hasPool),
+        poolPumpType: state.hasPool ? state.poolPumpType || null : null,
+        poolPumpHp: state.hasPool ? (state.poolPumpHp === "" ? null : Number(state.poolPumpHp)) : null,
+        poolSummerRunHoursPerDay: state.hasPool
+          ? state.poolSummerRunHoursPerDay === ""
+            ? null
+            : Number(state.poolSummerRunHoursPerDay)
+          : null,
+        poolWinterRunHoursPerDay: state.hasPool
+          ? state.poolWinterRunHoursPerDay === ""
+            ? null
+            : Number(state.poolWinterRunHoursPerDay)
+          : null,
+        hasPoolHeater: state.hasPool ? Boolean(state.hasPoolHeater) : false,
+        poolHeaterType: state.hasPool && state.hasPoolHeater ? state.poolHeaterType || null : null,
       };
 
       const res = await fetch("/api/user/home-profile", {
@@ -425,6 +482,39 @@ export function HomeDetailsClient({ houseId, onSaved }: { houseId: string; onSav
           </div>
 
           <div>
+            <label className="block text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">HVAC type</label>
+            <select
+              value={state.hvacType}
+              onChange={(e) => setState((s) => ({ ...s, hvacType: e.target.value }))}
+              className="mt-1 w-full rounded-lg border border-brand-cyan/20 bg-brand-navy px-3 py-2 text-sm text-brand-cyan"
+            >
+              <option value="">Select…</option>
+              {HVAC_TYPES.map((v) => (
+                <option key={v} value={v}>
+                  {v.replace(/_/g, " ")}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Heating type</label>
+            <select
+              value={state.heatingType}
+              onChange={(e) => setState((s) => ({ ...s, heatingType: e.target.value }))}
+              className="mt-1 w-full rounded-lg border border-brand-cyan/20 bg-brand-navy px-3 py-2 text-sm text-brand-cyan"
+            >
+              <option value="">Select…</option>
+              {HEATING_TYPES.map((v) => (
+                <option key={v} value={v}>
+                  {v.replace(/_/g, " ")}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-[11px] text-brand-cyan/60">Used for past travel/missing-day simulation shaping.</p>
+          </div>
+
+          <div>
             <label className="block text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Summer temp (°F)</label>
             <input
               type="number"
@@ -447,6 +537,123 @@ export function HomeDetailsClient({ houseId, onSaved }: { houseId: string; onSav
               className="mt-1 w-full rounded-lg border border-brand-cyan/20 bg-brand-navy px-3 py-2 text-sm text-brand-cyan"
             />
           </div>
+        </div>
+
+        <div className="mt-8 rounded-2xl border border-brand-cyan/15 bg-brand-navy px-5 py-5">
+          <p className="text-sm font-semibold uppercase tracking-[0.3em] text-brand-cyan/60">Pool details</p>
+          <div className="mt-3 flex items-center gap-3">
+            <input
+              id="hasPool"
+              type="checkbox"
+              checked={state.hasPool}
+              onChange={(e) =>
+                setState((s) => ({
+                  ...s,
+                  hasPool: e.target.checked,
+                  hasPoolHeater: e.target.checked ? s.hasPoolHeater : false,
+                  poolHeaterType: e.target.checked ? s.poolHeaterType : "",
+                }))
+              }
+              className="h-4 w-4 accent-brand-blue"
+            />
+            <label htmlFor="hasPool" className="text-sm text-brand-cyan/85">
+              This home has a pool
+            </label>
+          </div>
+
+          {state.hasPool ? (
+            <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <div>
+                <label className="block text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Pool pump type</label>
+                <select
+                  value={state.poolPumpType}
+                  onChange={(e) => setState((s) => ({ ...s, poolPumpType: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-brand-cyan/20 bg-brand-navy px-3 py-2 text-sm text-brand-cyan"
+                >
+                  <option value="">Select…</option>
+                  {POOL_PUMP_TYPES.map((v) => (
+                    <option key={v} value={v}>
+                      {v.replace(/_/g, " ")}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Pump HP</label>
+                <input
+                  type="number"
+                  min={0}
+                  step={0.1}
+                  value={state.poolPumpHp}
+                  onChange={(e) => setState((s) => ({ ...s, poolPumpHp: e.target.value === "" ? "" : Number(e.target.value) }))}
+                  className="mt-1 w-full rounded-lg border border-brand-cyan/20 bg-brand-navy px-3 py-2 text-sm text-brand-cyan"
+                />
+              </div>
+              <div>
+                <label className="block text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Summer run (hrs/day)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={24}
+                  step={0.1}
+                  value={state.poolSummerRunHoursPerDay}
+                  onChange={(e) =>
+                    setState((s) => ({ ...s, poolSummerRunHoursPerDay: e.target.value === "" ? "" : Number(e.target.value) }))
+                  }
+                  className="mt-1 w-full rounded-lg border border-brand-cyan/20 bg-brand-navy px-3 py-2 text-sm text-brand-cyan"
+                />
+              </div>
+              <div>
+                <label className="block text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Winter run (hrs/day)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={24}
+                  step={0.1}
+                  value={state.poolWinterRunHoursPerDay}
+                  onChange={(e) =>
+                    setState((s) => ({ ...s, poolWinterRunHoursPerDay: e.target.value === "" ? "" : Number(e.target.value) }))
+                  }
+                  className="mt-1 w-full rounded-lg border border-brand-cyan/20 bg-brand-navy px-3 py-2 text-sm text-brand-cyan"
+                />
+              </div>
+              <div className="flex items-center gap-3">
+                <input
+                  id="hasPoolHeater"
+                  type="checkbox"
+                  checked={state.hasPoolHeater}
+                  onChange={(e) =>
+                    setState((s) => ({
+                      ...s,
+                      hasPoolHeater: e.target.checked,
+                      poolHeaterType: e.target.checked ? s.poolHeaterType : "",
+                    }))
+                  }
+                  className="h-4 w-4 accent-brand-blue"
+                />
+                <label htmlFor="hasPoolHeater" className="text-sm text-brand-cyan/85">
+                  Pool heater installed
+                </label>
+              </div>
+              {state.hasPoolHeater ? (
+                <div>
+                  <label className="block text-[0.7rem] font-semibold uppercase tracking-wide text-brand-cyan/60">Pool heater type</label>
+                  <select
+                    value={state.poolHeaterType}
+                    onChange={(e) => setState((s) => ({ ...s, poolHeaterType: e.target.value }))}
+                    className="mt-1 w-full rounded-lg border border-brand-cyan/20 bg-brand-navy px-3 py-2 text-sm text-brand-cyan"
+                  >
+                    <option value="">Select…</option>
+                    {POOL_HEATER_TYPES.map((v) => (
+                      <option key={v} value={v}>
+                        {v.replace(/_/g, " ")}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
 
         <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

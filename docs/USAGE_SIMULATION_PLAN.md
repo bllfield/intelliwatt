@@ -162,6 +162,9 @@ Applies:
 - Leading-missing replacement (day-level only)
 - Weather-aware HVAC simulation for those days only
 - NEAREST_WEATHER reference-day selection for simulated days when weather-backed candidates exist
+- Home Details-gated shaping inputs for SMT baseline:
+  - HVAC type + heating type
+  - Pool toggle + pool pump seasonal runtime details
 
 Deterministic simulated-day fallback ladder:
 1. `NEAREST_WEATHER` (K-nearest weather reference days from non-excluded, non-leading-missing days; deterministic tie-break by weather distance, temperature distance, then `dateKey`)
@@ -171,6 +174,7 @@ Deterministic simulated-day fallback ladder:
 5. `UNIFORM`/`ZERO`
 
 Non-simulated days are exact copies.
+Occupancy and all other existing Home Details factors remain in the model and are not removed.
 
 ### 3) Future Baseline
 Starts from Past Simulated Baseline.  

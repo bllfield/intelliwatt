@@ -35,6 +35,15 @@ model HomeProfileSimulated {
   occupantsSchool     Int
   occupantsHomeAllDay Int
   fuelConfiguration   String
+  hvacType            String?
+  heatingType         String?
+  hasPool             Boolean  @default(false)
+  poolPumpType        String?
+  poolPumpHp          Float?
+  poolSummerRunHoursPerDay Float?
+  poolWinterRunHoursPerDay Float?
+  hasPoolHeater       Boolean  @default(false)
+  poolHeaterType      String?
 
   provenanceJson Json?
   prefillJson    Json?

@@ -15,11 +15,15 @@ export type SimulatorInputs = {
 export function computeRequirements(inputs: SimulatorInputs, mode: SimulatorMode): { canRecalc: boolean; missingItems: string[] } {
   const missingItems: string[] = [];
 
-  const homeOk = inputs.homeProfile ? validateHomeProfile(inputs.homeProfile).ok : false;
+  const homeOk = inputs.homeProfile
+    ? validateHomeProfile(inputs.homeProfile, { requirePastBaselineFields: mode === "SMT_BASELINE" }).ok
+    : false;
   if (!homeOk) missingItems.push("Complete Home Details (required fields).");
 
   const appliancesOk = inputs.applianceProfile ? validateApplianceProfile(inputs.applianceProfile).ok : false;
-  if (!appliancesOk) missingItems.push("Complete Appliances (select fuel configuration, add appliance types as needed).");
+  if (mode !== "SMT_BASELINE" && !appliancesOk) {
+    missingItems.push("Complete Appliances (select fuel configuration, add appliance types as needed).");
+  }
 
   if (mode === "SMT_BASELINE") {
     if (!inputs.hasActualIntervals) {
