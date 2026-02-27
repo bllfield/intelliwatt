@@ -44,8 +44,7 @@ function defaultRange() {
 
 export default function AdminWeatherPage() {
   const [adminToken, setAdminToken] = useState("");
-  const [houseId, setHouseId] = useState("");
-  const [start, setStart] = useState(defaultRange().start);
+  const [email, setEmail] = useState("");
   const [end, setEnd] = useState(defaultRange().end);
   const [mode, setMode] = useState<WeatherSourceMode>("STUB");
   const [loading, setLoading] = useState(false);
@@ -107,8 +106,8 @@ export default function AdminWeatherPage() {
   }
 
   async function fetchWeather() {
-    if (!houseId.trim()) {
-      setError("houseId is required.");
+    if (!email.trim()) {
+      setError("email is required.");
       return;
     }
     setLoading(true);
@@ -116,8 +115,7 @@ export default function AdminWeatherPage() {
     setData(null);
     try {
       const params = new URLSearchParams({
-        houseId: houseId.trim(),
-        start: start.trim(),
+        email: email.trim(),
         end: end.trim(),
         version: "1",
       });
@@ -143,12 +141,12 @@ export default function AdminWeatherPage() {
         <div className="mb-6 rounded-lg bg-brand-white p-6 shadow-lg">
           <h1 className="text-2xl font-bold text-brand-navy">Admin Weather</h1>
           <p className="mt-1 text-sm text-brand-navy/70">
-            Inspect station-based weather rows by house and date range.
+            Inspect station-based weather rows by email and a fixed 365-day window ending on the selected date.
           </p>
         </div>
 
         <div className="rounded-lg bg-brand-white p-6 shadow-lg">
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
             <label className="text-sm">
               <div className="mb-1 font-semibold text-brand-navy">Admin token</div>
               <input
@@ -160,22 +158,13 @@ export default function AdminWeatherPage() {
               />
             </label>
             <label className="text-sm lg:col-span-2">
-              <div className="mb-1 font-semibold text-brand-navy">House ID</div>
+              <div className="mb-1 font-semibold text-brand-navy">Email address</div>
               <input
-                type="text"
+                type="email"
                 className="w-full rounded border border-slate-300 px-3 py-2"
-                value={houseId}
-                onChange={(e) => setHouseId(e.target.value)}
-                placeholder="cuid/uuid house id"
-              />
-            </label>
-            <label className="text-sm">
-              <div className="mb-1 font-semibold text-brand-navy">Start</div>
-              <input
-                type="date"
-                className="w-full rounded border border-slate-300 px-3 py-2"
-                value={start}
-                onChange={(e) => setStart(e.target.value)}
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="user@example.com"
               />
             </label>
             <label className="text-sm">
@@ -186,6 +175,9 @@ export default function AdminWeatherPage() {
                 value={end}
                 onChange={(e) => setEnd(e.target.value)}
               />
+              <div className="mt-1 text-xs text-slate-500">
+                Start is auto-set to 364 days before End (365 total days).
+              </div>
             </label>
           </div>
 

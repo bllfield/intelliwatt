@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/admin";
+import { prisma } from "@/lib/db";
 import { getWeatherSourceMode } from "@/modules/adminSettings/repo";
 import {
   findMissingStationWeatherDateKeys,
@@ -37,6 +38,31 @@ function defaultRangeUtc(): { start: string; end: string } {
   return { start: toYyyyMmDdUtc(start), end: toYyyyMmDdUtc(end) };
 }
 
+async function resolveHouseIdByEmail(emailRaw: string): Promise<string | null> {
+  const email = String(emailRaw ?? "").trim();
+  if (!email) return null;
+
+  const primary = await (prisma as any).houseAddress.findFirst({
+    where: {
+      userEmail: { equals: email, mode: "insensitive" },
+      archivedAt: null,
+      isPrimary: true,
+    },
+    select: { id: true },
+  });
+  if (primary?.id) return String(primary.id);
+
+  const fallback = await (prisma as any).houseAddress.findFirst({
+    where: {
+      userEmail: { equals: email, mode: "insensitive" },
+      archivedAt: null,
+    },
+    orderBy: { updatedAt: "desc" },
+    select: { id: true },
+  });
+  return fallback?.id ? String(fallback.id) : null;
+}
+
 function enumerateDateKeysUtc(start: string, end: string): string[] {
   const s = parseYyyyMmDdUtc(start);
   const e = parseYyyyMmDdUtc(end);
@@ -56,17 +82,24 @@ export async function GET(req: NextRequest) {
 
   try {
     const url = new URL(req.url);
-    const houseId = String(url.searchParams.get("houseId") ?? "").trim();
-    if (!houseId) {
+    const email = String(url.searchParams.get("email") ?? "").trim();
+    if (!email) {
       return NextResponse.json(
-        { ok: false, error: "houseId is required" },
+        { ok: false, error: "email is required" },
         { status: 400 }
       );
     }
 
     const defaults = defaultRangeUtc();
-    const start = String(url.searchParams.get("start") ?? defaults.start).slice(0, 10);
     const end = String(url.searchParams.get("end") ?? defaults.end).slice(0, 10);
+    const endDate = parseYyyyMmDdUtc(end);
+    if (!endDate) {
+      return NextResponse.json(
+        { ok: false, error: "Invalid end date. Use YYYY-MM-DD." },
+        { status: 400 }
+      );
+    }
+    const start = toYyyyMmDdUtc(new Date(endDate.getTime() - 364 * DAY_MS));
     const versionParam = Number(url.searchParams.get("version"));
     const version = Number.isFinite(versionParam)
       ? Math.max(1, Math.trunc(versionParam))
@@ -77,6 +110,14 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(
         { ok: false, error: "Invalid date range. Use YYYY-MM-DD." },
         { status: 400 }
+      );
+    }
+
+    const houseId = await resolveHouseIdByEmail(email);
+    if (!houseId) {
+      return NextResponse.json(
+        { ok: false, error: "No active house found for that email." },
+        { status: 404 }
       );
     }
 
